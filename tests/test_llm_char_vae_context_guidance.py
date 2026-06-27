@@ -37,7 +37,15 @@ def _load_module():
     return module
 
 
-def _ancestor(*, feature: str, nll: float) -> dict:
+def _ancestor(*, feature: str, nll: float, raw_delta: float | None = None) -> dict:
+    best_config = {
+        "best_feature": feature,
+        "feature_normalize": "blocks",
+        "hybrid_latent_scale": 1.0,
+        "mean_best_nll": nll,
+    }
+    if raw_delta is not None:
+        best_config["mean_best_nll_delta_vs_raw"] = raw_delta
     return {
         "schema": "st.llm_char_vae_context.follow_up_ancestor.v1",
         "summary_path": "/tmp/source/summary.json",
@@ -45,12 +53,7 @@ def _ancestor(*, feature: str, nll: float) -> dict:
         "generation": 0,
         "status": "improved",
         "best_feature": feature,
-        "best_config": {
-            "best_feature": feature,
-            "feature_normalize": "blocks",
-            "hybrid_latent_scale": 1.0,
-            "mean_best_nll": nll,
-        },
+        "best_config": best_config,
         "mean_best_nll": nll,
         "verdict": None,
         "guidance_action": None,
@@ -396,6 +399,120 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
         report = mod._aggregate_report(summary)
         self.assertIn("- raw_positive_points: 1/1 (100.0%)", report)
         self.assertIn("raw_delta_vs_raw", report)
+
+    def test_raw_positive_streak_reconfirms_best_generation(self) -> None:
+        mod = _load_module()
+        parser = mod._build_parser()
+        args = parser.parse_args(["models/samples/spiral_corpus_en"])
+        summary = _summary(
+            best_feature="raw_latent",
+            nll=4.214,
+            verdict="regressed",
+            config_verdict="regressed",
+            source_feature_verdict="regressed",
+            source_feature_raw_verdict="improved",
+            source_feature_delta_vs_raw=-0.017,
+            source_retained=True,
+            gate_failed=True,
+        )
+        summary["follow_up_chain"]["verdict_history"] = [
+            "regressed",
+            "improved",
+            "regressed",
+            "regressed",
+        ]
+        summary["follow_up_chain"]["latest_verdict"] = "regressed"
+        next_follow_up = _next_follow_up()
+        next_follow_up["used_seed_history"] = [
+            7,
+            13,
+            17,
+            19,
+            23,
+            101,
+            103,
+            107,
+            109,
+            113,
+            127,
+            131,
+            137,
+            139,
+            149,
+            151,
+            157,
+            1001,
+            1003,
+            1005,
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            trajectory = mod._follow_up_trajectory_record(
+                root,
+                summary,
+                {
+                    "ancestors": [
+                        _ancestor(feature="raw_latent", nll=4.216, raw_delta=-0.014),
+                        _ancestor(feature="raw_latent", nll=4.207, raw_delta=-0.024),
+                        _ancestor(feature="raw_latent", nll=4.211, raw_delta=-0.019),
+                    ]
+                },
+                min_nll_delta=0.0,
+            )
+            best_generation = mod._best_generation_follow_up_command_record(
+                args,
+                ["raw", "latent", "raw_latent"],
+                root,
+                [1001, 1003, 1005],
+                trajectory,
+                next_follow_up,
+            )
+            guidance = mod._follow_up_guidance_record(
+                summary["follow_up_result"],
+                summary["follow_up_chain"],
+                summary["follow_up_gate"],
+                next_follow_up,
+                trajectory,
+                best_generation,
+            )
+            guided = mod._guided_next_follow_up_command_record(
+                root,
+                guidance,
+                best_generation,
+            )
+
+        self.assertEqual(
+            trajectory["trajectory_action"],
+            "reconfirm_best_raw_positive_generation",
+        )
+        self.assertEqual(trajectory["raw_positive_streak"], 4)
+        self.assertEqual(trajectory["best_mean_best_nll"], 4.207)
+        self.assertIsNotNone(best_generation)
+        self.assertEqual(
+            best_generation["action"],
+            "reconfirm_best_raw_positive_generation",
+        )
+        self.assertEqual(best_generation["default_new_seeds"], "1007,1009,1011")
+        self.assertEqual(
+            best_generation["best_summary_path"],
+            "/tmp/source/summary.json",
+        )
+        self.assertIn("--follow-up-used-seeds", best_generation["script_command"])
+        self.assertIn(
+            (
+                "7,13,17,19,23,101,103,107,109,113,127,131,137,139,"
+                "149,151,157,1001,1003,1005"
+            ),
+            best_generation["script_command"],
+        )
+        self.assertEqual(guidance["action"], "reconfirm_best_raw_positive_generation")
+        self.assertIs(guidance["use_next_follow_up_command"], False)
+        self.assertIs(guidance["use_best_generation_follow_up_command"], True)
+        self.assertEqual(guidance["command_usage"], best_generation["script_usage"])
+        self.assertIs(guided["enabled"], True)
+        self.assertEqual(guided["default_follow_up_from"], "/tmp/source/summary.json")
+        self.assertEqual(guided["default_new_seeds"], "1007,1009,1011")
 
 
 if __name__ == "__main__":

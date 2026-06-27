@@ -1135,6 +1135,7 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
     follow_up_trajectory = summary.get("follow_up_trajectory")
     follow_up_gate = summary.get("follow_up_gate")
     follow_up_guidance = summary.get("follow_up_guidance")
+    best_generation_follow_up = summary.get("best_generation_follow_up_command")
     if isinstance(follow_up_result, dict):
         source_config = follow_up_result.get("source_best_config")
         evaluated_config = follow_up_result.get("evaluated_config")
@@ -1398,6 +1399,8 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
                 f"- promote_current_best: {follow_up_guidance.get('promote_current_best')}",
                 "- use_next_follow_up_command: "
                 f"{follow_up_guidance.get('use_next_follow_up_command')}",
+                "- use_best_generation_follow_up_command: "
+                f"{follow_up_guidance.get('use_best_generation_follow_up_command')}",
                 f"- gate_failed: {follow_up_guidance.get('gate_failed')}",
                 f"- reasons: {reasons_text}",
                 f"- command_usage: `{follow_up_guidance.get('command_usage') or '-'}`",
@@ -1483,6 +1486,31 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
                 "",
                 "```bash",
                 str(next_follow_up.get("shell_command")),
+                "```",
+            ]
+        )
+    if isinstance(best_generation_follow_up, dict):
+        lines.extend(
+            [
+                "",
+                "## Best Generation Follow-Up Command",
+                "",
+                f"- action: {best_generation_follow_up.get('action')}",
+                f"- best_generation: {best_generation_follow_up.get('best_generation')}",
+                f"- best_summary: `{best_generation_follow_up.get('best_summary_path')}`",
+                "- default_follow_up_from: "
+                f"`{best_generation_follow_up.get('default_follow_up_from')}`",
+                "- default_follow_up_fail_on_verdict: "
+                f"{best_generation_follow_up.get('default_follow_up_fail_on_verdict') or '-'}",
+                "- default_new_seeds: "
+                f"{best_generation_follow_up.get('default_new_seeds')}",
+                "- used_seed_history: "
+                f"{', '.join(str(seed) for seed in best_generation_follow_up.get('used_seed_history', [])) or '-'}",
+                f"- script: `{best_generation_follow_up.get('script_path')}`",
+                f"- usage: `{best_generation_follow_up.get('script_usage')}`",
+                "",
+                "```bash",
+                str(best_generation_follow_up.get("shell_command")),
                 "```",
             ]
         )
@@ -1905,6 +1933,7 @@ def _follow_up_used_seeds(
                 except (OSError, json.JSONDecodeError, ValueError):
                     continue
                 _append_unique_ints(used, _summary_seeds(ancestor_summary))
+        _append_unique_ints(used, follow_up.get("external_seed_history"))
         _append_unique_ints(used, follow_up.get("source_seeds"))
         resolved = follow_up.get("resolved")
         if isinstance(resolved, dict):
@@ -1941,6 +1970,7 @@ def _follow_up_command_parts(
     run_dir_value: str,
     follow_up_from_value: str | None,
     fail_on_verdict_value: str | None,
+    used_seed_history_value: str | None = None,
 ) -> list[str]:
     command = [
         "python3",
@@ -1957,6 +1987,7 @@ def _follow_up_command_parts(
         ("--run-dir", run_dir_value),
         ("--follow-up-from", follow_up_from_value),
         ("--follow-up-fail-on-verdict", fail_on_verdict_value),
+        ("--follow-up-used-seeds", used_seed_history_value),
         ("--window-chars", int(args.window_chars)),
         ("--latent-dim", int(args.latent_dim)),
         ("--hidden", int(args.hidden)),
@@ -2005,6 +2036,9 @@ def _next_follow_up_command_record(
         return None
     used_seeds = _follow_up_used_seeds(follow_up, seeds)
     default_new_seeds = _fresh_seed_csv(used_seeds or seeds, count=max(3, len(seeds)))
+    used_seed_history_value = (
+        ",".join(str(seed) for seed in used_seeds) if used_seeds else None
+    )
     default_run_dir = root_run_dir / "follow_up_best_config"
     default_follow_up_from = root_run_dir / "summary.json"
     default_fail_on_verdict = (
@@ -2022,6 +2056,7 @@ def _next_follow_up_command_record(
         run_dir_value=str(default_run_dir),
         follow_up_from_value=str(default_follow_up_from),
         fail_on_verdict_value=default_fail_on_verdict,
+        used_seed_history_value=used_seed_history_value,
     )
     shell_command = "PYTHONNOUSERSITE=1 " + shlex.join(literal_command)
     script_command = _follow_up_command_parts(
@@ -2036,6 +2071,7 @@ def _next_follow_up_command_record(
             if default_fail_on_verdict is not None
             else None
         ),
+        used_seed_history_value=used_seed_history_value,
     )
     script_usage = (
         f"FOLLOW_UP_FROM={default_follow_up_from} NEW_SEEDS={default_new_seeds} "
@@ -2068,9 +2104,15 @@ def _guided_next_follow_up_command_record(
     if not isinstance(follow_up_guidance, dict):
         return None
 
-    enabled = bool(follow_up_guidance.get("use_next_follow_up_command")) and isinstance(
-        next_follow_up,
-        dict,
+    enabled = (
+        bool(
+            follow_up_guidance.get("use_next_follow_up_command")
+            or follow_up_guidance.get("use_best_generation_follow_up_command")
+        )
+        and isinstance(
+            next_follow_up,
+            dict,
+        )
     )
     reasons_raw = follow_up_guidance.get("reasons", [])
     reasons = (
@@ -2133,6 +2175,93 @@ def _guided_next_follow_up_command_record(
         }
     )
     return record
+
+
+def _best_generation_follow_up_command_record(
+    args: argparse.Namespace,
+    features: list[str],
+    root_run_dir: pathlib.Path,
+    seeds: list[int],
+    follow_up_trajectory: dict[str, Any] | None,
+    next_follow_up: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not isinstance(follow_up_trajectory, dict):
+        return None
+    if (
+        follow_up_trajectory.get("trajectory_action")
+        != "reconfirm_best_raw_positive_generation"
+    ):
+        return None
+    best_config = follow_up_trajectory.get("best_config")
+    best_summary_path = follow_up_trajectory.get("best_summary_path")
+    if not isinstance(best_config, dict) or not best_summary_path:
+        return None
+
+    used_seeds: list[int] = []
+    if isinstance(next_follow_up, dict):
+        _append_unique_ints(used_seeds, next_follow_up.get("used_seed_history"))
+    _append_unique_ints(used_seeds, seeds)
+    default_new_seeds = _fresh_seed_csv(used_seeds or seeds, count=max(3, len(seeds)))
+    used_seed_history_value = (
+        ",".join(str(seed) for seed in used_seeds) if used_seeds else None
+    )
+    default_run_dir = root_run_dir / "follow_up_best_generation"
+    default_follow_up_from = pathlib.Path(str(best_summary_path)).expanduser()
+    default_fail_on_verdict = (
+        str(args.follow_up_fail_on_verdict).strip()
+        if args.follow_up_fail_on_verdict is not None
+        and str(args.follow_up_fail_on_verdict).strip()
+        else None
+    )
+    script_path = root_run_dir / "best_generation_follow_up_command.sh"
+    literal_command = _follow_up_command_parts(
+        args,
+        features,
+        best_config,
+        seeds_value=default_new_seeds,
+        run_dir_value=str(default_run_dir),
+        follow_up_from_value=str(default_follow_up_from),
+        fail_on_verdict_value=default_fail_on_verdict,
+        used_seed_history_value=used_seed_history_value,
+    )
+    shell_command = "PYTHONNOUSERSITE=1 " + shlex.join(literal_command)
+    script_command = _follow_up_command_parts(
+        args,
+        features,
+        best_config,
+        seeds_value="${NEW_SEEDS}",
+        run_dir_value="${NEXT_RUN_DIR}",
+        follow_up_from_value="${FOLLOW_UP_FROM}",
+        fail_on_verdict_value=(
+            "${FOLLOW_UP_FAIL_ON_VERDICT}"
+            if default_fail_on_verdict is not None
+            else None
+        ),
+        used_seed_history_value=used_seed_history_value,
+    )
+    script_usage = (
+        f"FOLLOW_UP_FROM={default_follow_up_from} NEW_SEEDS={default_new_seeds} "
+        f"NEXT_RUN_DIR={default_run_dir}"
+    )
+    if default_fail_on_verdict is not None:
+        script_usage += f" FOLLOW_UP_FAIL_ON_VERDICT={default_fail_on_verdict}"
+    script_usage += f" bash {script_path}"
+    return {
+        "schema": "st.llm_char_vae_context.best_generation_follow_up_command.v1",
+        "action": "reconfirm_best_raw_positive_generation",
+        "best_config": best_config,
+        "best_generation": follow_up_trajectory.get("best_generation"),
+        "best_summary_path": str(default_follow_up_from),
+        "default_new_seeds": default_new_seeds,
+        "used_seed_history": used_seeds,
+        "default_run_dir": str(default_run_dir),
+        "default_follow_up_from": str(default_follow_up_from),
+        "default_follow_up_fail_on_verdict": default_fail_on_verdict,
+        "script_path": str(script_path),
+        "shell_command": shell_command,
+        "script_command": script_command,
+        "script_usage": script_usage,
+    }
 
 
 def _script_command_line(command: list[str]) -> str:
@@ -2368,6 +2497,7 @@ def _apply_follow_up_defaults(
     source_features = _summary_features(source_summary)
     source_seeds = _summary_seeds(source_summary)
     source_chain = _follow_up_chain_source(source_summary)
+    external_seed_history = _seed_csv_values(args.follow_up_used_seeds)
 
     explicit_features = _flag_present(argv, "--features")
     explicit_normalize = _flag_present(argv, "--feature-normalize") or _flag_present(
@@ -2405,6 +2535,7 @@ def _apply_follow_up_defaults(
         "source_features": source_features,
         "source_seeds": source_seeds,
         "source_chain": source_chain,
+        "external_seed_history": external_seed_history,
         "applied_defaults": applied_defaults,
         "user_overrides": {
             "features": explicit_features,
@@ -2846,6 +2977,7 @@ def _follow_up_trajectory_action(
     latest_verdict: str,
     current_gate_failed: bool,
     current_raw_positive: bool,
+    raw_positive_streak: int,
     source_feature_tradeoff: bool,
     best_feature_changed: bool,
     current_is_best_generation: bool,
@@ -2854,6 +2986,16 @@ def _follow_up_trajectory_action(
     if current_gate_failed and source_feature_tradeoff:
         reasons.append("overall trajectory improved while source feature regressed")
         return "audit_feature_swap_before_promotion", reasons
+    if (
+        current_gate_failed
+        and current_raw_positive
+        and raw_positive_streak >= 3
+        and not current_is_best_generation
+    ):
+        reasons.append(f"raw-positive streak={raw_positive_streak} survived")
+        reasons.append("latest point regressed away from the best generation")
+        reasons.append("reconfirm the best raw-positive generation with fresh seeds")
+        return "reconfirm_best_raw_positive_generation", reasons
     if current_gate_failed and current_raw_positive:
         reasons.append(f"follow-up gate failed on latest verdict={latest_verdict}")
         reasons.append("source feature still beats the raw baseline")
@@ -3027,6 +3169,8 @@ def _follow_up_trajectory_record(
     ]
     mean_raw_delta = sum(raw_deltas) / len(raw_deltas) if raw_deltas else None
     best_raw_delta = min(raw_deltas) if raw_deltas else None
+    raw_positive_streak = _bool_streak(metric_point_records, "raw_positive", True)
+    raw_negative_streak = _bool_streak(metric_point_records, "raw_positive", False)
 
     current_point = points[-1] if points else {}
     trajectory_verdict = _delta_verdict(cumulative_delta, min_nll_delta)
@@ -3067,6 +3211,7 @@ def _follow_up_trajectory_record(
         latest_verdict=latest_verdict,
         current_gate_failed=current_gate_failed,
         current_raw_positive=current_raw_positive,
+        raw_positive_streak=raw_positive_streak,
         source_feature_tradeoff=source_feature_tradeoff,
         best_feature_changed=best_feature_changed,
         current_is_best_generation=current_is_best_generation,
@@ -3090,8 +3235,8 @@ def _follow_up_trajectory_record(
         "raw_evidence_count": len(raw_evidence_points),
         "raw_positive_count": raw_positive_count,
         "raw_positive_rate": raw_positive_rate,
-        "raw_positive_streak": _bool_streak(metric_point_records, "raw_positive", True),
-        "raw_negative_streak": _bool_streak(metric_point_records, "raw_positive", False),
+        "raw_positive_streak": raw_positive_streak,
+        "raw_negative_streak": raw_negative_streak,
         "mean_raw_delta_vs_raw": mean_raw_delta,
         "best_raw_delta_vs_raw": best_raw_delta,
         "current_raw_delta_vs_raw": _finite_float(
@@ -3157,6 +3302,7 @@ def _follow_up_guidance_record(
     follow_up_gate: dict[str, Any] | None,
     next_follow_up: dict[str, Any] | None,
     follow_up_trajectory: dict[str, Any] | None = None,
+    best_generation_follow_up: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     if not isinstance(follow_up_result, dict):
         return None
@@ -3200,6 +3346,7 @@ def _follow_up_guidance_record(
     reasons: list[str] = []
     promote_current_best = False
     use_next_follow_up_command = False
+    use_best_generation_follow_up_command = False
     action = "review_follow_up"
 
     def add_reason(reason: str) -> None:
@@ -3300,6 +3447,20 @@ def _follow_up_guidance_record(
             use_next_follow_up_command = isinstance(next_follow_up, dict)
             if use_next_follow_up_command and isinstance(next_follow_up, dict):
                 command_usage = next_follow_up.get("script_usage")
+        elif trajectory_action == "reconfirm_best_raw_positive_generation":
+            action = "reconfirm_best_raw_positive_generation"
+            promote_current_best = False
+            use_next_follow_up_command = False
+            use_best_generation_follow_up_command = isinstance(
+                best_generation_follow_up,
+                dict,
+            )
+            command_usage = (
+                best_generation_follow_up.get("script_usage")
+                if use_best_generation_follow_up_command
+                and isinstance(best_generation_follow_up, dict)
+                else None
+            )
         elif trajectory_action in {
             "return_to_best_generation_or_rerun",
             "inspect_trajectory",
@@ -3324,6 +3485,7 @@ def _follow_up_guidance_record(
         "trajectory_reasons": trajectory_reasons,
         "promote_current_best": promote_current_best,
         "use_next_follow_up_command": use_next_follow_up_command,
+        "use_best_generation_follow_up_command": use_best_generation_follow_up_command,
         "gate_failed": gate_failed,
         "reasons": reasons,
         "command_usage": command_usage,
@@ -3436,6 +3598,11 @@ def _build_parser() -> argparse.ArgumentParser:
             "comma-separated follow-up verdicts that should exit non-zero after "
             "writing summary/report, e.g. regressed,unknown"
         ),
+    )
+    parser.add_argument(
+        "--follow-up-used-seeds",
+        default=None,
+        help=argparse.SUPPRESS,
     )
     parser.add_argument("--json", action="store_true", help="Print summary JSON")
     return parser
@@ -3879,19 +4046,38 @@ def main(argv: list[str] | None = None) -> int:
     if follow_up_trajectory is not None:
         aggregate["follow_up_trajectory"] = follow_up_trajectory
 
+    best_generation_follow_up = _best_generation_follow_up_command_record(
+        args,
+        features,
+        root_run_dir,
+        seeds,
+        follow_up_trajectory,
+        next_follow_up,
+    )
+    if best_generation_follow_up is not None:
+        aggregate["best_generation_follow_up_command"] = best_generation_follow_up
+        _write_next_follow_up_script(best_generation_follow_up)
+
     follow_up_guidance = _follow_up_guidance_record(
         follow_up_result,
         follow_up_chain,
         follow_up_gate,
         next_follow_up,
         follow_up_trajectory,
+        best_generation_follow_up,
     )
     if follow_up_guidance is not None:
         aggregate["follow_up_guidance"] = follow_up_guidance
+    selected_guided_follow_up = (
+        best_generation_follow_up
+        if isinstance(follow_up_guidance, dict)
+        and follow_up_guidance.get("use_best_generation_follow_up_command")
+        else next_follow_up
+    )
     guided_next_follow_up = _guided_next_follow_up_command_record(
         root_run_dir,
         follow_up_guidance,
-        next_follow_up,
+        selected_guided_follow_up,
     )
     if guided_next_follow_up is not None:
         aggregate["guided_next_follow_up_command"] = guided_next_follow_up
