@@ -395,6 +395,70 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
             "eval_samples:128->256",
             mod._run_budget_shift_label(result["run_budget_shift"]),
         )
+        args = mod._build_parser().parse_args(
+            [
+                "models/samples/spiral_corpus_en",
+                "--epochs",
+                "16",
+                "--batches",
+                "32",
+                "--eval-samples",
+                "256",
+                "--window-chars",
+                "32",
+                "--latent-dim",
+                "8",
+                "--hidden",
+                "16",
+                "--batch-size",
+                "4",
+                "--vae-epochs",
+                "16",
+                "--vae-batches",
+                "32",
+                "--vae-batch-size",
+                "4",
+            ]
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            record = mod._best_generation_follow_up_command_record(
+                args,
+                ["raw", "latent", "raw_latent", "reconstruction_latent"],
+                Path(tmp),
+                [1061, 1063],
+                {
+                    "trajectory_action": "reconfirm_best_raw_positive_generation",
+                    "best_config": source_best_config,
+                    "best_summary_path": "/tmp/source/summary.json",
+                    "best_generation": 6,
+                },
+                {"used_seed_history": [1, 1061]},
+                result,
+            )
+
+        self.assertIsNotNone(record)
+        assert record is not None
+        self.assertIs(record["source_budget_matched"], True)
+        self.assertEqual(record["command_run_budget"]["epochs"], 8)
+        self.assertEqual(record["command_run_budget"]["batches"], 16)
+        self.assertEqual(record["command_run_budget"]["eval_samples"], 128)
+        self.assertEqual(record["command_run_budget"]["vae_epochs"], 8)
+        self.assertEqual(record["command_run_budget"]["vae_batches"], 16)
+        script_command = record["script_command"]
+        self.assertEqual(script_command[script_command.index("--epochs") + 1], "8")
+        self.assertEqual(script_command[script_command.index("--batches") + 1], "16")
+        self.assertEqual(
+            script_command[script_command.index("--eval-samples") + 1],
+            "128",
+        )
+        self.assertEqual(
+            script_command[script_command.index("--vae-epochs") + 1],
+            "8",
+        )
+        self.assertEqual(
+            script_command[script_command.index("--vae-batches") + 1],
+            "16",
+        )
 
     def test_safe_trajectory_promotes_guided_confirmation(self) -> None:
         mod = _load_module()

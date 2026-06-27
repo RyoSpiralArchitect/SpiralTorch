@@ -1628,6 +1628,10 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
                 f"- action: {best_generation_follow_up.get('action')}",
                 f"- best_generation: {best_generation_follow_up.get('best_generation')}",
                 f"- best_summary: `{best_generation_follow_up.get('best_summary_path')}`",
+                "- source_budget_matched: "
+                f"{best_generation_follow_up.get('source_budget_matched')}",
+                "- command_run_budget: "
+                f"{_run_budget_label(best_generation_follow_up.get('command_run_budget'))}",
                 "- default_follow_up_from: "
                 f"`{best_generation_follow_up.get('default_follow_up_from')}`",
                 "- default_follow_up_fail_on_verdict: "
@@ -2536,6 +2540,7 @@ def _best_generation_follow_up_command_record(
     seeds: list[int],
     follow_up_trajectory: dict[str, Any] | None,
     next_follow_up: dict[str, Any] | None,
+    follow_up_result: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     if not isinstance(follow_up_trajectory, dict):
         return None
@@ -2565,9 +2570,25 @@ def _best_generation_follow_up_command_record(
         and str(args.follow_up_fail_on_verdict).strip()
         else None
     )
+    source_run_budget = (
+        follow_up_result.get("source_run_budget")
+        if isinstance(follow_up_result, dict)
+        and isinstance(follow_up_result.get("source_run_budget"), dict)
+        else {}
+    )
+    source_budget_matched = bool(
+        isinstance(follow_up_result, dict)
+        and follow_up_result.get("run_budget_shifted")
+        and source_run_budget
+    )
+    command_args = (
+        _args_with_run_budget(args, source_run_budget)
+        if source_budget_matched
+        else args
+    )
     script_path = root_run_dir / "best_generation_follow_up_command.sh"
     literal_command = _follow_up_command_parts(
-        args,
+        command_args,
         features,
         best_config,
         seeds_value=default_new_seeds,
@@ -2578,7 +2599,7 @@ def _best_generation_follow_up_command_record(
     )
     shell_command = "PYTHONNOUSERSITE=1 " + shlex.join(literal_command)
     script_command = _follow_up_command_parts(
-        args,
+        command_args,
         features,
         best_config,
         seeds_value="${NEW_SEEDS}",
@@ -2604,6 +2625,9 @@ def _best_generation_follow_up_command_record(
         "best_config": best_config,
         "best_generation": follow_up_trajectory.get("best_generation"),
         "best_summary_path": str(default_follow_up_from),
+        "source_budget_matched": source_budget_matched,
+        "source_run_budget": source_run_budget,
+        "command_run_budget": _args_run_budget(command_args),
         "default_new_seeds": default_new_seeds,
         "used_seed_history": used_seeds,
         "default_run_dir": str(default_run_dir),
@@ -2972,6 +2996,35 @@ def _run_budget_shift_label(shift: Any) -> str:
             continue
         labels.append(f"{item.get('key')}:{item.get('source')}->{item.get('current')}")
     return ", ".join(labels) if labels else "-"
+
+
+def _run_budget_label(budget: Any) -> str:
+    if not isinstance(budget, dict):
+        return "-"
+    labels = [
+        f"{key}={budget.get(key)}"
+        for key in RUN_BUDGET_KEYS
+        if budget.get(key) is not None
+    ]
+    return ", ".join(labels) if labels else "-"
+
+
+def _args_with_run_budget(
+    args: argparse.Namespace,
+    run_budget: dict[str, Any] | None,
+) -> argparse.Namespace:
+    if not isinstance(run_budget, dict):
+        return args
+    overrides: dict[str, int] = {}
+    for key in RUN_BUDGET_KEYS:
+        value = run_budget.get(key)
+        if value is None or not hasattr(args, key):
+            continue
+        try:
+            overrides[key] = int(value)
+        except (TypeError, ValueError):
+            continue
+    return _clone_args(args, **overrides) if overrides else args
 
 
 def _source_best_config(summary: dict[str, Any]) -> dict[str, Any]:
@@ -4673,6 +4726,7 @@ def main(argv: list[str] | None = None) -> int:
         seeds,
         follow_up_trajectory,
         next_follow_up,
+        follow_up_result,
     )
     if best_generation_follow_up is not None:
         aggregate["best_generation_follow_up_command"] = best_generation_follow_up
