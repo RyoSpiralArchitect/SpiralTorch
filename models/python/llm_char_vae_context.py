@@ -1270,12 +1270,20 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
             if isinstance(verdict_counts, dict)
             else "-"
         )
+        trajectory_reasons = follow_up_trajectory.get("trajectory_reasons", [])
+        trajectory_reasons_text = (
+            ", ".join(str(reason) for reason in trajectory_reasons)
+            if isinstance(trajectory_reasons, list)
+            else "-"
+        )
         points = follow_up_trajectory.get("points", [])
         lines.extend(
             [
                 "## Follow-Up Trajectory",
                 "",
                 f"- trajectory_verdict: {follow_up_trajectory.get('trajectory_verdict')}",
+                f"- trajectory_action: {follow_up_trajectory.get('trajectory_action')}",
+                f"- trajectory_reasons: {trajectory_reasons_text}",
                 f"- latest_verdict: {follow_up_trajectory.get('latest_verdict')}",
                 "- cumulative_mean_best_nll_delta: "
                 f"{_fmt_float(follow_up_trajectory.get('cumulative_mean_best_nll_delta'))}",
@@ -1287,6 +1295,10 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
                 f"{_fmt_float(follow_up_trajectory.get('best_mean_best_nll'))}",
                 f"- best_generation: {follow_up_trajectory.get('best_generation')}",
                 f"- best_summary: `{follow_up_trajectory.get('best_summary_path') or '-'}`",
+                "- source_feature_tradeoff: "
+                f"{follow_up_trajectory.get('source_feature_tradeoff')}",
+                f"- best_feature_changed: {follow_up_trajectory.get('best_feature_changed')}",
+                f"- unsafe_promotion: {follow_up_trajectory.get('unsafe_promotion')}",
                 f"- verdict_counts: {verdict_counts_text}",
                 "",
             ]
@@ -2498,6 +2510,9 @@ def _follow_up_ancestor_record(
         "verdict": follow_up_result.get("verdict"),
         "config_verdict": follow_up_result.get("config_verdict"),
         "source_feature_verdict": follow_up_result.get("source_feature_verdict"),
+        "source_best_feature_retained": follow_up_result.get(
+            "source_best_feature_retained"
+        ),
         "guidance_action": follow_up_guidance.get("action"),
         "guided_enabled": guided_next.get("enabled"),
         "gate_failed": gate.get("failed"),
@@ -2609,6 +2624,7 @@ def _follow_up_current_trajectory_point(
         "verdict": result.get("verdict"),
         "config_verdict": result.get("config_verdict"),
         "source_feature_verdict": result.get("source_feature_verdict"),
+        "source_best_feature_retained": result.get("source_best_feature_retained"),
         "guidance_action": guidance.get("action"),
         "guided_enabled": guided_next.get("enabled"),
         "gate_failed": gate.get("failed"),
@@ -2622,6 +2638,56 @@ def _follow_up_trajectory_point_from_ancestor(
     point["schema"] = "st.llm_char_vae_context.follow_up_trajectory_point.v1"
     point["role"] = "ancestor"
     return point
+
+
+def _trajectory_best_feature(point: dict[str, Any] | None) -> str | None:
+    if not isinstance(point, dict):
+        return None
+    best_config = point.get("best_config")
+    if isinstance(best_config, dict) and best_config.get("best_feature") is not None:
+        return str(best_config.get("best_feature"))
+    if point.get("best_feature") is not None:
+        return str(point.get("best_feature"))
+    return None
+
+
+def _follow_up_trajectory_action(
+    *,
+    trajectory_verdict: str,
+    latest_verdict: str,
+    current_gate_failed: bool,
+    source_feature_tradeoff: bool,
+    best_feature_changed: bool,
+    current_is_best_generation: bool,
+) -> tuple[str, list[str]]:
+    reasons: list[str] = []
+    if current_gate_failed and source_feature_tradeoff:
+        reasons.append("overall trajectory improved while source feature regressed")
+        return "audit_feature_swap_before_promotion", reasons
+    if current_gate_failed:
+        reasons.append(f"follow-up gate failed on latest verdict={latest_verdict}")
+        return "stop_on_follow_up_gate", reasons
+    if source_feature_tradeoff:
+        reasons.append("config improved while source feature regressed")
+        return "review_feature_swap_before_promotion", reasons
+    if trajectory_verdict == "improved" and latest_verdict == "improved":
+        reasons.append("trajectory and latest follow-up both improved")
+        if current_is_best_generation:
+            reasons.append("current generation is the best NLL point")
+        if best_feature_changed:
+            reasons.append("best feature changed across the chain")
+        return "confirm_trajectory_with_fresh_seeds", reasons
+    if trajectory_verdict == "improved":
+        reasons.append("trajectory improved but latest verdict is not improved")
+        return "continue_or_audit_mixed_trajectory", reasons
+    if trajectory_verdict == "confirmed":
+        reasons.append("trajectory stayed within the confirmation band")
+        return "collect_more_seed_evidence", reasons
+    if trajectory_verdict == "regressed":
+        reasons.append("trajectory regressed relative to the first measured point")
+        return "return_to_best_generation_or_rerun", reasons
+    reasons.append("trajectory verdict is unknown")
+    return "inspect_trajectory", reasons
 
 
 def _follow_up_trajectory_record(
@@ -2688,13 +2754,49 @@ def _follow_up_trajectory_record(
         best_nll, best_point = min(metric_points, key=lambda item: item[0])
 
     current_point = points[-1] if points else {}
+    trajectory_verdict = _delta_verdict(cumulative_delta, min_nll_delta)
+    current_gate_failed = bool(current_point.get("gate_failed"))
+    current_config_verdict = str(current_point.get("config_verdict") or "unknown")
+    current_source_feature_verdict = str(
+        current_point.get("source_feature_verdict") or "unknown"
+    )
+    current_source_retained = current_point.get("source_best_feature_retained")
+    source_feature_tradeoff = (
+        current_config_verdict == "improved"
+        and (
+            current_source_feature_verdict == "regressed"
+            or current_source_retained is False
+        )
+    )
+    start_point = metric_points[0][1] if metric_points else None
+    start_best_feature = _trajectory_best_feature(start_point)
+    current_best_feature = _trajectory_best_feature(current_point)
+    best_feature_changed = (
+        start_best_feature is not None
+        and current_best_feature is not None
+        and start_best_feature != current_best_feature
+    )
+    current_is_best_generation = (
+        best_point is current_point if best_point is not None else False
+    )
+    trajectory_action, trajectory_reasons = _follow_up_trajectory_action(
+        trajectory_verdict=trajectory_verdict,
+        latest_verdict=latest_verdict,
+        current_gate_failed=current_gate_failed,
+        source_feature_tradeoff=source_feature_tradeoff,
+        best_feature_changed=best_feature_changed,
+        current_is_best_generation=current_is_best_generation,
+    )
+    unsafe_promotion = bool(current_gate_failed or source_feature_tradeoff)
     return {
         "schema": "st.llm_char_vae_context.follow_up_trajectory.v1",
         "point_count": len(points),
         "metric_point_count": len(metric_points),
         "generation": chain.get("generation"),
         "latest_verdict": latest_verdict,
-        "trajectory_verdict": _delta_verdict(cumulative_delta, min_nll_delta),
+        "trajectory_verdict": trajectory_verdict,
+        "trajectory_action": trajectory_action,
+        "trajectory_reasons": trajectory_reasons,
         "verdict_counts": verdict_counts,
         "start_mean_best_nll": start_nll,
         "current_mean_best_nll": current_nll,
@@ -2703,9 +2805,17 @@ def _follow_up_trajectory_record(
         "best_generation": best_point.get("generation") if best_point else None,
         "best_summary_path": best_point.get("summary_path") if best_point else None,
         "best_config": best_point.get("best_config") if best_point else None,
+        "start_best_feature": start_best_feature,
+        "current_best_feature": current_best_feature,
+        "best_feature_changed": best_feature_changed,
+        "source_feature_tradeoff": source_feature_tradeoff,
+        "unsafe_promotion": unsafe_promotion,
         "current_guidance_action": current_point.get("guidance_action"),
         "current_guided_enabled": current_point.get("guided_enabled"),
         "current_gate_failed": current_point.get("gate_failed"),
+        "current_config_verdict": current_config_verdict,
+        "current_source_feature_verdict": current_source_feature_verdict,
+        "current_source_best_feature_retained": current_source_retained,
         "points": points,
     }
 
