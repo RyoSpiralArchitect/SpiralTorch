@@ -811,15 +811,14 @@ def _train_feature_head(
     initial_nll = _finite_float(initial_validation.get("mean_nll"))
     validation_nlls = [
         value
-        for value in [
-            initial_nll,
-            *(
-                _finite_float(item.get("validation", {}).get("mean_nll"))
-                for item in history
-            ),
-        ]
+        for value in (
+            _finite_float(item.get("validation", {}).get("mean_nll"))
+            for item in history
+        )
         if value is not None
     ]
+    if not validation_nlls and initial_nll is not None:
+        validation_nlls.append(initial_nll)
     return {
         "feature": feature,
         "feature_dim": feature_dim,
@@ -951,6 +950,82 @@ def _finite_float(value: Any) -> float | None:
     if not math.isfinite(parsed):
         return None
     return parsed
+
+
+def _validation_mean_nll(validation: Any) -> float | None:
+    if not isinstance(validation, dict):
+        return None
+    return _finite_float(validation.get("mean_nll"))
+
+
+def _feature_result_validation_nlls(feature_result: dict[str, Any]) -> list[float]:
+    values: list[float] = []
+    history = feature_result.get("history", [])
+    if isinstance(history, list):
+        for item in history:
+            if not isinstance(item, dict):
+                continue
+            value = _validation_mean_nll(item.get("validation"))
+            if value is not None:
+                values.append(value)
+    if not values:
+        final = _validation_mean_nll(feature_result.get("final_validation"))
+        if final is not None:
+            values.append(final)
+    if not values:
+        initial = _validation_mean_nll(feature_result.get("initial_validation"))
+        if initial is not None:
+            values.append(initial)
+    return values
+
+
+def _feature_result_best_nll(feature_result: dict[str, Any]) -> float | None:
+    best = _validation_mean_nll(feature_result.get("best_validation"))
+    if best is not None:
+        return best
+    values = _feature_result_validation_nlls(feature_result)
+    return min(values) if values else None
+
+
+def _feature_result_final_nll(feature_result: dict[str, Any]) -> float | None:
+    final = _validation_mean_nll(feature_result.get("final_validation"))
+    if final is not None:
+        return final
+    history = feature_result.get("history", [])
+    if isinstance(history, list):
+        for item in reversed(history):
+            if not isinstance(item, dict):
+                continue
+            value = _validation_mean_nll(item.get("validation"))
+            if value is not None:
+                return value
+    return _validation_mean_nll(feature_result.get("initial_validation"))
+
+
+def _feature_result_validation_nll_mean(feature_result: dict[str, Any]) -> float | None:
+    explicit = _finite_float(feature_result.get("validation_nll_mean"))
+    if explicit is not None:
+        return explicit
+    values = _feature_result_validation_nlls(feature_result)
+    return sum(values) / len(values) if values else None
+
+
+def _feature_result_initial_minus_best(feature_result: dict[str, Any]) -> float | None:
+    explicit = _finite_float(feature_result.get("validation_nll_initial_minus_best"))
+    if explicit is not None:
+        return explicit
+    initial = _validation_mean_nll(feature_result.get("initial_validation"))
+    best = _feature_result_best_nll(feature_result)
+    return initial - best if initial is not None and best is not None else None
+
+
+def _feature_result_final_minus_best(feature_result: dict[str, Any]) -> float | None:
+    explicit = _finite_float(feature_result.get("validation_nll_final_minus_best"))
+    if explicit is not None:
+        return explicit
+    final = _feature_result_final_nll(feature_result)
+    best = _feature_result_best_nll(feature_result)
+    return final - best if final is not None and best is not None else None
 
 
 def _fmt_float(value: Any, digits: int = 6) -> str:
@@ -1810,37 +1885,57 @@ def _aggregate_summaries(
             if best_step is not None:
                 best_steps.append(best_step)
         validation_nll_means = [
-            float(feature_result["validation_nll_mean"])
-            for feature_result in feature_results
-            if feature_result.get("validation_nll_mean") is not None
+            value
+            for value in (
+                _feature_result_validation_nll_mean(feature_result)
+                for feature_result in feature_results
+            )
+            if value is not None
         ]
         validation_nll_initial_gains = [
-            float(feature_result["validation_nll_initial_minus_best"])
-            for feature_result in feature_results
-            if feature_result.get("validation_nll_initial_minus_best") is not None
+            value
+            for value in (
+                _feature_result_initial_minus_best(feature_result)
+                for feature_result in feature_results
+            )
+            if value is not None
         ]
         validation_nll_final_gaps = [
-            float(feature_result["validation_nll_final_minus_best"])
-            for feature_result in feature_results
-            if feature_result.get("validation_nll_final_minus_best") is not None
+            value
+            for value in (
+                _feature_result_final_minus_best(feature_result)
+                for feature_result in feature_results
+            )
+            if value is not None
         ]
         deltas = [
             float(summary.get("deltas", {}).get(f"{feature}_best_nll_vs_raw"))
             for summary in summaries
             if summary.get("deltas", {}).get(f"{feature}_best_nll_vs_raw") is not None
         ]
-        curve_deltas = [
-            float(
+        curve_deltas = []
+        for summary in summaries:
+            existing_delta = _finite_float(
                 summary.get("deltas", {}).get(
                     f"{feature}_validation_nll_mean_vs_raw"
                 )
             )
-            for summary in summaries
-            if summary.get("deltas", {}).get(
-                f"{feature}_validation_nll_mean_vs_raw"
-            )
-            is not None
-        ]
+            if existing_delta is not None:
+                curve_deltas.append(existing_delta)
+                continue
+            feature_by_name = {
+                str(item.get("feature")): item
+                for item in summary.get("features", [])
+                if isinstance(item, dict) and item.get("feature") is not None
+            }
+            raw_result = feature_by_name.get(FEATURE_RAW)
+            feature_result = feature_by_name.get(feature)
+            if raw_result is None or feature_result is None:
+                continue
+            raw_curve = _feature_result_validation_nll_mean(raw_result)
+            feature_curve = _feature_result_validation_nll_mean(feature_result)
+            if raw_curve is not None and feature_curve is not None:
+                curve_deltas.append(feature_curve - raw_curve)
         feature_rows.append(
             {
                 "feature": feature,

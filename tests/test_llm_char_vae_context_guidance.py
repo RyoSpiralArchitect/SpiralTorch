@@ -322,6 +322,69 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
         self.assertIn("curve_nll", report)
         self.assertIn("| hybrid_latent | 4.040000 | 25.00% | -0.025000 | 2/2", report)
 
+    def test_aggregate_recovers_curve_metrics_from_legacy_history(self) -> None:
+        mod = _load_module()
+        summary = {
+            "run": {"seed": 1},
+            "features": [
+                {
+                    "feature": "raw",
+                    "best_epoch": 1,
+                    "initial_validation": {"mean_nll": 4.30},
+                    "best_validation": {"mean_nll": 4.10, "accuracy": 0.20},
+                    "final_validation": {"mean_nll": 4.10},
+                    "history": [
+                        {"validation": {"mean_nll": 4.20}},
+                        {"validation": {"mean_nll": 4.10}},
+                    ],
+                },
+                {
+                    "feature": "raw_latent",
+                    "best_epoch": 1,
+                    "initial_validation": {"mean_nll": 4.40},
+                    "best_validation": {"mean_nll": 4.00, "accuracy": 0.25},
+                    "final_validation": {"mean_nll": 4.00},
+                    "history": [
+                        {"validation": {"mean_nll": 4.15}},
+                        {"validation": {"mean_nll": 4.00}},
+                    ],
+                },
+            ],
+            "ranking": [
+                {"feature": "raw_latent", "best_mean_nll": 4.00, "best_accuracy": 0.25},
+                {"feature": "raw", "best_mean_nll": 4.10, "best_accuracy": 0.20},
+            ],
+            "deltas": {
+                "raw_best_nll_vs_raw": 0.0,
+                "raw_latent_best_nll_vs_raw": -0.10,
+            },
+        }
+
+        aggregate = mod._aggregate_summaries(
+            [summary],
+            min_nll_delta=0.0,
+            win_tolerance=0.0001,
+        )
+
+        by_feature = {item["feature"]: item for item in aggregate["ranking"]}
+        self.assertAlmostEqual(by_feature["raw_latent"]["mean_best_step"], 2.0)
+        self.assertAlmostEqual(
+            by_feature["raw_latent"]["mean_validation_nll_mean"],
+            (4.15 + 4.00) / 2.0,
+        )
+        self.assertAlmostEqual(
+            by_feature["raw_latent"]["mean_validation_nll_mean_delta_vs_raw"],
+            ((4.15 + 4.00) / 2.0) - ((4.20 + 4.10) / 2.0),
+        )
+        self.assertAlmostEqual(
+            by_feature["raw_latent"]["mean_validation_nll_initial_minus_best"],
+            0.40,
+        )
+        self.assertAlmostEqual(
+            by_feature["raw_latent"]["mean_validation_nll_final_minus_best"],
+            0.0,
+        )
+
     def test_follow_up_result_reports_run_budget_shift(self) -> None:
         mod = _load_module()
         source_best_config = {
