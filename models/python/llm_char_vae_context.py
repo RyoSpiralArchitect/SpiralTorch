@@ -1114,6 +1114,7 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
             _fmt_float(item.get("mean_best_nll_delta_vs_raw")),
             _fmt_float(item.get("mean_best_step"), 2),
             _fmt_float(item.get("mean_validation_nll_mean")),
+            _fmt_float(item.get("mean_validation_nll_mean_delta_vs_raw")),
             _fmt_float(item.get("mean_validation_nll_final_minus_best")),
             str(item.get("runs", "-")),
         ]
@@ -1559,6 +1560,7 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
                 "mean_delta_vs_raw",
                 "mean_best_step",
                 "curve_nll",
+                "curve_delta_vs_raw",
                 "final_gap",
                 "runs",
             ],
@@ -1827,6 +1829,18 @@ def _aggregate_summaries(
             for summary in summaries
             if summary.get("deltas", {}).get(f"{feature}_best_nll_vs_raw") is not None
         ]
+        curve_deltas = [
+            float(
+                summary.get("deltas", {}).get(
+                    f"{feature}_validation_nll_mean_vs_raw"
+                )
+            )
+            for summary in summaries
+            if summary.get("deltas", {}).get(
+                f"{feature}_validation_nll_mean_vs_raw"
+            )
+            is not None
+        ]
         feature_rows.append(
             {
                 "feature": feature,
@@ -1842,6 +1856,7 @@ def _aggregate_summaries(
                 "validation_nll_final_minus_best": _metric_stats(
                     validation_nll_final_gaps
                 ),
+                "validation_nll_mean_delta_vs_raw": _metric_stats(curve_deltas),
             }
         )
     diagnostic_rows = []
@@ -2182,6 +2197,9 @@ def _aggregate_summaries(
                 "mean_best_nll_delta_vs_raw": item["best_nll_delta_vs_raw"]["mean"],
                 "mean_best_step": item["best_step"]["mean"],
                 "mean_validation_nll_mean": item["validation_nll_mean"]["mean"],
+                "mean_validation_nll_mean_delta_vs_raw": item[
+                    "validation_nll_mean_delta_vs_raw"
+                ]["mean"],
                 "mean_validation_nll_initial_minus_best": item[
                     "validation_nll_initial_minus_best"
                 ]["mean"],
@@ -4691,7 +4709,14 @@ def _run_single(args: argparse.Namespace, features: list[str]) -> dict[str, Any]
     best = ranked[0] if ranked else None
     raw = next((item for item in results if item["feature"] == FEATURE_RAW), None)
     raw_best_nll = (
-        None if raw is None or raw["best_validation"]["mean_nll"] is None else float(raw["best_validation"]["mean_nll"])
+        None
+        if raw is None or raw["best_validation"]["mean_nll"] is None
+        else float(raw["best_validation"]["mean_nll"])
+    )
+    raw_curve_nll = (
+        None
+        if raw is None or raw.get("validation_nll_mean") is None
+        else float(raw["validation_nll_mean"])
     )
     deltas = {}
     if raw_best_nll is not None:
@@ -4699,6 +4724,13 @@ def _run_single(args: argparse.Namespace, features: list[str]) -> dict[str, Any]
             best_nll = item["best_validation"]["mean_nll"]
             if best_nll is not None:
                 deltas[f"{item['feature']}_best_nll_vs_raw"] = float(best_nll) - raw_best_nll
+    if raw_curve_nll is not None:
+        for item in results:
+            curve_nll = item.get("validation_nll_mean")
+            if curve_nll is not None:
+                deltas[f"{item['feature']}_validation_nll_mean_vs_raw"] = (
+                    float(curve_nll) - raw_curve_nll
+                )
 
     summary = {
         "schema": RUN_SCHEMA,
@@ -4715,6 +4747,9 @@ def _run_single(args: argparse.Namespace, features: list[str]) -> dict[str, Any]
                 "best_mean_nll": item["best_validation"]["mean_nll"],
                 "best_accuracy": item["best_validation"]["accuracy"],
                 "validation_nll_mean": item["validation_nll_mean"],
+                "validation_nll_mean_delta_vs_raw": deltas.get(
+                    f"{item['feature']}_validation_nll_mean_vs_raw"
+                ),
                 "validation_nll_initial_minus_best": item[
                     "validation_nll_initial_minus_best"
                 ],

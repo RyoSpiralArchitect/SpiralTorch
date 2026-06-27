@@ -167,8 +167,14 @@ def _seed_summary(
             for feature, nll in scores.items()
         ],
         "deltas": {
-            f"{feature}_best_nll_vs_raw": nll - raw
-            for feature, nll in scores.items()
+            **{
+                f"{feature}_best_nll_vs_raw": nll - raw
+                for feature, nll in scores.items()
+            },
+            **{
+                f"{feature}_validation_nll_mean_vs_raw": nll - raw
+                for feature, nll in scores.items()
+            },
         },
         "feature_diagnostics": {"features": {}},
     }
@@ -303,6 +309,10 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
         )
         by_feature = {item["feature"]: item for item in aggregate["ranking"]}
         self.assertAlmostEqual(by_feature["raw_latent"]["mean_best_step"], 2.0)
+        self.assertAlmostEqual(
+            by_feature["raw_latent"]["mean_validation_nll_mean_delta_vs_raw"],
+            -0.0248,
+        )
         self.assertAlmostEqual(
             by_feature["raw_latent"]["mean_validation_nll_final_minus_best"],
             0.002,
