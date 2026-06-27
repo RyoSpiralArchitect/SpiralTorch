@@ -175,14 +175,50 @@ def _build_mellin_basis(model: Any, args: argparse.Namespace) -> Any | None:
     raise ValueError("--mellin must be one of: none|constant|ramp")
 
 
-def _feature_vector(model: Any, basis: Any | None, feature: str, text: str) -> list[float]:
+def _l2_normalize(values: list[float], epsilon: float = 1e-12) -> list[float]:
+    norm = math.sqrt(sum(value * value for value in values))
+    if norm <= epsilon:
+        return values
+    return [value / norm for value in values]
+
+
+def _normalise_feature_values(
+    model: Any,
+    feature: str,
+    values: list[float],
+    mode: str,
+) -> list[float]:
+    if mode == "none":
+        return values
+    if mode == "vector":
+        return _l2_normalize(values)
+    if mode == "blocks":
+        if feature in {FEATURE_RAW_LATENT, FEATURE_RECONSTRUCTION_LATENT}:
+            split = int(model.input_dim)
+            return _l2_normalize(values[:split]) + _l2_normalize(values[split:])
+        return _l2_normalize(values)
+    raise ValueError("--feature-normalize must be one of: none|vector|blocks")
+
+
+def _feature_vector(
+    model: Any,
+    basis: Any | None,
+    feature: str,
+    text: str,
+    normalize: str = "none",
+) -> list[float]:
     if feature in {FEATURE_RAW, FEATURE_RAW_LATENT}:
         if basis is None:
             raw_values = model.encode_text(text)
         else:
             raw_values = model.encode_text_with_mellin(text, basis)
         if feature == FEATURE_RAW:
-            return [float(value) for value in raw_values]
+            return _normalise_feature_values(
+                model,
+                feature,
+                [float(value) for value in raw_values],
+                normalize,
+            )
 
     if basis is None:
         state = model.forward_mean_text(text)
@@ -198,7 +234,12 @@ def _feature_vector(model: Any, basis: Any | None, feature: str, text: str) -> l
         values = [*state.reconstruction, *state.latent]
     else:
         raise ValueError(f"unknown feature: {feature}")
-    return [float(value) for value in values]
+    return _normalise_feature_values(
+        model,
+        feature,
+        [float(value) for value in values],
+        normalize,
+    )
 
 
 def _feature_tensor(
@@ -206,11 +247,12 @@ def _feature_tensor(
     basis: Any | None,
     feature: str,
     samples: list[_WindowSample],
+    normalize: str = "none",
 ) -> st.Tensor:
     dim = _feature_dim(model, feature)
     data: list[float] = []
     for sample in samples:
-        values = _feature_vector(model, basis, feature, sample.window)
+        values = _feature_vector(model, basis, feature, sample.window, normalize)
         if len(values) != dim:
             raise ValueError(f"{feature} feature length mismatch: expected {dim}, got {len(values)}")
         data.extend(values)
@@ -221,6 +263,7 @@ def _build_batches(
     vae: Any,
     basis: Any | None,
     feature: str,
+    normalize: str,
     text: str,
     index: dict[str, int],
     vocab_size: int,
@@ -232,7 +275,10 @@ def _build_batches(
     out: list[tuple[st.Tensor, st.Tensor]] = []
     for _ in range(batches):
         samples = _sample_windows(text, window_chars, index, batch_size, rng)
-        out.append((_feature_tensor(vae, basis, feature, samples), _one_hot_targets(samples, vocab_size)))
+        out.append((
+            _feature_tensor(vae, basis, feature, samples, normalize),
+            _one_hot_targets(samples, vocab_size),
+        ))
     return out
 
 
@@ -410,6 +456,7 @@ def _feature_diagnostics(
     vae: Any,
     basis: Any | None,
     features: list[str],
+    normalize: str,
     text: str,
     index: dict[str, int],
     window_chars: int,
@@ -420,7 +467,7 @@ def _feature_diagnostics(
     windows = _sample_windows(text, window_chars, index, max(1, samples), rng)
     vectors = {
         feature: [
-            _feature_vector(vae, basis, feature, sample.window)
+            _feature_vector(vae, basis, feature, sample.window, normalize)
             for sample in windows
         ]
         for feature in features
@@ -474,6 +521,7 @@ def _evaluate(
     vae: Any,
     basis: Any | None,
     feature: str,
+    normalize: str,
     text: str,
     index: dict[str, int],
     vocab_size: int,
@@ -491,7 +539,7 @@ def _evaluate(
         }
     rng = random.Random(seed)
     samples = _sample_windows(text, window_chars, index, eval_samples, rng)
-    x = _feature_tensor(vae, basis, feature, samples)
+    x = _feature_tensor(vae, basis, feature, samples, normalize)
     probs = head.forward(x).tolist()
     nll = 0.0
     correct = 0
@@ -518,6 +566,7 @@ def _generate(
     vae: Any,
     basis: Any | None,
     feature: str,
+    normalize: str,
     symbols: list[str],
     index: dict[str, int],
     prompt: str,
@@ -535,7 +584,7 @@ def _generate(
         if len(context) < window_chars:
             context = (DEFAULT_UNK * (window_chars - len(context))) + context
         sample = _WindowSample(window=context, target=0)
-        x = _feature_tensor(vae, basis, feature, [sample])
+        x = _feature_tensor(vae, basis, feature, [sample], normalize)
         probs = [float(value) for value in head.forward(x).tolist()[0]]
         next_idx = _sample_topk(probs, top_k, rng)
         out += symbols[next_idx] if 0 <= next_idx < len(symbols) else DEFAULT_UNK
@@ -584,6 +633,7 @@ def _train_feature_head(
         vae,
         basis,
         feature,
+        str(args.feature_normalize),
         val_text,
         index,
         vocab_size,
@@ -606,6 +656,7 @@ def _train_feature_head(
             vae,
             basis,
             feature,
+            str(args.feature_normalize),
             train_text,
             index,
             vocab_size,
@@ -620,6 +671,7 @@ def _train_feature_head(
             vae,
             basis,
             feature,
+            str(args.feature_normalize),
             val_text,
             index,
             vocab_size,
@@ -657,6 +709,7 @@ def _train_feature_head(
         vae,
         basis,
         feature,
+        str(args.feature_normalize),
         symbols,
         index,
         str(args.prompt),
@@ -841,6 +894,7 @@ def _single_report(summary: dict[str, Any]) -> str:
         f"- best_feature: {summary.get('best_feature')}",
         f"- seed: {run.get('seed')}",
         f"- features: {', '.join(str(item) for item in run.get('features', []))}",
+        f"- feature_normalize: {run.get('feature_normalize')}",
         f"- window_chars: {run.get('window_chars')}",
         f"- latent_dim: {run.get('latent_dim')}",
         f"- summary_json: `summary.json`",
@@ -929,6 +983,7 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
         f"- best_feature: {summary.get('best_feature')}",
         f"- seeds: {', '.join(str(seed) for seed in run.get('seeds', []))}",
         f"- features: {', '.join(str(item) for item in run.get('features', []))}",
+        f"- feature_normalize: {run.get('feature_normalize')}",
         f"- min_nll_delta: {run.get('min_nll_delta')}",
         f"- win_tolerance: {run.get('win_tolerance')}",
         f"- summary_json: `summary.json`",
@@ -1249,6 +1304,15 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--window-chars", type=int, default=64)
     parser.add_argument("--latent-dim", type=int, default=16)
     parser.add_argument("--hidden", type=int, default=64)
+    parser.add_argument(
+        "--feature-normalize",
+        choices=("none", "vector", "blocks"),
+        default="none",
+        help=(
+            "feature scaling before the prediction head; blocks normalizes hybrid "
+            "raw/reconstruction and latent segments separately"
+        ),
+    )
     parser.add_argument("--epochs", type=int, default=3)
     parser.add_argument("--batches", type=int, default=16)
     parser.add_argument("--batch-size", type=int, default=8)
@@ -1369,6 +1433,7 @@ def _run_single(args: argparse.Namespace, features: list[str]) -> dict[str, Any]
     print(
         f"files={len(data_files)} chars={len(text)} vocab={vocab_size} "
         f"window_chars={vae.window_chars} latent_dim={vae.latent_dim} features={','.join(features)} "
+        f"feature_normalize={args.feature_normalize} "
         f"epochs={args.epochs} vae_epochs={args.vae_epochs} run_dir={run_dir}",
         flush=True,
     )
@@ -1381,6 +1446,7 @@ def _run_single(args: argparse.Namespace, features: list[str]) -> dict[str, Any]
         vae,
         basis,
         features,
+        str(args.feature_normalize),
         val_text,
         index,
         int(args.window_chars),
@@ -1401,6 +1467,7 @@ def _run_single(args: argparse.Namespace, features: list[str]) -> dict[str, Any]
         "input_dim": int(vae.input_dim),
         "latent_dim": int(vae.latent_dim),
         "features": features,
+        "feature_normalize": str(args.feature_normalize),
         "hidden": int(args.hidden),
         "epochs": int(args.epochs),
         "batches": int(args.batches),
@@ -1527,6 +1594,7 @@ def main(argv: list[str] | None = None) -> int:
         "format": FORMAT,
         "arch": "llm_char_vae_context_sweep",
         "features": features,
+        "feature_normalize": str(args.feature_normalize),
         "seeds": seeds,
         "seed_count": len(seeds),
         "min_nll_delta": float(args.min_nll_delta),
