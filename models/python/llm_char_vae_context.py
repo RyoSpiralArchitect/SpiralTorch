@@ -1148,6 +1148,8 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
                 f"- verdict: {follow_up_result.get('verdict')}",
                 f"- config_verdict: {follow_up_result.get('config_verdict')}",
                 f"- source_feature_verdict: {follow_up_result.get('source_feature_verdict')}",
+                f"- source_feature_raw_verdict: {follow_up_result.get('source_feature_raw_verdict')}",
+                f"- current_best_raw_verdict: {follow_up_result.get('current_best_raw_verdict')}",
                 f"- source_best_feature_retained: {follow_up_result.get('source_best_feature_retained')}",
                 f"- match_found: {follow_up_result.get('match_found')}",
                 "",
@@ -1164,6 +1166,8 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
                     "evaluated_nll",
                     "delta_vs_source",
                     "source_feature_delta",
+                    "source_feature_delta_vs_raw",
+                    "current_best_delta_vs_raw",
                 ],
                 [
                     [
@@ -1189,6 +1193,16 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
                         _fmt_float(
                             follow_up_result.get(
                                 "source_feature_mean_best_nll_delta_vs_source"
+                            )
+                        ),
+                        _fmt_float(
+                            follow_up_result.get(
+                                "source_feature_mean_best_nll_delta_vs_raw"
+                            )
+                        ),
+                        _fmt_float(
+                            follow_up_result.get(
+                                "current_best_mean_best_nll_delta_vs_raw"
                             )
                         ),
                     ]
@@ -1965,6 +1979,9 @@ def _guided_next_follow_up_command_record(
         "verdict": follow_up_guidance.get("verdict"),
         "config_verdict": follow_up_guidance.get("config_verdict"),
         "source_feature_verdict": follow_up_guidance.get("source_feature_verdict"),
+        "source_feature_raw_verdict": follow_up_guidance.get(
+            "source_feature_raw_verdict"
+        ),
         "gate_failed": follow_up_guidance.get("gate_failed"),
         "trajectory_action": follow_up_guidance.get("trajectory_action"),
         "trajectory_verdict": follow_up_guidance.get("trajectory_verdict"),
@@ -2402,6 +2419,19 @@ def _follow_up_result(
     source_feature_nll = _finite_float(
         source_feature_evaluated.get("mean_best_nll") if source_feature_evaluated else None
     )
+    evaluated_delta_vs_raw = _finite_float(
+        evaluated.get("mean_best_nll_delta_vs_raw") if evaluated else None
+    )
+    source_feature_delta_vs_raw = _finite_float(
+        source_feature_evaluated.get("mean_best_nll_delta_vs_raw")
+        if source_feature_evaluated
+        else None
+    )
+    current_best_delta_vs_raw = _finite_float(
+        current_best_config.get("mean_best_nll_delta_vs_raw")
+        if isinstance(current_best_config, dict)
+        else None
+    )
     config_delta = None
     source_feature_delta = None
     if source_nll is not None and evaluated_nll is not None:
@@ -2427,8 +2457,20 @@ def _follow_up_result(
         "current_best_config": current_best_config,
         "mean_best_nll_delta_vs_source": config_delta,
         "source_feature_mean_best_nll_delta_vs_source": source_feature_delta,
+        "evaluated_mean_best_nll_delta_vs_raw": evaluated_delta_vs_raw,
+        "source_feature_mean_best_nll_delta_vs_raw": source_feature_delta_vs_raw,
+        "current_best_mean_best_nll_delta_vs_raw": current_best_delta_vs_raw,
         "config_verdict": config_verdict,
         "source_feature_verdict": source_feature_verdict,
+        "evaluated_raw_verdict": _delta_verdict(evaluated_delta_vs_raw, min_nll_delta),
+        "source_feature_raw_verdict": _delta_verdict(
+            source_feature_delta_vs_raw,
+            min_nll_delta,
+        ),
+        "current_best_raw_verdict": _delta_verdict(
+            current_best_delta_vs_raw,
+            min_nll_delta,
+        ),
         "source_best_feature_retained": source_best_feature_retained,
         "verdict": source_feature_verdict
         if source_feature_verdict != "unknown"
@@ -2521,6 +2563,16 @@ def _follow_up_ancestor_record(
         "verdict": follow_up_result.get("verdict"),
         "config_verdict": follow_up_result.get("config_verdict"),
         "source_feature_verdict": follow_up_result.get("source_feature_verdict"),
+        "source_feature_raw_verdict": follow_up_result.get(
+            "source_feature_raw_verdict"
+        ),
+        "source_feature_mean_best_nll_delta_vs_raw": follow_up_result.get(
+            "source_feature_mean_best_nll_delta_vs_raw"
+        ),
+        "current_best_raw_verdict": follow_up_result.get("current_best_raw_verdict"),
+        "current_best_mean_best_nll_delta_vs_raw": follow_up_result.get(
+            "current_best_mean_best_nll_delta_vs_raw"
+        ),
         "source_best_feature_retained": follow_up_result.get(
             "source_best_feature_retained"
         ),
@@ -2635,6 +2687,14 @@ def _follow_up_current_trajectory_point(
         "verdict": result.get("verdict"),
         "config_verdict": result.get("config_verdict"),
         "source_feature_verdict": result.get("source_feature_verdict"),
+        "source_feature_raw_verdict": result.get("source_feature_raw_verdict"),
+        "source_feature_mean_best_nll_delta_vs_raw": result.get(
+            "source_feature_mean_best_nll_delta_vs_raw"
+        ),
+        "current_best_raw_verdict": result.get("current_best_raw_verdict"),
+        "current_best_mean_best_nll_delta_vs_raw": result.get(
+            "current_best_mean_best_nll_delta_vs_raw"
+        ),
         "source_best_feature_retained": result.get("source_best_feature_retained"),
         "guidance_action": guidance.get("action"),
         "guided_enabled": guided_next.get("enabled"),
@@ -2667,6 +2727,7 @@ def _follow_up_trajectory_action(
     trajectory_verdict: str,
     latest_verdict: str,
     current_gate_failed: bool,
+    current_raw_positive: bool,
     source_feature_tradeoff: bool,
     best_feature_changed: bool,
     current_is_best_generation: bool,
@@ -2675,6 +2736,11 @@ def _follow_up_trajectory_action(
     if current_gate_failed and source_feature_tradeoff:
         reasons.append("overall trajectory improved while source feature regressed")
         return "audit_feature_swap_before_promotion", reasons
+    if current_gate_failed and current_raw_positive:
+        reasons.append(f"follow-up gate failed on latest verdict={latest_verdict}")
+        reasons.append("source feature still beats the raw baseline")
+        reasons.append("widen seed confirmation before rejecting raw-positive candidate")
+        return "widen_seed_confirmation_on_raw_positive_regression", reasons
     if current_gate_failed:
         reasons.append(f"follow-up gate failed on latest verdict={latest_verdict}")
         return "stop_on_follow_up_gate", reasons
@@ -2771,6 +2837,9 @@ def _follow_up_trajectory_record(
     current_source_feature_verdict = str(
         current_point.get("source_feature_verdict") or "unknown"
     )
+    current_source_feature_raw_verdict = str(
+        current_point.get("source_feature_raw_verdict") or "unknown"
+    )
     current_source_retained = current_point.get("source_best_feature_retained")
     source_feature_tradeoff = (
         current_config_verdict == "improved"
@@ -2778,6 +2847,11 @@ def _follow_up_trajectory_record(
             current_source_feature_verdict == "regressed"
             or current_source_retained is False
         )
+    )
+    current_raw_positive = (
+        current_source_retained is True
+        and current_source_feature_raw_verdict == "improved"
+        and not source_feature_tradeoff
     )
     start_point = metric_points[0][1] if metric_points else None
     start_best_feature = _trajectory_best_feature(start_point)
@@ -2794,11 +2868,14 @@ def _follow_up_trajectory_record(
         trajectory_verdict=trajectory_verdict,
         latest_verdict=latest_verdict,
         current_gate_failed=current_gate_failed,
+        current_raw_positive=current_raw_positive,
         source_feature_tradeoff=source_feature_tradeoff,
         best_feature_changed=best_feature_changed,
         current_is_best_generation=current_is_best_generation,
     )
-    unsafe_promotion = bool(current_gate_failed or source_feature_tradeoff)
+    unsafe_promotion = bool(
+        source_feature_tradeoff or (current_gate_failed and not current_raw_positive)
+    )
     return {
         "schema": "st.llm_char_vae_context.follow_up_trajectory.v1",
         "point_count": len(points),
@@ -2826,7 +2903,9 @@ def _follow_up_trajectory_record(
         "current_gate_failed": current_point.get("gate_failed"),
         "current_config_verdict": current_config_verdict,
         "current_source_feature_verdict": current_source_feature_verdict,
+        "current_source_feature_raw_verdict": current_source_feature_raw_verdict,
         "current_source_best_feature_retained": current_source_retained,
+        "current_raw_positive": current_raw_positive,
         "points": points,
     }
 
@@ -2877,6 +2956,9 @@ def _follow_up_guidance_record(
     source_feature_verdict = str(
         follow_up_result.get("source_feature_verdict") or "unknown"
     )
+    source_feature_raw_verdict = str(
+        follow_up_result.get("source_feature_raw_verdict") or "unknown"
+    )
     source_retained = bool(follow_up_result.get("source_best_feature_retained"))
     gate_failed = (
         bool(follow_up_gate.get("failed"))
@@ -2900,6 +2982,11 @@ def _follow_up_guidance_record(
     config_improved_while_source_regressed = (
         config_verdict == "improved" and source_feature_verdict == "regressed"
     )
+    raw_positive_regression = (
+        source_retained
+        and source_feature_verdict == "regressed"
+        and source_feature_raw_verdict == "improved"
+    )
     reasons: list[str] = []
     promote_current_best = False
     use_next_follow_up_command = False
@@ -2910,8 +2997,18 @@ def _follow_up_guidance_record(
             reasons.append(reason)
 
     if gate_failed:
-        action = "stop_on_follow_up_gate"
+        action = (
+            "widen_seed_confirmation_on_raw_positive_regression"
+            if raw_positive_regression
+            else "stop_on_follow_up_gate"
+        )
+        use_next_follow_up_command = (
+            raw_positive_regression and isinstance(next_follow_up, dict)
+        )
         add_reason(f"gate failed on verdict={verdict}")
+        if raw_positive_regression:
+            add_reason("source feature still beats the raw baseline")
+            add_reason("widen seed confirmation before rejecting raw-positive candidate")
     elif source_feature_needs_review:
         action = "review_feature_swap_before_promotion"
         if not source_retained:
@@ -2945,6 +3042,8 @@ def _follow_up_guidance_record(
         add_reason("source best feature did not retain its role")
     if gate_failed and source_feature_verdict == "regressed":
         add_reason("source best feature regressed on fresh seeds")
+    if gate_failed and source_feature_raw_verdict == "improved":
+        add_reason("source best feature remained raw-positive")
     if gate_failed and config_improved_while_source_regressed:
         add_reason("config improved while source feature regressed")
 
@@ -2985,6 +3084,12 @@ def _follow_up_guidance_record(
             use_next_follow_up_command = isinstance(next_follow_up, dict)
             if use_next_follow_up_command and isinstance(next_follow_up, dict):
                 command_usage = next_follow_up.get("script_usage")
+        elif trajectory_action == "widen_seed_confirmation_on_raw_positive_regression":
+            action = "widen_seed_confirmation_on_raw_positive_regression"
+            promote_current_best = False
+            use_next_follow_up_command = isinstance(next_follow_up, dict)
+            if use_next_follow_up_command and isinstance(next_follow_up, dict):
+                command_usage = next_follow_up.get("script_usage")
         elif trajectory_action in {
             "return_to_best_generation_or_rerun",
             "inspect_trajectory",
@@ -3001,6 +3106,7 @@ def _follow_up_guidance_record(
         "verdict": verdict,
         "config_verdict": config_verdict,
         "source_feature_verdict": source_feature_verdict,
+        "source_feature_raw_verdict": source_feature_raw_verdict,
         "source_best_feature_retained": source_retained,
         "trajectory_action": trajectory_action,
         "trajectory_verdict": trajectory_verdict,
