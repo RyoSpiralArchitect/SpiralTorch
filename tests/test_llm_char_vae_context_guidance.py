@@ -371,6 +371,14 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
         )
         self.assertIs(trajectory["current_raw_positive"], True)
         self.assertIs(trajectory["unsafe_promotion"], False)
+        self.assertEqual(trajectory["raw_evidence_count"], 1)
+        self.assertEqual(trajectory["raw_positive_count"], 1)
+        self.assertEqual(trajectory["raw_positive_rate"], 1.0)
+        self.assertEqual(trajectory["raw_positive_streak"], 1)
+        self.assertEqual(trajectory["raw_negative_streak"], 0)
+        self.assertAlmostEqual(trajectory["current_raw_delta_vs_raw"], -0.008)
+        self.assertAlmostEqual(trajectory["mean_raw_delta_vs_raw"], -0.008)
+        self.assertIs(trajectory["points"][-1]["raw_positive"], True)
         self.assertEqual(
             guidance["action"],
             "widen_seed_confirmation_on_raw_positive_regression",
@@ -383,6 +391,11 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
             guided["guidance_action"],
             "widen_seed_confirmation_on_raw_positive_regression",
         )
+
+        summary["follow_up_trajectory"] = trajectory
+        report = mod._aggregate_report(summary)
+        self.assertIn("- raw_positive_points: 1/1 (100.0%)", report)
+        self.assertIn("raw_delta_vs_raw", report)
 
 
 if __name__ == "__main__":

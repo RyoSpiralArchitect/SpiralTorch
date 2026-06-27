@@ -1284,6 +1284,16 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
             if isinstance(verdict_counts, dict)
             else "-"
         )
+        raw_positive_count = follow_up_trajectory.get("raw_positive_count")
+        raw_evidence_count = follow_up_trajectory.get("raw_evidence_count")
+        raw_positive_rate = _finite_float(follow_up_trajectory.get("raw_positive_rate"))
+        raw_positive_text = (
+            f"{raw_positive_count}/{raw_evidence_count} ({raw_positive_rate * 100.0:.1f}%)"
+            if raw_positive_count is not None
+            and raw_evidence_count
+            and raw_positive_rate is not None
+            else "-"
+        )
         trajectory_reasons = follow_up_trajectory.get("trajectory_reasons", [])
         trajectory_reasons_text = (
             ", ".join(str(reason) for reason in trajectory_reasons)
@@ -1301,6 +1311,17 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
                 f"- latest_verdict: {follow_up_trajectory.get('latest_verdict')}",
                 "- cumulative_mean_best_nll_delta: "
                 f"{_fmt_float(follow_up_trajectory.get('cumulative_mean_best_nll_delta'))}",
+                f"- raw_positive_points: {raw_positive_text}",
+                "- raw_positive_streak: "
+                f"{follow_up_trajectory.get('raw_positive_streak')}",
+                "- raw_negative_streak: "
+                f"{follow_up_trajectory.get('raw_negative_streak')}",
+                "- mean_raw_delta_vs_raw: "
+                f"{_fmt_float(follow_up_trajectory.get('mean_raw_delta_vs_raw'))}",
+                "- current_raw_delta_vs_raw: "
+                f"{_fmt_float(follow_up_trajectory.get('current_raw_delta_vs_raw'))}",
+                "- best_raw_delta_vs_raw: "
+                f"{_fmt_float(follow_up_trajectory.get('best_raw_delta_vs_raw'))}",
                 "- start_mean_best_nll: "
                 f"{_fmt_float(follow_up_trajectory.get('start_mean_best_nll'))}",
                 "- current_mean_best_nll: "
@@ -1326,6 +1347,8 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
                         "best_config",
                         "mean_best_nll",
                         "delta_from_previous",
+                        "raw_delta_vs_raw",
+                        "raw_positive",
                         "verdict",
                         "guidance_action",
                         "gate_failed",
@@ -2862,6 +2885,55 @@ def _follow_up_trajectory_action(
     return "inspect_trajectory", reasons
 
 
+def _trajectory_raw_delta(point: dict[str, Any]) -> float | None:
+    for key in (
+        "current_best_mean_best_nll_delta_vs_raw",
+        "source_feature_mean_best_nll_delta_vs_raw",
+    ):
+        value = _finite_float(point.get(key))
+        if value is not None:
+            return value
+    best_config = point.get("best_config")
+    if isinstance(best_config, dict):
+        return _finite_float(best_config.get("mean_best_nll_delta_vs_raw"))
+    return None
+
+
+def _trajectory_raw_verdict(point: dict[str, Any]) -> str:
+    for key in ("current_best_raw_verdict", "source_feature_raw_verdict"):
+        verdict = str(point.get(key) or "unknown")
+        if verdict != "unknown":
+            return verdict
+    raw_delta = _trajectory_raw_delta(point)
+    return _delta_verdict(raw_delta, 0.0) if raw_delta is not None else "unknown"
+
+
+def _trajectory_raw_positive(
+    point: dict[str, Any],
+    *,
+    min_nll_delta: float,
+) -> bool | None:
+    raw_delta = _trajectory_raw_delta(point)
+    if raw_delta is not None:
+        return _delta_verdict(raw_delta, min_nll_delta) == "improved"
+    raw_verdict = _trajectory_raw_verdict(point)
+    if raw_verdict == "improved":
+        return True
+    if raw_verdict in {"confirmed", "regressed"}:
+        return False
+    return None
+
+
+def _bool_streak(points: list[dict[str, Any]], key: str, value: bool) -> int:
+    streak = 0
+    for point in reversed(points):
+        if point.get(key) is value:
+            streak += 1
+            continue
+        break
+    return streak
+
+
 def _follow_up_trajectory_record(
     root_run_dir: pathlib.Path,
     summary: dict[str, Any],
@@ -2891,6 +2963,12 @@ def _follow_up_trajectory_record(
     metric_points = []
     for point in points:
         nll = _finite_float(point.get("mean_best_nll"))
+        point["raw_delta_vs_raw"] = _trajectory_raw_delta(point)
+        point["raw_verdict"] = _trajectory_raw_verdict(point)
+        point["raw_positive"] = _trajectory_raw_positive(
+            point,
+            min_nll_delta=min_nll_delta,
+        )
         point["mean_best_nll_delta_from_previous"] = (
             nll - previous_nll if nll is not None and previous_nll is not None else None
         )
@@ -2924,6 +3002,31 @@ def _follow_up_trajectory_record(
     best_point: dict[str, Any] | None = None
     if metric_points:
         best_nll, best_point = min(metric_points, key=lambda item: item[0])
+
+    metric_point_records = [point for _nll, point in metric_points]
+    raw_evidence_points = [
+        point
+        for point in metric_point_records
+        if point.get("raw_positive") is not None
+    ]
+    raw_positive_count = sum(
+        1 for point in raw_evidence_points if point.get("raw_positive") is True
+    )
+    raw_positive_rate = (
+        raw_positive_count / len(raw_evidence_points)
+        if raw_evidence_points
+        else None
+    )
+    raw_deltas = [
+        value
+        for value in (
+            _finite_float(point.get("raw_delta_vs_raw"))
+            for point in metric_point_records
+        )
+        if value is not None
+    ]
+    mean_raw_delta = sum(raw_deltas) / len(raw_deltas) if raw_deltas else None
+    best_raw_delta = min(raw_deltas) if raw_deltas else None
 
     current_point = points[-1] if points else {}
     trajectory_verdict = _delta_verdict(cumulative_delta, min_nll_delta)
@@ -2984,6 +3087,16 @@ def _follow_up_trajectory_record(
         "start_mean_best_nll": start_nll,
         "current_mean_best_nll": current_nll,
         "cumulative_mean_best_nll_delta": cumulative_delta,
+        "raw_evidence_count": len(raw_evidence_points),
+        "raw_positive_count": raw_positive_count,
+        "raw_positive_rate": raw_positive_rate,
+        "raw_positive_streak": _bool_streak(metric_point_records, "raw_positive", True),
+        "raw_negative_streak": _bool_streak(metric_point_records, "raw_positive", False),
+        "mean_raw_delta_vs_raw": mean_raw_delta,
+        "best_raw_delta_vs_raw": best_raw_delta,
+        "current_raw_delta_vs_raw": _finite_float(
+            current_point.get("raw_delta_vs_raw")
+        ),
         "best_mean_best_nll": best_nll,
         "best_generation": best_point.get("generation") if best_point else None,
         "best_summary_path": best_point.get("summary_path") if best_point else None,
@@ -3013,6 +3126,8 @@ def _follow_up_trajectory_point_row(point: dict[str, Any]) -> list[str]:
         _config_label(best_config if isinstance(best_config, dict) else None),
         _fmt_float(point.get("mean_best_nll")),
         _fmt_float(point.get("mean_best_nll_delta_from_previous")),
+        _fmt_float(point.get("raw_delta_vs_raw")),
+        str(point.get("raw_positive") if point.get("raw_positive") is not None else "-"),
         str(point.get("verdict") or "-"),
         str(point.get("guidance_action") or "-"),
         str(point.get("gate_failed") if point.get("gate_failed") is not None else "-"),
