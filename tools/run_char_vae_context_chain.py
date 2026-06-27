@@ -631,9 +631,30 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("text_or_dir", nargs="+", help="input text file(s) or directories")
     parser.add_argument("--preset", choices=sorted(PRESETS), default="small")
     parser.add_argument("--run-root", type=Path, default=None)
-    parser.add_argument("--follow-ups", type=int, default=1)
-    parser.add_argument("--follow-up-seed-groups", default=None)
-    parser.add_argument("--follow-up-fail-on-verdict", default=DEFAULT_FAIL_ON_VERDICT)
+    parser.add_argument(
+        "--follow-ups",
+        type=int,
+        default=1,
+        help="number of generated follow-up scripts to run after the parent sweep",
+    )
+    parser.add_argument(
+        "--follow-up-seed-groups",
+        default=None,
+        metavar="CSV[;CSV...]",
+        help=(
+            "explicit per-follow-up NEW_SEEDS groups; when omitted, each generated "
+            "follow-up command's tie-aware default_new_seeds wins before preset "
+            "fallback groups are used"
+        ),
+    )
+    parser.add_argument(
+        "--follow-up-fail-on-verdict",
+        default=DEFAULT_FAIL_ON_VERDICT,
+        help=(
+            "comma-separated follow-up verdicts that should make generated "
+            "follow-up scripts return non-zero"
+        ),
+    )
     parser.add_argument(
         "--allow-gate-stop",
         action="store_true",
