@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 import tempfile
 import types
@@ -116,6 +117,62 @@ def _next_follow_up() -> dict:
 
 
 class CharVaeContextGuidanceTests(unittest.TestCase):
+    def test_next_follow_up_avoids_source_and_current_seed_history(self) -> None:
+        mod = _load_module()
+        parser = mod._build_parser()
+        args = parser.parse_args(["models/samples/spiral_corpus_en"])
+        best_config = {
+            "best_feature": "raw_latent",
+            "feature_normalize": "blocks",
+            "hybrid_latent_scale": 4.0,
+            "mean_best_nll": 4.2,
+        }
+        follow_up = {
+            "source_seeds": [101, 103, 107],
+            "source_chain": {"ancestors": []},
+            "resolved": {"seeds": [109, 113, 127]},
+        }
+
+        record = mod._next_follow_up_command_record(
+            args,
+            ["raw", "latent", "raw_latent"],
+            best_config,
+            Path("/tmp/current"),
+            [109, 113, 127],
+            follow_up,
+        )
+
+        self.assertEqual(record["default_new_seeds"], "131,137,139")
+        self.assertEqual(
+            record["used_seed_history"],
+            [101, 103, 107, 109, 113, 127],
+        )
+
+    def test_default_follow_up_seeds_refreshes_stale_seed_history(self) -> None:
+        mod = _load_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            parent_summary = root / "parent_summary.json"
+            first_follow_up_summary = root / "first_follow_up_summary.json"
+            parent_summary.write_text(
+                json.dumps({"run": {"seeds": [7, 13, 17]}}),
+                encoding="utf-8",
+            )
+            first_follow_up_summary.write_text(
+                json.dumps({"run": {"seeds": [101, 103, 107]}}),
+                encoding="utf-8",
+            )
+            summary = {
+                "run": {"seeds": [109, 113, 127]},
+                "follow_up_chain": {
+                    "generation": 2,
+                    "ancestors": [str(parent_summary), str(first_follow_up_summary)],
+                },
+                "next_follow_up_command": {"default_new_seeds": "101,103,107"},
+            }
+
+            self.assertEqual(mod._default_follow_up_seeds(summary), "131,137,139")
+
     def test_safe_trajectory_promotes_guided_confirmation(self) -> None:
         mod = _load_module()
         summary = _summary(

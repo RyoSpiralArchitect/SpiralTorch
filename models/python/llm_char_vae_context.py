@@ -1453,6 +1453,8 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
                 "- default_follow_up_fail_on_verdict: "
                 f"{next_follow_up.get('default_follow_up_fail_on_verdict') or '-'}",
                 f"- default_new_seeds: {next_follow_up.get('default_new_seeds')}",
+                "- used_seed_history: "
+                f"{', '.join(str(seed) for seed in next_follow_up.get('used_seed_history', [])) or '-'}",
                 f"- script: `{next_follow_up.get('script_path')}`",
                 f"- usage: `{next_follow_up.get('script_usage')}`",
                 "",
@@ -1483,6 +1485,8 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
                 f"- reasons: {reasons_text}",
                 "- source_script: "
                 f"`{guided_next_follow_up.get('source_next_follow_up_command') or '-'}`",
+                "- used_seed_history: "
+                f"{', '.join(str(seed) for seed in guided_next_follow_up.get('used_seed_history', [])) or '-'}",
                 f"- script: `{guided_next_follow_up.get('script_path') or '-'}`",
                 f"- usage: `{guided_next_follow_up.get('script_usage') or '-'}`",
             ]
@@ -1811,18 +1815,94 @@ def _fmt_arg_float(value: Any) -> str:
     return f"{float(value):.8g}"
 
 
-def _fresh_seed_csv(seeds: list[int]) -> str:
+def _fresh_seed_csv(seeds: list[int], *, count: int | None = None) -> str:
     used = set(int(seed) for seed in seeds)
     candidates = [101, 103, 107, 109, 113, 127, 131, 137, 139, 149, 151, 157]
-    count = max(3, len(seeds))
-    fresh = [seed for seed in candidates if seed not in used][:count]
-    if len(fresh) < count:
+    target_count = max(3, len(seeds)) if count is None else max(1, int(count))
+    fresh = [seed for seed in candidates if seed not in used][:target_count]
+    if len(fresh) < target_count:
         cursor = 1_001
-        while len(fresh) < count:
+        while len(fresh) < target_count:
             if cursor not in used:
                 fresh.append(cursor)
             cursor += 2
     return ",".join(str(seed) for seed in fresh)
+
+
+def _append_unique_ints(target: list[int], values: Any) -> None:
+    if not isinstance(values, list):
+        return
+    seen = set(target)
+    for value in values:
+        try:
+            seed = int(value)
+        except (TypeError, ValueError):
+            continue
+        if seed not in seen:
+            target.append(seed)
+            seen.add(seed)
+
+
+def _seed_csv_values(raw: Any) -> list[int]:
+    if raw is None:
+        return []
+    seeds: list[int] = []
+    seen: set[int] = set()
+    for item in str(raw).split(","):
+        value = item.strip()
+        if not value:
+            continue
+        try:
+            seed = int(value)
+        except ValueError:
+            continue
+        if seed not in seen:
+            seeds.append(seed)
+            seen.add(seed)
+    return seeds
+
+
+def _follow_up_used_seeds(
+    follow_up: dict[str, Any] | None,
+    current_seeds: list[int],
+) -> list[int]:
+    used: list[int] = []
+    if isinstance(follow_up, dict):
+        source_chain = follow_up.get("source_chain")
+        source_chain = source_chain if isinstance(source_chain, dict) else {}
+        ancestors = source_chain.get("ancestors", [])
+        if isinstance(ancestors, list):
+            for raw_path in ancestors:
+                if raw_path is None or not str(raw_path):
+                    continue
+                try:
+                    _loaded_path, ancestor_summary = _load_follow_up_summary(
+                        pathlib.Path(str(raw_path)).expanduser()
+                    )
+                except (OSError, json.JSONDecodeError, ValueError):
+                    continue
+                _append_unique_ints(used, _summary_seeds(ancestor_summary))
+        _append_unique_ints(used, follow_up.get("source_seeds"))
+        resolved = follow_up.get("resolved")
+        if isinstance(resolved, dict):
+            _append_unique_ints(used, resolved.get("seeds"))
+    _append_unique_ints(used, current_seeds)
+    return used
+
+
+def _summary_seed_history(summary: dict[str, Any]) -> list[int]:
+    used: list[int] = []
+    next_follow_up = summary.get("next_follow_up_command")
+    if isinstance(next_follow_up, dict):
+        _append_unique_ints(used, next_follow_up.get("used_seed_history"))
+    _append_unique_ints(
+        used,
+        _follow_up_used_seeds(
+            {"source_chain": _follow_up_chain_source(summary)},
+            _summary_seeds(summary),
+        ),
+    )
+    return used
 
 
 def _append_flag(command: list[str], flag: str, value: Any) -> None:
@@ -1896,10 +1976,12 @@ def _next_follow_up_command_record(
     best_config: dict[str, Any],
     root_run_dir: pathlib.Path,
     seeds: list[int],
+    follow_up: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     if not best_config:
         return None
-    default_new_seeds = _fresh_seed_csv(seeds)
+    used_seeds = _follow_up_used_seeds(follow_up, seeds)
+    default_new_seeds = _fresh_seed_csv(used_seeds or seeds, count=max(3, len(seeds)))
     default_run_dir = root_run_dir / "follow_up_best_config"
     default_follow_up_from = root_run_dir / "summary.json"
     default_fail_on_verdict = (
@@ -1944,6 +2026,7 @@ def _next_follow_up_command_record(
         "action": "confirm_best_config_fresh_seeds",
         "best_config": best_config,
         "default_new_seeds": default_new_seeds,
+        "used_seed_history": used_seeds,
         "default_run_dir": str(default_run_dir),
         "default_follow_up_from": str(default_follow_up_from),
         "default_follow_up_fail_on_verdict": default_fail_on_verdict,
@@ -2017,6 +2100,7 @@ def _guided_next_follow_up_command_record(
         {
             "default_follow_up_from": next_follow_up.get("default_follow_up_from"),
             "default_new_seeds": next_follow_up.get("default_new_seeds"),
+            "used_seed_history": next_follow_up.get("used_seed_history", []),
             "default_run_dir": next_follow_up.get("default_run_dir"),
             "default_follow_up_fail_on_verdict": fail_on_verdict,
             "script_path": str(script_path),
@@ -2191,13 +2275,24 @@ def _source_best_config(summary: dict[str, Any]) -> dict[str, Any]:
 
 
 def _default_follow_up_seeds(summary: dict[str, Any]) -> str:
+    source_seeds = _summary_seeds(summary)
+    used_seeds = _summary_seed_history(summary)
     next_follow_up = summary.get("next_follow_up_command")
     if isinstance(next_follow_up, dict):
         raw = next_follow_up.get("default_new_seeds")
         if raw is not None and str(raw).strip():
-            return str(raw)
-    source_seeds = _summary_seeds(summary)
-    return _fresh_seed_csv(source_seeds or [42])
+            raw_seeds = _seed_csv_values(raw)
+            used_set = set(used_seeds)
+            if raw_seeds and all(seed not in used_set for seed in raw_seeds):
+                return ",".join(str(seed) for seed in raw_seeds)
+            return _fresh_seed_csv(
+                used_seeds or source_seeds or [42],
+                count=max(3, len(raw_seeds)),
+            )
+    return _fresh_seed_csv(
+        used_seeds or source_seeds or [42],
+        count=max(3, len(source_seeds)),
+    )
 
 
 def _follow_up_chain_source(summary: dict[str, Any]) -> dict[str, Any]:
@@ -3622,6 +3717,7 @@ def main(argv: list[str] | None = None) -> int:
             best_config,
             root_run_dir,
             seeds,
+            follow_up,
         )
         if next_follow_up is not None:
             aggregate["next_follow_up_command"] = next_follow_up
