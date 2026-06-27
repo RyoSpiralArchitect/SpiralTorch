@@ -441,6 +441,9 @@ class CharVaeContextChainTests(unittest.TestCase):
             "mean_best_nll_delta_vs_source": -0.0001,
             "follow_up_verdict": "confirmed",
             "follow_up_gate_failed": False,
+            "follow_up_command_source": "guided_next_follow_up_command",
+            "new_seed_source": "command_default",
+            "new_seeds": "101,103,107,109,113",
         }
         manifest = {
             "schema": mod.SCHEMA,
@@ -457,6 +460,15 @@ class CharVaeContextChainTests(unittest.TestCase):
         self.assertEqual(
             manifest["accepted_summary_path"],
             "/tmp/chain/follow_up_02/summary.json",
+        )
+        self.assertEqual(
+            manifest["accepted_step"]["follow_up_command_source"],
+            "guided_next_follow_up_command",
+        )
+        self.assertEqual(manifest["accepted_step"]["new_seed_source"], "command_default")
+        self.assertEqual(
+            manifest["accepted_step"]["new_seeds"],
+            "101,103,107,109,113",
         )
 
 

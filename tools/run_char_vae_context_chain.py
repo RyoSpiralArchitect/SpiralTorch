@@ -417,6 +417,9 @@ def _selection_step_record(step: dict[str, Any] | None) -> dict[str, Any] | None
         "next_default_new_seeds": step.get("next_default_new_seeds"),
         "seed_policy_reason": step.get("seed_policy_reason"),
         "uncertainty_tie_seed_boost": step.get("uncertainty_tie_seed_boost"),
+        "follow_up_command_source": step.get("follow_up_command_source"),
+        "new_seed_source": step.get("new_seed_source"),
+        "new_seeds": step.get("new_seeds"),
     }
 
 
