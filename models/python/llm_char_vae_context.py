@@ -1349,6 +1349,33 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
                 "```",
             ]
         )
+    guided_next_follow_up = summary.get("guided_next_follow_up_command")
+    if isinstance(guided_next_follow_up, dict):
+        reasons = guided_next_follow_up.get("reasons", [])
+        reasons_text = (
+            ", ".join(str(item) for item in reasons)
+            if isinstance(reasons, list)
+            else "-"
+        )
+        lines.extend(
+            [
+                "",
+                "## Guided Next Follow-Up Command",
+                "",
+                f"- enabled: {guided_next_follow_up.get('enabled')}",
+                f"- guidance_action: {guided_next_follow_up.get('guidance_action')}",
+                f"- verdict: {guided_next_follow_up.get('verdict')}",
+                f"- gate_failed: {guided_next_follow_up.get('gate_failed')}",
+                f"- reasons: {reasons_text}",
+                "- source_script: "
+                f"`{guided_next_follow_up.get('source_next_follow_up_command') or '-'}`",
+                f"- script: `{guided_next_follow_up.get('script_path') or '-'}`",
+                f"- usage: `{guided_next_follow_up.get('script_usage') or '-'}`",
+            ]
+        )
+        shell_command = guided_next_follow_up.get("shell_command")
+        if shell_command:
+            lines.extend(["", "```bash", str(shell_command), "```"])
     lines.append("")
     return "\n".join(lines)
 
@@ -1813,6 +1840,74 @@ def _next_follow_up_command_record(
     }
 
 
+def _guided_next_follow_up_command_record(
+    root_run_dir: pathlib.Path,
+    follow_up_guidance: dict[str, Any] | None,
+    next_follow_up: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not isinstance(follow_up_guidance, dict):
+        return None
+
+    enabled = bool(follow_up_guidance.get("use_next_follow_up_command")) and isinstance(
+        next_follow_up,
+        dict,
+    )
+    reasons_raw = follow_up_guidance.get("reasons", [])
+    reasons = (
+        [str(reason) for reason in reasons_raw]
+        if isinstance(reasons_raw, list)
+        else []
+    )
+    record: dict[str, Any] = {
+        "schema": "st.llm_char_vae_context.guided_next_follow_up_command.v1",
+        "enabled": enabled,
+        "guidance_action": follow_up_guidance.get("action"),
+        "verdict": follow_up_guidance.get("verdict"),
+        "config_verdict": follow_up_guidance.get("config_verdict"),
+        "source_feature_verdict": follow_up_guidance.get("source_feature_verdict"),
+        "gate_failed": follow_up_guidance.get("gate_failed"),
+        "reasons": reasons,
+        "source_next_follow_up_command": (
+            next_follow_up.get("script_path") if isinstance(next_follow_up, dict) else None
+        ),
+    }
+    if not enabled or not isinstance(next_follow_up, dict):
+        record.update(
+            {
+                "script_path": None,
+                "script_usage": None,
+                "shell_command": None,
+                "script_command": None,
+            }
+        )
+        return record
+
+    script_path = root_run_dir / "guided_next_follow_up_command.sh"
+    script_usage = (
+        f"FOLLOW_UP_FROM={next_follow_up.get('default_follow_up_from')} "
+        f"NEW_SEEDS={next_follow_up.get('default_new_seeds')} "
+        f"NEXT_RUN_DIR={next_follow_up.get('default_run_dir')}"
+    )
+    fail_on_verdict = next_follow_up.get("default_follow_up_fail_on_verdict")
+    if fail_on_verdict is not None:
+        script_usage += f" FOLLOW_UP_FAIL_ON_VERDICT={fail_on_verdict}"
+    script_usage += f" bash {script_path}"
+
+    record.update(
+        {
+            "default_follow_up_from": next_follow_up.get("default_follow_up_from"),
+            "default_new_seeds": next_follow_up.get("default_new_seeds"),
+            "default_run_dir": next_follow_up.get("default_run_dir"),
+            "default_follow_up_fail_on_verdict": fail_on_verdict,
+            "script_path": str(script_path),
+            "script_usage": script_usage,
+            "shell_command": next_follow_up.get("shell_command"),
+            "script_command": next_follow_up.get("script_command"),
+        }
+    )
+    return record
+
+
 def _script_command_line(command: list[str]) -> str:
     quoted = [shlex.quote(str(part)) for part in command]
     return (
@@ -1849,6 +1944,53 @@ def _write_next_follow_up_script(record: dict[str, Any]) -> None:
             "set -euo pipefail",
             *env_lines,
             _script_command_line([str(part) for part in record["script_command"]]),
+            "",
+        ]
+    )
+    _write_text(script_path, text)
+    script_path.chmod(script_path.stat().st_mode | 0o755)
+
+
+def _write_guided_next_follow_up_script(record: dict[str, Any]) -> None:
+    if not record.get("enabled"):
+        return
+    script_path_raw = record.get("script_path")
+    script_command = record.get("script_command")
+    if script_path_raw is None or not isinstance(script_command, list):
+        return
+
+    script_path = pathlib.Path(str(script_path_raw))
+    default_fail_on_verdict = record.get("default_follow_up_fail_on_verdict")
+    env_lines = [
+        f"FOLLOW_UP_FROM=\"${{FOLLOW_UP_FROM:-{record['default_follow_up_from']}}}\"",
+        f"NEW_SEEDS=\"${{NEW_SEEDS:-{record['default_new_seeds']}}}\"",
+        f"NEXT_RUN_DIR=\"${{NEXT_RUN_DIR:-{record['default_run_dir']}}}\"",
+    ]
+    if default_fail_on_verdict is not None:
+        env_lines.append(
+            "FOLLOW_UP_FAIL_ON_VERDICT="
+            f"\"${{FOLLOW_UP_FAIL_ON_VERDICT:-{default_fail_on_verdict}}}\""
+        )
+    reasons = record.get("reasons", [])
+    reason_lines = (
+        [f"# Reason: {reason}" for reason in reasons]
+        if isinstance(reasons, list) and reasons
+        else ["# Reason: -"]
+    )
+    text = "\n".join(
+        [
+            "#!/usr/bin/env bash",
+            "set -euo pipefail",
+            "",
+            "# Generated by models/python/llm_char_vae_context.py.",
+            f"# Guidance action: {record.get('guidance_action') or '-'}",
+            f"# Verdict: {record.get('verdict') or '-'}",
+            *reason_lines,
+            "# Example:",
+            f"#   {record.get('script_usage') or f'bash {script_path}'}",
+            "",
+            *env_lines,
+            _script_command_line([str(part) for part in script_command]),
             "",
         ]
     )
@@ -2887,6 +3029,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     if follow_up_guidance is not None:
         aggregate["follow_up_guidance"] = follow_up_guidance
+    guided_next_follow_up = _guided_next_follow_up_command_record(
+        root_run_dir,
+        follow_up_guidance,
+        next_follow_up,
+    )
+    if guided_next_follow_up is not None:
+        aggregate["guided_next_follow_up_command"] = guided_next_follow_up
+        _write_guided_next_follow_up_script(guided_next_follow_up)
     _write_json(root_run_dir / "summary.json", aggregate)
     _write_text(root_run_dir / "report.md", _aggregate_report(aggregate))
     if args.json:
