@@ -187,15 +187,29 @@ def _normalise_feature_values(
     feature: str,
     values: list[float],
     mode: str,
+    hybrid_latent_scale: float,
 ) -> list[float]:
+    if feature in {FEATURE_RAW_LATENT, FEATURE_RECONSTRUCTION_LATENT}:
+        split = int(model.input_dim)
+        base_values = values[:split]
+        latent_values = values[split:]
+    else:
+        base_values = values
+        latent_values = []
+
     if mode == "none":
+        if latent_values:
+            return base_values + [value * hybrid_latent_scale for value in latent_values]
         return values
     if mode == "vector":
+        if latent_values:
+            values = base_values + [value * hybrid_latent_scale for value in latent_values]
         return _l2_normalize(values)
     if mode == "blocks":
-        if feature in {FEATURE_RAW_LATENT, FEATURE_RECONSTRUCTION_LATENT}:
-            split = int(model.input_dim)
-            return _l2_normalize(values[:split]) + _l2_normalize(values[split:])
+        if latent_values:
+            return _l2_normalize(base_values) + [
+                value * hybrid_latent_scale for value in _l2_normalize(latent_values)
+            ]
         return _l2_normalize(values)
     raise ValueError("--feature-normalize must be one of: none|vector|blocks")
 
@@ -206,6 +220,7 @@ def _feature_vector(
     feature: str,
     text: str,
     normalize: str = "none",
+    hybrid_latent_scale: float = 1.0,
 ) -> list[float]:
     if feature in {FEATURE_RAW, FEATURE_RAW_LATENT}:
         if basis is None:
@@ -218,6 +233,7 @@ def _feature_vector(
                 feature,
                 [float(value) for value in raw_values],
                 normalize,
+                hybrid_latent_scale,
             )
 
     if basis is None:
@@ -239,6 +255,7 @@ def _feature_vector(
         feature,
         [float(value) for value in values],
         normalize,
+        hybrid_latent_scale,
     )
 
 
@@ -248,11 +265,19 @@ def _feature_tensor(
     feature: str,
     samples: list[_WindowSample],
     normalize: str = "none",
+    hybrid_latent_scale: float = 1.0,
 ) -> st.Tensor:
     dim = _feature_dim(model, feature)
     data: list[float] = []
     for sample in samples:
-        values = _feature_vector(model, basis, feature, sample.window, normalize)
+        values = _feature_vector(
+            model,
+            basis,
+            feature,
+            sample.window,
+            normalize,
+            hybrid_latent_scale,
+        )
         if len(values) != dim:
             raise ValueError(f"{feature} feature length mismatch: expected {dim}, got {len(values)}")
         data.extend(values)
@@ -264,6 +289,7 @@ def _build_batches(
     basis: Any | None,
     feature: str,
     normalize: str,
+    hybrid_latent_scale: float,
     text: str,
     index: dict[str, int],
     vocab_size: int,
@@ -276,7 +302,7 @@ def _build_batches(
     for _ in range(batches):
         samples = _sample_windows(text, window_chars, index, batch_size, rng)
         out.append((
-            _feature_tensor(vae, basis, feature, samples, normalize),
+            _feature_tensor(vae, basis, feature, samples, normalize, hybrid_latent_scale),
             _one_hot_targets(samples, vocab_size),
         ))
     return out
@@ -457,6 +483,7 @@ def _feature_diagnostics(
     basis: Any | None,
     features: list[str],
     normalize: str,
+    hybrid_latent_scale: float,
     text: str,
     index: dict[str, int],
     window_chars: int,
@@ -467,7 +494,14 @@ def _feature_diagnostics(
     windows = _sample_windows(text, window_chars, index, max(1, samples), rng)
     vectors = {
         feature: [
-            _feature_vector(vae, basis, feature, sample.window, normalize)
+            _feature_vector(
+                vae,
+                basis,
+                feature,
+                sample.window,
+                normalize,
+                hybrid_latent_scale,
+            )
             for sample in windows
         ]
         for feature in features
@@ -522,6 +556,7 @@ def _evaluate(
     basis: Any | None,
     feature: str,
     normalize: str,
+    hybrid_latent_scale: float,
     text: str,
     index: dict[str, int],
     vocab_size: int,
@@ -539,7 +574,7 @@ def _evaluate(
         }
     rng = random.Random(seed)
     samples = _sample_windows(text, window_chars, index, eval_samples, rng)
-    x = _feature_tensor(vae, basis, feature, samples, normalize)
+    x = _feature_tensor(vae, basis, feature, samples, normalize, hybrid_latent_scale)
     probs = head.forward(x).tolist()
     nll = 0.0
     correct = 0
@@ -567,6 +602,7 @@ def _generate(
     basis: Any | None,
     feature: str,
     normalize: str,
+    hybrid_latent_scale: float,
     symbols: list[str],
     index: dict[str, int],
     prompt: str,
@@ -584,7 +620,7 @@ def _generate(
         if len(context) < window_chars:
             context = (DEFAULT_UNK * (window_chars - len(context))) + context
         sample = _WindowSample(window=context, target=0)
-        x = _feature_tensor(vae, basis, feature, [sample], normalize)
+        x = _feature_tensor(vae, basis, feature, [sample], normalize, hybrid_latent_scale)
         probs = [float(value) for value in head.forward(x).tolist()[0]]
         next_idx = _sample_topk(probs, top_k, rng)
         out += symbols[next_idx] if 0 <= next_idx < len(symbols) else DEFAULT_UNK
@@ -634,6 +670,7 @@ def _train_feature_head(
         basis,
         feature,
         str(args.feature_normalize),
+        float(args.hybrid_latent_scale),
         val_text,
         index,
         vocab_size,
@@ -657,6 +694,7 @@ def _train_feature_head(
             basis,
             feature,
             str(args.feature_normalize),
+            float(args.hybrid_latent_scale),
             train_text,
             index,
             vocab_size,
@@ -672,6 +710,7 @@ def _train_feature_head(
             basis,
             feature,
             str(args.feature_normalize),
+            float(args.hybrid_latent_scale),
             val_text,
             index,
             vocab_size,
@@ -710,6 +749,7 @@ def _train_feature_head(
         basis,
         feature,
         str(args.feature_normalize),
+        float(args.hybrid_latent_scale),
         symbols,
         index,
         str(args.prompt),
@@ -895,6 +935,7 @@ def _single_report(summary: dict[str, Any]) -> str:
         f"- seed: {run.get('seed')}",
         f"- features: {', '.join(str(item) for item in run.get('features', []))}",
         f"- feature_normalize: {run.get('feature_normalize')}",
+        f"- hybrid_latent_scale: {run.get('hybrid_latent_scale')}",
         f"- window_chars: {run.get('window_chars')}",
         f"- latent_dim: {run.get('latent_dim')}",
         f"- summary_json: `summary.json`",
@@ -984,6 +1025,7 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
         f"- seeds: {', '.join(str(seed) for seed in run.get('seeds', []))}",
         f"- features: {', '.join(str(item) for item in run.get('features', []))}",
         f"- feature_normalize: {run.get('feature_normalize')}",
+        f"- hybrid_latent_scale: {run.get('hybrid_latent_scale')}",
         f"- min_nll_delta: {run.get('min_nll_delta')}",
         f"- win_tolerance: {run.get('win_tolerance')}",
         f"- summary_json: `summary.json`",
@@ -1313,6 +1355,12 @@ def _build_parser() -> argparse.ArgumentParser:
             "raw/reconstruction and latent segments separately"
         ),
     )
+    parser.add_argument(
+        "--hybrid-latent-scale",
+        type=float,
+        default=1.0,
+        help="multiply the latent segment of raw_latent/reconstruction_latent features",
+    )
     parser.add_argument("--epochs", type=int, default=3)
     parser.add_argument("--batches", type=int, default=16)
     parser.add_argument("--batch-size", type=int, default=8)
@@ -1388,6 +1436,8 @@ def _validate_args(args: argparse.Namespace) -> None:
         raise ValueError("--min-nll-delta must be non-negative and finite")
     if args.win_tolerance < 0.0 or not math.isfinite(args.win_tolerance):
         raise ValueError("--win-tolerance must be non-negative and finite")
+    if args.hybrid_latent_scale < 0.0 or not math.isfinite(args.hybrid_latent_scale):
+        raise ValueError("--hybrid-latent-scale must be non-negative and finite")
 
 
 def _run_single(args: argparse.Namespace, features: list[str]) -> dict[str, Any]:
@@ -1433,7 +1483,7 @@ def _run_single(args: argparse.Namespace, features: list[str]) -> dict[str, Any]
     print(
         f"files={len(data_files)} chars={len(text)} vocab={vocab_size} "
         f"window_chars={vae.window_chars} latent_dim={vae.latent_dim} features={','.join(features)} "
-        f"feature_normalize={args.feature_normalize} "
+        f"feature_normalize={args.feature_normalize} hybrid_latent_scale={args.hybrid_latent_scale} "
         f"epochs={args.epochs} vae_epochs={args.vae_epochs} run_dir={run_dir}",
         flush=True,
     )
@@ -1447,6 +1497,7 @@ def _run_single(args: argparse.Namespace, features: list[str]) -> dict[str, Any]
         basis,
         features,
         str(args.feature_normalize),
+        float(args.hybrid_latent_scale),
         val_text,
         index,
         int(args.window_chars),
@@ -1468,6 +1519,7 @@ def _run_single(args: argparse.Namespace, features: list[str]) -> dict[str, Any]
         "latent_dim": int(vae.latent_dim),
         "features": features,
         "feature_normalize": str(args.feature_normalize),
+        "hybrid_latent_scale": float(args.hybrid_latent_scale),
         "hidden": int(args.hidden),
         "epochs": int(args.epochs),
         "batches": int(args.batches),
@@ -1595,6 +1647,7 @@ def main(argv: list[str] | None = None) -> int:
         "arch": "llm_char_vae_context_sweep",
         "features": features,
         "feature_normalize": str(args.feature_normalize),
+        "hybrid_latent_scale": float(args.hybrid_latent_scale),
         "seeds": seeds,
         "seed_count": len(seeds),
         "min_nll_delta": float(args.min_nll_delta),
