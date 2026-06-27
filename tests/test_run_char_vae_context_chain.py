@@ -22,6 +22,39 @@ def _load_module():
 
 
 class CharVaeContextChainTests(unittest.TestCase):
+    def test_preset_latent_scale_defaults_keep_smoke_light_and_scout_small(self) -> None:
+        mod = _load_module()
+        parser = mod._build_parser()
+
+        smoke = parser.parse_args(["models/samples/spiral_corpus_en", "--preset", "smoke"])
+        smoke_command = mod._parent_command(smoke, Path("/tmp/smoke"))
+        self.assertEqual(
+            smoke_command[smoke_command.index("--hybrid-latent-scales") + 1],
+            "0.5,1.0",
+        )
+
+        small = parser.parse_args(["models/samples/spiral_corpus_en", "--preset", "small"])
+        small_command = mod._parent_command(small, Path("/tmp/small"))
+        self.assertEqual(
+            small_command[small_command.index("--hybrid-latent-scales") + 1],
+            "0.5,1.0,2.0,4.0",
+        )
+
+        explicit = parser.parse_args(
+            [
+                "models/samples/spiral_corpus_en",
+                "--preset",
+                "small",
+                "--hybrid-latent-scales",
+                "3.0",
+            ]
+        )
+        explicit_command = mod._parent_command(explicit, Path("/tmp/explicit"))
+        self.assertEqual(
+            explicit_command[explicit_command.index("--hybrid-latent-scales") + 1],
+            "3.0",
+        )
+
     def test_step_record_and_report_surface_follow_up_deltas(self) -> None:
         mod = _load_module()
         with tempfile.TemporaryDirectory() as tmp:

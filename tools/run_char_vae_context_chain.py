@@ -19,8 +19,9 @@ SCRIPT = ROOT / "models" / "python" / "llm_char_vae_context.py"
 SCHEMA = "st.llm_char_vae_context.chain.v1"
 DEFAULT_FEATURES = "raw,reconstruction,latent,raw_latent,reconstruction_latent"
 DEFAULT_NORMALIZE_MODES = "blocks,vector"
-DEFAULT_LATENT_SCALES = "0.5,1.0"
 DEFAULT_FAIL_ON_VERDICT = "regressed,unknown"
+SMOKE_LATENT_SCALES = "0.5,1.0"
+SCOUT_LATENT_SCALES = "0.5,1.0,2.0,4.0"
 
 PRESETS: dict[str, dict[str, Any]] = {
     "smoke": {
@@ -36,6 +37,7 @@ PRESETS: dict[str, dict[str, Any]] = {
         "eval_samples": 8,
         "gen": 0,
         "seeds": "7,13",
+        "hybrid_latent_scales": SMOKE_LATENT_SCALES,
         "follow_up_seed_groups": "17;19",
     },
     "small": {
@@ -51,6 +53,7 @@ PRESETS: dict[str, dict[str, Any]] = {
         "eval_samples": 32,
         "gen": 0,
         "seeds": "7,13,17",
+        "hybrid_latent_scales": SCOUT_LATENT_SCALES,
         "follow_up_seed_groups": "19,23;29,31",
     },
     "base": {
@@ -66,6 +69,7 @@ PRESETS: dict[str, dict[str, Any]] = {
         "eval_samples": 64,
         "gen": 0,
         "seeds": "7,13,17,19",
+        "hybrid_latent_scales": SCOUT_LATENT_SCALES,
         "follow_up_seed_groups": "23,29,31;37,41,43",
     },
 }
@@ -120,7 +124,11 @@ def _parent_command(args: argparse.Namespace, run_dir: Path) -> list[str]:
     ]
     _append_flag(command, "--features", args.features)
     _append_flag(command, "--feature-normalize-modes", args.feature_normalize_modes)
-    _append_flag(command, "--hybrid-latent-scales", args.hybrid_latent_scales)
+    _append_flag(
+        command,
+        "--hybrid-latent-scales",
+        _preset_value(args, "hybrid_latent_scales"),
+    )
     _append_flag(command, "--seeds", _preset_value(args, "seeds"))
     _append_flag(command, "--run-dir", run_dir)
     _append_flag(command, "--follow-up-fail-on-verdict", args.follow_up_fail_on_verdict)
@@ -365,7 +373,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--features", default=DEFAULT_FEATURES)
     parser.add_argument("--feature-normalize-modes", default=DEFAULT_NORMALIZE_MODES)
-    parser.add_argument("--hybrid-latent-scales", default=DEFAULT_LATENT_SCALES)
+    parser.add_argument("--hybrid-latent-scales", default=None)
     parser.add_argument("--python", default="python3")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true", help="print chain manifest JSON")
