@@ -36,6 +36,7 @@ FEATURE_CHOICES = (
 )
 NORMALIZE_CHOICES = ("none", "vector", "blocks")
 FOLLOW_UP_VERDICTS = ("improved", "confirmed", "regressed", "unknown")
+FOLLOW_UP_CHAIN_MAX_ANCESTORS = 8
 
 _TEXT_EXTS = {".txt"}
 
@@ -1130,6 +1131,7 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
     follow_up = summary.get("follow_up")
     follow_up_result = summary.get("follow_up_result")
     follow_up_chain = summary.get("follow_up_chain")
+    follow_up_ancestors = summary.get("follow_up_ancestors")
     follow_up_gate = summary.get("follow_up_gate")
     follow_up_guidance = summary.get("follow_up_guidance")
     if isinstance(follow_up_result, dict):
@@ -1230,6 +1232,36 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
                 "",
             ]
         )
+    if isinstance(follow_up_ancestors, dict):
+        ancestor_records = follow_up_ancestors.get("ancestors", [])
+        if isinstance(ancestor_records, list) and ancestor_records:
+            lines.extend(
+                [
+                    "## Follow-Up Ancestors",
+                    "",
+                ]
+            )
+            lines.extend(
+                _markdown_table(
+                    [
+                        "generation",
+                        "summary_path",
+                        "status",
+                        "best_config",
+                        "mean_best_nll",
+                        "verdict",
+                        "guidance_action",
+                        "guided_enabled",
+                        "missing",
+                    ],
+                    [
+                        _follow_up_ancestor_row(record)
+                        for record in ancestor_records
+                        if isinstance(record, dict)
+                    ],
+                )
+            )
+            lines.append("")
     if isinstance(follow_up_gate, dict):
         fail_on = follow_up_gate.get("fail_on_verdicts", [])
         fail_on_text = (
@@ -2380,6 +2412,121 @@ def _follow_up_chain_record(
     }
 
 
+def _follow_up_ancestor_record(
+    summary_path: pathlib.Path,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    run = payload.get("run")
+    run = run if isinstance(run, dict) else {}
+    chain = payload.get("follow_up_chain")
+    chain = chain if isinstance(chain, dict) else {}
+    best_config = payload.get("best_config")
+    best_config = best_config if isinstance(best_config, dict) else None
+    follow_up_result = payload.get("follow_up_result")
+    follow_up_result = follow_up_result if isinstance(follow_up_result, dict) else {}
+    follow_up_guidance = payload.get("follow_up_guidance")
+    follow_up_guidance = (
+        follow_up_guidance if isinstance(follow_up_guidance, dict) else {}
+    )
+    guided_next = payload.get("guided_next_follow_up_command")
+    guided_next = guided_next if isinstance(guided_next, dict) else {}
+    gate = payload.get("follow_up_gate")
+    gate = gate if isinstance(gate, dict) else {}
+
+    return {
+        "schema": "st.llm_char_vae_context.follow_up_ancestor.v1",
+        "summary_path": str(summary_path),
+        "run_dir": str(run.get("run_dir") or payload.get("run_dir") or "-"),
+        "generation": chain.get("generation", 0),
+        "status": payload.get("status"),
+        "best_feature": payload.get("best_feature"),
+        "best_config": best_config,
+        "mean_best_nll": best_config.get("mean_best_nll") if best_config else None,
+        "mean_best_accuracy": (
+            best_config.get("mean_best_accuracy") if best_config else None
+        ),
+        "verdict": follow_up_result.get("verdict"),
+        "config_verdict": follow_up_result.get("config_verdict"),
+        "source_feature_verdict": follow_up_result.get("source_feature_verdict"),
+        "guidance_action": follow_up_guidance.get("action"),
+        "guided_enabled": guided_next.get("enabled"),
+        "gate_failed": gate.get("failed"),
+    }
+
+
+def _follow_up_missing_ancestor_record(
+    summary_path: pathlib.Path,
+    error: Exception,
+) -> dict[str, Any]:
+    return {
+        "schema": "st.llm_char_vae_context.follow_up_ancestor.v1",
+        "summary_path": str(summary_path),
+        "missing": True,
+        "error": str(error),
+    }
+
+
+def _follow_up_ancestor_records(
+    follow_up_chain: dict[str, Any] | None,
+    *,
+    max_ancestors: int = FOLLOW_UP_CHAIN_MAX_ANCESTORS,
+) -> dict[str, Any] | None:
+    if not isinstance(follow_up_chain, dict):
+        return None
+    ancestors_raw = follow_up_chain.get("ancestors", [])
+    if not isinstance(ancestors_raw, list) or not ancestors_raw:
+        return None
+
+    records = []
+    seen: set[str] = set()
+    for raw_path in ancestors_raw[:max_ancestors]:
+        if raw_path is None or not str(raw_path):
+            continue
+        summary_path = pathlib.Path(str(raw_path)).expanduser()
+        summary_key = str(summary_path)
+        if summary_key in seen:
+            records.append(
+                {
+                    "schema": "st.llm_char_vae_context.follow_up_ancestor.v1",
+                    "summary_path": summary_key,
+                    "cycle_detected": True,
+                }
+            )
+            break
+        seen.add(summary_key)
+        try:
+            loaded_path, payload = _load_follow_up_summary(summary_path)
+            records.append(_follow_up_ancestor_record(loaded_path, payload))
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            records.append(_follow_up_missing_ancestor_record(summary_path, exc))
+            break
+
+    if not records:
+        return None
+    return {
+        "schema": "st.llm_char_vae_context.follow_up_ancestors.v1",
+        "ancestor_count": len(records),
+        "truncated": len(ancestors_raw) > max_ancestors,
+        "ancestors": records,
+    }
+
+
+def _follow_up_ancestor_row(record: dict[str, Any]) -> list[str]:
+    best_config = record.get("best_config")
+    guided_enabled = record.get("guided_enabled")
+    return [
+        str(record.get("generation") or "-"),
+        f"`{record.get('summary_path') or '-'}`",
+        str(record.get("status") or "-"),
+        _config_label(best_config if isinstance(best_config, dict) else None),
+        _fmt_float(record.get("mean_best_nll")),
+        str(record.get("verdict") or "-"),
+        str(record.get("guidance_action") or "-"),
+        str(guided_enabled if guided_enabled is not None else "-"),
+        "yes" if record.get("missing") else "no",
+    ]
+
+
 def _follow_up_gate_record(
     follow_up_result: dict[str, Any] | None,
     fail_on_verdicts: list[str],
@@ -3015,6 +3162,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     if follow_up_chain is not None:
         aggregate["follow_up_chain"] = follow_up_chain
+    follow_up_ancestors = _follow_up_ancestor_records(follow_up_chain)
+    if follow_up_ancestors is not None:
+        aggregate["follow_up_ancestors"] = follow_up_ancestors
     follow_up_gate = _follow_up_gate_record(
         follow_up_result,
         follow_up_fail_on_verdicts,
