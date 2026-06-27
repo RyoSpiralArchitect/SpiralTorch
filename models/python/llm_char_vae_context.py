@@ -716,6 +716,18 @@ def _metric_stats(values: Iterable[float]) -> dict[str, Any]:
     }
 
 
+def _finite_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(parsed):
+        return None
+    return parsed
+
+
 def _fmt_float(value: Any, digits: int = 6) -> str:
     if value is None:
         return "-"
@@ -738,6 +750,13 @@ def _fmt_percent(value: Any, digits: int = 2) -> str:
     if not math.isfinite(parsed):
         return "-"
     return f"{parsed * 100.0:.{digits}f}%"
+
+
+def _fmt_count_rate(count: Any, total: int) -> str:
+    parsed = _finite_float(count)
+    if parsed is None or total <= 0:
+        return "-"
+    return f"{int(parsed)}/{total} ({_fmt_percent(parsed / float(total), 1)})"
 
 
 def _fmt_stat_mean(stats: dict[str, Any] | None, digits: int = 6) -> str:
@@ -828,6 +847,7 @@ def _single_report(summary: dict[str, Any]) -> str:
 
 def _aggregate_report(summary: dict[str, Any]) -> str:
     run = summary.get("run", {})
+    seed_total = int(run.get("seed_count") or len(summary.get("seed_summaries", [])))
     ranking_rows = [
         [
             str(item.get("feature")),
@@ -837,6 +857,16 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
             str(item.get("runs", "-")),
         ]
         for item in summary.get("ranking", [])
+    ]
+    stability_rows = [
+        [
+            str(item.get("feature")),
+            _fmt_count_rate(item.get("win_count"), seed_total),
+            _fmt_count_rate(item.get("near_win_count"), seed_total),
+            _fmt_float(item.get("mean_rank"), 2),
+            _fmt_float(item.get("mean_gap_to_winner")),
+        ]
+        for item in summary.get("feature_stability", [])
     ]
     diagnostics_rows = []
     for item in summary.get("feature_diagnostics_summary", []):
@@ -851,15 +881,23 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
                 _fmt_stat_mean(item.get("raw_cosine_mean")),
             ]
         )
+    winner_by_seed = {
+        item.get("seed"): item
+        for item in summary.get("seed_winners", [])
+    }
     seed_rows = []
     for item in summary.get("seed_summaries", []):
         top = item.get("ranking", [{}])[0] if item.get("ranking") else {}
+        winner = winner_by_seed.get(item.get("seed"), {})
+        near_winners = winner.get("near_winners", [])
         seed_rows.append(
             [
                 str(item.get("seed")),
                 str(item.get("best_feature")),
                 _fmt_float(top.get("best_mean_nll")),
                 _fmt_percent(top.get("best_accuracy")),
+                _fmt_float(winner.get("margin_to_runner_up")),
+                ", ".join(str(feature) for feature in near_winners) if near_winners else "-",
                 f"`{item.get('run_dir')}`",
             ]
         )
@@ -872,6 +910,7 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
         f"- seeds: {', '.join(str(seed) for seed in run.get('seeds', []))}",
         f"- features: {', '.join(str(item) for item in run.get('features', []))}",
         f"- min_nll_delta: {run.get('min_nll_delta')}",
+        f"- win_tolerance: {run.get('win_tolerance')}",
         f"- summary_json: `summary.json`",
         "",
         "## Aggregate Ranking",
@@ -881,6 +920,13 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
         _markdown_table(
             ["feature", "mean_best_nll", "mean_best_acc", "mean_delta_vs_raw", "runs"],
             ranking_rows,
+        )
+    )
+    lines.extend(["", "## Feature Stability", ""])
+    lines.extend(
+        _markdown_table(
+            ["feature", "wins_or_ties", "near_wins", "mean_rank", "mean_gap_to_winner"],
+            stability_rows,
         )
     )
     lines.extend(["", "## Aggregate Feature Diagnostics", ""])
@@ -893,7 +939,15 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
     lines.extend(["", "## Seed Runs", ""])
     lines.extend(
         _markdown_table(
-            ["seed", "best_feature", "best_nll", "best_acc", "run_dir"],
+            [
+                "seed",
+                "best_feature",
+                "best_nll",
+                "best_acc",
+                "runner_up_margin",
+                "near_winners",
+                "run_dir",
+            ],
             seed_rows,
         )
     )
@@ -905,6 +959,7 @@ def _aggregate_summaries(
     summaries: list[dict[str, Any]],
     *,
     min_nll_delta: float,
+    win_tolerance: float,
 ) -> dict[str, Any]:
     feature_names = sorted(
         {
@@ -975,6 +1030,135 @@ def _aggregate_summaries(
             }
         )
 
+    seed_winners = []
+    feature_stability_acc: dict[str, dict[str, Any]] = {
+        feature: {
+            "win_count": 0,
+            "near_win_count": 0,
+            "ranks": [],
+            "gaps": [],
+        }
+        for feature in feature_names
+    }
+    for summary in summaries:
+        entries = []
+        for item in summary.get("ranking", []):
+            feature = str(item.get("feature"))
+            best_nll = _finite_float(item.get("best_mean_nll"))
+            if best_nll is None:
+                continue
+            entries.append(
+                {
+                    "feature": feature,
+                    "best_nll": best_nll,
+                    "best_accuracy": _finite_float(item.get("best_accuracy")),
+                    "rank": None,
+                }
+            )
+        entries.sort(key=lambda item: (item["best_nll"], item["feature"]))
+        if not entries:
+            continue
+
+        current_rank = 0
+        previous_nll: float | None = None
+        for position, item in enumerate(entries, start=1):
+            best_nll = float(item["best_nll"])
+            if previous_nll is None or best_nll > previous_nll:
+                current_rank = position
+                previous_nll = best_nll
+            item["rank"] = current_rank
+
+        best = entries[0]
+        strict_winners = [
+            item["feature"]
+            for item in entries
+            if float(item["best_nll"]) - float(best["best_nll"]) <= 0.0
+        ]
+        runner_up = next(
+            (
+                item
+                for item in entries
+                if float(item["best_nll"]) - float(best["best_nll"]) > 0.0
+            ),
+            None,
+        )
+        near_winners = [
+            item["feature"]
+            for item in entries
+            if float(item["best_nll"]) - float(best["best_nll"]) <= win_tolerance
+        ]
+        for feature in strict_winners:
+            feature_stability_acc.setdefault(
+                feature,
+                {"win_count": 0, "near_win_count": 0, "ranks": [], "gaps": []},
+            )["win_count"] += 1
+        for item in entries:
+            stats = feature_stability_acc.setdefault(
+                item["feature"],
+                {"win_count": 0, "near_win_count": 0, "ranks": [], "gaps": []},
+            )
+            stats["ranks"].append(float(item["rank"]))
+            stats["gaps"].append(float(item["best_nll"]) - float(best["best_nll"]))
+        for feature in near_winners:
+            feature_stability_acc.setdefault(
+                feature,
+                {"win_count": 0, "near_win_count": 0, "ranks": [], "gaps": []},
+            )["near_win_count"] += 1
+
+        seed_winners.append(
+            {
+                "seed": summary.get("run", {}).get("seed"),
+                "winner": best["feature"],
+                "winners": strict_winners,
+                "near_winners": near_winners,
+                "best_nll": best["best_nll"],
+                "best_accuracy": best["best_accuracy"],
+                "runner_up": runner_up["feature"] if runner_up is not None else None,
+                "runner_up_nll": runner_up["best_nll"] if runner_up is not None else None,
+                "margin_to_runner_up": (
+                    float(runner_up["best_nll"]) - float(best["best_nll"])
+                    if runner_up is not None
+                    else None
+                ),
+            }
+        )
+
+    seed_count = len(summaries)
+    feature_stability = []
+    for feature in feature_names:
+        stats = feature_stability_acc.get(
+            feature,
+            {"win_count": 0, "near_win_count": 0, "ranks": [], "gaps": []},
+        )
+        rank_stats = _metric_stats(stats.get("ranks", []))
+        gap_stats = _metric_stats(stats.get("gaps", []))
+        win_count = int(stats.get("win_count", 0))
+        near_win_count = int(stats.get("near_win_count", 0))
+        feature_stability.append(
+            {
+                "feature": feature,
+                "win_count": win_count,
+                "win_rate": win_count / float(seed_count) if seed_count else None,
+                "near_win_count": near_win_count,
+                "near_win_rate": near_win_count / float(seed_count) if seed_count else None,
+                "rank": rank_stats,
+                "mean_rank": rank_stats["mean"],
+                "gap_to_winner": gap_stats,
+                "mean_gap_to_winner": gap_stats["mean"],
+            }
+        )
+    feature_stability.sort(
+        key=lambda item: (
+            -int(item.get("win_count", 0)),
+            -int(item.get("near_win_count", 0)),
+            float("inf") if item.get("mean_rank") is None else float(item["mean_rank"]),
+            float("inf")
+            if item.get("mean_gap_to_winner") is None
+            else float(item["mean_gap_to_winner"]),
+            str(item.get("feature")),
+        )
+    )
+
     ranking = sorted(
         feature_rows,
         key=lambda item: (
@@ -1012,6 +1196,9 @@ def _aggregate_summaries(
             }
             for item in ranking
         ],
+        "seed_winners": seed_winners,
+        "feature_stability": feature_stability,
+        "win_tolerance": win_tolerance,
         "best_feature": best_feature,
         "status": status,
     }
@@ -1051,6 +1238,12 @@ def _build_parser() -> argparse.ArgumentParser:
         type=float,
         default=0.0,
         help="minimum mean NLL improvement over raw required for sweep status=improved",
+    )
+    parser.add_argument(
+        "--win-tolerance",
+        type=float,
+        default=1e-4,
+        help="per-seed NLL tolerance for counting near-win feature ties in sweep reports",
     )
     parser.add_argument("--prompt", default="SpiralTorch ")
     parser.add_argument("--gen", type=int, default=80)
@@ -1102,6 +1295,8 @@ def _validate_args(args: argparse.Namespace) -> None:
         raise ValueError("--top-k must be > 0")
     if args.min_nll_delta < 0.0 or not math.isfinite(args.min_nll_delta):
         raise ValueError("--min-nll-delta must be non-negative and finite")
+    if args.win_tolerance < 0.0 or not math.isfinite(args.win_tolerance):
+        raise ValueError("--win-tolerance must be non-negative and finite")
 
 
 def _run_single(args: argparse.Namespace, features: list[str]) -> dict[str, Any]:
@@ -1308,6 +1503,7 @@ def main(argv: list[str] | None = None) -> int:
         "seeds": seeds,
         "seed_count": len(seeds),
         "min_nll_delta": float(args.min_nll_delta),
+        "win_tolerance": float(args.win_tolerance),
         "run_dir": str(root_run_dir),
     }
     _write_json(root_run_dir / "run.json", aggregate_run)
@@ -1362,6 +1558,7 @@ def main(argv: list[str] | None = None) -> int:
         _aggregate_summaries(
             summaries,
             min_nll_delta=float(args.min_nll_delta),
+            win_tolerance=float(args.win_tolerance),
         )
     )
     _write_json(root_run_dir / "summary.json", aggregate)
