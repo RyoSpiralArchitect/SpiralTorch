@@ -1363,9 +1363,14 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
         ),
         (
             "- best_config_runner_up: {feature} "
-            "(margin={margin}, mean_best_nll={nll})".format(
+            "(margin={margin}, combined_stderr={stderr}, "
+            "within_uncertainty={within}, mean_best_nll={nll})".format(
                 feature=best_config.get("runner_up_feature"),
                 margin=_fmt_float(best_config.get("margin_to_runner_up")),
+                stderr=_fmt_float(
+                    best_config.get("combined_runner_up_margin_stderr")
+                ),
+                within=best_config.get("runner_up_within_uncertainty"),
                 nll=_fmt_float(best_config.get("runner_up_mean_best_nll")),
             )
             if best_config and best_config.get("runner_up_feature") is not None
@@ -2452,13 +2457,8 @@ def _best_config_summary(config_summaries: list[dict[str, Any]]) -> dict[str, An
         "mean_best_nll": top.get("mean_best_nll"),
         "mean_best_accuracy": top.get("mean_best_accuracy"),
         "mean_best_nll_delta_vs_raw": top.get("mean_best_nll_delta_vs_raw"),
-        "runner_up_feature": (
-            runner_up.get("feature") if isinstance(runner_up, dict) else None
-        ),
-        "runner_up_mean_best_nll": (
-            runner_up.get("mean_best_nll") if isinstance(runner_up, dict) else None
-        ),
-        "margin_to_runner_up": _nll_margin(top, runner_up),
+        **_runner_up_margin_fields(best, top, runner_up),
+        **_config_feature_uncertainty_fields(best, top.get("feature")),
         "run_dir": best.get("run_dir"),
     }
 
@@ -3611,6 +3611,44 @@ def _nll_margin(
     return runner_up_nll - winner_nll
 
 
+def _runner_up_margin_fields(
+    config: dict[str, Any] | None,
+    winner: dict[str, Any] | None,
+    runner_up: dict[str, Any] | None,
+) -> dict[str, Any]:
+    runner_up_feature = (
+        runner_up.get("feature") if isinstance(runner_up, dict) else None
+    )
+    margin = _nll_margin(winner, runner_up)
+    winner_uncertainty = _config_feature_uncertainty_fields(
+        config,
+        winner.get("feature") if isinstance(winner, dict) else None,
+    )
+    runner_up_uncertainty = _config_feature_uncertainty_fields(
+        config,
+        runner_up_feature,
+    )
+    combined_stderr = _combined_standard_error(
+        winner_uncertainty.get("mean_best_nll_stderr"),
+        runner_up_uncertainty.get("mean_best_nll_stderr"),
+    )
+    within_uncertainty = None
+    if margin is not None and combined_stderr is not None:
+        within_uncertainty = margin <= combined_stderr
+    return {
+        "runner_up_feature": runner_up_feature,
+        "runner_up_mean_best_nll": (
+            runner_up.get("mean_best_nll") if isinstance(runner_up, dict) else None
+        ),
+        "margin_to_runner_up": margin,
+        "runner_up_mean_best_nll_stderr": runner_up_uncertainty.get(
+            "mean_best_nll_stderr"
+        ),
+        "combined_runner_up_margin_stderr": combined_stderr,
+        "runner_up_within_uncertainty": within_uncertainty,
+    }
+
+
 def _compact_config_summary(config: dict[str, Any] | None) -> dict[str, Any] | None:
     if not config:
         return None
@@ -3629,13 +3667,7 @@ def _compact_config_summary(config: dict[str, Any] | None) -> dict[str, Any] | N
         "mean_best_nll": top.get("mean_best_nll"),
         "mean_best_accuracy": top.get("mean_best_accuracy"),
         "mean_best_nll_delta_vs_raw": top.get("mean_best_nll_delta_vs_raw"),
-        "runner_up_feature": (
-            runner_up.get("feature") if isinstance(runner_up, dict) else None
-        ),
-        "runner_up_mean_best_nll": (
-            runner_up.get("mean_best_nll") if isinstance(runner_up, dict) else None
-        ),
-        "margin_to_runner_up": _nll_margin(top, runner_up),
+        **_runner_up_margin_fields(config, top, runner_up),
         **_config_feature_uncertainty_fields(config, feature),
         "run_dir": config.get("run_dir"),
     }
