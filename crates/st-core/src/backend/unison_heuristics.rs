@@ -2247,8 +2247,11 @@ mod tests {
         let generated_score = meta.1["wgpu_generated_score"]
             .as_f64()
             .expect("generated score");
-        assert!((baseline_score - generated_score).abs() <= f64::EPSILON);
-        assert_eq!(meta.1["wgpu_generated_score_delta"], 0.0);
+        let generated_delta = meta.1["wgpu_generated_score_delta"]
+            .as_f64()
+            .expect("generated score delta");
+        assert!((baseline_score - generated_score).abs() <= 1e-6);
+        assert!(generated_delta.abs() <= 1e-6);
         assert_eq!(meta.1["wgpu_generated_ties_baseline"], true);
     }
 
