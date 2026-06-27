@@ -405,6 +405,56 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
         self.assertIn("curve_nll", report)
         self.assertIn("| hybrid_latent | 4.040000 | 25.00% | -0.025000 | 2/2", report)
 
+    def test_best_config_summary_surfaces_runner_up_margin(self) -> None:
+        mod = _load_module()
+        config = {
+            "feature_normalize": "blocks",
+            "hybrid_latent_scale": 4.0,
+            "best_feature": "raw_latent",
+            "status": "improved",
+            "run_dir": "/tmp/chain/parent",
+            "ranking": [
+                {
+                    "feature": "raw_latent",
+                    "mean_best_nll": 4.1277,
+                    "mean_best_accuracy": 0.16,
+                    "mean_best_nll_delta_vs_raw": -0.063,
+                    "runs": 3,
+                },
+                {
+                    "feature": "reconstruction_latent",
+                    "mean_best_nll": 4.1281,
+                    "mean_best_accuracy": 0.16,
+                    "mean_best_nll_delta_vs_raw": -0.0626,
+                    "runs": 3,
+                },
+            ],
+        }
+
+        best_config = mod._best_config_summary([config])
+        compact = mod._compact_config_summary(config)
+        report = mod._aggregate_report(
+            {
+                "run": {"seed_count": 3},
+                "seed_summaries": [],
+                "config_summaries": [config],
+                "scale_summaries": [config],
+                "best_config": best_config,
+                "ranking": config["ranking"],
+                "feature_stability": [],
+                "feature_family_stability": [],
+                "status": "improved",
+                "best_feature": "raw_latent",
+            }
+        )
+
+        self.assertEqual(best_config["runner_up_feature"], "reconstruction_latent")
+        self.assertAlmostEqual(best_config["margin_to_runner_up"], 0.0004)
+        self.assertEqual(compact["runner_up_feature"], "reconstruction_latent")
+        self.assertAlmostEqual(compact["margin_to_runner_up"], 0.0004)
+        self.assertIn("- best_config_runner_up: reconstruction_latent", report)
+        self.assertIn("margin=0.000400", report)
+
     def test_aggregate_recovers_curve_metrics_from_legacy_history(self) -> None:
         mod = _load_module()
         summary = {

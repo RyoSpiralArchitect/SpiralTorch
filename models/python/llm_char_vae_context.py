@@ -1361,6 +1361,16 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
             if best_config
             else "- best_config: -"
         ),
+        (
+            "- best_config_runner_up: {feature} "
+            "(margin={margin}, mean_best_nll={nll})".format(
+                feature=best_config.get("runner_up_feature"),
+                margin=_fmt_float(best_config.get("margin_to_runner_up")),
+                nll=_fmt_float(best_config.get("runner_up_mean_best_nll")),
+            )
+            if best_config and best_config.get("runner_up_feature") is not None
+            else "- best_config_runner_up: -"
+        ),
         f"- seeds: {', '.join(str(seed) for seed in run.get('seeds', []))}",
         f"- features: {', '.join(str(item) for item in run.get('features', []))}",
         f"- feature_normalize: {run.get('feature_normalize')}",
@@ -2429,6 +2439,11 @@ def _best_config_summary(config_summaries: list[dict[str, Any]]) -> dict[str, An
     )
     best = ranked[0]
     top = best.get("ranking", [{}])[0] if best.get("ranking") else {}
+    runner_up = (
+        best.get("ranking", [None, None])[1]
+        if len(best.get("ranking", [])) > 1
+        else {}
+    )
     return {
         "feature_normalize": best.get("feature_normalize"),
         "hybrid_latent_scale": best.get("hybrid_latent_scale"),
@@ -2437,6 +2452,13 @@ def _best_config_summary(config_summaries: list[dict[str, Any]]) -> dict[str, An
         "mean_best_nll": top.get("mean_best_nll"),
         "mean_best_accuracy": top.get("mean_best_accuracy"),
         "mean_best_nll_delta_vs_raw": top.get("mean_best_nll_delta_vs_raw"),
+        "runner_up_feature": (
+            runner_up.get("feature") if isinstance(runner_up, dict) else None
+        ),
+        "runner_up_mean_best_nll": (
+            runner_up.get("mean_best_nll") if isinstance(runner_up, dict) else None
+        ),
+        "margin_to_runner_up": _nll_margin(top, runner_up),
         "run_dir": best.get("run_dir"),
     }
 
@@ -3574,10 +3596,30 @@ def _config_feature_uncertainty_fields(
     }
 
 
+def _nll_margin(
+    winner: dict[str, Any] | None,
+    runner_up: dict[str, Any] | None,
+) -> float | None:
+    winner_nll = _finite_float(
+        winner.get("mean_best_nll") if isinstance(winner, dict) else None
+    )
+    runner_up_nll = _finite_float(
+        runner_up.get("mean_best_nll") if isinstance(runner_up, dict) else None
+    )
+    if winner_nll is None or runner_up_nll is None:
+        return None
+    return runner_up_nll - winner_nll
+
+
 def _compact_config_summary(config: dict[str, Any] | None) -> dict[str, Any] | None:
     if not config:
         return None
     top = config.get("ranking", [{}])[0] if config.get("ranking") else {}
+    runner_up = (
+        config.get("ranking", [None, None])[1]
+        if len(config.get("ranking", [])) > 1
+        else {}
+    )
     feature = top.get("feature")
     return {
         "feature_normalize": config.get("feature_normalize"),
@@ -3587,6 +3629,13 @@ def _compact_config_summary(config: dict[str, Any] | None) -> dict[str, Any] | N
         "mean_best_nll": top.get("mean_best_nll"),
         "mean_best_accuracy": top.get("mean_best_accuracy"),
         "mean_best_nll_delta_vs_raw": top.get("mean_best_nll_delta_vs_raw"),
+        "runner_up_feature": (
+            runner_up.get("feature") if isinstance(runner_up, dict) else None
+        ),
+        "runner_up_mean_best_nll": (
+            runner_up.get("mean_best_nll") if isinstance(runner_up, dict) else None
+        ),
+        "margin_to_runner_up": _nll_margin(top, runner_up),
         **_config_feature_uncertainty_fields(config, feature),
         "run_dir": config.get("run_dir"),
     }

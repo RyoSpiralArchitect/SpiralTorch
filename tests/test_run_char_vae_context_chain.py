@@ -135,6 +135,9 @@ class CharVaeContextChainTests(unittest.TestCase):
                     "mean_best_nll": 4.2258,
                     "mean_best_accuracy": 0.104,
                     "mean_best_nll_delta_vs_raw": -0.0023,
+                    "runner_up_feature": "raw_latent",
+                    "runner_up_mean_best_nll": 4.2261,
+                    "margin_to_runner_up": 0.0003,
                 },
                 "follow_up_result": {
                     "verdict": "regressed",
@@ -174,12 +177,17 @@ class CharVaeContextChainTests(unittest.TestCase):
             )
 
         self.assertEqual(step["mean_best_nll_delta_vs_raw"], -0.0023)
+        self.assertEqual(step["runner_up_feature"], "raw_latent")
+        self.assertAlmostEqual(step["margin_to_runner_up"], 0.0003)
         self.assertEqual(step["mean_best_nll_delta_vs_source"], 0.001)
         self.assertEqual(step["source_feature_mean_best_nll_delta_vs_source"], 0.001)
         self.assertIs(step["source_best_feature_retained"], True)
         self.assertIs(step["follow_up_gate_failed"], True)
         self.assertEqual(step["best_config_label"], "latent@normalize=blocks,scale=0.5")
         self.assertIn("delta_vs_raw", report)
+        self.assertIn("runner_up", report)
+        self.assertIn("raw_latent", report)
+        self.assertIn("0.000300", report)
         self.assertIn("source_feature_delta_vs_source", report)
         self.assertIn("latent@normalize=blocks,scale=0.5", report)
         self.assertIn("0.001000", report)
