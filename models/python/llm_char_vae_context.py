@@ -73,6 +73,11 @@ def _write_json(path: pathlib.Path, payload: dict[str, Any]) -> None:
         json.dump(payload, handle, ensure_ascii=False, indent=2)
 
 
+def _write_text(path: pathlib.Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
 def _append_jsonl(path: pathlib.Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
@@ -711,6 +716,191 @@ def _metric_stats(values: Iterable[float]) -> dict[str, Any]:
     }
 
 
+def _fmt_float(value: Any, digits: int = 6) -> str:
+    if value is None:
+        return "-"
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    if not math.isfinite(parsed):
+        return "-"
+    return f"{parsed:.{digits}f}"
+
+
+def _fmt_percent(value: Any, digits: int = 2) -> str:
+    if value is None:
+        return "-"
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    if not math.isfinite(parsed):
+        return "-"
+    return f"{parsed * 100.0:.{digits}f}%"
+
+
+def _fmt_stat_mean(stats: dict[str, Any] | None, digits: int = 6) -> str:
+    if not stats:
+        return "-"
+    return _fmt_float(stats.get("mean"), digits)
+
+
+def _markdown_table(headers: list[str], rows: list[list[str]]) -> list[str]:
+    if not rows:
+        return ["_" + "No rows." + "_"]
+    lines = [
+        "| " + " | ".join(headers) + " |",
+        "| " + " | ".join("---" for _ in headers) + " |",
+    ]
+    lines.extend("| " + " | ".join(row) + " |" for row in rows)
+    return lines
+
+
+def _single_report(summary: dict[str, Any]) -> str:
+    run = summary.get("run", {})
+    ranking_rows = []
+    feature_results = {
+        str(item.get("feature")): item
+        for item in summary.get("features", [])
+    }
+    for item in summary.get("ranking", []):
+        feature = str(item.get("feature"))
+        result = feature_results.get(feature, {})
+        initial = result.get("initial_validation", {})
+        final = result.get("final_validation", {})
+        ranking_rows.append(
+            [
+                feature,
+                str(item.get("best_epoch") if item.get("best_epoch") is not None else "init"),
+                _fmt_float(item.get("best_mean_nll")),
+                _fmt_percent(item.get("best_accuracy")),
+                _fmt_float(initial.get("mean_nll")),
+                _fmt_float(final.get("mean_nll")),
+            ]
+        )
+
+    diagnostics_rows = []
+    diagnostics = summary.get("feature_diagnostics", {}).get("features", {})
+    for feature, item in sorted(diagnostics.items()):
+        diagnostics_rows.append(
+            [
+                str(feature),
+                str(item.get("dims", "-")),
+                _fmt_float(item.get("variance_mean")),
+                _fmt_percent(item.get("active_dim_fraction")),
+                _fmt_float(item.get("norm_mean")),
+                _fmt_float(item.get("raw_mse_mean")),
+                _fmt_float(item.get("raw_cosine_mean")),
+            ]
+        )
+
+    lines = [
+        "# Char VAE Context Report",
+        "",
+        f"- status: single-run",
+        f"- best_feature: {summary.get('best_feature')}",
+        f"- seed: {run.get('seed')}",
+        f"- features: {', '.join(str(item) for item in run.get('features', []))}",
+        f"- window_chars: {run.get('window_chars')}",
+        f"- latent_dim: {run.get('latent_dim')}",
+        f"- summary_json: `summary.json`",
+        "",
+        "## Ranking",
+        "",
+    ]
+    lines.extend(
+        _markdown_table(
+            ["feature", "best_epoch", "best_nll", "best_acc", "init_nll", "final_nll"],
+            ranking_rows,
+        )
+    )
+    lines.extend(["", "## Feature Diagnostics", ""])
+    lines.extend(
+        _markdown_table(
+            ["feature", "dims", "var_mean", "active_dims", "norm_mean", "raw_mse", "raw_cosine"],
+            diagnostics_rows,
+        )
+    )
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _aggregate_report(summary: dict[str, Any]) -> str:
+    run = summary.get("run", {})
+    ranking_rows = [
+        [
+            str(item.get("feature")),
+            _fmt_float(item.get("mean_best_nll")),
+            _fmt_percent(item.get("mean_best_accuracy")),
+            _fmt_float(item.get("mean_best_nll_delta_vs_raw")),
+            str(item.get("runs", "-")),
+        ]
+        for item in summary.get("ranking", [])
+    ]
+    diagnostics_rows = []
+    for item in summary.get("feature_diagnostics_summary", []):
+        diagnostics_rows.append(
+            [
+                str(item.get("feature")),
+                _fmt_stat_mean(item.get("dims"), 2),
+                _fmt_stat_mean(item.get("variance_mean")),
+                _fmt_percent(item.get("active_dim_fraction", {}).get("mean")),
+                _fmt_stat_mean(item.get("norm_mean")),
+                _fmt_stat_mean(item.get("raw_mse_mean")),
+                _fmt_stat_mean(item.get("raw_cosine_mean")),
+            ]
+        )
+    seed_rows = []
+    for item in summary.get("seed_summaries", []):
+        top = item.get("ranking", [{}])[0] if item.get("ranking") else {}
+        seed_rows.append(
+            [
+                str(item.get("seed")),
+                str(item.get("best_feature")),
+                _fmt_float(top.get("best_mean_nll")),
+                _fmt_percent(top.get("best_accuracy")),
+                f"`{item.get('run_dir')}`",
+            ]
+        )
+
+    lines = [
+        "# Char VAE Context Sweep Report",
+        "",
+        f"- status: {summary.get('status')}",
+        f"- best_feature: {summary.get('best_feature')}",
+        f"- seeds: {', '.join(str(seed) for seed in run.get('seeds', []))}",
+        f"- features: {', '.join(str(item) for item in run.get('features', []))}",
+        f"- min_nll_delta: {run.get('min_nll_delta')}",
+        f"- summary_json: `summary.json`",
+        "",
+        "## Aggregate Ranking",
+        "",
+    ]
+    lines.extend(
+        _markdown_table(
+            ["feature", "mean_best_nll", "mean_best_acc", "mean_delta_vs_raw", "runs"],
+            ranking_rows,
+        )
+    )
+    lines.extend(["", "## Aggregate Feature Diagnostics", ""])
+    lines.extend(
+        _markdown_table(
+            ["feature", "dims", "var_mean", "active_dims", "norm_mean", "raw_mse", "raw_cosine"],
+            diagnostics_rows,
+        )
+    )
+    lines.extend(["", "## Seed Runs", ""])
+    lines.extend(
+        _markdown_table(
+            ["seed", "best_feature", "best_nll", "best_acc", "run_dir"],
+            seed_rows,
+        )
+    )
+    lines.append("")
+    return "\n".join(lines)
+
+
 def _aggregate_summaries(
     summaries: list[dict[str, Any]],
     *,
@@ -1078,6 +1268,7 @@ def _run_single(args: argparse.Namespace, features: list[str]) -> dict[str, Any]
         "deltas": deltas,
     }
     _write_json(run_dir / "summary.json", summary)
+    _write_text(run_dir / "report.md", _single_report(summary))
     if args.json:
         print(json.dumps(summary, ensure_ascii=False, indent=2))
 
@@ -1174,6 +1365,7 @@ def main(argv: list[str] | None = None) -> int:
         )
     )
     _write_json(root_run_dir / "summary.json", aggregate)
+    _write_text(root_run_dir / "report.md", _aggregate_report(aggregate))
     if args.json:
         print(json.dumps(aggregate, ensure_ascii=False, indent=2))
 
