@@ -291,6 +291,28 @@ def _nll_from_prob(prob: float, epsilon: float = 1e-9) -> float:
     return -math.log(max(float(prob), epsilon))
 
 
+def _vector_norm(values: list[float]) -> float:
+    return math.sqrt(sum(float(value) * float(value) for value in values))
+
+
+def _squared_l2(left: list[float], right: list[float]) -> float:
+    return sum((float(a) - float(b)) ** 2 for a, b in zip(left, right))
+
+
+def _cosine(left: list[float], right: list[float]) -> float | None:
+    dot = 0.0
+    left_norm = 0.0
+    right_norm = 0.0
+    for a, b in zip(left, right):
+        fa = float(a)
+        fb = float(b)
+        dot += fa * fb
+        left_norm += fa * fa
+        right_norm += fb * fb
+    denom = math.sqrt(left_norm) * math.sqrt(right_norm)
+    return dot / denom if denom > 0.0 else None
+
+
 def _argmax(values: list[float]) -> int:
     best_idx = 0
     best_val = float("-inf")
@@ -319,6 +341,107 @@ def _sample_topk(values: list[float], top_k: int, rng: random.Random) -> int:
         if threshold <= 0.0:
             return idx
     return candidates[-1][0]
+
+
+def _feature_variance(vectors: list[list[float]], threshold: float = 1e-8) -> dict[str, Any]:
+    if not vectors:
+        return {
+            "dims": 0,
+            "variance_mean": None,
+            "variance_max": None,
+            "active_dim_fraction": None,
+            "norm_mean": None,
+        }
+    dims = min(len(vector) for vector in vectors)
+    if dims <= 0:
+        return {
+            "dims": 0,
+            "variance_mean": None,
+            "variance_max": None,
+            "active_dim_fraction": None,
+            "norm_mean": None,
+        }
+    means = [
+        sum(float(vector[idx]) for vector in vectors) / float(len(vectors))
+        for idx in range(dims)
+    ]
+    variances = []
+    for idx in range(dims):
+        variances.append(
+            sum((float(vector[idx]) - means[idx]) ** 2 for vector in vectors)
+            / float(len(vectors))
+        )
+    active = sum(1 for value in variances if value > threshold)
+    return {
+        "dims": dims,
+        "variance_mean": sum(variances) / float(dims),
+        "variance_max": max(variances) if variances else None,
+        "active_dim_fraction": active / float(dims),
+        "norm_mean": sum(_vector_norm(vector[:dims]) for vector in vectors) / float(len(vectors)),
+    }
+
+
+def _feature_diagnostics(
+    vae: Any,
+    basis: Any | None,
+    features: list[str],
+    text: str,
+    index: dict[str, int],
+    window_chars: int,
+    samples: int,
+    seed: int,
+) -> dict[str, Any]:
+    rng = random.Random(seed)
+    windows = _sample_windows(text, window_chars, index, max(1, samples), rng)
+    vectors = {
+        feature: [
+            _feature_vector(vae, basis, feature, sample.window)
+            for sample in windows
+        ]
+        for feature in features
+    }
+    raw_vectors = vectors.get(FEATURE_RAW)
+    diagnostics: dict[str, Any] = {}
+    for feature, feature_vectors in vectors.items():
+        item = _feature_variance(feature_vectors)
+        if raw_vectors is not None and raw_vectors and feature_vectors:
+            dims = min(
+                min(len(vector) for vector in raw_vectors),
+                min(len(vector) for vector in feature_vectors),
+            )
+            if dims == min(len(vector) for vector in raw_vectors) == min(
+                len(vector) for vector in feature_vectors
+            ):
+                sqs = [
+                    _squared_l2(raw[:dims], vector[:dims])
+                    for raw, vector in zip(raw_vectors, feature_vectors)
+                ]
+                cosines = [
+                    value
+                    for value in (
+                        _cosine(raw[:dims], vector[:dims])
+                        for raw, vector in zip(raw_vectors, feature_vectors)
+                    )
+                    if value is not None
+                ]
+                item["raw_l2_mean"] = sum(math.sqrt(value) for value in sqs) / float(len(sqs))
+                item["raw_mse_mean"] = sum(value / float(dims) for value in sqs) / float(len(sqs))
+                item["raw_cosine_mean"] = (
+                    sum(cosines) / float(len(cosines)) if cosines else None
+                )
+            else:
+                item["raw_l2_mean"] = None
+                item["raw_mse_mean"] = None
+                item["raw_cosine_mean"] = None
+        else:
+            item["raw_l2_mean"] = None
+            item["raw_mse_mean"] = None
+            item["raw_cosine_mean"] = None
+        diagnostics[feature] = item
+    return {
+        "samples": len(windows),
+        "features": diagnostics,
+    }
 
 
 def _evaluate(
@@ -632,6 +755,35 @@ def _aggregate_summaries(
                 "best_nll_delta_vs_raw": _metric_stats(deltas),
             }
         )
+    diagnostic_rows = []
+    diagnostic_keys = (
+        "dims",
+        "variance_mean",
+        "variance_max",
+        "active_dim_fraction",
+        "norm_mean",
+        "raw_l2_mean",
+        "raw_mse_mean",
+        "raw_cosine_mean",
+    )
+    for feature in feature_names:
+        feature_diagnostics = [
+            summary.get("feature_diagnostics", {}).get("features", {}).get(feature, {})
+            for summary in summaries
+        ]
+        diagnostic_rows.append(
+            {
+                "feature": feature,
+                **{
+                    key: _metric_stats(
+                        diag.get(key)
+                        for diag in feature_diagnostics
+                        if diag.get(key) is not None
+                    )
+                    for key in diagnostic_keys
+                },
+            }
+        )
 
     ranking = sorted(
         feature_rows,
@@ -659,6 +811,7 @@ def _aggregate_summaries(
 
     return {
         "feature_summary": feature_rows,
+        "feature_diagnostics_summary": diagnostic_rows,
         "ranking": [
             {
                 "feature": item["feature"],
@@ -812,6 +965,16 @@ def _run_single(args: argparse.Namespace, features: list[str]) -> dict[str, Any]
     vae_history = _train_vae(vae, basis, train_text, args)
     vae_save = args.vae_save or (run_dir / "text_vae_weights.bin")
     vae.save(str(vae_save))
+    feature_diagnostics = _feature_diagnostics(
+        vae,
+        basis,
+        features,
+        val_text,
+        index,
+        int(args.window_chars),
+        int(args.eval_samples),
+        int(args.seed) + 700_000,
+    )
 
     run_meta = {
         "schema": RUN_SCHEMA,
@@ -901,6 +1064,7 @@ def _run_single(args: argparse.Namespace, features: list[str]) -> dict[str, Any]
         "elapsed_seconds": time.time() - started,
         "run": run_meta,
         "features": results,
+        "feature_diagnostics": feature_diagnostics,
         "ranking": [
             {
                 "feature": item["feature"],
