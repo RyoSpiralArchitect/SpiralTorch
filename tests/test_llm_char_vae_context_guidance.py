@@ -228,6 +228,35 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
         )
         self.assertIs(guided["unsafe_promotion"], True)
 
+    def test_retained_source_feature_regression_has_precise_reason(self) -> None:
+        mod = _load_module()
+        summary = _summary(
+            best_feature="latent",
+            nll=4.23,
+            verdict="regressed",
+            config_verdict="regressed",
+            source_feature_verdict="regressed",
+            source_retained=True,
+            gate_failed=True,
+        )
+
+        guidance = mod._follow_up_guidance_record(
+            summary["follow_up_result"],
+            summary["follow_up_chain"],
+            summary["follow_up_gate"],
+            _next_follow_up(),
+        )
+
+        self.assertEqual(guidance["action"], "stop_on_follow_up_gate")
+        self.assertIn(
+            "source best feature regressed on fresh seeds",
+            guidance["reasons"],
+        )
+        self.assertNotIn(
+            "source best feature did not retain its role",
+            guidance["reasons"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
