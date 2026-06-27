@@ -460,6 +460,86 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
             "16",
         )
 
+    def test_follow_up_result_confirms_source_delta_inside_seed_noise(self) -> None:
+        mod = _load_module()
+        source_best_config = {
+            "best_feature": "raw_latent",
+            "feature_normalize": "blocks",
+            "hybrid_latent_scale": 4.0,
+            "mean_best_nll": 4.164274733570908,
+        }
+        config_summary = {
+            "feature_normalize": "blocks",
+            "hybrid_latent_scale": 4.0,
+            "best_feature": "raw_latent",
+            "status": "improved",
+            "ranking": [
+                {
+                    "feature": "raw_latent",
+                    "mean_best_nll": 4.165183979512166,
+                    "mean_best_accuracy": 0.16,
+                    "mean_best_nll_delta_vs_raw": -0.03029274605893484,
+                    "runs": 9,
+                },
+                {
+                    "feature": "raw",
+                    "mean_best_nll": 4.195476725571101,
+                    "mean_best_accuracy": 0.16,
+                    "mean_best_nll_delta_vs_raw": 0.0,
+                    "runs": 9,
+                },
+            ],
+            "seed_summaries": [
+                {
+                    "ranking": [
+                        {"feature": "raw_latent", "best_mean_nll": 4.162},
+                        {"feature": "raw", "best_mean_nll": 4.195},
+                    ],
+                },
+                {
+                    "ranking": [
+                        {"feature": "raw_latent", "best_mean_nll": 4.165183979512166},
+                        {"feature": "raw", "best_mean_nll": 4.196},
+                    ],
+                },
+                {
+                    "ranking": [
+                        {"feature": "raw_latent", "best_mean_nll": 4.1684},
+                        {"feature": "raw", "best_mean_nll": 4.197},
+                    ],
+                },
+            ],
+        }
+
+        result = mod._follow_up_result(
+            {
+                "source_summary_path": "/tmp/source/summary.json",
+                "source_best_config": source_best_config,
+                "source_run_budget": {},
+            },
+            [config_summary],
+            {
+                "best_feature": "raw_latent",
+                "mean_best_nll_delta_vs_raw": -0.03029274605893484,
+            },
+            min_nll_delta=0.0,
+        )
+
+        self.assertEqual(result["source_feature_verdict"], "confirmed")
+        self.assertEqual(result["config_verdict"], "confirmed")
+        self.assertEqual(result["verdict"], "confirmed")
+        self.assertEqual(result["source_feature_raw_verdict"], "improved")
+        self.assertGreater(
+            result["effective_source_feature_min_nll_delta"],
+            result["source_feature_mean_best_nll_delta_vs_source"],
+        )
+        self.assertAlmostEqual(
+            result["source_feature_mean_best_nll_delta_vs_source"],
+            0.0009092459412585185,
+        )
+        gate = mod._follow_up_gate_record(result, ["regressed", "unknown"])
+        self.assertIs(gate["failed"], False)
+
     def test_safe_trajectory_promotes_guided_confirmation(self) -> None:
         mod = _load_module()
         summary = _summary(

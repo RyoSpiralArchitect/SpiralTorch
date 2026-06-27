@@ -896,6 +896,7 @@ def _metric_stats(values: Iterable[float]) -> dict[str, Any]:
             "count": 0,
             "mean": None,
             "stddev": None,
+            "stderr": None,
             "min": None,
             "max": None,
         }
@@ -905,6 +906,7 @@ def _metric_stats(values: Iterable[float]) -> dict[str, Any]:
         "count": len(vals),
         "mean": mean,
         "stddev": math.sqrt(variance),
+        "stderr": math.sqrt(variance) / math.sqrt(float(len(vals))),
         "min": min(vals),
         "max": max(vals),
     }
@@ -1187,6 +1189,7 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
         f"- hybrid_latent_scale: {run.get('hybrid_latent_scale')}",
         f"- hybrid_latent_scales: {', '.join(str(scale) for scale in run.get('hybrid_latent_scales', [])) or '-'}",
         f"- min_nll_delta: {run.get('min_nll_delta')}",
+        f"- follow_up_confirm_tolerance: {run.get('follow_up_confirm_tolerance')}",
         f"- win_tolerance: {run.get('win_tolerance')}",
         f"- summary_json: `summary.json`",
         "",
@@ -1217,6 +1220,10 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
                 f"- current_best_raw_verdict: {follow_up_result.get('current_best_raw_verdict')}",
                 f"- source_best_feature_retained: {follow_up_result.get('source_best_feature_retained')}",
                 f"- match_found: {follow_up_result.get('match_found')}",
+                "- effective_source_feature_min_nll_delta: "
+                f"{_fmt_float(follow_up_result.get('effective_source_feature_min_nll_delta'))}",
+                "- source_feature_mean_best_nll_stderr: "
+                f"{_fmt_float(follow_up_result.get('source_feature_mean_best_nll_stderr'))}",
                 f"- run_budget_shifted: {follow_up_result.get('run_budget_shifted')}",
                 "- run_budget_shift: "
                 f"{_run_budget_shift_label(follow_up_result.get('run_budget_shift'))}",
@@ -2343,6 +2350,7 @@ def _follow_up_command_parts(
         ("--follow-up-from", follow_up_from_value),
         ("--follow-up-fail-on-verdict", fail_on_verdict_value),
         ("--follow-up-used-seeds", used_seed_history_value),
+        ("--follow-up-confirm-tolerance", _fmt_arg_float(args.follow_up_confirm_tolerance)),
         ("--window-chars", int(args.window_chars)),
         ("--latent-dim", int(args.latent_dim)),
         ("--hidden", int(args.hidden)),
@@ -3201,10 +3209,72 @@ def _matching_config_summary(
     return None
 
 
+def _config_feature_best_nll_stats(
+    config: dict[str, Any] | None,
+    feature: Any,
+) -> dict[str, Any]:
+    if not config or feature is None:
+        return {}
+    feature_name = str(feature)
+    for row in config.get("feature_summary", []):
+        if row.get("feature") != feature_name:
+            continue
+        stats = row.get("best_nll")
+        if isinstance(stats, dict) and stats.get("stderr") is not None:
+            return stats
+        if isinstance(stats, dict) and stats.get("stddev") is not None:
+            count = _finite_float(stats.get("count"))
+            if count is not None and count > 0.0:
+                enriched = dict(stats)
+                enriched["stderr"] = float(stats["stddev"]) / math.sqrt(count)
+                return enriched
+            return stats
+
+    seed_summaries = config.get("seed_summaries", [])
+    if not isinstance(seed_summaries, list):
+        seed_summaries = []
+    if not seed_summaries and config.get("run_dir") is not None:
+        summary_path = pathlib.Path(str(config.get("run_dir"))) / "summary.json"
+        try:
+            payload = json.loads(summary_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            payload = {}
+        if isinstance(payload, dict) and isinstance(payload.get("seed_summaries"), list):
+            seed_summaries = payload["seed_summaries"]
+
+    values = []
+    for seed_summary in seed_summaries:
+        if not isinstance(seed_summary, dict):
+            continue
+        for row in seed_summary.get("ranking", []):
+            if row.get("feature") != feature_name:
+                continue
+            value = _finite_float(row.get("best_mean_nll"))
+            if value is not None:
+                values.append(value)
+            break
+    if values:
+        return _metric_stats(values)
+    return {}
+
+
+def _config_feature_uncertainty_fields(
+    config: dict[str, Any] | None,
+    feature: Any,
+) -> dict[str, Any]:
+    stats = _config_feature_best_nll_stats(config, feature)
+    return {
+        "mean_best_nll_count": stats.get("count"),
+        "mean_best_nll_stddev": stats.get("stddev"),
+        "mean_best_nll_stderr": stats.get("stderr"),
+    }
+
+
 def _compact_config_summary(config: dict[str, Any] | None) -> dict[str, Any] | None:
     if not config:
         return None
     top = config.get("ranking", [{}])[0] if config.get("ranking") else {}
+    feature = top.get("feature")
     return {
         "feature_normalize": config.get("feature_normalize"),
         "hybrid_latent_scale": config.get("hybrid_latent_scale"),
@@ -3213,6 +3283,7 @@ def _compact_config_summary(config: dict[str, Any] | None) -> dict[str, Any] | N
         "mean_best_nll": top.get("mean_best_nll"),
         "mean_best_accuracy": top.get("mean_best_accuracy"),
         "mean_best_nll_delta_vs_raw": top.get("mean_best_nll_delta_vs_raw"),
+        **_config_feature_uncertainty_fields(config, feature),
         "run_dir": config.get("run_dir"),
     }
 
@@ -3235,6 +3306,7 @@ def _config_feature_summary(
             "mean_best_nll": row.get("mean_best_nll"),
             "mean_best_accuracy": row.get("mean_best_accuracy"),
             "mean_best_nll_delta_vs_raw": row.get("mean_best_nll_delta_vs_raw"),
+            **_config_feature_uncertainty_fields(config, feature_name),
             "runs": row.get("runs"),
             "run_dir": config.get("run_dir"),
         }
@@ -3249,6 +3321,18 @@ def _delta_verdict(delta: float | None, min_nll_delta: float) -> str:
     if delta > float(min_nll_delta):
         return "regressed"
     return "confirmed"
+
+
+def _effective_follow_up_tolerance(
+    *,
+    min_nll_delta: float,
+    follow_up_confirm_tolerance: float,
+    stderr: float | None,
+) -> float:
+    values = [float(min_nll_delta), float(follow_up_confirm_tolerance)]
+    if stderr is not None and math.isfinite(float(stderr)):
+        values.append(float(stderr))
+    return max(value for value in values if math.isfinite(value))
 
 
 def _parse_follow_up_fail_verdicts(raw: str | None) -> list[str]:
@@ -3280,6 +3364,7 @@ def _follow_up_result(
     current_best_config: dict[str, Any] | None,
     *,
     min_nll_delta: float,
+    follow_up_confirm_tolerance: float = 0.0,
     current_run_budget: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     if not follow_up:
@@ -3318,8 +3403,30 @@ def _follow_up_result(
     if source_nll is not None and source_feature_nll is not None:
         source_feature_delta = source_feature_nll - source_nll
 
-    config_verdict = _delta_verdict(config_delta, min_nll_delta)
-    source_feature_verdict = _delta_verdict(source_feature_delta, min_nll_delta)
+    evaluated_stderr = _finite_float(
+        evaluated.get("mean_best_nll_stderr") if evaluated else None
+    )
+    source_feature_stderr = _finite_float(
+        source_feature_evaluated.get("mean_best_nll_stderr")
+        if source_feature_evaluated
+        else None
+    )
+    config_tolerance = _effective_follow_up_tolerance(
+        min_nll_delta=min_nll_delta,
+        follow_up_confirm_tolerance=follow_up_confirm_tolerance,
+        stderr=evaluated_stderr,
+    )
+    source_feature_tolerance = _effective_follow_up_tolerance(
+        min_nll_delta=min_nll_delta,
+        follow_up_confirm_tolerance=follow_up_confirm_tolerance,
+        stderr=source_feature_stderr,
+    )
+
+    config_verdict = _delta_verdict(config_delta, config_tolerance)
+    source_feature_verdict = _delta_verdict(
+        source_feature_delta,
+        source_feature_tolerance,
+    )
     source_feature = source_best_config.get("best_feature")
     source_best_feature_retained = (
         evaluated is not None
@@ -3353,6 +3460,11 @@ def _follow_up_result(
         "evaluated_mean_best_nll_delta_vs_raw": evaluated_delta_vs_raw,
         "source_feature_mean_best_nll_delta_vs_raw": source_feature_delta_vs_raw,
         "current_best_mean_best_nll_delta_vs_raw": current_best_delta_vs_raw,
+        "follow_up_confirm_tolerance": float(follow_up_confirm_tolerance),
+        "effective_config_min_nll_delta": config_tolerance,
+        "effective_source_feature_min_nll_delta": source_feature_tolerance,
+        "evaluated_mean_best_nll_stderr": evaluated_stderr,
+        "source_feature_mean_best_nll_stderr": source_feature_stderr,
         "config_verdict": config_verdict,
         "source_feature_verdict": source_feature_verdict,
         "evaluated_raw_verdict": _delta_verdict(evaluated_delta_vs_raw, min_nll_delta),
@@ -4269,6 +4381,15 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--follow-up-confirm-tolerance",
+        type=float,
+        default=0.0,
+        help=(
+            "extra NLL tolerance for follow-up source comparisons; the effective "
+            "confirmation band also includes current fresh-seed standard error"
+        ),
+    )
+    parser.add_argument(
         "--follow-up-used-seeds",
         default=None,
         help=argparse.SUPPRESS,
@@ -4306,6 +4427,11 @@ def _validate_args(args: argparse.Namespace) -> None:
         raise ValueError("--top-k must be > 0")
     if args.min_nll_delta < 0.0 or not math.isfinite(args.min_nll_delta):
         raise ValueError("--min-nll-delta must be non-negative and finite")
+    if (
+        args.follow_up_confirm_tolerance < 0.0
+        or not math.isfinite(args.follow_up_confirm_tolerance)
+    ):
+        raise ValueError("--follow-up-confirm-tolerance must be non-negative and finite")
     if args.win_tolerance < 0.0 or not math.isfinite(args.win_tolerance):
         raise ValueError("--win-tolerance must be non-negative and finite")
     if args.hybrid_latent_scale < 0.0 or not math.isfinite(args.hybrid_latent_scale):
@@ -4555,6 +4681,7 @@ def main(argv: list[str] | None = None) -> int:
         "seeds": seeds,
         "seed_count": len(seeds),
         "min_nll_delta": float(args.min_nll_delta),
+        "follow_up_confirm_tolerance": float(args.follow_up_confirm_tolerance),
         "win_tolerance": float(args.win_tolerance),
         "follow_up_fail_on_verdicts": follow_up_fail_on_verdicts,
         "run_dir": str(root_run_dir),
@@ -4681,6 +4808,7 @@ def main(argv: list[str] | None = None) -> int:
         config_summaries,
         best_config,
         min_nll_delta=float(args.min_nll_delta),
+        follow_up_confirm_tolerance=float(args.follow_up_confirm_tolerance),
         current_run_budget=run_budget,
     )
     if follow_up_result is not None:
