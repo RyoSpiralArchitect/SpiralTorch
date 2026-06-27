@@ -1402,8 +1402,12 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
                 f"- match_found: {follow_up_result.get('match_found')}",
                 "- effective_source_feature_min_nll_delta: "
                 f"{_fmt_float(follow_up_result.get('effective_source_feature_min_nll_delta'))}",
+                "- source_mean_best_nll_stderr: "
+                f"{_fmt_float(follow_up_result.get('source_mean_best_nll_stderr'))}",
                 "- source_feature_mean_best_nll_stderr: "
                 f"{_fmt_float(follow_up_result.get('source_feature_mean_best_nll_stderr'))}",
+                "- combined_source_feature_mean_best_nll_stderr: "
+                f"{_fmt_float(follow_up_result.get('combined_source_feature_mean_best_nll_stderr'))}",
                 f"- run_budget_shifted: {follow_up_result.get('run_budget_shifted')}",
                 "- run_budget_shift: "
                 f"{_run_budget_shift_label(follow_up_result.get('run_budget_shift'))}",
@@ -3330,6 +3334,21 @@ def _source_best_config(summary: dict[str, Any]) -> dict[str, Any]:
     sanitized = dict(best_config)
     sanitized["feature_normalize"] = normalize
     sanitized["hybrid_latent_scale"] = scale
+    config_summaries = summary.get("config_summaries") or summary.get("scale_summaries")
+    matched_config = None
+    if isinstance(config_summaries, list):
+        matched_config = _matching_config_summary(config_summaries, sanitized)
+    uncertainty = _config_feature_uncertainty_fields(
+        matched_config if isinstance(matched_config, dict) else summary,
+        sanitized.get("best_feature"),
+    )
+    sanitized.update(
+        {
+            key: value
+            for key, value in uncertainty.items()
+            if value is not None and sanitized.get(key) is None
+        }
+    )
     return sanitized
 
 
@@ -3620,6 +3639,17 @@ def _effective_follow_up_tolerance(
     return max(value for value in values if math.isfinite(value))
 
 
+def _combined_standard_error(*values: float | None) -> float | None:
+    terms = [
+        float(value)
+        for value in values
+        if value is not None and math.isfinite(float(value))
+    ]
+    if not terms:
+        return None
+    return math.sqrt(sum(value * value for value in terms))
+
+
 def _parse_follow_up_fail_verdicts(raw: str | None) -> list[str]:
     if raw is None or not raw.strip():
         return []
@@ -3691,20 +3721,26 @@ def _follow_up_result(
     evaluated_stderr = _finite_float(
         evaluated.get("mean_best_nll_stderr") if evaluated else None
     )
+    source_stderr = _finite_float(source_best_config.get("mean_best_nll_stderr"))
     source_feature_stderr = _finite_float(
         source_feature_evaluated.get("mean_best_nll_stderr")
         if source_feature_evaluated
         else None
     )
+    combined_config_stderr = _combined_standard_error(source_stderr, evaluated_stderr)
+    combined_source_feature_stderr = _combined_standard_error(
+        source_stderr,
+        source_feature_stderr,
+    )
     config_tolerance = _effective_follow_up_tolerance(
         min_nll_delta=min_nll_delta,
         follow_up_confirm_tolerance=follow_up_confirm_tolerance,
-        stderr=evaluated_stderr,
+        stderr=combined_config_stderr,
     )
     source_feature_tolerance = _effective_follow_up_tolerance(
         min_nll_delta=min_nll_delta,
         follow_up_confirm_tolerance=follow_up_confirm_tolerance,
-        stderr=source_feature_stderr,
+        stderr=combined_source_feature_stderr,
     )
 
     config_verdict = _delta_verdict(config_delta, config_tolerance)
@@ -3748,8 +3784,11 @@ def _follow_up_result(
         "follow_up_confirm_tolerance": float(follow_up_confirm_tolerance),
         "effective_config_min_nll_delta": config_tolerance,
         "effective_source_feature_min_nll_delta": source_feature_tolerance,
+        "source_mean_best_nll_stderr": source_stderr,
         "evaluated_mean_best_nll_stderr": evaluated_stderr,
         "source_feature_mean_best_nll_stderr": source_feature_stderr,
+        "combined_config_mean_best_nll_stderr": combined_config_stderr,
+        "combined_source_feature_mean_best_nll_stderr": combined_source_feature_stderr,
         "config_verdict": config_verdict,
         "source_feature_verdict": source_feature_verdict,
         "evaluated_raw_verdict": _delta_verdict(evaluated_delta_vs_raw, min_nll_delta),
