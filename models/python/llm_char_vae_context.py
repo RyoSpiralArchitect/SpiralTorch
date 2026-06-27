@@ -1132,6 +1132,7 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
     follow_up_result = summary.get("follow_up_result")
     follow_up_chain = summary.get("follow_up_chain")
     follow_up_ancestors = summary.get("follow_up_ancestors")
+    follow_up_trajectory = summary.get("follow_up_trajectory")
     follow_up_gate = summary.get("follow_up_gate")
     follow_up_guidance = summary.get("follow_up_guidance")
     if isinstance(follow_up_result, dict):
@@ -1258,6 +1259,55 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
                         _follow_up_ancestor_row(record)
                         for record in ancestor_records
                         if isinstance(record, dict)
+                    ],
+                )
+            )
+            lines.append("")
+    if isinstance(follow_up_trajectory, dict):
+        verdict_counts = follow_up_trajectory.get("verdict_counts", {})
+        verdict_counts_text = (
+            ", ".join(f"{key}={value}" for key, value in verdict_counts.items())
+            if isinstance(verdict_counts, dict)
+            else "-"
+        )
+        points = follow_up_trajectory.get("points", [])
+        lines.extend(
+            [
+                "## Follow-Up Trajectory",
+                "",
+                f"- trajectory_verdict: {follow_up_trajectory.get('trajectory_verdict')}",
+                f"- latest_verdict: {follow_up_trajectory.get('latest_verdict')}",
+                "- cumulative_mean_best_nll_delta: "
+                f"{_fmt_float(follow_up_trajectory.get('cumulative_mean_best_nll_delta'))}",
+                "- start_mean_best_nll: "
+                f"{_fmt_float(follow_up_trajectory.get('start_mean_best_nll'))}",
+                "- current_mean_best_nll: "
+                f"{_fmt_float(follow_up_trajectory.get('current_mean_best_nll'))}",
+                "- best_mean_best_nll: "
+                f"{_fmt_float(follow_up_trajectory.get('best_mean_best_nll'))}",
+                f"- best_generation: {follow_up_trajectory.get('best_generation')}",
+                f"- best_summary: `{follow_up_trajectory.get('best_summary_path') or '-'}`",
+                f"- verdict_counts: {verdict_counts_text}",
+                "",
+            ]
+        )
+        if isinstance(points, list) and points:
+            lines.extend(
+                _markdown_table(
+                    [
+                        "generation",
+                        "role",
+                        "best_config",
+                        "mean_best_nll",
+                        "delta_from_previous",
+                        "verdict",
+                        "guidance_action",
+                        "gate_failed",
+                    ],
+                    [
+                        _follow_up_trajectory_point_row(point)
+                        for point in points
+                        if isinstance(point, dict)
                     ],
                 )
             )
@@ -2527,6 +2577,153 @@ def _follow_up_ancestor_row(record: dict[str, Any]) -> list[str]:
     ]
 
 
+def _follow_up_current_trajectory_point(
+    root_run_dir: pathlib.Path,
+    summary: dict[str, Any],
+) -> dict[str, Any]:
+    chain = summary.get("follow_up_chain")
+    chain = chain if isinstance(chain, dict) else {}
+    best_config = summary.get("best_config")
+    best_config = best_config if isinstance(best_config, dict) else None
+    result = summary.get("follow_up_result")
+    result = result if isinstance(result, dict) else {}
+    guidance = summary.get("follow_up_guidance")
+    guidance = guidance if isinstance(guidance, dict) else {}
+    guided_next = summary.get("guided_next_follow_up_command")
+    guided_next = guided_next if isinstance(guided_next, dict) else {}
+    gate = summary.get("follow_up_gate")
+    gate = gate if isinstance(gate, dict) else {}
+    return {
+        "schema": "st.llm_char_vae_context.follow_up_trajectory_point.v1",
+        "role": "current",
+        "summary_path": str(root_run_dir / "summary.json"),
+        "run_dir": str(root_run_dir),
+        "generation": chain.get("generation", 0),
+        "status": summary.get("status"),
+        "best_feature": summary.get("best_feature"),
+        "best_config": best_config,
+        "mean_best_nll": best_config.get("mean_best_nll") if best_config else None,
+        "mean_best_accuracy": (
+            best_config.get("mean_best_accuracy") if best_config else None
+        ),
+        "verdict": result.get("verdict"),
+        "config_verdict": result.get("config_verdict"),
+        "source_feature_verdict": result.get("source_feature_verdict"),
+        "guidance_action": guidance.get("action"),
+        "guided_enabled": guided_next.get("enabled"),
+        "gate_failed": gate.get("failed"),
+    }
+
+
+def _follow_up_trajectory_point_from_ancestor(
+    record: dict[str, Any],
+) -> dict[str, Any]:
+    point = dict(record)
+    point["schema"] = "st.llm_char_vae_context.follow_up_trajectory_point.v1"
+    point["role"] = "ancestor"
+    return point
+
+
+def _follow_up_trajectory_record(
+    root_run_dir: pathlib.Path,
+    summary: dict[str, Any],
+    follow_up_ancestors: dict[str, Any] | None,
+    *,
+    min_nll_delta: float,
+) -> dict[str, Any] | None:
+    chain = summary.get("follow_up_chain")
+    if not isinstance(chain, dict):
+        return None
+
+    points = []
+    ancestors_raw = (
+        follow_up_ancestors.get("ancestors", [])
+        if isinstance(follow_up_ancestors, dict)
+        else []
+    )
+    if isinstance(ancestors_raw, list):
+        points.extend(
+            _follow_up_trajectory_point_from_ancestor(record)
+            for record in ancestors_raw
+            if isinstance(record, dict)
+        )
+    points.append(_follow_up_current_trajectory_point(root_run_dir, summary))
+
+    previous_nll = None
+    metric_points = []
+    for point in points:
+        nll = _finite_float(point.get("mean_best_nll"))
+        point["mean_best_nll_delta_from_previous"] = (
+            nll - previous_nll if nll is not None and previous_nll is not None else None
+        )
+        if (
+            nll is not None
+            and not point.get("missing")
+            and not point.get("cycle_detected")
+        ):
+            metric_points.append((nll, point))
+            previous_nll = nll
+
+    verdict_history = chain.get("verdict_history", [])
+    verdicts = (
+        [str(verdict) for verdict in verdict_history if str(verdict)]
+        if isinstance(verdict_history, list)
+        else []
+    )
+    verdict_counts = {verdict: verdicts.count(verdict) for verdict in FOLLOW_UP_VERDICTS}
+    latest_verdict = str(
+        chain.get("latest_verdict") or (verdicts[-1] if verdicts else "unknown")
+    )
+
+    start_nll = metric_points[0][0] if metric_points else None
+    current_nll = _finite_float(points[-1].get("mean_best_nll")) if points else None
+    cumulative_delta = (
+        current_nll - start_nll
+        if current_nll is not None and start_nll is not None
+        else None
+    )
+    best_nll = None
+    best_point: dict[str, Any] | None = None
+    if metric_points:
+        best_nll, best_point = min(metric_points, key=lambda item: item[0])
+
+    current_point = points[-1] if points else {}
+    return {
+        "schema": "st.llm_char_vae_context.follow_up_trajectory.v1",
+        "point_count": len(points),
+        "metric_point_count": len(metric_points),
+        "generation": chain.get("generation"),
+        "latest_verdict": latest_verdict,
+        "trajectory_verdict": _delta_verdict(cumulative_delta, min_nll_delta),
+        "verdict_counts": verdict_counts,
+        "start_mean_best_nll": start_nll,
+        "current_mean_best_nll": current_nll,
+        "cumulative_mean_best_nll_delta": cumulative_delta,
+        "best_mean_best_nll": best_nll,
+        "best_generation": best_point.get("generation") if best_point else None,
+        "best_summary_path": best_point.get("summary_path") if best_point else None,
+        "best_config": best_point.get("best_config") if best_point else None,
+        "current_guidance_action": current_point.get("guidance_action"),
+        "current_guided_enabled": current_point.get("guided_enabled"),
+        "current_gate_failed": current_point.get("gate_failed"),
+        "points": points,
+    }
+
+
+def _follow_up_trajectory_point_row(point: dict[str, Any]) -> list[str]:
+    best_config = point.get("best_config")
+    return [
+        str(point.get("generation") or "-"),
+        str(point.get("role") or "-"),
+        _config_label(best_config if isinstance(best_config, dict) else None),
+        _fmt_float(point.get("mean_best_nll")),
+        _fmt_float(point.get("mean_best_nll_delta_from_previous")),
+        str(point.get("verdict") or "-"),
+        str(point.get("guidance_action") or "-"),
+        str(point.get("gate_failed") if point.get("gate_failed") is not None else "-"),
+    ]
+
+
 def _follow_up_gate_record(
     follow_up_result: dict[str, Any] | None,
     fail_on_verdicts: list[str],
@@ -3187,6 +3384,14 @@ def main(argv: list[str] | None = None) -> int:
     if guided_next_follow_up is not None:
         aggregate["guided_next_follow_up_command"] = guided_next_follow_up
         _write_guided_next_follow_up_script(guided_next_follow_up)
+    follow_up_trajectory = _follow_up_trajectory_record(
+        root_run_dir,
+        aggregate,
+        follow_up_ancestors,
+        min_nll_delta=float(args.min_nll_delta),
+    )
+    if follow_up_trajectory is not None:
+        aggregate["follow_up_trajectory"] = follow_up_trajectory
     _write_json(root_run_dir / "summary.json", aggregate)
     _write_text(root_run_dir / "report.md", _aggregate_report(aggregate))
     if args.json:
