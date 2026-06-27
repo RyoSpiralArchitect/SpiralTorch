@@ -119,6 +119,43 @@ def _next_follow_up() -> dict:
     }
 
 
+def _seed_summary(
+    seed: int,
+    *,
+    raw: float,
+    latent: float,
+    raw_latent: float,
+    reconstruction_latent: float,
+) -> dict:
+    scores = {
+        "raw": raw,
+        "latent": latent,
+        "raw_latent": raw_latent,
+        "reconstruction_latent": reconstruction_latent,
+    }
+    ranking = [
+        {"feature": feature, "best_mean_nll": nll, "best_accuracy": 0.25}
+        for feature, nll in sorted(scores.items(), key=lambda item: (item[1], item[0]))
+    ]
+    return {
+        "run": {"seed": seed},
+        "best_feature": ranking[0]["feature"],
+        "ranking": ranking,
+        "features": [
+            {
+                "feature": feature,
+                "best_validation": {"mean_nll": nll, "accuracy": 0.25},
+            }
+            for feature, nll in scores.items()
+        ],
+        "deltas": {
+            f"{feature}_best_nll_vs_raw": nll - raw
+            for feature, nll in scores.items()
+        },
+        "feature_diagnostics": {"features": {}},
+    }
+
+
 class CharVaeContextGuidanceTests(unittest.TestCase):
     def test_next_follow_up_avoids_source_and_current_seed_history(self) -> None:
         mod = _load_module()
@@ -175,6 +212,80 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
             }
 
             self.assertEqual(mod._default_follow_up_seeds(summary), "131,137,139")
+
+    def test_feature_family_stability_groups_hybrid_latent_members(self) -> None:
+        mod = _load_module()
+        summaries = [
+            _seed_summary(
+                1,
+                raw=4.03,
+                latent=4.04,
+                raw_latent=4.0004,
+                reconstruction_latent=4.0,
+            ),
+            _seed_summary(
+                2,
+                raw=4.10,
+                latent=4.11,
+                raw_latent=4.08,
+                reconstruction_latent=4.0805,
+            ),
+        ]
+
+        aggregate = mod._aggregate_summaries(
+            summaries,
+            min_nll_delta=0.0,
+            win_tolerance=0.001,
+        )
+        thin_aggregate = mod._aggregate_summaries(
+            [
+                {
+                    "run": summary["run"],
+                    "best_feature": summary["best_feature"],
+                    "ranking": summary["ranking"],
+                    "deltas": summary["deltas"],
+                }
+                for summary in summaries
+            ],
+            min_nll_delta=0.0,
+            win_tolerance=0.001,
+        )
+        families = {
+            item["family"]: item
+            for item in aggregate["feature_family_stability"]
+        }
+        thin_families = {
+            item["family"]: item
+            for item in thin_aggregate["feature_family_stability"]
+        }
+        report = mod._aggregate_report(
+            {
+                "run": {"seed_count": 2},
+                "seed_summaries": summaries,
+                **aggregate,
+            }
+        )
+
+        hybrid = families["hybrid_latent"]
+        self.assertEqual(hybrid["win_count"], 2)
+        self.assertEqual(hybrid["near_win_count"], 2)
+        self.assertAlmostEqual(hybrid["mean_best_nll_delta_vs_raw"], -0.025)
+        self.assertEqual(
+            hybrid["member_best_counts"],
+            {"reconstruction_latent": 1, "raw_latent": 1},
+        )
+        self.assertEqual(thin_families["hybrid_latent"]["win_count"], 2)
+        self.assertAlmostEqual(
+            thin_families["hybrid_latent"]["mean_best_nll"],
+            4.04,
+        )
+        self.assertAlmostEqual(
+            thin_aggregate["ranking"][0]["mean_best_nll"],
+            4.0402,
+        )
+        self.assertEqual(families["raw"]["win_count"], 0)
+        self.assertIn("## Feature Family Stability", report)
+        self.assertIn("| hybrid_latent | 4.040000 | 25.00% | -0.025000 | 2/2", report)
 
     def test_safe_trajectory_promotes_guided_confirmation(self) -> None:
         mod = _load_module()
