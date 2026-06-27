@@ -209,6 +209,22 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
                             "hybrid_latent_scale": 4.0,
                             "mean_best_nll": 4.1,
                         },
+                        "config_summaries": [
+                            {
+                                "feature_normalize": "blocks",
+                                "hybrid_latent_scale": 4.0,
+                                "feature_summary": [
+                                    {
+                                        "feature": "raw_latent",
+                                        "best_nll": {
+                                            "count": 3,
+                                            "stddev": 0.03,
+                                            "stderr": 0.017320508075688773,
+                                        },
+                                    }
+                                ],
+                            }
+                        ],
                         "run": {
                             "features": ["raw", "raw_latent"],
                             "seeds": [101, 103, 107],
@@ -235,6 +251,10 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
 
         self.assertEqual(args.head_init, "xavier")
         self.assertEqual(record["applied_defaults"]["head_init"], "xavier")
+        self.assertAlmostEqual(
+            record["source_best_config"]["mean_best_nll_stderr"],
+            0.017320508075688773,
+        )
         self.assertIs(record["user_overrides"]["head_init"], False)
 
     def test_next_follow_up_avoids_source_and_current_seed_history(self) -> None:
@@ -712,6 +732,72 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
         )
         gate = mod._follow_up_gate_record(result, ["regressed", "unknown"])
         self.assertIs(gate["failed"], False)
+
+    def test_follow_up_result_combines_source_and_current_seed_noise(self) -> None:
+        mod = _load_module()
+        source_best_config = {
+            "best_feature": "raw_latent",
+            "feature_normalize": "blocks",
+            "hybrid_latent_scale": 4.0,
+            "mean_best_nll": 4.100,
+            "mean_best_nll_stderr": 0.009,
+        }
+        config_summary = {
+            "feature_normalize": "blocks",
+            "hybrid_latent_scale": 4.0,
+            "best_feature": "raw_latent",
+            "status": "improved",
+            "ranking": [
+                {
+                    "feature": "raw_latent",
+                    "mean_best_nll": 4.107,
+                    "mean_best_accuracy": 0.16,
+                    "mean_best_nll_delta_vs_raw": -0.020,
+                    "runs": 3,
+                },
+                {
+                    "feature": "raw",
+                    "mean_best_nll": 4.127,
+                    "mean_best_accuracy": 0.16,
+                    "mean_best_nll_delta_vs_raw": 0.0,
+                    "runs": 3,
+                },
+            ],
+            "feature_summary": [
+                {
+                    "feature": "raw_latent",
+                    "best_nll": {
+                        "count": 3,
+                        "stddev": 0.006,
+                        "stderr": 0.003,
+                    },
+                }
+            ],
+        }
+
+        result = mod._follow_up_result(
+            {
+                "source_summary_path": "/tmp/source/summary.json",
+                "source_best_config": source_best_config,
+                "source_run_budget": {},
+            },
+            [config_summary],
+            {
+                "best_feature": "raw_latent",
+                "mean_best_nll_delta_vs_raw": -0.020,
+            },
+            min_nll_delta=0.0,
+        )
+
+        self.assertAlmostEqual(result["source_mean_best_nll_stderr"], 0.009)
+        self.assertAlmostEqual(result["source_feature_mean_best_nll_stderr"], 0.003)
+        self.assertAlmostEqual(
+            result["combined_source_feature_mean_best_nll_stderr"],
+            (0.009**2 + 0.003**2) ** 0.5,
+        )
+        self.assertEqual(result["source_feature_verdict"], "confirmed")
+        self.assertEqual(result["verdict"], "confirmed")
+        self.assertEqual(result["source_feature_raw_verdict"], "improved")
 
     def test_safe_trajectory_promotes_guided_confirmation(self) -> None:
         mod = _load_module()

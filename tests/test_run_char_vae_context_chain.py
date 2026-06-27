@@ -75,6 +75,36 @@ class CharVaeContextChainTests(unittest.TestCase):
             "128",
         )
 
+        hybrid4_deep = parser.parse_args(
+            ["models/samples/spiral_corpus_en", "--preset", "hybrid4_deep"]
+        )
+        hybrid4_deep_command = mod._parent_command(
+            hybrid4_deep,
+            Path("/tmp/hybrid4_deep"),
+        )
+        self.assertEqual(
+            hybrid4_deep_command[
+                hybrid4_deep_command.index("--hybrid-latent-scales") + 1
+            ],
+            "4.0",
+        )
+        self.assertEqual(
+            hybrid4_deep_command[hybrid4_deep_command.index("--head-init") + 1],
+            "xavier",
+        )
+        self.assertEqual(
+            hybrid4_deep_command[hybrid4_deep_command.index("--epochs") + 1],
+            "10",
+        )
+        self.assertEqual(
+            hybrid4_deep_command[hybrid4_deep_command.index("--batches") + 1],
+            "24",
+        )
+        self.assertEqual(
+            hybrid4_deep_command[hybrid4_deep_command.index("--eval-samples") + 1],
+            "256",
+        )
+
         explicit = parser.parse_args(
             [
                 "models/samples/spiral_corpus_en",

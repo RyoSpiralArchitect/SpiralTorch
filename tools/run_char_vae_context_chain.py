@@ -25,6 +25,7 @@ DEFAULT_FAIL_ON_VERDICT = "regressed,unknown"
 SMOKE_LATENT_SCALES = "0.5,1.0"
 SCOUT_LATENT_SCALES = "0.5,1.0,2.0,4.0"
 HYBRID4_LATENT_SCALES = "2.0,4.0"
+HYBRID4_DEEP_LATENT_SCALES = "4.0"
 
 PRESETS: dict[str, dict[str, Any]] = {
     "smoke": {
@@ -82,6 +83,25 @@ PRESETS: dict[str, dict[str, Any]] = {
         "gen": 0,
         "seeds": "2001,2003,2005",
         "hybrid_latent_scales": HYBRID4_LATENT_SCALES,
+        "follow_up_seed_groups": "2007,2009,2011;2013,2015,2017",
+    },
+    "hybrid4_deep": {
+        "features": FOCUSED_HYBRID_FEATURES,
+        "feature_normalize_modes": "blocks",
+        "head_init": "xavier",
+        "window_chars": 32,
+        "latent_dim": 8,
+        "hidden": 16,
+        "epochs": 10,
+        "batches": 24,
+        "batch_size": 4,
+        "vae_epochs": 8,
+        "vae_batches": 16,
+        "vae_batch_size": 4,
+        "eval_samples": 256,
+        "gen": 0,
+        "seeds": "2001,2003,2005",
+        "hybrid_latent_scales": HYBRID4_DEEP_LATENT_SCALES,
         "follow_up_seed_groups": "2007,2009,2011;2013,2015,2017",
     },
     "base": {
