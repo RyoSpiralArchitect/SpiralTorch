@@ -157,6 +157,14 @@ class CharVaeContextChainTests(unittest.TestCase):
                     "unsafe_promotion": True,
                 },
                 "guided_next_follow_up_command": {"enabled": False},
+                "next_follow_up_command": {
+                    "default_new_seed_count": 5,
+                    "default_new_seeds": "131,137,139,149,151",
+                    "seed_confirmation_policy": {
+                        "reason": "best runner-up within combined seed uncertainty",
+                        "uncertainty_tie_seed_boost": True,
+                    },
+                },
             }
             (run_dir / "summary.json").write_text(json.dumps(summary), encoding="utf-8")
 
@@ -187,6 +195,13 @@ class CharVaeContextChainTests(unittest.TestCase):
         self.assertEqual(step["source_feature_mean_best_nll_delta_vs_source"], 0.001)
         self.assertIs(step["source_best_feature_retained"], True)
         self.assertIs(step["follow_up_gate_failed"], True)
+        self.assertEqual(step["next_default_new_seed_count"], 5)
+        self.assertEqual(step["next_default_new_seeds"], "131,137,139,149,151")
+        self.assertEqual(
+            step["seed_policy_reason"],
+            "best runner-up within combined seed uncertainty",
+        )
+        self.assertIs(step["uncertainty_tie_seed_boost"], True)
         self.assertEqual(step["best_config_label"], "latent@normalize=blocks,scale=0.5")
         self.assertIn("delta_vs_raw", report)
         self.assertIn("runner_up", report)
@@ -194,6 +209,9 @@ class CharVaeContextChainTests(unittest.TestCase):
         self.assertIn("0.000300", report)
         self.assertIn("0.000500", report)
         self.assertIn("within_uncertainty", report)
+        self.assertIn("next_seed_count", report)
+        self.assertIn("tie_seed_boost", report)
+        self.assertIn("best runner-up within combined seed uncertainty", report)
         self.assertIn("source_feature_delta_vs_source", report)
         self.assertIn("latent@normalize=blocks,scale=0.5", report)
         self.assertIn("0.001000", report)

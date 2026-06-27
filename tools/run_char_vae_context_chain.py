@@ -271,6 +271,9 @@ def _step_record(
         "source_best_feature_retained",
     )
     gate_failed = _value(summary, "follow_up_gate", "failed")
+    seed_policy = _value(summary, "next_follow_up_command", "seed_confirmation_policy")
+    if not isinstance(seed_policy, dict):
+        seed_policy = {}
     return {
         "index": index,
         "role": role,
@@ -317,6 +320,18 @@ def _step_record(
         "guidance_action": _value(summary, "follow_up_guidance", "action"),
         "unsafe_promotion": _value(summary, "follow_up_guidance", "unsafe_promotion"),
         "guided_enabled": _value(summary, "guided_next_follow_up_command", "enabled"),
+        "next_default_new_seed_count": _value(
+            summary,
+            "next_follow_up_command",
+            "default_new_seed_count",
+        ),
+        "next_default_new_seeds": _value(
+            summary,
+            "next_follow_up_command",
+            "default_new_seeds",
+        ),
+        "seed_policy_reason": seed_policy.get("reason"),
+        "uncertainty_tie_seed_boost": seed_policy.get("uncertainty_tie_seed_boost"),
     }
 
 
@@ -363,6 +378,10 @@ def _selection_step_record(step: dict[str, Any] | None) -> dict[str, Any] | None
         "follow_up_verdict": step.get("follow_up_verdict"),
         "source_best_feature_retained": step.get("source_best_feature_retained"),
         "follow_up_gate_failed": step.get("follow_up_gate_failed"),
+        "next_default_new_seed_count": step.get("next_default_new_seed_count"),
+        "next_default_new_seeds": step.get("next_default_new_seeds"),
+        "seed_policy_reason": step.get("seed_policy_reason"),
+        "uncertainty_tie_seed_boost": step.get("uncertainty_tie_seed_boost"),
     }
 
 
@@ -445,15 +464,18 @@ def _render_report(manifest: dict[str, Any]) -> str:
         "",
         "| step | role | exit | status | best_config | mean_best_nll | "
         "runner_up | margin | margin_stderr | within_uncertainty | "
+        "next_seed_count | tie_seed_boost | seed_policy | "
         "delta_vs_raw | delta_vs_source | verdict | retained | gate | "
         "trajectory | guidance | unsafe | guided |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for step in manifest.get("steps", []):
         lines.append(
             "| {index} | {role} | {exit_code} | {status} | {best_feature} | "
             "{mean_best_nll} | {runner_up_feature} | {margin_to_runner_up} | "
             "{combined_runner_up_margin_stderr} | {runner_up_within_uncertainty} | "
+            "{next_default_new_seed_count} | {uncertainty_tie_seed_boost} | "
+            "{seed_policy_reason} | "
             "{mean_best_nll_delta_vs_raw} | "
             "{mean_best_nll_delta_vs_source} | {follow_up_verdict} | "
             "{source_best_feature_retained} | {follow_up_gate_failed} | "
@@ -475,6 +497,13 @@ def _render_report(manifest: dict[str, Any]) -> str:
                 runner_up_within_uncertainty=_fmt(
                     step.get("runner_up_within_uncertainty")
                 ),
+                next_default_new_seed_count=_fmt(
+                    step.get("next_default_new_seed_count")
+                ),
+                uncertainty_tie_seed_boost=_fmt(
+                    step.get("uncertainty_tie_seed_boost")
+                ),
+                seed_policy_reason=_fmt(step.get("seed_policy_reason")),
                 mean_best_nll_delta_vs_raw=_fmt(
                     step.get("mean_best_nll_delta_vs_raw")
                 ),
