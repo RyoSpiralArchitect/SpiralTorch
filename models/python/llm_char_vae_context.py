@@ -1793,6 +1793,22 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
     )
     next_follow_up = summary.get("next_follow_up_command")
     if isinstance(next_follow_up, dict):
+        seed_policy = next_follow_up.get("seed_confirmation_policy")
+        seed_policy_text = "-"
+        if isinstance(seed_policy, dict):
+            seed_policy_text = (
+                "{reason}; count={count}; tie_boost={tie_boost}; "
+                "runner_up={runner_up}; margin={margin}; combined_stderr={stderr}"
+            ).format(
+                reason=seed_policy.get("reason") or "-",
+                count=seed_policy.get("default_new_seed_count") or "-",
+                tie_boost=seed_policy.get("uncertainty_tie_seed_boost"),
+                runner_up=seed_policy.get("runner_up_feature") or "-",
+                margin=_fmt_float(seed_policy.get("margin_to_runner_up")),
+                stderr=_fmt_float(
+                    seed_policy.get("combined_runner_up_margin_stderr")
+                ),
+            )
         lines.extend(
             [
                 "",
@@ -1803,6 +1819,7 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
                 "- default_follow_up_fail_on_verdict: "
                 f"{next_follow_up.get('default_follow_up_fail_on_verdict') or '-'}",
                 f"- default_new_seeds: {next_follow_up.get('default_new_seeds')}",
+                f"- seed_confirmation_policy: {seed_policy_text}",
                 "- used_seed_history: "
                 f"{', '.join(str(seed) for seed in next_follow_up.get('used_seed_history', [])) or '-'}",
                 f"- script: `{next_follow_up.get('script_path')}`",
@@ -1894,6 +1911,16 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
             if isinstance(reasons, list)
             else "-"
         )
+        seed_policy = guided_next_follow_up.get("seed_confirmation_policy")
+        seed_policy_text = "-"
+        if isinstance(seed_policy, dict):
+            seed_policy_text = (
+                "{reason}; count={count}; tie_boost={tie_boost}"
+            ).format(
+                reason=seed_policy.get("reason") or "-",
+                count=seed_policy.get("default_new_seed_count") or "-",
+                tie_boost=seed_policy.get("uncertainty_tie_seed_boost"),
+            )
         lines.extend(
             [
                 "",
@@ -1910,6 +1937,7 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
                 f"- reasons: {reasons_text}",
                 "- source_script: "
                 f"`{guided_next_follow_up.get('source_next_follow_up_command') or '-'}`",
+                f"- seed_confirmation_policy: {seed_policy_text}",
                 "- used_seed_history: "
                 f"{', '.join(str(seed) for seed in guided_next_follow_up.get('used_seed_history', [])) or '-'}",
                 f"- script: `{guided_next_follow_up.get('script_path') or '-'}`",
@@ -2501,6 +2529,32 @@ def _fresh_seed_csv(seeds: list[int], *, count: int | None = None) -> str:
     return ",".join(str(seed) for seed in fresh)
 
 
+def _fresh_seed_confirmation_policy(
+    best_config: dict[str, Any],
+    seeds: list[int],
+) -> dict[str, Any]:
+    base_count = max(3, len(seeds))
+    uncertainty_tie_boost = bool(best_config.get("runner_up_within_uncertainty"))
+    default_count = max(base_count, 5) if uncertainty_tie_boost else base_count
+    reason = (
+        "best runner-up within combined seed uncertainty"
+        if uncertainty_tie_boost
+        else "default fresh-seed confirmation"
+    )
+    return {
+        "schema": "st.llm_char_vae_context.fresh_seed_confirmation_policy.v1",
+        "base_seed_count": base_count,
+        "default_new_seed_count": default_count,
+        "uncertainty_tie_seed_boost": uncertainty_tie_boost,
+        "reason": reason,
+        "runner_up_feature": best_config.get("runner_up_feature"),
+        "margin_to_runner_up": best_config.get("margin_to_runner_up"),
+        "combined_runner_up_margin_stderr": best_config.get(
+            "combined_runner_up_margin_stderr"
+        ),
+    }
+
+
 def _append_unique_ints(target: list[int], values: Any) -> None:
     if not isinstance(values, list):
         return
@@ -2716,7 +2770,11 @@ def _next_follow_up_command_record(
     if not best_config:
         return None
     used_seeds = _follow_up_used_seeds(follow_up, seeds)
-    default_new_seeds = _fresh_seed_csv(used_seeds or seeds, count=max(3, len(seeds)))
+    seed_policy = _fresh_seed_confirmation_policy(best_config, seeds)
+    default_new_seeds = _fresh_seed_csv(
+        used_seeds or seeds,
+        count=int(seed_policy["default_new_seed_count"]),
+    )
     used_seed_history_value = (
         ",".join(str(seed) for seed in used_seeds) if used_seeds else None
     )
@@ -2766,6 +2824,8 @@ def _next_follow_up_command_record(
         "action": "confirm_best_config_fresh_seeds",
         "best_config": best_config,
         "default_new_seeds": default_new_seeds,
+        "default_new_seed_count": seed_policy["default_new_seed_count"],
+        "seed_confirmation_policy": seed_policy,
         "used_seed_history": used_seeds,
         "default_run_dir": str(default_run_dir),
         "default_follow_up_from": str(default_follow_up_from),
@@ -2851,6 +2911,10 @@ def _guided_next_follow_up_command_record(
         {
             "default_follow_up_from": next_follow_up.get("default_follow_up_from"),
             "default_new_seeds": next_follow_up.get("default_new_seeds"),
+            "default_new_seed_count": next_follow_up.get("default_new_seed_count"),
+            "seed_confirmation_policy": next_follow_up.get(
+                "seed_confirmation_policy"
+            ),
             "used_seed_history": next_follow_up.get("used_seed_history", []),
             "default_run_dir": next_follow_up.get("default_run_dir"),
             "default_follow_up_fail_on_verdict": fail_on_verdict,
@@ -3153,6 +3217,12 @@ def _write_guided_next_follow_up_script(record: dict[str, Any]) -> None:
         if isinstance(reasons, list) and reasons
         else ["# Reason: -"]
     )
+    seed_policy = record.get("seed_confirmation_policy")
+    seed_policy_reason = (
+        seed_policy.get("reason")
+        if isinstance(seed_policy, dict) and seed_policy.get("reason")
+        else "-"
+    )
     text = "\n".join(
         [
             "#!/usr/bin/env bash",
@@ -3163,6 +3233,7 @@ def _write_guided_next_follow_up_script(record: dict[str, Any]) -> None:
             f"# Trajectory action: {record.get('trajectory_action') or '-'}",
             f"# Unsafe promotion: {record.get('unsafe_promotion')}",
             f"# Tie-aware confirmation: {record.get('tie_aware_confirmation')}",
+            f"# Seed confirmation policy: {seed_policy_reason}",
             f"# Verdict: {record.get('verdict') or '-'}",
             *reason_lines,
             "# Example:",

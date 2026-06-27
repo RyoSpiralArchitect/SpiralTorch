@@ -295,6 +295,47 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
             [101, 103, 107, 109, 113, 127],
         )
 
+    def test_next_follow_up_boosts_seed_count_for_uncertainty_tie(self) -> None:
+        mod = _load_module()
+        parser = mod._build_parser()
+        args = parser.parse_args(["models/samples/spiral_corpus_en"])
+        best_config = {
+            "best_feature": "reconstruction_latent",
+            "runner_up_feature": "raw_latent",
+            "margin_to_runner_up": 0.0004,
+            "combined_runner_up_margin_stderr": 0.0005,
+            "runner_up_within_uncertainty": True,
+            "feature_normalize": "blocks",
+            "hybrid_latent_scale": 1.0,
+            "mean_best_nll": 4.2,
+        }
+        follow_up = {
+            "source_seeds": [101, 103, 107],
+            "source_chain": {"ancestors": []},
+            "resolved": {"seeds": [109, 113, 127]},
+        }
+
+        record = mod._next_follow_up_command_record(
+            args,
+            ["raw", "latent", "raw_latent", "reconstruction_latent"],
+            best_config,
+            Path("/tmp/current"),
+            [109, 113, 127],
+            follow_up,
+        )
+
+        self.assertEqual(record["default_new_seed_count"], 5)
+        self.assertEqual(record["default_new_seeds"], "131,137,139,149,151")
+        self.assertIs(
+            record["seed_confirmation_policy"]["uncertainty_tie_seed_boost"],
+            True,
+        )
+        self.assertEqual(
+            record["seed_confirmation_policy"]["reason"],
+            "best runner-up within combined seed uncertainty",
+        )
+        self.assertIn("--seeds 131,137,139,149,151", record["shell_command"])
+
     def test_default_follow_up_seeds_refreshes_stale_seed_history(self) -> None:
         mod = _load_module()
         with tempfile.TemporaryDirectory() as tmp:
