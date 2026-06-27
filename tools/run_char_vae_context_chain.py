@@ -382,6 +382,21 @@ def _refresh_chain_selection(manifest: dict[str, Any]) -> None:
         manifest["best_config_label"] = best_record.get("best_config_label")
 
 
+def _can_continue_after_gate_stop(
+    summary: dict[str, Any] | None,
+    *,
+    allow_gate_stop: bool,
+    index: int,
+    follow_up_count: int,
+) -> bool:
+    if not allow_gate_stop or index >= follow_up_count:
+        return False
+    return bool(
+        _value(summary, "follow_up_gate", "failed")
+        and _value(summary, "guided_next_follow_up_command", "enabled")
+    )
+
+
 def _render_report(manifest: dict[str, Any]) -> str:
     accepted = manifest.get("accepted_step")
     best = manifest.get("best_step")
@@ -619,10 +634,17 @@ def main(argv: list[str] | None = None) -> int:
         manifest["steps"].append(step)
         current_dir = follow_dir
         if exit_code != 0:
-            manifest["stopped_reason"] = f"follow-up {index} exited {exit_code}"
             summary = _load_summary(follow_dir)
-            if args.allow_gate_stop and _value(summary, "follow_up_gate", "failed"):
+            if _value(summary, "follow_up_gate", "failed") and args.allow_gate_stop:
                 manifest["allowed_gate_stop"] = True
+            if _can_continue_after_gate_stop(
+                summary,
+                allow_gate_stop=args.allow_gate_stop,
+                index=index,
+                follow_up_count=follow_up_count,
+            ):
+                continue
+            manifest["stopped_reason"] = f"follow-up {index} exited {exit_code}"
             break
 
     chain_path = run_root / "chain.json"

@@ -250,6 +250,130 @@ class CharVaeContextChainTests(unittest.TestCase):
         self.assertIn("accepted: raw_latent@normalize=blocks,scale=4.0", report)
         self.assertIn("best: raw_latent@normalize=blocks,scale=4.0", report)
 
+    def test_allow_gate_stop_continues_when_guided_confirmation_remains(self) -> None:
+        mod = _load_module()
+        summary = {
+            "follow_up_gate": {"failed": True},
+            "guided_next_follow_up_command": {"enabled": True},
+        }
+
+        self.assertTrue(
+            mod._can_continue_after_gate_stop(
+                summary,
+                allow_gate_stop=True,
+                index=1,
+                follow_up_count=2,
+            )
+        )
+        self.assertFalse(
+            mod._can_continue_after_gate_stop(
+                summary,
+                allow_gate_stop=False,
+                index=1,
+                follow_up_count=2,
+            )
+        )
+        self.assertFalse(
+            mod._can_continue_after_gate_stop(
+                summary,
+                allow_gate_stop=True,
+                index=2,
+                follow_up_count=2,
+            )
+        )
+        self.assertFalse(
+            mod._can_continue_after_gate_stop(
+                {
+                    "follow_up_gate": {"failed": True},
+                    "guided_next_follow_up_command": {"enabled": False},
+                },
+                allow_gate_stop=True,
+                index=1,
+                follow_up_count=2,
+            )
+        )
+
+    def test_chain_selection_accepts_later_confirmed_follow_up_after_gate_stop(
+        self,
+    ) -> None:
+        mod = _load_module()
+        parent = {
+            "index": 0,
+            "role": "parent",
+            "run_dir": "/tmp/chain/parent",
+            "summary_path": "/tmp/chain/parent/summary.json",
+            "exit_code": 0,
+            "status": "improved",
+            "best_feature": "raw_latent",
+            "best_config_label": "raw_latent@normalize=blocks,scale=4.0",
+            "best_config": {
+                "best_feature": "raw_latent",
+                "feature_normalize": "blocks",
+                "hybrid_latent_scale": 4.0,
+                "mean_best_nll": 4.118,
+            },
+            "mean_best_nll": 4.118,
+            "mean_best_nll_delta_vs_raw": -0.072,
+        }
+        gate_stopped = {
+            "index": 1,
+            "role": "follow_up",
+            "run_dir": "/tmp/chain/follow_up_01",
+            "summary_path": "/tmp/chain/follow_up_01/summary.json",
+            "exit_code": 1,
+            "status": "improved",
+            "best_feature": "raw_latent",
+            "best_config_label": "raw_latent@normalize=blocks,scale=4.0",
+            "best_config": {
+                "best_feature": "raw_latent",
+                "feature_normalize": "blocks",
+                "hybrid_latent_scale": 4.0,
+                "mean_best_nll": 4.128,
+            },
+            "mean_best_nll": 4.128,
+            "mean_best_nll_delta_vs_raw": -0.065,
+            "mean_best_nll_delta_vs_source": 0.010,
+            "follow_up_verdict": "regressed",
+            "follow_up_gate_failed": True,
+        }
+        confirmed = {
+            "index": 2,
+            "role": "follow_up",
+            "run_dir": "/tmp/chain/follow_up_02",
+            "summary_path": "/tmp/chain/follow_up_02/summary.json",
+            "exit_code": 0,
+            "status": "improved",
+            "best_feature": "raw_latent",
+            "best_config_label": "raw_latent@normalize=blocks,scale=4.0",
+            "best_config": {
+                "best_feature": "raw_latent",
+                "feature_normalize": "blocks",
+                "hybrid_latent_scale": 4.0,
+                "mean_best_nll": 4.128,
+            },
+            "mean_best_nll": 4.128,
+            "mean_best_nll_delta_vs_raw": -0.063,
+            "mean_best_nll_delta_vs_source": -0.0001,
+            "follow_up_verdict": "confirmed",
+            "follow_up_gate_failed": False,
+        }
+        manifest = {
+            "schema": mod.SCHEMA,
+            "preset": "hybrid4_deep",
+            "run_root": "/tmp/chain",
+            "steps": [parent, gate_stopped, confirmed],
+            "allowed_gate_stop": True,
+        }
+
+        mod._refresh_chain_selection(manifest)
+
+        self.assertEqual(manifest["accepted_step"]["index"], 2)
+        self.assertEqual(manifest["best_step"]["index"], 0)
+        self.assertEqual(
+            manifest["accepted_summary_path"],
+            "/tmp/chain/follow_up_02/summary.json",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
