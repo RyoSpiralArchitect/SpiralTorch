@@ -307,6 +307,41 @@ class RunCharVaeHistoryLoopTests(unittest.TestCase):
         self.assertEqual(payload["stop_reason"], "loop_resume_failed")
         self.assertIn("not continuation-ready", payload["error"])
 
+    def test_cli_resume_from_report_honors_forwarded_overrides(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            command_dir = _write_bundle(Path(tmp))
+            result = _run_loop(
+                command_dir,
+                "--max-steps",
+                "1",
+                "--fail-on-max-steps-continuation",
+                "--write-loop-report",
+                "--json",
+            )
+            resume_result = _run_loop(
+                command_dir,
+                "--resume-from-report",
+                "--dry-run",
+                "--max-steps",
+                "2",
+                "--json",
+            )
+            payload = json.loads(resume_result.stdout)
+
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(resume_result.returncode, 0, resume_result.stderr)
+        self.assertTrue(payload["dry_run"])
+        self.assertEqual(payload["max_steps"], 2)
+        self.assertEqual(payload["step_count"], 1)
+        self.assertEqual(payload["executed_count"], 0)
+        self.assertEqual(payload["stop_reason"], "dry_run")
+        self.assertEqual(payload["handoff_status"], "dry_run")
+        self.assertEqual(payload["steps"][0]["target"], "execution-next")
+        self.assertEqual(payload["steps"][0]["target_kind"], "execution_next")
+        self.assertFalse(payload["steps"][0]["executed"])
+        self.assertIn("--dry-run", payload["continuation_command"])
+        self.assertIn("--max-steps 2", payload["continuation_command"])
+
     def test_cli_fails_when_final_action_requires_review(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             command_dir = _write_bundle(Path(tmp))

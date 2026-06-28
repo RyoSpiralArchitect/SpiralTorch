@@ -125,6 +125,79 @@ def _continuation_argv_from_report(command_dir: Path, report_path: Path) -> list
     return argv
 
 
+def _remove_cli_option(argv: list[str], option: str, *, takes_value: bool) -> list[str]:
+    cleaned: list[str] = []
+    index = 0
+    prefix = f"{option}="
+    while index < len(argv):
+        item = argv[index]
+        if item == option:
+            index += 2 if takes_value else 1
+            continue
+        if takes_value and item.startswith(prefix):
+            index += 1
+            continue
+        cleaned.append(item)
+        index += 1
+    return cleaned
+
+
+def _cli_option_values(argv: list[str], option: str) -> list[str]:
+    values: list[str] = []
+    index = 0
+    prefix = f"{option}="
+    while index < len(argv):
+        item = argv[index]
+        if item == option:
+            if index + 1 < len(argv):
+                values.append(argv[index + 1])
+            index += 2
+            continue
+        if item.startswith(prefix):
+            values.append(item[len(prefix) :])
+        index += 1
+    return values
+
+
+def _cli_flag_present(argv: list[str], flag: str) -> bool:
+    return flag in argv
+
+
+def _apply_resume_overrides(
+    continuation_argv: list[str],
+    raw_argv: list[str],
+) -> list[str]:
+    merged = list(continuation_argv)
+    for option in ("--max-steps", "--json-out", "--markdown-out"):
+        values = _cli_option_values(raw_argv, option)
+        if not values:
+            continue
+        merged = _remove_cli_option(merged, option, takes_value=True)
+        merged.extend([option, values[-1]])
+    fail_actions = _cli_option_values(raw_argv, "--fail-on-final-action")
+    if fail_actions:
+        merged = _remove_cli_option(
+            merged,
+            "--fail-on-final-action",
+            takes_value=True,
+        )
+        for value in fail_actions:
+            merged.extend(["--fail-on-final-action", value])
+    for flag in (
+        "--no-strict",
+        "--dry-run",
+        "--json",
+        "--write-loop-report",
+        "--no-write-inspection-report",
+        "--no-write-run-report",
+        "--no-write-run-history-report",
+        "--fail-on-max-steps-continuation",
+    ):
+        if _cli_flag_present(raw_argv, flag) and flag not in merged:
+            merged.append(flag)
+    return merged
+
+
 def _loop_command_line(
     command_dir: Path,
     *,
@@ -685,7 +758,8 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
-    args = parser.parse_args(argv)
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    args = parser.parse_args(raw_argv)
     command_dir = args.command_dir.resolve()
     json_out = args.json_out
     markdown_out = args.markdown_out
@@ -726,8 +800,7 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 print(render_markdown(summary), file=sys.stderr)
             return 1
-        if args.json and "--json" not in continuation_argv:
-            continuation_argv.append("--json")
+        continuation_argv = _apply_resume_overrides(continuation_argv, raw_argv)
         return main(continuation_argv)
     try:
         returncode, summary = run_loop(
