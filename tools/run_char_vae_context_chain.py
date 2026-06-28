@@ -199,10 +199,13 @@ def _unused_explicit_seed_groups(
     *,
     explicit_seed_groups: bool,
     attempted_follow_ups: int,
+    planned_follow_ups: int,
 ) -> list[str]:
     if not explicit_seed_groups:
         return []
-    return seed_groups[max(0, attempted_follow_ups) :]
+    start = max(0, attempted_follow_ups)
+    stop = max(0, planned_follow_ups)
+    return seed_groups[start:stop]
 
 
 def _follow_up_command_record(
@@ -901,6 +904,7 @@ def main(argv: list[str] | None = None) -> int:
             seed_groups,
             explicit_seed_groups=explicit_seed_groups,
             attempted_follow_ups=attempted_follow_ups,
+            planned_follow_ups=int(args.follow_ups),
         )
     )
 

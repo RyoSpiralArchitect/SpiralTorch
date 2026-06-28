@@ -106,14 +106,25 @@ class CharVaeContextChainTests(unittest.TestCase):
                 ["17", "19", "23"],
                 explicit_seed_groups=True,
                 attempted_follow_ups=1,
+                planned_follow_ups=3,
             ),
             ["19", "23"],
+        )
+        self.assertEqual(
+            mod._unused_explicit_seed_groups(
+                ["17", "19", "23"],
+                explicit_seed_groups=True,
+                attempted_follow_ups=1,
+                planned_follow_ups=1,
+            ),
+            [],
         )
         self.assertEqual(
             mod._unused_explicit_seed_groups(
                 ["17", "19"],
                 explicit_seed_groups=True,
                 attempted_follow_ups=2,
+                planned_follow_ups=2,
             ),
             [],
         )
@@ -122,6 +133,7 @@ class CharVaeContextChainTests(unittest.TestCase):
                 ["17", "19"],
                 explicit_seed_groups=False,
                 attempted_follow_ups=1,
+                planned_follow_ups=2,
             ),
             [],
         )
