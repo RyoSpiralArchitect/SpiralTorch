@@ -254,8 +254,15 @@ def _loop_command_line(
     return " ".join(parts)
 
 
-def _resume_from_report_command_line(command_dir: Path) -> str:
+def _resume_report_path(command_dir: Path, value: str | None) -> Path:
+    if value is None or value == "":
+        return command_dir / "run_loop.json"
+    return Path(value).expanduser().resolve()
+
+
+def _resume_from_report_command_line(command_dir: Path, report_path: Path) -> str:
     script_path = Path(__file__).resolve()
+    default_report_path = command_dir / "run_loop.json"
     parts = [
         "env",
         "PYTHONNOUSERSITE=1",
@@ -265,6 +272,8 @@ def _resume_from_report_command_line(command_dir: Path) -> str:
         shlex.quote(str(command_dir)),
         "--resume-from-report",
     ]
+    if not _token_matches_path(report_path, default_report_path):
+        parts.append(shlex.quote(str(report_path.resolve())))
     return " ".join(parts)
 
 
@@ -641,8 +650,8 @@ def run_loop(
         else None
     )
     resume_from_report_command = (
-        _resume_from_report_command_line(command_dir)
-        if final_next_action_runnable
+        _resume_from_report_command_line(command_dir, json_out)
+        if final_next_action_runnable and json_out is not None
         else None
     )
     error = latest_summary.get("error") if returncode != 0 else None
@@ -723,10 +732,14 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--resume-from-report",
-        action="store_true",
+        nargs="?",
+        const="",
+        default=None,
+        metavar="REPORT_JSON",
         help=(
-            "read run_loop.json and run its validated continuation_command when "
-            "the previous handoff is continuation-ready"
+            "read run_loop.json, or REPORT_JSON when provided, and run its "
+            "validated continuation_command when the previous handoff is "
+            "continuation-ready"
         ),
     )
     parser.add_argument(
@@ -793,11 +806,12 @@ def main(argv: list[str] | None = None) -> int:
         if args.fail_on_final_action is None
         else _csv_values(args.fail_on_final_action)
     )
-    if args.resume_from_report:
+    if args.resume_from_report is not None:
+        resume_report_path = _resume_report_path(command_dir, args.resume_from_report)
         try:
             continuation_argv = _continuation_argv_from_report(
                 command_dir,
-                command_dir / "run_loop.json",
+                resume_report_path,
             )
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             summary = _failure_summary(

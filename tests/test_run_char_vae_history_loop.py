@@ -301,6 +301,68 @@ class RunCharVaeHistoryLoopTests(unittest.TestCase):
         self.assertIsNone(resume_payload["resume_from_report_command"])
         self.assertEqual(resume_loop_report["handoff_status"], "awaiting_next_command")
 
+    def test_cli_resume_from_custom_report_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            command_dir = _write_bundle(root)
+            custom_report = root / "reports" / "custom_run_loop.json"
+            custom_markdown = root / "reports" / "custom_run_loop.md"
+            result = _run_loop(
+                command_dir,
+                "--max-steps",
+                "1",
+                "--json-out",
+                str(custom_report),
+                "--markdown-out",
+                str(custom_markdown),
+                "--json",
+            )
+            payload = json.loads(result.stdout)
+            loop_report = json.loads(custom_report.read_text(encoding="utf-8"))
+            resume_result = _run_loop(
+                command_dir,
+                "--resume-from-report",
+                str(custom_report),
+                "--json",
+            )
+            resume_payload = json.loads(resume_result.stdout)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((command_dir / "run_loop.json").exists())
+        self.assertEqual(payload["handoff_status"], "continuation_ready")
+        self.assertIs(payload["final_next_action_runnable"], True)
+        self.assertIn("--json-out", payload["continuation_command"])
+        self.assertIn(str(custom_report), payload["continuation_command"])
+        self.assertIn("--markdown-out", payload["continuation_command"])
+        self.assertIn(str(custom_markdown), payload["continuation_command"])
+        self.assertIn("--resume-from-report", payload["resume_from_report_command"])
+        self.assertIn(str(custom_report.resolve()), payload["resume_from_report_command"])
+        self.assertEqual(
+            loop_report["resume_from_report_command"],
+            payload["resume_from_report_command"],
+        )
+        self.assertEqual(resume_result.returncode, 0, resume_result.stderr)
+        self.assertEqual(resume_payload["handoff_status"], "awaiting_next_command")
+        self.assertEqual(resume_payload["steps"][0]["target"], "execution-next")
+        self.assertIsNone(resume_payload["resume_from_report_command"])
+
+    def test_cli_omits_report_resume_command_when_report_is_not_written(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            command_dir = _write_bundle(Path(tmp))
+            result = _run_loop(
+                command_dir,
+                "--max-steps",
+                "1",
+                "--json",
+            )
+            payload = json.loads(result.stdout)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(payload["handoff_status"], "continuation_ready")
+        self.assertIs(payload["final_next_action_runnable"], True)
+        self.assertIsNone(payload["resume_from_report_command"])
+        self.assertFalse((command_dir / "run_loop.json").exists())
+
     def test_cli_resume_from_report_rejects_non_continuation_handoff(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             command_dir = _write_bundle(Path(tmp))
