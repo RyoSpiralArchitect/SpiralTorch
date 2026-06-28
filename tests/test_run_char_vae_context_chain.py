@@ -436,6 +436,36 @@ class CharVaeContextChainTests(unittest.TestCase):
             "256",
         )
 
+        capacity_scout = parser.parse_args(
+            ["models/samples/spiral_corpus_en", "--preset", "capacity_scout"]
+        )
+        capacity_command = mod._parent_command(
+            capacity_scout,
+            Path("/tmp/capacity_scout"),
+        )
+        self.assertEqual(
+            capacity_command[capacity_command.index("--latent-dims") + 1],
+            "6,8,12",
+        )
+        self.assertEqual(
+            capacity_command[capacity_command.index("--hidden-sizes") + 1],
+            "8,16,32",
+        )
+        self.assertNotIn("--latent-dim", capacity_command)
+        self.assertNotIn("--hidden", capacity_command)
+        self.assertEqual(
+            capacity_command[capacity_command.index("--hybrid-latent-scales") + 1],
+            "2.0,4.0",
+        )
+        self.assertEqual(
+            capacity_command[capacity_command.index("--epochs") + 1],
+            "6",
+        )
+        self.assertEqual(
+            capacity_command[capacity_command.index("--batches") + 1],
+            "12",
+        )
+
         explicit = parser.parse_args(
             [
                 "models/samples/spiral_corpus_en",
@@ -450,6 +480,56 @@ class CharVaeContextChainTests(unittest.TestCase):
             explicit_command[explicit_command.index("--hybrid-latent-scales") + 1],
             "3.0",
         )
+
+    def test_capacity_preset_allows_scalar_and_grid_overrides(self) -> None:
+        mod = _load_module()
+        parser = mod._build_parser()
+
+        scalar = parser.parse_args(
+            [
+                "models/samples/spiral_corpus_en",
+                "--preset",
+                "capacity_scout",
+                "--latent-dim",
+                "10",
+                "--hidden",
+                "20",
+            ]
+        )
+        scalar_command = mod._parent_command(scalar, Path("/tmp/scalar"))
+        self.assertEqual(
+            scalar_command[scalar_command.index("--latent-dim") + 1],
+            "10",
+        )
+        self.assertEqual(
+            scalar_command[scalar_command.index("--hidden") + 1],
+            "20",
+        )
+        self.assertNotIn("--latent-dims", scalar_command)
+        self.assertNotIn("--hidden-sizes", scalar_command)
+
+        grid = parser.parse_args(
+            [
+                "models/samples/spiral_corpus_en",
+                "--preset",
+                "capacity_scout",
+                "--latent-dims",
+                "4,6",
+                "--hidden-sizes",
+                "0,8",
+            ]
+        )
+        grid_command = mod._parent_command(grid, Path("/tmp/grid"))
+        self.assertEqual(
+            grid_command[grid_command.index("--latent-dims") + 1],
+            "4,6",
+        )
+        self.assertEqual(
+            grid_command[grid_command.index("--hidden-sizes") + 1],
+            "0,8",
+        )
+        self.assertNotIn("--latent-dim", grid_command)
+        self.assertNotIn("--hidden", grid_command)
 
     def test_step_record_and_report_surface_follow_up_deltas(self) -> None:
         mod = _load_module()
