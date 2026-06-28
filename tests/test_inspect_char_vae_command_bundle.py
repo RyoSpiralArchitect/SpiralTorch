@@ -315,6 +315,9 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
                 "command_dir_matches": None,
                 "handoff_status": None,
                 "handoff_reason": None,
+                "handoff_severity": None,
+                "handoff_requires_attention": None,
+                "handoff_recommended_action": None,
                 "max_steps": None,
                 "step_count": None,
                 "executed_count": None,
@@ -396,6 +399,7 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
         self.assertIn("--write-loop-report", markdown_result.stdout)
         self.assertIn("run_history_summary", markdown_result.stdout)
         self.assertIn("run_loop_status_issues: -", markdown_result.stdout)
+        self.assertIn("run_loop_handoff_recommended_action: -", markdown_result.stdout)
         self.assertIn("run_history_summary_valid_json: -", markdown_result.stdout)
         self.assertIn("run_loop_valid_json: -", markdown_result.stdout)
 
@@ -866,6 +870,9 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
             status["handoff_reason"],
             "latest execution can continue but has no next script",
         )
+        self.assertEqual(status["handoff_severity"], "attention")
+        self.assertIs(status["handoff_requires_attention"], True)
+        self.assertEqual(status["handoff_recommended_action"], "collect_next_command")
         self.assertEqual(status["max_steps"], 3)
         self.assertEqual(status["step_count"], 2)
         self.assertEqual(status["executed_count"], 2)
@@ -913,6 +920,15 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
         self.assertIn(
             "run_loop_handoff_reason: "
             "latest execution can continue but has no next script",
+            markdown_result.stdout,
+        )
+        self.assertIn("run_loop_handoff_severity: attention", markdown_result.stdout)
+        self.assertIn(
+            "run_loop_handoff_requires_attention: yes",
+            markdown_result.stdout,
+        )
+        self.assertIn(
+            "run_loop_handoff_recommended_action: collect_next_command",
             markdown_result.stdout,
         )
         self.assertIn("run_loop_step_count: 2", markdown_result.stdout)
@@ -1047,6 +1063,12 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
         self.assertIs(status["final_next_action_runnable"], True)
         self.assertEqual(status["continuation_command"], continuation_command)
         self.assertTrue(status["command_dir_matches"])
+        self.assertEqual(status["handoff_severity"], "ready")
+        self.assertIs(status["handoff_requires_attention"], False)
+        self.assertEqual(
+            status["handoff_recommended_action"],
+            "run_continuation_command",
+        )
         self.assertIs(status["continuation_command_expected"], True)
         self.assertIs(status["continuation_command_present"], True)
         self.assertIs(status["continuation_command_ok"], True)
@@ -1064,6 +1086,73 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
         )
         self.assertIn(
             "run_loop_continuation_command_ok: yes",
+            markdown_result.stdout,
+        )
+
+    def test_cli_surfaces_failed_run_loop_handoff_guidance(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            command_dir = _write_bundle(Path(tmp))
+            _write_json(
+                command_dir / "run_loop.json",
+                {
+                    "schema": "st.llm_char_vae_context.command_bundle_history_loop.v1",
+                    "command_dir": str(command_dir),
+                    "handoff_status": "failed",
+                    "handoff_reason": "--max-steps must be at least 1",
+                    "max_steps": 0,
+                    "step_count": 0,
+                    "executed_count": 0,
+                    "success_count": 0,
+                    "failure_count": 0,
+                    "stop_reason": "loop_setup_failed",
+                    "fail_on_final_actions": [
+                        "review_before_continuing",
+                        "inspect_history",
+                    ],
+                    "final_action_failed": False,
+                    "fail_on_max_steps_continuation": False,
+                    "max_steps_continuation_failed": False,
+                    "returncode": 1,
+                    "error": "--max-steps must be at least 1",
+                    "final_next_action": None,
+                    "final_next_action_runnable": False,
+                    "continuation_command": None,
+                    "steps": [],
+                },
+            )
+            result = subprocess.run(
+                ["python3", "-P", str(SCRIPT), str(command_dir), "--json"],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            markdown_result = subprocess.run(
+                ["python3", "-P", str(SCRIPT), str(command_dir)],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertTrue(payload["strict_ready"])
+        self.assertEqual(payload["run_loop_status_issues"], [])
+        status = payload["run_loop_status"]
+        self.assertEqual(status["handoff_status"], "failed")
+        self.assertEqual(status["handoff_severity"], "failed")
+        self.assertIs(status["handoff_requires_attention"], True)
+        self.assertEqual(status["handoff_recommended_action"], "inspect_failure")
+        self.assertEqual(status["returncode"], 1)
+        self.assertEqual(status["stop_reason"], "loop_setup_failed")
+        self.assertEqual(markdown_result.returncode, 0, markdown_result.stderr)
+        self.assertIn("run_loop_handoff_status: failed", markdown_result.stdout)
+        self.assertIn("run_loop_handoff_severity: failed", markdown_result.stdout)
+        self.assertIn(
+            "run_loop_handoff_recommended_action: inspect_failure",
             markdown_result.stdout,
         )
 
@@ -1158,6 +1247,12 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
         self.assertFalse(strict_payload["strict_ready"])
         status = payload["run_loop_status"]
         self.assertFalse(status["command_dir_matches"])
+        self.assertEqual(status["handoff_severity"], "invalid")
+        self.assertIs(status["handoff_requires_attention"], True)
+        self.assertEqual(
+            status["handoff_recommended_action"],
+            "repair_run_loop_report",
+        )
         self.assertIs(status["continuation_command_expected"], True)
         self.assertIs(status["continuation_command_present"], True)
         self.assertIs(status["continuation_command_ok"], False)
@@ -1173,6 +1268,11 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
         self.assertIn(
             "run_loop_status_issues: run_loop_command_dir, "
             "run_loop_continuation_command",
+            markdown_result.stdout,
+        )
+        self.assertIn("run_loop_handoff_severity: invalid", markdown_result.stdout)
+        self.assertIn(
+            "run_loop_handoff_recommended_action: repair_run_loop_report",
             markdown_result.stdout,
         )
         self.assertIn("run_loop_command_dir_matches: no", markdown_result.stdout)

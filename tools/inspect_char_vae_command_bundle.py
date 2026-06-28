@@ -418,6 +418,9 @@ def _run_loop_status(
         "command_dir_matches": None,
         "handoff_status": None,
         "handoff_reason": None,
+        "handoff_severity": None,
+        "handoff_requires_attention": None,
+        "handoff_recommended_action": None,
         "max_steps": None,
         "step_count": None,
         "executed_count": None,
@@ -574,6 +577,40 @@ def _run_loop_status_issues(status: dict[str, Any]) -> list[str]:
     elif continuation_present:
         issues.append("run_loop_continuation_command")
     return issues
+
+
+def _run_loop_handoff_guidance(
+    status: dict[str, Any],
+    issues: list[str],
+) -> tuple[str | None, bool | None, str | None]:
+    if status.get("exists") is not True:
+        return None, None, None
+    if issues:
+        return "invalid", True, "repair_run_loop_report"
+    handoff_status = status.get("handoff_status")
+    if handoff_status == "continuation_ready":
+        return "ready", False, "run_continuation_command"
+    if handoff_status == "awaiting_next_command":
+        return "attention", True, "collect_next_command"
+    if handoff_status == "needs_review":
+        return "attention", True, "review_before_continuing"
+    if handoff_status == "needs_inspection":
+        return "attention", True, "inspect_history"
+    if handoff_status == "blocked":
+        return "blocked", True, "repair_blocker"
+    if handoff_status in {"failed", "final_action_failed"}:
+        return "failed", True, "inspect_failure"
+    if handoff_status == "not_runnable":
+        return "attention", True, "repair_or_collect_runnable_target"
+    if handoff_status == "max_steps_reached":
+        return "attention", True, "increase_max_steps_or_review"
+    if handoff_status == "dry_run":
+        return "info", False, "run_without_dry_run_when_ready"
+    if handoff_status == "stopped":
+        return "attention", True, "review_stopped_loop"
+    if handoff_status is None:
+        return None, None, None
+    return "attention", True, "review_handoff_status"
 
 
 def inspect_bundle(command_dir: Path) -> dict[str, Any]:
@@ -780,6 +817,18 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
         command_dir=command_dir,
     )
     run_loop_status_issues = _run_loop_status_issues(run_loop_status)
+    (
+        handoff_severity,
+        handoff_requires_attention,
+        handoff_recommended_action,
+    ) = _run_loop_handoff_guidance(run_loop_status, run_loop_status_issues)
+    run_loop_status.update(
+        {
+            "handoff_severity": handoff_severity,
+            "handoff_requires_attention": handoff_requires_attention,
+            "handoff_recommended_action": handoff_recommended_action,
+        }
+    )
     missing_required = [
         check["label"] for check in checks if check["required"] and not check["ok"]
     ]
@@ -941,6 +990,9 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"- run_loop_command_dir_matches: {_fmt(_value(summary, 'run_loop_status', 'command_dir_matches'))}",
         f"- run_loop_handoff_status: {_fmt(_value(summary, 'run_loop_status', 'handoff_status'))}",
         f"- run_loop_handoff_reason: {_fmt(_value(summary, 'run_loop_status', 'handoff_reason'))}",
+        f"- run_loop_handoff_severity: {_fmt(_value(summary, 'run_loop_status', 'handoff_severity'))}",
+        f"- run_loop_handoff_requires_attention: {_fmt(_value(summary, 'run_loop_status', 'handoff_requires_attention'))}",
+        f"- run_loop_handoff_recommended_action: {_fmt(_value(summary, 'run_loop_status', 'handoff_recommended_action'))}",
         f"- run_loop_step_count: {_fmt(_value(summary, 'run_loop_status', 'step_count'))}",
         f"- run_loop_executed_count: {_fmt(_value(summary, 'run_loop_status', 'executed_count'))}",
         f"- run_loop_stop_reason: {_fmt(_value(summary, 'run_loop_status', 'stop_reason'))}",
