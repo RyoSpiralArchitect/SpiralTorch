@@ -655,6 +655,16 @@ def _run_line(path: Any) -> str | None:
     return f"bash {shlex.quote(path)}"
 
 
+def _inspection_command_line(command_dir: Any) -> str | None:
+    if not isinstance(command_dir, str) or not command_dir:
+        return None
+    return (
+        "PYTHONNOUSERSITE=1 python3 -P "
+        "tools/inspect_char_vae_command_bundle.py "
+        f"{shlex.quote(command_dir)} --strict --write-report"
+    )
+
+
 def _resolved_path(path: Path | None) -> str | None:
     if path is None:
         return None
@@ -756,6 +766,14 @@ def _render_command_readme(
         f"- markdown: {_fmt_readme_value(command_scripts.get('comparison_markdown_path'))}",
         f"- chain_sources: {_fmt_readme_value(', '.join(_chain_sources(summary)))}",
         "",
+        "## Bundle Inspection",
+        "",
+        "Run this before handing the command bundle to automation.",
+        "",
+        f"- run: {_fmt_readme_value(command_scripts.get('inspection_command'))}",
+        f"- report_json: {_fmt_readme_value(command_scripts.get('inspection_json_path'))}",
+        f"- report_markdown: {_fmt_readme_value(command_scripts.get('inspection_markdown_path'))}",
+        "",
         "## Machine-Readable Manifest",
         "",
         "Includes comparison metadata, aggregate counts, selection, recommendation, and scripts.",
@@ -813,6 +831,9 @@ def _write_recommended_command_scripts(
         "execution_cwd": str(execution_cwd),
         "comparison_json_path": _resolved_path(comparison_json_path),
         "comparison_markdown_path": _resolved_path(comparison_markdown_path),
+        "inspection_command": _inspection_command_line(str(out_dir)),
+        "inspection_json_path": str(out_dir / "inspection.json"),
+        "inspection_markdown_path": str(out_dir / "inspection.md"),
         "manifest_path": str(manifest_path),
         "readme_path": str(readme_path),
     }
@@ -887,6 +908,9 @@ def _render_markdown(summary: dict[str, Any]) -> str:
         f"- command_execution_cwd: {_fmt(_value(command_scripts, 'execution_cwd'))}",
         f"- command_manifest_path: {_fmt(_value(command_scripts, 'manifest_path'))}",
         f"- command_readme_path: {_fmt(_value(command_scripts, 'readme_path'))}",
+        f"- command_inspection: {_fmt(_value(command_scripts, 'inspection_command'))}",
+        f"- command_inspection_json_path: {_fmt(_value(command_scripts, 'inspection_json_path'))}",
+        f"- command_inspection_markdown_path: {_fmt(_value(command_scripts, 'inspection_markdown_path'))}",
         "",
         "## Chains",
         "",
