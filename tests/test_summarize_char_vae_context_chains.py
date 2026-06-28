@@ -1022,6 +1022,87 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
                     f"next={default_run_dir} fail=regressed,unknown"
                 ),
             )
+            history_next_script = command_dir / "history_guided_next.sh"
+            history_next_script.write_text(
+                "\n".join(
+                    [
+                        "#!/usr/bin/env bash",
+                        "set -euo pipefail",
+                        'printf "history-guided-next cwd=%s\\n" "$(pwd)"',
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            history_next_script.chmod(history_next_script.stat().st_mode | 0o755)
+            (command_dir / "run_history.jsonl").write_text(
+                json.dumps(
+                    {
+                        "schema": (
+                            "st.llm_char_vae_context."
+                            "command_bundle_run_history_event.v1"
+                        ),
+                        "target": "next",
+                        "target_kind": "follow_up",
+                        "dry_run": False,
+                        "executed": True,
+                        "returncode": 0,
+                        "execution_summary": {
+                            "exists": True,
+                            "valid_json": True,
+                            "follow_up_verdict": "improved",
+                            "follow_up_gate_failed": False,
+                            "guidance_action": (
+                                "confirm_trajectory_with_fresh_seeds"
+                            ),
+                            "next_command": {
+                                "source": "guided_next_follow_up_command",
+                                "script_path": str(history_next_script),
+                                "default_new_seeds": "109,113,127",
+                                "default_run_dir": str(root / "history-next"),
+                            },
+                        },
+                    },
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            history_next_result = subprocess.run(
+                [
+                    "bash",
+                    str(history_runner_script),
+                    "--dry-run",
+                    "--json",
+                ],
+                cwd=command_dir,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            self.assertEqual(
+                history_next_result.returncode,
+                0,
+                history_next_result.stderr,
+            )
+            history_next_payload = json.loads(history_next_result.stdout)
+            self.assertEqual(history_next_payload["requested_target"], "next")
+            self.assertEqual(history_next_payload["target"], "execution-next")
+            self.assertTrue(history_next_payload["use_history_next_action"])
+            self.assertEqual(
+                history_next_payload["history_next_action"]["action"],
+                "run_execution_next",
+            )
+            self.assertEqual(
+                history_next_payload["history_next_action_resolved_target"],
+                "execution-next",
+            )
+            self.assertEqual(
+                history_next_payload["selected_execution_next_command"]["script_path"],
+                str(history_next_script),
+            )
+            self.assertFalse(history_next_payload["executed"])
             self.assertIn("Char VAE Chain Recommended Commands", readme)
             self.assertIn("continue_from_accepted", readme)
             self.assertIn("## Champion", readme)
