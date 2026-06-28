@@ -710,7 +710,7 @@ def _runner_command_line(command_dir: Any) -> str | None:
         "env PYTHONNOUSERSITE=1 python3 -P "
         f"{shlex.quote(str(script_path))} "
         f"{shlex.quote(command_dir)} --write-inspection-report "
-        "--write-run-report --append-run-history"
+        "--write-run-report --append-run-history --write-run-history-report"
     )
 
 
@@ -800,6 +800,7 @@ def _render_command_readme(
         f"- run_json: {_fmt_readme_value(command_scripts.get('run_json_path'))}",
         f"- run_markdown: {_fmt_readme_value(command_scripts.get('run_markdown_path'))}",
         f"- run_history_jsonl: {_fmt_readme_value(command_scripts.get('run_history_jsonl_path'))}",
+        f"- run_history_markdown: {_fmt_readme_value(command_scripts.get('run_history_markdown_path'))}",
         "",
         "## Safe Follow-Up",
         "",
@@ -954,6 +955,7 @@ def _write_recommended_command_scripts(
         "run_json_path": str(out_dir / "run.json"),
         "run_markdown_path": str(out_dir / "run.md"),
         "run_history_jsonl_path": str(out_dir / "run_history.jsonl"),
+        "run_history_markdown_path": str(out_dir / "run_history.md"),
         "manifest_path": str(manifest_path),
         "readme_path": str(readme_path),
     }
@@ -1064,6 +1066,7 @@ def _render_markdown(summary: dict[str, Any]) -> str:
         f"- command_run_json_path: {_fmt(_value(command_scripts, 'run_json_path'))}",
         f"- command_run_markdown_path: {_fmt(_value(command_scripts, 'run_markdown_path'))}",
         f"- command_run_history_jsonl_path: {_fmt(_value(command_scripts, 'run_history_jsonl_path'))}",
+        f"- command_run_history_markdown_path: {_fmt(_value(command_scripts, 'run_history_markdown_path'))}",
         "",
         "## Chains",
         "",

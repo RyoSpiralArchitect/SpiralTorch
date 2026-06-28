@@ -218,12 +218,27 @@ def _run_history_path(
     command_scripts: dict[str, Any],
     *,
     append_history: bool,
+    write_history_report: bool,
 ) -> Path | None:
-    if not append_history:
+    if not append_history and not write_history_report:
         return None
     return (
         _path_from(command_scripts.get("run_history_jsonl_path"))
         or command_dir / "run_history.jsonl"
+    )
+
+
+def _run_history_markdown_path(
+    command_dir: Path,
+    command_scripts: dict[str, Any],
+    *,
+    write_history_report: bool,
+) -> Path | None:
+    if not write_history_report:
+        return None
+    return (
+        _path_from(command_scripts.get("run_history_markdown_path"))
+        or command_dir / "run_history.md"
     )
 
 
@@ -325,6 +340,7 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"- run_json_path: {_fmt(summary.get('run_json_path'))}",
         f"- run_markdown_path: {_fmt(summary.get('run_markdown_path'))}",
         f"- run_history_jsonl_path: {_fmt(summary.get('run_history_jsonl_path'))}",
+        f"- run_history_markdown_path: {_fmt(summary.get('run_history_markdown_path'))}",
         f"- returncode: {_fmt(summary.get('returncode'))}",
         f"- error: {_fmt(summary.get('error'))}",
         "",
@@ -379,6 +395,7 @@ def _history_event(summary: dict[str, Any]) -> dict[str, Any]:
         "run_json_path",
         "run_markdown_path",
         "run_history_jsonl_path",
+        "run_history_markdown_path",
         "recommendation_context",
     )
     event = {
@@ -394,12 +411,106 @@ def _append_run_history(summary: dict[str, Any], history_out: Path) -> None:
         handle.write(json.dumps(_history_event(summary), sort_keys=True) + "\n")
 
 
+def _read_history_events(history_out: Path) -> list[dict[str, Any]]:
+    if not history_out.exists():
+        return []
+    events: list[dict[str, Any]] = []
+    lines = history_out.read_text(encoding="utf-8").splitlines()
+    for lineno, line in enumerate(lines, 1):
+        if not line.strip():
+            continue
+        event = json.loads(line)
+        if not isinstance(event, dict):
+            raise ValueError(f"{history_out}:{lineno} did not contain a JSON object")
+        events.append(event)
+    return events
+
+
+def _event_status(event: dict[str, Any]) -> str:
+    if event.get("dry_run") and event.get("returncode") == 0:
+        return "dry-run"
+    if event.get("returncode") == 0:
+        return "ok"
+    if event.get("error"):
+        return "blocked"
+    return "failed"
+
+
+def _md_cell(value: Any) -> str:
+    text = _fmt(value)
+    return text.replace("|", "\\|").replace("\n", " ")
+
+
+def render_history_markdown(
+    events: list[dict[str, Any]],
+    *,
+    history_jsonl_path: Path,
+) -> str:
+    success_count = sum(1 for event in events if event.get("returncode") == 0)
+    dry_run_count = sum(1 for event in events if event.get("dry_run"))
+    executed_count = sum(1 for event in events if event.get("executed"))
+    failure_count = len(events) - success_count
+    latest = events[-1] if events else {}
+    latest_context = _mapping(latest.get("recommendation_context"))
+    latest_champion = _mapping(latest_context.get("champion"))
+    lines = [
+        "# Char VAE Command Bundle Run History",
+        "",
+        f"- history_jsonl_path: {_fmt(str(history_jsonl_path))}",
+        f"- total_runs: {len(events)}",
+        f"- success_count: {success_count}",
+        f"- failure_count: {failure_count}",
+        f"- dry_run_count: {dry_run_count}",
+        f"- executed_count: {executed_count}",
+        f"- latest_started_at: {_fmt(latest.get('started_at'))}",
+        f"- latest_finished_at: {_fmt(latest.get('finished_at'))}",
+        f"- latest_status: {_fmt(_event_status(latest) if latest else None)}",
+        f"- latest_target_kind: {_fmt(latest.get('target_kind'))}",
+        f"- latest_recommendation_action: {_fmt(latest_context.get('action'))}",
+        f"- latest_champion_config: {_fmt(latest_champion.get('config'))}",
+        "",
+        "## Recent Events",
+        "",
+        "| # | status | target | kind | dry_run | executed | returncode | "
+        "started_at | duration_seconds | action | champion |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for index, event in enumerate(events[-10:], max(1, len(events) - 9)):
+        context = _mapping(event.get("recommendation_context"))
+        champion = _mapping(context.get("champion"))
+        row = [
+            index,
+            _event_status(event),
+            event.get("target"),
+            event.get("target_kind"),
+            event.get("dry_run"),
+            event.get("executed"),
+            event.get("returncode"),
+            event.get("started_at"),
+            event.get("duration_seconds"),
+            context.get("action"),
+            champion.get("config"),
+        ]
+        lines.append("| " + " | ".join(_md_cell(value) for value in row) + " |")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _write_run_history_report(history_out: Path, markdown_out: Path) -> None:
+    events = _read_history_events(history_out)
+    markdown = render_history_markdown(events, history_jsonl_path=history_out)
+    markdown_out.parent.mkdir(parents=True, exist_ok=True)
+    markdown_out.write_text(markdown, encoding="utf-8")
+
+
 def write_run_artifacts(
     summary: dict[str, Any],
     *,
     json_out: Path | None,
     markdown_out: Path | None,
     history_out: Path | None = None,
+    history_markdown_out: Path | None = None,
+    append_history: bool = False,
 ) -> dict[str, Any]:
     summary = dict(summary)
     summary["run_json_path"] = str(json_out) if json_out is not None else None
@@ -409,6 +520,9 @@ def write_run_artifacts(
     summary["run_history_jsonl_path"] = (
         str(history_out) if history_out is not None else None
     )
+    summary["run_history_markdown_path"] = (
+        str(history_markdown_out) if history_markdown_out is not None else None
+    )
     markdown = render_markdown(summary)
     if json_out is not None:
         json_out.parent.mkdir(parents=True, exist_ok=True)
@@ -416,8 +530,10 @@ def write_run_artifacts(
     if markdown_out is not None:
         markdown_out.parent.mkdir(parents=True, exist_ok=True)
         markdown_out.write_text(markdown, encoding="utf-8")
-    if history_out is not None:
+    if history_out is not None and append_history:
         _append_run_history(summary, history_out)
+    if history_out is not None and history_markdown_out is not None:
+        _write_run_history_report(history_out, history_markdown_out)
     return summary
 
 
@@ -431,6 +547,7 @@ def run_bundle(
     write_inspection_report: bool,
     write_run_report: bool,
     append_run_history: bool,
+    write_run_history_report: bool,
     json_out: Path | None = None,
     markdown_out: Path | None = None,
 ) -> tuple[int, dict[str, Any]]:
@@ -471,6 +588,12 @@ def run_bundle(
         command_dir,
         command_scripts,
         append_history=append_run_history,
+        write_history_report=write_run_history_report,
+    )
+    history_markdown_out = _run_history_markdown_path(
+        command_dir,
+        command_scripts,
+        write_history_report=write_run_history_report,
     )
     inspector = _load_inspector()
     inspection = inspector.inspect_bundle(command_dir)
@@ -503,6 +626,8 @@ def run_bundle(
             json_out=json_out,
             markdown_out=markdown_out,
             history_out=history_out,
+            history_markdown_out=history_markdown_out,
+            append_history=append_run_history,
         )
         return 1, summary
     if script_path is None:
@@ -526,6 +651,8 @@ def run_bundle(
             json_out=json_out,
             markdown_out=markdown_out,
             history_out=history_out,
+            history_markdown_out=history_markdown_out,
+            append_history=append_run_history,
         )
         return 1, summary
     if dry_run:
@@ -548,6 +675,8 @@ def run_bundle(
             json_out=json_out,
             markdown_out=markdown_out,
             history_out=history_out,
+            history_markdown_out=history_markdown_out,
+            append_history=append_run_history,
         )
         return 0, summary
     if json_mode:
@@ -581,6 +710,8 @@ def run_bundle(
             json_out=json_out,
             markdown_out=markdown_out,
             history_out=history_out,
+            history_markdown_out=history_markdown_out,
+            append_history=append_run_history,
         )
         return result.returncode, summary
     result = subprocess.run(
@@ -608,6 +739,8 @@ def run_bundle(
         json_out=json_out,
         markdown_out=markdown_out,
         history_out=history_out,
+        history_markdown_out=history_markdown_out,
+        append_history=append_run_history,
     )
     return result.returncode, summary
 
@@ -651,6 +784,11 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="append a compact run event to run_history.jsonl",
     )
+    parser.add_argument(
+        "--write-run-history-report",
+        action="store_true",
+        help="write a Markdown summary of run_history.jsonl",
+    )
     parser.add_argument("--json-out", type=Path, default=None)
     parser.add_argument("--markdown-out", type=Path, default=None)
     return parser
@@ -668,6 +806,7 @@ def main(argv: list[str] | None = None) -> int:
             write_inspection_report=bool(args.write_inspection_report),
             write_run_report=bool(args.write_run_report),
             append_run_history=bool(args.append_run_history),
+            write_run_history_report=bool(args.write_run_history_report),
             json_out=args.json_out,
             markdown_out=args.markdown_out,
         )
