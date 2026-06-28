@@ -134,6 +134,7 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
         self.assertEqual(payload["chain_source_count"], 1)
         self.assertEqual(payload["missing_required"], [])
         self.assertEqual(payload["missing_optional"], [])
+        self.assertEqual(payload["declared_command_issues"], [])
         self.assertEqual(payload["runner_command"], _runner_command(command_dir))
         self.assertEqual(
             payload["history_report_command"],
@@ -204,6 +205,7 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
         self.assertIn("bundle_ready: yes", markdown_result.stdout)
         self.assertIn("Declared Run Outputs", markdown_result.stdout)
         self.assertIn("Declared Commands", markdown_result.stdout)
+        self.assertIn("declared_command_issues: -", markdown_result.stdout)
         self.assertIn("history_report_command", markdown_result.stdout)
         self.assertIn("--history-report-only", markdown_result.stdout)
         self.assertIn("run_history_summary", markdown_result.stdout)
@@ -240,6 +242,10 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         payload = json.loads(result.stdout)
+        self.assertTrue(payload["bundle_ready"])
+        self.assertFalse(payload["strict_ready"])
+        self.assertEqual(payload["declared_command_issues"], ["history_report_command"])
+        self.assertEqual(payload["missing_optional"], ["history_report_command"])
         commands = {item["label"]: item for item in payload["declared_commands"]}
         self.assertFalse(commands["history_report_command"]["ok"])
         self.assertEqual(
@@ -247,6 +253,11 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
             ["--append-run-history"],
         )
         self.assertEqual(markdown_result.returncode, 0, markdown_result.stderr)
+        self.assertIn("strict_ready: no", markdown_result.stdout)
+        self.assertIn(
+            "declared_command_issues: history_report_command",
+            markdown_result.stdout,
+        )
         self.assertIn("--append-run-history", markdown_result.stdout)
 
     def test_cli_writes_default_inspection_reports(self) -> None:

@@ -270,12 +270,6 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
             required=True,
         ),
     ]
-    missing_required = [
-        check["label"] for check in checks if check["required"] and not check["ok"]
-    ]
-    missing_optional = [
-        check["label"] for check in checks if not check["required"] and not check["ok"]
-    ]
     declared_outputs = [
         _declared_output("run_json", run_json_path),
         _declared_output("run_markdown", run_markdown_path),
@@ -302,6 +296,18 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
             forbidden_flags=("--append-run-history",),
         ),
     ]
+    declared_command_issues = [
+        command["label"]
+        for command in declared_commands
+        if command["present"] and not command["ok"]
+    ]
+    missing_required = [
+        check["label"] for check in checks if check["required"] and not check["ok"]
+    ]
+    missing_optional = [
+        check["label"] for check in checks if not check["required"] and not check["ok"]
+    ]
+    missing_optional.extend(declared_command_issues)
     run_history_summary_status = _run_history_summary_status(
         summary_path=run_history_summary_path,
         history_path=run_history_jsonl_path,
@@ -327,6 +333,7 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
         "runner_command": runner_command,
         "history_report_command": history_report_command,
         "declared_commands": declared_commands,
+        "declared_command_issues": declared_command_issues,
         "declared_outputs": declared_outputs,
         "run_json_path": str(run_json_path) if run_json_path is not None else None,
         "run_markdown_path": (
@@ -369,6 +376,7 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"- comparison_markdown_path: {_fmt(summary.get('comparison_markdown_path'))}",
         f"- runner_command: {_fmt(summary.get('runner_command'))}",
         f"- history_report_command: {_fmt(summary.get('history_report_command'))}",
+        f"- declared_command_issues: {_fmt_list(summary.get('declared_command_issues'))}",
         f"- run_json_path: {_fmt(summary.get('run_json_path'))}",
         f"- run_markdown_path: {_fmt(summary.get('run_markdown_path'))}",
         f"- run_history_jsonl_path: {_fmt(summary.get('run_history_jsonl_path'))}",
