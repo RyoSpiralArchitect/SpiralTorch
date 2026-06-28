@@ -286,17 +286,44 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             markdown = markdown_out.read_text(encoding="utf-8")
             follow_up_script = command_dir / "recommended_follow_up.sh"
             review_script = command_dir / "recommended_review.sh"
+            manifest_path = command_dir / "recommendation.json"
+            readme_path = command_dir / "README.md"
             self.assertTrue(follow_up_script.exists())
             self.assertFalse(review_script.exists())
+            self.assertTrue(manifest_path.exists())
+            self.assertTrue(readme_path.exists())
             script_text = follow_up_script.read_text(encoding="utf-8")
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            readme = readme_path.read_text(encoding="utf-8")
             self.assertEqual(
                 payload["command_scripts"]["follow_up_path"],
                 str(follow_up_script),
             )
             self.assertIsNone(payload["command_scripts"]["review_path"])
             self.assertEqual(payload["command_scripts"]["written_count"], 1)
+            self.assertEqual(
+                payload["command_scripts"]["manifest_path"],
+                str(manifest_path),
+            )
+            self.assertEqual(
+                payload["command_scripts"]["readme_path"],
+                str(readme_path),
+            )
+            self.assertEqual(
+                manifest["recommendation"]["action"],
+                "continue_from_accepted",
+            )
+            self.assertEqual(
+                manifest["command_scripts"]["follow_up_path"],
+                str(follow_up_script),
+            )
             self.assertIn("FOLLOW_UP_FROM=accepted NEW_SEEDS=31", script_text)
+            self.assertIn("Char VAE Chain Recommended Commands", readme)
+            self.assertIn("continue_from_accepted", readme)
+            self.assertIn("recommended_follow_up.sh", readme)
             self.assertIn("recommended_follow_up.sh", markdown)
+            self.assertIn("recommendation.json", markdown)
+            self.assertIn("README.md", markdown)
 
     def test_selection_separates_safe_accepted_from_absolute_best(self) -> None:
         mod = _load_module()
@@ -424,6 +451,19 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
 
             summary = mod.summarize_chains([reviewed, safe], sort_by="best")
             markdown = mod._render_markdown(summary)
+            command_scripts = mod._write_recommended_command_scripts(
+                summary,
+                root / "commands",
+            )
+            review_script = root / "commands" / "recommended_review.sh"
+            follow_up_script = root / "commands" / "recommended_follow_up.sh"
+            review_script_path = str(review_script)
+            follow_up_script_path = str(follow_up_script)
+            review_script_exists = review_script.exists()
+            follow_up_script_exists = follow_up_script.exists()
+            command_readme = (root / "commands" / "README.md").read_text(
+                encoding="utf-8"
+            )
 
         selection = summary["selection"]
         self.assertEqual(selection["accepted_candidate_count"], 2)
@@ -480,6 +520,14 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
         self.assertIn(f"review={reviewed_follow_summary}", markdown)
         self.assertIn("follow_up_command: next_follow_up_command", markdown)
         self.assertIn("review_command: guided_next_follow_up_command", markdown)
+        self.assertEqual(command_scripts["written_count"], 2)
+        self.assertEqual(command_scripts["follow_up_path"], follow_up_script_path)
+        self.assertEqual(command_scripts["review_path"], review_script_path)
+        self.assertTrue(follow_up_script_exists)
+        self.assertTrue(review_script_exists)
+        self.assertIn("review_absolute_best", command_readme)
+        self.assertIn("recommended_follow_up.sh", command_readme)
+        self.assertIn("recommended_review.sh", command_readme)
 
     def test_recursive_discovery_finds_nested_chains_once(self) -> None:
         mod = _load_module()
