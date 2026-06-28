@@ -19,6 +19,7 @@ RUN_HISTORY_NEXT_ACTION_SCHEMA = (
     "st.llm_char_vae_context.command_bundle_history_next_action.v1"
 )
 RUN_LOOP_SCHEMA = "st.llm_char_vae_context.command_bundle_history_loop.v1"
+RUN_LOOP_RUNNABLE_TARGETS = {"next", "follow-up", "review", "execution-next"}
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -301,6 +302,94 @@ def _run_history_summary_status(
     return status
 
 
+def _derived_run_loop_handoff(
+    payload: dict[str, Any],
+    final_next_action: dict[str, Any],
+) -> tuple[str | None, str | None]:
+    explicit_status = payload.get("handoff_status")
+    explicit_reason = payload.get("handoff_reason")
+    if explicit_status is not None or explicit_reason is not None:
+        return (
+            explicit_status if isinstance(explicit_status, str) else None,
+            explicit_reason if isinstance(explicit_reason, str) else None,
+        )
+    action = final_next_action.get("action")
+    action_reason = final_next_action.get("reason")
+    stop_reason = payload.get("stop_reason")
+    returncode = payload.get("returncode")
+    final_action_failed = payload.get("final_action_failed") is True
+    max_steps_continuation_failed = (
+        payload.get("max_steps_continuation_failed") is True
+    )
+    final_next_action_runnable = payload.get("final_next_action_runnable")
+    if not isinstance(final_next_action_runnable, bool):
+        final_next_action_runnable = (
+            final_next_action.get("should_continue") is True
+            and final_next_action.get("target") in RUN_LOOP_RUNNABLE_TARGETS
+        )
+    if final_action_failed:
+        if action == "review_before_continuing":
+            return (
+                "needs_review",
+                action_reason or "final next action requested review",
+            )
+        if action == "inspect_history":
+            return (
+                "needs_inspection",
+                action_reason or "final next action requested inspection",
+            )
+        return (
+            "final_action_failed",
+            action_reason or f"final next action requested failure: {action}",
+        )
+    if stop_reason == "dry_run":
+        return "dry_run", "dry-run resolved the next history-guided step"
+    if max_steps_continuation_failed:
+        return (
+            "continuation_ready",
+            action_reason or "max steps reached with runnable final next action",
+        )
+    if final_next_action_runnable:
+        return (
+            "continuation_ready",
+            action_reason or "final next action is runnable",
+        )
+    if returncode != 0:
+        if stop_reason == "history_next_action_blocked":
+            return (
+                "blocked",
+                action_reason or "history next action blocked execution",
+            )
+        return "failed", action_reason or "history loop step failed"
+    if action == "collect_next_command":
+        return (
+            "awaiting_next_command",
+            action_reason or "latest execution can continue but has no next script",
+        )
+    if action == "review_before_continuing":
+        return (
+            "needs_review",
+            action_reason or "final next action requested review",
+        )
+    if action == "inspect_history":
+        return (
+            "needs_inspection",
+            action_reason or "final next action requested inspection",
+        )
+    if action == "repair_blocker":
+        return "blocked", action_reason or "final next action requests repair"
+    if stop_reason == "history_next_action_not_runnable":
+        return (
+            "not_runnable",
+            action_reason or "final next action target is not runnable",
+        )
+    if stop_reason == "max_steps_reached":
+        return "max_steps_reached", "max steps reached"
+    if stop_reason is not None or action_reason is not None:
+        return "stopped", action_reason or str(stop_reason)
+    return None, None
+
+
 def _run_loop_status(
     *,
     summary_path: Path | None,
@@ -347,6 +436,16 @@ def _run_loop_status(
         return status
     final_next_action = payload.get("final_next_action")
     final_next_action = final_next_action if isinstance(final_next_action, dict) else {}
+    final_next_action_runnable = payload.get("final_next_action_runnable")
+    if not isinstance(final_next_action_runnable, bool):
+        final_next_action_runnable = (
+            final_next_action.get("should_continue") is True
+            and final_next_action.get("target") in RUN_LOOP_RUNNABLE_TARGETS
+        )
+    handoff_status, handoff_reason = _derived_run_loop_handoff(
+        payload,
+        final_next_action,
+    )
     schema = payload.get("schema")
     status.update(
         {
@@ -354,8 +453,8 @@ def _run_loop_status(
             "schema": schema,
             "schema_ok": schema == RUN_LOOP_SCHEMA,
             "command_dir": payload.get("command_dir"),
-            "handoff_status": payload.get("handoff_status"),
-            "handoff_reason": payload.get("handoff_reason"),
+            "handoff_status": handoff_status,
+            "handoff_reason": handoff_reason,
             "max_steps": payload.get("max_steps"),
             "step_count": payload.get("step_count"),
             "executed_count": payload.get("executed_count"),
@@ -385,9 +484,7 @@ def _run_loop_status(
             "final_next_action_should_continue": final_next_action.get(
                 "should_continue"
             ),
-            "final_next_action_runnable": payload.get(
-                "final_next_action_runnable"
-            ),
+            "final_next_action_runnable": final_next_action_runnable,
             "continuation_command": payload.get("continuation_command"),
         }
     )

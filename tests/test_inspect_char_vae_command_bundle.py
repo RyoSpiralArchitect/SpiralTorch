@@ -776,10 +776,6 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
                 {
                     "schema": "st.llm_char_vae_context.command_bundle_history_loop.v1",
                     "command_dir": str(command_dir),
-                    "handoff_status": "awaiting_next_command",
-                    "handoff_reason": (
-                        "latest execution can continue but has no next script"
-                    ),
                     "max_steps": 3,
                     "step_count": 2,
                     "executed_count": 2,
@@ -940,6 +936,93 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
             markdown_result.stdout,
         )
         self.assertIn("run_loop_continuation_command: -", markdown_result.stdout)
+
+    def test_cli_derives_legacy_run_loop_continuation_handoff(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            command_dir = _write_bundle(Path(tmp))
+            next_script = command_dir / "executed_follow_up" / "guided_next.sh"
+            continuation_command = (
+                "env PYTHONNOUSERSITE=1 python3 -P "
+                f"{ROOT / 'tools' / 'run_char_vae_history_loop.py'} "
+                f"{command_dir} --max-steps 1 --fail-on-max-steps-continuation "
+                "--write-loop-report"
+            )
+            _write_json(
+                command_dir / "run_loop.json",
+                {
+                    "schema": "st.llm_char_vae_context.command_bundle_history_loop.v1",
+                    "command_dir": str(command_dir),
+                    "max_steps": 1,
+                    "step_count": 1,
+                    "executed_count": 1,
+                    "success_count": 1,
+                    "failure_count": 0,
+                    "stop_reason": "max_steps_reached",
+                    "fail_on_final_actions": [
+                        "review_before_continuing",
+                        "inspect_history",
+                    ],
+                    "final_action_failed": False,
+                    "fail_on_max_steps_continuation": True,
+                    "max_steps_continuation_failed": True,
+                    "returncode": 1,
+                    "error": (
+                        "max steps reached with runnable final next action: "
+                        "run_execution_next"
+                    ),
+                    "final_next_action": {
+                        "schema": (
+                            "st.llm_char_vae_context."
+                            "command_bundle_history_next_action.v1"
+                        ),
+                        "action": "run_execution_next",
+                        "reason": "latest execution summary exposes a next command",
+                        "target": "execution-next",
+                        "command_source": "guided_next_follow_up_command",
+                        "script_path": str(next_script),
+                        "default_new_seeds": "109,113,127",
+                        "should_continue": True,
+                    },
+                    "continuation_command": continuation_command,
+                    "steps": [],
+                },
+            )
+            result = subprocess.run(
+                ["python3", "-P", str(SCRIPT), str(command_dir), "--json"],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            markdown_result = subprocess.run(
+                ["python3", "-P", str(SCRIPT), str(command_dir)],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        status = payload["run_loop_status"]
+        self.assertEqual(status["handoff_status"], "continuation_ready")
+        self.assertEqual(
+            status["handoff_reason"],
+            "latest execution summary exposes a next command",
+        )
+        self.assertIs(status["final_next_action_runnable"], True)
+        self.assertEqual(status["continuation_command"], continuation_command)
+        self.assertEqual(status["returncode"], 1)
+        self.assertIn(
+            "run_loop_handoff_status: continuation_ready",
+            markdown_result.stdout,
+        )
+        self.assertIn(
+            "run_loop_final_next_action_runnable: yes",
+            markdown_result.stdout,
+        )
 
     def test_cli_writes_explicit_inspection_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
