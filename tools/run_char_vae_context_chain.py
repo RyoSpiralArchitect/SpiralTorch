@@ -30,6 +30,7 @@ CAPACITY_SCOUT_LATENT_DIMS = "6,8,12"
 CAPACITY_SCOUT_HIDDEN_SIZES = "8,16,32"
 CAPACITY_ZOOM_LATENT_DIMS = "12,16,24"
 CAPACITY_ZOOM_HIDDEN_SIZES = "32,64"
+CAPACITY_LOCKIN_SEEDS = "127,131,137,139,149"
 
 PRESETS: dict[str, dict[str, Any]] = {
     "smoke": {
@@ -149,6 +150,25 @@ PRESETS: dict[str, dict[str, Any]] = {
         "seeds": "3001,3003",
         "hybrid_latent_scales": HYBRID4_DEEP_LATENT_SCALES,
         "follow_up_seed_groups": "3005,3007,3009;3011,3013,3015",
+    },
+    "capacity_lockin": {
+        "features": FOCUSED_HYBRID_FEATURES,
+        "feature_normalize_modes": "blocks",
+        "head_init": "xavier",
+        "window_chars": 32,
+        "latent_dim": 12,
+        "hidden": 64,
+        "epochs": 8,
+        "batches": 16,
+        "batch_size": 4,
+        "vae_epochs": 8,
+        "vae_batches": 16,
+        "vae_batch_size": 4,
+        "eval_samples": 192,
+        "gen": 0,
+        "seeds": CAPACITY_LOCKIN_SEEDS,
+        "hybrid_latent_scales": HYBRID4_DEEP_LATENT_SCALES,
+        "follow_up_seed_groups": "151,157,163,167,173;179,181,191,193,197",
     },
     "base": {
         "features": DEFAULT_FEATURES,
