@@ -952,6 +952,7 @@ def _render_command_readme(
         f"- run_loop_handoff_severity: {_fmt_readme_value(command_scripts.get('inspection_run_loop_handoff_severity'))}",
         f"- run_loop_handoff_requires_attention: {_fmt_readme_value(command_scripts.get('inspection_run_loop_handoff_requires_attention'))}",
         f"- run_loop_handoff_recommended_action: {_fmt_readme_value(command_scripts.get('inspection_run_loop_handoff_recommended_action'))}",
+        f"- run_loop_handoff_recommended_command: {_fmt_readme_value(command_scripts.get('inspection_run_loop_handoff_recommended_command'))}",
         f"- run_loop_final_next_action_runnable: {_fmt_readme_value(command_scripts.get('inspection_run_loop_final_next_action_runnable'))}",
         f"- run_loop_continuation_command: {_fmt_readme_value(command_scripts.get('inspection_run_loop_continuation_command'))}",
         f"- run_loop_resume_from_report_command: {_fmt_readme_value(command_scripts.get('inspection_run_loop_resume_from_report_command'))}",
@@ -1129,6 +1130,7 @@ def _write_recommended_command_scripts(
         "inspection_run_loop_handoff_severity": None,
         "inspection_run_loop_handoff_requires_attention": None,
         "inspection_run_loop_handoff_recommended_action": None,
+        "inspection_run_loop_handoff_recommended_command": None,
         "inspection_run_loop_final_next_action_runnable": None,
         "inspection_run_loop_continuation_command": None,
         "inspection_run_loop_resume_from_report_command": None,
@@ -1277,6 +1279,7 @@ def _render_markdown(summary: dict[str, Any]) -> str:
         f"- command_inspection_run_loop_handoff_severity: {_fmt(_value(command_scripts, 'inspection_run_loop_handoff_severity'))}",
         f"- command_inspection_run_loop_handoff_requires_attention: {_fmt(_value(command_scripts, 'inspection_run_loop_handoff_requires_attention'))}",
         f"- command_inspection_run_loop_handoff_recommended_action: {_fmt(_value(command_scripts, 'inspection_run_loop_handoff_recommended_action'))}",
+        f"- command_inspection_run_loop_handoff_recommended_command: {_fmt(_value(command_scripts, 'inspection_run_loop_handoff_recommended_command'))}",
         f"- command_inspection_run_loop_final_next_action_runnable: {_fmt(_value(command_scripts, 'inspection_run_loop_final_next_action_runnable'))}",
         f"- command_inspection_run_loop_continuation_command: {_fmt(_value(command_scripts, 'inspection_run_loop_continuation_command'))}",
         f"- command_inspection_run_loop_resume_from_report_command: {_fmt(_value(command_scripts, 'inspection_run_loop_resume_from_report_command'))}",
@@ -1520,6 +1523,9 @@ def main(argv: list[str] | None = None) -> int:
                 ),
                 "inspection_run_loop_handoff_recommended_action": (
                     run_loop_status.get("handoff_recommended_action")
+                ),
+                "inspection_run_loop_handoff_recommended_command": (
+                    run_loop_status.get("handoff_recommended_command")
                 ),
                 "inspection_run_loop_final_next_action_runnable": (
                     run_loop_status.get("final_next_action_runnable")

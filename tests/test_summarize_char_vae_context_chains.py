@@ -704,6 +704,11 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
         )
         self.assertIsNone(
             manifest["command_scripts"][
+                "inspection_run_loop_handoff_recommended_command"
+            ]
+        )
+        self.assertIsNone(
+            manifest["command_scripts"][
                 "inspection_run_loop_resume_from_report_command"
             ]
         )
@@ -740,6 +745,10 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
         self.assertIn("command_inspection_run_loop_handoff_status: -", markdown)
         self.assertIn("command_inspection_run_loop_handoff_severity: -", markdown)
         self.assertIn(
+            "command_inspection_run_loop_handoff_recommended_command: -",
+            markdown,
+        )
+        self.assertIn(
             "command_inspection_run_loop_resume_from_report_command: -",
             markdown,
         )
@@ -757,6 +766,7 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
         self.assertIn("run_loop_status_issues: -", readme)
         self.assertIn("run_loop_handoff_status: -", readme)
         self.assertIn("run_loop_handoff_severity: -", readme)
+        self.assertIn("run_loop_handoff_recommended_command: -", readme)
         self.assertIn("run_loop_resume_from_report_command: -", readme)
         self.assertIn("run_loop_resume_from_report_command_ok: -", readme)
         self.assertIn(
@@ -859,6 +869,10 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             command_scripts["inspection_run_loop_handoff_recommended_action"],
             "run_resume_from_report_command",
         )
+        self.assertEqual(
+            command_scripts["inspection_run_loop_handoff_recommended_command"],
+            resume_from_report_command,
+        )
         self.assertTrue(command_scripts["inspection_run_loop_final_next_action_runnable"])
         self.assertEqual(
             command_scripts["inspection_run_loop_continuation_command"],
@@ -906,7 +920,16 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             readme,
         )
         self.assertIn(
+            f"run_loop_handoff_recommended_command: `{resume_from_report_command}`",
+            readme,
+        )
+        self.assertIn(
             "command_inspection_run_loop_handoff_status: continuation_ready",
+            markdown,
+        )
+        self.assertIn(
+            "command_inspection_run_loop_handoff_recommended_command: "
+            f"{resume_from_report_command}",
             markdown,
         )
         self.assertIn(

@@ -455,6 +455,7 @@ def _run_loop_status(
         "handoff_severity": None,
         "handoff_requires_attention": None,
         "handoff_recommended_action": None,
+        "handoff_recommended_command": None,
         "max_steps": None,
         "step_count": None,
         "executed_count": None,
@@ -723,6 +724,19 @@ def _run_loop_handoff_guidance(
     return "attention", True, "review_handoff_status"
 
 
+def _run_loop_handoff_recommended_command(
+    status: dict[str, Any],
+    action: str | None,
+) -> str | None:
+    if action == "run_resume_from_report_command":
+        command = status.get("resume_from_report_command")
+        return command if isinstance(command, str) and command else None
+    if action == "run_continuation_command":
+        command = status.get("continuation_command")
+        return command if isinstance(command, str) and command else None
+    return None
+
+
 def inspect_bundle(command_dir: Path) -> dict[str, Any]:
     command_dir = command_dir.resolve()
     manifest_path = command_dir / "recommendation.json"
@@ -954,11 +968,16 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
         handoff_requires_attention,
         handoff_recommended_action,
     ) = _run_loop_handoff_guidance(run_loop_status, run_loop_status_issues)
+    handoff_recommended_command = _run_loop_handoff_recommended_command(
+        run_loop_status,
+        handoff_recommended_action,
+    )
     run_loop_status.update(
         {
             "handoff_severity": handoff_severity,
             "handoff_requires_attention": handoff_requires_attention,
             "handoff_recommended_action": handoff_recommended_action,
+            "handoff_recommended_command": handoff_recommended_command,
         }
     )
     missing_required = [
@@ -1149,6 +1168,7 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"- run_loop_handoff_severity: {_fmt(_value(summary, 'run_loop_status', 'handoff_severity'))}",
         f"- run_loop_handoff_requires_attention: {_fmt(_value(summary, 'run_loop_status', 'handoff_requires_attention'))}",
         f"- run_loop_handoff_recommended_action: {_fmt(_value(summary, 'run_loop_status', 'handoff_recommended_action'))}",
+        f"- run_loop_handoff_recommended_command: {_fmt(_value(summary, 'run_loop_status', 'handoff_recommended_command'))}",
         f"- run_loop_step_count: {_fmt(_value(summary, 'run_loop_status', 'step_count'))}",
         f"- run_loop_executed_count: {_fmt(_value(summary, 'run_loop_status', 'executed_count'))}",
         f"- run_loop_stop_reason: {_fmt(_value(summary, 'run_loop_status', 'stop_reason'))}",

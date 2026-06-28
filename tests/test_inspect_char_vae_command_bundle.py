@@ -345,6 +345,7 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
                 "handoff_severity": None,
                 "handoff_requires_attention": None,
                 "handoff_recommended_action": None,
+                "handoff_recommended_command": None,
                 "max_steps": None,
                 "step_count": None,
                 "executed_count": None,
@@ -1139,6 +1140,10 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
             status["handoff_recommended_action"],
             "run_resume_from_report_command",
         )
+        self.assertEqual(
+            status["handoff_recommended_command"],
+            resume_from_report_command,
+        )
         self.assertIs(status["continuation_command_expected"], True)
         self.assertIs(status["continuation_command_present"], True)
         self.assertIs(status["continuation_command_ok"], True)
@@ -1168,6 +1173,10 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
         )
         self.assertIn(
             "run_loop_resume_from_report_command_report_path_ok: yes",
+            markdown_result.stdout,
+        )
+        self.assertIn(
+            f"run_loop_handoff_recommended_command: {resume_from_report_command}",
             markdown_result.stdout,
         )
 
@@ -1223,6 +1232,10 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
         self.assertEqual(
             status["handoff_recommended_action"],
             "run_continuation_command",
+        )
+        self.assertEqual(
+            status["handoff_recommended_command"],
+            continuation_command,
         )
         self.assertIsNone(status["resume_from_report_command"])
         self.assertIs(status["resume_from_report_command_present"], False)
