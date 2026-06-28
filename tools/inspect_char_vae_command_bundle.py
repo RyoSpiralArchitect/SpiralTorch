@@ -110,14 +110,37 @@ def _has_required_command_token(tokens: list[str] | None, required: str) -> bool
     return required in tokens
 
 
+def _token_matches_path(token: str, expected_path: Path) -> bool:
+    token_path = Path(token)
+    if not token_path.is_absolute():
+        return False
+    try:
+        return token_path.resolve() == expected_path.resolve()
+    except OSError:
+        return token_path.absolute() == expected_path.resolve()
+
+
+def _has_command_dir_token(
+    tokens: list[str] | None,
+    command_dir: Path | None,
+) -> bool | None:
+    if command_dir is None:
+        return None
+    if tokens is None:
+        return False
+    return any(_token_matches_path(token, command_dir) for token in tokens)
+
+
 def _declared_command(
     label: str,
     command: str | None,
     *,
     required_flags: tuple[str, ...] = (),
     forbidden_flags: tuple[str, ...] = (),
+    command_dir: Path | None = None,
 ) -> dict[str, Any]:
     tokens, parse_error = _command_tokens(command)
+    target_command_dir_ok = _has_command_dir_token(tokens, command_dir)
     missing_required_flags = [
         flag for flag in required_flags if not _has_required_command_token(tokens, flag)
     ]
@@ -130,12 +153,15 @@ def _declared_command(
         "present": command is not None,
         "tokens": tokens,
         "parse_error": parse_error,
+        "target_command_dir": str(command_dir) if command_dir is not None else None,
+        "target_command_dir_ok": target_command_dir_ok,
         "required_flags": list(required_flags),
         "missing_required_flags": missing_required_flags,
         "forbidden_flags": list(forbidden_flags),
         "forbidden_flags_present": forbidden_flags_present,
         "ok": command is not None
         and parse_error is None
+        and target_command_dir_ok is not False
         and not missing_required_flags
         and not forbidden_flags_present,
     }
@@ -310,12 +336,14 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
                 "--append-run-history",
                 "--write-run-history-report",
             ),
+            command_dir=command_dir,
         ),
         _declared_command(
             "history_report_command",
             history_report_command,
             required_flags=("run_char_vae_command_bundle.py", "--history-report-only"),
             forbidden_flags=("--append-run-history",),
+            command_dir=command_dir,
         ),
     ]
     declared_command_issues = [
@@ -439,8 +467,9 @@ def render_markdown(summary: dict[str, Any]) -> str:
             "",
             "## Declared Commands",
             "",
-            "| label | present | ok | parse_error | missing_required_flags | forbidden_flags_present | command |",
-            "| --- | --- | --- | --- | --- | --- | --- |",
+            "| label | present | ok | target_dir_ok | parse_error | "
+            "missing_required_flags | forbidden_flags_present | command |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- |",
         ]
     )
     commands = summary.get("declared_commands")
@@ -448,10 +477,12 @@ def render_markdown(summary: dict[str, Any]) -> str:
         if not isinstance(command, dict):
             continue
         lines.append(
-            "| {label} | {present} | {ok} | {parse_error} | {missing} | {forbidden} | {command} |".format(
+            "| {label} | {present} | {ok} | {target_dir_ok} | {parse_error} | "
+            "{missing} | {forbidden} | {command} |".format(
                 label=_fmt(command.get("label")),
                 present=_fmt(command.get("present")),
                 ok=_fmt(command.get("ok")),
+                target_dir_ok=_fmt(command.get("target_command_dir_ok")),
                 parse_error=_fmt(command.get("parse_error")),
                 missing=_fmt_list(command.get("missing_required_flags")),
                 forbidden=_fmt_list(command.get("forbidden_flags_present")),

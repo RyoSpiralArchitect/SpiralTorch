@@ -144,6 +144,8 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
         self.assertTrue(commands["runner_command"]["ok"])
         self.assertTrue(commands["history_report_command"]["ok"])
         self.assertIsNone(commands["history_report_command"]["parse_error"])
+        self.assertTrue(commands["runner_command"]["target_command_dir_ok"])
+        self.assertTrue(commands["history_report_command"]["target_command_dir_ok"])
         self.assertIn(
             "--history-report-only",
             commands["history_report_command"]["tokens"],
@@ -264,6 +266,48 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
             markdown_result.stdout,
         )
         self.assertIn("--append-run-history", markdown_result.stdout)
+
+    def test_cli_flags_declared_command_targeting_another_bundle(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            command_dir = _write_bundle(root)
+            other_command_dir = root / "other-commands"
+            manifest_path = command_dir / "recommendation.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["command_scripts"][
+                "history_report_command"
+            ] = _history_report_command(other_command_dir)
+            manifest_path.write_text(
+                json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                ["python3", "-P", str(SCRIPT), str(command_dir), "--json"],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            markdown_result = subprocess.run(
+                ["python3", "-P", str(SCRIPT), str(command_dir)],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertFalse(payload["strict_ready"])
+        self.assertEqual(payload["declared_command_issues"], ["history_report_command"])
+        commands = {item["label"]: item for item in payload["declared_commands"]}
+        self.assertFalse(commands["history_report_command"]["ok"])
+        self.assertFalse(commands["history_report_command"]["target_command_dir_ok"])
+        self.assertEqual(markdown_result.returncode, 0, markdown_result.stderr)
+        self.assertIn("target_dir_ok", markdown_result.stdout)
+        self.assertIn("strict_ready: no", markdown_result.stdout)
 
     def test_cli_ignores_forbidden_flag_substrings_inside_command_paths(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
