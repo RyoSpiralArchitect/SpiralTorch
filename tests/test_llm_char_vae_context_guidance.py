@@ -1060,6 +1060,87 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
         )
         self.assertIs(guided["unsafe_promotion"], True)
 
+    def test_feature_swap_review_command_matches_source_budget(self) -> None:
+        mod = _load_module()
+        parser = mod._build_parser()
+        args = parser.parse_args(
+            [
+                "models/samples/spiral_corpus_en",
+                "--epochs",
+                "2",
+                "--batches",
+                "2",
+                "--eval-samples",
+                "22",
+                "--vae-epochs",
+                "2",
+                "--vae-batches",
+                "2",
+            ]
+        )
+        summary = _summary(
+            best_feature="latent",
+            nll=3.802,
+            verdict="regressed",
+            config_verdict="regressed",
+            source_feature_verdict="regressed",
+            source_feature_raw_verdict="improved",
+            source_retained=True,
+            gate_failed=False,
+        )
+        summary["follow_up_result"].update(
+            {
+                "current_best_config": {
+                    "best_feature": "latent",
+                    "feature_normalize": "blocks",
+                    "hybrid_latent_scale": 0.5,
+                    "mean_best_nll": 3.802,
+                },
+                "source_best_config": {
+                    "best_feature": "latent",
+                    "feature_normalize": "blocks",
+                    "hybrid_latent_scale": 0.5,
+                    "mean_best_nll": 3.792,
+                },
+                "run_budget_shifted": True,
+                "source_run_budget": {
+                    "epochs": 1,
+                    "batches": 1,
+                    "eval_samples": 6,
+                    "vae_epochs": 1,
+                    "vae_batches": 1,
+                },
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            record = mod._feature_swap_review_command_record(
+                args,
+                ["raw", "latent", "raw_latent"],
+                root,
+                [131, 137, 139],
+                summary["follow_up_result"],
+                _next_follow_up(),
+            )
+            mod._write_next_follow_up_script(record)
+            script_text = Path(record["script_path"]).read_text(encoding="utf-8")
+
+        self.assertEqual(record["action"], "review_feature_swap_before_promotion")
+        self.assertIs(record["source_budget_matched"], True)
+        self.assertEqual(record["command_run_budget"]["epochs"], 1)
+        self.assertEqual(record["command_run_budget"]["eval_samples"], 6)
+        self.assertEqual(record["command_run_budget"]["vae_epochs"], 1)
+        self.assertEqual(record["default_new_seeds"], "101,103,107,109,113")
+        self.assertEqual(record["default_run_dir"], str(root / "feature_swap_review"))
+        self.assertEqual(record["default_follow_up_from"], str(root / "summary.json"))
+        self.assertIn("--epochs", record["script_command"])
+        self.assertIn("1", record["script_command"])
+        self.assertIn("--eval-samples", record["script_command"])
+        self.assertIn("6", record["script_command"])
+        self.assertIn("feature_swap_review", record["script_usage"])
+        self.assertIn("NEXT_RUN_DIR", script_text)
+
     def test_retained_source_feature_regression_has_precise_reason(self) -> None:
         mod = _load_module()
         summary = _summary(
