@@ -175,6 +175,17 @@ def _follow_up_seed_policy_record(*, explicit_seed_groups: bool) -> dict[str, An
     }
 
 
+def _extra_explicit_seed_groups(
+    seed_groups: list[str],
+    *,
+    explicit_seed_groups: bool,
+    follow_up_count: int,
+) -> list[str]:
+    if not explicit_seed_groups:
+        return []
+    return seed_groups[max(0, follow_up_count) :]
+
+
 def _follow_up_command_record(
     summary: dict[str, Any],
     *,
@@ -519,6 +530,15 @@ def _render_report(manifest: dict[str, Any]) -> str:
                 or "-"
             ),
         ),
+        "- extra_explicit_seed_groups: {groups}".format(
+            groups=(
+                ", ".join(
+                    str(group)
+                    for group in manifest.get("extra_explicit_seed_groups", [])
+                )
+                or "-"
+            ),
+        ),
         "- follow_up_seed_policy: {precedence} ({reason})".format(
             precedence=(
                 " -> ".join(
@@ -677,7 +697,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help=(
             "explicit per-follow-up NEW_SEEDS groups; supplied groups override "
             "matching follow-ups, while unspecified follow-ups still use generated "
-            "tie-aware default_new_seeds before script defaults"
+            "tie-aware default_new_seeds before script defaults; extra groups beyond "
+            "--follow-ups are reported in chain artifacts"
         ),
     )
     parser.add_argument(
@@ -738,6 +759,11 @@ def main(argv: list[str] | None = None) -> int:
         "allow_gate_stop": bool(args.allow_gate_stop),
         "planned_follow_ups": int(args.follow_ups),
         "planned_follow_up_seed_groups": seed_groups,
+        "extra_explicit_seed_groups": _extra_explicit_seed_groups(
+            seed_groups,
+            explicit_seed_groups=explicit_seed_groups,
+            follow_up_count=int(args.follow_ups),
+        ),
         "follow_up_seed_group_source": (
             "explicit" if explicit_seed_groups else "preset_fallback"
         ),

@@ -30,6 +30,7 @@ class CharVaeContextChainTests(unittest.TestCase):
         self.assertIn("supplied groups override matching follow-ups", help_text)
         self.assertIn("unspecified follow-ups still use generated", help_text)
         self.assertIn("tie-aware default_new_seeds", help_text)
+        self.assertIn("extra groups beyond --follow-ups are reported", help_text)
 
     def test_follow_up_seed_policy_records_precedence(self) -> None:
         mod = _load_module()
@@ -48,6 +49,34 @@ class CharVaeContextChainTests(unittest.TestCase):
         )
         self.assertIn("overrides matching follow-ups", explicit["reason"])
         self.assertIn("backfills unspecified follow-ups", explicit["reason"])
+
+    def test_extra_explicit_seed_groups_reports_unmatched_groups(self) -> None:
+        mod = _load_module()
+
+        self.assertEqual(
+            mod._extra_explicit_seed_groups(
+                ["17", "19", "23"],
+                explicit_seed_groups=True,
+                follow_up_count=1,
+            ),
+            ["19", "23"],
+        )
+        self.assertEqual(
+            mod._extra_explicit_seed_groups(
+                ["17"],
+                explicit_seed_groups=True,
+                follow_up_count=2,
+            ),
+            [],
+        )
+        self.assertEqual(
+            mod._extra_explicit_seed_groups(
+                ["17", "19"],
+                explicit_seed_groups=False,
+                follow_up_count=1,
+            ),
+            [],
+        )
 
     def test_preset_latent_scale_defaults_keep_smoke_light_and_scout_small(self) -> None:
         mod = _load_module()
@@ -214,6 +243,7 @@ class CharVaeContextChainTests(unittest.TestCase):
                     "allowed_gate_stop": True,
                     "follow_up_seed_group_source": "preset_fallback",
                     "planned_follow_up_seed_groups": ["17", "19"],
+                    "extra_explicit_seed_groups": [],
                     "follow_up_seed_policy": mod._follow_up_seed_policy_record(
                         explicit_seed_groups=False
                     ),
@@ -249,6 +279,7 @@ class CharVaeContextChainTests(unittest.TestCase):
         self.assertIn("run_seed_source", report)
         self.assertIn("command_default", report)
         self.assertIn("- follow_up_seed_groups: preset_fallback (17, 19)", report)
+        self.assertIn("- extra_explicit_seed_groups: -", report)
         self.assertIn(
             "- follow_up_seed_policy: command_default -> preset_seed_group -> "
             "script_default",
