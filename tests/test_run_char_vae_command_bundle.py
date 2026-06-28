@@ -425,6 +425,64 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
         self.assertEqual(relaxed.returncode, 0, relaxed.stderr)
         self.assertEqual(relaxed_payload["returncode"], 0)
 
+    def test_cli_history_report_only_bypasses_execution_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            command_dir = _write_bundle(Path(tmp), non_executable_follow_up=True)
+            result = subprocess.run(
+                [
+                    "python3",
+                    "-P",
+                    str(SCRIPT),
+                    str(command_dir),
+                    "--history-report-only",
+                    "--json",
+                ],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            payload = json.loads(result.stdout)
+            history_summary_path = command_dir / "run_history_summary.json"
+            history_summary = json.loads(
+                history_summary_path.read_text(encoding="utf-8")
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(payload["strict_ready"])
+        self.assertFalse(payload["executed"])
+        self.assertTrue(payload["history_report_only"])
+        self.assertFalse((command_dir / "runner.out").exists())
+        self.assertEqual(payload["run_history_summary"]["total_runs"], 0)
+        self.assertEqual(history_summary["total_runs"], 0)
+
+    def test_cli_rejects_history_report_only_with_append(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            command_dir = _write_bundle(Path(tmp))
+            result = subprocess.run(
+                [
+                    "python3",
+                    "-P",
+                    str(SCRIPT),
+                    str(command_dir),
+                    "--history-report-only",
+                    "--append-run-history",
+                    "--json",
+                ],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn(
+            "--history-report-only cannot be combined with --append-run-history",
+            result.stderr,
+        )
+
     def test_cli_reports_missing_target_script(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             command_dir = _write_bundle(Path(tmp))
@@ -681,13 +739,14 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
                 stderr=subprocess.PIPE,
                 check=False,
             )
+            (command_dir / "runner.out").write_text("sentinel\n", encoding="utf-8")
             report_only = subprocess.run(
                 [
                     "python3",
                     "-P",
                     str(SCRIPT),
                     str(command_dir),
-                    "--write-run-history-report",
+                    "--history-report-only",
                     "--json",
                 ],
                 cwd=ROOT,
@@ -710,10 +769,14 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
             history_summary = json.loads(
                 history_summary_path.read_text(encoding="utf-8")
             )
+            runner_out = (command_dir / "runner.out").read_text(encoding="utf-8")
 
         self.assertEqual(dry_run.returncode, 0, dry_run.stderr)
         self.assertEqual(executed.returncode, 0, executed.stderr)
         self.assertEqual(report_only.returncode, 0, report_only.stderr)
+        self.assertEqual(runner_out, "sentinel\n")
+        self.assertFalse(report_only_payload["executed"])
+        self.assertTrue(report_only_payload["history_report_only"])
         self.assertEqual(dry_payload["run_history_jsonl_path"], str(history_path))
         self.assertEqual(executed_payload["run_history_jsonl_path"], str(history_path))
         self.assertEqual(report_only_payload["run_history_jsonl_path"], str(history_path))

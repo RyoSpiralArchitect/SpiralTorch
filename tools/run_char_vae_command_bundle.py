@@ -278,6 +278,7 @@ def _runner_summary(
     finished_at: str | None = None,
     duration_seconds: float | None = None,
     executed: bool = False,
+    history_report_only: bool = False,
 ) -> dict[str, Any]:
     return {
         "schema": SCHEMA,
@@ -299,6 +300,7 @@ def _runner_summary(
         "strict": strict,
         "dry_run": dry_run,
         "executed": bool(executed),
+        "history_report_only": bool(history_report_only),
         "started_at": started_at,
         "finished_at": finished_at,
         "duration_seconds": duration_seconds,
@@ -344,6 +346,7 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"- strict: {_fmt(summary.get('strict'))}",
         f"- dry_run: {_fmt(summary.get('dry_run'))}",
         f"- executed: {_fmt(summary.get('executed'))}",
+        f"- history_report_only: {_fmt(summary.get('history_report_only'))}",
         f"- started_at: {_fmt(summary.get('started_at'))}",
         f"- finished_at: {_fmt(summary.get('finished_at'))}",
         f"- duration_seconds: {_fmt(summary.get('duration_seconds'))}",
@@ -712,6 +715,7 @@ def run_bundle(
     write_run_report: bool,
     append_run_history: bool,
     write_run_history_report: bool,
+    history_report_only: bool = False,
     json_out: Path | None = None,
     markdown_out: Path | None = None,
 ) -> tuple[int, dict[str, Any]]:
@@ -775,7 +779,11 @@ def run_bundle(
         )
     required_ready = bool(inspection.get("strict_ready" if strict else "bundle_ready"))
 
-    def finish(summary: dict[str, Any]) -> dict[str, Any]:
+    def finish(
+        summary: dict[str, Any],
+        *,
+        append_history: bool = append_run_history,
+    ) -> dict[str, Any]:
         summary = write_run_artifacts(
             summary,
             json_out=json_out,
@@ -783,7 +791,7 @@ def run_bundle(
             history_out=history_out,
             history_markdown_out=history_markdown_out,
             history_summary_out=history_summary_out,
-            append_history=append_run_history,
+            append_history=append_history,
         )
         if not write_inspection_report:
             return summary
@@ -813,6 +821,25 @@ def run_bundle(
             history_summary_out=history_summary_out,
             append_history=False,
         )
+
+    if history_report_only:
+        summary = _runner_summary(
+            command_dir=command_dir,
+            manifest_path=manifest_path,
+            target=target,
+            script_key=script_key,
+            script_path=script_path,
+            **target_details,
+            recommendation_context=recommendation_context,
+            strict=strict,
+            dry_run=dry_run,
+            inspection=inspection,
+            returncode=0,
+            history_report_only=True,
+            **timing_fields(),
+        )
+        summary = finish(summary, append_history=False)
+        return 0, summary
 
     if not required_ready:
         summary = _runner_summary(
@@ -963,13 +990,27 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="write Markdown and JSON summaries of run_history.jsonl",
     )
+    parser.add_argument(
+        "--history-report-only",
+        action="store_true",
+        help=(
+            "rewrite run_history.md and run_history_summary.json without "
+            "executing a command or appending a new history event"
+        ),
+    )
     parser.add_argument("--json-out", type=Path, default=None)
     parser.add_argument("--markdown-out", type=Path, default=None)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = _build_parser().parse_args(argv)
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+    if args.history_report_only and args.append_run_history:
+        parser.error("--history-report-only cannot be combined with --append-run-history")
+    write_run_history_report = bool(
+        args.write_run_history_report or args.history_report_only
+    )
     try:
         returncode, summary = run_bundle(
             args.command_dir,
@@ -980,7 +1021,8 @@ def main(argv: list[str] | None = None) -> int:
             write_inspection_report=bool(args.write_inspection_report),
             write_run_report=bool(args.write_run_report),
             append_run_history=bool(args.append_run_history),
-            write_run_history_report=bool(args.write_run_history_report),
+            write_run_history_report=write_run_history_report,
+            history_report_only=bool(args.history_report_only),
             json_out=args.json_out,
             markdown_out=args.markdown_out,
         )
@@ -997,7 +1039,7 @@ def main(argv: list[str] | None = None) -> int:
         returncode = 1
     if args.json:
         print(json.dumps(summary, indent=2, sort_keys=True))
-    elif args.dry_run or returncode != 0:
+    elif args.dry_run or args.history_report_only or returncode != 0:
         stream = sys.stderr if returncode != 0 else sys.stdout
         print(render_markdown(summary), file=stream)
     return returncode

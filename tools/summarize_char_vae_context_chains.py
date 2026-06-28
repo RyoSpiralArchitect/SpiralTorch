@@ -714,6 +714,17 @@ def _runner_command_line(command_dir: Any) -> str | None:
     )
 
 
+def _history_report_command_line(command_dir: Any) -> str | None:
+    if not isinstance(command_dir, str) or not command_dir:
+        return None
+    script_path = Path(__file__).resolve().with_name("run_char_vae_command_bundle.py")
+    return (
+        "env PYTHONNOUSERSITE=1 python3 -P "
+        f"{shlex.quote(str(script_path))} "
+        f"{shlex.quote(command_dir)} --history-report-only"
+    )
+
+
 def _path_value(value: Any) -> Path | None:
     if not isinstance(value, str) or not value:
         return None
@@ -802,6 +813,7 @@ def _render_command_readme(
         f"- run_history_jsonl: {_fmt_readme_value(command_scripts.get('run_history_jsonl_path'))}",
         f"- run_history_markdown: {_fmt_readme_value(command_scripts.get('run_history_markdown_path'))}",
         f"- run_history_summary: {_fmt_readme_value(command_scripts.get('run_history_summary_path'))}",
+        f"- history_report_only: {_fmt_readme_value(command_scripts.get('history_report_command'))}",
         "",
         "## Safe Follow-Up",
         "",
@@ -952,6 +964,7 @@ def _write_recommended_command_scripts(
         "inspection_missing_required": [],
         "inspection_missing_optional": [],
         "runner_command": runner_command,
+        "history_report_command": _history_report_command_line(str(out_dir)),
         "runner_path": runner_path,
         "run_json_path": str(out_dir / "run.json"),
         "run_markdown_path": str(out_dir / "run.md"),
@@ -1070,6 +1083,7 @@ def _render_markdown(summary: dict[str, Any]) -> str:
         f"- command_run_history_jsonl_path: {_fmt(_value(command_scripts, 'run_history_jsonl_path'))}",
         f"- command_run_history_markdown_path: {_fmt(_value(command_scripts, 'run_history_markdown_path'))}",
         f"- command_run_history_summary_path: {_fmt(_value(command_scripts, 'run_history_summary_path'))}",
+        f"- command_history_report_only: {_fmt(_value(command_scripts, 'history_report_command'))}",
         "",
         "## Chains",
         "",
