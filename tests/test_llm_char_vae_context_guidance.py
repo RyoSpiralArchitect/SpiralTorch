@@ -581,6 +581,194 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
             0.0,
         )
 
+    def test_single_learning_evidence_surfaces_checkpoint_and_raw_delta(self) -> None:
+        mod = _load_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            checkpoint = Path(tmp) / "text_vae_weights.bin"
+            checkpoint.write_bytes(b"weights")
+            summary = {
+                "run": {
+                    "text_chars": 200,
+                    "train_chars": 160,
+                    "validation_chars": 40,
+                    "window_chars": 16,
+                    "eval_samples": 32,
+                    "hidden": 8,
+                    "head_init": "xavier",
+                    "epochs": 2,
+                    "batches": 3,
+                    "features": ["raw", "raw_latent"],
+                    "vae": {
+                        "save_path": str(checkpoint),
+                        "epochs": 2,
+                        "batches": 4,
+                        "history": [
+                            {
+                                "avg_recon_loss": 0.90,
+                                "avg_weighted_loss": 0.92,
+                                "avg_gradient_l2": 0.50,
+                                "avg_update_l2": 0.10,
+                            },
+                            {
+                                "avg_recon_loss": 0.70,
+                                "avg_weighted_loss": 0.71,
+                                "avg_gradient_l2": 0.40,
+                                "avg_update_l2": 0.08,
+                            },
+                        ],
+                    },
+                },
+                "ranking": [
+                    {
+                        "feature": "raw_latent",
+                        "best_mean_nll": 3.80,
+                        "best_accuracy": 0.25,
+                        "validation_nll_mean_delta_vs_raw": -0.08,
+                    },
+                    {
+                        "feature": "raw",
+                        "best_mean_nll": 4.00,
+                        "best_accuracy": 0.20,
+                    },
+                ],
+                "deltas": {
+                    "raw_latent_best_nll_vs_raw": -0.20,
+                    "raw_best_nll_vs_raw": 0.0,
+                },
+                "best_feature": "raw_latent",
+                "features": [],
+                "feature_diagnostics": {"features": {}},
+            }
+
+            evidence = mod._single_learning_evidence(summary)
+            summary["learning_evidence"] = evidence
+            report = mod._single_report(summary)
+
+        self.assertEqual(evidence["status"], "beats_raw")
+        self.assertTrue(evidence["checkpoint"]["exists"])
+        self.assertEqual(evidence["vae"]["steps"], 8)
+        self.assertEqual(evidence["head"]["total_steps"], 12)
+        self.assertAlmostEqual(
+            evidence["vae"]["recon_loss"]["initial_minus_final"],
+            0.20,
+        )
+        self.assertAlmostEqual(evidence["best"]["best_nll_delta_vs_raw"], -0.20)
+        self.assertIn("## Learning Evidence", report)
+        self.assertIn("- status: beats_raw", report)
+
+    def test_text_vae_binding_preflight_explains_native_requirement(self) -> None:
+        mod = _load_module()
+
+        with self.assertRaisesRegex(RuntimeError, "maturin develop"):
+            mod._require_zspace_text_vae_binding()
+
+    def test_aggregate_learning_evidence_marks_promising_sweep(self) -> None:
+        mod = _load_module()
+        summary = {
+            "run": {
+                "seed_count": 3,
+                "run_count": 6,
+                "config_count": 2,
+                "normalize_count": 1,
+                "scale_count": 2,
+                "seeds": [1, 2, 3],
+                "features": ["raw", "raw_latent"],
+                "feature_normalize": "blocks",
+                "feature_normalize_modes": ["blocks"],
+                "hybrid_latent_scale": None,
+                "hybrid_latent_scales": [1.0, 2.0],
+                "head_init": "xavier",
+                "min_nll_delta": 0.0,
+                "follow_up_confirm_tolerance": 0.0,
+                "win_tolerance": 0.001,
+            },
+            "status": "improved",
+            "best_feature": "raw_latent",
+            "ranking": [
+                {
+                    "feature": "raw_latent",
+                    "mean_best_nll": 3.80,
+                    "mean_best_accuracy": 0.25,
+                    "mean_best_nll_delta_vs_raw": -0.20,
+                    "runs": 6,
+                },
+                {
+                    "feature": "raw",
+                    "mean_best_nll": 4.00,
+                    "mean_best_accuracy": 0.20,
+                    "mean_best_nll_delta_vs_raw": 0.0,
+                    "runs": 6,
+                },
+            ],
+            "feature_stability": [
+                {
+                    "feature": "raw_latent",
+                    "win_count": 4,
+                    "win_rate": 4 / 6,
+                    "near_win_count": 5,
+                    "near_win_rate": 5 / 6,
+                }
+            ],
+            "feature_family_stability": [],
+            "feature_diagnostics_summary": [],
+            "seed_summaries": [
+                {
+                    "seed": 1,
+                    "feature_normalize": "blocks",
+                    "hybrid_latent_scale": 1.0,
+                    "best_feature": "raw_latent",
+                    "ranking": [],
+                    "run_dir": "/tmp/seed_1",
+                }
+            ],
+            "config_summaries": [
+                {
+                    "feature_normalize": "blocks",
+                    "hybrid_latent_scale": 2.0,
+                    "status": "improved",
+                    "best_feature": "raw_latent",
+                    "ranking": [
+                        {
+                            "feature": "raw_latent",
+                            "mean_best_nll": 3.80,
+                            "mean_best_nll_delta_vs_raw": -0.20,
+                        }
+                    ],
+                    "feature_stability": [
+                        {"feature": "raw_latent", "win_count": 2}
+                    ],
+                    "seed_count": 3,
+                    "run_dir": "/tmp/config",
+                }
+            ],
+            "best_config": {
+                "feature_normalize": "blocks",
+                "hybrid_latent_scale": 2.0,
+                "best_feature": "raw_latent",
+                "mean_best_nll": 3.80,
+                "mean_best_nll_delta_vs_raw": -0.20,
+                "runner_up_feature": "raw",
+                "margin_to_runner_up": 0.20,
+                "runner_up_within_uncertainty": False,
+            },
+            "seed_winners": [],
+        }
+
+        evidence = mod._aggregate_learning_evidence(summary)
+        summary["learning_evidence"] = evidence
+        report = mod._aggregate_report(summary)
+
+        self.assertEqual(evidence["status"], "promising")
+        self.assertEqual(evidence["coverage"]["run_count"], 6)
+        self.assertTrue(evidence["raw_baseline"]["present"])
+        self.assertTrue(evidence["follow_up_ready"])
+        self.assertAlmostEqual(
+            evidence["best"]["mean_best_nll_delta_vs_raw"],
+            -0.20,
+        )
+        self.assertIn("- learning_status: promising", report)
+        self.assertIn("## Learning Evidence", report)
+
     def test_follow_up_result_reports_run_budget_shift(self) -> None:
         mod = _load_module()
         source_best_config = {
