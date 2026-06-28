@@ -1196,6 +1196,51 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
         self.assertIn("recommended_follow_up.sh", command_readme)
         self.assertIn("recommended_review.sh", command_readme)
 
+    def test_summary_command_prefers_feature_swap_review_when_guided_disabled(
+        self,
+    ) -> None:
+        mod = _load_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            summary_path = root / "summary.json"
+            feature_swap_script = root / "feature_swap_review_command.sh"
+            next_script = root / "next_follow_up_command.sh"
+            _write_json(
+                summary_path,
+                {
+                    "guided_next_follow_up_command": {
+                        "enabled": False,
+                        "script_path": None,
+                    },
+                    "feature_swap_review_command": {
+                        "script_path": str(feature_swap_script),
+                        "script_usage": (
+                            "FOLLOW_UP_FROM=current NEW_SEEDS=101 "
+                            "bash feature_swap_review_command.sh"
+                        ),
+                        "shell_command": "PYTHONNOUSERSITE=1 python review.py",
+                        "default_new_seeds": "101",
+                        "default_run_dir": str(root / "feature_swap_review"),
+                        "default_follow_up_from": str(summary_path),
+                    },
+                    "next_follow_up_command": {
+                        "script_path": str(next_script),
+                        "script_usage": "NEW_SEEDS=103 bash next_follow_up_command.sh",
+                        "shell_command": "PYTHONNOUSERSITE=1 python next.py",
+                        "default_new_seeds": "103",
+                        "default_run_dir": str(root / "next"),
+                        "default_follow_up_from": str(summary_path),
+                    },
+                },
+            )
+
+            command = mod._summary_follow_up_command(str(summary_path))
+
+        self.assertTrue(command["available"])
+        self.assertEqual(command["command_source"], "feature_swap_review_command")
+        self.assertEqual(command["script_path"], str(feature_swap_script))
+        self.assertEqual(command["default_new_seeds"], "101")
+
     def test_recursive_discovery_finds_nested_chains_once(self) -> None:
         mod = _load_module()
         with tempfile.TemporaryDirectory() as tmp:

@@ -461,6 +461,43 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
         self.assertFalse(fields["execution_evidence_should_continue"])
         self.assertTrue(fields["execution_evidence_mixed_signal"])
 
+    def test_execution_next_prefers_feature_swap_review_when_guided_disabled(
+        self,
+    ) -> None:
+        mod = _load_module()
+        command = mod._compact_execution_next_command(
+            {
+                "guided_next_follow_up_command": {
+                    "enabled": False,
+                    "script_path": None,
+                },
+                "feature_swap_review_command": {
+                    "action": "review_feature_swap_before_promotion",
+                    "script_path": "/tmp/feature_swap_review_command.sh",
+                    "script_usage": (
+                        "FOLLOW_UP_FROM=current NEW_SEEDS=101 "
+                        "bash /tmp/feature_swap_review_command.sh"
+                    ),
+                    "default_new_seeds": "101",
+                    "default_run_dir": "/tmp/feature_swap_review",
+                    "default_follow_up_from": "/tmp/current/summary.json",
+                },
+                "next_follow_up_command": {
+                    "script_path": "/tmp/next_follow_up_command.sh",
+                    "script_usage": "NEW_SEEDS=103 bash /tmp/next_follow_up_command.sh",
+                    "default_new_seeds": "103",
+                    "default_run_dir": "/tmp/next",
+                    "default_follow_up_from": "/tmp/current/summary.json",
+                },
+            }
+        )
+
+        self.assertTrue(command["available"])
+        self.assertEqual(command["source"], "feature_swap_review_command")
+        self.assertEqual(command["action"], "review_feature_swap_before_promotion")
+        self.assertEqual(command["script_path"], "/tmp/feature_swap_review_command.sh")
+        self.assertEqual(command["default_new_seeds"], "101")
+
     def test_history_markdown_surfaces_problem_signals(self) -> None:
         mod = _load_module()
         events = [

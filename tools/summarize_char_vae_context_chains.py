@@ -285,6 +285,7 @@ def _summary_follow_up_command(summary_path: Any) -> dict[str, Any]:
 
     command_names = [
         "guided_next_follow_up_command",
+        "feature_swap_review_command",
         "best_generation_follow_up_command",
         "broadened_follow_up_command",
         "next_follow_up_command",

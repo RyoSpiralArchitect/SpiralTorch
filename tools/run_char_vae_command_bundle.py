@@ -360,10 +360,14 @@ def _execution_cwd_for_target(
 
 def _compact_execution_next_command(payload: dict[str, Any]) -> dict[str, Any]:
     guided_command = _mapping(payload.get("guided_next_follow_up_command"))
+    feature_swap_review_command = _mapping(payload.get("feature_swap_review_command"))
     next_command = _mapping(payload.get("next_follow_up_command"))
     if guided_command.get("enabled"):
         source = "guided_next_follow_up_command"
         command = guided_command
+    elif feature_swap_review_command:
+        source = "feature_swap_review_command"
+        command = feature_swap_review_command
     elif next_command:
         source = "next_follow_up_command"
         command = next_command
