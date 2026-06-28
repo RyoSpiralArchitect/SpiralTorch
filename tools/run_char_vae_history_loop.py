@@ -14,6 +14,7 @@ from typing import Any
 
 
 SCHEMA = "st.llm_char_vae_context.command_bundle_history_loop.v1"
+DEFAULT_FAIL_ON_FINAL_ACTIONS = ("review_before_continuing", "inspect_history")
 
 
 def _utc_now() -> str:
@@ -51,6 +52,18 @@ def _fmt(value: Any) -> str:
     if isinstance(value, list):
         return ", ".join(str(item) for item in value) if value else "-"
     return str(value)
+
+
+def _csv_values(values: list[str] | None) -> list[str]:
+    if not values:
+        return []
+    parsed: list[str] = []
+    for value in values:
+        for item in value.split(","):
+            item = item.strip()
+            if item:
+                parsed.append(item)
+    return parsed
 
 
 def _md_cell(value: Any) -> str:
@@ -146,6 +159,8 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"- success_count: {_fmt(summary.get('success_count'))}",
         f"- failure_count: {_fmt(summary.get('failure_count'))}",
         f"- stop_reason: {_fmt(summary.get('stop_reason'))}",
+        f"- fail_on_final_actions: {_fmt(summary.get('fail_on_final_actions'))}",
+        f"- final_action_failed: {_fmt(summary.get('final_action_failed'))}",
         f"- returncode: {_fmt(summary.get('returncode'))}",
         f"- error: {_fmt(summary.get('error'))}",
         f"- final_next_action: {_fmt(next_action.get('action'))}",
@@ -207,6 +222,7 @@ def run_loop(
     write_inspection_report: bool,
     write_run_report: bool,
     write_run_history_report: bool,
+    fail_on_final_actions: list[str] | tuple[str, ...],
     json_out: Path | None = None,
     markdown_out: Path | None = None,
 ) -> tuple[int, dict[str, Any]]:
@@ -250,6 +266,17 @@ def run_loop(
         stop_reason = "max_steps_reached"
 
     final_next_action = _run_history_next_action(latest_summary)
+    fail_on_final_actions = list(fail_on_final_actions)
+    final_action = final_next_action.get("action")
+    final_action_failed = (
+        returncode == 0
+        and isinstance(final_action, str)
+        and final_action in set(fail_on_final_actions)
+    )
+    error = latest_summary.get("error") if returncode != 0 else None
+    if final_action_failed:
+        returncode = 1
+        error = f"final next action requested failure: {final_action}"
     summary = {
         "schema": SCHEMA,
         "command_dir": str(command_dir),
@@ -264,8 +291,10 @@ def run_loop(
         "success_count": sum(1 for step in steps if step.get("returncode") == 0),
         "failure_count": sum(1 for step in steps if step.get("returncode") != 0),
         "stop_reason": stop_reason,
+        "fail_on_final_actions": fail_on_final_actions,
+        "final_action_failed": final_action_failed,
         "returncode": returncode,
-        "error": latest_summary.get("error") if returncode != 0 else None,
+        "error": error,
         "final_next_action": final_next_action if final_next_action else None,
         "latest_run_history_summary": latest_summary.get("run_history_summary"),
         "latest_run_json_path": latest_summary.get("run_json_path"),
@@ -327,6 +356,17 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="skip rewriting run_history.md and run_history_summary.json",
     )
+    parser.add_argument(
+        "--fail-on-final-action",
+        action="append",
+        default=None,
+        metavar="ACTION[,ACTION...]",
+        help=(
+            "return non-zero when the final run_history next_action has one "
+            "of these action names; defaults to "
+            f"{','.join(DEFAULT_FAIL_ON_FINAL_ACTIONS)}"
+        ),
+    )
     parser.add_argument("--json-out", type=Path, default=None)
     parser.add_argument("--markdown-out", type=Path, default=None)
     return parser
@@ -342,6 +382,11 @@ def main(argv: list[str] | None = None) -> int:
         json_out = json_out or command_dir / "run_loop.json"
         markdown_out = markdown_out or command_dir / "run_loop.md"
     try:
+        fail_on_final_actions = (
+            list(DEFAULT_FAIL_ON_FINAL_ACTIONS)
+            if args.fail_on_final_action is None
+            else _csv_values(args.fail_on_final_action)
+        )
         returncode, summary = run_loop(
             args.command_dir,
             max_steps=args.max_steps,
@@ -350,6 +395,7 @@ def main(argv: list[str] | None = None) -> int:
             write_inspection_report=not args.no_write_inspection_report,
             write_run_report=not args.no_write_run_report,
             write_run_history_report=not args.no_write_run_history_report,
+            fail_on_final_actions=fail_on_final_actions,
             json_out=json_out,
             markdown_out=markdown_out,
         )
@@ -360,6 +406,11 @@ def main(argv: list[str] | None = None) -> int:
             "max_steps": args.max_steps,
             "strict": not args.no_strict,
             "dry_run": bool(args.dry_run),
+            "fail_on_final_actions": (
+                list(DEFAULT_FAIL_ON_FINAL_ACTIONS)
+                if args.fail_on_final_action is None
+                else _csv_values(args.fail_on_final_action)
+            ),
             "returncode": 1,
             "error": str(exc),
         }

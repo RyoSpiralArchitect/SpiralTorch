@@ -737,14 +737,29 @@ def _history_report_command_line(command_dir: Any) -> str | None:
     )
 
 
-def _history_loop_command_line(command_dir: Any, *, max_steps: int = 3) -> str | None:
+def _history_loop_command_line(
+    command_dir: Any,
+    *,
+    max_steps: int = 3,
+    fail_on_final_actions: tuple[str, ...] = (
+        "review_before_continuing",
+        "inspect_history",
+    ),
+) -> str | None:
     if not isinstance(command_dir, str) or not command_dir:
         return None
     script_path = Path(__file__).resolve().with_name("run_char_vae_history_loop.py")
+    fail_arg = (
+        " --fail-on-final-action "
+        f"{shlex.quote(','.join(fail_on_final_actions))}"
+        if fail_on_final_actions
+        else ""
+    )
     return (
         "env PYTHONNOUSERSITE=1 python3 -P "
         f"{shlex.quote(str(script_path))} "
-        f"{shlex.quote(command_dir)} --max-steps {max_steps} --write-loop-report"
+        f"{shlex.quote(command_dir)} --max-steps {max_steps}{fail_arg} "
+        "--write-loop-report"
     )
 
 

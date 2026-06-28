@@ -88,7 +88,8 @@ def _history_loop_command(command_dir: Path) -> str:
         "env PYTHONNOUSERSITE=1 python3 -P "
         f"{shlex.quote(str(LOOP_SCRIPT.resolve()))} "
         f"{shlex.quote(str(command_dir.resolve()))} "
-        "--max-steps 3 --write-loop-report"
+        "--max-steps 3 --fail-on-final-action "
+        "review_before_continuing,inspect_history --write-loop-report"
     )
 
 
@@ -429,7 +430,11 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
         self.assertIn("## History-Guided Continuation", readme)
         self.assertIn("## History-Guided Loop", readme)
         self.assertIn("--use-history-next-action", readme)
-        self.assertIn("--max-steps 3 --write-loop-report", readme)
+        self.assertIn(
+            "--max-steps 3 --fail-on-final-action "
+            "review_before_continuing,inspect_history --write-loop-report",
+            readme,
+        )
         self.assertIn("## Execution-Next Continuation", readme)
         self.assertIn("--target execution-next", readme)
         self.assertIn("run.json", readme)

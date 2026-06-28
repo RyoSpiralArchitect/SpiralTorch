@@ -141,6 +141,98 @@ class RunCharVaeHistoryLoopTests(unittest.TestCase):
         self.assertEqual(history_summary["total_runs"], 0)
         self.assertFalse(runner_out_exists)
 
+    def test_cli_fails_when_final_action_requires_review(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            command_dir = _write_bundle(Path(tmp))
+            next_script = command_dir / "recommended_next.sh"
+            next_script.write_text(
+                "\n".join(
+                    [
+                        "#!/usr/bin/env bash",
+                        "set -euo pipefail",
+                        'mkdir -p "executed_follow_up"',
+                        'printf "review-needed\\n" > runner.out',
+                        'cat > "executed_follow_up/summary.json" <<\'JSON\'',
+                        json.dumps(
+                            {
+                                "schema": "st.modelzoo.run.v1",
+                                "status": "regressed",
+                                "best_feature": "latent",
+                                "best_config": {
+                                    "best_feature": "latent",
+                                    "feature_normalize": "blocks",
+                                    "hybrid_latent_scale": 0.5,
+                                    "mean_best_nll": 4.5,
+                                    "mean_best_nll_delta_vs_raw": 0.2,
+                                },
+                                "follow_up_result": {
+                                    "verdict": "regressed",
+                                    "source_best_feature_retained": False,
+                                },
+                                "follow_up_gate": {
+                                    "effective_verdict": "regressed",
+                                    "failed": True,
+                                },
+                                "follow_up_guidance": {
+                                    "action": "review_feature_swap_before_promotion",
+                                    "unsafe_promotion": True,
+                                },
+                            }
+                        ),
+                        "JSON",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            next_script.chmod(next_script.stat().st_mode | 0o755)
+            result = _run_loop(
+                command_dir,
+                "--max-steps",
+                "3",
+                "--write-loop-report",
+                "--json",
+            )
+            payload = json.loads(result.stdout)
+            loop_report = json.loads(
+                (command_dir / "run_loop.json").read_text(encoding="utf-8")
+            )
+            history_summary = json.loads(
+                (command_dir / "run_history_summary.json").read_text(encoding="utf-8")
+            )
+
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(payload["step_count"], 1)
+        self.assertEqual(payload["executed_count"], 1)
+        self.assertEqual(payload["success_count"], 1)
+        self.assertEqual(payload["failure_count"], 0)
+        self.assertEqual(payload["stop_reason"], "history_next_action_stopped")
+        self.assertEqual(
+            payload["fail_on_final_actions"],
+            ["review_before_continuing", "inspect_history"],
+        )
+        self.assertTrue(payload["final_action_failed"])
+        self.assertEqual(payload["returncode"], 1)
+        self.assertEqual(
+            payload["error"],
+            "final next action requested failure: review_before_continuing",
+        )
+        self.assertEqual(
+            payload["final_next_action"]["action"],
+            "review_before_continuing",
+        )
+        self.assertIs(payload["final_next_action"]["should_continue"], False)
+        self.assertEqual(
+            payload["steps"][0]["execution_evidence_status"],
+            "gate_failed",
+        )
+        self.assertEqual(
+            history_summary["next_action"]["action"],
+            "review_before_continuing",
+        )
+        self.assertEqual(loop_report["returncode"], 1)
+        self.assertTrue(loop_report["final_action_failed"])
+
     def test_cli_stops_before_execution_when_history_requires_review(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             command_dir = _write_bundle(Path(tmp))
