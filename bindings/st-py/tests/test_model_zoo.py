@@ -219,6 +219,46 @@ def test_suggest_models_focus_prefers_streaming_zspace(stub_spiraltorch, monkeyp
     ]
 
 
+def test_suggest_models_can_surface_text_vae_compare(
+    stub_spiraltorch, monkeypatch, tmp_path: Path
+):
+    scripts = tmp_path / "models" / "python"
+    scripts.mkdir(parents=True)
+    _write_script(scripts / "zspace_text_vae.py")
+    _write_script(scripts / "zspace_text_vae_compare.py")
+
+    monkeypatch.setenv("SPIRALTORCH_MODEL_ZOO_ROOT", str(tmp_path))
+    model_zoo = _load_model_zoo(stub_spiraltorch, monkeypatch)
+
+    entries = model_zoo.suggest_models(
+        focus="zspace_multimodal",
+        prefer_tags=["comparison"],
+        available_only=True,
+        limit=1,
+    )
+    assert entries[0].key == "zspace_text_vae_compare"
+
+
+def test_suggest_models_can_surface_char_vae_context_probe(
+    stub_spiraltorch, monkeypatch, tmp_path: Path
+):
+    scripts = tmp_path / "models" / "python"
+    scripts.mkdir(parents=True)
+    _write_script(scripts / "llm_char_finetune.py")
+    _write_script(scripts / "llm_char_vae_context.py")
+
+    monkeypatch.setenv("SPIRALTORCH_MODEL_ZOO_ROOT", str(tmp_path))
+    model_zoo = _load_model_zoo(stub_spiraltorch, monkeypatch)
+
+    entries = model_zoo.suggest_models(
+        focus="llm_coherence",
+        prefer_tags=["comparison", "vae"],
+        available_only=True,
+        limit=1,
+    )
+    assert entries[0].key == "llm_char_vae_context"
+
+
 def test_list_models_focus_bootstrap_filters_family(stub_spiraltorch, monkeypatch, tmp_path: Path):
     scripts = tmp_path / "models" / "python"
     scripts.mkdir(parents=True)
