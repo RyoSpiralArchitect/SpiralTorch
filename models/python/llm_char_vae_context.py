@@ -51,6 +51,7 @@ RUN_BUDGET_KEYS = (
     "vae_batches",
     "vae_batch_size",
 )
+CAPACITY_CONFIG_KEYS = ("latent_dim", "hidden")
 REQUIRED_TEXT_VAE_METHODS = (
     "load",
     "save",
@@ -983,6 +984,32 @@ def _parse_seeds(seed: int, raw: str | None) -> list[int]:
     return list(dict.fromkeys(seeds))
 
 
+def _parse_int_grid(
+    default_value: int,
+    raw: str | None,
+    *,
+    flag: str,
+    min_value: int,
+) -> list[int]:
+    if raw is None or not raw.strip():
+        return [int(default_value)]
+    values = []
+    for part in raw.split(","):
+        value = part.strip()
+        if not value:
+            continue
+        try:
+            parsed = int(value)
+        except ValueError as exc:
+            raise ValueError(f"{flag} values must be integers") from exc
+        if parsed < min_value:
+            raise ValueError(f"{flag} values must be >= {min_value}")
+        values.append(parsed)
+    if not values:
+        raise ValueError(f"{flag} must contain at least one integer")
+    return list(dict.fromkeys(values))
+
+
 def _parse_hybrid_latent_scales(default_scale: float, raw: str | None) -> list[float]:
     if raw is None or not raw.strip():
         return [float(default_scale)]
@@ -1251,6 +1278,7 @@ def _aggregate_learning_evidence(summary: dict[str, Any]) -> dict[str, Any]:
     seed_count = int(run.get("seed_count") or 0)
     run_count = int(run.get("run_count") or len(seed_summaries) or 0)
     config_count = int(run.get("config_count") or len(config_summaries) or 0)
+    capacity_count = int(run.get("capacity_count") or 1)
     raw_entry = next(
         (
             item
@@ -1312,6 +1340,11 @@ def _aggregate_learning_evidence(summary: dict[str, Any]) -> dict[str, Any]:
             "config_count": config_count,
             "normalize_count": run.get("normalize_count"),
             "scale_count": run.get("scale_count"),
+            "capacity_count": capacity_count,
+            "latent_dim_count": run.get("latent_dim_count"),
+            "hidden_size_count": run.get("hidden_size_count"),
+            "latent_dims": run.get("latent_dims", []),
+            "hidden_sizes": run.get("hidden_sizes", []),
             "features": run.get("features", []),
         },
         "raw_baseline": {
@@ -1332,6 +1365,8 @@ def _aggregate_learning_evidence(summary: dict[str, Any]) -> dict[str, Any]:
         "best_config": {
             "feature_normalize": best_config.get("feature_normalize"),
             "hybrid_latent_scale": best_config.get("hybrid_latent_scale"),
+            "latent_dim": best_config.get("latent_dim"),
+            "hidden": best_config.get("hidden"),
             "best_feature": best_config.get("best_feature"),
             "mean_best_nll": best_config.get("mean_best_nll"),
             "mean_best_nll_delta_vs_raw": best_config.get("mean_best_nll_delta_vs_raw"),
@@ -1618,6 +1653,8 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
         seed_total = int(run.get("run_count") or seed_count * config_count)
     show_normalize_column = int(run.get("normalize_count") or 1) > 1
     show_scale_column = int(run.get("scale_count") or 1) > 1
+    show_latent_dim_column = int(run.get("latent_dim_count") or 1) > 1
+    show_hidden_column = int(run.get("hidden_size_count") or 1) > 1
     best_config = summary.get("best_config") or {}
     ranking_rows = [
         [
@@ -1666,10 +1703,17 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
         }
         best_stability = stability_by_feature.get(item.get("best_feature"), {})
         config_seed_total = int(item.get("seed_count") or seed_total)
-        config_rows.append(
+        row = []
+        if show_normalize_column:
+            row.append(str(item.get("feature_normalize", run.get("feature_normalize"))))
+        if show_scale_column:
+            row.append(_fmt_float(item.get("hybrid_latent_scale"), 3))
+        if show_latent_dim_column:
+            row.append(str(item.get("latent_dim", "-")))
+        if show_hidden_column:
+            row.append(str(item.get("hidden", "-")))
+        row.extend(
             [
-                str(item.get("feature_normalize", run.get("feature_normalize"))),
-                _fmt_float(item.get("hybrid_latent_scale"), 3),
                 str(item.get("status")),
                 str(item.get("best_feature")),
                 _fmt_float(top.get("mean_best_nll")),
@@ -1678,6 +1722,7 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
                 f"`{item.get('run_dir')}`",
             ]
         )
+        config_rows.append(row)
     diagnostics_rows = []
     for item in summary.get("feature_diagnostics_summary", []):
         diagnostics_rows.append(
@@ -1692,7 +1737,13 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
             ]
         )
     winner_by_seed = {
-        (item.get("feature_normalize"), item.get("hybrid_latent_scale"), item.get("seed")): item
+        (
+            item.get("feature_normalize"),
+            item.get("hybrid_latent_scale"),
+            item.get("latent_dim"),
+            item.get("hidden"),
+            item.get("seed"),
+        ): item
         for item in summary.get("seed_winners", [])
     }
     seed_rows = []
@@ -1702,6 +1753,8 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
             (
                 item.get("feature_normalize"),
                 item.get("hybrid_latent_scale"),
+                item.get("latent_dim"),
+                item.get("hidden"),
                 item.get("seed"),
             ),
             {},
@@ -1712,6 +1765,10 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
             row.append(str(item.get("feature_normalize", "-")))
         if show_scale_column:
             row.append(_fmt_float(item.get("hybrid_latent_scale"), 3))
+        if show_latent_dim_column:
+            row.append(str(item.get("latent_dim", "-")))
+        if show_hidden_column:
+            row.append(str(item.get("hidden", "-")))
         row.extend(
             [
                 str(item.get("seed")),
@@ -1731,10 +1788,13 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
         f"- status: {summary.get('status')}",
         f"- best_feature: {summary.get('best_feature')}",
         (
-            "- best_config: {feature} @ normalize={normalize} scale={scale}".format(
+            "- best_config: {feature} @ normalize={normalize} scale={scale} "
+            "latent_dim={latent_dim} hidden={hidden}".format(
                 feature=best_config.get("best_feature"),
                 normalize=best_config.get("feature_normalize"),
                 scale=best_config.get("hybrid_latent_scale"),
+                latent_dim=best_config.get("latent_dim"),
+                hidden=best_config.get("hidden"),
             )
             if best_config
             else "- best_config: -"
@@ -1760,6 +1820,10 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
         f"- feature_normalize_modes: {', '.join(str(mode) for mode in run.get('feature_normalize_modes', [])) or '-'}",
         f"- hybrid_latent_scale: {run.get('hybrid_latent_scale')}",
         f"- hybrid_latent_scales: {', '.join(str(scale) for scale in run.get('hybrid_latent_scales', [])) or '-'}",
+        f"- latent_dim: {run.get('latent_dim')}",
+        f"- latent_dims: {', '.join(str(value) for value in run.get('latent_dims', [])) or '-'}",
+        f"- hidden: {run.get('hidden')}",
+        f"- hidden_sizes: {', '.join(str(value) for value in run.get('hidden_sizes', [])) or '-'}",
         f"- head_init: {run.get('head_init')}",
         f"- min_nll_delta: {run.get('min_nll_delta')}",
         f"- follow_up_confirm_tolerance: {run.get('follow_up_confirm_tolerance')}",
@@ -1787,12 +1851,13 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
                 "",
                 f"- status: {learning_evidence.get('status')}",
                 "- coverage: runs={runs} seeds={seeds} configs={configs} "
-                "normalizes={normalizes} scales={scales}".format(
+                "normalizes={normalizes} scales={scales} capacities={capacities}".format(
                     runs=coverage.get("run_count"),
                     seeds=coverage.get("seed_count"),
                     configs=coverage.get("config_count"),
                     normalizes=coverage.get("normalize_count"),
                     scales=coverage.get("scale_count"),
+                    capacities=coverage.get("capacity_count"),
                 ),
                 "- best_vs_raw: {feature} mean_delta={delta} win_rate={win_rate} "
                 "near_win_rate={near_win_rate}".format(
@@ -1803,12 +1868,15 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
                     win_rate=_fmt_percent(best_evidence.get("win_rate")),
                     near_win_rate=_fmt_percent(best_evidence.get("near_win_rate")),
                 ),
-                "- best_config: {feature}@normalize={normalize},scale={scale} "
+                "- best_config: {feature}@normalize={normalize},scale={scale},"
+                "latent_dim={latent_dim},hidden={hidden} "
                 "delta={delta} runner_up={runner_up} margin={margin} "
                 "within_uncertainty={within}".format(
                     feature=best_config_evidence.get("best_feature") or "-",
                     normalize=best_config_evidence.get("feature_normalize") or "-",
                     scale=best_config_evidence.get("hybrid_latent_scale"),
+                    latent_dim=best_config_evidence.get("latent_dim"),
+                    hidden=best_config_evidence.get("hidden"),
                     delta=_fmt_float(
                         best_config_evidence.get("mean_best_nll_delta_vs_raw")
                     ),
@@ -2130,18 +2198,27 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
         )
     if config_rows:
         lines.extend(["## Context Config Grid", ""])
+        config_headers = [
+            "status",
+            "best_feature",
+            "mean_best_nll",
+            "mean_delta_vs_raw",
+            "wins",
+            "run_dir",
+        ]
+        config_prefix_headers = []
+        if show_normalize_column:
+            config_prefix_headers.append("normalize")
+        if show_scale_column:
+            config_prefix_headers.append("scale")
+        if show_latent_dim_column:
+            config_prefix_headers.append("latent_dim")
+        if show_hidden_column:
+            config_prefix_headers.append("hidden")
+        config_headers = [*config_prefix_headers, *config_headers]
         lines.extend(
             _markdown_table(
-                [
-                    "normalize",
-                    "scale",
-                    "status",
-                    "best_feature",
-                    "mean_best_nll",
-                    "mean_delta_vs_raw",
-                    "wins",
-                    "run_dir",
-                ],
+                config_headers,
                 config_rows,
             )
         )
@@ -2205,10 +2282,16 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
         "near_winners",
         "run_dir",
     ]
-    if show_scale_column:
-        seed_headers = ["scale", *seed_headers]
+    seed_prefix_headers = []
     if show_normalize_column:
-        seed_headers = ["normalize", *seed_headers]
+        seed_prefix_headers.append("normalize")
+    if show_scale_column:
+        seed_prefix_headers.append("scale")
+    if show_latent_dim_column:
+        seed_prefix_headers.append("latent_dim")
+    if show_hidden_column:
+        seed_prefix_headers.append("hidden")
+    seed_headers = [*seed_prefix_headers, *seed_headers]
     lines.extend(
         _markdown_table(
             seed_headers,
@@ -2747,6 +2830,8 @@ def _aggregate_summaries(
                 "seed": summary.get("run", {}).get("seed"),
                 "feature_normalize": summary.get("run", {}).get("feature_normalize"),
                 "hybrid_latent_scale": summary.get("run", {}).get("hybrid_latent_scale"),
+                "latent_dim": summary.get("run", {}).get("latent_dim"),
+                "hidden": summary.get("run", {}).get("hidden"),
                 "winner": best["feature"],
                 "winners": strict_winners,
                 "near_winners": near_winners,
@@ -2919,18 +3004,32 @@ def _normalize_run_dir(root: pathlib.Path, mode: str) -> pathlib.Path:
     return root / f"normalize_{mode}"
 
 
+def _int_run_dir(root: pathlib.Path, name: str, value: int) -> pathlib.Path:
+    if value < 0:
+        return root / f"{name}_neg_{abs(value):06d}"
+    return root / f"{name}_{int(value):06d}"
+
+
 def _config_run_dir(
     root: pathlib.Path,
     mode: str,
     scale: float,
+    latent_dim: int,
+    hidden: int,
     normalize_modes: list[str],
     scales: list[float],
+    latent_dims: list[int],
+    hidden_sizes: list[int],
 ) -> pathlib.Path:
     run_dir = root
     if len(normalize_modes) > 1:
         run_dir = _normalize_run_dir(run_dir, mode)
     if len(scales) > 1:
         run_dir = _scale_run_dir(run_dir, scale)
+    if len(latent_dims) > 1:
+        run_dir = _int_run_dir(run_dir, "latent", latent_dim)
+    if len(hidden_sizes) > 1:
+        run_dir = _int_run_dir(run_dir, "hidden", hidden)
     return run_dir
 
 
@@ -2946,6 +3045,8 @@ def _best_config_summary(config_summaries: list[dict[str, Any]]) -> dict[str, An
             else float(item["ranking"][0]["mean_best_nll"]),
             str(item.get("feature_normalize", "")),
             float(item.get("hybrid_latent_scale", 0.0)),
+            int(item.get("latent_dim", 0) or 0),
+            int(item.get("hidden", 0) or 0),
         ),
     )
     best = ranked[0]
@@ -2958,6 +3059,8 @@ def _best_config_summary(config_summaries: list[dict[str, Any]]) -> dict[str, An
     return {
         "feature_normalize": best.get("feature_normalize"),
         "hybrid_latent_scale": best.get("hybrid_latent_scale"),
+        "latent_dim": best.get("latent_dim"),
+        "hidden": best.get("hidden"),
         "best_feature": best.get("best_feature"),
         "status": best.get("status"),
         "mean_best_nll": top.get("mean_best_nll"),
@@ -3163,6 +3266,12 @@ def _follow_up_command_parts(
     fail_on_verdict_value: str | None,
     used_seed_history_value: str | None = None,
 ) -> list[str]:
+    best_latent_dim = int(best_config.get("latent_dim") or args.latent_dim)
+    best_hidden = (
+        int(best_config["hidden"])
+        if best_config.get("hidden") is not None
+        else int(args.hidden)
+    )
     command = [
         "python3",
         "-S",
@@ -3181,8 +3290,8 @@ def _follow_up_command_parts(
         ("--follow-up-used-seeds", used_seed_history_value),
         ("--follow-up-confirm-tolerance", _fmt_arg_float(args.follow_up_confirm_tolerance)),
         ("--window-chars", int(args.window_chars)),
-        ("--latent-dim", int(args.latent_dim)),
-        ("--hidden", int(args.hidden)),
+        ("--latent-dim", best_latent_dim),
+        ("--hidden", best_hidden),
         ("--head-init", str(args.head_init)),
         ("--epochs", int(args.epochs)),
         ("--batches", int(args.batches)),
@@ -4026,6 +4135,10 @@ def _source_best_config(summary: dict[str, Any]) -> dict[str, Any]:
     sanitized = dict(best_config)
     sanitized["feature_normalize"] = normalize
     sanitized["hybrid_latent_scale"] = scale
+    for key in CAPACITY_CONFIG_KEYS:
+        value = _int_or_none(best_config.get(key))
+        if value is not None:
+            sanitized[key] = value
     config_summaries = summary.get("config_summaries") or summary.get("scale_summaries")
     matched_config = None
     if isinstance(config_summaries, list):
@@ -4127,6 +4240,14 @@ def _apply_follow_up_defaults(
         argv,
         "--hybrid-latent-scales",
     )
+    explicit_latent_dim = _flag_present(argv, "--latent-dim") or _flag_present(
+        argv,
+        "--latent-dims",
+    )
+    explicit_hidden = _flag_present(argv, "--hidden") or _flag_present(
+        argv,
+        "--hidden-sizes",
+    )
     explicit_head_init = _flag_present(argv, "--head-init")
     explicit_seeds = _flag_present(argv, "--seeds")
 
@@ -4142,6 +4263,14 @@ def _apply_follow_up_defaults(
         args.hybrid_latent_scale = float(best_config["hybrid_latent_scale"])
         args.hybrid_latent_scales = None
         applied_defaults["hybrid_latent_scale"] = args.hybrid_latent_scale
+    if not explicit_latent_dim and best_config.get("latent_dim") is not None:
+        args.latent_dim = int(best_config["latent_dim"])
+        args.latent_dims = None
+        applied_defaults["latent_dim"] = args.latent_dim
+    if not explicit_hidden and best_config.get("hidden") is not None:
+        args.hidden = int(best_config["hidden"])
+        args.hidden_sizes = None
+        applied_defaults["hidden"] = args.hidden
     if not explicit_head_init:
         source_run = source_summary.get("run", {})
         source_head_init = (
@@ -4173,6 +4302,8 @@ def _apply_follow_up_defaults(
             "features": explicit_features,
             "feature_normalize": explicit_normalize,
             "hybrid_latent_scale": explicit_scale,
+            "latent_dim": explicit_latent_dim,
+            "hidden": explicit_hidden,
             "head_init": explicit_head_init,
             "seeds": explicit_seeds,
         },
@@ -4185,7 +4316,9 @@ def _config_label(config: dict[str, Any] | None) -> str:
     feature = config.get("best_feature") or config.get("feature") or "-"
     normalize = config.get("feature_normalize", "-")
     scale = config.get("hybrid_latent_scale", "-")
-    return f"{feature} @ normalize={normalize} scale={scale}"
+    latent_dim = config.get("latent_dim", "-")
+    hidden = config.get("hidden", "-")
+    return f"{feature} @ normalize={normalize} scale={scale} latent_dim={latent_dim} hidden={hidden}"
 
 
 def _matching_config_summary(
@@ -4194,14 +4327,27 @@ def _matching_config_summary(
 ) -> dict[str, Any] | None:
     source_normalize = source_best_config.get("feature_normalize")
     source_scale = _finite_float(source_best_config.get("hybrid_latent_scale"))
+    source_latent_dim = _int_or_none(source_best_config.get("latent_dim"))
+    source_hidden = _int_or_none(source_best_config.get("hidden"))
     for summary in config_summaries:
         if summary.get("feature_normalize") != source_normalize:
             continue
         scale = _finite_float(summary.get("hybrid_latent_scale"))
         if source_scale is None or scale is None:
             continue
-        if abs(scale - source_scale) <= 1e-12:
-            return summary
+        if abs(scale - source_scale) > 1e-12:
+            continue
+        if (
+            source_latent_dim is not None
+            and _int_or_none(summary.get("latent_dim")) != source_latent_dim
+        ):
+            continue
+        if (
+            source_hidden is not None
+            and _int_or_none(summary.get("hidden")) != source_hidden
+        ):
+            continue
+        return summary
     return None
 
 
@@ -5431,7 +5577,23 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--window-chars", type=int, default=64)
     parser.add_argument("--latent-dim", type=int, default=16)
+    parser.add_argument(
+        "--latent-dims",
+        default=None,
+        help=(
+            "comma-separated latent_dim grid for capacity sweeps; overrides "
+            "--latent-dim when provided"
+        ),
+    )
     parser.add_argument("--hidden", type=int, default=64)
+    parser.add_argument(
+        "--hidden-sizes",
+        default=None,
+        help=(
+            "comma-separated prediction-head hidden-size grid for capacity sweeps; "
+            "overrides --hidden when provided"
+        ),
+    )
     parser.add_argument(
         "--head-init",
         choices=HEAD_INIT_CHOICES,
@@ -5822,6 +5984,18 @@ def main(argv: list[str] | None = None) -> int:
         float(args.hybrid_latent_scale),
         args.hybrid_latent_scales,
     )
+    latent_dims = _parse_int_grid(
+        int(args.latent_dim),
+        args.latent_dims,
+        flag="--latent-dims",
+        min_value=1,
+    )
+    hidden_sizes = _parse_int_grid(
+        int(args.hidden),
+        args.hidden_sizes,
+        flag="--hidden-sizes",
+        min_value=0,
+    )
     follow_up_fail_on_verdicts = _parse_follow_up_fail_verdicts(
         args.follow_up_fail_on_verdict,
     )
@@ -5831,13 +6005,24 @@ def main(argv: list[str] | None = None) -> int:
             "feature_normalize_modes": normalize_modes,
             "hybrid_latent_scales": scales,
             "head_init": str(args.head_init),
+            "latent_dims": latent_dims,
+            "hidden_sizes": hidden_sizes,
             "seeds": seeds,
         }
 
-    if len(seeds) == 1 and len(scales) == 1 and len(normalize_modes) == 1 and follow_up is None:
+    if (
+        len(seeds) == 1
+        and len(scales) == 1
+        and len(normalize_modes) == 1
+        and len(latent_dims) == 1
+        and len(hidden_sizes) == 1
+        and follow_up is None
+    ):
         args.seed = seeds[0]
         args.feature_normalize = normalize_modes[0]
         args.hybrid_latent_scale = scales[0]
+        args.latent_dim = latent_dims[0]
+        args.hidden = hidden_sizes[0]
         _run_single(args, features)
         return 0
 
@@ -5845,12 +6030,17 @@ def main(argv: list[str] | None = None) -> int:
     root_run_dir.mkdir(parents=True, exist_ok=True)
     (root_run_dir / "command.txt").write_text(" ".join(sys.argv), encoding="utf-8")
     run_budget = _args_run_budget(args)
+    aggregate_budget = dict(run_budget)
+    if len(latent_dims) > 1:
+        aggregate_budget["latent_dim"] = None
+    if len(hidden_sizes) > 1:
+        aggregate_budget["hidden"] = None
     aggregate_run = {
         "schema": RUN_SCHEMA,
         "format": FORMAT,
         "arch": "llm_char_vae_context_sweep",
         **run_budget,
-        "budget": run_budget,
+        "budget": aggregate_budget,
         "features": features,
         "feature_normalize": normalize_modes[0] if len(normalize_modes) == 1 else None,
         "feature_normalize_modes": normalize_modes,
@@ -5858,8 +6048,22 @@ def main(argv: list[str] | None = None) -> int:
         "hybrid_latent_scale": scales[0] if len(scales) == 1 else None,
         "hybrid_latent_scales": scales,
         "scale_count": len(scales),
-        "config_count": len(normalize_modes) * len(scales),
-        "run_count": len(normalize_modes) * len(scales) * len(seeds),
+        "latent_dim": latent_dims[0] if len(latent_dims) == 1 else None,
+        "latent_dims": latent_dims,
+        "latent_dim_count": len(latent_dims),
+        "hidden": hidden_sizes[0] if len(hidden_sizes) == 1 else None,
+        "hidden_sizes": hidden_sizes,
+        "hidden_size_count": len(hidden_sizes),
+        "capacity_count": len(latent_dims) * len(hidden_sizes),
+        "config_count": len(normalize_modes)
+        * len(scales)
+        * len(latent_dims)
+        * len(hidden_sizes),
+        "run_count": len(normalize_modes)
+        * len(scales)
+        * len(latent_dims)
+        * len(hidden_sizes)
+        * len(seeds),
         "seeds": seeds,
         "seed_count": len(seeds),
         "head_init": str(args.head_init),
@@ -5881,64 +6085,89 @@ def main(argv: list[str] | None = None) -> int:
     config_summaries = []
     for mode in normalize_modes:
         for scale in scales:
-            config_run_dir = _config_run_dir(root_run_dir, mode, scale, normalize_modes, scales)
-            config_run_dir.mkdir(parents=True, exist_ok=True)
-            config_seed_summaries = []
-            for seed in seeds:
-                seed_dir = _seed_run_dir(config_run_dir, seed)
-                print(
-                    "sweep_normalize={mode} sweep_scale={scale:.6g} "
-                    "sweep_seed={seed} run_dir={run_dir}".format(
-                        mode=mode,
-                        scale=scale,
-                        seed=seed,
-                        run_dir=seed_dir,
-                    ),
-                    flush=True,
-                )
-                seed_args = _clone_args(
-                    args,
-                    seed=seed,
-                    feature_normalize=mode,
-                    hybrid_latent_scale=scale,
-                    run_dir=seed_dir,
-                    vae_save=None,
-                    json=False,
-                )
-                summary = _run_single(seed_args, features)
-                summaries.append(summary)
-                config_seed_summaries.append(summary)
-                _append_jsonl(
-                    runs_jsonl,
-                    {
-                        "seed": seed,
-                        "feature_normalize": mode,
-                        "hybrid_latent_scale": scale,
-                        "run_dir": str(seed_dir),
-                        "summary_path": str(seed_dir / "summary.json"),
-                        "best_feature": summary.get("best_feature"),
-                        "ranking": summary.get("ranking", []),
-                        "deltas": summary.get("deltas", {}),
-                        "learning_evidence": summary.get("learning_evidence"),
-                    },
-                )
+            for latent_dim in latent_dims:
+                for hidden in hidden_sizes:
+                    config_run_dir = _config_run_dir(
+                        root_run_dir,
+                        mode,
+                        scale,
+                        latent_dim,
+                        hidden,
+                        normalize_modes,
+                        scales,
+                        latent_dims,
+                        hidden_sizes,
+                    )
+                    config_run_dir.mkdir(parents=True, exist_ok=True)
+                    config_seed_summaries = []
+                    for seed in seeds:
+                        seed_dir = _seed_run_dir(config_run_dir, seed)
+                        print(
+                            "sweep_normalize={mode} sweep_scale={scale:.6g} "
+                            "sweep_latent_dim={latent_dim} sweep_hidden={hidden} "
+                            "sweep_seed={seed} run_dir={run_dir}".format(
+                                mode=mode,
+                                scale=scale,
+                                latent_dim=latent_dim,
+                                hidden=hidden,
+                                seed=seed,
+                                run_dir=seed_dir,
+                            ),
+                            flush=True,
+                        )
+                        seed_args = _clone_args(
+                            args,
+                            seed=seed,
+                            feature_normalize=mode,
+                            hybrid_latent_scale=scale,
+                            latent_dim=latent_dim,
+                            hidden=hidden,
+                            run_dir=seed_dir,
+                            vae_save=None,
+                            json=False,
+                        )
+                        summary = _run_single(seed_args, features)
+                        summaries.append(summary)
+                        config_seed_summaries.append(summary)
+                        _append_jsonl(
+                            runs_jsonl,
+                            {
+                                "seed": seed,
+                                "feature_normalize": mode,
+                                "hybrid_latent_scale": scale,
+                                "latent_dim": latent_dim,
+                                "hidden": hidden,
+                                "run_dir": str(seed_dir),
+                                "summary_path": str(seed_dir / "summary.json"),
+                                "best_feature": summary.get("best_feature"),
+                                "ranking": summary.get("ranking", []),
+                                "deltas": summary.get("deltas", {}),
+                                "learning_evidence": summary.get("learning_evidence"),
+                            },
+                        )
 
-            config_aggregate = _aggregate_summaries(
-                config_seed_summaries,
-                min_nll_delta=float(args.min_nll_delta),
-                win_tolerance=float(args.win_tolerance),
-            )
-            config_summaries.append(
-                {
-                    "feature_normalize": mode,
-                    "hybrid_latent_scale": scale,
-                    "run_dir": str(config_run_dir),
-                    "seed_count": len(config_seed_summaries),
-                    **config_aggregate,
-                }
-            )
+                    config_aggregate = _aggregate_summaries(
+                        config_seed_summaries,
+                        min_nll_delta=float(args.min_nll_delta),
+                        win_tolerance=float(args.win_tolerance),
+                    )
+                    config_summaries.append(
+                        {
+                            "feature_normalize": mode,
+                            "hybrid_latent_scale": scale,
+                            "latent_dim": latent_dim,
+                            "hidden": hidden,
+                            "run_dir": str(config_run_dir),
+                            "seed_count": len(config_seed_summaries),
+                            **config_aggregate,
+                        }
+                    )
 
-    scale_summaries = config_summaries if len(normalize_modes) == 1 else []
+    scale_summaries = (
+        config_summaries
+        if len(normalize_modes) == 1 and len(latent_dims) == 1 and len(hidden_sizes) == 1
+        else []
+    )
 
     aggregate = {
         "schema": RUN_SCHEMA,
@@ -5951,6 +6180,8 @@ def main(argv: list[str] | None = None) -> int:
                 "seed": summary.get("run", {}).get("seed"),
                 "feature_normalize": summary.get("run", {}).get("feature_normalize"),
                 "hybrid_latent_scale": summary.get("run", {}).get("hybrid_latent_scale"),
+                "latent_dim": summary.get("run", {}).get("latent_dim"),
+                "hidden": summary.get("run", {}).get("hidden"),
                 "run_dir": str(summary.get("run", {}).get("run_dir")),
                 "best_feature": summary.get("best_feature"),
                 "ranking": summary.get("ranking", []),
@@ -5977,6 +6208,8 @@ def main(argv: list[str] | None = None) -> int:
         aggregate["best_config"] = best_config
         aggregate["best_feature_normalize"] = best_config.get("feature_normalize")
         aggregate["best_hybrid_latent_scale"] = best_config.get("hybrid_latent_scale")
+        aggregate["best_latent_dim"] = best_config.get("latent_dim")
+        aggregate["best_hidden"] = best_config.get("hidden")
         next_follow_up = _next_follow_up_command_record(
             args,
             features,
@@ -5994,7 +6227,7 @@ def main(argv: list[str] | None = None) -> int:
         best_config,
         min_nll_delta=float(args.min_nll_delta),
         follow_up_confirm_tolerance=float(args.follow_up_confirm_tolerance),
-        current_run_budget=run_budget,
+        current_run_budget=aggregate_budget,
     )
     if follow_up_result is not None:
         aggregate["follow_up_result"] = follow_up_result
@@ -6113,21 +6346,20 @@ def main(argv: list[str] | None = None) -> int:
 
     config_text = "-"
     if best_config is not None:
-        config_text = "{feature}@normalize={normalize},scale={scale}".format(
-            feature=best_config.get("best_feature"),
-            normalize=best_config.get("feature_normalize"),
-            scale=best_config.get("hybrid_latent_scale"),
-        )
+        config_text = _config_label(best_config)
     print(
         (
             "sweep_status={status} best_feature={feature} best_config={config} "
-            "normalizes={normalizes} scales={scales} seeds={seeds} summary_json={path}"
+            "normalizes={normalizes} scales={scales} latent_dims={latent_dims} "
+            "hidden_sizes={hidden_sizes} seeds={seeds} summary_json={path}"
         ).format(
             status=aggregate["status"],
             feature=aggregate["best_feature"],
             config=config_text,
             normalizes=",".join(normalize_modes),
             scales=",".join(f"{scale:.6g}" for scale in scales),
+            latent_dims=",".join(str(value) for value in latent_dims),
+            hidden_sizes=",".join(str(value) for value in hidden_sizes),
             seeds=",".join(str(seed) for seed in seeds),
             path=root_run_dir / "summary.json",
         ),

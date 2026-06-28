@@ -518,6 +518,156 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
         self.assertIn("combined_stderr=0.000500", report)
         self.assertIn("within_uncertainty=True", report)
 
+    def test_capacity_grid_best_config_and_report_surface_capacity(self) -> None:
+        mod = _load_module()
+        small = {
+            "feature_normalize": "blocks",
+            "hybrid_latent_scale": 1.0,
+            "latent_dim": 4,
+            "hidden": 8,
+            "best_feature": "raw",
+            "status": "ties_raw",
+            "run_dir": "/tmp/capacity/small",
+            "seed_count": 1,
+            "ranking": [
+                {
+                    "feature": "raw",
+                    "mean_best_nll": 4.20,
+                    "mean_best_accuracy": 0.10,
+                    "mean_best_nll_delta_vs_raw": 0.0,
+                }
+            ],
+            "feature_stability": [{"feature": "raw", "win_count": 1}],
+        }
+        large = {
+            "feature_normalize": "blocks",
+            "hybrid_latent_scale": 1.0,
+            "latent_dim": 8,
+            "hidden": 16,
+            "best_feature": "raw_latent",
+            "status": "improved",
+            "run_dir": "/tmp/capacity/large",
+            "seed_count": 1,
+            "ranking": [
+                {
+                    "feature": "raw_latent",
+                    "mean_best_nll": 4.00,
+                    "mean_best_accuracy": 0.12,
+                    "mean_best_nll_delta_vs_raw": -0.20,
+                },
+                {
+                    "feature": "raw",
+                    "mean_best_nll": 4.10,
+                    "mean_best_accuracy": 0.11,
+                    "mean_best_nll_delta_vs_raw": 0.0,
+                },
+            ],
+            "feature_stability": [{"feature": "raw_latent", "win_count": 1}],
+        }
+
+        best_config = mod._best_config_summary([small, large])
+        report = mod._aggregate_report(
+            {
+                "run": {
+                    "seed_count": 1,
+                    "run_count": 2,
+                    "config_count": 2,
+                    "normalize_count": 1,
+                    "scale_count": 1,
+                    "latent_dim_count": 2,
+                    "hidden_size_count": 2,
+                    "capacity_count": 4,
+                    "seeds": [7],
+                    "features": ["raw", "raw_latent"],
+                    "feature_normalize": "blocks",
+                    "feature_normalize_modes": ["blocks"],
+                    "hybrid_latent_scale": 1.0,
+                    "hybrid_latent_scales": [1.0],
+                    "latent_dim": None,
+                    "latent_dims": [4, 8],
+                    "hidden": None,
+                    "hidden_sizes": [8, 16],
+                },
+                "status": "improved",
+                "best_feature": "raw_latent",
+                "best_config": best_config,
+                "ranking": large["ranking"],
+                "config_summaries": [small, large],
+                "seed_summaries": [
+                    {
+                        "seed": 7,
+                        "feature_normalize": "blocks",
+                        "hybrid_latent_scale": 1.0,
+                        "latent_dim": 8,
+                        "hidden": 16,
+                        "best_feature": "raw_latent",
+                        "ranking": large["ranking"],
+                        "run_dir": "/tmp/capacity/large/seed_000007",
+                    }
+                ],
+                "seed_winners": [
+                    {
+                        "seed": 7,
+                        "feature_normalize": "blocks",
+                        "hybrid_latent_scale": 1.0,
+                        "latent_dim": 8,
+                        "hidden": 16,
+                        "near_winners": ["raw_latent"],
+                        "margin_to_runner_up": 0.10,
+                    }
+                ],
+                "feature_stability": [],
+                "feature_family_stability": [],
+            }
+        )
+
+        self.assertEqual(best_config["latent_dim"], 8)
+        self.assertEqual(best_config["hidden"], 16)
+        self.assertIn("latent_dim=8 hidden=16", report)
+        self.assertIn("- latent_dims: 4, 8", report)
+        self.assertIn("- hidden_sizes: 8, 16", report)
+        self.assertIn("| latent_dim | hidden | status |", report)
+        self.assertIn("| latent_dim | hidden | seed |", report)
+
+    def test_follow_up_defaults_inherit_best_capacity(self) -> None:
+        mod = _load_module()
+        parser = mod._build_parser()
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "summary.json"
+            source.write_text(
+                json.dumps(
+                    {
+                        "status": "improved",
+                        "best_feature": "raw_latent",
+                        "best_config": {
+                            "best_feature": "raw_latent",
+                            "feature_normalize": "blocks",
+                            "hybrid_latent_scale": 2.0,
+                            "latent_dim": 12,
+                            "hidden": 24,
+                            "mean_best_nll": 4.0,
+                        },
+                        "run": {
+                            "features": ["raw", "raw_latent"],
+                            "seeds": [7, 13, 17],
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            args = parser.parse_args(
+                ["models/samples/spiral_corpus_en", "--follow-up-from", str(source)]
+            )
+
+            record = mod._apply_follow_up_defaults(args, [])
+
+        self.assertEqual(args.latent_dim, 12)
+        self.assertEqual(args.hidden, 24)
+        self.assertIsNone(args.latent_dims)
+        self.assertIsNone(args.hidden_sizes)
+        self.assertEqual(record["applied_defaults"]["latent_dim"], 12)
+        self.assertEqual(record["applied_defaults"]["hidden"], 24)
+
     def test_aggregate_recovers_curve_metrics_from_legacy_history(self) -> None:
         mod = _load_module()
         summary = {
