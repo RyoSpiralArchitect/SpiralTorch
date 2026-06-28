@@ -256,6 +256,111 @@ def _run_history_summary_path(
     )
 
 
+def _config_label(config: dict[str, Any]) -> str | None:
+    feature = config.get("best_feature") or config.get("feature")
+    if not isinstance(feature, str) or not feature:
+        return None
+    parts = [feature]
+    normalize = config.get("feature_normalize")
+    if normalize is not None:
+        parts.append(f"normalize={normalize}")
+    scale = config.get("hybrid_latent_scale")
+    if scale is not None:
+        parts.append(f"scale={scale}")
+    return parts[0] if len(parts) == 1 else f"{parts[0]}@" + ",".join(parts[1:])
+
+
+def _recommended_command_for_kind(
+    manifest: dict[str, Any],
+    *,
+    target_kind: str | None,
+) -> dict[str, Any]:
+    recommendation = _mapping(manifest.get("recommendation"))
+    if target_kind == "follow_up":
+        return _mapping(recommendation.get("follow_up_command"))
+    if target_kind == "review":
+        return _mapping(recommendation.get("review_command"))
+    return {}
+
+
+def _expected_execution_summary_path(
+    manifest: dict[str, Any],
+    *,
+    target_kind: str | None,
+) -> Path | None:
+    command = _recommended_command_for_kind(manifest, target_kind=target_kind)
+    run_dir = _path_from(command.get("default_run_dir"))
+    return run_dir / "summary.json" if run_dir is not None else None
+
+
+def _compact_execution_summary(path: Path | None) -> dict[str, Any] | None:
+    if path is None:
+        return None
+    summary: dict[str, Any] = {
+        "schema": "st.llm_char_vae_context.command_bundle_execution_summary.v1",
+        "summary_path": str(path),
+        "exists": path.exists(),
+        "valid_json": None,
+        "error": None,
+    }
+    if not path.exists():
+        summary["valid_json"] = False
+        return summary
+    try:
+        payload = _read_json(path)
+    except Exception as exc:  # pragma: no cover - defensive artifact handling.
+        summary["valid_json"] = False
+        summary["error"] = str(exc)
+        return summary
+
+    best_config = _mapping(payload.get("best_config"))
+    follow_up_result = _mapping(payload.get("follow_up_result"))
+    follow_up_gate = _mapping(payload.get("follow_up_gate"))
+    follow_up_guidance = _mapping(payload.get("follow_up_guidance"))
+    follow_up_trajectory = _mapping(payload.get("follow_up_trajectory"))
+    next_command = _mapping(payload.get("next_follow_up_command"))
+    guided_command = _mapping(payload.get("guided_next_follow_up_command"))
+    summary.update(
+        {
+            "exists": True,
+            "valid_json": True,
+            "status": payload.get("status"),
+            "best_feature": payload.get("best_feature") or best_config.get("best_feature"),
+            "best_config_label": _config_label(best_config),
+            "mean_best_nll": best_config.get("mean_best_nll"),
+            "mean_best_nll_delta_vs_raw": best_config.get("mean_best_nll_delta_vs_raw"),
+            "runner_up_feature": best_config.get("runner_up_feature"),
+            "margin_to_runner_up": best_config.get("margin_to_runner_up"),
+            "combined_runner_up_margin_stderr": best_config.get(
+                "combined_runner_up_margin_stderr"
+            ),
+            "runner_up_within_uncertainty": best_config.get(
+                "runner_up_within_uncertainty"
+            ),
+            "follow_up_verdict": follow_up_result.get("verdict")
+            or follow_up_gate.get("effective_verdict"),
+            "follow_up_gate_failed": follow_up_gate.get("failed"),
+            "source_best_feature_retained": follow_up_result.get(
+                "source_best_feature_retained"
+            ),
+            "mean_best_nll_delta_vs_source": follow_up_result.get(
+                "mean_best_nll_delta_vs_source"
+            ),
+            "guidance_action": follow_up_guidance.get("action"),
+            "trajectory_action": follow_up_trajectory.get("trajectory_action"),
+            "trajectory_verdict": follow_up_trajectory.get("trajectory_verdict"),
+            "unsafe_promotion": follow_up_guidance.get("unsafe_promotion"),
+            "next_default_new_seeds": next_command.get("default_new_seeds"),
+            "next_default_new_seed_count": next_command.get("default_new_seed_count"),
+            "guided_next_enabled": guided_command.get("enabled"),
+            "guided_default_new_seeds": guided_command.get("default_new_seeds"),
+            "used_seed_history": next_command.get("used_seed_history")
+            or guided_command.get("used_seed_history"),
+        }
+    )
+    return summary
+
+
 def _runner_summary(
     *,
     command_dir: Path,
@@ -305,6 +410,8 @@ def _runner_summary(
         "started_at": started_at,
         "finished_at": finished_at,
         "duration_seconds": duration_seconds,
+        "expected_execution_summary_path": None,
+        "execution_summary": None,
         "bundle_ready": bool(inspection.get("bundle_ready")),
         "strict_ready": bool(inspection.get("strict_ready")),
         "missing_required": inspection.get("missing_required") or [],
@@ -339,6 +446,7 @@ def render_markdown(summary: dict[str, Any]) -> str:
     context = _mapping(summary.get("recommendation_context"))
     champion = _mapping(context.get("champion"))
     fallback = _mapping(context.get("fallback"))
+    execution_summary = _mapping(summary.get("execution_summary"))
     lines = [
         "# Char VAE Command Bundle Runner",
         "",
@@ -400,6 +508,40 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"- review_command_source: {_fmt(context.get('review_command_source'))}",
         f"- chain_sources: {_fmt(context.get('chain_sources'))}",
         "",
+        "## Execution Summary",
+        "",
+        (
+            "- expected_summary_path: "
+            f"{_fmt(summary.get('expected_execution_summary_path'))}"
+        ),
+        f"- summary_exists: {_fmt(execution_summary.get('exists'))}",
+        f"- summary_valid_json: {_fmt(execution_summary.get('valid_json'))}",
+        f"- summary_error: {_fmt(execution_summary.get('error'))}",
+        f"- execution_status: {_fmt(execution_summary.get('status'))}",
+        f"- execution_best_config: {_fmt(execution_summary.get('best_config_label'))}",
+        f"- execution_best_feature: {_fmt(execution_summary.get('best_feature'))}",
+        f"- execution_mean_best_nll: {_fmt(execution_summary.get('mean_best_nll'))}",
+        (
+            "- execution_delta_vs_raw: "
+            f"{_fmt(execution_summary.get('mean_best_nll_delta_vs_raw'))}"
+        ),
+        f"- execution_runner_up: {_fmt(execution_summary.get('runner_up_feature'))}",
+        f"- execution_margin: {_fmt(execution_summary.get('margin_to_runner_up'))}",
+        (
+            "- execution_margin_stderr: "
+            f"{_fmt(execution_summary.get('combined_runner_up_margin_stderr'))}"
+        ),
+        (
+            "- execution_follow_up_verdict: "
+            f"{_fmt(execution_summary.get('follow_up_verdict'))}"
+        ),
+        (
+            "- execution_gate_failed: "
+            f"{_fmt(execution_summary.get('follow_up_gate_failed'))}"
+        ),
+        f"- execution_guidance_action: {_fmt(execution_summary.get('guidance_action'))}",
+        f"- execution_next_seeds: {_fmt(execution_summary.get('next_default_new_seeds'))}",
+        "",
     ]
     return "\n".join(lines)
 
@@ -438,6 +580,8 @@ def _history_event(summary: dict[str, Any]) -> dict[str, Any]:
         "run_history_markdown_path",
         "run_history_summary_path",
         "recommendation_context",
+        "expected_execution_summary_path",
+        "execution_summary",
     )
     event = {
         "schema": "st.llm_char_vae_context.command_bundle_run_history_event.v1",
@@ -538,6 +682,7 @@ def summarize_history_events(
     latest = events[-1] if events else {}
     latest_context = _mapping(latest.get("recommendation_context"))
     latest_champion = _mapping(latest_context.get("champion"))
+    latest_execution = _mapping(latest.get("execution_summary"))
     status_counts = _count_values([_event_status(event) for event in events])
     target_kind_counts = _count_values([event.get("target_kind") for event in events])
     runner_wrapper_ok_counts = _bool_count_values(
@@ -549,12 +694,27 @@ def summarize_history_events(
             for event in events
         ]
     )
+    execution_verdict_counts = _count_values(
+        [
+            _mapping(event.get("execution_summary")).get("follow_up_verdict")
+            for event in events
+        ]
+    )
+    execution_guidance_action_counts = _count_values(
+        [
+            _mapping(event.get("execution_summary")).get("guidance_action")
+            for event in events
+        ]
+    )
     current_status, current_status_count = _status_streak(events)
     latest_executed = _latest_event(events, lambda event: bool(event.get("executed")))
     latest_executed_context = _mapping(
         latest_executed.get("recommendation_context") if latest_executed else None
     )
     latest_executed_champion = _mapping(latest_executed_context.get("champion"))
+    latest_executed_execution = _mapping(
+        latest_executed.get("execution_summary") if latest_executed else None
+    )
     last_problem = _latest_event(
         events,
         lambda event: _event_status(event) in {"blocked", "failed"},
@@ -578,12 +738,18 @@ def summarize_history_events(
             "runner_wrapper_executes_runner_command": latest.get(
                 "runner_wrapper_executes_runner_command"
             ),
+            "execution_summary_path": latest_execution.get("summary_path"),
+            "execution_verdict": latest_execution.get("follow_up_verdict"),
+            "execution_best_config": latest_execution.get("best_config_label"),
+            "execution_guidance_action": latest_execution.get("guidance_action"),
         },
         "signals": {
             "status_counts": status_counts,
             "target_kind_counts": target_kind_counts,
             "runner_wrapper_ok_counts": runner_wrapper_ok_counts,
             "recommendation_action_counts": action_counts,
+            "execution_verdict_counts": execution_verdict_counts,
+            "execution_guidance_action_counts": execution_guidance_action_counts,
             "current_status_streak": {
                 "status": current_status,
                 "count": current_status_count,
@@ -597,6 +763,16 @@ def summarize_history_events(
                 ),
                 "recommendation_action": latest_executed_context.get("action"),
                 "champion_config": latest_executed_champion.get("config"),
+                "execution_summary_path": latest_executed_execution.get("summary_path"),
+                "execution_verdict": latest_executed_execution.get(
+                    "follow_up_verdict"
+                ),
+                "execution_best_config": latest_executed_execution.get(
+                    "best_config_label"
+                ),
+                "execution_guidance_action": latest_executed_execution.get(
+                    "guidance_action"
+                ),
             },
             "last_problem": {
                 "status": _event_status(last_problem) if last_problem else None,
@@ -645,6 +821,12 @@ def render_history_markdown(
             "- latest_runner_wrapper_executes_runner_command: "
             f"{_fmt(latest.get('runner_wrapper_executes_runner_command'))}"
         ),
+        f"- latest_execution_verdict: {_fmt(latest.get('execution_verdict'))}",
+        f"- latest_execution_best_config: {_fmt(latest.get('execution_best_config'))}",
+        (
+            "- latest_execution_guidance_action: "
+            f"{_fmt(latest.get('execution_guidance_action'))}"
+        ),
         "",
         "## Decision Signals",
         "",
@@ -658,11 +840,31 @@ def render_history_markdown(
             "- recommendation_action_counts: "
             f"{_fmt_counts(_mapping(signals.get('recommendation_action_counts')))}"
         ),
+        (
+            "- execution_verdict_counts: "
+            f"{_fmt_counts(_mapping(signals.get('execution_verdict_counts')))}"
+        ),
+        (
+            "- execution_guidance_action_counts: "
+            f"{_fmt_counts(_mapping(signals.get('execution_guidance_action_counts')))}"
+        ),
         f"- current_status_streak: {_fmt_streak(status_streak.get('status'), int(status_streak.get('count') or 0))}",
         f"- latest_executed_status: {_fmt(latest_executed.get('status'))}",
         f"- latest_executed_finished_at: {_fmt(latest_executed.get('finished_at'))}",
         f"- latest_executed_action: {_fmt(latest_executed.get('recommendation_action'))}",
         f"- latest_executed_champion_config: {_fmt(latest_executed.get('champion_config'))}",
+        (
+            "- latest_executed_execution_verdict: "
+            f"{_fmt(latest_executed.get('execution_verdict'))}"
+        ),
+        (
+            "- latest_executed_execution_best_config: "
+            f"{_fmt(latest_executed.get('execution_best_config'))}"
+        ),
+        (
+            "- latest_executed_execution_guidance_action: "
+            f"{_fmt(latest_executed.get('execution_guidance_action'))}"
+        ),
         f"- last_problem_status: {_fmt(last_problem.get('status'))}",
         f"- last_problem_error: {_fmt(last_problem.get('error'))}",
         f"- last_problem_missing_required: {_fmt(last_problem.get('missing_required'))}",
@@ -670,12 +872,13 @@ def render_history_markdown(
         "## Recent Events",
         "",
         "| # | status | target | kind | dry_run | executed | returncode | "
-        "started_at | duration_seconds | action | champion |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "started_at | duration_seconds | action | champion | exec_verdict | exec_best |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for index, event in enumerate(events[-10:], max(1, len(events) - 9)):
         context = _mapping(event.get("recommendation_context"))
         champion = _mapping(context.get("champion"))
+        execution_summary = _mapping(event.get("execution_summary"))
         row = [
             index,
             _event_status(event),
@@ -688,6 +891,8 @@ def render_history_markdown(
             event.get("duration_seconds"),
             context.get("action"),
             champion.get("config"),
+            execution_summary.get("follow_up_verdict"),
+            execution_summary.get("best_config_label"),
         ]
         lines.append("| " + " | ".join(_md_cell(value) for value in row) + " |")
     lines.append("")
@@ -791,6 +996,10 @@ def run_bundle(
         command_scripts,
         target_kind=target_details.get("target_kind"),
     )
+    expected_summary_path = _expected_execution_summary_path(
+        manifest,
+        target_kind=target_details.get("target_kind"),
+    )
     json_out, markdown_out = _run_report_paths(
         command_dir,
         command_scripts,
@@ -830,6 +1039,15 @@ def run_bundle(
         *,
         append_history: bool = append_run_history,
     ) -> dict[str, Any]:
+        summary = dict(summary)
+        summary["expected_execution_summary_path"] = (
+            str(expected_summary_path) if expected_summary_path is not None else None
+        )
+        summary["execution_summary"] = (
+            _compact_execution_summary(expected_summary_path)
+            if summary.get("executed")
+            else None
+        )
         summary = write_run_artifacts(
             summary,
             json_out=json_out,

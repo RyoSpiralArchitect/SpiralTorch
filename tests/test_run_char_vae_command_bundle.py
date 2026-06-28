@@ -119,6 +119,48 @@ def _assert_recommendation_context(
     testcase.assertEqual(fallback["summary_path"], _chain_path(command_dir))
 
 
+def _assert_execution_summary(
+    testcase: unittest.TestCase,
+    payload: dict[str, object],
+    command_dir: Path,
+) -> None:
+    testcase.assertEqual(
+        payload["expected_execution_summary_path"],
+        str(command_dir / "executed_follow_up" / "summary.json"),
+    )
+    execution_summary = payload["execution_summary"]
+    testcase.assertIsInstance(execution_summary, dict)
+    assert isinstance(execution_summary, dict)
+    testcase.assertEqual(
+        execution_summary["schema"],
+        "st.llm_char_vae_context.command_bundle_execution_summary.v1",
+    )
+    testcase.assertTrue(execution_summary["exists"])
+    testcase.assertTrue(execution_summary["valid_json"])
+    testcase.assertIsNone(execution_summary["error"])
+    testcase.assertEqual(execution_summary["status"], "improved")
+    testcase.assertEqual(
+        execution_summary["best_config_label"],
+        "latent@normalize=blocks,scale=0.5",
+    )
+    testcase.assertEqual(execution_summary["best_feature"], "latent")
+    testcase.assertEqual(execution_summary["mean_best_nll"], 4.0)
+    testcase.assertEqual(execution_summary["mean_best_nll_delta_vs_raw"], -0.2)
+    testcase.assertEqual(execution_summary["runner_up_feature"], "raw")
+    testcase.assertEqual(execution_summary["margin_to_runner_up"], 0.2)
+    testcase.assertEqual(execution_summary["follow_up_verdict"], "improved")
+    testcase.assertFalse(execution_summary["follow_up_gate_failed"])
+    testcase.assertTrue(execution_summary["source_best_feature_retained"])
+    testcase.assertEqual(
+        execution_summary["guidance_action"],
+        "confirm_trajectory_with_fresh_seeds",
+    )
+    testcase.assertEqual(execution_summary["next_default_new_seeds"], "109,113,127")
+    testcase.assertEqual(execution_summary["next_default_new_seed_count"], 3)
+    testcase.assertTrue(execution_summary["guided_next_enabled"])
+    testcase.assertEqual(execution_summary["used_seed_history"], [7, 101, 103, 107])
+
+
 def _write_bundle(
     root: Path,
     *,
@@ -141,13 +183,75 @@ def _write_bundle(
     follow_up_script = command_dir / "recommended_follow_up.sh"
     review_script = command_dir / "recommended_review.sh"
     runner_script = command_dir / "run_recommended_next.sh"
+    execution_dir = command_dir / "executed_follow_up"
+    execution_summary_body = "\n".join(
+        [
+            'mkdir -p "executed_follow_up"',
+            'cat > "executed_follow_up/summary.json" <<\'JSON\'',
+            json.dumps(
+                {
+                    "schema": "st.modelzoo.run.v1",
+                    "status": "improved",
+                    "best_feature": "latent",
+                    "best_config": {
+                        "best_feature": "latent",
+                        "feature_normalize": "blocks",
+                        "hybrid_latent_scale": 0.5,
+                        "mean_best_nll": 4.0,
+                        "mean_best_nll_delta_vs_raw": -0.2,
+                        "runner_up_feature": "raw",
+                        "margin_to_runner_up": 0.2,
+                        "combined_runner_up_margin_stderr": 0.05,
+                        "runner_up_within_uncertainty": False,
+                    },
+                    "follow_up_result": {
+                        "verdict": "improved",
+                        "source_best_feature_retained": True,
+                        "mean_best_nll_delta_vs_source": -0.1,
+                    },
+                    "follow_up_gate": {
+                        "effective_verdict": "improved",
+                        "failed": False,
+                    },
+                    "follow_up_guidance": {
+                        "action": "confirm_trajectory_with_fresh_seeds",
+                        "unsafe_promotion": False,
+                    },
+                    "follow_up_trajectory": {
+                        "trajectory_action": "confirm_trajectory_with_fresh_seeds",
+                        "trajectory_verdict": "improved",
+                    },
+                    "next_follow_up_command": {
+                        "default_new_seeds": "109,113,127",
+                        "default_new_seed_count": 3,
+                        "used_seed_history": [7, 101, 103, 107],
+                    },
+                    "guided_next_follow_up_command": {
+                        "enabled": True,
+                        "default_new_seeds": "109,113,127",
+                    },
+                }
+            ),
+            "JSON",
+        ]
+    )
     _write_script(
         next_script,
-        'printf "next cwd=%s\\n" "$(pwd)" | tee runner.out',
+        "\n".join(
+            [
+                'printf "next cwd=%s\\n" "$(pwd)" | tee runner.out',
+                execution_summary_body,
+            ]
+        ),
     )
     _write_script(
         follow_up_script,
-        'printf "follow cwd=%s\\n" "$(pwd)" | tee runner.out',
+        "\n".join(
+            [
+                'printf "follow cwd=%s\\n" "$(pwd)" | tee runner.out',
+                execution_summary_body,
+            ]
+        ),
         executable=not non_executable_follow_up,
     )
     if include_review:
@@ -197,6 +301,7 @@ def _write_bundle(
                 "follow_up_command": {
                     "command_source": "next_follow_up_command",
                     "source_summary_path": str(chain),
+                    "default_run_dir": str(execution_dir),
                 },
                 "review_command": None,
             },
@@ -379,6 +484,11 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
             payload["command_argv"],
             ["bash", str(command_dir / "recommended_next.sh")],
         )
+        self.assertEqual(
+            payload["expected_execution_summary_path"],
+            str(command_dir / "executed_follow_up" / "summary.json"),
+        )
+        self.assertIsNone(payload["execution_summary"])
         self.assertFalse(runner_out_exists)
 
     def test_cli_runs_next_after_strict_inspection(self) -> None:
@@ -412,6 +522,7 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
         self.assertGreaterEqual(payload["duration_seconds"], 0.0)
         self.assertIn("next cwd=", payload["stdout"])
         self.assertIn(str(command_dir), runner_out)
+        _assert_execution_summary(self, payload, command_dir)
 
     def test_cli_blocks_when_strict_inspection_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -676,6 +787,8 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
         self.assertIsNone(run_report["run_history_jsonl_path"])
         self.assertIsNone(run_report["run_history_markdown_path"])
         self.assertIsNone(run_report["run_history_summary_path"])
+        _assert_execution_summary(self, payload, command_dir)
+        _assert_execution_summary(self, run_report, command_dir)
 
     def test_cli_surfaces_runner_wrapper_status_in_run_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -719,6 +832,7 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
         self.assertTrue(payload["runner_wrapper_ok"])
         self.assertTrue(payload["runner_wrapper_executes_runner_command"])
         self.assertTrue(payload["runner_wrapper_forwards_arguments"])
+        _assert_execution_summary(self, payload, command_dir)
         self.assertEqual(
             payload["runner_wrapper_status"],
             payload["inspection"]["runner_wrapper_status"],
@@ -726,6 +840,7 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
         self.assertTrue(run_report["runner_wrapper_ok"])
         self.assertTrue(run_report["runner_wrapper_executes_runner_command"])
         self.assertTrue(run_report["runner_wrapper_forwards_arguments"])
+        _assert_execution_summary(self, run_report, command_dir)
         self.assertEqual(
             run_report["runner_wrapper_status"],
             run_report["inspection"]["runner_wrapper_status"],
@@ -734,23 +849,40 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
         self.assertTrue(history_events[0]["runner_wrapper_ok"])
         self.assertTrue(history_events[0]["runner_wrapper_executes_runner_command"])
         self.assertTrue(history_events[0]["runner_wrapper_forwards_arguments"])
+        _assert_execution_summary(self, history_events[0], command_dir)
         self.assertEqual(history_summary["latest"]["runner_wrapper_ok"], True)
         self.assertEqual(
             history_summary["latest"]["runner_wrapper_executes_runner_command"],
             True,
         )
+        self.assertEqual(history_summary["latest"]["execution_verdict"], "improved")
+        self.assertEqual(
+            history_summary["latest"]["execution_best_config"],
+            "latent@normalize=blocks,scale=0.5",
+        )
         self.assertEqual(
             history_summary["signals"]["runner_wrapper_ok_counts"],
             {"yes": 1},
         )
+        self.assertEqual(
+            history_summary["signals"]["execution_verdict_counts"],
+            {"improved": 1},
+        )
         self.assertIn("runner_wrapper_ok: yes", run_markdown)
         self.assertIn("runner_wrapper_executes_runner_command: yes", run_markdown)
+        self.assertIn("execution_follow_up_verdict: improved", run_markdown)
+        self.assertIn(
+            "execution_best_config: latent@normalize=blocks,scale=0.5",
+            run_markdown,
+        )
         self.assertIn("latest_runner_wrapper_ok: yes", history_markdown)
         self.assertIn(
             "latest_runner_wrapper_executes_runner_command: yes",
             history_markdown,
         )
         self.assertIn("runner_wrapper_ok_counts: yes:1", history_markdown)
+        self.assertIn("latest_execution_verdict: improved", history_markdown)
+        self.assertIn("execution_verdict_counts: improved:1", history_markdown)
 
     def test_cli_refreshes_inspection_after_writing_history_reports(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -940,6 +1072,28 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
             "latent@normalize=blocks,scale=0.5",
         )
         self.assertEqual(
+            executed_summary["signals"]["latest_executed"]["execution_verdict"],
+            "improved",
+        )
+        self.assertEqual(
+            executed_summary["signals"]["latest_executed"]["execution_best_config"],
+            "latent@normalize=blocks,scale=0.5",
+        )
+        self.assertEqual(
+            executed_summary["signals"]["latest_executed"][
+                "execution_guidance_action"
+            ],
+            "confirm_trajectory_with_fresh_seeds",
+        )
+        self.assertEqual(
+            executed_summary["signals"]["execution_verdict_counts"],
+            {"improved": 1},
+        )
+        self.assertEqual(
+            executed_summary["signals"]["execution_guidance_action_counts"],
+            {"confirm_trajectory_with_fresh_seeds": 1},
+        )
+        self.assertEqual(
             executed_summary["signals"]["last_problem"],
             {"status": None, "error": None, "missing_required": None},
         )
@@ -973,6 +1127,7 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
             events[1]["recommendation_context"]["champion"]["config"],
             "latent@normalize=blocks,scale=0.5",
         )
+        _assert_execution_summary(self, events[1], command_dir)
         self.assertNotIn("stdout", events[1])
         self.assertNotIn("stderr", events[1])
         self.assertNotIn("inspection", events[1])
@@ -998,9 +1153,25 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
             "latest_executed_champion_config: latent@normalize=blocks,scale=0.5",
             history_markdown,
         )
+        self.assertIn(
+            "latest_executed_execution_verdict: improved",
+            history_markdown,
+        )
+        self.assertIn(
+            "latest_executed_execution_best_config: "
+            "latent@normalize=blocks,scale=0.5",
+            history_markdown,
+        )
+        self.assertIn("execution_verdict_counts: improved:1", history_markdown)
+        self.assertIn(
+            "execution_guidance_action_counts: "
+            "confirm_trajectory_with_fresh_seeds:1",
+            history_markdown,
+        )
         self.assertIn("last_problem_status: -", history_markdown)
         self.assertIn("## Recent Events", history_markdown)
         self.assertIn("| 2 | ok | next | follow_up | no | yes | 0 |", history_markdown)
+        self.assertIn("| improved | latent@normalize=blocks,scale=0.5 |", history_markdown)
 
     def test_cli_writes_explicit_run_report_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
