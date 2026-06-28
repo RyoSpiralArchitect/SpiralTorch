@@ -26,6 +26,8 @@ SMOKE_LATENT_SCALES = "0.5,1.0"
 SCOUT_LATENT_SCALES = "0.5,1.0,2.0,4.0"
 HYBRID4_LATENT_SCALES = "2.0,4.0"
 HYBRID4_DEEP_LATENT_SCALES = "4.0"
+CAPACITY_SCOUT_LATENT_DIMS = "6,8,12"
+CAPACITY_SCOUT_HIDDEN_SIZES = "8,16,32"
 
 PRESETS: dict[str, dict[str, Any]] = {
     "smoke": {
@@ -103,6 +105,27 @@ PRESETS: dict[str, dict[str, Any]] = {
         "seeds": "2001,2003,2005",
         "hybrid_latent_scales": HYBRID4_DEEP_LATENT_SCALES,
         "follow_up_seed_groups": "2007,2009,2011;2013,2015,2017",
+    },
+    "capacity_scout": {
+        "features": FOCUSED_HYBRID_FEATURES,
+        "feature_normalize_modes": "blocks",
+        "head_init": "xavier",
+        "window_chars": 32,
+        "latent_dim": 8,
+        "hidden": 16,
+        "latent_dims": CAPACITY_SCOUT_LATENT_DIMS,
+        "hidden_sizes": CAPACITY_SCOUT_HIDDEN_SIZES,
+        "epochs": 6,
+        "batches": 12,
+        "batch_size": 4,
+        "vae_epochs": 6,
+        "vae_batches": 12,
+        "vae_batch_size": 4,
+        "eval_samples": 128,
+        "gen": 0,
+        "seeds": "2001,2003",
+        "hybrid_latent_scales": HYBRID4_LATENT_SCALES,
+        "follow_up_seed_groups": "2005,2007,2009;2011,2013,2015",
     },
     "base": {
         "features": DEFAULT_FEATURES,
@@ -375,7 +398,28 @@ def _preset_value(args: argparse.Namespace, key: str) -> Any:
     value = getattr(args, key)
     if value is not None:
         return value
-    return PRESETS[args.preset][key]
+    return PRESETS[args.preset].get(key)
+
+
+def _capacity_flag_value(
+    args: argparse.Namespace,
+    *,
+    plural_key: str,
+    plural_flag: str,
+    singular_key: str,
+    singular_flag: str,
+) -> tuple[str, Any]:
+    plural_value = getattr(args, plural_key)
+    if plural_value is not None:
+        return plural_flag, plural_value
+    singular_value = getattr(args, singular_key)
+    if singular_value is not None:
+        return singular_flag, singular_value
+    preset = PRESETS[args.preset]
+    preset_plural = preset.get(plural_key)
+    if preset_plural is not None:
+        return plural_flag, preset_plural
+    return singular_flag, preset.get(singular_key)
 
 
 def _parent_command(args: argparse.Namespace, run_dir: Path) -> list[str]:
@@ -401,10 +445,28 @@ def _parent_command(args: argparse.Namespace, run_dir: Path) -> list[str]:
     _append_flag(command, "--seeds", _preset_value(args, "seeds"))
     _append_flag(command, "--run-dir", run_dir)
     _append_flag(command, "--follow-up-fail-on-verdict", args.follow_up_fail_on_verdict)
+    _append_flag(
+        command,
+        *_capacity_flag_value(
+            args,
+            plural_key="latent_dims",
+            plural_flag="--latent-dims",
+            singular_key="latent_dim",
+            singular_flag="--latent-dim",
+        ),
+    )
+    _append_flag(
+        command,
+        *_capacity_flag_value(
+            args,
+            plural_key="hidden_sizes",
+            plural_flag="--hidden-sizes",
+            singular_key="hidden",
+            singular_flag="--hidden",
+        ),
+    )
     for key, flag in (
         ("window_chars", "--window-chars"),
-        ("latent_dim", "--latent-dim"),
-        ("hidden", "--hidden"),
         ("epochs", "--epochs"),
         ("batches", "--batches"),
         ("batch_size", "--batch-size"),
@@ -452,7 +514,12 @@ def _config_label(config: dict[str, Any] | None) -> str | None:
     scale = config.get("hybrid_latent_scale")
     if feature is None:
         return None
-    return f"{feature}@normalize={normalize},scale={scale}"
+    label = f"{feature}@normalize={normalize},scale={scale}"
+    if config.get("latent_dim") is not None:
+        label += f",latent_dim={config.get('latent_dim')}"
+    if config.get("hidden") is not None:
+        label += f",hidden={config.get('hidden')}"
+    return label
 
 
 def _step_record(
@@ -939,6 +1006,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--features", default=None)
     parser.add_argument("--feature-normalize-modes", default=None)
     parser.add_argument("--hybrid-latent-scales", default=None)
+    parser.add_argument("--latent-dims", default=None)
+    parser.add_argument("--hidden-sizes", default=None)
     parser.add_argument("--head-init", choices=("legacy", "xavier"), default=None)
     parser.add_argument("--python", default="python3")
     parser.add_argument("--dry-run", action="store_true")
