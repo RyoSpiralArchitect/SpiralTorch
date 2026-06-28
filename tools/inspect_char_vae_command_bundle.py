@@ -186,6 +186,40 @@ def _has_command_dir_token(
     return any(_token_matches_path(token, command_dir) for token in tokens)
 
 
+def _resume_from_report_path_token(tokens: list[str] | None) -> str | None:
+    if tokens is None:
+        return None
+    prefix = "--resume-from-report="
+    for index, token in enumerate(tokens):
+        if token.startswith(prefix):
+            return token[len(prefix) :]
+        if token != "--resume-from-report":
+            continue
+        next_index = index + 1
+        if next_index < len(tokens) and not tokens[next_index].startswith("-"):
+            return tokens[next_index]
+        return None
+    return None
+
+
+def _resume_report_path_ok(
+    tokens: list[str] | None,
+    *,
+    summary_path: Path | None,
+    command_dir: Path | None,
+) -> bool | None:
+    if summary_path is None:
+        return None
+    if tokens is None:
+        return False
+    token = _resume_from_report_path_token(tokens)
+    if token is not None:
+        return _token_matches_path(token, summary_path)
+    if command_dir is None:
+        return None
+    return _path_matches(str(summary_path), command_dir / "run_loop.json")
+
+
 def _path_matches(value: Any, expected_path: Path | None) -> bool | None:
     if expected_path is None:
         return None
@@ -442,6 +476,12 @@ def _run_loop_status(
         "final_next_action_runnable": None,
         "continuation_command": None,
         "resume_from_report_command": None,
+        "resume_from_report_command_present": None,
+        "resume_from_report_command_ok": None,
+        "resume_from_report_command_target_dir_ok": None,
+        "resume_from_report_command_report_path_ok": None,
+        "resume_from_report_command_parse_error": None,
+        "resume_from_report_command_missing_required_flags": None,
         "continuation_command_expected": None,
         "continuation_command_present": None,
         "continuation_command_ok": None,
@@ -479,6 +519,45 @@ def _run_loop_status(
         resume_from_report_command
         if isinstance(resume_from_report_command, str)
         else None
+    )
+    resume_from_report_command_status = _declared_command(
+        "run_loop_resume_from_report_command",
+        resume_from_report_command,
+        required_flags=("run_char_vae_history_loop.py", "--resume-from-report"),
+        command_dir=command_dir,
+    )
+    resume_from_report_command_present = bool(
+        resume_from_report_command_status["present"]
+    )
+    resume_from_report_command_report_path_ok = (
+        _resume_report_path_ok(
+            resume_from_report_command_status.get("tokens"),
+            summary_path=summary_path,
+            command_dir=command_dir,
+        )
+        if resume_from_report_command_present
+        else None
+    )
+    resume_from_report_command_ok = (
+        bool(resume_from_report_command_status["ok"])
+        and resume_from_report_command_report_path_ok is not False
+        if resume_from_report_command_present
+        else None
+    )
+    resume_from_report_command_target_dir_ok = (
+        resume_from_report_command_status.get("target_command_dir_ok")
+        if resume_from_report_command_present
+        else None
+    )
+    resume_from_report_command_parse_error = (
+        resume_from_report_command_status.get("parse_error")
+        if resume_from_report_command_present
+        else None
+    )
+    resume_from_report_command_missing_required_flags = (
+        resume_from_report_command_status.get("missing_required_flags")
+        if resume_from_report_command_present
+        else []
     )
     continuation_command_status = _declared_command(
         "run_loop_continuation_command",
@@ -553,6 +632,22 @@ def _run_loop_status(
             "final_next_action_runnable": final_next_action_runnable,
             "continuation_command": continuation_command,
             "resume_from_report_command": resume_from_report_command,
+            "resume_from_report_command_present": (
+                resume_from_report_command_present
+            ),
+            "resume_from_report_command_ok": resume_from_report_command_ok,
+            "resume_from_report_command_target_dir_ok": (
+                resume_from_report_command_target_dir_ok
+            ),
+            "resume_from_report_command_report_path_ok": (
+                resume_from_report_command_report_path_ok
+            ),
+            "resume_from_report_command_parse_error": (
+                resume_from_report_command_parse_error
+            ),
+            "resume_from_report_command_missing_required_flags": (
+                resume_from_report_command_missing_required_flags
+            ),
             "continuation_command_expected": final_next_action_runnable,
             "continuation_command_present": continuation_command_present,
             "continuation_command_ok": continuation_command_ok,
@@ -584,6 +679,11 @@ def _run_loop_status_issues(status: dict[str, Any]) -> list[str]:
             issues.append("run_loop_continuation_command")
     elif continuation_present:
         issues.append("run_loop_continuation_command")
+    if (
+        status.get("resume_from_report_command_present") is True
+        and status.get("resume_from_report_command_ok") is not True
+    ):
+        issues.append("run_loop_resume_from_report_command")
     return issues
 
 
@@ -1065,6 +1165,12 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"- run_loop_final_next_action_runnable: {_fmt(_value(summary, 'run_loop_status', 'final_next_action_runnable'))}",
         f"- run_loop_continuation_command: {_fmt(_value(summary, 'run_loop_status', 'continuation_command'))}",
         f"- run_loop_resume_from_report_command: {_fmt(_value(summary, 'run_loop_status', 'resume_from_report_command'))}",
+        f"- run_loop_resume_from_report_command_present: {_fmt(_value(summary, 'run_loop_status', 'resume_from_report_command_present'))}",
+        f"- run_loop_resume_from_report_command_ok: {_fmt(_value(summary, 'run_loop_status', 'resume_from_report_command_ok'))}",
+        f"- run_loop_resume_from_report_command_target_dir_ok: {_fmt(_value(summary, 'run_loop_status', 'resume_from_report_command_target_dir_ok'))}",
+        f"- run_loop_resume_from_report_command_report_path_ok: {_fmt(_value(summary, 'run_loop_status', 'resume_from_report_command_report_path_ok'))}",
+        f"- run_loop_resume_from_report_command_parse_error: {_fmt(_value(summary, 'run_loop_status', 'resume_from_report_command_parse_error'))}",
+        f"- run_loop_resume_from_report_command_missing_required_flags: {_fmt(_value(summary, 'run_loop_status', 'resume_from_report_command_missing_required_flags'))}",
         f"- run_loop_continuation_command_expected: {_fmt(_value(summary, 'run_loop_status', 'continuation_command_expected'))}",
         f"- run_loop_continuation_command_present: {_fmt(_value(summary, 'run_loop_status', 'continuation_command_present'))}",
         f"- run_loop_continuation_command_ok: {_fmt(_value(summary, 'run_loop_status', 'continuation_command_ok'))}",
