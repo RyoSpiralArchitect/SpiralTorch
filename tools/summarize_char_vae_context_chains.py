@@ -1,0 +1,289 @@
+#!/usr/bin/env python3
+"""Summarize multiple char VAE context chain.json artifacts."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import sys
+from pathlib import Path
+from typing import Any
+
+
+SCHEMA = "st.llm_char_vae_context.chain_comparison.v1"
+
+
+def _chain_path(path: Path) -> Path:
+    return path / "chain.json" if path.is_dir() else path
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"{path} did not contain a JSON object")
+    return payload
+
+
+def _value(payload: dict[str, Any] | None, *keys: str) -> Any:
+    item: Any = payload
+    for key in keys:
+        if not isinstance(item, dict):
+            return None
+        item = item.get(key)
+    return item
+
+
+def _number(value: Any) -> float | None:
+    if isinstance(value, (int, float)) and math.isfinite(float(value)):
+        return float(value)
+    return None
+
+
+def _fmt(value: Any, digits: int = 6) -> str:
+    if value is None:
+        return "-"
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    if isinstance(value, float):
+        return f"{value:.{digits}f}"
+    return str(value)
+
+
+def _fmt_counts(counts: Any) -> str:
+    if not isinstance(counts, dict) or not counts:
+        return "-"
+    return ", ".join(f"{key}:{counts[key]}" for key in sorted(counts))
+
+
+def _fmt_groups(groups: Any) -> str:
+    if not isinstance(groups, list) or not groups:
+        return "-"
+    return ",".join(str(group) for group in groups)
+
+
+def _merge_counts(target: dict[str, int], counts: Any) -> None:
+    if not isinstance(counts, dict):
+        return
+    for key, value in counts.items():
+        try:
+            amount = int(value)
+        except (TypeError, ValueError):
+            continue
+        target[str(key)] = target.get(str(key), 0) + amount
+
+
+def _chain_row(path: Path, payload: dict[str, Any]) -> dict[str, Any]:
+    seed_summary = payload.get("follow_up_seed_resolution_summary")
+    seed_summary = seed_summary if isinstance(seed_summary, dict) else {}
+    accepted = payload.get("accepted_step")
+    accepted = accepted if isinstance(accepted, dict) else {}
+    best = payload.get("best_step")
+    best = best if isinstance(best, dict) else {}
+    return {
+        "source": str(path),
+        "preset": payload.get("preset"),
+        "run_root": payload.get("run_root"),
+        "dry_run": bool(payload.get("dry_run")),
+        "stopped_reason": payload.get("stopped_reason"),
+        "allowed_gate_stop": bool(payload.get("allowed_gate_stop")),
+        "planned_follow_ups": payload.get("planned_follow_ups"),
+        "attempted_follow_ups": payload.get("attempted_follow_ups"),
+        "accepted_step": accepted.get("index"),
+        "accepted_config": accepted.get("best_config_label")
+        or accepted.get("best_feature"),
+        "accepted_mean_best_nll": accepted.get("mean_best_nll"),
+        "best_step": best.get("index"),
+        "best_config": best.get("best_config_label") or best.get("best_feature"),
+        "best_mean_best_nll": best.get("mean_best_nll"),
+        "best_delta_vs_raw": best.get("mean_best_nll_delta_vs_raw"),
+        "runner_up_feature": best.get("runner_up_feature"),
+        "margin_to_runner_up": best.get("margin_to_runner_up"),
+        "runner_up_within_uncertainty": best.get("runner_up_within_uncertainty"),
+        "seed_source_counts": seed_summary.get("seed_source_counts", {}),
+        "command_source_counts": seed_summary.get("command_source_counts", {}),
+        "configured_seed_group_status_counts": seed_summary.get(
+            "configured_seed_group_status_counts",
+            {},
+        ),
+        "gate_failed_count": seed_summary.get("gate_failed_count", 0),
+        "nonzero_exit_count": seed_summary.get("nonzero_exit_count", 0),
+        "extra_explicit_seed_groups": payload.get("extra_explicit_seed_groups", []),
+        "unused_explicit_seed_groups": payload.get("unused_explicit_seed_groups", []),
+    }
+
+
+def _sort_rows(rows: list[dict[str, Any]], sort_by: str) -> list[dict[str, Any]]:
+    if sort_by == "input":
+        return rows
+    if sort_by == "accepted":
+        return sorted(
+            rows,
+            key=lambda row: (
+                _number(row.get("accepted_mean_best_nll")) is None,
+                _number(row.get("accepted_mean_best_nll")) or 0.0,
+                str(row.get("source")),
+            ),
+        )
+    if sort_by == "best":
+        return sorted(
+            rows,
+            key=lambda row: (
+                _number(row.get("best_mean_best_nll")) is None,
+                _number(row.get("best_mean_best_nll")) or 0.0,
+                str(row.get("source")),
+            ),
+        )
+    if sort_by == "attempted":
+        return sorted(
+            rows,
+            key=lambda row: (
+                -int(row.get("attempted_follow_ups") or 0),
+                str(row.get("source")),
+            ),
+        )
+    raise ValueError(f"unknown sort mode: {sort_by}")
+
+
+def _aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    seed_sources: dict[str, int] = {}
+    command_sources: dict[str, int] = {}
+    group_statuses: dict[str, int] = {}
+    stopped_reasons: dict[str, int] = {}
+    for row in rows:
+        _merge_counts(seed_sources, row.get("seed_source_counts"))
+        _merge_counts(command_sources, row.get("command_source_counts"))
+        _merge_counts(
+            group_statuses,
+            row.get("configured_seed_group_status_counts"),
+        )
+        stopped_reason = row.get("stopped_reason")
+        if stopped_reason:
+            label = str(stopped_reason)
+            stopped_reasons[label] = stopped_reasons.get(label, 0) + 1
+    return {
+        "chain_count": len(rows),
+        "attempted_follow_ups": sum(int(row.get("attempted_follow_ups") or 0) for row in rows),
+        "gate_failed_count": sum(int(row.get("gate_failed_count") or 0) for row in rows),
+        "nonzero_exit_count": sum(int(row.get("nonzero_exit_count") or 0) for row in rows),
+        "allowed_gate_stop_count": sum(1 for row in rows if row.get("allowed_gate_stop")),
+        "dry_run_count": sum(1 for row in rows if row.get("dry_run")),
+        "seed_source_counts": seed_sources,
+        "command_source_counts": command_sources,
+        "configured_seed_group_status_counts": group_statuses,
+        "stopped_reason_counts": stopped_reasons,
+    }
+
+
+def summarize_chains(paths: list[Path], *, sort_by: str = "input") -> dict[str, Any]:
+    rows: list[dict[str, Any]] = []
+    for raw_path in paths:
+        path = _chain_path(raw_path)
+        rows.append(_chain_row(path, _read_json(path)))
+    rows = _sort_rows(rows, sort_by)
+    return {
+        "schema": SCHEMA,
+        "sort_by": sort_by,
+        "aggregate": _aggregate(rows),
+        "chains": rows,
+    }
+
+
+def _render_markdown(summary: dict[str, Any]) -> str:
+    aggregate = summary.get("aggregate", {})
+    chains = summary.get("chains", [])
+    lines = [
+        "# Char VAE Context Chain Comparison",
+        "",
+        f"- schema: {summary.get('schema')}",
+        f"- sort_by: {summary.get('sort_by')}",
+        f"- chain_count: {_fmt(_value(aggregate, 'chain_count'))}",
+        f"- attempted_follow_ups: {_fmt(_value(aggregate, 'attempted_follow_ups'))}",
+        f"- gate_failed_count: {_fmt(_value(aggregate, 'gate_failed_count'))}",
+        f"- nonzero_exit_count: {_fmt(_value(aggregate, 'nonzero_exit_count'))}",
+        f"- allowed_gate_stop_count: {_fmt(_value(aggregate, 'allowed_gate_stop_count'))}",
+        f"- dry_run_count: {_fmt(_value(aggregate, 'dry_run_count'))}",
+        f"- seed_source_counts: {_fmt_counts(_value(aggregate, 'seed_source_counts'))}",
+        f"- command_source_counts: {_fmt_counts(_value(aggregate, 'command_source_counts'))}",
+        "- configured_seed_group_status_counts: "
+        f"{_fmt_counts(_value(aggregate, 'configured_seed_group_status_counts'))}",
+        f"- stopped_reason_counts: {_fmt_counts(_value(aggregate, 'stopped_reason_counts'))}",
+        "",
+        "| source | preset | stopped | planned | attempted | accepted | accepted_nll | best | best_nll | delta_vs_raw | runner_up | margin | tie | seed_sources | command_sources | group_statuses | gates | exits | extra | unused |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for row in chains if isinstance(chains, list) else []:
+        if not isinstance(row, dict):
+            continue
+        lines.append(
+            "| {source} | {preset} | {stopped} | {planned} | {attempted} | "
+            "{accepted} | {accepted_nll} | {best} | {best_nll} | "
+            "{delta} | {runner_up} | {margin} | {tie} | {seed_sources} | "
+            "{command_sources} | {group_statuses} | {gates} | {exits} | "
+            "{extra} | {unused} |".format(
+                source=_fmt(row.get("source")),
+                preset=_fmt(row.get("preset")),
+                stopped=_fmt(row.get("stopped_reason")),
+                planned=_fmt(row.get("planned_follow_ups")),
+                attempted=_fmt(row.get("attempted_follow_ups")),
+                accepted=_fmt(row.get("accepted_config")),
+                accepted_nll=_fmt(row.get("accepted_mean_best_nll")),
+                best=_fmt(row.get("best_config")),
+                best_nll=_fmt(row.get("best_mean_best_nll")),
+                delta=_fmt(row.get("best_delta_vs_raw")),
+                runner_up=_fmt(row.get("runner_up_feature")),
+                margin=_fmt(row.get("margin_to_runner_up")),
+                tie=_fmt(row.get("runner_up_within_uncertainty")),
+                seed_sources=_fmt_counts(row.get("seed_source_counts")),
+                command_sources=_fmt_counts(row.get("command_source_counts")),
+                group_statuses=_fmt_counts(
+                    row.get("configured_seed_group_status_counts")
+                ),
+                gates=_fmt(row.get("gate_failed_count")),
+                exits=_fmt(row.get("nonzero_exit_count")),
+                extra=_fmt_groups(row.get("extra_explicit_seed_groups")),
+                unused=_fmt_groups(row.get("unused_explicit_seed_groups")),
+            )
+        )
+    return "\n".join(lines) + "\n"
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "chains",
+        nargs="+",
+        type=Path,
+        help="chain.json files or directories containing chain.json",
+    )
+    parser.add_argument(
+        "--sort-by",
+        choices=["input", "accepted", "best", "attempted"],
+        default="input",
+        help="row ordering for the rendered comparison",
+    )
+    parser.add_argument("--json", action="store_true", help="print JSON instead of Markdown")
+    parser.add_argument("--json-out", type=Path, default=None)
+    parser.add_argument("--markdown-out", type=Path, default=None)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _build_parser().parse_args(argv)
+    summary = summarize_chains(args.chains, sort_by=args.sort_by)
+    markdown = _render_markdown(summary)
+    if args.json_out is not None:
+        args.json_out.parent.mkdir(parents=True, exist_ok=True)
+        args.json_out.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
+    if args.markdown_out is not None:
+        args.markdown_out.parent.mkdir(parents=True, exist_ok=True)
+        args.markdown_out.write_text(markdown)
+    if args.json:
+        print(json.dumps(summary, indent=2, sort_keys=True))
+    else:
+        print(markdown, end="")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
