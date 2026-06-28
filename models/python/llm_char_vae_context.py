@@ -482,6 +482,18 @@ def _train_vae(
     return history
 
 
+def _require_zspace_text_vae_binding() -> None:
+    nn = getattr(st, "nn", None)
+    if nn is not None and hasattr(nn, "ZSpaceTextVae"):
+        return
+    raise RuntimeError(
+        "spiraltorch.nn.ZSpaceTextVae is unavailable. The char VAE training "
+        "runner needs the native st-py bindings; from the repository root run "
+        "`PYTHONNOUSERSITE=1 maturin develop -m bindings/st-py/Cargo.toml` "
+        "or use a Python environment where the SpiralTorch native extension is installed."
+    )
+
+
 def _nll_from_prob(prob: float, epsilon: float = 1e-9) -> float:
     return -math.log(max(float(prob), epsilon))
 
@@ -1011,6 +1023,285 @@ def _finite_float(value: Any) -> float | None:
     return parsed
 
 
+def _int_or_none(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _safe_product(*values: Any) -> int | None:
+    product = 1
+    for value in values:
+        parsed = _int_or_none(value)
+        if parsed is None:
+            return None
+        product *= parsed
+    return product
+
+
+def _first_last_delta(history: Any, key: str) -> dict[str, Any]:
+    values = []
+    if isinstance(history, list):
+        values = [
+            parsed
+            for parsed in (
+                _finite_float(item.get(key))
+                for item in history
+                if isinstance(item, dict)
+            )
+            if parsed is not None
+        ]
+    first = values[0] if values else None
+    last = values[-1] if values else None
+    return {
+        "initial": first,
+        "final": last,
+        "initial_minus_final": first - last if first is not None and last is not None else None,
+    }
+
+
+def _best_ranking_entry(summary: dict[str, Any]) -> dict[str, Any] | None:
+    ranking = summary.get("ranking", [])
+    if not isinstance(ranking, list):
+        return None
+    return next((item for item in ranking if isinstance(item, dict)), None)
+
+
+def _ranking_entry(summary: dict[str, Any], feature: str) -> dict[str, Any] | None:
+    ranking = summary.get("ranking", [])
+    if not isinstance(ranking, list):
+        return None
+    return next(
+        (
+            item
+            for item in ranking
+            if isinstance(item, dict) and item.get("feature") == feature
+        ),
+        None,
+    )
+
+
+def _single_learning_evidence(summary: dict[str, Any]) -> dict[str, Any]:
+    run = summary.get("run", {})
+    vae = run.get("vae", {}) if isinstance(run.get("vae"), dict) else {}
+    vae_history = vae.get("history", [])
+    features = run.get("features", [])
+    feature_count = len(features) if isinstance(features, list) else 0
+    vae_steps = _safe_product(vae.get("epochs"), vae.get("batches"))
+    head_steps_per_feature = _safe_product(run.get("epochs"), run.get("batches"))
+    head_total_steps = (
+        head_steps_per_feature * feature_count
+        if head_steps_per_feature is not None
+        else None
+    )
+    save_path = vae.get("save_path")
+    checkpoint_path = pathlib.Path(str(save_path)) if save_path else None
+    checkpoint_exists = checkpoint_path.exists() if checkpoint_path is not None else False
+
+    raw_entry = _ranking_entry(summary, FEATURE_RAW)
+    best_entry = _best_ranking_entry(summary)
+    best_feature = best_entry.get("feature") if best_entry else summary.get("best_feature")
+    best_delta_vs_raw = None
+    if best_feature is not None:
+        best_delta_vs_raw = _finite_float(
+            summary.get("deltas", {}).get(f"{best_feature}_best_nll_vs_raw")
+        )
+    best_curve_delta_vs_raw = _finite_float(
+        best_entry.get("validation_nll_mean_delta_vs_raw") if best_entry else None
+    )
+
+    reasons: list[str] = []
+    if not checkpoint_exists:
+        reasons.append("checkpoint_missing")
+    if not vae_steps:
+        reasons.append("vae_not_trained")
+    if not head_total_steps:
+        reasons.append("heads_not_trained")
+    if raw_entry is None:
+        reasons.append("raw_baseline_missing")
+    if best_delta_vs_raw is None:
+        reasons.append("raw_delta_missing")
+
+    if best_delta_vs_raw is None:
+        status = "unknown"
+    elif best_delta_vs_raw < 0.0:
+        status = "beats_raw"
+    elif best_delta_vs_raw == 0.0:
+        status = "ties_raw"
+    else:
+        status = "behind_raw"
+    if not vae_steps or not head_total_steps:
+        status = "undertrained"
+    elif raw_entry is None:
+        status = "missing_raw_baseline"
+
+    latent_features = [
+        str(feature)
+        for feature in features
+        if str(feature) in {FEATURE_LATENT, FEATURE_RAW_LATENT, FEATURE_RECONSTRUCTION_LATENT}
+    ] if isinstance(features, list) else []
+
+    return {
+        "schema": "st.llm_char_vae_context.learning_evidence.v1",
+        "scope": "single_run",
+        "status": status,
+        "reasons": reasons,
+        "checkpoint": {
+            "path": str(checkpoint_path) if checkpoint_path is not None else None,
+            "exists": checkpoint_exists,
+            "loaded_from": vae.get("load_path"),
+        },
+        "data": {
+            "text_chars": run.get("text_chars"),
+            "train_chars": run.get("train_chars"),
+            "validation_chars": run.get("validation_chars"),
+            "window_chars": run.get("window_chars"),
+            "eval_samples": run.get("eval_samples"),
+        },
+        "vae": {
+            "steps": vae_steps,
+            "history_epochs": len(vae_history) if isinstance(vae_history, list) else 0,
+            "recon_loss": _first_last_delta(vae_history, "avg_recon_loss"),
+            "weighted_loss": _first_last_delta(vae_history, "avg_weighted_loss"),
+            "gradient_l2": _metric_stats(
+                item.get("avg_gradient_l2")
+                for item in vae_history
+                if isinstance(item, dict)
+            ),
+            "update_l2": _metric_stats(
+                item.get("avg_update_l2")
+                for item in vae_history
+                if isinstance(item, dict)
+            ),
+        },
+        "head": {
+            "feature_count": feature_count,
+            "features": features if isinstance(features, list) else [],
+            "latent_features": latent_features,
+            "steps_per_feature": head_steps_per_feature,
+            "total_steps": head_total_steps,
+            "hidden": run.get("hidden"),
+            "head_init": run.get("head_init"),
+        },
+        "raw_baseline": {
+            "best_nll": raw_entry.get("best_mean_nll") if raw_entry else None,
+            "best_accuracy": raw_entry.get("best_accuracy") if raw_entry else None,
+        },
+        "best": {
+            "feature": best_feature,
+            "best_nll": best_entry.get("best_mean_nll") if best_entry else None,
+            "best_accuracy": best_entry.get("best_accuracy") if best_entry else None,
+            "best_nll_delta_vs_raw": best_delta_vs_raw,
+            "validation_nll_mean_delta_vs_raw": best_curve_delta_vs_raw,
+        },
+    }
+
+
+def _aggregate_learning_evidence(summary: dict[str, Any]) -> dict[str, Any]:
+    run = summary.get("run", {})
+    ranking = summary.get("ranking", [])
+    best_ranking = next((item for item in ranking if isinstance(item, dict)), None)
+    best_feature = summary.get("best_feature") or (
+        best_ranking.get("feature") if best_ranking else None
+    )
+    seed_summaries = summary.get("seed_summaries", [])
+    config_summaries = summary.get("config_summaries") or summary.get("scale_summaries", [])
+    seed_count = int(run.get("seed_count") or 0)
+    run_count = int(run.get("run_count") or len(seed_summaries) or 0)
+    config_count = int(run.get("config_count") or len(config_summaries) or 0)
+    raw_entry = next(
+        (
+            item
+            for item in ranking
+            if isinstance(item, dict) and item.get("feature") == FEATURE_RAW
+        ),
+        None,
+    )
+    best_delta_vs_raw = _finite_float(
+        best_ranking.get("mean_best_nll_delta_vs_raw") if best_ranking else None
+    )
+    best_stability = next(
+        (
+            item
+            for item in summary.get("feature_stability", [])
+            if isinstance(item, dict) and item.get("feature") == best_feature
+        ),
+        {},
+    )
+    win_rate = _finite_float(best_stability.get("win_rate"))
+    near_win_rate = _finite_float(best_stability.get("near_win_rate"))
+
+    reasons: list[str] = []
+    if run_count <= 0:
+        reasons.append("no_runs")
+    if seed_count < 2:
+        reasons.append("single_seed_or_unset")
+    if config_count < 2:
+        reasons.append("single_config_or_unset")
+    if raw_entry is None:
+        reasons.append("raw_baseline_missing")
+    if best_delta_vs_raw is None:
+        reasons.append("raw_delta_missing")
+
+    if best_delta_vs_raw is None:
+        status = "unknown"
+    elif best_delta_vs_raw < 0.0:
+        status = "promising"
+        if win_rate is not None and win_rate < 0.5:
+            status = "promising_but_unstable"
+    elif best_delta_vs_raw == 0.0:
+        status = "ties_raw"
+    else:
+        status = "behind_raw"
+    if run_count <= 0:
+        status = "no_runs"
+    elif raw_entry is None:
+        status = "missing_raw_baseline"
+
+    best_config = summary.get("best_config") if isinstance(summary.get("best_config"), dict) else {}
+    return {
+        "schema": "st.llm_char_vae_context.learning_evidence.v1",
+        "scope": "aggregate_sweep",
+        "status": status,
+        "reasons": reasons,
+        "coverage": {
+            "run_count": run_count,
+            "seed_count": seed_count,
+            "config_count": config_count,
+            "normalize_count": run.get("normalize_count"),
+            "scale_count": run.get("scale_count"),
+            "features": run.get("features", []),
+        },
+        "raw_baseline": {
+            "present": raw_entry is not None,
+            "mean_best_nll": raw_entry.get("mean_best_nll") if raw_entry else None,
+            "mean_best_accuracy": raw_entry.get("mean_best_accuracy") if raw_entry else None,
+        },
+        "best": {
+            "feature": best_feature,
+            "mean_best_nll": best_ranking.get("mean_best_nll") if best_ranking else None,
+            "mean_best_accuracy": (
+                best_ranking.get("mean_best_accuracy") if best_ranking else None
+            ),
+            "mean_best_nll_delta_vs_raw": best_delta_vs_raw,
+            "win_rate": win_rate,
+            "near_win_rate": near_win_rate,
+        },
+        "best_config": {
+            "feature_normalize": best_config.get("feature_normalize"),
+            "hybrid_latent_scale": best_config.get("hybrid_latent_scale"),
+            "best_feature": best_config.get("best_feature"),
+            "mean_best_nll": best_config.get("mean_best_nll"),
+            "mean_best_nll_delta_vs_raw": best_config.get("mean_best_nll_delta_vs_raw"),
+            "runner_up_feature": best_config.get("runner_up_feature"),
+            "margin_to_runner_up": best_config.get("margin_to_runner_up"),
+            "runner_up_within_uncertainty": best_config.get("runner_up_within_uncertainty"),
+        },
+        "follow_up_ready": bool(best_config and run_count > 0),
+    }
+
+
 def _validation_mean_nll(validation: Any) -> float | None:
     if not isinstance(validation, dict):
         return None
@@ -1149,6 +1440,11 @@ def _markdown_table(headers: list[str], rows: list[list[str]]) -> list[str]:
 
 def _single_report(summary: dict[str, Any]) -> str:
     run = summary.get("run", {})
+    learning_evidence = (
+        summary.get("learning_evidence")
+        if isinstance(summary.get("learning_evidence"), dict)
+        else {}
+    )
     ranking_rows = []
     feature_results = {
         str(item.get("feature")): item
@@ -1201,6 +1497,42 @@ def _single_report(summary: dict[str, Any]) -> str:
         f"- latent_dim: {run.get('latent_dim')}",
         f"- summary_json: `summary.json`",
         "",
+        "## Learning Evidence",
+        "",
+        f"- status: {learning_evidence.get('status') or '-'}",
+        "- checkpoint: {exists} `{path}`".format(
+            exists=learning_evidence.get("checkpoint", {}).get("exists"),
+            path=learning_evidence.get("checkpoint", {}).get("path") or "-",
+        ),
+        "- vae_steps: {steps} recon_gain={recon_gain} weighted_gain={weighted_gain}".format(
+            steps=learning_evidence.get("vae", {}).get("steps"),
+            recon_gain=_fmt_float(
+                learning_evidence.get("vae", {})
+                .get("recon_loss", {})
+                .get("initial_minus_final")
+            ),
+            weighted_gain=_fmt_float(
+                learning_evidence.get("vae", {})
+                .get("weighted_loss", {})
+                .get("initial_minus_final")
+            ),
+        ),
+        "- head_steps: {steps} across {features} features".format(
+            steps=learning_evidence.get("head", {}).get("total_steps"),
+            features=learning_evidence.get("head", {}).get("feature_count"),
+        ),
+        "- best_vs_raw: {feature} delta={delta} curve_delta={curve_delta}".format(
+            feature=learning_evidence.get("best", {}).get("feature") or "-",
+            delta=_fmt_float(
+                learning_evidence.get("best", {}).get("best_nll_delta_vs_raw")
+            ),
+            curve_delta=_fmt_float(
+                learning_evidence.get("best", {}).get(
+                    "validation_nll_mean_delta_vs_raw"
+                )
+            ),
+        ),
+        "",
         "## Ranking",
         "",
     ]
@@ -1232,6 +1564,11 @@ def _single_report(summary: dict[str, Any]) -> str:
 
 def _aggregate_report(summary: dict[str, Any]) -> str:
     run = summary.get("run", {})
+    learning_evidence = (
+        summary.get("learning_evidence")
+        if isinstance(summary.get("learning_evidence"), dict)
+        else {}
+    )
     config_summaries = summary.get("config_summaries") or summary.get("scale_summaries", [])
     seed_total = len(summary.get("seed_summaries", []))
     if not seed_total:
@@ -1386,6 +1723,7 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
         f"- min_nll_delta: {run.get('min_nll_delta')}",
         f"- follow_up_confirm_tolerance: {run.get('follow_up_confirm_tolerance')}",
         f"- win_tolerance: {run.get('win_tolerance')}",
+        f"- learning_status: {learning_evidence.get('status') or '-'}",
         f"- summary_json: `summary.json`",
         "",
     ]
@@ -1398,6 +1736,51 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
     follow_up_guidance = summary.get("follow_up_guidance")
     best_generation_follow_up = summary.get("best_generation_follow_up_command")
     broadened_follow_up = summary.get("broadened_follow_up_command")
+    if learning_evidence:
+        coverage = learning_evidence.get("coverage", {})
+        best_evidence = learning_evidence.get("best", {})
+        best_config_evidence = learning_evidence.get("best_config", {})
+        lines.extend(
+            [
+                "## Learning Evidence",
+                "",
+                f"- status: {learning_evidence.get('status')}",
+                "- coverage: runs={runs} seeds={seeds} configs={configs} "
+                "normalizes={normalizes} scales={scales}".format(
+                    runs=coverage.get("run_count"),
+                    seeds=coverage.get("seed_count"),
+                    configs=coverage.get("config_count"),
+                    normalizes=coverage.get("normalize_count"),
+                    scales=coverage.get("scale_count"),
+                ),
+                "- best_vs_raw: {feature} mean_delta={delta} win_rate={win_rate} "
+                "near_win_rate={near_win_rate}".format(
+                    feature=best_evidence.get("feature") or "-",
+                    delta=_fmt_float(
+                        best_evidence.get("mean_best_nll_delta_vs_raw")
+                    ),
+                    win_rate=_fmt_percent(best_evidence.get("win_rate")),
+                    near_win_rate=_fmt_percent(best_evidence.get("near_win_rate")),
+                ),
+                "- best_config: {feature}@normalize={normalize},scale={scale} "
+                "delta={delta} runner_up={runner_up} margin={margin} "
+                "within_uncertainty={within}".format(
+                    feature=best_config_evidence.get("best_feature") or "-",
+                    normalize=best_config_evidence.get("feature_normalize") or "-",
+                    scale=best_config_evidence.get("hybrid_latent_scale"),
+                    delta=_fmt_float(
+                        best_config_evidence.get("mean_best_nll_delta_vs_raw")
+                    ),
+                    runner_up=best_config_evidence.get("runner_up_feature") or "-",
+                    margin=_fmt_float(
+                        best_config_evidence.get("margin_to_runner_up")
+                    ),
+                    within=best_config_evidence.get("runner_up_within_uncertainty"),
+                ),
+                f"- follow_up_ready: {learning_evidence.get('follow_up_ready')}",
+                "",
+            ]
+        )
     if isinstance(follow_up_result, dict):
         source_config = follow_up_result.get("source_best_config")
         evaluated_config = follow_up_result.get("evaluated_config")
@@ -5190,6 +5573,7 @@ def _run_single(args: argparse.Namespace, features: list[str]) -> dict[str, Any]
         encoding="utf-8",
     )
 
+    _require_zspace_text_vae_binding()
     if args.vae_load is not None:
         vae = st.nn.ZSpaceTextVae.load(str(args.vae_load))
     else:
@@ -5362,6 +5746,7 @@ def _run_single(args: argparse.Namespace, features: list[str]) -> dict[str, Any]
         "best_feature": best["feature"] if best is not None else None,
         "deltas": deltas,
     }
+    summary["learning_evidence"] = _single_learning_evidence(summary)
     _write_json(run_dir / "summary.json", summary)
     _write_text(run_dir / "report.md", _single_report(summary))
     if args.json:
@@ -5493,6 +5878,7 @@ def main(argv: list[str] | None = None) -> int:
                         "best_feature": summary.get("best_feature"),
                         "ranking": summary.get("ranking", []),
                         "deltas": summary.get("deltas", {}),
+                        "learning_evidence": summary.get("learning_evidence"),
                     },
                 )
 
@@ -5528,6 +5914,7 @@ def main(argv: list[str] | None = None) -> int:
                 "best_feature": summary.get("best_feature"),
                 "ranking": summary.get("ranking", []),
                 "deltas": summary.get("deltas", {}),
+                "learning_evidence": summary.get("learning_evidence"),
             }
             for summary in summaries
         ],
@@ -5677,6 +6064,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     if follow_up_trajectory is not None:
         aggregate["follow_up_trajectory"] = follow_up_trajectory
+    aggregate["learning_evidence"] = _aggregate_learning_evidence(aggregate)
     _write_json(root_run_dir / "summary.json", aggregate)
     _write_text(root_run_dir / "report.md", _aggregate_report(aggregate))
     if args.json:
