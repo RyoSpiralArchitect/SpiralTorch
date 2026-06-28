@@ -387,6 +387,22 @@ def _build_head(feature_dim: int, hidden: int, vocab_size: int, curvature: float
     return model
 
 
+def _head_load_path(args: argparse.Namespace, feature: str) -> pathlib.Path | None:
+    pattern = getattr(args, "head_load_pattern", None)
+    load_dir = getattr(args, "head_load_dir", None)
+    kind = str(getattr(args, "head_load_kind", "best"))
+    if pattern:
+        value = str(pattern).format(feature=feature, kind=kind)
+        path = pathlib.Path(value).expanduser()
+        if not path.is_absolute() and load_dir is not None:
+            path = pathlib.Path(load_dir).expanduser() / path
+        return path
+    if load_dir is None:
+        return None
+    suffix = "_best" if kind == "best" else ""
+    return pathlib.Path(load_dir).expanduser() / f"head_{feature}{suffix}.json"
+
+
 def _xavier_limit(rows: int, cols: int) -> float:
     fan_sum = max(1, int(rows) + int(cols))
     return math.sqrt(6.0 / float(fan_sum))
@@ -800,6 +816,18 @@ def _train_feature_head(
         float(args.temperature),
     )
     head_init = _rescale_head_init(head, str(args.head_init))
+    head_load_path = _head_load_path(args, feature)
+    head_load = {
+        "requested": head_load_path is not None,
+        "loaded": False,
+        "kind": str(getattr(args, "head_load_kind", "best")),
+        "path": str(head_load_path) if head_load_path is not None else None,
+    }
+    if head_load_path is not None:
+        if not head_load_path.exists():
+            raise FileNotFoundError(head_load_path)
+        st.nn.load(str(head_load_path), head)
+        head_load["loaded"] = True
     head.attach_hypergrad(curvature=float(args.curvature), learning_rate=float(args.lr))
     trainer = st.nn.ModuleTrainer(
         backend=str(args.backend),
@@ -841,7 +869,7 @@ def _train_feature_head(
 
     best_validation = initial_validation
     best_epoch: int | None = None
-    best_checkpoint_source = "init"
+    best_checkpoint_source = "loaded" if head_load["loaded"] else "init"
     st.nn.save(str(best_weights_path), head)
     history: list[dict[str, Any]] = []
     for epoch in range(max(0, int(args.epochs))):
@@ -940,6 +968,7 @@ def _train_feature_head(
         "feature": feature,
         "feature_dim": feature_dim,
         "head_init": head_init,
+        "head_load": head_load,
         "initial_validation": initial_validation,
         "best_validation": best_validation,
         "best_epoch": best_epoch,
@@ -1166,6 +1195,7 @@ def _ranking_entry(summary: dict[str, Any], feature: str) -> dict[str, Any] | No
 
 def _single_learning_evidence(summary: dict[str, Any]) -> dict[str, Any]:
     run = summary.get("run", {})
+    eval_only = bool(run.get("eval_only"))
     vae = run.get("vae", {}) if isinstance(run.get("vae"), dict) else {}
     vae_history = vae.get("history", [])
     features = run.get("features", [])
@@ -1182,11 +1212,21 @@ def _single_learning_evidence(summary: dict[str, Any]) -> dict[str, Any]:
     checkpoint_exists = checkpoint_path.exists() if checkpoint_path is not None else False
     feature_payloads = summary.get("features", [])
     best_head_checkpoints: list[dict[str, Any]] = []
+    loaded_head_checkpoints: list[dict[str, Any]] = []
     missing_best_head_checkpoints: list[str] = []
     if isinstance(feature_payloads, list):
         for item in feature_payloads:
             if not isinstance(item, dict):
                 continue
+            head_load = item.get("head_load") if isinstance(item.get("head_load"), dict) else {}
+            if head_load.get("loaded"):
+                loaded_head_checkpoints.append(
+                    {
+                        "feature": str(item.get("feature") or "-"),
+                        "path": head_load.get("path"),
+                        "kind": head_load.get("kind"),
+                    }
+                )
             checkpoint = (
                 item.get("best_checkpoint")
                 if isinstance(item.get("best_checkpoint"), dict)
@@ -1229,9 +1269,11 @@ def _single_learning_evidence(summary: dict[str, Any]) -> dict[str, Any]:
         reasons.append("checkpoint_missing")
     if missing_best_head_checkpoints:
         reasons.append("best_head_checkpoint_missing")
-    if not vae_steps:
+    if eval_only and not loaded_head_checkpoints:
+        reasons.append("loaded_head_checkpoint_missing")
+    if not vae_steps and not eval_only:
         reasons.append("vae_not_trained")
-    if not head_total_steps:
+    if not head_total_steps and not eval_only:
         reasons.append("heads_not_trained")
     if raw_entry is None:
         reasons.append("raw_baseline_missing")
@@ -1248,6 +1290,15 @@ def _single_learning_evidence(summary: dict[str, Any]) -> dict[str, Any]:
         status = "behind_raw"
     if not vae_steps or not head_total_steps:
         status = "undertrained"
+    if eval_only and loaded_head_checkpoints:
+        if best_delta_vs_raw is None:
+            status = "eval_only"
+        elif best_delta_vs_raw < 0.0:
+            status = "beats_raw"
+        elif best_delta_vs_raw == 0.0:
+            status = "ties_raw"
+        else:
+            status = "behind_raw"
     elif raw_entry is None:
         status = "missing_raw_baseline"
 
@@ -1298,6 +1349,10 @@ def _single_learning_evidence(summary: dict[str, Any]) -> dict[str, Any]:
             "total_steps": head_total_steps,
             "hidden": run.get("hidden"),
             "head_init": run.get("head_init"),
+            "loaded_checkpoints": {
+                "count": len(loaded_head_checkpoints),
+                "items": loaded_head_checkpoints,
+            },
             "best_checkpoints": {
                 "count": len(best_head_checkpoints),
                 "all_exist": bool(best_head_checkpoints)
@@ -1590,10 +1645,12 @@ def _single_report(summary: dict[str, Any]) -> str:
             if isinstance(result.get("best_checkpoint"), dict)
             else {}
         )
+        head_load = result.get("head_load") if isinstance(result.get("head_load"), dict) else {}
         ranking_rows.append(
             [
                 feature,
                 str(item.get("best_epoch") if item.get("best_epoch") is not None else "init"),
+                "yes" if head_load.get("loaded") else "no",
                 str(best_checkpoint.get("source") or "-"),
                 "yes" if best_checkpoint.get("exists") else "no",
                 _fmt_float(item.get("best_mean_nll")),
@@ -1630,6 +1687,7 @@ def _single_report(summary: dict[str, Any]) -> str:
         f"- feature_normalize: {run.get('feature_normalize')}",
         f"- hybrid_latent_scale: {run.get('hybrid_latent_scale')}",
         f"- head_init: {run.get('head_init')}",
+        f"- eval_only: {run.get('eval_only')}",
         f"- window_chars: {run.get('window_chars')}",
         f"- latent_dim: {run.get('latent_dim')}",
         f"- summary_json: `summary.json`",
@@ -1657,6 +1715,11 @@ def _single_report(summary: dict[str, Any]) -> str:
         "- head_steps: {steps} across {features} features".format(
             steps=learning_evidence.get("head", {}).get("total_steps"),
             features=learning_evidence.get("head", {}).get("feature_count"),
+        ),
+        "- loaded_head_checkpoints: {count}".format(
+            count=learning_evidence.get("head", {})
+            .get("loaded_checkpoints", {})
+            .get("count")
         ),
         "- best_head_checkpoints: {count} all_exist={all_exist} missing={missing}".format(
             count=learning_evidence.get("head", {})
@@ -1696,6 +1759,7 @@ def _single_report(summary: dict[str, Any]) -> str:
             [
                 "feature",
                 "best_epoch",
+                "loaded",
                 "best_ckpt",
                 "ckpt_exists",
                 "best_nll",
@@ -5705,6 +5769,32 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--head-load-dir",
+        type=pathlib.Path,
+        default=None,
+        help=(
+            "directory containing saved prediction heads; by default loads "
+            "head_<feature>_best.json for each requested feature"
+        ),
+    )
+    parser.add_argument(
+        "--head-load-kind",
+        choices=("best", "final"),
+        default="best",
+        help=(
+            "which default head file to load from --head-load-dir: "
+            "best=head_<feature>_best.json, final=head_<feature>.json"
+        ),
+    )
+    parser.add_argument(
+        "--head-load-pattern",
+        default=None,
+        help=(
+            "optional head path pattern with {feature} and {kind}; relative "
+            "patterns are resolved under --head-load-dir when provided"
+        ),
+    )
+    parser.add_argument(
         "--feature-normalize",
         choices=NORMALIZE_CHOICES,
         default="none",
@@ -5763,6 +5853,14 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--top-k", type=int, default=16)
     parser.add_argument("--vae-load", type=pathlib.Path, default=None)
     parser.add_argument("--vae-save", type=pathlib.Path, default=None)
+    parser.add_argument(
+        "--eval-only",
+        action="store_true",
+        help=(
+            "load a VAE and feature heads, skip training epochs, and only "
+            "evaluate/generate artifacts for the requested features"
+        ),
+    )
     parser.add_argument("--vae-epochs", type=int, default=2)
     parser.add_argument("--vae-batches", type=int, default=16)
     parser.add_argument("--vae-batch-size", type=int, default=8)
@@ -5850,6 +5948,11 @@ def _validate_args(args: argparse.Namespace) -> None:
         raise ValueError("--win-tolerance must be non-negative and finite")
     if args.hybrid_latent_scale < 0.0 or not math.isfinite(args.hybrid_latent_scale):
         raise ValueError("--hybrid-latent-scale must be non-negative and finite")
+    if args.eval_only:
+        if args.vae_load is None:
+            raise ValueError("--eval-only requires --vae-load")
+        if args.head_load_dir is None and args.head_load_pattern is None:
+            raise ValueError("--eval-only requires --head-load-dir or --head-load-pattern")
 
 
 def _run_single(args: argparse.Namespace, features: list[str]) -> dict[str, Any]:
@@ -5936,6 +6039,12 @@ def _run_single(args: argparse.Namespace, features: list[str]) -> dict[str, Any]
         "hybrid_latent_scale": float(args.hybrid_latent_scale),
         "hidden": int(args.hidden),
         "head_init": str(args.head_init),
+        "head_load": {
+            "dir": str(args.head_load_dir) if args.head_load_dir is not None else None,
+            "kind": str(args.head_load_kind),
+            "pattern": str(args.head_load_pattern) if args.head_load_pattern else None,
+        },
+        "eval_only": bool(args.eval_only),
         "epochs": int(args.epochs),
         "batches": int(args.batches),
         "batch_size": int(args.batch_size),
@@ -6043,6 +6152,7 @@ def _run_single(args: argparse.Namespace, features: list[str]) -> dict[str, Any]
                 "validation_nll_final_minus_best": item[
                     "validation_nll_final_minus_best"
                 ],
+                "head_load": item.get("head_load"),
                 "weights_path": item.get("weights_path"),
                 "best_weights_path": item.get("best_weights_path"),
                 "best_checkpoint": item.get("best_checkpoint"),
@@ -6076,6 +6186,9 @@ def main(argv: list[str] | None = None) -> int:
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     args = parser.parse_args(raw_argv)
     follow_up = _apply_follow_up_defaults(args, raw_argv)
+    if args.eval_only:
+        args.epochs = 0
+        args.vae_epochs = 0
     _validate_args(args)
     features = _parse_features(str(args.features))
     seeds = _parse_seeds(int(args.seed), args.seeds)
@@ -6170,6 +6283,12 @@ def main(argv: list[str] | None = None) -> int:
         "seeds": seeds,
         "seed_count": len(seeds),
         "head_init": str(args.head_init),
+        "head_load": {
+            "dir": str(args.head_load_dir) if args.head_load_dir is not None else None,
+            "kind": str(args.head_load_kind),
+            "pattern": str(args.head_load_pattern) if args.head_load_pattern else None,
+        },
+        "eval_only": bool(args.eval_only),
         "min_nll_delta": float(args.min_nll_delta),
         "follow_up_confirm_tolerance": float(args.follow_up_confirm_tolerance),
         "win_tolerance": float(args.win_tolerance),

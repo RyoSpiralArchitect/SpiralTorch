@@ -538,6 +538,50 @@ class CharVaeContextChainTests(unittest.TestCase):
             "192",
         )
 
+        capacity_train = parser.parse_args(
+            ["models/samples/spiral_corpus_en", "--preset", "capacity_train"]
+        )
+        capacity_train_command = mod._parent_command(
+            capacity_train,
+            Path("/tmp/capacity_train"),
+        )
+        self.assertEqual(
+            capacity_train_command[capacity_train_command.index("--latent-dim") + 1],
+            "12",
+        )
+        self.assertEqual(
+            capacity_train_command[capacity_train_command.index("--hidden") + 1],
+            "64",
+        )
+        self.assertNotIn("--latent-dims", capacity_train_command)
+        self.assertNotIn("--hidden-sizes", capacity_train_command)
+        self.assertEqual(
+            capacity_train_command[
+                capacity_train_command.index("--hybrid-latent-scales") + 1
+            ],
+            "4.0",
+        )
+        self.assertEqual(
+            capacity_train_command[capacity_train_command.index("--seeds") + 1],
+            "211,223,227",
+        )
+        self.assertEqual(
+            capacity_train_command[capacity_train_command.index("--epochs") + 1],
+            "16",
+        )
+        self.assertEqual(
+            capacity_train_command[capacity_train_command.index("--batches") + 1],
+            "32",
+        )
+        self.assertEqual(
+            capacity_train_command[capacity_train_command.index("--vae-epochs") + 1],
+            "12",
+        )
+        self.assertEqual(
+            capacity_train_command[capacity_train_command.index("--eval-samples") + 1],
+            "256",
+        )
+
         explicit = parser.parse_args(
             [
                 "models/samples/spiral_corpus_en",
