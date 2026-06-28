@@ -208,6 +208,7 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
         self.assertEqual(payload["missing_required"], [])
         self.assertEqual(payload["missing_optional"], [])
         self.assertEqual(payload["declared_command_issues"], [])
+        self.assertEqual(payload["run_loop_status_issues"], [])
         self.assertEqual(payload["runner_command"], _runner_command(command_dir))
         self.assertEqual(
             payload["history_report_command"],
@@ -394,6 +395,7 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
         self.assertIn("--history-report-only", markdown_result.stdout)
         self.assertIn("--write-loop-report", markdown_result.stdout)
         self.assertIn("run_history_summary", markdown_result.stdout)
+        self.assertIn("run_loop_status_issues: -", markdown_result.stdout)
         self.assertIn("run_history_summary_valid_json: -", markdown_result.stdout)
         self.assertIn("run_loop_valid_json: -", markdown_result.stdout)
 
@@ -850,6 +852,9 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         payload = json.loads(result.stdout)
+        self.assertTrue(payload["strict_ready"])
+        self.assertEqual(payload["missing_optional"], [])
+        self.assertEqual(payload["run_loop_status_issues"], [])
         status = payload["run_loop_status"]
         self.assertTrue(status["exists"])
         self.assertTrue(status["valid_json"])
@@ -1120,6 +1125,14 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
                 stderr=subprocess.PIPE,
                 check=False,
             )
+            strict_result = subprocess.run(
+                ["python3", "-P", str(SCRIPT), str(command_dir), "--json", "--strict"],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
             markdown_result = subprocess.run(
                 ["python3", "-P", str(SCRIPT), str(command_dir)],
                 cwd=ROOT,
@@ -1130,7 +1143,19 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
             )
 
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(strict_result.returncode, 1)
         payload = json.loads(result.stdout)
+        strict_payload = json.loads(strict_result.stdout)
+        self.assertFalse(payload["strict_ready"])
+        self.assertEqual(
+            payload["run_loop_status_issues"],
+            ["run_loop_command_dir", "run_loop_continuation_command"],
+        )
+        self.assertEqual(
+            payload["missing_optional"],
+            ["run_loop_command_dir", "run_loop_continuation_command"],
+        )
+        self.assertFalse(strict_payload["strict_ready"])
         status = payload["run_loop_status"]
         self.assertFalse(status["command_dir_matches"])
         self.assertIs(status["continuation_command_expected"], True)
@@ -1139,6 +1164,17 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
         self.assertIs(status["continuation_command_target_dir_ok"], False)
         self.assertEqual(status["continuation_command_missing_required_flags"], [])
         self.assertEqual(markdown_result.returncode, 0, markdown_result.stderr)
+        self.assertIn("strict_ready: no", markdown_result.stdout)
+        self.assertIn(
+            "missing_optional: run_loop_command_dir, "
+            "run_loop_continuation_command",
+            markdown_result.stdout,
+        )
+        self.assertIn(
+            "run_loop_status_issues: run_loop_command_dir, "
+            "run_loop_continuation_command",
+            markdown_result.stdout,
+        )
         self.assertIn("run_loop_command_dir_matches: no", markdown_result.stdout)
         self.assertIn(
             "run_loop_continuation_command_target_dir_ok: no",

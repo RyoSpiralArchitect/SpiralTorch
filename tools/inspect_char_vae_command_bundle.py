@@ -555,6 +555,27 @@ def _run_loop_status(
     return status
 
 
+def _run_loop_status_issues(status: dict[str, Any]) -> list[str]:
+    if status.get("exists") is not True:
+        return []
+    issues: list[str] = []
+    if status.get("valid_json") is not True:
+        issues.append("run_loop_json")
+        return issues
+    if status.get("schema_ok") is not True:
+        issues.append("run_loop_schema")
+    if status.get("command_dir_matches") is not True:
+        issues.append("run_loop_command_dir")
+    continuation_expected = status.get("continuation_command_expected") is True
+    continuation_present = status.get("continuation_command_present") is True
+    if continuation_expected:
+        if status.get("continuation_command_ok") is not True:
+            issues.append("run_loop_continuation_command")
+    elif continuation_present:
+        issues.append("run_loop_continuation_command")
+    return issues
+
+
 def inspect_bundle(command_dir: Path) -> dict[str, Any]:
     command_dir = command_dir.resolve()
     manifest_path = command_dir / "recommendation.json"
@@ -750,13 +771,6 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
         for command in declared_commands
         if command["present"] and not command["ok"]
     ]
-    missing_required = [
-        check["label"] for check in checks if check["required"] and not check["ok"]
-    ]
-    missing_optional = [
-        check["label"] for check in checks if not check["required"] and not check["ok"]
-    ]
-    missing_optional.extend(declared_command_issues)
     run_history_summary_status = _run_history_summary_status(
         summary_path=run_history_summary_path,
         history_path=run_history_jsonl_path,
@@ -765,6 +779,15 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
         summary_path=run_loop_json_path,
         command_dir=command_dir,
     )
+    run_loop_status_issues = _run_loop_status_issues(run_loop_status)
+    missing_required = [
+        check["label"] for check in checks if check["required"] and not check["ok"]
+    ]
+    missing_optional = [
+        check["label"] for check in checks if not check["required"] and not check["ok"]
+    ]
+    missing_optional.extend(declared_command_issues)
+    missing_optional.extend(run_loop_status_issues)
     return {
         "schema": SCHEMA,
         "command_dir": str(command_dir),
@@ -833,6 +856,7 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
         ),
         "run_history_summary_status": run_history_summary_status,
         "run_loop_status": run_loop_status,
+        "run_loop_status_issues": run_loop_status_issues,
         "chain_source_count": len(chain_source_paths),
         "missing_chain_sources": missing_chain_sources,
     }
@@ -911,6 +935,7 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"- run_history_summary_path: {_fmt(summary.get('run_history_summary_path'))}",
         f"- run_loop_json_path: {_fmt(summary.get('run_loop_json_path'))}",
         f"- run_loop_markdown_path: {_fmt(summary.get('run_loop_markdown_path'))}",
+        f"- run_loop_status_issues: {_fmt_list(summary.get('run_loop_status_issues'))}",
         f"- run_loop_valid_json: {_fmt(_value(summary, 'run_loop_status', 'valid_json'))}",
         f"- run_loop_schema_ok: {_fmt(_value(summary, 'run_loop_status', 'schema_ok'))}",
         f"- run_loop_command_dir_matches: {_fmt(_value(summary, 'run_loop_status', 'command_dir_matches'))}",
