@@ -683,7 +683,7 @@ def _runner_command_line(command_dir: Any) -> str | None:
     return (
         "PYTHONNOUSERSITE=1 python3 -P "
         f"{shlex.quote(str(script_path))} "
-        f"{shlex.quote(command_dir)} --write-inspection-report"
+        f"{shlex.quote(command_dir)} --write-inspection-report --write-run-report"
     )
 
 
@@ -768,6 +768,8 @@ def _render_command_readme(
         f"- target_kind: {_fmt_readme_value(command_scripts.get('next_kind'))}",
         f"- run: {_fmt_readme_value(_run_line(command_scripts.get('next_path')))}",
         f"- inspected_run: {_fmt_readme_value(command_scripts.get('runner_command'))}",
+        f"- run_json: {_fmt_readme_value(command_scripts.get('run_json_path'))}",
+        f"- run_markdown: {_fmt_readme_value(command_scripts.get('run_markdown_path'))}",
         "",
         "## Safe Follow-Up",
         "",
@@ -910,6 +912,8 @@ def _write_recommended_command_scripts(
         "inspection_missing_required": [],
         "inspection_missing_optional": [],
         "runner_command": _runner_command_line(str(out_dir)),
+        "run_json_path": str(out_dir / "run.json"),
+        "run_markdown_path": str(out_dir / "run.md"),
         "manifest_path": str(manifest_path),
         "readme_path": str(readme_path),
     }
@@ -1016,6 +1020,8 @@ def _render_markdown(summary: dict[str, Any]) -> str:
         f"- command_inspection_missing_required: {_fmt_list(_value(command_scripts, 'inspection_missing_required'))}",
         f"- command_inspection_missing_optional: {_fmt_list(_value(command_scripts, 'inspection_missing_optional'))}",
         f"- command_runner: {_fmt(_value(command_scripts, 'runner_command'))}",
+        f"- command_run_json_path: {_fmt(_value(command_scripts, 'run_json_path'))}",
+        f"- command_run_markdown_path: {_fmt(_value(command_scripts, 'run_markdown_path'))}",
         "",
         "## Chains",
         "",

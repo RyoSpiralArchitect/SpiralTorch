@@ -85,6 +85,8 @@ def _write_bundle(
                 "comparison_markdown_path": str(comparison_markdown),
                 "inspection_json_path": str(command_dir / "inspection.json"),
                 "inspection_markdown_path": str(command_dir / "inspection.md"),
+                "run_json_path": str(command_dir / "run.json"),
+                "run_markdown_path": str(command_dir / "run.md"),
                 "readme_path": str(command_dir / "README.md"),
             },
         },
@@ -208,6 +210,7 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
                     str(SCRIPT),
                     str(command_dir),
                     "--write-inspection-report",
+                    "--write-run-report",
                     "--json",
                 ],
                 cwd=ROOT,
@@ -218,17 +221,60 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
             )
             payload = json.loads(result.stdout)
             markdown_exists = (command_dir / "inspection.md").exists()
+            run_markdown_exists = (command_dir / "run.md").exists()
             inspection = json.loads(
                 (command_dir / "inspection.json").read_text(encoding="utf-8")
+            )
+            run_report = json.loads(
+                (command_dir / "run.json").read_text(encoding="utf-8")
             )
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(markdown_exists)
+        self.assertTrue(run_markdown_exists)
         self.assertTrue(inspection["strict_ready"])
         self.assertEqual(
             payload["inspection"]["inspection_json_path"],
             str(command_dir / "inspection.json"),
         )
+        self.assertEqual(payload["run_json_path"], str(command_dir / "run.json"))
+        self.assertEqual(run_report["returncode"], 0)
+        self.assertEqual(run_report["run_markdown_path"], str(command_dir / "run.md"))
+
+    def test_cli_writes_explicit_run_report_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            command_dir = _write_bundle(root)
+            json_out = root / "reports" / "bundle-run.json"
+            markdown_out = root / "reports" / "bundle-run.md"
+            result = subprocess.run(
+                [
+                    "python3",
+                    "-P",
+                    str(SCRIPT),
+                    str(command_dir),
+                    "--json",
+                    "--json-out",
+                    str(json_out),
+                    "--markdown-out",
+                    str(markdown_out),
+                ],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            payload = json.loads(result.stdout)
+            report = json.loads(json_out.read_text(encoding="utf-8"))
+            markdown = markdown_out.read_text(encoding="utf-8")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(payload["run_json_path"], str(json_out))
+        self.assertEqual(report["returncode"], 0)
+        self.assertEqual(report["run_markdown_path"], str(markdown_out))
+        self.assertIn("Char VAE Command Bundle Runner", markdown)
+        self.assertIn(f"run_json_path: {json_out}", markdown)
 
 
 if __name__ == "__main__":

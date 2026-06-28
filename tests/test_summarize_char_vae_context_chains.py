@@ -52,7 +52,8 @@ def _runner_command(command_dir: Path) -> str:
     return (
         "PYTHONNOUSERSITE=1 python3 -P "
         f"{shlex.quote(str(RUNNER_SCRIPT.resolve()))} "
-        f"{shlex.quote(str(command_dir.resolve()))} --write-inspection-report"
+        f"{shlex.quote(str(command_dir.resolve()))} "
+        "--write-inspection-report --write-run-report"
     )
 
 
@@ -315,15 +316,27 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             manifest["command_scripts"]["runner_command"],
             _runner_command(command_dir),
         )
+        self.assertEqual(
+            manifest["command_scripts"]["run_json_path"],
+            str((command_dir / "run.json").resolve()),
+        )
+        self.assertEqual(
+            manifest["command_scripts"]["run_markdown_path"],
+            str((command_dir / "run.md").resolve()),
+        )
         self.assertIn("## Bundle Inspection", readme)
         self.assertIn(inspection_command, readme)
         self.assertIn(_runner_command(command_dir), readme)
+        self.assertIn("run.json", readme)
+        self.assertIn("run.md", readme)
         self.assertIn("inspection.json", readme)
         self.assertIn("inspection.md", readme)
         self.assertIn(comparison_json_resolved, readme)
         self.assertIn(comparison_markdown_resolved, readme)
         self.assertIn("command_manifest_path", markdown)
         self.assertIn("command_runner", markdown)
+        self.assertIn("command_run_json_path", markdown)
+        self.assertIn("command_run_markdown_path", markdown)
         self.assertIn("recommendation.json", result.stdout)
 
     def test_cli_write_command_inspection_materializes_reports(self) -> None:
@@ -464,13 +477,23 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             _runner_command(command_dir),
         )
         self.assertEqual(
+            command_scripts["run_json_path"],
+            str((command_dir / "run.json").resolve()),
+        )
+        self.assertEqual(
+            command_scripts["run_markdown_path"],
+            str((command_dir / "run.md").resolve()),
+        )
+        self.assertEqual(
             comparison["command_scripts"]["directory"],
             str(command_dir.resolve()),
         )
         self.assertIn(str((command_dir / "inspection.json").resolve()), readme)
         self.assertIn(_runner_command(command_dir), readme)
+        self.assertIn(str((command_dir / "run.json").resolve()), readme)
         self.assertIn(str((command_dir / "recommendation.json").resolve()), markdown)
         self.assertIn(_runner_command(command_dir), markdown)
+        self.assertIn(str((command_dir / "run.md").resolve()), markdown)
 
     def test_cli_writes_recommended_command_scripts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -669,6 +692,14 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
                 manifest["command_scripts"]["runner_command"],
                 _runner_command(command_dir),
             )
+            self.assertEqual(
+                manifest["command_scripts"]["run_json_path"],
+                str((command_dir / "run.json").resolve()),
+            )
+            self.assertEqual(
+                manifest["command_scripts"]["run_markdown_path"],
+                str((command_dir / "run.md").resolve()),
+            )
             self.assertIn("# target_kind: follow_up", next_text)
             self.assertIn("recommended_follow_up.sh", next_text)
             self.assertIn(f"cd {shlex.quote(execution_cwd)}", script_text)
@@ -745,6 +776,8 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             self.assertIn("command_inspection_markdown_path", markdown)
             self.assertIn("command_runner", markdown)
             self.assertIn("tools/run_char_vae_command_bundle.py", markdown)
+            self.assertIn("command_run_json_path", markdown)
+            self.assertIn("command_run_markdown_path", markdown)
 
     def test_selection_separates_safe_accepted_from_absolute_best(self) -> None:
         mod = _load_module()

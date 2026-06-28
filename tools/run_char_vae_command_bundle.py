@@ -83,6 +83,24 @@ def _write_inspection_report(
     return inspection
 
 
+def _run_report_paths(
+    command_dir: Path,
+    command_scripts: dict[str, Any],
+    *,
+    json_out: Path | None,
+    markdown_out: Path | None,
+    write_report: bool,
+) -> tuple[Path | None, Path | None]:
+    if write_report or json_out is not None or markdown_out is not None:
+        json_out = json_out or _path_from(command_scripts.get("run_json_path"))
+        markdown_out = markdown_out or _path_from(
+            command_scripts.get("run_markdown_path")
+        )
+        json_out = json_out or command_dir / "run.json"
+        markdown_out = markdown_out or command_dir / "run.md"
+    return json_out, markdown_out
+
+
 def _runner_summary(
     *,
     command_dir: Path,
@@ -144,11 +162,34 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"- strict_ready: {_fmt(summary.get('strict_ready'))}",
         f"- missing_required: {_fmt(summary.get('missing_required'))}",
         f"- missing_optional: {_fmt(summary.get('missing_optional'))}",
+        f"- run_json_path: {_fmt(summary.get('run_json_path'))}",
+        f"- run_markdown_path: {_fmt(summary.get('run_markdown_path'))}",
         f"- returncode: {_fmt(summary.get('returncode'))}",
         f"- error: {_fmt(summary.get('error'))}",
         "",
     ]
     return "\n".join(lines)
+
+
+def write_run_artifacts(
+    summary: dict[str, Any],
+    *,
+    json_out: Path | None,
+    markdown_out: Path | None,
+) -> dict[str, Any]:
+    summary = dict(summary)
+    summary["run_json_path"] = str(json_out) if json_out is not None else None
+    summary["run_markdown_path"] = (
+        str(markdown_out) if markdown_out is not None else None
+    )
+    markdown = render_markdown(summary)
+    if json_out is not None:
+        json_out.parent.mkdir(parents=True, exist_ok=True)
+        json_out.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
+    if markdown_out is not None:
+        markdown_out.parent.mkdir(parents=True, exist_ok=True)
+        markdown_out.write_text(markdown, encoding="utf-8")
+    return summary
 
 
 def run_bundle(
@@ -159,12 +200,22 @@ def run_bundle(
     dry_run: bool,
     json_mode: bool,
     write_inspection_report: bool,
+    write_run_report: bool,
+    json_out: Path | None = None,
+    markdown_out: Path | None = None,
 ) -> tuple[int, dict[str, Any]]:
     command_dir = command_dir.resolve()
     manifest_path = command_dir / "recommendation.json"
     manifest = _read_json(manifest_path)
     command_scripts = _command_scripts(manifest)
     script_key, script_path = _selected_script(command_scripts, target=target)
+    json_out, markdown_out = _run_report_paths(
+        command_dir,
+        command_scripts,
+        json_out=json_out,
+        markdown_out=markdown_out,
+        write_report=write_run_report,
+    )
     inspector = _load_inspector()
     inspection = inspector.inspect_bundle(command_dir)
     if write_inspection_report:
@@ -188,6 +239,11 @@ def run_bundle(
             returncode=1,
             error="command bundle did not pass the requested inspection gate",
         )
+        summary = write_run_artifacts(
+            summary,
+            json_out=json_out,
+            markdown_out=markdown_out,
+        )
         return 1, summary
     if script_path is None:
         summary = _runner_summary(
@@ -202,6 +258,11 @@ def run_bundle(
             returncode=1,
             error=f"manifest does not declare {script_key}",
         )
+        summary = write_run_artifacts(
+            summary,
+            json_out=json_out,
+            markdown_out=markdown_out,
+        )
         return 1, summary
     if dry_run:
         summary = _runner_summary(
@@ -214,6 +275,11 @@ def run_bundle(
             dry_run=dry_run,
             inspection=inspection,
             returncode=0,
+        )
+        summary = write_run_artifacts(
+            summary,
+            json_out=json_out,
+            markdown_out=markdown_out,
         )
         return 0, summary
     if json_mode:
@@ -238,6 +304,11 @@ def run_bundle(
             stdout=result.stdout,
             stderr=result.stderr,
         )
+        summary = write_run_artifacts(
+            summary,
+            json_out=json_out,
+            markdown_out=markdown_out,
+        )
         return result.returncode, summary
     result = subprocess.run(
         ["bash", str(script_path)],
@@ -254,6 +325,11 @@ def run_bundle(
         dry_run=dry_run,
         inspection=inspection,
         returncode=result.returncode,
+    )
+    summary = write_run_artifacts(
+        summary,
+        json_out=json_out,
+        markdown_out=markdown_out,
     )
     return result.returncode, summary
 
@@ -287,6 +363,13 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="rewrite inspection.json and inspection.md before running",
     )
+    parser.add_argument(
+        "--write-run-report",
+        action="store_true",
+        help="write run.json and run.md into the command bundle",
+    )
+    parser.add_argument("--json-out", type=Path, default=None)
+    parser.add_argument("--markdown-out", type=Path, default=None)
     return parser
 
 
@@ -300,6 +383,9 @@ def main(argv: list[str] | None = None) -> int:
             dry_run=bool(args.dry_run),
             json_mode=bool(args.json),
             write_inspection_report=bool(args.write_inspection_report),
+            write_run_report=bool(args.write_run_report),
+            json_out=args.json_out,
+            markdown_out=args.markdown_out,
         )
     except (OSError, ValueError, RuntimeError, json.JSONDecodeError) as exc:
         summary = {
