@@ -280,6 +280,7 @@ def _runner_summary(
     executed: bool = False,
     history_report_only: bool = False,
 ) -> dict[str, Any]:
+    runner_wrapper_status = _mapping(inspection.get("runner_wrapper_status"))
     return {
         "schema": SCHEMA,
         "command_dir": str(command_dir),
@@ -308,6 +309,14 @@ def _runner_summary(
         "strict_ready": bool(inspection.get("strict_ready")),
         "missing_required": inspection.get("missing_required") or [],
         "missing_optional": inspection.get("missing_optional") or [],
+        "runner_wrapper_status": runner_wrapper_status,
+        "runner_wrapper_ok": runner_wrapper_status.get("ok"),
+        "runner_wrapper_executes_runner_command": runner_wrapper_status.get(
+            "executes_runner_command"
+        ),
+        "runner_wrapper_forwards_arguments": runner_wrapper_status.get(
+            "forwards_arguments"
+        ),
         "inspection": inspection,
         "returncode": returncode,
         "error": error,
@@ -354,6 +363,15 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"- strict_ready: {_fmt(summary.get('strict_ready'))}",
         f"- missing_required: {_fmt(summary.get('missing_required'))}",
         f"- missing_optional: {_fmt(summary.get('missing_optional'))}",
+        f"- runner_wrapper_ok: {_fmt(summary.get('runner_wrapper_ok'))}",
+        (
+            "- runner_wrapper_executes_runner_command: "
+            f"{_fmt(summary.get('runner_wrapper_executes_runner_command'))}"
+        ),
+        (
+            "- runner_wrapper_forwards_arguments: "
+            f"{_fmt(summary.get('runner_wrapper_forwards_arguments'))}"
+        ),
         f"- run_json_path: {_fmt(summary.get('run_json_path'))}",
         f"- run_markdown_path: {_fmt(summary.get('run_markdown_path'))}",
         f"- run_history_jsonl_path: {_fmt(summary.get('run_history_jsonl_path'))}",
@@ -408,6 +426,10 @@ def _history_event(summary: dict[str, Any]) -> dict[str, Any]:
         "strict_ready",
         "missing_required",
         "missing_optional",
+        "runner_wrapper_status",
+        "runner_wrapper_ok",
+        "runner_wrapper_executes_runner_command",
+        "runner_wrapper_forwards_arguments",
         "returncode",
         "error",
         "run_json_path",
@@ -467,6 +489,10 @@ def _count_values(values: list[Any]) -> dict[str, int]:
     return counts
 
 
+def _bool_count_values(values: list[Any]) -> dict[str, int]:
+    return _count_values([_fmt(value) for value in values if isinstance(value, bool)])
+
+
 def _fmt_counts(counts: dict[str, int]) -> str:
     if not counts:
         return "-"
@@ -514,6 +540,9 @@ def summarize_history_events(
     latest_champion = _mapping(latest_context.get("champion"))
     status_counts = _count_values([_event_status(event) for event in events])
     target_kind_counts = _count_values([event.get("target_kind") for event in events])
+    runner_wrapper_ok_counts = _bool_count_values(
+        [event.get("runner_wrapper_ok") for event in events]
+    )
     action_counts = _count_values(
         [
             _mapping(event.get("recommendation_context")).get("action")
@@ -545,10 +574,15 @@ def summarize_history_events(
             "target_kind": latest.get("target_kind"),
             "recommendation_action": latest_context.get("action"),
             "champion_config": latest_champion.get("config"),
+            "runner_wrapper_ok": latest.get("runner_wrapper_ok"),
+            "runner_wrapper_executes_runner_command": latest.get(
+                "runner_wrapper_executes_runner_command"
+            ),
         },
         "signals": {
             "status_counts": status_counts,
             "target_kind_counts": target_kind_counts,
+            "runner_wrapper_ok_counts": runner_wrapper_ok_counts,
             "recommendation_action_counts": action_counts,
             "current_status_streak": {
                 "status": current_status,
@@ -606,12 +640,24 @@ def render_history_markdown(
         f"- latest_target_kind: {_fmt(latest.get('target_kind'))}",
         f"- latest_recommendation_action: {_fmt(latest.get('recommendation_action'))}",
         f"- latest_champion_config: {_fmt(latest.get('champion_config'))}",
+        f"- latest_runner_wrapper_ok: {_fmt(latest.get('runner_wrapper_ok'))}",
+        (
+            "- latest_runner_wrapper_executes_runner_command: "
+            f"{_fmt(latest.get('runner_wrapper_executes_runner_command'))}"
+        ),
         "",
         "## Decision Signals",
         "",
         f"- status_counts: {_fmt_counts(_mapping(signals.get('status_counts')))}",
         f"- target_kind_counts: {_fmt_counts(_mapping(signals.get('target_kind_counts')))}",
-        f"- recommendation_action_counts: {_fmt_counts(_mapping(signals.get('recommendation_action_counts')))}",
+        (
+            "- runner_wrapper_ok_counts: "
+            f"{_fmt_counts(_mapping(signals.get('runner_wrapper_ok_counts')))}"
+        ),
+        (
+            "- recommendation_action_counts: "
+            f"{_fmt_counts(_mapping(signals.get('recommendation_action_counts')))}"
+        ),
         f"- current_status_streak: {_fmt_streak(status_streak.get('status'), int(status_streak.get('count') or 0))}",
         f"- latest_executed_status: {_fmt(latest_executed.get('status'))}",
         f"- latest_executed_finished_at: {_fmt(latest_executed.get('finished_at'))}",
@@ -810,6 +856,17 @@ def run_bundle(
         )
         summary["missing_optional"] = (
             refreshed_inspection.get("missing_optional") or []
+        )
+        runner_wrapper_status = _mapping(
+            refreshed_inspection.get("runner_wrapper_status")
+        )
+        summary["runner_wrapper_status"] = runner_wrapper_status
+        summary["runner_wrapper_ok"] = runner_wrapper_status.get("ok")
+        summary["runner_wrapper_executes_runner_command"] = (
+            runner_wrapper_status.get("executes_runner_command")
+        )
+        summary["runner_wrapper_forwards_arguments"] = runner_wrapper_status.get(
+            "forwards_arguments"
         )
         summary["inspection"] = refreshed_inspection
         return write_run_artifacts(
