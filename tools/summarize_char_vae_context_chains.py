@@ -684,10 +684,12 @@ def _fmt_readme_value(value: Any) -> str:
     return f"`{text}`"
 
 
-def _run_line(path: Any) -> str | None:
+def _run_line(path: Any, *extra_args: str) -> str | None:
     if not isinstance(path, str) or not path:
         return None
-    return f"bash {shlex.quote(path)}"
+    parts = ["bash", shlex.quote(path)]
+    parts.extend(shlex.quote(arg) for arg in extra_args if arg)
+    return " ".join(parts)
 
 
 def _inspection_command_line(command_dir: Any) -> str | None:
@@ -703,14 +705,15 @@ def _inspection_command_line(command_dir: Any) -> str | None:
     )
 
 
-def _runner_command_line(command_dir: Any) -> str | None:
+def _runner_command_line(command_dir: Any, *, target: str | None = None) -> str | None:
     if not isinstance(command_dir, str) or not command_dir:
         return None
     script_path = Path(__file__).resolve().with_name("run_char_vae_command_bundle.py")
+    target_arg = f" --target {shlex.quote(target)}" if target else ""
     return (
         "env PYTHONNOUSERSITE=1 python3 -P "
         f"{shlex.quote(str(script_path))} "
-        f"{shlex.quote(command_dir)} --write-inspection-report "
+        f"{shlex.quote(command_dir)}{target_arg} --write-inspection-report "
         "--write-run-report --append-run-history --write-run-history-report"
     )
 
@@ -815,6 +818,14 @@ def _render_command_readme(
         f"- run_history_markdown: {_fmt_readme_value(command_scripts.get('run_history_markdown_path'))}",
         f"- run_history_summary: {_fmt_readme_value(command_scripts.get('run_history_summary_path'))}",
         f"- history_report_only: {_fmt_readme_value(command_scripts.get('history_report_command'))}",
+        "",
+        "## Execution-Next Continuation",
+        "",
+        "After an inspected run writes `run.json`, use this target to run the next command selected from the latest execution summary or run history.",
+        "",
+        f"- target: {_fmt_readme_value('execution-next')}",
+        f"- inspected_script_run: {_fmt_readme_value(_run_line(command_scripts.get('runner_path'), '--target', 'execution-next'))}",
+        f"- inspected_run: {_fmt_readme_value(command_scripts.get('execution_next_command'))}",
         "",
         "## Safe Follow-Up",
         "",
@@ -937,6 +948,10 @@ def _write_recommended_command_scripts(
         target_kind=next_kind,
     )
     runner_command = _runner_command_line(str(out_dir))
+    execution_next_command = _runner_command_line(
+        str(out_dir),
+        target="execution-next",
+    )
     runner_path = _write_runner_command_script(
         out_dir / "run_recommended_next.sh",
         runner_command if next_path else None,
@@ -972,6 +987,7 @@ def _write_recommended_command_scripts(
         "inspection_runner_wrapper_executes_runner_command": None,
         "inspection_runner_wrapper_forwards_arguments": None,
         "runner_command": runner_command,
+        "execution_next_command": execution_next_command,
         "history_report_command": _history_report_command_line(str(out_dir)),
         "runner_path": runner_path,
         "run_json_path": str(out_dir / "run.json"),
@@ -1088,6 +1104,7 @@ def _render_markdown(summary: dict[str, Any]) -> str:
         f"- command_inspection_runner_wrapper_executes_runner_command: {_fmt(_value(command_scripts, 'inspection_runner_wrapper_executes_runner_command'))}",
         f"- command_inspection_runner_wrapper_forwards_arguments: {_fmt(_value(command_scripts, 'inspection_runner_wrapper_forwards_arguments'))}",
         f"- command_runner: {_fmt(_value(command_scripts, 'runner_command'))}",
+        f"- command_execution_next: {_fmt(_value(command_scripts, 'execution_next_command'))}",
         f"- command_runner_script: {_fmt(_value(command_scripts, 'runner_path'))}",
         f"- command_run_json_path: {_fmt(_value(command_scripts, 'run_json_path'))}",
         f"- command_run_markdown_path: {_fmt(_value(command_scripts, 'run_markdown_path'))}",
