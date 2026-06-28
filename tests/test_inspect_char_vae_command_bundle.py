@@ -218,6 +218,11 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
                 "schema": None,
                 "schema_ok": None,
                 "total_runs": None,
+                "next_action": None,
+                "next_action_target": None,
+                "next_action_command_source": None,
+                "next_action_should_continue": None,
+                "next_action_schema_ok": None,
                 "history_event_count": None,
                 "matches_history_event_count": None,
                 "error": None,
@@ -548,6 +553,16 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
                 {
                     "schema": "st.llm_char_vae_context.command_bundle_run_history_summary.v1",
                     "total_runs": 2,
+                    "next_action": {
+                        "schema": (
+                            "st.llm_char_vae_context."
+                            "command_bundle_history_next_action.v1"
+                        ),
+                        "action": "run_execution_next",
+                        "target": "execution-next",
+                        "command_source": "guided_next_follow_up_command",
+                        "should_continue": True,
+                    },
                     "signals": {"status_counts": {"ok": 2}},
                 },
             )
@@ -575,11 +590,33 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
         self.assertTrue(status["valid_json"])
         self.assertTrue(status["schema_ok"])
         self.assertEqual(status["total_runs"], 2)
+        self.assertEqual(status["next_action"], "run_execution_next")
+        self.assertEqual(status["next_action_target"], "execution-next")
+        self.assertEqual(
+            status["next_action_command_source"],
+            "guided_next_follow_up_command",
+        )
+        self.assertIs(status["next_action_should_continue"], True)
+        self.assertIs(status["next_action_schema_ok"], True)
         self.assertEqual(status["history_event_count"], 2)
         self.assertTrue(status["matches_history_event_count"])
         self.assertIsNone(status["error"])
         self.assertEqual(markdown_result.returncode, 0, markdown_result.stderr)
         self.assertIn("run_history_summary_valid_json: yes", markdown_result.stdout)
+        self.assertIn("run_history_next_action: run_execution_next", markdown_result.stdout)
+        self.assertIn("run_history_next_action_target: execution-next", markdown_result.stdout)
+        self.assertIn(
+            "run_history_next_action_command_source: guided_next_follow_up_command",
+            markdown_result.stdout,
+        )
+        self.assertIn(
+            "run_history_next_action_should_continue: yes",
+            markdown_result.stdout,
+        )
+        self.assertIn(
+            "run_history_next_action_schema_ok: yes",
+            markdown_result.stdout,
+        )
         self.assertIn("run_history_summary_matches_jsonl: yes", markdown_result.stdout)
 
     def test_cli_writes_explicit_inspection_outputs(self) -> None:

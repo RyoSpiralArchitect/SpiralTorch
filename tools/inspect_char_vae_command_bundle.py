@@ -15,6 +15,9 @@ SCHEMA = "st.llm_char_vae_context.command_bundle_inspection.v1"
 RUN_HISTORY_SUMMARY_SCHEMA = (
     "st.llm_char_vae_context.command_bundle_run_history_summary.v1"
 )
+RUN_HISTORY_NEXT_ACTION_SCHEMA = (
+    "st.llm_char_vae_context.command_bundle_history_next_action.v1"
+)
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -246,6 +249,11 @@ def _run_history_summary_status(
         "schema": None,
         "schema_ok": None,
         "total_runs": None,
+        "next_action": None,
+        "next_action_target": None,
+        "next_action_command_source": None,
+        "next_action_should_continue": None,
+        "next_action_schema_ok": None,
         "history_event_count": history_event_count,
         "matches_history_event_count": None,
         "error": history_error,
@@ -260,12 +268,23 @@ def _run_history_summary_status(
         return status
     schema = payload.get("schema")
     total_runs = payload.get("total_runs")
+    next_action = payload.get("next_action")
+    next_action = next_action if isinstance(next_action, dict) else {}
     status.update(
         {
             "valid_json": True,
             "schema": schema,
             "schema_ok": schema == RUN_HISTORY_SUMMARY_SCHEMA,
             "total_runs": total_runs,
+            "next_action": next_action.get("action"),
+            "next_action_target": next_action.get("target"),
+            "next_action_command_source": next_action.get("command_source"),
+            "next_action_should_continue": next_action.get("should_continue"),
+            "next_action_schema_ok": (
+                next_action.get("schema") == RUN_HISTORY_NEXT_ACTION_SCHEMA
+                if next_action
+                else None
+            ),
         }
     )
     if isinstance(total_runs, int) and history_event_count is not None:
@@ -517,6 +536,11 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"- run_history_summary_valid_json: {_fmt(_value(summary, 'run_history_summary_status', 'valid_json'))}",
         f"- run_history_summary_schema_ok: {_fmt(_value(summary, 'run_history_summary_status', 'schema_ok'))}",
         f"- run_history_summary_total_runs: {_fmt(_value(summary, 'run_history_summary_status', 'total_runs'))}",
+        f"- run_history_next_action: {_fmt(_value(summary, 'run_history_summary_status', 'next_action'))}",
+        f"- run_history_next_action_target: {_fmt(_value(summary, 'run_history_summary_status', 'next_action_target'))}",
+        f"- run_history_next_action_command_source: {_fmt(_value(summary, 'run_history_summary_status', 'next_action_command_source'))}",
+        f"- run_history_next_action_should_continue: {_fmt(_value(summary, 'run_history_summary_status', 'next_action_should_continue'))}",
+        f"- run_history_next_action_schema_ok: {_fmt(_value(summary, 'run_history_summary_status', 'next_action_schema_ok'))}",
         f"- run_history_event_count: {_fmt(_value(summary, 'run_history_summary_status', 'history_event_count'))}",
         f"- run_history_summary_matches_jsonl: {_fmt(_value(summary, 'run_history_summary_status', 'matches_history_event_count'))}",
         f"- run_history_summary_error: {_fmt(_value(summary, 'run_history_summary_status', 'error'))}",
