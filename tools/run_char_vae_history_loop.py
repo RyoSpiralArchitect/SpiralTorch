@@ -357,6 +357,52 @@ def write_loop_artifacts(
     return summary
 
 
+def _failure_summary(
+    command_dir: Path,
+    *,
+    max_steps: int,
+    strict: bool,
+    dry_run: bool,
+    fail_on_final_actions: list[str],
+    fail_on_max_steps_continuation: bool,
+    error: str,
+) -> dict[str, Any]:
+    finished_at = _utc_now()
+    return {
+        "schema": SCHEMA,
+        "command_dir": str(command_dir),
+        "handoff_status": "failed",
+        "handoff_reason": error,
+        "max_steps": max_steps,
+        "strict": strict,
+        "dry_run": dry_run,
+        "started_at": finished_at,
+        "finished_at": finished_at,
+        "duration_seconds": 0.0,
+        "step_count": 0,
+        "executed_count": 0,
+        "success_count": 0,
+        "failure_count": 0,
+        "stop_reason": "loop_setup_failed",
+        "fail_on_final_actions": fail_on_final_actions,
+        "final_action_failed": False,
+        "fail_on_max_steps_continuation": fail_on_max_steps_continuation,
+        "max_steps_continuation_failed": False,
+        "returncode": 1,
+        "error": error,
+        "final_next_action": None,
+        "final_next_action_runnable": False,
+        "continuation_command": None,
+        "latest_run_history_summary": None,
+        "latest_run_json_path": None,
+        "latest_run_markdown_path": None,
+        "latest_run_history_jsonl_path": None,
+        "latest_run_history_markdown_path": None,
+        "latest_run_history_summary_path": None,
+        "steps": [],
+    }
+
+
 def run_loop(
     command_dir: Path,
     *,
@@ -573,20 +619,20 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
+    command_dir = args.command_dir.resolve()
     json_out = args.json_out
     markdown_out = args.markdown_out
     if args.write_loop_report or json_out is not None or markdown_out is not None:
-        command_dir = args.command_dir.resolve()
         json_out = json_out or command_dir / "run_loop.json"
         markdown_out = markdown_out or command_dir / "run_loop.md"
+    fail_on_final_actions = (
+        list(DEFAULT_FAIL_ON_FINAL_ACTIONS)
+        if args.fail_on_final_action is None
+        else _csv_values(args.fail_on_final_action)
+    )
     try:
-        fail_on_final_actions = (
-            list(DEFAULT_FAIL_ON_FINAL_ACTIONS)
-            if args.fail_on_final_action is None
-            else _csv_values(args.fail_on_final_action)
-        )
         returncode, summary = run_loop(
-            args.command_dir,
+            command_dir,
             max_steps=args.max_steps,
             strict=not args.no_strict,
             dry_run=bool(args.dry_run),
@@ -601,23 +647,22 @@ def main(argv: list[str] | None = None) -> int:
             markdown_out=markdown_out,
         )
     except (OSError, ValueError, RuntimeError, json.JSONDecodeError) as exc:
-        summary = {
-            "schema": SCHEMA,
-            "command_dir": str(args.command_dir),
-            "max_steps": args.max_steps,
-            "strict": not args.no_strict,
-            "dry_run": bool(args.dry_run),
-            "fail_on_final_actions": (
-                list(DEFAULT_FAIL_ON_FINAL_ACTIONS)
-                if args.fail_on_final_action is None
-                else _csv_values(args.fail_on_final_action)
-            ),
-            "fail_on_max_steps_continuation": bool(
+        summary = _failure_summary(
+            command_dir,
+            max_steps=args.max_steps,
+            strict=not args.no_strict,
+            dry_run=bool(args.dry_run),
+            fail_on_final_actions=fail_on_final_actions,
+            fail_on_max_steps_continuation=bool(
                 args.fail_on_max_steps_continuation
             ),
-            "returncode": 1,
-            "error": str(exc),
-        }
+            error=str(exc),
+        )
+        summary = write_loop_artifacts(
+            summary,
+            json_out=json_out,
+            markdown_out=markdown_out,
+        )
         returncode = 1
     if args.json:
         print(json.dumps(summary, indent=2, sort_keys=True))

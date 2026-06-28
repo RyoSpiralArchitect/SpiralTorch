@@ -154,6 +154,36 @@ class RunCharVaeHistoryLoopTests(unittest.TestCase):
         self.assertEqual(history_summary["total_runs"], 0)
         self.assertFalse(runner_out_exists)
 
+    def test_cli_writes_loop_report_when_setup_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            command_dir = _write_bundle(Path(tmp))
+            result = _run_loop(
+                command_dir,
+                "--max-steps",
+                "0",
+                "--write-loop-report",
+                "--json",
+            )
+            payload = json.loads(result.stdout)
+            loop_report = json.loads(
+                (command_dir / "run_loop.json").read_text(encoding="utf-8")
+            )
+            loop_markdown = (command_dir / "run_loop.md").read_text(encoding="utf-8")
+
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(payload["handoff_status"], "failed")
+        self.assertEqual(payload["handoff_reason"], "--max-steps must be at least 1")
+        self.assertEqual(payload["stop_reason"], "loop_setup_failed")
+        self.assertEqual(payload["step_count"], 0)
+        self.assertEqual(payload["returncode"], 1)
+        self.assertEqual(payload["error"], "--max-steps must be at least 1")
+        self.assertEqual(loop_report["handoff_status"], "failed")
+        self.assertEqual(loop_report["stop_reason"], "loop_setup_failed")
+        self.assertEqual(loop_report["returncode"], 1)
+        self.assertIn("handoff_status: failed", loop_markdown)
+        self.assertIn("stop_reason: loop_setup_failed", loop_markdown)
+        self.assertIn("--max-steps must be at least 1", loop_markdown)
+
     def test_cli_can_fail_when_max_steps_leaves_runnable_action(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             command_dir = _write_bundle(Path(tmp))
