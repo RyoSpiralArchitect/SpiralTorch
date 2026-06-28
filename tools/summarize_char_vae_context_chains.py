@@ -737,6 +737,50 @@ def _history_report_command_line(command_dir: Any) -> str | None:
     )
 
 
+def _history_loop_command_line(
+    command_dir: Any,
+    *,
+    max_steps: int = 3,
+    fail_on_final_actions: tuple[str, ...] = (
+        "review_before_continuing",
+        "inspect_history",
+    ),
+    fail_on_max_steps_continuation: bool = True,
+) -> str | None:
+    if not isinstance(command_dir, str) or not command_dir:
+        return None
+    script_path = Path(__file__).resolve().with_name("run_char_vae_history_loop.py")
+    fail_arg = (
+        " --fail-on-final-action "
+        f"{shlex.quote(','.join(fail_on_final_actions))}"
+        if fail_on_final_actions
+        else ""
+    )
+    max_steps_fail_arg = (
+        " --fail-on-max-steps-continuation"
+        if fail_on_max_steps_continuation
+        else ""
+    )
+    return (
+        "env PYTHONNOUSERSITE=1 python3 -P "
+        f"{shlex.quote(str(script_path))} "
+        f"{shlex.quote(command_dir)} --max-steps {max_steps}{fail_arg}"
+        f"{max_steps_fail_arg} "
+        "--write-loop-report"
+    )
+
+
+def _history_loop_resume_command_line(command_dir: Any) -> str | None:
+    if not isinstance(command_dir, str) or not command_dir:
+        return None
+    script_path = Path(__file__).resolve().with_name("run_char_vae_history_loop.py")
+    return (
+        "env PYTHONNOUSERSITE=1 python3 -P "
+        f"{shlex.quote(str(script_path))} "
+        f"{shlex.quote(command_dir)} --resume-from-report"
+    )
+
+
 def _path_value(value: Any) -> Path | None:
     if not isinstance(value, str) or not value:
         return None
@@ -835,6 +879,19 @@ def _render_command_readme(
         f"- inspected_script_run: {_fmt_readme_value(_run_line(command_scripts.get('history_next_action_runner_path')))}",
         f"- inspected_run: {_fmt_readme_value(command_scripts.get('history_next_action_command'))}",
         "",
+        "## History-Guided Loop",
+        "",
+        "Run this bounded loop when you want the bundle to keep following safe run-history decisions until review, a blocker, or `--max-steps` stops it.",
+        "",
+        f"- inspected_script: {_fmt_readme_value(command_scripts.get('history_loop_runner_path'))}",
+        f"- inspected_script_run: {_fmt_readme_value(_run_line(command_scripts.get('history_loop_runner_path')))}",
+        f"- inspected_run: {_fmt_readme_value(command_scripts.get('history_loop_command'))}",
+        f"- run_loop_json: {_fmt_readme_value(command_scripts.get('run_loop_json_path'))}",
+        f"- run_loop_markdown: {_fmt_readme_value(command_scripts.get('run_loop_markdown_path'))}",
+        f"- resume_script: {_fmt_readme_value(command_scripts.get('history_loop_resume_runner_path'))}",
+        f"- resume_script_run: {_fmt_readme_value(_run_line(command_scripts.get('history_loop_resume_runner_path')))}",
+        f"- resume_run: {_fmt_readme_value(command_scripts.get('history_loop_resume_command'))}",
+        "",
         "## Execution-Next Continuation",
         "",
         "After an inspected run writes `run.json`, use this target to run the next command selected from the latest execution summary or run history.",
@@ -884,6 +941,30 @@ def _render_command_readme(
         f"- history_next_action_runner_ok: {_fmt_readme_value(command_scripts.get('inspection_history_next_action_runner_ok'))}",
         f"- history_next_action_runner_executes_command: {_fmt_readme_value(command_scripts.get('inspection_history_next_action_runner_executes_command'))}",
         f"- history_next_action_runner_forwards_arguments: {_fmt_readme_value(command_scripts.get('inspection_history_next_action_runner_forwards_arguments'))}",
+        f"- history_loop_runner_ok: {_fmt_readme_value(command_scripts.get('inspection_history_loop_runner_ok'))}",
+        f"- history_loop_runner_executes_command: {_fmt_readme_value(command_scripts.get('inspection_history_loop_runner_executes_command'))}",
+        f"- history_loop_runner_forwards_arguments: {_fmt_readme_value(command_scripts.get('inspection_history_loop_runner_forwards_arguments'))}",
+        f"- history_loop_resume_runner_ok: {_fmt_readme_value(command_scripts.get('inspection_history_loop_resume_runner_ok'))}",
+        f"- history_loop_resume_runner_executes_command: {_fmt_readme_value(command_scripts.get('inspection_history_loop_resume_runner_executes_command'))}",
+        f"- history_loop_resume_runner_forwards_arguments: {_fmt_readme_value(command_scripts.get('inspection_history_loop_resume_runner_forwards_arguments'))}",
+        f"- run_loop_status_issues: {_fmt_readme_value(_fmt_list(command_scripts.get('inspection_run_loop_status_issues')))}",
+        f"- run_loop_handoff_status: {_fmt_readme_value(command_scripts.get('inspection_run_loop_handoff_status'))}",
+        f"- run_loop_handoff_severity: {_fmt_readme_value(command_scripts.get('inspection_run_loop_handoff_severity'))}",
+        f"- run_loop_handoff_requires_attention: {_fmt_readme_value(command_scripts.get('inspection_run_loop_handoff_requires_attention'))}",
+        f"- run_loop_handoff_recommended_action: {_fmt_readme_value(command_scripts.get('inspection_run_loop_handoff_recommended_action'))}",
+        f"- run_loop_handoff_recommended_command: {_fmt_readme_value(command_scripts.get('inspection_run_loop_handoff_recommended_command'))}",
+        f"- run_loop_declared_handoff_recommended_action: {_fmt_readme_value(command_scripts.get('inspection_run_loop_declared_handoff_recommended_action'))}",
+        f"- run_loop_declared_handoff_recommended_action_present: {_fmt_readme_value(command_scripts.get('inspection_run_loop_declared_handoff_recommended_action_present'))}",
+        f"- run_loop_declared_handoff_recommended_action_ok: {_fmt_readme_value(command_scripts.get('inspection_run_loop_declared_handoff_recommended_action_ok'))}",
+        f"- run_loop_declared_handoff_recommended_command: {_fmt_readme_value(command_scripts.get('inspection_run_loop_declared_handoff_recommended_command'))}",
+        f"- run_loop_declared_handoff_recommended_command_present: {_fmt_readme_value(command_scripts.get('inspection_run_loop_declared_handoff_recommended_command_present'))}",
+        f"- run_loop_declared_handoff_recommended_command_ok: {_fmt_readme_value(command_scripts.get('inspection_run_loop_declared_handoff_recommended_command_ok'))}",
+        f"- run_loop_final_next_action_runnable: {_fmt_readme_value(command_scripts.get('inspection_run_loop_final_next_action_runnable'))}",
+        f"- run_loop_continuation_command: {_fmt_readme_value(command_scripts.get('inspection_run_loop_continuation_command'))}",
+        f"- run_loop_resume_from_report_command: {_fmt_readme_value(command_scripts.get('inspection_run_loop_resume_from_report_command'))}",
+        f"- run_loop_resume_from_report_command_ok: {_fmt_readme_value(command_scripts.get('inspection_run_loop_resume_from_report_command_ok'))}",
+        f"- run_loop_resume_from_report_command_target_dir_ok: {_fmt_readme_value(command_scripts.get('inspection_run_loop_resume_from_report_command_target_dir_ok'))}",
+        f"- run_loop_resume_from_report_command_report_path_ok: {_fmt_readme_value(command_scripts.get('inspection_run_loop_resume_from_report_command_report_path_ok'))}",
         "",
         "## Machine-Readable Manifest",
         "",
@@ -982,6 +1063,22 @@ def _write_recommended_command_scripts(
         label="run_history_next_action",
         description="# Runs the next safe target selected from run history.",
     )
+    history_loop_command = _history_loop_command_line(str(out_dir))
+    history_loop_runner_path = _write_runner_command_script(
+        out_dir / "run_history_loop.sh",
+        history_loop_command,
+        target_kind="history_loop",
+        label="run_history_loop",
+        description="# Runs bounded history-guided continuation.",
+    )
+    history_loop_resume_command = _history_loop_resume_command_line(str(out_dir))
+    history_loop_resume_runner_path = _write_runner_command_script(
+        out_dir / "run_resume_history_loop.sh",
+        history_loop_resume_command,
+        target_kind="history_loop_resume",
+        label="run_resume_history_loop",
+        description="# Resumes a continuation-ready bounded loop from run_loop.json.",
+    )
     runner_path = _write_runner_command_script(
         out_dir / "run_recommended_next.sh",
         runner_command if next_path else None,
@@ -999,7 +1096,11 @@ def _write_recommended_command_scripts(
         "written_count": sum(
             1
             for path in (next_path, follow_up_path, review_path, runner_path)
-            + (history_next_action_runner_path,)
+            + (
+                history_next_action_runner_path,
+                history_loop_runner_path,
+                history_loop_resume_runner_path,
+            )
             if path
         ),
         "execution_cwd": str(execution_cwd),
@@ -1021,10 +1122,44 @@ def _write_recommended_command_scripts(
         "inspection_history_next_action_runner_ok": None,
         "inspection_history_next_action_runner_executes_command": None,
         "inspection_history_next_action_runner_forwards_arguments": None,
+        "inspection_history_loop_runner_status": None,
+        "inspection_history_loop_runner_ok": None,
+        "inspection_history_loop_runner_executes_command": None,
+        "inspection_history_loop_runner_forwards_arguments": None,
+        "inspection_history_loop_resume_runner_status": None,
+        "inspection_history_loop_resume_runner_ok": None,
+        "inspection_history_loop_resume_runner_executes_command": None,
+        "inspection_history_loop_resume_runner_forwards_arguments": None,
+        "inspection_run_loop_status": None,
+        "inspection_run_loop_status_issues": [],
+        "inspection_run_loop_handoff_status": None,
+        "inspection_run_loop_handoff_severity": None,
+        "inspection_run_loop_handoff_requires_attention": None,
+        "inspection_run_loop_handoff_recommended_action": None,
+        "inspection_run_loop_handoff_recommended_command": None,
+        "inspection_run_loop_declared_handoff_recommended_action": None,
+        "inspection_run_loop_declared_handoff_recommended_action_present": None,
+        "inspection_run_loop_declared_handoff_recommended_action_ok": None,
+        "inspection_run_loop_declared_handoff_recommended_command": None,
+        "inspection_run_loop_declared_handoff_recommended_command_present": None,
+        "inspection_run_loop_declared_handoff_recommended_command_ok": None,
+        "inspection_run_loop_final_next_action_runnable": None,
+        "inspection_run_loop_continuation_command": None,
+        "inspection_run_loop_resume_from_report_command": None,
+        "inspection_run_loop_resume_from_report_command_present": None,
+        "inspection_run_loop_resume_from_report_command_ok": None,
+        "inspection_run_loop_resume_from_report_command_target_dir_ok": None,
+        "inspection_run_loop_resume_from_report_command_report_path_ok": None,
+        "inspection_run_loop_resume_from_report_command_parse_error": None,
+        "inspection_run_loop_resume_from_report_command_missing_required_flags": [],
         "runner_command": runner_command,
         "execution_next_command": execution_next_command,
         "history_next_action_command": history_next_action_command,
         "history_next_action_runner_path": history_next_action_runner_path,
+        "history_loop_command": history_loop_command,
+        "history_loop_runner_path": history_loop_runner_path,
+        "history_loop_resume_command": history_loop_resume_command,
+        "history_loop_resume_runner_path": history_loop_resume_runner_path,
         "history_report_command": _history_report_command_line(str(out_dir)),
         "runner_path": runner_path,
         "run_json_path": str(out_dir / "run.json"),
@@ -1032,6 +1167,8 @@ def _write_recommended_command_scripts(
         "run_history_jsonl_path": str(out_dir / "run_history.jsonl"),
         "run_history_markdown_path": str(out_dir / "run_history.md"),
         "run_history_summary_path": str(out_dir / "run_history_summary.json"),
+        "run_loop_json_path": str(out_dir / "run_loop.json"),
+        "run_loop_markdown_path": str(out_dir / "run_loop.md"),
         "manifest_path": str(manifest_path),
         "readme_path": str(readme_path),
     }
@@ -1143,16 +1280,49 @@ def _render_markdown(summary: dict[str, Any]) -> str:
         f"- command_inspection_history_next_action_runner_ok: {_fmt(_value(command_scripts, 'inspection_history_next_action_runner_ok'))}",
         f"- command_inspection_history_next_action_runner_executes_command: {_fmt(_value(command_scripts, 'inspection_history_next_action_runner_executes_command'))}",
         f"- command_inspection_history_next_action_runner_forwards_arguments: {_fmt(_value(command_scripts, 'inspection_history_next_action_runner_forwards_arguments'))}",
+        f"- command_inspection_history_loop_runner_ok: {_fmt(_value(command_scripts, 'inspection_history_loop_runner_ok'))}",
+        f"- command_inspection_history_loop_runner_executes_command: {_fmt(_value(command_scripts, 'inspection_history_loop_runner_executes_command'))}",
+        f"- command_inspection_history_loop_runner_forwards_arguments: {_fmt(_value(command_scripts, 'inspection_history_loop_runner_forwards_arguments'))}",
+        f"- command_inspection_history_loop_resume_runner_ok: {_fmt(_value(command_scripts, 'inspection_history_loop_resume_runner_ok'))}",
+        f"- command_inspection_history_loop_resume_runner_executes_command: {_fmt(_value(command_scripts, 'inspection_history_loop_resume_runner_executes_command'))}",
+        f"- command_inspection_history_loop_resume_runner_forwards_arguments: {_fmt(_value(command_scripts, 'inspection_history_loop_resume_runner_forwards_arguments'))}",
+        f"- command_inspection_run_loop_status_issues: {_fmt_list(_value(command_scripts, 'inspection_run_loop_status_issues'))}",
+        f"- command_inspection_run_loop_handoff_status: {_fmt(_value(command_scripts, 'inspection_run_loop_handoff_status'))}",
+        f"- command_inspection_run_loop_handoff_severity: {_fmt(_value(command_scripts, 'inspection_run_loop_handoff_severity'))}",
+        f"- command_inspection_run_loop_handoff_requires_attention: {_fmt(_value(command_scripts, 'inspection_run_loop_handoff_requires_attention'))}",
+        f"- command_inspection_run_loop_handoff_recommended_action: {_fmt(_value(command_scripts, 'inspection_run_loop_handoff_recommended_action'))}",
+        f"- command_inspection_run_loop_handoff_recommended_command: {_fmt(_value(command_scripts, 'inspection_run_loop_handoff_recommended_command'))}",
+        f"- command_inspection_run_loop_declared_handoff_recommended_action: {_fmt(_value(command_scripts, 'inspection_run_loop_declared_handoff_recommended_action'))}",
+        f"- command_inspection_run_loop_declared_handoff_recommended_action_present: {_fmt(_value(command_scripts, 'inspection_run_loop_declared_handoff_recommended_action_present'))}",
+        f"- command_inspection_run_loop_declared_handoff_recommended_action_ok: {_fmt(_value(command_scripts, 'inspection_run_loop_declared_handoff_recommended_action_ok'))}",
+        f"- command_inspection_run_loop_declared_handoff_recommended_command: {_fmt(_value(command_scripts, 'inspection_run_loop_declared_handoff_recommended_command'))}",
+        f"- command_inspection_run_loop_declared_handoff_recommended_command_present: {_fmt(_value(command_scripts, 'inspection_run_loop_declared_handoff_recommended_command_present'))}",
+        f"- command_inspection_run_loop_declared_handoff_recommended_command_ok: {_fmt(_value(command_scripts, 'inspection_run_loop_declared_handoff_recommended_command_ok'))}",
+        f"- command_inspection_run_loop_final_next_action_runnable: {_fmt(_value(command_scripts, 'inspection_run_loop_final_next_action_runnable'))}",
+        f"- command_inspection_run_loop_continuation_command: {_fmt(_value(command_scripts, 'inspection_run_loop_continuation_command'))}",
+        f"- command_inspection_run_loop_resume_from_report_command: {_fmt(_value(command_scripts, 'inspection_run_loop_resume_from_report_command'))}",
+        f"- command_inspection_run_loop_resume_from_report_command_present: {_fmt(_value(command_scripts, 'inspection_run_loop_resume_from_report_command_present'))}",
+        f"- command_inspection_run_loop_resume_from_report_command_ok: {_fmt(_value(command_scripts, 'inspection_run_loop_resume_from_report_command_ok'))}",
+        f"- command_inspection_run_loop_resume_from_report_command_target_dir_ok: {_fmt(_value(command_scripts, 'inspection_run_loop_resume_from_report_command_target_dir_ok'))}",
+        f"- command_inspection_run_loop_resume_from_report_command_report_path_ok: {_fmt(_value(command_scripts, 'inspection_run_loop_resume_from_report_command_report_path_ok'))}",
+        f"- command_inspection_run_loop_resume_from_report_command_parse_error: {_fmt(_value(command_scripts, 'inspection_run_loop_resume_from_report_command_parse_error'))}",
+        f"- command_inspection_run_loop_resume_from_report_command_missing_required_flags: {_fmt_list(_value(command_scripts, 'inspection_run_loop_resume_from_report_command_missing_required_flags'))}",
         f"- command_runner: {_fmt(_value(command_scripts, 'runner_command'))}",
         f"- command_execution_next: {_fmt(_value(command_scripts, 'execution_next_command'))}",
         f"- command_history_next_action: {_fmt(_value(command_scripts, 'history_next_action_command'))}",
         f"- command_history_next_action_runner: {_fmt(_value(command_scripts, 'history_next_action_runner_path'))}",
+        f"- command_history_loop: {_fmt(_value(command_scripts, 'history_loop_command'))}",
+        f"- command_history_loop_runner: {_fmt(_value(command_scripts, 'history_loop_runner_path'))}",
+        f"- command_history_loop_resume: {_fmt(_value(command_scripts, 'history_loop_resume_command'))}",
+        f"- command_history_loop_resume_runner: {_fmt(_value(command_scripts, 'history_loop_resume_runner_path'))}",
         f"- command_runner_script: {_fmt(_value(command_scripts, 'runner_path'))}",
         f"- command_run_json_path: {_fmt(_value(command_scripts, 'run_json_path'))}",
         f"- command_run_markdown_path: {_fmt(_value(command_scripts, 'run_markdown_path'))}",
         f"- command_run_history_jsonl_path: {_fmt(_value(command_scripts, 'run_history_jsonl_path'))}",
         f"- command_run_history_markdown_path: {_fmt(_value(command_scripts, 'run_history_markdown_path'))}",
         f"- command_run_history_summary_path: {_fmt(_value(command_scripts, 'run_history_summary_path'))}",
+        f"- command_run_loop_json_path: {_fmt(_value(command_scripts, 'run_loop_json_path'))}",
+        f"- command_run_loop_markdown_path: {_fmt(_value(command_scripts, 'run_loop_markdown_path'))}",
         f"- command_history_report_only: {_fmt(_value(command_scripts, 'history_report_command'))}",
         "",
         "## Chains",
@@ -1289,6 +1459,22 @@ def main(argv: list[str] | None = None) -> int:
             if isinstance(history_next_action_runner_status, dict)
             else {}
         )
+        history_loop_runner_status = inspection.get("history_loop_runner_status")
+        history_loop_runner_status = (
+            history_loop_runner_status
+            if isinstance(history_loop_runner_status, dict)
+            else {}
+        )
+        history_loop_resume_runner_status = inspection.get(
+            "history_loop_resume_runner_status"
+        )
+        history_loop_resume_runner_status = (
+            history_loop_resume_runner_status
+            if isinstance(history_loop_resume_runner_status, dict)
+            else {}
+        )
+        run_loop_status = inspection.get("run_loop_status")
+        run_loop_status = run_loop_status if isinstance(run_loop_status, dict) else {}
         command_scripts.update(
             {
                 "inspection_generated": True,
@@ -1315,6 +1501,101 @@ def main(argv: list[str] | None = None) -> int:
                 ),
                 "inspection_history_next_action_runner_forwards_arguments": (
                     history_next_action_runner_status.get("forwards_arguments")
+                ),
+                "inspection_history_loop_runner_status": (
+                    history_loop_runner_status
+                ),
+                "inspection_history_loop_runner_ok": (
+                    history_loop_runner_status.get("ok")
+                ),
+                "inspection_history_loop_runner_executes_command": (
+                    history_loop_runner_status.get("executes_runner_command")
+                ),
+                "inspection_history_loop_runner_forwards_arguments": (
+                    history_loop_runner_status.get("forwards_arguments")
+                ),
+                "inspection_history_loop_resume_runner_status": (
+                    history_loop_resume_runner_status
+                ),
+                "inspection_history_loop_resume_runner_ok": (
+                    history_loop_resume_runner_status.get("ok")
+                ),
+                "inspection_history_loop_resume_runner_executes_command": (
+                    history_loop_resume_runner_status.get("executes_runner_command")
+                ),
+                "inspection_history_loop_resume_runner_forwards_arguments": (
+                    history_loop_resume_runner_status.get("forwards_arguments")
+                ),
+                "inspection_run_loop_status": run_loop_status,
+                "inspection_run_loop_status_issues": (
+                    inspection.get("run_loop_status_issues") or []
+                ),
+                "inspection_run_loop_handoff_status": (
+                    run_loop_status.get("handoff_status")
+                ),
+                "inspection_run_loop_handoff_severity": (
+                    run_loop_status.get("handoff_severity")
+                ),
+                "inspection_run_loop_handoff_requires_attention": (
+                    run_loop_status.get("handoff_requires_attention")
+                ),
+                "inspection_run_loop_handoff_recommended_action": (
+                    run_loop_status.get("handoff_recommended_action")
+                ),
+                "inspection_run_loop_handoff_recommended_command": (
+                    run_loop_status.get("handoff_recommended_command")
+                ),
+                "inspection_run_loop_declared_handoff_recommended_action": (
+                    run_loop_status.get("declared_handoff_recommended_action")
+                ),
+                "inspection_run_loop_declared_handoff_recommended_action_present": (
+                    run_loop_status.get(
+                        "declared_handoff_recommended_action_present"
+                    )
+                ),
+                "inspection_run_loop_declared_handoff_recommended_action_ok": (
+                    run_loop_status.get("declared_handoff_recommended_action_ok")
+                ),
+                "inspection_run_loop_declared_handoff_recommended_command": (
+                    run_loop_status.get("declared_handoff_recommended_command")
+                ),
+                "inspection_run_loop_declared_handoff_recommended_command_present": (
+                    run_loop_status.get(
+                        "declared_handoff_recommended_command_present"
+                    )
+                ),
+                "inspection_run_loop_declared_handoff_recommended_command_ok": (
+                    run_loop_status.get("declared_handoff_recommended_command_ok")
+                ),
+                "inspection_run_loop_final_next_action_runnable": (
+                    run_loop_status.get("final_next_action_runnable")
+                ),
+                "inspection_run_loop_continuation_command": (
+                    run_loop_status.get("continuation_command")
+                ),
+                "inspection_run_loop_resume_from_report_command": (
+                    run_loop_status.get("resume_from_report_command")
+                ),
+                "inspection_run_loop_resume_from_report_command_present": (
+                    run_loop_status.get("resume_from_report_command_present")
+                ),
+                "inspection_run_loop_resume_from_report_command_ok": (
+                    run_loop_status.get("resume_from_report_command_ok")
+                ),
+                "inspection_run_loop_resume_from_report_command_target_dir_ok": (
+                    run_loop_status.get("resume_from_report_command_target_dir_ok")
+                ),
+                "inspection_run_loop_resume_from_report_command_report_path_ok": (
+                    run_loop_status.get("resume_from_report_command_report_path_ok")
+                ),
+                "inspection_run_loop_resume_from_report_command_parse_error": (
+                    run_loop_status.get("resume_from_report_command_parse_error")
+                ),
+                "inspection_run_loop_resume_from_report_command_missing_required_flags": (
+                    run_loop_status.get(
+                        "resume_from_report_command_missing_required_flags"
+                    )
+                    or []
                 ),
             }
         )
