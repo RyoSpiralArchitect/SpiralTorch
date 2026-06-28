@@ -279,6 +279,23 @@ class CharVaeContextChainTests(unittest.TestCase):
         self.assertEqual(resolution[1]["configured_seed_group"], "19")
         self.assertEqual(resolution[1]["gate_failed"], True)
 
+        summary = mod._follow_up_seed_resolution_summary(resolution)
+        self.assertEqual(summary["attempted_follow_ups"], 2)
+        self.assertEqual(
+            summary["seed_source_counts"],
+            {"command_default": 1, "explicit_seed_group": 1},
+        )
+        self.assertEqual(
+            summary["command_source_counts"],
+            {"guided_next_follow_up_command": 1, "next_follow_up_command": 1},
+        )
+        self.assertEqual(
+            summary["configured_seed_group_status_counts"],
+            {"attempted_slot": 2},
+        )
+        self.assertEqual(summary["gate_failed_count"], 1)
+        self.assertEqual(summary["nonzero_exit_count"], 1)
+
     def test_preset_latent_scale_defaults_keep_smoke_light_and_scout_small(self) -> None:
         mod = _load_module()
         parser = mod._build_parser()
@@ -463,6 +480,14 @@ class CharVaeContextChainTests(unittest.TestCase):
                             "configured_seed_group_status": None,
                         }
                     ],
+                    "follow_up_seed_resolution_summary": {
+                        "attempted_follow_ups": 1,
+                        "seed_source_counts": {"command_default": 1},
+                        "command_source_counts": {"next_follow_up_command": 1},
+                        "configured_seed_group_status_counts": {"none": 1},
+                        "gate_failed_count": 1,
+                        "nonzero_exit_count": 1,
+                    },
                     "follow_up_seed_policy": mod._follow_up_seed_policy_record(
                         explicit_seed_groups=False
                     ),
@@ -500,6 +525,13 @@ class CharVaeContextChainTests(unittest.TestCase):
         self.assertIn(
             "- follow_up_seed_resolution: #1 seeds=131,137,139,149,151 "
             "source=command_default command=next_follow_up_command",
+            report,
+        )
+        self.assertIn(
+            "- follow_up_seed_resolution_summary: attempts=1 "
+            "seed_sources=command_default:1 "
+            "command_sources=next_follow_up_command:1 "
+            "group_statuses=none:1 gates_failed=1 nonzero_exits=1",
             report,
         )
         self.assertIn("- follow_up_seed_groups: preset_fallback (17, 19)", report)

@@ -290,6 +290,38 @@ def _follow_up_seed_resolution(manifest: dict[str, Any]) -> list[dict[str, Any]]
     return resolution
 
 
+def _count_by(records: list[dict[str, Any]], key: str) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for record in records:
+        value = record.get(key)
+        label = "none" if value is None else str(value)
+        counts[label] = counts.get(label, 0) + 1
+    return counts
+
+
+def _follow_up_seed_resolution_summary(
+    resolution: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "schema": "st.llm_char_vae_context.follow_up_seed_resolution_summary.v1",
+        "attempted_follow_ups": len(resolution),
+        "seed_source_counts": _count_by(resolution, "seed_source"),
+        "command_source_counts": _count_by(resolution, "command_source"),
+        "configured_seed_group_status_counts": _count_by(
+            resolution,
+            "configured_seed_group_status",
+        ),
+        "gate_failed_count": sum(
+            1 for record in resolution if bool(record.get("gate_failed"))
+        ),
+        "nonzero_exit_count": sum(
+            1
+            for record in resolution
+            if record.get("exit_code") not in (None, 0)
+        ),
+    }
+
+
 def _follow_up_command_record(
     summary: dict[str, Any],
     *,
@@ -515,6 +547,12 @@ def _fmt(value: Any, digits: int = 6) -> str:
     return str(value)
 
 
+def _fmt_counts(counts: Any) -> str:
+    if not isinstance(counts, dict) or not counts:
+        return "-"
+    return ", ".join(f"{key}:{counts[key]}" for key in sorted(counts))
+
+
 def _is_number(value: Any) -> bool:
     return isinstance(value, (int, float)) and math.isfinite(float(value))
 
@@ -650,6 +688,7 @@ def _render_report(manifest: dict[str, Any]) -> str:
             if isinstance(item, dict)
         )
         seed_resolution_text = seed_resolution_text or "-"
+    seed_resolution_summary = manifest.get("follow_up_seed_resolution_summary", {})
     lines = [
         "# Char VAE Context Chain Report",
         "",
@@ -688,6 +727,28 @@ def _render_report(manifest: dict[str, Any]) -> str:
         ),
         f"- follow_up_seed_group_plan: {seed_group_plan_text}",
         f"- follow_up_seed_resolution: {seed_resolution_text}",
+        "- follow_up_seed_resolution_summary: attempts={attempts} "
+        "seed_sources={seed_sources} command_sources={command_sources} "
+        "group_statuses={group_statuses} gates_failed={gates_failed} "
+        "nonzero_exits={nonzero_exits}".format(
+            attempts=_fmt(
+                _value(seed_resolution_summary, "attempted_follow_ups")
+            ),
+            seed_sources=_fmt_counts(
+                _value(seed_resolution_summary, "seed_source_counts")
+            ),
+            command_sources=_fmt_counts(
+                _value(seed_resolution_summary, "command_source_counts")
+            ),
+            group_statuses=_fmt_counts(
+                _value(
+                    seed_resolution_summary,
+                    "configured_seed_group_status_counts",
+                )
+            ),
+            gates_failed=_fmt(_value(seed_resolution_summary, "gate_failed_count")),
+            nonzero_exits=_fmt(_value(seed_resolution_summary, "nonzero_exit_count")),
+        ),
         "- follow_up_seed_policy: {precedence} ({reason})".format(
             precedence=(
                 " -> ".join(
@@ -924,6 +985,7 @@ def main(argv: list[str] | None = None) -> int:
             dry_run=bool(args.dry_run),
         ),
         "follow_up_seed_resolution": [],
+        "follow_up_seed_resolution_summary": _follow_up_seed_resolution_summary([]),
         "follow_up_seed_group_source": (
             "explicit" if explicit_seed_groups else "preset_fallback"
         ),
@@ -1041,6 +1103,9 @@ def main(argv: list[str] | None = None) -> int:
         dry_run=bool(args.dry_run),
     )
     manifest["follow_up_seed_resolution"] = _follow_up_seed_resolution(manifest)
+    manifest["follow_up_seed_resolution_summary"] = (
+        _follow_up_seed_resolution_summary(manifest["follow_up_seed_resolution"])
+    )
 
     chain_path = run_root / "chain.json"
     report_path = run_root / "chain_report.md"
