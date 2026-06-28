@@ -216,16 +216,38 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="return non-zero when required or optional declared artifacts are missing",
     )
+    parser.add_argument(
+        "--write-report",
+        action="store_true",
+        help="write inspection.json and inspection.md into the command bundle",
+    )
+    parser.add_argument("--json-out", type=Path, default=None)
+    parser.add_argument("--markdown-out", type=Path, default=None)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     summary = inspect_bundle(args.command_dir)
+    command_dir = Path(summary["command_dir"])
+    json_out = args.json_out
+    markdown_out = args.markdown_out
+    if args.write_report:
+        if json_out is None:
+            json_out = command_dir / "inspection.json"
+        if markdown_out is None:
+            markdown_out = command_dir / "inspection.md"
+    markdown = render_markdown(summary)
+    if json_out is not None:
+        json_out.parent.mkdir(parents=True, exist_ok=True)
+        json_out.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
+    if markdown_out is not None:
+        markdown_out.parent.mkdir(parents=True, exist_ok=True)
+        markdown_out.write_text(markdown, encoding="utf-8")
     if args.json:
         print(json.dumps(summary, indent=2, sort_keys=True))
     else:
-        print(render_markdown(summary), end="")
+        print(markdown, end="")
     if args.strict:
         return 0 if summary["strict_ready"] else 1
     return 0 if summary["bundle_ready"] else 1

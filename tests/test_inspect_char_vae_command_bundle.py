@@ -109,6 +109,72 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
         self.assertIn("Char VAE Command Bundle Inspection", markdown_result.stdout)
         self.assertIn("bundle_ready: yes", markdown_result.stdout)
 
+    def test_cli_writes_default_inspection_reports(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            command_dir = _write_bundle(Path(tmp))
+            result = subprocess.run(
+                [
+                    "python3",
+                    "-P",
+                    str(SCRIPT),
+                    str(command_dir),
+                    "--write-report",
+                    "--json",
+                ],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            json_report = command_dir / "inspection.json"
+            markdown_report = command_dir / "inspection.md"
+            json_report_exists = json_report.exists()
+            markdown_report_exists = markdown_report.exists()
+            report_payload = json.loads(json_report.read_text(encoding="utf-8"))
+            markdown = markdown_report.read_text(encoding="utf-8")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(json_report_exists)
+        self.assertTrue(markdown_report_exists)
+        self.assertTrue(report_payload["bundle_ready"])
+        self.assertTrue(report_payload["strict_ready"])
+        self.assertIn("Char VAE Command Bundle Inspection", markdown)
+
+    def test_cli_writes_explicit_inspection_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            command_dir = _write_bundle(root)
+            json_out = root / "reports" / "bundle.json"
+            markdown_out = root / "reports" / "bundle.md"
+            result = subprocess.run(
+                [
+                    "python3",
+                    "-P",
+                    str(SCRIPT),
+                    str(command_dir),
+                    "--json-out",
+                    str(json_out),
+                    "--markdown-out",
+                    str(markdown_out),
+                ],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            json_out_exists = json_out.exists()
+            markdown_out_exists = markdown_out.exists()
+            payload = json.loads(json_out.read_text(encoding="utf-8"))
+            markdown = markdown_out.read_text(encoding="utf-8")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(json_out_exists)
+        self.assertTrue(markdown_out_exists)
+        self.assertEqual(payload["action"], "continue_from_accepted")
+        self.assertIn("strict_ready: yes", markdown)
+
     def test_cli_fails_when_required_artifact_is_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             command_dir = _write_bundle(Path(tmp), missing_comparison_json=True)
