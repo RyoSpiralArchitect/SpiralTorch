@@ -38,6 +38,54 @@ def _is_executable(path: Path | None) -> bool:
     return path is not None and path.is_file() and os.access(path, os.X_OK)
 
 
+def _runner_wrapper_status(
+    path: Path | None,
+    *,
+    runner_command: str | None,
+) -> dict[str, Any]:
+    status: dict[str, Any] = {
+        "path": str(path) if path is not None else None,
+        "present": path is not None,
+        "exists": None if path is None else path.is_file(),
+        "executable": None if path is None else _is_executable(path),
+        "readable": None,
+        "contains_runner_command": None,
+        "executes_runner_command": None,
+        "forwards_arguments": None,
+        "error": None,
+        "ok": path is None,
+    }
+    if path is None:
+        return status
+    if not path.is_file():
+        status["ok"] = False
+        return status
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        status["readable"] = False
+        status["error"] = str(exc)
+        status["ok"] = False
+        return status
+    status["readable"] = True
+    status["contains_runner_command"] = (
+        runner_command is not None and runner_command in text
+    )
+    expected_exec = (
+        f'exec {runner_command} "$@"' if runner_command is not None else None
+    )
+    status["executes_runner_command"] = (
+        expected_exec is not None and expected_exec in text
+    )
+    status["forwards_arguments"] = '"$@"' in text or "'$@'" in text
+    status["ok"] = bool(
+        status["executable"]
+        and status["executes_runner_command"]
+        and status["forwards_arguments"]
+    )
+    return status
+
+
 def _fmt(value: Any) -> str:
     if value is None:
         return "-"
@@ -263,6 +311,10 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
     run_history_summary_path = _path_from(
         command_scripts.get("run_history_summary_path")
     )
+    runner_wrapper_status = _runner_wrapper_status(
+        runner_path,
+        runner_command=runner_command,
+    )
 
     chain_sources = comparison.get("chain_sources")
     if not isinstance(chain_sources, list):
@@ -315,7 +367,7 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
         _check(
             "runner_script",
             path=runner_path,
-            ok=runner_path is None or _is_executable(runner_path),
+            ok=bool(runner_wrapper_status["ok"]),
             required=False,
         ),
         _check(
@@ -389,6 +441,7 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
         else None,
         "runner_command": runner_command,
         "runner_path": str(runner_path) if runner_path is not None else None,
+        "runner_wrapper_status": runner_wrapper_status,
         "history_report_command": history_report_command,
         "declared_commands": declared_commands,
         "declared_command_issues": declared_command_issues,
@@ -434,6 +487,26 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"- comparison_markdown_path: {_fmt(summary.get('comparison_markdown_path'))}",
         f"- runner_command: {_fmt(summary.get('runner_command'))}",
         f"- runner_path: {_fmt(summary.get('runner_path'))}",
+        (
+            "- runner_wrapper_ok: "
+            f"{_fmt(_value(summary, 'runner_wrapper_status', 'ok'))}"
+        ),
+        (
+            "- runner_wrapper_contains_runner_command: "
+            f"{_fmt(_value(summary, 'runner_wrapper_status', 'contains_runner_command'))}"
+        ),
+        (
+            "- runner_wrapper_executes_runner_command: "
+            f"{_fmt(_value(summary, 'runner_wrapper_status', 'executes_runner_command'))}"
+        ),
+        (
+            "- runner_wrapper_forwards_arguments: "
+            f"{_fmt(_value(summary, 'runner_wrapper_status', 'forwards_arguments'))}"
+        ),
+        (
+            "- runner_wrapper_error: "
+            f"{_fmt(_value(summary, 'runner_wrapper_status', 'error'))}"
+        ),
         f"- history_report_command: {_fmt(summary.get('history_report_command'))}",
         f"- declared_command_issues: {_fmt_list(summary.get('declared_command_issues'))}",
         f"- run_json_path: {_fmt(summary.get('run_json_path'))}",
