@@ -94,6 +94,15 @@ def _history_loop_command(command_dir: Path) -> str:
     )
 
 
+def _history_loop_continuation_command(command_dir: Path) -> str:
+    return (
+        "env PYTHONNOUSERSITE=1 python3 -P "
+        f"{shlex.quote(str(LOOP_SCRIPT.resolve()))} "
+        f"{shlex.quote(str(command_dir.resolve()))} "
+        "--max-steps 1 --write-loop-report"
+    )
+
+
 def _history_loop_runner_path(command_dir: Path) -> str:
     return str((command_dir / "run_history_loop.sh").resolve())
 
@@ -616,6 +625,30 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
         self.assertIsNone(
             manifest["command_scripts"]["inspection_runner_wrapper_forwards_arguments"]
         )
+        self.assertEqual(
+            manifest["command_scripts"]["inspection_run_loop_status"],
+            inspection["run_loop_status"],
+        )
+        self.assertEqual(
+            manifest["command_scripts"]["inspection_run_loop_status_issues"],
+            [],
+        )
+        self.assertIsNone(
+            manifest["command_scripts"]["inspection_run_loop_handoff_status"]
+        )
+        self.assertIsNone(
+            manifest["command_scripts"]["inspection_run_loop_handoff_severity"]
+        )
+        self.assertIsNone(
+            manifest["command_scripts"][
+                "inspection_run_loop_handoff_requires_attention"
+            ]
+        )
+        self.assertIsNone(
+            manifest["command_scripts"][
+                "inspection_run_loop_handoff_recommended_action"
+            ]
+        )
         self.assertTrue(comparison["command_scripts"]["inspection_generated"])
         self.assertTrue(comparison["command_inspection"]["strict_ready"])
         self.assertTrue(comparison["command_scripts"]["inspection_runner_wrapper_ok"])
@@ -630,8 +663,136 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
         self.assertIn("command_inspection_missing_required: -", markdown)
         self.assertIn("command_inspection_runner_wrapper_ok: yes", markdown)
         self.assertIn("command_inspection_history_loop_runner_ok: yes", markdown)
+        self.assertIn("command_inspection_run_loop_status_issues: -", markdown)
+        self.assertIn("command_inspection_run_loop_handoff_status: -", markdown)
+        self.assertIn("command_inspection_run_loop_handoff_severity: -", markdown)
         self.assertIn("runner_wrapper_ok: `yes`", readme)
         self.assertIn("history_loop_runner_ok: `yes`", readme)
+        self.assertIn("run_loop_status_issues: -", readme)
+        self.assertIn("run_loop_handoff_status: -", readme)
+        self.assertIn("run_loop_handoff_severity: -", readme)
+
+    def test_cli_write_command_inspection_surfaces_run_loop_handoff(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            chain = _write_chain(
+                root / "chain",
+                {
+                    "schema": "st.llm_char_vae_context.chain.v1",
+                    "preset": "smoke",
+                    "run_root": str(root / "chain"),
+                    "planned_follow_ups": 1,
+                    "attempted_follow_ups": 0,
+                    "dry_run": True,
+                    "follow_up_seed_resolution_summary": {
+                        "attempted_follow_ups": 0,
+                        "seed_source_counts": {},
+                        "command_source_counts": {},
+                        "configured_seed_group_status_counts": {},
+                        "gate_failed_count": 0,
+                        "nonzero_exit_count": 0,
+                    },
+                },
+            )
+            command_dir = root / "commands"
+            continuation_command = _history_loop_continuation_command(command_dir)
+            _write_json(
+                command_dir / "run_loop.json",
+                {
+                    "schema": "st.llm_char_vae_context.command_bundle_history_loop.v1",
+                    "command_dir": str(command_dir.resolve()),
+                    "handoff_status": "continuation_ready",
+                    "handoff_reason": "test continuation is runnable",
+                    "max_steps": 1,
+                    "step_count": 1,
+                    "executed_count": 1,
+                    "success_count": 1,
+                    "failure_count": 0,
+                    "stop_reason": "max_steps_reached",
+                    "returncode": 0,
+                    "final_next_action": {
+                        "action": "run_execution_next",
+                        "reason": "continue from execution summary",
+                        "target": "execution-next",
+                        "command_source": "execution_summary",
+                        "script_path": str(
+                            (command_dir / "run_recommended_next.sh").resolve()
+                        ),
+                        "should_continue": True,
+                    },
+                    "final_next_action_runnable": True,
+                    "continuation_command": continuation_command,
+                },
+            )
+            result = subprocess.run(
+                [
+                    "python3",
+                    "-P",
+                    str(SCRIPT),
+                    str(chain),
+                    "--command-out-dir",
+                    str(command_dir),
+                    "--write-command-inspection",
+                ],
+                cwd=root,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            manifest = json.loads(
+                (command_dir / "recommendation.json").read_text(encoding="utf-8")
+            )
+            comparison = json.loads(
+                (command_dir / "comparison.json").read_text(encoding="utf-8")
+            )
+            readme = (command_dir / "README.md").read_text(encoding="utf-8")
+            markdown = (command_dir / "comparison.md").read_text(encoding="utf-8")
+
+        command_scripts = manifest["command_scripts"]
+        self.assertEqual(command_scripts["inspection_run_loop_status_issues"], [])
+        self.assertEqual(
+            command_scripts["inspection_run_loop_handoff_status"],
+            "continuation_ready",
+        )
+        self.assertEqual(command_scripts["inspection_run_loop_handoff_severity"], "ready")
+        self.assertFalse(
+            command_scripts["inspection_run_loop_handoff_requires_attention"]
+        )
+        self.assertEqual(
+            command_scripts["inspection_run_loop_handoff_recommended_action"],
+            "run_continuation_command",
+        )
+        self.assertTrue(command_scripts["inspection_run_loop_final_next_action_runnable"])
+        self.assertEqual(
+            command_scripts["inspection_run_loop_continuation_command"],
+            continuation_command,
+        )
+        self.assertEqual(
+            comparison["command_scripts"]["inspection_run_loop_handoff_status"],
+            "continuation_ready",
+        )
+        self.assertIn("run_loop_handoff_status: `continuation_ready`", readme)
+        self.assertIn("run_loop_handoff_severity: `ready`", readme)
+        self.assertIn(
+            "run_loop_handoff_recommended_action: `run_continuation_command`",
+            readme,
+        )
+        self.assertIn(
+            "command_inspection_run_loop_handoff_status: continuation_ready",
+            markdown,
+        )
+        self.assertIn(
+            "command_inspection_run_loop_handoff_requires_attention: no",
+            markdown,
+        )
+        self.assertIn(
+            "command_inspection_run_loop_continuation_command: "
+            f"{continuation_command}",
+            markdown,
+        )
 
     def test_cli_command_dir_records_absolute_handoff_paths(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
