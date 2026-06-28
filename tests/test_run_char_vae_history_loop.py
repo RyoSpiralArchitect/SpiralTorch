@@ -78,6 +78,11 @@ class RunCharVaeHistoryLoopTests(unittest.TestCase):
         self.assertEqual(payload["success_count"], 2)
         self.assertEqual(payload["failure_count"], 0)
         self.assertEqual(payload["stop_reason"], "history_next_action_stopped")
+        self.assertEqual(payload["handoff_status"], "awaiting_next_command")
+        self.assertEqual(
+            payload["handoff_reason"],
+            "latest execution can continue but has no next script",
+        )
         self.assertEqual(payload["returncode"], 0)
         self.assertEqual(payload["steps"][0]["target"], "next")
         self.assertEqual(payload["steps"][0]["target_kind"], "follow_up")
@@ -107,6 +112,7 @@ class RunCharVaeHistoryLoopTests(unittest.TestCase):
         self.assertEqual(history_summary["next_action"]["action"], "collect_next_command")
         self.assertEqual(loop_report["stop_reason"], payload["stop_reason"])
         self.assertIn("Char VAE History Loop Runner", loop_markdown)
+        self.assertIn("handoff_status: awaiting_next_command", loop_markdown)
         self.assertIn("stop_reason: history_next_action_stopped", loop_markdown)
         self.assertIn("| 1 | next | follow_up | yes | 0 | improved |", loop_markdown)
         self.assertIn(
@@ -137,6 +143,11 @@ class RunCharVaeHistoryLoopTests(unittest.TestCase):
         self.assertEqual(payload["step_count"], 1)
         self.assertEqual(payload["executed_count"], 0)
         self.assertEqual(payload["stop_reason"], "dry_run")
+        self.assertEqual(payload["handoff_status"], "dry_run")
+        self.assertEqual(
+            payload["handoff_reason"],
+            "dry-run resolved the next history-guided step",
+        )
         self.assertEqual(payload["steps"][0]["target"], "next")
         self.assertFalse(payload["steps"][0]["executed"])
         self.assertFalse(history_jsonl_exists)
@@ -166,6 +177,11 @@ class RunCharVaeHistoryLoopTests(unittest.TestCase):
         self.assertEqual(payload["success_count"], 1)
         self.assertEqual(payload["failure_count"], 0)
         self.assertEqual(payload["stop_reason"], "max_steps_reached")
+        self.assertEqual(payload["handoff_status"], "continuation_ready")
+        self.assertEqual(
+            payload["handoff_reason"],
+            "latest execution summary exposes a next command",
+        )
         self.assertEqual(payload["returncode"], 1)
         self.assertIs(payload["fail_on_max_steps_continuation"], True)
         self.assertIs(payload["max_steps_continuation_failed"], True)
@@ -207,6 +223,7 @@ class RunCharVaeHistoryLoopTests(unittest.TestCase):
             payload["continuation_command"],
         )
         self.assertIn("stop_reason: max_steps_reached", loop_markdown)
+        self.assertIn("handoff_status: continuation_ready", loop_markdown)
         self.assertIn("max_steps_continuation_failed: yes", loop_markdown)
         self.assertIn(
             "final_next_action_command_source: guided_next_follow_up_command",
@@ -286,6 +303,11 @@ class RunCharVaeHistoryLoopTests(unittest.TestCase):
         self.assertEqual(payload["success_count"], 1)
         self.assertEqual(payload["failure_count"], 0)
         self.assertEqual(payload["stop_reason"], "history_next_action_stopped")
+        self.assertEqual(payload["handoff_status"], "needs_review")
+        self.assertEqual(
+            payload["handoff_reason"],
+            "follow-up gate requested stop",
+        )
         self.assertEqual(
             payload["fail_on_final_actions"],
             ["review_before_continuing", "inspect_history"],
@@ -352,6 +374,11 @@ class RunCharVaeHistoryLoopTests(unittest.TestCase):
         self.assertEqual(payload["executed_count"], 0)
         self.assertEqual(payload["failure_count"], 1)
         self.assertEqual(payload["stop_reason"], "history_next_action_blocked")
+        self.assertEqual(payload["handoff_status"], "blocked")
+        self.assertEqual(
+            payload["handoff_reason"],
+            "follow-up gate requested stop",
+        )
         self.assertEqual(
             payload["error"],
             (

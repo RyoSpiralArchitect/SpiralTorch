@@ -199,12 +199,86 @@ def _stop_reason_for_step(
     return None
 
 
+def _handoff_status(
+    *,
+    returncode: int,
+    stop_reason: str | None,
+    final_next_action: dict[str, Any],
+    final_next_action_runnable: bool,
+    final_action_failed: bool,
+    max_steps_continuation_failed: bool,
+) -> tuple[str, str]:
+    action = final_next_action.get("action")
+    action_reason = final_next_action.get("reason")
+    if final_action_failed:
+        if action == "review_before_continuing":
+            return (
+                "needs_review",
+                action_reason or "final next action requested review",
+            )
+        if action == "inspect_history":
+            return (
+                "needs_inspection",
+                action_reason or "final next action requested inspection",
+            )
+        return (
+            "final_action_failed",
+            action_reason or f"final next action requested failure: {action}",
+        )
+    if stop_reason == "dry_run":
+        return ("dry_run", "dry-run resolved the next history-guided step")
+    if max_steps_continuation_failed:
+        return (
+            "continuation_ready",
+            action_reason or "max steps reached with runnable final next action",
+        )
+    if final_next_action_runnable:
+        return (
+            "continuation_ready",
+            action_reason or "final next action is runnable",
+        )
+    if returncode != 0:
+        if stop_reason == "history_next_action_blocked":
+            return (
+                "blocked",
+                action_reason or "history next action blocked execution",
+            )
+        return ("failed", action_reason or "history loop step failed")
+    if action == "collect_next_command":
+        return (
+            "awaiting_next_command",
+            action_reason or "latest execution can continue but has no next script",
+        )
+    if action == "review_before_continuing":
+        return (
+            "needs_review",
+            action_reason or "final next action requested review",
+        )
+    if action == "inspect_history":
+        return (
+            "needs_inspection",
+            action_reason or "final next action requested inspection",
+        )
+    if action == "repair_blocker":
+        return ("blocked", action_reason or "final next action requests repair")
+    if stop_reason == "history_next_action_not_runnable":
+        return (
+            "not_runnable",
+            action_reason or "final next action target is not runnable",
+        )
+    if stop_reason == "max_steps_reached":
+        return ("max_steps_reached", "max steps reached")
+    return ("stopped", action_reason or stop_reason or "history loop stopped")
+
+
 def render_markdown(summary: dict[str, Any]) -> str:
     next_action = _mapping(summary.get("final_next_action"))
     lines = [
         "# Char VAE History Loop Runner",
         "",
         f"- command_dir: {_fmt(summary.get('command_dir'))}",
+        f"- handoff_status: {_fmt(summary.get('handoff_status'))}",
+        f"- handoff_reason: {_fmt(summary.get('handoff_reason'))}",
         f"- max_steps: {_fmt(summary.get('max_steps'))}",
         f"- strict: {_fmt(summary.get('strict'))}",
         f"- dry_run: {_fmt(summary.get('dry_run'))}",
@@ -379,9 +453,19 @@ def run_loop(
     elif max_steps_continuation_failed:
         returncode = 1
         error = f"max steps reached with runnable final next action: {final_action}"
+    handoff_status, handoff_reason = _handoff_status(
+        returncode=returncode,
+        stop_reason=stop_reason,
+        final_next_action=final_next_action,
+        final_next_action_runnable=final_next_action_runnable,
+        final_action_failed=final_action_failed,
+        max_steps_continuation_failed=max_steps_continuation_failed,
+    )
     summary = {
         "schema": SCHEMA,
         "command_dir": str(command_dir),
+        "handoff_status": handoff_status,
+        "handoff_reason": handoff_reason,
         "max_steps": max_steps,
         "strict": strict,
         "dry_run": dry_run,

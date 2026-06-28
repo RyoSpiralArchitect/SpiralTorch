@@ -311,6 +311,8 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
                 "schema": None,
                 "schema_ok": None,
                 "command_dir": None,
+                "handoff_status": None,
+                "handoff_reason": None,
                 "max_steps": None,
                 "step_count": None,
                 "executed_count": None,
@@ -774,6 +776,10 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
                 {
                     "schema": "st.llm_char_vae_context.command_bundle_history_loop.v1",
                     "command_dir": str(command_dir),
+                    "handoff_status": "awaiting_next_command",
+                    "handoff_reason": (
+                        "latest execution can continue but has no next script"
+                    ),
                     "max_steps": 3,
                     "step_count": 2,
                     "executed_count": 2,
@@ -846,6 +852,11 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
         self.assertTrue(status["valid_json"])
         self.assertTrue(status["schema_ok"])
         self.assertEqual(status["command_dir"], str(command_dir))
+        self.assertEqual(status["handoff_status"], "awaiting_next_command")
+        self.assertEqual(
+            status["handoff_reason"],
+            "latest execution can continue but has no next script",
+        )
         self.assertEqual(status["max_steps"], 3)
         self.assertEqual(status["step_count"], 2)
         self.assertEqual(status["executed_count"], 2)
@@ -879,6 +890,15 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
         self.assertEqual(markdown_result.returncode, 0, markdown_result.stderr)
         self.assertIn("run_loop_valid_json: yes", markdown_result.stdout)
         self.assertIn("run_loop_schema_ok: yes", markdown_result.stdout)
+        self.assertIn(
+            "run_loop_handoff_status: awaiting_next_command",
+            markdown_result.stdout,
+        )
+        self.assertIn(
+            "run_loop_handoff_reason: "
+            "latest execution can continue but has no next script",
+            markdown_result.stdout,
+        )
         self.assertIn("run_loop_step_count: 2", markdown_result.stdout)
         self.assertIn(
             "run_loop_stop_reason: history_next_action_stopped",
