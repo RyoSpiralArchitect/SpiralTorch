@@ -461,6 +461,69 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
         self.assertFalse(fields["execution_evidence_should_continue"])
         self.assertTrue(fields["execution_evidence_mixed_signal"])
 
+    def test_execution_evidence_marks_feature_swap_review_confirmed(self) -> None:
+        mod = _load_module()
+        fields = mod._execution_evidence_fields(
+            {
+                "exists": True,
+                "valid_json": True,
+                "status": "improved",
+                "follow_up_result_verdict": "improved",
+                "follow_up_verdict": "improved",
+                "follow_up_effective_verdict": "improved",
+                "follow_up_gate_failed": False,
+                "guidance_action": "confirm_trajectory_with_fresh_seeds",
+            },
+            selected_execution_next_command={
+                "source": "feature_swap_review_command",
+            },
+        )
+
+        self.assertEqual(fields["execution_evidence_status"], "review_confirmed")
+        self.assertEqual(
+            fields["execution_evidence_reason"],
+            "feature-swap review confirmed improvement",
+        )
+        self.assertTrue(fields["execution_evidence_should_continue"])
+        self.assertFalse(fields["execution_evidence_mixed_signal"])
+
+    def test_execution_next_prefers_feature_swap_review_when_guided_disabled(
+        self,
+    ) -> None:
+        mod = _load_module()
+        command = mod._compact_execution_next_command(
+            {
+                "guided_next_follow_up_command": {
+                    "enabled": False,
+                    "script_path": None,
+                },
+                "feature_swap_review_command": {
+                    "action": "review_feature_swap_before_promotion",
+                    "script_path": "/tmp/feature_swap_review_command.sh",
+                    "script_usage": (
+                        "FOLLOW_UP_FROM=current NEW_SEEDS=101 "
+                        "bash /tmp/feature_swap_review_command.sh"
+                    ),
+                    "default_new_seeds": "101",
+                    "default_run_dir": "/tmp/feature_swap_review",
+                    "default_follow_up_from": "/tmp/current/summary.json",
+                },
+                "next_follow_up_command": {
+                    "script_path": "/tmp/next_follow_up_command.sh",
+                    "script_usage": "NEW_SEEDS=103 bash /tmp/next_follow_up_command.sh",
+                    "default_new_seeds": "103",
+                    "default_run_dir": "/tmp/next",
+                    "default_follow_up_from": "/tmp/current/summary.json",
+                },
+            }
+        )
+
+        self.assertTrue(command["available"])
+        self.assertEqual(command["source"], "feature_swap_review_command")
+        self.assertEqual(command["action"], "review_feature_swap_before_promotion")
+        self.assertEqual(command["script_path"], "/tmp/feature_swap_review_command.sh")
+        self.assertEqual(command["default_new_seeds"], "101")
+
     def test_history_markdown_surfaces_problem_signals(self) -> None:
         mod = _load_module()
         events = [
@@ -572,7 +635,19 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
             summary["signals"]["last_problem"]["missing_required"],
             ["recommended_review.sh"],
         )
+        self.assertEqual(summary["next_action"]["action"], "repair_blocker")
+        self.assertEqual(
+            summary["next_action"]["reason"],
+            "command bundle did not pass the requested inspection gate",
+        )
+        self.assertIs(summary["next_action"]["should_continue"], False)
         self.assertIn("status_counts: blocked:2, ok:1", markdown)
+        self.assertIn("next_action: repair_blocker", markdown)
+        self.assertIn(
+            "next_action_reason: command bundle did not pass the requested "
+            "inspection gate",
+            markdown,
+        )
         self.assertIn("target_kind_counts: follow_up:1, review:2", markdown)
         self.assertIn(
             "recommendation_action_counts: continue_from_accepted:1, "
@@ -598,6 +673,107 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
             markdown,
         )
         self.assertIn("last_problem_missing_required: recommended_review.sh", markdown)
+
+    def test_history_marks_selected_feature_swap_review_confirmation(self) -> None:
+        mod = _load_module()
+        events = [
+            {
+                "target": "execution-next",
+                "target_kind": "execution_next",
+                "dry_run": False,
+                "executed": True,
+                "returncode": 0,
+                "finished_at": "2026-06-28T00:00:00.000Z",
+                "selected_execution_next_command": {
+                    "source": "feature_swap_review_command",
+                    "default_new_seeds": "157,1001,1003,1005,1007",
+                    "script_path": "/tmp/feature_swap_review_command.sh",
+                },
+                "recommendation_context": {
+                    "action": "continue_from_accepted",
+                    "champion": {"config": "latent@scale=0.5"},
+                },
+                "execution_summary": {
+                    "exists": True,
+                    "valid_json": True,
+                    "status": "improved",
+                    "follow_up_verdict": "improved",
+                    "follow_up_result_verdict": "improved",
+                    "follow_up_effective_verdict": "improved",
+                    "follow_up_gate_failed": False,
+                    "guidance_action": "confirm_trajectory_with_fresh_seeds",
+                    "next_command": {
+                        "source": "guided_next_follow_up_command",
+                        "default_new_seeds": "1009,1013,1019",
+                        "script_path": "/tmp/guided_next_follow_up_command.sh",
+                    },
+                },
+            }
+        ]
+        markdown = mod.render_history_markdown(
+            events,
+            history_jsonl_path=Path("/tmp/run_history.jsonl"),
+        )
+        summary = mod.summarize_history_events(
+            events,
+            history_jsonl_path=Path("/tmp/run_history.jsonl"),
+        )
+
+        self.assertEqual(
+            summary["latest"]["execution_evidence_status"],
+            "review_confirmed",
+        )
+        self.assertEqual(
+            summary["latest"]["execution_evidence_reason"],
+            "feature-swap review confirmed improvement",
+        )
+        self.assertEqual(
+            summary["latest"]["selected_execution_next_source"],
+            "feature_swap_review_command",
+        )
+        self.assertEqual(
+            summary["latest"]["execution_next_source"],
+            "guided_next_follow_up_command",
+        )
+        self.assertEqual(
+            summary["signals"]["execution_evidence_status_counts"],
+            {"review_confirmed": 1},
+        )
+        self.assertEqual(
+            summary["signals"]["selected_execution_next_source_counts"],
+            {"feature_swap_review_command": 1},
+        )
+        self.assertEqual(
+            summary["signals"]["latest_executed"][
+                "selected_execution_next_source"
+            ],
+            "feature_swap_review_command",
+        )
+        self.assertEqual(summary["next_action"]["action"], "run_execution_next")
+        self.assertEqual(summary["next_action"]["target"], "execution-next")
+        self.assertEqual(
+            summary["next_action"]["command_source"],
+            "guided_next_follow_up_command",
+        )
+        self.assertEqual(
+            summary["next_action"]["script_path"],
+            "/tmp/guided_next_follow_up_command.sh",
+        )
+        self.assertIs(summary["next_action"]["should_continue"], True)
+        self.assertIn("next_action: run_execution_next", markdown)
+        self.assertIn("next_action_target: execution-next", markdown)
+        self.assertIn(
+            "latest_selected_execution_next_source: feature_swap_review_command",
+            markdown,
+        )
+        self.assertIn(
+            "selected_execution_next_source_counts: feature_swap_review_command:1",
+            markdown,
+        )
+        self.assertIn(
+            "latest_executed_execution_evidence_status: review_confirmed",
+            markdown,
+        )
 
     def test_cli_dry_run_reports_next_without_running(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -859,6 +1035,259 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
             str(command_dir / "executed_follow_up" / "next" / "summary.json"),
         )
 
+    def test_cli_uses_history_next_action_to_select_execution_next(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            command_dir = _write_bundle(Path(tmp))
+            first = subprocess.run(
+                [
+                    "python3",
+                    "-P",
+                    str(SCRIPT),
+                    str(command_dir),
+                    "--write-run-report",
+                    "--append-run-history",
+                    "--write-run-history-report",
+                    "--json",
+                ],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            dry = subprocess.run(
+                [
+                    "python3",
+                    "-P",
+                    str(SCRIPT),
+                    str(command_dir),
+                    "--use-history-next-action",
+                    "--dry-run",
+                    "--write-run-report",
+                    "--json",
+                ],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            first_payload = json.loads(first.stdout)
+            dry_payload = json.loads(dry.stdout)
+            run_markdown = (command_dir / "run.md").read_text(encoding="utf-8")
+
+        self.assertEqual(first.returncode, 0, first.stderr)
+        self.assertEqual(dry.returncode, 0, dry.stderr)
+        _assert_execution_summary(self, first_payload, command_dir)
+        self.assertEqual(dry_payload["requested_target"], "next")
+        self.assertEqual(dry_payload["target"], "execution-next")
+        self.assertTrue(dry_payload["use_history_next_action"])
+        self.assertEqual(
+            dry_payload["history_next_action"]["action"],
+            "run_execution_next",
+        )
+        self.assertEqual(
+            dry_payload["history_next_action"]["target"],
+            "execution-next",
+        )
+        self.assertEqual(
+            dry_payload["history_next_action_resolved_target"],
+            "execution-next",
+        )
+        self.assertIsNone(dry_payload["history_next_action_error"])
+        self.assertEqual(
+            dry_payload["selected_execution_next_command"]["source"],
+            "guided_next_follow_up_command",
+        )
+        self.assertEqual(dry_payload["target_kind"], "execution_next")
+        self.assertFalse(dry_payload["executed"])
+        self.assertIn("requested_target: next", run_markdown)
+        self.assertIn("target: execution-next", run_markdown)
+        self.assertIn("use_history_next_action: yes", run_markdown)
+        self.assertIn("history_next_action: run_execution_next", run_markdown)
+        self.assertIn(
+            "history_next_action_resolved_target: execution-next",
+            run_markdown,
+        )
+
+    def test_cli_blocks_history_next_action_when_review_is_required(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            command_dir = _write_bundle(Path(tmp))
+            history_event = {
+                "schema": "st.llm_char_vae_context.command_bundle_run_history_event.v1",
+                "target": "next",
+                "target_kind": "follow_up",
+                "dry_run": False,
+                "executed": True,
+                "returncode": 0,
+                "execution_summary": {
+                    "exists": True,
+                    "valid_json": True,
+                    "follow_up_gate_failed": True,
+                    "follow_up_verdict": "regressed",
+                    "next_command": {
+                        "source": "guided_next_follow_up_command",
+                        "script_path": str(
+                            command_dir
+                            / "executed_follow_up"
+                            / "guided_next_follow_up_command.sh"
+                        ),
+                        "default_new_seeds": "109,113,127",
+                    },
+                },
+            }
+            (command_dir / "run_history.jsonl").write_text(
+                json.dumps(history_event, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                [
+                    "python3",
+                    "-P",
+                    str(SCRIPT),
+                    str(command_dir),
+                    "--use-history-next-action",
+                    "--write-run-report",
+                    "--json",
+                ],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            payload = json.loads(result.stdout)
+            run_markdown = (command_dir / "run.md").read_text(encoding="utf-8")
+
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(payload["requested_target"], "next")
+        self.assertEqual(payload["target"], "next")
+        self.assertTrue(payload["use_history_next_action"])
+        self.assertFalse(payload["executed"])
+        self.assertEqual(
+            payload["history_next_action"]["action"],
+            "review_before_continuing",
+        )
+        self.assertEqual(
+            payload["history_next_action"]["reason"],
+            "follow-up gate requested stop",
+        )
+        self.assertIs(payload["history_next_action"]["should_continue"], False)
+        self.assertIsNone(payload["history_next_action_resolved_target"])
+        self.assertEqual(
+            payload["history_next_action_error"],
+            (
+                "history next action does not allow continuation: "
+                "follow-up gate requested stop"
+            ),
+        )
+        self.assertEqual(payload["error"], payload["history_next_action_error"])
+        self.assertFalse((command_dir / "runner.out").exists())
+        self.assertIn("history_next_action: review_before_continuing", run_markdown)
+        self.assertIn("history_next_action_error:", run_markdown)
+
+    def test_cli_blocks_execution_next_when_selected_script_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            command_dir = _write_bundle(Path(tmp))
+            first = subprocess.run(
+                [
+                    "python3",
+                    "-P",
+                    str(SCRIPT),
+                    str(command_dir),
+                    "--write-run-report",
+                    "--json",
+                ],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            selected_script = (
+                command_dir
+                / "executed_follow_up"
+                / "guided_next_follow_up_command.sh"
+            )
+            selected_script.unlink()
+            blocked = subprocess.run(
+                [
+                    "python3",
+                    "-P",
+                    str(SCRIPT),
+                    str(command_dir),
+                    "--target",
+                    "execution-next",
+                    "--write-run-report",
+                    "--append-run-history",
+                    "--write-run-history-report",
+                    "--json",
+                ],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            first_payload = json.loads(first.stdout)
+            blocked_payload = json.loads(blocked.stdout)
+            run_report = json.loads(
+                (command_dir / "run.json").read_text(encoding="utf-8")
+            )
+            history_events = [
+                json.loads(line)
+                for line in (command_dir / "run_history.jsonl")
+                .read_text(encoding="utf-8")
+                .splitlines()
+            ]
+            history_summary = json.loads(
+                (command_dir / "run_history_summary.json").read_text(encoding="utf-8")
+            )
+            run_markdown = (command_dir / "run.md").read_text(encoding="utf-8")
+
+        self.assertEqual(first.returncode, 0, first.stderr)
+        _assert_execution_summary(self, first_payload, command_dir)
+        self.assertEqual(blocked.returncode, 1)
+        self.assertFalse(blocked_payload["executed"])
+        self.assertEqual(blocked_payload["target"], "execution-next")
+        self.assertEqual(blocked_payload["returncode"], 1)
+        self.assertEqual(
+            blocked_payload["error"],
+            "selected execution-next script does not exist",
+        )
+        self.assertEqual(
+            blocked_payload["script_path"],
+            str(selected_script),
+        )
+        self.assertEqual(
+            blocked_payload["selected_execution_next_command"]["source"],
+            "guided_next_follow_up_command",
+        )
+        self.assertFalse(blocked_payload["selected_script_status"]["ok"])
+        self.assertFalse(blocked_payload["selected_script_status"]["exists"])
+        self.assertEqual(
+            blocked_payload["selected_script_status"]["error"],
+            "selected execution-next script does not exist",
+        )
+        self.assertIsNone(blocked_payload["execution_summary"])
+        self.assertEqual(run_report["error"], blocked_payload["error"])
+        self.assertEqual(len(history_events), 1)
+        self.assertEqual(
+            history_events[0]["selected_script_status"],
+            blocked_payload["selected_script_status"],
+        )
+        self.assertEqual(history_summary["latest"]["status"], "blocked")
+        self.assertEqual(history_summary["signals"]["last_problem"]["status"], "blocked")
+        self.assertEqual(
+            history_summary["signals"]["last_problem"]["error"],
+            "selected execution-next script does not exist",
+        )
+        self.assertIn("selected_script_ok: no", run_markdown)
+        self.assertIn(
+            "selected_script_error: selected execution-next script does not exist",
+            run_markdown,
+        )
+
     def test_cli_blocks_when_strict_inspection_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             command_dir = _write_bundle(Path(tmp), non_executable_follow_up=True)
@@ -936,7 +1365,20 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
         self.assertTrue(payload["history_report_only"])
         self.assertFalse((command_dir / "runner.out").exists())
         self.assertEqual(payload["run_history_summary"]["total_runs"], 0)
+        self.assertEqual(
+            payload["run_history_summary"]["next_action"]["action"],
+            "run_recommended_next",
+        )
+        self.assertEqual(
+            payload["run_history_summary"]["next_action"]["target"],
+            "next",
+        )
+        self.assertIs(
+            payload["run_history_summary"]["next_action"]["should_continue"],
+            True,
+        )
         self.assertEqual(history_summary["total_runs"], 0)
+        self.assertEqual(history_summary["next_action"]["action"], "run_recommended_next")
 
     def test_cli_rejects_history_report_only_with_append(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1416,11 +1858,31 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
             dry_summary["signals"]["status_counts"],
             {"dry-run": 1},
         )
+        self.assertEqual(dry_summary["next_action"]["action"], "execute_selected_target")
+        self.assertEqual(dry_summary["next_action"]["target"], "next")
+        self.assertIs(dry_summary["next_action"]["should_continue"], True)
         self.assertEqual(executed_summary["total_runs"], 2)
         self.assertEqual(
             executed_summary["signals"]["status_counts"],
             {"dry-run": 1, "ok": 1},
         )
+        self.assertEqual(
+            executed_summary["next_action"]["action"],
+            "run_execution_next",
+        )
+        self.assertEqual(
+            executed_summary["next_action"]["target"],
+            "execution-next",
+        )
+        self.assertEqual(
+            executed_summary["next_action"]["command_source"],
+            "guided_next_follow_up_command",
+        )
+        self.assertEqual(
+            executed_summary["next_action"]["default_new_seeds"],
+            "109,113,127",
+        )
+        self.assertIs(executed_summary["next_action"]["should_continue"], True)
         self.assertEqual(
             executed_summary["signals"]["current_status_streak"],
             {"status": "ok", "count": 1},
@@ -1473,6 +1935,10 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
         )
         self.assertEqual(report_only_summary["total_runs"], 2)
         self.assertEqual(
+            report_only_summary["next_action"],
+            executed_summary["next_action"],
+        )
+        self.assertEqual(
             report_only_summary["signals"]["status_counts"],
             {"dry-run": 1, "ok": 1},
         )
@@ -1510,6 +1976,13 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
         self.assertIn("success_count: 2", history_markdown)
         self.assertIn("dry_run_count: 1", history_markdown)
         self.assertIn("executed_count: 1", history_markdown)
+        self.assertIn("next_action: run_execution_next", history_markdown)
+        self.assertIn("next_action_target: execution-next", history_markdown)
+        self.assertIn(
+            "next_action_command_source: guided_next_follow_up_command",
+            history_markdown,
+        )
+        self.assertIn("next_action_default_new_seeds: 109,113,127", history_markdown)
         self.assertIn("latest_status: ok", history_markdown)
         self.assertIn("latest_target_kind: follow_up", history_markdown)
         self.assertIn("latest_recommendation_action: continue_from_accepted", history_markdown)
