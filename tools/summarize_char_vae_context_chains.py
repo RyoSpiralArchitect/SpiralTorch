@@ -969,20 +969,28 @@ def main(argv: list[str] | None = None) -> int:
         sort_by=args.sort_by,
         recursive=bool(args.recursive),
     )
+    comparison_json_path = args.json_out
+    comparison_markdown_path = args.markdown_out
     if args.command_out_dir is not None:
+        if comparison_json_path is None:
+            comparison_json_path = args.command_out_dir / "comparison.json"
+        if comparison_markdown_path is None:
+            comparison_markdown_path = args.command_out_dir / "comparison.md"
         summary["command_scripts"] = _write_recommended_command_scripts(
             summary,
             args.command_out_dir,
-            comparison_json_path=args.json_out,
-            comparison_markdown_path=args.markdown_out,
+            comparison_json_path=comparison_json_path,
+            comparison_markdown_path=comparison_markdown_path,
         )
     markdown = _render_markdown(summary)
-    if args.json_out is not None:
-        args.json_out.parent.mkdir(parents=True, exist_ok=True)
-        args.json_out.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
-    if args.markdown_out is not None:
-        args.markdown_out.parent.mkdir(parents=True, exist_ok=True)
-        args.markdown_out.write_text(markdown)
+    if comparison_json_path is not None:
+        comparison_json_path.parent.mkdir(parents=True, exist_ok=True)
+        comparison_json_path.write_text(
+            json.dumps(summary, indent=2, sort_keys=True) + "\n"
+        )
+    if comparison_markdown_path is not None:
+        comparison_markdown_path.parent.mkdir(parents=True, exist_ok=True)
+        comparison_markdown_path.write_text(markdown)
     if args.json:
         print(json.dumps(summary, indent=2, sort_keys=True))
     else:
