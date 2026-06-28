@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +15,33 @@ SCHEMA = "st.llm_char_vae_context.chain_comparison.v1"
 
 def _chain_path(path: Path) -> Path:
     return path / "chain.json" if path.is_dir() else path
+
+
+def _dedupe_paths(paths: list[Path]) -> list[Path]:
+    seen: set[str] = set()
+    unique: list[Path] = []
+    for path in paths:
+        try:
+            key = str(path.resolve())
+        except OSError:
+            key = str(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(path)
+    return unique
+
+
+def _discover_chain_paths(paths: list[Path], *, recursive: bool) -> list[Path]:
+    discovered: list[Path] = []
+    for path in paths:
+        if recursive and path.is_dir():
+            matches = sorted(candidate for candidate in path.rglob("chain.json") if candidate.is_file())
+            if matches:
+                discovered.extend(matches)
+                continue
+        discovered.append(_chain_path(path))
+    return _dedupe_paths(discovered)
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -175,15 +201,23 @@ def _aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def summarize_chains(paths: list[Path], *, sort_by: str = "input") -> dict[str, Any]:
+def summarize_chains(
+    paths: list[Path],
+    *,
+    sort_by: str = "input",
+    recursive: bool = False,
+) -> dict[str, Any]:
     rows: list[dict[str, Any]] = []
-    for raw_path in paths:
-        path = _chain_path(raw_path)
+    discovered_paths = _discover_chain_paths(paths, recursive=recursive)
+    for path in discovered_paths:
         rows.append(_chain_row(path, _read_json(path)))
     rows = _sort_rows(rows, sort_by)
     return {
         "schema": SCHEMA,
         "sort_by": sort_by,
+        "recursive": recursive,
+        "input_count": len(paths),
+        "discovered_chain_count": len(discovered_paths),
         "aggregate": _aggregate(rows),
         "chains": rows,
     }
@@ -197,6 +231,9 @@ def _render_markdown(summary: dict[str, Any]) -> str:
         "",
         f"- schema: {summary.get('schema')}",
         f"- sort_by: {summary.get('sort_by')}",
+        f"- recursive: {_fmt(summary.get('recursive'))}",
+        f"- input_count: {_fmt(summary.get('input_count'))}",
+        f"- discovered_chain_count: {_fmt(summary.get('discovered_chain_count'))}",
         f"- chain_count: {_fmt(_value(aggregate, 'chain_count'))}",
         f"- attempted_follow_ups: {_fmt(_value(aggregate, 'attempted_follow_ups'))}",
         f"- gate_failed_count: {_fmt(_value(aggregate, 'gate_failed_count'))}",
@@ -254,7 +291,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "chains",
         nargs="+",
         type=Path,
-        help="chain.json files or directories containing chain.json",
+        help="chain.json files, chain run directories, or roots with --recursive",
+    )
+    parser.add_argument(
+        "--recursive",
+        action="store_true",
+        help="discover all chain.json files below directory arguments",
     )
     parser.add_argument(
         "--sort-by",
@@ -270,7 +312,11 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
-    summary = summarize_chains(args.chains, sort_by=args.sort_by)
+    summary = summarize_chains(
+        args.chains,
+        sort_by=args.sort_by,
+        recursive=bool(args.recursive),
+    )
     markdown = _render_markdown(summary)
     if args.json_out is not None:
         args.json_out.parent.mkdir(parents=True, exist_ok=True)

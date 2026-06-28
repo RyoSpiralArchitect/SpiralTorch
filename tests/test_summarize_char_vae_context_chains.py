@@ -182,6 +182,64 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
         self.assertIn("Char VAE Context Chain Comparison", result.stdout)
         self.assertIn("dry_run_count: 1", markdown)
 
+    def test_recursive_discovery_finds_nested_chains_once(self) -> None:
+        mod = _load_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            first = _write_chain(
+                root / "runs" / "chain_a",
+                {
+                    "schema": "st.llm_char_vae_context.chain.v1",
+                    "preset": "smoke",
+                    "run_root": str(root / "runs" / "chain_a"),
+                    "planned_follow_ups": 1,
+                    "attempted_follow_ups": 0,
+                    "dry_run": True,
+                    "follow_up_seed_resolution_summary": {
+                        "attempted_follow_ups": 0,
+                        "seed_source_counts": {},
+                        "command_source_counts": {},
+                        "configured_seed_group_status_counts": {},
+                        "gate_failed_count": 0,
+                        "nonzero_exit_count": 0,
+                    },
+                },
+            )
+            _write_chain(
+                root / "runs" / "chain_b",
+                {
+                    "schema": "st.llm_char_vae_context.chain.v1",
+                    "preset": "smoke",
+                    "run_root": str(root / "runs" / "chain_b"),
+                    "planned_follow_ups": 1,
+                    "attempted_follow_ups": 1,
+                    "follow_up_seed_resolution_summary": {
+                        "attempted_follow_ups": 1,
+                        "seed_source_counts": {"command_default": 1},
+                        "command_source_counts": {"next_follow_up_command": 1},
+                        "configured_seed_group_status_counts": {"attempted_slot": 1},
+                        "gate_failed_count": 0,
+                        "nonzero_exit_count": 0,
+                    },
+                },
+            )
+
+            summary = mod.summarize_chains(
+                [root / "runs", first],
+                recursive=True,
+                sort_by="attempted",
+            )
+
+        self.assertEqual(summary["recursive"], True)
+        self.assertEqual(summary["input_count"], 2)
+        self.assertEqual(summary["discovered_chain_count"], 2)
+        self.assertEqual(summary["aggregate"]["chain_count"], 2)
+        self.assertEqual(summary["aggregate"]["attempted_follow_ups"], 1)
+        self.assertEqual(
+            summary["aggregate"]["seed_source_counts"],
+            {"command_default": 1},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
