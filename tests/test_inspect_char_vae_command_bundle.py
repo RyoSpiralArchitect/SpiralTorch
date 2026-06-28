@@ -12,6 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "tools" / "inspect_char_vae_command_bundle.py"
 RUNNER_SCRIPT = ROOT / "tools" / "run_char_vae_command_bundle.py"
+LOOP_SCRIPT = ROOT / "tools" / "run_char_vae_history_loop.py"
 
 
 def _write_json(path: Path, payload: dict[str, object]) -> None:
@@ -82,6 +83,13 @@ def _history_next_action_command(command_dir: Path) -> str:
     )
 
 
+def _history_loop_command(command_dir: Path) -> str:
+    return (
+        "env PYTHONNOUSERSITE=1 python3 -P "
+        f"{LOOP_SCRIPT} {command_dir} --max-steps 3 --write-loop-report"
+    )
+
+
 def _write_bundle(
     root: Path,
     *,
@@ -103,6 +111,8 @@ def _write_bundle(
     run_history_jsonl = command_dir / "run_history.jsonl"
     run_history_markdown = command_dir / "run_history.md"
     run_history_summary = command_dir / "run_history_summary.json"
+    run_loop_json = command_dir / "run_loop.json"
+    run_loop_markdown = command_dir / "run_loop.md"
     if not missing_comparison_json:
         _write_json(comparison_json, {"schema": "comparison"})
     comparison_markdown.write_text("# comparison\n", encoding="utf-8")
@@ -149,12 +159,15 @@ def _write_bundle(
                 "history_next_action_command": _history_next_action_command(
                     command_dir
                 ),
+                "history_loop_command": _history_loop_command(command_dir),
                 "history_report_command": _history_report_command(command_dir),
                 "run_json_path": str(run_json),
                 "run_markdown_path": str(run_markdown),
                 "run_history_jsonl_path": str(run_history_jsonl),
                 "run_history_markdown_path": str(run_history_markdown),
                 "run_history_summary_path": str(run_history_summary),
+                "run_loop_json_path": str(run_loop_json),
+                "run_loop_markdown_path": str(run_loop_markdown),
                 "readme_path": str(command_dir / "README.md"),
             },
         },
@@ -202,16 +215,23 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
             payload["history_next_action_command"],
             _history_next_action_command(command_dir),
         )
+        self.assertEqual(
+            payload["history_loop_command"],
+            _history_loop_command(command_dir),
+        )
         commands = {item["label"]: item for item in payload["declared_commands"]}
         self.assertTrue(commands["runner_command"]["ok"])
         self.assertTrue(commands["history_next_action_command"]["ok"])
+        self.assertTrue(commands["history_loop_command"]["ok"])
         self.assertTrue(commands["history_report_command"]["ok"])
         self.assertIsNone(commands["history_next_action_command"]["parse_error"])
+        self.assertIsNone(commands["history_loop_command"]["parse_error"])
         self.assertIsNone(commands["history_report_command"]["parse_error"])
         self.assertTrue(commands["runner_command"]["target_command_dir_ok"])
         self.assertTrue(
             commands["history_next_action_command"]["target_command_dir_ok"]
         )
+        self.assertTrue(commands["history_loop_command"]["target_command_dir_ok"])
         self.assertTrue(commands["history_report_command"]["target_command_dir_ok"])
         self.assertIn(
             "--use-history-next-action",
@@ -220,6 +240,10 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
         self.assertIn(
             "--history-report-only",
             commands["history_report_command"]["tokens"],
+        )
+        self.assertIn(
+            "--write-loop-report",
+            commands["history_loop_command"]["tokens"],
         )
         self.assertEqual(
             commands["history_next_action_command"]["required_flags"],
@@ -235,6 +259,14 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
         self.assertEqual(
             commands["history_report_command"]["required_flags"],
             ["run_char_vae_command_bundle.py", "--history-report-only"],
+        )
+        self.assertEqual(
+            commands["history_loop_command"]["required_flags"],
+            [
+                "run_char_vae_history_loop.py",
+                "--max-steps",
+                "--write-loop-report",
+            ],
         )
         self.assertEqual(
             commands["history_report_command"]["forbidden_flags"],
@@ -295,6 +327,16 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
                     "path": str(command_dir / "run_history_summary.json"),
                     "exists": False,
                 },
+                {
+                    "label": "run_loop_json",
+                    "path": str(command_dir / "run_loop.json"),
+                    "exists": False,
+                },
+                {
+                    "label": "run_loop_markdown",
+                    "path": str(command_dir / "run_loop.md"),
+                    "exists": False,
+                },
             ],
         )
         self.assertEqual(markdown_result.returncode, 0, markdown_result.stderr)
@@ -304,7 +346,9 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
         self.assertIn("Declared Commands", markdown_result.stdout)
         self.assertIn("declared_command_issues: -", markdown_result.stdout)
         self.assertIn("history_report_command", markdown_result.stdout)
+        self.assertIn("history_loop_command", markdown_result.stdout)
         self.assertIn("--history-report-only", markdown_result.stdout)
+        self.assertIn("--write-loop-report", markdown_result.stdout)
         self.assertIn("run_history_summary", markdown_result.stdout)
         self.assertIn("run_history_summary_valid_json: -", markdown_result.stdout)
 

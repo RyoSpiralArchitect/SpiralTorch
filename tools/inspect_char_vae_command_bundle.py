@@ -330,6 +330,10 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
     history_next_action_command = _command_from(
         command_scripts.get("history_next_action_command")
     )
+    history_loop_runner_path = _path_from(
+        command_scripts.get("history_loop_runner_path")
+    )
+    history_loop_command = _command_from(command_scripts.get("history_loop_command"))
     history_report_command = _command_from(
         command_scripts.get("history_report_command")
     )
@@ -344,6 +348,8 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
     run_history_summary_path = _path_from(
         command_scripts.get("run_history_summary_path")
     )
+    run_loop_json_path = _path_from(command_scripts.get("run_loop_json_path"))
+    run_loop_markdown_path = _path_from(command_scripts.get("run_loop_markdown_path"))
     runner_wrapper_status = _runner_wrapper_status(
         runner_path,
         runner_command=runner_command,
@@ -351,6 +357,10 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
     history_next_action_runner_status = _runner_wrapper_status(
         history_next_action_runner_path,
         runner_command=history_next_action_command,
+    )
+    history_loop_runner_status = _runner_wrapper_status(
+        history_loop_runner_path,
+        runner_command=history_loop_command,
     )
 
     chain_sources = comparison.get("chain_sources")
@@ -414,6 +424,12 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
             required=False,
         ),
         _check(
+            "history_loop_runner_script",
+            path=history_loop_runner_path,
+            ok=bool(history_loop_runner_status["ok"]),
+            required=False,
+        ),
+        _check(
             "chain_sources",
             path=None,
             ok=bool(chain_source_paths) and not missing_chain_sources,
@@ -426,6 +442,8 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
         _declared_output("run_history_jsonl", run_history_jsonl_path),
         _declared_output("run_history_markdown", run_history_markdown_path),
         _declared_output("run_history_summary", run_history_summary_path),
+        _declared_output("run_loop_json", run_loop_json_path),
+        _declared_output("run_loop_markdown", run_loop_markdown_path),
     ]
     declared_commands = [
         _declared_command(
@@ -457,6 +475,16 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
                 "--write-run-report",
                 "--append-run-history",
                 "--write-run-history-report",
+            ),
+            command_dir=command_dir,
+        ),
+        _declared_command(
+            "history_loop_command",
+            history_loop_command,
+            required_flags=(
+                "run_char_vae_history_loop.py",
+                "--max-steps",
+                "--write-loop-report",
             ),
             command_dir=command_dir,
         ),
@@ -505,6 +533,13 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
             else None
         ),
         "history_next_action_runner_status": history_next_action_runner_status,
+        "history_loop_command": history_loop_command,
+        "history_loop_runner_path": (
+            str(history_loop_runner_path)
+            if history_loop_runner_path is not None
+            else None
+        ),
+        "history_loop_runner_status": history_loop_runner_status,
         "history_report_command": history_report_command,
         "declared_commands": declared_commands,
         "declared_command_issues": declared_command_issues,
@@ -526,6 +561,14 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
         "run_history_summary_path": (
             str(run_history_summary_path)
             if run_history_summary_path is not None
+            else None
+        ),
+        "run_loop_json_path": (
+            str(run_loop_json_path) if run_loop_json_path is not None else None
+        ),
+        "run_loop_markdown_path": (
+            str(run_loop_markdown_path)
+            if run_loop_markdown_path is not None
             else None
         ),
         "run_history_summary_status": run_history_summary_status,
@@ -584,6 +627,20 @@ def render_markdown(summary: dict[str, Any]) -> str:
             "- history_next_action_runner_error: "
             f"{_fmt(_value(summary, 'history_next_action_runner_status', 'error'))}"
         ),
+        f"- history_loop_command: {_fmt(summary.get('history_loop_command'))}",
+        f"- history_loop_runner_path: {_fmt(summary.get('history_loop_runner_path'))}",
+        (
+            "- history_loop_runner_ok: "
+            f"{_fmt(_value(summary, 'history_loop_runner_status', 'ok'))}"
+        ),
+        (
+            "- history_loop_runner_executes_command: "
+            f"{_fmt(_value(summary, 'history_loop_runner_status', 'executes_runner_command'))}"
+        ),
+        (
+            "- history_loop_runner_error: "
+            f"{_fmt(_value(summary, 'history_loop_runner_status', 'error'))}"
+        ),
         f"- history_report_command: {_fmt(summary.get('history_report_command'))}",
         f"- declared_command_issues: {_fmt_list(summary.get('declared_command_issues'))}",
         f"- run_json_path: {_fmt(summary.get('run_json_path'))}",
@@ -591,6 +648,8 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"- run_history_jsonl_path: {_fmt(summary.get('run_history_jsonl_path'))}",
         f"- run_history_markdown_path: {_fmt(summary.get('run_history_markdown_path'))}",
         f"- run_history_summary_path: {_fmt(summary.get('run_history_summary_path'))}",
+        f"- run_loop_json_path: {_fmt(summary.get('run_loop_json_path'))}",
+        f"- run_loop_markdown_path: {_fmt(summary.get('run_loop_markdown_path'))}",
         f"- run_history_summary_valid_json: {_fmt(_value(summary, 'run_history_summary_status', 'valid_json'))}",
         f"- run_history_summary_schema_ok: {_fmt(_value(summary, 'run_history_summary_status', 'schema_ok'))}",
         f"- run_history_summary_total_runs: {_fmt(_value(summary, 'run_history_summary_status', 'total_runs'))}",

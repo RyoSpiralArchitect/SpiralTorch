@@ -737,6 +737,17 @@ def _history_report_command_line(command_dir: Any) -> str | None:
     )
 
 
+def _history_loop_command_line(command_dir: Any, *, max_steps: int = 3) -> str | None:
+    if not isinstance(command_dir, str) or not command_dir:
+        return None
+    script_path = Path(__file__).resolve().with_name("run_char_vae_history_loop.py")
+    return (
+        "env PYTHONNOUSERSITE=1 python3 -P "
+        f"{shlex.quote(str(script_path))} "
+        f"{shlex.quote(command_dir)} --max-steps {max_steps} --write-loop-report"
+    )
+
+
 def _path_value(value: Any) -> Path | None:
     if not isinstance(value, str) or not value:
         return None
@@ -835,6 +846,16 @@ def _render_command_readme(
         f"- inspected_script_run: {_fmt_readme_value(_run_line(command_scripts.get('history_next_action_runner_path')))}",
         f"- inspected_run: {_fmt_readme_value(command_scripts.get('history_next_action_command'))}",
         "",
+        "## History-Guided Loop",
+        "",
+        "Run this bounded loop when you want the bundle to keep following safe run-history decisions until review, a blocker, or `--max-steps` stops it.",
+        "",
+        f"- inspected_script: {_fmt_readme_value(command_scripts.get('history_loop_runner_path'))}",
+        f"- inspected_script_run: {_fmt_readme_value(_run_line(command_scripts.get('history_loop_runner_path')))}",
+        f"- inspected_run: {_fmt_readme_value(command_scripts.get('history_loop_command'))}",
+        f"- run_loop_json: {_fmt_readme_value(command_scripts.get('run_loop_json_path'))}",
+        f"- run_loop_markdown: {_fmt_readme_value(command_scripts.get('run_loop_markdown_path'))}",
+        "",
         "## Execution-Next Continuation",
         "",
         "After an inspected run writes `run.json`, use this target to run the next command selected from the latest execution summary or run history.",
@@ -884,6 +905,9 @@ def _render_command_readme(
         f"- history_next_action_runner_ok: {_fmt_readme_value(command_scripts.get('inspection_history_next_action_runner_ok'))}",
         f"- history_next_action_runner_executes_command: {_fmt_readme_value(command_scripts.get('inspection_history_next_action_runner_executes_command'))}",
         f"- history_next_action_runner_forwards_arguments: {_fmt_readme_value(command_scripts.get('inspection_history_next_action_runner_forwards_arguments'))}",
+        f"- history_loop_runner_ok: {_fmt_readme_value(command_scripts.get('inspection_history_loop_runner_ok'))}",
+        f"- history_loop_runner_executes_command: {_fmt_readme_value(command_scripts.get('inspection_history_loop_runner_executes_command'))}",
+        f"- history_loop_runner_forwards_arguments: {_fmt_readme_value(command_scripts.get('inspection_history_loop_runner_forwards_arguments'))}",
         "",
         "## Machine-Readable Manifest",
         "",
@@ -982,6 +1006,14 @@ def _write_recommended_command_scripts(
         label="run_history_next_action",
         description="# Runs the next safe target selected from run history.",
     )
+    history_loop_command = _history_loop_command_line(str(out_dir))
+    history_loop_runner_path = _write_runner_command_script(
+        out_dir / "run_history_loop.sh",
+        history_loop_command,
+        target_kind="history_loop",
+        label="run_history_loop",
+        description="# Runs bounded history-guided continuation.",
+    )
     runner_path = _write_runner_command_script(
         out_dir / "run_recommended_next.sh",
         runner_command if next_path else None,
@@ -999,7 +1031,7 @@ def _write_recommended_command_scripts(
         "written_count": sum(
             1
             for path in (next_path, follow_up_path, review_path, runner_path)
-            + (history_next_action_runner_path,)
+            + (history_next_action_runner_path, history_loop_runner_path)
             if path
         ),
         "execution_cwd": str(execution_cwd),
@@ -1021,10 +1053,16 @@ def _write_recommended_command_scripts(
         "inspection_history_next_action_runner_ok": None,
         "inspection_history_next_action_runner_executes_command": None,
         "inspection_history_next_action_runner_forwards_arguments": None,
+        "inspection_history_loop_runner_status": None,
+        "inspection_history_loop_runner_ok": None,
+        "inspection_history_loop_runner_executes_command": None,
+        "inspection_history_loop_runner_forwards_arguments": None,
         "runner_command": runner_command,
         "execution_next_command": execution_next_command,
         "history_next_action_command": history_next_action_command,
         "history_next_action_runner_path": history_next_action_runner_path,
+        "history_loop_command": history_loop_command,
+        "history_loop_runner_path": history_loop_runner_path,
         "history_report_command": _history_report_command_line(str(out_dir)),
         "runner_path": runner_path,
         "run_json_path": str(out_dir / "run.json"),
@@ -1032,6 +1070,8 @@ def _write_recommended_command_scripts(
         "run_history_jsonl_path": str(out_dir / "run_history.jsonl"),
         "run_history_markdown_path": str(out_dir / "run_history.md"),
         "run_history_summary_path": str(out_dir / "run_history_summary.json"),
+        "run_loop_json_path": str(out_dir / "run_loop.json"),
+        "run_loop_markdown_path": str(out_dir / "run_loop.md"),
         "manifest_path": str(manifest_path),
         "readme_path": str(readme_path),
     }
@@ -1143,16 +1183,23 @@ def _render_markdown(summary: dict[str, Any]) -> str:
         f"- command_inspection_history_next_action_runner_ok: {_fmt(_value(command_scripts, 'inspection_history_next_action_runner_ok'))}",
         f"- command_inspection_history_next_action_runner_executes_command: {_fmt(_value(command_scripts, 'inspection_history_next_action_runner_executes_command'))}",
         f"- command_inspection_history_next_action_runner_forwards_arguments: {_fmt(_value(command_scripts, 'inspection_history_next_action_runner_forwards_arguments'))}",
+        f"- command_inspection_history_loop_runner_ok: {_fmt(_value(command_scripts, 'inspection_history_loop_runner_ok'))}",
+        f"- command_inspection_history_loop_runner_executes_command: {_fmt(_value(command_scripts, 'inspection_history_loop_runner_executes_command'))}",
+        f"- command_inspection_history_loop_runner_forwards_arguments: {_fmt(_value(command_scripts, 'inspection_history_loop_runner_forwards_arguments'))}",
         f"- command_runner: {_fmt(_value(command_scripts, 'runner_command'))}",
         f"- command_execution_next: {_fmt(_value(command_scripts, 'execution_next_command'))}",
         f"- command_history_next_action: {_fmt(_value(command_scripts, 'history_next_action_command'))}",
         f"- command_history_next_action_runner: {_fmt(_value(command_scripts, 'history_next_action_runner_path'))}",
+        f"- command_history_loop: {_fmt(_value(command_scripts, 'history_loop_command'))}",
+        f"- command_history_loop_runner: {_fmt(_value(command_scripts, 'history_loop_runner_path'))}",
         f"- command_runner_script: {_fmt(_value(command_scripts, 'runner_path'))}",
         f"- command_run_json_path: {_fmt(_value(command_scripts, 'run_json_path'))}",
         f"- command_run_markdown_path: {_fmt(_value(command_scripts, 'run_markdown_path'))}",
         f"- command_run_history_jsonl_path: {_fmt(_value(command_scripts, 'run_history_jsonl_path'))}",
         f"- command_run_history_markdown_path: {_fmt(_value(command_scripts, 'run_history_markdown_path'))}",
         f"- command_run_history_summary_path: {_fmt(_value(command_scripts, 'run_history_summary_path'))}",
+        f"- command_run_loop_json_path: {_fmt(_value(command_scripts, 'run_loop_json_path'))}",
+        f"- command_run_loop_markdown_path: {_fmt(_value(command_scripts, 'run_loop_markdown_path'))}",
         f"- command_history_report_only: {_fmt(_value(command_scripts, 'history_report_command'))}",
         "",
         "## Chains",
@@ -1289,6 +1336,12 @@ def main(argv: list[str] | None = None) -> int:
             if isinstance(history_next_action_runner_status, dict)
             else {}
         )
+        history_loop_runner_status = inspection.get("history_loop_runner_status")
+        history_loop_runner_status = (
+            history_loop_runner_status
+            if isinstance(history_loop_runner_status, dict)
+            else {}
+        )
         command_scripts.update(
             {
                 "inspection_generated": True,
@@ -1315,6 +1368,18 @@ def main(argv: list[str] | None = None) -> int:
                 ),
                 "inspection_history_next_action_runner_forwards_arguments": (
                     history_next_action_runner_status.get("forwards_arguments")
+                ),
+                "inspection_history_loop_runner_status": (
+                    history_loop_runner_status
+                ),
+                "inspection_history_loop_runner_ok": (
+                    history_loop_runner_status.get("ok")
+                ),
+                "inspection_history_loop_runner_executes_command": (
+                    history_loop_runner_status.get("executes_runner_command")
+                ),
+                "inspection_history_loop_runner_forwards_arguments": (
+                    history_loop_runner_status.get("forwards_arguments")
                 ),
             }
         )
