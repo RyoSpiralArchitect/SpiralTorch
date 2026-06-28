@@ -1317,8 +1317,12 @@ class SpiralTorchSmokeTest(unittest.TestCase):
                 self.assertEqual(extra.get("spiraltorch.source"), "path")
                 self.assertEqual(Path(extra["spiraltorch.source_path"]).resolve(), Path(plugin_path).resolve())
 
-                with open(plugin_path, "w", encoding="utf-8") as handle:
+                # Use an atomic replace so the fast polling watcher never sees
+                # the transient empty file created by opening the plugin with "w".
+                tmp_plugin_path = f"{plugin_path}.tmp"
+                with open(tmp_plugin_path, "w", encoding="utf-8") as handle:
                     handle.write(plugin_source_v2)
+                os.replace(tmp_plugin_path, plugin_path)
 
                 deadline = time.time() + 2.0
                 while time.time() < deadline:
