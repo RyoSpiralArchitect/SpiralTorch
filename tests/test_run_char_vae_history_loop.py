@@ -141,6 +141,44 @@ class RunCharVaeHistoryLoopTests(unittest.TestCase):
         self.assertEqual(history_summary["total_runs"], 0)
         self.assertFalse(runner_out_exists)
 
+    def test_cli_can_fail_when_max_steps_leaves_runnable_action(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            command_dir = _write_bundle(Path(tmp))
+            result = _run_loop(
+                command_dir,
+                "--max-steps",
+                "1",
+                "--fail-on-max-steps-continuation",
+                "--write-loop-report",
+                "--json",
+            )
+            payload = json.loads(result.stdout)
+            loop_report = json.loads(
+                (command_dir / "run_loop.json").read_text(encoding="utf-8")
+            )
+            loop_markdown = (command_dir / "run_loop.md").read_text(encoding="utf-8")
+
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(payload["step_count"], 1)
+        self.assertEqual(payload["executed_count"], 1)
+        self.assertEqual(payload["success_count"], 1)
+        self.assertEqual(payload["failure_count"], 0)
+        self.assertEqual(payload["stop_reason"], "max_steps_reached")
+        self.assertEqual(payload["returncode"], 1)
+        self.assertIs(payload["fail_on_max_steps_continuation"], True)
+        self.assertIs(payload["max_steps_continuation_failed"], True)
+        self.assertEqual(
+            payload["error"],
+            "max steps reached with runnable final next action: run_execution_next",
+        )
+        self.assertEqual(payload["final_next_action"]["action"], "run_execution_next")
+        self.assertEqual(payload["final_next_action"]["target"], "execution-next")
+        self.assertIs(payload["final_next_action"]["should_continue"], True)
+        self.assertEqual(loop_report["returncode"], 1)
+        self.assertTrue(loop_report["max_steps_continuation_failed"])
+        self.assertIn("stop_reason: max_steps_reached", loop_markdown)
+        self.assertIn("max_steps_continuation_failed: yes", loop_markdown)
+
     def test_cli_fails_when_final_action_requires_review(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             command_dir = _write_bundle(Path(tmp))

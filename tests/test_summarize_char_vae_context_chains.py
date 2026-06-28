@@ -89,7 +89,8 @@ def _history_loop_command(command_dir: Path) -> str:
         f"{shlex.quote(str(LOOP_SCRIPT.resolve()))} "
         f"{shlex.quote(str(command_dir.resolve()))} "
         "--max-steps 3 --fail-on-final-action "
-        "review_before_continuing,inspect_history --write-loop-report"
+        "review_before_continuing,inspect_history "
+        "--fail-on-max-steps-continuation --write-loop-report"
     )
 
 
@@ -432,7 +433,8 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
         self.assertIn("--use-history-next-action", readme)
         self.assertIn(
             "--max-steps 3 --fail-on-final-action "
-            "review_before_continuing,inspect_history --write-loop-report",
+            "review_before_continuing,inspect_history "
+            "--fail-on-max-steps-continuation --write-loop-report",
             readme,
         )
         self.assertIn("## Execution-Next Continuation", readme)
@@ -1106,6 +1108,7 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             self.assertIn("run_history_loop", history_loop_text)
             self.assertIn("tools/run_char_vae_history_loop.py", history_loop_text)
             self.assertIn("--max-steps 3", history_loop_text)
+            self.assertIn("--fail-on-max-steps-continuation", history_loop_text)
             self.assertIn("--write-loop-report", history_loop_text)
             self.assertIn("runner_wrapper_ok: `yes`", readme)
             self.assertIn("runner_wrapper_executes_runner_command: `yes`", readme)
@@ -1621,6 +1624,7 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
         self.assertIn("--use-history-next-action", history_runner_script_text)
         self.assertIn("# target_kind: history_loop", history_loop_script_text)
         self.assertIn("--max-steps 3", history_loop_script_text)
+        self.assertIn("--fail-on-max-steps-continuation", history_loop_script_text)
         self.assertIn("--write-loop-report", history_loop_script_text)
         self.assertIn("review_absolute_best", command_readme)
         self.assertIn("## Champion", command_readme)

@@ -87,7 +87,8 @@ def _history_loop_command(command_dir: Path) -> str:
     return (
         "env PYTHONNOUSERSITE=1 python3 -P "
         f"{LOOP_SCRIPT} {command_dir} --max-steps 3 --fail-on-final-action "
-        "review_before_continuing,inspect_history --write-loop-report"
+        "review_before_continuing,inspect_history "
+        "--fail-on-max-steps-continuation --write-loop-report"
     )
 
 
@@ -266,6 +267,7 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
             [
                 "run_char_vae_history_loop.py",
                 "--max-steps",
+                "--fail-on-max-steps-continuation",
                 "--write-loop-report",
             ],
         )
@@ -317,6 +319,8 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
                 "stop_reason": None,
                 "fail_on_final_actions": None,
                 "final_action_failed": None,
+                "fail_on_max_steps_continuation": None,
+                "max_steps_continuation_failed": None,
                 "returncode": None,
                 "error": None,
                 "final_next_action": None,
@@ -776,6 +780,8 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
                         "inspect_history",
                     ],
                     "final_action_failed": False,
+                    "fail_on_max_steps_continuation": True,
+                    "max_steps_continuation_failed": False,
                     "returncode": 0,
                     "error": None,
                     "final_next_action": {
@@ -841,6 +847,8 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
             ["review_before_continuing", "inspect_history"],
         )
         self.assertIs(status["final_action_failed"], False)
+        self.assertIs(status["fail_on_max_steps_continuation"], True)
+        self.assertIs(status["max_steps_continuation_failed"], False)
         self.assertEqual(status["returncode"], 0)
         self.assertEqual(status["final_next_action"], "collect_next_command")
         self.assertEqual(
@@ -864,6 +872,14 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
             markdown_result.stdout,
         )
         self.assertIn("run_loop_final_action_failed: no", markdown_result.stdout)
+        self.assertIn(
+            "run_loop_fail_on_max_steps_continuation: yes",
+            markdown_result.stdout,
+        )
+        self.assertIn(
+            "run_loop_max_steps_continuation_failed: no",
+            markdown_result.stdout,
+        )
         self.assertIn(
             "run_loop_final_next_action: collect_next_command",
             markdown_result.stdout,

@@ -161,6 +161,14 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"- stop_reason: {_fmt(summary.get('stop_reason'))}",
         f"- fail_on_final_actions: {_fmt(summary.get('fail_on_final_actions'))}",
         f"- final_action_failed: {_fmt(summary.get('final_action_failed'))}",
+        (
+            "- fail_on_max_steps_continuation: "
+            f"{_fmt(summary.get('fail_on_max_steps_continuation'))}"
+        ),
+        (
+            "- max_steps_continuation_failed: "
+            f"{_fmt(summary.get('max_steps_continuation_failed'))}"
+        ),
         f"- returncode: {_fmt(summary.get('returncode'))}",
         f"- error: {_fmt(summary.get('error'))}",
         f"- final_next_action: {_fmt(next_action.get('action'))}",
@@ -223,6 +231,7 @@ def run_loop(
     write_run_report: bool,
     write_run_history_report: bool,
     fail_on_final_actions: list[str] | tuple[str, ...],
+    fail_on_max_steps_continuation: bool,
     json_out: Path | None = None,
     markdown_out: Path | None = None,
 ) -> tuple[int, dict[str, Any]]:
@@ -268,15 +277,26 @@ def run_loop(
     final_next_action = _run_history_next_action(latest_summary)
     fail_on_final_actions = list(fail_on_final_actions)
     final_action = final_next_action.get("action")
+    final_target = final_next_action.get("target")
     final_action_failed = (
         returncode == 0
         and isinstance(final_action, str)
         and final_action in set(fail_on_final_actions)
     )
+    max_steps_continuation_failed = (
+        returncode == 0
+        and fail_on_max_steps_continuation
+        and stop_reason == "max_steps_reached"
+        and final_next_action.get("should_continue") is True
+        and final_target in runner.TARGET_KEYS
+    )
     error = latest_summary.get("error") if returncode != 0 else None
     if final_action_failed:
         returncode = 1
         error = f"final next action requested failure: {final_action}"
+    elif max_steps_continuation_failed:
+        returncode = 1
+        error = f"max steps reached with runnable final next action: {final_action}"
     summary = {
         "schema": SCHEMA,
         "command_dir": str(command_dir),
@@ -293,6 +313,8 @@ def run_loop(
         "stop_reason": stop_reason,
         "fail_on_final_actions": fail_on_final_actions,
         "final_action_failed": final_action_failed,
+        "fail_on_max_steps_continuation": fail_on_max_steps_continuation,
+        "max_steps_continuation_failed": max_steps_continuation_failed,
         "returncode": returncode,
         "error": error,
         "final_next_action": final_next_action if final_next_action else None,
@@ -367,6 +389,14 @@ def _build_parser() -> argparse.ArgumentParser:
             f"{','.join(DEFAULT_FAIL_ON_FINAL_ACTIONS)}"
         ),
     )
+    parser.add_argument(
+        "--fail-on-max-steps-continuation",
+        action="store_true",
+        help=(
+            "return non-zero when --max-steps is reached while the final "
+            "run_history next_action is still runnable"
+        ),
+    )
     parser.add_argument("--json-out", type=Path, default=None)
     parser.add_argument("--markdown-out", type=Path, default=None)
     return parser
@@ -396,6 +426,9 @@ def main(argv: list[str] | None = None) -> int:
             write_run_report=not args.no_write_run_report,
             write_run_history_report=not args.no_write_run_history_report,
             fail_on_final_actions=fail_on_final_actions,
+            fail_on_max_steps_continuation=bool(
+                args.fail_on_max_steps_continuation
+            ),
             json_out=json_out,
             markdown_out=markdown_out,
         )
@@ -410,6 +443,9 @@ def main(argv: list[str] | None = None) -> int:
                 list(DEFAULT_FAIL_ON_FINAL_ACTIONS)
                 if args.fail_on_final_action is None
                 else _csv_values(args.fail_on_final_action)
+            ),
+            "fail_on_max_steps_continuation": bool(
+                args.fail_on_max_steps_continuation
             ),
             "returncode": 1,
             "error": str(exc),

@@ -321,6 +321,8 @@ def _run_loop_status(
         "stop_reason": None,
         "fail_on_final_actions": None,
         "final_action_failed": None,
+        "fail_on_max_steps_continuation": None,
+        "max_steps_continuation_failed": None,
         "returncode": None,
         "final_next_action": None,
         "final_next_action_reason": None,
@@ -353,6 +355,12 @@ def _run_loop_status(
             "stop_reason": payload.get("stop_reason"),
             "fail_on_final_actions": payload.get("fail_on_final_actions"),
             "final_action_failed": payload.get("final_action_failed"),
+            "fail_on_max_steps_continuation": payload.get(
+                "fail_on_max_steps_continuation"
+            ),
+            "max_steps_continuation_failed": payload.get(
+                "max_steps_continuation_failed"
+            ),
             "returncode": payload.get("returncode"),
             "error": payload.get("error"),
             "final_next_action": final_next_action.get("action"),
@@ -550,6 +558,7 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
             required_flags=(
                 "run_char_vae_history_loop.py",
                 "--max-steps",
+                "--fail-on-max-steps-continuation",
                 "--write-loop-report",
             ),
             command_dir=command_dir,
@@ -725,6 +734,8 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"- run_loop_stop_reason: {_fmt(_value(summary, 'run_loop_status', 'stop_reason'))}",
         f"- run_loop_fail_on_final_actions: {_fmt(_value(summary, 'run_loop_status', 'fail_on_final_actions'))}",
         f"- run_loop_final_action_failed: {_fmt(_value(summary, 'run_loop_status', 'final_action_failed'))}",
+        f"- run_loop_fail_on_max_steps_continuation: {_fmt(_value(summary, 'run_loop_status', 'fail_on_max_steps_continuation'))}",
+        f"- run_loop_max_steps_continuation_failed: {_fmt(_value(summary, 'run_loop_status', 'max_steps_continuation_failed'))}",
         f"- run_loop_returncode: {_fmt(_value(summary, 'run_loop_status', 'returncode'))}",
         f"- run_loop_final_next_action: {_fmt(_value(summary, 'run_loop_status', 'final_next_action'))}",
         f"- run_loop_final_next_action_reason: {_fmt(_value(summary, 'run_loop_status', 'final_next_action_reason'))}",

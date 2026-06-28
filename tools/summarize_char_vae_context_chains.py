@@ -745,6 +745,7 @@ def _history_loop_command_line(
         "review_before_continuing",
         "inspect_history",
     ),
+    fail_on_max_steps_continuation: bool = True,
 ) -> str | None:
     if not isinstance(command_dir, str) or not command_dir:
         return None
@@ -755,10 +756,16 @@ def _history_loop_command_line(
         if fail_on_final_actions
         else ""
     )
+    max_steps_fail_arg = (
+        " --fail-on-max-steps-continuation"
+        if fail_on_max_steps_continuation
+        else ""
+    )
     return (
         "env PYTHONNOUSERSITE=1 python3 -P "
         f"{shlex.quote(str(script_path))} "
-        f"{shlex.quote(command_dir)} --max-steps {max_steps}{fail_arg} "
+        f"{shlex.quote(command_dir)} --max-steps {max_steps}{fail_arg}"
+        f"{max_steps_fail_arg} "
         "--write-loop-report"
     )
 
