@@ -213,6 +213,20 @@ def _run_report_paths(
     return json_out, markdown_out
 
 
+def _run_history_path(
+    command_dir: Path,
+    command_scripts: dict[str, Any],
+    *,
+    append_history: bool,
+) -> Path | None:
+    if not append_history:
+        return None
+    return (
+        _path_from(command_scripts.get("run_history_jsonl_path"))
+        or command_dir / "run_history.jsonl"
+    )
+
+
 def _runner_summary(
     *,
     command_dir: Path,
@@ -310,6 +324,7 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"- missing_optional: {_fmt(summary.get('missing_optional'))}",
         f"- run_json_path: {_fmt(summary.get('run_json_path'))}",
         f"- run_markdown_path: {_fmt(summary.get('run_markdown_path'))}",
+        f"- run_history_jsonl_path: {_fmt(summary.get('run_history_jsonl_path'))}",
         f"- returncode: {_fmt(summary.get('returncode'))}",
         f"- error: {_fmt(summary.get('error'))}",
         "",
@@ -337,16 +352,62 @@ def render_markdown(summary: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _history_event(summary: dict[str, Any]) -> dict[str, Any]:
+    fields = (
+        "command_dir",
+        "manifest_path",
+        "target",
+        "target_kind",
+        "script_key",
+        "script_path",
+        "target_script_key",
+        "target_script_path",
+        "command_argv",
+        "execution_cwd",
+        "strict",
+        "dry_run",
+        "executed",
+        "started_at",
+        "finished_at",
+        "duration_seconds",
+        "bundle_ready",
+        "strict_ready",
+        "missing_required",
+        "missing_optional",
+        "returncode",
+        "error",
+        "run_json_path",
+        "run_markdown_path",
+        "run_history_jsonl_path",
+        "recommendation_context",
+    )
+    event = {
+        "schema": "st.llm_char_vae_context.command_bundle_run_history_event.v1",
+    }
+    event.update({key: summary.get(key) for key in fields})
+    return event
+
+
+def _append_run_history(summary: dict[str, Any], history_out: Path) -> None:
+    history_out.parent.mkdir(parents=True, exist_ok=True)
+    with history_out.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(_history_event(summary), sort_keys=True) + "\n")
+
+
 def write_run_artifacts(
     summary: dict[str, Any],
     *,
     json_out: Path | None,
     markdown_out: Path | None,
+    history_out: Path | None = None,
 ) -> dict[str, Any]:
     summary = dict(summary)
     summary["run_json_path"] = str(json_out) if json_out is not None else None
     summary["run_markdown_path"] = (
         str(markdown_out) if markdown_out is not None else None
+    )
+    summary["run_history_jsonl_path"] = (
+        str(history_out) if history_out is not None else None
     )
     markdown = render_markdown(summary)
     if json_out is not None:
@@ -355,6 +416,8 @@ def write_run_artifacts(
     if markdown_out is not None:
         markdown_out.parent.mkdir(parents=True, exist_ok=True)
         markdown_out.write_text(markdown, encoding="utf-8")
+    if history_out is not None:
+        _append_run_history(summary, history_out)
     return summary
 
 
@@ -367,6 +430,7 @@ def run_bundle(
     json_mode: bool,
     write_inspection_report: bool,
     write_run_report: bool,
+    append_run_history: bool,
     json_out: Path | None = None,
     markdown_out: Path | None = None,
 ) -> tuple[int, dict[str, Any]]:
@@ -403,6 +467,11 @@ def run_bundle(
         markdown_out=markdown_out,
         write_report=write_run_report,
     )
+    history_out = _run_history_path(
+        command_dir,
+        command_scripts,
+        append_history=append_run_history,
+    )
     inspector = _load_inspector()
     inspection = inspector.inspect_bundle(command_dir)
     if write_inspection_report:
@@ -433,6 +502,7 @@ def run_bundle(
             summary,
             json_out=json_out,
             markdown_out=markdown_out,
+            history_out=history_out,
         )
         return 1, summary
     if script_path is None:
@@ -455,6 +525,7 @@ def run_bundle(
             summary,
             json_out=json_out,
             markdown_out=markdown_out,
+            history_out=history_out,
         )
         return 1, summary
     if dry_run:
@@ -476,6 +547,7 @@ def run_bundle(
             summary,
             json_out=json_out,
             markdown_out=markdown_out,
+            history_out=history_out,
         )
         return 0, summary
     if json_mode:
@@ -508,6 +580,7 @@ def run_bundle(
             summary,
             json_out=json_out,
             markdown_out=markdown_out,
+            history_out=history_out,
         )
         return result.returncode, summary
     result = subprocess.run(
@@ -534,6 +607,7 @@ def run_bundle(
         summary,
         json_out=json_out,
         markdown_out=markdown_out,
+        history_out=history_out,
     )
     return result.returncode, summary
 
@@ -572,6 +646,11 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="write run.json and run.md into the command bundle",
     )
+    parser.add_argument(
+        "--append-run-history",
+        action="store_true",
+        help="append a compact run event to run_history.jsonl",
+    )
     parser.add_argument("--json-out", type=Path, default=None)
     parser.add_argument("--markdown-out", type=Path, default=None)
     return parser
@@ -588,6 +667,7 @@ def main(argv: list[str] | None = None) -> int:
             json_mode=bool(args.json),
             write_inspection_report=bool(args.write_inspection_report),
             write_run_report=bool(args.write_run_report),
+            append_run_history=bool(args.append_run_history),
             json_out=args.json_out,
             markdown_out=args.markdown_out,
         )

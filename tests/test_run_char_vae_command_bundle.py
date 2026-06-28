@@ -171,6 +171,7 @@ def _write_bundle(
                 "inspection_markdown_path": str(command_dir / "inspection.md"),
                 "run_json_path": str(command_dir / "run.json"),
                 "run_markdown_path": str(command_dir / "run.md"),
+                "run_history_jsonl_path": str(command_dir / "run_history.jsonl"),
                 "readme_path": str(command_dir / "README.md"),
             },
         },
@@ -208,6 +209,7 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
         self.assertFalse(payload["executed"])
         self.assertIsNotNone(payload["started_at"])
         self.assertIsNotNone(payload["finished_at"])
+        self.assertIsNone(payload["run_history_jsonl_path"])
         self.assertGreaterEqual(payload["duration_seconds"], 0.0)
         self.assertEqual(payload["execution_cwd"], str(command_dir.resolve()))
         self.assertEqual(
@@ -240,6 +242,7 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
             str(command_dir / "recommended_follow_up.sh"),
         )
         _assert_recommendation_context(self, payload, command_dir)
+        self.assertIsNone(payload["run_history_jsonl_path"])
         self.assertTrue(payload["executed"])
         self.assertGreaterEqual(payload["duration_seconds"], 0.0)
         self.assertIn("next cwd=", payload["stdout"])
@@ -280,6 +283,7 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
         self.assertEqual(strict_payload["target_kind"], "follow_up")
         self.assertEqual(strict_payload["target_script_key"], "follow_up_path")
         _assert_recommendation_context(self, strict_payload, command_dir)
+        self.assertIsNone(strict_payload["run_history_jsonl_path"])
         self.assertGreaterEqual(strict_payload["duration_seconds"], 0.0)
         self.assertIn("follow_up_script", strict_payload["missing_optional"])
         self.assertEqual(
@@ -321,6 +325,7 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
             command_dir,
             target_kind="review",
         )
+        self.assertIsNone(payload["run_history_jsonl_path"])
         self.assertFalse(payload["executed"])
         self.assertEqual(payload["error"], "manifest does not declare review_path")
 
@@ -360,6 +365,7 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
             command_dir,
             target_kind="review",
         )
+        self.assertIsNone(payload["run_history_jsonl_path"])
         self.assertEqual(
             payload["command_argv"],
             ["bash", str(command_dir / "recommended_review.sh")],
@@ -421,6 +427,81 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
         self.assertGreaterEqual(run_report["duration_seconds"], 0.0)
         self.assertEqual(run_report["execution_cwd"], str(command_dir.resolve()))
         self.assertEqual(run_report["run_markdown_path"], str(command_dir / "run.md"))
+        self.assertIsNone(run_report["run_history_jsonl_path"])
+
+    def test_cli_appends_compact_run_history(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            command_dir = _write_bundle(Path(tmp))
+            dry_run = subprocess.run(
+                [
+                    "python3",
+                    "-P",
+                    str(SCRIPT),
+                    str(command_dir),
+                    "--dry-run",
+                    "--append-run-history",
+                    "--json",
+                ],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            executed = subprocess.run(
+                [
+                    "python3",
+                    "-P",
+                    str(SCRIPT),
+                    str(command_dir),
+                    "--append-run-history",
+                    "--json",
+                ],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            dry_payload = json.loads(dry_run.stdout)
+            executed_payload = json.loads(executed.stdout)
+            history_path = command_dir / "run_history.jsonl"
+            events = [
+                json.loads(line)
+                for line in history_path.read_text(encoding="utf-8").splitlines()
+            ]
+
+        self.assertEqual(dry_run.returncode, 0, dry_run.stderr)
+        self.assertEqual(executed.returncode, 0, executed.stderr)
+        self.assertEqual(dry_payload["run_history_jsonl_path"], str(history_path))
+        self.assertEqual(executed_payload["run_history_jsonl_path"], str(history_path))
+        self.assertEqual(len(events), 2)
+        self.assertEqual(
+            events[0]["schema"],
+            "st.llm_char_vae_context.command_bundle_run_history_event.v1",
+        )
+        self.assertTrue(events[0]["dry_run"])
+        self.assertFalse(events[0]["executed"])
+        self.assertFalse(events[1]["dry_run"])
+        self.assertTrue(events[1]["executed"])
+        self.assertEqual(events[1]["returncode"], 0)
+        self.assertEqual(events[1]["target_kind"], "follow_up")
+        self.assertEqual(events[1]["target_script_key"], "follow_up_path")
+        self.assertEqual(
+            events[1]["target_script_path"],
+            str(command_dir / "recommended_follow_up.sh"),
+        )
+        self.assertEqual(
+            events[1]["recommendation_context"]["action"],
+            "continue_from_accepted",
+        )
+        self.assertEqual(
+            events[1]["recommendation_context"]["champion"]["config"],
+            "latent@normalize=blocks,scale=0.5",
+        )
+        self.assertNotIn("stdout", events[1])
+        self.assertNotIn("stderr", events[1])
+        self.assertNotIn("inspection", events[1])
 
     def test_cli_writes_explicit_run_report_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -464,8 +545,10 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
         )
         self.assertGreaterEqual(report["duration_seconds"], 0.0)
         self.assertEqual(report["run_markdown_path"], str(markdown_out))
+        self.assertIsNone(report["run_history_jsonl_path"])
         self.assertIn("Char VAE Command Bundle Runner", markdown)
         self.assertIn(f"run_json_path: {json_out}", markdown)
+        self.assertIn("run_history_jsonl_path: -", markdown)
         self.assertIn("target_kind: follow_up", markdown)
         self.assertIn("target_script_key: follow_up_path", markdown)
         self.assertIn("Recommendation Context", markdown)
