@@ -308,24 +308,32 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             payload = json.loads(json_out.read_text(encoding="utf-8"))
             markdown = markdown_out.read_text(encoding="utf-8")
+            next_script = command_dir / "recommended_next.sh"
             follow_up_script = command_dir / "recommended_follow_up.sh"
             review_script = command_dir / "recommended_review.sh"
             manifest_path = command_dir / "recommendation.json"
             readme_path = command_dir / "README.md"
             execution_cwd = str(root.resolve())
+            self.assertTrue(next_script.exists())
             self.assertTrue(follow_up_script.exists())
             self.assertFalse(review_script.exists())
             self.assertTrue(manifest_path.exists())
             self.assertTrue(readme_path.exists())
+            next_text = next_script.read_text(encoding="utf-8")
             script_text = follow_up_script.read_text(encoding="utf-8")
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             readme = readme_path.read_text(encoding="utf-8")
+            self.assertEqual(
+                payload["command_scripts"]["next_path"],
+                str(next_script),
+            )
+            self.assertEqual(payload["command_scripts"]["next_kind"], "follow_up")
             self.assertEqual(
                 payload["command_scripts"]["follow_up_path"],
                 str(follow_up_script),
             )
             self.assertIsNone(payload["command_scripts"]["review_path"])
-            self.assertEqual(payload["command_scripts"]["written_count"], 1)
+            self.assertEqual(payload["command_scripts"]["written_count"], 2)
             self.assertEqual(
                 payload["command_scripts"]["execution_cwd"],
                 execution_cwd,
@@ -346,10 +354,13 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
                 manifest["command_scripts"]["follow_up_path"],
                 str(follow_up_script),
             )
+            self.assertEqual(manifest["command_scripts"]["next_kind"], "follow_up")
             self.assertEqual(
                 manifest["command_scripts"]["execution_cwd"],
                 execution_cwd,
             )
+            self.assertIn("# target_kind: follow_up", next_text)
+            self.assertIn("recommended_follow_up.sh", next_text)
             self.assertIn(f"cd {shlex.quote(execution_cwd)}", script_text)
             self.assertIn("FOLLOW_UP_FROM=accepted NEW_SEEDS=31", script_text)
             self.assertIn(
@@ -376,11 +387,32 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
                     f"next={default_run_dir} fail=regressed,unknown"
                 ),
             )
+            (root / "wrapper.out").unlink()
+            next_result = subprocess.run(
+                ["bash", str(next_script)],
+                cwd=command_dir,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            self.assertEqual(next_result.returncode, 0, next_result.stderr)
+            self.assertEqual(
+                (root / "wrapper.out").read_text(encoding="utf-8").strip(),
+                (
+                    f"cwd={execution_cwd} follow=accepted seeds=31 "
+                    f"next={default_run_dir} fail=regressed,unknown"
+                ),
+            )
             self.assertIn("Char VAE Chain Recommended Commands", readme)
             self.assertIn("continue_from_accepted", readme)
             self.assertIn("execution_cwd", readme)
+            self.assertIn("recommended_next.sh", readme)
+            self.assertIn(f"bash {shlex.quote(str(next_script))}", readme)
             self.assertIn("recommended_follow_up.sh", readme)
+            self.assertIn("recommended_next.sh", markdown)
             self.assertIn("recommended_follow_up.sh", markdown)
+            self.assertIn("next_command_kind: follow_up", markdown)
             self.assertIn("command_execution_cwd", markdown)
             self.assertIn("recommendation.json", markdown)
             self.assertIn("README.md", markdown)
@@ -517,10 +549,14 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             )
             review_script = root / "commands" / "recommended_review.sh"
             follow_up_script = root / "commands" / "recommended_follow_up.sh"
+            next_script = root / "commands" / "recommended_next.sh"
+            next_script_path = str(next_script)
             review_script_path = str(review_script)
             follow_up_script_path = str(follow_up_script)
+            next_script_exists = next_script.exists()
             review_script_exists = review_script.exists()
             follow_up_script_exists = follow_up_script.exists()
+            next_script_text = next_script.read_text(encoding="utf-8")
             command_readme = (root / "commands" / "README.md").read_text(
                 encoding="utf-8"
             )
@@ -580,12 +616,18 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
         self.assertIn(f"review={reviewed_follow_summary}", markdown)
         self.assertIn("follow_up_command: next_follow_up_command", markdown)
         self.assertIn("review_command: guided_next_follow_up_command", markdown)
-        self.assertEqual(command_scripts["written_count"], 2)
+        self.assertEqual(command_scripts["written_count"], 3)
+        self.assertEqual(command_scripts["next_path"], next_script_path)
+        self.assertEqual(command_scripts["next_kind"], "review")
         self.assertEqual(command_scripts["follow_up_path"], follow_up_script_path)
         self.assertEqual(command_scripts["review_path"], review_script_path)
+        self.assertTrue(next_script_exists)
         self.assertTrue(follow_up_script_exists)
         self.assertTrue(review_script_exists)
+        self.assertIn("# target_kind: review", next_script_text)
+        self.assertIn("recommended_review.sh", next_script_text)
         self.assertIn("review_absolute_best", command_readme)
+        self.assertIn("recommended_next.sh", command_readme)
         self.assertIn("recommended_follow_up.sh", command_readme)
         self.assertIn("recommended_review.sh", command_readme)
 
