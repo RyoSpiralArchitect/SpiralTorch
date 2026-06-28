@@ -15,10 +15,12 @@ from typing import Any, Callable
 
 
 SCHEMA = "st.llm_char_vae_context.command_bundle_run.v1"
+EXECUTION_NEXT_TARGET = "execution-next"
 TARGET_KEYS = {
     "next": "next_path",
     "follow-up": "follow_up_path",
     "review": "review_path",
+    EXECUTION_NEXT_TARGET: "execution_summary.next_command.script_path",
 }
 TARGET_KIND_KEYS = {
     "follow_up": "follow_up_path",
@@ -81,8 +83,15 @@ def _selected_script(
     command_scripts: dict[str, Any],
     *,
     target: str,
+    execution_next_command: dict[str, Any] | None = None,
+    previous_run_report: dict[str, Any] | None = None,
 ) -> tuple[str, Path | None]:
     key = TARGET_KEYS[target]
+    if target == EXECUTION_NEXT_TARGET:
+        next_command = _mapping(execution_next_command)
+        if not next_command:
+            next_command = _execution_next_command_from_report(previous_run_report)
+        return key, _path_from(next_command.get("script_path"))
     return key, _path_from(command_scripts.get(key))
 
 
@@ -93,6 +102,12 @@ def _target_details(
     script_key: str,
     script_path: Path | None,
 ) -> dict[str, Any]:
+    if target == EXECUTION_NEXT_TARGET:
+        return {
+            "target_kind": "execution_next",
+            "target_script_key": script_key,
+            "target_script_path": script_path,
+        }
     if target != "next":
         target_kind = "follow_up" if target == "follow-up" else target
         return {
@@ -117,6 +132,34 @@ def _target_details(
         "target_script_key": target_script_key,
         "target_script_path": target_script_path,
     }
+
+
+def _run_json_path(command_dir: Path, command_scripts: dict[str, Any]) -> Path:
+    return _path_from(command_scripts.get("run_json_path")) or command_dir / "run.json"
+
+
+def _previous_run_report(
+    command_dir: Path,
+    command_scripts: dict[str, Any],
+) -> dict[str, Any]:
+    path = _run_json_path(command_dir, command_scripts)
+    if not path.exists():
+        return {}
+    try:
+        return _read_json(path)
+    except Exception:
+        return {}
+
+
+def _execution_next_command_from_report(
+    report: dict[str, Any] | None,
+) -> dict[str, Any]:
+    report = _mapping(report)
+    execution_summary = _mapping(report.get("execution_summary"))
+    next_command = _mapping(execution_summary.get("next_command"))
+    if next_command:
+        return next_command
+    return _mapping(report.get("selected_execution_next_command"))
 
 
 def _candidate_context(value: Any) -> dict[str, Any] | None:
@@ -222,6 +265,13 @@ def _run_history_path(
 ) -> Path | None:
     if not append_history and not write_history_report:
         return None
+    return _configured_run_history_path(command_dir, command_scripts)
+
+
+def _configured_run_history_path(
+    command_dir: Path,
+    command_scripts: dict[str, Any],
+) -> Path:
     return (
         _path_from(command_scripts.get("run_history_jsonl_path"))
         or command_dir / "run_history.jsonl"
@@ -287,10 +337,25 @@ def _expected_execution_summary_path(
     manifest: dict[str, Any],
     *,
     target_kind: str | None,
+    execution_next_command: dict[str, Any] | None = None,
 ) -> Path | None:
+    if target_kind == "execution_next":
+        run_dir = _path_from(_mapping(execution_next_command).get("default_run_dir"))
+        return run_dir / "summary.json" if run_dir is not None else None
     command = _recommended_command_for_kind(manifest, target_kind=target_kind)
     run_dir = _path_from(command.get("default_run_dir"))
     return run_dir / "summary.json" if run_dir is not None else None
+
+
+def _execution_cwd_for_target(
+    command_dir: Path,
+    command_scripts: dict[str, Any],
+    *,
+    target: str,
+) -> Path:
+    if target == EXECUTION_NEXT_TARGET:
+        return _path_from(command_scripts.get("execution_cwd")) or command_dir
+    return command_dir
 
 
 def _compact_execution_next_command(payload: dict[str, Any]) -> dict[str, Any]:
@@ -429,6 +494,8 @@ def _runner_summary(
     dry_run: bool,
     inspection: dict[str, Any],
     returncode: int | None,
+    execution_cwd: Path | None = None,
+    selected_execution_next_command: dict[str, Any] | None = None,
     error: str | None = None,
     stdout: str | None = None,
     stderr: str | None = None,
@@ -455,7 +522,12 @@ def _runner_summary(
         "command_argv": ["bash", str(script_path)]
         if script_path is not None
         else None,
-        "execution_cwd": str(command_dir),
+        "execution_cwd": str(execution_cwd or command_dir),
+        "selected_execution_next_command": (
+            selected_execution_next_command
+            if selected_execution_next_command is not None
+            else None
+        ),
         "strict": strict,
         "dry_run": dry_run,
         "executed": bool(executed),
@@ -499,6 +571,7 @@ def render_markdown(summary: dict[str, Any]) -> str:
     context = _mapping(summary.get("recommendation_context"))
     champion = _mapping(context.get("champion"))
     fallback = _mapping(context.get("fallback"))
+    selected_execution_next = _mapping(summary.get("selected_execution_next_command"))
     execution_summary = _mapping(summary.get("execution_summary"))
     execution_next = _mapping(execution_summary.get("next_command"))
     lines = [
@@ -512,6 +585,22 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"- script_path: {_fmt(summary.get('script_path'))}",
         f"- target_script_key: {_fmt(summary.get('target_script_key'))}",
         f"- target_script_path: {_fmt(summary.get('target_script_path'))}",
+        (
+            "- selected_execution_next_source: "
+            f"{_fmt(selected_execution_next.get('source'))}"
+        ),
+        (
+            "- selected_execution_next_seeds: "
+            f"{_fmt(selected_execution_next.get('default_new_seeds'))}"
+        ),
+        (
+            "- selected_execution_next_script: "
+            f"{_fmt(selected_execution_next.get('script_path'))}"
+        ),
+        (
+            "- selected_execution_next_run_dir: "
+            f"{_fmt(selected_execution_next.get('default_run_dir'))}"
+        ),
         f"- command_argv: {_fmt(summary.get('command_argv'))}",
         f"- execution_cwd: {_fmt(summary.get('execution_cwd'))}",
         f"- strict: {_fmt(summary.get('strict'))}",
@@ -641,6 +730,7 @@ def _history_event(summary: dict[str, Any]) -> dict[str, Any]:
         "run_history_summary_path",
         "recommendation_context",
         "expected_execution_summary_path",
+        "selected_execution_next_command",
         "execution_summary",
     )
     event = {
@@ -669,6 +759,22 @@ def _read_history_events(history_out: Path) -> list[dict[str, Any]]:
             raise ValueError(f"{history_out}:{lineno} did not contain a JSON object")
         events.append(event)
     return events
+
+
+def _execution_next_command_from_history(
+    command_dir: Path,
+    command_scripts: dict[str, Any],
+) -> dict[str, Any]:
+    history_path = _configured_run_history_path(command_dir, command_scripts)
+    try:
+        events = _read_history_events(history_path)
+    except Exception:
+        return {}
+    for event in reversed(events):
+        next_command = _execution_next_command_from_report(event)
+        if next_command.get("script_path"):
+            return next_command
+    return {}
 
 
 def _event_status(event: dict[str, Any]) -> str:
@@ -1091,12 +1197,32 @@ def run_bundle(
     manifest_path = command_dir / "recommendation.json"
     manifest = _read_json(manifest_path)
     command_scripts = _command_scripts(manifest)
-    script_key, script_path = _selected_script(command_scripts, target=target)
+    previous_run_report = _previous_run_report(command_dir, command_scripts)
+    execution_next_command = _execution_next_command_from_report(previous_run_report)
+    if target == EXECUTION_NEXT_TARGET and not execution_next_command:
+        execution_next_command = _execution_next_command_from_history(
+            command_dir,
+            command_scripts,
+        )
+    selected_execution_next_command = (
+        execution_next_command if target == EXECUTION_NEXT_TARGET else None
+    )
+    script_key, script_path = _selected_script(
+        command_scripts,
+        target=target,
+        execution_next_command=execution_next_command,
+        previous_run_report=previous_run_report,
+    )
     target_details = _target_details(
         command_scripts,
         target=target,
         script_key=script_key,
         script_path=script_path,
+    )
+    execution_cwd = _execution_cwd_for_target(
+        command_dir,
+        command_scripts,
+        target=target,
     )
     recommendation_context = _recommendation_context(
         manifest,
@@ -1106,6 +1232,7 @@ def run_bundle(
     expected_summary_path = _expected_execution_summary_path(
         manifest,
         target_kind=target_details.get("target_kind"),
+        execution_next_command=execution_next_command,
     )
     json_out, markdown_out = _run_report_paths(
         command_dir,
@@ -1213,6 +1340,8 @@ def run_bundle(
             script_path=script_path,
             **target_details,
             recommendation_context=recommendation_context,
+            execution_cwd=execution_cwd,
+            selected_execution_next_command=selected_execution_next_command,
             strict=strict,
             dry_run=dry_run,
             inspection=inspection,
@@ -1232,6 +1361,8 @@ def run_bundle(
             script_path=script_path,
             **target_details,
             recommendation_context=recommendation_context,
+            execution_cwd=execution_cwd,
+            selected_execution_next_command=selected_execution_next_command,
             strict=strict,
             dry_run=dry_run,
             inspection=inspection,
@@ -1250,6 +1381,8 @@ def run_bundle(
             script_path=script_path,
             **target_details,
             recommendation_context=recommendation_context,
+            execution_cwd=execution_cwd,
+            selected_execution_next_command=selected_execution_next_command,
             strict=strict,
             dry_run=dry_run,
             inspection=inspection,
@@ -1268,6 +1401,8 @@ def run_bundle(
             script_path=script_path,
             **target_details,
             recommendation_context=recommendation_context,
+            execution_cwd=execution_cwd,
+            selected_execution_next_command=selected_execution_next_command,
             strict=strict,
             dry_run=dry_run,
             inspection=inspection,
@@ -1279,7 +1414,7 @@ def run_bundle(
     if json_mode:
         result = subprocess.run(
             ["bash", str(script_path)],
-            cwd=command_dir,
+            cwd=execution_cwd,
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -1293,6 +1428,8 @@ def run_bundle(
             script_path=script_path,
             **target_details,
             recommendation_context=recommendation_context,
+            execution_cwd=execution_cwd,
+            selected_execution_next_command=selected_execution_next_command,
             strict=strict,
             dry_run=dry_run,
             inspection=inspection,
@@ -1306,7 +1443,7 @@ def run_bundle(
         return result.returncode, summary
     result = subprocess.run(
         ["bash", str(script_path)],
-        cwd=command_dir,
+        cwd=execution_cwd,
         check=False,
     )
     summary = _runner_summary(
@@ -1317,6 +1454,8 @@ def run_bundle(
         script_path=script_path,
         **target_details,
         recommendation_context=recommendation_context,
+        execution_cwd=execution_cwd,
+        selected_execution_next_command=selected_execution_next_command,
         strict=strict,
         dry_run=dry_run,
         inspection=inspection,

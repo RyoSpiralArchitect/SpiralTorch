@@ -288,6 +288,50 @@ def _write_bundle(
                 }
             ),
             "JSON",
+            f'cat > "{execution_dir / "guided_next_follow_up_command.sh"}" <<\'SH\'',
+            "#!/usr/bin/env bash",
+            "set -euo pipefail",
+            f'mkdir -p "{execution_dir / "next"}"',
+            'printf "execution-next cwd=%s\\n" "$(pwd)" | tee execution_next.out',
+            f'cat > "{execution_dir / "next" / "summary.json"}" <<\'JSON\'',
+            json.dumps(
+                {
+                    "schema": "st.modelzoo.run.v1",
+                    "status": "improved",
+                    "best_feature": "latent",
+                    "best_config": {
+                        "best_feature": "latent",
+                        "feature_normalize": "blocks",
+                        "hybrid_latent_scale": 0.5,
+                        "mean_best_nll": 3.8,
+                        "mean_best_nll_delta_vs_raw": -0.4,
+                        "runner_up_feature": "raw",
+                        "margin_to_runner_up": 0.4,
+                        "combined_runner_up_margin_stderr": 0.05,
+                        "runner_up_within_uncertainty": False,
+                    },
+                    "follow_up_result": {
+                        "verdict": "improved",
+                        "source_best_feature_retained": True,
+                        "mean_best_nll_delta_vs_source": -0.2,
+                    },
+                    "follow_up_gate": {
+                        "effective_verdict": "improved",
+                        "failed": False,
+                    },
+                    "follow_up_guidance": {
+                        "action": "promote_and_broaden_after_streak",
+                        "unsafe_promotion": False,
+                    },
+                    "follow_up_trajectory": {
+                        "trajectory_action": "confirm_trajectory_with_fresh_seeds",
+                        "trajectory_verdict": "improved",
+                    },
+                }
+            ),
+            "JSON",
+            "SH",
+            f'chmod +x "{execution_dir / "guided_next_follow_up_command.sh"}"',
         ]
     )
     _write_script(
@@ -383,6 +427,7 @@ def _write_bundle(
                 "run_history_summary_path": str(
                     command_dir / "run_history_summary.json"
                 ),
+                "execution_cwd": str(command_dir),
                 "readme_path": str(command_dir / "README.md"),
             },
         },
@@ -578,6 +623,188 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
         self.assertIn("next cwd=", payload["stdout"])
         self.assertIn(str(command_dir), runner_out)
         _assert_execution_summary(self, payload, command_dir)
+
+    def test_cli_runs_execution_next_from_previous_run_report(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            command_dir = _write_bundle(Path(tmp))
+            first = subprocess.run(
+                [
+                    "python3",
+                    "-P",
+                    str(SCRIPT),
+                    str(command_dir),
+                    "--write-run-report",
+                    "--json",
+                ],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            dry = subprocess.run(
+                [
+                    "python3",
+                    "-P",
+                    str(SCRIPT),
+                    str(command_dir),
+                    "--target",
+                    "execution-next",
+                    "--dry-run",
+                    "--write-run-report",
+                    "--json",
+                ],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            executed = subprocess.run(
+                [
+                    "python3",
+                    "-P",
+                    str(SCRIPT),
+                    str(command_dir),
+                    "--target",
+                    "execution-next",
+                    "--write-run-report",
+                    "--append-run-history",
+                    "--write-run-history-report",
+                    "--json",
+                ],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            first_payload = json.loads(first.stdout)
+            dry_payload = json.loads(dry.stdout)
+            executed_payload = json.loads(executed.stdout)
+            run_report = json.loads(
+                (command_dir / "run.json").read_text(encoding="utf-8")
+            )
+            history_summary = json.loads(
+                (command_dir / "run_history_summary.json").read_text(encoding="utf-8")
+            )
+
+        self.assertEqual(first.returncode, 0, first.stderr)
+        self.assertEqual(dry.returncode, 0, dry.stderr)
+        self.assertEqual(executed.returncode, 0, executed.stderr)
+        _assert_execution_summary(self, first_payload, command_dir)
+        self.assertEqual(dry_payload["target"], "execution-next")
+        self.assertEqual(dry_payload["target_kind"], "execution_next")
+        self.assertEqual(
+            dry_payload["selected_execution_next_command"]["source"],
+            "guided_next_follow_up_command",
+        )
+        self.assertEqual(
+            dry_payload["selected_execution_next_command"]["default_new_seeds"],
+            "109,113,127",
+        )
+        self.assertEqual(
+            dry_payload["script_key"],
+            "execution_summary.next_command.script_path",
+        )
+        self.assertEqual(
+            dry_payload["script_path"],
+            str(command_dir / "executed_follow_up" / "guided_next_follow_up_command.sh"),
+        )
+        self.assertEqual(
+            dry_payload["expected_execution_summary_path"],
+            str(command_dir / "executed_follow_up" / "next" / "summary.json"),
+        )
+        self.assertEqual(dry_payload["execution_cwd"], str(command_dir))
+        self.assertIsNone(dry_payload["execution_summary"])
+        self.assertEqual(executed_payload["target"], "execution-next")
+        self.assertEqual(executed_payload["target_kind"], "execution_next")
+        self.assertEqual(executed_payload["returncode"], 0)
+        self.assertIn("execution-next cwd=", executed_payload["stdout"])
+        self.assertEqual(
+            executed_payload["execution_summary"]["summary_path"],
+            str(command_dir / "executed_follow_up" / "next" / "summary.json"),
+        )
+        self.assertEqual(executed_payload["execution_summary"]["mean_best_nll"], 3.8)
+        self.assertEqual(
+            executed_payload["execution_summary"]["guidance_action"],
+            "promote_and_broaden_after_streak",
+        )
+        self.assertEqual(run_report["target"], "execution-next")
+        self.assertEqual(run_report["target_kind"], "execution_next")
+        self.assertEqual(history_summary["latest"]["target_kind"], "execution_next")
+        self.assertEqual(
+            history_summary["latest"]["execution_guidance_action"],
+            "promote_and_broaden_after_streak",
+        )
+
+    def test_cli_recovers_execution_next_from_history_when_run_report_is_stale(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            command_dir = _write_bundle(Path(tmp))
+            first = subprocess.run(
+                [
+                    "python3",
+                    "-P",
+                    str(SCRIPT),
+                    str(command_dir),
+                    "--write-run-report",
+                    "--append-run-history",
+                    "--json",
+                ],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            stale_report = {
+                "schema": "st.llm_char_vae_context.command_bundle_run.v1",
+                "target": "execution-next",
+                "target_kind": "execution_next",
+                "dry_run": True,
+                "executed": False,
+                "returncode": 0,
+                "execution_summary": None,
+            }
+            (command_dir / "run.json").write_text(
+                json.dumps(stale_report, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            executed = subprocess.run(
+                [
+                    "python3",
+                    "-P",
+                    str(SCRIPT),
+                    str(command_dir),
+                    "--target",
+                    "execution-next",
+                    "--write-run-report",
+                    "--json",
+                ],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            first_payload = json.loads(first.stdout)
+            executed_payload = json.loads(executed.stdout)
+
+        self.assertEqual(first.returncode, 0, first.stderr)
+        self.assertEqual(executed.returncode, 0, executed.stderr)
+        _assert_execution_summary(self, first_payload, command_dir)
+        self.assertEqual(
+            executed_payload["selected_execution_next_command"]["script_path"],
+            str(command_dir / "executed_follow_up" / "guided_next_follow_up_command.sh"),
+        )
+        self.assertEqual(executed_payload["returncode"], 0)
+        self.assertIn("execution-next cwd=", executed_payload["stdout"])
+        self.assertEqual(
+            executed_payload["execution_summary"]["summary_path"],
+            str(command_dir / "executed_follow_up" / "next" / "summary.json"),
+        )
 
     def test_cli_blocks_when_strict_inspection_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
