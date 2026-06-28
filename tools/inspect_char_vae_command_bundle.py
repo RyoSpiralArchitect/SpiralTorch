@@ -328,6 +328,8 @@ def _run_loop_status(
         "final_next_action_reason": None,
         "final_next_action_target": None,
         "final_next_action_should_continue": None,
+        "final_next_action_runnable": None,
+        "continuation_command": None,
         "error": None,
     }
     if summary_path is None or not exists:
@@ -369,6 +371,10 @@ def _run_loop_status(
             "final_next_action_should_continue": final_next_action.get(
                 "should_continue"
             ),
+            "final_next_action_runnable": payload.get(
+                "final_next_action_runnable"
+            ),
+            "continuation_command": payload.get("continuation_command"),
         }
     )
     return status
@@ -741,6 +747,8 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"- run_loop_final_next_action_reason: {_fmt(_value(summary, 'run_loop_status', 'final_next_action_reason'))}",
         f"- run_loop_final_next_action_target: {_fmt(_value(summary, 'run_loop_status', 'final_next_action_target'))}",
         f"- run_loop_final_next_action_should_continue: {_fmt(_value(summary, 'run_loop_status', 'final_next_action_should_continue'))}",
+        f"- run_loop_final_next_action_runnable: {_fmt(_value(summary, 'run_loop_status', 'final_next_action_runnable'))}",
+        f"- run_loop_continuation_command: {_fmt(_value(summary, 'run_loop_status', 'continuation_command'))}",
         f"- run_loop_error: {_fmt(_value(summary, 'run_loop_status', 'error'))}",
         f"- run_history_summary_valid_json: {_fmt(_value(summary, 'run_history_summary_status', 'valid_json'))}",
         f"- run_history_summary_schema_ok: {_fmt(_value(summary, 'run_history_summary_status', 'schema_ok'))}",

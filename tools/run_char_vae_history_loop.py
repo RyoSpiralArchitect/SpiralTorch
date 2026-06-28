@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import shlex
 import sys
 import time
 from datetime import datetime, timezone
@@ -64,6 +65,62 @@ def _csv_values(values: list[str] | None) -> list[str]:
             if item:
                 parsed.append(item)
     return parsed
+
+
+def _loop_command_line(
+    command_dir: Path,
+    *,
+    max_steps: int,
+    strict: bool,
+    dry_run: bool,
+    write_inspection_report: bool,
+    write_run_report: bool,
+    write_run_history_report: bool,
+    fail_on_final_actions: list[str] | tuple[str, ...],
+    fail_on_max_steps_continuation: bool,
+    json_out: Path | None,
+    markdown_out: Path | None,
+) -> str:
+    script_path = Path(__file__).resolve()
+    parts = [
+        "env",
+        "PYTHONNOUSERSITE=1",
+        "python3",
+        "-P",
+        shlex.quote(str(script_path)),
+        shlex.quote(str(command_dir)),
+        "--max-steps",
+        str(max_steps),
+    ]
+    if not strict:
+        parts.append("--no-strict")
+    if dry_run:
+        parts.append("--dry-run")
+    if not write_inspection_report:
+        parts.append("--no-write-inspection-report")
+    if not write_run_report:
+        parts.append("--no-write-run-report")
+    if not write_run_history_report:
+        parts.append("--no-write-run-history-report")
+    if fail_on_final_actions:
+        parts.extend(
+            [
+                "--fail-on-final-action",
+                shlex.quote(",".join(fail_on_final_actions)),
+            ]
+        )
+    if fail_on_max_steps_continuation:
+        parts.append("--fail-on-max-steps-continuation")
+    default_json_out = command_dir / "run_loop.json"
+    default_markdown_out = command_dir / "run_loop.md"
+    if json_out == default_json_out and markdown_out == default_markdown_out:
+        parts.append("--write-loop-report")
+    else:
+        if json_out is not None:
+            parts.extend(["--json-out", shlex.quote(str(json_out))])
+        if markdown_out is not None:
+            parts.extend(["--markdown-out", shlex.quote(str(markdown_out))])
+    return " ".join(parts)
 
 
 def _md_cell(value: Any) -> str:
@@ -175,6 +232,8 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"- final_next_action_reason: {_fmt(next_action.get('reason'))}",
         f"- final_next_action_target: {_fmt(next_action.get('target'))}",
         f"- final_next_action_should_continue: {_fmt(next_action.get('should_continue'))}",
+        f"- final_next_action_runnable: {_fmt(summary.get('final_next_action_runnable'))}",
+        f"- continuation_command: {_fmt(summary.get('continuation_command'))}",
         f"- json_path: {_fmt(summary.get('json_path'))}",
         f"- markdown_path: {_fmt(summary.get('markdown_path'))}",
         "",
@@ -278,6 +337,10 @@ def run_loop(
     fail_on_final_actions = list(fail_on_final_actions)
     final_action = final_next_action.get("action")
     final_target = final_next_action.get("target")
+    final_next_action_runnable = (
+        final_next_action.get("should_continue") is True
+        and final_target in runner.TARGET_KEYS
+    )
     final_action_failed = (
         returncode == 0
         and isinstance(final_action, str)
@@ -287,8 +350,24 @@ def run_loop(
         returncode == 0
         and fail_on_max_steps_continuation
         and stop_reason == "max_steps_reached"
-        and final_next_action.get("should_continue") is True
-        and final_target in runner.TARGET_KEYS
+        and final_next_action_runnable
+    )
+    continuation_command = (
+        _loop_command_line(
+            command_dir,
+            max_steps=max_steps,
+            strict=strict,
+            dry_run=dry_run,
+            write_inspection_report=write_inspection_report,
+            write_run_report=write_run_report,
+            write_run_history_report=write_run_history_report,
+            fail_on_final_actions=fail_on_final_actions,
+            fail_on_max_steps_continuation=fail_on_max_steps_continuation,
+            json_out=json_out,
+            markdown_out=markdown_out,
+        )
+        if final_next_action_runnable
+        else None
     )
     error = latest_summary.get("error") if returncode != 0 else None
     if final_action_failed:
@@ -318,6 +397,8 @@ def run_loop(
         "returncode": returncode,
         "error": error,
         "final_next_action": final_next_action if final_next_action else None,
+        "final_next_action_runnable": final_next_action_runnable,
+        "continuation_command": continuation_command,
         "latest_run_history_summary": latest_summary.get("run_history_summary"),
         "latest_run_json_path": latest_summary.get("run_json_path"),
         "latest_run_markdown_path": latest_summary.get("run_markdown_path"),

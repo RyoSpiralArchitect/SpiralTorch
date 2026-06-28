@@ -327,6 +327,8 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
                 "final_next_action_reason": None,
                 "final_next_action_target": None,
                 "final_next_action_should_continue": None,
+                "final_next_action_runnable": None,
+                "continuation_command": None,
             },
         )
         self.assertEqual(
@@ -796,6 +798,8 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
                         "target": None,
                         "should_continue": False,
                     },
+                    "final_next_action_runnable": False,
+                    "continuation_command": None,
                     "steps": [
                         {
                             "index": 1,
@@ -857,6 +861,8 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
         )
         self.assertIsNone(status["final_next_action_target"])
         self.assertIs(status["final_next_action_should_continue"], False)
+        self.assertIs(status["final_next_action_runnable"], False)
+        self.assertIsNone(status["continuation_command"])
         self.assertIsNone(status["error"])
         self.assertEqual(markdown_result.returncode, 0, markdown_result.stderr)
         self.assertIn("run_loop_valid_json: yes", markdown_result.stdout)
@@ -888,6 +894,11 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
             "run_loop_final_next_action_should_continue: no",
             markdown_result.stdout,
         )
+        self.assertIn(
+            "run_loop_final_next_action_runnable: no",
+            markdown_result.stdout,
+        )
+        self.assertIn("run_loop_continuation_command: -", markdown_result.stdout)
 
     def test_cli_writes_explicit_inspection_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

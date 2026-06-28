@@ -100,6 +100,8 @@ class RunCharVaeHistoryLoopTests(unittest.TestCase):
             False,
         )
         self.assertEqual(payload["final_next_action"]["action"], "collect_next_command")
+        self.assertIs(payload["final_next_action_runnable"], False)
+        self.assertIsNone(payload["continuation_command"])
         self.assertEqual(len(history_events), 2)
         self.assertEqual(history_summary["total_runs"], 2)
         self.assertEqual(history_summary["next_action"]["action"], "collect_next_command")
@@ -174,10 +176,27 @@ class RunCharVaeHistoryLoopTests(unittest.TestCase):
         self.assertEqual(payload["final_next_action"]["action"], "run_execution_next")
         self.assertEqual(payload["final_next_action"]["target"], "execution-next")
         self.assertIs(payload["final_next_action"]["should_continue"], True)
+        self.assertIs(payload["final_next_action_runnable"], True)
+        self.assertIn(
+            "tools/run_char_vae_history_loop.py",
+            payload["continuation_command"],
+        )
+        self.assertIn(str(command_dir.resolve()), payload["continuation_command"])
+        self.assertIn("--max-steps 1", payload["continuation_command"])
+        self.assertIn(
+            "--fail-on-max-steps-continuation",
+            payload["continuation_command"],
+        )
+        self.assertIn("--write-loop-report", payload["continuation_command"])
         self.assertEqual(loop_report["returncode"], 1)
         self.assertTrue(loop_report["max_steps_continuation_failed"])
+        self.assertEqual(
+            loop_report["continuation_command"],
+            payload["continuation_command"],
+        )
         self.assertIn("stop_reason: max_steps_reached", loop_markdown)
         self.assertIn("max_steps_continuation_failed: yes", loop_markdown)
+        self.assertIn("continuation_command:", loop_markdown)
 
     def test_cli_fails_when_final_action_requires_review(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
