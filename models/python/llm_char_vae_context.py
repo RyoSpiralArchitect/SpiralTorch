@@ -51,6 +51,30 @@ RUN_BUDGET_KEYS = (
     "vae_batches",
     "vae_batch_size",
 )
+REQUIRED_TEXT_VAE_METHODS = (
+    "load",
+    "save",
+    "encode_text",
+    "encode_text_with_mellin",
+    "forward_mean_text",
+    "forward_mean_text_with_mellin",
+    "train_text_batch",
+    "train_text_batch_with_mellin",
+    "evaluate_text_batch",
+    "evaluate_text_batch_with_mellin",
+)
+REQUIRED_NN_BINDING_SYMBOLS = (
+    "ZSpaceTextVae",
+    "MellinBasis",
+    "Sequential",
+    "Linear",
+    "Relu",
+    "ZSpaceSoftmax",
+    "ModuleTrainer",
+    "CategoricalCrossEntropy",
+    "RoundtableConfig",
+    "save",
+)
 
 _TEXT_EXTS = {".txt"}
 
@@ -484,12 +508,29 @@ def _train_vae(
 
 def _require_zspace_text_vae_binding() -> None:
     nn = getattr(st, "nn", None)
-    if nn is not None and hasattr(nn, "ZSpaceTextVae"):
+    missing: list[str] = []
+    if nn is None:
+        missing.append("nn")
+    else:
+        for symbol in REQUIRED_NN_BINDING_SYMBOLS:
+            if not hasattr(nn, symbol):
+                missing.append(f"nn.{symbol}")
+        vae_cls = getattr(nn, "ZSpaceTextVae", None)
+        if vae_cls is not None:
+            for method in REQUIRED_TEXT_VAE_METHODS:
+                if not hasattr(vae_cls, method):
+                    missing.append(f"nn.ZSpaceTextVae.{method}")
+
+    if not missing:
         return
     raise RuntimeError(
-        "spiraltorch.nn.ZSpaceTextVae is unavailable. The char VAE training "
-        "runner needs the native st-py bindings; from the repository root run "
+        "spiraltorch native bindings are missing required char VAE training "
+        f"APIs: {', '.join(missing)}. The runner needs a matching st-py "
+        "native extension; from the repository root run "
         "`PYTHONNOUSERSITE=1 maturin develop -m bindings/st-py/Cargo.toml` "
+        "or for a CPU-only source-checkout smoke run "
+        "`PYTHONNOUSERSITE=1 maturin develop -m bindings/st-py/Cargo.toml "
+        "--no-default-features --features python-default --skip-install` "
         "or use a Python environment where the SpiralTorch native extension is installed."
     )
 
