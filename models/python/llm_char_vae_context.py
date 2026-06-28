@@ -1903,6 +1903,40 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
                 "```",
             ]
         )
+    feature_swap_review = summary.get("feature_swap_review_command")
+    if isinstance(feature_swap_review, dict):
+        lines.extend(
+            [
+                "",
+                "## Feature Swap Review Command",
+                "",
+                f"- action: {feature_swap_review.get('action')}",
+                "- source_feature_verdict: "
+                f"{feature_swap_review.get('source_feature_verdict') or '-'}",
+                "- source_feature_raw_verdict: "
+                f"{feature_swap_review.get('source_feature_raw_verdict') or '-'}",
+                "- source_best_feature_retained: "
+                f"{feature_swap_review.get('source_best_feature_retained')}",
+                "- source_budget_matched: "
+                f"{feature_swap_review.get('source_budget_matched')}",
+                "- command_run_budget: "
+                f"{_run_budget_label(feature_swap_review.get('command_run_budget'))}",
+                "- default_follow_up_from: "
+                f"`{feature_swap_review.get('default_follow_up_from')}`",
+                "- default_follow_up_fail_on_verdict: "
+                f"{feature_swap_review.get('default_follow_up_fail_on_verdict') or '-'}",
+                "- default_new_seeds: "
+                f"{feature_swap_review.get('default_new_seeds')}",
+                "- used_seed_history: "
+                f"{', '.join(str(seed) for seed in feature_swap_review.get('used_seed_history', [])) or '-'}",
+                f"- script: `{feature_swap_review.get('script_path')}`",
+                f"- usage: `{feature_swap_review.get('script_usage')}`",
+                "",
+                "```bash",
+                str(feature_swap_review.get("shell_command")),
+                "```",
+            ]
+        )
     guided_next_follow_up = summary.get("guided_next_follow_up_command")
     if isinstance(guided_next_follow_up, dict):
         reasons = guided_next_follow_up.get("reasons", [])
@@ -3019,6 +3053,122 @@ def _best_generation_follow_up_command_record(
         "best_config": best_config,
         "best_generation": follow_up_trajectory.get("best_generation"),
         "best_summary_path": str(default_follow_up_from),
+        "source_budget_matched": source_budget_matched,
+        "source_run_budget": source_run_budget,
+        "command_run_budget": _args_run_budget(command_args),
+        "default_new_seeds": default_new_seeds,
+        "used_seed_history": used_seeds,
+        "default_run_dir": str(default_run_dir),
+        "default_follow_up_from": str(default_follow_up_from),
+        "default_follow_up_fail_on_verdict": default_fail_on_verdict,
+        "script_path": str(script_path),
+        "shell_command": shell_command,
+        "script_command": script_command,
+        "script_usage": script_usage,
+    }
+
+
+def _feature_swap_review_command_record(
+    args: argparse.Namespace,
+    features: list[str],
+    root_run_dir: pathlib.Path,
+    seeds: list[int],
+    follow_up_result: dict[str, Any] | None,
+    next_follow_up: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not isinstance(follow_up_result, dict):
+        return None
+    source_feature_verdict = str(
+        follow_up_result.get("source_feature_verdict") or "unknown"
+    )
+    source_retained = follow_up_result.get("source_best_feature_retained")
+    source_feature_needs_review = (
+        source_feature_verdict == "regressed" or source_retained is False
+    )
+    if not source_feature_needs_review:
+        return None
+
+    current_best = follow_up_result.get("current_best_config")
+    if not isinstance(current_best, dict):
+        current_best = follow_up_result.get("evaluated_config")
+    if not isinstance(current_best, dict):
+        current_best = follow_up_result.get("source_best_config")
+    if not isinstance(current_best, dict):
+        return None
+
+    used_seeds: list[int] = []
+    if isinstance(next_follow_up, dict):
+        _append_unique_ints(used_seeds, next_follow_up.get("used_seed_history"))
+    _append_unique_ints(used_seeds, seeds)
+    default_new_seeds = _fresh_seed_csv(used_seeds or seeds, count=max(5, len(seeds)))
+    used_seed_history_value = (
+        ",".join(str(seed) for seed in used_seeds) if used_seeds else None
+    )
+    default_run_dir = root_run_dir / "feature_swap_review"
+    default_follow_up_from = root_run_dir / "summary.json"
+    default_fail_on_verdict = (
+        str(args.follow_up_fail_on_verdict).strip()
+        if args.follow_up_fail_on_verdict is not None
+        and str(args.follow_up_fail_on_verdict).strip()
+        else None
+    )
+    source_run_budget = (
+        follow_up_result.get("source_run_budget")
+        if isinstance(follow_up_result.get("source_run_budget"), dict)
+        else {}
+    )
+    source_budget_matched = bool(
+        follow_up_result.get("run_budget_shifted") and source_run_budget
+    )
+    command_args = (
+        _args_with_run_budget(args, source_run_budget)
+        if source_budget_matched
+        else args
+    )
+    script_path = root_run_dir / "feature_swap_review_command.sh"
+    literal_command = _follow_up_command_parts(
+        command_args,
+        features,
+        current_best,
+        seeds_value=default_new_seeds,
+        run_dir_value=str(default_run_dir),
+        follow_up_from_value=str(default_follow_up_from),
+        fail_on_verdict_value=default_fail_on_verdict,
+        used_seed_history_value=used_seed_history_value,
+    )
+    shell_command = "PYTHONNOUSERSITE=1 " + shlex.join(literal_command)
+    script_command = _follow_up_command_parts(
+        command_args,
+        features,
+        current_best,
+        seeds_value="${NEW_SEEDS}",
+        run_dir_value="${NEXT_RUN_DIR}",
+        follow_up_from_value="${FOLLOW_UP_FROM}",
+        fail_on_verdict_value=(
+            "${FOLLOW_UP_FAIL_ON_VERDICT}"
+            if default_fail_on_verdict is not None
+            else None
+        ),
+        used_seed_history_value=used_seed_history_value,
+    )
+    script_usage = (
+        f"FOLLOW_UP_FROM={default_follow_up_from} NEW_SEEDS={default_new_seeds} "
+        f"NEXT_RUN_DIR={default_run_dir}"
+    )
+    if default_fail_on_verdict is not None:
+        script_usage += f" FOLLOW_UP_FAIL_ON_VERDICT={default_fail_on_verdict}"
+    script_usage += f" bash {script_path}"
+    return {
+        "schema": "st.llm_char_vae_context.feature_swap_review_command.v1",
+        "action": "review_feature_swap_before_promotion",
+        "best_config": current_best,
+        "source_best_config": follow_up_result.get("source_best_config"),
+        "source_feature_verdict": source_feature_verdict,
+        "source_feature_raw_verdict": follow_up_result.get(
+            "source_feature_raw_verdict"
+        ),
+        "source_best_feature_retained": source_retained,
+        "run_budget_shifted": follow_up_result.get("run_budget_shifted"),
         "source_budget_matched": source_budget_matched,
         "source_run_budget": source_run_budget,
         "command_run_budget": _args_run_budget(command_args),
@@ -5466,6 +5616,18 @@ def main(argv: list[str] | None = None) -> int:
     if best_generation_follow_up is not None:
         aggregate["best_generation_follow_up_command"] = best_generation_follow_up
         _write_next_follow_up_script(best_generation_follow_up)
+
+    feature_swap_review = _feature_swap_review_command_record(
+        args,
+        features,
+        root_run_dir,
+        seeds,
+        follow_up_result,
+        next_follow_up,
+    )
+    if feature_swap_review is not None:
+        aggregate["feature_swap_review_command"] = feature_swap_review
+        _write_next_follow_up_script(feature_swap_review)
 
     broadened_follow_up = _broadened_follow_up_command_record(
         args,
