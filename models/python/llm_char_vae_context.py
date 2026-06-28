@@ -816,6 +816,8 @@ def _train_feature_head(
     metrics_path = run_dir / f"metrics_{feature}.jsonl"
     if metrics_path.exists():
         metrics_path.unlink()
+    weights_path = run_dir / f"head_{feature}.json"
+    best_weights_path = run_dir / f"head_{feature}_best.json"
 
     initial_validation = _evaluate(
         head,
@@ -839,6 +841,8 @@ def _train_feature_head(
 
     best_validation = initial_validation
     best_epoch: int | None = None
+    best_checkpoint_source = "init"
+    st.nn.save(str(best_weights_path), head)
     history: list[dict[str, Any]] = []
     for epoch in range(max(0, int(args.epochs))):
         rng = random.Random(int(args.seed) + epoch * 10_000)
@@ -889,6 +893,8 @@ def _train_feature_head(
         ):
             best_validation = validation
             best_epoch = epoch
+            best_checkpoint_source = f"epoch_{epoch}"
+            st.nn.save(str(best_weights_path), head)
         print(
             f"{feature}[{epoch}] train_loss={float(stats.average_loss):.6f} "
             f"val_nll={float(validation['mean_nll']):.6f} "
@@ -915,7 +921,6 @@ def _train_feature_head(
     samples_dir.mkdir(parents=True, exist_ok=True)
     sample_path = samples_dir / f"{feature}.txt"
     sample_path.write_text(sample, encoding="utf-8")
-    weights_path = run_dir / f"head_{feature}.json"
     st.nn.save(str(weights_path), head)
     best_nll = _finite_float(best_validation.get("mean_nll"))
     final_validation = history[-1]["validation"] if history else initial_validation
@@ -956,6 +961,15 @@ def _train_feature_head(
         "history": history,
         "sample_path": str(sample_path),
         "weights_path": str(weights_path),
+        "best_weights_path": str(best_weights_path),
+        "best_checkpoint": {
+            "path": str(best_weights_path),
+            "exists": best_weights_path.exists(),
+            "epoch": best_epoch,
+            "step": 0 if best_epoch is None else int(best_epoch) + 1,
+            "source": best_checkpoint_source,
+            "mean_nll": best_nll,
+        },
     }
 
 
@@ -1166,6 +1180,37 @@ def _single_learning_evidence(summary: dict[str, Any]) -> dict[str, Any]:
     save_path = vae.get("save_path")
     checkpoint_path = pathlib.Path(str(save_path)) if save_path else None
     checkpoint_exists = checkpoint_path.exists() if checkpoint_path is not None else False
+    feature_payloads = summary.get("features", [])
+    best_head_checkpoints: list[dict[str, Any]] = []
+    missing_best_head_checkpoints: list[str] = []
+    if isinstance(feature_payloads, list):
+        for item in feature_payloads:
+            if not isinstance(item, dict):
+                continue
+            checkpoint = (
+                item.get("best_checkpoint")
+                if isinstance(item.get("best_checkpoint"), dict)
+                else {}
+            )
+            raw_path = checkpoint.get("path") or item.get("best_weights_path")
+            if not raw_path:
+                continue
+            path = pathlib.Path(str(raw_path))
+            exists = path.exists()
+            feature = str(item.get("feature") or "-")
+            if not exists:
+                missing_best_head_checkpoints.append(feature)
+            best_head_checkpoints.append(
+                {
+                    "feature": feature,
+                    "path": str(path),
+                    "exists": exists,
+                    "epoch": checkpoint.get("epoch"),
+                    "step": checkpoint.get("step"),
+                    "source": checkpoint.get("source"),
+                    "mean_nll": checkpoint.get("mean_nll"),
+                }
+            )
 
     raw_entry = _ranking_entry(summary, FEATURE_RAW)
     best_entry = _best_ranking_entry(summary)
@@ -1182,6 +1227,8 @@ def _single_learning_evidence(summary: dict[str, Any]) -> dict[str, Any]:
     reasons: list[str] = []
     if not checkpoint_exists:
         reasons.append("checkpoint_missing")
+    if missing_best_head_checkpoints:
+        reasons.append("best_head_checkpoint_missing")
     if not vae_steps:
         reasons.append("vae_not_trained")
     if not head_total_steps:
@@ -1251,6 +1298,13 @@ def _single_learning_evidence(summary: dict[str, Any]) -> dict[str, Any]:
             "total_steps": head_total_steps,
             "hidden": run.get("hidden"),
             "head_init": run.get("head_init"),
+            "best_checkpoints": {
+                "count": len(best_head_checkpoints),
+                "all_exist": bool(best_head_checkpoints)
+                and not missing_best_head_checkpoints,
+                "missing_features": missing_best_head_checkpoints,
+                "items": best_head_checkpoints,
+            },
         },
         "raw_baseline": {
             "best_nll": raw_entry.get("best_mean_nll") if raw_entry else None,
@@ -1531,10 +1585,17 @@ def _single_report(summary: dict[str, Any]) -> str:
         result = feature_results.get(feature, {})
         initial = result.get("initial_validation", {})
         final = result.get("final_validation", {})
+        best_checkpoint = (
+            result.get("best_checkpoint")
+            if isinstance(result.get("best_checkpoint"), dict)
+            else {}
+        )
         ranking_rows.append(
             [
                 feature,
                 str(item.get("best_epoch") if item.get("best_epoch") is not None else "init"),
+                str(best_checkpoint.get("source") or "-"),
+                "yes" if best_checkpoint.get("exists") else "no",
                 _fmt_float(item.get("best_mean_nll")),
                 _fmt_percent(item.get("best_accuracy")),
                 _fmt_float(initial.get("mean_nll")),
@@ -1597,6 +1658,24 @@ def _single_report(summary: dict[str, Any]) -> str:
             steps=learning_evidence.get("head", {}).get("total_steps"),
             features=learning_evidence.get("head", {}).get("feature_count"),
         ),
+        "- best_head_checkpoints: {count} all_exist={all_exist} missing={missing}".format(
+            count=learning_evidence.get("head", {})
+            .get("best_checkpoints", {})
+            .get("count"),
+            all_exist=learning_evidence.get("head", {})
+            .get("best_checkpoints", {})
+            .get("all_exist"),
+            missing=", ".join(
+                str(item)
+                for item in (
+                    learning_evidence.get("head", {})
+                    .get("best_checkpoints", {})
+                    .get("missing_features")
+                    or []
+                )
+            )
+            or "-",
+        ),
         "- best_vs_raw: {feature} delta={delta} curve_delta={curve_delta}".format(
             feature=learning_evidence.get("best", {}).get("feature") or "-",
             delta=_fmt_float(
@@ -1617,6 +1696,8 @@ def _single_report(summary: dict[str, Any]) -> str:
             [
                 "feature",
                 "best_epoch",
+                "best_ckpt",
+                "ckpt_exists",
                 "best_nll",
                 "best_acc",
                 "init_nll",
@@ -5962,6 +6043,9 @@ def _run_single(args: argparse.Namespace, features: list[str]) -> dict[str, Any]
                 "validation_nll_final_minus_best": item[
                     "validation_nll_final_minus_best"
                 ],
+                "weights_path": item.get("weights_path"),
+                "best_weights_path": item.get("best_weights_path"),
+                "best_checkpoint": item.get("best_checkpoint"),
             }
             for item in ranked
         ],

@@ -736,6 +736,10 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             checkpoint = Path(tmp) / "text_vae_weights.bin"
             checkpoint.write_bytes(b"weights")
+            raw_head = Path(tmp) / "head_raw_best.json"
+            raw_head.write_text("{}", encoding="utf-8")
+            hybrid_head = Path(tmp) / "head_raw_latent_best.json"
+            hybrid_head.write_text("{}", encoding="utf-8")
             summary = {
                 "run": {
                     "text_chars": 200,
@@ -786,7 +790,30 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
                     "raw_best_nll_vs_raw": 0.0,
                 },
                 "best_feature": "raw_latent",
-                "features": [],
+                "features": [
+                    {
+                        "feature": "raw",
+                        "best_checkpoint": {
+                            "path": str(raw_head),
+                            "exists": True,
+                            "epoch": 1,
+                            "step": 2,
+                            "source": "epoch_1",
+                            "mean_nll": 4.00,
+                        },
+                    },
+                    {
+                        "feature": "raw_latent",
+                        "best_checkpoint": {
+                            "path": str(hybrid_head),
+                            "exists": True,
+                            "epoch": 1,
+                            "step": 2,
+                            "source": "epoch_1",
+                            "mean_nll": 3.80,
+                        },
+                    },
+                ],
                 "feature_diagnostics": {"features": {}},
             }
 
@@ -796,6 +823,8 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
 
         self.assertEqual(evidence["status"], "beats_raw")
         self.assertTrue(evidence["checkpoint"]["exists"])
+        self.assertTrue(evidence["head"]["best_checkpoints"]["all_exist"])
+        self.assertEqual(evidence["head"]["best_checkpoints"]["count"], 2)
         self.assertEqual(evidence["vae"]["steps"], 8)
         self.assertEqual(evidence["head"]["total_steps"], 12)
         self.assertAlmostEqual(
@@ -805,6 +834,7 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
         self.assertAlmostEqual(evidence["best"]["best_nll_delta_vs_raw"], -0.20)
         self.assertIn("## Learning Evidence", report)
         self.assertIn("- status: beats_raw", report)
+        self.assertIn("- best_head_checkpoints: 2 all_exist=True missing=-", report)
 
     def test_text_vae_binding_preflight_explains_native_requirement(self) -> None:
         mod = _load_module()
