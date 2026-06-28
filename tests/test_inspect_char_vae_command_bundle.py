@@ -11,6 +11,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "tools" / "inspect_char_vae_command_bundle.py"
+RUNNER_SCRIPT = ROOT / "tools" / "run_char_vae_command_bundle.py"
 
 
 def _write_json(path: Path, payload: dict[str, object]) -> None:
@@ -22,6 +23,22 @@ def _write_script(path: Path, *, executable: bool = True) -> None:
     path.write_text("#!/usr/bin/env bash\nset -euo pipefail\n", encoding="utf-8")
     if executable:
         path.chmod(path.stat().st_mode | 0o755)
+
+
+def _runner_command(command_dir: Path) -> str:
+    return (
+        "env PYTHONNOUSERSITE=1 python3 -P "
+        f"{RUNNER_SCRIPT} {command_dir} "
+        "--write-inspection-report --write-run-report --append-run-history "
+        "--write-run-history-report"
+    )
+
+
+def _history_report_command(command_dir: Path) -> str:
+    return (
+        "env PYTHONNOUSERSITE=1 python3 -P "
+        f"{RUNNER_SCRIPT} {command_dir} --history-report-only"
+    )
 
 
 def _write_bundle(
@@ -73,6 +90,8 @@ def _write_bundle(
                 "written_count": 2,
                 "comparison_json_path": str(comparison_json),
                 "comparison_markdown_path": str(comparison_markdown),
+                "runner_command": _runner_command(command_dir),
+                "history_report_command": _history_report_command(command_dir),
                 "run_json_path": str(run_json),
                 "run_markdown_path": str(run_markdown),
                 "run_history_jsonl_path": str(run_history_jsonl),
@@ -115,6 +134,22 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
         self.assertEqual(payload["chain_source_count"], 1)
         self.assertEqual(payload["missing_required"], [])
         self.assertEqual(payload["missing_optional"], [])
+        self.assertEqual(payload["runner_command"], _runner_command(command_dir))
+        self.assertEqual(
+            payload["history_report_command"],
+            _history_report_command(command_dir),
+        )
+        commands = {item["label"]: item for item in payload["declared_commands"]}
+        self.assertTrue(commands["runner_command"]["ok"])
+        self.assertTrue(commands["history_report_command"]["ok"])
+        self.assertEqual(
+            commands["history_report_command"]["required_flags"],
+            ["run_char_vae_command_bundle.py", "--history-report-only"],
+        )
+        self.assertEqual(
+            commands["history_report_command"]["forbidden_flags"],
+            ["--append-run-history"],
+        )
         self.assertEqual(payload["run_json_path"], str(command_dir / "run.json"))
         self.assertEqual(
             payload["run_history_summary_path"],
@@ -168,8 +203,51 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
         self.assertIn("Char VAE Command Bundle Inspection", markdown_result.stdout)
         self.assertIn("bundle_ready: yes", markdown_result.stdout)
         self.assertIn("Declared Run Outputs", markdown_result.stdout)
+        self.assertIn("Declared Commands", markdown_result.stdout)
+        self.assertIn("history_report_command", markdown_result.stdout)
+        self.assertIn("--history-report-only", markdown_result.stdout)
         self.assertIn("run_history_summary", markdown_result.stdout)
         self.assertIn("run_history_summary_valid_json: -", markdown_result.stdout)
+
+    def test_cli_flags_unsafe_history_report_command(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            command_dir = _write_bundle(Path(tmp))
+            manifest_path = command_dir / "recommendation.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["command_scripts"][
+                "history_report_command"
+            ] = f"{_history_report_command(command_dir)} --append-run-history"
+            manifest_path.write_text(
+                json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                ["python3", "-P", str(SCRIPT), str(command_dir), "--json"],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            markdown_result = subprocess.run(
+                ["python3", "-P", str(SCRIPT), str(command_dir)],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        commands = {item["label"]: item for item in payload["declared_commands"]}
+        self.assertFalse(commands["history_report_command"]["ok"])
+        self.assertEqual(
+            commands["history_report_command"]["forbidden_flags_present"],
+            ["--append-run-history"],
+        )
+        self.assertEqual(markdown_result.returncode, 0, markdown_result.stderr)
+        self.assertIn("--append-run-history", markdown_result.stdout)
 
     def test_cli_writes_default_inspection_reports(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

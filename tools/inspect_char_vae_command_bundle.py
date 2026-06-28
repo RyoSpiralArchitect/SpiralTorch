@@ -45,6 +45,12 @@ def _fmt(value: Any) -> str:
     return str(value)
 
 
+def _fmt_list(value: Any) -> str:
+    if not isinstance(value, list) or not value:
+        return "-"
+    return ", ".join(str(item) for item in value)
+
+
 def _value(payload: dict[str, Any], *keys: str) -> Any:
     item: Any = payload
     for key in keys:
@@ -77,6 +83,39 @@ def _declared_output(
         "label": label,
         "path": str(path) if path is not None else None,
         "exists": _exists(path),
+    }
+
+
+def _command_from(value: Any) -> str | None:
+    if not isinstance(value, str) or not value:
+        return None
+    return value
+
+
+def _declared_command(
+    label: str,
+    command: str | None,
+    *,
+    required_flags: tuple[str, ...] = (),
+    forbidden_flags: tuple[str, ...] = (),
+) -> dict[str, Any]:
+    missing_required_flags = [
+        flag for flag in required_flags if command is None or flag not in command
+    ]
+    forbidden_flags_present = [
+        flag for flag in forbidden_flags if command is not None and flag in command
+    ]
+    return {
+        "label": label,
+        "command": command,
+        "present": command is not None,
+        "required_flags": list(required_flags),
+        "missing_required_flags": missing_required_flags,
+        "forbidden_flags": list(forbidden_flags),
+        "forbidden_flags_present": forbidden_flags_present,
+        "ok": command is not None
+        and not missing_required_flags
+        and not forbidden_flags_present,
     }
 
 
@@ -160,6 +199,10 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
     next_path = _path_from(command_scripts.get("next_path"))
     follow_up_path = _path_from(command_scripts.get("follow_up_path"))
     review_path = _path_from(command_scripts.get("review_path"))
+    runner_command = _command_from(command_scripts.get("runner_command"))
+    history_report_command = _command_from(
+        command_scripts.get("history_report_command")
+    )
     run_json_path = _path_from(command_scripts.get("run_json_path"))
     run_markdown_path = _path_from(command_scripts.get("run_markdown_path"))
     run_history_jsonl_path = _path_from(
@@ -240,6 +283,25 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
         _declared_output("run_history_markdown", run_history_markdown_path),
         _declared_output("run_history_summary", run_history_summary_path),
     ]
+    declared_commands = [
+        _declared_command(
+            "runner_command",
+            runner_command,
+            required_flags=(
+                "run_char_vae_command_bundle.py",
+                "--write-inspection-report",
+                "--write-run-report",
+                "--append-run-history",
+                "--write-run-history-report",
+            ),
+        ),
+        _declared_command(
+            "history_report_command",
+            history_report_command,
+            required_flags=("run_char_vae_command_bundle.py", "--history-report-only"),
+            forbidden_flags=("--append-run-history",),
+        ),
+    ]
     run_history_summary_status = _run_history_summary_status(
         summary_path=run_history_summary_path,
         history_path=run_history_jsonl_path,
@@ -262,6 +324,9 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
         "comparison_markdown_path": str(comparison_markdown_path)
         if comparison_markdown_path is not None
         else None,
+        "runner_command": runner_command,
+        "history_report_command": history_report_command,
+        "declared_commands": declared_commands,
         "declared_outputs": declared_outputs,
         "run_json_path": str(run_json_path) if run_json_path is not None else None,
         "run_markdown_path": (
@@ -302,6 +367,8 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"- written_count: {_fmt(summary.get('written_count'))}",
         f"- comparison_json_path: {_fmt(summary.get('comparison_json_path'))}",
         f"- comparison_markdown_path: {_fmt(summary.get('comparison_markdown_path'))}",
+        f"- runner_command: {_fmt(summary.get('runner_command'))}",
+        f"- history_report_command: {_fmt(summary.get('history_report_command'))}",
         f"- run_json_path: {_fmt(summary.get('run_json_path'))}",
         f"- run_markdown_path: {_fmt(summary.get('run_markdown_path'))}",
         f"- run_history_jsonl_path: {_fmt(summary.get('run_history_jsonl_path'))}",
@@ -335,6 +402,29 @@ def render_markdown(summary: dict[str, Any]) -> str:
                 required=_fmt(check.get("required")),
                 ok=_fmt(check.get("ok")),
                 path=_fmt(check.get("path")),
+            )
+        )
+    lines.extend(
+        [
+            "",
+            "## Declared Commands",
+            "",
+            "| label | present | ok | missing_required_flags | forbidden_flags_present | command |",
+            "| --- | --- | --- | --- | --- | --- |",
+        ]
+    )
+    commands = summary.get("declared_commands")
+    for command in commands if isinstance(commands, list) else []:
+        if not isinstance(command, dict):
+            continue
+        lines.append(
+            "| {label} | {present} | {ok} | {missing} | {forbidden} | {command} |".format(
+                label=_fmt(command.get("label")),
+                present=_fmt(command.get("present")),
+                ok=_fmt(command.get("ok")),
+                missing=_fmt_list(command.get("missing_required_flags")),
+                forbidden=_fmt_list(command.get("forbidden_flags_present")),
+                command=_fmt(command.get("command")),
             )
         )
     lines.extend(

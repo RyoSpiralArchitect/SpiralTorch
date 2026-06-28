@@ -425,9 +425,22 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             )
             readme = (command_dir / "README.md").read_text(encoding="utf-8")
             markdown = (command_dir / "comparison.md").read_text(encoding="utf-8")
+            inspection_commands = {
+                item["label"]: item for item in inspection["declared_commands"]
+            }
+            comparison_commands = {
+                item["label"]: item
+                for item in comparison["command_inspection"]["declared_commands"]
+            }
 
         self.assertTrue(inspection["bundle_ready"])
         self.assertTrue(inspection["strict_ready"])
+        self.assertEqual(
+            inspection["history_report_command"],
+            _history_report_command(command_dir),
+        )
+        self.assertTrue(inspection_commands["history_report_command"]["ok"])
+        self.assertTrue(comparison_commands["history_report_command"]["ok"])
         self.assertTrue(manifest["command_scripts"]["inspection_generated"])
         self.assertTrue(manifest["command_scripts"]["inspection_bundle_ready"])
         self.assertTrue(manifest["command_scripts"]["inspection_strict_ready"])
