@@ -13,6 +13,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "tools" / "summarize_char_vae_context_chains.py"
+INSPECT_SCRIPT = ROOT / "tools" / "inspect_char_vae_command_bundle.py"
 
 
 def _load_module():
@@ -36,6 +37,14 @@ def _write_chain(path: Path, payload: dict[str, object]) -> Path:
 def _write_json(path: Path, payload: dict[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _inspection_command(command_dir: Path) -> str:
+    return (
+        "PYTHONNOUSERSITE=1 python3 -P "
+        f"{shlex.quote(str(INSPECT_SCRIPT.resolve()))} "
+        f"{shlex.quote(str(command_dir.resolve()))} --strict --write-report"
+    )
 
 
 class SummarizeCharVaeContextChainsTests(unittest.TestCase):
@@ -260,11 +269,7 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             comparison = json.loads(comparison_json.read_text(encoding="utf-8"))
             readme = (command_dir / "README.md").read_text(encoding="utf-8")
             markdown = comparison_markdown.read_text(encoding="utf-8")
-            inspection_command = (
-                "PYTHONNOUSERSITE=1 python3 -P "
-                f"tools/inspect_char_vae_command_bundle.py {command_dir} "
-                "--strict --write-report"
-            )
+            inspection_command = _inspection_command(command_dir)
 
         self.assertTrue(comparison_json_exists)
         self.assertTrue(comparison_markdown_exists)
@@ -291,11 +296,11 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
         )
         self.assertEqual(
             manifest["command_scripts"]["inspection_json_path"],
-            str(command_dir / "inspection.json"),
+            str((command_dir / "inspection.json").resolve()),
         )
         self.assertEqual(
             manifest["command_scripts"]["inspection_markdown_path"],
-            str(command_dir / "inspection.md"),
+            str((command_dir / "inspection.md").resolve()),
         )
         self.assertIn("## Bundle Inspection", readme)
         self.assertIn(inspection_command, readme)
@@ -370,13 +375,81 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
         self.assertTrue(comparison["command_inspection"]["strict_ready"])
         self.assertEqual(
             comparison["command_inspection"]["inspection_json_path"],
-            str(command_dir / "inspection.json"),
+            str((command_dir / "inspection.json").resolve()),
         )
         self.assertIn("- generated_now: `yes`", readme)
         self.assertIn("- strict_ready: `yes`", readme)
         self.assertIn("command_inspection_generated: yes", markdown)
         self.assertIn("command_inspection_strict_ready: yes", markdown)
         self.assertIn("command_inspection_missing_required: -", markdown)
+
+    def test_cli_command_dir_records_absolute_handoff_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            chain = _write_chain(
+                root / "chain",
+                {
+                    "schema": "st.llm_char_vae_context.chain.v1",
+                    "preset": "smoke",
+                    "run_root": str(root / "chain"),
+                    "planned_follow_ups": 1,
+                    "attempted_follow_ups": 0,
+                    "dry_run": True,
+                    "follow_up_seed_resolution_summary": {
+                        "attempted_follow_ups": 0,
+                        "seed_source_counts": {},
+                        "command_source_counts": {},
+                        "configured_seed_group_status_counts": {},
+                        "gate_failed_count": 0,
+                        "nonzero_exit_count": 0,
+                    },
+                },
+            )
+            command_dir = root / "commands"
+            result = subprocess.run(
+                [
+                    "python3",
+                    "-P",
+                    str(SCRIPT),
+                    str(chain),
+                    "--command-out-dir",
+                    "commands",
+                    "--write-command-inspection",
+                ],
+                cwd=root,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            manifest = json.loads(
+                (command_dir / "recommendation.json").read_text(encoding="utf-8")
+            )
+            comparison = json.loads(
+                (command_dir / "comparison.json").read_text(encoding="utf-8")
+            )
+            readme = (command_dir / "README.md").read_text(encoding="utf-8")
+            markdown = (command_dir / "comparison.md").read_text(encoding="utf-8")
+
+        command_scripts = manifest["command_scripts"]
+        self.assertEqual(command_scripts["directory"], str(command_dir.resolve()))
+        self.assertIsNone(command_scripts["next_path"])
+        self.assertEqual(
+            command_scripts["manifest_path"],
+            str((command_dir / "recommendation.json").resolve()),
+        )
+        self.assertEqual(
+            command_scripts["inspection_command"],
+            _inspection_command(command_dir),
+        )
+        self.assertEqual(
+            comparison["command_scripts"]["directory"],
+            str(command_dir.resolve()),
+        )
+        self.assertIn(str((command_dir / "inspection.json").resolve()), readme)
+        self.assertIn(str((command_dir / "recommendation.json").resolve()), markdown)
 
     def test_cli_writes_recommended_command_scripts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -483,6 +556,11 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             review_script = command_dir / "recommended_review.sh"
             manifest_path = command_dir / "recommendation.json"
             readme_path = command_dir / "README.md"
+            next_script_path = str(next_script.resolve())
+            follow_up_script_path = str(follow_up_script.resolve())
+            manifest_path_resolved = str(manifest_path.resolve())
+            readme_path_resolved = str(readme_path.resolve())
+            command_dir_resolved = str(command_dir.resolve())
             execution_cwd = str(root.resolve())
             self.assertTrue(next_script.exists())
             self.assertTrue(follow_up_script.exists())
@@ -495,12 +573,12 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             readme = readme_path.read_text(encoding="utf-8")
             self.assertEqual(
                 payload["command_scripts"]["next_path"],
-                str(next_script),
+                next_script_path,
             )
             self.assertEqual(payload["command_scripts"]["next_kind"], "follow_up")
             self.assertEqual(
                 payload["command_scripts"]["follow_up_path"],
-                str(follow_up_script),
+                follow_up_script_path,
             )
             self.assertIsNone(payload["command_scripts"]["review_path"])
             self.assertEqual(payload["command_scripts"]["written_count"], 2)
@@ -518,11 +596,11 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             )
             self.assertEqual(
                 payload["command_scripts"]["manifest_path"],
-                str(manifest_path),
+                manifest_path_resolved,
             )
             self.assertEqual(
                 payload["command_scripts"]["readme_path"],
-                str(readme_path),
+                readme_path_resolved,
             )
             self.assertEqual(
                 manifest["recommendation"]["action"],
@@ -539,7 +617,7 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             self.assertIs(manifest["selection"]["accepted_matches_best"], True)
             self.assertEqual(
                 manifest["command_scripts"]["follow_up_path"],
-                str(follow_up_script),
+                follow_up_script_path,
             )
             self.assertEqual(manifest["command_scripts"]["next_kind"], "follow_up")
             self.assertEqual(
@@ -556,19 +634,15 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             )
             self.assertEqual(
                 manifest["command_scripts"]["inspection_command"],
-                (
-                    "PYTHONNOUSERSITE=1 python3 -P "
-                    f"tools/inspect_char_vae_command_bundle.py {command_dir} "
-                    "--strict --write-report"
-                ),
+                _inspection_command(command_dir),
             )
             self.assertEqual(
                 manifest["command_scripts"]["inspection_json_path"],
-                str(command_dir / "inspection.json"),
+                str((command_dir / "inspection.json").resolve()),
             )
             self.assertEqual(
                 manifest["command_scripts"]["inspection_markdown_path"],
-                str(command_dir / "inspection.md"),
+                str((command_dir / "inspection.md").resolve()),
             )
             self.assertIn("# target_kind: follow_up", next_text)
             self.assertIn("recommended_follow_up.sh", next_text)
@@ -631,7 +705,7 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             self.assertIn("inspection.json", readme)
             self.assertIn("inspection.md", readme)
             self.assertIn("recommended_next.sh", readme)
-            self.assertIn(f"bash {shlex.quote(str(next_script))}", readme)
+            self.assertIn(f"bash {shlex.quote(next_script_path)}", readme)
             self.assertIn("recommended_follow_up.sh", readme)
             self.assertIn("recommended_next.sh", markdown)
             self.assertIn("recommended_follow_up.sh", markdown)
@@ -777,9 +851,9 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             review_script = root / "commands" / "recommended_review.sh"
             follow_up_script = root / "commands" / "recommended_follow_up.sh"
             next_script = root / "commands" / "recommended_next.sh"
-            next_script_path = str(next_script)
-            review_script_path = str(review_script)
-            follow_up_script_path = str(follow_up_script)
+            next_script_path = str(next_script.resolve())
+            review_script_path = str(review_script.resolve())
+            follow_up_script_path = str(follow_up_script.resolve())
             next_script_exists = next_script.exists()
             review_script_exists = review_script.exists()
             follow_up_script_exists = follow_up_script.exists()

@@ -666,9 +666,12 @@ def _run_line(path: Any) -> str | None:
 def _inspection_command_line(command_dir: Any) -> str | None:
     if not isinstance(command_dir, str) or not command_dir:
         return None
+    script_path = Path(__file__).resolve().with_name(
+        "inspect_char_vae_command_bundle.py"
+    )
     return (
         "PYTHONNOUSERSITE=1 python3 -P "
-        "tools/inspect_char_vae_command_bundle.py "
+        f"{shlex.quote(str(script_path))} "
         f"{shlex.quote(command_dir)} --strict --write-report"
     )
 
@@ -844,6 +847,7 @@ def _write_recommended_command_scripts(
     comparison_json_path: Path | None = None,
     comparison_markdown_path: Path | None = None,
 ) -> dict[str, Any]:
+    out_dir = out_dir.resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
     execution_cwd = Path.cwd().resolve()
     recommendation = summary.get("recommendation")
