@@ -466,6 +466,42 @@ class CharVaeContextChainTests(unittest.TestCase):
             "12",
         )
 
+        capacity_zoom = parser.parse_args(
+            ["models/samples/spiral_corpus_en", "--preset", "capacity_zoom"]
+        )
+        capacity_zoom_command = mod._parent_command(
+            capacity_zoom,
+            Path("/tmp/capacity_zoom"),
+        )
+        self.assertEqual(
+            capacity_zoom_command[capacity_zoom_command.index("--latent-dims") + 1],
+            "12,16,24",
+        )
+        self.assertEqual(
+            capacity_zoom_command[capacity_zoom_command.index("--hidden-sizes") + 1],
+            "32,64",
+        )
+        self.assertNotIn("--latent-dim", capacity_zoom_command)
+        self.assertNotIn("--hidden", capacity_zoom_command)
+        self.assertEqual(
+            capacity_zoom_command[
+                capacity_zoom_command.index("--hybrid-latent-scales") + 1
+            ],
+            "4.0",
+        )
+        self.assertEqual(
+            capacity_zoom_command[capacity_zoom_command.index("--epochs") + 1],
+            "8",
+        )
+        self.assertEqual(
+            capacity_zoom_command[capacity_zoom_command.index("--batches") + 1],
+            "16",
+        )
+        self.assertEqual(
+            capacity_zoom_command[capacity_zoom_command.index("--eval-samples") + 1],
+            "192",
+        )
+
         explicit = parser.parse_args(
             [
                 "models/samples/spiral_corpus_en",

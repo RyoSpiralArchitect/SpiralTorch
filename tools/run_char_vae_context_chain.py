@@ -28,6 +28,8 @@ HYBRID4_LATENT_SCALES = "2.0,4.0"
 HYBRID4_DEEP_LATENT_SCALES = "4.0"
 CAPACITY_SCOUT_LATENT_DIMS = "6,8,12"
 CAPACITY_SCOUT_HIDDEN_SIZES = "8,16,32"
+CAPACITY_ZOOM_LATENT_DIMS = "12,16,24"
+CAPACITY_ZOOM_HIDDEN_SIZES = "32,64"
 
 PRESETS: dict[str, dict[str, Any]] = {
     "smoke": {
@@ -126,6 +128,27 @@ PRESETS: dict[str, dict[str, Any]] = {
         "seeds": "2001,2003",
         "hybrid_latent_scales": HYBRID4_LATENT_SCALES,
         "follow_up_seed_groups": "2005,2007,2009;2011,2013,2015",
+    },
+    "capacity_zoom": {
+        "features": FOCUSED_HYBRID_FEATURES,
+        "feature_normalize_modes": "blocks",
+        "head_init": "xavier",
+        "window_chars": 32,
+        "latent_dim": 12,
+        "hidden": 32,
+        "latent_dims": CAPACITY_ZOOM_LATENT_DIMS,
+        "hidden_sizes": CAPACITY_ZOOM_HIDDEN_SIZES,
+        "epochs": 8,
+        "batches": 16,
+        "batch_size": 4,
+        "vae_epochs": 8,
+        "vae_batches": 16,
+        "vae_batch_size": 4,
+        "eval_samples": 192,
+        "gen": 0,
+        "seeds": "3001,3003",
+        "hybrid_latent_scales": HYBRID4_DEEP_LATENT_SCALES,
+        "follow_up_seed_groups": "3005,3007,3009;3011,3013,3015",
     },
     "base": {
         "features": DEFAULT_FEATURES,
