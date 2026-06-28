@@ -22,6 +22,280 @@ def _load_module():
 
 
 class CharVaeContextChainTests(unittest.TestCase):
+    def test_help_documents_tie_aware_seed_group_override(self) -> None:
+        mod = _load_module()
+        help_text = " ".join(mod._build_parser().format_help().split())
+
+        self.assertIn("--follow-up-seed-groups", help_text)
+        self.assertIn("supplied groups override matching follow-ups", help_text)
+        self.assertIn("unspecified follow-ups still use generated", help_text)
+        self.assertIn("tie-aware default_new_seeds", help_text)
+        self.assertIn("extra groups beyond --follow-ups and planned", help_text)
+        self.assertIn("reported separately", help_text)
+
+    def test_follow_up_seed_policy_records_precedence(self) -> None:
+        mod = _load_module()
+
+        implicit = mod._follow_up_seed_policy_record(explicit_seed_groups=False)
+        explicit = mod._follow_up_seed_policy_record(explicit_seed_groups=True)
+
+        self.assertEqual(
+            implicit["precedence"],
+            ["command_default", "preset_seed_group", "script_default"],
+        )
+        self.assertIn("default_new_seeds wins", implicit["reason"])
+        self.assertEqual(
+            explicit["precedence"],
+            ["explicit_seed_group", "command_default", "script_default"],
+        )
+        self.assertIn("overrides matching follow-ups", explicit["reason"])
+        self.assertIn("backfills unspecified follow-ups", explicit["reason"])
+
+    def test_extra_explicit_seed_groups_reports_unmatched_groups(self) -> None:
+        mod = _load_module()
+
+        self.assertEqual(
+            mod._extra_explicit_seed_groups(
+                ["17", "19", "23"],
+                explicit_seed_groups=True,
+                follow_up_count=1,
+            ),
+            ["19", "23"],
+        )
+        self.assertEqual(
+            mod._extra_explicit_seed_groups(
+                ["17"],
+                explicit_seed_groups=True,
+                follow_up_count=2,
+            ),
+            [],
+        )
+        self.assertEqual(
+            mod._extra_explicit_seed_groups(
+                ["17", "19"],
+                explicit_seed_groups=False,
+                follow_up_count=1,
+            ),
+            [],
+        )
+
+    def test_unused_explicit_seed_groups_reports_unattempted_groups(self) -> None:
+        mod = _load_module()
+        manifest = {
+            "schema": mod.SCHEMA,
+            "preset": "smoke",
+            "run_root": "/tmp/chain",
+            "allowed_gate_stop": False,
+            "steps": [
+                {"index": 0, "role": "parent"},
+                {"index": 1, "role": "follow_up"},
+            ],
+            "follow_up_seed_group_source": "explicit",
+            "planned_follow_up_seed_groups": ["17", "19", "23"],
+            "extra_explicit_seed_groups": [],
+            "unused_explicit_seed_groups": ["19", "23"],
+            "follow_up_seed_group_plan": [
+                {
+                    "group_index": 1,
+                    "follow_up_index": 1,
+                    "seed_group": "17",
+                    "source": "explicit",
+                    "planned": True,
+                    "attempted": True,
+                    "status": "attempted_slot",
+                },
+                {
+                    "group_index": 2,
+                    "follow_up_index": 2,
+                    "seed_group": "19",
+                    "source": "explicit",
+                    "planned": True,
+                    "attempted": False,
+                    "status": "unused_after_stop",
+                },
+            ],
+            "follow_up_seed_policy": mod._follow_up_seed_policy_record(
+                explicit_seed_groups=True
+            ),
+        }
+        report = mod._render_report(manifest)
+
+        self.assertEqual(mod._attempted_follow_up_count(manifest), 1)
+        self.assertIn("- unused_explicit_seed_groups: 19, 23", report)
+        self.assertIn(
+            "- follow_up_seed_group_plan: #1 source=explicit -> follow_up=1 "
+            "status=attempted_slot seeds=17; #2 source=explicit -> follow_up=2 "
+            "status=unused_after_stop seeds=19",
+            report,
+        )
+        self.assertEqual(
+            mod._unused_explicit_seed_groups(
+                ["17", "19", "23"],
+                explicit_seed_groups=True,
+                attempted_follow_ups=1,
+                planned_follow_ups=3,
+            ),
+            ["19", "23"],
+        )
+        self.assertEqual(
+            mod._unused_explicit_seed_groups(
+                ["17", "19", "23"],
+                explicit_seed_groups=True,
+                attempted_follow_ups=1,
+                planned_follow_ups=1,
+            ),
+            [],
+        )
+        self.assertEqual(
+            mod._unused_explicit_seed_groups(
+                ["17", "19"],
+                explicit_seed_groups=True,
+                attempted_follow_ups=2,
+                planned_follow_ups=2,
+            ),
+            [],
+        )
+        self.assertEqual(
+            mod._unused_explicit_seed_groups(
+                ["17", "19"],
+                explicit_seed_groups=False,
+                attempted_follow_ups=1,
+                planned_follow_ups=2,
+            ),
+            [],
+        )
+
+    def test_follow_up_seed_group_plan_maps_attempted_unused_and_extra(self) -> None:
+        mod = _load_module()
+
+        plan = mod._follow_up_seed_group_plan(
+            ["17", "19", "23"],
+            explicit_seed_groups=True,
+            planned_follow_ups=2,
+            attempted_follow_ups=1,
+            dry_run=False,
+        )
+
+        self.assertEqual(
+            plan,
+            [
+                {
+                    "group_index": 1,
+                    "follow_up_index": 1,
+                    "seed_group": "17",
+                    "source": "explicit",
+                    "planned": True,
+                    "attempted": True,
+                    "status": "attempted_slot",
+                },
+                {
+                    "group_index": 2,
+                    "follow_up_index": 2,
+                    "seed_group": "19",
+                    "source": "explicit",
+                    "planned": True,
+                    "attempted": False,
+                    "status": "unused_after_stop",
+                },
+                {
+                    "group_index": 3,
+                    "follow_up_index": None,
+                    "seed_group": "23",
+                    "source": "explicit",
+                    "planned": False,
+                    "attempted": False,
+                    "status": "extra",
+                },
+            ],
+        )
+
+        dry_run_plan = mod._follow_up_seed_group_plan(
+            ["17", "19"],
+            explicit_seed_groups=True,
+            planned_follow_ups=1,
+            attempted_follow_ups=0,
+            dry_run=True,
+        )
+        self.assertEqual(dry_run_plan[0]["status"], "dry_run_planned")
+        self.assertEqual(dry_run_plan[1]["status"], "extra")
+
+    def test_follow_up_seed_resolution_summarizes_attempted_seeds(self) -> None:
+        mod = _load_module()
+        manifest = {
+            "steps": [
+                {"index": 0, "role": "parent"},
+                {
+                    "index": 1,
+                    "role": "follow_up",
+                    "run_dir": "/tmp/chain/follow_up_01",
+                    "exit_code": 0,
+                    "status": "improved",
+                    "follow_up_verdict": "confirmed",
+                    "follow_up_gate_failed": False,
+                    "follow_up_command_source": "next_follow_up_command",
+                    "new_seed_source": "explicit_seed_group",
+                    "new_seeds": "17",
+                },
+                {
+                    "index": 2,
+                    "role": "follow_up",
+                    "run_dir": "/tmp/chain/follow_up_02",
+                    "exit_code": 1,
+                    "status": "improved",
+                    "follow_up_verdict": "regressed",
+                    "follow_up_gate_failed": True,
+                    "follow_up_command_source": "guided_next_follow_up_command",
+                    "new_seed_source": "command_default",
+                    "new_seeds": "101,103,107",
+                },
+            ],
+            "follow_up_seed_group_plan": [
+                {
+                    "group_index": 1,
+                    "follow_up_index": 1,
+                    "seed_group": "17",
+                    "source": "explicit",
+                    "status": "attempted_slot",
+                },
+                {
+                    "group_index": 2,
+                    "follow_up_index": 2,
+                    "seed_group": "19",
+                    "source": "explicit",
+                    "status": "attempted_slot",
+                },
+            ],
+        }
+
+        resolution = mod._follow_up_seed_resolution(manifest)
+
+        self.assertEqual(len(resolution), 2)
+        self.assertEqual(resolution[0]["seed_source"], "explicit_seed_group")
+        self.assertEqual(resolution[0]["seeds"], "17")
+        self.assertEqual(resolution[0]["configured_seed_group"], "17")
+        self.assertEqual(resolution[1]["command_source"], "guided_next_follow_up_command")
+        self.assertEqual(resolution[1]["seed_source"], "command_default")
+        self.assertEqual(resolution[1]["seeds"], "101,103,107")
+        self.assertEqual(resolution[1]["configured_seed_group"], "19")
+        self.assertEqual(resolution[1]["gate_failed"], True)
+
+        summary = mod._follow_up_seed_resolution_summary(resolution)
+        self.assertEqual(summary["attempted_follow_ups"], 2)
+        self.assertEqual(
+            summary["seed_source_counts"],
+            {"command_default": 1, "explicit_seed_group": 1},
+        )
+        self.assertEqual(
+            summary["command_source_counts"],
+            {"guided_next_follow_up_command": 1, "next_follow_up_command": 1},
+        )
+        self.assertEqual(
+            summary["configured_seed_group_status_counts"],
+            {"attempted_slot": 2},
+        )
+        self.assertEqual(summary["gate_failed_count"], 1)
+        self.assertEqual(summary["nonzero_exit_count"], 1)
+
     def test_preset_latent_scale_defaults_keep_smoke_light_and_scout_small(self) -> None:
         mod = _load_module()
         parser = mod._build_parser()
@@ -157,6 +431,14 @@ class CharVaeContextChainTests(unittest.TestCase):
                     "unsafe_promotion": True,
                 },
                 "guided_next_follow_up_command": {"enabled": False},
+                "next_follow_up_command": {
+                    "default_new_seed_count": 5,
+                    "default_new_seeds": "131,137,139,149,151",
+                    "seed_confirmation_policy": {
+                        "reason": "best runner-up within combined seed uncertainty",
+                        "uncertainty_tie_seed_boost": True,
+                    },
+                },
             }
             (run_dir / "summary.json").write_text(json.dumps(summary), encoding="utf-8")
 
@@ -168,6 +450,8 @@ class CharVaeContextChainTests(unittest.TestCase):
                 exit_code=1,
                 dry_run=False,
             )
+            step["new_seeds"] = "131,137,139,149,151"
+            step["new_seed_source"] = "command_default"
             report = mod._render_report(
                 {
                     "schema": mod.SCHEMA,
@@ -175,6 +459,38 @@ class CharVaeContextChainTests(unittest.TestCase):
                     "run_root": str(run_dir.parent),
                     "steps": [step],
                     "allowed_gate_stop": True,
+                    "follow_up_seed_group_source": "preset_fallback",
+                    "planned_follow_up_seed_groups": ["17", "19"],
+                    "extra_explicit_seed_groups": [],
+                    "unused_explicit_seed_groups": [],
+                    "follow_up_seed_group_plan": [],
+                    "follow_up_seed_resolution": [
+                        {
+                            "follow_up_index": 1,
+                            "step_index": 1,
+                            "run_dir": str(run_dir),
+                            "exit_code": 1,
+                            "status": "improved",
+                            "verdict": "regressed",
+                            "gate_failed": True,
+                            "command_source": "next_follow_up_command",
+                            "seed_source": "command_default",
+                            "seeds": "131,137,139,149,151",
+                            "configured_seed_group": None,
+                            "configured_seed_group_status": None,
+                        }
+                    ],
+                    "follow_up_seed_resolution_summary": {
+                        "attempted_follow_ups": 1,
+                        "seed_source_counts": {"command_default": 1},
+                        "command_source_counts": {"next_follow_up_command": 1},
+                        "configured_seed_group_status_counts": {"none": 1},
+                        "gate_failed_count": 1,
+                        "nonzero_exit_count": 1,
+                    },
+                    "follow_up_seed_policy": mod._follow_up_seed_policy_record(
+                        explicit_seed_groups=False
+                    ),
                 }
             )
 
@@ -187,6 +503,13 @@ class CharVaeContextChainTests(unittest.TestCase):
         self.assertEqual(step["source_feature_mean_best_nll_delta_vs_source"], 0.001)
         self.assertIs(step["source_best_feature_retained"], True)
         self.assertIs(step["follow_up_gate_failed"], True)
+        self.assertEqual(step["next_default_new_seed_count"], 5)
+        self.assertEqual(step["next_default_new_seeds"], "131,137,139,149,151")
+        self.assertEqual(
+            step["seed_policy_reason"],
+            "best runner-up within combined seed uncertainty",
+        )
+        self.assertIs(step["uncertainty_tie_seed_boost"], True)
         self.assertEqual(step["best_config_label"], "latent@normalize=blocks,scale=0.5")
         self.assertIn("delta_vs_raw", report)
         self.assertIn("runner_up", report)
@@ -194,9 +517,92 @@ class CharVaeContextChainTests(unittest.TestCase):
         self.assertIn("0.000300", report)
         self.assertIn("0.000500", report)
         self.assertIn("within_uncertainty", report)
+        self.assertIn("next_seed_count", report)
+        self.assertIn("tie_seed_boost", report)
+        self.assertIn("best runner-up within combined seed uncertainty", report)
+        self.assertIn("run_seed_source", report)
+        self.assertIn("command_default", report)
+        self.assertIn(
+            "- follow_up_seed_resolution: #1 seeds=131,137,139,149,151 "
+            "source=command_default command=next_follow_up_command",
+            report,
+        )
+        self.assertIn(
+            "- follow_up_seed_resolution_summary: attempts=1 "
+            "seed_sources=command_default:1 "
+            "command_sources=next_follow_up_command:1 "
+            "group_statuses=none:1 gates_failed=1 nonzero_exits=1",
+            report,
+        )
+        self.assertIn("- follow_up_seed_groups: preset_fallback (17, 19)", report)
+        self.assertIn("- extra_explicit_seed_groups: -", report)
+        self.assertIn("- unused_explicit_seed_groups: -", report)
+        self.assertIn(
+            "- follow_up_seed_policy: command_default -> preset_seed_group -> "
+            "script_default",
+            report,
+        )
         self.assertIn("source_feature_delta_vs_source", report)
         self.assertIn("latent@normalize=blocks,scale=0.5", report)
         self.assertIn("0.001000", report)
+
+    def test_follow_up_new_seeds_prefers_command_defaults_until_explicit(self) -> None:
+        mod = _load_module()
+        command_record = {
+            "default_new_seeds": "131,137,139,149,151",
+            "script_path": "/tmp/next_follow_up_command.sh",
+        }
+
+        seeds, source = mod._follow_up_new_seeds(
+            command_record,
+            ["17"],
+            index=1,
+            explicit_seed_groups=False,
+        )
+        self.assertEqual(seeds, "131,137,139,149,151")
+        self.assertEqual(source, "command_default")
+
+        seeds, source = mod._follow_up_new_seeds(
+            command_record,
+            ["17"],
+            index=1,
+            explicit_seed_groups=True,
+        )
+        self.assertEqual(seeds, "17")
+        self.assertEqual(source, "explicit_seed_group")
+
+        seeds, source = mod._follow_up_new_seeds(
+            command_record,
+            ["17"],
+            index=2,
+            explicit_seed_groups=True,
+        )
+        self.assertEqual(seeds, "131,137,139,149,151")
+        self.assertEqual(source, "command_default")
+
+        seeds, source = mod._follow_up_new_seeds(
+            {},
+            ["19,23"],
+            index=1,
+            explicit_seed_groups=False,
+        )
+        self.assertEqual(seeds, "19,23")
+        self.assertEqual(source, "preset_seed_group")
+
+    def test_follow_up_command_record_prefers_enabled_guided_script(self) -> None:
+        mod = _load_module()
+        summary = {
+            "next_follow_up_command": {"script_path": "/tmp/next.sh"},
+            "guided_next_follow_up_command": {
+                "enabled": True,
+                "script_path": "/tmp/guided.sh",
+            },
+        }
+
+        record, source = mod._follow_up_command_record(summary, index=2)
+
+        self.assertEqual(record["script_path"], "/tmp/guided.sh")
+        self.assertEqual(source, "guided_next_follow_up_command")
 
     def test_chain_selection_retains_parent_when_follow_up_gate_stops(self) -> None:
         mod = _load_module()
@@ -370,6 +776,9 @@ class CharVaeContextChainTests(unittest.TestCase):
             "mean_best_nll_delta_vs_source": -0.0001,
             "follow_up_verdict": "confirmed",
             "follow_up_gate_failed": False,
+            "follow_up_command_source": "guided_next_follow_up_command",
+            "new_seed_source": "command_default",
+            "new_seeds": "101,103,107,109,113",
         }
         manifest = {
             "schema": mod.SCHEMA,
@@ -386,6 +795,15 @@ class CharVaeContextChainTests(unittest.TestCase):
         self.assertEqual(
             manifest["accepted_summary_path"],
             "/tmp/chain/follow_up_02/summary.json",
+        )
+        self.assertEqual(
+            manifest["accepted_step"]["follow_up_command_source"],
+            "guided_next_follow_up_command",
+        )
+        self.assertEqual(manifest["accepted_step"]["new_seed_source"], "command_default")
+        self.assertEqual(
+            manifest["accepted_step"]["new_seeds"],
+            "101,103,107,109,113",
         )
 
 

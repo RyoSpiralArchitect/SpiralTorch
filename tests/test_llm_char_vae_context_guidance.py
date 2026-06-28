@@ -295,6 +295,47 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
             [101, 103, 107, 109, 113, 127],
         )
 
+    def test_next_follow_up_boosts_seed_count_for_uncertainty_tie(self) -> None:
+        mod = _load_module()
+        parser = mod._build_parser()
+        args = parser.parse_args(["models/samples/spiral_corpus_en"])
+        best_config = {
+            "best_feature": "reconstruction_latent",
+            "runner_up_feature": "raw_latent",
+            "margin_to_runner_up": 0.0004,
+            "combined_runner_up_margin_stderr": 0.0005,
+            "runner_up_within_uncertainty": True,
+            "feature_normalize": "blocks",
+            "hybrid_latent_scale": 1.0,
+            "mean_best_nll": 4.2,
+        }
+        follow_up = {
+            "source_seeds": [101, 103, 107],
+            "source_chain": {"ancestors": []},
+            "resolved": {"seeds": [109, 113, 127]},
+        }
+
+        record = mod._next_follow_up_command_record(
+            args,
+            ["raw", "latent", "raw_latent", "reconstruction_latent"],
+            best_config,
+            Path("/tmp/current"),
+            [109, 113, 127],
+            follow_up,
+        )
+
+        self.assertEqual(record["default_new_seed_count"], 5)
+        self.assertEqual(record["default_new_seeds"], "131,137,139,149,151")
+        self.assertIs(
+            record["seed_confirmation_policy"]["uncertainty_tie_seed_boost"],
+            True,
+        )
+        self.assertEqual(
+            record["seed_confirmation_policy"]["reason"],
+            "best runner-up within combined seed uncertainty",
+        )
+        self.assertIn("--seeds 131,137,139,149,151", record["shell_command"])
+
     def test_default_follow_up_seeds_refreshes_stale_seed_history(self) -> None:
         mod = _load_module()
         with tempfile.TemporaryDirectory() as tmp:
@@ -882,6 +923,13 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
             source_retained=True,
             gate_failed=False,
         )
+        summary["follow_up_result"]["current_best_config"] = {
+            "best_feature": "reconstruction_latent",
+            "runner_up_feature": "raw_latent",
+            "margin_to_runner_up": 0.0004,
+            "combined_runner_up_margin_stderr": 0.0005,
+            "runner_up_within_uncertainty": True,
+        }
         next_follow_up = _next_follow_up()
         preliminary = mod._follow_up_guidance_record(
             summary["follow_up_result"],
@@ -910,6 +958,13 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
                 guidance,
                 next_follow_up,
             )
+            mod._write_guided_next_follow_up_script(guided)
+            guided_script = Path(guided["script_path"]).read_text(encoding="utf-8")
+            report_summary = dict(summary)
+            report_summary["follow_up_trajectory"] = trajectory
+            report_summary["follow_up_guidance"] = guidance
+            report_summary["guided_next_follow_up_command"] = guided
+            report = mod._aggregate_report(report_summary)
 
         self.assertEqual(
             trajectory["trajectory_action"],
@@ -920,12 +975,30 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
         self.assertEqual(guidance["action"], "confirm_trajectory_with_fresh_seeds")
         self.assertIs(guidance["promote_current_best"], True)
         self.assertIs(guidance["use_next_follow_up_command"], True)
+        self.assertIs(guidance["tie_aware_confirmation"], True)
+        self.assertEqual(
+            guidance["best_config_uncertainty_tie"]["runner_up_feature"],
+            "raw_latent",
+        )
+        self.assertTrue(
+            any(
+                "best runner-up within combined seed uncertainty" in reason
+                for reason in guidance["reasons"]
+            ),
+        )
         self.assertIs(guided["enabled"], True)
+        self.assertIs(guided["tie_aware_confirmation"], True)
         self.assertEqual(
             guided["trajectory_action"],
             "confirm_trajectory_with_fresh_seeds",
         )
         self.assertIs(guided["unsafe_promotion"], False)
+        self.assertIn("# Tie-aware confirmation: True", guided_script)
+        self.assertIn("- tie_aware_confirmation: True", report)
+        self.assertIn(
+            "reconstruction_latent vs raw_latent margin=0.000400",
+            report,
+        )
 
     def test_unsafe_trajectory_blocks_guided_promotion(self) -> None:
         mod = _load_module()

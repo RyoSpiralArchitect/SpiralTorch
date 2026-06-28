@@ -153,6 +153,208 @@ def _csv_groups(value: str | None) -> list[str]:
     return [part.strip() for part in value.split(";") if part.strip()]
 
 
+def _follow_up_seed_policy_record(*, explicit_seed_groups: bool) -> dict[str, Any]:
+    if explicit_seed_groups:
+        return {
+            "schema": "st.llm_char_vae_context.chain_seed_policy.v1",
+            "explicit_seed_groups": True,
+            "precedence": ["explicit_seed_group", "command_default", "script_default"],
+            "reason": (
+                "--follow-up-seed-groups overrides matching follow-ups; generated "
+                "default_new_seeds backfills unspecified follow-ups"
+            ),
+        }
+    return {
+        "schema": "st.llm_char_vae_context.chain_seed_policy.v1",
+        "explicit_seed_groups": False,
+        "precedence": ["command_default", "preset_seed_group", "script_default"],
+        "reason": (
+            "generated follow-up default_new_seeds wins; preset groups only "
+            "backfill missing defaults"
+        ),
+    }
+
+
+def _extra_explicit_seed_groups(
+    seed_groups: list[str],
+    *,
+    explicit_seed_groups: bool,
+    follow_up_count: int,
+) -> list[str]:
+    if not explicit_seed_groups:
+        return []
+    return seed_groups[max(0, follow_up_count) :]
+
+
+def _attempted_follow_up_count(manifest: dict[str, Any]) -> int:
+    return sum(
+        1
+        for step in manifest.get("steps", [])
+        if isinstance(step, dict) and step.get("role") == "follow_up"
+    )
+
+
+def _unused_explicit_seed_groups(
+    seed_groups: list[str],
+    *,
+    explicit_seed_groups: bool,
+    attempted_follow_ups: int,
+    planned_follow_ups: int,
+) -> list[str]:
+    if not explicit_seed_groups:
+        return []
+    start = max(0, attempted_follow_ups)
+    stop = max(0, planned_follow_ups)
+    return seed_groups[start:stop]
+
+
+def _follow_up_seed_group_plan(
+    seed_groups: list[str],
+    *,
+    explicit_seed_groups: bool,
+    planned_follow_ups: int,
+    attempted_follow_ups: int,
+    dry_run: bool,
+) -> list[dict[str, Any]]:
+    source = "explicit" if explicit_seed_groups else "preset_fallback"
+    planned = max(0, planned_follow_ups)
+    attempted = max(0, attempted_follow_ups)
+    plan: list[dict[str, Any]] = []
+    for index, group in enumerate(seed_groups):
+        planned_slot = index < planned
+        attempted_slot = planned_slot and index < attempted
+        if not planned_slot:
+            status = "extra"
+            follow_up_index = None
+        elif dry_run:
+            status = "dry_run_planned"
+            follow_up_index = index + 1
+        elif attempted_slot:
+            status = "attempted_slot"
+            follow_up_index = index + 1
+        else:
+            status = "unused_after_stop"
+            follow_up_index = index + 1
+        plan.append(
+            {
+                "group_index": index + 1,
+                "follow_up_index": follow_up_index,
+                "seed_group": group,
+                "source": source,
+                "planned": planned_slot,
+                "attempted": attempted_slot,
+                "status": status,
+            }
+        )
+    return plan
+
+
+def _follow_up_seed_resolution(manifest: dict[str, Any]) -> list[dict[str, Any]]:
+    group_by_follow_up: dict[int, dict[str, Any]] = {}
+    for item in manifest.get("follow_up_seed_group_plan", []):
+        if not isinstance(item, dict):
+            continue
+        follow_up_index = item.get("follow_up_index")
+        if isinstance(follow_up_index, int):
+            group_by_follow_up[follow_up_index] = item
+
+    resolution: list[dict[str, Any]] = []
+    for step in manifest.get("steps", []):
+        if not isinstance(step, dict) or step.get("role") != "follow_up":
+            continue
+        follow_up_index = step.get("index")
+        group = (
+            group_by_follow_up.get(follow_up_index)
+            if isinstance(follow_up_index, int)
+            else None
+        )
+        group = group if isinstance(group, dict) else {}
+        resolution.append(
+            {
+                "follow_up_index": follow_up_index,
+                "step_index": step.get("index"),
+                "run_dir": step.get("run_dir"),
+                "exit_code": step.get("exit_code"),
+                "status": step.get("status"),
+                "verdict": step.get("follow_up_verdict"),
+                "gate_failed": step.get("follow_up_gate_failed"),
+                "command_source": step.get("follow_up_command_source"),
+                "seed_source": step.get("new_seed_source"),
+                "seeds": step.get("new_seeds"),
+                "configured_seed_group_index": group.get("group_index"),
+                "configured_seed_group": group.get("seed_group"),
+                "configured_seed_group_source": group.get("source"),
+                "configured_seed_group_status": group.get("status"),
+            }
+        )
+    return resolution
+
+
+def _count_by(records: list[dict[str, Any]], key: str) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for record in records:
+        value = record.get(key)
+        label = "none" if value is None else str(value)
+        counts[label] = counts.get(label, 0) + 1
+    return counts
+
+
+def _follow_up_seed_resolution_summary(
+    resolution: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "schema": "st.llm_char_vae_context.follow_up_seed_resolution_summary.v1",
+        "attempted_follow_ups": len(resolution),
+        "seed_source_counts": _count_by(resolution, "seed_source"),
+        "command_source_counts": _count_by(resolution, "command_source"),
+        "configured_seed_group_status_counts": _count_by(
+            resolution,
+            "configured_seed_group_status",
+        ),
+        "gate_failed_count": sum(
+            1 for record in resolution if bool(record.get("gate_failed"))
+        ),
+        "nonzero_exit_count": sum(
+            1
+            for record in resolution
+            if record.get("exit_code") not in (None, 0)
+        ),
+    }
+
+
+def _follow_up_command_record(
+    summary: dict[str, Any],
+    *,
+    index: int,
+) -> tuple[dict[str, Any] | None, str | None]:
+    guided = summary.get("guided_next_follow_up_command")
+    if isinstance(guided, dict) and guided.get("enabled"):
+        return guided, "guided_next_follow_up_command"
+    next_command = summary.get("next_follow_up_command")
+    if index == 1 and isinstance(next_command, dict):
+        return next_command, "next_follow_up_command"
+    return None, None
+
+
+def _follow_up_new_seeds(
+    command_record: dict[str, Any] | None,
+    seed_groups: list[str],
+    *,
+    index: int,
+    explicit_seed_groups: bool,
+) -> tuple[str | None, str]:
+    seed_group_index = index - 1
+    if explicit_seed_groups and seed_group_index < len(seed_groups):
+        return seed_groups[seed_group_index], "explicit_seed_group"
+    if isinstance(command_record, dict):
+        default_new_seeds = command_record.get("default_new_seeds")
+        if isinstance(default_new_seeds, str) and default_new_seeds.strip():
+            return default_new_seeds.strip(), "command_default"
+    if not explicit_seed_groups and seed_group_index < len(seed_groups):
+        return seed_groups[seed_group_index], "preset_seed_group"
+    return None, "script_default"
+
+
 def _append_flag(command: list[str], flag: str, value: Any) -> None:
     if value is not None:
         command.extend([flag, str(value)])
@@ -271,6 +473,9 @@ def _step_record(
         "source_best_feature_retained",
     )
     gate_failed = _value(summary, "follow_up_gate", "failed")
+    seed_policy = _value(summary, "next_follow_up_command", "seed_confirmation_policy")
+    if not isinstance(seed_policy, dict):
+        seed_policy = {}
     return {
         "index": index,
         "role": role,
@@ -317,6 +522,18 @@ def _step_record(
         "guidance_action": _value(summary, "follow_up_guidance", "action"),
         "unsafe_promotion": _value(summary, "follow_up_guidance", "unsafe_promotion"),
         "guided_enabled": _value(summary, "guided_next_follow_up_command", "enabled"),
+        "next_default_new_seed_count": _value(
+            summary,
+            "next_follow_up_command",
+            "default_new_seed_count",
+        ),
+        "next_default_new_seeds": _value(
+            summary,
+            "next_follow_up_command",
+            "default_new_seeds",
+        ),
+        "seed_policy_reason": seed_policy.get("reason"),
+        "uncertainty_tie_seed_boost": seed_policy.get("uncertainty_tie_seed_boost"),
     }
 
 
@@ -328,6 +545,12 @@ def _fmt(value: Any, digits: int = 6) -> str:
     if isinstance(value, float):
         return f"{value:.{digits}f}"
     return str(value)
+
+
+def _fmt_counts(counts: Any) -> str:
+    if not isinstance(counts, dict) or not counts:
+        return "-"
+    return ", ".join(f"{key}:{counts[key]}" for key in sorted(counts))
 
 
 def _is_number(value: Any) -> bool:
@@ -363,6 +586,13 @@ def _selection_step_record(step: dict[str, Any] | None) -> dict[str, Any] | None
         "follow_up_verdict": step.get("follow_up_verdict"),
         "source_best_feature_retained": step.get("source_best_feature_retained"),
         "follow_up_gate_failed": step.get("follow_up_gate_failed"),
+        "next_default_new_seed_count": step.get("next_default_new_seed_count"),
+        "next_default_new_seeds": step.get("next_default_new_seeds"),
+        "seed_policy_reason": step.get("seed_policy_reason"),
+        "uncertainty_tie_seed_boost": step.get("uncertainty_tie_seed_boost"),
+        "follow_up_command_source": step.get("follow_up_command_source"),
+        "new_seed_source": step.get("new_seed_source"),
+        "new_seeds": step.get("new_seeds"),
     }
 
 
@@ -424,6 +654,41 @@ def _can_continue_after_gate_stop(
 def _render_report(manifest: dict[str, Any]) -> str:
     accepted = manifest.get("accepted_step")
     best = manifest.get("best_step")
+    seed_group_plan = manifest.get("follow_up_seed_group_plan", [])
+    seed_group_plan_text = "-"
+    if isinstance(seed_group_plan, list) and seed_group_plan:
+        seed_group_plan_text = "; ".join(
+            "#{group} source={source} -> follow_up={follow_up} "
+            "status={status} seeds={seeds}".format(
+                group=_fmt(_value(item, "group_index")),
+                source=_fmt(_value(item, "source")),
+                follow_up=_fmt(_value(item, "follow_up_index")),
+                status=_fmt(_value(item, "status")),
+                seeds=_fmt(_value(item, "seed_group")),
+            )
+            for item in seed_group_plan
+            if isinstance(item, dict)
+        )
+        seed_group_plan_text = seed_group_plan_text or "-"
+    seed_resolution = manifest.get("follow_up_seed_resolution", [])
+    seed_resolution_text = "-"
+    if isinstance(seed_resolution, list) and seed_resolution:
+        seed_resolution_text = "; ".join(
+            "#{follow_up} seeds={seeds} source={source} command={command} "
+            "configured_group={group} group_status={group_status} exit={exit}".format(
+                follow_up=_fmt(_value(item, "follow_up_index")),
+                seeds=_fmt(_value(item, "seeds")),
+                source=_fmt(_value(item, "seed_source")),
+                command=_fmt(_value(item, "command_source")),
+                group=_fmt(_value(item, "configured_seed_group")),
+                group_status=_fmt(_value(item, "configured_seed_group_status")),
+                exit=_fmt(_value(item, "exit_code")),
+            )
+            for item in seed_resolution
+            if isinstance(item, dict)
+        )
+        seed_resolution_text = seed_resolution_text or "-"
+    seed_resolution_summary = manifest.get("follow_up_seed_resolution_summary", {})
     lines = [
         "# Char VAE Context Chain Report",
         "",
@@ -432,6 +697,71 @@ def _render_report(manifest: dict[str, Any]) -> str:
         f"- run_root: `{manifest['run_root']}`",
         f"- stopped_reason: {manifest.get('stopped_reason') or '-'}",
         f"- allowed_gate_stop: {manifest.get('allowed_gate_stop') or False}",
+        "- follow_up_seed_groups: {source} ({groups})".format(
+            source=_fmt(manifest.get("follow_up_seed_group_source")),
+            groups=(
+                ", ".join(
+                    str(group)
+                    for group in manifest.get("planned_follow_up_seed_groups", [])
+                )
+                or "-"
+            ),
+        ),
+        "- extra_explicit_seed_groups: {groups}".format(
+            groups=(
+                ", ".join(
+                    str(group)
+                    for group in manifest.get("extra_explicit_seed_groups", [])
+                )
+                or "-"
+            ),
+        ),
+        "- unused_explicit_seed_groups: {groups}".format(
+            groups=(
+                ", ".join(
+                    str(group)
+                    for group in manifest.get("unused_explicit_seed_groups", [])
+                )
+                or "-"
+            ),
+        ),
+        f"- follow_up_seed_group_plan: {seed_group_plan_text}",
+        f"- follow_up_seed_resolution: {seed_resolution_text}",
+        "- follow_up_seed_resolution_summary: attempts={attempts} "
+        "seed_sources={seed_sources} command_sources={command_sources} "
+        "group_statuses={group_statuses} gates_failed={gates_failed} "
+        "nonzero_exits={nonzero_exits}".format(
+            attempts=_fmt(
+                _value(seed_resolution_summary, "attempted_follow_ups")
+            ),
+            seed_sources=_fmt_counts(
+                _value(seed_resolution_summary, "seed_source_counts")
+            ),
+            command_sources=_fmt_counts(
+                _value(seed_resolution_summary, "command_source_counts")
+            ),
+            group_statuses=_fmt_counts(
+                _value(
+                    seed_resolution_summary,
+                    "configured_seed_group_status_counts",
+                )
+            ),
+            gates_failed=_fmt(_value(seed_resolution_summary, "gate_failed_count")),
+            nonzero_exits=_fmt(_value(seed_resolution_summary, "nonzero_exit_count")),
+        ),
+        "- follow_up_seed_policy: {precedence} ({reason})".format(
+            precedence=(
+                " -> ".join(
+                    str(item)
+                    for item in _value(
+                        manifest, "follow_up_seed_policy", "precedence"
+                    )
+                    or []
+                )
+                or "-"
+            ),
+            reason=_fmt(_value(manifest, "follow_up_seed_policy", "reason")),
+        ),
         "- accepted: {label} (step {index}, mean_best_nll={nll})".format(
             label=_fmt(_value(accepted, "best_config_label")),
             index=_fmt(_value(accepted, "index")),
@@ -445,15 +775,20 @@ def _render_report(manifest: dict[str, Any]) -> str:
         "",
         "| step | role | exit | status | best_config | mean_best_nll | "
         "runner_up | margin | margin_stderr | within_uncertainty | "
+        "next_seed_count | tie_seed_boost | seed_policy | "
+        "run_seeds | run_seed_source | "
         "delta_vs_raw | delta_vs_source | verdict | retained | gate | "
         "trajectory | guidance | unsafe | guided |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for step in manifest.get("steps", []):
         lines.append(
             "| {index} | {role} | {exit_code} | {status} | {best_feature} | "
             "{mean_best_nll} | {runner_up_feature} | {margin_to_runner_up} | "
             "{combined_runner_up_margin_stderr} | {runner_up_within_uncertainty} | "
+            "{next_default_new_seed_count} | {uncertainty_tie_seed_boost} | "
+            "{seed_policy_reason} | "
+            "{new_seeds} | {new_seed_source} | "
             "{mean_best_nll_delta_vs_raw} | "
             "{mean_best_nll_delta_vs_source} | {follow_up_verdict} | "
             "{source_best_feature_retained} | {follow_up_gate_failed} | "
@@ -475,6 +810,15 @@ def _render_report(manifest: dict[str, Any]) -> str:
                 runner_up_within_uncertainty=_fmt(
                     step.get("runner_up_within_uncertainty")
                 ),
+                next_default_new_seed_count=_fmt(
+                    step.get("next_default_new_seed_count")
+                ),
+                uncertainty_tie_seed_boost=_fmt(
+                    step.get("uncertainty_tie_seed_boost")
+                ),
+                seed_policy_reason=_fmt(step.get("seed_policy_reason")),
+                new_seeds=_fmt(step.get("new_seeds")),
+                new_seed_source=_fmt(step.get("new_seed_source")),
                 mean_best_nll_delta_vs_raw=_fmt(
                     step.get("mean_best_nll_delta_vs_raw")
                 ),
@@ -550,9 +894,32 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("text_or_dir", nargs="+", help="input text file(s) or directories")
     parser.add_argument("--preset", choices=sorted(PRESETS), default="small")
     parser.add_argument("--run-root", type=Path, default=None)
-    parser.add_argument("--follow-ups", type=int, default=1)
-    parser.add_argument("--follow-up-seed-groups", default=None)
-    parser.add_argument("--follow-up-fail-on-verdict", default=DEFAULT_FAIL_ON_VERDICT)
+    parser.add_argument(
+        "--follow-ups",
+        type=int,
+        default=1,
+        help="number of generated follow-up scripts to run after the parent sweep",
+    )
+    parser.add_argument(
+        "--follow-up-seed-groups",
+        default=None,
+        metavar="CSV[;CSV...]",
+        help=(
+            "explicit per-follow-up NEW_SEEDS groups; supplied groups override "
+            "matching follow-ups, while unspecified follow-ups still use generated "
+            "tie-aware default_new_seeds before script defaults; extra groups beyond "
+            "--follow-ups and planned groups skipped after early stops are reported "
+            "separately in chain artifacts"
+        ),
+    )
+    parser.add_argument(
+        "--follow-up-fail-on-verdict",
+        default=DEFAULT_FAIL_ON_VERDICT,
+        help=(
+            "comma-separated follow-up verdicts that should make generated "
+            "follow-up scripts return non-zero"
+        ),
+    )
     parser.add_argument(
         "--allow-gate-stop",
         action="store_true",
@@ -588,8 +955,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.follow_ups < 0:
         raise ValueError("--follow-ups must be >= 0")
     run_root = args.run_root or ROOT / "models" / "runs" / f"char_vae_context_chain_{_timestamp_slug()}"
+    explicit_seed_groups = args.follow_up_seed_groups is not None
     seed_groups = _csv_groups(
-        args.follow_up_seed_groups or PRESETS[args.preset]["follow_up_seed_groups"]
+        args.follow_up_seed_groups
+        if explicit_seed_groups
+        else PRESETS[args.preset]["follow_up_seed_groups"]
     )
 
     manifest: dict[str, Any] = {
@@ -599,7 +969,29 @@ def main(argv: list[str] | None = None) -> int:
         "dry_run": bool(args.dry_run),
         "allow_gate_stop": bool(args.allow_gate_stop),
         "planned_follow_ups": int(args.follow_ups),
+        "attempted_follow_ups": 0,
         "planned_follow_up_seed_groups": seed_groups,
+        "extra_explicit_seed_groups": _extra_explicit_seed_groups(
+            seed_groups,
+            explicit_seed_groups=explicit_seed_groups,
+            follow_up_count=int(args.follow_ups),
+        ),
+        "unused_explicit_seed_groups": [],
+        "follow_up_seed_group_plan": _follow_up_seed_group_plan(
+            seed_groups,
+            explicit_seed_groups=explicit_seed_groups,
+            planned_follow_ups=int(args.follow_ups),
+            attempted_follow_ups=0,
+            dry_run=bool(args.dry_run),
+        ),
+        "follow_up_seed_resolution": [],
+        "follow_up_seed_resolution_summary": _follow_up_seed_resolution_summary([]),
+        "follow_up_seed_group_source": (
+            "explicit" if explicit_seed_groups else "preset_fallback"
+        ),
+        "follow_up_seed_policy": _follow_up_seed_policy_record(
+            explicit_seed_groups=explicit_seed_groups
+        ),
         "steps": [],
     }
 
@@ -631,12 +1023,12 @@ def main(argv: list[str] | None = None) -> int:
         if summary is None:
             manifest["stopped_reason"] = "missing summary for follow-up source"
             break
-        guided = summary.get("guided_next_follow_up_command")
-        next_command = summary.get("next_follow_up_command")
-        if isinstance(guided, dict) and guided.get("enabled"):
-            script_path = guided.get("script_path")
-        elif index == 1 and isinstance(next_command, dict):
-            script_path = next_command.get("script_path")
+        command_record, command_record_source = _follow_up_command_record(
+            summary,
+            index=index,
+        )
+        if isinstance(command_record, dict):
+            script_path = command_record.get("script_path")
         else:
             manifest["stopped_reason"] = "guided follow-up disabled"
             break
@@ -650,8 +1042,14 @@ def main(argv: list[str] | None = None) -> int:
             "FOLLOW_UP_FROM": str(current_dir / "summary.json"),
             "FOLLOW_UP_FAIL_ON_VERDICT": args.follow_up_fail_on_verdict,
         }
-        if index - 1 < len(seed_groups):
-            env["NEW_SEEDS"] = seed_groups[index - 1]
+        new_seeds, new_seed_source = _follow_up_new_seeds(
+            command_record,
+            seed_groups,
+            index=index,
+            explicit_seed_groups=explicit_seed_groups,
+        )
+        if new_seeds is not None:
+            env["NEW_SEEDS"] = new_seeds
         command = ["bash", str(script_path)]
         exit_code = 0 if args.dry_run else _run_command(
             command,
@@ -666,6 +1064,9 @@ def main(argv: list[str] | None = None) -> int:
             exit_code=exit_code,
             dry_run=args.dry_run,
         )
+        step["follow_up_command_source"] = command_record_source
+        step["new_seed_source"] = new_seed_source
+        step["new_seeds"] = new_seeds
         manifest["steps"].append(step)
         current_dir = follow_dir
         if exit_code != 0:
@@ -681,6 +1082,30 @@ def main(argv: list[str] | None = None) -> int:
                 continue
             manifest["stopped_reason"] = f"follow-up {index} exited {exit_code}"
             break
+
+    attempted_follow_ups = _attempted_follow_up_count(manifest)
+    manifest["attempted_follow_ups"] = attempted_follow_ups
+    manifest["unused_explicit_seed_groups"] = (
+        []
+        if args.dry_run
+        else _unused_explicit_seed_groups(
+            seed_groups,
+            explicit_seed_groups=explicit_seed_groups,
+            attempted_follow_ups=attempted_follow_ups,
+            planned_follow_ups=int(args.follow_ups),
+        )
+    )
+    manifest["follow_up_seed_group_plan"] = _follow_up_seed_group_plan(
+        seed_groups,
+        explicit_seed_groups=explicit_seed_groups,
+        planned_follow_ups=int(args.follow_ups),
+        attempted_follow_ups=attempted_follow_ups,
+        dry_run=bool(args.dry_run),
+    )
+    manifest["follow_up_seed_resolution"] = _follow_up_seed_resolution(manifest)
+    manifest["follow_up_seed_resolution_summary"] = (
+        _follow_up_seed_resolution_summary(manifest["follow_up_seed_resolution"])
+    )
 
     chain_path = run_root / "chain.json"
     report_path = run_root / "chain_report.md"

@@ -1664,6 +1664,21 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
             if isinstance(reasons, list)
             else "-"
         )
+        uncertainty_tie = follow_up_guidance.get("best_config_uncertainty_tie")
+        uncertainty_tie_text = "-"
+        if isinstance(uncertainty_tie, dict):
+            uncertainty_tie_text = (
+                "{best} vs {runner_up} margin={margin} combined_stderr={stderr} "
+                "within_uncertainty={within}"
+            ).format(
+                best=uncertainty_tie.get("best_feature") or "-",
+                runner_up=uncertainty_tie.get("runner_up_feature") or "-",
+                margin=_fmt_float(uncertainty_tie.get("margin_to_runner_up")),
+                stderr=_fmt_float(
+                    uncertainty_tie.get("combined_runner_up_margin_stderr")
+                ),
+                within=uncertainty_tie.get("runner_up_within_uncertainty"),
+            )
         lines.extend(
             [
                 "## Follow-Up Guidance",
@@ -1680,6 +1695,9 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
                 f"{follow_up_guidance.get('use_best_generation_follow_up_command')}",
                 "- use_broadened_follow_up_command: "
                 f"{follow_up_guidance.get('use_broadened_follow_up_command')}",
+                "- tie_aware_confirmation: "
+                f"{follow_up_guidance.get('tie_aware_confirmation')}",
+                f"- best_config_uncertainty_tie: {uncertainty_tie_text}",
                 f"- gate_failed: {follow_up_guidance.get('gate_failed')}",
                 f"- reasons: {reasons_text}",
                 f"- command_usage: `{follow_up_guidance.get('command_usage') or '-'}`",
@@ -1775,6 +1793,22 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
     )
     next_follow_up = summary.get("next_follow_up_command")
     if isinstance(next_follow_up, dict):
+        seed_policy = next_follow_up.get("seed_confirmation_policy")
+        seed_policy_text = "-"
+        if isinstance(seed_policy, dict):
+            seed_policy_text = (
+                "{reason}; count={count}; tie_boost={tie_boost}; "
+                "runner_up={runner_up}; margin={margin}; combined_stderr={stderr}"
+            ).format(
+                reason=seed_policy.get("reason") or "-",
+                count=seed_policy.get("default_new_seed_count") or "-",
+                tie_boost=seed_policy.get("uncertainty_tie_seed_boost"),
+                runner_up=seed_policy.get("runner_up_feature") or "-",
+                margin=_fmt_float(seed_policy.get("margin_to_runner_up")),
+                stderr=_fmt_float(
+                    seed_policy.get("combined_runner_up_margin_stderr")
+                ),
+            )
         lines.extend(
             [
                 "",
@@ -1785,6 +1819,7 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
                 "- default_follow_up_fail_on_verdict: "
                 f"{next_follow_up.get('default_follow_up_fail_on_verdict') or '-'}",
                 f"- default_new_seeds: {next_follow_up.get('default_new_seeds')}",
+                f"- seed_confirmation_policy: {seed_policy_text}",
                 "- used_seed_history: "
                 f"{', '.join(str(seed) for seed in next_follow_up.get('used_seed_history', [])) or '-'}",
                 f"- script: `{next_follow_up.get('script_path')}`",
@@ -1876,6 +1911,16 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
             if isinstance(reasons, list)
             else "-"
         )
+        seed_policy = guided_next_follow_up.get("seed_confirmation_policy")
+        seed_policy_text = "-"
+        if isinstance(seed_policy, dict):
+            seed_policy_text = (
+                "{reason}; count={count}; tie_boost={tie_boost}"
+            ).format(
+                reason=seed_policy.get("reason") or "-",
+                count=seed_policy.get("default_new_seed_count") or "-",
+                tie_boost=seed_policy.get("uncertainty_tie_seed_boost"),
+            )
         lines.extend(
             [
                 "",
@@ -1885,11 +1930,14 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
                 f"- guidance_action: {guided_next_follow_up.get('guidance_action')}",
                 f"- trajectory_action: {guided_next_follow_up.get('trajectory_action') or '-'}",
                 f"- unsafe_promotion: {guided_next_follow_up.get('unsafe_promotion')}",
+                "- tie_aware_confirmation: "
+                f"{guided_next_follow_up.get('tie_aware_confirmation')}",
                 f"- verdict: {guided_next_follow_up.get('verdict')}",
                 f"- gate_failed: {guided_next_follow_up.get('gate_failed')}",
                 f"- reasons: {reasons_text}",
                 "- source_script: "
                 f"`{guided_next_follow_up.get('source_next_follow_up_command') or '-'}`",
+                f"- seed_confirmation_policy: {seed_policy_text}",
                 "- used_seed_history: "
                 f"{', '.join(str(seed) for seed in guided_next_follow_up.get('used_seed_history', [])) or '-'}",
                 f"- script: `{guided_next_follow_up.get('script_path') or '-'}`",
@@ -2481,6 +2529,32 @@ def _fresh_seed_csv(seeds: list[int], *, count: int | None = None) -> str:
     return ",".join(str(seed) for seed in fresh)
 
 
+def _fresh_seed_confirmation_policy(
+    best_config: dict[str, Any],
+    seeds: list[int],
+) -> dict[str, Any]:
+    base_count = max(3, len(seeds))
+    uncertainty_tie_boost = bool(best_config.get("runner_up_within_uncertainty"))
+    default_count = max(base_count, 5) if uncertainty_tie_boost else base_count
+    reason = (
+        "best runner-up within combined seed uncertainty"
+        if uncertainty_tie_boost
+        else "default fresh-seed confirmation"
+    )
+    return {
+        "schema": "st.llm_char_vae_context.fresh_seed_confirmation_policy.v1",
+        "base_seed_count": base_count,
+        "default_new_seed_count": default_count,
+        "uncertainty_tie_seed_boost": uncertainty_tie_boost,
+        "reason": reason,
+        "runner_up_feature": best_config.get("runner_up_feature"),
+        "margin_to_runner_up": best_config.get("margin_to_runner_up"),
+        "combined_runner_up_margin_stderr": best_config.get(
+            "combined_runner_up_margin_stderr"
+        ),
+    }
+
+
 def _append_unique_ints(target: list[int], values: Any) -> None:
     if not isinstance(values, list):
         return
@@ -2696,7 +2770,11 @@ def _next_follow_up_command_record(
     if not best_config:
         return None
     used_seeds = _follow_up_used_seeds(follow_up, seeds)
-    default_new_seeds = _fresh_seed_csv(used_seeds or seeds, count=max(3, len(seeds)))
+    seed_policy = _fresh_seed_confirmation_policy(best_config, seeds)
+    default_new_seeds = _fresh_seed_csv(
+        used_seeds or seeds,
+        count=int(seed_policy["default_new_seed_count"]),
+    )
     used_seed_history_value = (
         ",".join(str(seed) for seed in used_seeds) if used_seeds else None
     )
@@ -2746,6 +2824,8 @@ def _next_follow_up_command_record(
         "action": "confirm_best_config_fresh_seeds",
         "best_config": best_config,
         "default_new_seeds": default_new_seeds,
+        "default_new_seed_count": seed_policy["default_new_seed_count"],
+        "seed_confirmation_policy": seed_policy,
         "used_seed_history": used_seeds,
         "default_run_dir": str(default_run_dir),
         "default_follow_up_from": str(default_follow_up_from),
@@ -2796,6 +2876,10 @@ def _guided_next_follow_up_command_record(
         "trajectory_action": follow_up_guidance.get("trajectory_action"),
         "trajectory_verdict": follow_up_guidance.get("trajectory_verdict"),
         "unsafe_promotion": follow_up_guidance.get("unsafe_promotion"),
+        "best_config_uncertainty_tie": follow_up_guidance.get(
+            "best_config_uncertainty_tie"
+        ),
+        "tie_aware_confirmation": follow_up_guidance.get("tie_aware_confirmation"),
         "reasons": reasons,
         "source_next_follow_up_command": (
             next_follow_up.get("script_path") if isinstance(next_follow_up, dict) else None
@@ -2827,6 +2911,10 @@ def _guided_next_follow_up_command_record(
         {
             "default_follow_up_from": next_follow_up.get("default_follow_up_from"),
             "default_new_seeds": next_follow_up.get("default_new_seeds"),
+            "default_new_seed_count": next_follow_up.get("default_new_seed_count"),
+            "seed_confirmation_policy": next_follow_up.get(
+                "seed_confirmation_policy"
+            ),
             "used_seed_history": next_follow_up.get("used_seed_history", []),
             "default_run_dir": next_follow_up.get("default_run_dir"),
             "default_follow_up_fail_on_verdict": fail_on_verdict,
@@ -3129,6 +3217,12 @@ def _write_guided_next_follow_up_script(record: dict[str, Any]) -> None:
         if isinstance(reasons, list) and reasons
         else ["# Reason: -"]
     )
+    seed_policy = record.get("seed_confirmation_policy")
+    seed_policy_reason = (
+        seed_policy.get("reason")
+        if isinstance(seed_policy, dict) and seed_policy.get("reason")
+        else "-"
+    )
     text = "\n".join(
         [
             "#!/usr/bin/env bash",
@@ -3138,6 +3232,8 @@ def _write_guided_next_follow_up_script(record: dict[str, Any]) -> None:
             f"# Guidance action: {record.get('guidance_action') or '-'}",
             f"# Trajectory action: {record.get('trajectory_action') or '-'}",
             f"# Unsafe promotion: {record.get('unsafe_promotion')}",
+            f"# Tie-aware confirmation: {record.get('tie_aware_confirmation')}",
+            f"# Seed confirmation policy: {seed_policy_reason}",
             f"# Verdict: {record.get('verdict') or '-'}",
             *reason_lines,
             "# Example:",
@@ -4472,6 +4568,28 @@ def _follow_up_gate_record(
     }
 
 
+def _best_config_uncertainty_tie_record(
+    follow_up_result: dict[str, Any],
+) -> dict[str, Any] | None:
+    current_best = follow_up_result.get("current_best_config")
+    if not isinstance(current_best, dict):
+        return None
+    if current_best.get("runner_up_feature") is None:
+        return None
+    return {
+        "schema": "st.llm_char_vae_context.best_config_uncertainty_tie.v1",
+        "best_feature": current_best.get("best_feature"),
+        "runner_up_feature": current_best.get("runner_up_feature"),
+        "margin_to_runner_up": current_best.get("margin_to_runner_up"),
+        "combined_runner_up_margin_stderr": current_best.get(
+            "combined_runner_up_margin_stderr"
+        ),
+        "runner_up_within_uncertainty": current_best.get(
+            "runner_up_within_uncertainty"
+        ),
+    }
+
+
 def _follow_up_guidance_record(
     follow_up_result: dict[str, Any] | None,
     follow_up_chain: dict[str, Any] | None,
@@ -4483,6 +4601,12 @@ def _follow_up_guidance_record(
 ) -> dict[str, Any] | None:
     if not isinstance(follow_up_result, dict):
         return None
+
+    uncertainty_tie = _best_config_uncertainty_tie_record(follow_up_result)
+    runner_up_within_uncertainty = bool(
+        isinstance(uncertainty_tie, dict)
+        and uncertainty_tie.get("runner_up_within_uncertainty")
+    )
 
     verdict = str(follow_up_result.get("verdict") or "unknown")
     config_verdict = str(follow_up_result.get("config_verdict") or "unknown")
@@ -4534,6 +4658,18 @@ def _follow_up_guidance_record(
     run_budget_shift = follow_up_result.get("run_budget_shift")
     if follow_up_result.get("run_budget_shifted"):
         add_reason(f"run budget shifted: {_run_budget_shift_label(run_budget_shift)}")
+    if runner_up_within_uncertainty and isinstance(uncertainty_tie, dict):
+        add_reason(
+            "best runner-up within combined seed uncertainty: "
+            "{best} vs {runner_up} margin={margin} stderr={stderr}".format(
+                best=uncertainty_tie.get("best_feature"),
+                runner_up=uncertainty_tie.get("runner_up_feature"),
+                margin=_fmt_float(uncertainty_tie.get("margin_to_runner_up")),
+                stderr=_fmt_float(
+                    uncertainty_tie.get("combined_runner_up_margin_stderr")
+                ),
+            )
+        )
 
     if gate_failed:
         action = (
@@ -4683,6 +4819,16 @@ def _follow_up_guidance_record(
         "trajectory_verdict": trajectory_verdict,
         "unsafe_promotion": unsafe_promotion,
         "trajectory_reasons": trajectory_reasons,
+        "best_config_uncertainty_tie": uncertainty_tie,
+        "tie_aware_confirmation": bool(
+            runner_up_within_uncertainty
+            and (
+                promote_current_best
+                or use_next_follow_up_command
+                or use_broadened_follow_up_command
+                or use_best_generation_follow_up_command
+            )
+        ),
         "promote_current_best": promote_current_best,
         "use_next_follow_up_command": use_next_follow_up_command,
         "use_best_generation_follow_up_command": use_best_generation_follow_up_command,
