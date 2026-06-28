@@ -1157,6 +1157,114 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
             "16",
         )
 
+    def test_follow_up_source_budget_prefers_best_config_capacity(self) -> None:
+        mod = _load_module()
+        source_best_config = {
+            "best_feature": "raw_latent",
+            "feature_normalize": "blocks",
+            "hybrid_latent_scale": 4.0,
+            "latent_dim": 12,
+            "hidden": 32,
+            "mean_best_nll": 4.164,
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            seed_dir = Path(tmp) / "scale_4" / "latent_000006" / "hidden_000008"
+            seed_dir.mkdir(parents=True)
+            (seed_dir / "summary.json").write_text(
+                json.dumps(
+                    {
+                        "run": {
+                            "window_chars": 32,
+                            "latent_dim": 6,
+                            "hidden": 8,
+                            "epochs": 6,
+                            "batches": 12,
+                            "batch_size": 4,
+                            "eval_samples": 128,
+                            "vae": {
+                                "epochs": 6,
+                                "batches": 12,
+                                "batch_size": 4,
+                            },
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            source_summary = {
+                "run": {
+                    "window_chars": 32,
+                    "latent_dim": None,
+                    "hidden": None,
+                    "epochs": 6,
+                    "batches": 12,
+                    "batch_size": 4,
+                    "eval_samples": 128,
+                    "vae_epochs": 6,
+                    "vae_batches": 12,
+                    "vae_batch_size": 4,
+                    "latent_dims": [6, 8, 12],
+                    "hidden_sizes": [8, 16, 32],
+                },
+                "seed_summaries": [{"run_dir": str(seed_dir)}],
+                "best_config": source_best_config,
+            }
+            fallback_budget = mod._summary_run_budget(source_summary)
+            source_budget = mod._summary_run_budget_for_best_config(
+                source_summary,
+                source_best_config,
+            )
+
+        self.assertEqual(fallback_budget["latent_dim"], 6)
+        self.assertEqual(fallback_budget["hidden"], 8)
+        self.assertEqual(source_budget["latent_dim"], 12)
+        self.assertEqual(source_budget["hidden"], 32)
+
+        config_summary = {
+            "feature_normalize": "blocks",
+            "hybrid_latent_scale": 4.0,
+            "latent_dim": 12,
+            "hidden": 32,
+            "best_feature": "raw_latent",
+            "status": "improved",
+            "ranking": [
+                {
+                    "feature": "raw_latent",
+                    "mean_best_nll": 4.172,
+                    "mean_best_accuracy": 0.2,
+                    "mean_best_nll_delta_vs_raw": -0.03,
+                    "runs": 5,
+                },
+                {
+                    "feature": "raw",
+                    "mean_best_nll": 4.202,
+                    "mean_best_accuracy": 0.2,
+                    "mean_best_nll_delta_vs_raw": 0.0,
+                    "runs": 5,
+                },
+            ],
+        }
+        result = mod._follow_up_result(
+            {
+                "source_summary_path": "/tmp/source/summary.json",
+                "source_best_config": source_best_config,
+                "source_run_budget": source_budget,
+            },
+            [config_summary],
+            {
+                "best_feature": "raw_latent",
+                "mean_best_nll_delta_vs_raw": -0.03,
+            },
+            min_nll_delta=0.0,
+            current_run_budget=dict(source_budget),
+        )
+
+        self.assertIs(result["run_budget_shifted"], False)
+        self.assertEqual(result["evaluated_config"]["latent_dim"], 12)
+        self.assertEqual(result["evaluated_config"]["hidden"], 32)
+        self.assertEqual(result["source_feature_evaluated"]["latent_dim"], 12)
+        self.assertEqual(result["source_feature_evaluated"]["hidden"], 32)
+
     def test_follow_up_result_confirms_source_delta_inside_seed_noise(self) -> None:
         mod = _load_module()
         source_best_config = {

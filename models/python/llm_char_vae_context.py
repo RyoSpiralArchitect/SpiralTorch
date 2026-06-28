@@ -4042,6 +4042,21 @@ def _summary_run_budget(summary: dict[str, Any]) -> dict[str, Any]:
     return budget
 
 
+def _summary_run_budget_for_best_config(
+    summary: dict[str, Any],
+    best_config: dict[str, Any] | None,
+) -> dict[str, Any]:
+    budget = _summary_run_budget(summary)
+    if not isinstance(best_config, dict):
+        return budget
+    budget = dict(budget)
+    for key in CAPACITY_CONFIG_KEYS:
+        value = _int_or_none(best_config.get(key))
+        if value is not None:
+            budget[key] = value
+    return budget
+
+
 def _run_budget_shift(
     source_budget: dict[str, Any] | None,
     current_budget: dict[str, Any] | None,
@@ -4227,7 +4242,7 @@ def _apply_follow_up_defaults(
     best_config = _source_best_config(source_summary)
     source_features = _summary_features(source_summary)
     source_seeds = _summary_seeds(source_summary)
-    source_run_budget = _summary_run_budget(source_summary)
+    source_run_budget = _summary_run_budget_for_best_config(source_summary, best_config)
     source_chain = _follow_up_chain_source(source_summary)
     external_seed_history = _seed_csv_values(args.follow_up_used_seeds)
 
@@ -4478,6 +4493,8 @@ def _compact_config_summary(config: dict[str, Any] | None) -> dict[str, Any] | N
     return {
         "feature_normalize": config.get("feature_normalize"),
         "hybrid_latent_scale": config.get("hybrid_latent_scale"),
+        "latent_dim": config.get("latent_dim"),
+        "hidden": config.get("hidden"),
         "best_feature": config.get("best_feature"),
         "status": config.get("status"),
         "mean_best_nll": top.get("mean_best_nll"),
@@ -4502,6 +4519,8 @@ def _config_feature_summary(
         return {
             "feature_normalize": config.get("feature_normalize"),
             "hybrid_latent_scale": config.get("hybrid_latent_scale"),
+            "latent_dim": config.get("latent_dim"),
+            "hidden": config.get("hidden"),
             "feature": feature_name,
             "best_feature": feature_name,
             "mean_best_nll": row.get("mean_best_nll"),
