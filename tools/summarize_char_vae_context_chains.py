@@ -655,6 +655,26 @@ def _run_line(path: Any) -> str | None:
     return f"bash {shlex.quote(path)}"
 
 
+def _resolved_path(path: Path | None) -> str | None:
+    if path is None:
+        return None
+    return str(path.resolve())
+
+
+def _chain_sources(summary: dict[str, Any]) -> list[str]:
+    chains = summary.get("chains")
+    if not isinstance(chains, list):
+        return []
+    sources: list[str] = []
+    for row in chains:
+        if not isinstance(row, dict):
+            continue
+        source = row.get("source")
+        if isinstance(source, str) and source:
+            sources.append(source)
+    return sources
+
+
 def _render_command_readme(
     summary: dict[str, Any],
     command_scripts: dict[str, Any],
@@ -728,6 +748,14 @@ def _render_command_readme(
         f"- command_source: {_fmt_readme_value(review.get('command_source'))}",
         f"- summary_path: {_fmt_readme_value(review.get('source_summary_path'))}",
         "",
+        "## Comparison Artifacts",
+        "",
+        "Use these to reopen the full comparison that generated this command directory.",
+        "",
+        f"- json: {_fmt_readme_value(command_scripts.get('comparison_json_path'))}",
+        f"- markdown: {_fmt_readme_value(command_scripts.get('comparison_markdown_path'))}",
+        f"- chain_sources: {_fmt_readme_value(', '.join(_chain_sources(summary)))}",
+        "",
         "## Machine-Readable Manifest",
         "",
         "Includes comparison metadata, aggregate counts, selection, recommendation, and scripts.",
@@ -740,6 +768,9 @@ def _render_command_readme(
 def _write_recommended_command_scripts(
     summary: dict[str, Any],
     out_dir: Path,
+    *,
+    comparison_json_path: Path | None = None,
+    comparison_markdown_path: Path | None = None,
 ) -> dict[str, Any]:
     out_dir.mkdir(parents=True, exist_ok=True)
     execution_cwd = Path.cwd().resolve()
@@ -780,6 +811,8 @@ def _write_recommended_command_scripts(
             1 for path in (next_path, follow_up_path, review_path) if path
         ),
         "execution_cwd": str(execution_cwd),
+        "comparison_json_path": _resolved_path(comparison_json_path),
+        "comparison_markdown_path": _resolved_path(comparison_markdown_path),
         "manifest_path": str(manifest_path),
         "readme_path": str(readme_path),
     }
@@ -791,6 +824,7 @@ def _write_recommended_command_scripts(
             "recursive": summary.get("recursive"),
             "input_count": summary.get("input_count"),
             "discovered_chain_count": summary.get("discovered_chain_count"),
+            "chain_sources": _chain_sources(summary),
         },
         "aggregate": summary.get("aggregate"),
         "selection": summary.get("selection"),
@@ -939,6 +973,8 @@ def main(argv: list[str] | None = None) -> int:
         summary["command_scripts"] = _write_recommended_command_scripts(
             summary,
             args.command_out_dir,
+            comparison_json_path=args.json_out,
+            comparison_markdown_path=args.markdown_out,
         )
     markdown = _render_markdown(summary)
     if args.json_out is not None:

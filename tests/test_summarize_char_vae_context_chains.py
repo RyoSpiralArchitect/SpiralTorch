@@ -339,6 +339,14 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
                 execution_cwd,
             )
             self.assertEqual(
+                payload["command_scripts"]["comparison_json_path"],
+                str(json_out.resolve()),
+            )
+            self.assertEqual(
+                payload["command_scripts"]["comparison_markdown_path"],
+                str(markdown_out.resolve()),
+            )
+            self.assertEqual(
                 payload["command_scripts"]["manifest_path"],
                 str(manifest_path),
             )
@@ -352,6 +360,7 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             )
             self.assertEqual(manifest["comparison"]["sort_by"], "input")
             self.assertIs(manifest["comparison"]["recursive"], False)
+            self.assertEqual(manifest["comparison"]["chain_sources"], [str(chain)])
             self.assertEqual(manifest["aggregate"]["chain_count"], 1)
             self.assertEqual(
                 manifest["selection"]["accepted_champion"]["config"],
@@ -366,6 +375,14 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             self.assertEqual(
                 manifest["command_scripts"]["execution_cwd"],
                 execution_cwd,
+            )
+            self.assertEqual(
+                manifest["command_scripts"]["comparison_json_path"],
+                str(json_out.resolve()),
+            )
+            self.assertEqual(
+                manifest["command_scripts"]["comparison_markdown_path"],
+                str(markdown_out.resolve()),
             )
             self.assertIn("# target_kind: follow_up", next_text)
             self.assertIn("recommended_follow_up.sh", next_text)
@@ -419,6 +436,10 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             self.assertIn("mean_best_nll", readme)
             self.assertIn("## Fallback", readme)
             self.assertIn("execution_cwd", readme)
+            self.assertIn("## Comparison Artifacts", readme)
+            self.assertIn(str(json_out.resolve()), readme)
+            self.assertIn(str(markdown_out.resolve()), readme)
+            self.assertIn(str(chain), readme)
             self.assertIn("recommended_next.sh", readme)
             self.assertIn(f"bash {shlex.quote(str(next_script))}", readme)
             self.assertIn("recommended_follow_up.sh", readme)
