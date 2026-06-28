@@ -346,6 +346,12 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
                 "handoff_requires_attention": None,
                 "handoff_recommended_action": None,
                 "handoff_recommended_command": None,
+                "declared_handoff_recommended_action": None,
+                "declared_handoff_recommended_action_present": None,
+                "declared_handoff_recommended_action_ok": None,
+                "declared_handoff_recommended_command": None,
+                "declared_handoff_recommended_command_present": None,
+                "declared_handoff_recommended_command_ok": None,
                 "max_steps": None,
                 "step_count": None,
                 "executed_count": None,
@@ -1144,6 +1150,10 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
             status["handoff_recommended_command"],
             resume_from_report_command,
         )
+        self.assertIs(status["declared_handoff_recommended_action_present"], False)
+        self.assertIsNone(status["declared_handoff_recommended_action_ok"])
+        self.assertIs(status["declared_handoff_recommended_command_present"], False)
+        self.assertIsNone(status["declared_handoff_recommended_command_ok"])
         self.assertIs(status["continuation_command_expected"], True)
         self.assertIs(status["continuation_command_present"], True)
         self.assertIs(status["continuation_command_ok"], True)
@@ -1212,6 +1222,8 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
                     },
                     "final_next_action_runnable": True,
                     "continuation_command": continuation_command,
+                    "handoff_recommended_action": "run_continuation_command",
+                    "handoff_recommended_command": continuation_command,
                     "steps": [],
                 },
             )
@@ -1237,9 +1249,139 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
             status["handoff_recommended_command"],
             continuation_command,
         )
+        self.assertEqual(
+            status["declared_handoff_recommended_action"],
+            "run_continuation_command",
+        )
+        self.assertIs(status["declared_handoff_recommended_action_present"], True)
+        self.assertIs(status["declared_handoff_recommended_action_ok"], True)
+        self.assertEqual(
+            status["declared_handoff_recommended_command"],
+            continuation_command,
+        )
+        self.assertIs(status["declared_handoff_recommended_command_present"], True)
+        self.assertIs(status["declared_handoff_recommended_command_ok"], True)
         self.assertIsNone(status["resume_from_report_command"])
         self.assertIs(status["resume_from_report_command_present"], False)
         self.assertIsNone(status["resume_from_report_command_ok"])
+
+    def test_cli_flags_mismatched_run_loop_handoff_recommendation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            command_dir = _write_bundle(Path(tmp))
+            continuation_command = (
+                "env PYTHONNOUSERSITE=1 python3 -P "
+                f"{ROOT / 'tools' / 'run_char_vae_history_loop.py'} "
+                f"{command_dir} --max-steps 1 --write-loop-report"
+            )
+            _write_json(
+                command_dir / "run_loop.json",
+                {
+                    "schema": "st.llm_char_vae_context.command_bundle_history_loop.v1",
+                    "command_dir": str(command_dir),
+                    "handoff_status": "continuation_ready",
+                    "handoff_reason": "legacy continuation is runnable",
+                    "max_steps": 1,
+                    "step_count": 1,
+                    "executed_count": 1,
+                    "success_count": 1,
+                    "failure_count": 0,
+                    "stop_reason": "max_steps_reached",
+                    "returncode": 0,
+                    "final_next_action": {
+                        "action": "run_execution_next",
+                        "reason": "latest execution summary exposes a next command",
+                        "target": "execution-next",
+                        "command_source": "guided_next_follow_up_command",
+                        "script_path": str(command_dir / "guided_next.sh"),
+                        "should_continue": True,
+                    },
+                    "final_next_action_runnable": True,
+                    "continuation_command": continuation_command,
+                    "handoff_recommended_action": "collect_next_command",
+                    "handoff_recommended_command": "echo stale",
+                    "steps": [],
+                },
+            )
+            result = subprocess.run(
+                ["python3", "-P", str(SCRIPT), str(command_dir), "--json"],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            strict_result = subprocess.run(
+                ["python3", "-P", str(SCRIPT), str(command_dir), "--json", "--strict"],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            markdown_result = subprocess.run(
+                ["python3", "-P", str(SCRIPT), str(command_dir)],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(strict_result.returncode, 1)
+        payload = json.loads(result.stdout)
+        self.assertFalse(payload["strict_ready"])
+        self.assertEqual(
+            payload["run_loop_status_issues"],
+            [
+                "run_loop_handoff_recommended_action",
+                "run_loop_handoff_recommended_command",
+            ],
+        )
+        self.assertEqual(
+            payload["missing_optional"],
+            [
+                "run_loop_handoff_recommended_action",
+                "run_loop_handoff_recommended_command",
+            ],
+        )
+        status = payload["run_loop_status"]
+        self.assertEqual(status["handoff_severity"], "invalid")
+        self.assertIs(status["handoff_requires_attention"], True)
+        self.assertEqual(
+            status["handoff_recommended_action"],
+            "repair_run_loop_report",
+        )
+        self.assertIsNone(status["handoff_recommended_command"])
+        self.assertEqual(
+            status["declared_handoff_recommended_action"],
+            "collect_next_command",
+        )
+        self.assertIs(status["declared_handoff_recommended_action_present"], True)
+        self.assertIs(status["declared_handoff_recommended_action_ok"], False)
+        self.assertEqual(status["declared_handoff_recommended_command"], "echo stale")
+        self.assertIs(status["declared_handoff_recommended_command_present"], True)
+        self.assertIs(status["declared_handoff_recommended_command_ok"], False)
+        self.assertEqual(markdown_result.returncode, 0, markdown_result.stderr)
+        self.assertIn(
+            (
+                "run_loop_status_issues: run_loop_handoff_recommended_action, "
+                "run_loop_handoff_recommended_command"
+            ),
+            markdown_result.stdout,
+        )
+        self.assertIn(
+            "run_loop_handoff_recommended_action: repair_run_loop_report",
+            markdown_result.stdout,
+        )
+        self.assertIn(
+            "run_loop_declared_handoff_recommended_action_ok: no",
+            markdown_result.stdout,
+        )
+        self.assertIn(
+            "run_loop_declared_handoff_recommended_command_ok: no",
+            markdown_result.stdout,
+        )
 
     def test_cli_surfaces_failed_run_loop_handoff_guidance(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
