@@ -18,6 +18,7 @@ RUN_HISTORY_SUMMARY_SCHEMA = (
 RUN_HISTORY_NEXT_ACTION_SCHEMA = (
     "st.llm_char_vae_context.command_bundle_history_next_action.v1"
 )
+RUN_LOOP_SCHEMA = "st.llm_char_vae_context.command_bundle_history_loop.v1"
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -300,6 +301,67 @@ def _run_history_summary_status(
     return status
 
 
+def _run_loop_status(
+    *,
+    summary_path: Path | None,
+) -> dict[str, Any]:
+    exists = _exists(summary_path)
+    status: dict[str, Any] = {
+        "path": str(summary_path) if summary_path is not None else None,
+        "exists": exists,
+        "valid_json": None,
+        "schema": None,
+        "schema_ok": None,
+        "command_dir": None,
+        "max_steps": None,
+        "step_count": None,
+        "executed_count": None,
+        "success_count": None,
+        "failure_count": None,
+        "stop_reason": None,
+        "returncode": None,
+        "final_next_action": None,
+        "final_next_action_reason": None,
+        "final_next_action_target": None,
+        "final_next_action_should_continue": None,
+        "error": None,
+    }
+    if summary_path is None or not exists:
+        return status
+    try:
+        payload = _read_json(summary_path)
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        status["valid_json"] = False
+        status["error"] = str(exc)
+        return status
+    final_next_action = payload.get("final_next_action")
+    final_next_action = final_next_action if isinstance(final_next_action, dict) else {}
+    schema = payload.get("schema")
+    status.update(
+        {
+            "valid_json": True,
+            "schema": schema,
+            "schema_ok": schema == RUN_LOOP_SCHEMA,
+            "command_dir": payload.get("command_dir"),
+            "max_steps": payload.get("max_steps"),
+            "step_count": payload.get("step_count"),
+            "executed_count": payload.get("executed_count"),
+            "success_count": payload.get("success_count"),
+            "failure_count": payload.get("failure_count"),
+            "stop_reason": payload.get("stop_reason"),
+            "returncode": payload.get("returncode"),
+            "error": payload.get("error"),
+            "final_next_action": final_next_action.get("action"),
+            "final_next_action_reason": final_next_action.get("reason"),
+            "final_next_action_target": final_next_action.get("target"),
+            "final_next_action_should_continue": final_next_action.get(
+                "should_continue"
+            ),
+        }
+    )
+    return status
+
+
 def inspect_bundle(command_dir: Path) -> dict[str, Any]:
     command_dir = command_dir.resolve()
     manifest_path = command_dir / "recommendation.json"
@@ -505,6 +567,7 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
         summary_path=run_history_summary_path,
         history_path=run_history_jsonl_path,
     )
+    run_loop_status = _run_loop_status(summary_path=run_loop_json_path)
     return {
         "schema": SCHEMA,
         "command_dir": str(command_dir),
@@ -572,6 +635,7 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
             else None
         ),
         "run_history_summary_status": run_history_summary_status,
+        "run_loop_status": run_loop_status,
         "chain_source_count": len(chain_source_paths),
         "missing_chain_sources": missing_chain_sources,
     }
@@ -650,6 +714,17 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"- run_history_summary_path: {_fmt(summary.get('run_history_summary_path'))}",
         f"- run_loop_json_path: {_fmt(summary.get('run_loop_json_path'))}",
         f"- run_loop_markdown_path: {_fmt(summary.get('run_loop_markdown_path'))}",
+        f"- run_loop_valid_json: {_fmt(_value(summary, 'run_loop_status', 'valid_json'))}",
+        f"- run_loop_schema_ok: {_fmt(_value(summary, 'run_loop_status', 'schema_ok'))}",
+        f"- run_loop_step_count: {_fmt(_value(summary, 'run_loop_status', 'step_count'))}",
+        f"- run_loop_executed_count: {_fmt(_value(summary, 'run_loop_status', 'executed_count'))}",
+        f"- run_loop_stop_reason: {_fmt(_value(summary, 'run_loop_status', 'stop_reason'))}",
+        f"- run_loop_returncode: {_fmt(_value(summary, 'run_loop_status', 'returncode'))}",
+        f"- run_loop_final_next_action: {_fmt(_value(summary, 'run_loop_status', 'final_next_action'))}",
+        f"- run_loop_final_next_action_reason: {_fmt(_value(summary, 'run_loop_status', 'final_next_action_reason'))}",
+        f"- run_loop_final_next_action_target: {_fmt(_value(summary, 'run_loop_status', 'final_next_action_target'))}",
+        f"- run_loop_final_next_action_should_continue: {_fmt(_value(summary, 'run_loop_status', 'final_next_action_should_continue'))}",
+        f"- run_loop_error: {_fmt(_value(summary, 'run_loop_status', 'error'))}",
         f"- run_history_summary_valid_json: {_fmt(_value(summary, 'run_history_summary_status', 'valid_json'))}",
         f"- run_history_summary_schema_ok: {_fmt(_value(summary, 'run_history_summary_status', 'schema_ok'))}",
         f"- run_history_summary_total_runs: {_fmt(_value(summary, 'run_history_summary_status', 'total_runs'))}",

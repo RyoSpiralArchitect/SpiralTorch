@@ -300,6 +300,29 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
             },
         )
         self.assertEqual(
+            payload["run_loop_status"],
+            {
+                "path": str(command_dir / "run_loop.json"),
+                "exists": False,
+                "valid_json": None,
+                "schema": None,
+                "schema_ok": None,
+                "command_dir": None,
+                "max_steps": None,
+                "step_count": None,
+                "executed_count": None,
+                "success_count": None,
+                "failure_count": None,
+                "stop_reason": None,
+                "returncode": None,
+                "error": None,
+                "final_next_action": None,
+                "final_next_action_reason": None,
+                "final_next_action_target": None,
+                "final_next_action_should_continue": None,
+            },
+        )
+        self.assertEqual(
             payload["declared_outputs"],
             [
                 {
@@ -351,6 +374,7 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
         self.assertIn("--write-loop-report", markdown_result.stdout)
         self.assertIn("run_history_summary", markdown_result.stdout)
         self.assertIn("run_history_summary_valid_json: -", markdown_result.stdout)
+        self.assertIn("run_loop_valid_json: -", markdown_result.stdout)
 
     def test_cli_reports_declared_runner_wrapper(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -728,6 +752,107 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
             markdown_result.stdout,
         )
         self.assertIn("run_history_summary_matches_jsonl: yes", markdown_result.stdout)
+
+    def test_cli_validates_existing_run_loop_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            command_dir = _write_bundle(Path(tmp))
+            run_loop_path = command_dir / "run_loop.json"
+            _write_json(
+                run_loop_path,
+                {
+                    "schema": "st.llm_char_vae_context.command_bundle_history_loop.v1",
+                    "command_dir": str(command_dir),
+                    "max_steps": 3,
+                    "step_count": 2,
+                    "executed_count": 2,
+                    "success_count": 2,
+                    "failure_count": 0,
+                    "stop_reason": "history_next_action_stopped",
+                    "returncode": 0,
+                    "error": None,
+                    "final_next_action": {
+                        "schema": (
+                            "st.llm_char_vae_context."
+                            "command_bundle_history_next_action.v1"
+                        ),
+                        "action": "collect_next_command",
+                        "reason": (
+                            "latest execution can continue but has no next script"
+                        ),
+                        "target": None,
+                        "should_continue": False,
+                    },
+                    "steps": [
+                        {
+                            "index": 1,
+                            "target": "next",
+                            "executed": True,
+                            "returncode": 0,
+                        },
+                        {
+                            "index": 2,
+                            "target": "execution-next",
+                            "executed": True,
+                            "returncode": 0,
+                        },
+                    ],
+                },
+            )
+            result = subprocess.run(
+                ["python3", "-P", str(SCRIPT), str(command_dir), "--json"],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            markdown_result = subprocess.run(
+                ["python3", "-P", str(SCRIPT), str(command_dir)],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        status = payload["run_loop_status"]
+        self.assertTrue(status["exists"])
+        self.assertTrue(status["valid_json"])
+        self.assertTrue(status["schema_ok"])
+        self.assertEqual(status["command_dir"], str(command_dir))
+        self.assertEqual(status["max_steps"], 3)
+        self.assertEqual(status["step_count"], 2)
+        self.assertEqual(status["executed_count"], 2)
+        self.assertEqual(status["success_count"], 2)
+        self.assertEqual(status["failure_count"], 0)
+        self.assertEqual(status["stop_reason"], "history_next_action_stopped")
+        self.assertEqual(status["returncode"], 0)
+        self.assertEqual(status["final_next_action"], "collect_next_command")
+        self.assertEqual(
+            status["final_next_action_reason"],
+            "latest execution can continue but has no next script",
+        )
+        self.assertIsNone(status["final_next_action_target"])
+        self.assertIs(status["final_next_action_should_continue"], False)
+        self.assertIsNone(status["error"])
+        self.assertEqual(markdown_result.returncode, 0, markdown_result.stderr)
+        self.assertIn("run_loop_valid_json: yes", markdown_result.stdout)
+        self.assertIn("run_loop_schema_ok: yes", markdown_result.stdout)
+        self.assertIn("run_loop_step_count: 2", markdown_result.stdout)
+        self.assertIn(
+            "run_loop_stop_reason: history_next_action_stopped",
+            markdown_result.stdout,
+        )
+        self.assertIn(
+            "run_loop_final_next_action: collect_next_command",
+            markdown_result.stdout,
+        )
+        self.assertIn(
+            "run_loop_final_next_action_should_continue: no",
+            markdown_result.stdout,
+        )
 
     def test_cli_writes_explicit_inspection_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
