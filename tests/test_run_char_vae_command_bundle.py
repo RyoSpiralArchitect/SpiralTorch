@@ -112,7 +112,13 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(payload["dry_run"])
         self.assertEqual(payload["target"], "next")
+        self.assertEqual(payload["target_kind"], "follow_up")
         self.assertEqual(payload["script_key"], "next_path")
+        self.assertEqual(payload["target_script_key"], "follow_up_path")
+        self.assertEqual(
+            payload["target_script_path"],
+            str(command_dir / "recommended_follow_up.sh"),
+        )
         self.assertTrue(payload["strict_ready"])
         self.assertFalse(payload["executed"])
         self.assertIsNotNone(payload["started_at"])
@@ -142,6 +148,12 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(payload["returncode"], 0)
         self.assertEqual(payload["target"], "next")
+        self.assertEqual(payload["target_kind"], "follow_up")
+        self.assertEqual(payload["target_script_key"], "follow_up_path")
+        self.assertEqual(
+            payload["target_script_path"],
+            str(command_dir / "recommended_follow_up.sh"),
+        )
         self.assertTrue(payload["executed"])
         self.assertGreaterEqual(payload["duration_seconds"], 0.0)
         self.assertIn("next cwd=", payload["stdout"])
@@ -179,6 +191,8 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
         self.assertEqual(strict.returncode, 1)
         self.assertFalse(strict_payload["strict_ready"])
         self.assertFalse(strict_payload["executed"])
+        self.assertEqual(strict_payload["target_kind"], "follow_up")
+        self.assertEqual(strict_payload["target_script_key"], "follow_up_path")
         self.assertGreaterEqual(strict_payload["duration_seconds"], 0.0)
         self.assertIn("follow_up_script", strict_payload["missing_optional"])
         self.assertEqual(
@@ -210,9 +224,49 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
             payload = json.loads(result.stdout)
 
         self.assertEqual(result.returncode, 1)
+        self.assertEqual(payload["target_kind"], "review")
         self.assertEqual(payload["script_key"], "review_path")
+        self.assertEqual(payload["target_script_key"], "review_path")
+        self.assertIsNone(payload["target_script_path"])
         self.assertFalse(payload["executed"])
         self.assertEqual(payload["error"], "manifest does not declare review_path")
+
+    def test_cli_runs_review_target_with_resolved_kind(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            command_dir = _write_bundle(Path(tmp), include_review=True)
+            result = subprocess.run(
+                [
+                    "python3",
+                    "-P",
+                    str(SCRIPT),
+                    str(command_dir),
+                    "--target",
+                    "review",
+                    "--json",
+                ],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            payload = json.loads(result.stdout)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(payload["target"], "review")
+        self.assertEqual(payload["target_kind"], "review")
+        self.assertEqual(payload["script_key"], "review_path")
+        self.assertEqual(payload["target_script_key"], "review_path")
+        self.assertEqual(
+            payload["target_script_path"],
+            str(command_dir / "recommended_review.sh"),
+        )
+        self.assertEqual(
+            payload["command_argv"],
+            ["bash", str(command_dir / "recommended_review.sh")],
+        )
+        self.assertTrue(payload["executed"])
+        self.assertIn("review cwd=", payload["stdout"])
 
     def test_cli_writes_inspection_report_before_running(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -252,9 +306,16 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
             str(command_dir / "inspection.json"),
         )
         self.assertEqual(payload["run_json_path"], str(command_dir / "run.json"))
+        self.assertEqual(payload["target_kind"], "follow_up")
         self.assertTrue(payload["executed"])
         self.assertIsNotNone(payload["started_at"])
         self.assertEqual(run_report["returncode"], 0)
+        self.assertEqual(run_report["target_kind"], "follow_up")
+        self.assertEqual(run_report["target_script_key"], "follow_up_path")
+        self.assertEqual(
+            run_report["target_script_path"],
+            str(command_dir / "recommended_follow_up.sh"),
+        )
         self.assertTrue(run_report["executed"])
         self.assertGreaterEqual(run_report["duration_seconds"], 0.0)
         self.assertEqual(run_report["execution_cwd"], str(command_dir.resolve()))
@@ -290,8 +351,10 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(payload["run_json_path"], str(json_out))
+        self.assertEqual(payload["target_kind"], "follow_up")
         self.assertTrue(payload["executed"])
         self.assertEqual(report["returncode"], 0)
+        self.assertEqual(report["target_kind"], "follow_up")
         self.assertEqual(
             report["command_argv"],
             ["bash", str(command_dir / "recommended_next.sh")],
@@ -300,6 +363,8 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
         self.assertEqual(report["run_markdown_path"], str(markdown_out))
         self.assertIn("Char VAE Command Bundle Runner", markdown)
         self.assertIn(f"run_json_path: {json_out}", markdown)
+        self.assertIn("target_kind: follow_up", markdown)
+        self.assertIn("target_script_key: follow_up_path", markdown)
         self.assertIn("executed: yes", markdown)
         self.assertIn("duration_seconds:", markdown)
 

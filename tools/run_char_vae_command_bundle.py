@@ -20,6 +20,10 @@ TARGET_KEYS = {
     "follow-up": "follow_up_path",
     "review": "review_path",
 }
+TARGET_KIND_KEYS = {
+    "follow_up": "follow_up_path",
+    "review": "review_path",
+}
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -72,6 +76,39 @@ def _selected_script(
     return key, _path_from(command_scripts.get(key))
 
 
+def _target_details(
+    command_scripts: dict[str, Any],
+    *,
+    target: str,
+    script_key: str,
+    script_path: Path | None,
+) -> dict[str, Any]:
+    if target != "next":
+        target_kind = "follow_up" if target == "follow-up" else target
+        return {
+            "target_kind": target_kind,
+            "target_script_key": script_key,
+            "target_script_path": script_path,
+        }
+    target_kind_value = command_scripts.get("next_kind")
+    target_kind = (
+        str(target_kind_value)
+        if isinstance(target_kind_value, str) and target_kind_value
+        else None
+    )
+    target_script_key = TARGET_KIND_KEYS.get(target_kind or "")
+    target_script_path = (
+        _path_from(command_scripts.get(target_script_key))
+        if target_script_key is not None
+        else None
+    )
+    return {
+        "target_kind": target_kind,
+        "target_script_key": target_script_key,
+        "target_script_path": target_script_path,
+    }
+
+
 def _write_inspection_report(
     inspector: Any,
     command_dir: Path,
@@ -116,8 +153,11 @@ def _runner_summary(
     command_dir: Path,
     manifest_path: Path,
     target: str,
+    target_kind: str | None,
     script_key: str,
     script_path: Path | None,
+    target_script_key: str | None,
+    target_script_path: Path | None,
     strict: bool,
     dry_run: bool,
     inspection: dict[str, Any],
@@ -135,8 +175,13 @@ def _runner_summary(
         "command_dir": str(command_dir),
         "manifest_path": str(manifest_path),
         "target": target,
+        "target_kind": target_kind,
         "script_key": script_key,
         "script_path": str(script_path) if script_path is not None else None,
+        "target_script_key": target_script_key,
+        "target_script_path": (
+            str(target_script_path) if target_script_path is not None else None
+        ),
         "command_argv": ["bash", str(script_path)]
         if script_path is not None
         else None,
@@ -176,8 +221,11 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"- command_dir: {_fmt(summary.get('command_dir'))}",
         f"- manifest_path: {_fmt(summary.get('manifest_path'))}",
         f"- target: {_fmt(summary.get('target'))}",
+        f"- target_kind: {_fmt(summary.get('target_kind'))}",
         f"- script_key: {_fmt(summary.get('script_key'))}",
         f"- script_path: {_fmt(summary.get('script_path'))}",
+        f"- target_script_key: {_fmt(summary.get('target_script_key'))}",
+        f"- target_script_path: {_fmt(summary.get('target_script_path'))}",
         f"- command_argv: {_fmt(summary.get('command_argv'))}",
         f"- execution_cwd: {_fmt(summary.get('execution_cwd'))}",
         f"- strict: {_fmt(summary.get('strict'))}",
@@ -247,6 +295,12 @@ def run_bundle(
     manifest = _read_json(manifest_path)
     command_scripts = _command_scripts(manifest)
     script_key, script_path = _selected_script(command_scripts, target=target)
+    target_details = _target_details(
+        command_scripts,
+        target=target,
+        script_key=script_key,
+        script_path=script_path,
+    )
     json_out, markdown_out = _run_report_paths(
         command_dir,
         command_scripts,
@@ -271,6 +325,7 @@ def run_bundle(
             target=target,
             script_key=script_key,
             script_path=script_path,
+            **target_details,
             strict=strict,
             dry_run=dry_run,
             inspection=inspection,
@@ -291,6 +346,7 @@ def run_bundle(
             target=target,
             script_key=script_key,
             script_path=script_path,
+            **target_details,
             strict=strict,
             dry_run=dry_run,
             inspection=inspection,
@@ -311,6 +367,7 @@ def run_bundle(
             target=target,
             script_key=script_key,
             script_path=script_path,
+            **target_details,
             strict=strict,
             dry_run=dry_run,
             inspection=inspection,
@@ -338,6 +395,7 @@ def run_bundle(
             target=target,
             script_key=script_key,
             script_path=script_path,
+            **target_details,
             strict=strict,
             dry_run=dry_run,
             inspection=inspection,
@@ -364,6 +422,7 @@ def run_bundle(
         target=target,
         script_key=script_key,
         script_path=script_path,
+        **target_details,
         strict=strict,
         dry_run=dry_run,
         inspection=inspection,
