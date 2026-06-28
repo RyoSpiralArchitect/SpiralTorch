@@ -293,6 +293,48 @@ def _expected_execution_summary_path(
     return run_dir / "summary.json" if run_dir is not None else None
 
 
+def _compact_execution_next_command(payload: dict[str, Any]) -> dict[str, Any]:
+    guided_command = _mapping(payload.get("guided_next_follow_up_command"))
+    next_command = _mapping(payload.get("next_follow_up_command"))
+    if guided_command.get("enabled"):
+        source = "guided_next_follow_up_command"
+        command = guided_command
+    elif next_command:
+        source = "next_follow_up_command"
+        command = next_command
+    else:
+        return {
+            "schema": "st.llm_char_vae_context.command_bundle_execution_next_command.v1",
+            "available": False,
+            "source": None,
+        }
+    seed_policy = _mapping(command.get("seed_confirmation_policy"))
+    return {
+        "schema": "st.llm_char_vae_context.command_bundle_execution_next_command.v1",
+        "available": True,
+        "source": source,
+        "enabled": command.get("enabled"),
+        "action": command.get("action") or command.get("guidance_action"),
+        "guidance_action": command.get("guidance_action"),
+        "trajectory_action": command.get("trajectory_action"),
+        "verdict": command.get("verdict"),
+        "gate_failed": command.get("gate_failed"),
+        "script_path": command.get("script_path"),
+        "script_usage": command.get("script_usage"),
+        "shell_command": command.get("shell_command"),
+        "default_follow_up_from": command.get("default_follow_up_from"),
+        "default_follow_up_fail_on_verdict": command.get(
+            "default_follow_up_fail_on_verdict"
+        ),
+        "default_new_seeds": command.get("default_new_seeds"),
+        "default_new_seed_count": command.get("default_new_seed_count"),
+        "default_run_dir": command.get("default_run_dir"),
+        "used_seed_history": command.get("used_seed_history"),
+        "seed_policy_reason": seed_policy.get("reason"),
+        "tie_seed_boost": seed_policy.get("uncertainty_tie_seed_boost"),
+    }
+
+
 def _compact_execution_summary(path: Path | None) -> dict[str, Any] | None:
     if path is None:
         return None
@@ -320,6 +362,7 @@ def _compact_execution_summary(path: Path | None) -> dict[str, Any] | None:
     follow_up_trajectory = _mapping(payload.get("follow_up_trajectory"))
     next_command = _mapping(payload.get("next_follow_up_command"))
     guided_command = _mapping(payload.get("guided_next_follow_up_command"))
+    execution_next_command = _compact_execution_next_command(payload)
     summary.update(
         {
             "exists": True,
@@ -354,6 +397,16 @@ def _compact_execution_summary(path: Path | None) -> dict[str, Any] | None:
             "next_default_new_seed_count": next_command.get("default_new_seed_count"),
             "guided_next_enabled": guided_command.get("enabled"),
             "guided_default_new_seeds": guided_command.get("default_new_seeds"),
+            "next_command": execution_next_command,
+            "next_command_source": execution_next_command.get("source"),
+            "next_command_available": execution_next_command.get("available"),
+            "next_command_default_new_seeds": execution_next_command.get(
+                "default_new_seeds"
+            ),
+            "next_command_default_run_dir": execution_next_command.get(
+                "default_run_dir"
+            ),
+            "next_command_script_path": execution_next_command.get("script_path"),
             "used_seed_history": next_command.get("used_seed_history")
             or guided_command.get("used_seed_history"),
         }
@@ -447,6 +500,7 @@ def render_markdown(summary: dict[str, Any]) -> str:
     champion = _mapping(context.get("champion"))
     fallback = _mapping(context.get("fallback"))
     execution_summary = _mapping(summary.get("execution_summary"))
+    execution_next = _mapping(execution_summary.get("next_command"))
     lines = [
         "# Char VAE Command Bundle Runner",
         "",
@@ -541,6 +595,12 @@ def render_markdown(summary: dict[str, Any]) -> str:
         ),
         f"- execution_guidance_action: {_fmt(execution_summary.get('guidance_action'))}",
         f"- execution_next_seeds: {_fmt(execution_summary.get('next_default_new_seeds'))}",
+        f"- execution_next_command_source: {_fmt(execution_next.get('source'))}",
+        f"- execution_next_command_available: {_fmt(execution_next.get('available'))}",
+        f"- execution_next_command_seeds: {_fmt(execution_next.get('default_new_seeds'))}",
+        f"- execution_next_command_run_dir: {_fmt(execution_next.get('default_run_dir'))}",
+        f"- execution_next_command_script: {_fmt(execution_next.get('script_path'))}",
+        f"- execution_next_command_usage: {_fmt(execution_next.get('script_usage'))}",
         "",
     ]
     return "\n".join(lines)
@@ -683,6 +743,7 @@ def summarize_history_events(
     latest_context = _mapping(latest.get("recommendation_context"))
     latest_champion = _mapping(latest_context.get("champion"))
     latest_execution = _mapping(latest.get("execution_summary"))
+    latest_execution_next = _mapping(latest_execution.get("next_command"))
     status_counts = _count_values([_event_status(event) for event in events])
     target_kind_counts = _count_values([event.get("target_kind") for event in events])
     runner_wrapper_ok_counts = _bool_count_values(
@@ -706,6 +767,14 @@ def summarize_history_events(
             for event in events
         ]
     )
+    execution_next_source_counts = _count_values(
+        [
+            _mapping(_mapping(event.get("execution_summary")).get("next_command")).get(
+                "source"
+            )
+            for event in events
+        ]
+    )
     current_status, current_status_count = _status_streak(events)
     latest_executed = _latest_event(events, lambda event: bool(event.get("executed")))
     latest_executed_context = _mapping(
@@ -714,6 +783,9 @@ def summarize_history_events(
     latest_executed_champion = _mapping(latest_executed_context.get("champion"))
     latest_executed_execution = _mapping(
         latest_executed.get("execution_summary") if latest_executed else None
+    )
+    latest_executed_execution_next = _mapping(
+        latest_executed_execution.get("next_command")
     )
     last_problem = _latest_event(
         events,
@@ -742,6 +814,9 @@ def summarize_history_events(
             "execution_verdict": latest_execution.get("follow_up_verdict"),
             "execution_best_config": latest_execution.get("best_config_label"),
             "execution_guidance_action": latest_execution.get("guidance_action"),
+            "execution_next_source": latest_execution_next.get("source"),
+            "execution_next_seeds": latest_execution_next.get("default_new_seeds"),
+            "execution_next_script_path": latest_execution_next.get("script_path"),
         },
         "signals": {
             "status_counts": status_counts,
@@ -750,6 +825,7 @@ def summarize_history_events(
             "recommendation_action_counts": action_counts,
             "execution_verdict_counts": execution_verdict_counts,
             "execution_guidance_action_counts": execution_guidance_action_counts,
+            "execution_next_source_counts": execution_next_source_counts,
             "current_status_streak": {
                 "status": current_status,
                 "count": current_status_count,
@@ -772,6 +848,13 @@ def summarize_history_events(
                 ),
                 "execution_guidance_action": latest_executed_execution.get(
                     "guidance_action"
+                ),
+                "execution_next_source": latest_executed_execution_next.get("source"),
+                "execution_next_seeds": latest_executed_execution_next.get(
+                    "default_new_seeds"
+                ),
+                "execution_next_script_path": latest_executed_execution_next.get(
+                    "script_path"
                 ),
             },
             "last_problem": {
@@ -827,6 +910,12 @@ def render_history_markdown(
             "- latest_execution_guidance_action: "
             f"{_fmt(latest.get('execution_guidance_action'))}"
         ),
+        f"- latest_execution_next_source: {_fmt(latest.get('execution_next_source'))}",
+        f"- latest_execution_next_seeds: {_fmt(latest.get('execution_next_seeds'))}",
+        (
+            "- latest_execution_next_script_path: "
+            f"{_fmt(latest.get('execution_next_script_path'))}"
+        ),
         "",
         "## Decision Signals",
         "",
@@ -848,6 +937,10 @@ def render_history_markdown(
             "- execution_guidance_action_counts: "
             f"{_fmt_counts(_mapping(signals.get('execution_guidance_action_counts')))}"
         ),
+        (
+            "- execution_next_source_counts: "
+            f"{_fmt_counts(_mapping(signals.get('execution_next_source_counts')))}"
+        ),
         f"- current_status_streak: {_fmt_streak(status_streak.get('status'), int(status_streak.get('count') or 0))}",
         f"- latest_executed_status: {_fmt(latest_executed.get('status'))}",
         f"- latest_executed_finished_at: {_fmt(latest_executed.get('finished_at'))}",
@@ -865,6 +958,18 @@ def render_history_markdown(
             "- latest_executed_execution_guidance_action: "
             f"{_fmt(latest_executed.get('execution_guidance_action'))}"
         ),
+        (
+            "- latest_executed_execution_next_source: "
+            f"{_fmt(latest_executed.get('execution_next_source'))}"
+        ),
+        (
+            "- latest_executed_execution_next_seeds: "
+            f"{_fmt(latest_executed.get('execution_next_seeds'))}"
+        ),
+        (
+            "- latest_executed_execution_next_script_path: "
+            f"{_fmt(latest_executed.get('execution_next_script_path'))}"
+        ),
         f"- last_problem_status: {_fmt(last_problem.get('status'))}",
         f"- last_problem_error: {_fmt(last_problem.get('error'))}",
         f"- last_problem_missing_required: {_fmt(last_problem.get('missing_required'))}",
@@ -872,13 +977,14 @@ def render_history_markdown(
         "## Recent Events",
         "",
         "| # | status | target | kind | dry_run | executed | returncode | "
-        "started_at | duration_seconds | action | champion | exec_verdict | exec_best |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "started_at | duration_seconds | action | champion | exec_verdict | exec_best | next_seeds |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for index, event in enumerate(events[-10:], max(1, len(events) - 9)):
         context = _mapping(event.get("recommendation_context"))
         champion = _mapping(context.get("champion"))
         execution_summary = _mapping(event.get("execution_summary"))
+        execution_next = _mapping(execution_summary.get("next_command"))
         row = [
             index,
             _event_status(event),
@@ -893,6 +999,7 @@ def render_history_markdown(
             champion.get("config"),
             execution_summary.get("follow_up_verdict"),
             execution_summary.get("best_config_label"),
+            execution_next.get("default_new_seeds"),
         ]
         lines.append("| " + " | ".join(_md_cell(value) for value in row) + " |")
     lines.append("")
