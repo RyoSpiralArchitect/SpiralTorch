@@ -219,8 +219,11 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
                 "schema_ok": None,
                 "total_runs": None,
                 "next_action": None,
+                "next_action_reason": None,
                 "next_action_target": None,
                 "next_action_command_source": None,
+                "next_action_script_path": None,
+                "next_action_default_new_seeds": None,
                 "next_action_should_continue": None,
                 "next_action_schema_ok": None,
                 "history_event_count": None,
@@ -559,8 +562,13 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
                             "command_bundle_history_next_action.v1"
                         ),
                         "action": "run_execution_next",
+                        "reason": (
+                            "latest execution summary exposes a next command"
+                        ),
                         "target": "execution-next",
                         "command_source": "guided_next_follow_up_command",
+                        "script_path": str(command_dir / "guided_next.sh"),
+                        "default_new_seeds": [109, 113, 127],
                         "should_continue": True,
                     },
                     "signals": {"status_counts": {"ok": 2}},
@@ -591,11 +599,20 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
         self.assertTrue(status["schema_ok"])
         self.assertEqual(status["total_runs"], 2)
         self.assertEqual(status["next_action"], "run_execution_next")
+        self.assertEqual(
+            status["next_action_reason"],
+            "latest execution summary exposes a next command",
+        )
         self.assertEqual(status["next_action_target"], "execution-next")
         self.assertEqual(
             status["next_action_command_source"],
             "guided_next_follow_up_command",
         )
+        self.assertEqual(
+            status["next_action_script_path"],
+            str(command_dir / "guided_next.sh"),
+        )
+        self.assertEqual(status["next_action_default_new_seeds"], [109, 113, 127])
         self.assertIs(status["next_action_should_continue"], True)
         self.assertIs(status["next_action_schema_ok"], True)
         self.assertEqual(status["history_event_count"], 2)
@@ -604,9 +621,22 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
         self.assertEqual(markdown_result.returncode, 0, markdown_result.stderr)
         self.assertIn("run_history_summary_valid_json: yes", markdown_result.stdout)
         self.assertIn("run_history_next_action: run_execution_next", markdown_result.stdout)
+        self.assertIn(
+            "run_history_next_action_reason: "
+            "latest execution summary exposes a next command",
+            markdown_result.stdout,
+        )
         self.assertIn("run_history_next_action_target: execution-next", markdown_result.stdout)
         self.assertIn(
             "run_history_next_action_command_source: guided_next_follow_up_command",
+            markdown_result.stdout,
+        )
+        self.assertIn(
+            f"run_history_next_action_script_path: {command_dir / 'guided_next.sh'}",
+            markdown_result.stdout,
+        )
+        self.assertIn(
+            "run_history_next_action_default_new_seeds: 109,113,127",
             markdown_result.stdout,
         )
         self.assertIn(
