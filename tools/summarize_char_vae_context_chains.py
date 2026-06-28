@@ -116,13 +116,32 @@ def _chain_row(path: Path, payload: dict[str, Any]) -> dict[str, Any]:
         "planned_follow_ups": payload.get("planned_follow_ups"),
         "attempted_follow_ups": payload.get("attempted_follow_ups"),
         "accepted_step": accepted.get("index"),
+        "accepted_role": accepted.get("role"),
+        "accepted_run_dir": accepted.get("run_dir"),
+        "accepted_summary_path": payload.get("accepted_summary_path")
+        or accepted.get("summary_path"),
         "accepted_config": accepted.get("best_config_label")
         or accepted.get("best_feature"),
         "accepted_mean_best_nll": accepted.get("mean_best_nll"),
+        "accepted_delta_vs_raw": accepted.get("mean_best_nll_delta_vs_raw"),
+        "accepted_runner_up_feature": accepted.get("runner_up_feature"),
+        "accepted_margin_to_runner_up": accepted.get("margin_to_runner_up"),
+        "accepted_runner_up_within_uncertainty": accepted.get(
+            "runner_up_within_uncertainty"
+        ),
         "best_step": best.get("index"),
+        "best_role": best.get("role"),
+        "best_run_dir": best.get("run_dir"),
+        "best_summary_path": payload.get("best_summary_path")
+        or best.get("summary_path"),
         "best_config": best.get("best_config_label") or best.get("best_feature"),
         "best_mean_best_nll": best.get("mean_best_nll"),
         "best_delta_vs_raw": best.get("mean_best_nll_delta_vs_raw"),
+        "best_runner_up_feature": best.get("runner_up_feature"),
+        "best_margin_to_runner_up": best.get("margin_to_runner_up"),
+        "best_runner_up_within_uncertainty": best.get(
+            "runner_up_within_uncertainty"
+        ),
         "runner_up_feature": best.get("runner_up_feature"),
         "margin_to_runner_up": best.get("margin_to_runner_up"),
         "runner_up_within_uncertainty": best.get("runner_up_within_uncertainty"),
@@ -136,6 +155,90 @@ def _chain_row(path: Path, payload: dict[str, Any]) -> dict[str, Any]:
         "nonzero_exit_count": seed_summary.get("nonzero_exit_count", 0),
         "extra_explicit_seed_groups": payload.get("extra_explicit_seed_groups", []),
         "unused_explicit_seed_groups": payload.get("unused_explicit_seed_groups", []),
+    }
+
+
+def _leader_record(
+    row: dict[str, Any],
+    *,
+    prefix: str,
+    mean_best_nll: float,
+) -> dict[str, Any]:
+    return {
+        "source": row.get("source"),
+        "preset": row.get("preset"),
+        "run_root": row.get("run_root"),
+        "step": row.get(f"{prefix}_step"),
+        "role": row.get(f"{prefix}_role"),
+        "run_dir": row.get(f"{prefix}_run_dir"),
+        "summary_path": row.get(f"{prefix}_summary_path"),
+        "config": row.get(f"{prefix}_config"),
+        "mean_best_nll": mean_best_nll,
+        "delta_vs_raw": row.get(f"{prefix}_delta_vs_raw"),
+        "stopped_reason": row.get("stopped_reason"),
+        "allowed_gate_stop": row.get("allowed_gate_stop"),
+        "runner_up_feature": row.get(f"{prefix}_runner_up_feature"),
+        "margin_to_runner_up": row.get(f"{prefix}_margin_to_runner_up"),
+        "runner_up_within_uncertainty": row.get(
+            f"{prefix}_runner_up_within_uncertainty"
+        ),
+        "seed_source_counts": row.get("seed_source_counts"),
+        "command_source_counts": row.get("command_source_counts"),
+    }
+
+
+def _leader(rows: list[dict[str, Any]], *, prefix: str) -> dict[str, Any] | None:
+    candidates: list[tuple[float, dict[str, Any]]] = []
+    key = f"{prefix}_mean_best_nll"
+    for row in rows:
+        mean_best_nll = _number(row.get(key))
+        if mean_best_nll is not None:
+            candidates.append((mean_best_nll, row))
+    if not candidates:
+        return None
+    mean_best_nll, row = min(
+        candidates,
+        key=lambda candidate: (candidate[0], str(candidate[1].get("source"))),
+    )
+    return _leader_record(row, prefix=prefix, mean_best_nll=mean_best_nll)
+
+
+def _same_leader(
+    left: dict[str, Any] | None,
+    right: dict[str, Any] | None,
+) -> bool:
+    if left is None or right is None:
+        return False
+    return (
+        left.get("source") == right.get("source")
+        and left.get("step") == right.get("step")
+        and left.get("config") == right.get("config")
+    )
+
+
+def _selection(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    accepted = _leader(rows, prefix="accepted")
+    best = _leader(rows, prefix="best")
+    matches = _same_leader(accepted, best)
+    accepted_nll = _number(accepted.get("mean_best_nll")) if accepted else None
+    best_nll = _number(best.get("mean_best_nll")) if best else None
+    gap = (
+        accepted_nll - best_nll
+        if accepted_nll is not None and best_nll is not None
+        else None
+    )
+    return {
+        "accepted_candidate_count": sum(
+            1 for row in rows if _number(row.get("accepted_mean_best_nll")) is not None
+        ),
+        "best_candidate_count": sum(
+            1 for row in rows if _number(row.get("best_mean_best_nll")) is not None
+        ),
+        "accepted_champion": accepted,
+        "best_champion": best,
+        "accepted_matches_best": matches,
+        "best_requires_review": best is not None and not matches,
+        "accepted_vs_best_nll_gap": gap,
     }
 
 
@@ -219,12 +322,30 @@ def summarize_chains(
         "input_count": len(paths),
         "discovered_chain_count": len(discovered_paths),
         "aggregate": _aggregate(rows),
+        "selection": _selection(rows),
         "chains": rows,
     }
 
 
+def _fmt_leader(record: Any) -> str:
+    if not isinstance(record, dict):
+        return "-"
+    return (
+        "{config} (source={source}, step={step}, nll={nll}, "
+        "delta_vs_raw={delta}, summary={summary})"
+    ).format(
+        config=_fmt(record.get("config")),
+        source=_fmt(record.get("source")),
+        step=_fmt(record.get("step")),
+        nll=_fmt(record.get("mean_best_nll")),
+        delta=_fmt(record.get("delta_vs_raw")),
+        summary=_fmt(record.get("summary_path")),
+    )
+
+
 def _render_markdown(summary: dict[str, Any]) -> str:
     aggregate = summary.get("aggregate", {})
+    selection = summary.get("selection", {})
     chains = summary.get("chains", [])
     lines = [
         "# Char VAE Context Chain Comparison",
@@ -245,6 +366,18 @@ def _render_markdown(summary: dict[str, Any]) -> str:
         "- configured_seed_group_status_counts: "
         f"{_fmt_counts(_value(aggregate, 'configured_seed_group_status_counts'))}",
         f"- stopped_reason_counts: {_fmt_counts(_value(aggregate, 'stopped_reason_counts'))}",
+        "",
+        "## Selection",
+        "",
+        f"- accepted_candidate_count: {_fmt(_value(selection, 'accepted_candidate_count'))}",
+        f"- best_candidate_count: {_fmt(_value(selection, 'best_candidate_count'))}",
+        f"- accepted_champion: {_fmt_leader(_value(selection, 'accepted_champion'))}",
+        f"- best_champion: {_fmt_leader(_value(selection, 'best_champion'))}",
+        f"- accepted_matches_best: {_fmt(_value(selection, 'accepted_matches_best'))}",
+        f"- best_requires_review: {_fmt(_value(selection, 'best_requires_review'))}",
+        f"- accepted_vs_best_nll_gap: {_fmt(_value(selection, 'accepted_vs_best_nll_gap'))}",
+        "",
+        "## Chains",
         "",
         "| source | preset | stopped | planned | attempted | accepted | accepted_nll | best | best_nll | delta_vs_raw | runner_up | margin | tie | seed_sources | command_sources | group_statuses | gates | exits | extra | unused |",
         "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
