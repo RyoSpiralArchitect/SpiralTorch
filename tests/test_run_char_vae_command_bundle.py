@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import subprocess
 import tempfile
@@ -11,6 +12,17 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "tools" / "run_char_vae_command_bundle.py"
+
+
+def _load_module():
+    spec = importlib.util.spec_from_file_location(
+        "run_char_vae_command_bundle",
+        SCRIPT,
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec is not None and spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
 
 
 def _write_json(path: Path, payload: dict[str, object]) -> None:
@@ -181,6 +193,72 @@ def _write_bundle(
 
 
 class RunCharVaeCommandBundleTests(unittest.TestCase):
+    def test_history_markdown_surfaces_problem_signals(self) -> None:
+        mod = _load_module()
+        events = [
+            {
+                "target": "next",
+                "target_kind": "follow_up",
+                "dry_run": False,
+                "executed": True,
+                "returncode": 0,
+                "finished_at": "2026-06-28T00:00:00.000Z",
+                "recommendation_context": {
+                    "action": "continue_from_accepted",
+                    "champion": {"config": "latent@scale=0.5"},
+                },
+            },
+            {
+                "target": "next",
+                "target_kind": "review",
+                "dry_run": False,
+                "executed": False,
+                "returncode": 1,
+                "error": "command bundle did not pass the requested inspection gate",
+                "missing_required": ["recommended_review.sh"],
+                "recommendation_context": {
+                    "action": "review_absolute_best",
+                    "champion": {"config": "raw_latent@scale=4.0"},
+                },
+            },
+            {
+                "target": "next",
+                "target_kind": "review",
+                "dry_run": False,
+                "executed": False,
+                "returncode": 1,
+                "error": "command bundle did not pass the requested inspection gate",
+                "missing_required": ["recommended_review.sh"],
+                "recommendation_context": {
+                    "action": "review_absolute_best",
+                    "champion": {"config": "raw_latent@scale=4.0"},
+                },
+            },
+        ]
+        markdown = mod.render_history_markdown(
+            events,
+            history_jsonl_path=Path("/tmp/run_history.jsonl"),
+        )
+
+        self.assertIn("status_counts: blocked:2, ok:1", markdown)
+        self.assertIn("target_kind_counts: follow_up:1, review:2", markdown)
+        self.assertIn(
+            "recommendation_action_counts: continue_from_accepted:1, "
+            "review_absolute_best:2",
+            markdown,
+        )
+        self.assertIn("current_status_streak: blocked:2", markdown)
+        self.assertIn("latest_executed_status: ok", markdown)
+        self.assertIn("latest_executed_action: continue_from_accepted", markdown)
+        self.assertIn("latest_executed_champion_config: latent@scale=0.5", markdown)
+        self.assertIn("last_problem_status: blocked", markdown)
+        self.assertIn(
+            "last_problem_error: command bundle did not pass the requested "
+            "inspection gate",
+            markdown,
+        )
+        self.assertIn("last_problem_missing_required: recommended_review.sh", markdown)
+
     def test_cli_dry_run_reports_next_without_running(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             command_dir = _write_bundle(Path(tmp))
@@ -551,6 +629,21 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
         self.assertIn("latest_status: ok", history_markdown)
         self.assertIn("latest_target_kind: follow_up", history_markdown)
         self.assertIn("latest_recommendation_action: continue_from_accepted", history_markdown)
+        self.assertIn("## Decision Signals", history_markdown)
+        self.assertIn("status_counts: dry-run:1, ok:1", history_markdown)
+        self.assertIn("target_kind_counts: follow_up:2", history_markdown)
+        self.assertIn(
+            "recommendation_action_counts: continue_from_accepted:2",
+            history_markdown,
+        )
+        self.assertIn("current_status_streak: ok:1", history_markdown)
+        self.assertIn("latest_executed_status: ok", history_markdown)
+        self.assertIn("latest_executed_action: continue_from_accepted", history_markdown)
+        self.assertIn(
+            "latest_executed_champion_config: latent@normalize=blocks,scale=0.5",
+            history_markdown,
+        )
+        self.assertIn("last_problem_status: -", history_markdown)
         self.assertIn("## Recent Events", history_markdown)
         self.assertIn("| 2 | ok | next | follow_up | no | yes | 0 |", history_markdown)
 

@@ -11,7 +11,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 
 SCHEMA = "st.llm_char_vae_context.command_bundle_run.v1"
@@ -436,6 +436,52 @@ def _event_status(event: dict[str, Any]) -> str:
     return "failed"
 
 
+def _count_values(values: list[Any]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for value in values:
+        if value is None:
+            continue
+        key = str(value)
+        if not key:
+            continue
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def _fmt_counts(counts: dict[str, int]) -> str:
+    if not counts:
+        return "-"
+    return ", ".join(f"{key}:{counts[key]}" for key in sorted(counts))
+
+
+def _latest_event(
+    events: list[dict[str, Any]],
+    predicate: Callable[[dict[str, Any]], bool],
+) -> dict[str, Any] | None:
+    for event in reversed(events):
+        if predicate(event):
+            return event
+    return None
+
+
+def _status_streak(events: list[dict[str, Any]]) -> tuple[str | None, int]:
+    if not events:
+        return None, 0
+    status = _event_status(events[-1])
+    count = 0
+    for event in reversed(events):
+        if _event_status(event) != status:
+            break
+        count += 1
+    return status, count
+
+
+def _fmt_streak(status: str | None, count: int) -> str:
+    if status is None:
+        return "-"
+    return f"{status}:{count}"
+
+
 def _md_cell(value: Any) -> str:
     text = _fmt(value)
     return text.replace("|", "\\|").replace("\n", " ")
@@ -453,6 +499,24 @@ def render_history_markdown(
     latest = events[-1] if events else {}
     latest_context = _mapping(latest.get("recommendation_context"))
     latest_champion = _mapping(latest_context.get("champion"))
+    status_counts = _count_values([_event_status(event) for event in events])
+    target_kind_counts = _count_values([event.get("target_kind") for event in events])
+    action_counts = _count_values(
+        [
+            _mapping(event.get("recommendation_context")).get("action")
+            for event in events
+        ]
+    )
+    current_status, current_status_count = _status_streak(events)
+    latest_executed = _latest_event(events, lambda event: bool(event.get("executed")))
+    latest_executed_context = _mapping(
+        latest_executed.get("recommendation_context") if latest_executed else None
+    )
+    latest_executed_champion = _mapping(latest_executed_context.get("champion"))
+    last_problem = _latest_event(
+        events,
+        lambda event: _event_status(event) in {"blocked", "failed"},
+    )
     lines = [
         "# Char VAE Command Bundle Run History",
         "",
@@ -468,6 +532,20 @@ def render_history_markdown(
         f"- latest_target_kind: {_fmt(latest.get('target_kind'))}",
         f"- latest_recommendation_action: {_fmt(latest_context.get('action'))}",
         f"- latest_champion_config: {_fmt(latest_champion.get('config'))}",
+        "",
+        "## Decision Signals",
+        "",
+        f"- status_counts: {_fmt_counts(status_counts)}",
+        f"- target_kind_counts: {_fmt_counts(target_kind_counts)}",
+        f"- recommendation_action_counts: {_fmt_counts(action_counts)}",
+        f"- current_status_streak: {_fmt_streak(current_status, current_status_count)}",
+        f"- latest_executed_status: {_fmt(_event_status(latest_executed) if latest_executed else None)}",
+        f"- latest_executed_finished_at: {_fmt(latest_executed.get('finished_at') if latest_executed else None)}",
+        f"- latest_executed_action: {_fmt(latest_executed_context.get('action'))}",
+        f"- latest_executed_champion_config: {_fmt(latest_executed_champion.get('config'))}",
+        f"- last_problem_status: {_fmt(_event_status(last_problem) if last_problem else None)}",
+        f"- last_problem_error: {_fmt(last_problem.get('error') if last_problem else None)}",
+        f"- last_problem_missing_required: {_fmt(last_problem.get('missing_required') if last_problem else None)}",
         "",
         "## Recent Events",
         "",
