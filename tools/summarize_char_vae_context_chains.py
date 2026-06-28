@@ -51,6 +51,18 @@ def _read_json(path: Path) -> dict[str, Any]:
     return payload
 
 
+def _maybe_read_json(path: Any) -> dict[str, Any] | None:
+    if not isinstance(path, str) or not path:
+        return None
+    json_path = Path(path)
+    if not json_path.exists() or not json_path.is_file():
+        return None
+    try:
+        return _read_json(json_path)
+    except (OSError, json.JSONDecodeError, ValueError):
+        return None
+
+
 def _value(payload: dict[str, Any] | None, *keys: str) -> Any:
     item: Any = payload
     for key in keys:
@@ -242,67 +254,147 @@ def _selection(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _summary_follow_up_command(summary_path: Any) -> dict[str, Any]:
+    record: dict[str, Any] = {
+        "schema": "st.llm_char_vae_context.chain_recommended_command.v1",
+        "source_summary_path": summary_path if isinstance(summary_path, str) else None,
+        "available": False,
+        "command_source": None,
+        "script_usage": None,
+        "script_path": None,
+        "shell_command": None,
+        "default_new_seeds": None,
+        "default_run_dir": None,
+        "default_follow_up_from": None,
+        "missing_reason": "summary path unavailable",
+    }
+    summary = _maybe_read_json(summary_path)
+    if summary is None:
+        if isinstance(summary_path, str) and summary_path:
+            record["missing_reason"] = "summary json unavailable"
+        return record
+
+    command_names = [
+        "guided_next_follow_up_command",
+        "best_generation_follow_up_command",
+        "broadened_follow_up_command",
+        "next_follow_up_command",
+    ]
+    for name in command_names:
+        command = summary.get(name)
+        if not isinstance(command, dict):
+            continue
+        if name == "guided_next_follow_up_command" and not command.get("enabled"):
+            continue
+        script_usage = command.get("script_usage")
+        script_path = command.get("script_path")
+        shell_command = command.get("shell_command")
+        if not any(
+            isinstance(item, str) and item
+            for item in (script_usage, script_path, shell_command)
+        ):
+            continue
+        record.update(
+            {
+                "available": True,
+                "command_source": name,
+                "script_usage": script_usage,
+                "script_path": script_path,
+                "shell_command": shell_command,
+                "default_new_seeds": command.get("default_new_seeds"),
+                "default_run_dir": command.get("default_run_dir"),
+                "default_follow_up_from": command.get("default_follow_up_from"),
+                "missing_reason": None,
+            }
+        )
+        return record
+
+    record["missing_reason"] = "no runnable follow-up command in summary"
+    return record
+
+
+def _with_recommended_commands(recommendation: dict[str, Any]) -> dict[str, Any]:
+    recommendation = dict(recommendation)
+    recommendation["follow_up_command"] = _summary_follow_up_command(
+        recommendation.get("follow_up_from_summary_path")
+    )
+    recommendation["review_command"] = _summary_follow_up_command(
+        recommendation.get("review_summary_path")
+    )
+    return recommendation
+
+
 def _recommendation(selection: dict[str, Any]) -> dict[str, Any]:
     accepted = selection.get("accepted_champion")
     accepted = accepted if isinstance(accepted, dict) else None
     best = selection.get("best_champion")
     best = best if isinstance(best, dict) else None
     if best is not None and selection.get("best_requires_review"):
-        return {
-            "schema": "st.llm_char_vae_context.chain_recommendation.v1",
-            "action": "review_absolute_best",
-            "reason": (
-                "absolute best has lower NLL than the accepted champion, "
-                "but it differs from the safe accepted promotion"
-            ),
-            "follow_up_from_summary_path": accepted.get("summary_path")
-            if accepted is not None
-            else None,
-            "review_summary_path": best.get("summary_path"),
-            "champion_source": "best_champion",
-            "champion": best,
-            "fallback_source": "accepted_champion" if accepted is not None else None,
-            "fallback": accepted,
-        }
+        return _with_recommended_commands(
+            {
+                "schema": "st.llm_char_vae_context.chain_recommendation.v1",
+                "action": "review_absolute_best",
+                "reason": (
+                    "absolute best has lower NLL than the accepted champion, "
+                    "but it differs from the safe accepted promotion"
+                ),
+                "follow_up_from_summary_path": accepted.get("summary_path")
+                if accepted is not None
+                else None,
+                "review_summary_path": best.get("summary_path"),
+                "champion_source": "best_champion",
+                "champion": best,
+                "fallback_source": (
+                    "accepted_champion" if accepted is not None else None
+                ),
+                "fallback": accepted,
+            }
+        )
     if accepted is not None:
-        return {
-            "schema": "st.llm_char_vae_context.chain_recommendation.v1",
-            "action": "continue_from_accepted",
-            "reason": (
-                "accepted champion matches the absolute best"
-                if selection.get("accepted_matches_best")
-                else "accepted champion is the best safe promotion candidate"
-            ),
-            "follow_up_from_summary_path": accepted.get("summary_path"),
-            "review_summary_path": None,
-            "champion_source": "accepted_champion",
-            "champion": accepted,
-            "fallback_source": None,
-            "fallback": None,
-        }
+        return _with_recommended_commands(
+            {
+                "schema": "st.llm_char_vae_context.chain_recommendation.v1",
+                "action": "continue_from_accepted",
+                "reason": (
+                    "accepted champion matches the absolute best"
+                    if selection.get("accepted_matches_best")
+                    else "accepted champion is the best safe promotion candidate"
+                ),
+                "follow_up_from_summary_path": accepted.get("summary_path"),
+                "review_summary_path": None,
+                "champion_source": "accepted_champion",
+                "champion": accepted,
+                "fallback_source": None,
+                "fallback": None,
+            }
+        )
     if best is not None:
-        return {
+        return _with_recommended_commands(
+            {
+                "schema": "st.llm_char_vae_context.chain_recommendation.v1",
+                "action": "review_absolute_best",
+                "reason": "only an absolute best candidate is available",
+                "follow_up_from_summary_path": None,
+                "review_summary_path": best.get("summary_path"),
+                "champion_source": "best_champion",
+                "champion": best,
+                "fallback_source": None,
+                "fallback": None,
+            }
+        )
+    return _with_recommended_commands(
+        {
             "schema": "st.llm_char_vae_context.chain_recommendation.v1",
-            "action": "review_absolute_best",
-            "reason": "only an absolute best candidate is available",
+            "action": "collect_more_chains",
+            "reason": "no accepted or best chain candidates were found",
             "follow_up_from_summary_path": None,
-            "review_summary_path": best.get("summary_path"),
-            "champion_source": "best_champion",
-            "champion": best,
+            "review_summary_path": None,
+            "champion_source": None,
+            "champion": None,
             "fallback_source": None,
             "fallback": None,
         }
-    return {
-        "schema": "st.llm_char_vae_context.chain_recommendation.v1",
-        "action": "collect_more_chains",
-        "reason": "no accepted or best chain candidates were found",
-        "follow_up_from_summary_path": None,
-        "review_summary_path": None,
-        "champion_source": None,
-        "champion": None,
-        "fallback_source": None,
-        "fallback": None,
-    }
+    )
 
 
 def _sort_rows(rows: list[dict[str, Any]], sort_by: str) -> list[dict[str, Any]]:
@@ -421,6 +513,19 @@ def _fmt_recommendation(record: Any) -> str:
     )
 
 
+def _fmt_command(record: Any) -> str:
+    if not isinstance(record, dict):
+        return "-"
+    if not record.get("available"):
+        return f"unavailable ({_fmt(record.get('missing_reason'))})"
+    return (
+        "{source}: {usage}"
+    ).format(
+        source=_fmt(record.get("command_source")),
+        usage=_fmt(record.get("script_usage") or record.get("shell_command")),
+    )
+
+
 def _render_markdown(summary: dict[str, Any]) -> str:
     aggregate = summary.get("aggregate", {})
     selection = summary.get("selection", {})
@@ -458,6 +563,8 @@ def _render_markdown(summary: dict[str, Any]) -> str:
         f"- recommendation: {_fmt_recommendation(recommendation)}",
         f"- follow_up_from_summary_path: {_fmt(_value(recommendation, 'follow_up_from_summary_path'))}",
         f"- review_summary_path: {_fmt(_value(recommendation, 'review_summary_path'))}",
+        f"- follow_up_command: {_fmt_command(_value(recommendation, 'follow_up_command'))}",
+        f"- review_command: {_fmt_command(_value(recommendation, 'review_command'))}",
         "",
         "## Chains",
         "",

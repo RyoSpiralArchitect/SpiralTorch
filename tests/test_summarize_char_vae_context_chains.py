@@ -32,6 +32,11 @@ def _write_chain(path: Path, payload: dict[str, object]) -> Path:
     return chain_path
 
 
+def _write_json(path: Path, payload: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
 class SummarizeCharVaeContextChainsTests(unittest.TestCase):
     def test_summarize_chains_aggregates_seed_resolution(self) -> None:
         mod = _load_module()
@@ -211,6 +216,40 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
                 root / "reviewed" / "follow_up_01" / "summary.json"
             )
             safe_follow_summary = root / "safe" / "follow_up_01" / "summary.json"
+            _write_json(
+                reviewed_follow_summary,
+                {
+                    "guided_next_follow_up_command": {
+                        "enabled": True,
+                        "script_path": str(
+                            root / "reviewed" / "follow_up_01" / "guided.sh"
+                        ),
+                        "script_usage": (
+                            "FOLLOW_UP_FROM=reviewed NEW_SEEDS=41 "
+                            "bash reviewed/guided.sh"
+                        ),
+                        "shell_command": "PYTHONNOUSERSITE=1 python reviewed.py",
+                        "default_new_seeds": "41",
+                        "default_run_dir": str(root / "reviewed" / "next"),
+                        "default_follow_up_from": str(reviewed_follow_summary),
+                    },
+                },
+            )
+            _write_json(
+                safe_follow_summary,
+                {
+                    "next_follow_up_command": {
+                        "script_path": str(root / "safe" / "next.sh"),
+                        "script_usage": (
+                            "FOLLOW_UP_FROM=safe NEW_SEEDS=31 bash safe/next.sh"
+                        ),
+                        "shell_command": "PYTHONNOUSERSITE=1 python safe.py",
+                        "default_new_seeds": "31",
+                        "default_run_dir": str(root / "safe" / "next"),
+                        "default_follow_up_from": str(safe_follow_summary),
+                    },
+                },
+            )
             reviewed = _write_chain(
                 root / "reviewed",
                 {
@@ -327,11 +366,29 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             summary["recommendation"]["fallback"]["summary_path"],
             str(safe_follow_summary),
         )
+        self.assertEqual(
+            summary["recommendation"]["follow_up_command"]["command_source"],
+            "next_follow_up_command",
+        )
+        self.assertEqual(
+            summary["recommendation"]["follow_up_command"]["script_usage"],
+            "FOLLOW_UP_FROM=safe NEW_SEEDS=31 bash safe/next.sh",
+        )
+        self.assertEqual(
+            summary["recommendation"]["review_command"]["command_source"],
+            "guided_next_follow_up_command",
+        )
+        self.assertEqual(
+            summary["recommendation"]["review_command"]["script_usage"],
+            "FOLLOW_UP_FROM=reviewed NEW_SEEDS=41 bash reviewed/guided.sh",
+        )
         self.assertIn("best_requires_review: yes", markdown)
         self.assertIn("accepted_vs_best_nll_gap: 0.050000", markdown)
         self.assertIn("recommendation: review_absolute_best", markdown)
         self.assertIn(f"follow_up_from={safe_follow_summary}", markdown)
         self.assertIn(f"review={reviewed_follow_summary}", markdown)
+        self.assertIn("follow_up_command: next_follow_up_command", markdown)
+        self.assertIn("review_command: guided_next_follow_up_command", markdown)
 
     def test_recursive_discovery_finds_nested_chains_once(self) -> None:
         mod = _load_module()
