@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import shlex
 import subprocess
 import tempfile
 import unittest
@@ -210,12 +211,25 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
     def test_cli_writes_recommended_command_scripts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            relative_script = root / "accepted" / "next.sh"
+            relative_script.parent.mkdir(parents=True, exist_ok=True)
+            relative_script.write_text(
+                "\n".join(
+                    [
+                        "#!/usr/bin/env bash",
+                        "set -euo pipefail",
+                        'printf "cwd=%s follow=%s seeds=%s\\n" "$(pwd)" "$FOLLOW_UP_FROM" "$NEW_SEEDS" > wrapper.out',
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
             summary_path = root / "chain" / "accepted" / "summary.json"
             _write_json(
                 summary_path,
                 {
                     "next_follow_up_command": {
-                        "script_path": str(root / "chain" / "accepted" / "next.sh"),
+                        "script_path": str(relative_script),
                         "script_usage": (
                             "FOLLOW_UP_FROM=accepted NEW_SEEDS=31 bash accepted/next.sh"
                         ),
@@ -274,7 +288,7 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
                     "--command-out-dir",
                     str(command_dir),
                 ],
-                cwd=ROOT,
+                cwd=root,
                 text=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -288,6 +302,7 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             review_script = command_dir / "recommended_review.sh"
             manifest_path = command_dir / "recommendation.json"
             readme_path = command_dir / "README.md"
+            execution_cwd = str(root.resolve())
             self.assertTrue(follow_up_script.exists())
             self.assertFalse(review_script.exists())
             self.assertTrue(manifest_path.exists())
@@ -301,6 +316,10 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             )
             self.assertIsNone(payload["command_scripts"]["review_path"])
             self.assertEqual(payload["command_scripts"]["written_count"], 1)
+            self.assertEqual(
+                payload["command_scripts"]["execution_cwd"],
+                execution_cwd,
+            )
             self.assertEqual(
                 payload["command_scripts"]["manifest_path"],
                 str(manifest_path),
@@ -317,11 +336,31 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
                 manifest["command_scripts"]["follow_up_path"],
                 str(follow_up_script),
             )
+            self.assertEqual(
+                manifest["command_scripts"]["execution_cwd"],
+                execution_cwd,
+            )
+            self.assertIn(f"cd {shlex.quote(execution_cwd)}", script_text)
             self.assertIn("FOLLOW_UP_FROM=accepted NEW_SEEDS=31", script_text)
+            run_result = subprocess.run(
+                ["bash", str(follow_up_script)],
+                cwd=command_dir,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            self.assertEqual(run_result.returncode, 0, run_result.stderr)
+            self.assertEqual(
+                (root / "wrapper.out").read_text(encoding="utf-8").strip(),
+                f"cwd={execution_cwd} follow=accepted seeds=31",
+            )
             self.assertIn("Char VAE Chain Recommended Commands", readme)
             self.assertIn("continue_from_accepted", readme)
+            self.assertIn("execution_cwd", readme)
             self.assertIn("recommended_follow_up.sh", readme)
             self.assertIn("recommended_follow_up.sh", markdown)
+            self.assertIn("command_execution_cwd", markdown)
             self.assertIn("recommendation.json", markdown)
             self.assertIn("README.md", markdown)
 
