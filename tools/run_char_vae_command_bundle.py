@@ -774,6 +774,46 @@ def run_bundle(
             command_scripts,
         )
     required_ready = bool(inspection.get("strict_ready" if strict else "bundle_ready"))
+
+    def finish(summary: dict[str, Any]) -> dict[str, Any]:
+        summary = write_run_artifacts(
+            summary,
+            json_out=json_out,
+            markdown_out=markdown_out,
+            history_out=history_out,
+            history_markdown_out=history_markdown_out,
+            history_summary_out=history_summary_out,
+            append_history=append_run_history,
+        )
+        if not write_inspection_report:
+            return summary
+        refreshed_inspection = inspector.inspect_bundle(command_dir)
+        refreshed_inspection = _write_inspection_report(
+            inspector,
+            command_dir,
+            refreshed_inspection,
+            command_scripts,
+        )
+        summary = dict(summary)
+        summary["bundle_ready"] = bool(refreshed_inspection.get("bundle_ready"))
+        summary["strict_ready"] = bool(refreshed_inspection.get("strict_ready"))
+        summary["missing_required"] = (
+            refreshed_inspection.get("missing_required") or []
+        )
+        summary["missing_optional"] = (
+            refreshed_inspection.get("missing_optional") or []
+        )
+        summary["inspection"] = refreshed_inspection
+        return write_run_artifacts(
+            summary,
+            json_out=json_out,
+            markdown_out=markdown_out,
+            history_out=history_out,
+            history_markdown_out=history_markdown_out,
+            history_summary_out=history_summary_out,
+            append_history=False,
+        )
+
     if not required_ready:
         summary = _runner_summary(
             command_dir=command_dir,
@@ -790,15 +830,7 @@ def run_bundle(
             error="command bundle did not pass the requested inspection gate",
             **timing_fields(),
         )
-        summary = write_run_artifacts(
-            summary,
-            json_out=json_out,
-            markdown_out=markdown_out,
-            history_out=history_out,
-            history_markdown_out=history_markdown_out,
-            history_summary_out=history_summary_out,
-            append_history=append_run_history,
-        )
+        summary = finish(summary)
         return 1, summary
     if script_path is None:
         summary = _runner_summary(
@@ -816,15 +848,7 @@ def run_bundle(
             error=f"manifest does not declare {script_key}",
             **timing_fields(),
         )
-        summary = write_run_artifacts(
-            summary,
-            json_out=json_out,
-            markdown_out=markdown_out,
-            history_out=history_out,
-            history_markdown_out=history_markdown_out,
-            history_summary_out=history_summary_out,
-            append_history=append_run_history,
-        )
+        summary = finish(summary)
         return 1, summary
     if dry_run:
         summary = _runner_summary(
@@ -841,15 +865,7 @@ def run_bundle(
             returncode=0,
             **timing_fields(),
         )
-        summary = write_run_artifacts(
-            summary,
-            json_out=json_out,
-            markdown_out=markdown_out,
-            history_out=history_out,
-            history_markdown_out=history_markdown_out,
-            history_summary_out=history_summary_out,
-            append_history=append_run_history,
-        )
+        summary = finish(summary)
         return 0, summary
     if json_mode:
         result = subprocess.run(
@@ -877,15 +893,7 @@ def run_bundle(
             executed=True,
             **timing_fields(),
         )
-        summary = write_run_artifacts(
-            summary,
-            json_out=json_out,
-            markdown_out=markdown_out,
-            history_out=history_out,
-            history_markdown_out=history_markdown_out,
-            history_summary_out=history_summary_out,
-            append_history=append_run_history,
-        )
+        summary = finish(summary)
         return result.returncode, summary
     result = subprocess.run(
         ["bash", str(script_path)],
@@ -907,15 +915,7 @@ def run_bundle(
         executed=True,
         **timing_fields(),
     )
-    summary = write_run_artifacts(
-        summary,
-        json_out=json_out,
-        markdown_out=markdown_out,
-        history_out=history_out,
-        history_markdown_out=history_markdown_out,
-        history_summary_out=history_summary_out,
-        append_history=append_run_history,
-    )
+    summary = finish(summary)
     return result.returncode, summary
 
 

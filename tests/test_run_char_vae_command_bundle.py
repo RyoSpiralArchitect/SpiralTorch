@@ -537,11 +537,28 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
             run_report = json.loads(
                 (command_dir / "run.json").read_text(encoding="utf-8")
             )
+            inspection_outputs = {
+                item["label"]: item for item in inspection["declared_outputs"]
+            }
+            payload_outputs = {
+                item["label"]: item
+                for item in payload["inspection"]["declared_outputs"]
+            }
+            run_report_outputs = {
+                item["label"]: item
+                for item in run_report["inspection"]["declared_outputs"]
+            }
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(markdown_exists)
         self.assertTrue(run_markdown_exists)
         self.assertTrue(inspection["strict_ready"])
+        self.assertTrue(inspection_outputs["run_json"]["exists"])
+        self.assertTrue(inspection_outputs["run_markdown"]["exists"])
+        self.assertTrue(payload_outputs["run_json"]["exists"])
+        self.assertTrue(payload_outputs["run_markdown"]["exists"])
+        self.assertTrue(run_report_outputs["run_json"]["exists"])
+        self.assertTrue(run_report_outputs["run_markdown"]["exists"])
         self.assertEqual(
             payload["inspection"]["inspection_json_path"],
             str(command_dir / "inspection.json"),
@@ -566,6 +583,67 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
         self.assertIsNone(run_report["run_history_jsonl_path"])
         self.assertIsNone(run_report["run_history_markdown_path"])
         self.assertIsNone(run_report["run_history_summary_path"])
+
+    def test_cli_refreshes_inspection_after_writing_history_reports(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            command_dir = _write_bundle(Path(tmp))
+            result = subprocess.run(
+                [
+                    "python3",
+                    "-P",
+                    str(SCRIPT),
+                    str(command_dir),
+                    "--dry-run",
+                    "--write-inspection-report",
+                    "--write-run-report",
+                    "--append-run-history",
+                    "--write-run-history-report",
+                    "--json",
+                ],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            payload = json.loads(result.stdout)
+            inspection = json.loads(
+                (command_dir / "inspection.json").read_text(encoding="utf-8")
+            )
+            run_report = json.loads(
+                (command_dir / "run.json").read_text(encoding="utf-8")
+            )
+            events = [
+                json.loads(line)
+                for line in (command_dir / "run_history.jsonl")
+                .read_text(encoding="utf-8")
+                .splitlines()
+            ]
+            inspection_outputs = {
+                item["label"]: item for item in inspection["declared_outputs"]
+            }
+            inspection_status = inspection["run_history_summary_status"]
+            payload_status = payload["inspection"]["run_history_summary_status"]
+            run_report_status = run_report["inspection"]["run_history_summary_status"]
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(events), 1)
+        self.assertTrue(inspection_outputs["run_json"]["exists"])
+        self.assertTrue(inspection_outputs["run_markdown"]["exists"])
+        self.assertTrue(inspection_outputs["run_history_jsonl"]["exists"])
+        self.assertTrue(inspection_outputs["run_history_markdown"]["exists"])
+        self.assertTrue(inspection_outputs["run_history_summary"]["exists"])
+        self.assertTrue(inspection_status["exists"])
+        self.assertTrue(inspection_status["valid_json"])
+        self.assertTrue(inspection_status["schema_ok"])
+        self.assertEqual(inspection_status["total_runs"], 1)
+        self.assertEqual(inspection_status["history_event_count"], 1)
+        self.assertTrue(inspection_status["matches_history_event_count"])
+        self.assertIsNone(inspection_status["error"])
+        self.assertEqual(payload_status, inspection_status)
+        self.assertEqual(run_report_status, inspection_status)
+        self.assertEqual(payload["run_history_summary"]["total_runs"], 1)
+        self.assertEqual(run_report["run_history_summary"]["total_runs"], 1)
 
     def test_cli_appends_compact_run_history(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
