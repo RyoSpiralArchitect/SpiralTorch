@@ -41,6 +41,13 @@ def _load_runner() -> Any:
     return module
 
 
+def _read_json(path: Path) -> dict[str, Any]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"{path} did not contain a JSON object")
+    return payload
+
+
 def _mapping(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
@@ -65,6 +72,57 @@ def _csv_values(values: list[str] | None) -> list[str]:
             if item:
                 parsed.append(item)
     return parsed
+
+
+def _token_matches_path(token: str, expected_path: Path) -> bool:
+    token_path = Path(token)
+    if not token_path.is_absolute():
+        return False
+    try:
+        return token_path.resolve() == expected_path.resolve()
+    except OSError:
+        return token_path.absolute() == expected_path.resolve()
+
+
+def _continuation_argv_from_report(command_dir: Path, report_path: Path) -> list[str]:
+    payload = _read_json(report_path)
+    if payload.get("schema") != SCHEMA:
+        raise ValueError(f"{report_path} is not a char VAE history loop report")
+    report_command_dir = payload.get("command_dir")
+    if not isinstance(report_command_dir, str) or not _token_matches_path(
+        report_command_dir,
+        command_dir,
+    ):
+        raise ValueError("run_loop report belongs to a different command bundle")
+    handoff_status = payload.get("handoff_status")
+    if handoff_status not in {None, "continuation_ready"}:
+        raise ValueError(f"run_loop report is not continuation-ready: {handoff_status}")
+    if payload.get("final_next_action_runnable") is not True:
+        raise ValueError("run_loop report does not expose a runnable final action")
+    continuation_command = payload.get("continuation_command")
+    if not isinstance(continuation_command, str) or not continuation_command:
+        raise ValueError("run_loop report does not contain a continuation command")
+    tokens = shlex.split(continuation_command)
+    if "--resume-from-report" in tokens:
+        raise ValueError("run_loop continuation command cannot recursively resume")
+    script_index = next(
+        (
+            index
+            for index, token in enumerate(tokens)
+            if Path(token).name == Path(__file__).name
+        ),
+        None,
+    )
+    if script_index is None:
+        raise ValueError("run_loop continuation command does not call this loop runner")
+    argv = tokens[script_index + 1 :]
+    if not argv:
+        raise ValueError("run_loop continuation command is missing command_dir")
+    if not _token_matches_path(argv[0], command_dir):
+        raise ValueError("run_loop continuation command targets a different bundle")
+    if "--max-steps" not in argv:
+        raise ValueError("run_loop continuation command is missing --max-steps")
+    return argv
 
 
 def _loop_command_line(
@@ -366,6 +424,7 @@ def _failure_summary(
     fail_on_final_actions: list[str],
     fail_on_max_steps_continuation: bool,
     error: str,
+    stop_reason: str = "loop_setup_failed",
 ) -> dict[str, Any]:
     finished_at = _utc_now()
     return {
@@ -383,7 +442,7 @@ def _failure_summary(
         "executed_count": 0,
         "success_count": 0,
         "failure_count": 0,
-        "stop_reason": "loop_setup_failed",
+        "stop_reason": stop_reason,
         "fail_on_final_actions": fail_on_final_actions,
         "final_action_failed": False,
         "fail_on_max_steps_continuation": fail_on_max_steps_continuation,
@@ -568,6 +627,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="resolve the next history-guided step without executing or appending history",
     )
     parser.add_argument(
+        "--resume-from-report",
+        action="store_true",
+        help=(
+            "read run_loop.json and run its validated continuation_command when "
+            "the previous handoff is continuation-ready"
+        ),
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         help="print a JSON loop summary",
@@ -630,6 +697,38 @@ def main(argv: list[str] | None = None) -> int:
         if args.fail_on_final_action is None
         else _csv_values(args.fail_on_final_action)
     )
+    if args.resume_from_report:
+        try:
+            continuation_argv = _continuation_argv_from_report(
+                command_dir,
+                command_dir / "run_loop.json",
+            )
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            summary = _failure_summary(
+                command_dir,
+                max_steps=args.max_steps,
+                strict=not args.no_strict,
+                dry_run=bool(args.dry_run),
+                fail_on_final_actions=fail_on_final_actions,
+                fail_on_max_steps_continuation=bool(
+                    args.fail_on_max_steps_continuation
+                ),
+                error=str(exc),
+                stop_reason="loop_resume_failed",
+            )
+            summary = write_loop_artifacts(
+                summary,
+                json_out=json_out,
+                markdown_out=markdown_out,
+            )
+            if args.json:
+                print(json.dumps(summary, indent=2, sort_keys=True))
+            else:
+                print(render_markdown(summary), file=sys.stderr)
+            return 1
+        if args.json and "--json" not in continuation_argv:
+            continuation_argv.append("--json")
+        return main(continuation_argv)
     try:
         returncode, summary = run_loop(
             command_dir,

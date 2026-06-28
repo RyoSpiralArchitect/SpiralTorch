@@ -92,6 +92,13 @@ def _history_loop_command(command_dir: Path) -> str:
     )
 
 
+def _history_loop_resume_command(command_dir: Path) -> str:
+    return (
+        "env PYTHONNOUSERSITE=1 python3 -P "
+        f"{LOOP_SCRIPT} {command_dir} --resume-from-report"
+    )
+
+
 def _write_bundle(
     root: Path,
     *,
@@ -162,6 +169,9 @@ def _write_bundle(
                     command_dir
                 ),
                 "history_loop_command": _history_loop_command(command_dir),
+                "history_loop_resume_command": _history_loop_resume_command(
+                    command_dir
+                ),
                 "history_report_command": _history_report_command(command_dir),
                 "run_json_path": str(run_json),
                 "run_markdown_path": str(run_markdown),
@@ -222,19 +232,28 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
             payload["history_loop_command"],
             _history_loop_command(command_dir),
         )
+        self.assertEqual(
+            payload["history_loop_resume_command"],
+            _history_loop_resume_command(command_dir),
+        )
         commands = {item["label"]: item for item in payload["declared_commands"]}
         self.assertTrue(commands["runner_command"]["ok"])
         self.assertTrue(commands["history_next_action_command"]["ok"])
         self.assertTrue(commands["history_loop_command"]["ok"])
+        self.assertTrue(commands["history_loop_resume_command"]["ok"])
         self.assertTrue(commands["history_report_command"]["ok"])
         self.assertIsNone(commands["history_next_action_command"]["parse_error"])
         self.assertIsNone(commands["history_loop_command"]["parse_error"])
+        self.assertIsNone(commands["history_loop_resume_command"]["parse_error"])
         self.assertIsNone(commands["history_report_command"]["parse_error"])
         self.assertTrue(commands["runner_command"]["target_command_dir_ok"])
         self.assertTrue(
             commands["history_next_action_command"]["target_command_dir_ok"]
         )
         self.assertTrue(commands["history_loop_command"]["target_command_dir_ok"])
+        self.assertTrue(
+            commands["history_loop_resume_command"]["target_command_dir_ok"]
+        )
         self.assertTrue(commands["history_report_command"]["target_command_dir_ok"])
         self.assertIn(
             "--use-history-next-action",
@@ -247,6 +266,10 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
         self.assertIn(
             "--write-loop-report",
             commands["history_loop_command"]["tokens"],
+        )
+        self.assertIn(
+            "--resume-from-report",
+            commands["history_loop_resume_command"]["tokens"],
         )
         self.assertEqual(
             commands["history_next_action_command"]["required_flags"],
@@ -271,6 +294,10 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
                 "--fail-on-max-steps-continuation",
                 "--write-loop-report",
             ],
+        )
+        self.assertEqual(
+            commands["history_loop_resume_command"]["required_flags"],
+            ["run_char_vae_history_loop.py", "--resume-from-report"],
         )
         self.assertEqual(
             commands["history_report_command"]["forbidden_flags"],
@@ -395,8 +422,10 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
         self.assertIn("declared_command_issues: -", markdown_result.stdout)
         self.assertIn("history_report_command", markdown_result.stdout)
         self.assertIn("history_loop_command", markdown_result.stdout)
+        self.assertIn("history_loop_resume_command", markdown_result.stdout)
         self.assertIn("--history-report-only", markdown_result.stdout)
         self.assertIn("--write-loop-report", markdown_result.stdout)
+        self.assertIn("--resume-from-report", markdown_result.stdout)
         self.assertIn("run_history_summary", markdown_result.stdout)
         self.assertIn("run_loop_status_issues: -", markdown_result.stdout)
         self.assertIn("run_loop_handoff_recommended_action: -", markdown_result.stdout)

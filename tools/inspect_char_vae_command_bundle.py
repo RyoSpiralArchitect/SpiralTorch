@@ -647,6 +647,12 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
         command_scripts.get("history_loop_runner_path")
     )
     history_loop_command = _command_from(command_scripts.get("history_loop_command"))
+    history_loop_resume_runner_path = _path_from(
+        command_scripts.get("history_loop_resume_runner_path")
+    )
+    history_loop_resume_command = _command_from(
+        command_scripts.get("history_loop_resume_command")
+    )
     history_report_command = _command_from(
         command_scripts.get("history_report_command")
     )
@@ -674,6 +680,10 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
     history_loop_runner_status = _runner_wrapper_status(
         history_loop_runner_path,
         runner_command=history_loop_command,
+    )
+    history_loop_resume_runner_status = _runner_wrapper_status(
+        history_loop_resume_runner_path,
+        runner_command=history_loop_resume_command,
     )
 
     chain_sources = comparison.get("chain_sources")
@@ -743,6 +753,12 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
             required=False,
         ),
         _check(
+            "history_loop_resume_runner_script",
+            path=history_loop_resume_runner_path,
+            ok=bool(history_loop_resume_runner_status["ok"]),
+            required=False,
+        ),
+        _check(
             "chain_sources",
             path=None,
             ok=bool(chain_source_paths) and not missing_chain_sources,
@@ -800,6 +816,12 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
                 "--fail-on-max-steps-continuation",
                 "--write-loop-report",
             ),
+            command_dir=command_dir,
+        ),
+        _declared_command(
+            "history_loop_resume_command",
+            history_loop_resume_command,
+            required_flags=("run_char_vae_history_loop.py", "--resume-from-report"),
             command_dir=command_dir,
         ),
     ]
@@ -872,6 +894,13 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
             else None
         ),
         "history_loop_runner_status": history_loop_runner_status,
+        "history_loop_resume_command": history_loop_resume_command,
+        "history_loop_resume_runner_path": (
+            str(history_loop_resume_runner_path)
+            if history_loop_resume_runner_path is not None
+            else None
+        ),
+        "history_loop_resume_runner_status": history_loop_resume_runner_status,
         "history_report_command": history_report_command,
         "declared_commands": declared_commands,
         "declared_command_issues": declared_command_issues,
@@ -974,6 +1003,23 @@ def render_markdown(summary: dict[str, Any]) -> str:
         (
             "- history_loop_runner_error: "
             f"{_fmt(_value(summary, 'history_loop_runner_status', 'error'))}"
+        ),
+        f"- history_loop_resume_command: {_fmt(summary.get('history_loop_resume_command'))}",
+        (
+            "- history_loop_resume_runner_path: "
+            f"{_fmt(summary.get('history_loop_resume_runner_path'))}"
+        ),
+        (
+            "- history_loop_resume_runner_ok: "
+            f"{_fmt(_value(summary, 'history_loop_resume_runner_status', 'ok'))}"
+        ),
+        (
+            "- history_loop_resume_runner_executes_command: "
+            f"{_fmt(_value(summary, 'history_loop_resume_runner_status', 'executes_runner_command'))}"
+        ),
+        (
+            "- history_loop_resume_runner_error: "
+            f"{_fmt(_value(summary, 'history_loop_resume_runner_status', 'error'))}"
         ),
         f"- history_report_command: {_fmt(summary.get('history_report_command'))}",
         f"- declared_command_issues: {_fmt_list(summary.get('declared_command_issues'))}",

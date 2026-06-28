@@ -107,6 +107,18 @@ def _history_loop_runner_path(command_dir: Path) -> str:
     return str((command_dir / "run_history_loop.sh").resolve())
 
 
+def _history_loop_resume_command(command_dir: Path) -> str:
+    return (
+        "env PYTHONNOUSERSITE=1 python3 -P "
+        f"{shlex.quote(str(LOOP_SCRIPT.resolve()))} "
+        f"{shlex.quote(str(command_dir.resolve()))} --resume-from-report"
+    )
+
+
+def _history_loop_resume_runner_path(command_dir: Path) -> str:
+    return str((command_dir / "run_resume_history_loop.sh").resolve())
+
+
 def _history_report_command(command_dir: Path) -> str:
     return (
         "env PYTHONNOUSERSITE=1 python3 -P "
@@ -395,6 +407,14 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             _history_loop_runner_path(command_dir),
         )
         self.assertEqual(
+            manifest["command_scripts"]["history_loop_resume_command"],
+            _history_loop_resume_command(command_dir),
+        )
+        self.assertEqual(
+            manifest["command_scripts"]["history_loop_resume_runner_path"],
+            _history_loop_resume_runner_path(command_dir),
+        )
+        self.assertEqual(
             manifest["command_scripts"]["history_report_command"],
             _history_report_command(command_dir),
         )
@@ -435,8 +455,11 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
         self.assertIn(_history_next_action_runner_path(command_dir), readme)
         self.assertIn(_history_loop_command(command_dir), readme)
         self.assertIn(_history_loop_runner_path(command_dir), readme)
+        self.assertIn(_history_loop_resume_command(command_dir), readme)
+        self.assertIn(_history_loop_resume_runner_path(command_dir), readme)
         self.assertIn("run_history_next_action.sh", readme)
         self.assertIn("run_history_loop.sh", readme)
+        self.assertIn("run_resume_history_loop.sh", readme)
         self.assertIn("## History-Guided Continuation", readme)
         self.assertIn("## History-Guided Loop", readme)
         self.assertIn("--use-history-next-action", readme)
@@ -467,6 +490,8 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
         self.assertIn("command_history_next_action_runner", markdown)
         self.assertIn("command_history_loop", markdown)
         self.assertIn("command_history_loop_runner", markdown)
+        self.assertIn("command_history_loop_resume", markdown)
+        self.assertIn("command_history_loop_resume_runner", markdown)
         self.assertIn("command_run_json_path", markdown)
         self.assertIn("command_run_markdown_path", markdown)
         self.assertIn("command_run_history_jsonl_path", markdown)
@@ -559,6 +584,14 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             inspection["history_loop_runner_path"],
             _history_loop_runner_path(command_dir),
         )
+        self.assertEqual(
+            inspection["history_loop_resume_command"],
+            _history_loop_resume_command(command_dir),
+        )
+        self.assertEqual(
+            inspection["history_loop_resume_runner_path"],
+            _history_loop_resume_runner_path(command_dir),
+        )
         self.assertTrue(inspection_commands["history_report_command"]["ok"])
         self.assertTrue(inspection_commands["history_next_action_command"]["ok"])
         self.assertTrue(inspection_commands["history_loop_command"]["ok"])
@@ -578,6 +611,13 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
         )
         self.assertTrue(
             inspection["history_loop_runner_status"]["forwards_arguments"]
+        )
+        self.assertTrue(inspection["history_loop_resume_runner_status"]["ok"])
+        self.assertTrue(
+            inspection["history_loop_resume_runner_status"]["executes_runner_command"]
+        )
+        self.assertTrue(
+            inspection["history_loop_resume_runner_status"]["forwards_arguments"]
         )
         self.assertTrue(manifest["command_scripts"]["inspection_generated"])
         self.assertTrue(manifest["command_scripts"]["inspection_bundle_ready"])
@@ -615,6 +655,19 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
         self.assertTrue(
             manifest["command_scripts"][
                 "inspection_history_loop_runner_forwards_arguments"
+            ]
+        )
+        self.assertTrue(
+            manifest["command_scripts"]["inspection_history_loop_resume_runner_ok"]
+        )
+        self.assertTrue(
+            manifest["command_scripts"][
+                "inspection_history_loop_resume_runner_executes_command"
+            ]
+        )
+        self.assertTrue(
+            manifest["command_scripts"][
+                "inspection_history_loop_resume_runner_forwards_arguments"
             ]
         )
         self.assertIsNone(
@@ -663,11 +716,16 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
         self.assertIn("command_inspection_missing_required: -", markdown)
         self.assertIn("command_inspection_runner_wrapper_ok: yes", markdown)
         self.assertIn("command_inspection_history_loop_runner_ok: yes", markdown)
+        self.assertIn(
+            "command_inspection_history_loop_resume_runner_ok: yes",
+            markdown,
+        )
         self.assertIn("command_inspection_run_loop_status_issues: -", markdown)
         self.assertIn("command_inspection_run_loop_handoff_status: -", markdown)
         self.assertIn("command_inspection_run_loop_handoff_severity: -", markdown)
         self.assertIn("runner_wrapper_ok: `yes`", readme)
         self.assertIn("history_loop_runner_ok: `yes`", readme)
+        self.assertIn("history_loop_resume_runner_ok: `yes`", readme)
         self.assertIn("run_loop_status_issues: -", readme)
         self.assertIn("run_loop_handoff_status: -", readme)
         self.assertIn("run_loop_handoff_severity: -", readme)
@@ -880,6 +938,14 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             _history_loop_runner_path(command_dir),
         )
         self.assertEqual(
+            command_scripts["history_loop_resume_command"],
+            _history_loop_resume_command(command_dir),
+        )
+        self.assertEqual(
+            command_scripts["history_loop_resume_runner_path"],
+            _history_loop_resume_runner_path(command_dir),
+        )
+        self.assertEqual(
             command_scripts["history_report_command"],
             _history_report_command(command_dir),
         )
@@ -923,8 +989,11 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
         self.assertIn(_history_next_action_runner_path(command_dir), readme)
         self.assertIn(_history_loop_command(command_dir), readme)
         self.assertIn(_history_loop_runner_path(command_dir), readme)
+        self.assertIn(_history_loop_resume_command(command_dir), readme)
+        self.assertIn(_history_loop_resume_runner_path(command_dir), readme)
         self.assertIn("run_history_next_action.sh", readme)
         self.assertIn("run_history_loop.sh", readme)
+        self.assertIn("run_resume_history_loop.sh", readme)
         self.assertIn(_history_report_command(command_dir), readme)
         self.assertIn("## History-Guided Continuation", readme)
         self.assertIn("## History-Guided Loop", readme)
@@ -942,6 +1011,8 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
         self.assertIn(_history_next_action_runner_path(command_dir), markdown)
         self.assertIn(_history_loop_command(command_dir), markdown)
         self.assertIn(_history_loop_runner_path(command_dir), markdown)
+        self.assertIn(_history_loop_resume_command(command_dir), markdown)
+        self.assertIn(_history_loop_resume_runner_path(command_dir), markdown)
         self.assertIn(_history_report_command(command_dir), markdown)
         self.assertIn(str((command_dir / "run.md").resolve()), markdown)
         self.assertIn(str((command_dir / "run_history.jsonl").resolve()), markdown)
@@ -1055,6 +1126,7 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             runner_script = command_dir / "run_recommended_next.sh"
             history_runner_script = command_dir / "run_history_next_action.sh"
             history_loop_script = command_dir / "run_history_loop.sh"
+            history_loop_resume_script = command_dir / "run_resume_history_loop.sh"
             follow_up_script = command_dir / "recommended_follow_up.sh"
             review_script = command_dir / "recommended_review.sh"
             manifest_path = command_dir / "recommendation.json"
@@ -1063,6 +1135,9 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             runner_script_path = str(runner_script.resolve())
             history_runner_script_path = str(history_runner_script.resolve())
             history_loop_script_path = str(history_loop_script.resolve())
+            history_loop_resume_script_path = str(
+                history_loop_resume_script.resolve()
+            )
             follow_up_script_path = str(follow_up_script.resolve())
             manifest_path_resolved = str(manifest_path.resolve())
             readme_path_resolved = str(readme_path.resolve())
@@ -1072,6 +1147,7 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             self.assertTrue(runner_script.exists())
             self.assertTrue(history_runner_script.exists())
             self.assertTrue(history_loop_script.exists())
+            self.assertTrue(history_loop_resume_script.exists())
             self.assertTrue(follow_up_script.exists())
             self.assertFalse(review_script.exists())
             self.assertTrue(manifest_path.exists())
@@ -1080,6 +1156,9 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             runner_text = runner_script.read_text(encoding="utf-8")
             history_runner_text = history_runner_script.read_text(encoding="utf-8")
             history_loop_text = history_loop_script.read_text(encoding="utf-8")
+            history_loop_resume_text = history_loop_resume_script.read_text(
+                encoding="utf-8"
+            )
             script_text = follow_up_script.read_text(encoding="utf-8")
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             inspection = json.loads(
@@ -1096,7 +1175,7 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
                 follow_up_script_path,
             )
             self.assertIsNone(payload["command_scripts"]["review_path"])
-            self.assertEqual(payload["command_scripts"]["written_count"], 5)
+            self.assertEqual(payload["command_scripts"]["written_count"], 6)
             self.assertEqual(
                 payload["command_scripts"]["execution_cwd"],
                 execution_cwd,
@@ -1130,6 +1209,10 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
                 history_loop_script_path,
             )
             self.assertEqual(
+                payload["command_scripts"]["history_loop_resume_runner_path"],
+                history_loop_resume_script_path,
+            )
+            self.assertEqual(
                 manifest["recommendation"]["action"],
                 "continue_from_accepted",
             )
@@ -1160,8 +1243,16 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
                 history_loop_script_path,
             )
             self.assertEqual(
+                manifest["command_scripts"]["history_loop_resume_runner_path"],
+                history_loop_resume_script_path,
+            )
+            self.assertEqual(
                 manifest["command_scripts"]["history_loop_command"],
                 _history_loop_command(command_dir),
+            )
+            self.assertEqual(
+                manifest["command_scripts"]["history_loop_resume_command"],
+                _history_loop_resume_command(command_dir),
             )
             self.assertTrue(
                 manifest["command_scripts"]["inspection_runner_wrapper_ok"]
@@ -1179,6 +1270,27 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             self.assertEqual(
                 manifest["command_scripts"]["inspection_runner_wrapper_status"],
                 inspection["runner_wrapper_status"],
+            )
+            self.assertEqual(
+                manifest["command_scripts"][
+                    "inspection_history_loop_resume_runner_status"
+                ],
+                inspection["history_loop_resume_runner_status"],
+            )
+            self.assertTrue(
+                manifest["command_scripts"][
+                    "inspection_history_loop_resume_runner_ok"
+                ]
+            )
+            self.assertTrue(
+                manifest["command_scripts"][
+                    "inspection_history_loop_resume_runner_executes_command"
+                ]
+            )
+            self.assertTrue(
+                manifest["command_scripts"][
+                    "inspection_history_loop_resume_runner_forwards_arguments"
+                ]
             )
             self.assertTrue(
                 payload["command_scripts"]["inspection_runner_wrapper_ok"]
@@ -1271,11 +1383,15 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             self.assertIn("--max-steps 3", history_loop_text)
             self.assertIn("--fail-on-max-steps-continuation", history_loop_text)
             self.assertIn("--write-loop-report", history_loop_text)
+            self.assertIn("# target_kind: history_loop_resume", history_loop_resume_text)
+            self.assertIn("--resume-from-report", history_loop_resume_text)
             self.assertIn("runner_wrapper_ok: `yes`", readme)
             self.assertIn("runner_wrapper_executes_runner_command: `yes`", readme)
             self.assertIn("history_loop_runner_ok: `yes`", readme)
+            self.assertIn("history_loop_resume_runner_ok: `yes`", readme)
             self.assertIn("## History-Guided Loop", readme)
             self.assertIn(_history_loop_command(command_dir), readme)
+            self.assertIn(_history_loop_resume_command(command_dir), readme)
             self.assertIn("## Execution-Next Continuation", readme)
             self.assertIn(_execution_next_command(command_dir), readme)
             self.assertIn("--target execution-next", readme)
@@ -1474,6 +1590,11 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             self.assertIn(f"bash {shlex.quote(runner_script_path)}", readme)
             self.assertIn("run_history_loop.sh", readme)
             self.assertIn(f"bash {shlex.quote(history_loop_script_path)}", readme)
+            self.assertIn("run_resume_history_loop.sh", readme)
+            self.assertIn(
+                f"bash {shlex.quote(history_loop_resume_script_path)}",
+                readme,
+            )
             self.assertIn("run_history.jsonl", readme)
             self.assertIn("run_history.md", readme)
             self.assertIn("run_history_summary.json", readme)
@@ -1483,6 +1604,7 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             self.assertIn("recommended_next.sh", markdown)
             self.assertIn("run_recommended_next.sh", markdown)
             self.assertIn("run_history_loop.sh", markdown)
+            self.assertIn("run_resume_history_loop.sh", markdown)
             self.assertIn("recommended_follow_up.sh", markdown)
             self.assertIn("next_command_kind: follow_up", markdown)
             self.assertIn("command_execution_cwd", markdown)
@@ -1503,6 +1625,7 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             self.assertIn("command_run_history_summary_path", markdown)
             self.assertIn("command_history_report_only", markdown)
             self.assertIn("command_history_loop", markdown)
+            self.assertIn("command_history_loop_resume", markdown)
             self.assertIn("command_run_loop_json_path", markdown)
 
     def test_selection_separates_safe_accepted_from_absolute_best(self) -> None:
@@ -1641,16 +1764,21 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             runner_script = root / "commands" / "run_recommended_next.sh"
             history_runner_script = root / "commands" / "run_history_next_action.sh"
             history_loop_script = root / "commands" / "run_history_loop.sh"
+            history_loop_resume_script = root / "commands" / "run_resume_history_loop.sh"
             next_script_path = str(next_script.resolve())
             runner_script_path = str(runner_script.resolve())
             history_runner_script_path = str(history_runner_script.resolve())
             history_loop_script_path = str(history_loop_script.resolve())
+            history_loop_resume_script_path = str(
+                history_loop_resume_script.resolve()
+            )
             review_script_path = str(review_script.resolve())
             follow_up_script_path = str(follow_up_script.resolve())
             next_script_exists = next_script.exists()
             runner_script_exists = runner_script.exists()
             history_runner_script_exists = history_runner_script.exists()
             history_loop_script_exists = history_loop_script.exists()
+            history_loop_resume_script_exists = history_loop_resume_script.exists()
             review_script_exists = review_script.exists()
             follow_up_script_exists = follow_up_script.exists()
             next_script_text = next_script.read_text(encoding="utf-8")
@@ -1659,6 +1787,9 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
                 encoding="utf-8"
             )
             history_loop_script_text = history_loop_script.read_text(encoding="utf-8")
+            history_loop_resume_script_text = history_loop_resume_script.read_text(
+                encoding="utf-8"
+            )
             command_manifest = json.loads(
                 (root / "commands" / "recommendation.json").read_text(
                     encoding="utf-8"
@@ -1723,7 +1854,7 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
         self.assertIn(f"review={reviewed_follow_summary}", markdown)
         self.assertIn("follow_up_command: next_follow_up_command", markdown)
         self.assertIn("review_command: guided_next_follow_up_command", markdown)
-        self.assertEqual(command_scripts["written_count"], 6)
+        self.assertEqual(command_scripts["written_count"], 7)
         self.assertEqual(command_scripts["next_path"], next_script_path)
         self.assertEqual(command_scripts["next_kind"], "review")
         self.assertEqual(command_scripts["runner_path"], runner_script_path)
@@ -1734,6 +1865,10 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
         self.assertEqual(
             command_scripts["history_loop_runner_path"],
             history_loop_script_path,
+        )
+        self.assertEqual(
+            command_scripts["history_loop_resume_runner_path"],
+            history_loop_resume_script_path,
         )
         self.assertEqual(command_scripts["follow_up_path"], follow_up_script_path)
         self.assertEqual(command_scripts["review_path"], review_script_path)
@@ -1750,8 +1885,16 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             history_loop_script_path,
         )
         self.assertEqual(
+            command_manifest["command_scripts"]["history_loop_resume_runner_path"],
+            history_loop_resume_script_path,
+        )
+        self.assertEqual(
             command_manifest["command_scripts"]["history_loop_command"],
             _history_loop_command(root / "commands"),
+        )
+        self.assertEqual(
+            command_manifest["command_scripts"]["history_loop_resume_command"],
+            _history_loop_resume_command(root / "commands"),
         )
         self.assertEqual(
             command_manifest["command_scripts"]["execution_next_command"],
@@ -1768,6 +1911,7 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
         self.assertTrue(runner_script_exists)
         self.assertTrue(history_runner_script_exists)
         self.assertTrue(history_loop_script_exists)
+        self.assertTrue(history_loop_resume_script_exists)
         self.assertTrue(follow_up_script_exists)
         self.assertTrue(review_script_exists)
         self.assertIn("# target_kind: review", next_script_text)
@@ -1787,6 +1931,8 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
         self.assertIn("--max-steps 3", history_loop_script_text)
         self.assertIn("--fail-on-max-steps-continuation", history_loop_script_text)
         self.assertIn("--write-loop-report", history_loop_script_text)
+        self.assertIn("# target_kind: history_loop_resume", history_loop_resume_script_text)
+        self.assertIn("--resume-from-report", history_loop_resume_script_text)
         self.assertIn("review_absolute_best", command_readme)
         self.assertIn("## Champion", command_readme)
         self.assertIn("latent@normalize=blocks,scale=4.0", command_readme)
@@ -1796,6 +1942,7 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
         self.assertIn("run_recommended_next.sh", command_readme)
         self.assertIn("run_history_next_action.sh", command_readme)
         self.assertIn("run_history_loop.sh", command_readme)
+        self.assertIn("run_resume_history_loop.sh", command_readme)
         self.assertIn("## History-Guided Loop", command_readme)
         self.assertIn("## Execution-Next Continuation", command_readme)
         self.assertIn(_execution_next_command(root / "commands"), command_readme)
