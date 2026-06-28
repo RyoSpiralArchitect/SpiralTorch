@@ -1010,6 +1010,108 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
             str(command_dir / "executed_follow_up" / "next" / "summary.json"),
         )
 
+    def test_cli_blocks_execution_next_when_selected_script_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            command_dir = _write_bundle(Path(tmp))
+            first = subprocess.run(
+                [
+                    "python3",
+                    "-P",
+                    str(SCRIPT),
+                    str(command_dir),
+                    "--write-run-report",
+                    "--json",
+                ],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            selected_script = (
+                command_dir
+                / "executed_follow_up"
+                / "guided_next_follow_up_command.sh"
+            )
+            selected_script.unlink()
+            blocked = subprocess.run(
+                [
+                    "python3",
+                    "-P",
+                    str(SCRIPT),
+                    str(command_dir),
+                    "--target",
+                    "execution-next",
+                    "--write-run-report",
+                    "--append-run-history",
+                    "--write-run-history-report",
+                    "--json",
+                ],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            first_payload = json.loads(first.stdout)
+            blocked_payload = json.loads(blocked.stdout)
+            run_report = json.loads(
+                (command_dir / "run.json").read_text(encoding="utf-8")
+            )
+            history_events = [
+                json.loads(line)
+                for line in (command_dir / "run_history.jsonl")
+                .read_text(encoding="utf-8")
+                .splitlines()
+            ]
+            history_summary = json.loads(
+                (command_dir / "run_history_summary.json").read_text(encoding="utf-8")
+            )
+            run_markdown = (command_dir / "run.md").read_text(encoding="utf-8")
+
+        self.assertEqual(first.returncode, 0, first.stderr)
+        _assert_execution_summary(self, first_payload, command_dir)
+        self.assertEqual(blocked.returncode, 1)
+        self.assertFalse(blocked_payload["executed"])
+        self.assertEqual(blocked_payload["target"], "execution-next")
+        self.assertEqual(blocked_payload["returncode"], 1)
+        self.assertEqual(
+            blocked_payload["error"],
+            "selected execution-next script does not exist",
+        )
+        self.assertEqual(
+            blocked_payload["script_path"],
+            str(selected_script),
+        )
+        self.assertEqual(
+            blocked_payload["selected_execution_next_command"]["source"],
+            "guided_next_follow_up_command",
+        )
+        self.assertFalse(blocked_payload["selected_script_status"]["ok"])
+        self.assertFalse(blocked_payload["selected_script_status"]["exists"])
+        self.assertEqual(
+            blocked_payload["selected_script_status"]["error"],
+            "selected execution-next script does not exist",
+        )
+        self.assertIsNone(blocked_payload["execution_summary"])
+        self.assertEqual(run_report["error"], blocked_payload["error"])
+        self.assertEqual(len(history_events), 1)
+        self.assertEqual(
+            history_events[0]["selected_script_status"],
+            blocked_payload["selected_script_status"],
+        )
+        self.assertEqual(history_summary["latest"]["status"], "blocked")
+        self.assertEqual(history_summary["signals"]["last_problem"]["status"], "blocked")
+        self.assertEqual(
+            history_summary["signals"]["last_problem"]["error"],
+            "selected execution-next script does not exist",
+        )
+        self.assertIn("selected_script_ok: no", run_markdown)
+        self.assertIn(
+            "selected_script_error: selected execution-next script does not exist",
+            run_markdown,
+        )
+
     def test_cli_blocks_when_strict_inspection_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             command_dir = _write_bundle(Path(tmp), non_executable_follow_up=True)

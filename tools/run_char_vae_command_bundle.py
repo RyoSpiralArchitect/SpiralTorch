@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 import time
@@ -39,6 +40,44 @@ def _path_from(value: Any) -> Path | None:
     if not isinstance(value, str) or not value:
         return None
     return Path(value)
+
+
+def _selected_execution_next_script_status(
+    *,
+    target: str,
+    script_path: Path | None,
+    strict: bool,
+) -> dict[str, Any] | None:
+    if target != EXECUTION_NEXT_TARGET:
+        return None
+    status: dict[str, Any] = {
+        "schema": (
+            "st.llm_char_vae_context.command_bundle_selected_script_status.v1"
+        ),
+        "target": target,
+        "path": str(script_path) if script_path is not None else None,
+        "strict": strict,
+        "exists": None if script_path is None else script_path.exists(),
+        "is_file": None if script_path is None else script_path.is_file(),
+        "executable": None,
+        "ok": False,
+        "error": None,
+    }
+    if script_path is None:
+        status["error"] = "selected execution-next script path is unavailable"
+        return status
+    if not script_path.exists():
+        status["error"] = "selected execution-next script does not exist"
+        return status
+    if not script_path.is_file():
+        status["error"] = "selected execution-next script is not a file"
+        return status
+    status["executable"] = os.access(script_path, os.X_OK)
+    if strict and not status["executable"]:
+        status["error"] = "selected execution-next script is not executable"
+        return status
+    status["ok"] = True
+    return status
 
 
 def _utc_now() -> str:
@@ -600,6 +639,7 @@ def _runner_summary(
     returncode: int | None,
     execution_cwd: Path | None = None,
     selected_execution_next_command: dict[str, Any] | None = None,
+    selected_script_status: dict[str, Any] | None = None,
     error: str | None = None,
     stdout: str | None = None,
     stderr: str | None = None,
@@ -631,6 +671,9 @@ def _runner_summary(
             selected_execution_next_command
             if selected_execution_next_command is not None
             else None
+        ),
+        "selected_script_status": (
+            selected_script_status if selected_script_status is not None else None
         ),
         "strict": strict,
         "dry_run": dry_run,
@@ -708,6 +751,14 @@ def render_markdown(summary: dict[str, Any]) -> str:
         (
             "- selected_execution_next_run_dir: "
             f"{_fmt(selected_execution_next.get('default_run_dir'))}"
+        ),
+        (
+            "- selected_script_ok: "
+            f"{_fmt(_mapping(summary.get('selected_script_status')).get('ok'))}"
+        ),
+        (
+            "- selected_script_error: "
+            f"{_fmt(_mapping(summary.get('selected_script_status')).get('error'))}"
         ),
         f"- command_argv: {_fmt(summary.get('command_argv'))}",
         f"- execution_cwd: {_fmt(summary.get('execution_cwd'))}",
@@ -844,6 +895,7 @@ def _history_event(summary: dict[str, Any]) -> dict[str, Any]:
         "script_path",
         "target_script_key",
         "target_script_path",
+        "selected_script_status",
         "command_argv",
         "execution_cwd",
         "strict",
@@ -1510,6 +1562,11 @@ def run_bundle(
         script_key=script_key,
         script_path=script_path,
     )
+    selected_script_status = _selected_execution_next_script_status(
+        target=target,
+        script_path=script_path,
+        strict=strict,
+    )
     execution_cwd = _execution_cwd_for_target(
         command_dir,
         command_scripts,
@@ -1641,6 +1698,7 @@ def run_bundle(
             recommendation_context=recommendation_context,
             execution_cwd=execution_cwd,
             selected_execution_next_command=selected_execution_next_command,
+            selected_script_status=selected_script_status,
             strict=strict,
             dry_run=dry_run,
             inspection=inspection,
@@ -1662,6 +1720,7 @@ def run_bundle(
             recommendation_context=recommendation_context,
             execution_cwd=execution_cwd,
             selected_execution_next_command=selected_execution_next_command,
+            selected_script_status=selected_script_status,
             strict=strict,
             dry_run=dry_run,
             inspection=inspection,
@@ -1682,11 +1741,34 @@ def run_bundle(
             recommendation_context=recommendation_context,
             execution_cwd=execution_cwd,
             selected_execution_next_command=selected_execution_next_command,
+            selected_script_status=selected_script_status,
             strict=strict,
             dry_run=dry_run,
             inspection=inspection,
             returncode=1,
             error=f"manifest does not declare {script_key}",
+            **timing_fields(),
+        )
+        summary = finish(summary)
+        return 1, summary
+    if selected_script_status is not None and not selected_script_status.get("ok"):
+        summary = _runner_summary(
+            command_dir=command_dir,
+            manifest_path=manifest_path,
+            target=target,
+            script_key=script_key,
+            script_path=script_path,
+            **target_details,
+            recommendation_context=recommendation_context,
+            execution_cwd=execution_cwd,
+            selected_execution_next_command=selected_execution_next_command,
+            selected_script_status=selected_script_status,
+            strict=strict,
+            dry_run=dry_run,
+            inspection=inspection,
+            returncode=1,
+            error=selected_script_status.get("error")
+            or "selected execution-next script is unavailable",
             **timing_fields(),
         )
         summary = finish(summary)
@@ -1702,6 +1784,7 @@ def run_bundle(
             recommendation_context=recommendation_context,
             execution_cwd=execution_cwd,
             selected_execution_next_command=selected_execution_next_command,
+            selected_script_status=selected_script_status,
             strict=strict,
             dry_run=dry_run,
             inspection=inspection,
@@ -1729,6 +1812,7 @@ def run_bundle(
             recommendation_context=recommendation_context,
             execution_cwd=execution_cwd,
             selected_execution_next_command=selected_execution_next_command,
+            selected_script_status=selected_script_status,
             strict=strict,
             dry_run=dry_run,
             inspection=inspection,
@@ -1755,6 +1839,7 @@ def run_bundle(
         recommendation_context=recommendation_context,
         execution_cwd=execution_cwd,
         selected_execution_next_command=selected_execution_next_command,
+        selected_script_status=selected_script_status,
         strict=strict,
         dry_run=dry_run,
         inspection=inspection,
