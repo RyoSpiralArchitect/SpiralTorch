@@ -165,6 +165,34 @@ class CharVaeContextChainTests(unittest.TestCase):
             [],
         )
 
+    def test_manifest_follow_up_seed_groups_hide_unplanned_preset_fallbacks(self) -> None:
+        mod = _load_module()
+
+        self.assertEqual(
+            mod._manifest_follow_up_seed_groups(
+                ["17", "19"],
+                explicit_seed_groups=False,
+                planned_follow_ups=0,
+            ),
+            [],
+        )
+        self.assertEqual(
+            mod._manifest_follow_up_seed_groups(
+                ["17", "19"],
+                explicit_seed_groups=False,
+                planned_follow_ups=1,
+            ),
+            ["17"],
+        )
+        self.assertEqual(
+            mod._manifest_follow_up_seed_groups(
+                ["17", "19"],
+                explicit_seed_groups=True,
+                planned_follow_ups=0,
+            ),
+            ["17", "19"],
+        )
+
     def test_follow_up_seed_group_plan_maps_attempted_unused_and_extra(self) -> None:
         mod = _load_module()
 
@@ -218,6 +246,35 @@ class CharVaeContextChainTests(unittest.TestCase):
         )
         self.assertEqual(dry_run_plan[0]["status"], "dry_run_planned")
         self.assertEqual(dry_run_plan[1]["status"], "extra")
+
+    def test_zero_followups_dry_run_does_not_report_preset_fallback_extras(self) -> None:
+        mod = _load_module()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            run_root = Path(tmp) / "chain"
+            rc = mod.main(
+                [
+                    "dummy.txt",
+                    "--preset",
+                    "smoke",
+                    "--run-root",
+                    str(run_root),
+                    "--follow-ups",
+                    "0",
+                    "--dry-run",
+                ]
+            )
+
+            manifest = json.loads((run_root / "chain.json").read_text(encoding="utf-8"))
+            report = (run_root / "chain_report.md").read_text(encoding="utf-8")
+
+        self.assertEqual(rc, 0)
+        self.assertEqual(manifest["planned_follow_ups"], 0)
+        self.assertEqual(manifest["planned_follow_up_seed_groups"], [])
+        self.assertEqual(manifest["follow_up_seed_group_plan"], [])
+        self.assertEqual(manifest["extra_explicit_seed_groups"], [])
+        self.assertIn("- follow_up_seed_groups: preset_fallback (-)", report)
+        self.assertIn("- follow_up_seed_group_plan: -", report)
 
     def test_follow_up_seed_resolution_summarizes_attempted_seeds(self) -> None:
         mod = _load_module()
