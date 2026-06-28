@@ -447,13 +447,26 @@ def _compact_execution_summary(path: Path | None) -> dict[str, Any] | None:
             ),
             "follow_up_verdict": follow_up_result.get("verdict")
             or follow_up_gate.get("effective_verdict"),
+            "follow_up_result_verdict": follow_up_result.get("verdict"),
+            "follow_up_effective_verdict": follow_up_gate.get("effective_verdict"),
+            "follow_up_gate_verdict": follow_up_gate.get("verdict"),
             "follow_up_gate_failed": follow_up_gate.get("failed"),
+            "follow_up_gate_verdict_basis": follow_up_gate.get("verdict_basis"),
+            "follow_up_fail_on_verdicts": follow_up_gate.get("fail_on_verdicts"),
             "source_best_feature_retained": follow_up_result.get(
                 "source_best_feature_retained"
             ),
+            "source_feature_verdict": follow_up_result.get("source_feature_verdict")
+            or follow_up_guidance.get("source_feature_verdict"),
+            "source_feature_raw_verdict": follow_up_result.get(
+                "source_feature_raw_verdict"
+            )
+            or follow_up_guidance.get("source_feature_raw_verdict"),
             "mean_best_nll_delta_vs_source": follow_up_result.get(
                 "mean_best_nll_delta_vs_source"
             ),
+            "run_budget_shifted": follow_up_result.get("run_budget_shifted"),
+            "run_budget_shift_keys": follow_up_result.get("run_budget_shift_keys"),
             "guidance_action": follow_up_guidance.get("action"),
             "trajectory_action": follow_up_trajectory.get("trajectory_action"),
             "trajectory_verdict": follow_up_trajectory.get("trajectory_verdict"),
@@ -477,6 +490,79 @@ def _compact_execution_summary(path: Path | None) -> dict[str, Any] | None:
         }
     )
     return summary
+
+
+def _execution_evidence_fields(
+    execution_summary: dict[str, Any] | None,
+) -> dict[str, Any]:
+    summary = _mapping(execution_summary)
+    status: str | None
+    reason: str | None
+    should_continue: bool | None
+    mixed_signal = False
+    if not summary:
+        status = None
+        reason = "not_executed"
+        should_continue = None
+    elif not summary.get("exists"):
+        status = "missing_summary"
+        reason = "expected execution summary was not written"
+        should_continue = False
+    elif not summary.get("valid_json"):
+        status = "invalid_summary"
+        reason = summary.get("error") or "execution summary was not valid JSON"
+        should_continue = False
+    else:
+        result_verdict = summary.get("follow_up_result_verdict")
+        follow_up_verdict = summary.get("follow_up_verdict")
+        effective_verdict = summary.get("follow_up_effective_verdict")
+        guidance_action = summary.get("guidance_action")
+        run_status = summary.get("status")
+        mixed_signal = bool(
+            (follow_up_verdict and effective_verdict and follow_up_verdict != effective_verdict)
+            or (run_status == "improved" and follow_up_verdict not in {None, "improved"})
+        )
+        guidance_text = str(guidance_action or "")
+        if summary.get("follow_up_gate_failed"):
+            status = "gate_failed"
+            reason = "follow-up gate requested stop"
+            should_continue = False
+        elif guidance_text.startswith("review_"):
+            status = "needs_review"
+            reason = guidance_text
+            should_continue = False
+        elif follow_up_verdict in {"regressed", "unknown"}:
+            status = "needs_review"
+            reason = f"follow-up verdict is {follow_up_verdict}"
+            should_continue = False
+        elif guidance_text.startswith("promote_"):
+            status = "promote"
+            reason = guidance_text
+            should_continue = True
+        elif follow_up_verdict == "improved" or effective_verdict == "improved":
+            status = "improved"
+            reason = (
+                f"follow-up verdict is {result_verdict or follow_up_verdict or effective_verdict}"
+            )
+            should_continue = True
+        else:
+            status = "unknown"
+            reason = "no decisive follow-up evidence"
+            should_continue = False
+    return {
+        "execution_evidence_status": status,
+        "execution_evidence_reason": reason,
+        "execution_evidence_should_continue": should_continue,
+        "execution_evidence_mixed_signal": mixed_signal,
+    }
+
+
+def _event_execution_evidence(event: dict[str, Any]) -> dict[str, Any]:
+    fields = _execution_evidence_fields(_mapping(event.get("execution_summary")))
+    for key in fields:
+        if key in event:
+            fields[key] = event.get(key)
+    return fields
 
 
 def _runner_summary(
@@ -537,6 +623,10 @@ def _runner_summary(
         "duration_seconds": duration_seconds,
         "expected_execution_summary_path": None,
         "execution_summary": None,
+        "execution_evidence_status": None,
+        "execution_evidence_reason": None,
+        "execution_evidence_should_continue": None,
+        "execution_evidence_mixed_signal": False,
         "bundle_ready": bool(inspection.get("bundle_ready")),
         "strict_ready": bool(inspection.get("strict_ready")),
         "missing_required": inspection.get("missing_required") or [],
@@ -679,8 +769,39 @@ def render_markdown(summary: dict[str, Any]) -> str:
             f"{_fmt(execution_summary.get('follow_up_verdict'))}"
         ),
         (
+            "- execution_effective_verdict: "
+            f"{_fmt(execution_summary.get('follow_up_effective_verdict'))}"
+        ),
+        (
+            "- execution_gate_verdict_basis: "
+            f"{_fmt(execution_summary.get('follow_up_gate_verdict_basis'))}"
+        ),
+        (
             "- execution_gate_failed: "
             f"{_fmt(execution_summary.get('follow_up_gate_failed'))}"
+        ),
+        (
+            "- execution_source_feature_verdict: "
+            f"{_fmt(execution_summary.get('source_feature_verdict'))}"
+        ),
+        (
+            "- execution_source_feature_raw_verdict: "
+            f"{_fmt(execution_summary.get('source_feature_raw_verdict'))}"
+        ),
+        f"- execution_run_budget_shifted: {_fmt(execution_summary.get('run_budget_shifted'))}",
+        (
+            "- execution_run_budget_shift_keys: "
+            f"{_fmt(execution_summary.get('run_budget_shift_keys'))}"
+        ),
+        f"- execution_evidence_status: {_fmt(summary.get('execution_evidence_status'))}",
+        f"- execution_evidence_reason: {_fmt(summary.get('execution_evidence_reason'))}",
+        (
+            "- execution_evidence_should_continue: "
+            f"{_fmt(summary.get('execution_evidence_should_continue'))}"
+        ),
+        (
+            "- execution_evidence_mixed_signal: "
+            f"{_fmt(summary.get('execution_evidence_mixed_signal'))}"
         ),
         f"- execution_guidance_action: {_fmt(execution_summary.get('guidance_action'))}",
         f"- execution_next_seeds: {_fmt(execution_summary.get('next_default_new_seeds'))}",
@@ -732,6 +853,10 @@ def _history_event(summary: dict[str, Any]) -> dict[str, Any]:
         "expected_execution_summary_path",
         "selected_execution_next_command",
         "execution_summary",
+        "execution_evidence_status",
+        "execution_evidence_reason",
+        "execution_evidence_should_continue",
+        "execution_evidence_mixed_signal",
     )
     event = {
         "schema": "st.llm_char_vae_context.command_bundle_run_history_event.v1",
@@ -850,6 +975,7 @@ def summarize_history_events(
     latest_champion = _mapping(latest_context.get("champion"))
     latest_execution = _mapping(latest.get("execution_summary"))
     latest_execution_next = _mapping(latest_execution.get("next_command"))
+    latest_evidence = _event_execution_evidence(latest)
     status_counts = _count_values([_event_status(event) for event in events])
     target_kind_counts = _count_values([event.get("target_kind") for event in events])
     runner_wrapper_ok_counts = _bool_count_values(
@@ -873,6 +999,12 @@ def summarize_history_events(
             for event in events
         ]
     )
+    execution_evidence_status_counts = _count_values(
+        [
+            _event_execution_evidence(event).get("execution_evidence_status")
+            for event in events
+        ]
+    )
     execution_next_source_counts = _count_values(
         [
             _mapping(_mapping(event.get("execution_summary")).get("next_command")).get(
@@ -892,6 +1024,9 @@ def summarize_history_events(
     )
     latest_executed_execution_next = _mapping(
         latest_executed_execution.get("next_command")
+    )
+    latest_executed_evidence = (
+        _event_execution_evidence(latest_executed) if latest_executed else {}
     )
     last_problem = _latest_event(
         events,
@@ -918,8 +1053,23 @@ def summarize_history_events(
             ),
             "execution_summary_path": latest_execution.get("summary_path"),
             "execution_verdict": latest_execution.get("follow_up_verdict"),
+            "execution_effective_verdict": latest_execution.get(
+                "follow_up_effective_verdict"
+            ),
             "execution_best_config": latest_execution.get("best_config_label"),
             "execution_guidance_action": latest_execution.get("guidance_action"),
+            "execution_evidence_status": latest_evidence.get(
+                "execution_evidence_status"
+            ),
+            "execution_evidence_reason": latest_evidence.get(
+                "execution_evidence_reason"
+            ),
+            "execution_evidence_should_continue": latest_evidence.get(
+                "execution_evidence_should_continue"
+            ),
+            "execution_evidence_mixed_signal": latest_evidence.get(
+                "execution_evidence_mixed_signal"
+            ),
             "execution_next_source": latest_execution_next.get("source"),
             "execution_next_seeds": latest_execution_next.get("default_new_seeds"),
             "execution_next_script_path": latest_execution_next.get("script_path"),
@@ -931,6 +1081,7 @@ def summarize_history_events(
             "recommendation_action_counts": action_counts,
             "execution_verdict_counts": execution_verdict_counts,
             "execution_guidance_action_counts": execution_guidance_action_counts,
+            "execution_evidence_status_counts": execution_evidence_status_counts,
             "execution_next_source_counts": execution_next_source_counts,
             "current_status_streak": {
                 "status": current_status,
@@ -949,11 +1100,26 @@ def summarize_history_events(
                 "execution_verdict": latest_executed_execution.get(
                     "follow_up_verdict"
                 ),
+                "execution_effective_verdict": latest_executed_execution.get(
+                    "follow_up_effective_verdict"
+                ),
                 "execution_best_config": latest_executed_execution.get(
                     "best_config_label"
                 ),
                 "execution_guidance_action": latest_executed_execution.get(
                     "guidance_action"
+                ),
+                "execution_evidence_status": latest_executed_evidence.get(
+                    "execution_evidence_status"
+                ),
+                "execution_evidence_reason": latest_executed_evidence.get(
+                    "execution_evidence_reason"
+                ),
+                "execution_evidence_should_continue": latest_executed_evidence.get(
+                    "execution_evidence_should_continue"
+                ),
+                "execution_evidence_mixed_signal": latest_executed_evidence.get(
+                    "execution_evidence_mixed_signal"
                 ),
                 "execution_next_source": latest_executed_execution_next.get("source"),
                 "execution_next_seeds": latest_executed_execution_next.get(
@@ -1019,6 +1185,22 @@ def render_history_markdown(
         f"- latest_execution_next_source: {_fmt(latest.get('execution_next_source'))}",
         f"- latest_execution_next_seeds: {_fmt(latest.get('execution_next_seeds'))}",
         (
+            "- latest_execution_evidence_status: "
+            f"{_fmt(latest.get('execution_evidence_status'))}"
+        ),
+        (
+            "- latest_execution_evidence_reason: "
+            f"{_fmt(latest.get('execution_evidence_reason'))}"
+        ),
+        (
+            "- latest_execution_evidence_should_continue: "
+            f"{_fmt(latest.get('execution_evidence_should_continue'))}"
+        ),
+        (
+            "- latest_execution_evidence_mixed_signal: "
+            f"{_fmt(latest.get('execution_evidence_mixed_signal'))}"
+        ),
+        (
             "- latest_execution_next_script_path: "
             f"{_fmt(latest.get('execution_next_script_path'))}"
         ),
@@ -1044,10 +1226,17 @@ def render_history_markdown(
             f"{_fmt_counts(_mapping(signals.get('execution_guidance_action_counts')))}"
         ),
         (
+            "- execution_evidence_status_counts: "
+            f"{_fmt_counts(_mapping(signals.get('execution_evidence_status_counts')))}"
+        ),
+        (
             "- execution_next_source_counts: "
             f"{_fmt_counts(_mapping(signals.get('execution_next_source_counts')))}"
         ),
-        f"- current_status_streak: {_fmt_streak(status_streak.get('status'), int(status_streak.get('count') or 0))}",
+        (
+            "- current_status_streak: "
+            f"{_fmt_streak(status_streak.get('status'), int(status_streak.get('count') or 0))}"
+        ),
         f"- latest_executed_status: {_fmt(latest_executed.get('status'))}",
         f"- latest_executed_finished_at: {_fmt(latest_executed.get('finished_at'))}",
         f"- latest_executed_action: {_fmt(latest_executed.get('recommendation_action'))}",
@@ -1063,6 +1252,22 @@ def render_history_markdown(
         (
             "- latest_executed_execution_guidance_action: "
             f"{_fmt(latest_executed.get('execution_guidance_action'))}"
+        ),
+        (
+            "- latest_executed_execution_evidence_status: "
+            f"{_fmt(latest_executed.get('execution_evidence_status'))}"
+        ),
+        (
+            "- latest_executed_execution_evidence_reason: "
+            f"{_fmt(latest_executed.get('execution_evidence_reason'))}"
+        ),
+        (
+            "- latest_executed_execution_evidence_should_continue: "
+            f"{_fmt(latest_executed.get('execution_evidence_should_continue'))}"
+        ),
+        (
+            "- latest_executed_execution_evidence_mixed_signal: "
+            f"{_fmt(latest_executed.get('execution_evidence_mixed_signal'))}"
         ),
         (
             "- latest_executed_execution_next_source: "
@@ -1083,14 +1288,17 @@ def render_history_markdown(
         "## Recent Events",
         "",
         "| # | status | target | kind | dry_run | executed | returncode | "
-        "started_at | duration_seconds | action | champion | exec_verdict | exec_best | next_seeds |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "started_at | duration_seconds | action | champion | exec_verdict | "
+        "evidence | mixed | exec_best | next_seeds |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | "
+        "--- | --- | --- | --- | --- |",
     ]
     for index, event in enumerate(events[-10:], max(1, len(events) - 9)):
         context = _mapping(event.get("recommendation_context"))
         champion = _mapping(context.get("champion"))
         execution_summary = _mapping(event.get("execution_summary"))
         execution_next = _mapping(execution_summary.get("next_command"))
+        evidence = _event_execution_evidence(event)
         row = [
             index,
             _event_status(event),
@@ -1104,6 +1312,8 @@ def render_history_markdown(
             context.get("action"),
             champion.get("config"),
             execution_summary.get("follow_up_verdict"),
+            evidence.get("execution_evidence_status"),
+            evidence.get("execution_evidence_mixed_signal"),
             execution_summary.get("best_config_label"),
             execution_next.get("default_new_seeds"),
         ]
@@ -1282,6 +1492,7 @@ def run_bundle(
             if summary.get("executed")
             else None
         )
+        summary.update(_execution_evidence_fields(summary.get("execution_summary")))
         summary = write_run_artifacts(
             summary,
             json_out=json_out,

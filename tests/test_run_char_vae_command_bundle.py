@@ -149,6 +149,8 @@ def _assert_execution_summary(
     testcase.assertEqual(execution_summary["runner_up_feature"], "raw")
     testcase.assertEqual(execution_summary["margin_to_runner_up"], 0.2)
     testcase.assertEqual(execution_summary["follow_up_verdict"], "improved")
+    testcase.assertEqual(execution_summary["follow_up_result_verdict"], "improved")
+    testcase.assertEqual(execution_summary["follow_up_effective_verdict"], "improved")
     testcase.assertFalse(execution_summary["follow_up_gate_failed"])
     testcase.assertTrue(execution_summary["source_best_feature_retained"])
     testcase.assertEqual(
@@ -436,6 +438,29 @@ def _write_bundle(
 
 
 class RunCharVaeCommandBundleTests(unittest.TestCase):
+    def test_execution_evidence_status_marks_mixed_review_signal(self) -> None:
+        mod = _load_module()
+        fields = mod._execution_evidence_fields(
+            {
+                "exists": True,
+                "valid_json": True,
+                "status": "improved",
+                "follow_up_result_verdict": "regressed",
+                "follow_up_verdict": "regressed",
+                "follow_up_effective_verdict": "improved",
+                "follow_up_gate_failed": False,
+                "guidance_action": "review_feature_swap_before_promotion",
+            }
+        )
+
+        self.assertEqual(fields["execution_evidence_status"], "needs_review")
+        self.assertEqual(
+            fields["execution_evidence_reason"],
+            "review_feature_swap_before_promotion",
+        )
+        self.assertFalse(fields["execution_evidence_should_continue"])
+        self.assertTrue(fields["execution_evidence_mixed_signal"])
+
     def test_history_markdown_surfaces_problem_signals(self) -> None:
         mod = _load_module()
         events = [
@@ -450,6 +475,15 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
                     "action": "continue_from_accepted",
                     "champion": {"config": "latent@scale=0.5"},
                 },
+                "execution_summary": {
+                    "follow_up_verdict": "regressed",
+                    "follow_up_effective_verdict": "improved",
+                    "guidance_action": "review_feature_swap_before_promotion",
+                },
+                "execution_evidence_status": "needs_review",
+                "execution_evidence_reason": "review_feature_swap_before_promotion",
+                "execution_evidence_should_continue": False,
+                "execution_evidence_mixed_signal": True,
             },
             {
                 "target": "next",
@@ -513,7 +547,18 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
             summary["signals"]["current_status_streak"],
             {"status": "blocked", "count": 2},
         )
+        self.assertEqual(
+            summary["signals"]["execution_evidence_status_counts"],
+            {"needs_review": 1},
+        )
         self.assertEqual(summary["signals"]["latest_executed"]["status"], "ok")
+        self.assertEqual(
+            summary["signals"]["latest_executed"]["execution_evidence_status"],
+            "needs_review",
+        )
+        self.assertTrue(
+            summary["signals"]["latest_executed"]["execution_evidence_mixed_signal"]
+        )
         self.assertEqual(
             summary["signals"]["latest_executed"]["recommendation_action"],
             "continue_from_accepted",
@@ -535,7 +580,15 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
             markdown,
         )
         self.assertIn("current_status_streak: blocked:2", markdown)
+        self.assertIn("execution_evidence_status_counts: needs_review:1", markdown)
         self.assertIn("latest_executed_status: ok", markdown)
+        self.assertIn("latest_executed_execution_evidence_status: needs_review", markdown)
+        self.assertIn(
+            "latest_executed_execution_evidence_reason: "
+            "review_feature_swap_before_promotion",
+            markdown,
+        )
+        self.assertIn("latest_executed_execution_evidence_mixed_signal: yes", markdown)
         self.assertIn("latest_executed_action: continue_from_accepted", markdown)
         self.assertIn("latest_executed_champion_config: latent@scale=0.5", markdown)
         self.assertIn("last_problem_status: blocked", markdown)
@@ -1489,6 +1542,11 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
             "confirm_trajectory_with_fresh_seeds:1",
             history_markdown,
         )
+        self.assertIn("execution_evidence_status_counts: improved:1", history_markdown)
+        self.assertIn(
+            "latest_executed_execution_evidence_status: improved",
+            history_markdown,
+        )
         self.assertIn(
             "latest_executed_execution_next_source: "
             "guided_next_follow_up_command",
@@ -1506,7 +1564,7 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
         self.assertIn("## Recent Events", history_markdown)
         self.assertIn("| 2 | ok | next | follow_up | no | yes | 0 |", history_markdown)
         self.assertIn(
-            "| improved | latent@normalize=blocks,scale=0.5 | 109,113,127 |",
+            "| improved | improved | no | latent@normalize=blocks,scale=0.5 | 109,113,127 |",
             history_markdown,
         )
 
