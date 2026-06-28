@@ -640,6 +640,9 @@ def _runner_summary(
     execution_cwd: Path | None = None,
     selected_execution_next_command: dict[str, Any] | None = None,
     selected_script_status: dict[str, Any] | None = None,
+    requested_target: str | None = None,
+    use_history_next_action: bool = False,
+    history_next_action_status: dict[str, Any] | None = None,
     error: str | None = None,
     stdout: str | None = None,
     stderr: str | None = None,
@@ -650,10 +653,13 @@ def _runner_summary(
     history_report_only: bool = False,
 ) -> dict[str, Any]:
     runner_wrapper_status = _mapping(inspection.get("runner_wrapper_status"))
+    history_status = _mapping(history_next_action_status)
+    history_next_action = _mapping(history_status.get("next_action"))
     return {
         "schema": SCHEMA,
         "command_dir": str(command_dir),
         "manifest_path": str(manifest_path),
+        "requested_target": requested_target or target,
         "target": target,
         "target_kind": target_kind,
         "script_key": script_key,
@@ -675,6 +681,12 @@ def _runner_summary(
         "selected_script_status": (
             selected_script_status if selected_script_status is not None else None
         ),
+        "use_history_next_action": bool(use_history_next_action),
+        "history_next_action": history_next_action if history_next_action else None,
+        "history_next_action_source": history_status.get("source"),
+        "history_next_action_source_path": history_status.get("source_path"),
+        "history_next_action_resolved_target": history_status.get("resolved_target"),
+        "history_next_action_error": history_status.get("error"),
         "strict": strict,
         "dry_run": dry_run,
         "executed": bool(executed),
@@ -723,6 +735,7 @@ def render_markdown(summary: dict[str, Any]) -> str:
     champion = _mapping(context.get("champion"))
     fallback = _mapping(context.get("fallback"))
     selected_execution_next = _mapping(summary.get("selected_execution_next_command"))
+    history_next_action = _mapping(summary.get("history_next_action"))
     execution_summary = _mapping(summary.get("execution_summary"))
     execution_next = _mapping(execution_summary.get("next_command"))
     lines = [
@@ -730,12 +743,20 @@ def render_markdown(summary: dict[str, Any]) -> str:
         "",
         f"- command_dir: {_fmt(summary.get('command_dir'))}",
         f"- manifest_path: {_fmt(summary.get('manifest_path'))}",
+        f"- requested_target: {_fmt(summary.get('requested_target'))}",
         f"- target: {_fmt(summary.get('target'))}",
         f"- target_kind: {_fmt(summary.get('target_kind'))}",
         f"- script_key: {_fmt(summary.get('script_key'))}",
         f"- script_path: {_fmt(summary.get('script_path'))}",
         f"- target_script_key: {_fmt(summary.get('target_script_key'))}",
         f"- target_script_path: {_fmt(summary.get('target_script_path'))}",
+        f"- use_history_next_action: {_fmt(summary.get('use_history_next_action'))}",
+        f"- history_next_action: {_fmt(history_next_action.get('action'))}",
+        f"- history_next_action_reason: {_fmt(history_next_action.get('reason'))}",
+        f"- history_next_action_target: {_fmt(history_next_action.get('target'))}",
+        f"- history_next_action_source: {_fmt(summary.get('history_next_action_source'))}",
+        f"- history_next_action_resolved_target: {_fmt(summary.get('history_next_action_resolved_target'))}",
+        f"- history_next_action_error: {_fmt(summary.get('history_next_action_error'))}",
         (
             "- selected_execution_next_source: "
             f"{_fmt(selected_execution_next.get('source'))}"
@@ -895,6 +916,13 @@ def _history_event(summary: dict[str, Any]) -> dict[str, Any]:
         "script_path",
         "target_script_key",
         "target_script_path",
+        "requested_target",
+        "use_history_next_action",
+        "history_next_action",
+        "history_next_action_source",
+        "history_next_action_source_path",
+        "history_next_action_resolved_target",
+        "history_next_action_error",
         "selected_script_status",
         "command_argv",
         "execution_cwd",
@@ -970,6 +998,43 @@ def _execution_next_command_from_history(
         if next_command.get("script_path"):
             return next_command
     return {}
+
+
+def _history_next_action_status(
+    command_dir: Path,
+    command_scripts: dict[str, Any],
+) -> dict[str, Any]:
+    history_path = _configured_run_history_path(command_dir, command_scripts)
+    status: dict[str, Any] = {
+        "schema": "st.llm_char_vae_context.command_bundle_history_next_action_status.v1",
+        "source": "run_history_jsonl",
+        "source_path": str(history_path),
+        "next_action": None,
+        "resolved_target": None,
+        "error": None,
+    }
+    try:
+        events = _read_history_events(history_path)
+        summary = summarize_history_events(events, history_jsonl_path=history_path)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        status["error"] = str(exc)
+        return status
+
+    next_action = _mapping(summary.get("next_action"))
+    status["next_action"] = next_action if next_action else None
+    if not next_action:
+        status["error"] = "run history did not expose a next action"
+        return status
+    if next_action.get("should_continue") is not True:
+        reason = next_action.get("reason") or next_action.get("action")
+        status["error"] = f"history next action does not allow continuation: {reason}"
+        return status
+    target = next_action.get("target")
+    if target not in TARGET_KEYS:
+        status["error"] = f"history next action target is not runnable: {target}"
+        return status
+    status["resolved_target"] = target
+    return status
 
 
 def _event_status(event: dict[str, Any]) -> str:
@@ -1629,6 +1694,7 @@ def run_bundle(
     append_run_history: bool,
     write_run_history_report: bool,
     history_report_only: bool = False,
+    use_history_next_action: bool = False,
     json_out: Path | None = None,
     markdown_out: Path | None = None,
 ) -> tuple[int, dict[str, Any]]:
@@ -1646,6 +1712,21 @@ def run_bundle(
     manifest_path = command_dir / "recommendation.json"
     manifest = _read_json(manifest_path)
     command_scripts = _command_scripts(manifest)
+    requested_target = target
+    history_next_action_status = (
+        _history_next_action_status(command_dir, command_scripts)
+        if use_history_next_action
+        else {}
+    )
+    if use_history_next_action and not history_next_action_status.get("error"):
+        resolved_target = history_next_action_status.get("resolved_target")
+        if isinstance(resolved_target, str) and resolved_target:
+            target = resolved_target
+    history_next_action_fields = {
+        "requested_target": requested_target,
+        "use_history_next_action": use_history_next_action,
+        "history_next_action_status": history_next_action_status,
+    }
     previous_run_report = _previous_run_report(command_dir, command_scripts)
     execution_next_command = _execution_next_command_from_report(previous_run_report)
     if target == EXECUTION_NEXT_TARGET and not execution_next_command:
@@ -1805,6 +1886,7 @@ def run_bundle(
             execution_cwd=execution_cwd,
             selected_execution_next_command=selected_execution_next_command,
             selected_script_status=selected_script_status,
+            **history_next_action_fields,
             strict=strict,
             dry_run=dry_run,
             inspection=inspection,
@@ -1814,6 +1896,29 @@ def run_bundle(
         )
         summary = finish(summary, append_history=False)
         return 0, summary
+
+    if use_history_next_action and history_next_action_status.get("error"):
+        summary = _runner_summary(
+            command_dir=command_dir,
+            manifest_path=manifest_path,
+            target=target,
+            script_key=script_key,
+            script_path=script_path,
+            **target_details,
+            recommendation_context=recommendation_context,
+            execution_cwd=execution_cwd,
+            selected_execution_next_command=selected_execution_next_command,
+            selected_script_status=selected_script_status,
+            **history_next_action_fields,
+            strict=strict,
+            dry_run=dry_run,
+            inspection=inspection,
+            returncode=1,
+            error=history_next_action_status.get("error"),
+            **timing_fields(),
+        )
+        summary = finish(summary, append_history=False)
+        return 1, summary
 
     if not required_ready:
         summary = _runner_summary(
@@ -1827,6 +1932,7 @@ def run_bundle(
             execution_cwd=execution_cwd,
             selected_execution_next_command=selected_execution_next_command,
             selected_script_status=selected_script_status,
+            **history_next_action_fields,
             strict=strict,
             dry_run=dry_run,
             inspection=inspection,
@@ -1848,6 +1954,7 @@ def run_bundle(
             execution_cwd=execution_cwd,
             selected_execution_next_command=selected_execution_next_command,
             selected_script_status=selected_script_status,
+            **history_next_action_fields,
             strict=strict,
             dry_run=dry_run,
             inspection=inspection,
@@ -1869,6 +1976,7 @@ def run_bundle(
             execution_cwd=execution_cwd,
             selected_execution_next_command=selected_execution_next_command,
             selected_script_status=selected_script_status,
+            **history_next_action_fields,
             strict=strict,
             dry_run=dry_run,
             inspection=inspection,
@@ -1891,6 +1999,7 @@ def run_bundle(
             execution_cwd=execution_cwd,
             selected_execution_next_command=selected_execution_next_command,
             selected_script_status=selected_script_status,
+            **history_next_action_fields,
             strict=strict,
             dry_run=dry_run,
             inspection=inspection,
@@ -1919,6 +2028,7 @@ def run_bundle(
             execution_cwd=execution_cwd,
             selected_execution_next_command=selected_execution_next_command,
             selected_script_status=selected_script_status,
+            **history_next_action_fields,
             strict=strict,
             dry_run=dry_run,
             inspection=inspection,
@@ -1946,6 +2056,7 @@ def run_bundle(
         execution_cwd=execution_cwd,
         selected_execution_next_command=selected_execution_next_command,
         selected_script_status=selected_script_status,
+        **history_next_action_fields,
         strict=strict,
         dry_run=dry_run,
         inspection=inspection,
@@ -2009,6 +2120,14 @@ def _build_parser() -> argparse.ArgumentParser:
             "executing a command or appending a new history event"
         ),
     )
+    parser.add_argument(
+        "--use-history-next-action",
+        action="store_true",
+        help=(
+            "resolve --target from the current run_history next_action when it "
+            "allows continuation"
+        ),
+    )
     parser.add_argument("--json-out", type=Path, default=None)
     parser.add_argument("--markdown-out", type=Path, default=None)
     return parser
@@ -2019,6 +2138,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.history_report_only and args.append_run_history:
         parser.error("--history-report-only cannot be combined with --append-run-history")
+    if args.history_report_only and args.use_history_next_action:
+        parser.error(
+            "--history-report-only cannot be combined with --use-history-next-action"
+        )
     write_run_history_report = bool(
         args.write_run_history_report or args.history_report_only
     )
@@ -2034,6 +2157,7 @@ def main(argv: list[str] | None = None) -> int:
             append_run_history=bool(args.append_run_history),
             write_run_history_report=write_run_history_report,
             history_report_only=bool(args.history_report_only),
+            use_history_next_action=bool(args.use_history_next_action),
             json_out=args.json_out,
             markdown_out=args.markdown_out,
         )
@@ -2042,6 +2166,8 @@ def main(argv: list[str] | None = None) -> int:
             "schema": SCHEMA,
             "command_dir": str(args.command_dir),
             "target": args.target,
+            "requested_target": args.target,
+            "use_history_next_action": bool(args.use_history_next_action),
             "strict": not args.no_strict,
             "dry_run": bool(args.dry_run),
             "returncode": 1,

@@ -1035,6 +1035,157 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
             str(command_dir / "executed_follow_up" / "next" / "summary.json"),
         )
 
+    def test_cli_uses_history_next_action_to_select_execution_next(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            command_dir = _write_bundle(Path(tmp))
+            first = subprocess.run(
+                [
+                    "python3",
+                    "-P",
+                    str(SCRIPT),
+                    str(command_dir),
+                    "--write-run-report",
+                    "--append-run-history",
+                    "--write-run-history-report",
+                    "--json",
+                ],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            dry = subprocess.run(
+                [
+                    "python3",
+                    "-P",
+                    str(SCRIPT),
+                    str(command_dir),
+                    "--use-history-next-action",
+                    "--dry-run",
+                    "--write-run-report",
+                    "--json",
+                ],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            first_payload = json.loads(first.stdout)
+            dry_payload = json.loads(dry.stdout)
+            run_markdown = (command_dir / "run.md").read_text(encoding="utf-8")
+
+        self.assertEqual(first.returncode, 0, first.stderr)
+        self.assertEqual(dry.returncode, 0, dry.stderr)
+        _assert_execution_summary(self, first_payload, command_dir)
+        self.assertEqual(dry_payload["requested_target"], "next")
+        self.assertEqual(dry_payload["target"], "execution-next")
+        self.assertTrue(dry_payload["use_history_next_action"])
+        self.assertEqual(
+            dry_payload["history_next_action"]["action"],
+            "run_execution_next",
+        )
+        self.assertEqual(
+            dry_payload["history_next_action"]["target"],
+            "execution-next",
+        )
+        self.assertEqual(
+            dry_payload["history_next_action_resolved_target"],
+            "execution-next",
+        )
+        self.assertIsNone(dry_payload["history_next_action_error"])
+        self.assertEqual(
+            dry_payload["selected_execution_next_command"]["source"],
+            "guided_next_follow_up_command",
+        )
+        self.assertEqual(dry_payload["target_kind"], "execution_next")
+        self.assertFalse(dry_payload["executed"])
+        self.assertIn("requested_target: next", run_markdown)
+        self.assertIn("target: execution-next", run_markdown)
+        self.assertIn("use_history_next_action: yes", run_markdown)
+        self.assertIn("history_next_action: run_execution_next", run_markdown)
+        self.assertIn(
+            "history_next_action_resolved_target: execution-next",
+            run_markdown,
+        )
+
+    def test_cli_blocks_history_next_action_when_review_is_required(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            command_dir = _write_bundle(Path(tmp))
+            history_event = {
+                "schema": "st.llm_char_vae_context.command_bundle_run_history_event.v1",
+                "target": "next",
+                "target_kind": "follow_up",
+                "dry_run": False,
+                "executed": True,
+                "returncode": 0,
+                "execution_summary": {
+                    "exists": True,
+                    "valid_json": True,
+                    "follow_up_gate_failed": True,
+                    "follow_up_verdict": "regressed",
+                    "next_command": {
+                        "source": "guided_next_follow_up_command",
+                        "script_path": str(
+                            command_dir
+                            / "executed_follow_up"
+                            / "guided_next_follow_up_command.sh"
+                        ),
+                        "default_new_seeds": "109,113,127",
+                    },
+                },
+            }
+            (command_dir / "run_history.jsonl").write_text(
+                json.dumps(history_event, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                [
+                    "python3",
+                    "-P",
+                    str(SCRIPT),
+                    str(command_dir),
+                    "--use-history-next-action",
+                    "--write-run-report",
+                    "--json",
+                ],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            payload = json.loads(result.stdout)
+            run_markdown = (command_dir / "run.md").read_text(encoding="utf-8")
+
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(payload["requested_target"], "next")
+        self.assertEqual(payload["target"], "next")
+        self.assertTrue(payload["use_history_next_action"])
+        self.assertFalse(payload["executed"])
+        self.assertEqual(
+            payload["history_next_action"]["action"],
+            "review_before_continuing",
+        )
+        self.assertEqual(
+            payload["history_next_action"]["reason"],
+            "follow-up gate requested stop",
+        )
+        self.assertIs(payload["history_next_action"]["should_continue"], False)
+        self.assertIsNone(payload["history_next_action_resolved_target"])
+        self.assertEqual(
+            payload["history_next_action_error"],
+            (
+                "history next action does not allow continuation: "
+                "follow-up gate requested stop"
+            ),
+        )
+        self.assertEqual(payload["error"], payload["history_next_action_error"])
+        self.assertFalse((command_dir / "runner.out").exists())
+        self.assertIn("history_next_action: review_before_continuing", run_markdown)
+        self.assertIn("history_next_action_error:", run_markdown)
+
     def test_cli_blocks_execution_next_when_selected_script_is_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             command_dir = _write_bundle(Path(tmp))
