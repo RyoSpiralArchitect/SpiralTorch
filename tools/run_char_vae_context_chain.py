@@ -208,6 +208,17 @@ def _unused_explicit_seed_groups(
     return seed_groups[start:stop]
 
 
+def _manifest_follow_up_seed_groups(
+    seed_groups: list[str],
+    *,
+    explicit_seed_groups: bool,
+    planned_follow_ups: int,
+) -> list[str]:
+    if explicit_seed_groups:
+        return list(seed_groups)
+    return seed_groups[: max(0, planned_follow_ups)]
+
+
 def _follow_up_seed_group_plan(
     seed_groups: list[str],
     *,
@@ -961,6 +972,11 @@ def main(argv: list[str] | None = None) -> int:
         if explicit_seed_groups
         else PRESETS[args.preset]["follow_up_seed_groups"]
     )
+    manifest_seed_groups = _manifest_follow_up_seed_groups(
+        seed_groups,
+        explicit_seed_groups=explicit_seed_groups,
+        planned_follow_ups=int(args.follow_ups),
+    )
 
     manifest: dict[str, Any] = {
         "schema": SCHEMA,
@@ -970,7 +986,7 @@ def main(argv: list[str] | None = None) -> int:
         "allow_gate_stop": bool(args.allow_gate_stop),
         "planned_follow_ups": int(args.follow_ups),
         "attempted_follow_ups": 0,
-        "planned_follow_up_seed_groups": seed_groups,
+        "planned_follow_up_seed_groups": manifest_seed_groups,
         "extra_explicit_seed_groups": _extra_explicit_seed_groups(
             seed_groups,
             explicit_seed_groups=explicit_seed_groups,
@@ -978,7 +994,7 @@ def main(argv: list[str] | None = None) -> int:
         ),
         "unused_explicit_seed_groups": [],
         "follow_up_seed_group_plan": _follow_up_seed_group_plan(
-            seed_groups,
+            manifest_seed_groups,
             explicit_seed_groups=explicit_seed_groups,
             planned_follow_ups=int(args.follow_ups),
             attempted_follow_ups=0,
@@ -1096,7 +1112,7 @@ def main(argv: list[str] | None = None) -> int:
         )
     )
     manifest["follow_up_seed_group_plan"] = _follow_up_seed_group_plan(
-        seed_groups,
+        manifest_seed_groups,
         explicit_seed_groups=explicit_seed_groups,
         planned_follow_ups=int(args.follow_ups),
         attempted_follow_ups=attempted_follow_ups,
