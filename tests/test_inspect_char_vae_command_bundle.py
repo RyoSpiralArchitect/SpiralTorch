@@ -129,17 +129,32 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
             )
             json_report = command_dir / "inspection.json"
             markdown_report = command_dir / "inspection.md"
+            json_report_path = str(json_report.resolve())
+            markdown_report_path = str(markdown_report.resolve())
             json_report_exists = json_report.exists()
             markdown_report_exists = markdown_report.exists()
+            stdout_payload = json.loads(result.stdout)
             report_payload = json.loads(json_report.read_text(encoding="utf-8"))
             markdown = markdown_report.read_text(encoding="utf-8")
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(json_report_exists)
         self.assertTrue(markdown_report_exists)
+        self.assertEqual(stdout_payload["inspection_json_path"], json_report_path)
+        self.assertEqual(
+            stdout_payload["inspection_markdown_path"],
+            markdown_report_path,
+        )
         self.assertTrue(report_payload["bundle_ready"])
         self.assertTrue(report_payload["strict_ready"])
+        self.assertEqual(report_payload["inspection_json_path"], json_report_path)
+        self.assertEqual(
+            report_payload["inspection_markdown_path"],
+            markdown_report_path,
+        )
         self.assertIn("Char VAE Command Bundle Inspection", markdown)
+        self.assertIn(f"inspection_json_path: {json_report_path}", markdown)
+        self.assertIn(f"inspection_markdown_path: {markdown_report_path}", markdown)
 
     def test_cli_writes_explicit_inspection_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -147,6 +162,8 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
             command_dir = _write_bundle(root)
             json_out = root / "reports" / "bundle.json"
             markdown_out = root / "reports" / "bundle.md"
+            json_out_path = str(json_out)
+            markdown_out_path = str(markdown_out)
             result = subprocess.run(
                 [
                     "python3",
@@ -173,7 +190,10 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
         self.assertTrue(json_out_exists)
         self.assertTrue(markdown_out_exists)
         self.assertEqual(payload["action"], "continue_from_accepted")
+        self.assertEqual(payload["inspection_json_path"], json_out_path)
+        self.assertEqual(payload["inspection_markdown_path"], markdown_out_path)
         self.assertIn("strict_ready: yes", markdown)
+        self.assertIn(f"inspection_json_path: {json_out_path}", markdown)
 
     def test_cli_fails_when_required_artifact_is_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

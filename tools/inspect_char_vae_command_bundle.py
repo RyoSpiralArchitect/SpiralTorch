@@ -178,6 +178,8 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"- written_count: {_fmt(summary.get('written_count'))}",
         f"- comparison_json_path: {_fmt(summary.get('comparison_json_path'))}",
         f"- comparison_markdown_path: {_fmt(summary.get('comparison_markdown_path'))}",
+        f"- inspection_json_path: {_fmt(summary.get('inspection_json_path'))}",
+        f"- inspection_markdown_path: {_fmt(summary.get('inspection_markdown_path'))}",
         f"- chain_source_count: {_fmt(summary.get('chain_source_count'))}",
         f"- missing_required: {_fmt(', '.join(summary.get('missing_required') or []))}",
         f"- missing_optional: {_fmt(', '.join(summary.get('missing_optional') or []))}",
@@ -237,6 +239,10 @@ def main(argv: list[str] | None = None) -> int:
             json_out = command_dir / "inspection.json"
         if markdown_out is None:
             markdown_out = command_dir / "inspection.md"
+    summary["inspection_json_path"] = str(json_out) if json_out is not None else None
+    summary["inspection_markdown_path"] = (
+        str(markdown_out) if markdown_out is not None else None
+    )
     markdown = render_markdown(summary)
     if json_out is not None:
         json_out.parent.mkdir(parents=True, exist_ok=True)
