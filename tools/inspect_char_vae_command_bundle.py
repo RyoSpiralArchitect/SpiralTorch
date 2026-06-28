@@ -15,6 +15,11 @@ SCHEMA = "st.llm_char_vae_context.command_bundle_inspection.v1"
 RUN_HISTORY_SUMMARY_SCHEMA = (
     "st.llm_char_vae_context.command_bundle_run_history_summary.v1"
 )
+RUN_HISTORY_NEXT_ACTION_SCHEMA = (
+    "st.llm_char_vae_context.command_bundle_history_next_action.v1"
+)
+RUN_LOOP_SCHEMA = "st.llm_char_vae_context.command_bundle_history_loop.v1"
+RUN_LOOP_RUNNABLE_TARGETS = {"next", "follow-up", "review", "execution-next"}
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -38,11 +43,61 @@ def _is_executable(path: Path | None) -> bool:
     return path is not None and path.is_file() and os.access(path, os.X_OK)
 
 
+def _runner_wrapper_status(
+    path: Path | None,
+    *,
+    runner_command: str | None,
+) -> dict[str, Any]:
+    status: dict[str, Any] = {
+        "path": str(path) if path is not None else None,
+        "present": path is not None,
+        "exists": None if path is None else path.is_file(),
+        "executable": None if path is None else _is_executable(path),
+        "readable": None,
+        "contains_runner_command": None,
+        "executes_runner_command": None,
+        "forwards_arguments": None,
+        "error": None,
+        "ok": path is None,
+    }
+    if path is None:
+        return status
+    if not path.is_file():
+        status["ok"] = False
+        return status
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        status["readable"] = False
+        status["error"] = str(exc)
+        status["ok"] = False
+        return status
+    status["readable"] = True
+    status["contains_runner_command"] = (
+        runner_command is not None and runner_command in text
+    )
+    expected_exec = (
+        f'exec {runner_command} "$@"' if runner_command is not None else None
+    )
+    status["executes_runner_command"] = (
+        expected_exec is not None and expected_exec in text
+    )
+    status["forwards_arguments"] = '"$@"' in text or "'$@'" in text
+    status["ok"] = bool(
+        status["executable"]
+        and status["executes_runner_command"]
+        and status["forwards_arguments"]
+    )
+    return status
+
+
 def _fmt(value: Any) -> str:
     if value is None:
         return "-"
     if isinstance(value, bool):
         return "yes" if value else "no"
+    if isinstance(value, list):
+        return ",".join(str(item) for item in value) if value else "-"
     return str(value)
 
 
@@ -131,6 +186,52 @@ def _has_command_dir_token(
     return any(_token_matches_path(token, command_dir) for token in tokens)
 
 
+def _resume_from_report_path_token(tokens: list[str] | None) -> str | None:
+    if tokens is None:
+        return None
+    prefix = "--resume-from-report="
+    for index, token in enumerate(tokens):
+        if token.startswith(prefix):
+            return token[len(prefix) :]
+        if token != "--resume-from-report":
+            continue
+        next_index = index + 1
+        if next_index < len(tokens) and not tokens[next_index].startswith("-"):
+            return tokens[next_index]
+        return None
+    return None
+
+
+def _resume_report_path_ok(
+    tokens: list[str] | None,
+    *,
+    summary_path: Path | None,
+    command_dir: Path | None,
+) -> bool | None:
+    if summary_path is None:
+        return None
+    if tokens is None:
+        return False
+    token = _resume_from_report_path_token(tokens)
+    if token is not None:
+        return _token_matches_path(token, summary_path)
+    if command_dir is None:
+        return None
+    return _path_matches(str(summary_path), command_dir / "run_loop.json")
+
+
+def _path_matches(value: Any, expected_path: Path | None) -> bool | None:
+    if expected_path is None:
+        return None
+    if not isinstance(value, str) or not value:
+        return None
+    path = Path(value)
+    try:
+        return path.resolve() == expected_path.resolve()
+    except OSError:
+        return path.absolute() == expected_path.resolve()
+
+
 def _declared_command(
     label: str,
     command: str | None,
@@ -198,6 +299,14 @@ def _run_history_summary_status(
         "schema": None,
         "schema_ok": None,
         "total_runs": None,
+        "next_action": None,
+        "next_action_reason": None,
+        "next_action_target": None,
+        "next_action_command_source": None,
+        "next_action_script_path": None,
+        "next_action_default_new_seeds": None,
+        "next_action_should_continue": None,
+        "next_action_schema_ok": None,
         "history_event_count": history_event_count,
         "matches_history_event_count": None,
         "error": history_error,
@@ -212,17 +321,505 @@ def _run_history_summary_status(
         return status
     schema = payload.get("schema")
     total_runs = payload.get("total_runs")
+    next_action = payload.get("next_action")
+    next_action = next_action if isinstance(next_action, dict) else {}
     status.update(
         {
             "valid_json": True,
             "schema": schema,
             "schema_ok": schema == RUN_HISTORY_SUMMARY_SCHEMA,
             "total_runs": total_runs,
+            "next_action": next_action.get("action"),
+            "next_action_reason": next_action.get("reason"),
+            "next_action_target": next_action.get("target"),
+            "next_action_command_source": next_action.get("command_source"),
+            "next_action_script_path": next_action.get("script_path"),
+            "next_action_default_new_seeds": next_action.get("default_new_seeds"),
+            "next_action_should_continue": next_action.get("should_continue"),
+            "next_action_schema_ok": (
+                next_action.get("schema") == RUN_HISTORY_NEXT_ACTION_SCHEMA
+                if next_action
+                else None
+            ),
         }
     )
     if isinstance(total_runs, int) and history_event_count is not None:
         status["matches_history_event_count"] = total_runs == history_event_count
     return status
+
+
+def _derived_run_loop_handoff(
+    payload: dict[str, Any],
+    final_next_action: dict[str, Any],
+) -> tuple[str | None, str | None]:
+    explicit_status = payload.get("handoff_status")
+    explicit_reason = payload.get("handoff_reason")
+    if explicit_status is not None or explicit_reason is not None:
+        return (
+            explicit_status if isinstance(explicit_status, str) else None,
+            explicit_reason if isinstance(explicit_reason, str) else None,
+        )
+    action = final_next_action.get("action")
+    action_reason = final_next_action.get("reason")
+    stop_reason = payload.get("stop_reason")
+    returncode = payload.get("returncode")
+    final_action_failed = payload.get("final_action_failed") is True
+    max_steps_continuation_failed = (
+        payload.get("max_steps_continuation_failed") is True
+    )
+    final_next_action_runnable = payload.get("final_next_action_runnable")
+    if not isinstance(final_next_action_runnable, bool):
+        final_next_action_runnable = (
+            final_next_action.get("should_continue") is True
+            and final_next_action.get("target") in RUN_LOOP_RUNNABLE_TARGETS
+        )
+    if final_action_failed:
+        if action == "review_before_continuing":
+            return (
+                "needs_review",
+                action_reason or "final next action requested review",
+            )
+        if action == "inspect_history":
+            return (
+                "needs_inspection",
+                action_reason or "final next action requested inspection",
+            )
+        return (
+            "final_action_failed",
+            action_reason or f"final next action requested failure: {action}",
+        )
+    if stop_reason == "dry_run":
+        return "dry_run", "dry-run resolved the next history-guided step"
+    if max_steps_continuation_failed:
+        return (
+            "continuation_ready",
+            action_reason or "max steps reached with runnable final next action",
+        )
+    if final_next_action_runnable:
+        return (
+            "continuation_ready",
+            action_reason or "final next action is runnable",
+        )
+    if returncode != 0:
+        if stop_reason == "history_next_action_blocked":
+            return (
+                "blocked",
+                action_reason or "history next action blocked execution",
+            )
+        return "failed", action_reason or "history loop step failed"
+    if action == "collect_next_command":
+        return (
+            "awaiting_next_command",
+            action_reason or "latest execution can continue but has no next script",
+        )
+    if action == "review_before_continuing":
+        return (
+            "needs_review",
+            action_reason or "final next action requested review",
+        )
+    if action == "inspect_history":
+        return (
+            "needs_inspection",
+            action_reason or "final next action requested inspection",
+        )
+    if action == "repair_blocker":
+        return "blocked", action_reason or "final next action requests repair"
+    if stop_reason == "history_next_action_not_runnable":
+        return (
+            "not_runnable",
+            action_reason or "final next action target is not runnable",
+        )
+    if stop_reason == "max_steps_reached":
+        return "max_steps_reached", "max steps reached"
+    if stop_reason is not None or action_reason is not None:
+        return "stopped", action_reason or str(stop_reason)
+    return None, None
+
+
+def _run_loop_status(
+    *,
+    summary_path: Path | None,
+    command_dir: Path | None,
+) -> dict[str, Any]:
+    exists = _exists(summary_path)
+    status: dict[str, Any] = {
+        "path": str(summary_path) if summary_path is not None else None,
+        "exists": exists,
+        "valid_json": None,
+        "schema": None,
+        "schema_ok": None,
+        "command_dir": None,
+        "command_dir_matches": None,
+        "handoff_status": None,
+        "handoff_reason": None,
+        "handoff_severity": None,
+        "handoff_requires_attention": None,
+        "handoff_recommended_action": None,
+        "handoff_recommended_command": None,
+        "declared_handoff_recommended_action": None,
+        "declared_handoff_recommended_action_present": None,
+        "declared_handoff_recommended_action_ok": None,
+        "declared_handoff_recommended_command": None,
+        "declared_handoff_recommended_command_present": None,
+        "declared_handoff_recommended_command_ok": None,
+        "max_steps": None,
+        "step_count": None,
+        "executed_count": None,
+        "success_count": None,
+        "failure_count": None,
+        "stop_reason": None,
+        "fail_on_final_actions": None,
+        "final_action_failed": None,
+        "fail_on_max_steps_continuation": None,
+        "max_steps_continuation_failed": None,
+        "returncode": None,
+        "final_next_action": None,
+        "final_next_action_reason": None,
+        "final_next_action_target": None,
+        "final_next_action_command_source": None,
+        "final_next_action_script_path": None,
+        "final_next_action_default_new_seeds": None,
+        "final_next_action_should_continue": None,
+        "final_next_action_runnable": None,
+        "continuation_command": None,
+        "resume_from_report_command": None,
+        "resume_from_report_command_present": None,
+        "resume_from_report_command_ok": None,
+        "resume_from_report_command_target_dir_ok": None,
+        "resume_from_report_command_report_path_ok": None,
+        "resume_from_report_command_parse_error": None,
+        "resume_from_report_command_missing_required_flags": None,
+        "continuation_command_expected": None,
+        "continuation_command_present": None,
+        "continuation_command_ok": None,
+        "continuation_command_target_dir_ok": None,
+        "continuation_command_parse_error": None,
+        "continuation_command_missing_required_flags": None,
+        "error": None,
+    }
+    if summary_path is None or not exists:
+        return status
+    try:
+        payload = _read_json(summary_path)
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        status["valid_json"] = False
+        status["error"] = str(exc)
+        return status
+    final_next_action = payload.get("final_next_action")
+    final_next_action = final_next_action if isinstance(final_next_action, dict) else {}
+    final_next_action_runnable = payload.get("final_next_action_runnable")
+    if not isinstance(final_next_action_runnable, bool):
+        final_next_action_runnable = (
+            final_next_action.get("should_continue") is True
+            and final_next_action.get("target") in RUN_LOOP_RUNNABLE_TARGETS
+        )
+    handoff_status, handoff_reason = _derived_run_loop_handoff(
+        payload,
+        final_next_action,
+    )
+    continuation_command = payload.get("continuation_command")
+    continuation_command = (
+        continuation_command if isinstance(continuation_command, str) else None
+    )
+    resume_from_report_command = payload.get("resume_from_report_command")
+    resume_from_report_command = (
+        resume_from_report_command
+        if isinstance(resume_from_report_command, str)
+        else None
+    )
+    resume_from_report_command_status = _declared_command(
+        "run_loop_resume_from_report_command",
+        resume_from_report_command,
+        required_flags=("run_char_vae_history_loop.py", "--resume-from-report"),
+        command_dir=command_dir,
+    )
+    resume_from_report_command_present = bool(
+        resume_from_report_command_status["present"]
+    )
+    resume_from_report_command_report_path_ok = (
+        _resume_report_path_ok(
+            resume_from_report_command_status.get("tokens"),
+            summary_path=summary_path,
+            command_dir=command_dir,
+        )
+        if resume_from_report_command_present
+        else None
+    )
+    resume_from_report_command_ok = (
+        bool(resume_from_report_command_status["ok"])
+        and resume_from_report_command_report_path_ok is not False
+        if resume_from_report_command_present
+        else None
+    )
+    resume_from_report_command_target_dir_ok = (
+        resume_from_report_command_status.get("target_command_dir_ok")
+        if resume_from_report_command_present
+        else None
+    )
+    resume_from_report_command_parse_error = (
+        resume_from_report_command_status.get("parse_error")
+        if resume_from_report_command_present
+        else None
+    )
+    resume_from_report_command_missing_required_flags = (
+        resume_from_report_command_status.get("missing_required_flags")
+        if resume_from_report_command_present
+        else []
+    )
+    continuation_command_status = _declared_command(
+        "run_loop_continuation_command",
+        continuation_command,
+        required_flags=("run_char_vae_history_loop.py", "--max-steps"),
+        command_dir=command_dir,
+    )
+    continuation_command_present = bool(continuation_command_status["present"])
+    if final_next_action_runnable:
+        continuation_command_ok = bool(continuation_command_status["ok"])
+    elif continuation_command_present:
+        continuation_command_ok = False
+    else:
+        continuation_command_ok = None
+    continuation_command_target_dir_ok = (
+        continuation_command_status.get("target_command_dir_ok")
+        if continuation_command_present
+        else None
+    )
+    continuation_command_parse_error = (
+        continuation_command_status.get("parse_error")
+        if continuation_command_present
+        else None
+    )
+    continuation_command_missing_required_flags = (
+        continuation_command_status.get("missing_required_flags")
+        if continuation_command_present
+        else []
+    )
+    declared_handoff_recommended_action_present = (
+        "handoff_recommended_action" in payload
+    )
+    raw_declared_handoff_recommended_action = payload.get(
+        "handoff_recommended_action"
+    )
+    declared_handoff_recommended_action = (
+        raw_declared_handoff_recommended_action
+        if isinstance(raw_declared_handoff_recommended_action, str)
+        else None
+    )
+    declared_handoff_recommended_action_type_ok = (
+        raw_declared_handoff_recommended_action is None
+        or isinstance(raw_declared_handoff_recommended_action, str)
+    )
+    declared_handoff_recommended_command_present = (
+        "handoff_recommended_command" in payload
+    )
+    raw_declared_handoff_recommended_command = payload.get(
+        "handoff_recommended_command"
+    )
+    declared_handoff_recommended_command = (
+        raw_declared_handoff_recommended_command
+        if isinstance(raw_declared_handoff_recommended_command, str)
+        else None
+    )
+    declared_handoff_recommended_command_type_ok = (
+        raw_declared_handoff_recommended_command is None
+        or isinstance(raw_declared_handoff_recommended_command, str)
+    )
+    schema = payload.get("schema")
+    status.update(
+        {
+            "valid_json": True,
+            "schema": schema,
+            "schema_ok": schema == RUN_LOOP_SCHEMA,
+            "command_dir": payload.get("command_dir"),
+            "command_dir_matches": _path_matches(
+                payload.get("command_dir"),
+                command_dir,
+            ),
+            "handoff_status": handoff_status,
+            "handoff_reason": handoff_reason,
+            "max_steps": payload.get("max_steps"),
+            "step_count": payload.get("step_count"),
+            "executed_count": payload.get("executed_count"),
+            "success_count": payload.get("success_count"),
+            "failure_count": payload.get("failure_count"),
+            "stop_reason": payload.get("stop_reason"),
+            "fail_on_final_actions": payload.get("fail_on_final_actions"),
+            "final_action_failed": payload.get("final_action_failed"),
+            "fail_on_max_steps_continuation": payload.get(
+                "fail_on_max_steps_continuation"
+            ),
+            "max_steps_continuation_failed": payload.get(
+                "max_steps_continuation_failed"
+            ),
+            "returncode": payload.get("returncode"),
+            "error": payload.get("error"),
+            "final_next_action": final_next_action.get("action"),
+            "final_next_action_reason": final_next_action.get("reason"),
+            "final_next_action_target": final_next_action.get("target"),
+            "final_next_action_command_source": final_next_action.get(
+                "command_source"
+            ),
+            "final_next_action_script_path": final_next_action.get("script_path"),
+            "final_next_action_default_new_seeds": final_next_action.get(
+                "default_new_seeds"
+            ),
+            "final_next_action_should_continue": final_next_action.get(
+                "should_continue"
+            ),
+            "final_next_action_runnable": final_next_action_runnable,
+            "continuation_command": continuation_command,
+            "resume_from_report_command": resume_from_report_command,
+            "resume_from_report_command_present": (
+                resume_from_report_command_present
+            ),
+            "resume_from_report_command_ok": resume_from_report_command_ok,
+            "resume_from_report_command_target_dir_ok": (
+                resume_from_report_command_target_dir_ok
+            ),
+            "resume_from_report_command_report_path_ok": (
+                resume_from_report_command_report_path_ok
+            ),
+            "resume_from_report_command_parse_error": (
+                resume_from_report_command_parse_error
+            ),
+            "resume_from_report_command_missing_required_flags": (
+                resume_from_report_command_missing_required_flags
+            ),
+            "continuation_command_expected": final_next_action_runnable,
+            "continuation_command_present": continuation_command_present,
+            "continuation_command_ok": continuation_command_ok,
+            "continuation_command_target_dir_ok": continuation_command_target_dir_ok,
+            "continuation_command_parse_error": continuation_command_parse_error,
+            "continuation_command_missing_required_flags": (
+                continuation_command_missing_required_flags
+            ),
+            "declared_handoff_recommended_action": (
+                declared_handoff_recommended_action
+            ),
+            "declared_handoff_recommended_action_present": (
+                declared_handoff_recommended_action_present
+            ),
+            "declared_handoff_recommended_action_ok": (
+                declared_handoff_recommended_action_type_ok
+                if declared_handoff_recommended_action_present
+                else None
+            ),
+            "declared_handoff_recommended_command": (
+                declared_handoff_recommended_command
+            ),
+            "declared_handoff_recommended_command_present": (
+                declared_handoff_recommended_command_present
+            ),
+            "declared_handoff_recommended_command_ok": (
+                declared_handoff_recommended_command_type_ok
+                if declared_handoff_recommended_command_present
+                else None
+            ),
+        }
+    )
+    return status
+
+
+def _run_loop_declared_recommendation_issues(status: dict[str, Any]) -> list[str]:
+    if status.get("exists") is not True or status.get("valid_json") is not True:
+        return []
+    issues: list[str] = []
+    if status.get("declared_handoff_recommended_action_present") is True:
+        declared_action = status.get("declared_handoff_recommended_action")
+        if (
+            status.get("declared_handoff_recommended_action_ok") is not True
+            or declared_action != status.get("handoff_recommended_action")
+        ):
+            issues.append("run_loop_handoff_recommended_action")
+            status["declared_handoff_recommended_action_ok"] = False
+        else:
+            status["declared_handoff_recommended_action_ok"] = True
+    if status.get("declared_handoff_recommended_command_present") is True:
+        declared_command = status.get("declared_handoff_recommended_command")
+        if (
+            status.get("declared_handoff_recommended_command_ok") is not True
+            or declared_command != status.get("handoff_recommended_command")
+        ):
+            issues.append("run_loop_handoff_recommended_command")
+            status["declared_handoff_recommended_command_ok"] = False
+        else:
+            status["declared_handoff_recommended_command_ok"] = True
+    return issues
+
+
+def _run_loop_status_issues(status: dict[str, Any]) -> list[str]:
+    if status.get("exists") is not True:
+        return []
+    issues: list[str] = []
+    if status.get("valid_json") is not True:
+        issues.append("run_loop_json")
+        return issues
+    if status.get("schema_ok") is not True:
+        issues.append("run_loop_schema")
+    if status.get("command_dir_matches") is not True:
+        issues.append("run_loop_command_dir")
+    continuation_expected = status.get("continuation_command_expected") is True
+    continuation_present = status.get("continuation_command_present") is True
+    if continuation_expected:
+        if status.get("continuation_command_ok") is not True:
+            issues.append("run_loop_continuation_command")
+    elif continuation_present:
+        issues.append("run_loop_continuation_command")
+    if (
+        status.get("resume_from_report_command_present") is True
+        and status.get("resume_from_report_command_ok") is not True
+    ):
+        issues.append("run_loop_resume_from_report_command")
+    return issues
+
+
+def _run_loop_handoff_guidance(
+    status: dict[str, Any],
+    issues: list[str],
+) -> tuple[str | None, bool | None, str | None]:
+    if status.get("exists") is not True:
+        return None, None, None
+    if issues:
+        return "invalid", True, "repair_run_loop_report"
+    handoff_status = status.get("handoff_status")
+    if handoff_status == "continuation_ready":
+        if status.get("resume_from_report_command_ok") is True:
+            return "ready", False, "run_resume_from_report_command"
+        return "ready", False, "run_continuation_command"
+    if handoff_status == "awaiting_next_command":
+        return "attention", True, "collect_next_command"
+    if handoff_status == "needs_review":
+        return "attention", True, "review_before_continuing"
+    if handoff_status == "needs_inspection":
+        return "attention", True, "inspect_history"
+    if handoff_status == "blocked":
+        return "blocked", True, "repair_blocker"
+    if handoff_status in {"failed", "final_action_failed"}:
+        return "failed", True, "inspect_failure"
+    if handoff_status == "not_runnable":
+        return "attention", True, "repair_or_collect_runnable_target"
+    if handoff_status == "max_steps_reached":
+        return "attention", True, "increase_max_steps_or_review"
+    if handoff_status == "dry_run":
+        return "info", False, "run_without_dry_run_when_ready"
+    if handoff_status == "stopped":
+        return "attention", True, "review_stopped_loop"
+    if handoff_status is None:
+        return None, None, None
+    return "attention", True, "review_handoff_status"
+
+
+def _run_loop_handoff_recommended_command(
+    status: dict[str, Any],
+    action: str | None,
+) -> str | None:
+    if action == "run_resume_from_report_command":
+        command = status.get("resume_from_report_command")
+        return command if isinstance(command, str) and command else None
+    if action == "run_continuation_command":
+        command = status.get("continuation_command")
+        return command if isinstance(command, str) and command else None
+    return None
 
 
 def inspect_bundle(command_dir: Path) -> dict[str, Any]:
@@ -249,6 +846,22 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
     review_path = _path_from(command_scripts.get("review_path"))
     runner_path = _path_from(command_scripts.get("runner_path"))
     runner_command = _command_from(command_scripts.get("runner_command"))
+    history_next_action_runner_path = _path_from(
+        command_scripts.get("history_next_action_runner_path")
+    )
+    history_next_action_command = _command_from(
+        command_scripts.get("history_next_action_command")
+    )
+    history_loop_runner_path = _path_from(
+        command_scripts.get("history_loop_runner_path")
+    )
+    history_loop_command = _command_from(command_scripts.get("history_loop_command"))
+    history_loop_resume_runner_path = _path_from(
+        command_scripts.get("history_loop_resume_runner_path")
+    )
+    history_loop_resume_command = _command_from(
+        command_scripts.get("history_loop_resume_command")
+    )
     history_report_command = _command_from(
         command_scripts.get("history_report_command")
     )
@@ -262,6 +875,24 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
     )
     run_history_summary_path = _path_from(
         command_scripts.get("run_history_summary_path")
+    )
+    run_loop_json_path = _path_from(command_scripts.get("run_loop_json_path"))
+    run_loop_markdown_path = _path_from(command_scripts.get("run_loop_markdown_path"))
+    runner_wrapper_status = _runner_wrapper_status(
+        runner_path,
+        runner_command=runner_command,
+    )
+    history_next_action_runner_status = _runner_wrapper_status(
+        history_next_action_runner_path,
+        runner_command=history_next_action_command,
+    )
+    history_loop_runner_status = _runner_wrapper_status(
+        history_loop_runner_path,
+        runner_command=history_loop_command,
+    )
+    history_loop_resume_runner_status = _runner_wrapper_status(
+        history_loop_resume_runner_path,
+        runner_command=history_loop_resume_command,
     )
 
     chain_sources = comparison.get("chain_sources")
@@ -315,7 +946,25 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
         _check(
             "runner_script",
             path=runner_path,
-            ok=runner_path is None or _is_executable(runner_path),
+            ok=bool(runner_wrapper_status["ok"]),
+            required=False,
+        ),
+        _check(
+            "history_next_action_runner_script",
+            path=history_next_action_runner_path,
+            ok=bool(history_next_action_runner_status["ok"]),
+            required=False,
+        ),
+        _check(
+            "history_loop_runner_script",
+            path=history_loop_runner_path,
+            ok=bool(history_loop_runner_status["ok"]),
+            required=False,
+        ),
+        _check(
+            "history_loop_resume_runner_script",
+            path=history_loop_resume_runner_path,
+            ok=bool(history_loop_resume_runner_status["ok"]),
             required=False,
         ),
         _check(
@@ -331,6 +980,8 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
         _declared_output("run_history_jsonl", run_history_jsonl_path),
         _declared_output("run_history_markdown", run_history_markdown_path),
         _declared_output("run_history_summary", run_history_summary_path),
+        _declared_output("run_loop_json", run_loop_json_path),
+        _declared_output("run_loop_markdown", run_loop_markdown_path),
     ]
     declared_commands = [
         _declared_command(
@@ -352,12 +1003,90 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
             forbidden_flags=("--append-run-history",),
             command_dir=command_dir,
         ),
+        _declared_command(
+            "history_next_action_command",
+            history_next_action_command,
+            required_flags=(
+                "run_char_vae_command_bundle.py",
+                "--use-history-next-action",
+                "--write-inspection-report",
+                "--write-run-report",
+                "--append-run-history",
+                "--write-run-history-report",
+            ),
+            command_dir=command_dir,
+        ),
+        _declared_command(
+            "history_loop_command",
+            history_loop_command,
+            required_flags=(
+                "run_char_vae_history_loop.py",
+                "--max-steps",
+                "--fail-on-max-steps-continuation",
+                "--write-loop-report",
+            ),
+            command_dir=command_dir,
+        ),
+        _declared_command(
+            "history_loop_resume_command",
+            history_loop_resume_command,
+            required_flags=("run_char_vae_history_loop.py", "--resume-from-report"),
+            command_dir=command_dir,
+        ),
     ]
     declared_command_issues = [
         command["label"]
         for command in declared_commands
         if command["present"] and not command["ok"]
     ]
+    run_history_summary_status = _run_history_summary_status(
+        summary_path=run_history_summary_path,
+        history_path=run_history_jsonl_path,
+    )
+    run_loop_status = _run_loop_status(
+        summary_path=run_loop_json_path,
+        command_dir=command_dir,
+    )
+    run_loop_status_issues = _run_loop_status_issues(run_loop_status)
+    (
+        handoff_severity,
+        handoff_requires_attention,
+        handoff_recommended_action,
+    ) = _run_loop_handoff_guidance(run_loop_status, run_loop_status_issues)
+    handoff_recommended_command = _run_loop_handoff_recommended_command(
+        run_loop_status,
+        handoff_recommended_action,
+    )
+    run_loop_status.update(
+        {
+            "handoff_severity": handoff_severity,
+            "handoff_requires_attention": handoff_requires_attention,
+            "handoff_recommended_action": handoff_recommended_action,
+            "handoff_recommended_command": handoff_recommended_command,
+        }
+    )
+    declared_recommendation_issues = _run_loop_declared_recommendation_issues(
+        run_loop_status
+    )
+    if declared_recommendation_issues:
+        run_loop_status_issues.extend(declared_recommendation_issues)
+        (
+            handoff_severity,
+            handoff_requires_attention,
+            handoff_recommended_action,
+        ) = _run_loop_handoff_guidance(run_loop_status, run_loop_status_issues)
+        handoff_recommended_command = _run_loop_handoff_recommended_command(
+            run_loop_status,
+            handoff_recommended_action,
+        )
+        run_loop_status.update(
+            {
+                "handoff_severity": handoff_severity,
+                "handoff_requires_attention": handoff_requires_attention,
+                "handoff_recommended_action": handoff_recommended_action,
+                "handoff_recommended_command": handoff_recommended_command,
+            }
+        )
     missing_required = [
         check["label"] for check in checks if check["required"] and not check["ok"]
     ]
@@ -365,10 +1094,7 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
         check["label"] for check in checks if not check["required"] and not check["ok"]
     ]
     missing_optional.extend(declared_command_issues)
-    run_history_summary_status = _run_history_summary_status(
-        summary_path=run_history_summary_path,
-        history_path=run_history_jsonl_path,
-    )
+    missing_optional.extend(run_loop_status_issues)
     return {
         "schema": SCHEMA,
         "command_dir": str(command_dir),
@@ -389,6 +1115,28 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
         else None,
         "runner_command": runner_command,
         "runner_path": str(runner_path) if runner_path is not None else None,
+        "runner_wrapper_status": runner_wrapper_status,
+        "history_next_action_command": history_next_action_command,
+        "history_next_action_runner_path": (
+            str(history_next_action_runner_path)
+            if history_next_action_runner_path is not None
+            else None
+        ),
+        "history_next_action_runner_status": history_next_action_runner_status,
+        "history_loop_command": history_loop_command,
+        "history_loop_runner_path": (
+            str(history_loop_runner_path)
+            if history_loop_runner_path is not None
+            else None
+        ),
+        "history_loop_runner_status": history_loop_runner_status,
+        "history_loop_resume_command": history_loop_resume_command,
+        "history_loop_resume_runner_path": (
+            str(history_loop_resume_runner_path)
+            if history_loop_resume_runner_path is not None
+            else None
+        ),
+        "history_loop_resume_runner_status": history_loop_resume_runner_status,
         "history_report_command": history_report_command,
         "declared_commands": declared_commands,
         "declared_command_issues": declared_command_issues,
@@ -412,7 +1160,17 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
             if run_history_summary_path is not None
             else None
         ),
+        "run_loop_json_path": (
+            str(run_loop_json_path) if run_loop_json_path is not None else None
+        ),
+        "run_loop_markdown_path": (
+            str(run_loop_markdown_path)
+            if run_loop_markdown_path is not None
+            else None
+        ),
         "run_history_summary_status": run_history_summary_status,
+        "run_loop_status": run_loop_status,
+        "run_loop_status_issues": run_loop_status_issues,
         "chain_source_count": len(chain_source_paths),
         "missing_chain_sources": missing_chain_sources,
     }
@@ -434,6 +1192,71 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"- comparison_markdown_path: {_fmt(summary.get('comparison_markdown_path'))}",
         f"- runner_command: {_fmt(summary.get('runner_command'))}",
         f"- runner_path: {_fmt(summary.get('runner_path'))}",
+        (
+            "- runner_wrapper_ok: "
+            f"{_fmt(_value(summary, 'runner_wrapper_status', 'ok'))}"
+        ),
+        (
+            "- runner_wrapper_contains_runner_command: "
+            f"{_fmt(_value(summary, 'runner_wrapper_status', 'contains_runner_command'))}"
+        ),
+        (
+            "- runner_wrapper_executes_runner_command: "
+            f"{_fmt(_value(summary, 'runner_wrapper_status', 'executes_runner_command'))}"
+        ),
+        (
+            "- runner_wrapper_forwards_arguments: "
+            f"{_fmt(_value(summary, 'runner_wrapper_status', 'forwards_arguments'))}"
+        ),
+        (
+            "- runner_wrapper_error: "
+            f"{_fmt(_value(summary, 'runner_wrapper_status', 'error'))}"
+        ),
+        f"- history_next_action_command: {_fmt(summary.get('history_next_action_command'))}",
+        f"- history_next_action_runner_path: {_fmt(summary.get('history_next_action_runner_path'))}",
+        (
+            "- history_next_action_runner_ok: "
+            f"{_fmt(_value(summary, 'history_next_action_runner_status', 'ok'))}"
+        ),
+        (
+            "- history_next_action_runner_executes_command: "
+            f"{_fmt(_value(summary, 'history_next_action_runner_status', 'executes_runner_command'))}"
+        ),
+        (
+            "- history_next_action_runner_error: "
+            f"{_fmt(_value(summary, 'history_next_action_runner_status', 'error'))}"
+        ),
+        f"- history_loop_command: {_fmt(summary.get('history_loop_command'))}",
+        f"- history_loop_runner_path: {_fmt(summary.get('history_loop_runner_path'))}",
+        (
+            "- history_loop_runner_ok: "
+            f"{_fmt(_value(summary, 'history_loop_runner_status', 'ok'))}"
+        ),
+        (
+            "- history_loop_runner_executes_command: "
+            f"{_fmt(_value(summary, 'history_loop_runner_status', 'executes_runner_command'))}"
+        ),
+        (
+            "- history_loop_runner_error: "
+            f"{_fmt(_value(summary, 'history_loop_runner_status', 'error'))}"
+        ),
+        f"- history_loop_resume_command: {_fmt(summary.get('history_loop_resume_command'))}",
+        (
+            "- history_loop_resume_runner_path: "
+            f"{_fmt(summary.get('history_loop_resume_runner_path'))}"
+        ),
+        (
+            "- history_loop_resume_runner_ok: "
+            f"{_fmt(_value(summary, 'history_loop_resume_runner_status', 'ok'))}"
+        ),
+        (
+            "- history_loop_resume_runner_executes_command: "
+            f"{_fmt(_value(summary, 'history_loop_resume_runner_status', 'executes_runner_command'))}"
+        ),
+        (
+            "- history_loop_resume_runner_error: "
+            f"{_fmt(_value(summary, 'history_loop_resume_runner_status', 'error'))}"
+        ),
         f"- history_report_command: {_fmt(summary.get('history_report_command'))}",
         f"- declared_command_issues: {_fmt_list(summary.get('declared_command_issues'))}",
         f"- run_json_path: {_fmt(summary.get('run_json_path'))}",
@@ -441,9 +1264,66 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"- run_history_jsonl_path: {_fmt(summary.get('run_history_jsonl_path'))}",
         f"- run_history_markdown_path: {_fmt(summary.get('run_history_markdown_path'))}",
         f"- run_history_summary_path: {_fmt(summary.get('run_history_summary_path'))}",
+        f"- run_loop_json_path: {_fmt(summary.get('run_loop_json_path'))}",
+        f"- run_loop_markdown_path: {_fmt(summary.get('run_loop_markdown_path'))}",
+        f"- run_loop_status_issues: {_fmt_list(summary.get('run_loop_status_issues'))}",
+        f"- run_loop_valid_json: {_fmt(_value(summary, 'run_loop_status', 'valid_json'))}",
+        f"- run_loop_schema_ok: {_fmt(_value(summary, 'run_loop_status', 'schema_ok'))}",
+        f"- run_loop_command_dir_matches: {_fmt(_value(summary, 'run_loop_status', 'command_dir_matches'))}",
+        f"- run_loop_handoff_status: {_fmt(_value(summary, 'run_loop_status', 'handoff_status'))}",
+        f"- run_loop_handoff_reason: {_fmt(_value(summary, 'run_loop_status', 'handoff_reason'))}",
+        f"- run_loop_handoff_severity: {_fmt(_value(summary, 'run_loop_status', 'handoff_severity'))}",
+        f"- run_loop_handoff_requires_attention: {_fmt(_value(summary, 'run_loop_status', 'handoff_requires_attention'))}",
+        f"- run_loop_handoff_recommended_action: {_fmt(_value(summary, 'run_loop_status', 'handoff_recommended_action'))}",
+        f"- run_loop_handoff_recommended_command: {_fmt(_value(summary, 'run_loop_status', 'handoff_recommended_command'))}",
+        f"- run_loop_declared_handoff_recommended_action: {_fmt(_value(summary, 'run_loop_status', 'declared_handoff_recommended_action'))}",
+        f"- run_loop_declared_handoff_recommended_action_present: {_fmt(_value(summary, 'run_loop_status', 'declared_handoff_recommended_action_present'))}",
+        f"- run_loop_declared_handoff_recommended_action_ok: {_fmt(_value(summary, 'run_loop_status', 'declared_handoff_recommended_action_ok'))}",
+        f"- run_loop_declared_handoff_recommended_command: {_fmt(_value(summary, 'run_loop_status', 'declared_handoff_recommended_command'))}",
+        f"- run_loop_declared_handoff_recommended_command_present: {_fmt(_value(summary, 'run_loop_status', 'declared_handoff_recommended_command_present'))}",
+        f"- run_loop_declared_handoff_recommended_command_ok: {_fmt(_value(summary, 'run_loop_status', 'declared_handoff_recommended_command_ok'))}",
+        f"- run_loop_step_count: {_fmt(_value(summary, 'run_loop_status', 'step_count'))}",
+        f"- run_loop_executed_count: {_fmt(_value(summary, 'run_loop_status', 'executed_count'))}",
+        f"- run_loop_stop_reason: {_fmt(_value(summary, 'run_loop_status', 'stop_reason'))}",
+        f"- run_loop_fail_on_final_actions: {_fmt(_value(summary, 'run_loop_status', 'fail_on_final_actions'))}",
+        f"- run_loop_final_action_failed: {_fmt(_value(summary, 'run_loop_status', 'final_action_failed'))}",
+        f"- run_loop_fail_on_max_steps_continuation: {_fmt(_value(summary, 'run_loop_status', 'fail_on_max_steps_continuation'))}",
+        f"- run_loop_max_steps_continuation_failed: {_fmt(_value(summary, 'run_loop_status', 'max_steps_continuation_failed'))}",
+        f"- run_loop_returncode: {_fmt(_value(summary, 'run_loop_status', 'returncode'))}",
+        f"- run_loop_final_next_action: {_fmt(_value(summary, 'run_loop_status', 'final_next_action'))}",
+        f"- run_loop_final_next_action_reason: {_fmt(_value(summary, 'run_loop_status', 'final_next_action_reason'))}",
+        f"- run_loop_final_next_action_target: {_fmt(_value(summary, 'run_loop_status', 'final_next_action_target'))}",
+        f"- run_loop_final_next_action_command_source: {_fmt(_value(summary, 'run_loop_status', 'final_next_action_command_source'))}",
+        f"- run_loop_final_next_action_script_path: {_fmt(_value(summary, 'run_loop_status', 'final_next_action_script_path'))}",
+        f"- run_loop_final_next_action_default_new_seeds: {_fmt(_value(summary, 'run_loop_status', 'final_next_action_default_new_seeds'))}",
+        f"- run_loop_final_next_action_should_continue: {_fmt(_value(summary, 'run_loop_status', 'final_next_action_should_continue'))}",
+        f"- run_loop_final_next_action_runnable: {_fmt(_value(summary, 'run_loop_status', 'final_next_action_runnable'))}",
+        f"- run_loop_continuation_command: {_fmt(_value(summary, 'run_loop_status', 'continuation_command'))}",
+        f"- run_loop_resume_from_report_command: {_fmt(_value(summary, 'run_loop_status', 'resume_from_report_command'))}",
+        f"- run_loop_resume_from_report_command_present: {_fmt(_value(summary, 'run_loop_status', 'resume_from_report_command_present'))}",
+        f"- run_loop_resume_from_report_command_ok: {_fmt(_value(summary, 'run_loop_status', 'resume_from_report_command_ok'))}",
+        f"- run_loop_resume_from_report_command_target_dir_ok: {_fmt(_value(summary, 'run_loop_status', 'resume_from_report_command_target_dir_ok'))}",
+        f"- run_loop_resume_from_report_command_report_path_ok: {_fmt(_value(summary, 'run_loop_status', 'resume_from_report_command_report_path_ok'))}",
+        f"- run_loop_resume_from_report_command_parse_error: {_fmt(_value(summary, 'run_loop_status', 'resume_from_report_command_parse_error'))}",
+        f"- run_loop_resume_from_report_command_missing_required_flags: {_fmt(_value(summary, 'run_loop_status', 'resume_from_report_command_missing_required_flags'))}",
+        f"- run_loop_continuation_command_expected: {_fmt(_value(summary, 'run_loop_status', 'continuation_command_expected'))}",
+        f"- run_loop_continuation_command_present: {_fmt(_value(summary, 'run_loop_status', 'continuation_command_present'))}",
+        f"- run_loop_continuation_command_ok: {_fmt(_value(summary, 'run_loop_status', 'continuation_command_ok'))}",
+        f"- run_loop_continuation_command_target_dir_ok: {_fmt(_value(summary, 'run_loop_status', 'continuation_command_target_dir_ok'))}",
+        f"- run_loop_continuation_command_parse_error: {_fmt(_value(summary, 'run_loop_status', 'continuation_command_parse_error'))}",
+        f"- run_loop_continuation_command_missing_required_flags: {_fmt(_value(summary, 'run_loop_status', 'continuation_command_missing_required_flags'))}",
+        f"- run_loop_error: {_fmt(_value(summary, 'run_loop_status', 'error'))}",
         f"- run_history_summary_valid_json: {_fmt(_value(summary, 'run_history_summary_status', 'valid_json'))}",
         f"- run_history_summary_schema_ok: {_fmt(_value(summary, 'run_history_summary_status', 'schema_ok'))}",
         f"- run_history_summary_total_runs: {_fmt(_value(summary, 'run_history_summary_status', 'total_runs'))}",
+        f"- run_history_next_action: {_fmt(_value(summary, 'run_history_summary_status', 'next_action'))}",
+        f"- run_history_next_action_reason: {_fmt(_value(summary, 'run_history_summary_status', 'next_action_reason'))}",
+        f"- run_history_next_action_target: {_fmt(_value(summary, 'run_history_summary_status', 'next_action_target'))}",
+        f"- run_history_next_action_command_source: {_fmt(_value(summary, 'run_history_summary_status', 'next_action_command_source'))}",
+        f"- run_history_next_action_script_path: {_fmt(_value(summary, 'run_history_summary_status', 'next_action_script_path'))}",
+        f"- run_history_next_action_default_new_seeds: {_fmt(_value(summary, 'run_history_summary_status', 'next_action_default_new_seeds'))}",
+        f"- run_history_next_action_should_continue: {_fmt(_value(summary, 'run_history_summary_status', 'next_action_should_continue'))}",
+        f"- run_history_next_action_schema_ok: {_fmt(_value(summary, 'run_history_summary_status', 'next_action_schema_ok'))}",
         f"- run_history_event_count: {_fmt(_value(summary, 'run_history_summary_status', 'history_event_count'))}",
         f"- run_history_summary_matches_jsonl: {_fmt(_value(summary, 'run_history_summary_status', 'matches_history_event_count'))}",
         f"- run_history_summary_error: {_fmt(_value(summary, 'run_history_summary_status', 'error'))}",
