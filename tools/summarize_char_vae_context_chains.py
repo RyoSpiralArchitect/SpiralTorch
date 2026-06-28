@@ -676,6 +676,17 @@ def _inspection_command_line(command_dir: Any) -> str | None:
     )
 
 
+def _runner_command_line(command_dir: Any) -> str | None:
+    if not isinstance(command_dir, str) or not command_dir:
+        return None
+    script_path = Path(__file__).resolve().with_name("run_char_vae_command_bundle.py")
+    return (
+        "PYTHONNOUSERSITE=1 python3 -P "
+        f"{shlex.quote(str(script_path))} "
+        f"{shlex.quote(command_dir)} --write-inspection-report"
+    )
+
+
 def _path_value(value: Any) -> Path | None:
     if not isinstance(value, str) or not value:
         return None
@@ -756,6 +767,7 @@ def _render_command_readme(
         f"- script: {_fmt_readme_value(command_scripts.get('next_path'))}",
         f"- target_kind: {_fmt_readme_value(command_scripts.get('next_kind'))}",
         f"- run: {_fmt_readme_value(_run_line(command_scripts.get('next_path')))}",
+        f"- inspected_run: {_fmt_readme_value(command_scripts.get('runner_command'))}",
         "",
         "## Safe Follow-Up",
         "",
@@ -897,6 +909,7 @@ def _write_recommended_command_scripts(
         "inspection_strict_ready": None,
         "inspection_missing_required": [],
         "inspection_missing_optional": [],
+        "runner_command": _runner_command_line(str(out_dir)),
         "manifest_path": str(manifest_path),
         "readme_path": str(readme_path),
     }
@@ -1002,6 +1015,7 @@ def _render_markdown(summary: dict[str, Any]) -> str:
         f"- command_inspection_strict_ready: {_fmt(_value(command_scripts, 'inspection_strict_ready'))}",
         f"- command_inspection_missing_required: {_fmt_list(_value(command_scripts, 'inspection_missing_required'))}",
         f"- command_inspection_missing_optional: {_fmt_list(_value(command_scripts, 'inspection_missing_optional'))}",
+        f"- command_runner: {_fmt(_value(command_scripts, 'runner_command'))}",
         "",
         "## Chains",
         "",
