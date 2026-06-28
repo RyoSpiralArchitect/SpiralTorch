@@ -334,6 +334,10 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             manifest["command_scripts"]["run_history_markdown_path"],
             str((command_dir / "run_history.md").resolve()),
         )
+        self.assertEqual(
+            manifest["command_scripts"]["run_history_summary_path"],
+            str((command_dir / "run_history_summary.json").resolve()),
+        )
         self.assertIn("## Bundle Inspection", readme)
         self.assertIn(inspection_command, readme)
         self.assertIn(_runner_command(command_dir), readme)
@@ -341,6 +345,7 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
         self.assertIn("run.md", readme)
         self.assertIn("run_history.jsonl", readme)
         self.assertIn("run_history.md", readme)
+        self.assertIn("run_history_summary.json", readme)
         self.assertIn("inspection.json", readme)
         self.assertIn("inspection.md", readme)
         self.assertIn(comparison_json_resolved, readme)
@@ -351,6 +356,7 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
         self.assertIn("command_run_markdown_path", markdown)
         self.assertIn("command_run_history_jsonl_path", markdown)
         self.assertIn("command_run_history_markdown_path", markdown)
+        self.assertIn("command_run_history_summary_path", markdown)
         self.assertIn("recommendation.json", result.stdout)
 
     def test_cli_write_command_inspection_materializes_reports(self) -> None:
@@ -508,6 +514,10 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             str((command_dir / "run_history.md").resolve()),
         )
         self.assertEqual(
+            command_scripts["run_history_summary_path"],
+            str((command_dir / "run_history_summary.json").resolve()),
+        )
+        self.assertEqual(
             comparison["command_scripts"]["directory"],
             str(command_dir.resolve()),
         )
@@ -516,11 +526,13 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
         self.assertIn(str((command_dir / "run.json").resolve()), readme)
         self.assertIn(str((command_dir / "run_history.jsonl").resolve()), readme)
         self.assertIn(str((command_dir / "run_history.md").resolve()), readme)
+        self.assertIn(str((command_dir / "run_history_summary.json").resolve()), readme)
         self.assertIn(str((command_dir / "recommendation.json").resolve()), markdown)
         self.assertIn(_runner_command(command_dir), markdown)
         self.assertIn(str((command_dir / "run.md").resolve()), markdown)
         self.assertIn(str((command_dir / "run_history.jsonl").resolve()), markdown)
         self.assertIn(str((command_dir / "run_history.md").resolve()), markdown)
+        self.assertIn(str((command_dir / "run_history_summary.json").resolve()), markdown)
 
     def test_cli_writes_recommended_command_scripts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -747,6 +759,10 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
                 manifest["command_scripts"]["run_history_markdown_path"],
                 str((command_dir / "run_history.md").resolve()),
             )
+            self.assertEqual(
+                manifest["command_scripts"]["run_history_summary_path"],
+                str((command_dir / "run_history_summary.json").resolve()),
+            )
             self.assertIn("# target_kind: follow_up", next_text)
             self.assertIn("recommended_follow_up.sh", next_text)
             self.assertIn("# target_kind: follow_up", runner_text)
@@ -820,6 +836,7 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             self.assertIn(f"bash {shlex.quote(runner_script_path)}", readme)
             self.assertIn("run_history.jsonl", readme)
             self.assertIn("run_history.md", readme)
+            self.assertIn("run_history_summary.json", readme)
             self.assertIn("recommended_follow_up.sh", readme)
             self.assertIn("recommended_next.sh", markdown)
             self.assertIn("run_recommended_next.sh", markdown)
@@ -839,6 +856,7 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             self.assertIn("command_run_markdown_path", markdown)
             self.assertIn("command_run_history_jsonl_path", markdown)
             self.assertIn("command_run_history_markdown_path", markdown)
+            self.assertIn("command_run_history_summary_path", markdown)
 
     def test_selection_separates_safe_accepted_from_absolute_best(self) -> None:
         mod = _load_module()
@@ -1089,6 +1107,7 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
         self.assertIn("run_recommended_next.sh", command_readme)
         self.assertIn("run_history.jsonl", command_readme)
         self.assertIn("run_history.md", command_readme)
+        self.assertIn("run_history_summary.json", command_readme)
         self.assertIn("recommended_follow_up.sh", command_readme)
         self.assertIn("recommended_review.sh", command_readme)
 

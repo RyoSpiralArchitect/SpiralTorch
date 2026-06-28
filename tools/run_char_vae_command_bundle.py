@@ -242,6 +242,20 @@ def _run_history_markdown_path(
     )
 
 
+def _run_history_summary_path(
+    command_dir: Path,
+    command_scripts: dict[str, Any],
+    *,
+    write_history_report: bool,
+) -> Path | None:
+    if not write_history_report:
+        return None
+    return (
+        _path_from(command_scripts.get("run_history_summary_path"))
+        or command_dir / "run_history_summary.json"
+    )
+
+
 def _runner_summary(
     *,
     command_dir: Path,
@@ -341,6 +355,7 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"- run_markdown_path: {_fmt(summary.get('run_markdown_path'))}",
         f"- run_history_jsonl_path: {_fmt(summary.get('run_history_jsonl_path'))}",
         f"- run_history_markdown_path: {_fmt(summary.get('run_history_markdown_path'))}",
+        f"- run_history_summary_path: {_fmt(summary.get('run_history_summary_path'))}",
         f"- returncode: {_fmt(summary.get('returncode'))}",
         f"- error: {_fmt(summary.get('error'))}",
         "",
@@ -396,6 +411,7 @@ def _history_event(summary: dict[str, Any]) -> dict[str, Any]:
         "run_markdown_path",
         "run_history_jsonl_path",
         "run_history_markdown_path",
+        "run_history_summary_path",
         "recommendation_context",
     )
     event = {
@@ -636,6 +652,7 @@ def write_run_artifacts(
     markdown_out: Path | None,
     history_out: Path | None = None,
     history_markdown_out: Path | None = None,
+    history_summary_out: Path | None = None,
     append_history: bool = False,
 ) -> dict[str, Any]:
     summary = dict(summary)
@@ -648,6 +665,9 @@ def write_run_artifacts(
     )
     summary["run_history_markdown_path"] = (
         str(history_markdown_out) if history_markdown_out is not None else None
+    )
+    summary["run_history_summary_path"] = (
+        str(history_summary_out) if history_summary_out is not None else None
     )
     if history_out is not None and append_history:
         _append_run_history(summary, history_out)
@@ -664,6 +684,13 @@ def write_run_artifacts(
             )
             history_markdown_out.parent.mkdir(parents=True, exist_ok=True)
             history_markdown_out.write_text(markdown_history, encoding="utf-8")
+        if history_summary_out is not None:
+            history_summary_out.parent.mkdir(parents=True, exist_ok=True)
+            history_summary_out.write_text(
+                json.dumps(summary["run_history_summary"], indent=2, sort_keys=True)
+                + "\n",
+                encoding="utf-8",
+            )
     markdown = render_markdown(summary)
     if json_out is not None:
         json_out.parent.mkdir(parents=True, exist_ok=True)
@@ -732,6 +759,11 @@ def run_bundle(
         command_scripts,
         write_history_report=write_run_history_report,
     )
+    history_summary_out = _run_history_summary_path(
+        command_dir,
+        command_scripts,
+        write_history_report=write_run_history_report,
+    )
     inspector = _load_inspector()
     inspection = inspector.inspect_bundle(command_dir)
     if write_inspection_report:
@@ -764,6 +796,7 @@ def run_bundle(
             markdown_out=markdown_out,
             history_out=history_out,
             history_markdown_out=history_markdown_out,
+            history_summary_out=history_summary_out,
             append_history=append_run_history,
         )
         return 1, summary
@@ -789,6 +822,7 @@ def run_bundle(
             markdown_out=markdown_out,
             history_out=history_out,
             history_markdown_out=history_markdown_out,
+            history_summary_out=history_summary_out,
             append_history=append_run_history,
         )
         return 1, summary
@@ -813,6 +847,7 @@ def run_bundle(
             markdown_out=markdown_out,
             history_out=history_out,
             history_markdown_out=history_markdown_out,
+            history_summary_out=history_summary_out,
             append_history=append_run_history,
         )
         return 0, summary
@@ -848,6 +883,7 @@ def run_bundle(
             markdown_out=markdown_out,
             history_out=history_out,
             history_markdown_out=history_markdown_out,
+            history_summary_out=history_summary_out,
             append_history=append_run_history,
         )
         return result.returncode, summary
@@ -877,6 +913,7 @@ def run_bundle(
         markdown_out=markdown_out,
         history_out=history_out,
         history_markdown_out=history_markdown_out,
+        history_summary_out=history_summary_out,
         append_history=append_run_history,
     )
     return result.returncode, summary
@@ -924,7 +961,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--write-run-history-report",
         action="store_true",
-        help="write a Markdown summary of run_history.jsonl",
+        help="write Markdown and JSON summaries of run_history.jsonl",
     )
     parser.add_argument("--json-out", type=Path, default=None)
     parser.add_argument("--markdown-out", type=Path, default=None)

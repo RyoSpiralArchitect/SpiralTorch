@@ -185,6 +185,9 @@ def _write_bundle(
                 "run_markdown_path": str(command_dir / "run.md"),
                 "run_history_jsonl_path": str(command_dir / "run_history.jsonl"),
                 "run_history_markdown_path": str(command_dir / "run_history.md"),
+                "run_history_summary_path": str(
+                    command_dir / "run_history_summary.json"
+                ),
                 "readme_path": str(command_dir / "README.md"),
             },
         },
@@ -334,6 +337,7 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
         self.assertIsNotNone(payload["finished_at"])
         self.assertIsNone(payload["run_history_jsonl_path"])
         self.assertIsNone(payload["run_history_markdown_path"])
+        self.assertIsNone(payload["run_history_summary_path"])
         self.assertGreaterEqual(payload["duration_seconds"], 0.0)
         self.assertEqual(payload["execution_cwd"], str(command_dir.resolve()))
         self.assertEqual(
@@ -368,6 +372,7 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
         _assert_recommendation_context(self, payload, command_dir)
         self.assertIsNone(payload["run_history_jsonl_path"])
         self.assertIsNone(payload["run_history_markdown_path"])
+        self.assertIsNone(payload["run_history_summary_path"])
         self.assertTrue(payload["executed"])
         self.assertGreaterEqual(payload["duration_seconds"], 0.0)
         self.assertIn("next cwd=", payload["stdout"])
@@ -410,6 +415,7 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
         _assert_recommendation_context(self, strict_payload, command_dir)
         self.assertIsNone(strict_payload["run_history_jsonl_path"])
         self.assertIsNone(strict_payload["run_history_markdown_path"])
+        self.assertIsNone(strict_payload["run_history_summary_path"])
         self.assertGreaterEqual(strict_payload["duration_seconds"], 0.0)
         self.assertIn("follow_up_script", strict_payload["missing_optional"])
         self.assertEqual(
@@ -453,6 +459,7 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
         )
         self.assertIsNone(payload["run_history_jsonl_path"])
         self.assertIsNone(payload["run_history_markdown_path"])
+        self.assertIsNone(payload["run_history_summary_path"])
         self.assertFalse(payload["executed"])
         self.assertEqual(payload["error"], "manifest does not declare review_path")
 
@@ -494,6 +501,7 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
         )
         self.assertIsNone(payload["run_history_jsonl_path"])
         self.assertIsNone(payload["run_history_markdown_path"])
+        self.assertIsNone(payload["run_history_summary_path"])
         self.assertEqual(
             payload["command_argv"],
             ["bash", str(command_dir / "recommended_review.sh")],
@@ -557,6 +565,7 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
         self.assertEqual(run_report["run_markdown_path"], str(command_dir / "run.md"))
         self.assertIsNone(run_report["run_history_jsonl_path"])
         self.assertIsNone(run_report["run_history_markdown_path"])
+        self.assertIsNone(run_report["run_history_summary_path"])
 
     def test_cli_appends_compact_run_history(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -614,11 +623,15 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
             report_only_payload = json.loads(report_only.stdout)
             history_path = command_dir / "run_history.jsonl"
             history_markdown_path = command_dir / "run_history.md"
+            history_summary_path = command_dir / "run_history_summary.json"
             events = [
                 json.loads(line)
                 for line in history_path.read_text(encoding="utf-8").splitlines()
             ]
             history_markdown = history_markdown_path.read_text(encoding="utf-8")
+            history_summary = json.loads(
+                history_summary_path.read_text(encoding="utf-8")
+            )
 
         self.assertEqual(dry_run.returncode, 0, dry_run.stderr)
         self.assertEqual(executed.returncode, 0, executed.stderr)
@@ -637,6 +650,18 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
         self.assertEqual(
             report_only_payload["run_history_markdown_path"],
             str(history_markdown_path),
+        )
+        self.assertEqual(
+            dry_payload["run_history_summary_path"],
+            str(history_summary_path),
+        )
+        self.assertEqual(
+            executed_payload["run_history_summary_path"],
+            str(history_summary_path),
+        )
+        self.assertEqual(
+            report_only_payload["run_history_summary_path"],
+            str(history_summary_path),
         )
         dry_summary = dry_payload["run_history_summary"]
         executed_summary = executed_payload["run_history_summary"]
@@ -672,6 +697,7 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
             report_only_summary["signals"]["status_counts"],
             {"dry-run": 1, "ok": 1},
         )
+        self.assertEqual(history_summary, report_only_summary)
         self.assertEqual(len(events), 2)
         self.assertEqual(
             events[0]["schema"],
@@ -769,10 +795,12 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
         self.assertEqual(report["run_markdown_path"], str(markdown_out))
         self.assertIsNone(report["run_history_jsonl_path"])
         self.assertIsNone(report["run_history_markdown_path"])
+        self.assertIsNone(report["run_history_summary_path"])
         self.assertIn("Char VAE Command Bundle Runner", markdown)
         self.assertIn(f"run_json_path: {json_out}", markdown)
         self.assertIn("run_history_jsonl_path: -", markdown)
         self.assertIn("run_history_markdown_path: -", markdown)
+        self.assertIn("run_history_summary_path: -", markdown)
         self.assertIn("target_kind: follow_up", markdown)
         self.assertIn("target_script_key: follow_up_path", markdown)
         self.assertIn("Recommendation Context", markdown)
