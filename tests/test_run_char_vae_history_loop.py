@@ -108,12 +108,22 @@ class RunCharVaeHistoryLoopTests(unittest.TestCase):
         self.assertIs(payload["final_next_action_runnable"], False)
         self.assertIsNone(payload["continuation_command"])
         self.assertIsNone(payload["resume_from_report_command"])
+        self.assertEqual(payload["handoff_recommended_action"], "collect_next_command")
+        self.assertIsNone(payload["handoff_recommended_command"])
         self.assertEqual(len(history_events), 2)
         self.assertEqual(history_summary["total_runs"], 2)
         self.assertEqual(history_summary["next_action"]["action"], "collect_next_command")
         self.assertEqual(loop_report["stop_reason"], payload["stop_reason"])
+        self.assertEqual(
+            loop_report["handoff_recommended_action"],
+            payload["handoff_recommended_action"],
+        )
         self.assertIn("Char VAE History Loop Runner", loop_markdown)
         self.assertIn("handoff_status: awaiting_next_command", loop_markdown)
+        self.assertIn(
+            "handoff_recommended_action: collect_next_command",
+            loop_markdown,
+        )
         self.assertIn("stop_reason: history_next_action_stopped", loop_markdown)
         self.assertIn("| 1 | next | follow_up | yes | 0 | improved |", loop_markdown)
         self.assertIn(
@@ -174,14 +184,18 @@ class RunCharVaeHistoryLoopTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertEqual(payload["handoff_status"], "failed")
         self.assertEqual(payload["handoff_reason"], "--max-steps must be at least 1")
+        self.assertEqual(payload["handoff_recommended_action"], "inspect_failure")
+        self.assertIsNone(payload["handoff_recommended_command"])
         self.assertEqual(payload["stop_reason"], "loop_setup_failed")
         self.assertEqual(payload["step_count"], 0)
         self.assertEqual(payload["returncode"], 1)
         self.assertEqual(payload["error"], "--max-steps must be at least 1")
         self.assertEqual(loop_report["handoff_status"], "failed")
+        self.assertEqual(loop_report["handoff_recommended_action"], "inspect_failure")
         self.assertEqual(loop_report["stop_reason"], "loop_setup_failed")
         self.assertEqual(loop_report["returncode"], 1)
         self.assertIn("handoff_status: failed", loop_markdown)
+        self.assertIn("handoff_recommended_action: inspect_failure", loop_markdown)
         self.assertIn("stop_reason: loop_setup_failed", loop_markdown)
         self.assertIn("--max-steps must be at least 1", loop_markdown)
 
@@ -258,6 +272,14 @@ class RunCharVaeHistoryLoopTests(unittest.TestCase):
         )
         self.assertIn(str(command_dir.resolve()), payload["resume_from_report_command"])
         self.assertIn("--resume-from-report", payload["resume_from_report_command"])
+        self.assertEqual(
+            payload["handoff_recommended_action"],
+            "run_resume_from_report_command",
+        )
+        self.assertEqual(
+            payload["handoff_recommended_command"],
+            payload["resume_from_report_command"],
+        )
         self.assertEqual(loop_report["returncode"], 1)
         self.assertTrue(loop_report["max_steps_continuation_failed"])
         self.assertEqual(
@@ -268,8 +290,17 @@ class RunCharVaeHistoryLoopTests(unittest.TestCase):
             loop_report["resume_from_report_command"],
             payload["resume_from_report_command"],
         )
+        self.assertEqual(
+            loop_report["handoff_recommended_command"],
+            payload["resume_from_report_command"],
+        )
         self.assertIn("stop_reason: max_steps_reached", loop_markdown)
         self.assertIn("handoff_status: continuation_ready", loop_markdown)
+        self.assertIn(
+            "handoff_recommended_action: run_resume_from_report_command",
+            loop_markdown,
+        )
+        self.assertIn("handoff_recommended_command:", loop_markdown)
         self.assertIn("max_steps_continuation_failed: yes", loop_markdown)
         self.assertIn(
             "final_next_action_command_source: guided_next_follow_up_command",
@@ -299,6 +330,11 @@ class RunCharVaeHistoryLoopTests(unittest.TestCase):
         self.assertIs(resume_payload["final_next_action_runnable"], False)
         self.assertIsNone(resume_payload["continuation_command"])
         self.assertIsNone(resume_payload["resume_from_report_command"])
+        self.assertEqual(
+            resume_payload["handoff_recommended_action"],
+            "collect_next_command",
+        )
+        self.assertIsNone(resume_payload["handoff_recommended_command"])
         self.assertEqual(resume_loop_report["handoff_status"], "awaiting_next_command")
 
     def test_cli_resume_from_custom_report_path(self) -> None:
@@ -338,6 +374,14 @@ class RunCharVaeHistoryLoopTests(unittest.TestCase):
         self.assertIn("--resume-from-report", payload["resume_from_report_command"])
         self.assertIn(str(custom_report.resolve()), payload["resume_from_report_command"])
         self.assertEqual(
+            payload["handoff_recommended_action"],
+            "run_resume_from_report_command",
+        )
+        self.assertEqual(
+            payload["handoff_recommended_command"],
+            payload["resume_from_report_command"],
+        )
+        self.assertEqual(
             loop_report["resume_from_report_command"],
             payload["resume_from_report_command"],
         )
@@ -345,6 +389,10 @@ class RunCharVaeHistoryLoopTests(unittest.TestCase):
         self.assertEqual(resume_payload["handoff_status"], "awaiting_next_command")
         self.assertEqual(resume_payload["steps"][0]["target"], "execution-next")
         self.assertIsNone(resume_payload["resume_from_report_command"])
+        self.assertEqual(
+            resume_payload["handoff_recommended_action"],
+            "collect_next_command",
+        )
 
     def test_cli_omits_report_resume_command_when_report_is_not_written(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -361,6 +409,14 @@ class RunCharVaeHistoryLoopTests(unittest.TestCase):
         self.assertEqual(payload["handoff_status"], "continuation_ready")
         self.assertIs(payload["final_next_action_runnable"], True)
         self.assertIsNone(payload["resume_from_report_command"])
+        self.assertEqual(
+            payload["handoff_recommended_action"],
+            "run_continuation_command",
+        )
+        self.assertEqual(
+            payload["handoff_recommended_command"],
+            payload["continuation_command"],
+        )
         self.assertFalse((command_dir / "run_loop.json").exists())
 
     def test_cli_resume_from_report_rejects_non_continuation_handoff(self) -> None:
@@ -417,6 +473,11 @@ class RunCharVaeHistoryLoopTests(unittest.TestCase):
         self.assertIn("--dry-run", payload["continuation_command"])
         self.assertIn("--max-steps 2", payload["continuation_command"])
         self.assertIn("--resume-from-report", payload["resume_from_report_command"])
+        self.assertEqual(
+            payload["handoff_recommended_action"],
+            "run_without_dry_run_when_ready",
+        )
+        self.assertIsNone(payload["handoff_recommended_command"])
 
     def test_cli_fails_when_final_action_requires_review(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -505,6 +566,11 @@ class RunCharVaeHistoryLoopTests(unittest.TestCase):
         )
         self.assertIs(payload["final_next_action"]["should_continue"], False)
         self.assertEqual(
+            payload["handoff_recommended_action"],
+            "review_before_continuing",
+        )
+        self.assertIsNone(payload["handoff_recommended_command"])
+        self.assertEqual(
             payload["steps"][0]["execution_evidence_status"],
             "gate_failed",
         )
@@ -567,6 +633,8 @@ class RunCharVaeHistoryLoopTests(unittest.TestCase):
                 "follow-up gate requested stop"
             ),
         )
+        self.assertEqual(payload["handoff_recommended_action"], "repair_blocker")
+        self.assertIsNone(payload["handoff_recommended_command"])
         self.assertEqual(
             payload["steps"][0]["history_next_action"]["action"],
             "review_before_continuing",

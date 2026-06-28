@@ -425,6 +425,52 @@ def _handoff_status(
     return ("stopped", action_reason or stop_reason or "history loop stopped")
 
 
+def _handoff_recommended_action(
+    *,
+    handoff_status: str,
+    resume_from_report_command: str | None,
+    continuation_command: str | None,
+) -> str | None:
+    if handoff_status == "continuation_ready":
+        if resume_from_report_command:
+            return "run_resume_from_report_command"
+        if continuation_command:
+            return "run_continuation_command"
+        return None
+    if handoff_status == "awaiting_next_command":
+        return "collect_next_command"
+    if handoff_status == "needs_review":
+        return "review_before_continuing"
+    if handoff_status == "needs_inspection":
+        return "inspect_history"
+    if handoff_status == "blocked":
+        return "repair_blocker"
+    if handoff_status in {"failed", "final_action_failed"}:
+        return "inspect_failure"
+    if handoff_status == "not_runnable":
+        return "repair_or_collect_runnable_target"
+    if handoff_status == "max_steps_reached":
+        return "increase_max_steps_or_review"
+    if handoff_status == "dry_run":
+        return "run_without_dry_run_when_ready"
+    if handoff_status == "stopped":
+        return "review_stopped_loop"
+    return None
+
+
+def _handoff_recommended_command(
+    *,
+    handoff_recommended_action: str | None,
+    resume_from_report_command: str | None,
+    continuation_command: str | None,
+) -> str | None:
+    if handoff_recommended_action == "run_resume_from_report_command":
+        return resume_from_report_command
+    if handoff_recommended_action == "run_continuation_command":
+        return continuation_command
+    return None
+
+
 def render_markdown(summary: dict[str, Any]) -> str:
     next_action = _mapping(summary.get("final_next_action"))
     lines = [
@@ -433,6 +479,8 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"- command_dir: {_fmt(summary.get('command_dir'))}",
         f"- handoff_status: {_fmt(summary.get('handoff_status'))}",
         f"- handoff_reason: {_fmt(summary.get('handoff_reason'))}",
+        f"- handoff_recommended_action: {_fmt(summary.get('handoff_recommended_action'))}",
+        f"- handoff_recommended_command: {_fmt(summary.get('handoff_recommended_command'))}",
         f"- max_steps: {_fmt(summary.get('max_steps'))}",
         f"- strict: {_fmt(summary.get('strict'))}",
         f"- dry_run: {_fmt(summary.get('dry_run'))}",
@@ -529,6 +577,8 @@ def _failure_summary(
         "command_dir": str(command_dir),
         "handoff_status": "failed",
         "handoff_reason": error,
+        "handoff_recommended_action": "inspect_failure",
+        "handoff_recommended_command": None,
         "max_steps": max_steps,
         "strict": strict,
         "dry_run": dry_run,
@@ -669,11 +719,23 @@ def run_loop(
         final_action_failed=final_action_failed,
         max_steps_continuation_failed=max_steps_continuation_failed,
     )
+    handoff_recommended_action = _handoff_recommended_action(
+        handoff_status=handoff_status,
+        resume_from_report_command=resume_from_report_command,
+        continuation_command=continuation_command,
+    )
+    handoff_recommended_command = _handoff_recommended_command(
+        handoff_recommended_action=handoff_recommended_action,
+        resume_from_report_command=resume_from_report_command,
+        continuation_command=continuation_command,
+    )
     summary = {
         "schema": SCHEMA,
         "command_dir": str(command_dir),
         "handoff_status": handoff_status,
         "handoff_reason": handoff_reason,
+        "handoff_recommended_action": handoff_recommended_action,
+        "handoff_recommended_command": handoff_recommended_command,
         "max_steps": max_steps,
         "strict": strict,
         "dry_run": dry_run,
