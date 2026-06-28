@@ -730,6 +730,8 @@ def _render_command_readme(
         "",
         "## Machine-Readable Manifest",
         "",
+        "Includes comparison metadata, aggregate counts, selection, recommendation, and scripts.",
+        "",
         f"- manifest: {_fmt_readme_value(command_scripts.get('manifest_path'))}",
     ]
     return "\n".join(lines) + "\n"
@@ -783,6 +785,15 @@ def _write_recommended_command_scripts(
     }
     manifest = {
         "schema": "st.llm_char_vae_context.chain_command_manifest.v1",
+        "comparison": {
+            "schema": summary.get("schema"),
+            "sort_by": summary.get("sort_by"),
+            "recursive": summary.get("recursive"),
+            "input_count": summary.get("input_count"),
+            "discovered_chain_count": summary.get("discovered_chain_count"),
+        },
+        "aggregate": summary.get("aggregate"),
+        "selection": summary.get("selection"),
         "recommendation": recommendation,
         "command_scripts": command_scripts,
     }

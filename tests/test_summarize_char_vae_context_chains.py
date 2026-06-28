@@ -350,6 +350,14 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
                 manifest["recommendation"]["action"],
                 "continue_from_accepted",
             )
+            self.assertEqual(manifest["comparison"]["sort_by"], "input")
+            self.assertIs(manifest["comparison"]["recursive"], False)
+            self.assertEqual(manifest["aggregate"]["chain_count"], 1)
+            self.assertEqual(
+                manifest["selection"]["accepted_champion"]["config"],
+                "latent@normalize=blocks,scale=0.5",
+            )
+            self.assertIs(manifest["selection"]["accepted_matches_best"], True)
             self.assertEqual(
                 manifest["command_scripts"]["follow_up_path"],
                 str(follow_up_script),
@@ -561,6 +569,11 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             review_script_exists = review_script.exists()
             follow_up_script_exists = follow_up_script.exists()
             next_script_text = next_script.read_text(encoding="utf-8")
+            command_manifest = json.loads(
+                (root / "commands" / "recommendation.json").read_text(
+                    encoding="utf-8"
+                )
+            )
             command_readme = (root / "commands" / "README.md").read_text(
                 encoding="utf-8"
             )
@@ -625,6 +638,13 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
         self.assertEqual(command_scripts["next_kind"], "review")
         self.assertEqual(command_scripts["follow_up_path"], follow_up_script_path)
         self.assertEqual(command_scripts["review_path"], review_script_path)
+        self.assertEqual(command_manifest["comparison"]["sort_by"], "best")
+        self.assertEqual(command_manifest["aggregate"]["chain_count"], 2)
+        self.assertIs(command_manifest["selection"]["best_requires_review"], True)
+        self.assertEqual(
+            command_manifest["selection"]["best_champion"]["config"],
+            "latent@normalize=blocks,scale=4.0",
+        )
         self.assertTrue(next_script_exists)
         self.assertTrue(follow_up_script_exists)
         self.assertTrue(review_script_exists)
