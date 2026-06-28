@@ -502,6 +502,42 @@ class CharVaeContextChainTests(unittest.TestCase):
             "192",
         )
 
+        capacity_lockin = parser.parse_args(
+            ["models/samples/spiral_corpus_en", "--preset", "capacity_lockin"]
+        )
+        capacity_lockin_command = mod._parent_command(
+            capacity_lockin,
+            Path("/tmp/capacity_lockin"),
+        )
+        self.assertEqual(
+            capacity_lockin_command[capacity_lockin_command.index("--latent-dim") + 1],
+            "12",
+        )
+        self.assertEqual(
+            capacity_lockin_command[capacity_lockin_command.index("--hidden") + 1],
+            "64",
+        )
+        self.assertNotIn("--latent-dims", capacity_lockin_command)
+        self.assertNotIn("--hidden-sizes", capacity_lockin_command)
+        self.assertEqual(
+            capacity_lockin_command[
+                capacity_lockin_command.index("--hybrid-latent-scales") + 1
+            ],
+            "4.0",
+        )
+        self.assertEqual(
+            capacity_lockin_command[capacity_lockin_command.index("--seeds") + 1],
+            "127,131,137,139,149",
+        )
+        self.assertEqual(
+            capacity_lockin_command[capacity_lockin_command.index("--epochs") + 1],
+            "8",
+        )
+        self.assertEqual(
+            capacity_lockin_command[capacity_lockin_command.index("--eval-samples") + 1],
+            "192",
+        )
+
         explicit = parser.parse_args(
             [
                 "models/samples/spiral_corpus_en",
