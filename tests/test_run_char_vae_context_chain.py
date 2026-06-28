@@ -219,6 +219,66 @@ class CharVaeContextChainTests(unittest.TestCase):
         self.assertEqual(dry_run_plan[0]["status"], "dry_run_planned")
         self.assertEqual(dry_run_plan[1]["status"], "extra")
 
+    def test_follow_up_seed_resolution_summarizes_attempted_seeds(self) -> None:
+        mod = _load_module()
+        manifest = {
+            "steps": [
+                {"index": 0, "role": "parent"},
+                {
+                    "index": 1,
+                    "role": "follow_up",
+                    "run_dir": "/tmp/chain/follow_up_01",
+                    "exit_code": 0,
+                    "status": "improved",
+                    "follow_up_verdict": "confirmed",
+                    "follow_up_gate_failed": False,
+                    "follow_up_command_source": "next_follow_up_command",
+                    "new_seed_source": "explicit_seed_group",
+                    "new_seeds": "17",
+                },
+                {
+                    "index": 2,
+                    "role": "follow_up",
+                    "run_dir": "/tmp/chain/follow_up_02",
+                    "exit_code": 1,
+                    "status": "improved",
+                    "follow_up_verdict": "regressed",
+                    "follow_up_gate_failed": True,
+                    "follow_up_command_source": "guided_next_follow_up_command",
+                    "new_seed_source": "command_default",
+                    "new_seeds": "101,103,107",
+                },
+            ],
+            "follow_up_seed_group_plan": [
+                {
+                    "group_index": 1,
+                    "follow_up_index": 1,
+                    "seed_group": "17",
+                    "source": "explicit",
+                    "status": "attempted_slot",
+                },
+                {
+                    "group_index": 2,
+                    "follow_up_index": 2,
+                    "seed_group": "19",
+                    "source": "explicit",
+                    "status": "attempted_slot",
+                },
+            ],
+        }
+
+        resolution = mod._follow_up_seed_resolution(manifest)
+
+        self.assertEqual(len(resolution), 2)
+        self.assertEqual(resolution[0]["seed_source"], "explicit_seed_group")
+        self.assertEqual(resolution[0]["seeds"], "17")
+        self.assertEqual(resolution[0]["configured_seed_group"], "17")
+        self.assertEqual(resolution[1]["command_source"], "guided_next_follow_up_command")
+        self.assertEqual(resolution[1]["seed_source"], "command_default")
+        self.assertEqual(resolution[1]["seeds"], "101,103,107")
+        self.assertEqual(resolution[1]["configured_seed_group"], "19")
+        self.assertEqual(resolution[1]["gate_failed"], True)
+
     def test_preset_latent_scale_defaults_keep_smoke_light_and_scout_small(self) -> None:
         mod = _load_module()
         parser = mod._build_parser()
@@ -387,6 +447,22 @@ class CharVaeContextChainTests(unittest.TestCase):
                     "extra_explicit_seed_groups": [],
                     "unused_explicit_seed_groups": [],
                     "follow_up_seed_group_plan": [],
+                    "follow_up_seed_resolution": [
+                        {
+                            "follow_up_index": 1,
+                            "step_index": 1,
+                            "run_dir": str(run_dir),
+                            "exit_code": 1,
+                            "status": "improved",
+                            "verdict": "regressed",
+                            "gate_failed": True,
+                            "command_source": "next_follow_up_command",
+                            "seed_source": "command_default",
+                            "seeds": "131,137,139,149,151",
+                            "configured_seed_group": None,
+                            "configured_seed_group_status": None,
+                        }
+                    ],
                     "follow_up_seed_policy": mod._follow_up_seed_policy_record(
                         explicit_seed_groups=False
                     ),
@@ -421,6 +497,11 @@ class CharVaeContextChainTests(unittest.TestCase):
         self.assertIn("best runner-up within combined seed uncertainty", report)
         self.assertIn("run_seed_source", report)
         self.assertIn("command_default", report)
+        self.assertIn(
+            "- follow_up_seed_resolution: #1 seeds=131,137,139,149,151 "
+            "source=command_default command=next_follow_up_command",
+            report,
+        )
         self.assertIn("- follow_up_seed_groups: preset_fallback (17, 19)", report)
         self.assertIn("- extra_explicit_seed_groups: -", report)
         self.assertIn("- unused_explicit_seed_groups: -", report)

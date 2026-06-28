@@ -249,6 +249,47 @@ def _follow_up_seed_group_plan(
     return plan
 
 
+def _follow_up_seed_resolution(manifest: dict[str, Any]) -> list[dict[str, Any]]:
+    group_by_follow_up: dict[int, dict[str, Any]] = {}
+    for item in manifest.get("follow_up_seed_group_plan", []):
+        if not isinstance(item, dict):
+            continue
+        follow_up_index = item.get("follow_up_index")
+        if isinstance(follow_up_index, int):
+            group_by_follow_up[follow_up_index] = item
+
+    resolution: list[dict[str, Any]] = []
+    for step in manifest.get("steps", []):
+        if not isinstance(step, dict) or step.get("role") != "follow_up":
+            continue
+        follow_up_index = step.get("index")
+        group = (
+            group_by_follow_up.get(follow_up_index)
+            if isinstance(follow_up_index, int)
+            else None
+        )
+        group = group if isinstance(group, dict) else {}
+        resolution.append(
+            {
+                "follow_up_index": follow_up_index,
+                "step_index": step.get("index"),
+                "run_dir": step.get("run_dir"),
+                "exit_code": step.get("exit_code"),
+                "status": step.get("status"),
+                "verdict": step.get("follow_up_verdict"),
+                "gate_failed": step.get("follow_up_gate_failed"),
+                "command_source": step.get("follow_up_command_source"),
+                "seed_source": step.get("new_seed_source"),
+                "seeds": step.get("new_seeds"),
+                "configured_seed_group_index": group.get("group_index"),
+                "configured_seed_group": group.get("seed_group"),
+                "configured_seed_group_source": group.get("source"),
+                "configured_seed_group_status": group.get("status"),
+            }
+        )
+    return resolution
+
+
 def _follow_up_command_record(
     summary: dict[str, Any],
     *,
@@ -591,6 +632,24 @@ def _render_report(manifest: dict[str, Any]) -> str:
             if isinstance(item, dict)
         )
         seed_group_plan_text = seed_group_plan_text or "-"
+    seed_resolution = manifest.get("follow_up_seed_resolution", [])
+    seed_resolution_text = "-"
+    if isinstance(seed_resolution, list) and seed_resolution:
+        seed_resolution_text = "; ".join(
+            "#{follow_up} seeds={seeds} source={source} command={command} "
+            "configured_group={group} group_status={group_status} exit={exit}".format(
+                follow_up=_fmt(_value(item, "follow_up_index")),
+                seeds=_fmt(_value(item, "seeds")),
+                source=_fmt(_value(item, "seed_source")),
+                command=_fmt(_value(item, "command_source")),
+                group=_fmt(_value(item, "configured_seed_group")),
+                group_status=_fmt(_value(item, "configured_seed_group_status")),
+                exit=_fmt(_value(item, "exit_code")),
+            )
+            for item in seed_resolution
+            if isinstance(item, dict)
+        )
+        seed_resolution_text = seed_resolution_text or "-"
     lines = [
         "# Char VAE Context Chain Report",
         "",
@@ -628,6 +687,7 @@ def _render_report(manifest: dict[str, Any]) -> str:
             ),
         ),
         f"- follow_up_seed_group_plan: {seed_group_plan_text}",
+        f"- follow_up_seed_resolution: {seed_resolution_text}",
         "- follow_up_seed_policy: {precedence} ({reason})".format(
             precedence=(
                 " -> ".join(
@@ -863,6 +923,7 @@ def main(argv: list[str] | None = None) -> int:
             attempted_follow_ups=0,
             dry_run=bool(args.dry_run),
         ),
+        "follow_up_seed_resolution": [],
         "follow_up_seed_group_source": (
             "explicit" if explicit_seed_groups else "preset_fallback"
         ),
@@ -979,6 +1040,7 @@ def main(argv: list[str] | None = None) -> int:
         attempted_follow_ups=attempted_follow_ups,
         dry_run=bool(args.dry_run),
     )
+    manifest["follow_up_seed_resolution"] = _follow_up_seed_resolution(manifest)
 
     chain_path = run_root / "chain.json"
     report_path = run_root / "chain_report.md"
