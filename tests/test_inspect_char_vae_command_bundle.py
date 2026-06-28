@@ -46,6 +46,8 @@ def _write_bundle(
     *,
     missing_comparison_json: bool = False,
     non_executable_follow_up: bool = False,
+    include_runner: bool = False,
+    non_executable_runner: bool = False,
 ) -> Path:
     command_dir = root / "commands"
     command_dir.mkdir(parents=True, exist_ok=True)
@@ -66,8 +68,11 @@ def _write_bundle(
 
     next_script = command_dir / "recommended_next.sh"
     follow_up_script = command_dir / "recommended_follow_up.sh"
+    runner_script = command_dir / "run_recommended_next.sh"
     _write_script(next_script)
     _write_script(follow_up_script, executable=not non_executable_follow_up)
+    if include_runner or non_executable_runner:
+        _write_script(runner_script, executable=not non_executable_runner)
 
     _write_json(
         command_dir / "recommendation.json",
@@ -91,6 +96,9 @@ def _write_bundle(
                 "comparison_json_path": str(comparison_json),
                 "comparison_markdown_path": str(comparison_markdown),
                 "runner_command": _runner_command(command_dir),
+                "runner_path": str(runner_script)
+                if include_runner or non_executable_runner
+                else None,
                 "history_report_command": _history_report_command(command_dir),
                 "run_json_path": str(run_json),
                 "run_markdown_path": str(run_markdown),
@@ -217,6 +225,37 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
         self.assertIn("--history-report-only", markdown_result.stdout)
         self.assertIn("run_history_summary", markdown_result.stdout)
         self.assertIn("run_history_summary_valid_json: -", markdown_result.stdout)
+
+    def test_cli_reports_declared_runner_wrapper(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            command_dir = _write_bundle(Path(tmp), include_runner=True)
+            result = subprocess.run(
+                ["python3", "-P", str(SCRIPT), str(command_dir), "--json"],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            markdown_result = subprocess.run(
+                ["python3", "-P", str(SCRIPT), str(command_dir)],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        runner_path = str(command_dir / "run_recommended_next.sh")
+        checks = {item["label"]: item for item in payload["checks"]}
+        self.assertTrue(payload["strict_ready"])
+        self.assertEqual(payload["runner_path"], runner_path)
+        self.assertTrue(checks["runner_script"]["ok"])
+        self.assertEqual(checks["runner_script"]["path"], runner_path)
+        self.assertEqual(markdown_result.returncode, 0, markdown_result.stderr)
+        self.assertIn(f"runner_path: {runner_path}", markdown_result.stdout)
 
     def test_cli_flags_unsafe_history_report_command(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -581,6 +620,35 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
         self.assertTrue(payload["bundle_ready"])
         self.assertFalse(payload["strict_ready"])
         self.assertIn("follow_up_script", payload["missing_optional"])
+        self.assertEqual(strict.returncode, 1)
+
+    def test_strict_fails_when_runner_wrapper_is_not_executable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            command_dir = _write_bundle(Path(tmp), non_executable_runner=True)
+            relaxed = subprocess.run(
+                ["python3", "-P", str(SCRIPT), str(command_dir), "--json"],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            strict = subprocess.run(
+                ["python3", "-P", str(SCRIPT), str(command_dir), "--json", "--strict"],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+
+        self.assertEqual(relaxed.returncode, 0, relaxed.stderr)
+        payload = json.loads(relaxed.stdout)
+        checks = {item["label"]: item for item in payload["checks"]}
+        self.assertTrue(payload["bundle_ready"])
+        self.assertFalse(payload["strict_ready"])
+        self.assertIn("runner_script", payload["missing_optional"])
+        self.assertFalse(checks["runner_script"]["ok"])
         self.assertEqual(strict.returncode, 1)
 
 

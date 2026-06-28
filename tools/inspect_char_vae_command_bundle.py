@@ -247,6 +247,7 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
     next_path = _path_from(command_scripts.get("next_path"))
     follow_up_path = _path_from(command_scripts.get("follow_up_path"))
     review_path = _path_from(command_scripts.get("review_path"))
+    runner_path = _path_from(command_scripts.get("runner_path"))
     runner_command = _command_from(command_scripts.get("runner_command"))
     history_report_command = _command_from(
         command_scripts.get("history_report_command")
@@ -309,6 +310,12 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
             "review_script",
             path=review_path,
             ok=review_path is None or _is_executable(review_path),
+            required=False,
+        ),
+        _check(
+            "runner_script",
+            path=runner_path,
+            ok=runner_path is None or _is_executable(runner_path),
             required=False,
         ),
         _check(
@@ -381,6 +388,7 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
         if comparison_markdown_path is not None
         else None,
         "runner_command": runner_command,
+        "runner_path": str(runner_path) if runner_path is not None else None,
         "history_report_command": history_report_command,
         "declared_commands": declared_commands,
         "declared_command_issues": declared_command_issues,
@@ -425,6 +433,7 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"- comparison_json_path: {_fmt(summary.get('comparison_json_path'))}",
         f"- comparison_markdown_path: {_fmt(summary.get('comparison_markdown_path'))}",
         f"- runner_command: {_fmt(summary.get('runner_command'))}",
+        f"- runner_path: {_fmt(summary.get('runner_path'))}",
         f"- history_report_command: {_fmt(summary.get('history_report_command'))}",
         f"- declared_command_issues: {_fmt_list(summary.get('declared_command_issues'))}",
         f"- run_json_path: {_fmt(summary.get('run_json_path'))}",
