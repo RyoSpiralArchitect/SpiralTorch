@@ -446,8 +446,22 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
         self.assertTrue(manifest["command_scripts"]["inspection_strict_ready"])
         self.assertEqual(manifest["command_scripts"]["inspection_missing_required"], [])
         self.assertEqual(manifest["command_scripts"]["inspection_missing_optional"], [])
+        self.assertEqual(
+            manifest["command_scripts"]["inspection_runner_wrapper_status"],
+            inspection["runner_wrapper_status"],
+        )
+        self.assertTrue(manifest["command_scripts"]["inspection_runner_wrapper_ok"])
+        self.assertIsNone(
+            manifest["command_scripts"][
+                "inspection_runner_wrapper_executes_runner_command"
+            ]
+        )
+        self.assertIsNone(
+            manifest["command_scripts"]["inspection_runner_wrapper_forwards_arguments"]
+        )
         self.assertTrue(comparison["command_scripts"]["inspection_generated"])
         self.assertTrue(comparison["command_inspection"]["strict_ready"])
+        self.assertTrue(comparison["command_scripts"]["inspection_runner_wrapper_ok"])
         self.assertEqual(
             comparison["command_inspection"]["inspection_json_path"],
             str((command_dir / "inspection.json").resolve()),
@@ -457,6 +471,8 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
         self.assertIn("command_inspection_generated: yes", markdown)
         self.assertIn("command_inspection_strict_ready: yes", markdown)
         self.assertIn("command_inspection_missing_required: -", markdown)
+        self.assertIn("command_inspection_runner_wrapper_ok: yes", markdown)
+        self.assertIn("runner_wrapper_ok: `yes`", readme)
 
     def test_cli_command_dir_records_absolute_handoff_paths(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -656,6 +672,7 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
                     str(markdown_out),
                     "--command-out-dir",
                     str(command_dir),
+                    "--write-command-inspection",
                 ],
                 cwd=root,
                 text=True,
@@ -690,6 +707,9 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             runner_text = runner_script.read_text(encoding="utf-8")
             script_text = follow_up_script.read_text(encoding="utf-8")
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            inspection = json.loads(
+                (command_dir / "inspection.json").read_text(encoding="utf-8")
+            )
             readme = readme_path.read_text(encoding="utf-8")
             self.assertEqual(
                 payload["command_scripts"]["next_path"],
@@ -747,6 +767,31 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             self.assertEqual(
                 manifest["command_scripts"]["runner_path"],
                 runner_script_path,
+            )
+            self.assertTrue(
+                manifest["command_scripts"]["inspection_runner_wrapper_ok"]
+            )
+            self.assertTrue(
+                manifest["command_scripts"][
+                    "inspection_runner_wrapper_executes_runner_command"
+                ]
+            )
+            self.assertTrue(
+                manifest["command_scripts"][
+                    "inspection_runner_wrapper_forwards_arguments"
+                ]
+            )
+            self.assertEqual(
+                manifest["command_scripts"]["inspection_runner_wrapper_status"],
+                inspection["runner_wrapper_status"],
+            )
+            self.assertTrue(
+                payload["command_scripts"]["inspection_runner_wrapper_ok"]
+            )
+            self.assertTrue(
+                payload["command_scripts"][
+                    "inspection_runner_wrapper_executes_runner_command"
+                ]
             )
             self.assertEqual(
                 manifest["command_scripts"]["execution_cwd"],
@@ -808,6 +853,8 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             self.assertIn("--write-run-report", runner_text)
             self.assertIn("--append-run-history", runner_text)
             self.assertIn("--write-run-history-report", runner_text)
+            self.assertIn("runner_wrapper_ok: `yes`", readme)
+            self.assertIn("runner_wrapper_executes_runner_command: `yes`", readme)
             self.assertIn(f"cd {shlex.quote(execution_cwd)}", script_text)
             self.assertIn("FOLLOW_UP_FROM=accepted NEW_SEEDS=31", script_text)
             self.assertIn(

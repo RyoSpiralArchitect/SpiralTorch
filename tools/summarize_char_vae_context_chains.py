@@ -850,6 +850,9 @@ def _render_command_readme(
         f"- report_markdown: {_fmt_readme_value(command_scripts.get('inspection_markdown_path'))}",
         f"- generated_now: {_fmt_readme_value(command_scripts.get('inspection_generated'))}",
         f"- strict_ready: {_fmt_readme_value(command_scripts.get('inspection_strict_ready'))}",
+        f"- runner_wrapper_ok: {_fmt_readme_value(command_scripts.get('inspection_runner_wrapper_ok'))}",
+        f"- runner_wrapper_executes_runner_command: {_fmt_readme_value(command_scripts.get('inspection_runner_wrapper_executes_runner_command'))}",
+        f"- runner_wrapper_forwards_arguments: {_fmt_readme_value(command_scripts.get('inspection_runner_wrapper_forwards_arguments'))}",
         "",
         "## Machine-Readable Manifest",
         "",
@@ -963,6 +966,10 @@ def _write_recommended_command_scripts(
         "inspection_strict_ready": None,
         "inspection_missing_required": [],
         "inspection_missing_optional": [],
+        "inspection_runner_wrapper_status": None,
+        "inspection_runner_wrapper_ok": None,
+        "inspection_runner_wrapper_executes_runner_command": None,
+        "inspection_runner_wrapper_forwards_arguments": None,
         "runner_command": runner_command,
         "history_report_command": _history_report_command_line(str(out_dir)),
         "runner_path": runner_path,
@@ -1076,6 +1083,9 @@ def _render_markdown(summary: dict[str, Any]) -> str:
         f"- command_inspection_strict_ready: {_fmt(_value(command_scripts, 'inspection_strict_ready'))}",
         f"- command_inspection_missing_required: {_fmt_list(_value(command_scripts, 'inspection_missing_required'))}",
         f"- command_inspection_missing_optional: {_fmt_list(_value(command_scripts, 'inspection_missing_optional'))}",
+        f"- command_inspection_runner_wrapper_ok: {_fmt(_value(command_scripts, 'inspection_runner_wrapper_ok'))}",
+        f"- command_inspection_runner_wrapper_executes_runner_command: {_fmt(_value(command_scripts, 'inspection_runner_wrapper_executes_runner_command'))}",
+        f"- command_inspection_runner_wrapper_forwards_arguments: {_fmt(_value(command_scripts, 'inspection_runner_wrapper_forwards_arguments'))}",
         f"- command_runner: {_fmt(_value(command_scripts, 'runner_command'))}",
         f"- command_runner_script: {_fmt(_value(command_scripts, 'runner_path'))}",
         f"- command_run_json_path: {_fmt(_value(command_scripts, 'run_json_path'))}",
@@ -1207,6 +1217,10 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         command_scripts = summary.get("command_scripts")
         command_scripts = command_scripts if isinstance(command_scripts, dict) else {}
+        runner_wrapper_status = inspection.get("runner_wrapper_status")
+        runner_wrapper_status = (
+            runner_wrapper_status if isinstance(runner_wrapper_status, dict) else {}
+        )
         command_scripts.update(
             {
                 "inspection_generated": True,
@@ -1214,6 +1228,14 @@ def main(argv: list[str] | None = None) -> int:
                 "inspection_strict_ready": bool(inspection.get("strict_ready")),
                 "inspection_missing_required": inspection.get("missing_required") or [],
                 "inspection_missing_optional": inspection.get("missing_optional") or [],
+                "inspection_runner_wrapper_status": runner_wrapper_status,
+                "inspection_runner_wrapper_ok": runner_wrapper_status.get("ok"),
+                "inspection_runner_wrapper_executes_runner_command": (
+                    runner_wrapper_status.get("executes_runner_command")
+                ),
+                "inspection_runner_wrapper_forwards_arguments": (
+                    runner_wrapper_status.get("forwards_arguments")
+                ),
             }
         )
         summary["command_scripts"] = command_scripts
