@@ -207,6 +207,97 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
         self.assertIn("Char VAE Context Chain Comparison", result.stdout)
         self.assertIn("dry_run_count: 1", markdown)
 
+    def test_cli_writes_recommended_command_scripts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            summary_path = root / "chain" / "accepted" / "summary.json"
+            _write_json(
+                summary_path,
+                {
+                    "next_follow_up_command": {
+                        "script_path": str(root / "chain" / "accepted" / "next.sh"),
+                        "script_usage": (
+                            "FOLLOW_UP_FROM=accepted NEW_SEEDS=31 bash accepted/next.sh"
+                        ),
+                        "shell_command": "PYTHONNOUSERSITE=1 python accepted.py",
+                        "default_new_seeds": "31",
+                        "default_run_dir": str(root / "chain" / "accepted" / "next"),
+                        "default_follow_up_from": str(summary_path),
+                    },
+                },
+            )
+            chain = _write_chain(
+                root / "chain",
+                {
+                    "schema": "st.llm_char_vae_context.chain.v1",
+                    "preset": "smoke",
+                    "run_root": str(root / "chain"),
+                    "planned_follow_ups": 1,
+                    "attempted_follow_ups": 1,
+                    "accepted_summary_path": str(summary_path),
+                    "best_summary_path": str(summary_path),
+                    "accepted_step": {
+                        "index": 1,
+                        "summary_path": str(summary_path),
+                        "best_config_label": "latent@normalize=blocks,scale=0.5",
+                        "mean_best_nll": 4.1,
+                    },
+                    "best_step": {
+                        "index": 1,
+                        "summary_path": str(summary_path),
+                        "best_config_label": "latent@normalize=blocks,scale=0.5",
+                        "mean_best_nll": 4.1,
+                    },
+                    "follow_up_seed_resolution_summary": {
+                        "attempted_follow_ups": 1,
+                        "seed_source_counts": {"command_default": 1},
+                        "command_source_counts": {"next_follow_up_command": 1},
+                        "configured_seed_group_status_counts": {"attempted_slot": 1},
+                        "gate_failed_count": 0,
+                        "nonzero_exit_count": 0,
+                    },
+                },
+            )
+            json_out = root / "comparison.json"
+            markdown_out = root / "comparison.md"
+            command_dir = root / "commands"
+            result = subprocess.run(
+                [
+                    "python3",
+                    "-P",
+                    str(SCRIPT),
+                    str(chain),
+                    "--json-out",
+                    str(json_out),
+                    "--markdown-out",
+                    str(markdown_out),
+                    "--command-out-dir",
+                    str(command_dir),
+                ],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(json_out.read_text(encoding="utf-8"))
+            markdown = markdown_out.read_text(encoding="utf-8")
+            follow_up_script = command_dir / "recommended_follow_up.sh"
+            review_script = command_dir / "recommended_review.sh"
+            self.assertTrue(follow_up_script.exists())
+            self.assertFalse(review_script.exists())
+            script_text = follow_up_script.read_text(encoding="utf-8")
+            self.assertEqual(
+                payload["command_scripts"]["follow_up_path"],
+                str(follow_up_script),
+            )
+            self.assertIsNone(payload["command_scripts"]["review_path"])
+            self.assertEqual(payload["command_scripts"]["written_count"], 1)
+            self.assertIn("FOLLOW_UP_FROM=accepted NEW_SEEDS=31", script_text)
+            self.assertIn("recommended_follow_up.sh", markdown)
+
     def test_selection_separates_safe_accepted_from_absolute_best(self) -> None:
         mod = _load_module()
         with tempfile.TemporaryDirectory() as tmp:
