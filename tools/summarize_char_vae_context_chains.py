@@ -661,6 +661,10 @@ def _render_command_readme(
 ) -> str:
     recommendation = summary.get("recommendation")
     recommendation = recommendation if isinstance(recommendation, dict) else {}
+    champion = recommendation.get("champion")
+    champion = champion if isinstance(champion, dict) else {}
+    fallback = recommendation.get("fallback")
+    fallback = fallback if isinstance(fallback, dict) else {}
     follow_up = recommendation.get("follow_up_command")
     follow_up = follow_up if isinstance(follow_up, dict) else {}
     review = recommendation.get("review_command")
@@ -681,6 +685,22 @@ def _render_command_readme(
         f"- follow_up_from_summary_path: {_fmt_readme_value(recommendation.get('follow_up_from_summary_path'))}",
         f"- review_summary_path: {_fmt_readme_value(recommendation.get('review_summary_path'))}",
         f"- execution_cwd: {_fmt_readme_value(command_scripts.get('execution_cwd'))}",
+        "",
+        "## Champion",
+        "",
+        f"- source: {_fmt_readme_value(recommendation.get('champion_source'))}",
+        f"- config: {_fmt_readme_value(champion.get('config'))}",
+        f"- mean_best_nll: {_fmt_readme_value(champion.get('mean_best_nll'))}",
+        f"- step: {_fmt_readme_value(champion.get('step'))}",
+        f"- summary_path: {_fmt_readme_value(champion.get('summary_path'))}",
+        "",
+        "## Fallback",
+        "",
+        f"- source: {_fmt_readme_value(recommendation.get('fallback_source'))}",
+        f"- config: {_fmt_readme_value(fallback.get('config'))}",
+        f"- mean_best_nll: {_fmt_readme_value(fallback.get('mean_best_nll'))}",
+        f"- step: {_fmt_readme_value(fallback.get('step'))}",
+        f"- summary_path: {_fmt_readme_value(fallback.get('summary_path'))}",
         "",
         "## Recommended Next",
         "",
