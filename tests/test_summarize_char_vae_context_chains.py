@@ -1022,6 +1022,36 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
                     f"next={default_run_dir} fail=regressed,unknown"
                 ),
             )
+            (root / "wrapper.out").unlink()
+            first_history_next_result = subprocess.run(
+                ["bash", str(history_runner_script), "--json"],
+                cwd=command_dir,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            self.assertEqual(
+                first_history_next_result.returncode,
+                0,
+                first_history_next_result.stderr,
+            )
+            first_history_next_payload = json.loads(first_history_next_result.stdout)
+            self.assertEqual(first_history_next_payload["requested_target"], "next")
+            self.assertEqual(first_history_next_payload["target"], "next")
+            self.assertTrue(first_history_next_payload["use_history_next_action"])
+            self.assertEqual(
+                first_history_next_payload["history_next_action"]["action"],
+                "run_recommended_next",
+            )
+            self.assertTrue(first_history_next_payload["executed"])
+            self.assertEqual(
+                (root / "wrapper.out").read_text(encoding="utf-8").strip(),
+                (
+                    f"cwd={execution_cwd} follow=accepted seeds=31 "
+                    f"next={default_run_dir} fail=regressed,unknown"
+                ),
+            )
             history_next_script = command_dir / "history_guided_next.sh"
             history_next_script.write_text(
                 "\n".join(
