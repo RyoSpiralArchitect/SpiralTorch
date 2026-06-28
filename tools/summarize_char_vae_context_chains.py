@@ -305,6 +305,9 @@ def _summary_follow_up_command(summary_path: Any) -> dict[str, Any]:
                 "default_new_seeds": command.get("default_new_seeds"),
                 "default_run_dir": command.get("default_run_dir"),
                 "default_follow_up_from": command.get("default_follow_up_from"),
+                "default_follow_up_fail_on_verdict": command.get(
+                    "default_follow_up_fail_on_verdict"
+                ),
                 "missing_reason": None,
             }
         )
@@ -530,11 +533,38 @@ def _fmt_command(record: Any) -> str:
 def _command_line(record: Any) -> str | None:
     if not isinstance(record, dict) or not record.get("available"):
         return None
+    command_line = _safe_script_command_line(record)
+    if command_line is not None:
+        return command_line
     for key in ("script_usage", "shell_command"):
         value = record.get(key)
         if isinstance(value, str) and value.strip():
             return value.strip()
     return None
+
+
+def _env_assignment(name: str, value: Any) -> str | None:
+    if not isinstance(value, str) or not value:
+        return None
+    return f"{name}={shlex.quote(value)}"
+
+
+def _safe_script_command_line(record: dict[str, Any]) -> str | None:
+    script_path = record.get("script_path")
+    if not isinstance(script_path, str) or not script_path:
+        return None
+    assignments = [
+        _env_assignment("FOLLOW_UP_FROM", record.get("default_follow_up_from")),
+        _env_assignment("NEW_SEEDS", record.get("default_new_seeds")),
+        _env_assignment("NEXT_RUN_DIR", record.get("default_run_dir")),
+        _env_assignment(
+            "FOLLOW_UP_FAIL_ON_VERDICT",
+            record.get("default_follow_up_fail_on_verdict"),
+        ),
+    ]
+    parts = [assignment for assignment in assignments if assignment]
+    parts.extend(["bash", shlex.quote(script_path)])
+    return " ".join(parts)
 
 
 def _write_command_script(

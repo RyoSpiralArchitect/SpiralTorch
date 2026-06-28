@@ -211,14 +211,20 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
     def test_cli_writes_recommended_command_scripts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            relative_script = root / "accepted" / "next.sh"
+            relative_script = root / "accepted scripts" / "next command.sh"
+            default_run_dir = root / "chain" / "accepted" / "next run"
             relative_script.parent.mkdir(parents=True, exist_ok=True)
             relative_script.write_text(
                 "\n".join(
                     [
                         "#!/usr/bin/env bash",
                         "set -euo pipefail",
-                        'printf "cwd=%s follow=%s seeds=%s\\n" "$(pwd)" "$FOLLOW_UP_FROM" "$NEW_SEEDS" > wrapper.out',
+                        (
+                            'printf "cwd=%s follow=%s seeds=%s next=%s fail=%s\\n" '
+                            '"$(pwd)" "$FOLLOW_UP_FROM" "$NEW_SEEDS" '
+                            '"$NEXT_RUN_DIR" "$FOLLOW_UP_FAIL_ON_VERDICT" '
+                            "> wrapper.out"
+                        ),
                         "",
                     ]
                 ),
@@ -231,12 +237,16 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
                     "next_follow_up_command": {
                         "script_path": str(relative_script),
                         "script_usage": (
-                            "FOLLOW_UP_FROM=accepted NEW_SEEDS=31 bash accepted/next.sh"
+                            "FOLLOW_UP_FROM=accepted NEW_SEEDS=31 "
+                            "NEXT_RUN_DIR=chain/accepted/next run "
+                            "FOLLOW_UP_FAIL_ON_VERDICT=regressed,unknown "
+                            "bash accepted scripts/next command.sh"
                         ),
                         "shell_command": "PYTHONNOUSERSITE=1 python accepted.py",
                         "default_new_seeds": "31",
-                        "default_run_dir": str(root / "chain" / "accepted" / "next"),
-                        "default_follow_up_from": str(summary_path),
+                        "default_run_dir": str(default_run_dir),
+                        "default_follow_up_from": "accepted",
+                        "default_follow_up_fail_on_verdict": "regressed,unknown",
                     },
                 },
             )
@@ -342,6 +352,14 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             )
             self.assertIn(f"cd {shlex.quote(execution_cwd)}", script_text)
             self.assertIn("FOLLOW_UP_FROM=accepted NEW_SEEDS=31", script_text)
+            self.assertIn(
+                f"NEXT_RUN_DIR={shlex.quote(str(default_run_dir))}",
+                script_text,
+            )
+            self.assertIn(
+                f"bash {shlex.quote(str(relative_script))}",
+                script_text,
+            )
             run_result = subprocess.run(
                 ["bash", str(follow_up_script)],
                 cwd=command_dir,
@@ -353,7 +371,10 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             self.assertEqual(run_result.returncode, 0, run_result.stderr)
             self.assertEqual(
                 (root / "wrapper.out").read_text(encoding="utf-8").strip(),
-                f"cwd={execution_cwd} follow=accepted seeds=31",
+                (
+                    f"cwd={execution_cwd} follow=accepted seeds=31 "
+                    f"next={default_run_dir} fail=regressed,unknown"
+                ),
             )
             self.assertIn("Char VAE Chain Recommended Commands", readme)
             self.assertIn("continue_from_accepted", readme)
