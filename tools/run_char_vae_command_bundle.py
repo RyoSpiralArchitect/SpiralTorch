@@ -1032,6 +1032,98 @@ def _fmt_streak(status: str | None, count: int) -> str:
     return f"{status}:{count}"
 
 
+def _history_next_action(
+    latest: dict[str, Any],
+    latest_evidence: dict[str, Any],
+    latest_execution_next: dict[str, Any],
+) -> dict[str, Any]:
+    if not latest:
+        return {
+            "schema": "st.llm_char_vae_context.command_bundle_history_next_action.v1",
+            "action": "run_recommended_next",
+            "reason": "no run history exists yet",
+            "target": "next",
+            "command_source": None,
+            "script_path": None,
+            "default_new_seeds": None,
+            "should_continue": True,
+        }
+    status = _event_status(latest)
+    if status == "dry-run":
+        return {
+            "schema": "st.llm_char_vae_context.command_bundle_history_next_action.v1",
+            "action": "execute_selected_target",
+            "reason": "latest run was a dry-run",
+            "target": latest.get("target"),
+            "command_source": _mapping(
+                latest.get("selected_execution_next_command")
+            ).get("source"),
+            "script_path": latest.get("script_path"),
+            "default_new_seeds": _mapping(
+                latest.get("selected_execution_next_command")
+            ).get("default_new_seeds"),
+            "should_continue": True,
+        }
+    if status in {"blocked", "failed"}:
+        return {
+            "schema": "st.llm_char_vae_context.command_bundle_history_next_action.v1",
+            "action": "repair_blocker",
+            "reason": latest.get("error") or f"latest run status is {status}",
+            "target": None,
+            "command_source": None,
+            "script_path": latest.get("script_path"),
+            "default_new_seeds": None,
+            "should_continue": False,
+        }
+    should_continue = latest_evidence.get("execution_evidence_should_continue")
+    if should_continue is False:
+        return {
+            "schema": "st.llm_char_vae_context.command_bundle_history_next_action.v1",
+            "action": "review_before_continuing",
+            "reason": latest_evidence.get("execution_evidence_reason")
+            or "execution evidence requested review",
+            "target": None,
+            "command_source": latest_execution_next.get("source"),
+            "script_path": latest_execution_next.get("script_path"),
+            "default_new_seeds": latest_execution_next.get("default_new_seeds"),
+            "should_continue": False,
+        }
+    if should_continue is True:
+        if latest_execution_next.get("script_path"):
+            return {
+                "schema": (
+                    "st.llm_char_vae_context.command_bundle_history_next_action.v1"
+                ),
+                "action": "run_execution_next",
+                "reason": "latest execution summary exposes a next command",
+                "target": EXECUTION_NEXT_TARGET,
+                "command_source": latest_execution_next.get("source"),
+                "script_path": latest_execution_next.get("script_path"),
+                "default_new_seeds": latest_execution_next.get("default_new_seeds"),
+                "should_continue": True,
+            }
+        return {
+            "schema": "st.llm_char_vae_context.command_bundle_history_next_action.v1",
+            "action": "collect_next_command",
+            "reason": "latest execution can continue but has no next script",
+            "target": None,
+            "command_source": latest_execution_next.get("source"),
+            "script_path": None,
+            "default_new_seeds": latest_execution_next.get("default_new_seeds"),
+            "should_continue": False,
+        }
+    return {
+        "schema": "st.llm_char_vae_context.command_bundle_history_next_action.v1",
+        "action": "inspect_history",
+        "reason": "latest run has no decisive execution evidence",
+        "target": "history-report-only",
+        "command_source": latest_execution_next.get("source"),
+        "script_path": latest_execution_next.get("script_path"),
+        "default_new_seeds": latest_execution_next.get("default_new_seeds"),
+        "should_continue": False,
+    }
+
+
 def summarize_history_events(
     events: list[dict[str, Any]],
     *,
@@ -1116,6 +1208,11 @@ def summarize_history_events(
         events,
         lambda event: _event_status(event) in {"blocked", "failed"},
     )
+    next_action = _history_next_action(
+        latest,
+        latest_evidence,
+        latest_execution_next,
+    )
     return {
         "schema": "st.llm_char_vae_context.command_bundle_run_history_summary.v1",
         "history_jsonl_path": str(history_jsonl_path),
@@ -1167,6 +1264,7 @@ def summarize_history_events(
                 "script_path"
             ),
         },
+        "next_action": next_action,
         "signals": {
             "status_counts": status_counts,
             "target_kind_counts": target_kind_counts,
@@ -1257,6 +1355,7 @@ def render_history_markdown(
 ) -> str:
     summary = summarize_history_events(events, history_jsonl_path=history_jsonl_path)
     latest = _mapping(summary.get("latest"))
+    next_action = _mapping(summary.get("next_action"))
     signals = _mapping(summary.get("signals"))
     status_streak = _mapping(signals.get("current_status_streak"))
     latest_executed = _mapping(signals.get("latest_executed"))
@@ -1270,6 +1369,13 @@ def render_history_markdown(
         f"- failure_count: {summary.get('failure_count')}",
         f"- dry_run_count: {summary.get('dry_run_count')}",
         f"- executed_count: {summary.get('executed_count')}",
+        f"- next_action: {_fmt(next_action.get('action'))}",
+        f"- next_action_reason: {_fmt(next_action.get('reason'))}",
+        f"- next_action_target: {_fmt(next_action.get('target'))}",
+        f"- next_action_command_source: {_fmt(next_action.get('command_source'))}",
+        f"- next_action_script_path: {_fmt(next_action.get('script_path'))}",
+        f"- next_action_default_new_seeds: {_fmt(next_action.get('default_new_seeds'))}",
+        f"- next_action_should_continue: {_fmt(next_action.get('should_continue'))}",
         f"- latest_started_at: {_fmt(latest.get('started_at'))}",
         f"- latest_finished_at: {_fmt(latest.get('finished_at'))}",
         f"- latest_status: {_fmt(latest.get('status'))}",

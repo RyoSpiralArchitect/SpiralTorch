@@ -635,7 +635,19 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
             summary["signals"]["last_problem"]["missing_required"],
             ["recommended_review.sh"],
         )
+        self.assertEqual(summary["next_action"]["action"], "repair_blocker")
+        self.assertEqual(
+            summary["next_action"]["reason"],
+            "command bundle did not pass the requested inspection gate",
+        )
+        self.assertIs(summary["next_action"]["should_continue"], False)
         self.assertIn("status_counts: blocked:2, ok:1", markdown)
+        self.assertIn("next_action: repair_blocker", markdown)
+        self.assertIn(
+            "next_action_reason: command bundle did not pass the requested "
+            "inspection gate",
+            markdown,
+        )
         self.assertIn("target_kind_counts: follow_up:1, review:2", markdown)
         self.assertIn(
             "recommendation_action_counts: continue_from_accepted:1, "
@@ -737,6 +749,19 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
             ],
             "feature_swap_review_command",
         )
+        self.assertEqual(summary["next_action"]["action"], "run_execution_next")
+        self.assertEqual(summary["next_action"]["target"], "execution-next")
+        self.assertEqual(
+            summary["next_action"]["command_source"],
+            "guided_next_follow_up_command",
+        )
+        self.assertEqual(
+            summary["next_action"]["script_path"],
+            "/tmp/guided_next_follow_up_command.sh",
+        )
+        self.assertIs(summary["next_action"]["should_continue"], True)
+        self.assertIn("next_action: run_execution_next", markdown)
+        self.assertIn("next_action_target: execution-next", markdown)
         self.assertIn(
             "latest_selected_execution_next_source: feature_swap_review_command",
             markdown,
@@ -1189,7 +1214,20 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
         self.assertTrue(payload["history_report_only"])
         self.assertFalse((command_dir / "runner.out").exists())
         self.assertEqual(payload["run_history_summary"]["total_runs"], 0)
+        self.assertEqual(
+            payload["run_history_summary"]["next_action"]["action"],
+            "run_recommended_next",
+        )
+        self.assertEqual(
+            payload["run_history_summary"]["next_action"]["target"],
+            "next",
+        )
+        self.assertIs(
+            payload["run_history_summary"]["next_action"]["should_continue"],
+            True,
+        )
         self.assertEqual(history_summary["total_runs"], 0)
+        self.assertEqual(history_summary["next_action"]["action"], "run_recommended_next")
 
     def test_cli_rejects_history_report_only_with_append(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1669,11 +1707,31 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
             dry_summary["signals"]["status_counts"],
             {"dry-run": 1},
         )
+        self.assertEqual(dry_summary["next_action"]["action"], "execute_selected_target")
+        self.assertEqual(dry_summary["next_action"]["target"], "next")
+        self.assertIs(dry_summary["next_action"]["should_continue"], True)
         self.assertEqual(executed_summary["total_runs"], 2)
         self.assertEqual(
             executed_summary["signals"]["status_counts"],
             {"dry-run": 1, "ok": 1},
         )
+        self.assertEqual(
+            executed_summary["next_action"]["action"],
+            "run_execution_next",
+        )
+        self.assertEqual(
+            executed_summary["next_action"]["target"],
+            "execution-next",
+        )
+        self.assertEqual(
+            executed_summary["next_action"]["command_source"],
+            "guided_next_follow_up_command",
+        )
+        self.assertEqual(
+            executed_summary["next_action"]["default_new_seeds"],
+            "109,113,127",
+        )
+        self.assertIs(executed_summary["next_action"]["should_continue"], True)
         self.assertEqual(
             executed_summary["signals"]["current_status_streak"],
             {"status": "ok", "count": 1},
@@ -1726,6 +1784,10 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
         )
         self.assertEqual(report_only_summary["total_runs"], 2)
         self.assertEqual(
+            report_only_summary["next_action"],
+            executed_summary["next_action"],
+        )
+        self.assertEqual(
             report_only_summary["signals"]["status_counts"],
             {"dry-run": 1, "ok": 1},
         )
@@ -1763,6 +1825,13 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
         self.assertIn("success_count: 2", history_markdown)
         self.assertIn("dry_run_count: 1", history_markdown)
         self.assertIn("executed_count: 1", history_markdown)
+        self.assertIn("next_action: run_execution_next", history_markdown)
+        self.assertIn("next_action_target: execution-next", history_markdown)
+        self.assertIn(
+            "next_action_command_source: guided_next_follow_up_command",
+            history_markdown,
+        )
+        self.assertIn("next_action_default_new_seeds: 109,113,127", history_markdown)
         self.assertIn("latest_status: ok", history_markdown)
         self.assertIn("latest_target_kind: follow_up", history_markdown)
         self.assertIn("latest_recommendation_action: continue_from_accepted", history_markdown)
