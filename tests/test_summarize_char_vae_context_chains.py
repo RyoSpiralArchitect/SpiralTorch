@@ -857,7 +857,7 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
         )
         self.assertEqual(
             command_scripts["inspection_run_loop_handoff_recommended_action"],
-            "run_continuation_command",
+            "run_resume_from_report_command",
         )
         self.assertTrue(command_scripts["inspection_run_loop_final_next_action_runnable"])
         self.assertEqual(
@@ -902,7 +902,7 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
         self.assertIn("run_loop_handoff_status: `continuation_ready`", readme)
         self.assertIn("run_loop_handoff_severity: `ready`", readme)
         self.assertIn(
-            "run_loop_handoff_recommended_action: `run_continuation_command`",
+            "run_loop_handoff_recommended_action: `run_resume_from_report_command`",
             readme,
         )
         self.assertIn(

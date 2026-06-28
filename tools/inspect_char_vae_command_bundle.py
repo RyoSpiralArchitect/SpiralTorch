@@ -697,6 +697,8 @@ def _run_loop_handoff_guidance(
         return "invalid", True, "repair_run_loop_report"
     handoff_status = status.get("handoff_status")
     if handoff_status == "continuation_ready":
+        if status.get("resume_from_report_command_ok") is True:
+            return "ready", False, "run_resume_from_report_command"
         return "ready", False, "run_continuation_command"
     if handoff_status == "awaiting_next_command":
         return "attention", True, "collect_next_command"
