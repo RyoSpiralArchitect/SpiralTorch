@@ -8,6 +8,8 @@ import importlib.util
 import json
 import subprocess
 import sys
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +33,14 @@ def _path_from(value: Any) -> Path | None:
     if not isinstance(value, str) or not value:
         return None
     return Path(value)
+
+
+def _utc_now() -> str:
+    return (
+        datetime.now(timezone.utc)
+        .isoformat(timespec="milliseconds")
+        .replace("+00:00", "Z")
+    )
 
 
 def _load_inspector() -> Any:
@@ -115,6 +125,10 @@ def _runner_summary(
     error: str | None = None,
     stdout: str | None = None,
     stderr: str | None = None,
+    started_at: str | None = None,
+    finished_at: str | None = None,
+    duration_seconds: float | None = None,
+    executed: bool = False,
 ) -> dict[str, Any]:
     return {
         "schema": SCHEMA,
@@ -123,8 +137,16 @@ def _runner_summary(
         "target": target,
         "script_key": script_key,
         "script_path": str(script_path) if script_path is not None else None,
+        "command_argv": ["bash", str(script_path)]
+        if script_path is not None
+        else None,
+        "execution_cwd": str(command_dir),
         "strict": strict,
         "dry_run": dry_run,
+        "executed": bool(executed),
+        "started_at": started_at,
+        "finished_at": finished_at,
+        "duration_seconds": duration_seconds,
         "bundle_ready": bool(inspection.get("bundle_ready")),
         "strict_ready": bool(inspection.get("strict_ready")),
         "missing_required": inspection.get("missing_required") or [],
@@ -156,8 +178,14 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"- target: {_fmt(summary.get('target'))}",
         f"- script_key: {_fmt(summary.get('script_key'))}",
         f"- script_path: {_fmt(summary.get('script_path'))}",
+        f"- command_argv: {_fmt(summary.get('command_argv'))}",
+        f"- execution_cwd: {_fmt(summary.get('execution_cwd'))}",
         f"- strict: {_fmt(summary.get('strict'))}",
         f"- dry_run: {_fmt(summary.get('dry_run'))}",
+        f"- executed: {_fmt(summary.get('executed'))}",
+        f"- started_at: {_fmt(summary.get('started_at'))}",
+        f"- finished_at: {_fmt(summary.get('finished_at'))}",
+        f"- duration_seconds: {_fmt(summary.get('duration_seconds'))}",
         f"- bundle_ready: {_fmt(summary.get('bundle_ready'))}",
         f"- strict_ready: {_fmt(summary.get('strict_ready'))}",
         f"- missing_required: {_fmt(summary.get('missing_required'))}",
@@ -204,6 +232,16 @@ def run_bundle(
     json_out: Path | None = None,
     markdown_out: Path | None = None,
 ) -> tuple[int, dict[str, Any]]:
+    started_at = _utc_now()
+    started_perf = time.perf_counter()
+
+    def timing_fields() -> dict[str, Any]:
+        return {
+            "started_at": started_at,
+            "finished_at": _utc_now(),
+            "duration_seconds": round(time.perf_counter() - started_perf, 6),
+        }
+
     command_dir = command_dir.resolve()
     manifest_path = command_dir / "recommendation.json"
     manifest = _read_json(manifest_path)
@@ -238,6 +276,7 @@ def run_bundle(
             inspection=inspection,
             returncode=1,
             error="command bundle did not pass the requested inspection gate",
+            **timing_fields(),
         )
         summary = write_run_artifacts(
             summary,
@@ -257,6 +296,7 @@ def run_bundle(
             inspection=inspection,
             returncode=1,
             error=f"manifest does not declare {script_key}",
+            **timing_fields(),
         )
         summary = write_run_artifacts(
             summary,
@@ -275,6 +315,7 @@ def run_bundle(
             dry_run=dry_run,
             inspection=inspection,
             returncode=0,
+            **timing_fields(),
         )
         summary = write_run_artifacts(
             summary,
@@ -303,6 +344,8 @@ def run_bundle(
             returncode=result.returncode,
             stdout=result.stdout,
             stderr=result.stderr,
+            executed=True,
+            **timing_fields(),
         )
         summary = write_run_artifacts(
             summary,
@@ -325,6 +368,8 @@ def run_bundle(
         dry_run=dry_run,
         inspection=inspection,
         returncode=result.returncode,
+        executed=True,
+        **timing_fields(),
     )
     summary = write_run_artifacts(
         summary,
