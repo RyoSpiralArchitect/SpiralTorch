@@ -186,6 +186,25 @@ def _extra_explicit_seed_groups(
     return seed_groups[max(0, follow_up_count) :]
 
 
+def _attempted_follow_up_count(manifest: dict[str, Any]) -> int:
+    return sum(
+        1
+        for step in manifest.get("steps", [])
+        if isinstance(step, dict) and step.get("role") == "follow_up"
+    )
+
+
+def _unused_explicit_seed_groups(
+    seed_groups: list[str],
+    *,
+    explicit_seed_groups: bool,
+    attempted_follow_ups: int,
+) -> list[str]:
+    if not explicit_seed_groups:
+        return []
+    return seed_groups[max(0, attempted_follow_ups) :]
+
+
 def _follow_up_command_record(
     summary: dict[str, Any],
     *,
@@ -539,6 +558,15 @@ def _render_report(manifest: dict[str, Any]) -> str:
                 or "-"
             ),
         ),
+        "- unused_explicit_seed_groups: {groups}".format(
+            groups=(
+                ", ".join(
+                    str(group)
+                    for group in manifest.get("unused_explicit_seed_groups", [])
+                )
+                or "-"
+            ),
+        ),
         "- follow_up_seed_policy: {precedence} ({reason})".format(
             precedence=(
                 " -> ".join(
@@ -698,7 +726,8 @@ def _build_parser() -> argparse.ArgumentParser:
             "explicit per-follow-up NEW_SEEDS groups; supplied groups override "
             "matching follow-ups, while unspecified follow-ups still use generated "
             "tie-aware default_new_seeds before script defaults; extra groups beyond "
-            "--follow-ups are reported in chain artifacts"
+            "--follow-ups and unattempted groups after early stops are reported in "
+            "chain artifacts"
         ),
     )
     parser.add_argument(
@@ -758,12 +787,14 @@ def main(argv: list[str] | None = None) -> int:
         "dry_run": bool(args.dry_run),
         "allow_gate_stop": bool(args.allow_gate_stop),
         "planned_follow_ups": int(args.follow_ups),
+        "attempted_follow_ups": 0,
         "planned_follow_up_seed_groups": seed_groups,
         "extra_explicit_seed_groups": _extra_explicit_seed_groups(
             seed_groups,
             explicit_seed_groups=explicit_seed_groups,
             follow_up_count=int(args.follow_ups),
         ),
+        "unused_explicit_seed_groups": [],
         "follow_up_seed_group_source": (
             "explicit" if explicit_seed_groups else "preset_fallback"
         ),
@@ -860,6 +891,18 @@ def main(argv: list[str] | None = None) -> int:
                 continue
             manifest["stopped_reason"] = f"follow-up {index} exited {exit_code}"
             break
+
+    attempted_follow_ups = _attempted_follow_up_count(manifest)
+    manifest["attempted_follow_ups"] = attempted_follow_ups
+    manifest["unused_explicit_seed_groups"] = (
+        []
+        if args.dry_run
+        else _unused_explicit_seed_groups(
+            seed_groups,
+            explicit_seed_groups=explicit_seed_groups,
+            attempted_follow_ups=attempted_follow_ups,
+        )
+    )
 
     chain_path = run_root / "chain.json"
     report_path = run_root / "chain_report.md"

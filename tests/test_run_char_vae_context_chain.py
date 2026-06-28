@@ -30,7 +30,7 @@ class CharVaeContextChainTests(unittest.TestCase):
         self.assertIn("supplied groups override matching follow-ups", help_text)
         self.assertIn("unspecified follow-ups still use generated", help_text)
         self.assertIn("tie-aware default_new_seeds", help_text)
-        self.assertIn("extra groups beyond --follow-ups are reported", help_text)
+        self.assertIn("extra groups beyond --follow-ups and unattempted", help_text)
 
     def test_follow_up_seed_policy_records_precedence(self) -> None:
         mod = _load_module()
@@ -74,6 +74,54 @@ class CharVaeContextChainTests(unittest.TestCase):
                 ["17", "19"],
                 explicit_seed_groups=False,
                 follow_up_count=1,
+            ),
+            [],
+        )
+
+    def test_unused_explicit_seed_groups_reports_unattempted_groups(self) -> None:
+        mod = _load_module()
+        manifest = {
+            "schema": mod.SCHEMA,
+            "preset": "smoke",
+            "run_root": "/tmp/chain",
+            "allowed_gate_stop": False,
+            "steps": [
+                {"index": 0, "role": "parent"},
+                {"index": 1, "role": "follow_up"},
+            ],
+            "follow_up_seed_group_source": "explicit",
+            "planned_follow_up_seed_groups": ["17", "19", "23"],
+            "extra_explicit_seed_groups": [],
+            "unused_explicit_seed_groups": ["19", "23"],
+            "follow_up_seed_policy": mod._follow_up_seed_policy_record(
+                explicit_seed_groups=True
+            ),
+        }
+        report = mod._render_report(manifest)
+
+        self.assertEqual(mod._attempted_follow_up_count(manifest), 1)
+        self.assertIn("- unused_explicit_seed_groups: 19, 23", report)
+        self.assertEqual(
+            mod._unused_explicit_seed_groups(
+                ["17", "19", "23"],
+                explicit_seed_groups=True,
+                attempted_follow_ups=1,
+            ),
+            ["19", "23"],
+        )
+        self.assertEqual(
+            mod._unused_explicit_seed_groups(
+                ["17", "19"],
+                explicit_seed_groups=True,
+                attempted_follow_ups=2,
+            ),
+            [],
+        )
+        self.assertEqual(
+            mod._unused_explicit_seed_groups(
+                ["17", "19"],
+                explicit_seed_groups=False,
+                attempted_follow_ups=1,
             ),
             [],
         )
@@ -244,6 +292,7 @@ class CharVaeContextChainTests(unittest.TestCase):
                     "follow_up_seed_group_source": "preset_fallback",
                     "planned_follow_up_seed_groups": ["17", "19"],
                     "extra_explicit_seed_groups": [],
+                    "unused_explicit_seed_groups": [],
                     "follow_up_seed_policy": mod._follow_up_seed_policy_record(
                         explicit_seed_groups=False
                     ),
@@ -280,6 +329,7 @@ class CharVaeContextChainTests(unittest.TestCase):
         self.assertIn("command_default", report)
         self.assertIn("- follow_up_seed_groups: preset_fallback (17, 19)", report)
         self.assertIn("- extra_explicit_seed_groups: -", report)
+        self.assertIn("- unused_explicit_seed_groups: -", report)
         self.assertIn(
             "- follow_up_seed_policy: command_default -> preset_seed_group -> "
             "script_default",
