@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import math
 import shlex
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -99,6 +101,12 @@ def _fmt_groups(groups: Any) -> str:
     if not isinstance(groups, list) or not groups:
         return "-"
     return ",".join(str(group) for group in groups)
+
+
+def _fmt_list(values: Any) -> str:
+    if not isinstance(values, list) or not values:
+        return "-"
+    return ", ".join(str(value) for value in values)
 
 
 def _merge_counts(target: dict[str, int], counts: Any) -> None:
@@ -665,6 +673,12 @@ def _inspection_command_line(command_dir: Any) -> str | None:
     )
 
 
+def _path_value(value: Any) -> Path | None:
+    if not isinstance(value, str) or not value:
+        return None
+    return Path(value)
+
+
 def _resolved_path(path: Path | None) -> str | None:
     if path is None:
         return None
@@ -773,6 +787,8 @@ def _render_command_readme(
         f"- run: {_fmt_readme_value(command_scripts.get('inspection_command'))}",
         f"- report_json: {_fmt_readme_value(command_scripts.get('inspection_json_path'))}",
         f"- report_markdown: {_fmt_readme_value(command_scripts.get('inspection_markdown_path'))}",
+        f"- generated_now: {_fmt_readme_value(command_scripts.get('inspection_generated'))}",
+        f"- strict_ready: {_fmt_readme_value(command_scripts.get('inspection_strict_ready'))}",
         "",
         "## Machine-Readable Manifest",
         "",
@@ -781,6 +797,44 @@ def _render_command_readme(
         f"- manifest: {_fmt_readme_value(command_scripts.get('manifest_path'))}",
     ]
     return "\n".join(lines) + "\n"
+
+
+def _command_manifest(
+    summary: dict[str, Any],
+    command_scripts: dict[str, Any],
+) -> dict[str, Any]:
+    recommendation = summary.get("recommendation")
+    recommendation = recommendation if isinstance(recommendation, dict) else {}
+    return {
+        "schema": "st.llm_char_vae_context.chain_command_manifest.v1",
+        "comparison": {
+            "schema": summary.get("schema"),
+            "sort_by": summary.get("sort_by"),
+            "recursive": summary.get("recursive"),
+            "input_count": summary.get("input_count"),
+            "discovered_chain_count": summary.get("discovered_chain_count"),
+            "chain_sources": _chain_sources(summary),
+        },
+        "aggregate": summary.get("aggregate"),
+        "selection": summary.get("selection"),
+        "recommendation": recommendation,
+        "command_scripts": command_scripts,
+    }
+
+
+def _write_command_bundle_metadata(
+    summary: dict[str, Any],
+    command_scripts: dict[str, Any],
+    *,
+    manifest_path: Path,
+    readme_path: Path,
+) -> None:
+    manifest = _command_manifest(summary, command_scripts)
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+    readme_path.write_text(
+        _render_command_readme(summary, command_scripts),
+        encoding="utf-8",
+    )
 
 
 def _write_recommended_command_scripts(
@@ -834,30 +888,58 @@ def _write_recommended_command_scripts(
         "inspection_command": _inspection_command_line(str(out_dir)),
         "inspection_json_path": str(out_dir / "inspection.json"),
         "inspection_markdown_path": str(out_dir / "inspection.md"),
+        "inspection_generated": False,
+        "inspection_bundle_ready": None,
+        "inspection_strict_ready": None,
+        "inspection_missing_required": [],
+        "inspection_missing_optional": [],
         "manifest_path": str(manifest_path),
         "readme_path": str(readme_path),
     }
-    manifest = {
-        "schema": "st.llm_char_vae_context.chain_command_manifest.v1",
-        "comparison": {
-            "schema": summary.get("schema"),
-            "sort_by": summary.get("sort_by"),
-            "recursive": summary.get("recursive"),
-            "input_count": summary.get("input_count"),
-            "discovered_chain_count": summary.get("discovered_chain_count"),
-            "chain_sources": _chain_sources(summary),
-        },
-        "aggregate": summary.get("aggregate"),
-        "selection": summary.get("selection"),
-        "recommendation": recommendation,
-        "command_scripts": command_scripts,
-    }
-    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
-    readme_path.write_text(
-        _render_command_readme(summary, command_scripts),
-        encoding="utf-8",
+    _write_command_bundle_metadata(
+        summary,
+        command_scripts,
+        manifest_path=manifest_path,
+        readme_path=readme_path,
     )
     return command_scripts
+
+
+def _load_command_bundle_inspector() -> Any:
+    module_path = Path(__file__).with_name("inspect_char_vae_command_bundle.py")
+    spec = importlib.util.spec_from_file_location(
+        "_spiraltorch_char_vae_command_bundle_inspector",
+        module_path,
+    )
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"unable to load command bundle inspector from {module_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _write_command_bundle_inspection(command_dir: Path) -> dict[str, Any]:
+    inspector = _load_command_bundle_inspector()
+    manifest = _read_json(command_dir / "recommendation.json")
+    command_scripts = manifest.get("command_scripts")
+    command_scripts = command_scripts if isinstance(command_scripts, dict) else {}
+    json_out = (
+        _path_value(command_scripts.get("inspection_json_path"))
+        or command_dir / "inspection.json"
+    )
+    markdown_out = (
+        _path_value(command_scripts.get("inspection_markdown_path"))
+        or command_dir / "inspection.md"
+    )
+    summary = inspector.inspect_bundle(command_dir)
+    summary["inspection_json_path"] = str(json_out)
+    summary["inspection_markdown_path"] = str(markdown_out)
+    markdown = inspector.render_markdown(summary)
+    json_out.parent.mkdir(parents=True, exist_ok=True)
+    json_out.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
+    markdown_out.parent.mkdir(parents=True, exist_ok=True)
+    markdown_out.write_text(markdown, encoding="utf-8")
+    return summary
 
 
 def _render_markdown(summary: dict[str, Any]) -> str:
@@ -911,6 +993,11 @@ def _render_markdown(summary: dict[str, Any]) -> str:
         f"- command_inspection: {_fmt(_value(command_scripts, 'inspection_command'))}",
         f"- command_inspection_json_path: {_fmt(_value(command_scripts, 'inspection_json_path'))}",
         f"- command_inspection_markdown_path: {_fmt(_value(command_scripts, 'inspection_markdown_path'))}",
+        f"- command_inspection_generated: {_fmt(_value(command_scripts, 'inspection_generated'))}",
+        f"- command_inspection_bundle_ready: {_fmt(_value(command_scripts, 'inspection_bundle_ready'))}",
+        f"- command_inspection_strict_ready: {_fmt(_value(command_scripts, 'inspection_strict_ready'))}",
+        f"- command_inspection_missing_required: {_fmt_list(_value(command_scripts, 'inspection_missing_required'))}",
+        f"- command_inspection_missing_optional: {_fmt_list(_value(command_scripts, 'inspection_missing_optional'))}",
         "",
         "## Chains",
         "",
@@ -983,11 +1070,22 @@ def _build_parser() -> argparse.ArgumentParser:
             "write recommended_next plus follow-up/review scripts, README, and manifest there"
         ),
     )
+    parser.add_argument(
+        "--write-command-inspection",
+        action="store_true",
+        help=(
+            "with --command-out-dir, write inspection.json/inspection.md and fail "
+            "when the generated command bundle is not strict-ready"
+        ),
+    )
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = _build_parser().parse_args(argv)
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+    if args.write_command_inspection and args.command_out_dir is None:
+        parser.error("--write-command-inspection requires --command-out-dir")
     summary = summarize_chains(
         args.chains,
         sort_by=args.sort_by,
@@ -1015,6 +1113,43 @@ def main(argv: list[str] | None = None) -> int:
     if comparison_markdown_path is not None:
         comparison_markdown_path.parent.mkdir(parents=True, exist_ok=True)
         comparison_markdown_path.write_text(markdown)
+    if args.write_command_inspection:
+        try:
+            inspection = _write_command_bundle_inspection(args.command_out_dir)
+        except (OSError, ValueError, RuntimeError) as exc:
+            print(f"error: failed to inspect command bundle: {exc}", file=sys.stderr)
+            return 1
+        command_scripts = summary.get("command_scripts")
+        command_scripts = command_scripts if isinstance(command_scripts, dict) else {}
+        command_scripts.update(
+            {
+                "inspection_generated": True,
+                "inspection_bundle_ready": bool(inspection.get("bundle_ready")),
+                "inspection_strict_ready": bool(inspection.get("strict_ready")),
+                "inspection_missing_required": inspection.get("missing_required") or [],
+                "inspection_missing_optional": inspection.get("missing_optional") or [],
+            }
+        )
+        summary["command_scripts"] = command_scripts
+        summary["command_inspection"] = inspection
+        manifest_path = _path_value(command_scripts.get("manifest_path"))
+        readme_path = _path_value(command_scripts.get("readme_path"))
+        if manifest_path is not None and readme_path is not None:
+            _write_command_bundle_metadata(
+                summary,
+                command_scripts,
+                manifest_path=manifest_path,
+                readme_path=readme_path,
+            )
+        markdown = _render_markdown(summary)
+        if comparison_json_path is not None:
+            comparison_json_path.write_text(
+                json.dumps(summary, indent=2, sort_keys=True) + "\n"
+            )
+        if comparison_markdown_path is not None:
+            comparison_markdown_path.write_text(markdown)
+        if not inspection.get("strict_ready"):
+            return 1
     if args.json:
         print(json.dumps(summary, indent=2, sort_keys=True))
     else:

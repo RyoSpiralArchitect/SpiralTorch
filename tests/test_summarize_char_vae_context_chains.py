@@ -306,6 +306,78 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
         self.assertIn("command_manifest_path", markdown)
         self.assertIn("recommendation.json", result.stdout)
 
+    def test_cli_write_command_inspection_materializes_reports(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            chain = _write_chain(
+                root / "chain",
+                {
+                    "schema": "st.llm_char_vae_context.chain.v1",
+                    "preset": "smoke",
+                    "run_root": str(root / "chain"),
+                    "planned_follow_ups": 1,
+                    "attempted_follow_ups": 0,
+                    "dry_run": True,
+                    "follow_up_seed_resolution_summary": {
+                        "attempted_follow_ups": 0,
+                        "seed_source_counts": {},
+                        "command_source_counts": {},
+                        "configured_seed_group_status_counts": {},
+                        "gate_failed_count": 0,
+                        "nonzero_exit_count": 0,
+                    },
+                },
+            )
+            command_dir = root / "commands"
+            result = subprocess.run(
+                [
+                    "python3",
+                    "-P",
+                    str(SCRIPT),
+                    str(chain),
+                    "--command-out-dir",
+                    str(command_dir),
+                    "--write-command-inspection",
+                ],
+                cwd=root,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            manifest = json.loads(
+                (command_dir / "recommendation.json").read_text(encoding="utf-8")
+            )
+            comparison = json.loads(
+                (command_dir / "comparison.json").read_text(encoding="utf-8")
+            )
+            inspection = json.loads(
+                (command_dir / "inspection.json").read_text(encoding="utf-8")
+            )
+            readme = (command_dir / "README.md").read_text(encoding="utf-8")
+            markdown = (command_dir / "comparison.md").read_text(encoding="utf-8")
+
+        self.assertTrue(inspection["bundle_ready"])
+        self.assertTrue(inspection["strict_ready"])
+        self.assertTrue(manifest["command_scripts"]["inspection_generated"])
+        self.assertTrue(manifest["command_scripts"]["inspection_bundle_ready"])
+        self.assertTrue(manifest["command_scripts"]["inspection_strict_ready"])
+        self.assertEqual(manifest["command_scripts"]["inspection_missing_required"], [])
+        self.assertEqual(manifest["command_scripts"]["inspection_missing_optional"], [])
+        self.assertTrue(comparison["command_scripts"]["inspection_generated"])
+        self.assertTrue(comparison["command_inspection"]["strict_ready"])
+        self.assertEqual(
+            comparison["command_inspection"]["inspection_json_path"],
+            str(command_dir / "inspection.json"),
+        )
+        self.assertIn("- generated_now: `yes`", readme)
+        self.assertIn("- strict_ready: `yes`", readme)
+        self.assertIn("command_inspection_generated: yes", markdown)
+        self.assertIn("command_inspection_strict_ready: yes", markdown)
+        self.assertIn("command_inspection_missing_required: -", markdown)
+
     def test_cli_writes_recommended_command_scripts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
