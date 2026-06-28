@@ -662,6 +662,59 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "maturin develop"):
             mod._require_zspace_text_vae_binding()
 
+    def test_text_vae_binding_preflight_rejects_stale_text_vae_surface(self) -> None:
+        mod = _load_module()
+        original_st = mod.st
+        fake_text_vae = type(
+            "ZSpaceTextVae",
+            (),
+            {
+                "load": staticmethod(lambda path: None),
+                "save": lambda self, path: None,
+                "encode_text": lambda self, text: [],
+                "encode_text_with_mellin": lambda self, text, basis: [],
+            },
+        )
+        fake_nn = types.SimpleNamespace(
+            ZSpaceTextVae=fake_text_vae,
+            MellinBasis=object,
+            Sequential=object,
+            Linear=object,
+            Relu=object,
+            ZSpaceSoftmax=object,
+            ModuleTrainer=object,
+            CategoricalCrossEntropy=object,
+            RoundtableConfig=object,
+            save=lambda path, target: None,
+        )
+        mod.st = types.SimpleNamespace(nn=fake_nn)
+        try:
+            with self.assertRaisesRegex(RuntimeError, "ZSpaceTextVae.forward_mean_text"):
+                mod._require_zspace_text_vae_binding()
+        finally:
+            mod.st = original_st
+
+    def test_text_vae_binding_preflight_accepts_complete_training_surface(self) -> None:
+        mod = _load_module()
+        original_st = mod.st
+        fake_text_vae = type(
+            "ZSpaceTextVae",
+            (),
+            {
+                method: (lambda *args, **kwargs: None)
+                for method in mod.REQUIRED_TEXT_VAE_METHODS
+            },
+        )
+        fake_nn = types.SimpleNamespace(
+            **{symbol: object for symbol in mod.REQUIRED_NN_BINDING_SYMBOLS}
+        )
+        fake_nn.ZSpaceTextVae = fake_text_vae
+        mod.st = types.SimpleNamespace(nn=fake_nn)
+        try:
+            mod._require_zspace_text_vae_binding()
+        finally:
+            mod.st = original_st
+
     def test_aggregate_learning_evidence_marks_promising_sweep(self) -> None:
         mod = _load_module()
         summary = {
