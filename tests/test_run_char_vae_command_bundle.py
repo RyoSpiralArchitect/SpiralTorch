@@ -239,7 +239,51 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
             events,
             history_jsonl_path=Path("/tmp/run_history.jsonl"),
         )
+        summary = mod.summarize_history_events(
+            events,
+            history_jsonl_path=Path("/tmp/run_history.jsonl"),
+        )
 
+        self.assertEqual(
+            summary["schema"],
+            "st.llm_char_vae_context.command_bundle_run_history_summary.v1",
+        )
+        self.assertEqual(summary["history_jsonl_path"], "/tmp/run_history.jsonl")
+        self.assertEqual(summary["total_runs"], 3)
+        self.assertEqual(summary["success_count"], 1)
+        self.assertEqual(summary["failure_count"], 2)
+        self.assertEqual(summary["latest"]["status"], "blocked")
+        self.assertEqual(summary["latest"]["target_kind"], "review")
+        self.assertEqual(
+            summary["signals"]["status_counts"],
+            {"blocked": 2, "ok": 1},
+        )
+        self.assertEqual(
+            summary["signals"]["target_kind_counts"],
+            {"follow_up": 1, "review": 2},
+        )
+        self.assertEqual(
+            summary["signals"]["recommendation_action_counts"],
+            {"continue_from_accepted": 1, "review_absolute_best": 2},
+        )
+        self.assertEqual(
+            summary["signals"]["current_status_streak"],
+            {"status": "blocked", "count": 2},
+        )
+        self.assertEqual(summary["signals"]["latest_executed"]["status"], "ok")
+        self.assertEqual(
+            summary["signals"]["latest_executed"]["recommendation_action"],
+            "continue_from_accepted",
+        )
+        self.assertEqual(
+            summary["signals"]["latest_executed"]["champion_config"],
+            "latent@scale=0.5",
+        )
+        self.assertEqual(summary["signals"]["last_problem"]["status"], "blocked")
+        self.assertEqual(
+            summary["signals"]["last_problem"]["missing_required"],
+            ["recommended_review.sh"],
+        )
         self.assertIn("status_counts: blocked:2, ok:1", markdown)
         self.assertIn("target_kind_counts: follow_up:1, review:2", markdown)
         self.assertIn(
@@ -593,6 +637,40 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
         self.assertEqual(
             report_only_payload["run_history_markdown_path"],
             str(history_markdown_path),
+        )
+        dry_summary = dry_payload["run_history_summary"]
+        executed_summary = executed_payload["run_history_summary"]
+        report_only_summary = report_only_payload["run_history_summary"]
+        self.assertEqual(dry_summary["total_runs"], 1)
+        self.assertEqual(
+            dry_summary["signals"]["status_counts"],
+            {"dry-run": 1},
+        )
+        self.assertEqual(executed_summary["total_runs"], 2)
+        self.assertEqual(
+            executed_summary["signals"]["status_counts"],
+            {"dry-run": 1, "ok": 1},
+        )
+        self.assertEqual(
+            executed_summary["signals"]["current_status_streak"],
+            {"status": "ok", "count": 1},
+        )
+        self.assertEqual(
+            executed_summary["signals"]["latest_executed"]["status"],
+            "ok",
+        )
+        self.assertEqual(
+            executed_summary["signals"]["latest_executed"]["champion_config"],
+            "latent@normalize=blocks,scale=0.5",
+        )
+        self.assertEqual(
+            executed_summary["signals"]["last_problem"],
+            {"status": None, "error": None, "missing_required": None},
+        )
+        self.assertEqual(report_only_summary["total_runs"], 2)
+        self.assertEqual(
+            report_only_summary["signals"]["status_counts"],
+            {"dry-run": 1, "ok": 1},
         )
         self.assertEqual(len(events), 2)
         self.assertEqual(

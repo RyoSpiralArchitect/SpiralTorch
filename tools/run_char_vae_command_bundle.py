@@ -482,20 +482,14 @@ def _fmt_streak(status: str | None, count: int) -> str:
     return f"{status}:{count}"
 
 
-def _md_cell(value: Any) -> str:
-    text = _fmt(value)
-    return text.replace("|", "\\|").replace("\n", " ")
-
-
-def render_history_markdown(
+def summarize_history_events(
     events: list[dict[str, Any]],
     *,
     history_jsonl_path: Path,
-) -> str:
+) -> dict[str, Any]:
     success_count = sum(1 for event in events if event.get("returncode") == 0)
     dry_run_count = sum(1 for event in events if event.get("dry_run"))
     executed_count = sum(1 for event in events if event.get("executed"))
-    failure_count = len(events) - success_count
     latest = events[-1] if events else {}
     latest_context = _mapping(latest.get("recommendation_context"))
     latest_champion = _mapping(latest_context.get("champion"))
@@ -517,35 +511,96 @@ def render_history_markdown(
         events,
         lambda event: _event_status(event) in {"blocked", "failed"},
     )
+    return {
+        "schema": "st.llm_char_vae_context.command_bundle_run_history_summary.v1",
+        "history_jsonl_path": str(history_jsonl_path),
+        "total_runs": len(events),
+        "success_count": success_count,
+        "failure_count": len(events) - success_count,
+        "dry_run_count": dry_run_count,
+        "executed_count": executed_count,
+        "latest": {
+            "started_at": latest.get("started_at"),
+            "finished_at": latest.get("finished_at"),
+            "status": _event_status(latest) if latest else None,
+            "target_kind": latest.get("target_kind"),
+            "recommendation_action": latest_context.get("action"),
+            "champion_config": latest_champion.get("config"),
+        },
+        "signals": {
+            "status_counts": status_counts,
+            "target_kind_counts": target_kind_counts,
+            "recommendation_action_counts": action_counts,
+            "current_status_streak": {
+                "status": current_status,
+                "count": current_status_count,
+            },
+            "latest_executed": {
+                "status": (
+                    _event_status(latest_executed) if latest_executed else None
+                ),
+                "finished_at": (
+                    latest_executed.get("finished_at") if latest_executed else None
+                ),
+                "recommendation_action": latest_executed_context.get("action"),
+                "champion_config": latest_executed_champion.get("config"),
+            },
+            "last_problem": {
+                "status": _event_status(last_problem) if last_problem else None,
+                "error": last_problem.get("error") if last_problem else None,
+                "missing_required": (
+                    last_problem.get("missing_required") if last_problem else None
+                ),
+            },
+        },
+    }
+
+
+def _md_cell(value: Any) -> str:
+    text = _fmt(value)
+    return text.replace("|", "\\|").replace("\n", " ")
+
+
+def render_history_markdown(
+    events: list[dict[str, Any]],
+    *,
+    history_jsonl_path: Path,
+) -> str:
+    summary = summarize_history_events(events, history_jsonl_path=history_jsonl_path)
+    latest = _mapping(summary.get("latest"))
+    signals = _mapping(summary.get("signals"))
+    status_streak = _mapping(signals.get("current_status_streak"))
+    latest_executed = _mapping(signals.get("latest_executed"))
+    last_problem = _mapping(signals.get("last_problem"))
     lines = [
         "# Char VAE Command Bundle Run History",
         "",
-        f"- history_jsonl_path: {_fmt(str(history_jsonl_path))}",
-        f"- total_runs: {len(events)}",
-        f"- success_count: {success_count}",
-        f"- failure_count: {failure_count}",
-        f"- dry_run_count: {dry_run_count}",
-        f"- executed_count: {executed_count}",
+        f"- history_jsonl_path: {_fmt(summary.get('history_jsonl_path'))}",
+        f"- total_runs: {summary.get('total_runs')}",
+        f"- success_count: {summary.get('success_count')}",
+        f"- failure_count: {summary.get('failure_count')}",
+        f"- dry_run_count: {summary.get('dry_run_count')}",
+        f"- executed_count: {summary.get('executed_count')}",
         f"- latest_started_at: {_fmt(latest.get('started_at'))}",
         f"- latest_finished_at: {_fmt(latest.get('finished_at'))}",
-        f"- latest_status: {_fmt(_event_status(latest) if latest else None)}",
+        f"- latest_status: {_fmt(latest.get('status'))}",
         f"- latest_target_kind: {_fmt(latest.get('target_kind'))}",
-        f"- latest_recommendation_action: {_fmt(latest_context.get('action'))}",
-        f"- latest_champion_config: {_fmt(latest_champion.get('config'))}",
+        f"- latest_recommendation_action: {_fmt(latest.get('recommendation_action'))}",
+        f"- latest_champion_config: {_fmt(latest.get('champion_config'))}",
         "",
         "## Decision Signals",
         "",
-        f"- status_counts: {_fmt_counts(status_counts)}",
-        f"- target_kind_counts: {_fmt_counts(target_kind_counts)}",
-        f"- recommendation_action_counts: {_fmt_counts(action_counts)}",
-        f"- current_status_streak: {_fmt_streak(current_status, current_status_count)}",
-        f"- latest_executed_status: {_fmt(_event_status(latest_executed) if latest_executed else None)}",
-        f"- latest_executed_finished_at: {_fmt(latest_executed.get('finished_at') if latest_executed else None)}",
-        f"- latest_executed_action: {_fmt(latest_executed_context.get('action'))}",
-        f"- latest_executed_champion_config: {_fmt(latest_executed_champion.get('config'))}",
-        f"- last_problem_status: {_fmt(_event_status(last_problem) if last_problem else None)}",
-        f"- last_problem_error: {_fmt(last_problem.get('error') if last_problem else None)}",
-        f"- last_problem_missing_required: {_fmt(last_problem.get('missing_required') if last_problem else None)}",
+        f"- status_counts: {_fmt_counts(_mapping(signals.get('status_counts')))}",
+        f"- target_kind_counts: {_fmt_counts(_mapping(signals.get('target_kind_counts')))}",
+        f"- recommendation_action_counts: {_fmt_counts(_mapping(signals.get('recommendation_action_counts')))}",
+        f"- current_status_streak: {_fmt_streak(status_streak.get('status'), int(status_streak.get('count') or 0))}",
+        f"- latest_executed_status: {_fmt(latest_executed.get('status'))}",
+        f"- latest_executed_finished_at: {_fmt(latest_executed.get('finished_at'))}",
+        f"- latest_executed_action: {_fmt(latest_executed.get('recommendation_action'))}",
+        f"- latest_executed_champion_config: {_fmt(latest_executed.get('champion_config'))}",
+        f"- last_problem_status: {_fmt(last_problem.get('status'))}",
+        f"- last_problem_error: {_fmt(last_problem.get('error'))}",
+        f"- last_problem_missing_required: {_fmt(last_problem.get('missing_required'))}",
         "",
         "## Recent Events",
         "",
@@ -574,13 +629,6 @@ def render_history_markdown(
     return "\n".join(lines)
 
 
-def _write_run_history_report(history_out: Path, markdown_out: Path) -> None:
-    events = _read_history_events(history_out)
-    markdown = render_history_markdown(events, history_jsonl_path=history_out)
-    markdown_out.parent.mkdir(parents=True, exist_ok=True)
-    markdown_out.write_text(markdown, encoding="utf-8")
-
-
 def write_run_artifacts(
     summary: dict[str, Any],
     *,
@@ -601,6 +649,21 @@ def write_run_artifacts(
     summary["run_history_markdown_path"] = (
         str(history_markdown_out) if history_markdown_out is not None else None
     )
+    if history_out is not None and append_history:
+        _append_run_history(summary, history_out)
+    if history_out is not None:
+        events = _read_history_events(history_out)
+        summary["run_history_summary"] = summarize_history_events(
+            events,
+            history_jsonl_path=history_out,
+        )
+        if history_markdown_out is not None:
+            markdown_history = render_history_markdown(
+                events,
+                history_jsonl_path=history_out,
+            )
+            history_markdown_out.parent.mkdir(parents=True, exist_ok=True)
+            history_markdown_out.write_text(markdown_history, encoding="utf-8")
     markdown = render_markdown(summary)
     if json_out is not None:
         json_out.parent.mkdir(parents=True, exist_ok=True)
@@ -608,10 +671,6 @@ def write_run_artifacts(
     if markdown_out is not None:
         markdown_out.parent.mkdir(parents=True, exist_ok=True)
         markdown_out.write_text(markdown, encoding="utf-8")
-    if history_out is not None and append_history:
-        _append_run_history(summary, history_out)
-    if history_out is not None and history_markdown_out is not None:
-        _write_run_history_report(history_out, history_markdown_out)
     return summary
 
 
