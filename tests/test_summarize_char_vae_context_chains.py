@@ -707,6 +707,17 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
                 "inspection_run_loop_resume_from_report_command"
             ]
         )
+        self.assertIsNone(
+            manifest["command_scripts"][
+                "inspection_run_loop_resume_from_report_command_ok"
+            ]
+        )
+        self.assertEqual(
+            manifest["command_scripts"][
+                "inspection_run_loop_resume_from_report_command_missing_required_flags"
+            ],
+            [],
+        )
         self.assertTrue(comparison["command_scripts"]["inspection_generated"])
         self.assertTrue(comparison["command_inspection"]["strict_ready"])
         self.assertTrue(comparison["command_scripts"]["inspection_runner_wrapper_ok"])
@@ -732,6 +743,14 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             "command_inspection_run_loop_resume_from_report_command: -",
             markdown,
         )
+        self.assertIn(
+            "command_inspection_run_loop_resume_from_report_command_ok: -",
+            markdown,
+        )
+        self.assertIn(
+            "command_inspection_run_loop_resume_from_report_command_missing_required_flags: -",
+            markdown,
+        )
         self.assertIn("runner_wrapper_ok: `yes`", readme)
         self.assertIn("history_loop_runner_ok: `yes`", readme)
         self.assertIn("history_loop_resume_runner_ok: `yes`", readme)
@@ -739,6 +758,11 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
         self.assertIn("run_loop_handoff_status: -", readme)
         self.assertIn("run_loop_handoff_severity: -", readme)
         self.assertIn("run_loop_resume_from_report_command: -", readme)
+        self.assertIn("run_loop_resume_from_report_command_ok: -", readme)
+        self.assertIn(
+            "run_loop_resume_from_report_command_report_path_ok: -",
+            readme,
+        )
 
     def test_cli_write_command_inspection_surfaces_run_loop_handoff(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -844,6 +868,33 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             command_scripts["inspection_run_loop_resume_from_report_command"],
             resume_from_report_command,
         )
+        self.assertTrue(
+            command_scripts["inspection_run_loop_resume_from_report_command_present"]
+        )
+        self.assertTrue(
+            command_scripts["inspection_run_loop_resume_from_report_command_ok"]
+        )
+        self.assertTrue(
+            command_scripts[
+                "inspection_run_loop_resume_from_report_command_target_dir_ok"
+            ]
+        )
+        self.assertTrue(
+            command_scripts[
+                "inspection_run_loop_resume_from_report_command_report_path_ok"
+            ]
+        )
+        self.assertIsNone(
+            command_scripts[
+                "inspection_run_loop_resume_from_report_command_parse_error"
+            ]
+        )
+        self.assertEqual(
+            command_scripts[
+                "inspection_run_loop_resume_from_report_command_missing_required_flags"
+            ],
+            [],
+        )
         self.assertEqual(
             comparison["command_scripts"]["inspection_run_loop_handoff_status"],
             "continuation_ready",
@@ -873,7 +924,20 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             markdown,
         )
         self.assertIn(
+            "command_inspection_run_loop_resume_from_report_command_ok: yes",
+            markdown,
+        )
+        self.assertIn(
+            "command_inspection_run_loop_resume_from_report_command_report_path_ok: yes",
+            markdown,
+        )
+        self.assertIn(
             f"run_loop_resume_from_report_command: `{resume_from_report_command}`",
+            readme,
+        )
+        self.assertIn("run_loop_resume_from_report_command_ok: `yes`", readme)
+        self.assertIn(
+            "run_loop_resume_from_report_command_report_path_ok: `yes`",
             readme,
         )
 

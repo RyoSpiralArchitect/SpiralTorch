@@ -955,6 +955,9 @@ def _render_command_readme(
         f"- run_loop_final_next_action_runnable: {_fmt_readme_value(command_scripts.get('inspection_run_loop_final_next_action_runnable'))}",
         f"- run_loop_continuation_command: {_fmt_readme_value(command_scripts.get('inspection_run_loop_continuation_command'))}",
         f"- run_loop_resume_from_report_command: {_fmt_readme_value(command_scripts.get('inspection_run_loop_resume_from_report_command'))}",
+        f"- run_loop_resume_from_report_command_ok: {_fmt_readme_value(command_scripts.get('inspection_run_loop_resume_from_report_command_ok'))}",
+        f"- run_loop_resume_from_report_command_target_dir_ok: {_fmt_readme_value(command_scripts.get('inspection_run_loop_resume_from_report_command_target_dir_ok'))}",
+        f"- run_loop_resume_from_report_command_report_path_ok: {_fmt_readme_value(command_scripts.get('inspection_run_loop_resume_from_report_command_report_path_ok'))}",
         "",
         "## Machine-Readable Manifest",
         "",
@@ -1129,6 +1132,12 @@ def _write_recommended_command_scripts(
         "inspection_run_loop_final_next_action_runnable": None,
         "inspection_run_loop_continuation_command": None,
         "inspection_run_loop_resume_from_report_command": None,
+        "inspection_run_loop_resume_from_report_command_present": None,
+        "inspection_run_loop_resume_from_report_command_ok": None,
+        "inspection_run_loop_resume_from_report_command_target_dir_ok": None,
+        "inspection_run_loop_resume_from_report_command_report_path_ok": None,
+        "inspection_run_loop_resume_from_report_command_parse_error": None,
+        "inspection_run_loop_resume_from_report_command_missing_required_flags": [],
         "runner_command": runner_command,
         "execution_next_command": execution_next_command,
         "history_next_action_command": history_next_action_command,
@@ -1271,6 +1280,12 @@ def _render_markdown(summary: dict[str, Any]) -> str:
         f"- command_inspection_run_loop_final_next_action_runnable: {_fmt(_value(command_scripts, 'inspection_run_loop_final_next_action_runnable'))}",
         f"- command_inspection_run_loop_continuation_command: {_fmt(_value(command_scripts, 'inspection_run_loop_continuation_command'))}",
         f"- command_inspection_run_loop_resume_from_report_command: {_fmt(_value(command_scripts, 'inspection_run_loop_resume_from_report_command'))}",
+        f"- command_inspection_run_loop_resume_from_report_command_present: {_fmt(_value(command_scripts, 'inspection_run_loop_resume_from_report_command_present'))}",
+        f"- command_inspection_run_loop_resume_from_report_command_ok: {_fmt(_value(command_scripts, 'inspection_run_loop_resume_from_report_command_ok'))}",
+        f"- command_inspection_run_loop_resume_from_report_command_target_dir_ok: {_fmt(_value(command_scripts, 'inspection_run_loop_resume_from_report_command_target_dir_ok'))}",
+        f"- command_inspection_run_loop_resume_from_report_command_report_path_ok: {_fmt(_value(command_scripts, 'inspection_run_loop_resume_from_report_command_report_path_ok'))}",
+        f"- command_inspection_run_loop_resume_from_report_command_parse_error: {_fmt(_value(command_scripts, 'inspection_run_loop_resume_from_report_command_parse_error'))}",
+        f"- command_inspection_run_loop_resume_from_report_command_missing_required_flags: {_fmt_list(_value(command_scripts, 'inspection_run_loop_resume_from_report_command_missing_required_flags'))}",
         f"- command_runner: {_fmt(_value(command_scripts, 'runner_command'))}",
         f"- command_execution_next: {_fmt(_value(command_scripts, 'execution_next_command'))}",
         f"- command_history_next_action: {_fmt(_value(command_scripts, 'history_next_action_command'))}",
@@ -1514,6 +1529,27 @@ def main(argv: list[str] | None = None) -> int:
                 ),
                 "inspection_run_loop_resume_from_report_command": (
                     run_loop_status.get("resume_from_report_command")
+                ),
+                "inspection_run_loop_resume_from_report_command_present": (
+                    run_loop_status.get("resume_from_report_command_present")
+                ),
+                "inspection_run_loop_resume_from_report_command_ok": (
+                    run_loop_status.get("resume_from_report_command_ok")
+                ),
+                "inspection_run_loop_resume_from_report_command_target_dir_ok": (
+                    run_loop_status.get("resume_from_report_command_target_dir_ok")
+                ),
+                "inspection_run_loop_resume_from_report_command_report_path_ok": (
+                    run_loop_status.get("resume_from_report_command_report_path_ok")
+                ),
+                "inspection_run_loop_resume_from_report_command_parse_error": (
+                    run_loop_status.get("resume_from_report_command_parse_error")
+                ),
+                "inspection_run_loop_resume_from_report_command_missing_required_flags": (
+                    run_loop_status.get(
+                        "resume_from_report_command_missing_required_flags"
+                    )
+                    or []
                 ),
             }
         )
