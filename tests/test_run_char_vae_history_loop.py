@@ -107,6 +107,7 @@ class RunCharVaeHistoryLoopTests(unittest.TestCase):
         self.assertEqual(payload["final_next_action"]["action"], "collect_next_command")
         self.assertIs(payload["final_next_action_runnable"], False)
         self.assertIsNone(payload["continuation_command"])
+        self.assertIsNone(payload["resume_from_report_command"])
         self.assertEqual(len(history_events), 2)
         self.assertEqual(history_summary["total_runs"], 2)
         self.assertEqual(history_summary["next_action"]["action"], "collect_next_command")
@@ -251,11 +252,21 @@ class RunCharVaeHistoryLoopTests(unittest.TestCase):
             payload["continuation_command"],
         )
         self.assertIn("--write-loop-report", payload["continuation_command"])
+        self.assertIn(
+            "tools/run_char_vae_history_loop.py",
+            payload["resume_from_report_command"],
+        )
+        self.assertIn(str(command_dir.resolve()), payload["resume_from_report_command"])
+        self.assertIn("--resume-from-report", payload["resume_from_report_command"])
         self.assertEqual(loop_report["returncode"], 1)
         self.assertTrue(loop_report["max_steps_continuation_failed"])
         self.assertEqual(
             loop_report["continuation_command"],
             payload["continuation_command"],
+        )
+        self.assertEqual(
+            loop_report["resume_from_report_command"],
+            payload["resume_from_report_command"],
         )
         self.assertIn("stop_reason: max_steps_reached", loop_markdown)
         self.assertIn("handoff_status: continuation_ready", loop_markdown)
@@ -271,6 +282,7 @@ class RunCharVaeHistoryLoopTests(unittest.TestCase):
             loop_markdown,
         )
         self.assertIn("continuation_command:", loop_markdown)
+        self.assertIn("resume_from_report_command:", loop_markdown)
         self.assertEqual(resume_result.returncode, 0, resume_result.stderr)
         self.assertEqual(resume_payload["step_count"], 1)
         self.assertEqual(resume_payload["executed_count"], 1)
@@ -286,6 +298,7 @@ class RunCharVaeHistoryLoopTests(unittest.TestCase):
         )
         self.assertIs(resume_payload["final_next_action_runnable"], False)
         self.assertIsNone(resume_payload["continuation_command"])
+        self.assertIsNone(resume_payload["resume_from_report_command"])
         self.assertEqual(resume_loop_report["handoff_status"], "awaiting_next_command")
 
     def test_cli_resume_from_report_rejects_non_continuation_handoff(self) -> None:
@@ -341,6 +354,7 @@ class RunCharVaeHistoryLoopTests(unittest.TestCase):
         self.assertFalse(payload["steps"][0]["executed"])
         self.assertIn("--dry-run", payload["continuation_command"])
         self.assertIn("--max-steps 2", payload["continuation_command"])
+        self.assertIn("--resume-from-report", payload["resume_from_report_command"])
 
     def test_cli_fails_when_final_action_requires_review(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

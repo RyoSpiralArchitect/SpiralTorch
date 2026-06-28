@@ -702,6 +702,11 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
                 "inspection_run_loop_handoff_recommended_action"
             ]
         )
+        self.assertIsNone(
+            manifest["command_scripts"][
+                "inspection_run_loop_resume_from_report_command"
+            ]
+        )
         self.assertTrue(comparison["command_scripts"]["inspection_generated"])
         self.assertTrue(comparison["command_inspection"]["strict_ready"])
         self.assertTrue(comparison["command_scripts"]["inspection_runner_wrapper_ok"])
@@ -723,12 +728,17 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
         self.assertIn("command_inspection_run_loop_status_issues: -", markdown)
         self.assertIn("command_inspection_run_loop_handoff_status: -", markdown)
         self.assertIn("command_inspection_run_loop_handoff_severity: -", markdown)
+        self.assertIn(
+            "command_inspection_run_loop_resume_from_report_command: -",
+            markdown,
+        )
         self.assertIn("runner_wrapper_ok: `yes`", readme)
         self.assertIn("history_loop_runner_ok: `yes`", readme)
         self.assertIn("history_loop_resume_runner_ok: `yes`", readme)
         self.assertIn("run_loop_status_issues: -", readme)
         self.assertIn("run_loop_handoff_status: -", readme)
         self.assertIn("run_loop_handoff_severity: -", readme)
+        self.assertIn("run_loop_resume_from_report_command: -", readme)
 
     def test_cli_write_command_inspection_surfaces_run_loop_handoff(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -754,6 +764,7 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             )
             command_dir = root / "commands"
             continuation_command = _history_loop_continuation_command(command_dir)
+            resume_from_report_command = _history_loop_resume_command(command_dir)
             _write_json(
                 command_dir / "run_loop.json",
                 {
@@ -780,6 +791,7 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
                     },
                     "final_next_action_runnable": True,
                     "continuation_command": continuation_command,
+                    "resume_from_report_command": resume_from_report_command,
                 },
             )
             result = subprocess.run(
@@ -829,6 +841,10 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             continuation_command,
         )
         self.assertEqual(
+            command_scripts["inspection_run_loop_resume_from_report_command"],
+            resume_from_report_command,
+        )
+        self.assertEqual(
             comparison["command_scripts"]["inspection_run_loop_handoff_status"],
             "continuation_ready",
         )
@@ -850,6 +866,15 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             "command_inspection_run_loop_continuation_command: "
             f"{continuation_command}",
             markdown,
+        )
+        self.assertIn(
+            "command_inspection_run_loop_resume_from_report_command: "
+            f"{resume_from_report_command}",
+            markdown,
+        )
+        self.assertIn(
+            f"run_loop_resume_from_report_command: `{resume_from_report_command}`",
+            readme,
         )
 
     def test_cli_command_dir_records_absolute_handoff_paths(self) -> None:

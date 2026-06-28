@@ -954,6 +954,7 @@ def _render_command_readme(
         f"- run_loop_handoff_recommended_action: {_fmt_readme_value(command_scripts.get('inspection_run_loop_handoff_recommended_action'))}",
         f"- run_loop_final_next_action_runnable: {_fmt_readme_value(command_scripts.get('inspection_run_loop_final_next_action_runnable'))}",
         f"- run_loop_continuation_command: {_fmt_readme_value(command_scripts.get('inspection_run_loop_continuation_command'))}",
+        f"- run_loop_resume_from_report_command: {_fmt_readme_value(command_scripts.get('inspection_run_loop_resume_from_report_command'))}",
         "",
         "## Machine-Readable Manifest",
         "",
@@ -1127,6 +1128,7 @@ def _write_recommended_command_scripts(
         "inspection_run_loop_handoff_recommended_action": None,
         "inspection_run_loop_final_next_action_runnable": None,
         "inspection_run_loop_continuation_command": None,
+        "inspection_run_loop_resume_from_report_command": None,
         "runner_command": runner_command,
         "execution_next_command": execution_next_command,
         "history_next_action_command": history_next_action_command,
@@ -1268,6 +1270,7 @@ def _render_markdown(summary: dict[str, Any]) -> str:
         f"- command_inspection_run_loop_handoff_recommended_action: {_fmt(_value(command_scripts, 'inspection_run_loop_handoff_recommended_action'))}",
         f"- command_inspection_run_loop_final_next_action_runnable: {_fmt(_value(command_scripts, 'inspection_run_loop_final_next_action_runnable'))}",
         f"- command_inspection_run_loop_continuation_command: {_fmt(_value(command_scripts, 'inspection_run_loop_continuation_command'))}",
+        f"- command_inspection_run_loop_resume_from_report_command: {_fmt(_value(command_scripts, 'inspection_run_loop_resume_from_report_command'))}",
         f"- command_runner: {_fmt(_value(command_scripts, 'runner_command'))}",
         f"- command_execution_next: {_fmt(_value(command_scripts, 'execution_next_command'))}",
         f"- command_history_next_action: {_fmt(_value(command_scripts, 'history_next_action_command'))}",
@@ -1508,6 +1511,9 @@ def main(argv: list[str] | None = None) -> int:
                 ),
                 "inspection_run_loop_continuation_command": (
                     run_loop_status.get("continuation_command")
+                ),
+                "inspection_run_loop_resume_from_report_command": (
+                    run_loop_status.get("resume_from_report_command")
                 ),
             }
         )

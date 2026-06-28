@@ -254,6 +254,20 @@ def _loop_command_line(
     return " ".join(parts)
 
 
+def _resume_from_report_command_line(command_dir: Path) -> str:
+    script_path = Path(__file__).resolve()
+    parts = [
+        "env",
+        "PYTHONNOUSERSITE=1",
+        "python3",
+        "-P",
+        shlex.quote(str(script_path)),
+        shlex.quote(str(command_dir)),
+        "--resume-from-report",
+    ]
+    return " ".join(parts)
+
+
 def _md_cell(value: Any) -> str:
     return _fmt(value).replace("|", "\\|").replace("\n", " ")
 
@@ -442,6 +456,7 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"- final_next_action_should_continue: {_fmt(next_action.get('should_continue'))}",
         f"- final_next_action_runnable: {_fmt(summary.get('final_next_action_runnable'))}",
         f"- continuation_command: {_fmt(summary.get('continuation_command'))}",
+        f"- resume_from_report_command: {_fmt(summary.get('resume_from_report_command'))}",
         f"- json_path: {_fmt(summary.get('json_path'))}",
         f"- markdown_path: {_fmt(summary.get('markdown_path'))}",
         "",
@@ -525,6 +540,7 @@ def _failure_summary(
         "final_next_action": None,
         "final_next_action_runnable": False,
         "continuation_command": None,
+        "resume_from_report_command": None,
         "latest_run_history_summary": None,
         "latest_run_json_path": None,
         "latest_run_markdown_path": None,
@@ -624,6 +640,11 @@ def run_loop(
         if final_next_action_runnable
         else None
     )
+    resume_from_report_command = (
+        _resume_from_report_command_line(command_dir)
+        if final_next_action_runnable
+        else None
+    )
     error = latest_summary.get("error") if returncode != 0 else None
     if final_action_failed:
         returncode = 1
@@ -664,6 +685,7 @@ def run_loop(
         "final_next_action": final_next_action if final_next_action else None,
         "final_next_action_runnable": final_next_action_runnable,
         "continuation_command": continuation_command,
+        "resume_from_report_command": resume_from_report_command,
         "latest_run_history_summary": latest_summary.get("run_history_summary"),
         "latest_run_json_path": latest_summary.get("run_json_path"),
         "latest_run_markdown_path": latest_summary.get("run_markdown_path"),

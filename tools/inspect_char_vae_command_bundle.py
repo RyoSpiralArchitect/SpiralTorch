@@ -441,6 +441,7 @@ def _run_loop_status(
         "final_next_action_should_continue": None,
         "final_next_action_runnable": None,
         "continuation_command": None,
+        "resume_from_report_command": None,
         "continuation_command_expected": None,
         "continuation_command_present": None,
         "continuation_command_ok": None,
@@ -472,6 +473,12 @@ def _run_loop_status(
     continuation_command = payload.get("continuation_command")
     continuation_command = (
         continuation_command if isinstance(continuation_command, str) else None
+    )
+    resume_from_report_command = payload.get("resume_from_report_command")
+    resume_from_report_command = (
+        resume_from_report_command
+        if isinstance(resume_from_report_command, str)
+        else None
     )
     continuation_command_status = _declared_command(
         "run_loop_continuation_command",
@@ -545,6 +552,7 @@ def _run_loop_status(
             ),
             "final_next_action_runnable": final_next_action_runnable,
             "continuation_command": continuation_command,
+            "resume_from_report_command": resume_from_report_command,
             "continuation_command_expected": final_next_action_runnable,
             "continuation_command_present": continuation_command_present,
             "continuation_command_ok": continuation_command_ok,
@@ -1056,6 +1064,7 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"- run_loop_final_next_action_should_continue: {_fmt(_value(summary, 'run_loop_status', 'final_next_action_should_continue'))}",
         f"- run_loop_final_next_action_runnable: {_fmt(_value(summary, 'run_loop_status', 'final_next_action_runnable'))}",
         f"- run_loop_continuation_command: {_fmt(_value(summary, 'run_loop_status', 'continuation_command'))}",
+        f"- run_loop_resume_from_report_command: {_fmt(_value(summary, 'run_loop_status', 'resume_from_report_command'))}",
         f"- run_loop_continuation_command_expected: {_fmt(_value(summary, 'run_loop_status', 'continuation_command_expected'))}",
         f"- run_loop_continuation_command_present: {_fmt(_value(summary, 'run_loop_status', 'continuation_command_present'))}",
         f"- run_loop_continuation_command_ok: {_fmt(_value(summary, 'run_loop_status', 'continuation_command_ok'))}",

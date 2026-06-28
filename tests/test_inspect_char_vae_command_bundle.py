@@ -366,6 +366,7 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
                 "final_next_action_should_continue": None,
                 "final_next_action_runnable": None,
                 "continuation_command": None,
+                "resume_from_report_command": None,
                 "continuation_command_expected": None,
                 "continuation_command_present": None,
                 "continuation_command_ok": None,
@@ -850,6 +851,7 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
                     },
                     "final_next_action_runnable": False,
                     "continuation_command": None,
+                    "resume_from_report_command": None,
                     "steps": [
                         {
                             "index": 1,
@@ -931,6 +933,7 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
         self.assertIs(status["final_next_action_should_continue"], False)
         self.assertIs(status["final_next_action_runnable"], False)
         self.assertIsNone(status["continuation_command"])
+        self.assertIsNone(status["resume_from_report_command"])
         self.assertIs(status["continuation_command_expected"], False)
         self.assertIs(status["continuation_command_present"], False)
         self.assertIsNone(status["continuation_command_ok"])
@@ -1002,6 +1005,10 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
         )
         self.assertIn("run_loop_continuation_command: -", markdown_result.stdout)
         self.assertIn(
+            "run_loop_resume_from_report_command: -",
+            markdown_result.stdout,
+        )
+        self.assertIn(
             "run_loop_continuation_command_expected: no",
             markdown_result.stdout,
         )
@@ -1023,6 +1030,11 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
                 f"{ROOT / 'tools' / 'run_char_vae_history_loop.py'} "
                 f"{command_dir} --max-steps 1 --fail-on-max-steps-continuation "
                 "--write-loop-report"
+            )
+            resume_from_report_command = (
+                "env PYTHONNOUSERSITE=1 python3 -P "
+                f"{ROOT / 'tools' / 'run_char_vae_history_loop.py'} "
+                f"{command_dir} --resume-from-report"
             )
             _write_json(
                 command_dir / "run_loop.json",
@@ -1061,6 +1073,7 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
                         "should_continue": True,
                     },
                     "continuation_command": continuation_command,
+                    "resume_from_report_command": resume_from_report_command,
                     "steps": [],
                 },
             )
@@ -1091,6 +1104,10 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
         )
         self.assertIs(status["final_next_action_runnable"], True)
         self.assertEqual(status["continuation_command"], continuation_command)
+        self.assertEqual(
+            status["resume_from_report_command"],
+            resume_from_report_command,
+        )
         self.assertTrue(status["command_dir_matches"])
         self.assertEqual(status["handoff_severity"], "ready")
         self.assertIs(status["handoff_requires_attention"], False)
@@ -1115,6 +1132,10 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
         )
         self.assertIn(
             "run_loop_continuation_command_ok: yes",
+            markdown_result.stdout,
+        )
+        self.assertIn(
+            f"run_loop_resume_from_report_command: {resume_from_report_command}",
             markdown_result.stdout,
         )
 
