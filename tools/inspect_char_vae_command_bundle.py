@@ -11,6 +11,9 @@ from typing import Any
 
 
 SCHEMA = "st.llm_char_vae_context.command_bundle_inspection.v1"
+RUN_HISTORY_SUMMARY_SCHEMA = (
+    "st.llm_char_vae_context.command_bundle_run_history_summary.v1"
+)
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -42,6 +45,15 @@ def _fmt(value: Any) -> str:
     return str(value)
 
 
+def _value(payload: dict[str, Any], *keys: str) -> Any:
+    item: Any = payload
+    for key in keys:
+        if not isinstance(item, dict):
+            return None
+        item = item.get(key)
+    return item
+
+
 def _check(
     label: str,
     *,
@@ -66,6 +78,64 @@ def _declared_output(
         "path": str(path) if path is not None else None,
         "exists": _exists(path),
     }
+
+
+def _jsonl_event_count(path: Path | None) -> tuple[int | None, str | None]:
+    if path is None or not path.exists():
+        return None, None
+    try:
+        count = 0
+        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if not line.strip():
+                continue
+            payload = json.loads(line)
+            if not isinstance(payload, dict):
+                return None, f"{path}:{lineno} did not contain a JSON object"
+            count += 1
+        return count, None
+    except (OSError, json.JSONDecodeError) as exc:
+        return None, str(exc)
+
+
+def _run_history_summary_status(
+    *,
+    summary_path: Path | None,
+    history_path: Path | None,
+) -> dict[str, Any]:
+    history_event_count, history_error = _jsonl_event_count(history_path)
+    exists = _exists(summary_path)
+    status: dict[str, Any] = {
+        "path": str(summary_path) if summary_path is not None else None,
+        "exists": exists,
+        "valid_json": None,
+        "schema": None,
+        "schema_ok": None,
+        "total_runs": None,
+        "history_event_count": history_event_count,
+        "matches_history_event_count": None,
+        "error": history_error,
+    }
+    if summary_path is None or not exists:
+        return status
+    try:
+        payload = _read_json(summary_path)
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        status["valid_json"] = False
+        status["error"] = str(exc)
+        return status
+    schema = payload.get("schema")
+    total_runs = payload.get("total_runs")
+    status.update(
+        {
+            "valid_json": True,
+            "schema": schema,
+            "schema_ok": schema == RUN_HISTORY_SUMMARY_SCHEMA,
+            "total_runs": total_runs,
+        }
+    )
+    if isinstance(total_runs, int) and history_event_count is not None:
+        status["matches_history_event_count"] = total_runs == history_event_count
+    return status
 
 
 def inspect_bundle(command_dir: Path) -> dict[str, Any]:
@@ -170,6 +240,10 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
         _declared_output("run_history_markdown", run_history_markdown_path),
         _declared_output("run_history_summary", run_history_summary_path),
     ]
+    run_history_summary_status = _run_history_summary_status(
+        summary_path=run_history_summary_path,
+        history_path=run_history_jsonl_path,
+    )
     return {
         "schema": SCHEMA,
         "command_dir": str(command_dir),
@@ -208,6 +282,7 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
             if run_history_summary_path is not None
             else None
         ),
+        "run_history_summary_status": run_history_summary_status,
         "chain_source_count": len(chain_source_paths),
         "missing_chain_sources": missing_chain_sources,
     }
@@ -232,6 +307,12 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"- run_history_jsonl_path: {_fmt(summary.get('run_history_jsonl_path'))}",
         f"- run_history_markdown_path: {_fmt(summary.get('run_history_markdown_path'))}",
         f"- run_history_summary_path: {_fmt(summary.get('run_history_summary_path'))}",
+        f"- run_history_summary_valid_json: {_fmt(_value(summary, 'run_history_summary_status', 'valid_json'))}",
+        f"- run_history_summary_schema_ok: {_fmt(_value(summary, 'run_history_summary_status', 'schema_ok'))}",
+        f"- run_history_summary_total_runs: {_fmt(_value(summary, 'run_history_summary_status', 'total_runs'))}",
+        f"- run_history_event_count: {_fmt(_value(summary, 'run_history_summary_status', 'history_event_count'))}",
+        f"- run_history_summary_matches_jsonl: {_fmt(_value(summary, 'run_history_summary_status', 'matches_history_event_count'))}",
+        f"- run_history_summary_error: {_fmt(_value(summary, 'run_history_summary_status', 'error'))}",
         f"- inspection_json_path: {_fmt(summary.get('inspection_json_path'))}",
         f"- inspection_markdown_path: {_fmt(summary.get('inspection_markdown_path'))}",
         f"- chain_source_count: {_fmt(summary.get('chain_source_count'))}",

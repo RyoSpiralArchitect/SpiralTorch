@@ -121,6 +121,20 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
             str(command_dir / "run_history_summary.json"),
         )
         self.assertEqual(
+            payload["run_history_summary_status"],
+            {
+                "path": str(command_dir / "run_history_summary.json"),
+                "exists": False,
+                "valid_json": None,
+                "schema": None,
+                "schema_ok": None,
+                "total_runs": None,
+                "history_event_count": None,
+                "matches_history_event_count": None,
+                "error": None,
+            },
+        )
+        self.assertEqual(
             payload["declared_outputs"],
             [
                 {
@@ -155,6 +169,7 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
         self.assertIn("bundle_ready: yes", markdown_result.stdout)
         self.assertIn("Declared Run Outputs", markdown_result.stdout)
         self.assertIn("run_history_summary", markdown_result.stdout)
+        self.assertIn("run_history_summary_valid_json: -", markdown_result.stdout)
 
     def test_cli_writes_default_inspection_reports(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -204,6 +219,68 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
         self.assertIn(f"inspection_markdown_path: {markdown_report_path}", markdown)
         self.assertIn("run_history_summary_path:", markdown)
         self.assertIn("Declared Run Outputs", markdown)
+
+    def test_cli_validates_existing_run_history_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            command_dir = _write_bundle(Path(tmp))
+            history_path = command_dir / "run_history.jsonl"
+            summary_path = command_dir / "run_history_summary.json"
+            history_events = [
+                {
+                    "schema": "st.llm_char_vae_context.command_bundle_run_history_event.v1",
+                    "returncode": 0,
+                },
+                {
+                    "schema": "st.llm_char_vae_context.command_bundle_run_history_event.v1",
+                    "returncode": 0,
+                },
+            ]
+            history_jsonl = "".join(
+                json.dumps(event, sort_keys=True) + "\n"
+                for event in history_events
+            )
+            history_path.write_text(
+                history_jsonl,
+                encoding="utf-8",
+            )
+            _write_json(
+                summary_path,
+                {
+                    "schema": "st.llm_char_vae_context.command_bundle_run_history_summary.v1",
+                    "total_runs": 2,
+                    "signals": {"status_counts": {"ok": 2}},
+                },
+            )
+            result = subprocess.run(
+                ["python3", "-P", str(SCRIPT), str(command_dir), "--json"],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            markdown_result = subprocess.run(
+                ["python3", "-P", str(SCRIPT), str(command_dir)],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        status = payload["run_history_summary_status"]
+        self.assertTrue(status["exists"])
+        self.assertTrue(status["valid_json"])
+        self.assertTrue(status["schema_ok"])
+        self.assertEqual(status["total_runs"], 2)
+        self.assertEqual(status["history_event_count"], 2)
+        self.assertTrue(status["matches_history_event_count"])
+        self.assertIsNone(status["error"])
+        self.assertEqual(markdown_result.returncode, 0, markdown_result.stderr)
+        self.assertIn("run_history_summary_valid_json: yes", markdown_result.stdout)
+        self.assertIn("run_history_summary_matches_jsonl: yes", markdown_result.stdout)
 
     def test_cli_writes_explicit_inspection_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
