@@ -50,7 +50,7 @@ def _inspection_command(command_dir: Path) -> str:
 
 def _runner_command(command_dir: Path) -> str:
     return (
-        "PYTHONNOUSERSITE=1 python3 -P "
+        "env PYTHONNOUSERSITE=1 python3 -P "
         f"{shlex.quote(str(RUNNER_SCRIPT.resolve()))} "
         f"{shlex.quote(str(command_dir.resolve()))} "
         "--write-inspection-report --write-run-report"
@@ -316,6 +316,7 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             manifest["command_scripts"]["runner_command"],
             _runner_command(command_dir),
         )
+        self.assertIsNone(manifest["command_scripts"]["runner_path"])
         self.assertEqual(
             manifest["command_scripts"]["run_json_path"],
             str((command_dir / "run.json").resolve()),
@@ -476,6 +477,7 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             command_scripts["runner_command"],
             _runner_command(command_dir),
         )
+        self.assertIsNone(command_scripts["runner_path"])
         self.assertEqual(
             command_scripts["run_json_path"],
             str((command_dir / "run.json").resolve()),
@@ -596,22 +598,26 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             payload = json.loads(json_out.read_text(encoding="utf-8"))
             markdown = markdown_out.read_text(encoding="utf-8")
             next_script = command_dir / "recommended_next.sh"
+            runner_script = command_dir / "run_recommended_next.sh"
             follow_up_script = command_dir / "recommended_follow_up.sh"
             review_script = command_dir / "recommended_review.sh"
             manifest_path = command_dir / "recommendation.json"
             readme_path = command_dir / "README.md"
             next_script_path = str(next_script.resolve())
+            runner_script_path = str(runner_script.resolve())
             follow_up_script_path = str(follow_up_script.resolve())
             manifest_path_resolved = str(manifest_path.resolve())
             readme_path_resolved = str(readme_path.resolve())
             command_dir_resolved = str(command_dir.resolve())
             execution_cwd = str(root.resolve())
             self.assertTrue(next_script.exists())
+            self.assertTrue(runner_script.exists())
             self.assertTrue(follow_up_script.exists())
             self.assertFalse(review_script.exists())
             self.assertTrue(manifest_path.exists())
             self.assertTrue(readme_path.exists())
             next_text = next_script.read_text(encoding="utf-8")
+            runner_text = runner_script.read_text(encoding="utf-8")
             script_text = follow_up_script.read_text(encoding="utf-8")
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             readme = readme_path.read_text(encoding="utf-8")
@@ -625,7 +631,7 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
                 follow_up_script_path,
             )
             self.assertIsNone(payload["command_scripts"]["review_path"])
-            self.assertEqual(payload["command_scripts"]["written_count"], 2)
+            self.assertEqual(payload["command_scripts"]["written_count"], 3)
             self.assertEqual(
                 payload["command_scripts"]["execution_cwd"],
                 execution_cwd,
@@ -647,6 +653,10 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
                 readme_path_resolved,
             )
             self.assertEqual(
+                payload["command_scripts"]["runner_path"],
+                runner_script_path,
+            )
+            self.assertEqual(
                 manifest["recommendation"]["action"],
                 "continue_from_accepted",
             )
@@ -664,6 +674,10 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
                 follow_up_script_path,
             )
             self.assertEqual(manifest["command_scripts"]["next_kind"], "follow_up")
+            self.assertEqual(
+                manifest["command_scripts"]["runner_path"],
+                runner_script_path,
+            )
             self.assertEqual(
                 manifest["command_scripts"]["execution_cwd"],
                 execution_cwd,
@@ -702,6 +716,10 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             )
             self.assertIn("# target_kind: follow_up", next_text)
             self.assertIn("recommended_follow_up.sh", next_text)
+            self.assertIn("# target_kind: follow_up", runner_text)
+            self.assertIn("exec env PYTHONNOUSERSITE=1 python3 -P", runner_text)
+            self.assertIn("tools/run_char_vae_command_bundle.py", runner_text)
+            self.assertIn("--write-run-report", runner_text)
             self.assertIn(f"cd {shlex.quote(execution_cwd)}", script_text)
             self.assertIn("FOLLOW_UP_FROM=accepted NEW_SEEDS=31", script_text)
             self.assertIn(
@@ -763,8 +781,11 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             self.assertIn("inspection.md", readme)
             self.assertIn("recommended_next.sh", readme)
             self.assertIn(f"bash {shlex.quote(next_script_path)}", readme)
+            self.assertIn("run_recommended_next.sh", readme)
+            self.assertIn(f"bash {shlex.quote(runner_script_path)}", readme)
             self.assertIn("recommended_follow_up.sh", readme)
             self.assertIn("recommended_next.sh", markdown)
+            self.assertIn("run_recommended_next.sh", markdown)
             self.assertIn("recommended_follow_up.sh", markdown)
             self.assertIn("next_command_kind: follow_up", markdown)
             self.assertIn("command_execution_cwd", markdown)
@@ -775,6 +796,7 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             self.assertIn("command_inspection_json_path", markdown)
             self.assertIn("command_inspection_markdown_path", markdown)
             self.assertIn("command_runner", markdown)
+            self.assertIn("command_runner_script", markdown)
             self.assertIn("tools/run_char_vae_command_bundle.py", markdown)
             self.assertIn("command_run_json_path", markdown)
             self.assertIn("command_run_markdown_path", markdown)
@@ -912,13 +934,17 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             review_script = root / "commands" / "recommended_review.sh"
             follow_up_script = root / "commands" / "recommended_follow_up.sh"
             next_script = root / "commands" / "recommended_next.sh"
+            runner_script = root / "commands" / "run_recommended_next.sh"
             next_script_path = str(next_script.resolve())
+            runner_script_path = str(runner_script.resolve())
             review_script_path = str(review_script.resolve())
             follow_up_script_path = str(follow_up_script.resolve())
             next_script_exists = next_script.exists()
+            runner_script_exists = runner_script.exists()
             review_script_exists = review_script.exists()
             follow_up_script_exists = follow_up_script.exists()
             next_script_text = next_script.read_text(encoding="utf-8")
+            runner_script_text = runner_script.read_text(encoding="utf-8")
             command_manifest = json.loads(
                 (root / "commands" / "recommendation.json").read_text(
                     encoding="utf-8"
@@ -983,11 +1009,16 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
         self.assertIn(f"review={reviewed_follow_summary}", markdown)
         self.assertIn("follow_up_command: next_follow_up_command", markdown)
         self.assertIn("review_command: guided_next_follow_up_command", markdown)
-        self.assertEqual(command_scripts["written_count"], 3)
+        self.assertEqual(command_scripts["written_count"], 4)
         self.assertEqual(command_scripts["next_path"], next_script_path)
         self.assertEqual(command_scripts["next_kind"], "review")
+        self.assertEqual(command_scripts["runner_path"], runner_script_path)
         self.assertEqual(command_scripts["follow_up_path"], follow_up_script_path)
         self.assertEqual(command_scripts["review_path"], review_script_path)
+        self.assertEqual(
+            command_manifest["command_scripts"]["runner_path"],
+            runner_script_path,
+        )
         self.assertEqual(command_manifest["comparison"]["sort_by"], "best")
         self.assertEqual(command_manifest["aggregate"]["chain_count"], 2)
         self.assertIs(command_manifest["selection"]["best_requires_review"], True)
@@ -996,16 +1027,25 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             "latent@normalize=blocks,scale=4.0",
         )
         self.assertTrue(next_script_exists)
+        self.assertTrue(runner_script_exists)
         self.assertTrue(follow_up_script_exists)
         self.assertTrue(review_script_exists)
         self.assertIn("# target_kind: review", next_script_text)
         self.assertIn("recommended_review.sh", next_script_text)
+        self.assertIn("# target_kind: review", runner_script_text)
+        self.assertIn(
+            "exec env PYTHONNOUSERSITE=1 python3 -P",
+            runner_script_text,
+        )
+        self.assertIn("tools/run_char_vae_command_bundle.py", runner_script_text)
+        self.assertIn("--write-run-report", runner_script_text)
         self.assertIn("review_absolute_best", command_readme)
         self.assertIn("## Champion", command_readme)
         self.assertIn("latent@normalize=blocks,scale=4.0", command_readme)
         self.assertIn("## Fallback", command_readme)
         self.assertIn("raw_latent@normalize=blocks,scale=4.0", command_readme)
         self.assertIn("recommended_next.sh", command_readme)
+        self.assertIn("run_recommended_next.sh", command_readme)
         self.assertIn("recommended_follow_up.sh", command_readme)
         self.assertIn("recommended_review.sh", command_readme)
 
