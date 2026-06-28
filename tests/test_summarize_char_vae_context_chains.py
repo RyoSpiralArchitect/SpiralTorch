@@ -133,10 +133,19 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             "latent@normalize=blocks,scale=0.5",
         )
         self.assertIs(summary["selection"]["accepted_matches_best"], True)
+        self.assertEqual(
+            summary["recommendation"]["action"],
+            "continue_from_accepted",
+        )
+        self.assertEqual(
+            summary["recommendation"]["champion_source"],
+            "accepted_champion",
+        )
         self.assertEqual(summary["chains"][0]["best_mean_best_nll"], 4.1)
         self.assertIn("# Char VAE Context Chain Comparison", markdown)
         self.assertIn("## Selection", markdown)
         self.assertIn("accepted_champion", markdown)
+        self.assertIn("recommendation: continue_from_accepted", markdown)
         self.assertIn("- seed_source_counts: command_default:1, explicit_seed_group:1", markdown)
         self.assertIn("latent@normalize=blocks,scale=0.5", markdown)
         self.assertIn("29 | 19,23", markdown)
@@ -305,8 +314,24 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
         self.assertIs(selection["accepted_matches_best"], False)
         self.assertIs(selection["best_requires_review"], True)
         self.assertAlmostEqual(selection["accepted_vs_best_nll_gap"], 0.05)
+        self.assertEqual(summary["recommendation"]["action"], "review_absolute_best")
+        self.assertEqual(
+            summary["recommendation"]["follow_up_from_summary_path"],
+            str(safe_follow_summary),
+        )
+        self.assertEqual(
+            summary["recommendation"]["review_summary_path"],
+            str(reviewed_follow_summary),
+        )
+        self.assertEqual(
+            summary["recommendation"]["fallback"]["summary_path"],
+            str(safe_follow_summary),
+        )
         self.assertIn("best_requires_review: yes", markdown)
         self.assertIn("accepted_vs_best_nll_gap: 0.050000", markdown)
+        self.assertIn("recommendation: review_absolute_best", markdown)
+        self.assertIn(f"follow_up_from={safe_follow_summary}", markdown)
+        self.assertIn(f"review={reviewed_follow_summary}", markdown)
 
     def test_recursive_discovery_finds_nested_chains_once(self) -> None:
         mod = _load_module()

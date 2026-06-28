@@ -242,6 +242,69 @@ def _selection(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _recommendation(selection: dict[str, Any]) -> dict[str, Any]:
+    accepted = selection.get("accepted_champion")
+    accepted = accepted if isinstance(accepted, dict) else None
+    best = selection.get("best_champion")
+    best = best if isinstance(best, dict) else None
+    if best is not None and selection.get("best_requires_review"):
+        return {
+            "schema": "st.llm_char_vae_context.chain_recommendation.v1",
+            "action": "review_absolute_best",
+            "reason": (
+                "absolute best has lower NLL than the accepted champion, "
+                "but it differs from the safe accepted promotion"
+            ),
+            "follow_up_from_summary_path": accepted.get("summary_path")
+            if accepted is not None
+            else None,
+            "review_summary_path": best.get("summary_path"),
+            "champion_source": "best_champion",
+            "champion": best,
+            "fallback_source": "accepted_champion" if accepted is not None else None,
+            "fallback": accepted,
+        }
+    if accepted is not None:
+        return {
+            "schema": "st.llm_char_vae_context.chain_recommendation.v1",
+            "action": "continue_from_accepted",
+            "reason": (
+                "accepted champion matches the absolute best"
+                if selection.get("accepted_matches_best")
+                else "accepted champion is the best safe promotion candidate"
+            ),
+            "follow_up_from_summary_path": accepted.get("summary_path"),
+            "review_summary_path": None,
+            "champion_source": "accepted_champion",
+            "champion": accepted,
+            "fallback_source": None,
+            "fallback": None,
+        }
+    if best is not None:
+        return {
+            "schema": "st.llm_char_vae_context.chain_recommendation.v1",
+            "action": "review_absolute_best",
+            "reason": "only an absolute best candidate is available",
+            "follow_up_from_summary_path": None,
+            "review_summary_path": best.get("summary_path"),
+            "champion_source": "best_champion",
+            "champion": best,
+            "fallback_source": None,
+            "fallback": None,
+        }
+    return {
+        "schema": "st.llm_char_vae_context.chain_recommendation.v1",
+        "action": "collect_more_chains",
+        "reason": "no accepted or best chain candidates were found",
+        "follow_up_from_summary_path": None,
+        "review_summary_path": None,
+        "champion_source": None,
+        "champion": None,
+        "fallback_source": None,
+        "fallback": None,
+    }
+
+
 def _sort_rows(rows: list[dict[str, Any]], sort_by: str) -> list[dict[str, Any]]:
     if sort_by == "input":
         return rows
@@ -315,6 +378,7 @@ def summarize_chains(
     for path in discovered_paths:
         rows.append(_chain_row(path, _read_json(path)))
     rows = _sort_rows(rows, sort_by)
+    selection = _selection(rows)
     return {
         "schema": SCHEMA,
         "sort_by": sort_by,
@@ -322,7 +386,8 @@ def summarize_chains(
         "input_count": len(paths),
         "discovered_chain_count": len(discovered_paths),
         "aggregate": _aggregate(rows),
-        "selection": _selection(rows),
+        "selection": selection,
+        "recommendation": _recommendation(selection),
         "chains": rows,
     }
 
@@ -343,9 +408,23 @@ def _fmt_leader(record: Any) -> str:
     )
 
 
+def _fmt_recommendation(record: Any) -> str:
+    if not isinstance(record, dict):
+        return "-"
+    return (
+        "{action} (follow_up_from={follow_up}, review={review}, reason={reason})"
+    ).format(
+        action=_fmt(record.get("action")),
+        follow_up=_fmt(record.get("follow_up_from_summary_path")),
+        review=_fmt(record.get("review_summary_path")),
+        reason=_fmt(record.get("reason")),
+    )
+
+
 def _render_markdown(summary: dict[str, Any]) -> str:
     aggregate = summary.get("aggregate", {})
     selection = summary.get("selection", {})
+    recommendation = summary.get("recommendation", {})
     chains = summary.get("chains", [])
     lines = [
         "# Char VAE Context Chain Comparison",
@@ -376,6 +455,9 @@ def _render_markdown(summary: dict[str, Any]) -> str:
         f"- accepted_matches_best: {_fmt(_value(selection, 'accepted_matches_best'))}",
         f"- best_requires_review: {_fmt(_value(selection, 'best_requires_review'))}",
         f"- accepted_vs_best_nll_gap: {_fmt(_value(selection, 'accepted_vs_best_nll_gap'))}",
+        f"- recommendation: {_fmt_recommendation(recommendation)}",
+        f"- follow_up_from_summary_path: {_fmt(_value(recommendation, 'follow_up_from_summary_path'))}",
+        f"- review_summary_path: {_fmt(_value(recommendation, 'review_summary_path'))}",
         "",
         "## Chains",
         "",
