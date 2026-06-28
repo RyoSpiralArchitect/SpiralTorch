@@ -463,12 +463,15 @@ mod tests {
         assert!(trainer.merge_async_gradients().unwrap());
         st_tensor::set_tensor_op_meta_observer(previous);
 
-        let events = events.lock().unwrap();
+        let events = events.lock().unwrap().clone();
         let sync = events
             .iter()
             .find(|(op_name, data)| {
                 *op_name == "distributed_trainer_sync_step"
                     && data["kind"] == "st_core_distributed_trainer_sync_step"
+                    && data["total_params"] == 4
+                    && data["shards"] == 2
+                    && data["shard_dim"] == 2
             })
             .expect("distributed sync step metadata event");
         assert_eq!(sync.1["workers"], 2);
@@ -493,6 +496,8 @@ mod tests {
                 *op_name == "distributed_trainer_async_merge"
                     && data["kind"] == "st_core_distributed_trainer_async_merge"
                     && data["merged"] == true
+                    && data["total_params"] == 4
+                    && data["payload_len"] == 8
             })
             .expect("distributed async merge metadata event");
         assert_eq!(merge.1["contributions"], 2);
