@@ -311,6 +311,7 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
                 "schema": None,
                 "schema_ok": None,
                 "command_dir": None,
+                "command_dir_matches": None,
                 "handoff_status": None,
                 "handoff_reason": None,
                 "max_steps": None,
@@ -334,6 +335,12 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
                 "final_next_action_should_continue": None,
                 "final_next_action_runnable": None,
                 "continuation_command": None,
+                "continuation_command_expected": None,
+                "continuation_command_present": None,
+                "continuation_command_ok": None,
+                "continuation_command_target_dir_ok": None,
+                "continuation_command_parse_error": None,
+                "continuation_command_missing_required_flags": None,
             },
         )
         self.assertEqual(
@@ -848,6 +855,7 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
         self.assertTrue(status["valid_json"])
         self.assertTrue(status["schema_ok"])
         self.assertEqual(status["command_dir"], str(command_dir))
+        self.assertTrue(status["command_dir_matches"])
         self.assertEqual(status["handoff_status"], "awaiting_next_command")
         self.assertEqual(
             status["handoff_reason"],
@@ -882,10 +890,17 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
         self.assertIs(status["final_next_action_should_continue"], False)
         self.assertIs(status["final_next_action_runnable"], False)
         self.assertIsNone(status["continuation_command"])
+        self.assertIs(status["continuation_command_expected"], False)
+        self.assertIs(status["continuation_command_present"], False)
+        self.assertIsNone(status["continuation_command_ok"])
+        self.assertIsNone(status["continuation_command_target_dir_ok"])
+        self.assertIsNone(status["continuation_command_parse_error"])
+        self.assertEqual(status["continuation_command_missing_required_flags"], [])
         self.assertIsNone(status["error"])
         self.assertEqual(markdown_result.returncode, 0, markdown_result.stderr)
         self.assertIn("run_loop_valid_json: yes", markdown_result.stdout)
         self.assertIn("run_loop_schema_ok: yes", markdown_result.stdout)
+        self.assertIn("run_loop_command_dir_matches: yes", markdown_result.stdout)
         self.assertIn(
             "run_loop_handoff_status: awaiting_next_command",
             markdown_result.stdout,
@@ -936,6 +951,18 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
             markdown_result.stdout,
         )
         self.assertIn("run_loop_continuation_command: -", markdown_result.stdout)
+        self.assertIn(
+            "run_loop_continuation_command_expected: no",
+            markdown_result.stdout,
+        )
+        self.assertIn(
+            "run_loop_continuation_command_present: no",
+            markdown_result.stdout,
+        )
+        self.assertIn(
+            "run_loop_continuation_command_ok: -",
+            markdown_result.stdout,
+        )
 
     def test_cli_derives_legacy_run_loop_continuation_handoff(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1014,6 +1041,13 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
         )
         self.assertIs(status["final_next_action_runnable"], True)
         self.assertEqual(status["continuation_command"], continuation_command)
+        self.assertTrue(status["command_dir_matches"])
+        self.assertIs(status["continuation_command_expected"], True)
+        self.assertIs(status["continuation_command_present"], True)
+        self.assertIs(status["continuation_command_ok"], True)
+        self.assertIs(status["continuation_command_target_dir_ok"], True)
+        self.assertIsNone(status["continuation_command_parse_error"])
+        self.assertEqual(status["continuation_command_missing_required_flags"], [])
         self.assertEqual(status["returncode"], 1)
         self.assertIn(
             "run_loop_handoff_status: continuation_ready",
@@ -1021,6 +1055,93 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
         )
         self.assertIn(
             "run_loop_final_next_action_runnable: yes",
+            markdown_result.stdout,
+        )
+        self.assertIn(
+            "run_loop_continuation_command_ok: yes",
+            markdown_result.stdout,
+        )
+
+    def test_cli_flags_stale_run_loop_handoff_target(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            command_dir = _write_bundle(root)
+            other_command_dir = root / "other-commands"
+            continuation_command = (
+                "env PYTHONNOUSERSITE=1 python3 -P "
+                f"{ROOT / 'tools' / 'run_char_vae_history_loop.py'} "
+                f"{other_command_dir} --max-steps 1 --write-loop-report"
+            )
+            _write_json(
+                command_dir / "run_loop.json",
+                {
+                    "schema": "st.llm_char_vae_context.command_bundle_history_loop.v1",
+                    "command_dir": str(other_command_dir),
+                    "handoff_status": "continuation_ready",
+                    "handoff_reason": "latest execution summary exposes a next command",
+                    "max_steps": 1,
+                    "step_count": 1,
+                    "executed_count": 1,
+                    "success_count": 1,
+                    "failure_count": 0,
+                    "stop_reason": "max_steps_reached",
+                    "fail_on_final_actions": [
+                        "review_before_continuing",
+                        "inspect_history",
+                    ],
+                    "final_action_failed": False,
+                    "fail_on_max_steps_continuation": False,
+                    "max_steps_continuation_failed": False,
+                    "returncode": 0,
+                    "error": None,
+                    "final_next_action": {
+                        "schema": (
+                            "st.llm_char_vae_context."
+                            "command_bundle_history_next_action.v1"
+                        ),
+                        "action": "run_execution_next",
+                        "reason": "latest execution summary exposes a next command",
+                        "target": "execution-next",
+                        "command_source": "guided_next_follow_up_command",
+                        "script_path": str(other_command_dir / "guided_next.sh"),
+                        "default_new_seeds": "109,113,127",
+                        "should_continue": True,
+                    },
+                    "final_next_action_runnable": True,
+                    "continuation_command": continuation_command,
+                    "steps": [],
+                },
+            )
+            result = subprocess.run(
+                ["python3", "-P", str(SCRIPT), str(command_dir), "--json"],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            markdown_result = subprocess.run(
+                ["python3", "-P", str(SCRIPT), str(command_dir)],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        status = payload["run_loop_status"]
+        self.assertFalse(status["command_dir_matches"])
+        self.assertIs(status["continuation_command_expected"], True)
+        self.assertIs(status["continuation_command_present"], True)
+        self.assertIs(status["continuation_command_ok"], False)
+        self.assertIs(status["continuation_command_target_dir_ok"], False)
+        self.assertEqual(status["continuation_command_missing_required_flags"], [])
+        self.assertEqual(markdown_result.returncode, 0, markdown_result.stderr)
+        self.assertIn("run_loop_command_dir_matches: no", markdown_result.stdout)
+        self.assertIn(
+            "run_loop_continuation_command_target_dir_ok: no",
             markdown_result.stdout,
         )
 

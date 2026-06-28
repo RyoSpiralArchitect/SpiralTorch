@@ -186,6 +186,18 @@ def _has_command_dir_token(
     return any(_token_matches_path(token, command_dir) for token in tokens)
 
 
+def _path_matches(value: Any, expected_path: Path | None) -> bool | None:
+    if expected_path is None:
+        return None
+    if not isinstance(value, str) or not value:
+        return None
+    path = Path(value)
+    try:
+        return path.resolve() == expected_path.resolve()
+    except OSError:
+        return path.absolute() == expected_path.resolve()
+
+
 def _declared_command(
     label: str,
     command: str | None,
@@ -393,6 +405,7 @@ def _derived_run_loop_handoff(
 def _run_loop_status(
     *,
     summary_path: Path | None,
+    command_dir: Path | None,
 ) -> dict[str, Any]:
     exists = _exists(summary_path)
     status: dict[str, Any] = {
@@ -402,6 +415,7 @@ def _run_loop_status(
         "schema": None,
         "schema_ok": None,
         "command_dir": None,
+        "command_dir_matches": None,
         "handoff_status": None,
         "handoff_reason": None,
         "max_steps": None,
@@ -424,6 +438,12 @@ def _run_loop_status(
         "final_next_action_should_continue": None,
         "final_next_action_runnable": None,
         "continuation_command": None,
+        "continuation_command_expected": None,
+        "continuation_command_present": None,
+        "continuation_command_ok": None,
+        "continuation_command_target_dir_ok": None,
+        "continuation_command_parse_error": None,
+        "continuation_command_missing_required_flags": None,
         "error": None,
     }
     if summary_path is None or not exists:
@@ -446,6 +466,38 @@ def _run_loop_status(
         payload,
         final_next_action,
     )
+    continuation_command = payload.get("continuation_command")
+    continuation_command = (
+        continuation_command if isinstance(continuation_command, str) else None
+    )
+    continuation_command_status = _declared_command(
+        "run_loop_continuation_command",
+        continuation_command,
+        required_flags=("run_char_vae_history_loop.py", "--max-steps"),
+        command_dir=command_dir,
+    )
+    continuation_command_present = bool(continuation_command_status["present"])
+    if final_next_action_runnable:
+        continuation_command_ok = bool(continuation_command_status["ok"])
+    elif continuation_command_present:
+        continuation_command_ok = False
+    else:
+        continuation_command_ok = None
+    continuation_command_target_dir_ok = (
+        continuation_command_status.get("target_command_dir_ok")
+        if continuation_command_present
+        else None
+    )
+    continuation_command_parse_error = (
+        continuation_command_status.get("parse_error")
+        if continuation_command_present
+        else None
+    )
+    continuation_command_missing_required_flags = (
+        continuation_command_status.get("missing_required_flags")
+        if continuation_command_present
+        else []
+    )
     schema = payload.get("schema")
     status.update(
         {
@@ -453,6 +505,10 @@ def _run_loop_status(
             "schema": schema,
             "schema_ok": schema == RUN_LOOP_SCHEMA,
             "command_dir": payload.get("command_dir"),
+            "command_dir_matches": _path_matches(
+                payload.get("command_dir"),
+                command_dir,
+            ),
             "handoff_status": handoff_status,
             "handoff_reason": handoff_reason,
             "max_steps": payload.get("max_steps"),
@@ -485,7 +541,15 @@ def _run_loop_status(
                 "should_continue"
             ),
             "final_next_action_runnable": final_next_action_runnable,
-            "continuation_command": payload.get("continuation_command"),
+            "continuation_command": continuation_command,
+            "continuation_command_expected": final_next_action_runnable,
+            "continuation_command_present": continuation_command_present,
+            "continuation_command_ok": continuation_command_ok,
+            "continuation_command_target_dir_ok": continuation_command_target_dir_ok,
+            "continuation_command_parse_error": continuation_command_parse_error,
+            "continuation_command_missing_required_flags": (
+                continuation_command_missing_required_flags
+            ),
         }
     )
     return status
@@ -697,7 +761,10 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
         summary_path=run_history_summary_path,
         history_path=run_history_jsonl_path,
     )
-    run_loop_status = _run_loop_status(summary_path=run_loop_json_path)
+    run_loop_status = _run_loop_status(
+        summary_path=run_loop_json_path,
+        command_dir=command_dir,
+    )
     return {
         "schema": SCHEMA,
         "command_dir": str(command_dir),
@@ -846,6 +913,7 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"- run_loop_markdown_path: {_fmt(summary.get('run_loop_markdown_path'))}",
         f"- run_loop_valid_json: {_fmt(_value(summary, 'run_loop_status', 'valid_json'))}",
         f"- run_loop_schema_ok: {_fmt(_value(summary, 'run_loop_status', 'schema_ok'))}",
+        f"- run_loop_command_dir_matches: {_fmt(_value(summary, 'run_loop_status', 'command_dir_matches'))}",
         f"- run_loop_handoff_status: {_fmt(_value(summary, 'run_loop_status', 'handoff_status'))}",
         f"- run_loop_handoff_reason: {_fmt(_value(summary, 'run_loop_status', 'handoff_reason'))}",
         f"- run_loop_step_count: {_fmt(_value(summary, 'run_loop_status', 'step_count'))}",
@@ -865,6 +933,12 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"- run_loop_final_next_action_should_continue: {_fmt(_value(summary, 'run_loop_status', 'final_next_action_should_continue'))}",
         f"- run_loop_final_next_action_runnable: {_fmt(_value(summary, 'run_loop_status', 'final_next_action_runnable'))}",
         f"- run_loop_continuation_command: {_fmt(_value(summary, 'run_loop_status', 'continuation_command'))}",
+        f"- run_loop_continuation_command_expected: {_fmt(_value(summary, 'run_loop_status', 'continuation_command_expected'))}",
+        f"- run_loop_continuation_command_present: {_fmt(_value(summary, 'run_loop_status', 'continuation_command_present'))}",
+        f"- run_loop_continuation_command_ok: {_fmt(_value(summary, 'run_loop_status', 'continuation_command_ok'))}",
+        f"- run_loop_continuation_command_target_dir_ok: {_fmt(_value(summary, 'run_loop_status', 'continuation_command_target_dir_ok'))}",
+        f"- run_loop_continuation_command_parse_error: {_fmt(_value(summary, 'run_loop_status', 'continuation_command_parse_error'))}",
+        f"- run_loop_continuation_command_missing_required_flags: {_fmt(_value(summary, 'run_loop_status', 'continuation_command_missing_required_flags'))}",
         f"- run_loop_error: {_fmt(_value(summary, 'run_loop_status', 'error'))}",
         f"- run_history_summary_valid_json: {_fmt(_value(summary, 'run_history_summary_status', 'valid_json'))}",
         f"- run_history_summary_schema_ok: {_fmt(_value(summary, 'run_history_summary_status', 'schema_ok'))}",
