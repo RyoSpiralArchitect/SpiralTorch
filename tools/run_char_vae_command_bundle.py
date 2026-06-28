@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 import time
@@ -15,10 +16,12 @@ from typing import Any, Callable
 
 
 SCHEMA = "st.llm_char_vae_context.command_bundle_run.v1"
+EXECUTION_NEXT_TARGET = "execution-next"
 TARGET_KEYS = {
     "next": "next_path",
     "follow-up": "follow_up_path",
     "review": "review_path",
+    EXECUTION_NEXT_TARGET: "execution_summary.next_command.script_path",
 }
 TARGET_KIND_KEYS = {
     "follow_up": "follow_up_path",
@@ -37,6 +40,44 @@ def _path_from(value: Any) -> Path | None:
     if not isinstance(value, str) or not value:
         return None
     return Path(value)
+
+
+def _selected_execution_next_script_status(
+    *,
+    target: str,
+    script_path: Path | None,
+    strict: bool,
+) -> dict[str, Any] | None:
+    if target != EXECUTION_NEXT_TARGET:
+        return None
+    status: dict[str, Any] = {
+        "schema": (
+            "st.llm_char_vae_context.command_bundle_selected_script_status.v1"
+        ),
+        "target": target,
+        "path": str(script_path) if script_path is not None else None,
+        "strict": strict,
+        "exists": None if script_path is None else script_path.exists(),
+        "is_file": None if script_path is None else script_path.is_file(),
+        "executable": None,
+        "ok": False,
+        "error": None,
+    }
+    if script_path is None:
+        status["error"] = "selected execution-next script path is unavailable"
+        return status
+    if not script_path.exists():
+        status["error"] = "selected execution-next script does not exist"
+        return status
+    if not script_path.is_file():
+        status["error"] = "selected execution-next script is not a file"
+        return status
+    status["executable"] = os.access(script_path, os.X_OK)
+    if strict and not status["executable"]:
+        status["error"] = "selected execution-next script is not executable"
+        return status
+    status["ok"] = True
+    return status
 
 
 def _utc_now() -> str:
@@ -81,8 +122,15 @@ def _selected_script(
     command_scripts: dict[str, Any],
     *,
     target: str,
+    execution_next_command: dict[str, Any] | None = None,
+    previous_run_report: dict[str, Any] | None = None,
 ) -> tuple[str, Path | None]:
     key = TARGET_KEYS[target]
+    if target == EXECUTION_NEXT_TARGET:
+        next_command = _mapping(execution_next_command)
+        if not next_command:
+            next_command = _execution_next_command_from_report(previous_run_report)
+        return key, _path_from(next_command.get("script_path"))
     return key, _path_from(command_scripts.get(key))
 
 
@@ -93,6 +141,12 @@ def _target_details(
     script_key: str,
     script_path: Path | None,
 ) -> dict[str, Any]:
+    if target == EXECUTION_NEXT_TARGET:
+        return {
+            "target_kind": "execution_next",
+            "target_script_key": script_key,
+            "target_script_path": script_path,
+        }
     if target != "next":
         target_kind = "follow_up" if target == "follow-up" else target
         return {
@@ -117,6 +171,34 @@ def _target_details(
         "target_script_key": target_script_key,
         "target_script_path": target_script_path,
     }
+
+
+def _run_json_path(command_dir: Path, command_scripts: dict[str, Any]) -> Path:
+    return _path_from(command_scripts.get("run_json_path")) or command_dir / "run.json"
+
+
+def _previous_run_report(
+    command_dir: Path,
+    command_scripts: dict[str, Any],
+) -> dict[str, Any]:
+    path = _run_json_path(command_dir, command_scripts)
+    if not path.exists():
+        return {}
+    try:
+        return _read_json(path)
+    except Exception:
+        return {}
+
+
+def _execution_next_command_from_report(
+    report: dict[str, Any] | None,
+) -> dict[str, Any]:
+    report = _mapping(report)
+    execution_summary = _mapping(report.get("execution_summary"))
+    next_command = _mapping(execution_summary.get("next_command"))
+    if next_command:
+        return next_command
+    return _mapping(report.get("selected_execution_next_command"))
 
 
 def _candidate_context(value: Any) -> dict[str, Any] | None:
@@ -222,6 +304,13 @@ def _run_history_path(
 ) -> Path | None:
     if not append_history and not write_history_report:
         return None
+    return _configured_run_history_path(command_dir, command_scripts)
+
+
+def _configured_run_history_path(
+    command_dir: Path,
+    command_scripts: dict[str, Any],
+) -> Path:
     return (
         _path_from(command_scripts.get("run_history_jsonl_path"))
         or command_dir / "run_history.jsonl"
@@ -256,6 +345,283 @@ def _run_history_summary_path(
     )
 
 
+def _config_label(config: dict[str, Any]) -> str | None:
+    feature = config.get("best_feature") or config.get("feature")
+    if not isinstance(feature, str) or not feature:
+        return None
+    parts = [feature]
+    normalize = config.get("feature_normalize")
+    if normalize is not None:
+        parts.append(f"normalize={normalize}")
+    scale = config.get("hybrid_latent_scale")
+    if scale is not None:
+        parts.append(f"scale={scale}")
+    return parts[0] if len(parts) == 1 else f"{parts[0]}@" + ",".join(parts[1:])
+
+
+def _recommended_command_for_kind(
+    manifest: dict[str, Any],
+    *,
+    target_kind: str | None,
+) -> dict[str, Any]:
+    recommendation = _mapping(manifest.get("recommendation"))
+    if target_kind == "follow_up":
+        return _mapping(recommendation.get("follow_up_command"))
+    if target_kind == "review":
+        return _mapping(recommendation.get("review_command"))
+    return {}
+
+
+def _expected_execution_summary_path(
+    manifest: dict[str, Any],
+    *,
+    target_kind: str | None,
+    execution_next_command: dict[str, Any] | None = None,
+) -> Path | None:
+    if target_kind == "execution_next":
+        run_dir = _path_from(_mapping(execution_next_command).get("default_run_dir"))
+        return run_dir / "summary.json" if run_dir is not None else None
+    command = _recommended_command_for_kind(manifest, target_kind=target_kind)
+    run_dir = _path_from(command.get("default_run_dir"))
+    return run_dir / "summary.json" if run_dir is not None else None
+
+
+def _execution_cwd_for_target(
+    command_dir: Path,
+    command_scripts: dict[str, Any],
+    *,
+    target: str,
+) -> Path:
+    if target == EXECUTION_NEXT_TARGET:
+        return _path_from(command_scripts.get("execution_cwd")) or command_dir
+    return command_dir
+
+
+def _compact_execution_next_command(payload: dict[str, Any]) -> dict[str, Any]:
+    guided_command = _mapping(payload.get("guided_next_follow_up_command"))
+    feature_swap_review_command = _mapping(payload.get("feature_swap_review_command"))
+    next_command = _mapping(payload.get("next_follow_up_command"))
+    if guided_command.get("enabled"):
+        source = "guided_next_follow_up_command"
+        command = guided_command
+    elif feature_swap_review_command:
+        source = "feature_swap_review_command"
+        command = feature_swap_review_command
+    elif next_command:
+        source = "next_follow_up_command"
+        command = next_command
+    else:
+        return {
+            "schema": "st.llm_char_vae_context.command_bundle_execution_next_command.v1",
+            "available": False,
+            "source": None,
+        }
+    seed_policy = _mapping(command.get("seed_confirmation_policy"))
+    return {
+        "schema": "st.llm_char_vae_context.command_bundle_execution_next_command.v1",
+        "available": True,
+        "source": source,
+        "enabled": command.get("enabled"),
+        "action": command.get("action") or command.get("guidance_action"),
+        "guidance_action": command.get("guidance_action"),
+        "trajectory_action": command.get("trajectory_action"),
+        "verdict": command.get("verdict"),
+        "gate_failed": command.get("gate_failed"),
+        "script_path": command.get("script_path"),
+        "script_usage": command.get("script_usage"),
+        "shell_command": command.get("shell_command"),
+        "default_follow_up_from": command.get("default_follow_up_from"),
+        "default_follow_up_fail_on_verdict": command.get(
+            "default_follow_up_fail_on_verdict"
+        ),
+        "default_new_seeds": command.get("default_new_seeds"),
+        "default_new_seed_count": command.get("default_new_seed_count"),
+        "default_run_dir": command.get("default_run_dir"),
+        "used_seed_history": command.get("used_seed_history"),
+        "seed_policy_reason": seed_policy.get("reason"),
+        "tie_seed_boost": seed_policy.get("uncertainty_tie_seed_boost"),
+    }
+
+
+def _compact_execution_summary(path: Path | None) -> dict[str, Any] | None:
+    if path is None:
+        return None
+    summary: dict[str, Any] = {
+        "schema": "st.llm_char_vae_context.command_bundle_execution_summary.v1",
+        "summary_path": str(path),
+        "exists": path.exists(),
+        "valid_json": None,
+        "error": None,
+    }
+    if not path.exists():
+        summary["valid_json"] = False
+        return summary
+    try:
+        payload = _read_json(path)
+    except Exception as exc:  # pragma: no cover - defensive artifact handling.
+        summary["valid_json"] = False
+        summary["error"] = str(exc)
+        return summary
+
+    best_config = _mapping(payload.get("best_config"))
+    follow_up_result = _mapping(payload.get("follow_up_result"))
+    follow_up_gate = _mapping(payload.get("follow_up_gate"))
+    follow_up_guidance = _mapping(payload.get("follow_up_guidance"))
+    follow_up_trajectory = _mapping(payload.get("follow_up_trajectory"))
+    next_command = _mapping(payload.get("next_follow_up_command"))
+    guided_command = _mapping(payload.get("guided_next_follow_up_command"))
+    execution_next_command = _compact_execution_next_command(payload)
+    summary.update(
+        {
+            "exists": True,
+            "valid_json": True,
+            "status": payload.get("status"),
+            "best_feature": payload.get("best_feature") or best_config.get("best_feature"),
+            "best_config_label": _config_label(best_config),
+            "mean_best_nll": best_config.get("mean_best_nll"),
+            "mean_best_nll_delta_vs_raw": best_config.get("mean_best_nll_delta_vs_raw"),
+            "runner_up_feature": best_config.get("runner_up_feature"),
+            "margin_to_runner_up": best_config.get("margin_to_runner_up"),
+            "combined_runner_up_margin_stderr": best_config.get(
+                "combined_runner_up_margin_stderr"
+            ),
+            "runner_up_within_uncertainty": best_config.get(
+                "runner_up_within_uncertainty"
+            ),
+            "follow_up_verdict": follow_up_result.get("verdict")
+            or follow_up_gate.get("effective_verdict"),
+            "follow_up_result_verdict": follow_up_result.get("verdict"),
+            "follow_up_effective_verdict": follow_up_gate.get("effective_verdict"),
+            "follow_up_gate_verdict": follow_up_gate.get("verdict"),
+            "follow_up_gate_failed": follow_up_gate.get("failed"),
+            "follow_up_gate_verdict_basis": follow_up_gate.get("verdict_basis"),
+            "follow_up_fail_on_verdicts": follow_up_gate.get("fail_on_verdicts"),
+            "source_best_feature_retained": follow_up_result.get(
+                "source_best_feature_retained"
+            ),
+            "source_feature_verdict": follow_up_result.get("source_feature_verdict")
+            or follow_up_guidance.get("source_feature_verdict"),
+            "source_feature_raw_verdict": follow_up_result.get(
+                "source_feature_raw_verdict"
+            )
+            or follow_up_guidance.get("source_feature_raw_verdict"),
+            "mean_best_nll_delta_vs_source": follow_up_result.get(
+                "mean_best_nll_delta_vs_source"
+            ),
+            "run_budget_shifted": follow_up_result.get("run_budget_shifted"),
+            "run_budget_shift_keys": follow_up_result.get("run_budget_shift_keys"),
+            "guidance_action": follow_up_guidance.get("action"),
+            "trajectory_action": follow_up_trajectory.get("trajectory_action"),
+            "trajectory_verdict": follow_up_trajectory.get("trajectory_verdict"),
+            "unsafe_promotion": follow_up_guidance.get("unsafe_promotion"),
+            "next_default_new_seeds": next_command.get("default_new_seeds"),
+            "next_default_new_seed_count": next_command.get("default_new_seed_count"),
+            "guided_next_enabled": guided_command.get("enabled"),
+            "guided_default_new_seeds": guided_command.get("default_new_seeds"),
+            "next_command": execution_next_command,
+            "next_command_source": execution_next_command.get("source"),
+            "next_command_available": execution_next_command.get("available"),
+            "next_command_default_new_seeds": execution_next_command.get(
+                "default_new_seeds"
+            ),
+            "next_command_default_run_dir": execution_next_command.get(
+                "default_run_dir"
+            ),
+            "next_command_script_path": execution_next_command.get("script_path"),
+            "used_seed_history": next_command.get("used_seed_history")
+            or guided_command.get("used_seed_history"),
+        }
+    )
+    return summary
+
+
+def _execution_evidence_fields(
+    execution_summary: dict[str, Any] | None,
+    *,
+    selected_execution_next_command: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    summary = _mapping(execution_summary)
+    selected_source = _mapping(selected_execution_next_command).get("source")
+    feature_swap_review_selected = selected_source == "feature_swap_review_command"
+    status: str | None
+    reason: str | None
+    should_continue: bool | None
+    mixed_signal = False
+    if not summary:
+        status = None
+        reason = "not_executed"
+        should_continue = None
+    elif not summary.get("exists"):
+        status = "missing_summary"
+        reason = "expected execution summary was not written"
+        should_continue = False
+    elif not summary.get("valid_json"):
+        status = "invalid_summary"
+        reason = summary.get("error") or "execution summary was not valid JSON"
+        should_continue = False
+    else:
+        result_verdict = summary.get("follow_up_result_verdict")
+        follow_up_verdict = summary.get("follow_up_verdict")
+        effective_verdict = summary.get("follow_up_effective_verdict")
+        guidance_action = summary.get("guidance_action")
+        run_status = summary.get("status")
+        mixed_signal = bool(
+            (follow_up_verdict and effective_verdict and follow_up_verdict != effective_verdict)
+            or (run_status == "improved" and follow_up_verdict not in {None, "improved"})
+        )
+        guidance_text = str(guidance_action or "")
+        if summary.get("follow_up_gate_failed"):
+            status = "gate_failed"
+            reason = "follow-up gate requested stop"
+            should_continue = False
+        elif guidance_text.startswith("review_"):
+            status = "needs_review"
+            reason = guidance_text
+            should_continue = False
+        elif follow_up_verdict in {"regressed", "unknown"}:
+            status = "needs_review"
+            reason = f"follow-up verdict is {follow_up_verdict}"
+            should_continue = False
+        elif guidance_text.startswith("promote_"):
+            status = "promote"
+            reason = guidance_text
+            should_continue = True
+        elif follow_up_verdict == "improved" or effective_verdict == "improved":
+            if feature_swap_review_selected:
+                status = "review_confirmed"
+                reason = "feature-swap review confirmed improvement"
+            else:
+                status = "improved"
+                reason = (
+                    "follow-up verdict is "
+                    f"{result_verdict or follow_up_verdict or effective_verdict}"
+                )
+            should_continue = True
+        else:
+            status = "unknown"
+            reason = "no decisive follow-up evidence"
+            should_continue = False
+    return {
+        "execution_evidence_status": status,
+        "execution_evidence_reason": reason,
+        "execution_evidence_should_continue": should_continue,
+        "execution_evidence_mixed_signal": mixed_signal,
+    }
+
+
+def _event_execution_evidence(event: dict[str, Any]) -> dict[str, Any]:
+    fields = _execution_evidence_fields(
+        _mapping(event.get("execution_summary")),
+        selected_execution_next_command=_mapping(
+            event.get("selected_execution_next_command")
+        ),
+    )
+    for key in fields:
+        if key in event:
+            fields[key] = event.get(key)
+    return fields
+
+
 def _runner_summary(
     *,
     command_dir: Path,
@@ -271,6 +637,12 @@ def _runner_summary(
     dry_run: bool,
     inspection: dict[str, Any],
     returncode: int | None,
+    execution_cwd: Path | None = None,
+    selected_execution_next_command: dict[str, Any] | None = None,
+    selected_script_status: dict[str, Any] | None = None,
+    requested_target: str | None = None,
+    use_history_next_action: bool = False,
+    history_next_action_status: dict[str, Any] | None = None,
     error: str | None = None,
     stdout: str | None = None,
     stderr: str | None = None,
@@ -278,11 +650,16 @@ def _runner_summary(
     finished_at: str | None = None,
     duration_seconds: float | None = None,
     executed: bool = False,
+    history_report_only: bool = False,
 ) -> dict[str, Any]:
+    runner_wrapper_status = _mapping(inspection.get("runner_wrapper_status"))
+    history_status = _mapping(history_next_action_status)
+    history_next_action = _mapping(history_status.get("next_action"))
     return {
         "schema": SCHEMA,
         "command_dir": str(command_dir),
         "manifest_path": str(manifest_path),
+        "requested_target": requested_target or target,
         "target": target,
         "target_kind": target_kind,
         "script_key": script_key,
@@ -295,17 +672,46 @@ def _runner_summary(
         "command_argv": ["bash", str(script_path)]
         if script_path is not None
         else None,
-        "execution_cwd": str(command_dir),
+        "execution_cwd": str(execution_cwd or command_dir),
+        "selected_execution_next_command": (
+            selected_execution_next_command
+            if selected_execution_next_command is not None
+            else None
+        ),
+        "selected_script_status": (
+            selected_script_status if selected_script_status is not None else None
+        ),
+        "use_history_next_action": bool(use_history_next_action),
+        "history_next_action": history_next_action if history_next_action else None,
+        "history_next_action_source": history_status.get("source"),
+        "history_next_action_source_path": history_status.get("source_path"),
+        "history_next_action_resolved_target": history_status.get("resolved_target"),
+        "history_next_action_error": history_status.get("error"),
         "strict": strict,
         "dry_run": dry_run,
         "executed": bool(executed),
+        "history_report_only": bool(history_report_only),
         "started_at": started_at,
         "finished_at": finished_at,
         "duration_seconds": duration_seconds,
+        "expected_execution_summary_path": None,
+        "execution_summary": None,
+        "execution_evidence_status": None,
+        "execution_evidence_reason": None,
+        "execution_evidence_should_continue": None,
+        "execution_evidence_mixed_signal": False,
         "bundle_ready": bool(inspection.get("bundle_ready")),
         "strict_ready": bool(inspection.get("strict_ready")),
         "missing_required": inspection.get("missing_required") or [],
         "missing_optional": inspection.get("missing_optional") or [],
+        "runner_wrapper_status": runner_wrapper_status,
+        "runner_wrapper_ok": runner_wrapper_status.get("ok"),
+        "runner_wrapper_executes_runner_command": runner_wrapper_status.get(
+            "executes_runner_command"
+        ),
+        "runner_wrapper_forwards_arguments": runner_wrapper_status.get(
+            "forwards_arguments"
+        ),
         "inspection": inspection,
         "returncode": returncode,
         "error": error,
@@ -328,22 +734,59 @@ def render_markdown(summary: dict[str, Any]) -> str:
     context = _mapping(summary.get("recommendation_context"))
     champion = _mapping(context.get("champion"))
     fallback = _mapping(context.get("fallback"))
+    selected_execution_next = _mapping(summary.get("selected_execution_next_command"))
+    history_next_action = _mapping(summary.get("history_next_action"))
+    execution_summary = _mapping(summary.get("execution_summary"))
+    execution_next = _mapping(execution_summary.get("next_command"))
     lines = [
         "# Char VAE Command Bundle Runner",
         "",
         f"- command_dir: {_fmt(summary.get('command_dir'))}",
         f"- manifest_path: {_fmt(summary.get('manifest_path'))}",
+        f"- requested_target: {_fmt(summary.get('requested_target'))}",
         f"- target: {_fmt(summary.get('target'))}",
         f"- target_kind: {_fmt(summary.get('target_kind'))}",
         f"- script_key: {_fmt(summary.get('script_key'))}",
         f"- script_path: {_fmt(summary.get('script_path'))}",
         f"- target_script_key: {_fmt(summary.get('target_script_key'))}",
         f"- target_script_path: {_fmt(summary.get('target_script_path'))}",
+        f"- use_history_next_action: {_fmt(summary.get('use_history_next_action'))}",
+        f"- history_next_action: {_fmt(history_next_action.get('action'))}",
+        f"- history_next_action_reason: {_fmt(history_next_action.get('reason'))}",
+        f"- history_next_action_target: {_fmt(history_next_action.get('target'))}",
+        f"- history_next_action_source: {_fmt(summary.get('history_next_action_source'))}",
+        f"- history_next_action_resolved_target: {_fmt(summary.get('history_next_action_resolved_target'))}",
+        f"- history_next_action_error: {_fmt(summary.get('history_next_action_error'))}",
+        (
+            "- selected_execution_next_source: "
+            f"{_fmt(selected_execution_next.get('source'))}"
+        ),
+        (
+            "- selected_execution_next_seeds: "
+            f"{_fmt(selected_execution_next.get('default_new_seeds'))}"
+        ),
+        (
+            "- selected_execution_next_script: "
+            f"{_fmt(selected_execution_next.get('script_path'))}"
+        ),
+        (
+            "- selected_execution_next_run_dir: "
+            f"{_fmt(selected_execution_next.get('default_run_dir'))}"
+        ),
+        (
+            "- selected_script_ok: "
+            f"{_fmt(_mapping(summary.get('selected_script_status')).get('ok'))}"
+        ),
+        (
+            "- selected_script_error: "
+            f"{_fmt(_mapping(summary.get('selected_script_status')).get('error'))}"
+        ),
         f"- command_argv: {_fmt(summary.get('command_argv'))}",
         f"- execution_cwd: {_fmt(summary.get('execution_cwd'))}",
         f"- strict: {_fmt(summary.get('strict'))}",
         f"- dry_run: {_fmt(summary.get('dry_run'))}",
         f"- executed: {_fmt(summary.get('executed'))}",
+        f"- history_report_only: {_fmt(summary.get('history_report_only'))}",
         f"- started_at: {_fmt(summary.get('started_at'))}",
         f"- finished_at: {_fmt(summary.get('finished_at'))}",
         f"- duration_seconds: {_fmt(summary.get('duration_seconds'))}",
@@ -351,6 +794,15 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"- strict_ready: {_fmt(summary.get('strict_ready'))}",
         f"- missing_required: {_fmt(summary.get('missing_required'))}",
         f"- missing_optional: {_fmt(summary.get('missing_optional'))}",
+        f"- runner_wrapper_ok: {_fmt(summary.get('runner_wrapper_ok'))}",
+        (
+            "- runner_wrapper_executes_runner_command: "
+            f"{_fmt(summary.get('runner_wrapper_executes_runner_command'))}"
+        ),
+        (
+            "- runner_wrapper_forwards_arguments: "
+            f"{_fmt(summary.get('runner_wrapper_forwards_arguments'))}"
+        ),
         f"- run_json_path: {_fmt(summary.get('run_json_path'))}",
         f"- run_markdown_path: {_fmt(summary.get('run_markdown_path'))}",
         f"- run_history_jsonl_path: {_fmt(summary.get('run_history_jsonl_path'))}",
@@ -379,6 +831,77 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"- review_command_source: {_fmt(context.get('review_command_source'))}",
         f"- chain_sources: {_fmt(context.get('chain_sources'))}",
         "",
+        "## Execution Summary",
+        "",
+        (
+            "- expected_summary_path: "
+            f"{_fmt(summary.get('expected_execution_summary_path'))}"
+        ),
+        f"- summary_exists: {_fmt(execution_summary.get('exists'))}",
+        f"- summary_valid_json: {_fmt(execution_summary.get('valid_json'))}",
+        f"- summary_error: {_fmt(execution_summary.get('error'))}",
+        f"- execution_status: {_fmt(execution_summary.get('status'))}",
+        f"- execution_best_config: {_fmt(execution_summary.get('best_config_label'))}",
+        f"- execution_best_feature: {_fmt(execution_summary.get('best_feature'))}",
+        f"- execution_mean_best_nll: {_fmt(execution_summary.get('mean_best_nll'))}",
+        (
+            "- execution_delta_vs_raw: "
+            f"{_fmt(execution_summary.get('mean_best_nll_delta_vs_raw'))}"
+        ),
+        f"- execution_runner_up: {_fmt(execution_summary.get('runner_up_feature'))}",
+        f"- execution_margin: {_fmt(execution_summary.get('margin_to_runner_up'))}",
+        (
+            "- execution_margin_stderr: "
+            f"{_fmt(execution_summary.get('combined_runner_up_margin_stderr'))}"
+        ),
+        (
+            "- execution_follow_up_verdict: "
+            f"{_fmt(execution_summary.get('follow_up_verdict'))}"
+        ),
+        (
+            "- execution_effective_verdict: "
+            f"{_fmt(execution_summary.get('follow_up_effective_verdict'))}"
+        ),
+        (
+            "- execution_gate_verdict_basis: "
+            f"{_fmt(execution_summary.get('follow_up_gate_verdict_basis'))}"
+        ),
+        (
+            "- execution_gate_failed: "
+            f"{_fmt(execution_summary.get('follow_up_gate_failed'))}"
+        ),
+        (
+            "- execution_source_feature_verdict: "
+            f"{_fmt(execution_summary.get('source_feature_verdict'))}"
+        ),
+        (
+            "- execution_source_feature_raw_verdict: "
+            f"{_fmt(execution_summary.get('source_feature_raw_verdict'))}"
+        ),
+        f"- execution_run_budget_shifted: {_fmt(execution_summary.get('run_budget_shifted'))}",
+        (
+            "- execution_run_budget_shift_keys: "
+            f"{_fmt(execution_summary.get('run_budget_shift_keys'))}"
+        ),
+        f"- execution_evidence_status: {_fmt(summary.get('execution_evidence_status'))}",
+        f"- execution_evidence_reason: {_fmt(summary.get('execution_evidence_reason'))}",
+        (
+            "- execution_evidence_should_continue: "
+            f"{_fmt(summary.get('execution_evidence_should_continue'))}"
+        ),
+        (
+            "- execution_evidence_mixed_signal: "
+            f"{_fmt(summary.get('execution_evidence_mixed_signal'))}"
+        ),
+        f"- execution_guidance_action: {_fmt(execution_summary.get('guidance_action'))}",
+        f"- execution_next_seeds: {_fmt(execution_summary.get('next_default_new_seeds'))}",
+        f"- execution_next_command_source: {_fmt(execution_next.get('source'))}",
+        f"- execution_next_command_available: {_fmt(execution_next.get('available'))}",
+        f"- execution_next_command_seeds: {_fmt(execution_next.get('default_new_seeds'))}",
+        f"- execution_next_command_run_dir: {_fmt(execution_next.get('default_run_dir'))}",
+        f"- execution_next_command_script: {_fmt(execution_next.get('script_path'))}",
+        f"- execution_next_command_usage: {_fmt(execution_next.get('script_usage'))}",
+        "",
     ]
     return "\n".join(lines)
 
@@ -393,6 +916,14 @@ def _history_event(summary: dict[str, Any]) -> dict[str, Any]:
         "script_path",
         "target_script_key",
         "target_script_path",
+        "requested_target",
+        "use_history_next_action",
+        "history_next_action",
+        "history_next_action_source",
+        "history_next_action_source_path",
+        "history_next_action_resolved_target",
+        "history_next_action_error",
+        "selected_script_status",
         "command_argv",
         "execution_cwd",
         "strict",
@@ -405,6 +936,10 @@ def _history_event(summary: dict[str, Any]) -> dict[str, Any]:
         "strict_ready",
         "missing_required",
         "missing_optional",
+        "runner_wrapper_status",
+        "runner_wrapper_ok",
+        "runner_wrapper_executes_runner_command",
+        "runner_wrapper_forwards_arguments",
         "returncode",
         "error",
         "run_json_path",
@@ -413,6 +948,13 @@ def _history_event(summary: dict[str, Any]) -> dict[str, Any]:
         "run_history_markdown_path",
         "run_history_summary_path",
         "recommendation_context",
+        "expected_execution_summary_path",
+        "selected_execution_next_command",
+        "execution_summary",
+        "execution_evidence_status",
+        "execution_evidence_reason",
+        "execution_evidence_should_continue",
+        "execution_evidence_mixed_signal",
     )
     event = {
         "schema": "st.llm_char_vae_context.command_bundle_run_history_event.v1",
@@ -442,6 +984,59 @@ def _read_history_events(history_out: Path) -> list[dict[str, Any]]:
     return events
 
 
+def _execution_next_command_from_history(
+    command_dir: Path,
+    command_scripts: dict[str, Any],
+) -> dict[str, Any]:
+    history_path = _configured_run_history_path(command_dir, command_scripts)
+    try:
+        events = _read_history_events(history_path)
+    except Exception:
+        return {}
+    for event in reversed(events):
+        next_command = _execution_next_command_from_report(event)
+        if next_command.get("script_path"):
+            return next_command
+    return {}
+
+
+def _history_next_action_status(
+    command_dir: Path,
+    command_scripts: dict[str, Any],
+) -> dict[str, Any]:
+    history_path = _configured_run_history_path(command_dir, command_scripts)
+    status: dict[str, Any] = {
+        "schema": "st.llm_char_vae_context.command_bundle_history_next_action_status.v1",
+        "source": "run_history_jsonl",
+        "source_path": str(history_path),
+        "next_action": None,
+        "resolved_target": None,
+        "error": None,
+    }
+    try:
+        events = _read_history_events(history_path)
+        summary = summarize_history_events(events, history_jsonl_path=history_path)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        status["error"] = str(exc)
+        return status
+
+    next_action = _mapping(summary.get("next_action"))
+    status["next_action"] = next_action if next_action else None
+    if not next_action:
+        status["error"] = "run history did not expose a next action"
+        return status
+    if next_action.get("should_continue") is not True:
+        reason = next_action.get("reason") or next_action.get("action")
+        status["error"] = f"history next action does not allow continuation: {reason}"
+        return status
+    target = next_action.get("target")
+    if target not in TARGET_KEYS:
+        status["error"] = f"history next action target is not runnable: {target}"
+        return status
+    status["resolved_target"] = target
+    return status
+
+
 def _event_status(event: dict[str, Any]) -> str:
     if event.get("dry_run") and event.get("returncode") == 0:
         return "dry-run"
@@ -462,6 +1057,10 @@ def _count_values(values: list[Any]) -> dict[str, int]:
             continue
         counts[key] = counts.get(key, 0) + 1
     return counts
+
+
+def _bool_count_values(values: list[Any]) -> dict[str, int]:
+    return _count_values([_fmt(value) for value in values if isinstance(value, bool)])
 
 
 def _fmt_counts(counts: dict[str, int]) -> str:
@@ -498,6 +1097,98 @@ def _fmt_streak(status: str | None, count: int) -> str:
     return f"{status}:{count}"
 
 
+def _history_next_action(
+    latest: dict[str, Any],
+    latest_evidence: dict[str, Any],
+    latest_execution_next: dict[str, Any],
+) -> dict[str, Any]:
+    if not latest:
+        return {
+            "schema": "st.llm_char_vae_context.command_bundle_history_next_action.v1",
+            "action": "run_recommended_next",
+            "reason": "no run history exists yet",
+            "target": "next",
+            "command_source": None,
+            "script_path": None,
+            "default_new_seeds": None,
+            "should_continue": True,
+        }
+    status = _event_status(latest)
+    if status == "dry-run":
+        return {
+            "schema": "st.llm_char_vae_context.command_bundle_history_next_action.v1",
+            "action": "execute_selected_target",
+            "reason": "latest run was a dry-run",
+            "target": latest.get("target"),
+            "command_source": _mapping(
+                latest.get("selected_execution_next_command")
+            ).get("source"),
+            "script_path": latest.get("script_path"),
+            "default_new_seeds": _mapping(
+                latest.get("selected_execution_next_command")
+            ).get("default_new_seeds"),
+            "should_continue": True,
+        }
+    if status in {"blocked", "failed"}:
+        return {
+            "schema": "st.llm_char_vae_context.command_bundle_history_next_action.v1",
+            "action": "repair_blocker",
+            "reason": latest.get("error") or f"latest run status is {status}",
+            "target": None,
+            "command_source": None,
+            "script_path": latest.get("script_path"),
+            "default_new_seeds": None,
+            "should_continue": False,
+        }
+    should_continue = latest_evidence.get("execution_evidence_should_continue")
+    if should_continue is False:
+        return {
+            "schema": "st.llm_char_vae_context.command_bundle_history_next_action.v1",
+            "action": "review_before_continuing",
+            "reason": latest_evidence.get("execution_evidence_reason")
+            or "execution evidence requested review",
+            "target": None,
+            "command_source": latest_execution_next.get("source"),
+            "script_path": latest_execution_next.get("script_path"),
+            "default_new_seeds": latest_execution_next.get("default_new_seeds"),
+            "should_continue": False,
+        }
+    if should_continue is True:
+        if latest_execution_next.get("script_path"):
+            return {
+                "schema": (
+                    "st.llm_char_vae_context.command_bundle_history_next_action.v1"
+                ),
+                "action": "run_execution_next",
+                "reason": "latest execution summary exposes a next command",
+                "target": EXECUTION_NEXT_TARGET,
+                "command_source": latest_execution_next.get("source"),
+                "script_path": latest_execution_next.get("script_path"),
+                "default_new_seeds": latest_execution_next.get("default_new_seeds"),
+                "should_continue": True,
+            }
+        return {
+            "schema": "st.llm_char_vae_context.command_bundle_history_next_action.v1",
+            "action": "collect_next_command",
+            "reason": "latest execution can continue but has no next script",
+            "target": None,
+            "command_source": latest_execution_next.get("source"),
+            "script_path": None,
+            "default_new_seeds": latest_execution_next.get("default_new_seeds"),
+            "should_continue": False,
+        }
+    return {
+        "schema": "st.llm_char_vae_context.command_bundle_history_next_action.v1",
+        "action": "inspect_history",
+        "reason": "latest run has no decisive execution evidence",
+        "target": "history-report-only",
+        "command_source": latest_execution_next.get("source"),
+        "script_path": latest_execution_next.get("script_path"),
+        "default_new_seeds": latest_execution_next.get("default_new_seeds"),
+        "should_continue": False,
+    }
+
+
 def summarize_history_events(
     events: list[dict[str, Any]],
     *,
@@ -509,11 +1200,52 @@ def summarize_history_events(
     latest = events[-1] if events else {}
     latest_context = _mapping(latest.get("recommendation_context"))
     latest_champion = _mapping(latest_context.get("champion"))
+    latest_selected_execution_next = _mapping(
+        latest.get("selected_execution_next_command")
+    )
+    latest_execution = _mapping(latest.get("execution_summary"))
+    latest_execution_next = _mapping(latest_execution.get("next_command"))
+    latest_evidence = _event_execution_evidence(latest)
     status_counts = _count_values([_event_status(event) for event in events])
     target_kind_counts = _count_values([event.get("target_kind") for event in events])
+    runner_wrapper_ok_counts = _bool_count_values(
+        [event.get("runner_wrapper_ok") for event in events]
+    )
     action_counts = _count_values(
         [
             _mapping(event.get("recommendation_context")).get("action")
+            for event in events
+        ]
+    )
+    execution_verdict_counts = _count_values(
+        [
+            _mapping(event.get("execution_summary")).get("follow_up_verdict")
+            for event in events
+        ]
+    )
+    execution_guidance_action_counts = _count_values(
+        [
+            _mapping(event.get("execution_summary")).get("guidance_action")
+            for event in events
+        ]
+    )
+    execution_evidence_status_counts = _count_values(
+        [
+            _event_execution_evidence(event).get("execution_evidence_status")
+            for event in events
+        ]
+    )
+    execution_next_source_counts = _count_values(
+        [
+            _mapping(_mapping(event.get("execution_summary")).get("next_command")).get(
+                "source"
+            )
+            for event in events
+        ]
+    )
+    selected_execution_next_source_counts = _count_values(
+        [
+            _mapping(event.get("selected_execution_next_command")).get("source")
             for event in events
         ]
     )
@@ -523,9 +1255,28 @@ def summarize_history_events(
         latest_executed.get("recommendation_context") if latest_executed else None
     )
     latest_executed_champion = _mapping(latest_executed_context.get("champion"))
+    latest_executed_selected_execution_next = _mapping(
+        latest_executed.get("selected_execution_next_command")
+        if latest_executed
+        else None
+    )
+    latest_executed_execution = _mapping(
+        latest_executed.get("execution_summary") if latest_executed else None
+    )
+    latest_executed_execution_next = _mapping(
+        latest_executed_execution.get("next_command")
+    )
+    latest_executed_evidence = (
+        _event_execution_evidence(latest_executed) if latest_executed else {}
+    )
     last_problem = _latest_event(
         events,
         lambda event: _event_status(event) in {"blocked", "failed"},
+    )
+    next_action = _history_next_action(
+        latest,
+        latest_evidence,
+        latest_execution_next,
     )
     return {
         "schema": "st.llm_char_vae_context.command_bundle_run_history_summary.v1",
@@ -542,11 +1293,55 @@ def summarize_history_events(
             "target_kind": latest.get("target_kind"),
             "recommendation_action": latest_context.get("action"),
             "champion_config": latest_champion.get("config"),
+            "runner_wrapper_ok": latest.get("runner_wrapper_ok"),
+            "runner_wrapper_executes_runner_command": latest.get(
+                "runner_wrapper_executes_runner_command"
+            ),
+            "execution_summary_path": latest_execution.get("summary_path"),
+            "execution_verdict": latest_execution.get("follow_up_verdict"),
+            "execution_effective_verdict": latest_execution.get(
+                "follow_up_effective_verdict"
+            ),
+            "execution_best_config": latest_execution.get("best_config_label"),
+            "execution_guidance_action": latest_execution.get("guidance_action"),
+            "execution_evidence_status": latest_evidence.get(
+                "execution_evidence_status"
+            ),
+            "execution_evidence_reason": latest_evidence.get(
+                "execution_evidence_reason"
+            ),
+            "execution_evidence_should_continue": latest_evidence.get(
+                "execution_evidence_should_continue"
+            ),
+            "execution_evidence_mixed_signal": latest_evidence.get(
+                "execution_evidence_mixed_signal"
+            ),
+            "execution_next_source": latest_execution_next.get("source"),
+            "execution_next_seeds": latest_execution_next.get("default_new_seeds"),
+            "execution_next_script_path": latest_execution_next.get("script_path"),
+            "selected_execution_next_source": latest_selected_execution_next.get(
+                "source"
+            ),
+            "selected_execution_next_seeds": latest_selected_execution_next.get(
+                "default_new_seeds"
+            ),
+            "selected_execution_next_script_path": latest_selected_execution_next.get(
+                "script_path"
+            ),
         },
+        "next_action": next_action,
         "signals": {
             "status_counts": status_counts,
             "target_kind_counts": target_kind_counts,
+            "runner_wrapper_ok_counts": runner_wrapper_ok_counts,
             "recommendation_action_counts": action_counts,
+            "execution_verdict_counts": execution_verdict_counts,
+            "execution_guidance_action_counts": execution_guidance_action_counts,
+            "execution_evidence_status_counts": execution_evidence_status_counts,
+            "execution_next_source_counts": execution_next_source_counts,
+            "selected_execution_next_source_counts": (
+                selected_execution_next_source_counts
+            ),
             "current_status_streak": {
                 "status": current_status,
                 "count": current_status_count,
@@ -560,6 +1355,47 @@ def summarize_history_events(
                 ),
                 "recommendation_action": latest_executed_context.get("action"),
                 "champion_config": latest_executed_champion.get("config"),
+                "execution_summary_path": latest_executed_execution.get("summary_path"),
+                "execution_verdict": latest_executed_execution.get(
+                    "follow_up_verdict"
+                ),
+                "execution_effective_verdict": latest_executed_execution.get(
+                    "follow_up_effective_verdict"
+                ),
+                "execution_best_config": latest_executed_execution.get(
+                    "best_config_label"
+                ),
+                "execution_guidance_action": latest_executed_execution.get(
+                    "guidance_action"
+                ),
+                "execution_evidence_status": latest_executed_evidence.get(
+                    "execution_evidence_status"
+                ),
+                "execution_evidence_reason": latest_executed_evidence.get(
+                    "execution_evidence_reason"
+                ),
+                "execution_evidence_should_continue": latest_executed_evidence.get(
+                    "execution_evidence_should_continue"
+                ),
+                "execution_evidence_mixed_signal": latest_executed_evidence.get(
+                    "execution_evidence_mixed_signal"
+                ),
+                "execution_next_source": latest_executed_execution_next.get("source"),
+                "execution_next_seeds": latest_executed_execution_next.get(
+                    "default_new_seeds"
+                ),
+                "execution_next_script_path": latest_executed_execution_next.get(
+                    "script_path"
+                ),
+                "selected_execution_next_source": (
+                    latest_executed_selected_execution_next.get("source")
+                ),
+                "selected_execution_next_seeds": (
+                    latest_executed_selected_execution_next.get("default_new_seeds")
+                ),
+                "selected_execution_next_script_path": (
+                    latest_executed_selected_execution_next.get("script_path")
+                ),
             },
             "last_problem": {
                 "status": _event_status(last_problem) if last_problem else None,
@@ -584,6 +1420,7 @@ def render_history_markdown(
 ) -> str:
     summary = summarize_history_events(events, history_jsonl_path=history_jsonl_path)
     latest = _mapping(summary.get("latest"))
+    next_action = _mapping(summary.get("next_action"))
     signals = _mapping(summary.get("signals"))
     status_streak = _mapping(signals.get("current_status_streak"))
     latest_executed = _mapping(signals.get("latest_executed"))
@@ -597,23 +1434,157 @@ def render_history_markdown(
         f"- failure_count: {summary.get('failure_count')}",
         f"- dry_run_count: {summary.get('dry_run_count')}",
         f"- executed_count: {summary.get('executed_count')}",
+        f"- next_action: {_fmt(next_action.get('action'))}",
+        f"- next_action_reason: {_fmt(next_action.get('reason'))}",
+        f"- next_action_target: {_fmt(next_action.get('target'))}",
+        f"- next_action_command_source: {_fmt(next_action.get('command_source'))}",
+        f"- next_action_script_path: {_fmt(next_action.get('script_path'))}",
+        f"- next_action_default_new_seeds: {_fmt(next_action.get('default_new_seeds'))}",
+        f"- next_action_should_continue: {_fmt(next_action.get('should_continue'))}",
         f"- latest_started_at: {_fmt(latest.get('started_at'))}",
         f"- latest_finished_at: {_fmt(latest.get('finished_at'))}",
         f"- latest_status: {_fmt(latest.get('status'))}",
         f"- latest_target_kind: {_fmt(latest.get('target_kind'))}",
         f"- latest_recommendation_action: {_fmt(latest.get('recommendation_action'))}",
         f"- latest_champion_config: {_fmt(latest.get('champion_config'))}",
+        f"- latest_runner_wrapper_ok: {_fmt(latest.get('runner_wrapper_ok'))}",
+        (
+            "- latest_runner_wrapper_executes_runner_command: "
+            f"{_fmt(latest.get('runner_wrapper_executes_runner_command'))}"
+        ),
+        f"- latest_execution_verdict: {_fmt(latest.get('execution_verdict'))}",
+        f"- latest_execution_best_config: {_fmt(latest.get('execution_best_config'))}",
+        (
+            "- latest_execution_guidance_action: "
+            f"{_fmt(latest.get('execution_guidance_action'))}"
+        ),
+        f"- latest_execution_next_source: {_fmt(latest.get('execution_next_source'))}",
+        f"- latest_execution_next_seeds: {_fmt(latest.get('execution_next_seeds'))}",
+        (
+            "- latest_execution_evidence_status: "
+            f"{_fmt(latest.get('execution_evidence_status'))}"
+        ),
+        (
+            "- latest_execution_evidence_reason: "
+            f"{_fmt(latest.get('execution_evidence_reason'))}"
+        ),
+        (
+            "- latest_execution_evidence_should_continue: "
+            f"{_fmt(latest.get('execution_evidence_should_continue'))}"
+        ),
+        (
+            "- latest_execution_evidence_mixed_signal: "
+            f"{_fmt(latest.get('execution_evidence_mixed_signal'))}"
+        ),
+        (
+            "- latest_execution_next_script_path: "
+            f"{_fmt(latest.get('execution_next_script_path'))}"
+        ),
+        (
+            "- latest_selected_execution_next_source: "
+            f"{_fmt(latest.get('selected_execution_next_source'))}"
+        ),
+        (
+            "- latest_selected_execution_next_seeds: "
+            f"{_fmt(latest.get('selected_execution_next_seeds'))}"
+        ),
+        (
+            "- latest_selected_execution_next_script_path: "
+            f"{_fmt(latest.get('selected_execution_next_script_path'))}"
+        ),
         "",
         "## Decision Signals",
         "",
         f"- status_counts: {_fmt_counts(_mapping(signals.get('status_counts')))}",
         f"- target_kind_counts: {_fmt_counts(_mapping(signals.get('target_kind_counts')))}",
-        f"- recommendation_action_counts: {_fmt_counts(_mapping(signals.get('recommendation_action_counts')))}",
-        f"- current_status_streak: {_fmt_streak(status_streak.get('status'), int(status_streak.get('count') or 0))}",
+        (
+            "- runner_wrapper_ok_counts: "
+            f"{_fmt_counts(_mapping(signals.get('runner_wrapper_ok_counts')))}"
+        ),
+        (
+            "- recommendation_action_counts: "
+            f"{_fmt_counts(_mapping(signals.get('recommendation_action_counts')))}"
+        ),
+        (
+            "- execution_verdict_counts: "
+            f"{_fmt_counts(_mapping(signals.get('execution_verdict_counts')))}"
+        ),
+        (
+            "- execution_guidance_action_counts: "
+            f"{_fmt_counts(_mapping(signals.get('execution_guidance_action_counts')))}"
+        ),
+        (
+            "- execution_evidence_status_counts: "
+            f"{_fmt_counts(_mapping(signals.get('execution_evidence_status_counts')))}"
+        ),
+        (
+            "- execution_next_source_counts: "
+            f"{_fmt_counts(_mapping(signals.get('execution_next_source_counts')))}"
+        ),
+        (
+            "- selected_execution_next_source_counts: "
+            f"{_fmt_counts(_mapping(signals.get('selected_execution_next_source_counts')))}"
+        ),
+        (
+            "- current_status_streak: "
+            f"{_fmt_streak(status_streak.get('status'), int(status_streak.get('count') or 0))}"
+        ),
         f"- latest_executed_status: {_fmt(latest_executed.get('status'))}",
         f"- latest_executed_finished_at: {_fmt(latest_executed.get('finished_at'))}",
         f"- latest_executed_action: {_fmt(latest_executed.get('recommendation_action'))}",
         f"- latest_executed_champion_config: {_fmt(latest_executed.get('champion_config'))}",
+        (
+            "- latest_executed_execution_verdict: "
+            f"{_fmt(latest_executed.get('execution_verdict'))}"
+        ),
+        (
+            "- latest_executed_execution_best_config: "
+            f"{_fmt(latest_executed.get('execution_best_config'))}"
+        ),
+        (
+            "- latest_executed_execution_guidance_action: "
+            f"{_fmt(latest_executed.get('execution_guidance_action'))}"
+        ),
+        (
+            "- latest_executed_execution_evidence_status: "
+            f"{_fmt(latest_executed.get('execution_evidence_status'))}"
+        ),
+        (
+            "- latest_executed_execution_evidence_reason: "
+            f"{_fmt(latest_executed.get('execution_evidence_reason'))}"
+        ),
+        (
+            "- latest_executed_execution_evidence_should_continue: "
+            f"{_fmt(latest_executed.get('execution_evidence_should_continue'))}"
+        ),
+        (
+            "- latest_executed_execution_evidence_mixed_signal: "
+            f"{_fmt(latest_executed.get('execution_evidence_mixed_signal'))}"
+        ),
+        (
+            "- latest_executed_execution_next_source: "
+            f"{_fmt(latest_executed.get('execution_next_source'))}"
+        ),
+        (
+            "- latest_executed_execution_next_seeds: "
+            f"{_fmt(latest_executed.get('execution_next_seeds'))}"
+        ),
+        (
+            "- latest_executed_execution_next_script_path: "
+            f"{_fmt(latest_executed.get('execution_next_script_path'))}"
+        ),
+        (
+            "- latest_executed_selected_execution_next_source: "
+            f"{_fmt(latest_executed.get('selected_execution_next_source'))}"
+        ),
+        (
+            "- latest_executed_selected_execution_next_seeds: "
+            f"{_fmt(latest_executed.get('selected_execution_next_seeds'))}"
+        ),
+        (
+            "- latest_executed_selected_execution_next_script_path: "
+            f"{_fmt(latest_executed.get('selected_execution_next_script_path'))}"
+        ),
         f"- last_problem_status: {_fmt(last_problem.get('status'))}",
         f"- last_problem_error: {_fmt(last_problem.get('error'))}",
         f"- last_problem_missing_required: {_fmt(last_problem.get('missing_required'))}",
@@ -621,12 +1592,17 @@ def render_history_markdown(
         "## Recent Events",
         "",
         "| # | status | target | kind | dry_run | executed | returncode | "
-        "started_at | duration_seconds | action | champion |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "started_at | duration_seconds | action | champion | exec_verdict | "
+        "evidence | mixed | exec_best | next_seeds |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | "
+        "--- | --- | --- | --- | --- |",
     ]
     for index, event in enumerate(events[-10:], max(1, len(events) - 9)):
         context = _mapping(event.get("recommendation_context"))
         champion = _mapping(context.get("champion"))
+        execution_summary = _mapping(event.get("execution_summary"))
+        execution_next = _mapping(execution_summary.get("next_command"))
+        evidence = _event_execution_evidence(event)
         row = [
             index,
             _event_status(event),
@@ -639,6 +1615,11 @@ def render_history_markdown(
             event.get("duration_seconds"),
             context.get("action"),
             champion.get("config"),
+            execution_summary.get("follow_up_verdict"),
+            evidence.get("execution_evidence_status"),
+            evidence.get("execution_evidence_mixed_signal"),
+            execution_summary.get("best_config_label"),
+            execution_next.get("default_new_seeds"),
         ]
         lines.append("| " + " | ".join(_md_cell(value) for value in row) + " |")
     lines.append("")
@@ -712,6 +1693,8 @@ def run_bundle(
     write_run_report: bool,
     append_run_history: bool,
     write_run_history_report: bool,
+    history_report_only: bool = False,
+    use_history_next_action: bool = False,
     json_out: Path | None = None,
     markdown_out: Path | None = None,
 ) -> tuple[int, dict[str, Any]]:
@@ -729,17 +1712,62 @@ def run_bundle(
     manifest_path = command_dir / "recommendation.json"
     manifest = _read_json(manifest_path)
     command_scripts = _command_scripts(manifest)
-    script_key, script_path = _selected_script(command_scripts, target=target)
+    requested_target = target
+    history_next_action_status = (
+        _history_next_action_status(command_dir, command_scripts)
+        if use_history_next_action
+        else {}
+    )
+    if use_history_next_action and not history_next_action_status.get("error"):
+        resolved_target = history_next_action_status.get("resolved_target")
+        if isinstance(resolved_target, str) and resolved_target:
+            target = resolved_target
+    history_next_action_fields = {
+        "requested_target": requested_target,
+        "use_history_next_action": use_history_next_action,
+        "history_next_action_status": history_next_action_status,
+    }
+    previous_run_report = _previous_run_report(command_dir, command_scripts)
+    execution_next_command = _execution_next_command_from_report(previous_run_report)
+    if target == EXECUTION_NEXT_TARGET and not execution_next_command:
+        execution_next_command = _execution_next_command_from_history(
+            command_dir,
+            command_scripts,
+        )
+    selected_execution_next_command = (
+        execution_next_command if target == EXECUTION_NEXT_TARGET else None
+    )
+    script_key, script_path = _selected_script(
+        command_scripts,
+        target=target,
+        execution_next_command=execution_next_command,
+        previous_run_report=previous_run_report,
+    )
     target_details = _target_details(
         command_scripts,
         target=target,
         script_key=script_key,
         script_path=script_path,
     )
+    selected_script_status = _selected_execution_next_script_status(
+        target=target,
+        script_path=script_path,
+        strict=strict,
+    )
+    execution_cwd = _execution_cwd_for_target(
+        command_dir,
+        command_scripts,
+        target=target,
+    )
     recommendation_context = _recommendation_context(
         manifest,
         command_scripts,
         target_kind=target_details.get("target_kind"),
+    )
+    expected_summary_path = _expected_execution_summary_path(
+        manifest,
+        target_kind=target_details.get("target_kind"),
+        execution_next_command=execution_next_command,
     )
     json_out, markdown_out = _run_report_paths(
         command_dir,
@@ -774,6 +1802,124 @@ def run_bundle(
             command_scripts,
         )
     required_ready = bool(inspection.get("strict_ready" if strict else "bundle_ready"))
+
+    def finish(
+        summary: dict[str, Any],
+        *,
+        append_history: bool = append_run_history,
+    ) -> dict[str, Any]:
+        summary = dict(summary)
+        summary["expected_execution_summary_path"] = (
+            str(expected_summary_path) if expected_summary_path is not None else None
+        )
+        summary["execution_summary"] = (
+            _compact_execution_summary(expected_summary_path)
+            if summary.get("executed")
+            else None
+        )
+        summary.update(
+            _execution_evidence_fields(
+                summary.get("execution_summary"),
+                selected_execution_next_command=summary.get(
+                    "selected_execution_next_command"
+                ),
+            )
+        )
+        summary = write_run_artifacts(
+            summary,
+            json_out=json_out,
+            markdown_out=markdown_out,
+            history_out=history_out,
+            history_markdown_out=history_markdown_out,
+            history_summary_out=history_summary_out,
+            append_history=append_history,
+        )
+        if not write_inspection_report:
+            return summary
+        refreshed_inspection = inspector.inspect_bundle(command_dir)
+        refreshed_inspection = _write_inspection_report(
+            inspector,
+            command_dir,
+            refreshed_inspection,
+            command_scripts,
+        )
+        summary = dict(summary)
+        summary["bundle_ready"] = bool(refreshed_inspection.get("bundle_ready"))
+        summary["strict_ready"] = bool(refreshed_inspection.get("strict_ready"))
+        summary["missing_required"] = (
+            refreshed_inspection.get("missing_required") or []
+        )
+        summary["missing_optional"] = (
+            refreshed_inspection.get("missing_optional") or []
+        )
+        runner_wrapper_status = _mapping(
+            refreshed_inspection.get("runner_wrapper_status")
+        )
+        summary["runner_wrapper_status"] = runner_wrapper_status
+        summary["runner_wrapper_ok"] = runner_wrapper_status.get("ok")
+        summary["runner_wrapper_executes_runner_command"] = (
+            runner_wrapper_status.get("executes_runner_command")
+        )
+        summary["runner_wrapper_forwards_arguments"] = runner_wrapper_status.get(
+            "forwards_arguments"
+        )
+        summary["inspection"] = refreshed_inspection
+        return write_run_artifacts(
+            summary,
+            json_out=json_out,
+            markdown_out=markdown_out,
+            history_out=history_out,
+            history_markdown_out=history_markdown_out,
+            history_summary_out=history_summary_out,
+            append_history=False,
+        )
+
+    if history_report_only:
+        summary = _runner_summary(
+            command_dir=command_dir,
+            manifest_path=manifest_path,
+            target=target,
+            script_key=script_key,
+            script_path=script_path,
+            **target_details,
+            recommendation_context=recommendation_context,
+            execution_cwd=execution_cwd,
+            selected_execution_next_command=selected_execution_next_command,
+            selected_script_status=selected_script_status,
+            **history_next_action_fields,
+            strict=strict,
+            dry_run=dry_run,
+            inspection=inspection,
+            returncode=0,
+            history_report_only=True,
+            **timing_fields(),
+        )
+        summary = finish(summary, append_history=False)
+        return 0, summary
+
+    if use_history_next_action and history_next_action_status.get("error"):
+        summary = _runner_summary(
+            command_dir=command_dir,
+            manifest_path=manifest_path,
+            target=target,
+            script_key=script_key,
+            script_path=script_path,
+            **target_details,
+            recommendation_context=recommendation_context,
+            execution_cwd=execution_cwd,
+            selected_execution_next_command=selected_execution_next_command,
+            selected_script_status=selected_script_status,
+            **history_next_action_fields,
+            strict=strict,
+            dry_run=dry_run,
+            inspection=inspection,
+            returncode=1,
+            error=history_next_action_status.get("error"),
+            **timing_fields(),
+        )
+        summary = finish(summary, append_history=False)
+        return 1, summary
+
     if not required_ready:
         summary = _runner_summary(
             command_dir=command_dir,
@@ -783,6 +1929,10 @@ def run_bundle(
             script_path=script_path,
             **target_details,
             recommendation_context=recommendation_context,
+            execution_cwd=execution_cwd,
+            selected_execution_next_command=selected_execution_next_command,
+            selected_script_status=selected_script_status,
+            **history_next_action_fields,
             strict=strict,
             dry_run=dry_run,
             inspection=inspection,
@@ -790,15 +1940,7 @@ def run_bundle(
             error="command bundle did not pass the requested inspection gate",
             **timing_fields(),
         )
-        summary = write_run_artifacts(
-            summary,
-            json_out=json_out,
-            markdown_out=markdown_out,
-            history_out=history_out,
-            history_markdown_out=history_markdown_out,
-            history_summary_out=history_summary_out,
-            append_history=append_run_history,
-        )
+        summary = finish(summary)
         return 1, summary
     if script_path is None:
         summary = _runner_summary(
@@ -809,6 +1951,10 @@ def run_bundle(
             script_path=script_path,
             **target_details,
             recommendation_context=recommendation_context,
+            execution_cwd=execution_cwd,
+            selected_execution_next_command=selected_execution_next_command,
+            selected_script_status=selected_script_status,
+            **history_next_action_fields,
             strict=strict,
             dry_run=dry_run,
             inspection=inspection,
@@ -816,15 +1962,30 @@ def run_bundle(
             error=f"manifest does not declare {script_key}",
             **timing_fields(),
         )
-        summary = write_run_artifacts(
-            summary,
-            json_out=json_out,
-            markdown_out=markdown_out,
-            history_out=history_out,
-            history_markdown_out=history_markdown_out,
-            history_summary_out=history_summary_out,
-            append_history=append_run_history,
+        summary = finish(summary)
+        return 1, summary
+    if selected_script_status is not None and not selected_script_status.get("ok"):
+        summary = _runner_summary(
+            command_dir=command_dir,
+            manifest_path=manifest_path,
+            target=target,
+            script_key=script_key,
+            script_path=script_path,
+            **target_details,
+            recommendation_context=recommendation_context,
+            execution_cwd=execution_cwd,
+            selected_execution_next_command=selected_execution_next_command,
+            selected_script_status=selected_script_status,
+            **history_next_action_fields,
+            strict=strict,
+            dry_run=dry_run,
+            inspection=inspection,
+            returncode=1,
+            error=selected_script_status.get("error")
+            or "selected execution-next script is unavailable",
+            **timing_fields(),
         )
+        summary = finish(summary)
         return 1, summary
     if dry_run:
         summary = _runner_summary(
@@ -835,26 +1996,22 @@ def run_bundle(
             script_path=script_path,
             **target_details,
             recommendation_context=recommendation_context,
+            execution_cwd=execution_cwd,
+            selected_execution_next_command=selected_execution_next_command,
+            selected_script_status=selected_script_status,
+            **history_next_action_fields,
             strict=strict,
             dry_run=dry_run,
             inspection=inspection,
             returncode=0,
             **timing_fields(),
         )
-        summary = write_run_artifacts(
-            summary,
-            json_out=json_out,
-            markdown_out=markdown_out,
-            history_out=history_out,
-            history_markdown_out=history_markdown_out,
-            history_summary_out=history_summary_out,
-            append_history=append_run_history,
-        )
+        summary = finish(summary)
         return 0, summary
     if json_mode:
         result = subprocess.run(
             ["bash", str(script_path)],
-            cwd=command_dir,
+            cwd=execution_cwd,
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -868,6 +2025,10 @@ def run_bundle(
             script_path=script_path,
             **target_details,
             recommendation_context=recommendation_context,
+            execution_cwd=execution_cwd,
+            selected_execution_next_command=selected_execution_next_command,
+            selected_script_status=selected_script_status,
+            **history_next_action_fields,
             strict=strict,
             dry_run=dry_run,
             inspection=inspection,
@@ -877,19 +2038,11 @@ def run_bundle(
             executed=True,
             **timing_fields(),
         )
-        summary = write_run_artifacts(
-            summary,
-            json_out=json_out,
-            markdown_out=markdown_out,
-            history_out=history_out,
-            history_markdown_out=history_markdown_out,
-            history_summary_out=history_summary_out,
-            append_history=append_run_history,
-        )
+        summary = finish(summary)
         return result.returncode, summary
     result = subprocess.run(
         ["bash", str(script_path)],
-        cwd=command_dir,
+        cwd=execution_cwd,
         check=False,
     )
     summary = _runner_summary(
@@ -900,6 +2053,10 @@ def run_bundle(
         script_path=script_path,
         **target_details,
         recommendation_context=recommendation_context,
+        execution_cwd=execution_cwd,
+        selected_execution_next_command=selected_execution_next_command,
+        selected_script_status=selected_script_status,
+        **history_next_action_fields,
         strict=strict,
         dry_run=dry_run,
         inspection=inspection,
@@ -907,15 +2064,7 @@ def run_bundle(
         executed=True,
         **timing_fields(),
     )
-    summary = write_run_artifacts(
-        summary,
-        json_out=json_out,
-        markdown_out=markdown_out,
-        history_out=history_out,
-        history_markdown_out=history_markdown_out,
-        history_summary_out=history_summary_out,
-        append_history=append_run_history,
-    )
+    summary = finish(summary)
     return result.returncode, summary
 
 
@@ -963,13 +2112,39 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="write Markdown and JSON summaries of run_history.jsonl",
     )
+    parser.add_argument(
+        "--history-report-only",
+        action="store_true",
+        help=(
+            "rewrite run_history.md and run_history_summary.json without "
+            "executing a command or appending a new history event"
+        ),
+    )
+    parser.add_argument(
+        "--use-history-next-action",
+        action="store_true",
+        help=(
+            "resolve --target from the current run_history next_action when it "
+            "allows continuation"
+        ),
+    )
     parser.add_argument("--json-out", type=Path, default=None)
     parser.add_argument("--markdown-out", type=Path, default=None)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = _build_parser().parse_args(argv)
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+    if args.history_report_only and args.append_run_history:
+        parser.error("--history-report-only cannot be combined with --append-run-history")
+    if args.history_report_only and args.use_history_next_action:
+        parser.error(
+            "--history-report-only cannot be combined with --use-history-next-action"
+        )
+    write_run_history_report = bool(
+        args.write_run_history_report or args.history_report_only
+    )
     try:
         returncode, summary = run_bundle(
             args.command_dir,
@@ -980,7 +2155,9 @@ def main(argv: list[str] | None = None) -> int:
             write_inspection_report=bool(args.write_inspection_report),
             write_run_report=bool(args.write_run_report),
             append_run_history=bool(args.append_run_history),
-            write_run_history_report=bool(args.write_run_history_report),
+            write_run_history_report=write_run_history_report,
+            history_report_only=bool(args.history_report_only),
+            use_history_next_action=bool(args.use_history_next_action),
             json_out=args.json_out,
             markdown_out=args.markdown_out,
         )
@@ -989,6 +2166,8 @@ def main(argv: list[str] | None = None) -> int:
             "schema": SCHEMA,
             "command_dir": str(args.command_dir),
             "target": args.target,
+            "requested_target": args.target,
+            "use_history_next_action": bool(args.use_history_next_action),
             "strict": not args.no_strict,
             "dry_run": bool(args.dry_run),
             "returncode": 1,
@@ -997,7 +2176,7 @@ def main(argv: list[str] | None = None) -> int:
         returncode = 1
     if args.json:
         print(json.dumps(summary, indent=2, sort_keys=True))
-    elif args.dry_run or returncode != 0:
+    elif args.dry_run or args.history_report_only or returncode != 0:
         stream = sys.stderr if returncode != 0 else sys.stdout
         print(render_markdown(summary), file=stream)
     return returncode
