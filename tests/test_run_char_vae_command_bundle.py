@@ -27,6 +27,59 @@ def _write_script(path: Path, body: str, *, executable: bool = True) -> None:
         path.chmod(path.stat().st_mode | 0o755)
 
 
+def _chain_path(command_dir: Path) -> str:
+    return str(command_dir.parent / "chain" / "chain.json")
+
+
+def _assert_recommendation_context(
+    testcase: unittest.TestCase,
+    payload: dict[str, object],
+    command_dir: Path,
+    *,
+    target_kind: str = "follow_up",
+) -> None:
+    context = payload["recommendation_context"]
+    testcase.assertIsInstance(context, dict)
+    assert isinstance(context, dict)
+    testcase.assertEqual(
+        context["schema"],
+        "st.llm_char_vae_context.command_bundle_run_recommendation_context.v1",
+    )
+    testcase.assertEqual(context["action"], "continue_from_accepted")
+    testcase.assertEqual(
+        context["reason"],
+        "accepted champion remains the safest continuation",
+    )
+    testcase.assertEqual(context["target_kind"], target_kind)
+    testcase.assertEqual(context["next_kind"], "follow_up")
+    testcase.assertIs(context["accepted_matches_best"], True)
+    testcase.assertIs(context["best_requires_review"], False)
+    testcase.assertEqual(context["accepted_vs_best_nll_gap"], 0.0)
+    testcase.assertEqual(context["chain_sources"], [_chain_path(command_dir)])
+    testcase.assertEqual(context["chain_count"], 1)
+    testcase.assertEqual(context["attempted_follow_ups"], 1)
+    testcase.assertEqual(
+        context["follow_up_from_summary_path"],
+        _chain_path(command_dir),
+    )
+    testcase.assertIsNone(context["review_summary_path"])
+    testcase.assertEqual(context["champion_source"], _chain_path(command_dir))
+    testcase.assertEqual(context["fallback_source"], _chain_path(command_dir))
+    testcase.assertEqual(context["follow_up_command_source"], "next_follow_up_command")
+    testcase.assertIsNone(context["review_command_source"])
+    champion = context["champion"]
+    fallback = context["fallback"]
+    testcase.assertIsInstance(champion, dict)
+    testcase.assertIsInstance(fallback, dict)
+    assert isinstance(champion, dict)
+    assert isinstance(fallback, dict)
+    testcase.assertEqual(champion["config"], "latent@normalize=blocks,scale=0.5")
+    testcase.assertEqual(champion["mean_best_nll"], 4.1)
+    testcase.assertEqual(champion["summary_path"], _chain_path(command_dir))
+    testcase.assertEqual(fallback["config"], "raw@normalize=blocks,scale=1.0")
+    testcase.assertEqual(fallback["summary_path"], _chain_path(command_dir))
+
+
 def _write_bundle(
     root: Path,
     *,
@@ -70,8 +123,39 @@ def _write_bundle(
                 "schema": "st.llm_char_vae_context.chain_comparison.v1",
                 "chain_sources": [str(chain)],
             },
+            "aggregate": {
+                "chain_count": 1,
+                "attempted_follow_ups": 1,
+            },
+            "selection": {
+                "accepted_matches_best": True,
+                "best_requires_review": False,
+                "accepted_vs_best_nll_gap": 0.0,
+            },
             "recommendation": {
                 "action": "continue_from_accepted",
+                "reason": "accepted champion remains the safest continuation",
+                "follow_up_from_summary_path": str(chain),
+                "review_summary_path": None,
+                "champion_source": str(chain),
+                "champion": {
+                    "config": "latent@normalize=blocks,scale=0.5",
+                    "mean_best_nll": 4.1,
+                    "step": 1,
+                    "summary_path": str(chain),
+                },
+                "fallback_source": str(chain),
+                "fallback": {
+                    "config": "raw@normalize=blocks,scale=1.0",
+                    "mean_best_nll": 4.2,
+                    "step": 0,
+                    "summary_path": str(chain),
+                },
+                "follow_up_command": {
+                    "command_source": "next_follow_up_command",
+                    "source_summary_path": str(chain),
+                },
+                "review_command": None,
             },
             "command_scripts": {
                 "schema": "st.llm_char_vae_context.chain_command_scripts.v1",
@@ -119,6 +203,7 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
             payload["target_script_path"],
             str(command_dir / "recommended_follow_up.sh"),
         )
+        _assert_recommendation_context(self, payload, command_dir)
         self.assertTrue(payload["strict_ready"])
         self.assertFalse(payload["executed"])
         self.assertIsNotNone(payload["started_at"])
@@ -154,6 +239,7 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
             payload["target_script_path"],
             str(command_dir / "recommended_follow_up.sh"),
         )
+        _assert_recommendation_context(self, payload, command_dir)
         self.assertTrue(payload["executed"])
         self.assertGreaterEqual(payload["duration_seconds"], 0.0)
         self.assertIn("next cwd=", payload["stdout"])
@@ -193,6 +279,7 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
         self.assertFalse(strict_payload["executed"])
         self.assertEqual(strict_payload["target_kind"], "follow_up")
         self.assertEqual(strict_payload["target_script_key"], "follow_up_path")
+        _assert_recommendation_context(self, strict_payload, command_dir)
         self.assertGreaterEqual(strict_payload["duration_seconds"], 0.0)
         self.assertIn("follow_up_script", strict_payload["missing_optional"])
         self.assertEqual(
@@ -228,6 +315,12 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
         self.assertEqual(payload["script_key"], "review_path")
         self.assertEqual(payload["target_script_key"], "review_path")
         self.assertIsNone(payload["target_script_path"])
+        _assert_recommendation_context(
+            self,
+            payload,
+            command_dir,
+            target_kind="review",
+        )
         self.assertFalse(payload["executed"])
         self.assertEqual(payload["error"], "manifest does not declare review_path")
 
@@ -260,6 +353,12 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
         self.assertEqual(
             payload["target_script_path"],
             str(command_dir / "recommended_review.sh"),
+        )
+        _assert_recommendation_context(
+            self,
+            payload,
+            command_dir,
+            target_kind="review",
         )
         self.assertEqual(
             payload["command_argv"],
@@ -307,10 +406,12 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
         )
         self.assertEqual(payload["run_json_path"], str(command_dir / "run.json"))
         self.assertEqual(payload["target_kind"], "follow_up")
+        _assert_recommendation_context(self, payload, command_dir)
         self.assertTrue(payload["executed"])
         self.assertIsNotNone(payload["started_at"])
         self.assertEqual(run_report["returncode"], 0)
         self.assertEqual(run_report["target_kind"], "follow_up")
+        _assert_recommendation_context(self, run_report, command_dir)
         self.assertEqual(run_report["target_script_key"], "follow_up_path")
         self.assertEqual(
             run_report["target_script_path"],
@@ -352,9 +453,11 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(payload["run_json_path"], str(json_out))
         self.assertEqual(payload["target_kind"], "follow_up")
+        _assert_recommendation_context(self, payload, command_dir)
         self.assertTrue(payload["executed"])
         self.assertEqual(report["returncode"], 0)
         self.assertEqual(report["target_kind"], "follow_up")
+        _assert_recommendation_context(self, report, command_dir)
         self.assertEqual(
             report["command_argv"],
             ["bash", str(command_dir / "recommended_next.sh")],
@@ -365,6 +468,15 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
         self.assertIn(f"run_json_path: {json_out}", markdown)
         self.assertIn("target_kind: follow_up", markdown)
         self.assertIn("target_script_key: follow_up_path", markdown)
+        self.assertIn("Recommendation Context", markdown)
+        self.assertIn("recommendation_action: continue_from_accepted", markdown)
+        self.assertIn(
+            "recommendation_reason: accepted champion remains the safest continuation",
+            markdown,
+        )
+        self.assertIn("champion_config: latent@normalize=blocks,scale=0.5", markdown)
+        self.assertIn("fallback_config: raw@normalize=blocks,scale=1.0", markdown)
+        self.assertIn("follow_up_command_source: next_follow_up_command", markdown)
         self.assertIn("executed: yes", markdown)
         self.assertIn("duration_seconds:", markdown)
 

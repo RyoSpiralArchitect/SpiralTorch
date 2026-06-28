@@ -67,6 +67,16 @@ def _command_scripts(manifest: dict[str, Any]) -> dict[str, Any]:
     return command_scripts if isinstance(command_scripts, dict) else {}
 
 
+def _mapping(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _list_of_strings(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str) and item]
+
+
 def _selected_script(
     command_scripts: dict[str, Any],
     *,
@@ -106,6 +116,61 @@ def _target_details(
         "target_kind": target_kind,
         "target_script_key": target_script_key,
         "target_script_path": target_script_path,
+    }
+
+
+def _candidate_context(value: Any) -> dict[str, Any] | None:
+    candidate = _mapping(value)
+    if not candidate:
+        return None
+    fields = (
+        "config",
+        "mean_best_nll",
+        "step",
+        "summary_path",
+    )
+    compact = {key: candidate.get(key) for key in fields if key in candidate}
+    return compact or None
+
+
+def _recommendation_context(
+    manifest: dict[str, Any],
+    command_scripts: dict[str, Any],
+    *,
+    target_kind: str | None,
+) -> dict[str, Any]:
+    comparison = _mapping(manifest.get("comparison"))
+    aggregate = _mapping(manifest.get("aggregate"))
+    selection = _mapping(manifest.get("selection"))
+    recommendation = _mapping(manifest.get("recommendation"))
+    follow_up_command = _mapping(recommendation.get("follow_up_command"))
+    review_command = _mapping(recommendation.get("review_command"))
+    return {
+        "schema": (
+            "st.llm_char_vae_context.command_bundle_run_recommendation_context.v1"
+        ),
+        "action": recommendation.get("action"),
+        "reason": recommendation.get("reason"),
+        "target_kind": target_kind,
+        "next_kind": command_scripts.get("next_kind"),
+        "accepted_matches_best": selection.get("accepted_matches_best"),
+        "best_requires_review": selection.get("best_requires_review"),
+        "accepted_vs_best_nll_gap": selection.get("accepted_vs_best_nll_gap"),
+        "follow_up_from_summary_path": recommendation.get(
+            "follow_up_from_summary_path"
+        ),
+        "review_summary_path": recommendation.get("review_summary_path"),
+        "champion_source": recommendation.get("champion_source"),
+        "champion": _candidate_context(recommendation.get("champion")),
+        "fallback_source": recommendation.get("fallback_source"),
+        "fallback": _candidate_context(recommendation.get("fallback")),
+        "follow_up_command_source": follow_up_command.get("command_source"),
+        "follow_up_command_summary_path": follow_up_command.get("source_summary_path"),
+        "review_command_source": review_command.get("command_source"),
+        "review_command_summary_path": review_command.get("source_summary_path"),
+        "chain_sources": _list_of_strings(comparison.get("chain_sources")),
+        "chain_count": aggregate.get("chain_count"),
+        "attempted_follow_ups": aggregate.get("attempted_follow_ups"),
     }
 
 
@@ -158,6 +223,7 @@ def _runner_summary(
     script_path: Path | None,
     target_script_key: str | None,
     target_script_path: Path | None,
+    recommendation_context: dict[str, Any],
     strict: bool,
     dry_run: bool,
     inspection: dict[str, Any],
@@ -182,6 +248,7 @@ def _runner_summary(
         "target_script_path": (
             str(target_script_path) if target_script_path is not None else None
         ),
+        "recommendation_context": recommendation_context,
         "command_argv": ["bash", str(script_path)]
         if script_path is not None
         else None,
@@ -215,6 +282,9 @@ def _fmt(value: Any) -> str:
 
 
 def render_markdown(summary: dict[str, Any]) -> str:
+    context = _mapping(summary.get("recommendation_context"))
+    champion = _mapping(context.get("champion"))
+    fallback = _mapping(context.get("fallback"))
     lines = [
         "# Char VAE Command Bundle Runner",
         "",
@@ -242,6 +312,26 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"- run_markdown_path: {_fmt(summary.get('run_markdown_path'))}",
         f"- returncode: {_fmt(summary.get('returncode'))}",
         f"- error: {_fmt(summary.get('error'))}",
+        "",
+        "## Recommendation Context",
+        "",
+        f"- recommendation_action: {_fmt(context.get('action'))}",
+        f"- recommendation_reason: {_fmt(context.get('reason'))}",
+        f"- next_kind: {_fmt(context.get('next_kind'))}",
+        f"- accepted_matches_best: {_fmt(context.get('accepted_matches_best'))}",
+        f"- best_requires_review: {_fmt(context.get('best_requires_review'))}",
+        f"- accepted_vs_best_nll_gap: {_fmt(context.get('accepted_vs_best_nll_gap'))}",
+        f"- follow_up_from_summary_path: {_fmt(context.get('follow_up_from_summary_path'))}",
+        f"- review_summary_path: {_fmt(context.get('review_summary_path'))}",
+        f"- champion_source: {_fmt(context.get('champion_source'))}",
+        f"- champion_config: {_fmt(champion.get('config'))}",
+        f"- champion_summary_path: {_fmt(champion.get('summary_path'))}",
+        f"- fallback_source: {_fmt(context.get('fallback_source'))}",
+        f"- fallback_config: {_fmt(fallback.get('config'))}",
+        f"- fallback_summary_path: {_fmt(fallback.get('summary_path'))}",
+        f"- follow_up_command_source: {_fmt(context.get('follow_up_command_source'))}",
+        f"- review_command_source: {_fmt(context.get('review_command_source'))}",
+        f"- chain_sources: {_fmt(context.get('chain_sources'))}",
         "",
     ]
     return "\n".join(lines)
@@ -301,6 +391,11 @@ def run_bundle(
         script_key=script_key,
         script_path=script_path,
     )
+    recommendation_context = _recommendation_context(
+        manifest,
+        command_scripts,
+        target_kind=target_details.get("target_kind"),
+    )
     json_out, markdown_out = _run_report_paths(
         command_dir,
         command_scripts,
@@ -326,6 +421,7 @@ def run_bundle(
             script_key=script_key,
             script_path=script_path,
             **target_details,
+            recommendation_context=recommendation_context,
             strict=strict,
             dry_run=dry_run,
             inspection=inspection,
@@ -347,6 +443,7 @@ def run_bundle(
             script_key=script_key,
             script_path=script_path,
             **target_details,
+            recommendation_context=recommendation_context,
             strict=strict,
             dry_run=dry_run,
             inspection=inspection,
@@ -368,6 +465,7 @@ def run_bundle(
             script_key=script_key,
             script_path=script_path,
             **target_details,
+            recommendation_context=recommendation_context,
             strict=strict,
             dry_run=dry_run,
             inspection=inspection,
@@ -396,6 +494,7 @@ def run_bundle(
             script_key=script_key,
             script_path=script_path,
             **target_details,
+            recommendation_context=recommendation_context,
             strict=strict,
             dry_run=dry_run,
             inspection=inspection,
@@ -423,6 +522,7 @@ def run_bundle(
         script_key=script_key,
         script_path=script_path,
         **target_details,
+        recommendation_context=recommendation_context,
         strict=strict,
         dry_run=dry_run,
         inspection=inspection,
