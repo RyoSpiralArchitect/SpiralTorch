@@ -208,6 +208,83 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
         self.assertIn("Char VAE Context Chain Comparison", result.stdout)
         self.assertIn("dry_run_count: 1", markdown)
 
+    def test_cli_command_dir_bundles_comparison_outputs_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            chain = _write_chain(
+                root / "chain",
+                {
+                    "schema": "st.llm_char_vae_context.chain.v1",
+                    "preset": "smoke",
+                    "run_root": str(root / "chain"),
+                    "planned_follow_ups": 1,
+                    "attempted_follow_ups": 0,
+                    "dry_run": True,
+                    "follow_up_seed_resolution_summary": {
+                        "attempted_follow_ups": 0,
+                        "seed_source_counts": {},
+                        "command_source_counts": {},
+                        "configured_seed_group_status_counts": {},
+                        "gate_failed_count": 0,
+                        "nonzero_exit_count": 0,
+                    },
+                },
+            )
+            command_dir = root / "commands"
+            result = subprocess.run(
+                [
+                    "python3",
+                    "-P",
+                    str(SCRIPT),
+                    str(chain),
+                    "--command-out-dir",
+                    str(command_dir),
+                ],
+                cwd=root,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            comparison_json = command_dir / "comparison.json"
+            comparison_markdown = command_dir / "comparison.md"
+            comparison_json_exists = comparison_json.exists()
+            comparison_markdown_exists = comparison_markdown.exists()
+            comparison_json_resolved = str(comparison_json.resolve())
+            comparison_markdown_resolved = str(comparison_markdown.resolve())
+            manifest = json.loads(
+                (command_dir / "recommendation.json").read_text(encoding="utf-8")
+            )
+            comparison = json.loads(comparison_json.read_text(encoding="utf-8"))
+            readme = (command_dir / "README.md").read_text(encoding="utf-8")
+            markdown = comparison_markdown.read_text(encoding="utf-8")
+
+        self.assertTrue(comparison_json_exists)
+        self.assertTrue(comparison_markdown_exists)
+        self.assertEqual(
+            comparison["command_scripts"]["comparison_json_path"],
+            comparison_json_resolved,
+        )
+        self.assertEqual(
+            comparison["command_scripts"]["comparison_markdown_path"],
+            comparison_markdown_resolved,
+        )
+        self.assertEqual(
+            manifest["command_scripts"]["comparison_json_path"],
+            comparison_json_resolved,
+        )
+        self.assertEqual(
+            manifest["command_scripts"]["comparison_markdown_path"],
+            comparison_markdown_resolved,
+        )
+        self.assertEqual(manifest["comparison"]["chain_sources"], [str(chain)])
+        self.assertIn(comparison_json_resolved, readme)
+        self.assertIn(comparison_markdown_resolved, readme)
+        self.assertIn("command_manifest_path", markdown)
+        self.assertIn("recommendation.json", result.stdout)
+
     def test_cli_writes_recommended_command_scripts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
