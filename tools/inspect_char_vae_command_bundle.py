@@ -324,6 +324,12 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
     review_path = _path_from(command_scripts.get("review_path"))
     runner_path = _path_from(command_scripts.get("runner_path"))
     runner_command = _command_from(command_scripts.get("runner_command"))
+    history_next_action_runner_path = _path_from(
+        command_scripts.get("history_next_action_runner_path")
+    )
+    history_next_action_command = _command_from(
+        command_scripts.get("history_next_action_command")
+    )
     history_report_command = _command_from(
         command_scripts.get("history_report_command")
     )
@@ -341,6 +347,10 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
     runner_wrapper_status = _runner_wrapper_status(
         runner_path,
         runner_command=runner_command,
+    )
+    history_next_action_runner_status = _runner_wrapper_status(
+        history_next_action_runner_path,
+        runner_command=history_next_action_command,
     )
 
     chain_sources = comparison.get("chain_sources")
@@ -398,6 +408,12 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
             required=False,
         ),
         _check(
+            "history_next_action_runner_script",
+            path=history_next_action_runner_path,
+            ok=bool(history_next_action_runner_status["ok"]),
+            required=False,
+        ),
+        _check(
             "chain_sources",
             path=None,
             ok=bool(chain_source_paths) and not missing_chain_sources,
@@ -429,6 +445,19 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
             history_report_command,
             required_flags=("run_char_vae_command_bundle.py", "--history-report-only"),
             forbidden_flags=("--append-run-history",),
+            command_dir=command_dir,
+        ),
+        _declared_command(
+            "history_next_action_command",
+            history_next_action_command,
+            required_flags=(
+                "run_char_vae_command_bundle.py",
+                "--use-history-next-action",
+                "--write-inspection-report",
+                "--write-run-report",
+                "--append-run-history",
+                "--write-run-history-report",
+            ),
             command_dir=command_dir,
         ),
     ]
@@ -469,6 +498,13 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
         "runner_command": runner_command,
         "runner_path": str(runner_path) if runner_path is not None else None,
         "runner_wrapper_status": runner_wrapper_status,
+        "history_next_action_command": history_next_action_command,
+        "history_next_action_runner_path": (
+            str(history_next_action_runner_path)
+            if history_next_action_runner_path is not None
+            else None
+        ),
+        "history_next_action_runner_status": history_next_action_runner_status,
         "history_report_command": history_report_command,
         "declared_commands": declared_commands,
         "declared_command_issues": declared_command_issues,
@@ -533,6 +569,20 @@ def render_markdown(summary: dict[str, Any]) -> str:
         (
             "- runner_wrapper_error: "
             f"{_fmt(_value(summary, 'runner_wrapper_status', 'error'))}"
+        ),
+        f"- history_next_action_command: {_fmt(summary.get('history_next_action_command'))}",
+        f"- history_next_action_runner_path: {_fmt(summary.get('history_next_action_runner_path'))}",
+        (
+            "- history_next_action_runner_ok: "
+            f"{_fmt(_value(summary, 'history_next_action_runner_status', 'ok'))}"
+        ),
+        (
+            "- history_next_action_runner_executes_command: "
+            f"{_fmt(_value(summary, 'history_next_action_runner_status', 'executes_runner_command'))}"
+        ),
+        (
+            "- history_next_action_runner_error: "
+            f"{_fmt(_value(summary, 'history_next_action_runner_status', 'error'))}"
         ),
         f"- history_report_command: {_fmt(summary.get('history_report_command'))}",
         f"- declared_command_issues: {_fmt_list(summary.get('declared_command_issues'))}",

@@ -73,6 +73,15 @@ def _history_report_command(command_dir: Path) -> str:
     )
 
 
+def _history_next_action_command(command_dir: Path) -> str:
+    return (
+        "env PYTHONNOUSERSITE=1 python3 -P "
+        f"{RUNNER_SCRIPT} {command_dir} --use-history-next-action "
+        "--write-inspection-report --write-run-report --append-run-history "
+        "--write-run-history-report"
+    )
+
+
 def _write_bundle(
     root: Path,
     *,
@@ -137,6 +146,9 @@ def _write_bundle(
                 "runner_path": str(runner_script)
                 if include_runner or non_executable_runner or stale_runner
                 else None,
+                "history_next_action_command": _history_next_action_command(
+                    command_dir
+                ),
                 "history_report_command": _history_report_command(command_dir),
                 "run_json_path": str(run_json),
                 "run_markdown_path": str(run_markdown),
@@ -186,15 +198,39 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
             payload["history_report_command"],
             _history_report_command(command_dir),
         )
+        self.assertEqual(
+            payload["history_next_action_command"],
+            _history_next_action_command(command_dir),
+        )
         commands = {item["label"]: item for item in payload["declared_commands"]}
         self.assertTrue(commands["runner_command"]["ok"])
+        self.assertTrue(commands["history_next_action_command"]["ok"])
         self.assertTrue(commands["history_report_command"]["ok"])
+        self.assertIsNone(commands["history_next_action_command"]["parse_error"])
         self.assertIsNone(commands["history_report_command"]["parse_error"])
         self.assertTrue(commands["runner_command"]["target_command_dir_ok"])
+        self.assertTrue(
+            commands["history_next_action_command"]["target_command_dir_ok"]
+        )
         self.assertTrue(commands["history_report_command"]["target_command_dir_ok"])
+        self.assertIn(
+            "--use-history-next-action",
+            commands["history_next_action_command"]["tokens"],
+        )
         self.assertIn(
             "--history-report-only",
             commands["history_report_command"]["tokens"],
+        )
+        self.assertEqual(
+            commands["history_next_action_command"]["required_flags"],
+            [
+                "run_char_vae_command_bundle.py",
+                "--use-history-next-action",
+                "--write-inspection-report",
+                "--write-run-report",
+                "--append-run-history",
+                "--write-run-history-report",
+            ],
         )
         self.assertEqual(
             commands["history_report_command"]["required_flags"],
