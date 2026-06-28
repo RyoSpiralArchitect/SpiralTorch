@@ -57,6 +57,17 @@ def _check(
     }
 
 
+def _declared_output(
+    label: str,
+    path: Path | None,
+) -> dict[str, Any]:
+    return {
+        "label": label,
+        "path": str(path) if path is not None else None,
+        "exists": _exists(path),
+    }
+
+
 def inspect_bundle(command_dir: Path) -> dict[str, Any]:
     command_dir = command_dir.resolve()
     manifest_path = command_dir / "recommendation.json"
@@ -79,6 +90,17 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
     next_path = _path_from(command_scripts.get("next_path"))
     follow_up_path = _path_from(command_scripts.get("follow_up_path"))
     review_path = _path_from(command_scripts.get("review_path"))
+    run_json_path = _path_from(command_scripts.get("run_json_path"))
+    run_markdown_path = _path_from(command_scripts.get("run_markdown_path"))
+    run_history_jsonl_path = _path_from(
+        command_scripts.get("run_history_jsonl_path")
+    )
+    run_history_markdown_path = _path_from(
+        command_scripts.get("run_history_markdown_path")
+    )
+    run_history_summary_path = _path_from(
+        command_scripts.get("run_history_summary_path")
+    )
 
     chain_sources = comparison.get("chain_sources")
     if not isinstance(chain_sources, list):
@@ -141,6 +163,13 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
     missing_optional = [
         check["label"] for check in checks if not check["required"] and not check["ok"]
     ]
+    declared_outputs = [
+        _declared_output("run_json", run_json_path),
+        _declared_output("run_markdown", run_markdown_path),
+        _declared_output("run_history_jsonl", run_history_jsonl_path),
+        _declared_output("run_history_markdown", run_history_markdown_path),
+        _declared_output("run_history_summary", run_history_summary_path),
+    ]
     return {
         "schema": SCHEMA,
         "command_dir": str(command_dir),
@@ -159,6 +188,26 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
         "comparison_markdown_path": str(comparison_markdown_path)
         if comparison_markdown_path is not None
         else None,
+        "declared_outputs": declared_outputs,
+        "run_json_path": str(run_json_path) if run_json_path is not None else None,
+        "run_markdown_path": (
+            str(run_markdown_path) if run_markdown_path is not None else None
+        ),
+        "run_history_jsonl_path": (
+            str(run_history_jsonl_path)
+            if run_history_jsonl_path is not None
+            else None
+        ),
+        "run_history_markdown_path": (
+            str(run_history_markdown_path)
+            if run_history_markdown_path is not None
+            else None
+        ),
+        "run_history_summary_path": (
+            str(run_history_summary_path)
+            if run_history_summary_path is not None
+            else None
+        ),
         "chain_source_count": len(chain_source_paths),
         "missing_chain_sources": missing_chain_sources,
     }
@@ -178,6 +227,11 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"- written_count: {_fmt(summary.get('written_count'))}",
         f"- comparison_json_path: {_fmt(summary.get('comparison_json_path'))}",
         f"- comparison_markdown_path: {_fmt(summary.get('comparison_markdown_path'))}",
+        f"- run_json_path: {_fmt(summary.get('run_json_path'))}",
+        f"- run_markdown_path: {_fmt(summary.get('run_markdown_path'))}",
+        f"- run_history_jsonl_path: {_fmt(summary.get('run_history_jsonl_path'))}",
+        f"- run_history_markdown_path: {_fmt(summary.get('run_history_markdown_path'))}",
+        f"- run_history_summary_path: {_fmt(summary.get('run_history_summary_path'))}",
         f"- inspection_json_path: {_fmt(summary.get('inspection_json_path'))}",
         f"- inspection_markdown_path: {_fmt(summary.get('inspection_markdown_path'))}",
         f"- chain_source_count: {_fmt(summary.get('chain_source_count'))}",
@@ -200,6 +254,26 @@ def render_markdown(summary: dict[str, Any]) -> str:
                 required=_fmt(check.get("required")),
                 ok=_fmt(check.get("ok")),
                 path=_fmt(check.get("path")),
+            )
+        )
+    lines.extend(
+        [
+            "",
+            "## Declared Run Outputs",
+            "",
+            "| label | exists | path |",
+            "| --- | --- | --- |",
+        ]
+    )
+    outputs = summary.get("declared_outputs")
+    for output in outputs if isinstance(outputs, list) else []:
+        if not isinstance(output, dict):
+            continue
+        lines.append(
+            "| {label} | {exists} | {path} |".format(
+                label=_fmt(output.get("label")),
+                exists=_fmt(output.get("exists")),
+                path=_fmt(output.get("path")),
             )
         )
     return "\n".join(lines) + "\n"

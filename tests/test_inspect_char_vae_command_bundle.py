@@ -37,6 +37,11 @@ def _write_bundle(
 
     comparison_json = command_dir / "comparison.json"
     comparison_markdown = command_dir / "comparison.md"
+    run_json = command_dir / "run.json"
+    run_markdown = command_dir / "run.md"
+    run_history_jsonl = command_dir / "run_history.jsonl"
+    run_history_markdown = command_dir / "run_history.md"
+    run_history_summary = command_dir / "run_history_summary.json"
     if not missing_comparison_json:
         _write_json(comparison_json, {"schema": "comparison"})
     comparison_markdown.write_text("# comparison\n", encoding="utf-8")
@@ -68,6 +73,11 @@ def _write_bundle(
                 "written_count": 2,
                 "comparison_json_path": str(comparison_json),
                 "comparison_markdown_path": str(comparison_markdown),
+                "run_json_path": str(run_json),
+                "run_markdown_path": str(run_markdown),
+                "run_history_jsonl_path": str(run_history_jsonl),
+                "run_history_markdown_path": str(run_history_markdown),
+                "run_history_summary_path": str(run_history_summary),
                 "readme_path": str(command_dir / "README.md"),
             },
         },
@@ -105,9 +115,46 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
         self.assertEqual(payload["chain_source_count"], 1)
         self.assertEqual(payload["missing_required"], [])
         self.assertEqual(payload["missing_optional"], [])
+        self.assertEqual(payload["run_json_path"], str(command_dir / "run.json"))
+        self.assertEqual(
+            payload["run_history_summary_path"],
+            str(command_dir / "run_history_summary.json"),
+        )
+        self.assertEqual(
+            payload["declared_outputs"],
+            [
+                {
+                    "label": "run_json",
+                    "path": str(command_dir / "run.json"),
+                    "exists": False,
+                },
+                {
+                    "label": "run_markdown",
+                    "path": str(command_dir / "run.md"),
+                    "exists": False,
+                },
+                {
+                    "label": "run_history_jsonl",
+                    "path": str(command_dir / "run_history.jsonl"),
+                    "exists": False,
+                },
+                {
+                    "label": "run_history_markdown",
+                    "path": str(command_dir / "run_history.md"),
+                    "exists": False,
+                },
+                {
+                    "label": "run_history_summary",
+                    "path": str(command_dir / "run_history_summary.json"),
+                    "exists": False,
+                },
+            ],
+        )
         self.assertEqual(markdown_result.returncode, 0, markdown_result.stderr)
         self.assertIn("Char VAE Command Bundle Inspection", markdown_result.stdout)
         self.assertIn("bundle_ready: yes", markdown_result.stdout)
+        self.assertIn("Declared Run Outputs", markdown_result.stdout)
+        self.assertIn("run_history_summary", markdown_result.stdout)
 
     def test_cli_writes_default_inspection_reports(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -155,6 +202,8 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
         self.assertIn("Char VAE Command Bundle Inspection", markdown)
         self.assertIn(f"inspection_json_path: {json_report_path}", markdown)
         self.assertIn(f"inspection_markdown_path: {markdown_report_path}", markdown)
+        self.assertIn("run_history_summary_path:", markdown)
+        self.assertIn("Declared Run Outputs", markdown)
 
     def test_cli_writes_explicit_inspection_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
