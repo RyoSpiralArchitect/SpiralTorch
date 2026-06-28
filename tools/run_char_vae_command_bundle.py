@@ -498,8 +498,12 @@ def _compact_execution_summary(path: Path | None) -> dict[str, Any] | None:
 
 def _execution_evidence_fields(
     execution_summary: dict[str, Any] | None,
+    *,
+    selected_execution_next_command: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     summary = _mapping(execution_summary)
+    selected_source = _mapping(selected_execution_next_command).get("source")
+    feature_swap_review_selected = selected_source == "feature_swap_review_command"
     status: str | None
     reason: str | None
     should_continue: bool | None
@@ -544,10 +548,15 @@ def _execution_evidence_fields(
             reason = guidance_text
             should_continue = True
         elif follow_up_verdict == "improved" or effective_verdict == "improved":
-            status = "improved"
-            reason = (
-                f"follow-up verdict is {result_verdict or follow_up_verdict or effective_verdict}"
-            )
+            if feature_swap_review_selected:
+                status = "review_confirmed"
+                reason = "feature-swap review confirmed improvement"
+            else:
+                status = "improved"
+                reason = (
+                    "follow-up verdict is "
+                    f"{result_verdict or follow_up_verdict or effective_verdict}"
+                )
             should_continue = True
         else:
             status = "unknown"
@@ -562,7 +571,12 @@ def _execution_evidence_fields(
 
 
 def _event_execution_evidence(event: dict[str, Any]) -> dict[str, Any]:
-    fields = _execution_evidence_fields(_mapping(event.get("execution_summary")))
+    fields = _execution_evidence_fields(
+        _mapping(event.get("execution_summary")),
+        selected_execution_next_command=_mapping(
+            event.get("selected_execution_next_command")
+        ),
+    )
     for key in fields:
         if key in event:
             fields[key] = event.get(key)
@@ -977,6 +991,9 @@ def summarize_history_events(
     latest = events[-1] if events else {}
     latest_context = _mapping(latest.get("recommendation_context"))
     latest_champion = _mapping(latest_context.get("champion"))
+    latest_selected_execution_next = _mapping(
+        latest.get("selected_execution_next_command")
+    )
     latest_execution = _mapping(latest.get("execution_summary"))
     latest_execution_next = _mapping(latest_execution.get("next_command"))
     latest_evidence = _event_execution_evidence(latest)
@@ -1017,12 +1034,23 @@ def summarize_history_events(
             for event in events
         ]
     )
+    selected_execution_next_source_counts = _count_values(
+        [
+            _mapping(event.get("selected_execution_next_command")).get("source")
+            for event in events
+        ]
+    )
     current_status, current_status_count = _status_streak(events)
     latest_executed = _latest_event(events, lambda event: bool(event.get("executed")))
     latest_executed_context = _mapping(
         latest_executed.get("recommendation_context") if latest_executed else None
     )
     latest_executed_champion = _mapping(latest_executed_context.get("champion"))
+    latest_executed_selected_execution_next = _mapping(
+        latest_executed.get("selected_execution_next_command")
+        if latest_executed
+        else None
+    )
     latest_executed_execution = _mapping(
         latest_executed.get("execution_summary") if latest_executed else None
     )
@@ -1077,6 +1105,15 @@ def summarize_history_events(
             "execution_next_source": latest_execution_next.get("source"),
             "execution_next_seeds": latest_execution_next.get("default_new_seeds"),
             "execution_next_script_path": latest_execution_next.get("script_path"),
+            "selected_execution_next_source": latest_selected_execution_next.get(
+                "source"
+            ),
+            "selected_execution_next_seeds": latest_selected_execution_next.get(
+                "default_new_seeds"
+            ),
+            "selected_execution_next_script_path": latest_selected_execution_next.get(
+                "script_path"
+            ),
         },
         "signals": {
             "status_counts": status_counts,
@@ -1087,6 +1124,9 @@ def summarize_history_events(
             "execution_guidance_action_counts": execution_guidance_action_counts,
             "execution_evidence_status_counts": execution_evidence_status_counts,
             "execution_next_source_counts": execution_next_source_counts,
+            "selected_execution_next_source_counts": (
+                selected_execution_next_source_counts
+            ),
             "current_status_streak": {
                 "status": current_status,
                 "count": current_status_count,
@@ -1131,6 +1171,15 @@ def summarize_history_events(
                 ),
                 "execution_next_script_path": latest_executed_execution_next.get(
                     "script_path"
+                ),
+                "selected_execution_next_source": (
+                    latest_executed_selected_execution_next.get("source")
+                ),
+                "selected_execution_next_seeds": (
+                    latest_executed_selected_execution_next.get("default_new_seeds")
+                ),
+                "selected_execution_next_script_path": (
+                    latest_executed_selected_execution_next.get("script_path")
                 ),
             },
             "last_problem": {
@@ -1208,6 +1257,18 @@ def render_history_markdown(
             "- latest_execution_next_script_path: "
             f"{_fmt(latest.get('execution_next_script_path'))}"
         ),
+        (
+            "- latest_selected_execution_next_source: "
+            f"{_fmt(latest.get('selected_execution_next_source'))}"
+        ),
+        (
+            "- latest_selected_execution_next_seeds: "
+            f"{_fmt(latest.get('selected_execution_next_seeds'))}"
+        ),
+        (
+            "- latest_selected_execution_next_script_path: "
+            f"{_fmt(latest.get('selected_execution_next_script_path'))}"
+        ),
         "",
         "## Decision Signals",
         "",
@@ -1236,6 +1297,10 @@ def render_history_markdown(
         (
             "- execution_next_source_counts: "
             f"{_fmt_counts(_mapping(signals.get('execution_next_source_counts')))}"
+        ),
+        (
+            "- selected_execution_next_source_counts: "
+            f"{_fmt_counts(_mapping(signals.get('selected_execution_next_source_counts')))}"
         ),
         (
             "- current_status_streak: "
@@ -1284,6 +1349,18 @@ def render_history_markdown(
         (
             "- latest_executed_execution_next_script_path: "
             f"{_fmt(latest_executed.get('execution_next_script_path'))}"
+        ),
+        (
+            "- latest_executed_selected_execution_next_source: "
+            f"{_fmt(latest_executed.get('selected_execution_next_source'))}"
+        ),
+        (
+            "- latest_executed_selected_execution_next_seeds: "
+            f"{_fmt(latest_executed.get('selected_execution_next_seeds'))}"
+        ),
+        (
+            "- latest_executed_selected_execution_next_script_path: "
+            f"{_fmt(latest_executed.get('selected_execution_next_script_path'))}"
         ),
         f"- last_problem_status: {_fmt(last_problem.get('status'))}",
         f"- last_problem_error: {_fmt(last_problem.get('error'))}",
@@ -1496,7 +1573,14 @@ def run_bundle(
             if summary.get("executed")
             else None
         )
-        summary.update(_execution_evidence_fields(summary.get("execution_summary")))
+        summary.update(
+            _execution_evidence_fields(
+                summary.get("execution_summary"),
+                selected_execution_next_command=summary.get(
+                    "selected_execution_next_command"
+                ),
+            )
+        )
         summary = write_run_artifacts(
             summary,
             json_out=json_out,

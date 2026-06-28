@@ -461,6 +461,32 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
         self.assertFalse(fields["execution_evidence_should_continue"])
         self.assertTrue(fields["execution_evidence_mixed_signal"])
 
+    def test_execution_evidence_marks_feature_swap_review_confirmed(self) -> None:
+        mod = _load_module()
+        fields = mod._execution_evidence_fields(
+            {
+                "exists": True,
+                "valid_json": True,
+                "status": "improved",
+                "follow_up_result_verdict": "improved",
+                "follow_up_verdict": "improved",
+                "follow_up_effective_verdict": "improved",
+                "follow_up_gate_failed": False,
+                "guidance_action": "confirm_trajectory_with_fresh_seeds",
+            },
+            selected_execution_next_command={
+                "source": "feature_swap_review_command",
+            },
+        )
+
+        self.assertEqual(fields["execution_evidence_status"], "review_confirmed")
+        self.assertEqual(
+            fields["execution_evidence_reason"],
+            "feature-swap review confirmed improvement",
+        )
+        self.assertTrue(fields["execution_evidence_should_continue"])
+        self.assertFalse(fields["execution_evidence_mixed_signal"])
+
     def test_execution_next_prefers_feature_swap_review_when_guided_disabled(
         self,
     ) -> None:
@@ -635,6 +661,94 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
             markdown,
         )
         self.assertIn("last_problem_missing_required: recommended_review.sh", markdown)
+
+    def test_history_marks_selected_feature_swap_review_confirmation(self) -> None:
+        mod = _load_module()
+        events = [
+            {
+                "target": "execution-next",
+                "target_kind": "execution_next",
+                "dry_run": False,
+                "executed": True,
+                "returncode": 0,
+                "finished_at": "2026-06-28T00:00:00.000Z",
+                "selected_execution_next_command": {
+                    "source": "feature_swap_review_command",
+                    "default_new_seeds": "157,1001,1003,1005,1007",
+                    "script_path": "/tmp/feature_swap_review_command.sh",
+                },
+                "recommendation_context": {
+                    "action": "continue_from_accepted",
+                    "champion": {"config": "latent@scale=0.5"},
+                },
+                "execution_summary": {
+                    "exists": True,
+                    "valid_json": True,
+                    "status": "improved",
+                    "follow_up_verdict": "improved",
+                    "follow_up_result_verdict": "improved",
+                    "follow_up_effective_verdict": "improved",
+                    "follow_up_gate_failed": False,
+                    "guidance_action": "confirm_trajectory_with_fresh_seeds",
+                    "next_command": {
+                        "source": "guided_next_follow_up_command",
+                        "default_new_seeds": "1009,1013,1019",
+                        "script_path": "/tmp/guided_next_follow_up_command.sh",
+                    },
+                },
+            }
+        ]
+        markdown = mod.render_history_markdown(
+            events,
+            history_jsonl_path=Path("/tmp/run_history.jsonl"),
+        )
+        summary = mod.summarize_history_events(
+            events,
+            history_jsonl_path=Path("/tmp/run_history.jsonl"),
+        )
+
+        self.assertEqual(
+            summary["latest"]["execution_evidence_status"],
+            "review_confirmed",
+        )
+        self.assertEqual(
+            summary["latest"]["execution_evidence_reason"],
+            "feature-swap review confirmed improvement",
+        )
+        self.assertEqual(
+            summary["latest"]["selected_execution_next_source"],
+            "feature_swap_review_command",
+        )
+        self.assertEqual(
+            summary["latest"]["execution_next_source"],
+            "guided_next_follow_up_command",
+        )
+        self.assertEqual(
+            summary["signals"]["execution_evidence_status_counts"],
+            {"review_confirmed": 1},
+        )
+        self.assertEqual(
+            summary["signals"]["selected_execution_next_source_counts"],
+            {"feature_swap_review_command": 1},
+        )
+        self.assertEqual(
+            summary["signals"]["latest_executed"][
+                "selected_execution_next_source"
+            ],
+            "feature_swap_review_command",
+        )
+        self.assertIn(
+            "latest_selected_execution_next_source: feature_swap_review_command",
+            markdown,
+        )
+        self.assertIn(
+            "selected_execution_next_source_counts: feature_swap_review_command:1",
+            markdown,
+        )
+        self.assertIn(
+            "latest_executed_execution_evidence_status: review_confirmed",
+            markdown,
+        )
 
     def test_cli_dry_run_reports_next_without_running(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
