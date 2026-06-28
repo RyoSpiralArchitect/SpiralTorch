@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 from pathlib import Path
 from typing import Any
 
@@ -92,6 +93,23 @@ def _command_from(value: Any) -> str | None:
     return value
 
 
+def _command_tokens(command: str | None) -> tuple[list[str] | None, str | None]:
+    if command is None:
+        return None, None
+    try:
+        return shlex.split(command), None
+    except ValueError as exc:
+        return None, str(exc)
+
+
+def _has_required_command_token(tokens: list[str] | None, required: str) -> bool:
+    if tokens is None:
+        return False
+    if required.endswith(".py"):
+        return any(Path(token).name == required for token in tokens)
+    return required in tokens
+
+
 def _declared_command(
     label: str,
     command: str | None,
@@ -99,21 +117,25 @@ def _declared_command(
     required_flags: tuple[str, ...] = (),
     forbidden_flags: tuple[str, ...] = (),
 ) -> dict[str, Any]:
+    tokens, parse_error = _command_tokens(command)
     missing_required_flags = [
-        flag for flag in required_flags if command is None or flag not in command
+        flag for flag in required_flags if not _has_required_command_token(tokens, flag)
     ]
     forbidden_flags_present = [
-        flag for flag in forbidden_flags if command is not None and flag in command
+        flag for flag in forbidden_flags if tokens is not None and flag in tokens
     ]
     return {
         "label": label,
         "command": command,
         "present": command is not None,
+        "tokens": tokens,
+        "parse_error": parse_error,
         "required_flags": list(required_flags),
         "missing_required_flags": missing_required_flags,
         "forbidden_flags": list(forbidden_flags),
         "forbidden_flags_present": forbidden_flags_present,
         "ok": command is not None
+        and parse_error is None
         and not missing_required_flags
         and not forbidden_flags_present,
     }
@@ -417,8 +439,8 @@ def render_markdown(summary: dict[str, Any]) -> str:
             "",
             "## Declared Commands",
             "",
-            "| label | present | ok | missing_required_flags | forbidden_flags_present | command |",
-            "| --- | --- | --- | --- | --- | --- |",
+            "| label | present | ok | parse_error | missing_required_flags | forbidden_flags_present | command |",
+            "| --- | --- | --- | --- | --- | --- | --- |",
         ]
     )
     commands = summary.get("declared_commands")
@@ -426,10 +448,11 @@ def render_markdown(summary: dict[str, Any]) -> str:
         if not isinstance(command, dict):
             continue
         lines.append(
-            "| {label} | {present} | {ok} | {missing} | {forbidden} | {command} |".format(
+            "| {label} | {present} | {ok} | {parse_error} | {missing} | {forbidden} | {command} |".format(
                 label=_fmt(command.get("label")),
                 present=_fmt(command.get("present")),
                 ok=_fmt(command.get("ok")),
+                parse_error=_fmt(command.get("parse_error")),
                 missing=_fmt_list(command.get("missing_required_flags")),
                 forbidden=_fmt_list(command.get("forbidden_flags_present")),
                 command=_fmt(command.get("command")),

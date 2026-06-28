@@ -143,6 +143,11 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
         commands = {item["label"]: item for item in payload["declared_commands"]}
         self.assertTrue(commands["runner_command"]["ok"])
         self.assertTrue(commands["history_report_command"]["ok"])
+        self.assertIsNone(commands["history_report_command"]["parse_error"])
+        self.assertIn(
+            "--history-report-only",
+            commands["history_report_command"]["tokens"],
+        )
         self.assertEqual(
             commands["history_report_command"]["required_flags"],
             ["run_char_vae_command_bundle.py", "--history-report-only"],
@@ -259,6 +264,86 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
             markdown_result.stdout,
         )
         self.assertIn("--append-run-history", markdown_result.stdout)
+
+    def test_cli_ignores_forbidden_flag_substrings_inside_command_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            command_dir = _write_bundle(Path(tmp))
+            manifest_path = command_dir / "recommendation.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            fake_script = (
+                Path(tmp)
+                / "safe-directory-name-with---append-run-history"
+                / "run_char_vae_command_bundle.py"
+            )
+            manifest["command_scripts"]["history_report_command"] = (
+                "env PYTHONNOUSERSITE=1 python3 -P "
+                f"{fake_script} {command_dir} --history-report-only"
+            )
+            manifest_path.write_text(
+                json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                ["python3", "-P", str(SCRIPT), str(command_dir), "--json"],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertTrue(payload["strict_ready"])
+        self.assertEqual(payload["declared_command_issues"], [])
+        commands = {item["label"]: item for item in payload["declared_commands"]}
+        self.assertTrue(commands["history_report_command"]["ok"])
+        self.assertEqual(
+            commands["history_report_command"]["forbidden_flags_present"],
+            [],
+        )
+
+    def test_cli_flags_unparseable_declared_command(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            command_dir = _write_bundle(Path(tmp))
+            manifest_path = command_dir / "recommendation.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["command_scripts"][
+                "history_report_command"
+            ] = "'unterminated --history-report-only"
+            manifest_path.write_text(
+                json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                ["python3", "-P", str(SCRIPT), str(command_dir), "--json"],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            markdown_result = subprocess.run(
+                ["python3", "-P", str(SCRIPT), str(command_dir)],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertFalse(payload["strict_ready"])
+        commands = {item["label"]: item for item in payload["declared_commands"]}
+        self.assertFalse(commands["history_report_command"]["ok"])
+        self.assertIsNotNone(commands["history_report_command"]["parse_error"])
+        self.assertEqual(
+            commands["history_report_command"]["missing_required_flags"],
+            ["run_char_vae_command_bundle.py", "--history-report-only"],
+        )
+        self.assertEqual(markdown_result.returncode, 0, markdown_result.stderr)
+        self.assertIn("parse_error", markdown_result.stdout)
 
     def test_cli_writes_default_inspection_reports(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
