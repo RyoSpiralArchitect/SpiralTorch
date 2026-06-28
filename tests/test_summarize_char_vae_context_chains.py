@@ -260,6 +260,11 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             comparison = json.loads(comparison_json.read_text(encoding="utf-8"))
             readme = (command_dir / "README.md").read_text(encoding="utf-8")
             markdown = comparison_markdown.read_text(encoding="utf-8")
+            inspection_command = (
+                "PYTHONNOUSERSITE=1 python3 -P "
+                f"tools/inspect_char_vae_command_bundle.py {command_dir} "
+                "--strict --write-report"
+            )
 
         self.assertTrue(comparison_json_exists)
         self.assertTrue(comparison_markdown_exists)
@@ -280,6 +285,22 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             comparison_markdown_resolved,
         )
         self.assertEqual(manifest["comparison"]["chain_sources"], [str(chain)])
+        self.assertEqual(
+            manifest["command_scripts"]["inspection_command"],
+            inspection_command,
+        )
+        self.assertEqual(
+            manifest["command_scripts"]["inspection_json_path"],
+            str(command_dir / "inspection.json"),
+        )
+        self.assertEqual(
+            manifest["command_scripts"]["inspection_markdown_path"],
+            str(command_dir / "inspection.md"),
+        )
+        self.assertIn("## Bundle Inspection", readme)
+        self.assertIn(inspection_command, readme)
+        self.assertIn("inspection.json", readme)
+        self.assertIn("inspection.md", readme)
         self.assertIn(comparison_json_resolved, readme)
         self.assertIn(comparison_markdown_resolved, readme)
         self.assertIn("command_manifest_path", markdown)
@@ -461,6 +482,22 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
                 manifest["command_scripts"]["comparison_markdown_path"],
                 str(markdown_out.resolve()),
             )
+            self.assertEqual(
+                manifest["command_scripts"]["inspection_command"],
+                (
+                    "PYTHONNOUSERSITE=1 python3 -P "
+                    f"tools/inspect_char_vae_command_bundle.py {command_dir} "
+                    "--strict --write-report"
+                ),
+            )
+            self.assertEqual(
+                manifest["command_scripts"]["inspection_json_path"],
+                str(command_dir / "inspection.json"),
+            )
+            self.assertEqual(
+                manifest["command_scripts"]["inspection_markdown_path"],
+                str(command_dir / "inspection.md"),
+            )
             self.assertIn("# target_kind: follow_up", next_text)
             self.assertIn("recommended_follow_up.sh", next_text)
             self.assertIn(f"cd {shlex.quote(execution_cwd)}", script_text)
@@ -517,6 +554,10 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             self.assertIn(str(json_out.resolve()), readme)
             self.assertIn(str(markdown_out.resolve()), readme)
             self.assertIn(str(chain), readme)
+            self.assertIn("## Bundle Inspection", readme)
+            self.assertIn("tools/inspect_char_vae_command_bundle.py", readme)
+            self.assertIn("inspection.json", readme)
+            self.assertIn("inspection.md", readme)
             self.assertIn("recommended_next.sh", readme)
             self.assertIn(f"bash {shlex.quote(str(next_script))}", readme)
             self.assertIn("recommended_follow_up.sh", readme)
@@ -526,6 +567,10 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             self.assertIn("command_execution_cwd", markdown)
             self.assertIn("recommendation.json", markdown)
             self.assertIn("README.md", markdown)
+            self.assertIn("command_inspection:", markdown)
+            self.assertIn("tools/inspect_char_vae_command_bundle.py", markdown)
+            self.assertIn("command_inspection_json_path", markdown)
+            self.assertIn("command_inspection_markdown_path", markdown)
 
     def test_selection_separates_safe_accepted_from_absolute_best(self) -> None:
         mod = _load_module()
