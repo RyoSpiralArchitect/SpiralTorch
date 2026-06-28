@@ -30,7 +30,8 @@ class CharVaeContextChainTests(unittest.TestCase):
         self.assertIn("supplied groups override matching follow-ups", help_text)
         self.assertIn("unspecified follow-ups still use generated", help_text)
         self.assertIn("tie-aware default_new_seeds", help_text)
-        self.assertIn("extra groups beyond --follow-ups and unattempted", help_text)
+        self.assertIn("extra groups beyond --follow-ups and planned", help_text)
+        self.assertIn("reported separately", help_text)
 
     def test_follow_up_seed_policy_records_precedence(self) -> None:
         mod = _load_module()
@@ -93,6 +94,26 @@ class CharVaeContextChainTests(unittest.TestCase):
             "planned_follow_up_seed_groups": ["17", "19", "23"],
             "extra_explicit_seed_groups": [],
             "unused_explicit_seed_groups": ["19", "23"],
+            "follow_up_seed_group_plan": [
+                {
+                    "group_index": 1,
+                    "follow_up_index": 1,
+                    "seed_group": "17",
+                    "source": "explicit",
+                    "planned": True,
+                    "attempted": True,
+                    "status": "attempted_slot",
+                },
+                {
+                    "group_index": 2,
+                    "follow_up_index": 2,
+                    "seed_group": "19",
+                    "source": "explicit",
+                    "planned": True,
+                    "attempted": False,
+                    "status": "unused_after_stop",
+                },
+            ],
             "follow_up_seed_policy": mod._follow_up_seed_policy_record(
                 explicit_seed_groups=True
             ),
@@ -101,6 +122,12 @@ class CharVaeContextChainTests(unittest.TestCase):
 
         self.assertEqual(mod._attempted_follow_up_count(manifest), 1)
         self.assertIn("- unused_explicit_seed_groups: 19, 23", report)
+        self.assertIn(
+            "- follow_up_seed_group_plan: #1 source=explicit -> follow_up=1 "
+            "status=attempted_slot seeds=17; #2 source=explicit -> follow_up=2 "
+            "status=unused_after_stop seeds=19",
+            report,
+        )
         self.assertEqual(
             mod._unused_explicit_seed_groups(
                 ["17", "19", "23"],
@@ -137,6 +164,60 @@ class CharVaeContextChainTests(unittest.TestCase):
             ),
             [],
         )
+
+    def test_follow_up_seed_group_plan_maps_attempted_unused_and_extra(self) -> None:
+        mod = _load_module()
+
+        plan = mod._follow_up_seed_group_plan(
+            ["17", "19", "23"],
+            explicit_seed_groups=True,
+            planned_follow_ups=2,
+            attempted_follow_ups=1,
+            dry_run=False,
+        )
+
+        self.assertEqual(
+            plan,
+            [
+                {
+                    "group_index": 1,
+                    "follow_up_index": 1,
+                    "seed_group": "17",
+                    "source": "explicit",
+                    "planned": True,
+                    "attempted": True,
+                    "status": "attempted_slot",
+                },
+                {
+                    "group_index": 2,
+                    "follow_up_index": 2,
+                    "seed_group": "19",
+                    "source": "explicit",
+                    "planned": True,
+                    "attempted": False,
+                    "status": "unused_after_stop",
+                },
+                {
+                    "group_index": 3,
+                    "follow_up_index": None,
+                    "seed_group": "23",
+                    "source": "explicit",
+                    "planned": False,
+                    "attempted": False,
+                    "status": "extra",
+                },
+            ],
+        )
+
+        dry_run_plan = mod._follow_up_seed_group_plan(
+            ["17", "19"],
+            explicit_seed_groups=True,
+            planned_follow_ups=1,
+            attempted_follow_ups=0,
+            dry_run=True,
+        )
+        self.assertEqual(dry_run_plan[0]["status"], "dry_run_planned")
+        self.assertEqual(dry_run_plan[1]["status"], "extra")
 
     def test_preset_latent_scale_defaults_keep_smoke_light_and_scout_small(self) -> None:
         mod = _load_module()
@@ -305,6 +386,7 @@ class CharVaeContextChainTests(unittest.TestCase):
                     "planned_follow_up_seed_groups": ["17", "19"],
                     "extra_explicit_seed_groups": [],
                     "unused_explicit_seed_groups": [],
+                    "follow_up_seed_group_plan": [],
                     "follow_up_seed_policy": mod._follow_up_seed_policy_record(
                         explicit_seed_groups=False
                     ),

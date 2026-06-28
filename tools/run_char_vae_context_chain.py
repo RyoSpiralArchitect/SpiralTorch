@@ -208,6 +208,47 @@ def _unused_explicit_seed_groups(
     return seed_groups[start:stop]
 
 
+def _follow_up_seed_group_plan(
+    seed_groups: list[str],
+    *,
+    explicit_seed_groups: bool,
+    planned_follow_ups: int,
+    attempted_follow_ups: int,
+    dry_run: bool,
+) -> list[dict[str, Any]]:
+    source = "explicit" if explicit_seed_groups else "preset_fallback"
+    planned = max(0, planned_follow_ups)
+    attempted = max(0, attempted_follow_ups)
+    plan: list[dict[str, Any]] = []
+    for index, group in enumerate(seed_groups):
+        planned_slot = index < planned
+        attempted_slot = planned_slot and index < attempted
+        if not planned_slot:
+            status = "extra"
+            follow_up_index = None
+        elif dry_run:
+            status = "dry_run_planned"
+            follow_up_index = index + 1
+        elif attempted_slot:
+            status = "attempted_slot"
+            follow_up_index = index + 1
+        else:
+            status = "unused_after_stop"
+            follow_up_index = index + 1
+        plan.append(
+            {
+                "group_index": index + 1,
+                "follow_up_index": follow_up_index,
+                "seed_group": group,
+                "source": source,
+                "planned": planned_slot,
+                "attempted": attempted_slot,
+                "status": status,
+            }
+        )
+    return plan
+
+
 def _follow_up_command_record(
     summary: dict[str, Any],
     *,
@@ -534,6 +575,22 @@ def _can_continue_after_gate_stop(
 def _render_report(manifest: dict[str, Any]) -> str:
     accepted = manifest.get("accepted_step")
     best = manifest.get("best_step")
+    seed_group_plan = manifest.get("follow_up_seed_group_plan", [])
+    seed_group_plan_text = "-"
+    if isinstance(seed_group_plan, list) and seed_group_plan:
+        seed_group_plan_text = "; ".join(
+            "#{group} source={source} -> follow_up={follow_up} "
+            "status={status} seeds={seeds}".format(
+                group=_fmt(_value(item, "group_index")),
+                source=_fmt(_value(item, "source")),
+                follow_up=_fmt(_value(item, "follow_up_index")),
+                status=_fmt(_value(item, "status")),
+                seeds=_fmt(_value(item, "seed_group")),
+            )
+            for item in seed_group_plan
+            if isinstance(item, dict)
+        )
+        seed_group_plan_text = seed_group_plan_text or "-"
     lines = [
         "# Char VAE Context Chain Report",
         "",
@@ -570,6 +627,7 @@ def _render_report(manifest: dict[str, Any]) -> str:
                 or "-"
             ),
         ),
+        f"- follow_up_seed_group_plan: {seed_group_plan_text}",
         "- follow_up_seed_policy: {precedence} ({reason})".format(
             precedence=(
                 " -> ".join(
@@ -729,8 +787,8 @@ def _build_parser() -> argparse.ArgumentParser:
             "explicit per-follow-up NEW_SEEDS groups; supplied groups override "
             "matching follow-ups, while unspecified follow-ups still use generated "
             "tie-aware default_new_seeds before script defaults; extra groups beyond "
-            "--follow-ups and unattempted groups after early stops are reported in "
-            "chain artifacts"
+            "--follow-ups and planned groups skipped after early stops are reported "
+            "separately in chain artifacts"
         ),
     )
     parser.add_argument(
@@ -798,6 +856,13 @@ def main(argv: list[str] | None = None) -> int:
             follow_up_count=int(args.follow_ups),
         ),
         "unused_explicit_seed_groups": [],
+        "follow_up_seed_group_plan": _follow_up_seed_group_plan(
+            seed_groups,
+            explicit_seed_groups=explicit_seed_groups,
+            planned_follow_ups=int(args.follow_ups),
+            attempted_follow_ups=0,
+            dry_run=bool(args.dry_run),
+        ),
         "follow_up_seed_group_source": (
             "explicit" if explicit_seed_groups else "preset_fallback"
         ),
@@ -906,6 +971,13 @@ def main(argv: list[str] | None = None) -> int:
             attempted_follow_ups=attempted_follow_ups,
             planned_follow_ups=int(args.follow_ups),
         )
+    )
+    manifest["follow_up_seed_group_plan"] = _follow_up_seed_group_plan(
+        seed_groups,
+        explicit_seed_groups=explicit_seed_groups,
+        planned_follow_ups=int(args.follow_ups),
+        attempted_follow_ups=attempted_follow_ups,
+        dry_run=bool(args.dry_run),
     )
 
     chain_path = run_root / "chain.json"
