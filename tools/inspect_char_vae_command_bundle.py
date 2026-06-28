@@ -327,6 +327,9 @@ def _run_loop_status(
         "final_next_action": None,
         "final_next_action_reason": None,
         "final_next_action_target": None,
+        "final_next_action_command_source": None,
+        "final_next_action_script_path": None,
+        "final_next_action_default_new_seeds": None,
         "final_next_action_should_continue": None,
         "final_next_action_runnable": None,
         "continuation_command": None,
@@ -368,6 +371,13 @@ def _run_loop_status(
             "final_next_action": final_next_action.get("action"),
             "final_next_action_reason": final_next_action.get("reason"),
             "final_next_action_target": final_next_action.get("target"),
+            "final_next_action_command_source": final_next_action.get(
+                "command_source"
+            ),
+            "final_next_action_script_path": final_next_action.get("script_path"),
+            "final_next_action_default_new_seeds": final_next_action.get(
+                "default_new_seeds"
+            ),
             "final_next_action_should_continue": final_next_action.get(
                 "should_continue"
             ),
@@ -746,6 +756,9 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"- run_loop_final_next_action: {_fmt(_value(summary, 'run_loop_status', 'final_next_action'))}",
         f"- run_loop_final_next_action_reason: {_fmt(_value(summary, 'run_loop_status', 'final_next_action_reason'))}",
         f"- run_loop_final_next_action_target: {_fmt(_value(summary, 'run_loop_status', 'final_next_action_target'))}",
+        f"- run_loop_final_next_action_command_source: {_fmt(_value(summary, 'run_loop_status', 'final_next_action_command_source'))}",
+        f"- run_loop_final_next_action_script_path: {_fmt(_value(summary, 'run_loop_status', 'final_next_action_script_path'))}",
+        f"- run_loop_final_next_action_default_new_seeds: {_fmt(_value(summary, 'run_loop_status', 'final_next_action_default_new_seeds'))}",
         f"- run_loop_final_next_action_should_continue: {_fmt(_value(summary, 'run_loop_status', 'final_next_action_should_continue'))}",
         f"- run_loop_final_next_action_runnable: {_fmt(_value(summary, 'run_loop_status', 'final_next_action_runnable'))}",
         f"- run_loop_continuation_command: {_fmt(_value(summary, 'run_loop_status', 'continuation_command'))}",

@@ -326,6 +326,9 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
                 "final_next_action": None,
                 "final_next_action_reason": None,
                 "final_next_action_target": None,
+                "final_next_action_command_source": None,
+                "final_next_action_script_path": None,
+                "final_next_action_default_new_seeds": None,
                 "final_next_action_should_continue": None,
                 "final_next_action_runnable": None,
                 "continuation_command": None,
@@ -796,6 +799,9 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
                             "latest execution can continue but has no next script"
                         ),
                         "target": None,
+                        "command_source": "guided_next_follow_up_command",
+                        "script_path": None,
+                        "default_new_seeds": "109,113,127",
                         "should_continue": False,
                     },
                     "final_next_action_runnable": False,
@@ -860,6 +866,12 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
             "latest execution can continue but has no next script",
         )
         self.assertIsNone(status["final_next_action_target"])
+        self.assertEqual(
+            status["final_next_action_command_source"],
+            "guided_next_follow_up_command",
+        )
+        self.assertIsNone(status["final_next_action_script_path"])
+        self.assertEqual(status["final_next_action_default_new_seeds"], "109,113,127")
         self.assertIs(status["final_next_action_should_continue"], False)
         self.assertIs(status["final_next_action_runnable"], False)
         self.assertIsNone(status["continuation_command"])
@@ -892,6 +904,15 @@ class InspectCharVaeCommandBundleTests(unittest.TestCase):
         )
         self.assertIn(
             "run_loop_final_next_action_should_continue: no",
+            markdown_result.stdout,
+        )
+        self.assertIn(
+            "run_loop_final_next_action_command_source: "
+            "guided_next_follow_up_command",
+            markdown_result.stdout,
+        )
+        self.assertIn(
+            "run_loop_final_next_action_default_new_seeds: 109,113,127",
             markdown_result.stdout,
         )
         self.assertIn(

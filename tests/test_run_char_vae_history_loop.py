@@ -175,6 +175,18 @@ class RunCharVaeHistoryLoopTests(unittest.TestCase):
         )
         self.assertEqual(payload["final_next_action"]["action"], "run_execution_next")
         self.assertEqual(payload["final_next_action"]["target"], "execution-next")
+        self.assertEqual(
+            payload["final_next_action"]["command_source"],
+            "guided_next_follow_up_command",
+        )
+        self.assertIn(
+            "guided_next_follow_up_command.sh",
+            payload["final_next_action"]["script_path"],
+        )
+        self.assertEqual(
+            payload["final_next_action"]["default_new_seeds"],
+            "109,113,127",
+        )
         self.assertIs(payload["final_next_action"]["should_continue"], True)
         self.assertIs(payload["final_next_action_runnable"], True)
         self.assertIn(
@@ -196,6 +208,16 @@ class RunCharVaeHistoryLoopTests(unittest.TestCase):
         )
         self.assertIn("stop_reason: max_steps_reached", loop_markdown)
         self.assertIn("max_steps_continuation_failed: yes", loop_markdown)
+        self.assertIn(
+            "final_next_action_command_source: guided_next_follow_up_command",
+            loop_markdown,
+        )
+        self.assertIn("final_next_action_script_path:", loop_markdown)
+        self.assertIn("guided_next_follow_up_command.sh", loop_markdown)
+        self.assertIn(
+            "final_next_action_default_new_seeds: 109,113,127",
+            loop_markdown,
+        )
         self.assertIn("continuation_command:", loop_markdown)
 
     def test_cli_fails_when_final_action_requires_review(self) -> None:
