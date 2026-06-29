@@ -295,6 +295,50 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
             [101, 103, 107, 109, 113, 127],
         )
 
+    def test_next_follow_up_avoids_source_summary_reserved_scale_up_seeds(self) -> None:
+        mod = _load_module()
+        parser = mod._build_parser()
+        args = parser.parse_args(["models/samples/spiral_corpus_en"])
+        best_config = {
+            "best_feature": "reconstruction_latent",
+            "feature_normalize": "blocks",
+            "hybrid_latent_scale": 4.0,
+            "mean_best_nll": 4.2,
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "summary.json"
+            source.write_text(
+                json.dumps(
+                    {
+                        "mainline_scale_up_command": {
+                            "default_new_seeds": "131,137,139",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            follow_up = {
+                "source_summary_path": str(source),
+                "source_seeds": [101, 103, 107],
+                "source_chain": {"ancestors": []},
+                "resolved": {"seeds": [109, 113, 127]},
+            }
+
+            record = mod._next_follow_up_command_record(
+                args,
+                ["raw", "latent", "raw_latent", "reconstruction_latent"],
+                best_config,
+                Path(tmp) / "current",
+                [109, 113, 127],
+                follow_up,
+            )
+
+        self.assertEqual(record["default_new_seeds"], "149,151,157")
+        self.assertEqual(
+            record["used_seed_history"],
+            [131, 137, 139, 101, 103, 107, 109, 113, 127],
+        )
+
     def test_next_follow_up_boosts_seed_count_for_uncertainty_tie(self) -> None:
         mod = _load_module()
         parser = mod._build_parser()
@@ -1708,6 +1752,146 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
             refreshed["learning_evidence"]["best_family"]["family"],
             "hybrid_latent",
         )
+
+    def test_refresh_rebuilds_next_follow_up_around_source_reserved_seeds(
+        self,
+    ) -> None:
+        mod = _load_module()
+        parser = mod._build_parser()
+        run_budget = {
+            "window_chars": 32,
+            "latent_dim": 12,
+            "hidden": 64,
+            "epochs": 32,
+            "batches": 64,
+            "batch_size": 4,
+            "eval_samples": 256,
+            "vae_epochs": 12,
+            "vae_batches": 24,
+            "vae_batch_size": 4,
+        }
+
+        def seed_summary(seed: int, best_nll: float) -> dict:
+            raw_nll = best_nll + 0.25
+            return {
+                "seed": seed,
+                "feature_normalize": "blocks",
+                "hybrid_latent_scale": 4.0,
+                "latent_dim": 12,
+                "hidden": 64,
+                "run_dir": f"/tmp/seed_{seed}",
+                "best_feature": "reconstruction_latent",
+                "ranking": [
+                    {
+                        "feature": "reconstruction_latent",
+                        "best_mean_nll": best_nll,
+                        "best_accuracy": 0.18,
+                    },
+                    {
+                        "feature": "raw",
+                        "best_mean_nll": raw_nll,
+                        "best_accuracy": 0.17,
+                    },
+                ],
+                "deltas": {
+                    "reconstruction_latent_best_nll_vs_raw": best_nll - raw_nll,
+                    "raw_best_nll_vs_raw": 0.0,
+                },
+            }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "current"
+            root.mkdir()
+            source_summary = Path(tmp) / "source" / "summary.json"
+            source_summary.parent.mkdir()
+            source_summary.write_text(
+                json.dumps(
+                    {
+                        "mainline_scale_up_command": {
+                            "default_new_seeds": (
+                                "101,103,107,109,113,127,131,137,139"
+                            ),
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            aggregate = {
+                "schema": "st.llm_char_vae_context.v1",
+                "format": 1,
+                "aggregate": True,
+                "run": {
+                    **run_budget,
+                    "budget": run_budget,
+                    "features": ["raw", "reconstruction_latent"],
+                    "feature_normalize": "blocks",
+                    "feature_normalize_modes": ["blocks"],
+                    "normalize_count": 1,
+                    "hybrid_latent_scale": 4.0,
+                    "hybrid_latent_scales": [4.0],
+                    "scale_count": 1,
+                    "latent_dims": [12],
+                    "latent_dim_count": 1,
+                    "hidden_sizes": [64],
+                    "hidden_size_count": 1,
+                    "seeds": [149, 151, 157],
+                    "min_nll_delta": 0.0,
+                    "follow_up_confirm_tolerance": 0.0,
+                    "win_tolerance": 0.0001,
+                    "follow_up_fail_on_verdicts": ["regressed", "unknown"],
+                },
+                "seed_summaries": [
+                    seed_summary(149, 3.82),
+                    seed_summary(151, 3.81),
+                    seed_summary(157, 3.80),
+                ],
+                "config_summaries": [],
+                "follow_up": {
+                    "source_summary_path": str(source_summary),
+                    "source_best_config": {
+                        "best_feature": "reconstruction_latent",
+                        "feature_normalize": "blocks",
+                        "hybrid_latent_scale": 4.0,
+                        "latent_dim": 12,
+                        "hidden": 64,
+                        "mean_best_nll": 3.83,
+                    },
+                    "source_run_budget": run_budget,
+                    "source_chain": {"generation": 1, "ancestors": []},
+                },
+                "next_follow_up_command": {
+                    "schema": "st.llm_char_vae_context.next_follow_up_command.v1",
+                    "default_follow_up_from": str(root / "summary.json"),
+                    "default_new_seeds": "101,103,107",
+                    "default_new_seed_count": 3,
+                    "default_run_dir": str(root / "stale_next"),
+                    "default_follow_up_fail_on_verdict": "regressed,unknown",
+                    "script_path": str(root / "next_follow_up_command.sh"),
+                    "shell_command": "python3 models/python/llm_char_vae_context.py ...",
+                    "script_command": [
+                        "python3",
+                        "-S",
+                        "-s",
+                        "models/python/llm_char_vae_context.py",
+                        "models/samples/spiral_corpus_en",
+                    ],
+                },
+            }
+            args = parser.parse_args(["--run-dir", str(root), "--refresh-summary"])
+            refreshed = mod._refresh_aggregate_summary_payload(
+                aggregate,
+                args=args,
+                root_run_dir=root,
+                write_scripts=False,
+            )
+
+        command = refreshed["next_follow_up_command"]
+        self.assertEqual(command["default_new_seeds"], "1001,1003,1005")
+        self.assertEqual(
+            command["used_seed_history"],
+            [101, 103, 107, 109, 113, 127, 131, 137, 139, 149, 151, 157],
+        )
+        self.assertIn("--seeds 1001,1003,1005", command["shell_command"])
 
     def test_refresh_stable_family_recreates_promoted_train_command(self) -> None:
         mod = _load_module()
