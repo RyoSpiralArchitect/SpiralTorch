@@ -63,6 +63,7 @@ class RunLlmCharFinetuneReloadSweepTests(unittest.TestCase):
                         "--early-stop-patience",
                         "2",
                         "--restore-best-at-end",
+                        "--rollback-on-validation-regression",
                         "--dry-run",
                     ]
                 )
@@ -79,7 +80,13 @@ class RunLlmCharFinetuneReloadSweepTests(unittest.TestCase):
         self.assertEqual(manifest["summary"]["cells"], 4)
         self.assertEqual(manifest["summary"]["run_status_counts"], {"dry_run": 4})
         self.assertEqual(manifest["summary"]["training_status_counts"], {"dry_run": 4})
+        self.assertEqual(len(manifest["summary"]["reload_lr_groups"]), 2)
+        self.assertEqual(
+            [group["cells"] for group in manifest["summary"]["reload_lr_groups"]],
+            [2, 2],
+        )
         self.assertEqual(manifest["settings"]["eval_seed_offset"], 0)
+        self.assertTrue(manifest["settings"]["rollback_on_validation_regression"])
         first = manifest["cells"][0]
         self.assertEqual(first["status"], "dry_run")
         self.assertEqual(first["eval_seed"], first["seed"])
@@ -87,8 +94,11 @@ class RunLlmCharFinetuneReloadSweepTests(unittest.TestCase):
         self.assertIn("--eval-seed", first["command"])
         self.assertIn("--early-stop-patience", first["command"])
         self.assertIn("--restore-best-at-end", first["command"])
+        self.assertIn("--rollback-on-validation-regression", first["command"])
         self.assertIn("seed3_reloadlr0p02", first["name"])
         self.assertIn("# LLM Char Finetune Reload Sweep", markdown)
+        self.assertIn("## Reload LR Groups", markdown)
+        self.assertIn("| 0.02 | 2 |", markdown)
         self.assertIn(
             "| cell | status | training_status | run_status | seed | reload_seed | eval_seed |",
             markdown,
@@ -101,28 +111,33 @@ class RunLlmCharFinetuneReloadSweepTests(unittest.TestCase):
             {
                 "name": "regressed",
                 "status": "ok",
+                "reload_lr": 0.02,
                 "outcome": {
                     "status": "regressed",
                     "reload_training_status": "regressed",
                     "reload_best_minus_base_best_nll": 0.1,
                     "reload_training_final_minus_base_best_nll": 0.15,
                     "reload_final_minus_base_final_nll": 0.2,
+                    "reload_validation_rollback_count": 2,
                 },
             },
             {
                 "name": "improved",
                 "status": "ok",
+                "reload_lr": 0.005,
                 "outcome": {
                     "status": "improved",
                     "reload_training_status": "improved",
                     "reload_best_minus_base_best_nll": -0.2,
                     "reload_training_final_minus_base_best_nll": -0.3,
                     "reload_final_minus_base_final_nll": -0.1,
+                    "reload_validation_rollback_count": 0,
                 },
             },
             {
                 "name": "unknown",
                 "status": "missing_outcome",
+                "reload_lr": 0.02,
                 "outcome": None,
             },
         ]
@@ -146,6 +161,31 @@ class RunLlmCharFinetuneReloadSweepTests(unittest.TestCase):
         self.assertAlmostEqual(
             summary["best_reload_training_final_minus_base_best_nll"],
             -0.3,
+        )
+        self.assertAlmostEqual(
+            summary["reload_training_final_minus_base_best_nll_stats"]["mean"],
+            -0.075,
+        )
+        self.assertAlmostEqual(
+            summary["reload_validation_rollback_count_stats"]["mean"],
+            1.0,
+        )
+        groups = summary["reload_lr_groups"]
+        self.assertEqual([group["reload_lr_label"] for group in groups], ["0.005", "0.02"])
+        self.assertEqual(groups[0]["best_cell"], "improved")
+        self.assertEqual(groups[0]["training_status_counts"], {"improved": 1})
+        self.assertAlmostEqual(
+            groups[0]["reload_training_final_minus_base_best_nll_stats"]["mean"],
+            -0.3,
+        )
+        self.assertAlmostEqual(
+            groups[0]["reload_validation_rollback_count_stats"]["mean"],
+            0.0,
+        )
+        self.assertEqual(groups[1]["cells"], 2)
+        self.assertEqual(
+            groups[1]["training_status_counts"],
+            {"missing_outcome": 1, "regressed": 1},
         )
 
     def test_invalid_reload_lr_values_return_usage_error(self) -> None:

@@ -92,6 +92,7 @@ class RunLlmCharFinetuneReloadPairTests(unittest.TestCase):
                         "--early-stop-patience",
                         "2",
                         "--restore-best-at-end",
+                        "--rollback-on-validation-regression",
                         "--curves",
                         "--dry-run",
                     ]
@@ -113,6 +114,7 @@ class RunLlmCharFinetuneReloadPairTests(unittest.TestCase):
         self.assertEqual(manifest["settings"]["eval_seed"], 11)
         self.assertEqual(manifest["settings"]["early_stop_patience"], 2)
         self.assertTrue(manifest["settings"]["restore_best_at_end"])
+        self.assertTrue(manifest["settings"]["rollback_on_validation_regression"])
         self.assertEqual(len(manifest["runs"]), 2)
         self.assertEqual(manifest["runs"][0]["name"], "base_scratch")
         self.assertEqual(manifest["runs"][1]["name"], "reload_finetune")
@@ -126,10 +128,12 @@ class RunLlmCharFinetuneReloadPairTests(unittest.TestCase):
         self.assertIn("--eval-seed", base_command)
         self.assertIn("--early-stop-patience", base_command)
         self.assertIn("--restore-best-at-end", base_command)
+        self.assertIn("--rollback-on-validation-regression", base_command)
         self.assertIn("--load-run", reload_command)
         self.assertIn("--eval-seed", reload_command)
         self.assertIn("--early-stop-patience", reload_command)
         self.assertIn("--restore-best-at-end", reload_command)
+        self.assertIn("--rollback-on-validation-regression", reload_command)
         self.assertEqual(
             base_command[base_command.index("--eval-seed") + 1],
             reload_command[reload_command.index("--eval-seed") + 1],
@@ -307,6 +311,9 @@ class RunLlmCharFinetuneReloadPairTests(unittest.TestCase):
                         "restore_best_at_end": True,
                         "restored_best_at_end": True,
                         "best_checkpoint_exists": True,
+                        "rollback_on_validation_regression": True,
+                        "validation_rollback_count": 1,
+                        "validation_rollback_epochs": [0],
                         "epochs_completed": 2,
                     }
                 ),
@@ -328,6 +335,9 @@ class RunLlmCharFinetuneReloadPairTests(unittest.TestCase):
                         "restore_best_at_end": True,
                         "restored_best_at_end": True,
                         "best_checkpoint_exists": True,
+                        "rollback_on_validation_regression": True,
+                        "validation_rollback_count": 2,
+                        "validation_rollback_epochs": [1, 3],
                         "epochs_completed": 4,
                     }
                 ),
@@ -356,6 +366,9 @@ class RunLlmCharFinetuneReloadPairTests(unittest.TestCase):
         self.assertAlmostEqual(outcome["reload"]["training_final_nll"], 3.25)
         self.assertAlmostEqual(outcome["reload"]["training_final_nll_delta"], -0.2)
         self.assertAlmostEqual(outcome["reload"]["training_final_minus_best_nll"], 0.05)
+        self.assertEqual(outcome["reload_validation_rollback_count"], 2)
+        self.assertEqual(outcome["reload_validation_rollback_epochs"], [1, 3])
+        self.assertEqual(outcome["reload"]["validation_rollback_count"], 2)
         self.assertEqual(outcome["reload"]["early_stopped_epoch"], 3)
         self.assertTrue(outcome["reload"]["restored_best_at_end"])
 

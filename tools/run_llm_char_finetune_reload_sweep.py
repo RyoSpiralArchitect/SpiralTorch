@@ -104,6 +104,14 @@ def fmt_float(value: Any, *, digits: int = 6) -> str:
     return f"{out:.{digits}f}"
 
 
+def fmt_label(value: Any) -> str:
+    if isinstance(value, (int, float)):
+        out = float(value)
+        if math.isfinite(out):
+            return f"{out:.12g}"
+    return str(value)
+
+
 def run_command(command: list[str], log_path: Path) -> tuple[int, float]:
     started = time.time()
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -190,6 +198,8 @@ def pair_command(
         command.extend(["--early-stop-patience", str(args.early_stop_patience)])
     if args.restore_best_at_end:
         command.append("--restore-best-at-end")
+    if args.rollback_on_validation_regression:
+        command.append("--rollback-on-validation-regression")
     if args.curves:
         command.append("--curves")
     if args.ignore_preflight:
@@ -302,36 +312,54 @@ def outcome_delta(cell: dict[str, Any], key: str) -> float | None:
     return out if math.isfinite(out) else None
 
 
-def sweep_summary(cells: list[dict[str, Any]]) -> dict[str, Any]:
+def delta_stats(cells: list[dict[str, Any]], key: str) -> dict[str, Any]:
+    values = [outcome_delta(cell, key) for cell in cells]
+    finite = [value for value in values if value is not None]
+    if not finite:
+        return {"count": 0, "mean": None, "min": None, "max": None}
+    return {
+        "count": len(finite),
+        "mean": sum(finite) / len(finite),
+        "min": min(finite),
+        "max": max(finite),
+    }
+
+
+def best_cell_by_delta(
+    cells: list[dict[str, Any]],
+    key: str,
+    *,
+    secondary_key: str | None = None,
+) -> dict[str, Any] | None:
+    ranked = [cell for cell in cells if outcome_delta(cell, key) is not None]
+
+    def sort_delta(cell: dict[str, Any], metric: str) -> float:
+        value = outcome_delta(cell, metric)
+        return value if value is not None else float("inf")
+
+    ranked.sort(
+        key=lambda cell: (
+            sort_delta(cell, key),
+            sort_delta(cell, secondary_key) if secondary_key is not None else 0.0,
+            str(cell.get("name") or ""),
+        )
+    )
+    return ranked[0] if ranked else None
+
+
+def aggregate_cells(cells: list[dict[str, Any]]) -> dict[str, Any]:
     status_counts = Counter(outcome_status(cell) for cell in cells)
     training_status_counts = Counter(outcome_training_status(cell) for cell in cells)
     run_status_counts = Counter(str(cell.get("status") or "unknown") for cell in cells)
-    ranked = [
-        cell
-        for cell in cells
-        if outcome_delta(cell, "reload_best_minus_base_best_nll") is not None
-    ]
-    ranked.sort(
-        key=lambda cell: (
-            outcome_delta(cell, "reload_best_minus_base_best_nll"),
-            outcome_delta(cell, "reload_final_minus_base_final_nll") or float("inf"),
-            str(cell.get("name") or ""),
-        )
+    best = best_cell_by_delta(
+        cells,
+        "reload_best_minus_base_best_nll",
+        secondary_key="reload_final_minus_base_final_nll",
     )
-    training_ranked = [
-        cell
-        for cell in cells
-        if outcome_delta(cell, "reload_training_final_minus_base_best_nll")
-        is not None
-    ]
-    training_ranked.sort(
-        key=lambda cell: (
-            outcome_delta(cell, "reload_training_final_minus_base_best_nll"),
-            str(cell.get("name") or ""),
-        )
+    best_training = best_cell_by_delta(
+        cells,
+        "reload_training_final_minus_base_best_nll",
     )
-    best = ranked[0] if ranked else None
-    best_training = training_ranked[0] if training_ranked else None
     return {
         "cells": len(cells),
         "status_counts": dict(sorted(status_counts.items())),
@@ -349,7 +377,55 @@ def sweep_summary(cells: list[dict[str, Any]]) -> dict[str, Any]:
         ),
         "improved_cells": int(status_counts.get("improved", 0)),
         "regressed_cells": int(status_counts.get("regressed", 0)),
+        "reload_best_minus_base_best_nll_stats": delta_stats(
+            cells,
+            "reload_best_minus_base_best_nll",
+        ),
+        "reload_training_final_minus_base_best_nll_stats": delta_stats(
+            cells,
+            "reload_training_final_minus_base_best_nll",
+        ),
+        "reload_training_final_minus_reload_initial_nll_stats": delta_stats(
+            cells,
+            "reload_training_final_minus_reload_initial_nll",
+        ),
+        "reload_validation_rollback_count_stats": delta_stats(
+            cells,
+            "reload_validation_rollback_count",
+        ),
     }
+
+
+def reload_lr_group_summaries(cells: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    groups: dict[float, list[dict[str, Any]]] = {}
+    for cell in cells:
+        reload_lr = cell.get("reload_lr")
+        if not isinstance(reload_lr, (int, float)):
+            continue
+        value = float(reload_lr)
+        if not math.isfinite(value):
+            continue
+        groups.setdefault(value, []).append(cell)
+    summaries: list[dict[str, Any]] = []
+    for reload_lr in sorted(groups):
+        group_cells = groups[reload_lr]
+        summary = aggregate_cells(group_cells)
+        summary["reload_lr"] = reload_lr
+        summary["reload_lr_label"] = fmt_label(reload_lr)
+        summaries.append(summary)
+    return summaries
+
+
+def sweep_summary(cells: list[dict[str, Any]]) -> dict[str, Any]:
+    summary = aggregate_cells(cells)
+    summary["reload_lr_groups"] = reload_lr_group_summaries(cells)
+    return summary
+
+
+def stats_value(stats: Any, key: str) -> Any:
+    if isinstance(stats, dict):
+        return stats.get(key)
+    return None
 
 
 def render_markdown(manifest: dict[str, Any]) -> str:
@@ -364,9 +440,54 @@ def render_markdown(manifest: dict[str, Any]) -> str:
         f"- best_cell: `{summary.get('best_cell', '-')}`",
         f"- best_training_cell: `{summary.get('best_training_cell', '-')}`",
         "",
-        "| cell | status | training_status | run_status | seed | reload_seed | eval_seed | reload_lr | best_delta | training_delta | final_delta | reload_delta | manifest | outcome |",
-        "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |",
     ]
+    reload_lr_groups = summary.get("reload_lr_groups")
+    if isinstance(reload_lr_groups, list) and reload_lr_groups:
+        lines.extend(
+            [
+                "## Reload LR Groups",
+                "",
+                "| reload_lr | cells | status_counts | training_status_counts | best_cell | best_delta | best_training_cell | training_delta_mean | training_delta_min | training_delta_max | reload_delta_mean | rollback_count_mean |",
+                "| ---: | ---: | --- | --- | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: |",
+            ]
+        )
+        for group in reload_lr_groups:
+            if not isinstance(group, dict):
+                continue
+            training_stats = group.get(
+                "reload_training_final_minus_base_best_nll_stats"
+            )
+            reload_stats = group.get(
+                "reload_training_final_minus_reload_initial_nll_stats"
+            )
+            rollback_stats = group.get("reload_validation_rollback_count_stats")
+            lines.append(
+                "| "
+                + " | ".join(
+                    [
+                        md_cell(group.get("reload_lr_label")),
+                        md_cell(group.get("cells")),
+                        md_cell(group.get("status_counts")),
+                        md_cell(group.get("training_status_counts")),
+                        md_cell(group.get("best_cell")),
+                        fmt_float(group.get("best_reload_best_minus_base_best_nll")),
+                        md_cell(group.get("best_training_cell")),
+                        fmt_float(stats_value(training_stats, "mean")),
+                        fmt_float(stats_value(training_stats, "min")),
+                        fmt_float(stats_value(training_stats, "max")),
+                        fmt_float(stats_value(reload_stats, "mean")),
+                        fmt_float(stats_value(rollback_stats, "mean")),
+                    ]
+                )
+                + " |"
+            )
+        lines.append("")
+    lines.extend(
+        [
+            "| cell | status | training_status | run_status | seed | reload_seed | eval_seed | reload_lr | best_delta | training_delta | final_delta | reload_delta | rollback_count | manifest | outcome |",
+            "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |",
+        ]
+    )
     for cell in manifest.get("cells", []):
         outcome = cell.get("outcome") if isinstance(cell.get("outcome"), dict) else {}
         lines.append(
@@ -387,6 +508,7 @@ def render_markdown(manifest: dict[str, Any]) -> str:
                     ),
                     fmt_float(outcome.get("reload_final_minus_base_final_nll")),
                     fmt_float(outcome.get("reload_best_minus_reload_initial_nll")),
+                    fmt_float(outcome.get("reload_validation_rollback_count")),
                     md_cell(cell.get("manifest_path")),
                     md_cell(cell.get("outcome_path")),
                 ]
@@ -422,6 +544,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--topk", type=int, default=32)
     parser.add_argument("--early-stop-patience", type=int, default=0)
     parser.add_argument("--restore-best-at-end", action="store_true")
+    parser.add_argument("--rollback-on-validation-regression", action="store_true")
     parser.add_argument("--curves", action="store_true")
     parser.add_argument("--summary-limit", type=int, default=8)
     parser.add_argument("--ignore-preflight", action="store_true")
@@ -495,6 +618,9 @@ def main(argv: list[str] | None = None) -> int:
             "topk": args.topk,
             "early_stop_patience": int(args.early_stop_patience),
             "restore_best_at_end": bool(args.restore_best_at_end),
+            "rollback_on_validation_regression": bool(
+                args.rollback_on_validation_regression
+            ),
         },
         "cells": [],
         "summary": {},
