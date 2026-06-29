@@ -43,6 +43,32 @@ def _fmt_counts(counts: Any) -> str:
     return ", ".join(f"{key}:{counts[key]}" for key in sorted(counts))
 
 
+def _int_list(raw: Any) -> list[int]:
+    if not isinstance(raw, list):
+        return []
+    values: list[int] = []
+    for value in raw:
+        try:
+            values.append(int(value))
+        except (TypeError, ValueError):
+            continue
+    return values
+
+
+def _str_list(raw: Any) -> list[str]:
+    if not isinstance(raw, list):
+        return []
+    return [str(value) for value in raw if str(value)]
+
+
+def _positive_int(raw: Any) -> int | None:
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
 def _seed_from_path(path: Path) -> int | None:
     match = re.search(r"seed_(\d+)", str(path))
     if not match:
@@ -175,16 +201,79 @@ def _best_progress_feature(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "best_so_far_feature": None,
             "best_so_far_val_nll": None,
             "best_so_far_delta_vs_raw": None,
+            "best_so_far_runner_up_feature": None,
+            "best_so_far_margin_to_runner_up": None,
         }
-    best = min(rows, key=lambda item: float(item["best_val_nll"]))
+    ranked = sorted(rows, key=lambda item: float(item["best_val_nll"]))
+    best = ranked[0]
+    runner_up = ranked[1] if len(ranked) > 1 else {}
+    margin = None
+    if runner_up:
+        margin = float(runner_up["best_val_nll"]) - float(best["best_val_nll"])
     return {
         "best_so_far_feature": best.get("feature"),
         "best_so_far_val_nll": best.get("best_val_nll"),
         "best_so_far_delta_vs_raw": best.get("best_delta_vs_raw"),
+        "best_so_far_runner_up_feature": runner_up.get("feature"),
+        "best_so_far_margin_to_runner_up": margin,
     }
 
 
-def _log_status(log_path: Path) -> dict[str, Any]:
+def _active_seed_progress(
+    feature_progress: list[dict[str, Any]],
+    *,
+    planned_features: list[str],
+    expected_epoch_count: int | None,
+) -> dict[str, Any]:
+    if not planned_features:
+        planned_features = [
+            str(row.get("feature"))
+            for row in feature_progress
+            if row.get("feature") is not None
+        ]
+    by_feature = {str(row.get("feature")): row for row in feature_progress}
+    expected_final_epoch = (
+        expected_epoch_count - 1 if expected_epoch_count is not None else None
+    )
+    feature_fractions: list[float] = []
+    completed_features: list[str] = []
+    for feature in planned_features:
+        row = by_feature.get(feature)
+        latest_step = row.get("latest_step") if isinstance(row, dict) else None
+        if expected_epoch_count is None:
+            fraction = 1.0 if row is not None else 0.0
+        elif latest_step is None:
+            fraction = 0.0
+        else:
+            fraction = min(1.0, max(0.0, (int(latest_step) + 1) / expected_epoch_count))
+        feature_fractions.append(fraction)
+        if expected_final_epoch is not None and latest_step is not None:
+            if int(latest_step) >= expected_final_epoch:
+                completed_features.append(feature)
+        elif expected_epoch_count is None and row is not None:
+            completed_features.append(feature)
+    progress_fraction = (
+        sum(feature_fractions) / len(planned_features) if planned_features else None
+    )
+    return {
+        "planned_features": planned_features,
+        "planned_feature_count": len(planned_features),
+        "expected_epoch_count": expected_epoch_count,
+        "expected_final_epoch": expected_final_epoch,
+        "active_seed_completed_features": completed_features,
+        "active_seed_completed_feature_count": len(completed_features),
+        "active_seed_progress_fraction": progress_fraction,
+    }
+
+
+def _log_status(
+    log_path: Path,
+    *,
+    run_metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    run_metadata = run_metadata if isinstance(run_metadata, dict) else {}
+    planned_features = _str_list(run_metadata.get("features"))
+    expected_epoch_count = _positive_int(run_metadata.get("epochs"))
     if not log_path.exists():
         return {
             "log_exists": False,
@@ -198,6 +287,13 @@ def _log_status(log_path: Path) -> dict[str, Any]:
             "best_so_far_feature": None,
             "best_so_far_val_nll": None,
             "best_so_far_delta_vs_raw": None,
+            "best_so_far_runner_up_feature": None,
+            "best_so_far_margin_to_runner_up": None,
+            **_active_seed_progress(
+                [],
+                planned_features=planned_features,
+                expected_epoch_count=expected_epoch_count,
+            ),
             "best_feature_lines": [],
             "status_lines": [],
         }
@@ -228,20 +324,78 @@ def _log_status(log_path: Path) -> dict[str, Any]:
     ]
     feature_progress = _feature_progress(current_seed_records or progress_records)
     best_so_far = _best_progress_feature(feature_progress)
+    active_progress = _active_seed_progress(
+        feature_progress,
+        planned_features=planned_features,
+        expected_epoch_count=expected_epoch_count,
+    )
+    active_feature_index = None
+    current_feature = latest_record.get("feature")
+    if current_feature is not None and active_progress["planned_features"]:
+        try:
+            active_feature_index = active_progress["planned_features"].index(
+                str(current_feature)
+            ) + 1
+        except ValueError:
+            active_feature_index = None
     best_feature_lines = [line for line in lines if line.startswith("best_feature=")]
     status_lines = [line for line in lines if line.startswith("sweep_status=")]
     return {
         "log_exists": True,
         "log_lines": len(lines),
         "current_seed": current_seed,
-        "current_feature": latest_record.get("feature"),
+        "current_feature": current_feature,
+        "active_feature_index": active_feature_index,
         "current_epoch": latest_record.get("step"),
         "completed_best_features": len(best_feature_lines),
         "latest_progress": latest_progress,
         "feature_progress": feature_progress,
         **best_so_far,
+        **active_progress,
         "best_feature_lines": best_feature_lines,
         "status_lines": status_lines,
+    }
+
+
+def _run_progress_record(
+    *,
+    run_metadata: dict[str, Any],
+    seed_results: list[dict[str, Any]],
+    log_status: dict[str, Any],
+) -> dict[str, Any]:
+    planned_seeds = _int_list(run_metadata.get("seeds"))
+    completed_seed_count = len(seed_results)
+    planned_seed_count = len(planned_seeds)
+    current_seed = log_status.get("current_seed")
+    active_seed_index = None
+    if current_seed is not None and planned_seeds:
+        try:
+            active_seed_index = planned_seeds.index(int(current_seed)) + 1
+        except (TypeError, ValueError):
+            active_seed_index = None
+    latest_completed_seed = seed_results[-1] if seed_results else {}
+    return {
+        "schema": "st.llm_char_vae_context.live_progress.v1",
+        "planned_seeds": planned_seeds,
+        "planned_seed_count": planned_seed_count,
+        "completed_seed_count": completed_seed_count,
+        "completed_seed_fraction": (
+            completed_seed_count / planned_seed_count if planned_seed_count else None
+        ),
+        "current_seed": current_seed,
+        "active_seed_index": active_seed_index,
+        "active_seed_progress_fraction": log_status.get(
+            "active_seed_progress_fraction"
+        ),
+        "active_seed_completed_feature_count": log_status.get(
+            "active_seed_completed_feature_count"
+        ),
+        "planned_feature_count": log_status.get("planned_feature_count"),
+        "latest_completed_seed": latest_completed_seed.get("seed"),
+        "latest_completed_best_feature": latest_completed_seed.get("best_feature"),
+        "latest_completed_margin_to_runner_up": latest_completed_seed.get(
+            "margin_to_runner_up"
+        ),
     }
 
 
@@ -249,6 +403,7 @@ def summarize_run(run_dir: Path) -> dict[str, Any]:
     run_dir = run_dir.expanduser()
     summary_path = run_dir / "summary.json"
     summary = _read_json(summary_path)
+    run_metadata = _read_json(run_dir / "run.json") or {}
     seed_results = [
         result
         for result in (
@@ -257,7 +412,7 @@ def summarize_run(run_dir: Path) -> dict[str, Any]:
         )
         if result is not None
     ]
-    log_status = _log_status(run_dir / "run.log")
+    log_status = _log_status(run_dir / "run.log", run_metadata=run_metadata)
     final_best = summary.get("best_config") if isinstance(summary, dict) else None
     final_best = final_best if isinstance(final_best, dict) else {}
     follow_up = summary.get("follow_up_result") if isinstance(summary, dict) else None
@@ -277,6 +432,11 @@ def summarize_run(run_dir: Path) -> dict[str, Any]:
         "guidance_action": guidance.get("action"),
         "completed_seed_count": len(seed_results),
         "winner_counts": _winner_counts(seed_results),
+        "progress": _run_progress_record(
+            run_metadata=run_metadata,
+            seed_results=seed_results,
+            log_status=log_status,
+        ),
         "log": log_status,
         "seed_results": seed_results,
     }
@@ -331,26 +491,37 @@ def markdown_report(payload: dict[str, Any]) -> str:
             f"- completed_seed_count: {totals.get('completed_seed_count', 0)}",
             f"- winner_counts: {_fmt_counts(totals.get('winner_counts'))}",
             "",
-            "| run | summary | current_seed | current_feature | completed_seeds | winners | best_so_far | delta_vs_raw | latest_progress |",
-            "| --- | --- | ---: | --- | ---: | --- | --- | ---: | --- |",
+            "| run | summary | seed_progress | current_seed | current_feature | feature_progress | winners | best_so_far | margin | delta_vs_raw | latest_progress |",
+            "| --- | --- | ---: | ---: | --- | ---: | --- | --- | ---: | ---: | --- |",
         ]
     )
     for run in payload.get("runs", []):
         if not isinstance(run, dict):
             continue
         log = run.get("log") if isinstance(run.get("log"), dict) else {}
+        progress = run.get("progress") if isinstance(run.get("progress"), dict) else {}
+        seed_progress = "{completed}/{planned}".format(
+            completed=progress.get("completed_seed_count") or 0,
+            planned=progress.get("planned_seed_count") or "-",
+        )
+        feature_progress = "{completed}/{planned}".format(
+            completed=log.get("active_seed_completed_feature_count") or 0,
+            planned=log.get("planned_feature_count") or "-",
+        )
         lines.append(
-            "| {run} | {summary} | {current} | {feature} | {completed} | {winners} | {best_feature}:{best_nll} | {delta} | `{progress}` |".format(
+            "| {run} | {summary} | {seed_progress} | {current} | {feature} | {feature_progress} | {winners} | {best_feature}:{best_nll} | {margin} | {delta} | `{latest}` |".format(
                 run=run.get("run_dir") or "-",
                 summary=run.get("summary_exists"),
+                seed_progress=seed_progress,
                 current=log.get("current_seed") or "-",
                 feature=log.get("current_feature") or "-",
-                completed=run.get("completed_seed_count") or 0,
+                feature_progress=feature_progress,
                 winners=_fmt_counts(run.get("winner_counts")),
                 best_feature=log.get("best_so_far_feature") or "-",
                 best_nll=_fmt(log.get("best_so_far_val_nll")),
+                margin=_fmt(log.get("best_so_far_margin_to_runner_up")),
                 delta=_fmt(log.get("best_so_far_delta_vs_raw")),
-                progress=log.get("latest_progress") or "-",
+                latest=log.get("latest_progress") or "-",
             )
         )
     lines.append("")
@@ -358,6 +529,7 @@ def markdown_report(payload: dict[str, Any]) -> str:
         if not isinstance(run, dict):
             continue
         log = run.get("log") if isinstance(run.get("log"), dict) else {}
+        progress = run.get("progress") if isinstance(run.get("progress"), dict) else {}
         lines.extend(
             [
                 f"## {run.get('run_dir')}",
@@ -369,12 +541,19 @@ def markdown_report(payload: dict[str, Any]) -> str:
                 f"- mean_delta_vs_raw: {_fmt(run.get('mean_best_nll_delta_vs_raw'))}",
                 f"- follow_up_verdict: {run.get('follow_up_verdict') or '-'}",
                 f"- guidance_action: {run.get('guidance_action') or '-'}",
+                f"- seed_progress: {progress.get('completed_seed_count') or 0}/{progress.get('planned_seed_count') or '-'}",
                 f"- current_seed: {log.get('current_seed') or '-'}",
+                f"- active_seed_index: {_fmt(progress.get('active_seed_index'), digits=0)}/{progress.get('planned_seed_count') or '-'}",
                 f"- current_feature: {log.get('current_feature') or '-'}",
+                f"- active_feature_index: {_fmt(log.get('active_feature_index'), digits=0)}/{log.get('planned_feature_count') or '-'}",
                 f"- current_epoch: {_fmt(log.get('current_epoch'))}",
+                f"- active_seed_progress_fraction: {_fmt(log.get('active_seed_progress_fraction'))}",
                 f"- best_so_far: {log.get('best_so_far_feature') or '-'}@{_fmt(log.get('best_so_far_val_nll'))}",
+                f"- best_so_far_runner_up: {log.get('best_so_far_runner_up_feature') or '-'}",
+                f"- best_so_far_margin_to_runner_up: {_fmt(log.get('best_so_far_margin_to_runner_up'))}",
                 f"- best_so_far_delta_vs_raw: {_fmt(log.get('best_so_far_delta_vs_raw'))}",
                 f"- completed_best_features: {log.get('completed_best_features') or 0}",
+                f"- active_seed_completed_features: {', '.join(log.get('active_seed_completed_features') or []) or '-'}",
                 f"- latest_progress: `{log.get('latest_progress') or '-'}`",
                 "",
                 "| feature | latest_epoch | latest_nll | best_epoch | best_nll | best_acc_pct | delta_vs_raw |",
