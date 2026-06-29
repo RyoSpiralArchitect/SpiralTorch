@@ -2110,6 +2110,7 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
         evaluated_config = follow_up_result.get("evaluated_config")
         source_feature_eval = follow_up_result.get("source_feature_evaluated")
         current_best = follow_up_result.get("current_best_config")
+        sample_widening = follow_up_result.get("sample_widening_confirmation")
         lines.extend(
             [
                 "## Follow-Up Result",
@@ -2134,6 +2135,8 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
                 f"- run_budget_shifted: {follow_up_result.get('run_budget_shifted')}",
                 "- run_budget_shift: "
                 f"{_run_budget_shift_label(follow_up_result.get('run_budget_shift'))}",
+                "- sample_widening_confirmation: "
+                f"{sample_widening.get('basis') if isinstance(sample_widening, dict) else '-'}",
                 "",
             ]
         )
@@ -4826,6 +4829,21 @@ def _effective_follow_up_tolerance(
     return max(value for value in values if math.isfinite(value))
 
 
+def _summary_count(value: Any) -> float | None:
+    count = _finite_float(value)
+    if count is None or count < 0.0:
+        return None
+    return count
+
+
+def _config_run_count(config: dict[str, Any] | None) -> float | None:
+    if not isinstance(config, dict):
+        return None
+    return _summary_count(config.get("mean_best_nll_count")) or _summary_count(
+        config.get("runs")
+    )
+
+
 def _combined_standard_error(*values: float | None) -> float | None:
     terms = [
         float(value)
@@ -4935,6 +4953,8 @@ def _follow_up_result(
         source_feature_delta,
         source_feature_tolerance,
     )
+    direct_config_verdict = config_verdict
+    direct_source_feature_verdict = source_feature_verdict
     source_feature = source_best_config.get("best_feature")
     source_best_feature_retained = (
         evaluated is not None
@@ -4957,6 +4977,41 @@ def _follow_up_result(
         current_run_budget if isinstance(current_run_budget, dict) else {}
     )
     run_budget_shift = _run_budget_shift(source_run_budget, current_run_budget)
+
+    evaluated_raw_verdict = _delta_verdict(evaluated_delta_vs_raw, min_nll_delta)
+    source_feature_raw_verdict = _delta_verdict(
+        source_feature_delta_vs_raw,
+        min_nll_delta,
+    )
+    current_best_raw_verdict = _delta_verdict(
+        current_best_delta_vs_raw,
+        min_nll_delta,
+    )
+    source_count = _config_run_count(source_best_config)
+    current_count = _config_run_count(source_feature_evaluated)
+    sample_widening_confirmation = None
+    if (
+        source_feature_verdict == "regressed"
+        and source_feature_raw_verdict == "improved"
+        and not bool(run_budget_shift.get("changed"))
+        and (source_best_feature_retained or source_best_family_retained)
+        and source_count is not None
+        and source_count <= 1.0
+        and current_count is not None
+        and current_count > source_count
+    ):
+        sample_widening_confirmation = {
+            "schema": "st.llm_char_vae_context.sample_widening_confirmation.v1",
+            "applied": True,
+            "source_count": source_count,
+            "current_count": current_count,
+            "direct_config_verdict": direct_config_verdict,
+            "direct_source_feature_verdict": direct_source_feature_verdict,
+            "basis": "single_seed_source_to_multi_seed_raw_positive_confirmation",
+        }
+        source_feature_verdict = "confirmed"
+        if config_verdict == "regressed":
+            config_verdict = "confirmed"
 
     return {
         "schema": "st.llm_char_vae_context.follow_up_result.v1",
@@ -4985,15 +5040,12 @@ def _follow_up_result(
         "combined_source_feature_mean_best_nll_stderr": combined_source_feature_stderr,
         "config_verdict": config_verdict,
         "source_feature_verdict": source_feature_verdict,
-        "evaluated_raw_verdict": _delta_verdict(evaluated_delta_vs_raw, min_nll_delta),
-        "source_feature_raw_verdict": _delta_verdict(
-            source_feature_delta_vs_raw,
-            min_nll_delta,
-        ),
-        "current_best_raw_verdict": _delta_verdict(
-            current_best_delta_vs_raw,
-            min_nll_delta,
-        ),
+        "direct_config_verdict": direct_config_verdict,
+        "direct_source_feature_verdict": direct_source_feature_verdict,
+        "evaluated_raw_verdict": evaluated_raw_verdict,
+        "source_feature_raw_verdict": source_feature_raw_verdict,
+        "current_best_raw_verdict": current_best_raw_verdict,
+        "sample_widening_confirmation": sample_widening_confirmation,
         "source_best_feature_retained": source_best_feature_retained,
         "source_best_family_retained": source_best_family_retained,
         "verdict": source_feature_verdict
