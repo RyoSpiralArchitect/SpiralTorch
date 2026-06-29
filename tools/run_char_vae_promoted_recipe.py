@@ -218,10 +218,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.write_report:
         report_path = summary_path.parent / "promoted_recipe_eval_run.json"
         markdown_path = summary_path.parent / "promoted_recipe_eval_run.md"
-        report_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-        markdown_path.write_text(_markdown(payload), encoding="utf-8")
         payload["report_path"] = str(report_path)
         payload["markdown_path"] = str(markdown_path)
+        report_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        markdown_path.write_text(_markdown(payload), encoding="utf-8")
     if args.json:
         print(json.dumps(payload, indent=2))
     else:

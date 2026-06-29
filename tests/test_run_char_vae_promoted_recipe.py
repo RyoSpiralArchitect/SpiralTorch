@@ -122,8 +122,12 @@ class PromotedRecipeRunnerTests(unittest.TestCase):
             self.assertEqual(payload["selected_count"], 1)
             self.assertEqual(payload["results"][0]["returncode"], 0)
             self.assertTrue((root / "marker_101.txt").exists())
-            self.assertTrue((root / "promoted_recipe_eval_run.json").exists())
+            report_path = root / "promoted_recipe_eval_run.json"
+            self.assertTrue(report_path.exists())
             self.assertTrue((root / "promoted_recipe_eval_run.md").exists())
+            report_payload = json.loads(report_path.read_text(encoding="utf-8"))
+            self.assertEqual(report_payload["report_path"], str(report_path))
+            self.assertEqual(report_payload["markdown_path"], payload["markdown_path"])
 
 
 if __name__ == "__main__":
