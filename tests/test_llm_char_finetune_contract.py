@@ -401,6 +401,8 @@ class LlmCharFinetuneContractTests(unittest.TestCase):
                 restore_best_at_end=True,
                 restored_best_at_end=True,
                 restored_best_checkpoint_path=best_weights,
+                early_stopped_epoch=4,
+                epochs_completed=5,
                 validation=validation_payload,
             )
 
@@ -433,6 +435,8 @@ class LlmCharFinetuneContractTests(unittest.TestCase):
         self.assertTrue(summary["restore_best_at_end"])
         self.assertTrue(summary["restored_best_at_end"])
         self.assertEqual(summary["restored_best_checkpoint_path"], str(best_weights))
+        self.assertEqual(summary["early_stopped_epoch"], 4)
+        self.assertEqual(summary["epochs_completed"], 5)
         self.assertAlmostEqual(summary["final_validation"]["mean_nll"], 2.5)
         self.assertAlmostEqual(summary["validation_nll_delta"], -0.5)
         self.assertAlmostEqual(summary["final_minus_best_validation_nll"], 0.1)
