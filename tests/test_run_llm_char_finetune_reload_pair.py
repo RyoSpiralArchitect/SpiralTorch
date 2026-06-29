@@ -102,6 +102,7 @@ class RunLlmCharFinetuneReloadPairTests(unittest.TestCase):
         self.assertFalse(manifest["preflight_blocked"])
         self.assertIn("preflight_path", manifest)
         self.assertIn("preflight", manifest)
+        self.assertIn("child_preflight_path", manifest["preflight"])
         self.assertEqual(manifest["base_seed"], 11)
         self.assertEqual(manifest["reload_seed"], 19)
         self.assertEqual(manifest["settings"]["reload_lr"], 0.01)
@@ -125,13 +126,14 @@ class RunLlmCharFinetuneReloadPairTests(unittest.TestCase):
 
     def test_preflight_only_writes_readiness_and_skips_runs(self) -> None:
         mod = _load_module()
-        original = mod.preflight_environment
-        mod.preflight_environment = lambda *, backend: {
+        original = mod.run_finetune_preflight
+        mod.run_finetune_preflight = lambda data_paths, *, run_root, backend: {
             "schema": mod.PREFLIGHT_SCHEMA,
             "backend": backend,
             "ready": True,
             "reason": "ready",
             "missing_nn_symbols": [],
+            "child_preflight_path": str(run_root / "_preflight" / "preflight.json"),
         }
         try:
             with tempfile.TemporaryDirectory() as tmp:
@@ -156,7 +158,7 @@ class RunLlmCharFinetuneReloadPairTests(unittest.TestCase):
                     (run_root / "preflight.json").read_text(encoding="utf-8")
                 )
         finally:
-            mod.preflight_environment = original
+            mod.run_finetune_preflight = original
 
         self.assertEqual(code, 0)
         self.assertTrue(manifest["preflight_only"])
@@ -167,13 +169,14 @@ class RunLlmCharFinetuneReloadPairTests(unittest.TestCase):
 
     def test_preflight_only_failure_marks_manifest_failed(self) -> None:
         mod = _load_module()
-        original = mod.preflight_environment
-        mod.preflight_environment = lambda *, backend: {
+        original = mod.run_finetune_preflight
+        mod.run_finetune_preflight = lambda data_paths, *, run_root, backend: {
             "schema": mod.PREFLIGHT_SCHEMA,
             "backend": backend,
             "ready": False,
             "reason": "missing_nn_symbols",
             "missing_nn_symbols": ["Sequential"],
+            "child_preflight_path": str(run_root / "_preflight" / "preflight.json"),
         }
         try:
             with tempfile.TemporaryDirectory() as tmp:
@@ -195,7 +198,7 @@ class RunLlmCharFinetuneReloadPairTests(unittest.TestCase):
                     (run_root / "reload_pair.json").read_text(encoding="utf-8")
                 )
         finally:
-            mod.preflight_environment = original
+            mod.run_finetune_preflight = original
 
         self.assertEqual(code, 1)
         self.assertTrue(manifest["preflight_only"])
@@ -205,13 +208,14 @@ class RunLlmCharFinetuneReloadPairTests(unittest.TestCase):
 
     def test_preflight_failure_blocks_real_run_before_training(self) -> None:
         mod = _load_module()
-        original = mod.preflight_environment
-        mod.preflight_environment = lambda *, backend: {
+        original = mod.run_finetune_preflight
+        mod.run_finetune_preflight = lambda data_paths, *, run_root, backend: {
             "schema": mod.PREFLIGHT_SCHEMA,
             "backend": backend,
             "ready": False,
             "reason": "missing_nn_symbols",
             "missing_nn_symbols": ["Sequential"],
+            "child_preflight_path": str(run_root / "_preflight" / "preflight.json"),
         }
         try:
             with tempfile.TemporaryDirectory() as tmp:
@@ -228,7 +232,7 @@ class RunLlmCharFinetuneReloadPairTests(unittest.TestCase):
                     (run_root / "reload_pair.json").read_text(encoding="utf-8")
                 )
         finally:
-            mod.preflight_environment = original
+            mod.run_finetune_preflight = original
 
         self.assertEqual(code, 1)
         self.assertTrue(manifest["failed"])

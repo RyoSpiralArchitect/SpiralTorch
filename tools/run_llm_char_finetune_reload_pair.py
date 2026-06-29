@@ -8,12 +8,8 @@ tokenizerless char-LM finetuning is reload-safe and compare-ready.
 from __future__ import annotations
 
 import argparse
-import contextlib
-import importlib
-import io
 import json
 import os
-import platform
 import shlex
 import subprocess
 import sys
@@ -64,6 +60,12 @@ def write_json(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+def read_json(path: Path) -> dict[str, Any]:
+    with path.open("r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    return payload if isinstance(payload, dict) else {}
+
+
 def backend_readiness(backend: str, features: dict[str, bool]) -> dict[str, Any]:
     normalized = str(backend).strip().lower()
     required_any = BACKEND_FEATURE_REQUIREMENTS.get(normalized, [])
@@ -84,73 +86,88 @@ def backend_readiness(backend: str, features: dict[str, bool]) -> dict[str, Any]
     }
 
 
-def preflight_environment(*, backend: str) -> dict[str, Any]:
-    captured_stdout = io.StringIO()
-    captured_stderr = io.StringIO()
+def preflight_command(
+    data_paths: list[Path],
+    *,
+    run_dir: Path,
+    backend: str,
+) -> list[str]:
+    return [
+        sys.executable,
+        "-S",
+        "-s",
+        str(FINETUNE_SCRIPT),
+        *[str(path) for path in data_paths],
+        "--run-dir",
+        str(run_dir),
+        "--backend",
+        backend,
+        "--preflight-only",
+    ]
+
+
+def run_finetune_preflight(
+    data_paths: list[Path],
+    *,
+    run_root: Path,
+    backend: str,
+) -> dict[str, Any]:
+    preflight_run_dir = run_root / "_preflight"
+    child_preflight_path = preflight_run_dir / "preflight.json"
+    child_summary_path = preflight_run_dir / "summary.json"
+    command = preflight_command(data_paths, run_dir=preflight_run_dir, backend=backend)
+    returncode, elapsed = run_command(
+        command,
+        preflight_run_dir / "process.log",
+        dry_run=False,
+    )
+    try:
+        child_preflight = (
+            read_json(child_preflight_path) if child_preflight_path.exists() else {}
+        )
+    except Exception as exc:
+        child_preflight = {"error": str(exc)}
+    child_ready = child_preflight.get("ready") is True and returncode == 0
+    issues = child_preflight.get("issues")
+    if not isinstance(issues, list):
+        issues = []
+    reason = str(child_preflight.get("reason") or "")
+    if returncode != 0 and not reason:
+        reason = "preflight_command_failed"
+    if not child_preflight_path.exists():
+        reason = "preflight_artifact_missing"
+        issues = [reason]
+
     payload: dict[str, Any] = {
         "schema": PREFLIGHT_SCHEMA,
         "python_executable": sys.executable,
-        "python_version": sys.version,
-        "platform": platform.platform(),
         "backend": backend,
-        "import_ok": False,
-        "native_features": {},
-        "backend_normalized": str(backend).strip().lower(),
-        "backend_ready": False,
-        "backend_status": "not_checked",
-        "backend_required_any_features": [],
-        "required_nn_symbols": REQUIRED_NN_SYMBOLS,
-        "missing_nn_symbols": list(REQUIRED_NN_SYMBOLS),
-        "issues": ["spiraltorch_not_imported"],
-        "ready": False,
-        "reason": "spiraltorch_not_imported",
+        "ready": child_ready,
+        "reason": "ready" if child_ready else reason,
+        "issues": [] if child_ready else issues,
+        "returncode": returncode,
+        "elapsed_seconds": elapsed,
+        "run_dir": str(preflight_run_dir),
+        "log_path": str(preflight_run_dir / "process.log"),
+        "command": command,
+        "shell_command": shell_command(command),
+        "child_preflight_path": str(child_preflight_path),
+        "child_summary_path": str(child_summary_path),
+        "child_preflight": child_preflight,
     }
-    with contextlib.redirect_stdout(captured_stdout), contextlib.redirect_stderr(
-        captured_stderr
+    for key in (
+        "backend_normalized",
+        "backend_ready",
+        "backend_status",
+        "backend_required_any_features",
+        "native_features",
+        "required_nn_symbols",
+        "missing_nn_symbols",
+        "build_info_error",
+        "spiraltorch_module",
     ):
-        try:
-            if str(REPO_ROOT) not in sys.path:
-                sys.path.insert(0, str(REPO_ROOT))
-            st = importlib.import_module("spiraltorch")
-            payload["import_ok"] = True
-            try:
-                build_info = st.build_info()
-            except Exception as exc:  # pragma: no cover - depends on local extension state.
-                payload["build_info_error"] = str(exc)
-                build_info = {}
-            features_payload: dict[str, bool] = {}
-            if isinstance(build_info, dict):
-                features = build_info.get("features")
-                if isinstance(features, dict):
-                    features_payload = {
-                        str(key): bool(value) for key, value in features.items()
-                    }
-                    payload["native_features"] = features_payload
-            payload.update(backend_readiness(backend, features_payload))
-            nn = getattr(st, "nn", None)
-            missing = [symbol for symbol in REQUIRED_NN_SYMBOLS if not hasattr(nn, symbol)]
-            payload["missing_nn_symbols"] = missing
-            issues: list[str] = []
-            if missing:
-                issues.append("missing_nn_symbols")
-            if payload.get("backend_ready") is not True:
-                issues.append(str(payload.get("backend_status") or "backend_unavailable"))
-            payload["issues"] = issues
-            if issues:
-                payload["reason"] = "+".join(issues)
-            else:
-                payload["ready"] = True
-                payload["reason"] = "ready"
-        except Exception as exc:
-            payload["error"] = repr(exc)
-            payload["issues"] = ["spiraltorch_import_failed"]
-            payload["reason"] = "spiraltorch_import_failed"
-    stdout = captured_stdout.getvalue().strip()
-    stderr = captured_stderr.getvalue().strip()
-    if stdout:
-        payload["captured_stdout"] = stdout
-    if stderr:
-        payload["captured_stderr"] = stderr
+        if key in child_preflight:
+            payload[key] = child_preflight[key]
     return payload
 
 
@@ -418,7 +435,11 @@ def main(argv: list[str] | None = None) -> int:
     manifest_path = run_root / "reload_pair.json"
     preflight_path = run_root / "preflight.json"
     started = time.time()
-    preflight = preflight_environment(backend=args.backend)
+    preflight = run_finetune_preflight(
+        list(args.data_paths),
+        run_root=run_root,
+        backend=args.backend,
+    )
     write_json(preflight_path, preflight)
     manifest: dict[str, Any] = {
         "schema": SCHEMA,
