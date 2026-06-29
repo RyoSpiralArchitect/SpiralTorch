@@ -199,6 +199,75 @@ def _completed_seed_evidence(seed_results: list[dict[str, Any]]) -> dict[str, An
     }
 
 
+def _completed_feature_evidence(
+    seed_results: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    rows_by_feature: dict[str, list[dict[str, Any]]] = {}
+    for seed in seed_results:
+        ranking = seed.get("ranking")
+        if not isinstance(ranking, list) or not ranking:
+            continue
+        winner = ranking[0] if isinstance(ranking[0], dict) else {}
+        winner_nll = winner.get("best_mean_nll")
+        seed_id = seed.get("seed")
+        for rank, item in enumerate(ranking, start=1):
+            if not isinstance(item, dict):
+                continue
+            feature = item.get("feature")
+            if feature is None:
+                continue
+            gap_to_winner = None
+            try:
+                if winner_nll is not None:
+                    gap_to_winner = float(item["best_mean_nll"]) - float(winner_nll)
+            except (TypeError, ValueError):
+                gap_to_winner = None
+            rows_by_feature.setdefault(str(feature), []).append(
+                {
+                    "seed": seed_id,
+                    "rank": rank,
+                    "best_mean_nll": item.get("best_mean_nll"),
+                    "best_accuracy": item.get("best_accuracy"),
+                    "best_nll_vs_raw": item.get("best_nll_vs_raw"),
+                    "gap_to_winner": gap_to_winner,
+                    "is_winner": rank == 1,
+                }
+            )
+
+    completed = len(seed_results)
+    evidence: list[dict[str, Any]] = []
+    for feature, rows in rows_by_feature.items():
+        win_count = sum(1 for row in rows if row.get("is_winner"))
+        evidence.append(
+            {
+                "feature": feature,
+                "seed_count": len(rows),
+                "coverage_rate": len(rows) / completed if completed else None,
+                "win_count": win_count,
+                "win_rate": win_count / completed if completed else None,
+                "mean_rank": _mean([row.get("rank") for row in rows]),
+                "mean_best_nll": _mean([row.get("best_mean_nll") for row in rows]),
+                "mean_best_accuracy": _mean(
+                    [row.get("best_accuracy") for row in rows]
+                ),
+                "mean_delta_vs_raw": _mean(
+                    [row.get("best_nll_vs_raw") for row in rows]
+                ),
+                "mean_gap_to_winner": _mean(
+                    [row.get("gap_to_winner") for row in rows]
+                ),
+            }
+        )
+    return sorted(
+        evidence,
+        key=lambda row: (
+            -(row.get("win_count") or 0),
+            row.get("mean_rank") if row.get("mean_rank") is not None else float("inf"),
+            row.get("feature") or "",
+        ),
+    )
+
+
 def _progress_record(line: str, *, seed: int | None) -> dict[str, Any] | None:
     match = PROGRESS_RE.match(line)
     if match is None:
@@ -497,6 +566,7 @@ def summarize_run(run_dir: Path) -> dict[str, Any]:
         "completed_seed_count": len(seed_results),
         "winner_counts": _winner_counts(seed_results),
         "completed_seed_evidence": completed_seed_evidence,
+        "completed_feature_evidence": _completed_feature_evidence(seed_results),
         "progress": _run_progress_record(
             run_metadata=run_metadata,
             seed_results=seed_results,
@@ -638,6 +708,28 @@ def markdown_report(payload: dict[str, Any]) -> str:
                 f"- completed_best_features: {log.get('completed_best_features') or 0}",
                 f"- active_seed_completed_features: {', '.join(log.get('active_seed_completed_features') or []) or '-'}",
                 f"- latest_progress: `{log.get('latest_progress') or '-'}`",
+                "",
+                "| completed_feature | seeds | wins | win_rate | mean_rank | mean_nll | mean_delta_vs_raw | mean_gap_to_winner |",
+                "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+            ]
+        )
+        for feature in run.get("completed_feature_evidence", []):
+            if not isinstance(feature, dict):
+                continue
+            lines.append(
+                "| {feature} | {seeds} | {wins} | {win_rate} | {rank} | {nll} | {delta} | {gap} |".format(
+                    feature=feature.get("feature") or "-",
+                    seeds=feature.get("seed_count") or 0,
+                    wins=feature.get("win_count") or 0,
+                    win_rate=_fmt(feature.get("win_rate")),
+                    rank=_fmt(feature.get("mean_rank")),
+                    nll=_fmt(feature.get("mean_best_nll")),
+                    delta=_fmt(feature.get("mean_delta_vs_raw")),
+                    gap=_fmt(feature.get("mean_gap_to_winner")),
+                )
+            )
+        lines.extend(
+            [
                 "",
                 "| feature | latest_epoch | latest_nll | best_epoch | best_nll | best_acc_pct | delta_vs_raw |",
                 "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
