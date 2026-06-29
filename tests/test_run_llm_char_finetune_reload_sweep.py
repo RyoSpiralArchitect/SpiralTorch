@@ -78,13 +78,17 @@ class RunLlmCharFinetuneReloadSweepTests(unittest.TestCase):
         self.assertEqual(len(manifest["cells"]), 4)
         self.assertEqual(manifest["summary"]["cells"], 4)
         self.assertEqual(manifest["summary"]["run_status_counts"], {"dry_run": 4})
+        self.assertEqual(manifest["settings"]["eval_seed_offset"], 0)
         first = manifest["cells"][0]
         self.assertEqual(first["status"], "dry_run")
+        self.assertEqual(first["eval_seed"], first["seed"])
         self.assertIn("--reload-lr", first["command"])
+        self.assertIn("--eval-seed", first["command"])
         self.assertIn("--early-stop-patience", first["command"])
         self.assertIn("--restore-best-at-end", first["command"])
         self.assertIn("seed3_reloadlr0p02", first["name"])
         self.assertIn("# LLM Char Finetune Reload Sweep", markdown)
+        self.assertIn("| cell | status | run_status | seed | reload_seed | eval_seed |", markdown)
         self.assertIn("seed3_reloadlr0p02", markdown)
 
     def test_sweep_summary_ranks_best_delta_and_counts_statuses(self) -> None:

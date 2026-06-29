@@ -108,7 +108,9 @@ class RunLlmCharFinetuneReloadPairTests(unittest.TestCase):
         self.assertIn("child_preflight_path", manifest["preflight"])
         self.assertEqual(manifest["base_seed"], 11)
         self.assertEqual(manifest["reload_seed"], 19)
+        self.assertEqual(manifest["eval_seed"], 11)
         self.assertEqual(manifest["settings"]["reload_lr"], 0.01)
+        self.assertEqual(manifest["settings"]["eval_seed"], 11)
         self.assertEqual(manifest["settings"]["early_stop_patience"], 2)
         self.assertTrue(manifest["settings"]["restore_best_at_end"])
         self.assertEqual(len(manifest["runs"]), 2)
@@ -121,11 +123,17 @@ class RunLlmCharFinetuneReloadPairTests(unittest.TestCase):
         compare_command = manifest["compare_command"]
         self.assertIn("--run-dir", base_command)
         self.assertNotIn("--load-run", base_command)
+        self.assertIn("--eval-seed", base_command)
         self.assertIn("--early-stop-patience", base_command)
         self.assertIn("--restore-best-at-end", base_command)
         self.assertIn("--load-run", reload_command)
+        self.assertIn("--eval-seed", reload_command)
         self.assertIn("--early-stop-patience", reload_command)
         self.assertIn("--restore-best-at-end", reload_command)
+        self.assertEqual(
+            base_command[base_command.index("--eval-seed") + 1],
+            reload_command[reload_command.index("--eval-seed") + 1],
+        )
         self.assertIn(str(run_root / "base_scratch"), reload_command)
         self.assertIn(str(reload_data), reload_command)
         self.assertIn("--aggregate", compare_command)
@@ -272,6 +280,7 @@ class RunLlmCharFinetuneReloadPairTests(unittest.TestCase):
 
         self.assertEqual(code, 0)
         self.assertEqual(manifest["reload_seed"], manifest["base_seed"] + 1)
+        self.assertEqual(manifest["eval_seed"], manifest["base_seed"])
         self.assertEqual(manifest["reload_data_paths"], manifest["data_paths"])
         self.assertIn(str(data), manifest["runs"][1]["command"])
 
@@ -323,6 +332,7 @@ class RunLlmCharFinetuneReloadPairTests(unittest.TestCase):
 
         self.assertEqual(outcome["schema"], mod.OUTCOME_SCHEMA)
         self.assertTrue(outcome["ready"])
+        self.assertTrue(outcome["evaluation_comparable"])
         self.assertEqual(outcome["issues"], [])
         self.assertEqual(outcome["status"], "improved")
         self.assertTrue(outcome["reload_improved_best"])
@@ -333,6 +343,41 @@ class RunLlmCharFinetuneReloadPairTests(unittest.TestCase):
         self.assertEqual(outcome["base"]["best_epoch"], 1)
         self.assertEqual(outcome["reload"]["early_stopped_epoch"], 3)
         self.assertTrue(outcome["reload"]["restored_best_at_end"])
+
+    def test_reload_pair_outcome_rejects_eval_seed_mismatch(self) -> None:
+        mod = _load_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            base = root / "base_scratch"
+            reload = root / "reload_finetune"
+            base.mkdir()
+            reload.mkdir()
+            for run_dir, eval_seed, best_nll in (
+                (base, 7, 3.5),
+                (reload, 8, 3.4),
+            ):
+                (run_dir / "summary.json").write_text(
+                    json.dumps(
+                        {
+                            "initial_validation": {"mean_nll": best_nll},
+                            "final_validation": {"mean_nll": best_nll},
+                            "best_validation_mean_nll": best_nll,
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                (run_dir / "run.json").write_text(
+                    json.dumps({"seed": 1, "eval_seed": eval_seed}),
+                    encoding="utf-8",
+                )
+
+            outcome = mod.reload_pair_outcome(base, reload)
+
+        self.assertFalse(outcome["ready"])
+        self.assertFalse(outcome["evaluation_comparable"])
+        self.assertEqual(outcome["status"], "unknown")
+        self.assertIn("eval_seed_mismatch", outcome["issues"])
+        self.assertIn("eval_seed_mismatch", outcome["comparison_issues"])
 
     def test_invalid_budget_returns_usage_error(self) -> None:
         mod = _load_module()

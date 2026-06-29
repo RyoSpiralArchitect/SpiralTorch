@@ -131,6 +131,7 @@ def pair_command(
     run_root: Path,
     seed: int,
     reload_seed: int,
+    eval_seed: int,
     reload_lr: float,
     args: argparse.Namespace,
 ) -> list[str]:
@@ -177,6 +178,8 @@ def pair_command(
             str(seed),
             "--reload-seed",
             str(reload_seed),
+            "--eval-seed",
+            str(eval_seed),
             "--backend",
             args.backend,
             "--summary-limit",
@@ -203,12 +206,14 @@ def planned_cells(args: argparse.Namespace) -> list[dict[str, Any]]:
     for seed in seeds:
         for reload_lr in reload_lrs:
             reload_seed = seed + int(args.reload_seed_offset)
+            eval_seed = seed + int(args.eval_seed_offset)
             name = f"seed{seed}_reloadlr{float_slug(reload_lr)}"
             cells.append(
                 {
                     "name": name,
                     "seed": seed,
                     "reload_seed": reload_seed,
+                    "eval_seed": eval_seed,
                     "reload_lr": reload_lr,
                     "run_root": str(args.run_root / name),
                 }
@@ -230,6 +235,7 @@ def run_cell(
         run_root=run_root,
         seed=int(cell["seed"]),
         reload_seed=int(cell["reload_seed"]),
+        eval_seed=int(cell["eval_seed"]),
         reload_lr=float(cell["reload_lr"]),
         args=args,
     )
@@ -328,8 +334,8 @@ def render_markdown(manifest: dict[str, Any]) -> str:
         f"- status_counts: `{summary.get('status_counts', {})}`",
         f"- best_cell: `{summary.get('best_cell', '-')}`",
         "",
-        "| cell | status | run_status | seed | reload_lr | best_delta | final_delta | reload_delta | manifest | outcome |",
-        "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- | --- |",
+        "| cell | status | run_status | seed | reload_seed | eval_seed | reload_lr | best_delta | final_delta | reload_delta | manifest | outcome |",
+        "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |",
     ]
     for cell in manifest.get("cells", []):
         outcome = cell.get("outcome") if isinstance(cell.get("outcome"), dict) else {}
@@ -341,6 +347,8 @@ def render_markdown(manifest: dict[str, Any]) -> str:
                     md_cell(outcome_status(cell)),
                     md_cell(cell.get("status")),
                     md_cell(cell.get("seed")),
+                    md_cell(cell.get("reload_seed")),
+                    md_cell(cell.get("eval_seed")),
                     fmt_float(cell.get("reload_lr")),
                     fmt_float(outcome.get("reload_best_minus_base_best_nll")),
                     fmt_float(outcome.get("reload_final_minus_base_final_nll")),
@@ -364,6 +372,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--backend", default="cpu")
     parser.add_argument("--seed-values", default="42")
     parser.add_argument("--reload-seed-offset", type=int, default=1)
+    parser.add_argument("--eval-seed-offset", type=int, default=0)
     parser.add_argument("--base-epochs", type=int, default=2)
     parser.add_argument("--reload-epochs", type=int, default=2)
     parser.add_argument("--batches", type=int, default=8)
@@ -436,6 +445,7 @@ def main(argv: list[str] | None = None) -> int:
             "backend": args.backend,
             "seed_values": parse_int_values(args.seed_values, label="seed-values"),
             "reload_seed_offset": int(args.reload_seed_offset),
+            "eval_seed_offset": int(args.eval_seed_offset),
             "base_epochs": args.base_epochs,
             "reload_epochs": args.reload_epochs,
             "batches": args.batches,

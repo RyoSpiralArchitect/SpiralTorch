@@ -246,6 +246,7 @@ def finetune_command(
     gen: int,
     topk: int,
     seed: int,
+    eval_seed: int,
     backend: str,
     early_stop_patience: int,
     restore_best_at_end: bool,
@@ -283,6 +284,8 @@ def finetune_command(
         str(topk),
         "--seed",
         str(seed),
+        "--eval-seed",
+        str(eval_seed),
         "--backend",
         backend,
     ]
@@ -342,7 +345,9 @@ def run_item(
 
 def run_summary_contract(run_dir: Path) -> dict[str, Any]:
     summary_path = run_dir / "summary.json"
+    run_json_path = run_dir / "run.json"
     summary = read_json(summary_path) if summary_path.exists() else {}
+    run_json = read_json(run_json_path) if run_json_path.exists() else {}
     final_nll = metric_value(summary, "final_validation", "mean_nll")
     best_nll = finite_float(summary.get("best_validation_mean_nll"))
     initial_nll = metric_value(summary, "initial_validation", "mean_nll")
@@ -350,6 +355,13 @@ def run_summary_contract(run_dir: Path) -> dict[str, Any]:
         "run_dir": str(run_dir),
         "summary_path": str(summary_path),
         "summary_exists": summary_path.exists(),
+        "run_json_path": str(run_json_path),
+        "run_json_exists": run_json_path.exists(),
+        "seed": run_json.get("seed"),
+        "eval_seed": run_json.get("eval_seed"),
+        "validation_sample_seed": run_json.get("validation_sample_seed"),
+        "data_paths": run_json.get("data_paths"),
+        "validation_tokens": run_json.get("validation_tokens"),
         "initial_nll": initial_nll,
         "final_nll": final_nll,
         "best_nll": best_nll,
@@ -385,6 +397,23 @@ def reload_pair_outcome(base_run_dir: Path, reload_run_dir: Path) -> dict[str, A
         issues.append("missing_reload_summary")
     if reload_best_minus_base_best is None:
         issues.append("missing_best_nll_pair")
+    comparison_issues: list[str] = []
+    if (
+        base.get("eval_seed") is not None
+        and reload.get("eval_seed") is not None
+        and base.get("eval_seed") != reload.get("eval_seed")
+    ):
+        comparison_issues.append("eval_seed_mismatch")
+    if (
+        base.get("data_paths") is not None
+        and reload.get("data_paths") is not None
+        and base.get("data_paths") != reload.get("data_paths")
+    ):
+        comparison_issues.append("data_paths_mismatch")
+    issues.extend(comparison_issues)
+    evaluation_comparable = not comparison_issues
+    if not evaluation_comparable:
+        status = "unknown"
 
     return {
         "schema": OUTCOME_SCHEMA,
@@ -393,6 +422,8 @@ def reload_pair_outcome(base_run_dir: Path, reload_run_dir: Path) -> dict[str, A
         "status": status,
         "issues": issues,
         "ready": not issues,
+        "evaluation_comparable": evaluation_comparable,
+        "comparison_issues": comparison_issues,
         "reload_improved_best": status == "improved",
         "reload_regressed_best": status == "regressed",
         "reload_best_minus_base_best_nll": reload_best_minus_base_best,
@@ -426,6 +457,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--backend", default="cpu")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--reload-seed", type=int, default=None)
+    parser.add_argument("--eval-seed", type=int, default=None)
     parser.add_argument("--base-epochs", type=int, default=2)
     parser.add_argument("--reload-epochs", type=int, default=2)
     parser.add_argument("--batches", type=int, default=8)
@@ -492,6 +524,7 @@ def main(argv: list[str] | None = None) -> int:
     reload_run_dir = run_root / "reload_finetune"
     reload_data_paths = list(args.reload_data_paths) or list(args.data_paths)
     reload_seed = args.reload_seed if args.reload_seed is not None else args.seed + 1
+    eval_seed = args.eval_seed if args.eval_seed is not None else args.seed
     reload_lr = args.reload_lr if args.reload_lr is not None else args.lr
 
     base_command = finetune_command(
@@ -509,6 +542,7 @@ def main(argv: list[str] | None = None) -> int:
         gen=args.gen,
         topk=args.topk,
         seed=args.seed,
+        eval_seed=eval_seed,
         backend=args.backend,
         early_stop_patience=args.early_stop_patience,
         restore_best_at_end=args.restore_best_at_end,
@@ -528,6 +562,7 @@ def main(argv: list[str] | None = None) -> int:
         gen=args.gen,
         topk=args.topk,
         seed=reload_seed,
+        eval_seed=eval_seed,
         backend=args.backend,
         early_stop_patience=args.early_stop_patience,
         restore_best_at_end=args.restore_best_at_end,
@@ -561,6 +596,7 @@ def main(argv: list[str] | None = None) -> int:
         "reload_data_paths": [str(path) for path in reload_data_paths],
         "base_seed": int(args.seed),
         "reload_seed": int(reload_seed),
+        "eval_seed": int(eval_seed),
         "settings": {
             "backend": args.backend,
             "base_epochs": args.base_epochs,
@@ -576,6 +612,7 @@ def main(argv: list[str] | None = None) -> int:
             "val_split": args.val_split,
             "gen": args.gen,
             "topk": args.topk,
+            "eval_seed": int(eval_seed),
             "early_stop_patience": int(args.early_stop_patience),
             "restore_best_at_end": bool(args.restore_best_at_end),
         },
