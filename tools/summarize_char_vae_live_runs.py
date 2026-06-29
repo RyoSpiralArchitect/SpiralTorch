@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 from pathlib import Path
 from typing import Any
@@ -134,6 +135,68 @@ def _winner_counts(seed_results: list[dict[str, Any]]) -> dict[str, int]:
         key = str(feature)
         counts[key] = counts.get(key, 0) + 1
     return counts
+
+
+def _finite_floats(values: list[Any]) -> list[float]:
+    floats: list[float] = []
+    for value in values:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(number):
+            continue
+        floats.append(number)
+    return floats
+
+
+def _mean(values: list[Any]) -> float | None:
+    floats = _finite_floats(values)
+    return sum(floats) / len(floats) if floats else None
+
+
+def _winner_rates(counts: dict[str, int], total: int) -> dict[str, float]:
+    if total <= 0:
+        return {}
+    return {key: value / total for key, value in sorted(counts.items())}
+
+
+def _top_winner(counts: dict[str, int]) -> tuple[str | None, int]:
+    if not counts:
+        return None, 0
+    feature, count = sorted(counts.items(), key=lambda item: (-item[1], item[0]))[0]
+    return feature, count
+
+
+def _completed_seed_evidence(seed_results: list[dict[str, Any]]) -> dict[str, Any]:
+    completed = len(seed_results)
+    counts = _winner_counts(seed_results)
+    top_feature, top_count = _top_winner(counts)
+    latest = seed_results[-1] if seed_results else {}
+    return {
+        "schema": "st.llm_char_vae_context.completed_seed_evidence.v1",
+        "completed_seed_count": completed,
+        "winner_counts": counts,
+        "winner_rates": _winner_rates(counts, completed),
+        "top_winner_feature": top_feature,
+        "top_winner_count": top_count,
+        "top_winner_rate": top_count / completed if completed else None,
+        "mean_best_nll": _mean([seed.get("best_mean_nll") for seed in seed_results]),
+        "mean_best_accuracy": _mean(
+            [seed.get("best_accuracy") for seed in seed_results]
+        ),
+        "mean_delta_vs_raw": _mean(
+            [seed.get("best_nll_vs_raw") for seed in seed_results]
+        ),
+        "mean_margin_to_runner_up": _mean(
+            [seed.get("margin_to_runner_up") for seed in seed_results]
+        ),
+        "latest_completed_seed": latest.get("seed"),
+        "latest_completed_best_feature": latest.get("best_feature"),
+        "latest_completed_best_nll": latest.get("best_mean_nll"),
+        "latest_completed_delta_vs_raw": latest.get("best_nll_vs_raw"),
+        "latest_completed_margin_to_runner_up": latest.get("margin_to_runner_up"),
+    }
 
 
 def _progress_record(line: str, *, seed: int | None) -> dict[str, Any] | None:
@@ -419,6 +482,7 @@ def summarize_run(run_dir: Path) -> dict[str, Any]:
     follow_up = follow_up if isinstance(follow_up, dict) else {}
     guidance = summary.get("follow_up_guidance") if isinstance(summary, dict) else None
     guidance = guidance if isinstance(guidance, dict) else {}
+    completed_seed_evidence = _completed_seed_evidence(seed_results)
     return {
         "schema": RUN_SCHEMA,
         "run_dir": str(run_dir),
@@ -432,6 +496,7 @@ def summarize_run(run_dir: Path) -> dict[str, Any]:
         "guidance_action": guidance.get("action"),
         "completed_seed_count": len(seed_results),
         "winner_counts": _winner_counts(seed_results),
+        "completed_seed_evidence": completed_seed_evidence,
         "progress": _run_progress_record(
             run_metadata=run_metadata,
             seed_results=seed_results,
@@ -491,8 +556,8 @@ def markdown_report(payload: dict[str, Any]) -> str:
             f"- completed_seed_count: {totals.get('completed_seed_count', 0)}",
             f"- winner_counts: {_fmt_counts(totals.get('winner_counts'))}",
             "",
-            "| run | summary | seed_progress | current_seed | current_feature | feature_progress | winners | best_so_far | margin | delta_vs_raw | latest_progress |",
-            "| --- | --- | ---: | ---: | --- | ---: | --- | --- | ---: | ---: | --- |",
+            "| run | summary | seed_progress | current_seed | current_feature | feature_progress | winners | completed_mean_delta | completed_mean_margin | best_so_far | margin | delta_vs_raw | latest_progress |",
+            "| --- | --- | ---: | ---: | --- | ---: | --- | ---: | ---: | --- | ---: | ---: | --- |",
         ]
     )
     for run in payload.get("runs", []):
@@ -500,6 +565,11 @@ def markdown_report(payload: dict[str, Any]) -> str:
             continue
         log = run.get("log") if isinstance(run.get("log"), dict) else {}
         progress = run.get("progress") if isinstance(run.get("progress"), dict) else {}
+        evidence = (
+            run.get("completed_seed_evidence")
+            if isinstance(run.get("completed_seed_evidence"), dict)
+            else {}
+        )
         seed_progress = "{completed}/{planned}".format(
             completed=progress.get("completed_seed_count") or 0,
             planned=progress.get("planned_seed_count") or "-",
@@ -509,7 +579,7 @@ def markdown_report(payload: dict[str, Any]) -> str:
             planned=log.get("planned_feature_count") or "-",
         )
         lines.append(
-            "| {run} | {summary} | {seed_progress} | {current} | {feature} | {feature_progress} | {winners} | {best_feature}:{best_nll} | {margin} | {delta} | `{latest}` |".format(
+            "| {run} | {summary} | {seed_progress} | {current} | {feature} | {feature_progress} | {winners} | {completed_delta} | {completed_margin} | {best_feature}:{best_nll} | {margin} | {delta} | `{latest}` |".format(
                 run=run.get("run_dir") or "-",
                 summary=run.get("summary_exists"),
                 seed_progress=seed_progress,
@@ -517,6 +587,8 @@ def markdown_report(payload: dict[str, Any]) -> str:
                 feature=log.get("current_feature") or "-",
                 feature_progress=feature_progress,
                 winners=_fmt_counts(run.get("winner_counts")),
+                completed_delta=_fmt(evidence.get("mean_delta_vs_raw")),
+                completed_margin=_fmt(evidence.get("mean_margin_to_runner_up")),
                 best_feature=log.get("best_so_far_feature") or "-",
                 best_nll=_fmt(log.get("best_so_far_val_nll")),
                 margin=_fmt(log.get("best_so_far_margin_to_runner_up")),
@@ -530,6 +602,11 @@ def markdown_report(payload: dict[str, Any]) -> str:
             continue
         log = run.get("log") if isinstance(run.get("log"), dict) else {}
         progress = run.get("progress") if isinstance(run.get("progress"), dict) else {}
+        evidence = (
+            run.get("completed_seed_evidence")
+            if isinstance(run.get("completed_seed_evidence"), dict)
+            else {}
+        )
         lines.extend(
             [
                 f"## {run.get('run_dir')}",
@@ -542,6 +619,12 @@ def markdown_report(payload: dict[str, Any]) -> str:
                 f"- follow_up_verdict: {run.get('follow_up_verdict') or '-'}",
                 f"- guidance_action: {run.get('guidance_action') or '-'}",
                 f"- seed_progress: {progress.get('completed_seed_count') or 0}/{progress.get('planned_seed_count') or '-'}",
+                f"- completed_seed_leader: {evidence.get('top_winner_feature') or '-'} ({evidence.get('top_winner_count') or 0}/{evidence.get('completed_seed_count') or 0}, rate={_fmt(evidence.get('top_winner_rate'))})",
+                f"- completed_seed_mean_best_nll: {_fmt(evidence.get('mean_best_nll'))}",
+                f"- completed_seed_mean_delta_vs_raw: {_fmt(evidence.get('mean_delta_vs_raw'))}",
+                f"- completed_seed_mean_margin_to_runner_up: {_fmt(evidence.get('mean_margin_to_runner_up'))}",
+                f"- latest_completed_seed: {evidence.get('latest_completed_seed') or '-'}",
+                f"- latest_completed_best_feature: {evidence.get('latest_completed_best_feature') or '-'}",
                 f"- current_seed: {log.get('current_seed') or '-'}",
                 f"- active_seed_index: {_fmt(progress.get('active_seed_index'), digits=0)}/{progress.get('planned_seed_count') or '-'}",
                 f"- current_feature: {log.get('current_feature') or '-'}",
