@@ -398,6 +398,84 @@ def _active_seed_progress(
     }
 
 
+def _active_feature_evidence(
+    feature_progress: list[dict[str, Any]],
+    *,
+    planned_features: list[str],
+    expected_epoch_count: int | None,
+    current_feature: str | None,
+) -> list[dict[str, Any]]:
+    if not planned_features:
+        planned_features = [
+            str(row.get("feature"))
+            for row in feature_progress
+            if row.get("feature") is not None
+        ]
+    by_feature = {str(row.get("feature")): row for row in feature_progress}
+    started_rows = [
+        row
+        for row in feature_progress
+        if row.get("best_val_nll") is not None and row.get("feature") is not None
+    ]
+    ranked = sorted(started_rows, key=lambda row: float(row["best_val_nll"]))
+    rank_by_feature = {
+        str(row.get("feature")): index for index, row in enumerate(ranked, start=1)
+    }
+    active_best = ranked[0] if ranked else {}
+    active_best_nll = active_best.get("best_val_nll")
+    expected_final_epoch = (
+        expected_epoch_count - 1 if expected_epoch_count is not None else None
+    )
+    rows: list[dict[str, Any]] = []
+    for feature in planned_features:
+        row = by_feature.get(feature)
+        latest_step = row.get("latest_step") if isinstance(row, dict) else None
+        if row is None:
+            status = "not_started"
+            progress_fraction = 0.0 if expected_epoch_count is not None else None
+        elif expected_final_epoch is not None and latest_step is not None:
+            status = (
+                "completed" if int(latest_step) >= expected_final_epoch else "active"
+            )
+            progress_fraction = min(
+                1.0,
+                max(0.0, (int(latest_step) + 1) / expected_epoch_count),
+            )
+        elif expected_epoch_count is not None:
+            status = "active"
+            progress_fraction = 0.0
+        else:
+            status = "active"
+            progress_fraction = None
+
+        gap_to_active_best = None
+        try:
+            if row is not None and active_best_nll is not None:
+                gap_to_active_best = float(row["best_val_nll"]) - float(active_best_nll)
+        except (TypeError, ValueError):
+            gap_to_active_best = None
+
+        rows.append(
+            {
+                "feature": feature,
+                "status": status,
+                "is_current": current_feature == feature,
+                "rank_so_far": rank_by_feature.get(feature),
+                "progress_fraction": progress_fraction,
+                "latest_step": latest_step if row is not None else None,
+                "best_step": row.get("best_step") if isinstance(row, dict) else None,
+                "best_val_nll": (
+                    row.get("best_val_nll") if isinstance(row, dict) else None
+                ),
+                "best_delta_vs_raw": (
+                    row.get("best_delta_vs_raw") if isinstance(row, dict) else None
+                ),
+                "gap_to_active_best": gap_to_active_best,
+            }
+        )
+    return rows
+
+
 def _log_status(
     log_path: Path,
     *,
@@ -425,6 +503,12 @@ def _log_status(
                 [],
                 planned_features=planned_features,
                 expected_epoch_count=expected_epoch_count,
+            ),
+            "active_feature_evidence": _active_feature_evidence(
+                [],
+                planned_features=planned_features,
+                expected_epoch_count=expected_epoch_count,
+                current_feature=None,
             ),
             "best_feature_lines": [],
             "status_lines": [],
@@ -484,6 +568,14 @@ def _log_status(
         "feature_progress": feature_progress,
         **best_so_far,
         **active_progress,
+        "active_feature_evidence": _active_feature_evidence(
+            feature_progress,
+            planned_features=active_progress["planned_features"],
+            expected_epoch_count=expected_epoch_count,
+            current_feature=(
+                str(current_feature) if current_feature is not None else None
+            ),
+        ),
         "best_feature_lines": best_feature_lines,
         "status_lines": status_lines,
     }
@@ -726,6 +818,28 @@ def markdown_report(payload: dict[str, Any]) -> str:
                     nll=_fmt(feature.get("mean_best_nll")),
                     delta=_fmt(feature.get("mean_delta_vs_raw")),
                     gap=_fmt(feature.get("mean_gap_to_winner")),
+                )
+            )
+        lines.extend(
+            [
+                "",
+                "| active_feature | status | current | rank_so_far | progress | best_nll | delta_vs_raw | gap_to_active_best |",
+                "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: |",
+            ]
+        )
+        for feature in log.get("active_feature_evidence", []):
+            if not isinstance(feature, dict):
+                continue
+            lines.append(
+                "| {feature} | {status} | {current} | {rank} | {progress} | {nll} | {delta} | {gap} |".format(
+                    feature=feature.get("feature") or "-",
+                    status=feature.get("status") or "-",
+                    current="yes" if feature.get("is_current") else "no",
+                    rank=_fmt(feature.get("rank_so_far"), digits=0),
+                    progress=_fmt(feature.get("progress_fraction")),
+                    nll=_fmt(feature.get("best_val_nll")),
+                    delta=_fmt(feature.get("best_delta_vs_raw")),
+                    gap=_fmt(feature.get("gap_to_active_best")),
                 )
             )
         lines.extend(
