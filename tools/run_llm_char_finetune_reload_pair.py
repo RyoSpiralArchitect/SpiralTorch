@@ -215,6 +215,7 @@ def finetune_command(
     topk: int,
     seed: int,
     backend: str,
+    restore_best_at_end: bool,
     load_run: Path | None = None,
 ) -> list[str]:
     command = [
@@ -252,6 +253,8 @@ def finetune_command(
         "--backend",
         backend,
     ]
+    if restore_best_at_end:
+        command.append("--restore-best-at-end")
     if load_run is not None:
         command.extend(["--load-run", str(load_run)])
     return command
@@ -339,6 +342,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--val-split", type=float, default=0.1)
     parser.add_argument("--gen", type=int, default=120)
     parser.add_argument("--topk", type=int, default=32)
+    parser.add_argument("--restore-best-at-end", action="store_true")
     parser.add_argument("--curves", action="store_true")
     parser.add_argument("--summary-limit", type=int, default=8)
     parser.add_argument(
@@ -407,6 +411,7 @@ def main(argv: list[str] | None = None) -> int:
         topk=args.topk,
         seed=args.seed,
         backend=args.backend,
+        restore_best_at_end=args.restore_best_at_end,
     )
     reload_command = finetune_command(
         reload_data_paths,
@@ -424,6 +429,7 @@ def main(argv: list[str] | None = None) -> int:
         topk=args.topk,
         seed=reload_seed,
         backend=args.backend,
+        restore_best_at_end=args.restore_best_at_end,
         load_run=base_run_dir,
     )
     planned_compare_command = compare_command(
@@ -469,6 +475,7 @@ def main(argv: list[str] | None = None) -> int:
             "val_split": args.val_split,
             "gen": args.gen,
             "topk": args.topk,
+            "restore_best_at_end": bool(args.restore_best_at_end),
         },
         "runs": [],
         "compare_command": planned_compare_command,
