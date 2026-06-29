@@ -303,12 +303,19 @@ def _command_ready(item: dict[str, Any], *, cwd: Path) -> bool:
     )
 
 
-def _run_command(command: list[str], *, cwd: Path) -> tuple[int, float]:
+def _run_command(command: list[str], *, cwd: Path) -> tuple[int, float, str, str]:
     started = time.time()
     env = os.environ.copy()
     env.setdefault("PYTHONNOUSERSITE", "1")
-    proc = subprocess.run(command, cwd=cwd, env=env)
-    return int(proc.returncode), time.time() - started
+    proc = subprocess.run(
+        command,
+        cwd=cwd,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    return int(proc.returncode), time.time() - started, proc.stdout, proc.stderr
 
 
 def _command_result(
@@ -344,11 +351,15 @@ def _command_result(
         "executed": bool(execute),
         "returncode": None,
         "elapsed_seconds": None,
+        "stdout": None,
+        "stderr": None,
     }
     if execute:
-        returncode, elapsed = _run_command(command, cwd=cwd)
+        returncode, elapsed, stdout, stderr = _run_command(command, cwd=cwd)
         result["returncode"] = returncode
         result["elapsed_seconds"] = elapsed
+        result["stdout"] = stdout
+        result["stderr"] = stderr
     return result
 
 
@@ -373,20 +384,22 @@ def _markdown(payload: dict[str, Any]) -> str:
         f"- selected_count: {payload.get('selected_count')}",
         f"- cwd: `{payload.get('cwd')}`",
         "",
-        "| seed | executed | returncode | vae | heads | source_summary | missing_heads | run_dir |",
-        "| ---: | --- | ---: | --- | --- | --- | ---: | --- |",
+        "| seed | executed | returncode | vae | heads | source_summary | stdout_lines | stderr_lines | missing_heads | run_dir |",
+        "| ---: | --- | ---: | --- | --- | --- | ---: | ---: | ---: | --- |",
     ]
     for item in payload.get("results", []):
         if not isinstance(item, dict):
             continue
         lines.append(
-            "| {seed} | {executed} | {returncode} | {vae} | {heads} | {source} | {missing} | `{run_dir}` |".format(
+            "| {seed} | {executed} | {returncode} | {vae} | {heads} | {source} | {stdout_lines} | {stderr_lines} | {missing} | `{run_dir}` |".format(
                 seed=_fmt(item.get("seed")),
                 executed=_fmt(item.get("executed")),
                 returncode=_fmt(item.get("returncode")),
                 vae=_fmt(item.get("vae_load_exists")),
                 heads=_fmt(item.get("required_heads_all_exist")),
                 source=_fmt(item.get("source_summary_exists")),
+                stdout_lines=len(str(item.get("stdout") or "").splitlines()),
+                stderr_lines=len(str(item.get("stderr") or "").splitlines()),
                 missing=len(item.get("missing_head_paths", [])),
                 run_dir=item.get("run_dir") or "-",
             )

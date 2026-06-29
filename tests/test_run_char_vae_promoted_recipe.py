@@ -39,7 +39,8 @@ def _write_summary(path: Path) -> None:
                     "-c",
                     (
                         "from pathlib import Path; "
-                        f"Path('marker_{seed}.txt').write_text('ok')"
+                        f"Path('marker_{seed}.txt').write_text('ok'); "
+                        f"print('child-out-{seed}')"
                     ),
                     "--features",
                     "raw,reconstruction_latent",
@@ -196,6 +197,7 @@ class PromotedRecipeRunnerTests(unittest.TestCase):
             self.assertEqual(payload["results"][0]["returncode"], 0)
             self.assertTrue(payload["results"][0]["required_heads_all_exist"])
             self.assertTrue(payload["results"][0]["source_summary_exists"])
+            self.assertIn("child-out-101", payload["results"][0]["stdout"])
             self.assertTrue((root / "marker_101.txt").exists())
             report_path = root / "promoted_recipe_eval_run.json"
             self.assertTrue(report_path.exists())
