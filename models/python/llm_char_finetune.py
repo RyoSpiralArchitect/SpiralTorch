@@ -814,6 +814,11 @@ def _write_completion_summary(
     metrics_path: pathlib.Path,
     final_sample_path: pathlib.Path,
     save_weights: pathlib.Path | None,
+    best_checkpoint_path: pathlib.Path | None = None,
+    best_sample_path: pathlib.Path | None = None,
+    restore_best_at_end: bool = False,
+    restored_best_at_end: bool = False,
+    restored_best_checkpoint_path: pathlib.Path | None = None,
     validation: dict[str, Any] | None = None,
 ) -> None:
     meta_path = _meta_path_for_weights(weights_path)
@@ -852,6 +857,23 @@ def _write_completion_summary(
             "path": str(final_sample_path),
             "exists": final_sample_path.exists(),
         },
+        "best_checkpoint_path": (
+            str(best_checkpoint_path) if best_checkpoint_path is not None else None
+        ),
+        "best_checkpoint_exists": (
+            best_checkpoint_path.exists() if best_checkpoint_path is not None else None
+        ),
+        "best_sample_path": str(best_sample_path) if best_sample_path is not None else None,
+        "best_sample_exists": (
+            best_sample_path.exists() if best_sample_path is not None else None
+        ),
+        "restore_best_at_end": bool(restore_best_at_end),
+        "restored_best_at_end": bool(restored_best_at_end),
+        "restored_best_checkpoint_path": (
+            str(restored_best_checkpoint_path)
+            if restored_best_checkpoint_path is not None
+            else None
+        ),
     }
     if validation:
         payload.update(validation)
@@ -1087,6 +1109,7 @@ def main() -> int:
             "[--load weights.json] [--load-run run_dir] [--save weights.json] [--steps N] [--embed-dim N] [--hidden N] "
             "[--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] "
             "[--gen N] [--topk N] [--seed N] [--prompt STR] [--val-split F] [--eval-samples N] "
+            "[--restore-best-at-end] "
             "[--backend cpu|wgpu|cuda|hip|auto] "
             "[--preflight-only] [--ignore-preflight] "
             "[--events PATH] [--events-types A,B,C] "
@@ -1123,6 +1146,7 @@ def main() -> int:
     seed = 42
     val_split = 0.1
     eval_samples = 64
+    restore_best_at_end = False
     prompt: str | None = None
     backend = "cpu"
     events_path: pathlib.Path | None = None
@@ -1181,6 +1205,8 @@ def main() -> int:
             val_split = float(next(it))
         elif flag == "--eval-samples":
             eval_samples = int(next(it))
+        elif flag == "--restore-best-at-end":
+            restore_best_at_end = True
         elif flag == "--prompt":
             prompt = str(next(it))
         elif flag == "--backend":
@@ -1377,9 +1403,21 @@ def main() -> int:
         "desire_prime": desire_prime if desire else None,
         "desire_blend": desire_blend if desire else None,
         "desire_drift_gain": desire_drift_gain if desire else None,
+        "restore_best_at_end": restore_best_at_end,
         "weights_loaded_from": str(load_weights) if load_weights is not None else None,
         "weights_loaded_from_run": str(load_run) if load_run is not None else None,
         "source_checkpoint": source_checkpoint,
+    }
+
+    weights_meta = {
+        "format": FORMAT_V2 if embed_dim_runtime is not None else FORMAT_V1,
+        "steps": steps,
+        "hidden": hidden,
+        "curvature": curvature,
+        "temperature": temperature,
+        "embed_dim": embed_dim_runtime,
+        "unk": symbols[0],
+        "symbols": symbols,
     }
 
     model.attach_hypergrad(curvature=curvature, learning_rate=lr)
@@ -1446,6 +1484,10 @@ def main() -> int:
     )
     best_validation = initial_validation
     best_validation_epoch: int | None = None
+    best_checkpoint_path = run_dir / "best_weights.json"
+    best_sample_path: pathlib.Path | None = None
+    st.nn.save(str(best_checkpoint_path), model)
+    _save_meta(_meta_path_for_weights(best_checkpoint_path), weights_meta)
 
     print(
         f"mode={mode} vocab={vocab_size} files={len(data_files)} chars={len(text)} steps={steps} hidden={hidden} epochs={epochs} "
@@ -1510,6 +1552,7 @@ def main() -> int:
             )
             validation_nll = validation.get("mean_nll")
             best_nll = best_validation.get("mean_nll")
+            validation_is_best = False
             if (
                 isinstance(validation_nll, (int, float))
                 and (
@@ -1519,6 +1562,7 @@ def main() -> int:
             ):
                 best_validation = validation
                 best_validation_epoch = epoch
+                validation_is_best = True
             with metrics_path.open("a", encoding="utf-8") as handle:
                 handle.write(
                     json.dumps(
@@ -1545,11 +1589,17 @@ def main() -> int:
                 desire=desire_pipeline,
             )
             (samples_dir / f"epoch_{epoch:03d}.txt").write_text(sample, encoding="utf-8")
+            if validation_is_best:
+                st.nn.save(str(best_checkpoint_path), model)
+                _save_meta(_meta_path_for_weights(best_checkpoint_path), weights_meta)
+                best_sample_path = samples_dir / f"best_epoch_{epoch:03d}.txt"
+                best_sample_path.write_text(sample, encoding="utf-8")
             if validation.get("mean_nll") is not None:
                 print(
                     f"epoch[{epoch}] batches={stats.batches} avg_loss={avg_loss:.6f} "
                     f"val_nll={float(validation['mean_nll']):.6f} "
-                    f"acc={float(validation['accuracy']) * 100.0:.2f}%",
+                    f"acc={float(validation['accuracy']) * 100.0:.2f}%"
+                    f"{' best=checkpoint' if validation_is_best else ''}",
                     flush=True,
                 )
             else:
@@ -1568,27 +1618,48 @@ def main() -> int:
         except Exception as exc:
             _write_json(run_dir / "atlas_summary.json", {"error": str(exc)})
 
-    st.nn.save(str(weights_path), model)
+    restored_best_at_end = False
+    restored_best_checkpoint_path: pathlib.Path | None = None
+    restored_best_sample_path: pathlib.Path | None = None
+    if restore_best_at_end and best_checkpoint_path.exists():
+        st.nn.load(str(best_checkpoint_path), model)
+        restored_sample = _generate(
+            model,
+            symbols,
+            index,
+            steps,
+            prompt,
+            gen_len,
+            top_k,
+            seed + 999 + (best_validation_epoch or 0),
+            embed_dim=embed_dim_runtime,
+            desire=desire_pipeline,
+        )
+        restored_best_sample_path = samples_dir / "restored_best.txt"
+        restored_best_sample_path.write_text(restored_sample, encoding="utf-8")
+        restored_best_at_end = True
+        restored_best_checkpoint_path = best_checkpoint_path
+        print(
+            "restore_best_at_end "
+            f"checkpoint={best_checkpoint_path} "
+            f"best_epoch={best_validation_epoch if best_validation_epoch is not None else '-'} "
+            f"best_nll={best_validation.get('mean_nll')}",
+            flush=True,
+        )
 
-    meta = {
-        "format": FORMAT_V2 if embed_dim_runtime is not None else FORMAT_V1,
-        "steps": steps,
-        "hidden": hidden,
-        "curvature": curvature,
-        "temperature": temperature,
-        "embed_dim": embed_dim_runtime,
-        "unk": symbols[0],
-        "symbols": symbols,
-    }
-    _save_meta(_meta_path_for_weights(weights_path), meta)
+    st.nn.save(str(weights_path), model)
+    _save_meta(_meta_path_for_weights(weights_path), weights_meta)
 
     if save_weights is not None:
         save_weights = pathlib.Path(save_weights)
         save_weights.parent.mkdir(parents=True, exist_ok=True)
         st.nn.save(str(save_weights), model)
-        _save_meta(_meta_path_for_weights(save_weights), meta)
+        _save_meta(_meta_path_for_weights(save_weights), weights_meta)
 
-    if epochs > 0:
+    if restored_best_at_end and restored_best_sample_path is not None:
+        final_sample_path = restored_best_sample_path
+        sample = final_sample_path.read_text(encoding="utf-8")
+    elif epochs > 0:
         final_sample_path = samples_dir / f"epoch_{epochs - 1:03d}.txt"
         sample = final_sample_path.read_text(encoding="utf-8")
     else:
@@ -1606,10 +1677,12 @@ def main() -> int:
         )
         final_sample_path = samples_dir / "init.txt"
         final_sample_path.write_text(sample, encoding="utf-8")
-    final_validation = (
-        validation
-        if epochs > 0
-        else _evaluate_model(
+    if restored_best_at_end:
+        final_validation = best_validation
+    elif epochs > 0:
+        final_validation = validation
+    else:
+        final_validation = _evaluate_model(
             model,
             validation_samples,
             vocab_size=vocab_size,
@@ -1618,7 +1691,6 @@ def main() -> int:
             unigram_rows=unigram_rows,
             bigram_rows=bigram_rows,
         )
-    )
     _write_completion_summary(
         run_dir,
         run_meta,
@@ -1626,6 +1698,11 @@ def main() -> int:
         metrics_path=metrics_path,
         final_sample_path=final_sample_path,
         save_weights=save_weights,
+        best_checkpoint_path=best_checkpoint_path,
+        best_sample_path=best_sample_path,
+        restore_best_at_end=restore_best_at_end,
+        restored_best_at_end=restored_best_at_end,
+        restored_best_checkpoint_path=restored_best_checkpoint_path,
         validation=_validation_summary_payload(
             initial_validation=initial_validation,
             final_validation=final_validation,

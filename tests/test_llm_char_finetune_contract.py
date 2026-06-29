@@ -348,13 +348,17 @@ class LlmCharFinetuneContractTests(unittest.TestCase):
             sample_path = run_dir / "samples" / "epoch_000.txt"
             save_weights = root / "exported.json"
             save_meta = root / "exported.meta.json"
+            best_weights = run_dir / "best_weights.json"
+            best_sample = run_dir / "samples" / "best_epoch_001.txt"
 
             weights_path.write_text("{}", encoding="utf-8")
             meta_path.write_text("{}", encoding="utf-8")
+            best_weights.write_text("{}", encoding="utf-8")
             save_weights.write_text("{}", encoding="utf-8")
             save_meta.write_text("{}", encoding="utf-8")
             sample_path.parent.mkdir(parents=True)
             sample_path.write_text("hello", encoding="utf-8")
+            best_sample.write_text("best", encoding="utf-8")
             metrics_path.write_text(
                 "\n".join(
                     [
@@ -392,6 +396,11 @@ class LlmCharFinetuneContractTests(unittest.TestCase):
                 metrics_path=metrics_path,
                 final_sample_path=sample_path,
                 save_weights=save_weights,
+                best_checkpoint_path=best_weights,
+                best_sample_path=best_sample,
+                restore_best_at_end=True,
+                restored_best_at_end=True,
+                restored_best_checkpoint_path=best_weights,
                 validation=validation_payload,
             )
 
@@ -417,6 +426,13 @@ class LlmCharFinetuneContractTests(unittest.TestCase):
             0.75,
         )
         self.assertTrue(summary["sample"]["exists"])
+        self.assertEqual(summary["best_checkpoint_path"], str(best_weights))
+        self.assertTrue(summary["best_checkpoint_exists"])
+        self.assertEqual(summary["best_sample_path"], str(best_sample))
+        self.assertTrue(summary["best_sample_exists"])
+        self.assertTrue(summary["restore_best_at_end"])
+        self.assertTrue(summary["restored_best_at_end"])
+        self.assertEqual(summary["restored_best_checkpoint_path"], str(best_weights))
         self.assertAlmostEqual(summary["final_validation"]["mean_nll"], 2.5)
         self.assertAlmostEqual(summary["validation_nll_delta"], -0.5)
         self.assertAlmostEqual(summary["final_minus_best_validation_nll"], 0.1)
