@@ -25,10 +25,65 @@ def _load_module():
 
 
 class LlmCharFinetuneContractTests(unittest.TestCase):
+    def test_load_run_resolves_weights_and_records_source_checkpoint(self) -> None:
+        mod = _load_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_run = root / "source"
+            source_run.mkdir()
+            weights_path = source_run / "weights.json"
+            meta_path = source_run / "weights.meta.json"
+            run_json_path = source_run / "run.json"
+            summary_path = source_run / "summary.json"
+            weights_path.write_text('{"weights": []}', encoding="utf-8")
+            meta_path.write_text(
+                json.dumps(
+                    {
+                        "format": mod.FORMAT_V2,
+                        "steps": 4,
+                        "hidden": 8,
+                        "curvature": -1.0,
+                        "temperature": 1.0,
+                        "embed_dim": 4,
+                        "unk": mod.DEFAULT_UNK,
+                        "symbols": [mod.DEFAULT_UNK, "a"],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            run_json_path.write_text('{"schema": "st.modelzoo.run.v1"}', encoding="utf-8")
+            summary_path.write_text('{"status": "completed"}', encoding="utf-8")
+
+            resolved = mod._resolve_load_weights(None, source_run)
+            source = mod._checkpoint_source_payload(resolved, load_run=source_run)
+
+        self.assertEqual(resolved, source_run / "weights.json")
+        self.assertIsNotNone(source)
+        assert source is not None
+        self.assertEqual(source["kind"], "run_dir")
+        self.assertTrue(source["weights_exists"])
+        self.assertTrue(source["meta_exists"])
+        self.assertTrue(source["run_json_exists"])
+        self.assertTrue(source["summary_exists"])
+        self.assertEqual(len(source["weights_sha256"]), 64)
+        self.assertEqual(len(source["meta_sha256"]), 64)
+        with self.assertRaisesRegex(ValueError, "mutually exclusive"):
+            mod._resolve_load_weights(root / "weights.json", source_run)
+
     def test_training_contract_records_ft_backend_and_reload_scope(self) -> None:
         mod = _load_module()
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            source_checkpoint = {
+                "kind": "run_dir",
+                "run_dir": str(root / "base-run"),
+                "weights_path": str(root / "base-run" / "weights.json"),
+                "weights_exists": True,
+                "weights_sha256": "a" * 64,
+                "meta_path": str(root / "base-run" / "weights.meta.json"),
+                "meta_exists": True,
+                "meta_sha256": "b" * 64,
+            }
             run_meta = {
                 "format": mod.FORMAT_V2,
                 "steps": 16,
@@ -50,6 +105,8 @@ class LlmCharFinetuneContractTests(unittest.TestCase):
                 "desire": True,
                 "softlogic": {"enabled": False},
                 "weights_loaded_from": str(root / "base.json"),
+                "weights_loaded_from_run": str(root / "base-run"),
+                "source_checkpoint": source_checkpoint,
             }
 
             contract = mod._build_training_contract(
@@ -66,10 +123,19 @@ class LlmCharFinetuneContractTests(unittest.TestCase):
         self.assertEqual(contract["input"]["format"], mod.FORMAT_V2)
         self.assertIn("embedding", contract["parameter_policy"]["trainable"])
         self.assertEqual(contract["parameter_policy"]["frozen"], [])
+        self.assertEqual(
+            contract["parameter_policy"]["reload_source_run"],
+            run_meta["weights_loaded_from_run"],
+        )
         self.assertEqual(contract["backend"]["requested"], "cpu")
         self.assertEqual(contract["backend"]["status"], "available")
         self.assertTrue(contract["reload"]["reload_safe"])
         self.assertTrue(contract["reload"]["metadata_required"])
+        self.assertEqual(contract["reload"]["source_checkpoint"], source_checkpoint)
+        self.assertEqual(
+            contract["reload"]["weights_loaded_from_run"],
+            run_meta["weights_loaded_from_run"],
+        )
         self.assertTrue(contract["geometry"]["zspace_softmax"])
         self.assertTrue(contract["geometry"]["hypergrad_attached"])
         self.assertTrue(contract["controls"]["desire"])
@@ -176,7 +242,13 @@ class LlmCharFinetuneContractTests(unittest.TestCase):
             run_meta = {
                 "schema": mod.RUN_SCHEMA,
                 "arch": "llm_char_finetune",
-                "weights_loaded_from": None,
+                "weights_loaded_from": str(root / "base-run" / "weights.json"),
+                "weights_loaded_from_run": str(root / "base-run"),
+                "source_checkpoint": {
+                    "kind": "run_dir",
+                    "run_dir": str(root / "base-run"),
+                    "weights_sha256": "c" * 64,
+                },
                 "training_contract": {"schema": mod.TRAINING_CONTRACT_SCHEMA},
             }
             validation_payload = {
@@ -205,6 +277,11 @@ class LlmCharFinetuneContractTests(unittest.TestCase):
         self.assertTrue(summary["checkpoint"]["meta_exists"])
         self.assertTrue(summary["checkpoint"]["save_weights_exists"])
         self.assertTrue(summary["checkpoint"]["save_meta_exists"])
+        self.assertEqual(
+            summary["checkpoint"]["loaded_from_run"],
+            str(root / "base-run"),
+        )
+        self.assertEqual(summary["checkpoint"]["source_checkpoint"]["kind"], "run_dir")
         self.assertEqual(summary["metrics"]["epoch_count"], 2)
         self.assertEqual(summary["metrics"]["loss_count"], 2)
         self.assertAlmostEqual(summary["metrics"]["first_average_loss"], 4.0)
