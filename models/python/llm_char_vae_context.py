@@ -2407,6 +2407,8 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
                 f"{follow_up_guidance.get('use_best_generation_follow_up_command')}",
                 "- use_broadened_follow_up_command: "
                 f"{follow_up_guidance.get('use_broadened_follow_up_command')}",
+                "- use_promoted_train_command: "
+                f"{follow_up_guidance.get('use_promoted_train_command')}",
                 "- tie_aware_confirmation: "
                 f"{follow_up_guidance.get('tie_aware_confirmation')}",
                 f"- best_config_uncertainty_tie: {uncertainty_tie_text}",
@@ -2558,6 +2560,10 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
             ]
         )
     if isinstance(broadened_follow_up, dict):
+        promoted_train = (
+            broadened_follow_up.get("command_kind") == "promoted_family_train"
+            or broadened_follow_up.get("action") == "promote_stable_family_confirmation"
+        )
         family_focus = broadened_follow_up.get("feature_family_focus")
         focus_family = (
             family_focus.get("family")
@@ -2569,14 +2575,35 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
             if isinstance(family_focus, dict)
             else []
         )
+        command_title = (
+            "Promoted Family Train Command"
+            if promoted_train
+            else "Broadened Follow-Up Command"
+        )
+        train_budget_label = (
+            "train_epochs/batches/eval_samples"
+            if promoted_train
+            else "broadened_epochs/batches/eval_samples"
+        )
+        vae_budget_label = (
+            "train_vae_epochs/batches"
+            if promoted_train
+            else "broadened_vae_epochs/batches"
+        )
         lines.extend(
             [
                 "",
-                "## Broadened Follow-Up Command",
+                f"## {command_title}",
                 "",
                 f"- action: {broadened_follow_up.get('action')}",
+                f"- command_kind: {broadened_follow_up.get('command_kind') or '-'}",
+                f"- training_track: {broadened_follow_up.get('training_track') or '-'}",
                 "- promotion_budget_policy: "
                 f"{broadened_follow_up.get('promotion_budget_policy') or '-'}",
+                "- current_is_trajectory_best: "
+                f"{broadened_follow_up.get('current_is_trajectory_best')}",
+                "- trajectory_best_summary: "
+                f"`{broadened_follow_up.get('trajectory_best_summary_path') or '-'}`",
                 f"- default_follow_up_from: `{broadened_follow_up.get('default_follow_up_from')}`",
                 "- default_follow_up_fail_on_verdict: "
                 f"{broadened_follow_up.get('default_follow_up_fail_on_verdict') or '-'}",
@@ -2588,11 +2615,11 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
                 f"{', '.join(str(feature) for feature in broadened_follow_up.get('focused_features', [])) or '-'}",
                 "- features_added_for_family: "
                 f"{', '.join(str(feature) for feature in focus_added) or '-'}",
-                "- broadened_epochs/batches/eval_samples: "
+                f"- {train_budget_label}: "
                 f"{broadened_follow_up.get('broadened_epochs')}/"
                 f"{broadened_follow_up.get('broadened_batches')}/"
                 f"{broadened_follow_up.get('broadened_eval_samples')}",
-                "- broadened_vae_epochs/batches: "
+                f"- {vae_budget_label}: "
                 f"{broadened_follow_up.get('broadened_vae_epochs')}/"
                 f"{broadened_follow_up.get('broadened_vae_batches')}",
                 f"- script: `{broadened_follow_up.get('script_path')}`",
@@ -3956,8 +3983,10 @@ def _broadened_follow_up_command_record(
         return None
     if follow_up_trajectory.get("unsafe_promotion"):
         return None
-    if follow_up_trajectory.get("best_summary_path") != str(root_run_dir / "summary.json"):
-        return None
+    current_summary_path = str(root_run_dir / "summary.json")
+    current_is_trajectory_best = (
+        follow_up_trajectory.get("best_summary_path") == current_summary_path
+    )
     family_focus = _feature_family_focus_record(
         best_config,
         feature_family_stability,
@@ -3968,6 +3997,7 @@ def _broadened_follow_up_command_record(
     improved_ready = (
         int(follow_up_chain.get("improved_streak") or 0) >= 2
         and trajectory_action == "confirm_trajectory_with_fresh_seeds"
+        and current_is_trajectory_best
     )
     family_win_rate = _finite_float(
         family_focus.get("win_rate") if isinstance(family_focus, dict) else None
@@ -4084,8 +4114,20 @@ def _broadened_follow_up_command_record(
     return {
         "schema": "st.llm_char_vae_context.broadened_follow_up_command.v1",
         "action": command_action,
+        "command_kind": (
+            "promoted_family_train"
+            if command_action == "promote_stable_family_confirmation"
+            else "broadened_follow_up"
+        ),
+        "training_track": (
+            "stable_family_head_train"
+            if promotion_budget_policy == "head_only"
+            else "full_broadened_follow_up"
+        ),
         "promotion_budget_policy": promotion_budget_policy,
         "best_config": best_config,
+        "current_is_trajectory_best": current_is_trajectory_best,
+        "trajectory_best_summary_path": follow_up_trajectory.get("best_summary_path"),
         "default_new_seeds": default_new_seeds,
         "used_seed_history": used_seeds,
         "default_run_dir": str(default_run_dir),
@@ -4098,6 +4140,11 @@ def _broadened_follow_up_command_record(
         "broadened_eval_samples": int(broadened_args.eval_samples),
         "broadened_vae_epochs": int(broadened_args.vae_epochs),
         "broadened_vae_batches": int(broadened_args.vae_batches),
+        "train_epochs": int(broadened_args.epochs),
+        "train_batches": int(broadened_args.batches),
+        "train_eval_samples": int(broadened_args.eval_samples),
+        "train_vae_epochs": int(broadened_args.vae_epochs),
+        "train_vae_batches": int(broadened_args.vae_batches),
         "script_path": str(script_path),
         "shell_command": shell_command,
         "script_command": script_command,
@@ -4247,6 +4294,67 @@ def _summary_features(summary: dict[str, Any]) -> list[str]:
         return []
     features = [str(feature) for feature in raw_features if str(feature) in FEATURE_CHOICES]
     return list(dict.fromkeys(features))
+
+
+def _command_record_text_or_dir(command_record: dict[str, Any] | None) -> list[str]:
+    if not isinstance(command_record, dict):
+        return []
+    command = command_record.get("script_command")
+    if not isinstance(command, list):
+        return []
+    values = [str(part) for part in command]
+    try:
+        script_index = values.index("models/python/llm_char_vae_context.py")
+    except ValueError:
+        return []
+    text_or_dir: list[str] = []
+    for value in values[script_index + 1 :]:
+        if value.startswith("--"):
+            break
+        text_or_dir.append(value)
+    return text_or_dir
+
+
+def _refresh_command_args(
+    args: argparse.Namespace,
+    run: dict[str, Any],
+    next_follow_up: dict[str, Any] | None,
+) -> argparse.Namespace:
+    budget = _run_budget_from_run(run)
+    overrides: dict[str, Any] = {}
+    for key, value in budget.items():
+        if key in RUN_BUDGET_KEYS and value is not None:
+            overrides[key] = int(value)
+
+    text_or_dir = list(getattr(args, "text_or_dir", []) or [])
+    if not text_or_dir:
+        text_or_dir = _command_record_text_or_dir(next_follow_up)
+    if text_or_dir:
+        overrides["text_or_dir"] = text_or_dir
+
+    for key in ("min_nll_delta", "win_tolerance", "follow_up_confirm_tolerance"):
+        value = _finite_float(run.get(key))
+        if value is not None:
+            overrides[key] = float(value)
+
+    head_init = run.get("head_init")
+    if head_init in HEAD_INIT_CHOICES:
+        overrides["head_init"] = str(head_init)
+
+    normalize = run.get("feature_normalize")
+    if normalize in NORMALIZE_CHOICES:
+        overrides["feature_normalize"] = str(normalize)
+
+    scale = _finite_float(run.get("hybrid_latent_scale"))
+    if scale is not None:
+        overrides["hybrid_latent_scale"] = float(scale)
+
+    fail_on = run.get("follow_up_fail_on_verdicts")
+    if isinstance(fail_on, list):
+        values = [str(verdict) for verdict in fail_on if str(verdict)]
+        overrides["follow_up_fail_on_verdict"] = ",".join(values) if values else None
+
+    return _clone_args(args, **overrides)
 
 
 def _args_run_budget(args: argparse.Namespace) -> dict[str, Any]:
@@ -5755,6 +5863,7 @@ def _follow_up_guidance_record(
     use_next_follow_up_command = False
     use_best_generation_follow_up_command = False
     use_broadened_follow_up_command = False
+    use_promoted_train_command = False
     command_usage = None
     action = "review_follow_up"
 
@@ -5825,6 +5934,10 @@ def _follow_up_guidance_record(
             add_reason("confirmed family candidate is raw-positive")
             if isinstance(broadened_follow_up, dict):
                 use_broadened_follow_up_command = True
+                use_promoted_train_command = (
+                    broadened_follow_up.get("command_kind")
+                    == "promoted_family_train"
+                )
                 command_usage = broadened_follow_up.get("script_usage")
                 family_focus = broadened_follow_up.get("feature_family_focus")
                 if isinstance(family_focus, dict):
@@ -5886,6 +5999,10 @@ def _follow_up_guidance_record(
                 action = "promote_and_broaden_after_streak"
                 use_next_follow_up_command = False
                 use_broadened_follow_up_command = True
+                use_promoted_train_command = (
+                    broadened_follow_up.get("command_kind")
+                    == "promoted_family_train"
+                )
                 command_usage = broadened_follow_up.get("script_usage")
                 family_focus = broadened_follow_up.get("feature_family_focus")
                 if isinstance(family_focus, dict):
@@ -5965,6 +6082,7 @@ def _follow_up_guidance_record(
         "use_next_follow_up_command": use_next_follow_up_command,
         "use_best_generation_follow_up_command": use_best_generation_follow_up_command,
         "use_broadened_follow_up_command": use_broadened_follow_up_command,
+        "use_promoted_train_command": use_promoted_train_command,
         "gate_failed": gate_failed,
         "reasons": reasons,
         "command_usage": command_usage,
@@ -6169,6 +6287,27 @@ def _refresh_aggregate_summary_payload(
         refreshed["follow_up_trajectory"] = follow_up_trajectory
     else:
         refreshed.pop("follow_up_trajectory", None)
+
+    command_args = _refresh_command_args(args, run, next_follow_up)
+    features = _summary_features(refreshed)
+    seeds = _summary_seeds(refreshed)
+    broadened_follow_up = _broadened_follow_up_command_record(
+        command_args,
+        features,
+        best_config,
+        root_run_dir,
+        seeds,
+        follow_up_chain,
+        follow_up_trajectory,
+        next_follow_up,
+        refreshed.get("feature_family_stability"),
+    )
+    if broadened_follow_up is not None:
+        refreshed["broadened_follow_up_command"] = broadened_follow_up
+        if write_scripts:
+            _write_next_follow_up_script(broadened_follow_up)
+    else:
+        refreshed.pop("broadened_follow_up_command", None)
 
     follow_up_guidance = _follow_up_guidance_record(
         follow_up_result,

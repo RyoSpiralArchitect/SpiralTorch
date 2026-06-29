@@ -1603,6 +1603,11 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
                         "best_accuracy": 0.18,
                     },
                     {
+                        "feature": "latent",
+                        "best_mean_nll": best_nll + 0.33,
+                        "best_accuracy": 0.17,
+                    },
+                    {
                         "feature": "raw",
                         "best_mean_nll": raw_nll,
                         "best_accuracy": 0.17,
@@ -1611,6 +1616,7 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
                 "deltas": {
                     "reconstruction_latent_best_nll_vs_raw": best_nll - raw_nll,
                     "raw_latent_best_nll_vs_raw": best_nll + 0.002 - raw_nll,
+                    "latent_best_nll_vs_raw": best_nll + 0.33 - raw_nll,
                     "raw_best_nll_vs_raw": 0.0,
                 },
             }
@@ -1701,6 +1707,206 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
         self.assertEqual(
             refreshed["learning_evidence"]["best_family"]["family"],
             "hybrid_latent",
+        )
+
+    def test_refresh_stable_family_recreates_promoted_train_command(self) -> None:
+        mod = _load_module()
+        parser = mod._build_parser()
+        run_budget = {
+            "window_chars": 32,
+            "latent_dim": 12,
+            "hidden": 64,
+            "epochs": 32,
+            "batches": 64,
+            "batch_size": 4,
+            "eval_samples": 256,
+            "vae_epochs": 12,
+            "vae_batches": 24,
+            "vae_batch_size": 4,
+        }
+        source_best_config = {
+            "best_feature": "reconstruction_latent",
+            "feature_normalize": "blocks",
+            "hybrid_latent_scale": 4.0,
+            "latent_dim": 12,
+            "hidden": 64,
+            "mean_best_nll": 3.833,
+            "mean_best_nll_count": 3,
+            "mean_best_nll_stderr": 0.01,
+            "mean_best_nll_delta_vs_raw": -0.356,
+        }
+
+        def seed_summary(seed: int, best_nll: float) -> dict:
+            raw_nll = 4.189
+            return {
+                "seed": seed,
+                "feature_normalize": "blocks",
+                "hybrid_latent_scale": 4.0,
+                "latent_dim": 12,
+                "hidden": 64,
+                "run_dir": f"/tmp/seed_{seed}",
+                "best_feature": "reconstruction_latent",
+                "ranking": [
+                    {
+                        "feature": "reconstruction_latent",
+                        "best_mean_nll": best_nll,
+                        "best_accuracy": 0.18,
+                    },
+                    {
+                        "feature": "raw_latent",
+                        "best_mean_nll": best_nll + 0.002,
+                        "best_accuracy": 0.18,
+                    },
+                    {
+                        "feature": "raw",
+                        "best_mean_nll": raw_nll,
+                        "best_accuracy": 0.17,
+                    },
+                ],
+                "deltas": {
+                    "reconstruction_latent_best_nll_vs_raw": best_nll - raw_nll,
+                    "raw_latent_best_nll_vs_raw": best_nll + 0.002 - raw_nll,
+                    "raw_best_nll_vs_raw": 0.0,
+                },
+            }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "current"
+            root.mkdir()
+            start_summary = Path(tmp) / "start" / "summary.json"
+            start_summary.parent.mkdir()
+            start_summary.write_text(
+                json.dumps(
+                    {
+                        "status": "improved",
+                        "best_feature": "raw_latent",
+                        "best_config": {
+                            **source_best_config,
+                            "best_feature": "raw_latent",
+                            "mean_best_nll": 4.102,
+                            "mean_best_nll_delta_vs_raw": -0.087,
+                        },
+                        "follow_up_chain": {"generation": 0},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            older_summary = Path(tmp) / "older" / "summary.json"
+            older_summary.parent.mkdir()
+            older_summary.write_text(
+                json.dumps(
+                    {
+                        "status": "improved",
+                        "best_feature": "reconstruction_latent",
+                        "best_config": {
+                            **source_best_config,
+                            "mean_best_nll": 3.808,
+                            "mean_best_nll_delta_vs_raw": -0.38,
+                        },
+                        "follow_up_chain": {"generation": 3},
+                        "follow_up_result": {"verdict": "improved"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            parent_summary = Path(tmp) / "parent" / "summary.json"
+            parent_summary.parent.mkdir()
+            parent_summary.write_text(
+                json.dumps(
+                    {
+                        "status": "improved",
+                        "best_feature": "reconstruction_latent",
+                        "best_config": source_best_config,
+                        "follow_up_chain": {"generation": 4},
+                        "follow_up_result": {"verdict": "confirmed"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            aggregate = {
+                "schema": "st.llm_char_vae_context.v1",
+                "format": 1,
+                "aggregate": True,
+                "run": {
+                    **run_budget,
+                    "budget": run_budget,
+                    "features": ["raw", "latent", "raw_latent", "reconstruction_latent"],
+                    "feature_normalize": "blocks",
+                    "feature_normalize_modes": ["blocks"],
+                    "normalize_count": 1,
+                    "hybrid_latent_scale": 4.0,
+                    "hybrid_latent_scales": [4.0],
+                    "scale_count": 1,
+                    "latent_dims": [12],
+                    "latent_dim_count": 1,
+                    "hidden_sizes": [64],
+                    "hidden_size_count": 1,
+                    "seeds": [1005, 1007, 1009, 1011, 1013],
+                    "head_init": "xavier",
+                    "min_nll_delta": 0.0,
+                    "follow_up_confirm_tolerance": 0.0,
+                    "win_tolerance": 0.0001,
+                    "follow_up_fail_on_verdicts": ["regressed", "unknown"],
+                },
+                "seed_summaries": [
+                    seed_summary(1005, 3.831),
+                    seed_summary(1007, 3.833),
+                    seed_summary(1009, 3.835),
+                    seed_summary(1011, 3.832),
+                    seed_summary(1013, 3.834),
+                ],
+                "config_summaries": [],
+                "follow_up": {
+                    "source_summary_path": str(parent_summary),
+                    "source_best_config": source_best_config,
+                    "source_run_budget": run_budget,
+                    "source_chain": {
+                        "generation": 4,
+                        "verdict_history": ["improved", "confirmed"],
+                        "ancestors": [str(start_summary), str(older_summary)],
+                    },
+                },
+                "next_follow_up_command": {
+                    "schema": "st.llm_char_vae_context.next_follow_up_command.v1",
+                    "default_follow_up_from": str(root / "summary.json"),
+                    "default_new_seeds": "1015,1017,1019,1021,1023",
+                    "default_new_seed_count": 5,
+                    "default_run_dir": str(root / "follow_up_best_config"),
+                    "default_follow_up_fail_on_verdict": "regressed,unknown",
+                    "script_path": str(root / "next_follow_up_command.sh"),
+                    "shell_command": "python3 models/python/llm_char_vae_context.py ...",
+                    "script_command": [
+                        "python3",
+                        "-S",
+                        "-s",
+                        "models/python/llm_char_vae_context.py",
+                        "models/samples/spiral_corpus_en",
+                        "--features",
+                        "raw,latent,raw_latent,reconstruction_latent",
+                    ],
+                },
+            }
+            args = parser.parse_args(["--run-dir", str(root), "--refresh-summary"])
+            refreshed = mod._refresh_aggregate_summary_payload(
+                aggregate,
+                args=args,
+                root_run_dir=root,
+                write_scripts=False,
+            )
+
+        command = refreshed["broadened_follow_up_command"]
+        guidance = refreshed["follow_up_guidance"]
+        guided = refreshed["guided_next_follow_up_command"]
+        self.assertEqual(guidance["action"], "promote_stable_family_confirmation")
+        self.assertTrue(guidance["use_promoted_train_command"])
+        self.assertTrue(guided["enabled"])
+        self.assertEqual(command["command_kind"], "promoted_family_train")
+        self.assertEqual(command["training_track"], "stable_family_head_train")
+        self.assertFalse(command["current_is_trajectory_best"])
+        self.assertEqual(command["trajectory_best_summary_path"], str(older_summary))
+        self.assertIn(
+            "models/samples/spiral_corpus_en",
+            command["script_command"],
         )
 
     def test_follow_up_source_budget_prefers_best_config_capacity(self) -> None:
@@ -2160,7 +2366,9 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            trajectory["best_summary_path"] = str(root / "summary.json")
+            trajectory["best_summary_path"] = str(
+                root / "older_single_seed_best" / "summary.json"
+            )
             broadened = mod._broadened_follow_up_command_record(
                 args,
                 ["raw", "latent", "raw_latent"],
@@ -2186,13 +2394,29 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
                 guidance,
                 broadened,
             )
+            report = mod._aggregate_report(
+                {
+                    "status": "improved",
+                    "best_feature": "raw_latent",
+                    "best_config": best_config,
+                    "follow_up_guidance": guidance,
+                    "broadened_follow_up_command": broadened,
+                }
+            )
 
         self.assertIsNotNone(broadened)
         self.assertEqual(
             broadened["action"],
             "promote_stable_family_confirmation",
         )
+        self.assertEqual(broadened["command_kind"], "promoted_family_train")
+        self.assertEqual(broadened["training_track"], "stable_family_head_train")
         self.assertEqual(broadened["promotion_budget_policy"], "head_only")
+        self.assertFalse(broadened["current_is_trajectory_best"])
+        self.assertEqual(
+            broadened["trajectory_best_summary_path"],
+            str(root / "older_single_seed_best" / "summary.json"),
+        )
         self.assertEqual(
             broadened["default_run_dir"],
             str(root / "promoted_family_train"),
@@ -2206,12 +2430,18 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
         self.assertEqual(broadened["broadened_eval_samples"], 256)
         self.assertEqual(broadened["broadened_vae_epochs"], 12)
         self.assertEqual(broadened["broadened_vae_batches"], 24)
+        self.assertEqual(broadened["train_epochs"], 32)
+        self.assertEqual(broadened["train_batches"], 64)
+        self.assertEqual(broadened["train_eval_samples"], 256)
+        self.assertEqual(broadened["train_vae_epochs"], 12)
+        self.assertEqual(broadened["train_vae_batches"], 24)
         self.assertEqual(
             broadened["focused_features"],
             ["raw", "latent", "raw_latent", "reconstruction_latent"],
         )
         self.assertEqual(guidance["action"], "promote_stable_family_confirmation")
         self.assertTrue(guidance["use_broadened_follow_up_command"])
+        self.assertTrue(guidance["use_promoted_train_command"])
         self.assertFalse(guidance["use_next_follow_up_command"])
         self.assertEqual(guidance["command_usage"], broadened["script_usage"])
         self.assertIn(
@@ -2223,6 +2453,10 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
             guided["default_run_dir"],
             str(root / "promoted_family_train"),
         )
+        self.assertIn("## Promoted Family Train Command", report)
+        self.assertIn("- command_kind: promoted_family_train", report)
+        self.assertIn("- training_track: stable_family_head_train", report)
+        self.assertIn("- current_is_trajectory_best: False", report)
 
     def test_follow_up_result_combines_source_and_current_seed_noise(self) -> None:
         mod = _load_module()
@@ -2888,6 +3122,7 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
         self.assertEqual(guidance["action"], "promote_and_broaden_after_streak")
         self.assertIs(guidance["use_next_follow_up_command"], False)
         self.assertIs(guidance["use_broadened_follow_up_command"], True)
+        self.assertIs(guidance["use_promoted_train_command"], False)
         self.assertEqual(guidance["command_usage"], broadened["script_usage"])
         self.assertIn(
             "family focus: hybrid_latent wins=3 near_wins=3",
