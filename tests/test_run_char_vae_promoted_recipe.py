@@ -62,6 +62,68 @@ def _write_summary(path: Path) -> None:
     )
 
 
+def _write_legacy_mainline_summary(path: Path) -> None:
+    run_dir = path.parent / "mainline_scale_up"
+    path.write_text(
+        json.dumps(
+            {
+                "mainline_scale_up_command": {
+                    "schema": "st.llm_char_vae_context.mainline_scale_up_command.v1",
+                    "best_config": {
+                        "best_feature": "reconstruction_latent",
+                        "feature_normalize": "blocks",
+                        "hybrid_latent_scale": 4.0,
+                        "latent_dim": 12,
+                        "hidden": 64,
+                    },
+                    "feature_family_focus": {
+                        "family": "hybrid_latent",
+                        "best_feature": "reconstruction_latent",
+                    },
+                    "focused_features": [
+                        "raw",
+                        "raw_latent",
+                        "reconstruction_latent",
+                    ],
+                    "default_new_seeds": "101,103",
+                    "default_run_dir": str(run_dir),
+                    "train_window_chars": 64,
+                    "train_epochs": 128,
+                    "train_batches": 256,
+                    "train_eval_samples": 512,
+                    "train_vae_epochs": 24,
+                    "train_vae_batches": 48,
+                    "train_gen": 120,
+                    "script_command": [
+                        "python3",
+                        "-S",
+                        "-s",
+                        "models/python/llm_char_vae_context.py",
+                        "models/samples/spiral_corpus_en",
+                        "--features",
+                        "raw,raw_latent,reconstruction_latent",
+                        "--seeds",
+                        "${NEW_SEEDS}",
+                        "--run-dir",
+                        "${NEXT_RUN_DIR}",
+                        "--follow-up-from",
+                        "${FOLLOW_UP_FROM}",
+                        "--epochs",
+                        "128",
+                        "--batches",
+                        "256",
+                        "--vae-epochs",
+                        "24",
+                        "--vae-batches",
+                        "48",
+                    ],
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 class PromotedRecipeRunnerTests(unittest.TestCase):
     def test_dry_run_reports_selected_eval_command_without_executing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -128,6 +190,54 @@ class PromotedRecipeRunnerTests(unittest.TestCase):
             report_payload = json.loads(report_path.read_text(encoding="utf-8"))
             self.assertEqual(report_payload["report_path"], str(report_path))
             self.assertEqual(report_payload["markdown_path"], payload["markdown_path"])
+
+    def test_dry_run_synthesizes_eval_commands_from_legacy_mainline_summary(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            summary = root / "summary.json"
+            _write_legacy_mainline_summary(summary)
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(SCRIPT),
+                    str(summary),
+                    "--seed",
+                    "103",
+                    "--json",
+                ],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["feature"], "reconstruction_latent")
+            self.assertEqual(payload["feature_family"], "hybrid_latent")
+            self.assertEqual(payload["available_count"], 2)
+            self.assertEqual(payload["selected_count"], 1)
+            item = payload["results"][0]
+            self.assertEqual(item["seed"], 103)
+            command = item["command"]
+            self.assertIn("--eval-only", command)
+            self.assertNotIn("--seeds", command)
+            self.assertEqual(command[command.index("--seed") + 1], "103")
+            self.assertEqual(command[command.index("--epochs") + 1], "0")
+            self.assertEqual(command[command.index("--vae-epochs") + 1], "0")
+            self.assertTrue(
+                command[command.index("--run-dir") + 1].endswith(
+                    "mainline_scale_up/seed_000103/eval_best"
+                )
+            )
+            self.assertTrue(
+                command[command.index("--vae-load") + 1].endswith(
+                    "mainline_scale_up/seed_000103/text_vae_weights.bin"
+                )
+            )
 
 
 if __name__ == "__main__":

@@ -32,11 +32,161 @@ def _mapping(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _seed_run_dir(root: Path, seed: int) -> Path:
+    if seed < 0:
+        return root / f"seed_neg_{abs(seed):06d}"
+    return root / f"seed_{seed:06d}"
+
+
+def _parse_seed_csv(value: Any) -> list[int]:
+    if isinstance(value, list):
+        values = value
+    elif isinstance(value, str):
+        values = value.split(",")
+    else:
+        return []
+    seeds: list[int] = []
+    for item in values:
+        text = str(item).strip()
+        if not text:
+            continue
+        seeds.append(int(text))
+    return seeds
+
+
+def _remove_value_flags(command: list[str], flags: set[str]) -> list[str]:
+    out: list[str] = []
+    idx = 0
+    while idx < len(command):
+        part = command[idx]
+        if part in flags:
+            idx += 2
+            continue
+        out.append(part)
+        idx += 1
+    return out
+
+
+def _set_value_flag(command: list[str], flag: str, value: Any) -> list[str]:
+    out = list(command)
+    text = str(value)
+    for idx, part in enumerate(out):
+        if part == flag:
+            if idx + 1 < len(out):
+                out[idx + 1] = text
+            else:
+                out.append(text)
+            return out
+    out.extend([flag, text])
+    return out
+
+
+def _append_bool_flag(command: list[str], flag: str) -> list[str]:
+    out = [part for part in command if part != flag]
+    out.append(flag)
+    return out
+
+
+def _mainline_base_command(mainline: dict[str, Any]) -> list[str]:
+    script_command = mainline.get("script_command")
+    if isinstance(script_command, list) and script_command:
+        return [str(part) for part in script_command]
+    shell_command = mainline.get("shell_command")
+    if isinstance(shell_command, str) and shell_command:
+        parts = shlex.split(shell_command)
+        if parts and parts[0].startswith("PYTHONNOUSERSITE="):
+            parts = parts[1:]
+        return parts
+    raise ValueError("mainline_scale_up_command has no script_command")
+
+
+def _legacy_eval_command(
+    mainline: dict[str, Any],
+    *,
+    seed: int,
+    seed_dir: Path,
+) -> list[str]:
+    command = _mainline_base_command(mainline)
+    command = _remove_value_flags(
+        command,
+        {
+            "--seeds",
+            "--follow-up-from",
+            "--follow-up-fail-on-verdict",
+            "--follow-up-used-seeds",
+            "--follow-up-confirm-tolerance",
+        },
+    )
+    command = _set_value_flag(command, "--seed", seed)
+    command = _set_value_flag(command, "--run-dir", seed_dir / "eval_best")
+    command = _set_value_flag(command, "--vae-load", seed_dir / "text_vae_weights.bin")
+    command = _set_value_flag(command, "--head-load-dir", seed_dir)
+    command = _set_value_flag(command, "--head-load-kind", "best")
+    command = _set_value_flag(command, "--epochs", 0)
+    command = _set_value_flag(command, "--vae-epochs", 0)
+    return _append_bool_flag(command, "--eval-only")
+
+
+def _recipe_from_mainline(mainline: dict[str, Any]) -> dict[str, Any]:
+    best_config = _mapping(mainline.get("best_config"))
+    family_focus = _mapping(mainline.get("feature_family_focus"))
+    feature = best_config.get("best_feature") or family_focus.get("best_feature")
+    feature_family = family_focus.get("family")
+    run_dir_raw = mainline.get("default_run_dir")
+    seeds = _parse_seed_csv(mainline.get("default_new_seeds"))
+    if not isinstance(run_dir_raw, str) or not run_dir_raw:
+        raise ValueError("mainline_scale_up_command has no default_run_dir")
+    if not seeds:
+        raise ValueError("mainline_scale_up_command has no default_new_seeds")
+    run_dir = Path(run_dir_raw)
+    eval_items: list[dict[str, Any]] = []
+    for seed in seeds:
+        seed_dir = _seed_run_dir(run_dir, int(seed))
+        command = _legacy_eval_command(mainline, seed=int(seed), seed_dir=seed_dir)
+        eval_items.append(
+            {
+                "schema": "st.llm_char_vae_context.promoted_learning_eval_command.v1",
+                "seed": int(seed),
+                "run_dir": str(seed_dir / "eval_best"),
+                "source_run_dir": str(seed_dir),
+                "vae_load": str(seed_dir / "text_vae_weights.bin"),
+                "head_load_dir": str(seed_dir),
+                "head_load_kind": "best",
+                "script_command": command,
+                "shell_command": "PYTHONNOUSERSITE=1 " + shlex.join(command),
+            }
+        )
+    return {
+        "schema": "st.llm_char_vae_context.promoted_learning_recipe.v1",
+        "status": "candidate",
+        "synthesized_from": "mainline_scale_up_command",
+        "feature": feature,
+        "feature_family": feature_family,
+        "focused_features": mainline.get("focused_features", []),
+        "run_budget": {
+            "window_chars": mainline.get("train_window_chars"),
+            "epochs": mainline.get("train_epochs"),
+            "batches": mainline.get("train_batches"),
+            "eval_samples": mainline.get("train_eval_samples"),
+            "vae_epochs": mainline.get("train_vae_epochs"),
+            "vae_batches": mainline.get("train_vae_batches"),
+            "gen": mainline.get("train_gen"),
+        },
+        "eval_reload_commands": {
+            "schema": "st.llm_char_vae_context.promoted_learning_eval_commands.v1",
+            "count": len(eval_items),
+            "items": eval_items,
+        },
+    }
+
+
 def _load_recipe(summary: dict[str, Any]) -> dict[str, Any]:
     mainline = _mapping(summary.get("mainline_scale_up_command"))
     recipe = _mapping(mainline.get("promoted_learning_recipe"))
     if not recipe:
         recipe = _mapping(summary.get("promoted_learning_recipe"))
+    if not recipe and mainline:
+        recipe = _recipe_from_mainline(mainline)
     if not recipe:
         raise ValueError("summary has no promoted_learning_recipe")
     return recipe
