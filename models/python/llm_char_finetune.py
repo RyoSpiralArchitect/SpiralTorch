@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import contextlib
+import hashlib
 import json
 import math
 import pathlib
@@ -32,6 +33,61 @@ def _meta_path_for_weights(weights_path: pathlib.Path) -> pathlib.Path:
     if name.endswith(".json"):
         return weights_path.with_name(name[: -len(".json")] + ".meta.json")
     return weights_path.with_name(name + ".meta.json")
+
+
+def _sha256_file(path: pathlib.Path) -> str | None:
+    if not path.is_file():
+        return None
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _resolve_load_weights(
+    load_weights: pathlib.Path | None,
+    load_run: pathlib.Path | None,
+) -> pathlib.Path | None:
+    if load_weights is not None and load_run is not None:
+        raise ValueError("--load and --load-run are mutually exclusive")
+    if load_run is None:
+        return load_weights
+    return load_run / "weights.json"
+
+
+def _checkpoint_source_payload(
+    weights_path: pathlib.Path | None,
+    *,
+    load_run: pathlib.Path | None,
+) -> dict[str, Any] | None:
+    if weights_path is None:
+        return None
+    meta_path = _meta_path_for_weights(weights_path)
+    payload: dict[str, Any] = {
+        "kind": "run_dir" if load_run is not None else "weights_file",
+        "weights_path": str(weights_path),
+        "weights_exists": weights_path.is_file(),
+        "weights_sha256": _sha256_file(weights_path),
+        "meta_path": str(meta_path),
+        "meta_exists": meta_path.is_file(),
+        "meta_sha256": _sha256_file(meta_path),
+    }
+    if load_run is not None:
+        run_json_path = load_run / "run.json"
+        summary_path = load_run / "summary.json"
+        payload.update(
+            {
+                "run_dir": str(load_run),
+                "run_json_path": str(run_json_path),
+                "run_json_exists": run_json_path.is_file(),
+                "run_json_sha256": _sha256_file(run_json_path),
+                "summary_path": str(summary_path),
+                "summary_exists": summary_path.is_file(),
+                "summary_sha256": _sha256_file(summary_path),
+            }
+        )
+    return payload
 
 
 def _read_text(path: pathlib.Path) -> str:
@@ -183,6 +239,7 @@ def _build_training_contract(
             "trainable": trainable,
             "frozen": [],
             "reload_source": weights_loaded_from,
+            "reload_source_run": run_meta.get("weights_loaded_from_run"),
         },
         "geometry": {
             "curvature": run_meta.get("curvature"),
@@ -214,6 +271,8 @@ def _build_training_contract(
         },
         "reload": {
             "weights_loaded_from": weights_loaded_from,
+            "weights_loaded_from_run": run_meta.get("weights_loaded_from_run"),
+            "source_checkpoint": run_meta.get("source_checkpoint"),
             "output_weights_path": str(weights_path),
             "output_meta_path": str(_meta_path_for_weights(weights_path)),
             "save_weights_path": str(save_weights) if save_weights is not None else None,
@@ -688,6 +747,8 @@ def _write_completion_summary(
                 else None
             ),
             "loaded_from": run_meta.get("weights_loaded_from"),
+            "loaded_from_run": run_meta.get("weights_loaded_from_run"),
+            "source_checkpoint": run_meta.get("source_checkpoint"),
         },
         "metrics": _metrics_summary(metrics_path),
         "sample": {
@@ -926,7 +987,7 @@ def main() -> None:
     if len(sys.argv) < 2 or sys.argv[1] in {"-h", "--help"}:
         print(
             "usage: PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_finetune.py <text_or_dir> [<text_or_dir> ...] "
-            "[--load weights.json] [--save weights.json] [--steps N] [--embed-dim N] [--hidden N] "
+            "[--load weights.json] [--load-run run_dir] [--save weights.json] [--steps N] [--embed-dim N] [--hidden N] "
             "[--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] "
             "[--gen N] [--topk N] [--seed N] [--prompt STR] [--val-split F] [--eval-samples N] "
             "[--backend cpu|wgpu|cuda|hip|auto] "
@@ -947,6 +1008,7 @@ def main() -> None:
     data_paths = [pathlib.Path(p) for p in data_args]
 
     load_weights: pathlib.Path | None = None
+    load_run: pathlib.Path | None = None
     save_weights: pathlib.Path | None = None
     run_dir: pathlib.Path | None = None
     steps = 32
@@ -987,6 +1049,8 @@ def main() -> None:
     for flag in it:
         if flag == "--load":
             load_weights = pathlib.Path(next(it))
+        elif flag == "--load-run":
+            load_run = pathlib.Path(next(it))
         elif flag == "--save":
             save_weights = pathlib.Path(next(it))
         elif flag == "--steps":
@@ -1058,6 +1122,8 @@ def main() -> None:
         raise ValueError("--val-split must be within [0, 0.95)")
     if eval_samples < 0:
         raise ValueError("--eval-samples must be >= 0")
+    load_weights = _resolve_load_weights(load_weights, load_run)
+    source_checkpoint = _checkpoint_source_payload(load_weights, load_run=load_run)
 
     _require_backend_available(backend)
 
@@ -1106,6 +1172,16 @@ def main() -> None:
             raise ValueError("meta format st-char-lm-v2 requires embed_dim")
         index = {ch: i for i, ch in enumerate(symbols)}
         vocab_size = len(symbols)
+        if source_checkpoint is not None:
+            source_checkpoint.update(
+                {
+                    "meta_format": fmt,
+                    "meta_steps": steps,
+                    "meta_hidden": hidden,
+                    "meta_embed_dim": embed_dim_opt,
+                    "meta_symbols_count": len(symbols),
+                }
+            )
         model = _build_model(
             vocab_size,
             steps,
@@ -1185,6 +1261,8 @@ def main() -> None:
         "desire_blend": desire_blend if desire else None,
         "desire_drift_gain": desire_drift_gain if desire else None,
         "weights_loaded_from": str(load_weights) if load_weights is not None else None,
+        "weights_loaded_from_run": str(load_run) if load_run is not None else None,
+        "source_checkpoint": source_checkpoint,
     }
 
     model.attach_hypergrad(curvature=curvature, learning_rate=lr)
