@@ -52,20 +52,35 @@ def _write_report(
     seeds: list[int],
     available_count: int | None = None,
     planned_seeds: list[int] | None = None,
+    mainline_next_command: str | None = None,
 ) -> None:
     if planned_seeds is not None:
+        mainline_run_dir = cwd / "mainline_scale_up"
         (cwd / "summary.json").write_text(
             json.dumps(
                 {
                     "mainline_scale_up_command": {
-                        "default_new_seeds": ",".join(
-                            str(seed) for seed in planned_seeds
-                        )
+                        "default_new_seeds": ",".join(str(seed) for seed in planned_seeds),
+                        "default_run_dir": str(mainline_run_dir),
                     }
                 }
             ),
             encoding="utf-8",
         )
+        if mainline_next_command is not None:
+            mainline_run_dir.mkdir(parents=True, exist_ok=True)
+            (mainline_run_dir / "summary.json").write_text(
+                json.dumps(
+                    {
+                        "mainline_scale_up_command": {
+                            "shell_command": mainline_next_command,
+                            "default_new_seeds": "211,223",
+                            "default_run_dir": str(cwd / "mainline_next"),
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
     path.write_text(
         json.dumps(
             {
@@ -107,6 +122,10 @@ class PromotedEvalSummaryTests(unittest.TestCase):
                 cwd=root,
                 seeds=[101, 103],
                 planned_seeds=[101, 103],
+                mainline_next_command=(
+                    "PYTHONNOUSERSITE=1 python3 -S -s "
+                    "models/python/llm_char_vae_context.py corpus --seeds 211,223"
+                ),
             )
             _write_eval_summary(
                 root / "seed_000101" / "eval_best" / "summary.json",
@@ -139,11 +158,24 @@ class PromotedEvalSummaryTests(unittest.TestCase):
             self.assertEqual(summary["planned_eval_seeds"], [101, 103])
             self.assertEqual(summary["evaluated_eval_seeds"], [101, 103])
             self.assertEqual(summary["remaining_eval_seeds"], [])
+            self.assertTrue(summary["promoted_mainline_summary_exists"])
+            self.assertTrue(
+                summary["promoted_mainline_summary_path"].endswith(
+                    "mainline_scale_up/summary.json"
+                )
+            )
             self.assertEqual(summary["winner_counts"], {"reconstruction_latent": 2})
             self.assertEqual(summary["target_feature_win_rate"], 1.0)
             self.assertAlmostEqual(summary["mean_target_delta_vs_raw"], -0.3)
             self.assertEqual(summary["recommendation"], "promote_reload_evidence")
             self.assertIsNone(summary["recommended_next_eval_command"])
+            self.assertEqual(
+                summary["recommended_next_mainline_command"],
+                (
+                    "PYTHONNOUSERSITE=1 python3 -S -s "
+                    "models/python/llm_char_vae_context.py corpus --seeds 211,223"
+                ),
+            )
             self.assertIn(
                 "tools/summarize_char_vae_promoted_eval_runs.py",
                 summary["recommended_summary_command"],
@@ -186,9 +218,11 @@ class PromotedEvalSummaryTests(unittest.TestCase):
             self.assertEqual(summary["remaining_eval_seeds"], [107])
             self.assertEqual(summary["winner_counts"], {"reconstruction_latent": 2})
             self.assertEqual(summary["recommendation"], "continue_planned_eval")
+            self.assertIsNone(summary["recommended_next_mainline_command"])
             command = summary["recommended_next_eval_command"]
             self.assertIsInstance(command, str)
             self.assertIn("tools/run_char_vae_promoted_recipe.py", command)
+            self.assertIn("--seed 107", command)
             self.assertIn("--ready-only", command)
             self.assertIn("--complete-only", command)
             self.assertIn("--execute", command)
