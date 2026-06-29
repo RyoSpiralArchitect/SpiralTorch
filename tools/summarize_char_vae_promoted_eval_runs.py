@@ -186,6 +186,15 @@ def _shell_command(parts: list[Any]) -> str:
     return " ".join(shlex.quote(str(part)) for part in parts)
 
 
+def _seed_flag_parts(seeds: Any) -> list[Any]:
+    if not isinstance(seeds, list):
+        return []
+    parts: list[Any] = []
+    for seed in _int_list(seeds):
+        parts.extend(["--seed", seed])
+    return parts
+
+
 def _recommended_next_eval_command(report: dict[str, Any]) -> str | None:
     source_summary = report.get("source_summary_path")
     remaining = report.get("remaining_eval_count")
@@ -199,6 +208,7 @@ def _recommended_next_eval_command(report: dict[str, Any]) -> str | None:
             "-P",
             "tools/run_char_vae_promoted_recipe.py",
             source_summary,
+            *_seed_flag_parts(report.get("remaining_eval_seeds")),
             "--ready-only",
             "--complete-only",
             "--execute",
@@ -218,6 +228,44 @@ def _recommended_summary_command(report_path: str) -> str:
             report_path,
         ]
     )
+
+
+def _mainline_scale_up(source_summary: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(source_summary, dict):
+        return {}
+    mainline = source_summary.get("mainline_scale_up_command")
+    return mainline if isinstance(mainline, dict) else {}
+
+
+def _mainline_summary_path(
+    source_summary: dict[str, Any] | None,
+    *,
+    cwd: Path,
+) -> Path | None:
+    run_dir = _mainline_scale_up(source_summary).get("default_run_dir")
+    if not isinstance(run_dir, str) or not run_dir:
+        return None
+    path = Path(run_dir)
+    if not path.is_absolute():
+        path = cwd / path
+    return path / "summary.json"
+
+
+def _next_mainline_command(
+    *,
+    recommendation: str,
+    mainline_summary: dict[str, Any] | None,
+) -> str | None:
+    if recommendation != "promote_reload_evidence":
+        return None
+    mainline = _mainline_scale_up(mainline_summary)
+    shell_command = mainline.get("shell_command")
+    if isinstance(shell_command, str) and shell_command:
+        return shell_command
+    script_command = mainline.get("script_command")
+    if isinstance(script_command, list) and script_command:
+        return "PYTHONNOUSERSITE=1 " + _shell_command(script_command)
+    return None
 
 
 def _resolve_source_summary_path(value: Any, *, cwd: Path) -> Path | None:
@@ -305,10 +353,29 @@ def summarize_report(path: Path) -> dict[str, Any]:
     elif isinstance(selected_count, int) and isinstance(available_count, int):
         remaining_eval_count = max(available_count - selected_count, 0)
         planned_eval_complete = remaining_eval_count == 0
+    recommendation = _recommendation(
+        target_feature=target_feature,
+        successful_count=successful_count,
+        missing_summary_count=missing_summary_count,
+        failed_count=failed_count,
+        remaining_eval_count=remaining_eval_count,
+        target_win_count=target_win_count,
+        mean_target_delta_vs_raw=mean_target_delta_vs_raw,
+    )
+    mainline_summary_path = _mainline_summary_path(source_summary, cwd=cwd)
+    mainline_summary = (
+        _read_json(mainline_summary_path)
+        if mainline_summary_path is not None
+        else None
+    )
     report = {
         "schema": REPORT_SCHEMA,
         "report_path": str(report_path),
         "source_summary_path": payload.get("summary_path"),
+        "promoted_mainline_summary_path": (
+            str(mainline_summary_path) if mainline_summary_path is not None else None
+        ),
+        "promoted_mainline_summary_exists": mainline_summary is not None,
         "feature": target_feature,
         "feature_family": payload.get("feature_family"),
         "execute": payload.get("execute"),
@@ -343,17 +410,13 @@ def summarize_report(path: Path) -> dict[str, Any]:
         "mean_margin_to_runner_up": _mean(
             [seed.get("margin_to_runner_up") for seed in successful]
         ),
-        "recommendation": _recommendation(
-            target_feature=target_feature,
-            successful_count=successful_count,
-            missing_summary_count=missing_summary_count,
-            failed_count=failed_count,
-            remaining_eval_count=remaining_eval_count,
-            target_win_count=target_win_count,
-            mean_target_delta_vs_raw=mean_target_delta_vs_raw,
-        ),
+        "recommendation": recommendation,
     }
     report["recommended_next_eval_command"] = _recommended_next_eval_command(report)
+    report["recommended_next_mainline_command"] = _next_mainline_command(
+        recommendation=recommendation,
+        mainline_summary=mainline_summary,
+    )
     report["recommended_summary_command"] = _recommended_summary_command(
         str(report_path)
     )
@@ -396,6 +459,8 @@ def markdown_report(payload: dict[str, Any]) -> str:
                 f"{', '.join(str(seed) for seed in report.get('remaining_eval_seeds') or []) or '-'}",
                 f"- remaining_eval_count: {_fmt(report.get('remaining_eval_count'))}",
                 f"- planned_eval_complete: {_fmt(report.get('planned_eval_complete'))}",
+                f"- promoted_mainline_summary_path: `{report.get('promoted_mainline_summary_path') or '-'}`",
+                f"- promoted_mainline_summary_exists: {_fmt(report.get('promoted_mainline_summary_exists'))}",
                 f"- successful_eval_count: {report.get('successful_eval_count')}",
                 f"- failed_eval_count: {report.get('failed_eval_count')}",
                 f"- missing_summary_count: {report.get('missing_summary_count')}",
@@ -405,6 +470,7 @@ def markdown_report(payload: dict[str, Any]) -> str:
                 f"- mean_margin_to_runner_up: {_fmt(report.get('mean_margin_to_runner_up'))}",
                 f"- recommendation: {report.get('recommendation') or '-'}",
                 f"- recommended_next_eval_command: `{report.get('recommended_next_eval_command') or '-'}`",
+                f"- recommended_next_mainline_command: `{report.get('recommended_next_mainline_command') or '-'}`",
                 f"- recommended_summary_command: `{report.get('recommended_summary_command') or '-'}`",
                 "",
                 "| seed | returncode | summary | best_feature | best_nll | delta_vs_raw | runner_up | margin |",
