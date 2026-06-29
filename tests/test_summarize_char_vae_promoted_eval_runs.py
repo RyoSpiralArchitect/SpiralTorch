@@ -53,6 +53,7 @@ def _write_report(
     available_count: int | None = None,
     planned_seeds: list[int] | None = None,
     mainline_next_command: str | None = None,
+    mainline_next_command_key: str = "mainline_scale_up_command",
 ) -> None:
     if planned_seeds is not None:
         mainline_run_dir = cwd / "mainline_scale_up"
@@ -60,7 +61,9 @@ def _write_report(
             json.dumps(
                 {
                     "mainline_scale_up_command": {
-                        "default_new_seeds": ",".join(str(seed) for seed in planned_seeds),
+                        "default_new_seeds": ",".join(
+                            str(seed) for seed in planned_seeds
+                        ),
                         "default_run_dir": str(mainline_run_dir),
                     }
                 }
@@ -72,7 +75,7 @@ def _write_report(
             (mainline_run_dir / "summary.json").write_text(
                 json.dumps(
                     {
-                        "mainline_scale_up_command": {
+                        mainline_next_command_key: {
                             "shell_command": mainline_next_command,
                             "default_new_seeds": "211,223",
                             "default_run_dir": str(cwd / "mainline_next"),
@@ -176,9 +179,59 @@ class PromotedEvalSummaryTests(unittest.TestCase):
                     "models/python/llm_char_vae_context.py corpus --seeds 211,223"
                 ),
             )
+            self.assertEqual(
+                summary["recommended_next_mainline_command_source"],
+                "mainline_scale_up_command",
+            )
             self.assertIn(
                 "tools/summarize_char_vae_promoted_eval_runs.py",
                 summary["recommended_summary_command"],
+            )
+
+    def test_json_summary_uses_completed_mainline_next_follow_up_command(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            report = root / "promoted_recipe_eval_run.json"
+            _write_report(
+                report,
+                cwd=root,
+                seeds=[101],
+                planned_seeds=[101],
+                mainline_next_command=(
+                    "PYTHONNOUSERSITE=1 python3 -S -s "
+                    "models/python/llm_char_vae_context.py corpus --seeds 301,303"
+                ),
+                mainline_next_command_key="next_follow_up_command",
+            )
+            _write_eval_summary(
+                root / "seed_000101" / "eval_best" / "summary.json",
+                seed=101,
+                reconstruction_nll=3.8,
+                raw_nll=4.0,
+            )
+
+            result = subprocess.run(
+                ["python3", str(SCRIPT), str(report), "--json"],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(result.stdout)
+            summary = payload["reports"][0]
+            self.assertEqual(summary["recommendation"], "promote_reload_evidence")
+            self.assertEqual(
+                summary["recommended_next_mainline_command"],
+                (
+                    "PYTHONNOUSERSITE=1 python3 -S -s "
+                    "models/python/llm_char_vae_context.py corpus --seeds 301,303"
+                ),
+            )
+            self.assertEqual(
+                summary["recommended_next_mainline_command_source"],
+                "next_follow_up_command",
             )
 
     def test_json_summary_continues_when_planned_eval_remains(self) -> None:
@@ -219,6 +272,7 @@ class PromotedEvalSummaryTests(unittest.TestCase):
             self.assertEqual(summary["winner_counts"], {"reconstruction_latent": 2})
             self.assertEqual(summary["recommendation"], "continue_planned_eval")
             self.assertIsNone(summary["recommended_next_mainline_command"])
+            self.assertIsNone(summary["recommended_next_mainline_command_source"])
             command = summary["recommended_next_eval_command"]
             self.assertIsInstance(command, str)
             self.assertIn("tools/run_char_vae_promoted_recipe.py", command)
