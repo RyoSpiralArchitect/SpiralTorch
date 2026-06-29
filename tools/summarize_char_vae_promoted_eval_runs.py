@@ -146,6 +146,7 @@ def _recommendation(
     successful_count: int,
     missing_summary_count: int,
     failed_count: int,
+    remaining_eval_count: int | None,
     target_win_count: int,
     mean_target_delta_vs_raw: float | None,
 ) -> str:
@@ -155,6 +156,8 @@ def _recommendation(
         return "complete_eval_summaries"
     if successful_count == 0:
         return "run_eval_reload"
+    if remaining_eval_count is not None and remaining_eval_count > 0:
+        return "continue_planned_eval"
     if target_feature and target_win_count == successful_count:
         if mean_target_delta_vs_raw is not None and mean_target_delta_vs_raw < 0:
             return "promote_reload_evidence"
@@ -193,6 +196,13 @@ def summarize_report(path: Path) -> dict[str, Any]:
         [_target_delta(seed, target_feature) for seed in successful]
     )
     successful_count = len(successful)
+    selected_count = payload.get("selected_count")
+    available_count = payload.get("available_count")
+    remaining_eval_count = None
+    planned_eval_complete = None
+    if isinstance(selected_count, int) and isinstance(available_count, int):
+        remaining_eval_count = max(available_count - selected_count, 0)
+        planned_eval_complete = remaining_eval_count == 0
     return {
         "schema": REPORT_SCHEMA,
         "report_path": str(report_path),
@@ -202,8 +212,10 @@ def summarize_report(path: Path) -> dict[str, Any]:
         "execute": payload.get("execute"),
         "ready_only": payload.get("ready_only"),
         "complete_only": payload.get("complete_only"),
-        "selected_count": payload.get("selected_count"),
-        "available_count": payload.get("available_count"),
+        "selected_count": selected_count,
+        "available_count": available_count,
+        "remaining_eval_count": remaining_eval_count,
+        "planned_eval_complete": planned_eval_complete,
         "returncode": payload.get("returncode"),
         "seed_results": seed_results,
         "successful_eval_count": successful_count,
@@ -231,6 +243,7 @@ def summarize_report(path: Path) -> dict[str, Any]:
             successful_count=successful_count,
             missing_summary_count=missing_summary_count,
             failed_count=failed_count,
+            remaining_eval_count=remaining_eval_count,
             target_win_count=target_win_count,
             mean_target_delta_vs_raw=mean_target_delta_vs_raw,
         ),
@@ -267,6 +280,8 @@ def markdown_report(payload: dict[str, Any]) -> str:
                 f"- ready_only: {_fmt(report.get('ready_only'))}",
                 f"- complete_only: {_fmt(report.get('complete_only'))}",
                 f"- selected/available: {report.get('selected_count')}/{report.get('available_count')}",
+                f"- remaining_eval_count: {_fmt(report.get('remaining_eval_count'))}",
+                f"- planned_eval_complete: {_fmt(report.get('planned_eval_complete'))}",
                 f"- successful_eval_count: {report.get('successful_eval_count')}",
                 f"- failed_eval_count: {report.get('failed_eval_count')}",
                 f"- missing_summary_count: {report.get('missing_summary_count')}",

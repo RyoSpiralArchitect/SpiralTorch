@@ -45,7 +45,13 @@ def _write_eval_summary(
     )
 
 
-def _write_report(path: Path, *, cwd: Path, seeds: list[int]) -> None:
+def _write_report(
+    path: Path,
+    *,
+    cwd: Path,
+    seeds: list[int],
+    available_count: int | None = None,
+) -> None:
     path.write_text(
         json.dumps(
             {
@@ -57,7 +63,9 @@ def _write_report(path: Path, *, cwd: Path, seeds: list[int]) -> None:
                 "ready_only": True,
                 "complete_only": True,
                 "selected_count": len(seeds),
-                "available_count": len(seeds) + 1,
+                "available_count": available_count
+                if available_count is not None
+                else len(seeds),
                 "cwd": str(cwd),
                 "returncode": 0,
                 "results": [
@@ -107,10 +115,41 @@ class PromotedEvalSummaryTests(unittest.TestCase):
             summary = payload["reports"][0]
             self.assertEqual(summary["successful_eval_count"], 2)
             self.assertTrue(summary["complete_only"])
+            self.assertTrue(summary["planned_eval_complete"])
+            self.assertEqual(summary["remaining_eval_count"], 0)
             self.assertEqual(summary["winner_counts"], {"reconstruction_latent": 2})
             self.assertEqual(summary["target_feature_win_rate"], 1.0)
             self.assertAlmostEqual(summary["mean_target_delta_vs_raw"], -0.3)
             self.assertEqual(summary["recommendation"], "promote_reload_evidence")
+
+    def test_json_summary_continues_when_planned_eval_remains(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            report = root / "promoted_recipe_eval_run.json"
+            _write_report(report, cwd=root, seeds=[101, 103], available_count=3)
+            for seed, reconstruction_nll in ((101, 3.8), (103, 3.7)):
+                _write_eval_summary(
+                    root / f"seed_{seed:06d}" / "eval_best" / "summary.json",
+                    seed=seed,
+                    reconstruction_nll=reconstruction_nll,
+                    raw_nll=4.0,
+                )
+
+            result = subprocess.run(
+                ["python3", str(SCRIPT), str(report), "--json"],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(result.stdout)
+            summary = payload["reports"][0]
+            self.assertFalse(summary["planned_eval_complete"])
+            self.assertEqual(summary["remaining_eval_count"], 1)
+            self.assertEqual(summary["winner_counts"], {"reconstruction_latent": 2})
+            self.assertEqual(summary["recommendation"], "continue_planned_eval")
 
     def test_markdown_surfaces_missing_summaries(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
