@@ -1555,6 +1555,154 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
             report,
         )
 
+    def test_refresh_aggregate_summary_confirms_sample_widening(self) -> None:
+        mod = _load_module()
+        parser = mod._build_parser()
+        run_budget = {
+            "window_chars": 32,
+            "latent_dim": 12,
+            "hidden": 64,
+            "epochs": 32,
+            "batches": 64,
+            "batch_size": 4,
+            "eval_samples": 256,
+            "vae_epochs": 12,
+            "vae_batches": 24,
+            "vae_batch_size": 4,
+        }
+        source_best_config = {
+            "best_feature": "reconstruction_latent",
+            "feature_normalize": "blocks",
+            "hybrid_latent_scale": 4.0,
+            "latent_dim": 12,
+            "hidden": 64,
+            "mean_best_nll": 3.808677,
+            "mean_best_nll_count": 1,
+            "mean_best_nll_stderr": 0.0,
+            "mean_best_nll_delta_vs_raw": -0.379927,
+        }
+
+        def seed_summary(seed: int, best_nll: float, raw_nll: float) -> dict:
+            return {
+                "seed": seed,
+                "feature_normalize": "blocks",
+                "hybrid_latent_scale": 4.0,
+                "latent_dim": 12,
+                "hidden": 64,
+                "run_dir": f"/tmp/seed_{seed}",
+                "best_feature": "reconstruction_latent",
+                "ranking": [
+                    {
+                        "feature": "reconstruction_latent",
+                        "best_mean_nll": best_nll,
+                        "best_accuracy": 0.18,
+                    },
+                    {
+                        "feature": "raw_latent",
+                        "best_mean_nll": best_nll + 0.002,
+                        "best_accuracy": 0.18,
+                    },
+                    {
+                        "feature": "raw",
+                        "best_mean_nll": raw_nll,
+                        "best_accuracy": 0.17,
+                    },
+                ],
+                "deltas": {
+                    "reconstruction_latent_best_nll_vs_raw": best_nll - raw_nll,
+                    "raw_latent_best_nll_vs_raw": best_nll + 0.002 - raw_nll,
+                    "raw_best_nll_vs_raw": 0.0,
+                },
+            }
+
+        aggregate = {
+            "schema": "st.llm_char_vae_context.v1",
+            "format": 1,
+            "aggregate": True,
+            "run": {
+                **run_budget,
+                "budget": run_budget,
+                "features": ["raw", "raw_latent", "reconstruction_latent"],
+                "feature_normalize_modes": ["blocks"],
+                "normalize_count": 1,
+                "hybrid_latent_scales": [4.0],
+                "scale_count": 1,
+                "latent_dims": [12],
+                "latent_dim_count": 1,
+                "hidden_sizes": [64],
+                "hidden_size_count": 1,
+                "seeds": [157, 1001, 1003],
+                "min_nll_delta": 0.0,
+                "follow_up_confirm_tolerance": 0.0,
+                "win_tolerance": 0.0001,
+                "follow_up_fail_on_verdicts": ["regressed", "unknown"],
+            },
+            "seed_summaries": [
+                seed_summary(157, 3.862838, 4.187470),
+                seed_summary(1001, 3.829773, 4.190476),
+                seed_summary(1003, 3.807259, 4.188635),
+            ],
+            "config_summaries": [],
+            "follow_up": {
+                "source_summary_path": "/tmp/source/summary.json",
+                "source_best_config": source_best_config,
+                "source_run_budget": run_budget,
+                "source_chain": {
+                    "generation": 3,
+                    "verdict_history": ["confirmed", "confirmed", "improved"],
+                    "ancestors": [],
+                },
+            },
+            "next_follow_up_command": {
+                "schema": "st.llm_char_vae_context.next_follow_up_command.v1",
+                "default_follow_up_from": "/tmp/current/summary.json",
+                "default_new_seeds": "1005,1007,1009",
+                "default_new_seed_count": 3,
+                "default_run_dir": "/tmp/current/next",
+                "default_follow_up_fail_on_verdict": "regressed,unknown",
+                "script_path": "/tmp/current/next_follow_up_command.sh",
+                "shell_command": "python3 models/python/llm_char_vae_context.py ...",
+                "script_command": ["python3", "models/python/llm_char_vae_context.py"],
+            },
+            "follow_up_result": {
+                "verdict": "regressed",
+                "source_feature_verdict": "regressed",
+            },
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            args = parser.parse_args(["--run-dir", str(root), "--refresh-summary"])
+            refreshed = mod._refresh_aggregate_summary_payload(
+                aggregate,
+                args=args,
+                root_run_dir=root,
+                write_scripts=False,
+            )
+
+        result = refreshed["follow_up_result"]
+        self.assertEqual(result["direct_source_feature_verdict"], "regressed")
+        self.assertEqual(result["source_feature_verdict"], "confirmed")
+        self.assertEqual(result["verdict"], "confirmed")
+        self.assertEqual(result["source_feature_raw_verdict"], "improved")
+        self.assertIs(refreshed["follow_up_gate"]["failed"], False)
+        self.assertEqual(
+            result["sample_widening_confirmation"]["basis"],
+            "single_seed_source_to_multi_seed_raw_positive_confirmation",
+        )
+        self.assertIn(
+            refreshed["follow_up_guidance"]["action"],
+            {
+                "continue_confirmation_or_widen_seeds",
+                "collect_more_seed_evidence",
+            },
+        )
+        self.assertTrue(refreshed["guided_next_follow_up_command"]["enabled"])
+        self.assertEqual(
+            refreshed["learning_evidence"]["best_family"]["family"],
+            "hybrid_latent",
+        )
+
     def test_follow_up_source_budget_prefers_best_config_capacity(self) -> None:
         mod = _load_module()
         source_best_config = {

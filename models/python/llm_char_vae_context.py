@@ -5971,6 +5971,292 @@ def _follow_up_guidance_record(
     }
 
 
+def _config_summary_group_key(summary: dict[str, Any]) -> tuple[Any, Any, Any, Any]:
+    return (
+        summary.get("feature_normalize"),
+        summary.get("hybrid_latent_scale"),
+        summary.get("latent_dim"),
+        summary.get("hidden"),
+    )
+
+
+def _refresh_config_summaries(
+    seed_summaries: list[dict[str, Any]],
+    existing_config_summaries: list[dict[str, Any]],
+    *,
+    min_nll_delta: float,
+    win_tolerance: float,
+) -> list[dict[str, Any]]:
+    if not seed_summaries:
+        return existing_config_summaries
+    existing_by_key = {
+        _config_summary_group_key(item): item
+        for item in existing_config_summaries
+        if isinstance(item, dict)
+    }
+    grouped: dict[tuple[Any, Any, Any, Any], list[dict[str, Any]]] = {}
+    for summary in seed_summaries:
+        if not isinstance(summary, dict):
+            continue
+        grouped.setdefault(_config_summary_group_key(summary), []).append(summary)
+
+    refreshed = []
+    for key in sorted(grouped, key=lambda item: tuple(str(value) for value in item)):
+        items = grouped[key]
+        existing = existing_by_key.get(key, {})
+        mode, scale, latent_dim, hidden = key
+        refreshed.append(
+            {
+                "feature_normalize": mode,
+                "hybrid_latent_scale": scale,
+                "latent_dim": latent_dim,
+                "hidden": hidden,
+                "run_dir": existing.get("run_dir"),
+                "seed_count": len(items),
+                **_aggregate_summaries(
+                    items,
+                    min_nll_delta=min_nll_delta,
+                    win_tolerance=win_tolerance,
+                ),
+            }
+        )
+    return refreshed
+
+
+def _scale_summaries_from_run(
+    run: dict[str, Any],
+    config_summaries: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if (
+        int(run.get("normalize_count") or 1) == 1
+        and int(run.get("latent_dim_count") or 1) == 1
+        and int(run.get("hidden_size_count") or 1) == 1
+    ):
+        return config_summaries
+    return []
+
+
+def _refresh_aggregate_summary_payload(
+    aggregate: dict[str, Any],
+    *,
+    args: argparse.Namespace,
+    root_run_dir: pathlib.Path,
+    write_scripts: bool = True,
+) -> dict[str, Any]:
+    if not isinstance(aggregate, dict) or not aggregate.get("aggregate"):
+        raise ValueError("summary refresh requires an aggregate summary.json")
+
+    refreshed = dict(aggregate)
+    run = refreshed.get("run")
+    run = run if isinstance(run, dict) else {}
+    min_nll_delta = _finite_float(run.get("min_nll_delta"))
+    if min_nll_delta is None:
+        min_nll_delta = float(args.min_nll_delta)
+    follow_up_confirm_tolerance = _finite_float(
+        run.get("follow_up_confirm_tolerance")
+    )
+    if follow_up_confirm_tolerance is None:
+        follow_up_confirm_tolerance = float(args.follow_up_confirm_tolerance)
+    win_tolerance = _finite_float(run.get("win_tolerance"))
+    if win_tolerance is None:
+        win_tolerance = float(args.win_tolerance)
+    fail_on = run.get("follow_up_fail_on_verdicts")
+    if not isinstance(fail_on, list):
+        fail_on = _parse_follow_up_fail_verdicts(args.follow_up_fail_on_verdict)
+    else:
+        fail_on = [str(verdict) for verdict in fail_on if str(verdict)]
+
+    seed_summaries = refreshed.get("seed_summaries")
+    seed_summaries = seed_summaries if isinstance(seed_summaries, list) else []
+    existing_config_summaries = refreshed.get("config_summaries")
+    existing_config_summaries = (
+        existing_config_summaries if isinstance(existing_config_summaries, list) else []
+    )
+    config_summaries = _refresh_config_summaries(
+        seed_summaries,
+        existing_config_summaries,
+        min_nll_delta=float(min_nll_delta),
+        win_tolerance=float(win_tolerance),
+    )
+    refreshed["config_summaries"] = config_summaries
+    refreshed["scale_summaries"] = _scale_summaries_from_run(run, config_summaries)
+    if seed_summaries:
+        refreshed.update(
+            _aggregate_summaries(
+                seed_summaries,
+                min_nll_delta=float(min_nll_delta),
+                win_tolerance=float(win_tolerance),
+            )
+        )
+
+    best_config = _best_config_summary(config_summaries)
+    if best_config is not None:
+        refreshed["best_config"] = best_config
+        refreshed["best_feature_normalize"] = best_config.get("feature_normalize")
+        refreshed["best_hybrid_latent_scale"] = best_config.get("hybrid_latent_scale")
+        refreshed["best_latent_dim"] = best_config.get("latent_dim")
+        refreshed["best_hidden"] = best_config.get("hidden")
+
+    follow_up = refreshed.get("follow_up")
+    if not isinstance(follow_up, dict):
+        follow_up = run.get("follow_up") if isinstance(run.get("follow_up"), dict) else None
+    aggregate_budget = run.get("budget") if isinstance(run.get("budget"), dict) else {}
+    if not aggregate_budget:
+        aggregate_budget = _summary_run_budget(refreshed)
+
+    follow_up_result = _follow_up_result(
+        follow_up,
+        config_summaries,
+        best_config,
+        min_nll_delta=float(min_nll_delta),
+        follow_up_confirm_tolerance=float(follow_up_confirm_tolerance),
+        current_run_budget=aggregate_budget,
+    )
+    if follow_up_result is not None:
+        refreshed["follow_up_result"] = follow_up_result
+    else:
+        refreshed.pop("follow_up_result", None)
+
+    follow_up_chain = _follow_up_chain_record(
+        follow_up,
+        follow_up_result,
+        root_run_dir,
+    )
+    if follow_up_chain is not None:
+        refreshed["follow_up_chain"] = follow_up_chain
+    else:
+        refreshed.pop("follow_up_chain", None)
+
+    follow_up_ancestors = _follow_up_ancestor_records(follow_up_chain)
+    if follow_up_ancestors is not None:
+        refreshed["follow_up_ancestors"] = follow_up_ancestors
+    else:
+        refreshed.pop("follow_up_ancestors", None)
+
+    follow_up_gate = _follow_up_gate_record(follow_up_result, fail_on)
+    if follow_up_gate is not None:
+        refreshed["follow_up_gate"] = follow_up_gate
+    else:
+        refreshed.pop("follow_up_gate", None)
+
+    next_follow_up = refreshed.get("next_follow_up_command")
+    next_follow_up = next_follow_up if isinstance(next_follow_up, dict) else None
+    best_generation_follow_up = refreshed.get("best_generation_follow_up_command")
+    best_generation_follow_up = (
+        best_generation_follow_up
+        if isinstance(best_generation_follow_up, dict)
+        else None
+    )
+    broadened_follow_up = refreshed.get("broadened_follow_up_command")
+    broadened_follow_up = broadened_follow_up if isinstance(broadened_follow_up, dict) else None
+
+    preliminary_guidance = _follow_up_guidance_record(
+        follow_up_result,
+        follow_up_chain,
+        follow_up_gate,
+        next_follow_up,
+    )
+    if preliminary_guidance is not None:
+        refreshed["follow_up_guidance"] = preliminary_guidance
+
+    follow_up_trajectory = _follow_up_trajectory_record(
+        root_run_dir,
+        refreshed,
+        follow_up_ancestors,
+        min_nll_delta=float(min_nll_delta),
+    )
+    if follow_up_trajectory is not None:
+        refreshed["follow_up_trajectory"] = follow_up_trajectory
+    else:
+        refreshed.pop("follow_up_trajectory", None)
+
+    follow_up_guidance = _follow_up_guidance_record(
+        follow_up_result,
+        follow_up_chain,
+        follow_up_gate,
+        next_follow_up,
+        follow_up_trajectory,
+        best_generation_follow_up,
+        broadened_follow_up,
+    )
+    if follow_up_guidance is not None:
+        refreshed["follow_up_guidance"] = follow_up_guidance
+    else:
+        refreshed.pop("follow_up_guidance", None)
+
+    selected_guided_follow_up = next_follow_up
+    if isinstance(follow_up_guidance, dict):
+        if follow_up_guidance.get("use_best_generation_follow_up_command"):
+            selected_guided_follow_up = best_generation_follow_up
+        elif follow_up_guidance.get("use_broadened_follow_up_command"):
+            selected_guided_follow_up = broadened_follow_up
+    guided_next_follow_up = _guided_next_follow_up_command_record(
+        root_run_dir,
+        follow_up_guidance,
+        selected_guided_follow_up,
+    )
+    if guided_next_follow_up is not None:
+        refreshed["guided_next_follow_up_command"] = guided_next_follow_up
+        if write_scripts:
+            _write_guided_next_follow_up_script(guided_next_follow_up)
+    else:
+        refreshed.pop("guided_next_follow_up_command", None)
+
+    follow_up_trajectory = _follow_up_trajectory_record(
+        root_run_dir,
+        refreshed,
+        follow_up_ancestors,
+        min_nll_delta=float(min_nll_delta),
+    )
+    if follow_up_trajectory is not None:
+        refreshed["follow_up_trajectory"] = follow_up_trajectory
+
+    refreshed["learning_evidence"] = _aggregate_learning_evidence(refreshed)
+    refreshed["summary_refreshed"] = {
+        "schema": "st.llm_char_vae_context.summary_refresh.v1",
+        "source": "existing_aggregate_summary",
+        "refreshed_at_unix": time.time(),
+    }
+    return refreshed
+
+
+def _refresh_summary_command(args: argparse.Namespace) -> int:
+    if args.run_dir is None:
+        raise ValueError("--refresh-summary requires --run-dir")
+    summary_path = pathlib.Path(args.run_dir).expanduser()
+    if summary_path.is_dir() or summary_path.name != "summary.json":
+        summary_path = summary_path / "summary.json"
+    aggregate = json.loads(summary_path.read_text(encoding="utf-8"))
+    if not isinstance(aggregate, dict):
+        raise ValueError(f"expected object summary JSON at {summary_path}")
+    root_run_dir = summary_path.parent
+    refreshed = _refresh_aggregate_summary_payload(
+        aggregate,
+        args=args,
+        root_run_dir=root_run_dir,
+    )
+    _write_json(summary_path, refreshed)
+    _write_text(root_run_dir / "report.md", _aggregate_report(refreshed))
+    if args.json:
+        print(json.dumps(refreshed, ensure_ascii=False, indent=2))
+    gate = refreshed.get("follow_up_gate")
+    print(
+        "summary_refreshed verdict={verdict} gate_failed={failed} summary_json={path}".format(
+            verdict=(
+                refreshed.get("follow_up_result", {}).get("verdict")
+                if isinstance(refreshed.get("follow_up_result"), dict)
+                else "-"
+            ),
+            failed=gate.get("failed") if isinstance(gate, dict) else False,
+            path=summary_path,
+        ),
+        flush=True,
+    )
+    if isinstance(gate, dict) and gate.get("failed"):
+        return int(gate.get("exit_code") or 1)
+    return 0
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
@@ -5978,7 +6264,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "context features on a real next-character prediction loss."
         )
     )
-    parser.add_argument("text_or_dir", nargs="+", help="Input .txt file(s) or directories")
+    parser.add_argument("text_or_dir", nargs="*", help="Input .txt file(s) or directories")
     parser.add_argument(
         "--features",
         default="raw,reconstruction,latent",
@@ -6122,6 +6408,14 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--mellin-end", type=float, default=1.2)
     parser.add_argument("--run-dir", type=pathlib.Path, default=None)
     parser.add_argument(
+        "--refresh-summary",
+        action="store_true",
+        help=(
+            "recompute an existing aggregate --run-dir summary.json/report.md with "
+            "the current diagnostic logic without retraining seed runs"
+        ),
+    )
+    parser.add_argument(
         "--follow-up-from",
         type=pathlib.Path,
         default=None,
@@ -6157,6 +6451,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _validate_args(args: argparse.Namespace) -> None:
+    if not args.refresh_summary and not args.text_or_dir:
+        raise ValueError("at least one input .txt file or directory is required")
+    if args.refresh_summary and args.run_dir is None:
+        raise ValueError("--refresh-summary requires --run-dir")
     if args.window_chars <= 0:
         raise ValueError("--window-chars must be > 0")
     if args.latent_dim <= 0:
@@ -6433,6 +6731,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     args = parser.parse_args(raw_argv)
+    if args.refresh_summary:
+        _validate_args(args)
+        return _refresh_summary_command(args)
     follow_up = _apply_follow_up_defaults(args, raw_argv)
     if args.eval_only:
         args.epochs = 0
