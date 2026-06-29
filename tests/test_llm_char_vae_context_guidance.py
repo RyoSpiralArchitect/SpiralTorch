@@ -2458,6 +2458,177 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
         self.assertIn("- training_track: stable_family_head_train", report)
         self.assertIn("- current_is_trajectory_best: False", report)
 
+    def test_promoted_family_train_surfaces_mainline_scale_up_command(self) -> None:
+        mod = _load_module()
+        parser = mod._build_parser()
+        args = parser.parse_args(
+            [
+                "models/samples/spiral_corpus_en",
+                "--window-chars",
+                "32",
+                "--epochs",
+                "64",
+                "--batches",
+                "128",
+                "--eval-samples",
+                "256",
+                "--gen",
+                "80",
+                "--vae-epochs",
+                "12",
+                "--vae-batches",
+                "24",
+                "--follow-up-fail-on-verdict",
+                "regressed,unknown",
+            ]
+        )
+        best_config = {
+            "best_feature": "reconstruction_latent",
+            "feature_normalize": "blocks",
+            "hybrid_latent_scale": 4.0,
+            "latent_dim": 12,
+            "hidden": 64,
+            "mean_best_nll": 3.8075,
+            "mean_best_nll_delta_vs_raw": -0.3804,
+        }
+        result = {
+            "verdict": "improved",
+            "config_verdict": "improved",
+            "source_feature_verdict": "improved",
+            "source_feature_raw_verdict": "improved",
+            "current_best_raw_verdict": "improved",
+            "source_best_feature_retained": True,
+            "source_best_family_retained": True,
+            "run_budget_shifted": True,
+        }
+        chain = {
+            "generation": 6,
+            "latest_verdict": "improved",
+            "verdict_history": [
+                "confirmed",
+                "confirmed",
+                "improved",
+                "confirmed",
+                "confirmed",
+                "improved",
+            ],
+            "improved_streak": 1,
+            "confirmed_streak": 0,
+            "regressed_streak": 0,
+        }
+        trajectory = {
+            "trajectory_action": "confirm_trajectory_with_fresh_seeds",
+            "trajectory_verdict": "improved",
+            "trajectory_reasons": [
+                "trajectory and latest follow-up both improved",
+                "current generation is the best NLL point",
+            ],
+            "unsafe_promotion": False,
+        }
+        feature_family_stability = [
+            {
+                "family": "hybrid_latent",
+                "win_count": 7,
+                "near_win_count": 7,
+                "win_rate": 1.0,
+                "near_win_rate": 1.0,
+                "mean_best_nll": 3.8075,
+                "mean_best_accuracy": 0.20,
+                "mean_best_nll_delta_vs_raw": -0.3804,
+                "mean_rank": 1.0,
+                "mean_gap_to_winner": 0.0,
+                "member_best_counts": {"reconstruction_latent": 7},
+            },
+            {
+                "family": "raw",
+                "win_count": 0,
+                "near_win_count": 0,
+                "mean_best_nll_delta_vs_raw": 0.0,
+            },
+        ]
+        next_follow_up = _next_follow_up()
+        next_follow_up["used_seed_history"] = [
+            211,
+            223,
+            227,
+            101,
+            103,
+            107,
+            109,
+            113,
+            127,
+            131,
+            137,
+            139,
+            149,
+            151,
+            157,
+            1001,
+            1003,
+            1005,
+            1007,
+            1009,
+            1011,
+            1013,
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            command = mod._mainline_scale_up_command_record(
+                args,
+                ["raw", "latent", "raw_latent"],
+                best_config,
+                root,
+                [1015, 1017, 1019, 1021, 1023, 1025, 1027],
+                result,
+                chain,
+                {"failed": False},
+                trajectory,
+                next_follow_up,
+                feature_family_stability,
+            )
+            report = mod._aggregate_report(
+                {
+                    "status": "improved",
+                    "best_feature": "reconstruction_latent",
+                    "best_config": best_config,
+                    "mainline_scale_up_command": command,
+                }
+            )
+
+        self.assertIsNotNone(command)
+        self.assertEqual(command["command_kind"], "mainline_scale_up")
+        self.assertEqual(command["training_track"], "mainline_capacity_train")
+        self.assertEqual(
+            command["readiness_basis"],
+            "raw_positive_family_evidence_after_generation_5",
+        )
+        self.assertEqual(command["default_run_dir"], str(root / "mainline_scale_up"))
+        self.assertEqual(
+            command["script_path"],
+            str(root / "mainline_scale_up_command.sh"),
+        )
+        self.assertEqual(command["train_window_chars"], 64)
+        self.assertEqual(command["train_epochs"], 128)
+        self.assertEqual(command["train_batches"], 256)
+        self.assertEqual(command["train_eval_samples"], 512)
+        self.assertEqual(command["train_vae_epochs"], 24)
+        self.assertEqual(command["train_vae_batches"], 48)
+        self.assertEqual(command["train_gen"], 120)
+        self.assertEqual(
+            command["focused_features"],
+            ["raw", "latent", "raw_latent", "reconstruction_latent"],
+        )
+        self.assertIn("--window-chars", command["script_command"])
+        self.assertIn("64", command["script_command"])
+        self.assertIn("## Mainline Scale-Up Command", report)
+        self.assertIn("- command_kind: mainline_scale_up", report)
+        self.assertIn("- training_track: mainline_capacity_train", report)
+        self.assertIn(
+            "- train_window/epochs/batches/eval_samples: 64/128/256/512",
+            report,
+        )
+
     def test_follow_up_result_combines_source_and_current_seed_noise(self) -> None:
         mod = _load_module()
         source_best_config = {

@@ -2630,6 +2630,59 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
                 "```",
             ]
         )
+    mainline_scale_up = summary.get("mainline_scale_up_command")
+    if isinstance(mainline_scale_up, dict):
+        family_focus = mainline_scale_up.get("feature_family_focus")
+        focus_family = (
+            family_focus.get("family")
+            if isinstance(family_focus, dict)
+            else None
+        )
+        lines.extend(
+            [
+                "",
+                "## Mainline Scale-Up Command",
+                "",
+                f"- action: {mainline_scale_up.get('action')}",
+                f"- command_kind: {mainline_scale_up.get('command_kind') or '-'}",
+                f"- training_track: {mainline_scale_up.get('training_track') or '-'}",
+                f"- readiness_basis: {mainline_scale_up.get('readiness_basis') or '-'}",
+                f"- verdict: {mainline_scale_up.get('verdict') or '-'}",
+                f"- generation: {mainline_scale_up.get('generation') or '-'}",
+                "- run_budget_shifted: "
+                f"{mainline_scale_up.get('run_budget_shifted')}",
+                "- source_best_family_retained: "
+                f"{mainline_scale_up.get('source_best_family_retained')}",
+                "- source_feature_raw_verdict: "
+                f"{mainline_scale_up.get('source_feature_raw_verdict') or '-'}",
+                "- current_best_raw_verdict: "
+                f"{mainline_scale_up.get('current_best_raw_verdict') or '-'}",
+                f"- default_follow_up_from: `{mainline_scale_up.get('default_follow_up_from')}`",
+                "- default_follow_up_fail_on_verdict: "
+                f"{mainline_scale_up.get('default_follow_up_fail_on_verdict') or '-'}",
+                f"- default_new_seeds: {mainline_scale_up.get('default_new_seeds')}",
+                "- used_seed_history: "
+                f"{', '.join(str(seed) for seed in mainline_scale_up.get('used_seed_history', [])) or '-'}",
+                f"- feature_family_focus: {focus_family or '-'}",
+                "- focused_features: "
+                f"{', '.join(str(feature) for feature in mainline_scale_up.get('focused_features', [])) or '-'}",
+                "- train_window/epochs/batches/eval_samples: "
+                f"{mainline_scale_up.get('train_window_chars')}/"
+                f"{mainline_scale_up.get('train_epochs')}/"
+                f"{mainline_scale_up.get('train_batches')}/"
+                f"{mainline_scale_up.get('train_eval_samples')}",
+                "- train_vae_epochs/batches: "
+                f"{mainline_scale_up.get('train_vae_epochs')}/"
+                f"{mainline_scale_up.get('train_vae_batches')}",
+                f"- train_gen: {mainline_scale_up.get('train_gen')}",
+                f"- script: `{mainline_scale_up.get('script_path')}`",
+                f"- usage: `{mainline_scale_up.get('script_usage')}`",
+                "",
+                "```bash",
+                str(mainline_scale_up.get("shell_command")),
+                "```",
+            ]
+        )
     if isinstance(best_generation_follow_up, dict):
         lines.extend(
             [
@@ -4145,6 +4198,169 @@ def _broadened_follow_up_command_record(
         "train_eval_samples": int(broadened_args.eval_samples),
         "train_vae_epochs": int(broadened_args.vae_epochs),
         "train_vae_batches": int(broadened_args.vae_batches),
+        "script_path": str(script_path),
+        "shell_command": shell_command,
+        "script_command": script_command,
+        "script_usage": script_usage,
+    }
+
+
+def _mainline_scale_up_command_record(
+    args: argparse.Namespace,
+    features: list[str],
+    best_config: dict[str, Any] | None,
+    root_run_dir: pathlib.Path,
+    seeds: list[int],
+    follow_up_result: dict[str, Any] | None,
+    follow_up_chain: dict[str, Any] | None,
+    follow_up_gate: dict[str, Any] | None,
+    follow_up_trajectory: dict[str, Any] | None,
+    next_follow_up: dict[str, Any] | None,
+    feature_family_stability: list[dict[str, Any]] | None,
+) -> dict[str, Any] | None:
+    if not isinstance(best_config, dict):
+        return None
+    if not isinstance(follow_up_result, dict) or not isinstance(follow_up_chain, dict):
+        return None
+    gate_failed = (
+        bool(follow_up_gate.get("failed"))
+        if isinstance(follow_up_gate, dict)
+        else False
+    )
+    if gate_failed:
+        return None
+    if isinstance(follow_up_trajectory, dict) and follow_up_trajectory.get(
+        "unsafe_promotion"
+    ):
+        return None
+
+    verdict = str(follow_up_result.get("verdict") or "unknown")
+    if verdict not in {"improved", "confirmed"}:
+        return None
+    if int(follow_up_chain.get("generation") or 0) < 5:
+        return None
+    if not bool(follow_up_result.get("source_best_family_retained")):
+        return None
+    raw_positive = str(
+        follow_up_result.get("source_feature_raw_verdict")
+        or follow_up_result.get("current_best_raw_verdict")
+        or "unknown"
+    ) == "improved"
+    if not raw_positive:
+        return None
+
+    family_focus = _feature_family_focus_record(
+        best_config,
+        feature_family_stability,
+        features,
+    )
+    if not isinstance(family_focus, dict) or family_focus.get("family") == FEATURE_RAW:
+        return None
+    family_win_rate = _finite_float(family_focus.get("win_rate"))
+    family_near_win_rate = _finite_float(family_focus.get("near_win_rate"))
+    if not (
+        (family_win_rate is not None and family_win_rate >= 0.8)
+        or (family_near_win_rate is not None and family_near_win_rate >= 0.8)
+    ):
+        return None
+
+    used_seeds: list[int] = []
+    if isinstance(next_follow_up, dict):
+        _append_unique_ints(used_seeds, next_follow_up.get("used_seed_history"))
+    _append_unique_ints(used_seeds, seeds)
+    default_new_seed_count = max(5, min(7, len(seeds) if seeds else 5))
+    default_new_seeds = _fresh_seed_csv(
+        used_seeds or seeds,
+        count=default_new_seed_count,
+    )
+    used_seed_history_value = (
+        ",".join(str(seed) for seed in used_seeds) if used_seeds else None
+    )
+    default_run_dir = root_run_dir / "mainline_scale_up"
+    default_follow_up_from = root_run_dir / "summary.json"
+    default_fail_on_verdict = (
+        str(args.follow_up_fail_on_verdict).strip()
+        if args.follow_up_fail_on_verdict is not None
+        and str(args.follow_up_fail_on_verdict).strip()
+        else None
+    )
+
+    scaled_args = _clone_args(
+        args,
+        window_chars=max(int(args.window_chars), 64),
+        epochs=max(int(args.epochs) + 1, int(args.epochs) * 2),
+        batches=max(int(args.batches) + 1, int(args.batches) * 2),
+        eval_samples=max(int(args.eval_samples) + 64, int(args.eval_samples) * 2),
+        gen=max(int(args.gen), 120) if int(args.gen) > 0 else 0,
+        vae_epochs=max(int(args.vae_epochs) + 1, int(args.vae_epochs) * 2),
+        vae_batches=max(int(args.vae_batches) + 1, int(args.vae_batches) * 2),
+    )
+    focused_features = list(family_focus["focused_features"])
+    script_path = root_run_dir / "mainline_scale_up_command.sh"
+    literal_command = _follow_up_command_parts(
+        scaled_args,
+        focused_features,
+        best_config,
+        seeds_value=default_new_seeds,
+        run_dir_value=str(default_run_dir),
+        follow_up_from_value=str(default_follow_up_from),
+        fail_on_verdict_value=default_fail_on_verdict,
+        used_seed_history_value=used_seed_history_value,
+    )
+    shell_command = "PYTHONNOUSERSITE=1 " + shlex.join(literal_command)
+    script_command = _follow_up_command_parts(
+        scaled_args,
+        focused_features,
+        best_config,
+        seeds_value="${NEW_SEEDS}",
+        run_dir_value="${NEXT_RUN_DIR}",
+        follow_up_from_value="${FOLLOW_UP_FROM}",
+        fail_on_verdict_value=(
+            "${FOLLOW_UP_FAIL_ON_VERDICT}"
+            if default_fail_on_verdict is not None
+            else None
+        ),
+        used_seed_history_value=used_seed_history_value,
+    )
+    script_usage = (
+        f"FOLLOW_UP_FROM={default_follow_up_from} NEW_SEEDS={default_new_seeds} "
+        f"NEXT_RUN_DIR={default_run_dir}"
+    )
+    if default_fail_on_verdict is not None:
+        script_usage += f" FOLLOW_UP_FAIL_ON_VERDICT={default_fail_on_verdict}"
+    script_usage += f" bash {script_path}"
+    return {
+        "schema": "st.llm_char_vae_context.mainline_scale_up_command.v1",
+        "action": "scale_mainline_learning_after_promoted_family_train",
+        "command_kind": "mainline_scale_up",
+        "training_track": "mainline_capacity_train",
+        "readiness_basis": "raw_positive_family_evidence_after_generation_5",
+        "verdict": verdict,
+        "best_config": best_config,
+        "feature_family_focus": family_focus,
+        "focused_features": focused_features,
+        "source_best_family_retained": follow_up_result.get(
+            "source_best_family_retained"
+        ),
+        "source_feature_raw_verdict": follow_up_result.get(
+            "source_feature_raw_verdict"
+        ),
+        "current_best_raw_verdict": follow_up_result.get("current_best_raw_verdict"),
+        "run_budget_shifted": follow_up_result.get("run_budget_shifted"),
+        "generation": follow_up_chain.get("generation"),
+        "default_new_seeds": default_new_seeds,
+        "default_new_seed_count": default_new_seed_count,
+        "used_seed_history": used_seeds,
+        "default_run_dir": str(default_run_dir),
+        "default_follow_up_from": str(default_follow_up_from),
+        "default_follow_up_fail_on_verdict": default_fail_on_verdict,
+        "train_window_chars": int(scaled_args.window_chars),
+        "train_epochs": int(scaled_args.epochs),
+        "train_batches": int(scaled_args.batches),
+        "train_eval_samples": int(scaled_args.eval_samples),
+        "train_vae_epochs": int(scaled_args.vae_epochs),
+        "train_vae_batches": int(scaled_args.vae_batches),
+        "train_gen": int(scaled_args.gen),
         "script_path": str(script_path),
         "shell_command": shell_command,
         "script_command": script_command,
@@ -6309,6 +6525,26 @@ def _refresh_aggregate_summary_payload(
     else:
         refreshed.pop("broadened_follow_up_command", None)
 
+    mainline_scale_up = _mainline_scale_up_command_record(
+        command_args,
+        features,
+        best_config,
+        root_run_dir,
+        seeds,
+        follow_up_result,
+        follow_up_chain,
+        follow_up_gate,
+        follow_up_trajectory,
+        next_follow_up,
+        refreshed.get("feature_family_stability"),
+    )
+    if mainline_scale_up is not None:
+        refreshed["mainline_scale_up_command"] = mainline_scale_up
+        if write_scripts:
+            _write_next_follow_up_script(mainline_scale_up)
+    else:
+        refreshed.pop("mainline_scale_up_command", None)
+
     follow_up_guidance = _follow_up_guidance_record(
         follow_up_result,
         follow_up_chain,
@@ -7214,6 +7450,23 @@ def main(argv: list[str] | None = None) -> int:
     if broadened_follow_up is not None:
         aggregate["broadened_follow_up_command"] = broadened_follow_up
         _write_next_follow_up_script(broadened_follow_up)
+
+    mainline_scale_up = _mainline_scale_up_command_record(
+        args,
+        features,
+        best_config,
+        root_run_dir,
+        seeds,
+        follow_up_result,
+        follow_up_chain,
+        follow_up_gate,
+        follow_up_trajectory,
+        next_follow_up,
+        aggregate.get("feature_family_stability"),
+    )
+    if mainline_scale_up is not None:
+        aggregate["mainline_scale_up_command"] = mainline_scale_up
+        _write_next_follow_up_script(mainline_scale_up)
 
     follow_up_guidance = _follow_up_guidance_record(
         follow_up_result,
