@@ -15,10 +15,12 @@ def _write_summary(path: Path) -> None:
         seed_dir = path.parent / f"seed_{seed:06d}"
         seed_dir.mkdir()
         (seed_dir / "text_vae_weights.bin").write_bytes(b"weights")
-        (seed_dir / "head_reconstruction_latent_best.json").write_text(
-            "{}",
-            encoding="utf-8",
-        )
+        if seed == 101:
+            for feature in ("raw", "reconstruction_latent"):
+                (seed_dir / f"head_{feature}_best.json").write_text(
+                    "{}",
+                    encoding="utf-8",
+                )
         commands.append(
             {
                 "schema": "st.llm_char_vae_context.promoted_learning_eval_command.v1",
@@ -35,6 +37,8 @@ def _write_summary(path: Path) -> None:
                         "from pathlib import Path; "
                         f"Path('marker_{seed}.txt').write_text('ok')"
                     ),
+                    "--features",
+                    "raw,reconstruction_latent",
                 ],
             }
         )
@@ -151,6 +155,8 @@ class PromotedRecipeRunnerTests(unittest.TestCase):
             self.assertFalse(payload["execute"])
             self.assertEqual(payload["selected_count"], 1)
             self.assertEqual(payload["results"][0]["seed"], 103)
+            self.assertFalse(payload["results"][0]["required_heads_all_exist"])
+            self.assertEqual(len(payload["results"][0]["missing_head_paths"]), 2)
             self.assertFalse((ROOT / "marker_103.txt").exists())
 
     def test_execute_runs_selected_eval_command_and_writes_report(self) -> None:
@@ -183,6 +189,7 @@ class PromotedRecipeRunnerTests(unittest.TestCase):
             self.assertTrue(payload["execute"])
             self.assertEqual(payload["selected_count"], 1)
             self.assertEqual(payload["results"][0]["returncode"], 0)
+            self.assertTrue(payload["results"][0]["required_heads_all_exist"])
             self.assertTrue((root / "marker_101.txt").exists())
             report_path = root / "promoted_recipe_eval_run.json"
             self.assertTrue(report_path.exists())
@@ -190,6 +197,34 @@ class PromotedRecipeRunnerTests(unittest.TestCase):
             report_payload = json.loads(report_path.read_text(encoding="utf-8"))
             self.assertEqual(report_payload["report_path"], str(report_path))
             self.assertEqual(report_payload["markdown_path"], payload["markdown_path"])
+
+    def test_ready_only_filters_to_commands_with_all_required_heads(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            summary = root / "summary.json"
+            _write_summary(summary)
+
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(SCRIPT),
+                    str(summary),
+                    "--ready-only",
+                    "--json",
+                ],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertTrue(payload["ready_only"])
+            self.assertEqual(payload["selected_count"], 1)
+            self.assertEqual(payload["available_count"], 2)
+            self.assertEqual(payload["results"][0]["seed"], 101)
+            self.assertTrue(payload["results"][0]["required_heads_all_exist"])
 
     def test_dry_run_synthesizes_eval_commands_from_legacy_mainline_summary(
         self,

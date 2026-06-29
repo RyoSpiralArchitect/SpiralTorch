@@ -205,6 +205,8 @@ def _select_commands(
     *,
     seeds: list[int],
     limit: int | None,
+    ready_only: bool,
+    cwd: Path,
 ) -> list[dict[str, Any]]:
     selected = commands
     if seeds:
@@ -212,6 +214,8 @@ def _select_commands(
         selected = [
             item for item in selected if int(item.get("seed") or -1) in wanted
         ]
+    if ready_only:
+        selected = [item for item in selected if _command_ready(item, cwd=cwd)]
     if limit is not None:
         selected = selected[: max(0, int(limit))]
     return selected
@@ -236,6 +240,53 @@ def _path_exists(value: Any, *, cwd: Path) -> bool | None:
     return path.exists()
 
 
+def _resolve_path(value: Any, *, cwd: Path) -> Path | None:
+    if not isinstance(value, str) or not value:
+        return None
+    path = Path(value)
+    return path if path.is_absolute() else cwd / path
+
+
+def _flag_value(command: list[str], flag: str) -> str | None:
+    for idx, part in enumerate(command):
+        if part == flag and idx + 1 < len(command):
+            return command[idx + 1]
+    return None
+
+
+def _features_from_command(command: list[str]) -> list[str]:
+    raw = _flag_value(command, "--features")
+    if raw is None:
+        return []
+    return [part.strip() for part in raw.split(",") if part.strip()]
+
+
+def _required_head_paths(
+    item: dict[str, Any],
+    command: list[str],
+    *,
+    cwd: Path,
+) -> list[Path]:
+    head_dir = _resolve_path(item.get("head_load_dir"), cwd=cwd)
+    if head_dir is None:
+        return []
+    kind = str(item.get("head_load_kind") or "best")
+    suffix = "_best.json" if kind == "best" else ".json"
+    return [head_dir / f"head_{feature}{suffix}" for feature in _features_from_command(command)]
+
+
+def _command_ready(item: dict[str, Any], *, cwd: Path) -> bool:
+    command = _command_tokens(item)
+    vae_path = _resolve_path(item.get("vae_load"), cwd=cwd)
+    head_paths = _required_head_paths(item, command, cwd=cwd)
+    return bool(
+        vae_path is not None
+        and vae_path.exists()
+        and head_paths
+        and all(path.exists() for path in head_paths)
+    )
+
+
 def _run_command(command: list[str], *, cwd: Path) -> tuple[int, float]:
     started = time.time()
     env = os.environ.copy()
@@ -251,6 +302,8 @@ def _command_result(
     execute: bool,
 ) -> dict[str, Any]:
     command = _command_tokens(item)
+    required_heads = _required_head_paths(item, command, cwd=cwd)
+    missing_heads = [path for path in required_heads if not path.exists()]
     result: dict[str, Any] = {
         "seed": item.get("seed"),
         "run_dir": item.get("run_dir"),
@@ -260,6 +313,9 @@ def _command_result(
         "head_load_kind": item.get("head_load_kind"),
         "vae_load_exists": _path_exists(item.get("vae_load"), cwd=cwd),
         "head_load_dir_exists": _path_exists(item.get("head_load_dir"), cwd=cwd),
+        "required_head_paths": [str(path) for path in required_heads],
+        "required_heads_all_exist": bool(required_heads) and not missing_heads,
+        "missing_head_paths": [str(path) for path in missing_heads],
         "command": command,
         "shell_command": " ".join(shlex.quote(part) for part in command),
         "executed": bool(execute),
@@ -289,22 +345,24 @@ def _markdown(payload: dict[str, Any]) -> str:
         f"- feature: {payload.get('feature') or '-'}",
         f"- feature_family: {payload.get('feature_family') or '-'}",
         f"- execute: {_fmt(payload.get('execute'))}",
+        f"- ready_only: {_fmt(payload.get('ready_only'))}",
         f"- selected_count: {payload.get('selected_count')}",
         f"- cwd: `{payload.get('cwd')}`",
         "",
-        "| seed | executed | returncode | vae | heads | run_dir |",
-        "| ---: | --- | ---: | --- | --- | --- |",
+        "| seed | executed | returncode | vae | heads | missing_heads | run_dir |",
+        "| ---: | --- | ---: | --- | --- | ---: | --- |",
     ]
     for item in payload.get("results", []):
         if not isinstance(item, dict):
             continue
         lines.append(
-            "| {seed} | {executed} | {returncode} | {vae} | {heads} | `{run_dir}` |".format(
+            "| {seed} | {executed} | {returncode} | {vae} | {heads} | {missing} | `{run_dir}` |".format(
                 seed=_fmt(item.get("seed")),
                 executed=_fmt(item.get("executed")),
                 returncode=_fmt(item.get("returncode")),
                 vae=_fmt(item.get("vae_load_exists")),
-                heads=_fmt(item.get("head_load_dir_exists")),
+                heads=_fmt(item.get("required_heads_all_exist")),
+                missing=len(item.get("missing_head_paths", [])),
                 run_dir=item.get("run_dir") or "-",
             )
         )
@@ -324,6 +382,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--cwd", type=Path, default=Path.cwd())
     parser.add_argument(
+        "--ready-only",
+        action="store_true",
+        help="select only eval commands whose VAE and requested feature heads exist",
+    )
+    parser.add_argument(
         "--execute",
         action="store_true",
         help="execute selected eval commands; default only reports the plan",
@@ -340,11 +403,17 @@ def main(argv: list[str] | None = None) -> int:
     summary = _read_json(summary_path)
     recipe = _load_recipe(summary)
     commands = _eval_commands(recipe)
-    selected = _select_commands(commands, seeds=args.seed, limit=args.limit)
+    cwd = args.cwd.resolve()
+    selected = _select_commands(
+        commands,
+        seeds=args.seed,
+        limit=args.limit,
+        ready_only=bool(args.ready_only),
+        cwd=cwd,
+    )
     if not selected:
         raise ValueError("no promoted recipe eval commands selected")
 
-    cwd = args.cwd.resolve()
     results = [
         _command_result(item, cwd=cwd, execute=bool(args.execute))
         for item in selected
@@ -359,6 +428,7 @@ def main(argv: list[str] | None = None) -> int:
         "feature": recipe.get("feature"),
         "feature_family": recipe.get("feature_family"),
         "execute": bool(args.execute),
+        "ready_only": bool(args.ready_only),
         "selected_count": len(results),
         "available_count": len(commands),
         "cwd": str(cwd),
