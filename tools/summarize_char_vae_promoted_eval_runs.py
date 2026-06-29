@@ -251,21 +251,33 @@ def _mainline_summary_path(
     return path / "summary.json"
 
 
+def _command_from_record(record: dict[str, Any]) -> str | None:
+    shell_command = record.get("shell_command")
+    if isinstance(shell_command, str) and shell_command:
+        return shell_command
+    script_command = record.get("script_command")
+    if isinstance(script_command, list) and script_command:
+        return "PYTHONNOUSERSITE=1 " + _shell_command(script_command)
+    return None
+
+
 def _next_mainline_command(
     *,
     recommendation: str,
     mainline_summary: dict[str, Any] | None,
-) -> str | None:
+) -> tuple[str | None, str | None]:
     if recommendation != "promote_reload_evidence":
-        return None
-    mainline = _mainline_scale_up(mainline_summary)
-    shell_command = mainline.get("shell_command")
-    if isinstance(shell_command, str) and shell_command:
-        return shell_command
-    script_command = mainline.get("script_command")
-    if isinstance(script_command, list) and script_command:
-        return "PYTHONNOUSERSITE=1 " + _shell_command(script_command)
-    return None
+        return None, None
+    if not isinstance(mainline_summary, dict):
+        return None, None
+    for key in ("mainline_scale_up_command", "next_follow_up_command"):
+        record = mainline_summary.get(key)
+        if not isinstance(record, dict):
+            continue
+        command = _command_from_record(record)
+        if command is not None:
+            return command, key
+    return None, None
 
 
 def _resolve_source_summary_path(value: Any, *, cwd: Path) -> Path | None:
@@ -413,10 +425,12 @@ def summarize_report(path: Path) -> dict[str, Any]:
         "recommendation": recommendation,
     }
     report["recommended_next_eval_command"] = _recommended_next_eval_command(report)
-    report["recommended_next_mainline_command"] = _next_mainline_command(
+    next_mainline_command, next_mainline_command_source = _next_mainline_command(
         recommendation=recommendation,
         mainline_summary=mainline_summary,
     )
+    report["recommended_next_mainline_command"] = next_mainline_command
+    report["recommended_next_mainline_command_source"] = next_mainline_command_source
     report["recommended_summary_command"] = _recommended_summary_command(
         str(report_path)
     )
@@ -471,6 +485,8 @@ def markdown_report(payload: dict[str, Any]) -> str:
                 f"- recommendation: {report.get('recommendation') or '-'}",
                 f"- recommended_next_eval_command: `{report.get('recommended_next_eval_command') or '-'}`",
                 f"- recommended_next_mainline_command: `{report.get('recommended_next_mainline_command') or '-'}`",
+                "- recommended_next_mainline_command_source: "
+                f"{report.get('recommended_next_mainline_command_source') or '-'}",
                 f"- recommended_summary_command: `{report.get('recommended_summary_command') or '-'}`",
                 "",
                 "| seed | returncode | summary | best_feature | best_nll | delta_vs_raw | runner_up | margin |",
