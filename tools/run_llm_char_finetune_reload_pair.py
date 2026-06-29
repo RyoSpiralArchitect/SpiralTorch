@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import shlex
 import subprocess
@@ -26,6 +27,7 @@ import run_char_lm_sweep as sweep
 
 SCHEMA = "st.llm_char_finetune.reload_pair.v1"
 PREFLIGHT_SCHEMA = "st.llm_char_finetune.reload_pair.preflight.v1"
+OUTCOME_SCHEMA = "st.llm_char_finetune.reload_pair.outcome.v1"
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FINETUNE_SCRIPT = REPO_ROOT / "models" / "python" / "llm_char_finetune.py"
 COMPARE_SCRIPT = REPO_ROOT / "tools" / "compare_char_lm_runs.py"
@@ -64,6 +66,36 @@ def read_json(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as handle:
         payload = json.load(handle)
     return payload if isinstance(payload, dict) else {}
+
+
+def finite_float(value: Any) -> float | None:
+    if not isinstance(value, (int, float)):
+        return None
+    out = float(value)
+    return out if math.isfinite(out) else None
+
+
+def metric_value(payload: dict[str, Any], section: str, metric: str) -> float | None:
+    section_payload = payload.get(section)
+    if not isinstance(section_payload, dict):
+        return None
+    return finite_float(section_payload.get(metric))
+
+
+def nll_delta(left: float | None, right: float | None) -> float | None:
+    if left is None or right is None:
+        return None
+    return left - right
+
+
+def nll_status(delta: float | None, *, tolerance: float = 1.0e-9) -> str:
+    if delta is None:
+        return "unknown"
+    if delta < -tolerance:
+        return "improved"
+    if delta > tolerance:
+        return "regressed"
+    return "tied"
 
 
 def backend_readiness(backend: str, features: dict[str, bool]) -> dict[str, Any]:
@@ -308,6 +340,68 @@ def run_item(
     }
 
 
+def run_summary_contract(run_dir: Path) -> dict[str, Any]:
+    summary_path = run_dir / "summary.json"
+    summary = read_json(summary_path) if summary_path.exists() else {}
+    final_nll = metric_value(summary, "final_validation", "mean_nll")
+    best_nll = finite_float(summary.get("best_validation_mean_nll"))
+    initial_nll = metric_value(summary, "initial_validation", "mean_nll")
+    return {
+        "run_dir": str(run_dir),
+        "summary_path": str(summary_path),
+        "summary_exists": summary_path.exists(),
+        "initial_nll": initial_nll,
+        "final_nll": final_nll,
+        "best_nll": best_nll,
+        "validation_nll_delta": finite_float(summary.get("validation_nll_delta")),
+        "final_minus_best_nll": finite_float(
+            summary.get("final_minus_best_validation_nll")
+        ),
+        "best_epoch": summary.get("best_validation_epoch"),
+        "early_stopped_epoch": summary.get("early_stopped_epoch"),
+        "epochs_completed": summary.get("epochs_completed"),
+        "restore_best_at_end": summary.get("restore_best_at_end") is True,
+        "restored_best_at_end": summary.get("restored_best_at_end") is True,
+        "best_checkpoint_exists": summary.get("best_checkpoint_exists") is True,
+    }
+
+
+def reload_pair_outcome(base_run_dir: Path, reload_run_dir: Path) -> dict[str, Any]:
+    base = run_summary_contract(base_run_dir)
+    reload = run_summary_contract(reload_run_dir)
+    reload_best_minus_base_best = nll_delta(reload["best_nll"], base["best_nll"])
+    reload_final_minus_base_final = nll_delta(reload["final_nll"], base["final_nll"])
+    reload_best_minus_reload_initial = nll_delta(
+        reload["best_nll"], reload["initial_nll"]
+    )
+    reload_final_minus_reload_initial = nll_delta(
+        reload["final_nll"], reload["initial_nll"]
+    )
+    status = nll_status(reload_best_minus_base_best)
+    issues: list[str] = []
+    if base["summary_exists"] is not True:
+        issues.append("missing_base_summary")
+    if reload["summary_exists"] is not True:
+        issues.append("missing_reload_summary")
+    if reload_best_minus_base_best is None:
+        issues.append("missing_best_nll_pair")
+
+    return {
+        "schema": OUTCOME_SCHEMA,
+        "base": base,
+        "reload": reload,
+        "status": status,
+        "issues": issues,
+        "ready": not issues,
+        "reload_improved_best": status == "improved",
+        "reload_regressed_best": status == "regressed",
+        "reload_best_minus_base_best_nll": reload_best_minus_base_best,
+        "reload_final_minus_base_final_nll": reload_final_minus_base_final,
+        "reload_best_minus_reload_initial_nll": reload_best_minus_reload_initial,
+        "reload_final_minus_reload_initial_nll": reload_final_minus_reload_initial,
+    }
+
+
 def positive_int(value: int, *, label: str, allow_zero: bool = False) -> int:
     if value < 0 or (value == 0 and not allow_zero):
         suffix = "non-negative" if allow_zero else "positive"
@@ -492,6 +586,8 @@ def main(argv: list[str] | None = None) -> int:
         "compare_json_path": None,
         "compare_summary_path": None,
         "compare_summary_json_path": None,
+        "outcome_path": None,
+        "outcome": None,
         "failed": False,
         "preflight_only": bool(args.preflight_only),
         "ignore_preflight": bool(args.ignore_preflight),
@@ -551,6 +647,11 @@ def main(argv: list[str] | None = None) -> int:
             )
             if compare_summary_output is None:
                 manifest["failed"] = True
+        outcome = reload_pair_outcome(base_run_dir, reload_run_dir)
+        outcome_path = run_root / "outcome.json"
+        write_json(outcome_path, outcome)
+        manifest["outcome_path"] = str(outcome_path)
+        manifest["outcome"] = outcome
 
     manifest["finished_at_unix"] = time.time()
     manifest["elapsed_seconds"] = manifest["finished_at_unix"] - started
@@ -576,6 +677,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"compare: {manifest['compare_path']}")
     if manifest["compare_summary_path"] is not None:
         print(f"compare_summary: {manifest['compare_summary_path']}")
+    if manifest["outcome_path"] is not None:
+        print(f"outcome: {manifest['outcome_path']}")
     return 1 if manifest["failed"] else 0
 
 
