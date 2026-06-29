@@ -1446,6 +1446,115 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
             "16",
         )
 
+    def test_follow_up_result_confirms_raw_positive_sample_widening(self) -> None:
+        mod = _load_module()
+        source_best_config = {
+            "best_feature": "reconstruction_latent",
+            "feature_normalize": "blocks",
+            "hybrid_latent_scale": 4.0,
+            "latent_dim": 12,
+            "hidden": 64,
+            "mean_best_nll": 3.808677,
+            "mean_best_nll_count": 1,
+            "mean_best_nll_stderr": 0.0,
+            "mean_best_nll_delta_vs_raw": -0.379927,
+        }
+        run_budget = {
+            "window_chars": 32,
+            "latent_dim": 12,
+            "hidden": 64,
+            "epochs": 32,
+            "batches": 64,
+            "batch_size": 4,
+            "eval_samples": 256,
+            "vae_epochs": 12,
+            "vae_batches": 24,
+            "vae_batch_size": 4,
+        }
+        config_summary = {
+            "feature_normalize": "blocks",
+            "hybrid_latent_scale": 4.0,
+            "latent_dim": 12,
+            "hidden": 64,
+            "best_feature": "reconstruction_latent",
+            "status": "improved",
+            "ranking": [
+                {
+                    "feature": "reconstruction_latent",
+                    "mean_best_nll": 3.833290,
+                    "mean_best_accuracy": 0.1797,
+                    "mean_best_nll_delta_vs_raw": -0.355401,
+                    "runs": 3,
+                },
+                {
+                    "feature": "raw_latent",
+                    "mean_best_nll": 3.835880,
+                    "mean_best_accuracy": 0.1797,
+                    "mean_best_nll_delta_vs_raw": -0.352811,
+                    "runs": 3,
+                },
+                {
+                    "feature": "raw",
+                    "mean_best_nll": 4.188691,
+                    "mean_best_accuracy": 0.1706,
+                    "mean_best_nll_delta_vs_raw": 0.0,
+                    "runs": 3,
+                },
+            ],
+            "feature_summary": [
+                {
+                    "feature": "reconstruction_latent",
+                    "best_nll": {
+                        "count": 3,
+                        "stddev": 0.022826,
+                        "stderr": 0.013178,
+                    },
+                }
+            ],
+        }
+
+        result = mod._follow_up_result(
+            {
+                "source_summary_path": "/tmp/source/summary.json",
+                "source_best_config": source_best_config,
+                "source_run_budget": run_budget,
+            },
+            [config_summary],
+            {
+                "best_feature": "reconstruction_latent",
+                "mean_best_nll_delta_vs_raw": -0.355401,
+            },
+            min_nll_delta=0.0,
+            current_run_budget=run_budget,
+        )
+
+        self.assertEqual(result["direct_source_feature_verdict"], "regressed")
+        self.assertEqual(result["direct_config_verdict"], "regressed")
+        self.assertEqual(result["source_feature_verdict"], "confirmed")
+        self.assertEqual(result["config_verdict"], "confirmed")
+        self.assertEqual(result["verdict"], "confirmed")
+        self.assertEqual(result["source_feature_raw_verdict"], "improved")
+        self.assertIs(result["run_budget_shifted"], False)
+        sample_widening = result["sample_widening_confirmation"]
+        self.assertIsNotNone(sample_widening)
+        self.assertEqual(sample_widening["source_count"], 1)
+        self.assertEqual(sample_widening["current_count"], 3)
+        self.assertEqual(
+            sample_widening["basis"],
+            "single_seed_source_to_multi_seed_raw_positive_confirmation",
+        )
+        gate = mod._follow_up_gate_record(result, ["regressed", "unknown"])
+        self.assertIsNotNone(gate)
+        assert gate is not None
+        self.assertEqual(gate["effective_verdict"], "confirmed")
+        self.assertIs(gate["failed"], False)
+        report = mod._aggregate_report({"follow_up_result": result})
+        self.assertIn("sample_widening_confirmation", report)
+        self.assertIn(
+            "single_seed_source_to_multi_seed_raw_positive_confirmation",
+            report,
+        )
+
     def test_follow_up_source_budget_prefers_best_config_capacity(self) -> None:
         mod = _load_module()
         source_best_config = {
