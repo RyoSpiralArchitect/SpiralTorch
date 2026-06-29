@@ -60,10 +60,18 @@ DATA_MEAN_COLUMNS = [
     "vocab_size",
 ]
 
+FT_CONTRACT_COLUMNS = [
+    "ft_mode",
+    "ft_input",
+    "ft_backend_status",
+    "ft_reload_safe",
+]
+
 AGGREGATE_GROUP_COLUMNS = [
     "arch",
     "recurrent",
     "backend",
+    *FT_CONTRACT_COLUMNS,
     *DATA_GROUP_COLUMNS,
     "head_prior",
     "head_resid",
@@ -1702,6 +1710,32 @@ def bool_label(value: Any) -> str:
     return "-"
 
 
+def ft_contract_columns(
+    run: dict[str, Any],
+    summary: dict[str, Any],
+) -> dict[str, str]:
+    defaults = {key: "-" for key in FT_CONTRACT_COLUMNS}
+    contract = summary.get("training_contract")
+    if not isinstance(contract, dict):
+        contract = run.get("training_contract")
+    if not isinstance(contract, dict):
+        return defaults
+
+    defaults["ft_mode"] = metadata_cell(contract.get("learning_mode"))
+    input_contract = contract.get("input")
+    if isinstance(input_contract, dict):
+        defaults["ft_input"] = metadata_cell(input_contract.get("representation"))
+
+    backend = contract.get("backend")
+    if isinstance(backend, dict):
+        defaults["ft_backend_status"] = metadata_cell(backend.get("status"))
+
+    reload_contract = contract.get("reload")
+    if isinstance(reload_contract, dict):
+        defaults["ft_reload_safe"] = bool_label(reload_contract.get("reload_safe"))
+    return defaults
+
+
 def run_backend_audit_columns(run: dict[str, Any]) -> dict[str, str]:
     defaults = {key: "-" for key in RUN_BACKEND_AUDIT_COLUMNS}
     policy = run.get("tensor_policy")
@@ -2097,6 +2131,7 @@ def row_for(raw: str) -> tuple[dict[str, str], Path]:
     lstm_scan_route_cols = trace_lstm_scan_route_columns(run_dir)
     coherence_route_cols = coherence_route_columns(arch, backend, learning_op_cols)
     policy_cols = trace_policy_columns(run_dir)
+    ft_contract_cols = ft_contract_columns(run, summary)
     sample_cols = sample_quality_columns(run_dir, summary, run)
 
     return (
@@ -2106,6 +2141,7 @@ def row_for(raw: str) -> tuple[dict[str, str], Path]:
             "backend": backend,
             "recurrent": recurrent,
             "seed": seed,
+            **ft_contract_cols,
             "data_label": data_label,
             "data_files": data_files,
             "train_tokens": train_tokens,
@@ -2348,6 +2384,7 @@ def markdown_table(rows: list[dict[str, str]]) -> str:
         "backend",
         "recurrent",
         "seed",
+        *FT_CONTRACT_COLUMNS,
         "data_label",
         "data_files",
         "train_tokens",

@@ -31,6 +31,13 @@ DATA_MEAN_COLUMNS = [
     "vocab_size_mean",
 ]
 
+FT_CONTRACT_COLUMNS = [
+    "ft_mode",
+    "ft_input",
+    "ft_backend_status",
+    "ft_reload_safe",
+]
+
 SUMMARY_HEADERS = [
     "rank",
     "source",
@@ -39,6 +46,7 @@ SUMMARY_HEADERS = [
     "arch",
     "recurrent",
     "backend",
+    *FT_CONTRACT_COLUMNS,
     "head_prior",
     "head_resid",
     "bigram_guard",
@@ -122,6 +130,7 @@ SUMMARY_HEADERS = [
 
 PAIR_GROUP_COLUMNS = [
     "backend",
+    *FT_CONTRACT_COLUMNS,
     *DATA_GROUP_COLUMNS,
     "head_prior",
     "head_resid",
@@ -213,6 +222,7 @@ BIGRAM_GUARD_GROUP_COLUMNS = [
     "arch",
     "recurrent",
     "backend",
+    *FT_CONTRACT_COLUMNS,
     *DATA_GROUP_COLUMNS,
     "head_prior",
     "head_resid",
@@ -298,6 +308,7 @@ BIGRAM_RANK_GUARD_GROUP_COLUMNS = [
     "arch",
     "recurrent",
     "backend",
+    *FT_CONTRACT_COLUMNS,
     *DATA_GROUP_COLUMNS,
     "head_prior",
     "head_resid",
@@ -449,6 +460,7 @@ BIGRAM_RANK_BAND_GROUP_COLUMNS = [
     "arch",
     "recurrent",
     "backend",
+    *FT_CONTRACT_COLUMNS,
     *DATA_GROUP_COLUMNS,
     "head_prior",
     "head_resid",
@@ -600,6 +612,7 @@ BIGRAM_RANK_MIN_GROUP_COLUMNS = [
     "arch",
     "recurrent",
     "backend",
+    *FT_CONTRACT_COLUMNS,
     *DATA_GROUP_COLUMNS,
     "head_prior",
     "head_resid",
@@ -815,6 +828,7 @@ BIGRAM_SOFT_GUARD_GROUP_COLUMNS = [
     "arch",
     "recurrent",
     "backend",
+    *FT_CONTRACT_COLUMNS,
     *DATA_GROUP_COLUMNS,
     "head_prior",
     "head_resid",
@@ -969,6 +983,7 @@ BASELINE_DIFFICULTY_HEADERS = [
     "arch",
     "recurrent",
     "backend",
+    *FT_CONTRACT_COLUMNS,
     "head_prior",
     "head_resid",
     "bigram_guard",
@@ -1019,6 +1034,7 @@ LEARNING_SCOREBOARD_HEADERS = [
     "arch",
     "recurrent",
     "backend",
+    *FT_CONTRACT_COLUMNS,
     "head_prior",
     "head_resid",
     "char_feature",
@@ -1059,6 +1075,7 @@ ROUTE_DEBT_GROUP_COLUMNS = [
     "arch",
     "recurrent",
     "backend",
+    *FT_CONTRACT_COLUMNS,
     *DATA_GROUP_COLUMNS,
     "head_prior",
     "head_resid",
