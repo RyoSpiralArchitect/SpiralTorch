@@ -158,6 +158,21 @@ class SummarizeCharVaeLiveRunsTests(unittest.TestCase):
             summary["log"]["active_seed_progress_fraction"],
             0.775,
         )
+        active_evidence = summary["log"]["active_feature_evidence"]
+        self.assertEqual(
+            [item["feature"] for item in active_evidence],
+            ["raw", "latent"],
+        )
+        self.assertEqual(active_evidence[0]["status"], "completed")
+        self.assertFalse(active_evidence[0]["is_current"])
+        self.assertEqual(active_evidence[0]["rank_so_far"], 2)
+        self.assertAlmostEqual(active_evidence[0]["progress_fraction"], 1.0)
+        self.assertAlmostEqual(active_evidence[0]["gap_to_active_best"], 0.02)
+        self.assertEqual(active_evidence[1]["status"], "active")
+        self.assertTrue(active_evidence[1]["is_current"])
+        self.assertEqual(active_evidence[1]["rank_so_far"], 1)
+        self.assertAlmostEqual(active_evidence[1]["progress_fraction"], 0.55)
+        self.assertAlmostEqual(active_evidence[1]["gap_to_active_best"], 0.0)
         progress = summary["log"]["feature_progress"]
         self.assertEqual([item["feature"] for item in progress], ["raw", "latent"])
         self.assertEqual(progress[0]["latest_step"], 19)
@@ -248,6 +263,14 @@ class SummarizeCharVaeLiveRunsTests(unittest.TestCase):
         self.assertIn("- completed_seed_mean_margin_to_runner_up: -", markdown)
         self.assertIn(
             "| completed_feature | seeds | wins | win_rate | mean_rank | mean_nll | mean_delta_vs_raw | mean_gap_to_winner |",
+            markdown,
+        )
+        self.assertIn(
+            "| active_feature | status | current | rank_so_far | progress | best_nll | delta_vs_raw | gap_to_active_best |",
+            markdown,
+        )
+        self.assertIn(
+            "| raw | completed | yes | 1 | 1.000000 | 4.190000 | 0.000000 | 0.000000 |",
             markdown,
         )
         self.assertIn("- active_feature_index: 1/1", markdown)
