@@ -193,6 +193,7 @@ def _write_bundle(
     *,
     non_executable_follow_up: bool = False,
     include_review: bool = False,
+    include_scale_up: bool = False,
     include_runner_wrapper: bool = False,
 ) -> Path:
     command_dir = root / "commands"
@@ -209,8 +210,10 @@ def _write_bundle(
     next_script = command_dir / "recommended_next.sh"
     follow_up_script = command_dir / "recommended_follow_up.sh"
     review_script = command_dir / "recommended_review.sh"
+    scale_up_script = command_dir / "recommended_scale_up.sh"
     runner_script = command_dir / "run_recommended_next.sh"
     execution_dir = command_dir / "executed_follow_up"
+    scale_up_dir = command_dir / "mainline_scale_up"
     execution_summary_body = "\n".join(
         [
             'mkdir -p "executed_follow_up"',
@@ -360,6 +363,41 @@ def _write_bundle(
             review_script,
             'printf "review cwd=%s\\n" "$(pwd)" | tee runner.out',
         )
+    if include_scale_up:
+        _write_script(
+            scale_up_script,
+            "\n".join(
+                [
+                    'printf "scale-up cwd=%s\\n" "$(pwd)" | tee scale_up.out',
+                    'mkdir -p "mainline_scale_up"',
+                    'cat > "mainline_scale_up/summary.json" <<\'JSON\'',
+                    json.dumps(
+                        {
+                            "schema": "st.modelzoo.run.v1",
+                            "status": "improved",
+                            "best_feature": "reconstruction_latent",
+                            "best_config": {
+                                "best_feature": "reconstruction_latent",
+                                "feature_normalize": "blocks",
+                                "hybrid_latent_scale": 4.0,
+                                "mean_best_nll": 3.7,
+                                "mean_best_nll_delta_vs_raw": -0.5,
+                            },
+                            "follow_up_result": {
+                                "verdict": "improved",
+                                "source_best_feature_retained": True,
+                                "source_best_family_retained": True,
+                            },
+                            "follow_up_gate": {
+                                "effective_verdict": "improved",
+                                "failed": False,
+                            },
+                        }
+                    ),
+                    "JSON",
+                ]
+            ),
+        )
     if include_runner_wrapper:
         _write_runner_wrapper(runner_script, command_dir)
 
@@ -405,6 +443,19 @@ def _write_bundle(
                     "default_run_dir": str(execution_dir),
                 },
                 "review_command": None,
+                "scale_up_command": {
+                    "command_source": "mainline_scale_up_command",
+                    "source_summary_path": str(chain),
+                    "default_run_dir": str(scale_up_dir),
+                    "script_path": str(scale_up_script),
+                    "script_usage": f"bash {scale_up_script}",
+                    "default_new_seeds": "1043,1045,1047",
+                }
+                if include_scale_up
+                else {
+                    "available": False,
+                    "command_source": None,
+                },
             },
             "command_scripts": {
                 "schema": "st.llm_char_vae_context.chain_command_scripts.v1",
@@ -413,7 +464,9 @@ def _write_bundle(
                 "next_kind": "follow_up",
                 "follow_up_path": str(follow_up_script),
                 "review_path": str(review_script) if include_review else None,
-                "written_count": 3 if include_review else 2,
+                "scale_up_path": str(scale_up_script) if include_scale_up else None,
+                "written_count": (3 if include_review else 2)
+                + (1 if include_scale_up else 0),
                 "comparison_json_path": str(comparison_json),
                 "comparison_markdown_path": str(comparison_markdown),
                 "runner_command": _runner_command(command_dir)
@@ -852,6 +905,53 @@ class RunCharVaeCommandBundleTests(unittest.TestCase):
         self.assertIn("next cwd=", payload["stdout"])
         self.assertIn(str(command_dir), runner_out)
         _assert_execution_summary(self, payload, command_dir)
+
+    def test_cli_runs_explicit_scale_up_target(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            command_dir = _write_bundle(Path(tmp), include_scale_up=True)
+            result = subprocess.run(
+                [
+                    "python3",
+                    "-P",
+                    str(SCRIPT),
+                    str(command_dir),
+                    "--target",
+                    "scale-up",
+                    "--write-run-report",
+                    "--json",
+                ],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            payload = json.loads(result.stdout)
+            scale_up_out = (command_dir / "scale_up.out").read_text(encoding="utf-8")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(payload["returncode"], 0)
+        self.assertEqual(payload["target"], "scale-up")
+        self.assertEqual(payload["target_kind"], "scale_up")
+        self.assertEqual(payload["script_key"], "scale_up_path")
+        self.assertEqual(payload["target_script_key"], "scale_up_path")
+        self.assertEqual(
+            payload["target_script_path"],
+            str(command_dir / "recommended_scale_up.sh"),
+        )
+        self.assertEqual(
+            payload["expected_execution_summary_path"],
+            str(command_dir / "mainline_scale_up" / "summary.json"),
+        )
+        self.assertTrue(payload["executed"])
+        self.assertIn("scale-up cwd=", payload["stdout"])
+        self.assertIn(str(command_dir), scale_up_out)
+        execution_summary = payload["execution_summary"]
+        self.assertIsInstance(execution_summary, dict)
+        assert isinstance(execution_summary, dict)
+        self.assertTrue(execution_summary["exists"])
+        self.assertTrue(execution_summary["valid_json"])
+        self.assertEqual(execution_summary["best_feature"], "reconstruction_latent")
 
     def test_cli_runs_execution_next_from_previous_run_report(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
