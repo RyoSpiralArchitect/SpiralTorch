@@ -1744,6 +1744,69 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
         self.assertIs(trajectory["unsafe_promotion"], False)
         self.assertIs(trajectory["current_raw_positive"], True)
 
+    def test_confirmed_same_family_streak_promotes_candidate(self) -> None:
+        mod = _load_module()
+        result = {
+            "verdict": "confirmed",
+            "config_verdict": "confirmed",
+            "source_feature_verdict": "confirmed",
+            "source_feature_raw_verdict": "improved",
+            "current_best_raw_verdict": "improved",
+            "source_best_feature_retained": False,
+            "source_best_family_retained": True,
+            "current_best_config": {
+                "best_feature": "raw_latent",
+                "feature_normalize": "blocks",
+                "hybrid_latent_scale": 4.0,
+                "mean_best_nll": 4.0879,
+                "mean_best_nll_delta_vs_raw": -0.1033,
+                "runner_up_feature": "reconstruction_latent",
+                "margin_to_runner_up": 0.00015,
+                "combined_runner_up_margin_stderr": 0.0258,
+                "runner_up_within_uncertainty": True,
+            },
+        }
+        chain = {
+            "generation": 2,
+            "latest_verdict": "confirmed",
+            "verdict_history": ["confirmed", "confirmed"],
+            "improved_streak": 0,
+            "confirmed_streak": 2,
+            "regressed_streak": 0,
+        }
+        guidance = mod._follow_up_guidance_record(
+            result,
+            chain,
+            {"failed": False},
+            _next_follow_up(),
+            {
+                "trajectory_action": "continue_or_audit_mixed_trajectory",
+                "trajectory_verdict": "improved",
+                "trajectory_reasons": [
+                    "trajectory improved but latest verdict is not improved"
+                ],
+                "unsafe_promotion": False,
+            },
+        )
+
+        self.assertEqual(
+            guidance["action"],
+            "promote_stable_family_confirmation",
+        )
+        self.assertEqual(guidance["confirmed_streak"], 2)
+        self.assertTrue(guidance["promote_current_best"])
+        self.assertFalse(guidance["use_next_follow_up_command"])
+        self.assertIsNone(guidance["command_usage"])
+        self.assertIn("family confirmation streak=2", guidance["reasons"])
+        self.assertIn(
+            "confirmed family candidate is raw-positive",
+            guidance["reasons"],
+        )
+        self.assertIn(
+            "source best feature stayed within the same family",
+            guidance["reasons"],
+        )
+
     def test_follow_up_result_combines_source_and_current_seed_noise(self) -> None:
         mod = _load_module()
         source_best_config = {
