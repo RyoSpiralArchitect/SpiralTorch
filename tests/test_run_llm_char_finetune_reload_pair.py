@@ -22,6 +22,25 @@ def _load_module():
 
 
 class RunLlmCharFinetuneReloadPairTests(unittest.TestCase):
+    def test_backend_readiness_requires_accelerator_feature(self) -> None:
+        mod = _load_module()
+
+        self.assertTrue(mod.backend_readiness("cpu", {})["backend_ready"])
+
+        wgpu_missing = mod.backend_readiness(
+            "wgpu", {"wgpu": False, "wgpu-rt": False}
+        )
+        self.assertFalse(wgpu_missing["backend_ready"])
+        self.assertEqual(wgpu_missing["backend_status"], "backend_unavailable")
+        self.assertEqual(
+            wgpu_missing["backend_required_any_features"], ["wgpu", "wgpu-rt"]
+        )
+
+        self.assertTrue(mod.backend_readiness("cuda", {"cuda": True})["backend_ready"])
+        self.assertEqual(
+            mod.backend_readiness("quantum", {})["backend_status"], "unknown_backend"
+        )
+
     def test_dry_run_writes_base_reload_and_compare_contract(self) -> None:
         mod = _load_module()
         with tempfile.TemporaryDirectory() as tmp:
@@ -80,6 +99,9 @@ class RunLlmCharFinetuneReloadPairTests(unittest.TestCase):
         self.assertEqual(manifest["schema"], mod.SCHEMA)
         self.assertTrue(manifest["dry_run"])
         self.assertFalse(manifest["failed"])
+        self.assertFalse(manifest["preflight_blocked"])
+        self.assertIn("preflight_path", manifest)
+        self.assertIn("preflight", manifest)
         self.assertEqual(manifest["base_seed"], 11)
         self.assertEqual(manifest["reload_seed"], 19)
         self.assertEqual(manifest["settings"]["reload_lr"], 0.01)
@@ -100,6 +122,119 @@ class RunLlmCharFinetuneReloadPairTests(unittest.TestCase):
         self.assertIn("--curves", compare_command)
         self.assertIn(str(run_root / "compare.json"), compare_command)
         self.assertIsNone(manifest["compare_path"])
+
+    def test_preflight_only_writes_readiness_and_skips_runs(self) -> None:
+        mod = _load_module()
+        original = mod.preflight_environment
+        mod.preflight_environment = lambda *, backend: {
+            "schema": mod.PREFLIGHT_SCHEMA,
+            "backend": backend,
+            "ready": True,
+            "reason": "ready",
+            "missing_nn_symbols": [],
+        }
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                data = root / "data.txt"
+                run_root = root / "runs"
+                data.write_text("spiral torch shared corpus", encoding="utf-8")
+
+                with contextlib.redirect_stdout(io.StringIO()):
+                    code = mod.main(
+                        [
+                            str(data),
+                            "--run-root",
+                            str(run_root),
+                            "--preflight-only",
+                        ]
+                    )
+                manifest = json.loads(
+                    (run_root / "reload_pair.json").read_text(encoding="utf-8")
+                )
+                preflight = json.loads(
+                    (run_root / "preflight.json").read_text(encoding="utf-8")
+                )
+        finally:
+            mod.preflight_environment = original
+
+        self.assertEqual(code, 0)
+        self.assertTrue(manifest["preflight_only"])
+        self.assertFalse(manifest["failed"])
+        self.assertEqual(manifest["runs"], [])
+        self.assertTrue(preflight["ready"])
+        self.assertEqual(manifest["preflight"]["reason"], "ready")
+
+    def test_preflight_only_failure_marks_manifest_failed(self) -> None:
+        mod = _load_module()
+        original = mod.preflight_environment
+        mod.preflight_environment = lambda *, backend: {
+            "schema": mod.PREFLIGHT_SCHEMA,
+            "backend": backend,
+            "ready": False,
+            "reason": "missing_nn_symbols",
+            "missing_nn_symbols": ["Sequential"],
+        }
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                data = root / "data.txt"
+                run_root = root / "runs"
+                data.write_text("spiral torch shared corpus", encoding="utf-8")
+
+                with contextlib.redirect_stdout(io.StringIO()):
+                    code = mod.main(
+                        [
+                            str(data),
+                            "--run-root",
+                            str(run_root),
+                            "--preflight-only",
+                        ]
+                    )
+                manifest = json.loads(
+                    (run_root / "reload_pair.json").read_text(encoding="utf-8")
+                )
+        finally:
+            mod.preflight_environment = original
+
+        self.assertEqual(code, 1)
+        self.assertTrue(manifest["preflight_only"])
+        self.assertTrue(manifest["failed"])
+        self.assertFalse(manifest["preflight_blocked"])
+        self.assertEqual(manifest["runs"], [])
+
+    def test_preflight_failure_blocks_real_run_before_training(self) -> None:
+        mod = _load_module()
+        original = mod.preflight_environment
+        mod.preflight_environment = lambda *, backend: {
+            "schema": mod.PREFLIGHT_SCHEMA,
+            "backend": backend,
+            "ready": False,
+            "reason": "missing_nn_symbols",
+            "missing_nn_symbols": ["Sequential"],
+        }
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                data = root / "data.txt"
+                run_root = root / "runs"
+                data.write_text("spiral torch shared corpus", encoding="utf-8")
+
+                with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
+                    io.StringIO()
+                ):
+                    code = mod.main([str(data), "--run-root", str(run_root)])
+                manifest = json.loads(
+                    (run_root / "reload_pair.json").read_text(encoding="utf-8")
+                )
+        finally:
+            mod.preflight_environment = original
+
+        self.assertEqual(code, 1)
+        self.assertTrue(manifest["failed"])
+        self.assertTrue(manifest["preflight_blocked"])
+        self.assertEqual(manifest["runs"], [])
+        self.assertEqual(manifest["preflight"]["missing_nn_symbols"], ["Sequential"])
 
     def test_defaults_reload_seed_and_data_to_base_inputs(self) -> None:
         mod = _load_module()
