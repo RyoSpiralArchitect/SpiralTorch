@@ -1935,6 +1935,7 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
             broadened["action"],
             "promote_stable_family_confirmation",
         )
+        self.assertEqual(broadened["promotion_budget_policy"], "head_only")
         self.assertEqual(
             broadened["default_run_dir"],
             str(root / "promoted_family_train"),
@@ -1945,9 +1946,9 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
         )
         self.assertEqual(broadened["broadened_epochs"], 32)
         self.assertEqual(broadened["broadened_batches"], 64)
-        self.assertEqual(broadened["broadened_eval_samples"], 512)
-        self.assertEqual(broadened["broadened_vae_epochs"], 24)
-        self.assertEqual(broadened["broadened_vae_batches"], 48)
+        self.assertEqual(broadened["broadened_eval_samples"], 256)
+        self.assertEqual(broadened["broadened_vae_epochs"], 12)
+        self.assertEqual(broadened["broadened_vae_batches"], 24)
         self.assertEqual(
             broadened["focused_features"],
             ["raw", "latent", "raw_latent", "reconstruction_latent"],
@@ -2604,6 +2605,7 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
             "confirm_trajectory_with_fresh_seeds",
         )
         self.assertIsNotNone(broadened)
+        self.assertEqual(broadened["promotion_budget_policy"], "full_broaden")
         self.assertEqual(broadened["default_new_seeds"], "101,103,107,109,113")
         self.assertEqual(broadened["broadened_epochs"], 4)
         self.assertEqual(broadened["broadened_batches"], 8)
