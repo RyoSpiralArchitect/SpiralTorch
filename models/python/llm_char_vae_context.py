@@ -2223,6 +2223,7 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
                 f"- parent_summary: `{follow_up_chain.get('parent_summary_path')}`",
                 f"- latest_verdict: {follow_up_chain.get('latest_verdict')}",
                 f"- improved_streak: {follow_up_chain.get('improved_streak')}",
+                f"- confirmed_streak: {follow_up_chain.get('confirmed_streak')}",
                 f"- regressed_streak: {follow_up_chain.get('regressed_streak')}",
                 f"- verdict_history: {verdict_history_text}",
                 f"- ancestors: {ancestors_text}",
@@ -4991,6 +4992,7 @@ def _follow_up_chain_record(
         "verdict_history": verdict_history,
         "latest_verdict": latest_verdict,
         "improved_streak": _verdict_streak(verdict_history, "improved"),
+        "confirmed_streak": _verdict_streak(verdict_history, "confirmed"),
         "regressed_streak": _verdict_streak(verdict_history, "regressed"),
         "unknown_streak": _verdict_streak(verdict_history, "unknown"),
     }
@@ -5593,6 +5595,9 @@ def _follow_up_guidance_record(
     source_feature_raw_verdict = str(
         follow_up_result.get("source_feature_raw_verdict") or "unknown"
     )
+    current_best_raw_verdict = str(
+        follow_up_result.get("current_best_raw_verdict") or "unknown"
+    )
     source_retained = bool(follow_up_result.get("source_best_feature_retained"))
     source_family_retained = bool(
         follow_up_result.get("source_best_family_retained")
@@ -5604,6 +5609,11 @@ def _follow_up_guidance_record(
     )
     improved_streak = (
         int(follow_up_chain.get("improved_streak") or 0)
+        if isinstance(follow_up_chain, dict)
+        else 0
+    )
+    confirmed_streak = (
+        int(follow_up_chain.get("confirmed_streak") or 0)
         if isinstance(follow_up_chain, dict)
         else 0
     )
@@ -5624,6 +5634,15 @@ def _follow_up_guidance_record(
         source_retained
         and source_feature_verdict == "regressed"
         and source_feature_raw_verdict == "improved"
+    )
+    raw_positive_confirmation = (
+        source_feature_raw_verdict == "improved"
+        or current_best_raw_verdict == "improved"
+    )
+    stable_family_confirmation = (
+        confirmed_streak >= 2
+        and source_family_retained
+        and raw_positive_confirmation
     )
     reasons: list[str] = []
     promote_current_best = False
@@ -5686,8 +5705,17 @@ def _follow_up_guidance_record(
         add_reason(f"source feature improved with streak={improved_streak}")
     elif verdict == "confirmed":
         promote_current_best = True
-        use_next_follow_up_command = isinstance(next_follow_up, dict)
-        action = "continue_confirmation_or_widen_seeds"
+        use_next_follow_up_command = (
+            isinstance(next_follow_up, dict) and not stable_family_confirmation
+        )
+        action = (
+            "promote_stable_family_confirmation"
+            if stable_family_confirmation
+            else "continue_confirmation_or_widen_seeds"
+        )
+        if stable_family_confirmation:
+            add_reason(f"family confirmation streak={confirmed_streak}")
+            add_reason("confirmed family candidate is raw-positive")
         add_reason("source feature stayed within the confirmation band")
     elif verdict == "regressed":
         action = "rerun_or_audit_source_feature"
@@ -5797,8 +5825,10 @@ def _follow_up_guidance_record(
         "config_verdict": config_verdict,
         "source_feature_verdict": source_feature_verdict,
         "source_feature_raw_verdict": source_feature_raw_verdict,
+        "current_best_raw_verdict": current_best_raw_verdict,
         "source_best_feature_retained": source_retained,
         "source_best_family_retained": source_family_retained,
+        "confirmed_streak": confirmed_streak,
         "trajectory_action": trajectory_action,
         "trajectory_verdict": trajectory_verdict,
         "unsafe_promotion": unsafe_promotion,
