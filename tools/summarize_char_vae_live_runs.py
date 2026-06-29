@@ -639,6 +639,29 @@ def _run_progress_record(
             active_seed_index = planned_seeds.index(int(current_seed)) + 1
         except (TypeError, ValueError):
             active_seed_index = None
+    active_seed_progress_fraction = log_status.get("active_seed_progress_fraction")
+    overall_progress_fraction = None
+    try:
+        if planned_seed_count:
+            active_fraction = float(active_seed_progress_fraction or 0.0)
+            active_seed_is_incomplete = (
+                current_seed is not None
+                and int(current_seed) not in completed_seed_ids
+            )
+            active_progress = (
+                min(1.0, max(0.0, active_fraction))
+                if active_seed_is_incomplete
+                else 0.0
+            )
+            overall_progress_fraction = min(
+                1.0,
+                max(
+                    0.0,
+                    (completed_seed_count + active_progress) / planned_seed_count,
+                ),
+            )
+    except (TypeError, ValueError):
+        overall_progress_fraction = None
     latest_completed_seed = seed_results[-1] if seed_results else {}
     return {
         "schema": "st.llm_char_vae_context.live_progress.v1",
@@ -650,11 +673,15 @@ def _run_progress_record(
         "completed_seed_fraction": (
             completed_seed_count / planned_seed_count if planned_seed_count else None
         ),
+        "overall_progress_fraction": overall_progress_fraction,
+        "remaining_overall_fraction": (
+            max(0.0, 1.0 - overall_progress_fraction)
+            if overall_progress_fraction is not None
+            else None
+        ),
         "current_seed": current_seed,
         "active_seed_index": active_seed_index,
-        "active_seed_progress_fraction": log_status.get(
-            "active_seed_progress_fraction"
-        ),
+        "active_seed_progress_fraction": active_seed_progress_fraction,
         "active_seed_completed_feature_count": log_status.get(
             "active_seed_completed_feature_count"
         ),
@@ -762,8 +789,8 @@ def markdown_report(payload: dict[str, Any]) -> str:
             f"- completed_seed_count: {totals.get('completed_seed_count', 0)}",
             f"- winner_counts: {_fmt_counts(totals.get('winner_counts'))}",
             "",
-            "| run | summary | seed_progress | current_seed | current_feature | feature_progress | winners | completed_mean_delta | completed_mean_margin | best_so_far | margin | delta_vs_raw | latest_progress |",
-            "| --- | --- | ---: | ---: | --- | ---: | --- | ---: | ---: | --- | ---: | ---: | --- |",
+            "| run | summary | seed_progress | overall_progress | current_seed | current_feature | feature_progress | winners | completed_mean_delta | completed_mean_margin | best_so_far | margin | delta_vs_raw | latest_progress |",
+            "| --- | --- | ---: | ---: | ---: | --- | ---: | --- | ---: | ---: | --- | ---: | ---: | --- |",
         ]
     )
     for run in payload.get("runs", []):
@@ -785,10 +812,11 @@ def markdown_report(payload: dict[str, Any]) -> str:
             planned=log.get("planned_feature_count") or "-",
         )
         lines.append(
-            "| {run} | {summary} | {seed_progress} | {current} | {feature} | {feature_progress} | {winners} | {completed_delta} | {completed_margin} | {best_feature}:{best_nll} | {margin} | {delta} | `{latest}` |".format(
+            "| {run} | {summary} | {seed_progress} | {overall} | {current} | {feature} | {feature_progress} | {winners} | {completed_delta} | {completed_margin} | {best_feature}:{best_nll} | {margin} | {delta} | `{latest}` |".format(
                 run=run.get("run_dir") or "-",
                 summary=run.get("summary_exists"),
                 seed_progress=seed_progress,
+                overall=_fmt(progress.get("overall_progress_fraction")),
                 current=log.get("current_seed") or "-",
                 feature=log.get("current_feature") or "-",
                 feature_progress=feature_progress,
@@ -825,6 +853,8 @@ def markdown_report(payload: dict[str, Any]) -> str:
                 f"- follow_up_verdict: {run.get('follow_up_verdict') or '-'}",
                 f"- guidance_action: {run.get('guidance_action') or '-'}",
                 f"- seed_progress: {progress.get('completed_seed_count') or 0}/{progress.get('planned_seed_count') or '-'}",
+                f"- overall_progress_fraction: {_fmt(progress.get('overall_progress_fraction'))}",
+                f"- remaining_overall_fraction: {_fmt(progress.get('remaining_overall_fraction'))}",
                 "- remaining_seeds: "
                 f"{', '.join(str(seed) for seed in progress.get('remaining_seeds') or []) or '-'}",
                 f"- remaining_seed_count: {_fmt(progress.get('remaining_seed_count'), digits=0)}",

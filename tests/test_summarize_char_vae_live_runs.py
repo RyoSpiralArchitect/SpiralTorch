@@ -131,6 +131,11 @@ class SummarizeCharVaeLiveRunsTests(unittest.TestCase):
         self.assertEqual(summary["progress"]["remaining_seeds"], [1033])
         self.assertEqual(summary["progress"]["remaining_seed_count"], 1)
         self.assertAlmostEqual(summary["progress"]["completed_seed_fraction"], 0.5)
+        self.assertAlmostEqual(summary["progress"]["overall_progress_fraction"], 0.8875)
+        self.assertAlmostEqual(
+            summary["progress"]["remaining_overall_fraction"],
+            0.1125,
+        )
         self.assertEqual(summary["progress"]["active_seed_index"], 2)
         self.assertEqual(summary["progress"]["latest_completed_seed"], 1031)
         self.assertEqual(
@@ -197,6 +202,22 @@ class SummarizeCharVaeLiveRunsTests(unittest.TestCase):
             0.001597,
         )
 
+    def test_overall_progress_does_not_double_count_completed_current_seed(self) -> None:
+        mod = _load_module()
+
+        progress = mod._run_progress_record(
+            run_metadata={"seeds": [1031, 1033, 1035]},
+            seed_results=[{"seed": 1031}, {"seed": 1033}],
+            log_status={
+                "current_seed": 1033,
+                "active_seed_progress_fraction": 1.0,
+            },
+        )
+
+        self.assertAlmostEqual(progress["completed_seed_fraction"], 2 / 3)
+        self.assertAlmostEqual(progress["overall_progress_fraction"], 2 / 3)
+        self.assertAlmostEqual(progress["remaining_overall_fraction"], 1 / 3)
+
     def test_cli_writes_json_and_markdown(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -261,6 +282,14 @@ class SummarizeCharVaeLiveRunsTests(unittest.TestCase):
         self.assertEqual(payload["runs"][0]["status"], "improved")
         self.assertEqual(payload["runs"][0]["progress"]["remaining_seeds"], [1043])
         self.assertEqual(payload["runs"][0]["progress"]["remaining_seed_count"], 1)
+        self.assertAlmostEqual(
+            payload["runs"][0]["progress"]["overall_progress_fraction"],
+            1.0,
+        )
+        self.assertAlmostEqual(
+            payload["runs"][0]["progress"]["remaining_overall_fraction"],
+            0.0,
+        )
         self.assertEqual(payload["runs"][0]["log"]["current_feature"], "raw")
         self.assertEqual(payload["runs"][0]["log"]["best_so_far_feature"], "raw")
         self.assertEqual(payload["runs"][0]["log"]["active_seed_remaining_features"], [])
@@ -273,6 +302,8 @@ class SummarizeCharVaeLiveRunsTests(unittest.TestCase):
         self.assertIn("## Overview", markdown)
         self.assertIn("- completed_run_count: 1", markdown)
         self.assertIn("- seed_progress: 0/1", markdown)
+        self.assertIn("- overall_progress_fraction: 1.000000", markdown)
+        self.assertIn("- remaining_overall_fraction: 0.000000", markdown)
         self.assertIn("- remaining_seeds: 1043", markdown)
         self.assertIn("- remaining_seed_count: 1", markdown)
         self.assertIn("- completed_seed_leader: - (0/0, rate=-)", markdown)
