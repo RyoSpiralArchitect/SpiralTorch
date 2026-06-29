@@ -215,6 +215,7 @@ def finetune_command(
     topk: int,
     seed: int,
     backend: str,
+    early_stop_patience: int,
     restore_best_at_end: bool,
     load_run: Path | None = None,
 ) -> list[str]:
@@ -253,6 +254,8 @@ def finetune_command(
         "--backend",
         backend,
     ]
+    if early_stop_patience > 0:
+        command.extend(["--early-stop-patience", str(early_stop_patience)])
     if restore_best_at_end:
         command.append("--restore-best-at-end")
     if load_run is not None:
@@ -342,6 +345,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--val-split", type=float, default=0.1)
     parser.add_argument("--gen", type=int, default=120)
     parser.add_argument("--topk", type=int, default=32)
+    parser.add_argument("--early-stop-patience", type=int, default=0)
     parser.add_argument("--restore-best-at-end", action="store_true")
     parser.add_argument("--curves", action="store_true")
     parser.add_argument("--summary-limit", type=int, default=8)
@@ -370,6 +374,7 @@ def validate_args(args: argparse.Namespace) -> None:
     positive_int(args.eval_samples, label="eval-samples", allow_zero=True)
     positive_int(args.gen, label="gen", allow_zero=True)
     positive_int(args.topk, label="topk")
+    positive_int(args.early_stop_patience, label="early-stop-patience", allow_zero=True)
     positive_int(args.summary_limit, label="summary-limit", allow_zero=True)
     if not (0.0 <= float(args.val_split) < 0.95):
         raise ValueError("--val-split must be within [0, 0.95)")
@@ -411,6 +416,7 @@ def main(argv: list[str] | None = None) -> int:
         topk=args.topk,
         seed=args.seed,
         backend=args.backend,
+        early_stop_patience=args.early_stop_patience,
         restore_best_at_end=args.restore_best_at_end,
     )
     reload_command = finetune_command(
@@ -429,6 +435,7 @@ def main(argv: list[str] | None = None) -> int:
         topk=args.topk,
         seed=reload_seed,
         backend=args.backend,
+        early_stop_patience=args.early_stop_patience,
         restore_best_at_end=args.restore_best_at_end,
         load_run=base_run_dir,
     )
@@ -475,6 +482,7 @@ def main(argv: list[str] | None = None) -> int:
             "val_split": args.val_split,
             "gen": args.gen,
             "topk": args.topk,
+            "early_stop_patience": int(args.early_stop_patience),
             "restore_best_at_end": bool(args.restore_best_at_end),
         },
         "runs": [],

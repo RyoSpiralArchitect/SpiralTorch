@@ -819,6 +819,8 @@ def _write_completion_summary(
     restore_best_at_end: bool = False,
     restored_best_at_end: bool = False,
     restored_best_checkpoint_path: pathlib.Path | None = None,
+    early_stopped_epoch: int | None = None,
+    epochs_completed: int | None = None,
     validation: dict[str, Any] | None = None,
 ) -> None:
     meta_path = _meta_path_for_weights(weights_path)
@@ -874,6 +876,8 @@ def _write_completion_summary(
             if restored_best_checkpoint_path is not None
             else None
         ),
+        "early_stopped_epoch": early_stopped_epoch,
+        "epochs_completed": epochs_completed,
     }
     if validation:
         payload.update(validation)
@@ -1109,7 +1113,7 @@ def main() -> int:
             "[--load weights.json] [--load-run run_dir] [--save weights.json] [--steps N] [--embed-dim N] [--hidden N] "
             "[--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] "
             "[--gen N] [--topk N] [--seed N] [--prompt STR] [--val-split F] [--eval-samples N] "
-            "[--restore-best-at-end] "
+            "[--early-stop-patience N] [--restore-best-at-end] "
             "[--backend cpu|wgpu|cuda|hip|auto] "
             "[--preflight-only] [--ignore-preflight] "
             "[--events PATH] [--events-types A,B,C] "
@@ -1146,6 +1150,7 @@ def main() -> int:
     seed = 42
     val_split = 0.1
     eval_samples = 64
+    early_stop_patience = 0
     restore_best_at_end = False
     prompt: str | None = None
     backend = "cpu"
@@ -1205,6 +1210,8 @@ def main() -> int:
             val_split = float(next(it))
         elif flag == "--eval-samples":
             eval_samples = int(next(it))
+        elif flag == "--early-stop-patience":
+            early_stop_patience = int(next(it))
         elif flag == "--restore-best-at-end":
             restore_best_at_end = True
         elif flag == "--prompt":
@@ -1252,6 +1259,8 @@ def main() -> int:
         raise ValueError("--val-split must be within [0, 0.95)")
     if eval_samples < 0:
         raise ValueError("--eval-samples must be >= 0")
+    if early_stop_patience < 0:
+        raise ValueError("--early-stop-patience must be >= 0")
     load_weights = _resolve_load_weights(load_weights, load_run)
     source_checkpoint = _checkpoint_source_payload(load_weights, load_run=load_run)
 
@@ -1403,6 +1412,7 @@ def main() -> int:
         "desire_prime": desire_prime if desire else None,
         "desire_blend": desire_blend if desire else None,
         "desire_drift_gain": desire_drift_gain if desire else None,
+        "early_stop_patience": early_stop_patience,
         "restore_best_at_end": restore_best_at_end,
         "weights_loaded_from": str(load_weights) if load_weights is not None else None,
         "weights_loaded_from_run": str(load_run) if load_run is not None else None,
@@ -1486,6 +1496,9 @@ def main() -> int:
     best_validation_epoch: int | None = None
     best_checkpoint_path = run_dir / "best_weights.json"
     best_sample_path: pathlib.Path | None = None
+    early_stopped_epoch: int | None = None
+    epochs_completed = 0
+    epochs_without_validation_improvement = 0
     st.nn.save(str(best_checkpoint_path), model)
     _save_meta(_meta_path_for_weights(best_checkpoint_path), weights_meta)
 
@@ -1563,6 +1576,9 @@ def main() -> int:
                 best_validation = validation
                 best_validation_epoch = epoch
                 validation_is_best = True
+                epochs_without_validation_improvement = 0
+            elif isinstance(validation_nll, (int, float)):
+                epochs_without_validation_improvement += 1
             with metrics_path.open("a", encoding="utf-8") as handle:
                 handle.write(
                     json.dumps(
@@ -1604,6 +1620,23 @@ def main() -> int:
                 )
             else:
                 print(f"epoch[{epoch}] batches={stats.batches} avg_loss={avg_loss:.6f}")
+            epochs_completed = epoch + 1
+            if (
+                early_stop_patience > 0
+                and isinstance(validation_nll, (int, float))
+                and not validation_is_best
+                and epochs_without_validation_improvement >= early_stop_patience
+            ):
+                early_stopped_epoch = epoch
+                print(
+                    "early_stop "
+                    f"epoch={epoch} "
+                    f"patience={early_stop_patience} "
+                    f"best_epoch={best_validation_epoch if best_validation_epoch is not None else '-'} "
+                    f"best_nll={best_validation.get('mean_nll')}",
+                    flush=True,
+                )
+                break
 
     if atlas and events_path is not None:
         try:
@@ -1703,6 +1736,8 @@ def main() -> int:
         restore_best_at_end=restore_best_at_end,
         restored_best_at_end=restored_best_at_end,
         restored_best_checkpoint_path=restored_best_checkpoint_path,
+        early_stopped_epoch=early_stopped_epoch,
+        epochs_completed=epochs_completed,
         validation=_validation_summary_payload(
             initial_validation=initial_validation,
             final_validation=final_validation,

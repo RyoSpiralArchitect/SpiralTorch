@@ -89,6 +89,8 @@ class RunLlmCharFinetuneReloadPairTests(unittest.TestCase):
                         "19",
                         "--backend",
                         "cpu",
+                        "--early-stop-patience",
+                        "2",
                         "--restore-best-at-end",
                         "--curves",
                         "--dry-run",
@@ -107,6 +109,7 @@ class RunLlmCharFinetuneReloadPairTests(unittest.TestCase):
         self.assertEqual(manifest["base_seed"], 11)
         self.assertEqual(manifest["reload_seed"], 19)
         self.assertEqual(manifest["settings"]["reload_lr"], 0.01)
+        self.assertEqual(manifest["settings"]["early_stop_patience"], 2)
         self.assertTrue(manifest["settings"]["restore_best_at_end"])
         self.assertEqual(len(manifest["runs"]), 2)
         self.assertEqual(manifest["runs"][0]["name"], "base_scratch")
@@ -118,8 +121,10 @@ class RunLlmCharFinetuneReloadPairTests(unittest.TestCase):
         compare_command = manifest["compare_command"]
         self.assertIn("--run-dir", base_command)
         self.assertNotIn("--load-run", base_command)
+        self.assertIn("--early-stop-patience", base_command)
         self.assertIn("--restore-best-at-end", base_command)
         self.assertIn("--load-run", reload_command)
+        self.assertIn("--early-stop-patience", reload_command)
         self.assertIn("--restore-best-at-end", reload_command)
         self.assertIn(str(run_root / "base_scratch"), reload_command)
         self.assertIn(str(reload_data), reload_command)
