@@ -132,6 +132,8 @@ class RunLlmCharFinetuneReloadPairTests(unittest.TestCase):
         self.assertIn("--curves", compare_command)
         self.assertIn(str(run_root / "compare.json"), compare_command)
         self.assertIsNone(manifest["compare_path"])
+        self.assertIsNone(manifest["outcome_path"])
+        self.assertIsNone(manifest["outcome"])
 
     def test_preflight_only_writes_readiness_and_skips_runs(self) -> None:
         mod = _load_module()
@@ -272,6 +274,65 @@ class RunLlmCharFinetuneReloadPairTests(unittest.TestCase):
         self.assertEqual(manifest["reload_seed"], manifest["base_seed"] + 1)
         self.assertEqual(manifest["reload_data_paths"], manifest["data_paths"])
         self.assertIn(str(data), manifest["runs"][1]["command"])
+
+    def test_reload_pair_outcome_reports_best_improvement(self) -> None:
+        mod = _load_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            base = root / "base_scratch"
+            reload = root / "reload_finetune"
+            base.mkdir()
+            reload.mkdir()
+            (base / "summary.json").write_text(
+                json.dumps(
+                    {
+                        "initial_validation": {"mean_nll": 4.0},
+                        "final_validation": {"mean_nll": 3.5},
+                        "best_validation_mean_nll": 3.4,
+                        "best_validation_epoch": 1,
+                        "validation_nll_delta": -0.5,
+                        "final_minus_best_validation_nll": 0.1,
+                        "restore_best_at_end": True,
+                        "restored_best_at_end": True,
+                        "best_checkpoint_exists": True,
+                        "epochs_completed": 2,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (reload / "summary.json").write_text(
+                json.dumps(
+                    {
+                        "initial_validation": {"mean_nll": 3.45},
+                        "final_validation": {"mean_nll": 3.3},
+                        "best_validation_mean_nll": 3.2,
+                        "best_validation_epoch": 2,
+                        "validation_nll_delta": -0.15,
+                        "final_minus_best_validation_nll": 0.1,
+                        "early_stopped_epoch": 3,
+                        "restore_best_at_end": True,
+                        "restored_best_at_end": True,
+                        "best_checkpoint_exists": True,
+                        "epochs_completed": 4,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            outcome = mod.reload_pair_outcome(base, reload)
+
+        self.assertEqual(outcome["schema"], mod.OUTCOME_SCHEMA)
+        self.assertTrue(outcome["ready"])
+        self.assertEqual(outcome["issues"], [])
+        self.assertEqual(outcome["status"], "improved")
+        self.assertTrue(outcome["reload_improved_best"])
+        self.assertFalse(outcome["reload_regressed_best"])
+        self.assertAlmostEqual(outcome["reload_best_minus_base_best_nll"], -0.2)
+        self.assertAlmostEqual(outcome["reload_final_minus_base_final_nll"], -0.2)
+        self.assertAlmostEqual(outcome["reload_best_minus_reload_initial_nll"], -0.25)
+        self.assertEqual(outcome["base"]["best_epoch"], 1)
+        self.assertEqual(outcome["reload"]["early_stopped_epoch"], 3)
+        self.assertTrue(outcome["reload"]["restored_best_at_end"])
 
     def test_invalid_budget_returns_usage_error(self) -> None:
         mod = _load_module()
