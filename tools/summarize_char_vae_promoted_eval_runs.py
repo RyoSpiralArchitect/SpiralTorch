@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
+import re
 import shlex
 from pathlib import Path
 from typing import Any
@@ -280,6 +282,80 @@ def _next_mainline_command(
     return None, None
 
 
+def _flag_value(command: str, flag: str) -> str | None:
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        return None
+    for idx, part in enumerate(parts):
+        if part == flag and idx + 1 < len(parts):
+            return parts[idx + 1]
+    return None
+
+
+def _screen_session_name(run_dir: Path) -> str:
+    base = re.sub(r"[^A-Za-z0-9_.-]+", "_", run_dir.name).strip("_")
+    if not base:
+        base = "mainline"
+    digest = hashlib.sha1(str(run_dir).encode("utf-8")).hexdigest()[:8]
+    return f"char_vae_{base}_{digest}"[:80]
+
+
+def _screen_launch_command(
+    *,
+    command: str | None,
+    cwd: Path,
+) -> dict[str, Any]:
+    if not isinstance(command, str) or not command:
+        return {
+            "cwd": str(cwd),
+            "run_dir": None,
+            "log_path": None,
+            "screen_session": None,
+            "screen_command": None,
+        }
+    run_dir_raw = _flag_value(command, "--run-dir")
+    if not run_dir_raw:
+        return {
+            "cwd": str(cwd),
+            "run_dir": None,
+            "log_path": None,
+            "screen_session": None,
+            "screen_command": None,
+        }
+    run_dir = Path(run_dir_raw)
+    if not run_dir.is_absolute():
+        run_dir = cwd / run_dir
+    log_path = run_dir / "run.log"
+    session = _screen_session_name(run_dir)
+    script = "\n".join(
+        [
+            "set -euo pipefail",
+            f"cd {shlex.quote(str(cwd))}",
+            f"mkdir -p {shlex.quote(str(run_dir))}",
+            "{",
+            "  printf 'launcher_started=%s\\n' \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"",
+            "  set +e",
+            f"  {command}",
+            "  status=$?",
+            "  set -e",
+            "  printf 'launcher_exit_status=%s\\n' \"$status\"",
+            "  printf 'launcher_finished=%s\\n' \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"",
+            "  exit \"$status\"",
+            f"}} > {shlex.quote(str(log_path))} 2>&1",
+        ]
+    )
+    return {
+        "cwd": str(cwd),
+        "run_dir": str(run_dir),
+        "log_path": str(log_path),
+        "screen_session": session,
+        "screen_command": _shell_command(
+            ["screen", "-dmS", session, "bash", "-lc", script]
+        ),
+    }
+
+
 def _resolve_source_summary_path(value: Any, *, cwd: Path) -> Path | None:
     if not isinstance(value, str) or not value:
         return None
@@ -431,6 +507,16 @@ def summarize_report(path: Path) -> dict[str, Any]:
     )
     report["recommended_next_mainline_command"] = next_mainline_command
     report["recommended_next_mainline_command_source"] = next_mainline_command_source
+    screen_launch = _screen_launch_command(command=next_mainline_command, cwd=cwd)
+    report["recommended_next_mainline_cwd"] = screen_launch["cwd"]
+    report["recommended_next_mainline_run_dir"] = screen_launch["run_dir"]
+    report["recommended_next_mainline_log_path"] = screen_launch["log_path"]
+    report["recommended_next_mainline_screen_session"] = screen_launch[
+        "screen_session"
+    ]
+    report["recommended_next_mainline_screen_command"] = screen_launch[
+        "screen_command"
+    ]
     report["recommended_summary_command"] = _recommended_summary_command(
         str(report_path)
     )
@@ -487,6 +573,11 @@ def markdown_report(payload: dict[str, Any]) -> str:
                 f"- recommended_next_mainline_command: `{report.get('recommended_next_mainline_command') or '-'}`",
                 "- recommended_next_mainline_command_source: "
                 f"{report.get('recommended_next_mainline_command_source') or '-'}",
+                f"- recommended_next_mainline_run_dir: `{report.get('recommended_next_mainline_run_dir') or '-'}`",
+                f"- recommended_next_mainline_log_path: `{report.get('recommended_next_mainline_log_path') or '-'}`",
+                "- recommended_next_mainline_screen_session: "
+                f"{report.get('recommended_next_mainline_screen_session') or '-'}",
+                f"- recommended_next_mainline_screen_command: `{report.get('recommended_next_mainline_screen_command') or '-'}`",
                 f"- recommended_summary_command: `{report.get('recommended_summary_command') or '-'}`",
                 "",
                 "| seed | returncode | summary | best_feature | best_nll | delta_vs_raw | runner_up | margin |",

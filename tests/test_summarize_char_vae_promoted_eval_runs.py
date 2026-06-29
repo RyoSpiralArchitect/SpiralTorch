@@ -199,7 +199,8 @@ class PromotedEvalSummaryTests(unittest.TestCase):
                 planned_seeds=[101],
                 mainline_next_command=(
                     "PYTHONNOUSERSITE=1 python3 -S -s "
-                    "models/python/llm_char_vae_context.py corpus --seeds 301,303"
+                    "models/python/llm_char_vae_context.py corpus "
+                    "--seeds 301,303 --run-dir next_run"
                 ),
                 mainline_next_command_key="next_follow_up_command",
             )
@@ -226,13 +227,37 @@ class PromotedEvalSummaryTests(unittest.TestCase):
                 summary["recommended_next_mainline_command"],
                 (
                     "PYTHONNOUSERSITE=1 python3 -S -s "
-                    "models/python/llm_char_vae_context.py corpus --seeds 301,303"
+                    "models/python/llm_char_vae_context.py corpus "
+                    "--seeds 301,303 --run-dir next_run"
                 ),
             )
             self.assertEqual(
                 summary["recommended_next_mainline_command_source"],
                 "next_follow_up_command",
             )
+            self.assertEqual(
+                summary["recommended_next_mainline_cwd"],
+                str(root),
+            )
+            self.assertEqual(
+                summary["recommended_next_mainline_run_dir"],
+                str(root / "next_run"),
+            )
+            self.assertEqual(
+                summary["recommended_next_mainline_log_path"],
+                str(root / "next_run" / "run.log"),
+            )
+            self.assertTrue(
+                summary["recommended_next_mainline_screen_session"].startswith(
+                    "char_vae_next_run_"
+                )
+            )
+            screen_command = summary["recommended_next_mainline_screen_command"]
+            self.assertIsInstance(screen_command, str)
+            self.assertIn("screen -dmS", screen_command)
+            self.assertIn("launcher_started=", screen_command)
+            self.assertIn("--run-dir next_run", screen_command)
+            self.assertIn(str(root / "next_run" / "run.log"), screen_command)
 
     def test_json_summary_continues_when_planned_eval_remains(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
