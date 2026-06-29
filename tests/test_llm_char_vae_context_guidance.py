@@ -2839,6 +2839,24 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
             recipe["eval_reload_policy"]["mode"],
             "per_seed_best_checkpoint",
         )
+        eval_commands = recipe["eval_reload_commands"]
+        self.assertEqual(eval_commands["count"], 7)
+        first_eval_command = eval_commands["items"][0]
+        self.assertEqual(first_eval_command["seed"], 1043)
+        self.assertTrue(first_eval_command["run_dir"].endswith("seed_001043/eval_best"))
+        self.assertTrue(
+            first_eval_command["vae_load"].endswith(
+                "seed_001043/text_vae_weights.bin"
+            )
+        )
+        script_command = first_eval_command["script_command"]
+        self.assertIn("--eval-only", script_command)
+        self.assertEqual(script_command[script_command.index("--epochs") + 1], "0")
+        self.assertEqual(script_command[script_command.index("--vae-epochs") + 1], "0")
+        self.assertEqual(
+            script_command[script_command.index("--head-load-kind") + 1],
+            "best",
+        )
         self.assertIn("--window-chars", command["script_command"])
         self.assertIn("64", command["script_command"])
         self.assertIn("## Mainline Scale-Up Command", report)
@@ -2866,6 +2884,7 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
             "head_load_kind=best",
             report,
         )
+        self.assertIn("- recipe_eval_commands: count=7 first_run_dir=", report)
 
     def test_follow_up_result_combines_source_and_current_seed_noise(self) -> None:
         mod = _load_module()

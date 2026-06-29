@@ -2643,6 +2643,19 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
         recipe_budget = promoted_recipe.get("run_budget", {})
         recipe_artifacts = promoted_recipe.get("expected_artifacts", {})
         recipe_reload = promoted_recipe.get("eval_reload_policy", {})
+        recipe_eval_commands = promoted_recipe.get("eval_reload_commands", {})
+        recipe_eval_items = (
+            recipe_eval_commands.get("items")
+            if isinstance(recipe_eval_commands, dict)
+            else []
+        )
+        first_recipe_eval = (
+            recipe_eval_items[0]
+            if isinstance(recipe_eval_items, list)
+            and recipe_eval_items
+            and isinstance(recipe_eval_items[0], dict)
+            else {}
+        )
         lines.extend(
             [
                 "",
@@ -2703,6 +2716,14 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
                 "- recipe_eval_reload: mode={mode} head_load_kind={kind}".format(
                     mode=recipe_reload.get("mode") or "-",
                     kind=recipe_reload.get("head_load_kind") or "-",
+                ),
+                "- recipe_eval_commands: count={count} first_run_dir=`{run_dir}`".format(
+                    count=(
+                        recipe_eval_commands.get("count")
+                        if isinstance(recipe_eval_commands, dict)
+                        else None
+                    ),
+                    run_dir=first_recipe_eval.get("run_dir") or "-",
                 ),
                 "- train_window/epochs/batches/eval_samples: "
                 f"{mainline_scale_up.get('train_window_chars')}/"
@@ -3697,6 +3718,72 @@ def _follow_up_command_parts(
     return command
 
 
+def _promoted_learning_eval_command_parts(
+    args: argparse.Namespace,
+    best_config: dict[str, Any],
+    focused_features: list[str],
+    seed_dir: pathlib.Path,
+    seed: int,
+) -> list[str]:
+    best_latent_dim = int(best_config.get("latent_dim") or args.latent_dim)
+    best_hidden = (
+        int(best_config["hidden"])
+        if best_config.get("hidden") is not None
+        else int(args.hidden)
+    )
+    eval_run_dir = seed_dir / "eval_best"
+    command = [
+        "python3",
+        "-S",
+        "-s",
+        "models/python/llm_char_vae_context.py",
+        *[str(value) for value in args.text_or_dir],
+    ]
+    for flag, value in (
+        ("--features", ",".join(focused_features)),
+        ("--feature-normalize", best_config.get("feature_normalize")),
+        ("--hybrid-latent-scale", _fmt_arg_float(best_config.get("hybrid_latent_scale", 1.0))),
+        ("--seed", int(seed)),
+        ("--run-dir", eval_run_dir),
+        ("--vae-load", seed_dir / "text_vae_weights.bin"),
+        ("--head-load-dir", seed_dir),
+        ("--head-load-kind", "best"),
+        ("--window-chars", int(args.window_chars)),
+        ("--latent-dim", best_latent_dim),
+        ("--hidden", best_hidden),
+        ("--head-init", str(args.head_init)),
+        ("--epochs", 0),
+        ("--batches", int(args.batches)),
+        ("--batch-size", int(args.batch_size)),
+        ("--lr", _fmt_arg_float(args.lr)),
+        ("--eval-samples", int(args.eval_samples)),
+        ("--val-ratio", _fmt_arg_float(args.val_ratio)),
+        ("--curvature", _fmt_arg_float(args.curvature)),
+        ("--temperature", _fmt_arg_float(args.temperature)),
+        ("--backend", str(args.backend)),
+        ("--min-nll-delta", _fmt_arg_float(args.min_nll_delta)),
+        ("--win-tolerance", _fmt_arg_float(args.win_tolerance)),
+        ("--prompt", str(args.prompt)),
+        ("--gen", int(args.gen)),
+        ("--top-k", int(args.top_k)),
+        ("--vae-epochs", 0),
+        ("--vae-batches", int(args.vae_batches)),
+        ("--vae-batch-size", int(args.vae_batch_size)),
+        ("--vae-lr", _fmt_arg_float(args.vae_lr)),
+        ("--vae-kl-weight", _fmt_arg_float(args.vae_kl_weight)),
+        ("--vae-optimizer", str(args.vae_optimizer)),
+        ("--vae-grad-clip", str(args.vae_grad_clip)),
+        ("--mellin", str(args.mellin)),
+        ("--mellin-exponent", _fmt_arg_float(args.mellin_exponent)),
+        ("--mellin-start", _fmt_arg_float(args.mellin_start)),
+        ("--mellin-end", _fmt_arg_float(args.mellin_end)),
+    ):
+        if value is not None:
+            _append_flag(command, flag, value)
+    command.append("--eval-only")
+    return command
+
+
 def _promoted_learning_recipe_record(
     args: argparse.Namespace,
     best_config: dict[str, Any],
@@ -3714,14 +3801,23 @@ def _promoted_learning_recipe_record(
         or (_feature_family(best_feature) if best_feature else "")
     )
     seed_artifacts: list[dict[str, Any]] = []
+    eval_commands: list[dict[str, Any]] = []
     for seed in seeds:
         seed_dir = _seed_run_dir(run_dir, int(seed))
+        eval_command = _promoted_learning_eval_command_parts(
+            args,
+            best_config,
+            focused_features,
+            seed_dir,
+            int(seed),
+        )
         seed_artifacts.append(
             {
                 "seed": int(seed),
                 "run_dir": str(seed_dir),
                 "summary_path": str(seed_dir / "summary.json"),
                 "report_path": str(seed_dir / "report.md"),
+                "eval_run_dir": str(seed_dir / "eval_best"),
                 "vae_checkpoint_path": str(seed_dir / "text_vae_weights.bin"),
                 "best_head_path": (
                     str(seed_dir / f"head_{best_feature}_best.json")
@@ -3733,6 +3829,19 @@ def _promoted_learning_recipe_record(
                     if best_feature
                     else None
                 ),
+            }
+        )
+        eval_commands.append(
+            {
+                "schema": "st.llm_char_vae_context.promoted_learning_eval_command.v1",
+                "seed": int(seed),
+                "run_dir": str(seed_dir / "eval_best"),
+                "source_run_dir": str(seed_dir),
+                "vae_load": str(seed_dir / "text_vae_weights.bin"),
+                "head_load_dir": str(seed_dir),
+                "head_load_kind": "best",
+                "script_command": eval_command,
+                "shell_command": "PYTHONNOUSERSITE=1 " + shlex.join(eval_command),
             }
         )
     return {
@@ -3788,6 +3897,11 @@ def _promoted_learning_recipe_record(
                 "--head-load-dir",
                 "--head-load-kind",
             ],
+        },
+        "eval_reload_commands": {
+            "schema": "st.llm_char_vae_context.promoted_learning_eval_commands.v1",
+            "count": len(eval_commands),
+            "items": eval_commands,
         },
     }
 
