@@ -206,6 +206,7 @@ def _select_commands(
     seeds: list[int],
     limit: int | None,
     ready_only: bool,
+    complete_only: bool,
     cwd: Path,
 ) -> list[dict[str, Any]]:
     selected = commands
@@ -216,6 +217,8 @@ def _select_commands(
         ]
     if ready_only:
         selected = [item for item in selected if _command_ready(item, cwd=cwd)]
+    if complete_only:
+        selected = [item for item in selected if _source_summary_exists(item, cwd=cwd)]
     if limit is not None:
         selected = selected[: max(0, int(limit))]
     return selected
@@ -272,7 +275,20 @@ def _required_head_paths(
         return []
     kind = str(item.get("head_load_kind") or "best")
     suffix = "_best.json" if kind == "best" else ".json"
-    return [head_dir / f"head_{feature}{suffix}" for feature in _features_from_command(command)]
+    return [
+        head_dir / f"head_{feature}{suffix}"
+        for feature in _features_from_command(command)
+    ]
+
+
+def _source_summary_path(item: dict[str, Any], *, cwd: Path) -> Path | None:
+    source_dir = _resolve_path(item.get("source_run_dir"), cwd=cwd)
+    return source_dir / "summary.json" if source_dir is not None else None
+
+
+def _source_summary_exists(item: dict[str, Any], *, cwd: Path) -> bool:
+    path = _source_summary_path(item, cwd=cwd)
+    return bool(path is not None and path.exists())
 
 
 def _command_ready(item: dict[str, Any], *, cwd: Path) -> bool:
@@ -304,6 +320,7 @@ def _command_result(
     command = _command_tokens(item)
     required_heads = _required_head_paths(item, command, cwd=cwd)
     missing_heads = [path for path in required_heads if not path.exists()]
+    source_summary = _source_summary_path(item, cwd=cwd)
     result: dict[str, Any] = {
         "seed": item.get("seed"),
         "run_dir": item.get("run_dir"),
@@ -316,6 +333,12 @@ def _command_result(
         "required_head_paths": [str(path) for path in required_heads],
         "required_heads_all_exist": bool(required_heads) and not missing_heads,
         "missing_head_paths": [str(path) for path in missing_heads],
+        "source_summary_path": (
+            str(source_summary) if source_summary is not None else None
+        ),
+        "source_summary_exists": bool(
+            source_summary is not None and source_summary.exists()
+        ),
         "command": command,
         "shell_command": " ".join(shlex.quote(part) for part in command),
         "executed": bool(execute),
@@ -346,22 +369,24 @@ def _markdown(payload: dict[str, Any]) -> str:
         f"- feature_family: {payload.get('feature_family') or '-'}",
         f"- execute: {_fmt(payload.get('execute'))}",
         f"- ready_only: {_fmt(payload.get('ready_only'))}",
+        f"- complete_only: {_fmt(payload.get('complete_only'))}",
         f"- selected_count: {payload.get('selected_count')}",
         f"- cwd: `{payload.get('cwd')}`",
         "",
-        "| seed | executed | returncode | vae | heads | missing_heads | run_dir |",
-        "| ---: | --- | ---: | --- | --- | ---: | --- |",
+        "| seed | executed | returncode | vae | heads | source_summary | missing_heads | run_dir |",
+        "| ---: | --- | ---: | --- | --- | --- | ---: | --- |",
     ]
     for item in payload.get("results", []):
         if not isinstance(item, dict):
             continue
         lines.append(
-            "| {seed} | {executed} | {returncode} | {vae} | {heads} | {missing} | `{run_dir}` |".format(
+            "| {seed} | {executed} | {returncode} | {vae} | {heads} | {source} | {missing} | `{run_dir}` |".format(
                 seed=_fmt(item.get("seed")),
                 executed=_fmt(item.get("executed")),
                 returncode=_fmt(item.get("returncode")),
                 vae=_fmt(item.get("vae_load_exists")),
                 heads=_fmt(item.get("required_heads_all_exist")),
+                source=_fmt(item.get("source_summary_exists")),
                 missing=len(item.get("missing_head_paths", [])),
                 run_dir=item.get("run_dir") or "-",
             )
@@ -387,6 +412,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="select only eval commands whose VAE and requested feature heads exist",
     )
     parser.add_argument(
+        "--complete-only",
+        action="store_true",
+        help="select only eval commands whose source run summary exists",
+    )
+    parser.add_argument(
         "--execute",
         action="store_true",
         help="execute selected eval commands; default only reports the plan",
@@ -409,6 +439,7 @@ def main(argv: list[str] | None = None) -> int:
         seeds=args.seed,
         limit=args.limit,
         ready_only=bool(args.ready_only),
+        complete_only=bool(args.complete_only),
         cwd=cwd,
     )
     if not selected:
@@ -429,6 +460,7 @@ def main(argv: list[str] | None = None) -> int:
         "feature_family": recipe.get("feature_family"),
         "execute": bool(args.execute),
         "ready_only": bool(args.ready_only),
+        "complete_only": bool(args.complete_only),
         "selected_count": len(results),
         "available_count": len(commands),
         "cwd": str(cwd),
