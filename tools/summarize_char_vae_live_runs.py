@@ -476,6 +476,20 @@ def _active_feature_evidence(
     return rows
 
 
+def _remaining_active_features(
+    rows: list[dict[str, Any]],
+) -> list[str]:
+    remaining: list[str] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        feature = row.get("feature")
+        if feature is None or row.get("status") == "completed":
+            continue
+        remaining.append(str(feature))
+    return remaining
+
+
 def _log_status(
     log_path: Path,
     *,
@@ -504,6 +518,12 @@ def _log_status(
                 planned_features=planned_features,
                 expected_epoch_count=expected_epoch_count,
             ),
+            "active_seed_remaining_features": planned_features,
+            "active_seed_remaining_feature_count": len(planned_features),
+            "active_seed_next_feature": (
+                planned_features[0] if planned_features else None
+            ),
+            "active_seed_completed_fraction": 0.0 if planned_features else None,
             "active_feature_evidence": _active_feature_evidence(
                 [],
                 planned_features=planned_features,
@@ -545,6 +565,17 @@ def _log_status(
         planned_features=planned_features,
         expected_epoch_count=expected_epoch_count,
     )
+    active_feature_evidence = _active_feature_evidence(
+        feature_progress,
+        planned_features=active_progress["planned_features"],
+        expected_epoch_count=expected_epoch_count,
+        current_feature=(
+            str(latest_record.get("feature"))
+            if latest_record.get("feature") is not None
+            else None
+        ),
+    )
+    remaining_features = _remaining_active_features(active_feature_evidence)
     active_feature_index = None
     current_feature = latest_record.get("feature")
     if current_feature is not None and active_progress["planned_features"]:
@@ -568,14 +599,17 @@ def _log_status(
         "feature_progress": feature_progress,
         **best_so_far,
         **active_progress,
-        "active_feature_evidence": _active_feature_evidence(
-            feature_progress,
-            planned_features=active_progress["planned_features"],
-            expected_epoch_count=expected_epoch_count,
-            current_feature=(
-                str(current_feature) if current_feature is not None else None
-            ),
+        "active_seed_remaining_features": remaining_features,
+        "active_seed_remaining_feature_count": len(remaining_features),
+        "active_seed_next_feature": (
+            remaining_features[0] if remaining_features else None
         ),
+        "active_seed_completed_fraction": (
+            1.0 - (len(remaining_features) / len(active_progress["planned_features"]))
+            if active_progress["planned_features"]
+            else None
+        ),
+        "active_feature_evidence": active_feature_evidence,
         "best_feature_lines": best_feature_lines,
         "status_lines": status_lines,
     }
@@ -590,6 +624,14 @@ def _run_progress_record(
     planned_seeds = _int_list(run_metadata.get("seeds"))
     completed_seed_count = len(seed_results)
     planned_seed_count = len(planned_seeds)
+    completed_seed_ids = {
+        int(seed["seed"])
+        for seed in seed_results
+        if seed.get("seed") is not None
+    }
+    remaining_seeds = [
+        seed for seed in planned_seeds if int(seed) not in completed_seed_ids
+    ]
     current_seed = log_status.get("current_seed")
     active_seed_index = None
     if current_seed is not None and planned_seeds:
@@ -602,6 +644,8 @@ def _run_progress_record(
         "schema": "st.llm_char_vae_context.live_progress.v1",
         "planned_seeds": planned_seeds,
         "planned_seed_count": planned_seed_count,
+        "remaining_seeds": remaining_seeds,
+        "remaining_seed_count": len(remaining_seeds),
         "completed_seed_count": completed_seed_count,
         "completed_seed_fraction": (
             completed_seed_count / planned_seed_count if planned_seed_count else None
@@ -781,6 +825,9 @@ def markdown_report(payload: dict[str, Any]) -> str:
                 f"- follow_up_verdict: {run.get('follow_up_verdict') or '-'}",
                 f"- guidance_action: {run.get('guidance_action') or '-'}",
                 f"- seed_progress: {progress.get('completed_seed_count') or 0}/{progress.get('planned_seed_count') or '-'}",
+                "- remaining_seeds: "
+                f"{', '.join(str(seed) for seed in progress.get('remaining_seeds') or []) or '-'}",
+                f"- remaining_seed_count: {_fmt(progress.get('remaining_seed_count'), digits=0)}",
                 f"- completed_seed_leader: {evidence.get('top_winner_feature') or '-'} ({evidence.get('top_winner_count') or 0}/{evidence.get('completed_seed_count') or 0}, rate={_fmt(evidence.get('top_winner_rate'))})",
                 f"- completed_seed_mean_best_nll: {_fmt(evidence.get('mean_best_nll'))}",
                 f"- completed_seed_mean_delta_vs_raw: {_fmt(evidence.get('mean_delta_vs_raw'))}",
@@ -793,6 +840,11 @@ def markdown_report(payload: dict[str, Any]) -> str:
                 f"- active_feature_index: {_fmt(log.get('active_feature_index'), digits=0)}/{log.get('planned_feature_count') or '-'}",
                 f"- current_epoch: {_fmt(log.get('current_epoch'))}",
                 f"- active_seed_progress_fraction: {_fmt(log.get('active_seed_progress_fraction'))}",
+                "- active_seed_remaining_features: "
+                f"{', '.join(log.get('active_seed_remaining_features') or []) or '-'}",
+                f"- active_seed_remaining_feature_count: {_fmt(log.get('active_seed_remaining_feature_count'), digits=0)}",
+                f"- active_seed_next_feature: {log.get('active_seed_next_feature') or '-'}",
+                f"- active_seed_completed_fraction: {_fmt(log.get('active_seed_completed_fraction'))}",
                 f"- best_so_far: {log.get('best_so_far_feature') or '-'}@{_fmt(log.get('best_so_far_val_nll'))}",
                 f"- best_so_far_runner_up: {log.get('best_so_far_runner_up_feature') or '-'}",
                 f"- best_so_far_margin_to_runner_up: {_fmt(log.get('best_so_far_margin_to_runner_up'))}",
