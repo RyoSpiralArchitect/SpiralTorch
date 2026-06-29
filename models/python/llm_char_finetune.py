@@ -203,6 +203,15 @@ def _build_training_contract(
                 "here_tolerance": 1e-5,
             },
         },
+        "validation": {
+            "eval_samples": run_meta.get("eval_samples"),
+            "validation_start_fraction_requested": run_meta.get(
+                "validation_start_fraction_requested"
+            ),
+            "validation_start_fraction_actual": run_meta.get(
+                "validation_start_fraction_actual"
+            ),
+        },
         "reload": {
             "weights_loaded_from": weights_loaded_from,
             "output_weights_path": str(weights_path),
@@ -262,6 +271,385 @@ def _metrics_summary(metrics_path: pathlib.Path) -> dict[str, Any]:
     }
 
 
+def _safe_prob(value: float, eps: float = 1e-12) -> float:
+    if not math.isfinite(value) or value <= 0.0:
+        return eps
+    return max(eps, min(1.0, value))
+
+
+def _nll_from_prob(probability: float) -> float:
+    return -math.log(_safe_prob(probability))
+
+
+def _normalise_probs(values: list[float], vocab_size: int) -> list[float]:
+    out = []
+    for value in values[:vocab_size]:
+        parsed = float(value)
+        out.append(parsed if math.isfinite(parsed) and parsed > 0.0 else 0.0)
+    if len(out) < vocab_size:
+        out.extend([0.0] * (vocab_size - len(out)))
+    total = sum(out)
+    if total <= 0.0 or not math.isfinite(total):
+        return [1.0 / float(vocab_size)] * vocab_size
+    inv = 1.0 / total
+    return [value * inv for value in out]
+
+
+def _target_rank(values: list[float], target: int) -> int | None:
+    if target < 0 or target >= len(values):
+        return None
+    target_value = values[target]
+    return 1 + sum(1 for value in values if value > target_value)
+
+
+def _entropy(values: list[float]) -> float:
+    return -sum(prob * math.log(_safe_prob(prob)) for prob in values if prob > 0.0)
+
+
+def _kl_divergence(lhs: list[float], rhs: list[float]) -> float:
+    total = 0.0
+    for left, right in zip(lhs, rhs):
+        if left <= 0.0:
+            continue
+        total += left * (math.log(_safe_prob(left)) - math.log(_safe_prob(right)))
+    return total
+
+
+def _topk_indices(values: list[float], k: int) -> set[int]:
+    if k <= 0:
+        return set()
+    return {
+        idx
+        for idx, _value in sorted(
+            enumerate(values),
+            key=lambda item: item[1],
+            reverse=True,
+        )[:k]
+    }
+
+
+def _split_token_stream(
+    tokens: list[int],
+    *,
+    steps: int,
+    val_split: float,
+) -> tuple[list[int], list[int], float | None]:
+    if val_split <= 0.0 or len(tokens) <= (2 * steps) + 2:
+        return tokens, tokens, None
+    split_at = int(len(tokens) * (1.0 - val_split))
+    split_at = min(max(split_at, steps + 1), len(tokens) - steps - 1)
+    train_tokens = tokens[:split_at]
+    validation_tokens = tokens[split_at:]
+    if len(train_tokens) <= steps or len(validation_tokens) <= steps:
+        return tokens, tokens, None
+    return train_tokens, validation_tokens, split_at / float(len(tokens))
+
+
+def _sample_eval_windows(
+    tokens: list[int],
+    *,
+    steps: int,
+    count: int,
+    seed: int,
+) -> list[tuple[list[int], int]]:
+    if count <= 0:
+        return []
+    max_start = len(tokens) - steps
+    if max_start <= 0:
+        return []
+    rng = random.Random(seed)
+    samples = []
+    for _ in range(count):
+        start = rng.randrange(0, max_start)
+        samples.append((tokens[start : start + steps], tokens[start + steps]))
+    return samples
+
+
+def _tensor_from_eval_windows(
+    samples: list[tuple[list[int], int]],
+    *,
+    vocab_size: int,
+    steps: int,
+    embed_dim: int | None,
+) -> st.Tensor:
+    if embed_dim is not None:
+        data = [
+            float(token)
+            for context, _target in samples
+            for token in context[:steps]
+        ]
+        return st.Tensor(len(samples), steps, data)
+
+    cols = vocab_size * steps
+    data = [0.0] * (len(samples) * cols)
+    for row, (context, _target) in enumerate(samples):
+        for step, token in enumerate(context[:steps]):
+            if 0 <= token < vocab_size:
+                data[row * cols + step * vocab_size + token] = 1.0
+    return st.Tensor(len(samples), cols, data)
+
+
+def _unigram_probs(tokens: list[int], vocab_size: int) -> list[float]:
+    counts = [1.0] * vocab_size
+    for token in tokens:
+        if 0 <= token < vocab_size:
+            counts[token] += 1.0
+    total = sum(counts)
+    return [count / total for count in counts]
+
+
+def _bigram_probs(tokens: list[int], vocab_size: int) -> list[list[float]]:
+    counts = [[1.0] * vocab_size for _ in range(vocab_size)]
+    for prev, token in zip(tokens, tokens[1:]):
+        if 0 <= prev < vocab_size and 0 <= token < vocab_size:
+            counts[prev][token] += 1.0
+    return [[value / sum(row) for value in row] for row in counts]
+
+
+def _baseline_rows(
+    samples: list[tuple[list[int], int]],
+    *,
+    unigram: list[float],
+    bigram: list[list[float]],
+) -> tuple[list[list[float]], list[list[float]]]:
+    unigram_rows = [list(unigram) for _ in samples]
+    bigram_rows = []
+    for context, _target in samples:
+        previous = context[-1] if context else 0
+        if 0 <= previous < len(bigram):
+            bigram_rows.append(list(bigram[previous]))
+        else:
+            bigram_rows.append(list(unigram))
+    return unigram_rows, bigram_rows
+
+
+def _validation_from_probability_rows(
+    rows: list[list[float]],
+    samples: list[tuple[list[int], int]],
+    *,
+    vocab_size: int,
+    unigram_rows: list[list[float]] | None = None,
+    bigram_rows: list[list[float]] | None = None,
+) -> dict[str, Any]:
+    if not rows or not samples:
+        return {
+            "windows": 0,
+            "mean_nll": None,
+            "perplexity": None,
+            "accuracy": None,
+            "mean_target_probability": None,
+        }
+
+    nll = 0.0
+    correct = 0
+    target_probability = 0.0
+    entropy = 0.0
+    ranks: list[int] = []
+    unigram_logprob_lifts: list[float] = []
+    unigram_rank_lifts: list[float] = []
+    unigram_ranks: list[int] = []
+    unigram_rank_debts: list[float] = []
+    unigram_kls: list[float] = []
+    unigram_top5: list[float] = []
+    bigram_logprob_lifts: list[float] = []
+    bigram_rank_lifts: list[float] = []
+    bigram_ranks: list[int] = []
+    bigram_rank_debts: list[float] = []
+    bigram_kls: list[float] = []
+    bigram_top5: list[float] = []
+    paired_count = 0
+
+    for idx, ((context, target), raw_row) in enumerate(zip(samples, rows)):
+        paired_count += 1
+        del context
+        values = _normalise_probs([float(value) for value in raw_row], vocab_size)
+        prob = values[target] if 0 <= target < vocab_size else 0.0
+        target_probability += prob
+        nll += _nll_from_prob(prob)
+        if _argmax(values) == target:
+            correct += 1
+        entropy += _entropy(values)
+        rank = _target_rank(values, target)
+        if rank is not None:
+            ranks.append(rank)
+
+        for baseline_rows, logprob_lifts, rank_lifts, baseline_ranks, rank_debts, kls, top5s in (
+            (
+                unigram_rows,
+                unigram_logprob_lifts,
+                unigram_rank_lifts,
+                unigram_ranks,
+                unigram_rank_debts,
+                unigram_kls,
+                unigram_top5,
+            ),
+            (
+                bigram_rows,
+                bigram_logprob_lifts,
+                bigram_rank_lifts,
+                bigram_ranks,
+                bigram_rank_debts,
+                bigram_kls,
+                bigram_top5,
+            ),
+        ):
+            if baseline_rows is None or idx >= len(baseline_rows):
+                continue
+            baseline = _normalise_probs(baseline_rows[idx], vocab_size)
+            baseline_prob = baseline[target] if 0 <= target < vocab_size else 0.0
+            logprob_lifts.append(
+                math.log(_safe_prob(prob)) - math.log(_safe_prob(baseline_prob))
+            )
+            baseline_rank = _target_rank(baseline, target)
+            if rank is not None and baseline_rank is not None:
+                baseline_ranks.append(baseline_rank)
+                rank_lifts.append(float(baseline_rank - rank))
+                rank_debts.append(float(rank - baseline_rank))
+            kls.append(_kl_divergence(values, baseline))
+            denom = float(min(5, vocab_size))
+            overlap = len(_topk_indices(values, 5) & _topk_indices(baseline, 5))
+            top5s.append(overlap / denom if denom > 0.0 else 0.0)
+
+    if paired_count <= 0:
+        return _validation_from_probability_rows([], [], vocab_size=vocab_size)
+
+    count = float(paired_count)
+    mean_nll = nll / count
+
+    def mean(values: list[float] | list[int]) -> float | None:
+        return sum(float(value) for value in values) / float(len(values)) if values else None
+
+    result: dict[str, Any] = {
+        "windows": paired_count,
+        "mean_nll": mean_nll,
+        "perplexity": math.exp(mean_nll) if mean_nll < 80.0 else None,
+        "accuracy": correct / count,
+        "mean_target_probability": target_probability / count,
+        "mean_entropy": entropy / count,
+        "mean_target_rank": mean(ranks),
+    }
+    if unigram_rows is not None:
+        result.update(
+            {
+                "mean_target_logprob_lift": mean(unigram_logprob_lifts),
+                "mean_target_rank_lift": mean(unigram_rank_lifts),
+                "mean_unigram_target_rank": mean(unigram_ranks),
+                "mean_target_rank_debt_vs_unigram": mean(unigram_rank_debts),
+                "mean_kl_to_unigram": mean(unigram_kls),
+                "mean_top5_overlap_with_unigram": mean(unigram_top5),
+            }
+        )
+    if bigram_rows is not None:
+        result.update(
+            {
+                "mean_target_logprob_lift_vs_bigram": mean(bigram_logprob_lifts),
+                "mean_target_rank_lift_vs_bigram": mean(bigram_rank_lifts),
+                "mean_bigram_target_rank": mean(bigram_ranks),
+                "mean_target_rank_debt_vs_bigram": mean(bigram_rank_debts),
+                "mean_kl_to_bigram": mean(bigram_kls),
+                "mean_top5_overlap_with_bigram": mean(bigram_top5),
+            }
+        )
+    return result
+
+
+def _evaluate_model(
+    model: st.nn.Sequential,
+    samples: list[tuple[list[int], int]],
+    *,
+    vocab_size: int,
+    steps: int,
+    embed_dim: int | None,
+    unigram_rows: list[list[float]],
+    bigram_rows: list[list[float]],
+) -> dict[str, Any]:
+    if not samples:
+        return _validation_from_probability_rows([], [], vocab_size=vocab_size)
+    x = _tensor_from_eval_windows(
+        samples,
+        vocab_size=vocab_size,
+        steps=steps,
+        embed_dim=embed_dim,
+    )
+    rows = model.forward(x).tolist()
+    return _validation_from_probability_rows(
+        rows,
+        samples,
+        vocab_size=vocab_size,
+        unigram_rows=unigram_rows,
+        bigram_rows=bigram_rows,
+    )
+
+
+def _validation_summary_payload(
+    *,
+    initial_validation: dict[str, Any],
+    final_validation: dict[str, Any],
+    unigram_validation: dict[str, Any],
+    bigram_validation: dict[str, Any],
+    best_validation: dict[str, Any],
+    best_epoch: int | None,
+) -> dict[str, Any]:
+    initial_nll = initial_validation.get("mean_nll")
+    final_nll = final_validation.get("mean_nll")
+    unigram_nll = unigram_validation.get("mean_nll")
+    bigram_nll = bigram_validation.get("mean_nll")
+    initial_acc = initial_validation.get("accuracy")
+    final_acc = final_validation.get("accuracy")
+    best_nll = best_validation.get("mean_nll")
+    return {
+        "initial_validation": initial_validation,
+        "final_validation": final_validation,
+        "unigram_validation": unigram_validation,
+        "bigram_validation": bigram_validation,
+        "validation_nll_delta": (
+            final_nll - initial_nll
+            if isinstance(final_nll, (int, float))
+            and isinstance(initial_nll, (int, float))
+            else None
+        ),
+        "validation_accuracy_delta": (
+            final_acc - initial_acc
+            if isinstance(final_acc, (int, float))
+            and isinstance(initial_acc, (int, float))
+            else None
+        ),
+        "final_vs_unigram_nll_delta": (
+            final_nll - unigram_nll
+            if isinstance(final_nll, (int, float))
+            and isinstance(unigram_nll, (int, float))
+            else None
+        ),
+        "final_vs_bigram_nll_delta": (
+            final_nll - bigram_nll
+            if isinstance(final_nll, (int, float))
+            and isinstance(bigram_nll, (int, float))
+            else None
+        ),
+        "best_validation": best_validation,
+        "best_validation_epoch": best_epoch,
+        "best_validation_mean_nll": best_nll,
+        "final_minus_best_validation_nll": (
+            final_nll - best_nll
+            if isinstance(final_nll, (int, float))
+            and isinstance(best_nll, (int, float))
+            else None
+        ),
+        "best_vs_unigram_nll_delta": (
+            best_nll - unigram_nll
+            if isinstance(best_nll, (int, float))
+            and isinstance(unigram_nll, (int, float))
+            else None
+        ),
+        "best_vs_bigram_nll_delta": (
+            best_nll - bigram_nll
+            if isinstance(best_nll, (int, float))
+            and isinstance(bigram_nll, (int, float))
+            else None
+        ),
+    }
+
+
 def _write_completion_summary(
     run_dir: pathlib.Path,
     run_meta: dict[str, Any],
@@ -270,6 +658,7 @@ def _write_completion_summary(
     metrics_path: pathlib.Path,
     final_sample_path: pathlib.Path,
     save_weights: pathlib.Path | None,
+    validation: dict[str, Any] | None = None,
 ) -> None:
     meta_path = _meta_path_for_weights(weights_path)
     external_meta_path = (
@@ -306,6 +695,8 @@ def _write_completion_summary(
             "exists": final_sample_path.exists(),
         },
     }
+    if validation:
+        payload.update(validation)
     _write_json(run_dir / "summary.json", payload)
 
 
@@ -537,7 +928,7 @@ def main() -> None:
             "usage: PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_finetune.py <text_or_dir> [<text_or_dir> ...] "
             "[--load weights.json] [--save weights.json] [--steps N] [--embed-dim N] [--hidden N] "
             "[--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] "
-            "[--gen N] [--topk N] [--seed N] [--prompt STR] "
+            "[--gen N] [--topk N] [--seed N] [--prompt STR] [--val-split F] [--eval-samples N] "
             "[--backend cpu|wgpu|cuda|hip|auto] "
             "[--events PATH] [--events-types A,B,C] "
             "[--atlas] [--atlas-bound N] [--atlas-district NAME] "
@@ -570,6 +961,8 @@ def main() -> None:
     gen_len = 200
     top_k = 32
     seed = 42
+    val_split = 0.1
+    eval_samples = 64
     prompt: str | None = None
     backend = "cpu"
     events_path: pathlib.Path | None = None
@@ -620,6 +1013,10 @@ def main() -> None:
             top_k = int(next(it))
         elif flag == "--seed":
             seed = int(next(it))
+        elif flag == "--val-split":
+            val_split = float(next(it))
+        elif flag == "--eval-samples":
+            eval_samples = int(next(it))
         elif flag == "--prompt":
             prompt = str(next(it))
         elif flag == "--backend":
@@ -657,6 +1054,10 @@ def main() -> None:
         raise ValueError("--desire-concepts must be >= 1")
     if desire_prime < 0:
         raise ValueError("--desire-prime must be >= 0")
+    if val_split < 0.0 or val_split >= 0.95:
+        raise ValueError("--val-split must be within [0, 0.95)")
+    if eval_samples < 0:
+        raise ValueError("--eval-samples must be >= 0")
 
     _require_backend_available(backend)
 
@@ -731,6 +1132,11 @@ def main() -> None:
     tokens = _encode(text, index)
     if len(tokens) <= steps:
         raise ValueError(f"text too short for steps={steps}: len={len(tokens)}")
+    train_tokens, validation_tokens, validation_start_fraction_actual = _split_token_stream(
+        tokens,
+        steps=steps,
+        val_split=val_split,
+    )
 
     if prompt is None:
         prompt = "".join(list(text)[:steps])
@@ -751,7 +1157,9 @@ def main() -> None:
         "epochs": epochs,
         "batches_per_epoch": batches_per_epoch,
         "batch": batch,
+        "eval_samples": eval_samples,
         "lr": lr,
+        "learning_rate": lr,
         "curvature": curvature,
         "temperature": temperature,
         "backend": backend,
@@ -760,6 +1168,10 @@ def main() -> None:
         "seed": seed,
         "prompt": prompt,
         "vocab_size": vocab_size,
+        "train_tokens": len(train_tokens),
+        "validation_tokens": len(validation_tokens),
+        "validation_start_fraction_requested": 1.0 - val_split,
+        "validation_start_fraction_actual": validation_start_fraction_actual,
         "symbols_count": len(symbols),
         "mode": mode,
         "events_path": str(events_path) if events_path is not None else None,
@@ -805,11 +1217,51 @@ def main() -> None:
             bundle=desire_bundle,
         )
     loss = st.nn.CategoricalCrossEntropy()
+    validation_samples = _sample_eval_windows(
+        validation_tokens,
+        steps=steps,
+        count=eval_samples,
+        seed=seed + 700_000,
+    )
+    unigram = _unigram_probs(train_tokens, vocab_size)
+    bigram = _bigram_probs(train_tokens, vocab_size)
+    unigram_rows, bigram_rows = _baseline_rows(
+        validation_samples,
+        unigram=unigram,
+        bigram=bigram,
+    )
+    unigram_validation = _validation_from_probability_rows(
+        unigram_rows,
+        validation_samples,
+        vocab_size=vocab_size,
+    )
+    bigram_validation = _validation_from_probability_rows(
+        bigram_rows,
+        validation_samples,
+        vocab_size=vocab_size,
+    )
+    initial_validation = _evaluate_model(
+        model,
+        validation_samples,
+        vocab_size=vocab_size,
+        steps=steps,
+        embed_dim=embed_dim_runtime,
+        unigram_rows=unigram_rows,
+        bigram_rows=bigram_rows,
+    )
+    best_validation = initial_validation
+    best_validation_epoch: int | None = None
 
     print(
         f"mode={mode} vocab={vocab_size} files={len(data_files)} chars={len(text)} steps={steps} hidden={hidden} epochs={epochs} "
-        f"batch={batch} lr={lr:.3e} curvature={curvature} temp={temperature} backend={backend} run_dir={run_dir}"
+        f"batch={batch} lr={lr:.3e} curvature={curvature} temp={temperature} backend={backend} eval_samples={eval_samples} run_dir={run_dir}"
     )
+    if initial_validation.get("mean_nll") is not None:
+        print(
+            f"init val_nll={float(initial_validation['mean_nll']):.6f} "
+            f"acc={float(initial_validation['accuracy']) * 100.0:.2f}%",
+            flush=True,
+        )
 
     record_ctx = (
         st.plugin.record(str(events_path), event_types=events_types)
@@ -842,7 +1294,7 @@ def main() -> None:
             for _ in range(batches_per_epoch):
                 batches.append(
                     _build_random_batch(
-                        tokens,
+                        train_tokens,
                         vocab_size,
                         steps,
                         batch,
@@ -852,10 +1304,35 @@ def main() -> None:
                 )
             stats = trainer.train_epoch(model, loss, batches, schedule)
             avg_loss = float(stats.average_loss)
+            validation = _evaluate_model(
+                model,
+                validation_samples,
+                vocab_size=vocab_size,
+                steps=steps,
+                embed_dim=embed_dim_runtime,
+                unigram_rows=unigram_rows,
+                bigram_rows=bigram_rows,
+            )
+            validation_nll = validation.get("mean_nll")
+            best_nll = best_validation.get("mean_nll")
+            if (
+                isinstance(validation_nll, (int, float))
+                and (
+                    not isinstance(best_nll, (int, float))
+                    or float(validation_nll) < float(best_nll)
+                )
+            ):
+                best_validation = validation
+                best_validation_epoch = epoch
             with metrics_path.open("a", encoding="utf-8") as handle:
                 handle.write(
                     json.dumps(
-                        {"epoch": epoch, "batches": int(stats.batches), "average_loss": avg_loss},
+                        {
+                            "epoch": epoch,
+                            "batches": int(stats.batches),
+                            "average_loss": avg_loss,
+                            "validation": validation,
+                        },
                         ensure_ascii=False,
                     )
                     + "\n"
@@ -873,7 +1350,15 @@ def main() -> None:
                 desire=desire_pipeline,
             )
             (samples_dir / f"epoch_{epoch:03d}.txt").write_text(sample, encoding="utf-8")
-            print(f"epoch[{epoch}] batches={stats.batches} avg_loss={avg_loss:.6f}")
+            if validation.get("mean_nll") is not None:
+                print(
+                    f"epoch[{epoch}] batches={stats.batches} avg_loss={avg_loss:.6f} "
+                    f"val_nll={float(validation['mean_nll']):.6f} "
+                    f"acc={float(validation['accuracy']) * 100.0:.2f}%",
+                    flush=True,
+                )
+            else:
+                print(f"epoch[{epoch}] batches={stats.batches} avg_loss={avg_loss:.6f}")
 
     if atlas and events_path is not None:
         try:
@@ -926,6 +1411,19 @@ def main() -> None:
         )
         final_sample_path = samples_dir / "init.txt"
         final_sample_path.write_text(sample, encoding="utf-8")
+    final_validation = (
+        validation
+        if epochs > 0
+        else _evaluate_model(
+            model,
+            validation_samples,
+            vocab_size=vocab_size,
+            steps=steps,
+            embed_dim=embed_dim_runtime,
+            unigram_rows=unigram_rows,
+            bigram_rows=bigram_rows,
+        )
+    )
     _write_completion_summary(
         run_dir,
         run_meta,
@@ -933,6 +1431,14 @@ def main() -> None:
         metrics_path=metrics_path,
         final_sample_path=final_sample_path,
         save_weights=save_weights,
+        validation=_validation_summary_payload(
+            initial_validation=initial_validation,
+            final_validation=final_validation,
+            unigram_validation=unigram_validation,
+            bigram_validation=bigram_validation,
+            best_validation=best_validation,
+            best_epoch=best_validation_epoch,
+        ),
     )
     print("--- sample (prompt + gen) ---")
     print(sample)
