@@ -36,6 +36,14 @@ class SummarizeCharVaeLiveRunsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             run = Path(tmp) / "run"
             run.mkdir()
+            _write_json(
+                run / "run.json",
+                {
+                    "seeds": [1031, 1033],
+                    "features": ["raw", "latent"],
+                    "epochs": 20,
+                },
+            )
             (run / "run.log").write_text(
                 "\n".join(
                     [
@@ -48,6 +56,7 @@ class SummarizeCharVaeLiveRunsTests(unittest.TestCase):
                         ),
                         "sweep_normalize=blocks sweep_scale=4 sweep_seed=1033",
                         "raw[0] train_loss=4.5 val_nll=4.19 acc=17.00%",
+                        "raw[19] train_loss=4.5 val_nll=4.19 acc=17.00%",
                         "latent[10] train_loss=4.51 val_nll=4.17 acc=14.45%",
                     ]
                 ),
@@ -84,6 +93,15 @@ class SummarizeCharVaeLiveRunsTests(unittest.TestCase):
         self.assertEqual(summary["log"]["completed_best_features"], 1)
         self.assertEqual(summary["completed_seed_count"], 1)
         self.assertEqual(summary["winner_counts"], {"reconstruction_latent": 1})
+        self.assertEqual(summary["progress"]["planned_seed_count"], 2)
+        self.assertEqual(summary["progress"]["completed_seed_count"], 1)
+        self.assertAlmostEqual(summary["progress"]["completed_seed_fraction"], 0.5)
+        self.assertEqual(summary["progress"]["active_seed_index"], 2)
+        self.assertEqual(summary["progress"]["latest_completed_seed"], 1031)
+        self.assertEqual(
+            summary["progress"]["latest_completed_best_feature"],
+            "reconstruction_latent",
+        )
         self.assertEqual(
             summary["log"]["latest_progress"],
             "latent[10] train_loss=4.51 val_nll=4.17 acc=14.45%",
@@ -91,9 +109,25 @@ class SummarizeCharVaeLiveRunsTests(unittest.TestCase):
         self.assertEqual(summary["log"]["best_so_far_feature"], "latent")
         self.assertAlmostEqual(summary["log"]["best_so_far_val_nll"], 4.17)
         self.assertAlmostEqual(summary["log"]["best_so_far_delta_vs_raw"], -0.02)
+        self.assertEqual(summary["log"]["best_so_far_runner_up_feature"], "raw")
+        self.assertAlmostEqual(summary["log"]["best_so_far_margin_to_runner_up"], 0.02)
+        self.assertEqual(summary["log"]["planned_features"], ["raw", "latent"])
+        self.assertEqual(summary["log"]["planned_feature_count"], 2)
+        self.assertEqual(summary["log"]["expected_epoch_count"], 20)
+        self.assertEqual(summary["log"]["expected_final_epoch"], 19)
+        self.assertEqual(summary["log"]["active_feature_index"], 2)
+        self.assertEqual(
+            summary["log"]["active_seed_completed_features"],
+            ["raw"],
+        )
+        self.assertEqual(summary["log"]["active_seed_completed_feature_count"], 1)
+        self.assertAlmostEqual(
+            summary["log"]["active_seed_progress_fraction"],
+            0.775,
+        )
         progress = summary["log"]["feature_progress"]
         self.assertEqual([item["feature"] for item in progress], ["raw", "latent"])
-        self.assertEqual(progress[0]["latest_step"], 0)
+        self.assertEqual(progress[0]["latest_step"], 19)
         self.assertAlmostEqual(progress[0]["best_val_nll"], 4.19)
         self.assertAlmostEqual(progress[0]["best_delta_vs_raw"], 0.0)
         self.assertEqual(progress[1]["latest_step"], 10)
@@ -114,6 +148,14 @@ class SummarizeCharVaeLiveRunsTests(unittest.TestCase):
             root = Path(tmp)
             run = root / "run"
             run.mkdir()
+            _write_json(
+                run / "run.json",
+                {
+                    "seeds": [1043],
+                    "features": ["raw"],
+                    "epochs": 1,
+                },
+            )
             (run / "run.log").write_text(
                 "sweep_normalize=blocks sweep_scale=4 sweep_seed=1043\n"
                 "raw[0] train_loss=4.5 val_nll=4.19 acc=17.00%\n",
@@ -167,7 +209,11 @@ class SummarizeCharVaeLiveRunsTests(unittest.TestCase):
         self.assertEqual(payload["runs"][0]["log"]["best_so_far_feature"], "raw")
         self.assertIn("## Overview", markdown)
         self.assertIn("- completed_run_count: 1", markdown)
+        self.assertIn("- seed_progress: 0/1", markdown)
+        self.assertIn("- active_feature_index: 1/1", markdown)
+        self.assertIn("- active_seed_progress_fraction: 1.000000", markdown)
         self.assertIn("- best_so_far: raw@4.190000", markdown)
+        self.assertIn("- best_so_far_margin_to_runner_up: -", markdown)
         self.assertIn("| raw | 0 | 4.190000 | 0 | 4.190000 | 17.00 | 0.000000 |", markdown)
         self.assertIn("follow_up_verdict: improved", markdown)
 
