@@ -224,6 +224,8 @@ class LlmCharFinetuneContractTests(unittest.TestCase):
                 "batches_per_epoch": 5,
                 "batch": 2,
                 "eval_samples": 17,
+                "eval_seed": 123,
+                "validation_sample_seed": 700123,
                 "lr": 0.01,
                 "validation_start_fraction_requested": 0.9,
                 "validation_start_fraction_actual": 0.875,
@@ -255,6 +257,8 @@ class LlmCharFinetuneContractTests(unittest.TestCase):
         )
         self.assertEqual(contract["backend"]["requested"], "cpu")
         self.assertEqual(contract["backend"]["status"], "available")
+        self.assertEqual(contract["validation"]["eval_seed"], 123)
+        self.assertEqual(contract["validation"]["validation_sample_seed"], 700123)
         self.assertTrue(contract["reload"]["reload_safe"])
         self.assertTrue(contract["reload"]["metadata_required"])
         self.assertEqual(contract["reload"]["source_checkpoint"], source_checkpoint)

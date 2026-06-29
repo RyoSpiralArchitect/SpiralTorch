@@ -359,6 +359,8 @@ def _build_training_contract(
         },
         "validation": {
             "eval_samples": run_meta.get("eval_samples"),
+            "eval_seed": run_meta.get("eval_seed"),
+            "validation_sample_seed": run_meta.get("validation_sample_seed"),
             "validation_start_fraction_requested": run_meta.get(
                 "validation_start_fraction_requested"
             ),
@@ -1113,7 +1115,7 @@ def main() -> int:
             "[--load weights.json] [--load-run run_dir] [--save weights.json] [--steps N] [--embed-dim N] [--hidden N] "
             "[--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] "
             "[--gen N] [--topk N] [--seed N] [--prompt STR] [--val-split F] [--eval-samples N] "
-            "[--early-stop-patience N] [--restore-best-at-end] "
+            "[--eval-seed N] [--early-stop-patience N] [--restore-best-at-end] "
             "[--backend cpu|wgpu|cuda|hip|auto] "
             "[--preflight-only] [--ignore-preflight] "
             "[--events PATH] [--events-types A,B,C] "
@@ -1148,6 +1150,7 @@ def main() -> int:
     gen_len = 200
     top_k = 32
     seed = 42
+    eval_seed: int | None = None
     val_split = 0.1
     eval_samples = 64
     early_stop_patience = 0
@@ -1206,6 +1209,8 @@ def main() -> int:
             top_k = int(next(it))
         elif flag == "--seed":
             seed = int(next(it))
+        elif flag == "--eval-seed":
+            eval_seed = int(next(it))
         elif flag == "--val-split":
             val_split = float(next(it))
         elif flag == "--eval-samples":
@@ -1261,6 +1266,9 @@ def main() -> int:
         raise ValueError("--eval-samples must be >= 0")
     if early_stop_patience < 0:
         raise ValueError("--early-stop-patience must be >= 0")
+    if eval_seed is None:
+        eval_seed = seed
+    validation_sample_seed = eval_seed + 700_000
     load_weights = _resolve_load_weights(load_weights, load_run)
     source_checkpoint = _checkpoint_source_payload(load_weights, load_run=load_run)
 
@@ -1394,10 +1402,12 @@ def main() -> int:
         "gen_len": gen_len,
         "top_k": top_k,
         "seed": seed,
+        "eval_seed": eval_seed,
         "prompt": prompt,
         "vocab_size": vocab_size,
         "train_tokens": len(train_tokens),
         "validation_tokens": len(validation_tokens),
+        "validation_sample_seed": validation_sample_seed,
         "validation_start_fraction_requested": 1.0 - val_split,
         "validation_start_fraction_actual": validation_start_fraction_actual,
         "symbols_count": len(symbols),
@@ -1464,7 +1474,7 @@ def main() -> int:
         validation_tokens,
         steps=steps,
         count=eval_samples,
-        seed=seed + 700_000,
+        seed=validation_sample_seed,
     )
     unigram = _unigram_probs(train_tokens, vocab_size)
     bigram = _bigram_probs(train_tokens, vocab_size)
