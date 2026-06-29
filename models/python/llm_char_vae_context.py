@@ -1375,6 +1375,44 @@ def _single_learning_evidence(summary: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _best_family_learning_evidence(summary: dict[str, Any]) -> dict[str, Any] | None:
+    families = summary.get("feature_family_stability", [])
+    if not isinstance(families, list):
+        return None
+    valid_families = [item for item in families if isinstance(item, dict)]
+    if not valid_families:
+        return None
+    best = sorted(
+        valid_families,
+        key=lambda item: (
+            -int(item.get("win_count") or 0),
+            -int(item.get("near_win_count") or 0),
+            (
+                float("inf")
+                if _finite_float(item.get("mean_rank")) is None
+                else float(item["mean_rank"])
+            ),
+            (
+                float("inf")
+                if _finite_float(item.get("mean_best_nll")) is None
+                else float(item["mean_best_nll"])
+            ),
+            str(item.get("family") or ""),
+        ),
+    )[0]
+    return {
+        "family": best.get("family"),
+        "mean_best_nll": best.get("mean_best_nll"),
+        "mean_best_accuracy": best.get("mean_best_accuracy"),
+        "mean_best_nll_delta_vs_raw": best.get("mean_best_nll_delta_vs_raw"),
+        "win_rate": _finite_float(best.get("win_rate")),
+        "near_win_rate": _finite_float(best.get("near_win_rate")),
+        "mean_rank": best.get("mean_rank"),
+        "mean_gap_to_winner": best.get("mean_gap_to_winner"),
+        "member_best_counts": best.get("member_best_counts", {}),
+    }
+
+
 def _aggregate_learning_evidence(summary: dict[str, Any]) -> dict[str, Any]:
     run = summary.get("run", {})
     ranking = summary.get("ranking", [])
@@ -1409,6 +1447,18 @@ def _aggregate_learning_evidence(summary: dict[str, Any]) -> dict[str, Any]:
     )
     win_rate = _finite_float(best_stability.get("win_rate"))
     near_win_rate = _finite_float(best_stability.get("near_win_rate"))
+    best_family = _best_family_learning_evidence(summary)
+    family_delta_vs_raw = _finite_float(
+        best_family.get("mean_best_nll_delta_vs_raw") if best_family else None
+    )
+    family_win_rate = _finite_float(best_family.get("win_rate") if best_family else None)
+    family_promising = (
+        best_family is not None
+        and best_family.get("family") != FEATURE_RAW
+        and family_delta_vs_raw is not None
+        and family_delta_vs_raw < 0.0
+    )
+    family_stable = family_win_rate is not None and family_win_rate >= 0.5
 
     reasons: list[str] = []
     if run_count <= 0:
@@ -1428,6 +1478,8 @@ def _aggregate_learning_evidence(summary: dict[str, Any]) -> dict[str, Any]:
         status = "promising"
         if win_rate is not None and win_rate < 0.5:
             status = "promising_but_unstable"
+            if family_promising and family_stable:
+                status = "promising_family_stable"
     elif best_delta_vs_raw == 0.0:
         status = "ties_raw"
     else:
@@ -1471,6 +1523,7 @@ def _aggregate_learning_evidence(summary: dict[str, Any]) -> dict[str, Any]:
             "win_rate": win_rate,
             "near_win_rate": near_win_rate,
         },
+        "best_family": best_family,
         "best_config": {
             "feature_normalize": best_config.get("feature_normalize"),
             "hybrid_latent_scale": best_config.get("hybrid_latent_scale"),
@@ -1989,6 +2042,9 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
     if learning_evidence:
         coverage = learning_evidence.get("coverage", {})
         best_evidence = learning_evidence.get("best", {})
+        best_family_evidence = learning_evidence.get("best_family", {})
+        if not isinstance(best_family_evidence, dict):
+            best_family_evidence = {}
         best_config_evidence = learning_evidence.get("best_config", {})
         lines.extend(
             [
@@ -2012,6 +2068,20 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
                     ),
                     win_rate=_fmt_percent(best_evidence.get("win_rate")),
                     near_win_rate=_fmt_percent(best_evidence.get("near_win_rate")),
+                ),
+                "- best_family_vs_raw: {family} mean_delta={delta} win_rate={win_rate} "
+                "near_win_rate={near_win_rate} best_members={members}".format(
+                    family=best_family_evidence.get("family") or "-",
+                    delta=_fmt_float(
+                        best_family_evidence.get("mean_best_nll_delta_vs_raw")
+                    ),
+                    win_rate=_fmt_percent(best_family_evidence.get("win_rate")),
+                    near_win_rate=_fmt_percent(
+                        best_family_evidence.get("near_win_rate")
+                    ),
+                    members=_fmt_count_map(
+                        best_family_evidence.get("member_best_counts")
+                    ),
                 ),
                 "- best_config: {feature}@normalize={normalize},scale={scale},"
                 "latent_dim={latent_dim},hidden={hidden} "

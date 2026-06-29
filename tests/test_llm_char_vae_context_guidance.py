@@ -1146,6 +1146,121 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
         self.assertIn("- learning_status: promising", report)
         self.assertIn("## Learning Evidence", report)
 
+    def test_aggregate_learning_evidence_promotes_stable_hybrid_family(self) -> None:
+        mod = _load_module()
+        summary = {
+            "run": {
+                "seed_count": 3,
+                "run_count": 12,
+                "config_count": 4,
+                "normalize_count": 1,
+                "scale_count": 1,
+                "capacity_count": 1,
+                "features": [
+                    "raw",
+                    "latent",
+                    "raw_latent",
+                    "reconstruction_latent",
+                ],
+            },
+            "status": "improved",
+            "best_feature": "raw_latent",
+            "ranking": [
+                {
+                    "feature": "raw_latent",
+                    "mean_best_nll": 4.1023,
+                    "mean_best_accuracy": 0.165,
+                    "mean_best_nll_delta_vs_raw": -0.0867,
+                },
+                {
+                    "feature": "reconstruction_latent",
+                    "mean_best_nll": 4.1025,
+                    "mean_best_accuracy": 0.164,
+                    "mean_best_nll_delta_vs_raw": -0.0865,
+                },
+                {
+                    "feature": "raw",
+                    "mean_best_nll": 4.1890,
+                    "mean_best_accuracy": 0.142,
+                    "mean_best_nll_delta_vs_raw": 0.0,
+                },
+            ],
+            "feature_stability": [
+                {
+                    "feature": "raw_latent",
+                    "win_count": 1,
+                    "win_rate": 1 / 3,
+                    "near_win_count": 1,
+                    "near_win_rate": 1 / 3,
+                }
+            ],
+            "feature_family_stability": [
+                {
+                    "family": "hybrid_latent",
+                    "win_count": 3,
+                    "win_rate": 1.0,
+                    "near_win_count": 3,
+                    "near_win_rate": 1.0,
+                    "mean_best_nll": 4.1020,
+                    "mean_best_accuracy": 0.165,
+                    "mean_best_nll_delta_vs_raw": -0.0870,
+                    "mean_rank": 1.0,
+                    "mean_gap_to_winner": 0.0,
+                    "member_best_counts": {
+                        "reconstruction_latent": 2,
+                        "raw_latent": 1,
+                    },
+                },
+                {
+                    "family": "raw",
+                    "win_count": 0,
+                    "win_rate": 0.0,
+                    "near_win_count": 0,
+                    "near_win_rate": 0.0,
+                    "mean_best_nll_delta_vs_raw": 0.0,
+                    "member_best_counts": {},
+                },
+            ],
+            "feature_diagnostics_summary": [],
+            "seed_summaries": [{"seed": 211}, {"seed": 223}, {"seed": 227}],
+            "config_summaries": [{"status": "improved"} for _ in range(4)],
+            "best_config": {
+                "feature_normalize": "blocks",
+                "hybrid_latent_scale": 4.0,
+                "latent_dim": 12,
+                "hidden": 64,
+                "best_feature": "raw_latent",
+                "mean_best_nll": 4.1023,
+                "mean_best_nll_delta_vs_raw": -0.0867,
+                "runner_up_feature": "reconstruction_latent",
+                "margin_to_runner_up": 0.0002,
+                "runner_up_within_uncertainty": True,
+            },
+            "seed_winners": [],
+        }
+
+        evidence = mod._aggregate_learning_evidence(summary)
+        summary["learning_evidence"] = evidence
+        report = mod._aggregate_report(summary)
+
+        self.assertEqual(evidence["status"], "promising_family_stable")
+        self.assertEqual(evidence["best_family"]["family"], "hybrid_latent")
+        self.assertAlmostEqual(
+            evidence["best_family"]["mean_best_nll_delta_vs_raw"],
+            -0.0870,
+        )
+        self.assertEqual(
+            evidence["best_family"]["member_best_counts"],
+            {"reconstruction_latent": 2, "raw_latent": 1},
+        )
+        self.assertIn("- learning_status: promising_family_stable", report)
+        self.assertIn(
+            "- best_family_vs_raw: hybrid_latent mean_delta=-0.087000 "
+            "win_rate=100.00% near_win_rate=100.00% "
+            "best_members=reconstruction_latent=2, raw_latent=1",
+            report,
+        )
+
     def test_follow_up_result_reports_run_budget_shift(self) -> None:
         mod = _load_module()
         source_best_config = {
