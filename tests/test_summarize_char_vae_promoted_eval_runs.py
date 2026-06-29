@@ -55,6 +55,7 @@ def _write_report(path: Path, *, cwd: Path, seeds: list[int]) -> None:
                 "feature_family": "hybrid_latent",
                 "execute": True,
                 "ready_only": True,
+                "complete_only": True,
                 "selected_count": len(seeds),
                 "available_count": len(seeds) + 1,
                 "cwd": str(cwd),
@@ -105,6 +106,7 @@ class PromotedEvalSummaryTests(unittest.TestCase):
             payload = json.loads(result.stdout)
             summary = payload["reports"][0]
             self.assertEqual(summary["successful_eval_count"], 2)
+            self.assertTrue(summary["complete_only"])
             self.assertEqual(summary["winner_counts"], {"reconstruction_latent": 2})
             self.assertEqual(summary["target_feature_win_rate"], 1.0)
             self.assertAlmostEqual(summary["mean_target_delta_vs_raw"], -0.3)
