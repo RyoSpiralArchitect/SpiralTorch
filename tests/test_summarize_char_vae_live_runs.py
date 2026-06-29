@@ -128,6 +128,8 @@ class SummarizeCharVaeLiveRunsTests(unittest.TestCase):
         self.assertAlmostEqual(feature_evidence[1]["mean_gap_to_winner"], 0.001597)
         self.assertEqual(summary["progress"]["planned_seed_count"], 2)
         self.assertEqual(summary["progress"]["completed_seed_count"], 1)
+        self.assertEqual(summary["progress"]["remaining_seeds"], [1033])
+        self.assertEqual(summary["progress"]["remaining_seed_count"], 1)
         self.assertAlmostEqual(summary["progress"]["completed_seed_fraction"], 0.5)
         self.assertEqual(summary["progress"]["active_seed_index"], 2)
         self.assertEqual(summary["progress"]["latest_completed_seed"], 1031)
@@ -154,6 +156,10 @@ class SummarizeCharVaeLiveRunsTests(unittest.TestCase):
             ["raw"],
         )
         self.assertEqual(summary["log"]["active_seed_completed_feature_count"], 1)
+        self.assertEqual(summary["log"]["active_seed_remaining_features"], ["latent"])
+        self.assertEqual(summary["log"]["active_seed_remaining_feature_count"], 1)
+        self.assertEqual(summary["log"]["active_seed_next_feature"], "latent")
+        self.assertAlmostEqual(summary["log"]["active_seed_completed_fraction"], 0.5)
         self.assertAlmostEqual(
             summary["log"]["active_seed_progress_fraction"],
             0.775,
@@ -253,11 +259,22 @@ class SummarizeCharVaeLiveRunsTests(unittest.TestCase):
         self.assertEqual(payload["totals"]["run_count"], 1)
         self.assertEqual(payload["totals"]["completed_run_count"], 1)
         self.assertEqual(payload["runs"][0]["status"], "improved")
+        self.assertEqual(payload["runs"][0]["progress"]["remaining_seeds"], [1043])
+        self.assertEqual(payload["runs"][0]["progress"]["remaining_seed_count"], 1)
         self.assertEqual(payload["runs"][0]["log"]["current_feature"], "raw")
         self.assertEqual(payload["runs"][0]["log"]["best_so_far_feature"], "raw")
+        self.assertEqual(payload["runs"][0]["log"]["active_seed_remaining_features"], [])
+        self.assertEqual(payload["runs"][0]["log"]["active_seed_remaining_feature_count"], 0)
+        self.assertIsNone(payload["runs"][0]["log"]["active_seed_next_feature"])
+        self.assertAlmostEqual(
+            payload["runs"][0]["log"]["active_seed_completed_fraction"],
+            1.0,
+        )
         self.assertIn("## Overview", markdown)
         self.assertIn("- completed_run_count: 1", markdown)
         self.assertIn("- seed_progress: 0/1", markdown)
+        self.assertIn("- remaining_seeds: 1043", markdown)
+        self.assertIn("- remaining_seed_count: 1", markdown)
         self.assertIn("- completed_seed_leader: - (0/0, rate=-)", markdown)
         self.assertIn("- completed_seed_mean_delta_vs_raw: -", markdown)
         self.assertIn("- completed_seed_mean_margin_to_runner_up: -", markdown)
@@ -275,6 +292,10 @@ class SummarizeCharVaeLiveRunsTests(unittest.TestCase):
         )
         self.assertIn("- active_feature_index: 1/1", markdown)
         self.assertIn("- active_seed_progress_fraction: 1.000000", markdown)
+        self.assertIn("- active_seed_remaining_features: -", markdown)
+        self.assertIn("- active_seed_remaining_feature_count: 0", markdown)
+        self.assertIn("- active_seed_next_feature: -", markdown)
+        self.assertIn("- active_seed_completed_fraction: 1.000000", markdown)
         self.assertIn("- best_so_far: raw@4.190000", markdown)
         self.assertIn("- best_so_far_margin_to_runner_up: -", markdown)
         self.assertIn("| raw | 0 | 4.190000 | 0 | 4.190000 | 17.00 | 0.000000 |", markdown)
