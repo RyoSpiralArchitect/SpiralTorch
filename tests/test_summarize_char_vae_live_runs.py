@@ -79,6 +79,8 @@ class SummarizeCharVaeLiveRunsTests(unittest.TestCase):
         self.assertFalse(summary["summary_exists"])
         self.assertEqual(summary["log"]["current_seed"], 1033)
         self.assertEqual(summary["log"]["completed_best_features"], 1)
+        self.assertEqual(summary["completed_seed_count"], 1)
+        self.assertEqual(summary["winner_counts"], {"reconstruction_latent": 1})
         self.assertEqual(
             summary["log"]["latest_progress"],
             "latent[10] train_loss=4.51 val_nll=4.17 acc=14.45%",
@@ -144,7 +146,11 @@ class SummarizeCharVaeLiveRunsTests(unittest.TestCase):
             payload["schema"],
             "st.llm_char_vae_context.live_run_summaries.v1",
         )
+        self.assertEqual(payload["totals"]["run_count"], 1)
+        self.assertEqual(payload["totals"]["completed_run_count"], 1)
         self.assertEqual(payload["runs"][0]["status"], "improved")
+        self.assertIn("## Overview", markdown)
+        self.assertIn("- completed_run_count: 1", markdown)
         self.assertIn("follow_up_verdict: improved", markdown)
 
 

@@ -30,6 +30,12 @@ def _fmt(value: Any, digits: int = 6) -> str:
     return str(value)
 
 
+def _fmt_counts(counts: Any) -> str:
+    if not isinstance(counts, dict) or not counts:
+        return "-"
+    return ", ".join(f"{key}:{counts[key]}" for key in sorted(counts))
+
+
 def _seed_from_path(path: Path) -> int | None:
     match = re.search(r"seed_(\d+)", str(path))
     if not match:
@@ -84,6 +90,17 @@ def _seed_result(path: Path) -> dict[str, Any] | None:
         "margin_to_runner_up": margin,
         "ranking": ranking,
     }
+
+
+def _winner_counts(seed_results: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for seed in seed_results:
+        feature = seed.get("best_feature")
+        if feature is None:
+            continue
+        key = str(feature)
+        counts[key] = counts.get(key, 0) + 1
+    return counts
 
 
 def _log_status(log_path: Path) -> dict[str, Any]:
@@ -154,8 +171,36 @@ def summarize_run(run_dir: Path) -> dict[str, Any]:
         "mean_best_nll_delta_vs_raw": final_best.get("mean_best_nll_delta_vs_raw"),
         "follow_up_verdict": follow_up.get("verdict"),
         "guidance_action": guidance.get("action"),
+        "completed_seed_count": len(seed_results),
+        "winner_counts": _winner_counts(seed_results),
         "log": log_status,
         "seed_results": seed_results,
+    }
+
+
+def _totals(runs: list[dict[str, Any]]) -> dict[str, Any]:
+    winner_counts: dict[str, int] = {}
+    completed_seed_count = 0
+    completed_run_count = 0
+    for run in runs:
+        if run.get("summary_exists"):
+            completed_run_count += 1
+        completed_seed_count += int(run.get("completed_seed_count") or 0)
+        counts = run.get("winner_counts")
+        if not isinstance(counts, dict):
+            continue
+        for key, value in counts.items():
+            try:
+                amount = int(value)
+            except (TypeError, ValueError):
+                continue
+            winner_counts[str(key)] = winner_counts.get(str(key), 0) + amount
+    return {
+        "run_count": len(runs),
+        "completed_run_count": completed_run_count,
+        "in_progress_run_count": len(runs) - completed_run_count,
+        "completed_seed_count": completed_seed_count,
+        "winner_counts": winner_counts,
     }
 
 
@@ -164,12 +209,43 @@ def summarize_runs(run_dirs: list[Path]) -> dict[str, Any]:
     return {
         "schema": SCHEMA,
         "run_count": len(runs),
+        "totals": _totals(runs),
         "runs": runs,
     }
 
 
 def markdown_report(payload: dict[str, Any]) -> str:
     lines = ["# Char VAE Live Runs", ""]
+    totals = payload.get("totals") if isinstance(payload.get("totals"), dict) else {}
+    lines.extend(
+        [
+            "## Overview",
+            "",
+            f"- run_count: {totals.get('run_count', payload.get('run_count', 0))}",
+            f"- completed_run_count: {totals.get('completed_run_count', 0)}",
+            f"- in_progress_run_count: {totals.get('in_progress_run_count', 0)}",
+            f"- completed_seed_count: {totals.get('completed_seed_count', 0)}",
+            f"- winner_counts: {_fmt_counts(totals.get('winner_counts'))}",
+            "",
+            "| run | summary | current_seed | completed_seeds | winners | latest_progress |",
+            "| --- | --- | ---: | ---: | --- | --- |",
+        ]
+    )
+    for run in payload.get("runs", []):
+        if not isinstance(run, dict):
+            continue
+        log = run.get("log") if isinstance(run.get("log"), dict) else {}
+        lines.append(
+            "| {run} | {summary} | {current} | {completed} | {winners} | `{progress}` |".format(
+                run=run.get("run_dir") or "-",
+                summary=run.get("summary_exists"),
+                current=log.get("current_seed") or "-",
+                completed=run.get("completed_seed_count") or 0,
+                winners=_fmt_counts(run.get("winner_counts")),
+                progress=log.get("latest_progress") or "-",
+            )
+        )
+    lines.append("")
     for run in payload.get("runs", []):
         if not isinstance(run, dict):
             continue
