@@ -26,6 +26,30 @@ DEFAULT_UNK = "\uFFFD"
 RUN_SCHEMA = "st.modelzoo.run.v1"
 TRAINING_CONTRACT_SCHEMA = "st.llm_char_finetune.training_contract.v1"
 SUMMARY_SCHEMA = "st.llm_char_finetune.summary.v1"
+PREFLIGHT_SCHEMA = "st.llm_char_finetune.preflight.v1"
+REQUIRED_NN_SYMBOLS = [
+    "Sequential",
+    "Embedding",
+    "SpiralRnn",
+    "Linear",
+    "ZSpaceSoftmax",
+    "ModuleTrainer",
+    "CategoricalCrossEntropy",
+    "save",
+    "load",
+]
+DESIRE_NN_SYMBOLS = [
+    "DesireTelemetryBundle",
+    "DesirePipeline",
+]
+BACKEND_FEATURE_REQUIREMENTS = {
+    "wgpu": ["wgpu", "wgpu-rt"],
+    "webgpu": ["wgpu", "wgpu-rt"],
+    "auto": ["wgpu", "wgpu-rt"],
+    "cuda": ["cuda"],
+    "hip": ["hip", "hip-real"],
+    "rocm": ["hip", "hip-real"],
+}
 
 
 def _meta_path_for_weights(weights_path: pathlib.Path) -> pathlib.Path:
@@ -136,47 +160,120 @@ def _write_json(path: pathlib.Path, payload: dict[str, Any]) -> None:
         json.dump(payload, handle, ensure_ascii=False, indent=2)
 
 
-def _native_feature_flags() -> dict[str, bool]:
+def _native_feature_flags_with_error() -> tuple[dict[str, bool], str | None]:
     try:
         info = st.build_info()
-    except Exception:
-        return {}
+    except Exception as exc:
+        return {}, str(exc)
     if not isinstance(info, dict):
-        return {}
+        return {}, None
     features = info.get("features")
     if not isinstance(features, dict):
-        return {}
+        return {}, None
     out: dict[str, bool] = {}
     for key, value in features.items():
         out[str(key)] = bool(value)
+    return out, None
+
+
+def _native_feature_flags() -> dict[str, bool]:
+    out, _error = _native_feature_flags_with_error()
     return out
 
 
-def _backend_contract(backend: str) -> dict[str, Any]:
+def _backend_readiness(backend: str, flags: dict[str, bool]) -> dict[str, Any]:
     normalized = str(backend).strip().lower()
-    flags = _native_feature_flags()
-    required_any: list[str] = []
-    if normalized in {"wgpu", "webgpu", "auto"}:
-        required_any = ["wgpu", "wgpu-rt"]
-    elif normalized == "cuda":
-        required_any = ["cuda"]
-    elif normalized in {"hip", "rocm"}:
-        required_any = ["hip", "hip-real"]
-
+    required_any = BACKEND_FEATURE_REQUIREMENTS.get(normalized, [])
     if normalized == "cpu":
-        available = True
+        ready = True
+        status = "available"
     elif required_any:
-        available = any(flags.get(feature) for feature in required_any)
+        ready = any(flags.get(feature) for feature in required_any)
+        status = "available" if ready else "backend_unavailable"
     else:
-        available = False
-
+        ready = False
+        status = "unknown_backend"
     return {
         "requested": normalized,
-        "status": "available" if available else "unavailable",
+        "ready": ready,
+        "status": status,
         "required_any_features": required_any,
+    }
+
+
+def _backend_contract(backend: str) -> dict[str, Any]:
+    flags = _native_feature_flags()
+    readiness = _backend_readiness(backend, flags)
+
+    return {
+        "requested": readiness["requested"],
+        "status": "available" if readiness["ready"] else "unavailable",
+        "required_any_features": readiness["required_any_features"],
         "native_features": flags,
         "availability_checked": True,
     }
+
+
+def _required_nn_symbols(*, desire: bool) -> list[str]:
+    symbols = list(REQUIRED_NN_SYMBOLS)
+    if desire:
+        symbols.extend(DESIRE_NN_SYMBOLS)
+    return symbols
+
+
+def _learning_preflight_payload(*, backend: str, desire: bool) -> dict[str, Any]:
+    flags, build_info_error = _native_feature_flags_with_error()
+    backend_status = _backend_readiness(backend, flags)
+    required_symbols = _required_nn_symbols(desire=desire)
+    nn = getattr(st, "nn", None)
+    missing_symbols = [symbol for symbol in required_symbols if not hasattr(nn, symbol)]
+
+    issues: list[str] = []
+    if missing_symbols:
+        issues.append("missing_nn_symbols")
+    if backend_status["ready"] is not True:
+        issues.append(str(backend_status["status"]))
+
+    payload: dict[str, Any] = {
+        "schema": PREFLIGHT_SCHEMA,
+        "python_executable": sys.executable,
+        "backend": backend,
+        "backend_normalized": backend_status["requested"],
+        "backend_ready": bool(backend_status["ready"]),
+        "backend_status": backend_status["status"],
+        "backend_required_any_features": backend_status["required_any_features"],
+        "native_features": flags,
+        "required_nn_symbols": required_symbols,
+        "missing_nn_symbols": missing_symbols,
+        "desire_requested": bool(desire),
+        "issues": issues,
+        "ready": not issues,
+        "reason": "ready" if not issues else "+".join(issues),
+        "spiraltorch_module": str(getattr(st, "__file__", "")),
+    }
+    if build_info_error:
+        payload["build_info_error"] = build_info_error
+    return payload
+
+
+def _write_preflight_summary(
+    run_dir: pathlib.Path,
+    preflight: dict[str, Any],
+    *,
+    preflight_only: bool,
+) -> None:
+    status = "preflight_ready" if preflight.get("ready") is True else "preflight_failed"
+    _write_json(
+        run_dir / "summary.json",
+        {
+            "schema": SUMMARY_SCHEMA,
+            "status": status,
+            "arch": "llm_char_finetune",
+            "preflight_only": bool(preflight_only),
+            "preflight_path": str(run_dir / "preflight.json"),
+            "preflight": preflight,
+        },
+    )
 
 
 def _require_backend_available(backend: str) -> None:
@@ -983,7 +1080,7 @@ def _save_meta(meta_path: pathlib.Path, meta: dict[str, Any]) -> None:
         json.dump(meta, handle, ensure_ascii=False, indent=2)
 
 
-def main() -> None:
+def main() -> int:
     if len(sys.argv) < 2 or sys.argv[1] in {"-h", "--help"}:
         print(
             "usage: PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_finetune.py <text_or_dir> [<text_or_dir> ...] "
@@ -991,13 +1088,14 @@ def main() -> None:
             "[--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] "
             "[--gen N] [--topk N] [--seed N] [--prompt STR] [--val-split F] [--eval-samples N] "
             "[--backend cpu|wgpu|cuda|hip|auto] "
+            "[--preflight-only] [--ignore-preflight] "
             "[--events PATH] [--events-types A,B,C] "
             "[--atlas] [--atlas-bound N] [--atlas-district NAME] "
             "[--desire] [--desire-concepts N] [--desire-prime N] [--desire-blend F] [--desire-drift-gain F] "
             "[--run-dir PATH] "
             f"{_softlogic_cli.usage_flags()}"
         )
-        return
+        return 0
 
     args = list(sys.argv[1:])
     data_args: list[str] = []
@@ -1043,6 +1141,8 @@ def main() -> None:
     desire_prime = 16
     desire_blend = 0.35
     desire_drift_gain = 0.35
+    preflight_only = False
+    ignore_preflight = False
 
     softlogic_cli = _softlogic_cli.pop_softlogic_flags(args)
     it = iter(args)
@@ -1085,6 +1185,10 @@ def main() -> None:
             prompt = str(next(it))
         elif flag == "--backend":
             backend = str(next(it)).strip().lower()
+        elif flag == "--preflight-only":
+            preflight_only = True
+        elif flag == "--ignore-preflight":
+            ignore_preflight = True
         elif flag == "--events":
             events_path = pathlib.Path(str(next(it)))
         elif flag == "--events-types":
@@ -1125,6 +1229,23 @@ def main() -> None:
     load_weights = _resolve_load_weights(load_weights, load_run)
     source_checkpoint = _checkpoint_source_payload(load_weights, load_run=load_run)
 
+    if run_dir is None:
+        run_dir = _default_run_dir()
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "command.txt").write_text(" ".join(sys.argv), encoding="utf-8")
+    preflight = _learning_preflight_payload(backend=backend, desire=desire)
+    _write_json(run_dir / "preflight.json", preflight)
+    if preflight_only:
+        _write_preflight_summary(run_dir, preflight, preflight_only=True)
+        print(f"preflight: {run_dir / 'preflight.json'}")
+        print(f"summary: {run_dir / 'summary.json'}")
+        return 0 if preflight.get("ready") is True else 1
+    if not ignore_preflight and preflight.get("ready") is not True:
+        _write_preflight_summary(run_dir, preflight, preflight_only=False)
+        print(f"preflight failed: {run_dir / 'preflight.json'}", file=sys.stderr)
+        print(f"summary: {run_dir / 'summary.json'}")
+        return 1
+
     _require_backend_available(backend)
 
     data_files = _collect_text_files(data_paths)
@@ -1136,12 +1257,8 @@ def main() -> None:
     if not text:
         raise ValueError("empty text")
 
-    if run_dir is None:
-        run_dir = _default_run_dir()
-    run_dir.mkdir(parents=True, exist_ok=True)
     samples_dir = run_dir / "samples"
     samples_dir.mkdir(parents=True, exist_ok=True)
-    (run_dir / "command.txt").write_text(" ".join(sys.argv), encoding="utf-8")
     (run_dir / "data_files.txt").write_text(
         "\n".join(str(path) for path in data_files) + "\n",
         encoding="utf-8",
@@ -1520,7 +1637,8 @@ def main() -> None:
     )
     print("--- sample (prompt + gen) ---")
     print(sample)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

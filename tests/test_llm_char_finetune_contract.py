@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import json
 import math
 import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 
@@ -24,7 +27,130 @@ def _load_module():
     return module
 
 
+def _fake_spiraltorch(*, symbols: list[str], features: dict[str, bool]):
+    nn = types.SimpleNamespace(**{symbol: object() for symbol in symbols})
+
+    def build_info():
+        return {"features": dict(features)}
+
+    return types.SimpleNamespace(
+        __file__="/fake/spiraltorch/__init__.py",
+        build_info=build_info,
+        nn=nn,
+    )
+
+
 class LlmCharFinetuneContractTests(unittest.TestCase):
+    def test_learning_preflight_accepts_complete_cpu_surface(self) -> None:
+        mod = _load_module()
+        original_st = mod.st
+        mod.st = _fake_spiraltorch(
+            symbols=mod.REQUIRED_NN_SYMBOLS + mod.DESIRE_NN_SYMBOLS,
+            features={},
+        )
+        try:
+            payload = mod._learning_preflight_payload(backend="cpu", desire=True)
+        finally:
+            mod.st = original_st
+
+        self.assertEqual(payload["schema"], mod.PREFLIGHT_SCHEMA)
+        self.assertTrue(payload["ready"])
+        self.assertEqual(payload["reason"], "ready")
+        self.assertTrue(payload["backend_ready"])
+        self.assertEqual(payload["missing_nn_symbols"], [])
+        self.assertEqual(payload["issues"], [])
+
+    def test_learning_preflight_reports_missing_symbols_and_backend(self) -> None:
+        mod = _load_module()
+        original_st = mod.st
+        present_symbols = [
+            symbol for symbol in mod.REQUIRED_NN_SYMBOLS if symbol != "Sequential"
+        ]
+        mod.st = _fake_spiraltorch(
+            symbols=present_symbols,
+            features={"wgpu": False, "wgpu-rt": False},
+        )
+        try:
+            payload = mod._learning_preflight_payload(backend="wgpu", desire=False)
+        finally:
+            mod.st = original_st
+
+        self.assertFalse(payload["ready"])
+        self.assertFalse(payload["backend_ready"])
+        self.assertEqual(payload["backend_status"], "backend_unavailable")
+        self.assertEqual(payload["missing_nn_symbols"], ["Sequential"])
+        self.assertEqual(
+            payload["issues"], ["missing_nn_symbols", "backend_unavailable"]
+        )
+
+    def test_preflight_only_writes_summary_without_training(self) -> None:
+        mod = _load_module()
+        original_st = mod.st
+        original_argv = sys.argv
+        mod.st = _fake_spiraltorch(symbols=mod.REQUIRED_NN_SYMBOLS, features={})
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                data = root / "data.txt"
+                run_dir = root / "run"
+                data.write_text("spiral torch corpus", encoding="utf-8")
+                sys.argv = [
+                    str(SCRIPT),
+                    str(data),
+                    "--run-dir",
+                    str(run_dir),
+                    "--preflight-only",
+                ]
+                with contextlib.redirect_stdout(io.StringIO()):
+                    code = mod.main()
+                preflight = json.loads(
+                    (run_dir / "preflight.json").read_text(encoding="utf-8")
+                )
+                summary = json.loads(
+                    (run_dir / "summary.json").read_text(encoding="utf-8")
+                )
+        finally:
+            mod.st = original_st
+            sys.argv = original_argv
+
+        self.assertEqual(code, 0)
+        self.assertTrue(preflight["ready"])
+        self.assertEqual(summary["status"], "preflight_ready")
+        self.assertTrue(summary["preflight_only"])
+        self.assertFalse((run_dir / "metrics.jsonl").exists())
+
+    def test_preflight_only_failure_returns_nonzero(self) -> None:
+        mod = _load_module()
+        original_st = mod.st
+        original_argv = sys.argv
+        mod.st = _fake_spiraltorch(symbols=[], features={})
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                data = root / "data.txt"
+                run_dir = root / "run"
+                data.write_text("spiral torch corpus", encoding="utf-8")
+                sys.argv = [
+                    str(SCRIPT),
+                    str(data),
+                    "--run-dir",
+                    str(run_dir),
+                    "--preflight-only",
+                ]
+                with contextlib.redirect_stdout(io.StringIO()):
+                    code = mod.main()
+                summary = json.loads(
+                    (run_dir / "summary.json").read_text(encoding="utf-8")
+                )
+        finally:
+            mod.st = original_st
+            sys.argv = original_argv
+
+        self.assertEqual(code, 1)
+        self.assertEqual(summary["status"], "preflight_failed")
+        self.assertTrue(summary["preflight_only"])
+        self.assertEqual(summary["preflight"]["reason"], "missing_nn_symbols")
+
     def test_load_run_resolves_weights_and_records_source_checkpoint(self) -> None:
         mod = _load_module()
         with tempfile.TemporaryDirectory() as tmp:
