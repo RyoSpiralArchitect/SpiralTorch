@@ -98,6 +98,29 @@ def nll_status(delta: float | None, *, tolerance: float = 1.0e-9) -> str:
     return "tied"
 
 
+def reload_adoption_status(
+    status: str,
+    training_status: str,
+    *,
+    rollback_count: Any,
+    evaluation_comparable: bool,
+) -> str:
+    if not evaluation_comparable or status == "unknown":
+        return "unknown"
+    if status == "improved":
+        return "accepted_improved"
+    if status == "regressed":
+        return "rejected_regressed"
+    if status != "tied":
+        return "unknown"
+    if training_status == "regressed":
+        return "protected_noop"
+    count = finite_float(rollback_count)
+    if count is not None and count > 0.0:
+        return "protected_noop"
+    return "accepted_tied"
+
+
 def backend_readiness(backend: str, features: dict[str, bool]) -> dict[str, Any]:
     normalized = str(backend).strip().lower()
     required_any = BACKEND_FEATURE_REQUIREMENTS.get(normalized, [])
@@ -440,6 +463,13 @@ def reload_pair_outcome(base_run_dir: Path, reload_run_dir: Path) -> dict[str, A
     if not evaluation_comparable:
         status = "unknown"
         training_status = "unknown"
+    rollback_count = reload.get("validation_rollback_count")
+    adoption_status = reload_adoption_status(
+        status,
+        training_status,
+        rollback_count=rollback_count,
+        evaluation_comparable=evaluation_comparable,
+    )
 
     return {
         "schema": OUTCOME_SCHEMA,
@@ -453,6 +483,13 @@ def reload_pair_outcome(base_run_dir: Path, reload_run_dir: Path) -> dict[str, A
         "reload_improved_best": status == "improved",
         "reload_regressed_best": status == "regressed",
         "reload_training_status": training_status,
+        "reload_adoption_status": adoption_status,
+        "reload_candidate_accepted": adoption_status in {
+            "accepted_improved",
+            "accepted_tied",
+        },
+        "reload_learning_effective": adoption_status == "accepted_improved",
+        "reload_protected_noop": adoption_status == "protected_noop",
         "reload_best_minus_base_best_nll": reload_best_minus_base_best,
         "reload_final_minus_base_final_nll": reload_final_minus_base_final,
         "reload_training_final_minus_base_best_nll": reload_training_final_minus_base_best,
@@ -461,7 +498,7 @@ def reload_pair_outcome(base_run_dir: Path, reload_run_dir: Path) -> dict[str, A
             reload_training_final_minus_reload_initial
         ),
         "reload_final_minus_reload_initial_nll": reload_final_minus_reload_initial,
-        "reload_validation_rollback_count": reload.get("validation_rollback_count"),
+        "reload_validation_rollback_count": rollback_count,
         "reload_validation_rollback_epochs": reload.get("validation_rollback_epochs"),
     }
 

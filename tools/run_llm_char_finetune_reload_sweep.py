@@ -301,6 +301,13 @@ def outcome_training_status(cell: dict[str, Any]) -> str:
     return str(cell.get("status") or "unknown")
 
 
+def outcome_adoption_status(cell: dict[str, Any]) -> str:
+    outcome = cell.get("outcome")
+    if isinstance(outcome, dict):
+        return str(outcome.get("reload_adoption_status") or "unknown")
+    return str(cell.get("status") or "unknown")
+
+
 def outcome_delta(cell: dict[str, Any], key: str) -> float | None:
     outcome = cell.get("outcome")
     if not isinstance(outcome, dict):
@@ -350,6 +357,7 @@ def best_cell_by_delta(
 def aggregate_cells(cells: list[dict[str, Any]]) -> dict[str, Any]:
     status_counts = Counter(outcome_status(cell) for cell in cells)
     training_status_counts = Counter(outcome_training_status(cell) for cell in cells)
+    adoption_status_counts = Counter(outcome_adoption_status(cell) for cell in cells)
     run_status_counts = Counter(str(cell.get("status") or "unknown") for cell in cells)
     best = best_cell_by_delta(
         cells,
@@ -364,6 +372,7 @@ def aggregate_cells(cells: list[dict[str, Any]]) -> dict[str, Any]:
         "cells": len(cells),
         "status_counts": dict(sorted(status_counts.items())),
         "training_status_counts": dict(sorted(training_status_counts.items())),
+        "adoption_status_counts": dict(sorted(adoption_status_counts.items())),
         "run_status_counts": dict(sorted(run_status_counts.items())),
         "best_cell": best.get("name") if best else None,
         "best_reload_best_minus_base_best_nll": (
@@ -377,6 +386,13 @@ def aggregate_cells(cells: list[dict[str, Any]]) -> dict[str, Any]:
         ),
         "improved_cells": int(status_counts.get("improved", 0)),
         "regressed_cells": int(status_counts.get("regressed", 0)),
+        "accepted_improved_cells": int(
+            adoption_status_counts.get("accepted_improved", 0)
+        ),
+        "protected_noop_cells": int(adoption_status_counts.get("protected_noop", 0)),
+        "rejected_regressed_cells": int(
+            adoption_status_counts.get("rejected_regressed", 0)
+        ),
         "reload_best_minus_base_best_nll_stats": delta_stats(
             cells,
             "reload_best_minus_base_best_nll",
@@ -437,6 +453,7 @@ def render_markdown(manifest: dict[str, Any]) -> str:
         f"- cells: `{summary.get('cells', 0)}`",
         f"- status_counts: `{summary.get('status_counts', {})}`",
         f"- training_status_counts: `{summary.get('training_status_counts', {})}`",
+        f"- adoption_status_counts: `{summary.get('adoption_status_counts', {})}`",
         f"- best_cell: `{summary.get('best_cell', '-')}`",
         f"- best_training_cell: `{summary.get('best_training_cell', '-')}`",
         "",
@@ -447,8 +464,8 @@ def render_markdown(manifest: dict[str, Any]) -> str:
             [
                 "## Reload LR Groups",
                 "",
-                "| reload_lr | cells | status_counts | training_status_counts | best_cell | best_delta | best_training_cell | training_delta_mean | training_delta_min | training_delta_max | reload_delta_mean | rollback_count_mean |",
-                "| ---: | ---: | --- | --- | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: |",
+                "| reload_lr | cells | status_counts | training_status_counts | adoption_status_counts | best_cell | best_delta | best_training_cell | training_delta_mean | training_delta_min | training_delta_max | reload_delta_mean | rollback_count_mean |",
+                "| ---: | ---: | --- | --- | --- | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: |",
             ]
         )
         for group in reload_lr_groups:
@@ -469,6 +486,7 @@ def render_markdown(manifest: dict[str, Any]) -> str:
                         md_cell(group.get("cells")),
                         md_cell(group.get("status_counts")),
                         md_cell(group.get("training_status_counts")),
+                        md_cell(group.get("adoption_status_counts")),
                         md_cell(group.get("best_cell")),
                         fmt_float(group.get("best_reload_best_minus_base_best_nll")),
                         md_cell(group.get("best_training_cell")),
@@ -484,8 +502,8 @@ def render_markdown(manifest: dict[str, Any]) -> str:
         lines.append("")
     lines.extend(
         [
-            "| cell | status | training_status | run_status | seed | reload_seed | eval_seed | reload_lr | best_delta | training_delta | final_delta | reload_delta | rollback_count | manifest | outcome |",
-            "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |",
+            "| cell | status | training_status | adoption_status | run_status | seed | reload_seed | eval_seed | reload_lr | best_delta | training_delta | final_delta | reload_delta | rollback_count | manifest | outcome |",
+            "| --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |",
         ]
     )
     for cell in manifest.get("cells", []):
@@ -497,6 +515,7 @@ def render_markdown(manifest: dict[str, Any]) -> str:
                     md_cell(cell.get("name")),
                     md_cell(outcome_status(cell)),
                     md_cell(outcome_training_status(cell)),
+                    md_cell(outcome_adoption_status(cell)),
                     md_cell(cell.get("status")),
                     md_cell(cell.get("seed")),
                     md_cell(cell.get("reload_seed")),

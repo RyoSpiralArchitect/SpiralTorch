@@ -353,6 +353,10 @@ class RunLlmCharFinetuneReloadPairTests(unittest.TestCase):
         self.assertEqual(outcome["status"], "improved")
         self.assertTrue(outcome["reload_improved_best"])
         self.assertFalse(outcome["reload_regressed_best"])
+        self.assertEqual(outcome["reload_adoption_status"], "accepted_improved")
+        self.assertTrue(outcome["reload_candidate_accepted"])
+        self.assertTrue(outcome["reload_learning_effective"])
+        self.assertFalse(outcome["reload_protected_noop"])
         self.assertAlmostEqual(outcome["reload_best_minus_base_best_nll"], -0.2)
         self.assertAlmostEqual(outcome["reload_final_minus_base_final_nll"], -0.2)
         self.assertEqual(outcome["reload_training_status"], "improved")
@@ -371,6 +375,57 @@ class RunLlmCharFinetuneReloadPairTests(unittest.TestCase):
         self.assertEqual(outcome["reload"]["validation_rollback_count"], 2)
         self.assertEqual(outcome["reload"]["early_stopped_epoch"], 3)
         self.assertTrue(outcome["reload"]["restored_best_at_end"])
+
+    def test_reload_pair_outcome_marks_rollback_tie_as_protected_noop(self) -> None:
+        mod = _load_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            base = root / "base_scratch"
+            reload = root / "reload_finetune"
+            base.mkdir()
+            reload.mkdir()
+            for run_dir, training_final_nll, rollback_count in (
+                (base, 3.4, 0),
+                (reload, 3.48, 2),
+            ):
+                (run_dir / "summary.json").write_text(
+                    json.dumps(
+                        {
+                            "initial_validation": {"mean_nll": 3.4},
+                            "final_validation": {"mean_nll": 3.4},
+                            "training_final_validation": {
+                                "mean_nll": training_final_nll
+                            },
+                            "best_validation_mean_nll": 3.4,
+                            "rollback_on_validation_regression": True,
+                            "validation_rollback_count": rollback_count,
+                            "validation_rollback_epochs": (
+                                [0, 1] if rollback_count else []
+                            ),
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                (run_dir / "run.json").write_text(
+                    json.dumps(
+                        {
+                            "seed": 1,
+                            "eval_seed": 7,
+                            "data_paths": ["shared.txt"],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+            outcome = mod.reload_pair_outcome(base, reload)
+
+        self.assertEqual(outcome["status"], "tied")
+        self.assertEqual(outcome["reload_training_status"], "regressed")
+        self.assertEqual(outcome["reload_adoption_status"], "protected_noop")
+        self.assertFalse(outcome["reload_candidate_accepted"])
+        self.assertFalse(outcome["reload_learning_effective"])
+        self.assertTrue(outcome["reload_protected_noop"])
+        self.assertEqual(outcome["reload_validation_rollback_count"], 2)
 
     def test_reload_pair_outcome_rejects_eval_seed_mismatch(self) -> None:
         mod = _load_module()
@@ -404,6 +459,7 @@ class RunLlmCharFinetuneReloadPairTests(unittest.TestCase):
         self.assertFalse(outcome["ready"])
         self.assertFalse(outcome["evaluation_comparable"])
         self.assertEqual(outcome["status"], "unknown")
+        self.assertEqual(outcome["reload_adoption_status"], "unknown")
         self.assertIn("eval_seed_mismatch", outcome["issues"])
         self.assertIn("eval_seed_mismatch", outcome["comparison_issues"])
 
