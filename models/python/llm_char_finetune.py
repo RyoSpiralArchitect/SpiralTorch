@@ -350,6 +350,11 @@ def _build_training_contract(
             "batches_per_epoch": run_meta.get("batches_per_epoch"),
             "batch": run_meta.get("batch"),
             "lr": run_meta.get("lr"),
+            "early_stop_patience": run_meta.get("early_stop_patience"),
+            "restore_best_at_end": run_meta.get("restore_best_at_end"),
+            "rollback_on_validation_regression": run_meta.get(
+                "rollback_on_validation_regression"
+            ),
             "roundtable": {
                 "top_k": 1,
                 "mid_k": 1,
@@ -847,6 +852,8 @@ def _write_completion_summary(
     restored_best_checkpoint_path: pathlib.Path | None = None,
     early_stopped_epoch: int | None = None,
     epochs_completed: int | None = None,
+    rollback_on_validation_regression: bool = False,
+    validation_rollback_epochs: list[int] | None = None,
     validation: dict[str, Any] | None = None,
 ) -> None:
     meta_path = _meta_path_for_weights(weights_path)
@@ -902,6 +909,11 @@ def _write_completion_summary(
             if restored_best_checkpoint_path is not None
             else None
         ),
+        "rollback_on_validation_regression": bool(
+            rollback_on_validation_regression
+        ),
+        "validation_rollback_epochs": list(validation_rollback_epochs or []),
+        "validation_rollback_count": len(validation_rollback_epochs or []),
         "early_stopped_epoch": early_stopped_epoch,
         "epochs_completed": epochs_completed,
     }
@@ -1139,7 +1151,7 @@ def main() -> int:
             "[--load weights.json] [--load-run run_dir] [--save weights.json] [--steps N] [--embed-dim N] [--hidden N] "
             "[--epochs N] [--batches N] [--batch N] [--lr F] [--curvature F] [--temperature F] "
             "[--gen N] [--topk N] [--seed N] [--prompt STR] [--val-split F] [--eval-samples N] "
-            "[--eval-seed N] [--early-stop-patience N] [--restore-best-at-end] "
+            "[--eval-seed N] [--early-stop-patience N] [--restore-best-at-end] [--rollback-on-validation-regression] "
             "[--backend cpu|wgpu|cuda|hip|auto] "
             "[--preflight-only] [--ignore-preflight] "
             "[--events PATH] [--events-types A,B,C] "
@@ -1179,6 +1191,7 @@ def main() -> int:
     eval_samples = 64
     early_stop_patience = 0
     restore_best_at_end = False
+    rollback_on_validation_regression = False
     prompt: str | None = None
     backend = "cpu"
     events_path: pathlib.Path | None = None
@@ -1243,6 +1256,8 @@ def main() -> int:
             early_stop_patience = int(next(it))
         elif flag == "--restore-best-at-end":
             restore_best_at_end = True
+        elif flag == "--rollback-on-validation-regression":
+            rollback_on_validation_regression = True
         elif flag == "--prompt":
             prompt = str(next(it))
         elif flag == "--backend":
@@ -1448,6 +1463,7 @@ def main() -> int:
         "desire_drift_gain": desire_drift_gain if desire else None,
         "early_stop_patience": early_stop_patience,
         "restore_best_at_end": restore_best_at_end,
+        "rollback_on_validation_regression": rollback_on_validation_regression,
         "weights_loaded_from": str(load_weights) if load_weights is not None else None,
         "weights_loaded_from_run": str(load_run) if load_run is not None else None,
         "source_checkpoint": source_checkpoint,
@@ -1532,6 +1548,8 @@ def main() -> int:
     best_sample_path: pathlib.Path | None = None
     early_stopped_epoch: int | None = None
     epochs_completed = 0
+    validation_rollback_epochs: list[int] = []
+    last_training_validation = initial_validation
     epochs_without_validation_improvement = 0
     st.nn.save(str(best_checkpoint_path), model)
     _save_meta(_meta_path_for_weights(best_checkpoint_path), weights_meta)
@@ -1598,6 +1616,7 @@ def main() -> int:
                 bigram_rows=bigram_rows,
             )
             validation_nll = validation.get("mean_nll")
+            last_training_validation = validation
             best_nll = best_validation.get("mean_nll")
             validation_is_best = False
             if (
@@ -1613,6 +1632,12 @@ def main() -> int:
                 epochs_without_validation_improvement = 0
             elif isinstance(validation_nll, (int, float)):
                 epochs_without_validation_improvement += 1
+            rollback_to_best = (
+                rollback_on_validation_regression
+                and isinstance(validation_nll, (int, float))
+                and not validation_is_best
+                and best_checkpoint_path.exists()
+            )
             with metrics_path.open("a", encoding="utf-8") as handle:
                 handle.write(
                     json.dumps(
@@ -1621,6 +1646,11 @@ def main() -> int:
                             "batches": int(stats.batches),
                             "average_loss": avg_loss,
                             "validation": validation,
+                            "validation_is_best": validation_is_best,
+                            "rolled_back_to_best": rollback_to_best,
+                            "rollback_best_epoch": (
+                                best_validation_epoch if rollback_to_best else None
+                            ),
                         },
                         ensure_ascii=False,
                     )
@@ -1644,12 +1674,32 @@ def main() -> int:
                 _save_meta(_meta_path_for_weights(best_checkpoint_path), weights_meta)
                 best_sample_path = samples_dir / f"best_epoch_{epoch:03d}.txt"
                 best_sample_path.write_text(sample, encoding="utf-8")
+            if rollback_to_best:
+                st.nn.load(str(best_checkpoint_path), model)
+                validation_rollback_epochs.append(epoch)
+                rollback_sample = _generate(
+                    model,
+                    symbols,
+                    index,
+                    steps,
+                    prompt,
+                    gen_len,
+                    top_k,
+                    seed + 1999 + epoch,
+                    embed_dim=embed_dim_runtime,
+                    desire=desire_pipeline,
+                )
+                (samples_dir / f"rollback_epoch_{epoch:03d}.txt").write_text(
+                    rollback_sample,
+                    encoding="utf-8",
+                )
             if validation.get("mean_nll") is not None:
                 print(
                     f"epoch[{epoch}] batches={stats.batches} avg_loss={avg_loss:.6f} "
                     f"val_nll={float(validation['mean_nll']):.6f} "
                     f"acc={float(validation['accuracy']) * 100.0:.2f}%"
-                    f"{' best=checkpoint' if validation_is_best else ''}",
+                    f"{' best=checkpoint' if validation_is_best else ''}"
+                    f"{' rollback=best' if rollback_to_best else ''}",
                     flush=True,
                 )
             else:
@@ -1726,8 +1776,23 @@ def main() -> int:
     if restored_best_at_end and restored_best_sample_path is not None:
         final_sample_path = restored_best_sample_path
         sample = final_sample_path.read_text(encoding="utf-8")
-    elif epochs > 0:
-        final_sample_path = samples_dir / f"epoch_{epochs - 1:03d}.txt"
+    elif rollback_on_validation_regression and epochs_completed > 0:
+        sample = _generate(
+            model,
+            symbols,
+            index,
+            steps,
+            prompt,
+            gen_len,
+            top_k,
+            seed + 2999,
+            embed_dim=embed_dim_runtime,
+            desire=desire_pipeline,
+        )
+        final_sample_path = samples_dir / "final_accepted.txt"
+        final_sample_path.write_text(sample, encoding="utf-8")
+    elif epochs_completed > 0:
+        final_sample_path = samples_dir / f"epoch_{epochs_completed - 1:03d}.txt"
         sample = final_sample_path.read_text(encoding="utf-8")
     else:
         sample = _generate(
@@ -1745,11 +1810,22 @@ def main() -> int:
         final_sample_path = samples_dir / "init.txt"
         final_sample_path.write_text(sample, encoding="utf-8")
     if restored_best_at_end:
-        training_final_validation = validation if epochs_completed > 0 else initial_validation
+        training_final_validation = last_training_validation
         final_validation = best_validation
-    elif epochs > 0:
-        training_final_validation = validation
-        final_validation = validation
+    elif rollback_on_validation_regression:
+        training_final_validation = last_training_validation
+        final_validation = _evaluate_model(
+            model,
+            validation_samples,
+            vocab_size=vocab_size,
+            steps=steps,
+            embed_dim=embed_dim_runtime,
+            unigram_rows=unigram_rows,
+            bigram_rows=bigram_rows,
+        )
+    elif epochs_completed > 0:
+        training_final_validation = last_training_validation
+        final_validation = last_training_validation
     else:
         final_validation = _evaluate_model(
             model,
@@ -1775,6 +1851,8 @@ def main() -> int:
         restored_best_checkpoint_path=restored_best_checkpoint_path,
         early_stopped_epoch=early_stopped_epoch,
         epochs_completed=epochs_completed,
+        rollback_on_validation_regression=rollback_on_validation_regression,
+        validation_rollback_epochs=validation_rollback_epochs,
         validation=_validation_summary_payload(
             initial_validation=initial_validation,
             final_validation=final_validation,

@@ -250,6 +250,7 @@ def finetune_command(
     backend: str,
     early_stop_patience: int,
     restore_best_at_end: bool,
+    rollback_on_validation_regression: bool,
     load_run: Path | None = None,
 ) -> list[str]:
     command = [
@@ -293,6 +294,8 @@ def finetune_command(
         command.extend(["--early-stop-patience", str(early_stop_patience)])
     if restore_best_at_end:
         command.append("--restore-best-at-end")
+    if rollback_on_validation_regression:
+        command.append("--rollback-on-validation-regression")
     if load_run is not None:
         command.extend(["--load-run", str(load_run)])
     return command
@@ -380,6 +383,11 @@ def run_summary_contract(run_dir: Path) -> dict[str, Any]:
         "best_epoch": summary.get("best_validation_epoch"),
         "early_stopped_epoch": summary.get("early_stopped_epoch"),
         "epochs_completed": summary.get("epochs_completed"),
+        "rollback_on_validation_regression": (
+            summary.get("rollback_on_validation_regression") is True
+        ),
+        "validation_rollback_count": summary.get("validation_rollback_count"),
+        "validation_rollback_epochs": summary.get("validation_rollback_epochs"),
         "restore_best_at_end": summary.get("restore_best_at_end") is True,
         "restored_best_at_end": summary.get("restored_best_at_end") is True,
         "best_checkpoint_exists": summary.get("best_checkpoint_exists") is True,
@@ -453,6 +461,8 @@ def reload_pair_outcome(base_run_dir: Path, reload_run_dir: Path) -> dict[str, A
             reload_training_final_minus_reload_initial
         ),
         "reload_final_minus_reload_initial_nll": reload_final_minus_reload_initial,
+        "reload_validation_rollback_count": reload.get("validation_rollback_count"),
+        "reload_validation_rollback_epochs": reload.get("validation_rollback_epochs"),
     }
 
 
@@ -496,6 +506,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--topk", type=int, default=32)
     parser.add_argument("--early-stop-patience", type=int, default=0)
     parser.add_argument("--restore-best-at-end", action="store_true")
+    parser.add_argument("--rollback-on-validation-regression", action="store_true")
     parser.add_argument("--curves", action="store_true")
     parser.add_argument("--summary-limit", type=int, default=8)
     parser.add_argument(
@@ -569,6 +580,7 @@ def main(argv: list[str] | None = None) -> int:
         backend=args.backend,
         early_stop_patience=args.early_stop_patience,
         restore_best_at_end=args.restore_best_at_end,
+        rollback_on_validation_regression=args.rollback_on_validation_regression,
     )
     reload_command = finetune_command(
         reload_data_paths,
@@ -589,6 +601,7 @@ def main(argv: list[str] | None = None) -> int:
         backend=args.backend,
         early_stop_patience=args.early_stop_patience,
         restore_best_at_end=args.restore_best_at_end,
+        rollback_on_validation_regression=args.rollback_on_validation_regression,
         load_run=base_run_dir,
     )
     planned_compare_command = compare_command(
@@ -638,6 +651,9 @@ def main(argv: list[str] | None = None) -> int:
             "eval_seed": int(eval_seed),
             "early_stop_patience": int(args.early_stop_patience),
             "restore_best_at_end": bool(args.restore_best_at_end),
+            "rollback_on_validation_regression": bool(
+                args.rollback_on_validation_regression
+            ),
         },
         "runs": [],
         "compare_command": planned_compare_command,

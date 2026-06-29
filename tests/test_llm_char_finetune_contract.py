@@ -227,6 +227,9 @@ class LlmCharFinetuneContractTests(unittest.TestCase):
                 "eval_seed": 123,
                 "validation_sample_seed": 700123,
                 "lr": 0.01,
+                "early_stop_patience": 2,
+                "restore_best_at_end": True,
+                "rollback_on_validation_regression": True,
                 "validation_start_fraction_requested": 0.9,
                 "validation_start_fraction_actual": 0.875,
                 "events_path": str(root / "events.jsonl"),
@@ -257,6 +260,9 @@ class LlmCharFinetuneContractTests(unittest.TestCase):
         )
         self.assertEqual(contract["backend"]["requested"], "cpu")
         self.assertEqual(contract["backend"]["status"], "available")
+        self.assertEqual(contract["optimization"]["early_stop_patience"], 2)
+        self.assertTrue(contract["optimization"]["restore_best_at_end"])
+        self.assertTrue(contract["optimization"]["rollback_on_validation_regression"])
         self.assertEqual(contract["validation"]["eval_seed"], 123)
         self.assertEqual(contract["validation"]["validation_sample_seed"], 700123)
         self.assertTrue(contract["reload"]["reload_safe"])
