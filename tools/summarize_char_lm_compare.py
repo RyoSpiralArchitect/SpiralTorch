@@ -36,6 +36,9 @@ FT_CONTRACT_COLUMNS = [
     "ft_input",
     "ft_backend_status",
     "ft_reload_safe",
+    "ft_source_kind",
+    "ft_source_complete",
+    "ft_source_sha",
 ]
 
 SUMMARY_HEADERS = [

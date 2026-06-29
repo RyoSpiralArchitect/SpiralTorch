@@ -65,6 +65,9 @@ FT_CONTRACT_COLUMNS = [
     "ft_input",
     "ft_backend_status",
     "ft_reload_safe",
+    "ft_source_kind",
+    "ft_source_complete",
+    "ft_source_sha",
 ]
 
 AGGREGATE_GROUP_COLUMNS = [
@@ -1733,6 +1736,35 @@ def ft_contract_columns(
     reload_contract = contract.get("reload")
     if isinstance(reload_contract, dict):
         defaults["ft_reload_safe"] = bool_label(reload_contract.get("reload_safe"))
+        source_checkpoint = reload_contract.get("source_checkpoint")
+    else:
+        source_checkpoint = None
+    if not isinstance(source_checkpoint, dict):
+        checkpoint = summary.get("checkpoint")
+        if isinstance(checkpoint, dict):
+            source_checkpoint = checkpoint.get("source_checkpoint")
+    if not isinstance(source_checkpoint, dict):
+        source_checkpoint = run.get("source_checkpoint")
+    if isinstance(source_checkpoint, dict):
+        source_kind = str(source_checkpoint.get("kind") or "-")
+        defaults["ft_source_kind"] = metadata_cell(source_kind)
+        weights_ok = source_checkpoint.get("weights_exists") is True
+        meta_ok = source_checkpoint.get("meta_exists") is True
+        if source_kind == "run_dir":
+            complete = (
+                weights_ok
+                and meta_ok
+                and source_checkpoint.get("run_json_exists") is True
+                and source_checkpoint.get("summary_exists") is True
+            )
+        elif source_kind != "-":
+            complete = weights_ok and meta_ok
+        else:
+            complete = None
+        defaults["ft_source_complete"] = bool_label(complete)
+        sha = source_checkpoint.get("weights_sha256")
+        if isinstance(sha, str) and sha:
+            defaults["ft_source_sha"] = sha[:12]
     return defaults
 
 

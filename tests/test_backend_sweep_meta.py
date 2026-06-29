@@ -5547,7 +5547,17 @@ class BackendSweepMetaTests(unittest.TestCase):
                             "learning_mode": "finetune",
                             "input": {"representation": "tokenizerless_char"},
                             "backend": {"status": "available"},
-                            "reload": {"reload_safe": True},
+                            "reload": {
+                                "reload_safe": True,
+                                "source_checkpoint": {
+                                    "kind": "run_dir",
+                                    "weights_exists": True,
+                                    "meta_exists": True,
+                                    "run_json_exists": True,
+                                    "summary_exists": True,
+                                    "weights_sha256": "abc123def4567890",
+                                },
+                            },
                         },
                     }
                 ),
@@ -5570,6 +5580,9 @@ class BackendSweepMetaTests(unittest.TestCase):
         self.assertEqual(compare_json["runs"][0]["ft_input"], "tokenizerless_char")
         self.assertEqual(compare_json["runs"][0]["ft_backend_status"], "available")
         self.assertEqual(compare_json["runs"][0]["ft_reload_safe"], "yes")
+        self.assertEqual(compare_json["runs"][0]["ft_source_kind"], "run_dir")
+        self.assertEqual(compare_json["runs"][0]["ft_source_complete"], "yes")
+        self.assertEqual(compare_json["runs"][0]["ft_source_sha"], "abc123def456")
         self.assertEqual(compare_json["runs"][0]["data_label"], "spiral_corpus_en")
         self.assertEqual(compare_json["runs"][0]["train_tokens"], "100")
         self.assertEqual(compare_json["aggregate_runs"][0]["ft_mode"], "finetune")
@@ -5582,6 +5595,9 @@ class BackendSweepMetaTests(unittest.TestCase):
             "available",
         )
         self.assertEqual(compare_json["aggregate_runs"][0]["ft_reload_safe"], "yes")
+        self.assertEqual(compare_json["aggregate_runs"][0]["ft_source_kind"], "run_dir")
+        self.assertEqual(compare_json["aggregate_runs"][0]["ft_source_complete"], "yes")
+        self.assertEqual(compare_json["aggregate_runs"][0]["ft_source_sha"], "abc123def456")
         self.assertEqual(
             compare_json["aggregate_runs"][0]["data_label"], "spiral_corpus_en"
         )
@@ -5610,6 +5626,9 @@ class BackendSweepMetaTests(unittest.TestCase):
         self.assertEqual(compare_summary["rows"][0]["ft_input"], "tokenizerless_char")
         self.assertEqual(compare_summary["rows"][0]["ft_backend_status"], "available")
         self.assertEqual(compare_summary["rows"][0]["ft_reload_safe"], "yes")
+        self.assertEqual(compare_summary["rows"][0]["ft_source_kind"], "run_dir")
+        self.assertEqual(compare_summary["rows"][0]["ft_source_complete"], "yes")
+        self.assertEqual(compare_summary["rows"][0]["ft_source_sha"], "abc123def456")
         self.assertEqual(compare_summary["rows"][0]["data_label"], "spiral_corpus_en")
         self.assertEqual(compare_summary["rows"][0]["train_tokens_mean"], "100.0000")
         self.assertEqual(compare_summary["rows"][0]["final_windows_mean"], "8.0000")
