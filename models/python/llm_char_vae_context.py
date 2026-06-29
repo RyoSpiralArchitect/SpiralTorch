@@ -3949,13 +3949,44 @@ def _broadened_follow_up_command_record(
         return None
     if not isinstance(follow_up_chain, dict) or not isinstance(follow_up_trajectory, dict):
         return None
-    if int(follow_up_chain.get("improved_streak") or 0) < 2:
-        return None
-    if follow_up_trajectory.get("trajectory_action") != "confirm_trajectory_with_fresh_seeds":
-        return None
     if follow_up_trajectory.get("unsafe_promotion"):
         return None
     if follow_up_trajectory.get("best_summary_path") != str(root_run_dir / "summary.json"):
+        return None
+    family_focus = _feature_family_focus_record(
+        best_config,
+        feature_family_stability,
+        features,
+    )
+    trajectory_action = str(follow_up_trajectory.get("trajectory_action") or "")
+    trajectory_verdict = str(follow_up_trajectory.get("trajectory_verdict") or "unknown")
+    improved_ready = (
+        int(follow_up_chain.get("improved_streak") or 0) >= 2
+        and trajectory_action == "confirm_trajectory_with_fresh_seeds"
+    )
+    family_win_rate = _finite_float(
+        family_focus.get("win_rate") if isinstance(family_focus, dict) else None
+    )
+    family_near_win_rate = _finite_float(
+        family_focus.get("near_win_rate") if isinstance(family_focus, dict) else None
+    )
+    stable_family_ready = (
+        int(follow_up_chain.get("confirmed_streak") or 0) >= 2
+        and isinstance(family_focus, dict)
+        and family_focus.get("family") != FEATURE_RAW
+        and trajectory_verdict in {"improved", "confirmed"}
+        and trajectory_action
+        in {
+            "continue_or_audit_mixed_trajectory",
+            "collect_more_seed_evidence",
+            "confirm_trajectory_with_fresh_seeds",
+        }
+        and (
+            (family_win_rate is not None and family_win_rate >= 0.8)
+            or (family_near_win_rate is not None and family_near_win_rate >= 0.8)
+        )
+    )
+    if not (improved_ready or stable_family_ready):
         return None
 
     used_seeds: list[int] = []
@@ -3966,7 +3997,16 @@ def _broadened_follow_up_command_record(
     used_seed_history_value = (
         ",".join(str(seed) for seed in used_seeds) if used_seeds else None
     )
-    default_run_dir = root_run_dir / "follow_up_broadened"
+    command_action = (
+        "promote_stable_family_confirmation"
+        if stable_family_ready and not improved_ready
+        else "promote_and_broaden_after_streak"
+    )
+    default_run_dir = root_run_dir / (
+        "promoted_family_train"
+        if command_action == "promote_stable_family_confirmation"
+        else "follow_up_broadened"
+    )
     default_follow_up_from = root_run_dir / "summary.json"
     default_fail_on_verdict = (
         str(args.follow_up_fail_on_verdict).strip()
@@ -3982,17 +4022,16 @@ def _broadened_follow_up_command_record(
         vae_epochs=max(int(args.vae_epochs) + 1, int(args.vae_epochs) * 2),
         vae_batches=max(int(args.vae_batches) + 1, int(args.vae_batches) * 2),
     )
-    family_focus = _feature_family_focus_record(
-        best_config,
-        feature_family_stability,
-        features,
-    )
     focused_features = (
         list(family_focus["focused_features"])
         if isinstance(family_focus, dict)
         else features
     )
-    script_path = root_run_dir / "broadened_follow_up_command.sh"
+    script_path = root_run_dir / (
+        "promoted_family_train_command.sh"
+        if command_action == "promote_stable_family_confirmation"
+        else "broadened_follow_up_command.sh"
+    )
     literal_command = _follow_up_command_parts(
         broadened_args,
         focused_features,
@@ -4027,7 +4066,7 @@ def _broadened_follow_up_command_record(
     script_usage += f" bash {script_path}"
     return {
         "schema": "st.llm_char_vae_context.broadened_follow_up_command.v1",
-        "action": "promote_and_broaden_after_streak",
+        "action": command_action,
         "best_config": best_config,
         "default_new_seeds": default_new_seeds,
         "used_seed_history": used_seeds,
@@ -5649,6 +5688,7 @@ def _follow_up_guidance_record(
     use_next_follow_up_command = False
     use_best_generation_follow_up_command = False
     use_broadened_follow_up_command = False
+    command_usage = None
     action = "review_follow_up"
 
     def add_reason(reason: str) -> None:
@@ -5716,6 +5756,18 @@ def _follow_up_guidance_record(
         if stable_family_confirmation:
             add_reason(f"family confirmation streak={confirmed_streak}")
             add_reason("confirmed family candidate is raw-positive")
+            if isinstance(broadened_follow_up, dict):
+                use_broadened_follow_up_command = True
+                command_usage = broadened_follow_up.get("script_usage")
+                family_focus = broadened_follow_up.get("feature_family_focus")
+                if isinstance(family_focus, dict):
+                    add_reason(
+                        "family focus: {family} wins={wins} near_wins={near_wins}".format(
+                            family=family_focus.get("family"),
+                            wins=family_focus.get("win_count"),
+                            near_wins=family_focus.get("near_win_count"),
+                        )
+                    )
         add_reason("source feature stayed within the confirmation band")
     elif verdict == "regressed":
         action = "rerun_or_audit_source_feature"
@@ -5733,7 +5785,6 @@ def _follow_up_guidance_record(
     if gate_failed and config_improved_while_source_regressed:
         add_reason("config improved while source feature regressed")
 
-    command_usage = None
     if use_next_follow_up_command and isinstance(next_follow_up, dict):
         command_usage = next_follow_up.get("script_usage")
 

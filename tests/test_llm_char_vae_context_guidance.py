@@ -1807,6 +1807,165 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
             guidance["reasons"],
         )
 
+    def test_confirmed_same_family_streak_generates_promoted_train_command(self) -> None:
+        mod = _load_module()
+        parser = mod._build_parser()
+        args = parser.parse_args(
+            [
+                "models/samples/spiral_corpus_en",
+                "--epochs",
+                "16",
+                "--batches",
+                "32",
+                "--eval-samples",
+                "256",
+                "--vae-epochs",
+                "12",
+                "--vae-batches",
+                "24",
+            ]
+        )
+        best_config = {
+            "best_feature": "raw_latent",
+            "feature_normalize": "blocks",
+            "hybrid_latent_scale": 4.0,
+            "latent_dim": 12,
+            "hidden": 64,
+            "mean_best_nll": 4.0879,
+            "mean_best_nll_delta_vs_raw": -0.1033,
+        }
+        result = {
+            "verdict": "confirmed",
+            "config_verdict": "confirmed",
+            "source_feature_verdict": "confirmed",
+            "source_feature_raw_verdict": "improved",
+            "current_best_raw_verdict": "improved",
+            "source_best_feature_retained": False,
+            "source_best_family_retained": True,
+            "current_best_config": best_config,
+        }
+        chain = {
+            "generation": 2,
+            "latest_verdict": "confirmed",
+            "verdict_history": ["confirmed", "confirmed"],
+            "improved_streak": 0,
+            "confirmed_streak": 2,
+            "regressed_streak": 0,
+        }
+        trajectory = {
+            "trajectory_action": "continue_or_audit_mixed_trajectory",
+            "trajectory_verdict": "improved",
+            "trajectory_reasons": [
+                "trajectory improved but latest verdict is not improved"
+            ],
+            "unsafe_promotion": False,
+        }
+        feature_family_stability = [
+            {
+                "family": "hybrid_latent",
+                "win_count": 5,
+                "near_win_count": 5,
+                "win_rate": 1.0,
+                "near_win_rate": 1.0,
+                "mean_best_nll": 4.0874,
+                "mean_best_accuracy": 0.16,
+                "mean_best_nll_delta_vs_raw": -0.1038,
+                "mean_rank": 1.0,
+                "mean_gap_to_winner": 0.0,
+                "member_best_counts": {
+                    "reconstruction_latent": 3,
+                    "raw_latent": 2,
+                },
+            },
+            {
+                "family": "raw",
+                "win_count": 0,
+                "near_win_count": 0,
+                "mean_best_nll_delta_vs_raw": 0.0,
+            },
+        ]
+        next_follow_up = _next_follow_up()
+        next_follow_up["used_seed_history"] = [
+            211,
+            223,
+            227,
+            101,
+            103,
+            107,
+            109,
+            113,
+            127,
+            131,
+            137,
+            139,
+            149,
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            trajectory["best_summary_path"] = str(root / "summary.json")
+            broadened = mod._broadened_follow_up_command_record(
+                args,
+                ["raw", "latent", "raw_latent"],
+                best_config,
+                root,
+                [127, 131, 137, 139, 149],
+                chain,
+                trajectory,
+                next_follow_up,
+                feature_family_stability,
+            )
+            guidance = mod._follow_up_guidance_record(
+                result,
+                chain,
+                {"failed": False},
+                next_follow_up,
+                trajectory,
+                None,
+                broadened,
+            )
+            guided = mod._guided_next_follow_up_command_record(
+                root,
+                guidance,
+                broadened,
+            )
+
+        self.assertIsNotNone(broadened)
+        self.assertEqual(
+            broadened["action"],
+            "promote_stable_family_confirmation",
+        )
+        self.assertEqual(
+            broadened["default_run_dir"],
+            str(root / "promoted_family_train"),
+        )
+        self.assertEqual(
+            broadened["script_path"],
+            str(root / "promoted_family_train_command.sh"),
+        )
+        self.assertEqual(broadened["broadened_epochs"], 32)
+        self.assertEqual(broadened["broadened_batches"], 64)
+        self.assertEqual(broadened["broadened_eval_samples"], 512)
+        self.assertEqual(broadened["broadened_vae_epochs"], 24)
+        self.assertEqual(broadened["broadened_vae_batches"], 48)
+        self.assertEqual(
+            broadened["focused_features"],
+            ["raw", "latent", "raw_latent", "reconstruction_latent"],
+        )
+        self.assertEqual(guidance["action"], "promote_stable_family_confirmation")
+        self.assertTrue(guidance["use_broadened_follow_up_command"])
+        self.assertFalse(guidance["use_next_follow_up_command"])
+        self.assertEqual(guidance["command_usage"], broadened["script_usage"])
+        self.assertIn(
+            "family focus: hybrid_latent wins=5 near_wins=5",
+            guidance["reasons"],
+        )
+        self.assertTrue(guided["enabled"])
+        self.assertEqual(
+            guided["default_run_dir"],
+            str(root / "promoted_family_train"),
+        )
+
     def test_follow_up_result_combines_source_and_current_seed_noise(self) -> None:
         mod = _load_module()
         source_best_config = {
