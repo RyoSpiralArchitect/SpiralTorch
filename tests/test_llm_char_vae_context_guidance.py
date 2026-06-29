@@ -2812,6 +2812,51 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
             command["focused_features"],
             ["raw", "latent", "raw_latent", "reconstruction_latent"],
         )
+        recipe = command["promoted_learning_recipe"]
+        self.assertEqual(
+            recipe["schema"],
+            "st.llm_char_vae_context.promoted_learning_recipe.v1",
+        )
+        self.assertEqual(recipe["feature"], "reconstruction_latent")
+        self.assertEqual(recipe["feature_family"], "hybrid_latent")
+        self.assertEqual(recipe["feature_normalize"], "blocks")
+        self.assertEqual(recipe["hybrid_latent_scale"], 4.0)
+        self.assertEqual(recipe["latent_dim"], 12)
+        self.assertEqual(recipe["hidden"], 64)
+        self.assertEqual(recipe["run_budget"]["window_chars"], 64)
+        self.assertEqual(recipe["run_budget"]["epochs"], 128)
+        self.assertEqual(recipe["run_budget"]["eval_samples"], 512)
+        self.assertEqual(recipe["expected_artifacts"]["seed_run_count"], 7)
+        first_seed = recipe["expected_artifacts"]["seed_runs"][0]
+        self.assertEqual(first_seed["seed"], 1043)
+        self.assertTrue(first_seed["run_dir"].endswith("seed_001043"))
+        self.assertTrue(
+            first_seed["best_head_path"].endswith(
+                "seed_001043/head_reconstruction_latent_best.json"
+            )
+        )
+        self.assertEqual(
+            recipe["eval_reload_policy"]["mode"],
+            "per_seed_best_checkpoint",
+        )
+        eval_commands = recipe["eval_reload_commands"]
+        self.assertEqual(eval_commands["count"], 7)
+        first_eval_command = eval_commands["items"][0]
+        self.assertEqual(first_eval_command["seed"], 1043)
+        self.assertTrue(first_eval_command["run_dir"].endswith("seed_001043/eval_best"))
+        self.assertTrue(
+            first_eval_command["vae_load"].endswith(
+                "seed_001043/text_vae_weights.bin"
+            )
+        )
+        script_command = first_eval_command["script_command"]
+        self.assertIn("--eval-only", script_command)
+        self.assertEqual(script_command[script_command.index("--epochs") + 1], "0")
+        self.assertEqual(script_command[script_command.index("--vae-epochs") + 1], "0")
+        self.assertEqual(
+            script_command[script_command.index("--head-load-kind") + 1],
+            "best",
+        )
         self.assertIn("--window-chars", command["script_command"])
         self.assertIn("64", command["script_command"])
         self.assertIn("## Mainline Scale-Up Command", report)
@@ -2829,6 +2874,17 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
             "- train_window/epochs/batches/eval_samples: 64/128/256/512",
             report,
         )
+        self.assertIn(
+            "- promoted_recipe: feature=reconstruction_latent family=hybrid_latent "
+            "normalize=blocks scale=4.0 latent_dim=12 hidden=64",
+            report,
+        )
+        self.assertIn(
+            "- recipe_eval_reload: mode=per_seed_best_checkpoint "
+            "head_load_kind=best",
+            report,
+        )
+        self.assertIn("- recipe_eval_commands: count=7 first_run_dir=", report)
 
     def test_follow_up_result_combines_source_and_current_seed_noise(self) -> None:
         mod = _load_module()
