@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import shlex
 from pathlib import Path
 from typing import Any
 
@@ -165,6 +166,44 @@ def _recommendation(
     return "review_reload_winners"
 
 
+def _shell_command(parts: list[Any]) -> str:
+    return " ".join(shlex.quote(str(part)) for part in parts)
+
+
+def _recommended_next_eval_command(report: dict[str, Any]) -> str | None:
+    source_summary = report.get("source_summary_path")
+    remaining = report.get("remaining_eval_count")
+    if not isinstance(source_summary, str) or not source_summary:
+        return None
+    if not isinstance(remaining, int) or remaining <= 0:
+        return None
+    return "PYTHONNOUSERSITE=1 " + _shell_command(
+        [
+            "python3",
+            "-P",
+            "tools/run_char_vae_promoted_recipe.py",
+            source_summary,
+            "--ready-only",
+            "--complete-only",
+            "--execute",
+            "--write-report",
+            "--json",
+        ]
+    )
+
+
+def _recommended_summary_command(report_path: str) -> str:
+    return "PYTHONNOUSERSITE=1 " + _shell_command(
+        [
+            "python3",
+            "-S",
+            "-s",
+            "tools/summarize_char_vae_promoted_eval_runs.py",
+            report_path,
+        ]
+    )
+
+
 def summarize_report(path: Path) -> dict[str, Any]:
     report_path = _report_path(path)
     payload = _read_json(report_path)
@@ -203,7 +242,7 @@ def summarize_report(path: Path) -> dict[str, Any]:
     if isinstance(selected_count, int) and isinstance(available_count, int):
         remaining_eval_count = max(available_count - selected_count, 0)
         planned_eval_complete = remaining_eval_count == 0
-    return {
+    report = {
         "schema": REPORT_SCHEMA,
         "report_path": str(report_path),
         "source_summary_path": payload.get("summary_path"),
@@ -248,6 +287,11 @@ def summarize_report(path: Path) -> dict[str, Any]:
             mean_target_delta_vs_raw=mean_target_delta_vs_raw,
         ),
     }
+    report["recommended_next_eval_command"] = _recommended_next_eval_command(report)
+    report["recommended_summary_command"] = _recommended_summary_command(
+        str(report_path)
+    )
+    return report
 
 
 def summarize_reports(paths: list[Path]) -> dict[str, Any]:
@@ -290,6 +334,8 @@ def markdown_report(payload: dict[str, Any]) -> str:
                 f"- mean_target_delta_vs_raw: {_fmt(report.get('mean_target_delta_vs_raw'))}",
                 f"- mean_margin_to_runner_up: {_fmt(report.get('mean_margin_to_runner_up'))}",
                 f"- recommendation: {report.get('recommendation') or '-'}",
+                f"- recommended_next_eval_command: `{report.get('recommended_next_eval_command') or '-'}`",
+                f"- recommended_summary_command: `{report.get('recommended_summary_command') or '-'}`",
                 "",
                 "| seed | returncode | summary | best_feature | best_nll | delta_vs_raw | runner_up | margin |",
                 "| ---: | ---: | --- | --- | ---: | ---: | --- | ---: |",

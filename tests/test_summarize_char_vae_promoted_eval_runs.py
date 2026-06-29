@@ -121,6 +121,11 @@ class PromotedEvalSummaryTests(unittest.TestCase):
             self.assertEqual(summary["target_feature_win_rate"], 1.0)
             self.assertAlmostEqual(summary["mean_target_delta_vs_raw"], -0.3)
             self.assertEqual(summary["recommendation"], "promote_reload_evidence")
+            self.assertIsNone(summary["recommended_next_eval_command"])
+            self.assertIn(
+                "tools/summarize_char_vae_promoted_eval_runs.py",
+                summary["recommended_summary_command"],
+            )
 
     def test_json_summary_continues_when_planned_eval_remains(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -150,6 +155,13 @@ class PromotedEvalSummaryTests(unittest.TestCase):
             self.assertEqual(summary["remaining_eval_count"], 1)
             self.assertEqual(summary["winner_counts"], {"reconstruction_latent": 2})
             self.assertEqual(summary["recommendation"], "continue_planned_eval")
+            command = summary["recommended_next_eval_command"]
+            self.assertIsInstance(command, str)
+            self.assertIn("tools/run_char_vae_promoted_recipe.py", command)
+            self.assertIn("--ready-only", command)
+            self.assertIn("--complete-only", command)
+            self.assertIn("--execute", command)
+            self.assertIn("--write-report", command)
 
     def test_markdown_surfaces_missing_summaries(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
