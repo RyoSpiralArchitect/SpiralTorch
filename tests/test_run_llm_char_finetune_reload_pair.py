@@ -297,10 +297,13 @@ class RunLlmCharFinetuneReloadPairTests(unittest.TestCase):
                     {
                         "initial_validation": {"mean_nll": 4.0},
                         "final_validation": {"mean_nll": 3.5},
+                        "training_final_validation": {"mean_nll": 3.6},
                         "best_validation_mean_nll": 3.4,
                         "best_validation_epoch": 1,
                         "validation_nll_delta": -0.5,
+                        "training_final_nll_delta": -0.4,
                         "final_minus_best_validation_nll": 0.1,
+                        "training_final_minus_best_validation_nll": 0.2,
                         "restore_best_at_end": True,
                         "restored_best_at_end": True,
                         "best_checkpoint_exists": True,
@@ -314,10 +317,13 @@ class RunLlmCharFinetuneReloadPairTests(unittest.TestCase):
                     {
                         "initial_validation": {"mean_nll": 3.45},
                         "final_validation": {"mean_nll": 3.3},
+                        "training_final_validation": {"mean_nll": 3.25},
                         "best_validation_mean_nll": 3.2,
                         "best_validation_epoch": 2,
                         "validation_nll_delta": -0.15,
+                        "training_final_nll_delta": -0.2,
                         "final_minus_best_validation_nll": 0.1,
+                        "training_final_minus_best_validation_nll": 0.05,
                         "early_stopped_epoch": 3,
                         "restore_best_at_end": True,
                         "restored_best_at_end": True,
@@ -339,8 +345,17 @@ class RunLlmCharFinetuneReloadPairTests(unittest.TestCase):
         self.assertFalse(outcome["reload_regressed_best"])
         self.assertAlmostEqual(outcome["reload_best_minus_base_best_nll"], -0.2)
         self.assertAlmostEqual(outcome["reload_final_minus_base_final_nll"], -0.2)
+        self.assertEqual(outcome["reload_training_status"], "improved")
+        self.assertAlmostEqual(outcome["reload_training_final_minus_base_best_nll"], -0.15)
         self.assertAlmostEqual(outcome["reload_best_minus_reload_initial_nll"], -0.25)
+        self.assertAlmostEqual(
+            outcome["reload_training_final_minus_reload_initial_nll"],
+            -0.2,
+        )
         self.assertEqual(outcome["base"]["best_epoch"], 1)
+        self.assertAlmostEqual(outcome["reload"]["training_final_nll"], 3.25)
+        self.assertAlmostEqual(outcome["reload"]["training_final_nll_delta"], -0.2)
+        self.assertAlmostEqual(outcome["reload"]["training_final_minus_best_nll"], 0.05)
         self.assertEqual(outcome["reload"]["early_stopped_epoch"], 3)
         self.assertTrue(outcome["reload"]["restored_best_at_end"])
 

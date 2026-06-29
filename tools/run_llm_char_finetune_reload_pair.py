@@ -349,6 +349,7 @@ def run_summary_contract(run_dir: Path) -> dict[str, Any]:
     summary = read_json(summary_path) if summary_path.exists() else {}
     run_json = read_json(run_json_path) if run_json_path.exists() else {}
     final_nll = metric_value(summary, "final_validation", "mean_nll")
+    training_final_nll = metric_value(summary, "training_final_validation", "mean_nll")
     best_nll = finite_float(summary.get("best_validation_mean_nll"))
     initial_nll = metric_value(summary, "initial_validation", "mean_nll")
     return {
@@ -364,10 +365,17 @@ def run_summary_contract(run_dir: Path) -> dict[str, Any]:
         "validation_tokens": run_json.get("validation_tokens"),
         "initial_nll": initial_nll,
         "final_nll": final_nll,
+        "training_final_nll": training_final_nll,
         "best_nll": best_nll,
         "validation_nll_delta": finite_float(summary.get("validation_nll_delta")),
+        "training_final_nll_delta": finite_float(
+            summary.get("training_final_nll_delta")
+        ),
         "final_minus_best_nll": finite_float(
             summary.get("final_minus_best_validation_nll")
+        ),
+        "training_final_minus_best_nll": finite_float(
+            summary.get("training_final_minus_best_validation_nll")
         ),
         "best_epoch": summary.get("best_validation_epoch"),
         "early_stopped_epoch": summary.get("early_stopped_epoch"),
@@ -383,13 +391,22 @@ def reload_pair_outcome(base_run_dir: Path, reload_run_dir: Path) -> dict[str, A
     reload = run_summary_contract(reload_run_dir)
     reload_best_minus_base_best = nll_delta(reload["best_nll"], base["best_nll"])
     reload_final_minus_base_final = nll_delta(reload["final_nll"], base["final_nll"])
+    reload_training_final_minus_base_best = nll_delta(
+        reload["training_final_nll"],
+        base["best_nll"],
+    )
     reload_best_minus_reload_initial = nll_delta(
         reload["best_nll"], reload["initial_nll"]
+    )
+    reload_training_final_minus_reload_initial = nll_delta(
+        reload["training_final_nll"],
+        reload["initial_nll"],
     )
     reload_final_minus_reload_initial = nll_delta(
         reload["final_nll"], reload["initial_nll"]
     )
     status = nll_status(reload_best_minus_base_best)
+    training_status = nll_status(reload_training_final_minus_base_best)
     issues: list[str] = []
     if base["summary_exists"] is not True:
         issues.append("missing_base_summary")
@@ -414,6 +431,7 @@ def reload_pair_outcome(base_run_dir: Path, reload_run_dir: Path) -> dict[str, A
     evaluation_comparable = not comparison_issues
     if not evaluation_comparable:
         status = "unknown"
+        training_status = "unknown"
 
     return {
         "schema": OUTCOME_SCHEMA,
@@ -426,9 +444,14 @@ def reload_pair_outcome(base_run_dir: Path, reload_run_dir: Path) -> dict[str, A
         "comparison_issues": comparison_issues,
         "reload_improved_best": status == "improved",
         "reload_regressed_best": status == "regressed",
+        "reload_training_status": training_status,
         "reload_best_minus_base_best_nll": reload_best_minus_base_best,
         "reload_final_minus_base_final_nll": reload_final_minus_base_final,
+        "reload_training_final_minus_base_best_nll": reload_training_final_minus_base_best,
         "reload_best_minus_reload_initial_nll": reload_best_minus_reload_initial,
+        "reload_training_final_minus_reload_initial_nll": (
+            reload_training_final_minus_reload_initial
+        ),
         "reload_final_minus_reload_initial_nll": reload_final_minus_reload_initial,
     }
 
