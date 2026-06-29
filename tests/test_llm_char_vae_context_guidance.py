@@ -2547,6 +2547,7 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
             },
         ]
         next_follow_up = _next_follow_up()
+        next_follow_up["default_new_seeds"] = "1029,1031,1033,1035,1037,1039,1041"
         next_follow_up["used_seed_history"] = [
             211,
             223,
@@ -2603,6 +2604,14 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
             command["readiness_basis"],
             "raw_positive_family_evidence_after_generation_5",
         )
+        self.assertEqual(
+            command["default_new_seeds"],
+            "1043,1045,1047,1049,1051,1053,1055",
+        )
+        self.assertEqual(
+            command["reserved_follow_up_seeds"],
+            [1029, 1031, 1033, 1035, 1037, 1039, 1041],
+        )
         self.assertEqual(command["default_run_dir"], str(root / "mainline_scale_up"))
         self.assertEqual(
             command["script_path"],
@@ -2624,6 +2633,14 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
         self.assertIn("## Mainline Scale-Up Command", report)
         self.assertIn("- command_kind: mainline_scale_up", report)
         self.assertIn("- training_track: mainline_capacity_train", report)
+        self.assertIn(
+            "- default_new_seeds: 1043,1045,1047,1049,1051,1053,1055",
+            report,
+        )
+        self.assertIn(
+            "- reserved_follow_up_seeds: 1029, 1031, 1033, 1035, 1037, 1039, 1041",
+            report,
+        )
         self.assertIn(
             "- train_window/epochs/batches/eval_samples: 64/128/256/512",
             report,

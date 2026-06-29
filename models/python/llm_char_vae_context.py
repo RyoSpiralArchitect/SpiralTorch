@@ -2663,6 +2663,10 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
                 f"- default_new_seeds: {mainline_scale_up.get('default_new_seeds')}",
                 "- used_seed_history: "
                 f"{', '.join(str(seed) for seed in mainline_scale_up.get('used_seed_history', [])) or '-'}",
+                "- reserved_follow_up_seeds: "
+                f"{', '.join(str(seed) for seed in mainline_scale_up.get('reserved_follow_up_seeds', [])) or '-'}",
+                "- seed_exclusion_history: "
+                f"{', '.join(str(seed) for seed in mainline_scale_up.get('seed_exclusion_history', [])) or '-'}",
                 f"- feature_family_focus: {focus_family or '-'}",
                 "- focused_features: "
                 f"{', '.join(str(feature) for feature in mainline_scale_up.get('focused_features', [])) or '-'}",
@@ -4268,13 +4272,22 @@ def _mainline_scale_up_command_record(
     if isinstance(next_follow_up, dict):
         _append_unique_ints(used_seeds, next_follow_up.get("used_seed_history"))
     _append_unique_ints(used_seeds, seeds)
+    reserved_follow_up_seeds = (
+        _seed_csv_values(next_follow_up.get("default_new_seeds"))
+        if isinstance(next_follow_up, dict)
+        else []
+    )
+    seed_exclusions = list(used_seeds)
+    _append_unique_ints(seed_exclusions, reserved_follow_up_seeds)
     default_new_seed_count = max(5, min(7, len(seeds) if seeds else 5))
     default_new_seeds = _fresh_seed_csv(
-        used_seeds or seeds,
+        seed_exclusions or seeds,
         count=default_new_seed_count,
     )
-    used_seed_history_value = (
-        ",".join(str(seed) for seed in used_seeds) if used_seeds else None
+    seed_exclusion_history_value = (
+        ",".join(str(seed) for seed in seed_exclusions)
+        if seed_exclusions
+        else None
     )
     default_run_dir = root_run_dir / "mainline_scale_up"
     default_follow_up_from = root_run_dir / "summary.json"
@@ -4305,7 +4318,7 @@ def _mainline_scale_up_command_record(
         run_dir_value=str(default_run_dir),
         follow_up_from_value=str(default_follow_up_from),
         fail_on_verdict_value=default_fail_on_verdict,
-        used_seed_history_value=used_seed_history_value,
+        used_seed_history_value=seed_exclusion_history_value,
     )
     shell_command = "PYTHONNOUSERSITE=1 " + shlex.join(literal_command)
     script_command = _follow_up_command_parts(
@@ -4320,7 +4333,7 @@ def _mainline_scale_up_command_record(
             if default_fail_on_verdict is not None
             else None
         ),
-        used_seed_history_value=used_seed_history_value,
+        used_seed_history_value=seed_exclusion_history_value,
     )
     script_usage = (
         f"FOLLOW_UP_FROM={default_follow_up_from} NEW_SEEDS={default_new_seeds} "
@@ -4351,6 +4364,8 @@ def _mainline_scale_up_command_record(
         "default_new_seeds": default_new_seeds,
         "default_new_seed_count": default_new_seed_count,
         "used_seed_history": used_seeds,
+        "reserved_follow_up_seeds": reserved_follow_up_seeds,
+        "seed_exclusion_history": seed_exclusions,
         "default_run_dir": str(default_run_dir),
         "default_follow_up_from": str(default_follow_up_from),
         "default_follow_up_fail_on_verdict": default_fail_on_verdict,
