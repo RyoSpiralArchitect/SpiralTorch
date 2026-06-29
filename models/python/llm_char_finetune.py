@@ -23,6 +23,8 @@ FORMAT_V2 = "st-char-lm-v2"
 DEFAULT_UNK = "\uFFFD"
 
 RUN_SCHEMA = "st.modelzoo.run.v1"
+TRAINING_CONTRACT_SCHEMA = "st.llm_char_finetune.training_contract.v1"
+SUMMARY_SCHEMA = "st.llm_char_finetune.summary.v1"
 
 
 def _meta_path_for_weights(weights_path: pathlib.Path) -> pathlib.Path:
@@ -94,6 +96,33 @@ def _native_feature_flags() -> dict[str, bool]:
     return out
 
 
+def _backend_contract(backend: str) -> dict[str, Any]:
+    normalized = str(backend).strip().lower()
+    flags = _native_feature_flags()
+    required_any: list[str] = []
+    if normalized in {"wgpu", "webgpu", "auto"}:
+        required_any = ["wgpu", "wgpu-rt"]
+    elif normalized == "cuda":
+        required_any = ["cuda"]
+    elif normalized in {"hip", "rocm"}:
+        required_any = ["hip", "hip-real"]
+
+    if normalized == "cpu":
+        available = True
+    elif required_any:
+        available = any(flags.get(feature) for feature in required_any)
+    else:
+        available = False
+
+    return {
+        "requested": normalized,
+        "status": "available" if available else "unavailable",
+        "required_any_features": required_any,
+        "native_features": flags,
+        "availability_checked": True,
+    }
+
+
 def _require_backend_available(backend: str) -> None:
     backend = str(backend).strip().lower()
     if backend in {"cpu"}:
@@ -122,6 +151,162 @@ def _require_backend_available(backend: str) -> None:
             "Rebuild the extension with `--features hip` (or `hip-real`)."
         )
     raise ValueError(f"unknown --backend: {backend} (expected cpu|wgpu|cuda|hip|auto)")
+
+
+def _build_training_contract(
+    run_meta: dict[str, Any],
+    *,
+    weights_path: pathlib.Path,
+    metrics_path: pathlib.Path,
+    samples_dir: pathlib.Path,
+    save_weights: pathlib.Path | None,
+) -> dict[str, Any]:
+    weights_loaded_from = run_meta.get("weights_loaded_from")
+    trainable = ["char_rnn", "linear_head", "zspace_softmax"]
+    if run_meta.get("embed_dim") is not None:
+        trainable.insert(0, "embedding")
+    return {
+        "schema": TRAINING_CONTRACT_SCHEMA,
+        "scope": "llm_char_finetune",
+        "learning_mode": "finetune" if weights_loaded_from else "scratch",
+        "input": {
+            "representation": "tokenizerless_char",
+            "format": run_meta.get("format"),
+            "unk": DEFAULT_UNK,
+            "steps": run_meta.get("steps"),
+            "vocab_size": run_meta.get("vocab_size"),
+            "symbols_count": run_meta.get("symbols_count"),
+            "embed_dim": run_meta.get("embed_dim"),
+            "mode": run_meta.get("mode"),
+        },
+        "parameter_policy": {
+            "trainable": trainable,
+            "frozen": [],
+            "reload_source": weights_loaded_from,
+        },
+        "geometry": {
+            "curvature": run_meta.get("curvature"),
+            "temperature": run_meta.get("temperature"),
+            "zspace_softmax": True,
+            "hypergrad_attached": True,
+        },
+        "backend": _backend_contract(str(run_meta.get("backend") or "cpu")),
+        "optimization": {
+            "epochs": run_meta.get("epochs"),
+            "batches_per_epoch": run_meta.get("batches_per_epoch"),
+            "batch": run_meta.get("batch"),
+            "lr": run_meta.get("lr"),
+            "roundtable": {
+                "top_k": 1,
+                "mid_k": 1,
+                "bottom_k": 1,
+                "here_tolerance": 1e-5,
+            },
+        },
+        "reload": {
+            "weights_loaded_from": weights_loaded_from,
+            "output_weights_path": str(weights_path),
+            "output_meta_path": str(_meta_path_for_weights(weights_path)),
+            "save_weights_path": str(save_weights) if save_weights is not None else None,
+            "metadata_required": True,
+            "reload_safe": True,
+        },
+        "artifacts": {
+            "metrics_path": str(metrics_path),
+            "samples_dir": str(samples_dir),
+            "events_path": run_meta.get("events_path"),
+        },
+        "controls": {
+            "desire": bool(run_meta.get("desire")),
+            "softlogic": run_meta.get("softlogic"),
+        },
+    }
+
+
+def _metrics_summary(metrics_path: pathlib.Path) -> dict[str, Any]:
+    rows: list[dict[str, Any]] = []
+    if metrics_path.exists():
+        for line in metrics_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                item = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(item, dict):
+                rows.append(item)
+
+    losses = []
+    for item in rows:
+        try:
+            loss = float(item.get("average_loss"))
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(loss):
+            losses.append(loss)
+
+    first_loss = losses[0] if losses else None
+    final_loss = losses[-1] if losses else None
+    best_loss = min(losses) if losses else None
+    return {
+        "epoch_count": len(rows),
+        "loss_count": len(losses),
+        "first_average_loss": first_loss,
+        "final_average_loss": final_loss,
+        "best_average_loss": best_loss,
+        "first_minus_final_average_loss": (
+            first_loss - final_loss
+            if first_loss is not None and final_loss is not None
+            else None
+        ),
+    }
+
+
+def _write_completion_summary(
+    run_dir: pathlib.Path,
+    run_meta: dict[str, Any],
+    *,
+    weights_path: pathlib.Path,
+    metrics_path: pathlib.Path,
+    final_sample_path: pathlib.Path,
+    save_weights: pathlib.Path | None,
+) -> None:
+    meta_path = _meta_path_for_weights(weights_path)
+    external_meta_path = (
+        _meta_path_for_weights(save_weights) if save_weights is not None else None
+    )
+    payload = {
+        "schema": SUMMARY_SCHEMA,
+        "status": "completed",
+        "arch": run_meta.get("arch"),
+        "run_schema": run_meta.get("schema"),
+        "training_contract": run_meta.get("training_contract"),
+        "checkpoint": {
+            "weights_path": str(weights_path),
+            "weights_exists": weights_path.exists(),
+            "meta_path": str(meta_path),
+            "meta_exists": meta_path.exists(),
+            "save_weights_path": str(save_weights) if save_weights is not None else None,
+            "save_weights_exists": (
+                save_weights.exists() if save_weights is not None else None
+            ),
+            "save_meta_path": (
+                str(external_meta_path) if external_meta_path is not None else None
+            ),
+            "save_meta_exists": (
+                external_meta_path.exists()
+                if external_meta_path is not None
+                else None
+            ),
+            "loaded_from": run_meta.get("weights_loaded_from"),
+        },
+        "metrics": _metrics_summary(metrics_path),
+        "sample": {
+            "path": str(final_sample_path),
+            "exists": final_sample_path.exists(),
+        },
+    }
+    _write_json(run_dir / "summary.json", payload)
 
 
 def _build_vocab(text: str, unk: str) -> tuple[str, list[str], dict[str, int]]:
@@ -497,6 +682,10 @@ def main() -> None:
 
     if atlas and events_path is None:
         events_path = run_dir / "events.jsonl"
+    metrics_path = run_dir / "metrics.jsonl"
+    weights_path = run_dir / "weights.json"
+    if metrics_path.exists():
+        metrics_path.unlink()
 
     if load_weights is not None:
         meta_path = _meta_path_for_weights(load_weights)
@@ -595,6 +784,13 @@ def main() -> None:
     )
     softlogic_meta = _softlogic_cli.apply_softlogic_cli(trainer, softlogic_cli)
     run_meta["softlogic"] = softlogic_meta
+    run_meta["training_contract"] = _build_training_contract(
+        run_meta,
+        weights_path=weights_path,
+        metrics_path=metrics_path,
+        samples_dir=samples_dir,
+        save_weights=save_weights,
+    )
     _write_json(run_dir / "run.json", run_meta)
     desire_pipeline: st.nn.DesirePipeline | None = None
     if desire:
@@ -615,7 +811,6 @@ def main() -> None:
         f"batch={batch} lr={lr:.3e} curvature={curvature} temp={temperature} backend={backend} run_dir={run_dir}"
     )
 
-    metrics_path = run_dir / "metrics.jsonl"
     record_ctx = (
         st.plugin.record(str(events_path), event_types=events_types)
         if events_path is not None
@@ -693,7 +888,6 @@ def main() -> None:
         except Exception as exc:
             _write_json(run_dir / "atlas_summary.json", {"error": str(exc)})
 
-    weights_path = run_dir / "weights.json"
     st.nn.save(str(weights_path), model)
 
     meta = {
@@ -715,7 +909,8 @@ def main() -> None:
         _save_meta(_meta_path_for_weights(save_weights), meta)
 
     if epochs > 0:
-        sample = (samples_dir / f"epoch_{epochs - 1:03d}.txt").read_text(encoding="utf-8")
+        final_sample_path = samples_dir / f"epoch_{epochs - 1:03d}.txt"
+        sample = final_sample_path.read_text(encoding="utf-8")
     else:
         sample = _generate(
             model,
@@ -729,7 +924,16 @@ def main() -> None:
             embed_dim=embed_dim_runtime,
             desire=desire_pipeline,
         )
-        (samples_dir / "init.txt").write_text(sample, encoding="utf-8")
+        final_sample_path = samples_dir / "init.txt"
+        final_sample_path.write_text(sample, encoding="utf-8")
+    _write_completion_summary(
+        run_dir,
+        run_meta,
+        weights_path=weights_path,
+        metrics_path=metrics_path,
+        final_sample_path=final_sample_path,
+        save_weights=save_weights,
+    )
     print("--- sample (prompt + gen) ---")
     print(sample)
 
