@@ -3455,12 +3455,43 @@ def _seed_csv_values(raw: Any) -> list[int]:
     return seeds
 
 
+def _append_summary_command_seed_history(
+    used: list[int],
+    summary: dict[str, Any],
+) -> None:
+    command_names = (
+        "next_follow_up_command",
+        "guided_next_follow_up_command",
+        "best_generation_follow_up_command",
+        "feature_swap_review_command",
+        "broadened_follow_up_command",
+        "mainline_scale_up_command",
+    )
+    for name in command_names:
+        command = summary.get(name)
+        if not isinstance(command, dict):
+            continue
+        _append_unique_ints(used, command.get("used_seed_history"))
+        _append_unique_ints(used, command.get("reserved_follow_up_seeds"))
+        _append_unique_ints(used, command.get("seed_exclusion_history"))
+        _append_unique_ints(used, _seed_csv_values(command.get("default_new_seeds")))
+
+
 def _follow_up_used_seeds(
     follow_up: dict[str, Any] | None,
     current_seeds: list[int],
 ) -> list[int]:
     used: list[int] = []
     if isinstance(follow_up, dict):
+        source_summary_path = follow_up.get("source_summary_path")
+        if source_summary_path is not None and str(source_summary_path):
+            try:
+                _loaded_path, source_summary = _load_follow_up_summary(
+                    pathlib.Path(str(source_summary_path)).expanduser()
+                )
+                _append_summary_command_seed_history(used, source_summary)
+            except (OSError, json.JSONDecodeError, ValueError):
+                pass
         source_chain = follow_up.get("source_chain")
         source_chain = source_chain if isinstance(source_chain, dict) else {}
         ancestors = source_chain.get("ancestors", [])
@@ -6488,8 +6519,10 @@ def _refresh_aggregate_summary_payload(
     else:
         refreshed.pop("follow_up_gate", None)
 
-    next_follow_up = refreshed.get("next_follow_up_command")
-    next_follow_up = next_follow_up if isinstance(next_follow_up, dict) else None
+    existing_next_follow_up = refreshed.get("next_follow_up_command")
+    existing_next_follow_up = (
+        existing_next_follow_up if isinstance(existing_next_follow_up, dict) else None
+    )
     best_generation_follow_up = refreshed.get("best_generation_follow_up_command")
     best_generation_follow_up = (
         best_generation_follow_up
@@ -6498,6 +6531,24 @@ def _refresh_aggregate_summary_payload(
     )
     broadened_follow_up = refreshed.get("broadened_follow_up_command")
     broadened_follow_up = broadened_follow_up if isinstance(broadened_follow_up, dict) else None
+
+    command_args = _refresh_command_args(args, run, existing_next_follow_up)
+    features = _summary_features(refreshed)
+    seeds = _summary_seeds(refreshed)
+    next_follow_up = _next_follow_up_command_record(
+        command_args,
+        features,
+        best_config if isinstance(best_config, dict) else {},
+        root_run_dir,
+        seeds,
+        follow_up,
+    )
+    if next_follow_up is not None:
+        refreshed["next_follow_up_command"] = next_follow_up
+        if write_scripts:
+            _write_next_follow_up_script(next_follow_up)
+    else:
+        refreshed.pop("next_follow_up_command", None)
 
     preliminary_guidance = _follow_up_guidance_record(
         follow_up_result,
@@ -6519,9 +6570,6 @@ def _refresh_aggregate_summary_payload(
     else:
         refreshed.pop("follow_up_trajectory", None)
 
-    command_args = _refresh_command_args(args, run, next_follow_up)
-    features = _summary_features(refreshed)
-    seeds = _summary_seeds(refreshed)
     broadened_follow_up = _broadened_follow_up_command_record(
         command_args,
         features,
