@@ -263,7 +263,22 @@ def _selection(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _summary_follow_up_command(summary_path: Any) -> dict[str, Any]:
+FOLLOW_UP_COMMAND_NAMES = (
+    "guided_next_follow_up_command",
+    "feature_swap_review_command",
+    "best_generation_follow_up_command",
+    "broadened_follow_up_command",
+    "next_follow_up_command",
+)
+SCALE_UP_COMMAND_NAMES = ("mainline_scale_up_command",)
+
+
+def _summary_command(
+    summary_path: Any,
+    *,
+    command_names: tuple[str, ...],
+    unavailable_reason: str,
+) -> dict[str, Any]:
     record: dict[str, Any] = {
         "schema": "st.llm_char_vae_context.chain_recommended_command.v1",
         "source_summary_path": summary_path if isinstance(summary_path, str) else None,
@@ -283,13 +298,6 @@ def _summary_follow_up_command(summary_path: Any) -> dict[str, Any]:
             record["missing_reason"] = "summary json unavailable"
         return record
 
-    command_names = [
-        "guided_next_follow_up_command",
-        "feature_swap_review_command",
-        "best_generation_follow_up_command",
-        "broadened_follow_up_command",
-        "next_follow_up_command",
-    ]
     for name in command_names:
         command = summary.get(name)
         if not isinstance(command, dict):
@@ -322,8 +330,24 @@ def _summary_follow_up_command(summary_path: Any) -> dict[str, Any]:
         )
         return record
 
-    record["missing_reason"] = "no runnable follow-up command in summary"
+    record["missing_reason"] = unavailable_reason
     return record
+
+
+def _summary_follow_up_command(summary_path: Any) -> dict[str, Any]:
+    return _summary_command(
+        summary_path,
+        command_names=FOLLOW_UP_COMMAND_NAMES,
+        unavailable_reason="no runnable follow-up command in summary",
+    )
+
+
+def _summary_scale_up_command(summary_path: Any) -> dict[str, Any]:
+    return _summary_command(
+        summary_path,
+        command_names=SCALE_UP_COMMAND_NAMES,
+        unavailable_reason="no runnable mainline scale-up command in summary",
+    )
 
 
 def _with_recommended_commands(recommendation: dict[str, Any]) -> dict[str, Any]:
@@ -333,6 +357,9 @@ def _with_recommended_commands(recommendation: dict[str, Any]) -> dict[str, Any]
     )
     recommendation["review_command"] = _summary_follow_up_command(
         recommendation.get("review_summary_path")
+    )
+    recommendation["scale_up_command"] = _summary_scale_up_command(
+        recommendation.get("follow_up_from_summary_path")
     )
     return recommendation
 
@@ -821,6 +848,8 @@ def _render_command_readme(
     follow_up = follow_up if isinstance(follow_up, dict) else {}
     review = recommendation.get("review_command")
     review = review if isinstance(review, dict) else {}
+    scale_up = recommendation.get("scale_up_command")
+    scale_up = scale_up if isinstance(scale_up, dict) else {}
     selection = summary.get("selection")
     selection = selection if isinstance(selection, dict) else {}
     lines = [
@@ -899,6 +928,21 @@ def _render_command_readme(
         f"- target: {_fmt_readme_value('execution-next')}",
         f"- inspected_script_run: {_fmt_readme_value(_run_line(command_scripts.get('runner_path'), '--target', 'execution-next'))}",
         f"- inspected_run: {_fmt_readme_value(command_scripts.get('execution_next_command'))}",
+        "",
+        "## Mainline Scale-Up",
+        "",
+        "Use this explicit target when the accepted champion exposes a mainline capacity scale-up command.",
+        "",
+        f"- target: {_fmt_readme_value('scale-up')}",
+        f"- script: {_fmt_readme_value(command_scripts.get('scale_up_path'))}",
+        f"- run: {_fmt_readme_value(_run_line(command_scripts.get('scale_up_path')))}",
+        f"- inspected_script: {_fmt_readme_value(command_scripts.get('scale_up_runner_path'))}",
+        f"- inspected_script_run: {_fmt_readme_value(_run_line(command_scripts.get('scale_up_runner_path')))}",
+        f"- inspected_run: {_fmt_readme_value(command_scripts.get('scale_up_command'))}",
+        f"- command_source: {_fmt_readme_value(scale_up.get('command_source'))}",
+        f"- summary_path: {_fmt_readme_value(scale_up.get('source_summary_path'))}",
+        f"- default_new_seeds: {_fmt_readme_value(scale_up.get('default_new_seeds'))}",
+        f"- default_run_dir: {_fmt_readme_value(scale_up.get('default_run_dir'))}",
         "",
         "## Safe Follow-Up",
         "",
@@ -1037,6 +1081,12 @@ def _write_recommended_command_scripts(
         label="review_command",
         execution_cwd=execution_cwd,
     )
+    scale_up_path = _write_command_script(
+        out_dir / "recommended_scale_up.sh",
+        recommendation.get("scale_up_command"),
+        label="scale_up_command",
+        execution_cwd=execution_cwd,
+    )
     next_target, next_kind = _recommended_next_target(
         recommendation,
         follow_up_path=follow_up_path,
@@ -1051,6 +1101,17 @@ def _write_recommended_command_scripts(
     execution_next_command = _runner_command_line(
         str(out_dir),
         target="execution-next",
+    )
+    scale_up_command = _runner_command_line(
+        str(out_dir),
+        target="scale-up",
+    )
+    scale_up_runner_path = _write_runner_command_script(
+        out_dir / "run_recommended_scale_up.sh",
+        scale_up_command if scale_up_path else None,
+        target_kind="scale_up",
+        label="run_recommended_scale_up",
+        description="# Runs the explicit mainline scale-up through bundle inspection first.",
     )
     history_next_action_command = _runner_command_line(
         str(out_dir),
@@ -1093,9 +1154,17 @@ def _write_recommended_command_scripts(
         "next_kind": next_kind,
         "follow_up_path": follow_up_path,
         "review_path": review_path,
+        "scale_up_path": scale_up_path,
         "written_count": sum(
             1
-            for path in (next_path, follow_up_path, review_path, runner_path)
+            for path in (
+                next_path,
+                follow_up_path,
+                review_path,
+                scale_up_path,
+                runner_path,
+                scale_up_runner_path,
+            )
             + (
                 history_next_action_runner_path,
                 history_loop_runner_path,
@@ -1154,6 +1223,8 @@ def _write_recommended_command_scripts(
         "inspection_run_loop_resume_from_report_command_missing_required_flags": [],
         "runner_command": runner_command,
         "execution_next_command": execution_next_command,
+        "scale_up_command": scale_up_command,
+        "scale_up_runner_path": scale_up_runner_path,
         "history_next_action_command": history_next_action_command,
         "history_next_action_runner_path": history_next_action_runner_path,
         "history_loop_command": history_loop_command,
@@ -1309,6 +1380,8 @@ def _render_markdown(summary: dict[str, Any]) -> str:
         f"- command_inspection_run_loop_resume_from_report_command_missing_required_flags: {_fmt_list(_value(command_scripts, 'inspection_run_loop_resume_from_report_command_missing_required_flags'))}",
         f"- command_runner: {_fmt(_value(command_scripts, 'runner_command'))}",
         f"- command_execution_next: {_fmt(_value(command_scripts, 'execution_next_command'))}",
+        f"- command_scale_up: {_fmt(_value(command_scripts, 'scale_up_command'))}",
+        f"- command_scale_up_runner: {_fmt(_value(command_scripts, 'scale_up_runner_path'))}",
         f"- command_history_next_action: {_fmt(_value(command_scripts, 'history_next_action_command'))}",
         f"- command_history_next_action_runner: {_fmt(_value(command_scripts, 'history_next_action_runner_path'))}",
         f"- command_history_loop: {_fmt(_value(command_scripts, 'history_loop_command'))}",

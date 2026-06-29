@@ -69,6 +69,16 @@ def _execution_next_command(command_dir: Path) -> str:
     )
 
 
+def _scale_up_command(command_dir: Path) -> str:
+    return (
+        "env PYTHONNOUSERSITE=1 python3 -P "
+        f"{shlex.quote(str(RUNNER_SCRIPT.resolve()))} "
+        f"{shlex.quote(str(command_dir.resolve()))} --target scale-up "
+        "--write-inspection-report --write-run-report --append-run-history "
+        "--write-run-history-report"
+    )
+
+
 def _history_next_action_command(command_dir: Path) -> str:
     return (
         "env PYTHONNOUSERSITE=1 python3 -P "
@@ -1246,7 +1256,9 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             relative_script = root / "accepted scripts" / "next command.sh"
+            scale_up_script = root / "accepted scripts" / "scale up.sh"
             default_run_dir = root / "chain" / "accepted" / "next run"
+            scale_up_run_dir = root / "chain" / "accepted" / "mainline scale"
             relative_script.parent.mkdir(parents=True, exist_ok=True)
             relative_script.write_text(
                 "\n".join(
@@ -1259,6 +1271,17 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
                             '"$NEXT_RUN_DIR" "$FOLLOW_UP_FAIL_ON_VERDICT" '
                             "> wrapper.out"
                         ),
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            scale_up_script.write_text(
+                "\n".join(
+                    [
+                        "#!/usr/bin/env bash",
+                        "set -euo pipefail",
+                        'printf "scale=%s\\n" "$NEXT_RUN_DIR" > scale.out',
                         "",
                     ]
                 ),
@@ -1279,6 +1302,20 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
                         "shell_command": "PYTHONNOUSERSITE=1 python accepted.py",
                         "default_new_seeds": "31",
                         "default_run_dir": str(default_run_dir),
+                        "default_follow_up_from": "accepted",
+                        "default_follow_up_fail_on_verdict": "regressed,unknown",
+                    },
+                    "mainline_scale_up_command": {
+                        "script_path": str(scale_up_script),
+                        "script_usage": (
+                            "FOLLOW_UP_FROM=accepted NEW_SEEDS=1043,1045 "
+                            "NEXT_RUN_DIR=chain/accepted/mainline scale "
+                            "FOLLOW_UP_FAIL_ON_VERDICT=regressed,unknown "
+                            "bash accepted scripts/scale up.sh"
+                        ),
+                        "shell_command": "PYTHONNOUSERSITE=1 python scale.py",
+                        "default_new_seeds": "1043,1045",
+                        "default_run_dir": str(scale_up_run_dir),
                         "default_follow_up_from": "accepted",
                         "default_follow_up_fail_on_verdict": "regressed,unknown",
                     },
@@ -1350,10 +1387,14 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             history_loop_resume_script = command_dir / "run_resume_history_loop.sh"
             follow_up_script = command_dir / "recommended_follow_up.sh"
             review_script = command_dir / "recommended_review.sh"
+            scale_up_wrapper_script = command_dir / "recommended_scale_up.sh"
+            scale_up_runner_script = command_dir / "run_recommended_scale_up.sh"
             manifest_path = command_dir / "recommendation.json"
             readme_path = command_dir / "README.md"
             next_script_path = str(next_script.resolve())
             runner_script_path = str(runner_script.resolve())
+            scale_up_wrapper_script_path = str(scale_up_wrapper_script.resolve())
+            scale_up_runner_script_path = str(scale_up_runner_script.resolve())
             history_runner_script_path = str(history_runner_script.resolve())
             history_loop_script_path = str(history_loop_script.resolve())
             history_loop_resume_script_path = str(
@@ -1371,10 +1412,16 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             self.assertTrue(history_loop_resume_script.exists())
             self.assertTrue(follow_up_script.exists())
             self.assertFalse(review_script.exists())
+            self.assertTrue(scale_up_wrapper_script.exists())
+            self.assertTrue(scale_up_runner_script.exists())
             self.assertTrue(manifest_path.exists())
             self.assertTrue(readme_path.exists())
             next_text = next_script.read_text(encoding="utf-8")
             runner_text = runner_script.read_text(encoding="utf-8")
+            scale_up_wrapper_text = scale_up_wrapper_script.read_text(
+                encoding="utf-8"
+            )
+            scale_up_runner_text = scale_up_runner_script.read_text(encoding="utf-8")
             history_runner_text = history_runner_script.read_text(encoding="utf-8")
             history_loop_text = history_loop_script.read_text(encoding="utf-8")
             history_loop_resume_text = history_loop_resume_script.read_text(
@@ -1396,7 +1443,15 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
                 follow_up_script_path,
             )
             self.assertIsNone(payload["command_scripts"]["review_path"])
-            self.assertEqual(payload["command_scripts"]["written_count"], 6)
+            self.assertEqual(
+                payload["command_scripts"]["scale_up_path"],
+                scale_up_wrapper_script_path,
+            )
+            self.assertEqual(
+                payload["command_scripts"]["scale_up_runner_path"],
+                scale_up_runner_script_path,
+            )
+            self.assertEqual(payload["command_scripts"]["written_count"], 8)
             self.assertEqual(
                 payload["command_scripts"]["execution_cwd"],
                 execution_cwd,
@@ -1449,6 +1504,14 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             self.assertEqual(
                 manifest["command_scripts"]["follow_up_path"],
                 follow_up_script_path,
+            )
+            self.assertEqual(
+                manifest["command_scripts"]["scale_up_path"],
+                scale_up_wrapper_script_path,
+            )
+            self.assertEqual(
+                manifest["command_scripts"]["scale_up_runner_path"],
+                scale_up_runner_script_path,
             )
             self.assertEqual(manifest["command_scripts"]["next_kind"], "follow_up")
             self.assertEqual(
@@ -1554,6 +1617,10 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
                 _execution_next_command(command_dir),
             )
             self.assertEqual(
+                manifest["command_scripts"]["scale_up_command"],
+                _scale_up_command(command_dir),
+            )
+            self.assertEqual(
                 manifest["command_scripts"]["history_report_command"],
                 _history_report_command(command_dir),
             )
@@ -1593,6 +1660,17 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             self.assertIn("--write-run-report", runner_text)
             self.assertIn("--append-run-history", runner_text)
             self.assertIn("--write-run-history-report", runner_text)
+            self.assertIn("# target_kind: scale_up", scale_up_runner_text)
+            self.assertIn("--target scale-up", scale_up_runner_text)
+            self.assertIn("scale_up_command", scale_up_wrapper_text)
+            self.assertIn(
+                f"NEXT_RUN_DIR={shlex.quote(str(scale_up_run_dir))}",
+                scale_up_wrapper_text,
+            )
+            self.assertIn(
+                f"bash {shlex.quote(str(scale_up_script))}",
+                scale_up_wrapper_text,
+            )
             self.assertIn("# target_kind: history_next_action", history_runner_text)
             self.assertIn("run_history_next_action", history_runner_text)
             self.assertIn("--use-history-next-action", history_runner_text)
@@ -1616,6 +1694,9 @@ class SummarizeCharVaeContextChainsTests(unittest.TestCase):
             self.assertIn("## Execution-Next Continuation", readme)
             self.assertIn(_execution_next_command(command_dir), readme)
             self.assertIn("--target execution-next", readme)
+            self.assertIn("## Mainline Scale-Up", readme)
+            self.assertIn(_scale_up_command(command_dir), readme)
+            self.assertIn("--target scale-up", readme)
             self.assertIn(f"cd {shlex.quote(execution_cwd)}", script_text)
             self.assertIn("FOLLOW_UP_FROM=accepted NEW_SEEDS=31", script_text)
             self.assertIn(

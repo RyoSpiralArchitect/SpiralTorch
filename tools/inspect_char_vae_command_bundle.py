@@ -19,7 +19,13 @@ RUN_HISTORY_NEXT_ACTION_SCHEMA = (
     "st.llm_char_vae_context.command_bundle_history_next_action.v1"
 )
 RUN_LOOP_SCHEMA = "st.llm_char_vae_context.command_bundle_history_loop.v1"
-RUN_LOOP_RUNNABLE_TARGETS = {"next", "follow-up", "review", "execution-next"}
+RUN_LOOP_RUNNABLE_TARGETS = {
+    "next",
+    "follow-up",
+    "review",
+    "scale-up",
+    "execution-next",
+}
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -844,8 +850,11 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
     next_path = _path_from(command_scripts.get("next_path"))
     follow_up_path = _path_from(command_scripts.get("follow_up_path"))
     review_path = _path_from(command_scripts.get("review_path"))
+    scale_up_path = _path_from(command_scripts.get("scale_up_path"))
     runner_path = _path_from(command_scripts.get("runner_path"))
     runner_command = _command_from(command_scripts.get("runner_command"))
+    scale_up_command = _command_from(command_scripts.get("scale_up_command"))
+    scale_up_runner_path = _path_from(command_scripts.get("scale_up_runner_path"))
     history_next_action_runner_path = _path_from(
         command_scripts.get("history_next_action_runner_path")
     )
@@ -881,6 +890,10 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
     runner_wrapper_status = _runner_wrapper_status(
         runner_path,
         runner_command=runner_command,
+    )
+    scale_up_runner_status = _runner_wrapper_status(
+        scale_up_runner_path,
+        runner_command=scale_up_command,
     )
     history_next_action_runner_status = _runner_wrapper_status(
         history_next_action_runner_path,
@@ -944,9 +957,21 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
             required=False,
         ),
         _check(
+            "scale_up_script",
+            path=scale_up_path,
+            ok=scale_up_path is None or _is_executable(scale_up_path),
+            required=False,
+        ),
+        _check(
             "runner_script",
             path=runner_path,
             ok=bool(runner_wrapper_status["ok"]),
+            required=False,
+        ),
+        _check(
+            "scale_up_runner_script",
+            path=scale_up_runner_path,
+            ok=bool(scale_up_runner_status["ok"]),
             required=False,
         ),
         _check(
@@ -1001,6 +1026,20 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
             history_report_command,
             required_flags=("run_char_vae_command_bundle.py", "--history-report-only"),
             forbidden_flags=("--append-run-history",),
+            command_dir=command_dir,
+        ),
+        _declared_command(
+            "scale_up_command",
+            scale_up_command,
+            required_flags=(
+                "run_char_vae_command_bundle.py",
+                "--target",
+                "scale-up",
+                "--write-inspection-report",
+                "--write-run-report",
+                "--append-run-history",
+                "--write-run-history-report",
+            ),
             command_dir=command_dir,
         ),
         _declared_command(
@@ -1116,6 +1155,12 @@ def inspect_bundle(command_dir: Path) -> dict[str, Any]:
         "runner_command": runner_command,
         "runner_path": str(runner_path) if runner_path is not None else None,
         "runner_wrapper_status": runner_wrapper_status,
+        "scale_up_command": scale_up_command,
+        "scale_up_path": str(scale_up_path) if scale_up_path is not None else None,
+        "scale_up_runner_path": (
+            str(scale_up_runner_path) if scale_up_runner_path is not None else None
+        ),
+        "scale_up_runner_status": scale_up_runner_status,
         "history_next_action_command": history_next_action_command,
         "history_next_action_runner_path": (
             str(history_next_action_runner_path)
@@ -1211,6 +1256,21 @@ def render_markdown(summary: dict[str, Any]) -> str:
         (
             "- runner_wrapper_error: "
             f"{_fmt(_value(summary, 'runner_wrapper_status', 'error'))}"
+        ),
+        f"- scale_up_command: {_fmt(summary.get('scale_up_command'))}",
+        f"- scale_up_path: {_fmt(summary.get('scale_up_path'))}",
+        f"- scale_up_runner_path: {_fmt(summary.get('scale_up_runner_path'))}",
+        (
+            "- scale_up_runner_ok: "
+            f"{_fmt(_value(summary, 'scale_up_runner_status', 'ok'))}"
+        ),
+        (
+            "- scale_up_runner_executes_command: "
+            f"{_fmt(_value(summary, 'scale_up_runner_status', 'executes_runner_command'))}"
+        ),
+        (
+            "- scale_up_runner_error: "
+            f"{_fmt(_value(summary, 'scale_up_runner_status', 'error'))}"
         ),
         f"- history_next_action_command: {_fmt(summary.get('history_next_action_command'))}",
         f"- history_next_action_runner_path: {_fmt(summary.get('history_next_action_runner_path'))}",

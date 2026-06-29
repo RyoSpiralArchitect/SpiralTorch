@@ -21,11 +21,13 @@ TARGET_KEYS = {
     "next": "next_path",
     "follow-up": "follow_up_path",
     "review": "review_path",
+    "scale-up": "scale_up_path",
     EXECUTION_NEXT_TARGET: "execution_summary.next_command.script_path",
 }
 TARGET_KIND_KEYS = {
     "follow_up": "follow_up_path",
     "review": "review_path",
+    "scale_up": "scale_up_path",
 }
 
 
@@ -148,7 +150,13 @@ def _target_details(
             "target_script_path": script_path,
         }
     if target != "next":
-        target_kind = "follow_up" if target == "follow-up" else target
+        target_kind = (
+            "follow_up"
+            if target == "follow-up"
+            else "scale_up"
+            if target == "scale-up"
+            else target
+        )
         return {
             "target_kind": target_kind,
             "target_script_key": script_key,
@@ -369,6 +377,8 @@ def _recommended_command_for_kind(
         return _mapping(recommendation.get("follow_up_command"))
     if target_kind == "review":
         return _mapping(recommendation.get("review_command"))
+    if target_kind == "scale_up":
+        return _mapping(recommendation.get("scale_up_command"))
     return {}
 
 
