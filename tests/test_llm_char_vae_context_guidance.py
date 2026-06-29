@@ -836,6 +836,150 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
         self.assertIn("- status: beats_raw", report)
         self.assertIn("- best_head_checkpoints: 2 all_exist=True missing=-", report)
 
+    def test_head_load_path_defaults_to_best_or_final_checkpoint(self) -> None:
+        mod = _load_module()
+        parser = mod._build_parser()
+        args = parser.parse_args(
+            [
+                "models/samples/spiral_corpus_en",
+                "--head-load-dir",
+                "/tmp/heads",
+            ]
+        )
+        self.assertEqual(
+            mod._head_load_path(args, "raw_latent"),
+            Path("/tmp/heads/head_raw_latent_best.json"),
+        )
+
+        args = parser.parse_args(
+            [
+                "models/samples/spiral_corpus_en",
+                "--head-load-dir",
+                "/tmp/heads",
+                "--head-load-kind",
+                "final",
+            ]
+        )
+        self.assertEqual(
+            mod._head_load_path(args, "raw_latent"),
+            Path("/tmp/heads/head_raw_latent.json"),
+        )
+
+    def test_eval_only_requires_vae_and_head_sources(self) -> None:
+        mod = _load_module()
+        parser = mod._build_parser()
+        args = parser.parse_args(["models/samples/spiral_corpus_en", "--eval-only"])
+        args.epochs = 0
+        args.vae_epochs = 0
+        with self.assertRaisesRegex(ValueError, "--eval-only requires --vae-load"):
+            mod._validate_args(args)
+
+        args = parser.parse_args(
+            [
+                "models/samples/spiral_corpus_en",
+                "--eval-only",
+                "--vae-load",
+                "/tmp/text_vae_weights.bin",
+            ]
+        )
+        args.epochs = 0
+        args.vae_epochs = 0
+        with self.assertRaisesRegex(ValueError, "--eval-only requires --head-load"):
+            mod._validate_args(args)
+
+    def test_eval_only_learning_evidence_uses_loaded_head_checkpoints(self) -> None:
+        mod = _load_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            vae_checkpoint = root / "text_vae_weights.bin"
+            vae_checkpoint.write_bytes(b"weights")
+            raw_head = root / "head_raw_best.json"
+            raw_head.write_text("{}", encoding="utf-8")
+            hybrid_head = root / "head_raw_latent_best.json"
+            hybrid_head.write_text("{}", encoding="utf-8")
+            summary = {
+                "run": {
+                    "text_chars": 200,
+                    "train_chars": 160,
+                    "validation_chars": 40,
+                    "window_chars": 16,
+                    "eval_samples": 32,
+                    "hidden": 8,
+                    "head_init": "xavier",
+                    "eval_only": True,
+                    "epochs": 0,
+                    "batches": 3,
+                    "features": ["raw", "raw_latent"],
+                    "vae": {
+                        "save_path": str(vae_checkpoint),
+                        "load_path": str(vae_checkpoint),
+                        "epochs": 0,
+                        "batches": 4,
+                        "history": [],
+                    },
+                },
+                "ranking": [
+                    {
+                        "feature": "raw_latent",
+                        "best_mean_nll": 3.80,
+                        "best_accuracy": 0.25,
+                        "validation_nll_mean_delta_vs_raw": -0.08,
+                    },
+                    {
+                        "feature": "raw",
+                        "best_mean_nll": 4.00,
+                        "best_accuracy": 0.20,
+                    },
+                ],
+                "deltas": {
+                    "raw_latent_best_nll_vs_raw": -0.20,
+                    "raw_best_nll_vs_raw": 0.0,
+                },
+                "best_feature": "raw_latent",
+                "features": [
+                    {
+                        "feature": "raw",
+                        "head_load": {
+                            "loaded": True,
+                            "path": str(raw_head),
+                            "kind": "best",
+                        },
+                        "best_checkpoint": {
+                            "path": str(raw_head),
+                            "exists": True,
+                            "source": "loaded",
+                            "mean_nll": 4.00,
+                        },
+                    },
+                    {
+                        "feature": "raw_latent",
+                        "head_load": {
+                            "loaded": True,
+                            "path": str(hybrid_head),
+                            "kind": "best",
+                        },
+                        "best_checkpoint": {
+                            "path": str(hybrid_head),
+                            "exists": True,
+                            "source": "loaded",
+                            "mean_nll": 3.80,
+                        },
+                    },
+                ],
+                "feature_diagnostics": {"features": {}},
+            }
+
+            evidence = mod._single_learning_evidence(summary)
+            summary["learning_evidence"] = evidence
+            report = mod._single_report(summary)
+
+        self.assertEqual(evidence["status"], "beats_raw")
+        self.assertNotIn("vae_not_trained", evidence["reasons"])
+        self.assertNotIn("heads_not_trained", evidence["reasons"])
+        self.assertEqual(evidence["head"]["loaded_checkpoints"]["count"], 2)
+        self.assertIn("- eval_only: True", report)
+        self.assertIn("- loaded_head_checkpoints: 2", report)
+
     def test_text_vae_binding_preflight_explains_native_requirement(self) -> None:
         mod = _load_module()
 
