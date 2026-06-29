@@ -8,8 +8,12 @@ tokenizerless char-LM finetuning is reload-safe and compare-ready.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import importlib
+import io
 import json
 import os
+import platform
 import shlex
 import subprocess
 import sys
@@ -25,9 +29,29 @@ import run_char_lm_sweep as sweep
 
 
 SCHEMA = "st.llm_char_finetune.reload_pair.v1"
+PREFLIGHT_SCHEMA = "st.llm_char_finetune.reload_pair.preflight.v1"
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FINETUNE_SCRIPT = REPO_ROOT / "models" / "python" / "llm_char_finetune.py"
 COMPARE_SCRIPT = REPO_ROOT / "tools" / "compare_char_lm_runs.py"
+REQUIRED_NN_SYMBOLS = [
+    "Sequential",
+    "Embedding",
+    "SpiralRnn",
+    "Linear",
+    "ZSpaceSoftmax",
+    "ModuleTrainer",
+    "CategoricalCrossEntropy",
+    "save",
+    "load",
+]
+BACKEND_FEATURE_REQUIREMENTS = {
+    "wgpu": ["wgpu", "wgpu-rt"],
+    "webgpu": ["wgpu", "wgpu-rt"],
+    "auto": ["wgpu", "wgpu-rt"],
+    "cuda": ["cuda"],
+    "hip": ["hip", "hip-real"],
+    "rocm": ["hip", "hip-real"],
+}
 
 
 def default_run_root() -> Path:
@@ -38,6 +62,96 @@ def default_run_root() -> Path:
 def write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def backend_readiness(backend: str, features: dict[str, bool]) -> dict[str, Any]:
+    normalized = str(backend).strip().lower()
+    required_any = BACKEND_FEATURE_REQUIREMENTS.get(normalized, [])
+    if normalized == "cpu":
+        ready = True
+        status = "available"
+    elif required_any:
+        ready = any(bool(features.get(feature)) for feature in required_any)
+        status = "available" if ready else "backend_unavailable"
+    else:
+        ready = False
+        status = "unknown_backend"
+    return {
+        "backend_normalized": normalized,
+        "backend_ready": ready,
+        "backend_status": status,
+        "backend_required_any_features": required_any,
+    }
+
+
+def preflight_environment(*, backend: str) -> dict[str, Any]:
+    captured_stdout = io.StringIO()
+    captured_stderr = io.StringIO()
+    payload: dict[str, Any] = {
+        "schema": PREFLIGHT_SCHEMA,
+        "python_executable": sys.executable,
+        "python_version": sys.version,
+        "platform": platform.platform(),
+        "backend": backend,
+        "import_ok": False,
+        "native_features": {},
+        "backend_normalized": str(backend).strip().lower(),
+        "backend_ready": False,
+        "backend_status": "not_checked",
+        "backend_required_any_features": [],
+        "required_nn_symbols": REQUIRED_NN_SYMBOLS,
+        "missing_nn_symbols": list(REQUIRED_NN_SYMBOLS),
+        "issues": ["spiraltorch_not_imported"],
+        "ready": False,
+        "reason": "spiraltorch_not_imported",
+    }
+    with contextlib.redirect_stdout(captured_stdout), contextlib.redirect_stderr(
+        captured_stderr
+    ):
+        try:
+            if str(REPO_ROOT) not in sys.path:
+                sys.path.insert(0, str(REPO_ROOT))
+            st = importlib.import_module("spiraltorch")
+            payload["import_ok"] = True
+            try:
+                build_info = st.build_info()
+            except Exception as exc:  # pragma: no cover - depends on local extension state.
+                payload["build_info_error"] = str(exc)
+                build_info = {}
+            features_payload: dict[str, bool] = {}
+            if isinstance(build_info, dict):
+                features = build_info.get("features")
+                if isinstance(features, dict):
+                    features_payload = {
+                        str(key): bool(value) for key, value in features.items()
+                    }
+                    payload["native_features"] = features_payload
+            payload.update(backend_readiness(backend, features_payload))
+            nn = getattr(st, "nn", None)
+            missing = [symbol for symbol in REQUIRED_NN_SYMBOLS if not hasattr(nn, symbol)]
+            payload["missing_nn_symbols"] = missing
+            issues: list[str] = []
+            if missing:
+                issues.append("missing_nn_symbols")
+            if payload.get("backend_ready") is not True:
+                issues.append(str(payload.get("backend_status") or "backend_unavailable"))
+            payload["issues"] = issues
+            if issues:
+                payload["reason"] = "+".join(issues)
+            else:
+                payload["ready"] = True
+                payload["reason"] = "ready"
+        except Exception as exc:
+            payload["error"] = repr(exc)
+            payload["issues"] = ["spiraltorch_import_failed"]
+            payload["reason"] = "spiraltorch_import_failed"
+    stdout = captured_stdout.getvalue().strip()
+    stderr = captured_stderr.getvalue().strip()
+    if stdout:
+        payload["captured_stdout"] = stdout
+    if stderr:
+        payload["captured_stderr"] = stderr
+    return payload
 
 
 def shell_command(command: list[str]) -> str:
@@ -210,6 +324,16 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--topk", type=int, default=32)
     parser.add_argument("--curves", action="store_true")
     parser.add_argument("--summary-limit", type=int, default=8)
+    parser.add_argument(
+        "--preflight-only",
+        action="store_true",
+        help="write preflight.json/reload_pair.json and exit before launching training",
+    )
+    parser.add_argument(
+        "--ignore-preflight",
+        action="store_true",
+        help="launch training even when the readiness preflight reports missing symbols",
+    )
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args(argv)
 
@@ -292,7 +416,10 @@ def main(argv: list[str] | None = None) -> int:
         curves=args.curves,
     )
     manifest_path = run_root / "reload_pair.json"
+    preflight_path = run_root / "preflight.json"
     started = time.time()
+    preflight = preflight_environment(backend=args.backend)
+    write_json(preflight_path, preflight)
     manifest: dict[str, Any] = {
         "schema": SCHEMA,
         "started_at_unix": started,
@@ -300,6 +427,8 @@ def main(argv: list[str] | None = None) -> int:
         "dry_run": bool(args.dry_run),
         "base_run_dir": str(base_run_dir),
         "reload_run_dir": str(reload_run_dir),
+        "preflight_path": str(preflight_path),
+        "preflight": preflight,
         "data_paths": [str(path) for path in args.data_paths],
         "reload_data_paths": [str(path) for path in reload_data_paths],
         "base_seed": int(args.seed),
@@ -328,8 +457,29 @@ def main(argv: list[str] | None = None) -> int:
         "compare_summary_path": None,
         "compare_summary_json_path": None,
         "failed": False,
+        "preflight_only": bool(args.preflight_only),
+        "ignore_preflight": bool(args.ignore_preflight),
+        "preflight_blocked": False,
     }
     write_json(manifest_path, manifest)
+    if args.preflight_only:
+        if preflight.get("ready") is not True:
+            manifest["failed"] = True
+        manifest["finished_at_unix"] = time.time()
+        manifest["elapsed_seconds"] = manifest["finished_at_unix"] - started
+        write_json(manifest_path, manifest)
+        print(f"preflight: {preflight_path}")
+        print(f"manifest: {manifest_path}")
+        return 0 if preflight.get("ready") is True else 1
+    if not args.dry_run and not args.ignore_preflight and preflight.get("ready") is not True:
+        manifest["failed"] = True
+        manifest["preflight_blocked"] = True
+        manifest["finished_at_unix"] = time.time()
+        manifest["elapsed_seconds"] = manifest["finished_at_unix"] - started
+        write_json(manifest_path, manifest)
+        print(f"preflight failed: {preflight_path}", file=sys.stderr)
+        print(f"manifest: {manifest_path}")
+        return 1
 
     successful_run_dirs: list[Path] = []
     for name, command, run_dir in (
