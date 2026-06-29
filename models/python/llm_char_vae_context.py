@@ -2638,6 +2638,11 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
             if isinstance(family_focus, dict)
             else None
         )
+        promoted_recipe = mainline_scale_up.get("promoted_learning_recipe")
+        promoted_recipe = promoted_recipe if isinstance(promoted_recipe, dict) else {}
+        recipe_budget = promoted_recipe.get("run_budget", {})
+        recipe_artifacts = promoted_recipe.get("expected_artifacts", {})
+        recipe_reload = promoted_recipe.get("eval_reload_policy", {})
         lines.extend(
             [
                 "",
@@ -2670,6 +2675,35 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
                 f"- feature_family_focus: {focus_family or '-'}",
                 "- focused_features: "
                 f"{', '.join(str(feature) for feature in mainline_scale_up.get('focused_features', [])) or '-'}",
+                "- promoted_recipe: feature={feature} family={family} "
+                "normalize={normalize} scale={scale} latent_dim={latent_dim} "
+                "hidden={hidden}".format(
+                    feature=promoted_recipe.get("feature") or "-",
+                    family=promoted_recipe.get("feature_family") or "-",
+                    normalize=promoted_recipe.get("feature_normalize") or "-",
+                    scale=promoted_recipe.get("hybrid_latent_scale"),
+                    latent_dim=promoted_recipe.get("latent_dim"),
+                    hidden=promoted_recipe.get("hidden"),
+                ),
+                "- recipe_budget: window/epochs/batches/eval_samples="
+                "{window}/{epochs}/{batches}/{eval_samples} "
+                "vae_epochs/batches={vae_epochs}/{vae_batches}".format(
+                    window=recipe_budget.get("window_chars"),
+                    epochs=recipe_budget.get("epochs"),
+                    batches=recipe_budget.get("batches"),
+                    eval_samples=recipe_budget.get("eval_samples"),
+                    vae_epochs=recipe_budget.get("vae_epochs"),
+                    vae_batches=recipe_budget.get("vae_batches"),
+                ),
+                "- recipe_artifacts: aggregate_summary=`{summary}` "
+                "seed_runs={seed_runs}".format(
+                    summary=recipe_artifacts.get("aggregate_summary_path") or "-",
+                    seed_runs=recipe_artifacts.get("seed_run_count"),
+                ),
+                "- recipe_eval_reload: mode={mode} head_load_kind={kind}".format(
+                    mode=recipe_reload.get("mode") or "-",
+                    kind=recipe_reload.get("head_load_kind") or "-",
+                ),
                 "- train_window/epochs/batches/eval_samples: "
                 f"{mainline_scale_up.get('train_window_chars')}/"
                 f"{mainline_scale_up.get('train_epochs')}/"
@@ -3663,6 +3697,101 @@ def _follow_up_command_parts(
     return command
 
 
+def _promoted_learning_recipe_record(
+    args: argparse.Namespace,
+    best_config: dict[str, Any],
+    family_focus: dict[str, Any],
+    focused_features: list[str],
+    run_dir: pathlib.Path,
+    seeds: list[int],
+    *,
+    command_kind: str,
+    training_track: str,
+) -> dict[str, Any]:
+    best_feature = str(best_config.get("best_feature") or "")
+    feature_family = str(
+        family_focus.get("family")
+        or (_feature_family(best_feature) if best_feature else "")
+    )
+    seed_artifacts: list[dict[str, Any]] = []
+    for seed in seeds:
+        seed_dir = _seed_run_dir(run_dir, int(seed))
+        seed_artifacts.append(
+            {
+                "seed": int(seed),
+                "run_dir": str(seed_dir),
+                "summary_path": str(seed_dir / "summary.json"),
+                "report_path": str(seed_dir / "report.md"),
+                "vae_checkpoint_path": str(seed_dir / "text_vae_weights.bin"),
+                "best_head_path": (
+                    str(seed_dir / f"head_{best_feature}_best.json")
+                    if best_feature
+                    else None
+                ),
+                "final_head_path": (
+                    str(seed_dir / f"head_{best_feature}.json")
+                    if best_feature
+                    else None
+                ),
+            }
+        )
+    return {
+        "schema": "st.llm_char_vae_context.promoted_learning_recipe.v1",
+        "status": "candidate",
+        "promotion_basis": command_kind,
+        "training_track": training_track,
+        "feature": best_feature or None,
+        "feature_family": feature_family or None,
+        "feature_normalize": best_config.get("feature_normalize"),
+        "hybrid_latent_scale": best_config.get("hybrid_latent_scale"),
+        "latent_dim": int(best_config.get("latent_dim") or args.latent_dim),
+        "hidden": int(best_config.get("hidden") or args.hidden),
+        "head_init": str(args.head_init),
+        "focused_features": focused_features,
+        "comparison_baselines": [
+            feature
+            for feature in (FEATURE_RAW, FEATURE_RAW_LATENT)
+            if feature in focused_features and feature != best_feature
+        ],
+        "run_budget": {
+            "window_chars": int(args.window_chars),
+            "epochs": int(args.epochs),
+            "batches": int(args.batches),
+            "batch_size": int(args.batch_size),
+            "eval_samples": int(args.eval_samples),
+            "vae_epochs": int(args.vae_epochs),
+            "vae_batches": int(args.vae_batches),
+            "vae_batch_size": int(args.vae_batch_size),
+            "gen": int(args.gen),
+        },
+        "selection_policy": {
+            "checkpoint_kind": "best",
+            "metric": "validation_mean_nll",
+            "scope": "per_seed_then_aggregate",
+            "tie_break": "lower_nll_then_feature_order",
+        },
+        "expected_artifacts": {
+            "aggregate_summary_path": str(run_dir / "summary.json"),
+            "aggregate_report_path": str(run_dir / "report.md"),
+            "seed_run_count": len(seed_artifacts),
+            "seed_runs": seed_artifacts,
+        },
+        "eval_reload_policy": {
+            "mode": "per_seed_best_checkpoint",
+            "feature": best_feature or None,
+            "vae_load_template": "<seed_run_dir>/text_vae_weights.bin",
+            "head_load_dir_template": "<seed_run_dir>",
+            "head_load_kind": "best",
+            "required_flags": [
+                "--eval-only",
+                "--vae-load",
+                "--head-load-dir",
+                "--head-load-kind",
+            ],
+        },
+    }
+
+
 def _next_follow_up_command_record(
     args: argparse.Namespace,
     features: list[str],
@@ -4373,6 +4502,16 @@ def _mainline_scale_up_command_record(
     if default_fail_on_verdict is not None:
         script_usage += f" FOLLOW_UP_FAIL_ON_VERDICT={default_fail_on_verdict}"
     script_usage += f" bash {script_path}"
+    promoted_learning_recipe = _promoted_learning_recipe_record(
+        scaled_args,
+        best_config,
+        family_focus,
+        focused_features,
+        default_run_dir,
+        _seed_csv_values(default_new_seeds),
+        command_kind="mainline_scale_up",
+        training_track="mainline_capacity_train",
+    )
     return {
         "schema": "st.llm_char_vae_context.mainline_scale_up_command.v1",
         "action": "scale_mainline_learning_after_promoted_family_train",
@@ -4383,6 +4522,7 @@ def _mainline_scale_up_command_record(
         "best_config": best_config,
         "feature_family_focus": family_focus,
         "focused_features": focused_features,
+        "promoted_learning_recipe": promoted_learning_recipe,
         "source_best_family_retained": follow_up_result.get(
             "source_best_family_retained"
         ),

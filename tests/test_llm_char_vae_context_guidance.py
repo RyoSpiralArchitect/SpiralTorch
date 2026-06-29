@@ -2812,6 +2812,33 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
             command["focused_features"],
             ["raw", "latent", "raw_latent", "reconstruction_latent"],
         )
+        recipe = command["promoted_learning_recipe"]
+        self.assertEqual(
+            recipe["schema"],
+            "st.llm_char_vae_context.promoted_learning_recipe.v1",
+        )
+        self.assertEqual(recipe["feature"], "reconstruction_latent")
+        self.assertEqual(recipe["feature_family"], "hybrid_latent")
+        self.assertEqual(recipe["feature_normalize"], "blocks")
+        self.assertEqual(recipe["hybrid_latent_scale"], 4.0)
+        self.assertEqual(recipe["latent_dim"], 12)
+        self.assertEqual(recipe["hidden"], 64)
+        self.assertEqual(recipe["run_budget"]["window_chars"], 64)
+        self.assertEqual(recipe["run_budget"]["epochs"], 128)
+        self.assertEqual(recipe["run_budget"]["eval_samples"], 512)
+        self.assertEqual(recipe["expected_artifacts"]["seed_run_count"], 7)
+        first_seed = recipe["expected_artifacts"]["seed_runs"][0]
+        self.assertEqual(first_seed["seed"], 1043)
+        self.assertTrue(first_seed["run_dir"].endswith("seed_001043"))
+        self.assertTrue(
+            first_seed["best_head_path"].endswith(
+                "seed_001043/head_reconstruction_latent_best.json"
+            )
+        )
+        self.assertEqual(
+            recipe["eval_reload_policy"]["mode"],
+            "per_seed_best_checkpoint",
+        )
         self.assertIn("--window-chars", command["script_command"])
         self.assertIn("64", command["script_command"])
         self.assertIn("## Mainline Scale-Up Command", report)
@@ -2827,6 +2854,16 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
         )
         self.assertIn(
             "- train_window/epochs/batches/eval_samples: 64/128/256/512",
+            report,
+        )
+        self.assertIn(
+            "- promoted_recipe: feature=reconstruction_latent family=hybrid_latent "
+            "normalize=blocks scale=4.0 latent_dim=12 hidden=64",
+            report,
+        )
+        self.assertIn(
+            "- recipe_eval_reload: mode=per_seed_best_checkpoint "
+            "head_load_kind=best",
             report,
         )
 
