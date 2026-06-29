@@ -12,6 +12,13 @@ from typing import Any
 
 SCHEMA = "st.llm_char_vae_context.live_run_summaries.v1"
 RUN_SCHEMA = "st.llm_char_vae_context.live_run_summary.v1"
+PROGRESS_RE = re.compile(
+    r"^(?P<feature>raw|latent|raw_latent|reconstruction_latent)"
+    r"\[(?P<step>init|\d+)\]"
+    r"(?: train_loss=(?P<train_loss>-?\d+(?:\.\d+)?))?"
+    r" val_nll=(?P<val_nll>-?\d+(?:\.\d+)?)"
+    r" acc=(?P<acc>-?\d+(?:\.\d+)?)%"
+)
 
 
 def _read_json(path: Path) -> dict[str, Any] | None:
@@ -103,14 +110,94 @@ def _winner_counts(seed_results: list[dict[str, Any]]) -> dict[str, int]:
     return counts
 
 
+def _progress_record(line: str, *, seed: int | None) -> dict[str, Any] | None:
+    match = PROGRESS_RE.match(line)
+    if match is None:
+        return None
+    step_raw = match.group("step")
+    step = None if step_raw == "init" else int(step_raw)
+    train_loss_raw = match.group("train_loss")
+    return {
+        "feature": match.group("feature"),
+        "seed": seed,
+        "step": step,
+        "step_label": step_raw,
+        "train_loss": float(train_loss_raw) if train_loss_raw is not None else None,
+        "val_nll": float(match.group("val_nll")),
+        "accuracy_percent": float(match.group("acc")),
+        "line": line,
+    }
+
+
+def _feature_progress(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    by_feature: dict[str, list[dict[str, Any]]] = {}
+    order: list[str] = []
+    for record in records:
+        feature = str(record.get("feature"))
+        if feature not in by_feature:
+            by_feature[feature] = []
+            order.append(feature)
+        by_feature[feature].append(record)
+
+    raw_best = None
+    raw_records = by_feature.get("raw", [])
+    if raw_records:
+        raw_best = min(raw_records, key=lambda item: float(item["val_nll"]))
+
+    rows: list[dict[str, Any]] = []
+    for feature in order:
+        items = by_feature[feature]
+        latest = items[-1]
+        best = min(items, key=lambda item: float(item["val_nll"]))
+        delta_vs_raw = None
+        if raw_best is not None:
+            delta_vs_raw = float(best["val_nll"]) - float(raw_best["val_nll"])
+        rows.append(
+            {
+                "feature": feature,
+                "latest_step": latest.get("step"),
+                "latest_step_label": latest.get("step_label"),
+                "latest_val_nll": latest.get("val_nll"),
+                "latest_accuracy_percent": latest.get("accuracy_percent"),
+                "best_step": best.get("step"),
+                "best_step_label": best.get("step_label"),
+                "best_val_nll": best.get("val_nll"),
+                "best_accuracy_percent": best.get("accuracy_percent"),
+                "best_delta_vs_raw": delta_vs_raw,
+            }
+        )
+    return rows
+
+
+def _best_progress_feature(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    if not rows:
+        return {
+            "best_so_far_feature": None,
+            "best_so_far_val_nll": None,
+            "best_so_far_delta_vs_raw": None,
+        }
+    best = min(rows, key=lambda item: float(item["best_val_nll"]))
+    return {
+        "best_so_far_feature": best.get("feature"),
+        "best_so_far_val_nll": best.get("best_val_nll"),
+        "best_so_far_delta_vs_raw": best.get("best_delta_vs_raw"),
+    }
+
+
 def _log_status(log_path: Path) -> dict[str, Any]:
     if not log_path.exists():
         return {
             "log_exists": False,
             "log_lines": 0,
             "current_seed": None,
+            "current_feature": None,
+            "current_epoch": None,
             "completed_best_features": 0,
             "latest_progress": None,
+            "feature_progress": [],
+            "best_so_far_feature": None,
+            "best_so_far_val_nll": None,
+            "best_so_far_delta_vs_raw": None,
             "best_feature_lines": [],
             "status_lines": [],
         }
@@ -123,19 +210,36 @@ def _log_status(log_path: Path) -> dict[str, Any]:
         if match:
             current_seed = int(match.group(1))
             break
-    latest_progress = None
-    for line in reversed(lines):
-        if re.match(r"^(raw|latent|raw_latent|reconstruction_latent)\[\d+\]", line):
-            latest_progress = line
-            break
+    progress_records: list[dict[str, Any]] = []
+    active_seed = None
+    for line in lines:
+        if line.startswith("sweep_normalize="):
+            match = re.search(r"sweep_seed=(\d+)", line)
+            active_seed = int(match.group(1)) if match else None
+        record = _progress_record(line, seed=active_seed)
+        if record is not None:
+            progress_records.append(record)
+    latest_record = progress_records[-1] if progress_records else {}
+    latest_progress = latest_record.get("line")
+    current_seed_records = [
+        record
+        for record in progress_records
+        if current_seed is not None and record.get("seed") == current_seed
+    ]
+    feature_progress = _feature_progress(current_seed_records or progress_records)
+    best_so_far = _best_progress_feature(feature_progress)
     best_feature_lines = [line for line in lines if line.startswith("best_feature=")]
     status_lines = [line for line in lines if line.startswith("sweep_status=")]
     return {
         "log_exists": True,
         "log_lines": len(lines),
         "current_seed": current_seed,
+        "current_feature": latest_record.get("feature"),
+        "current_epoch": latest_record.get("step"),
         "completed_best_features": len(best_feature_lines),
         "latest_progress": latest_progress,
+        "feature_progress": feature_progress,
+        **best_so_far,
         "best_feature_lines": best_feature_lines,
         "status_lines": status_lines,
     }
@@ -227,8 +331,8 @@ def markdown_report(payload: dict[str, Any]) -> str:
             f"- completed_seed_count: {totals.get('completed_seed_count', 0)}",
             f"- winner_counts: {_fmt_counts(totals.get('winner_counts'))}",
             "",
-            "| run | summary | current_seed | completed_seeds | winners | latest_progress |",
-            "| --- | --- | ---: | ---: | --- | --- |",
+            "| run | summary | current_seed | current_feature | completed_seeds | winners | best_so_far | delta_vs_raw | latest_progress |",
+            "| --- | --- | ---: | --- | ---: | --- | --- | ---: | --- |",
         ]
     )
     for run in payload.get("runs", []):
@@ -236,12 +340,16 @@ def markdown_report(payload: dict[str, Any]) -> str:
             continue
         log = run.get("log") if isinstance(run.get("log"), dict) else {}
         lines.append(
-            "| {run} | {summary} | {current} | {completed} | {winners} | `{progress}` |".format(
+            "| {run} | {summary} | {current} | {feature} | {completed} | {winners} | {best_feature}:{best_nll} | {delta} | `{progress}` |".format(
                 run=run.get("run_dir") or "-",
                 summary=run.get("summary_exists"),
                 current=log.get("current_seed") or "-",
+                feature=log.get("current_feature") or "-",
                 completed=run.get("completed_seed_count") or 0,
                 winners=_fmt_counts(run.get("winner_counts")),
+                best_feature=log.get("best_so_far_feature") or "-",
+                best_nll=_fmt(log.get("best_so_far_val_nll")),
+                delta=_fmt(log.get("best_so_far_delta_vs_raw")),
                 progress=log.get("latest_progress") or "-",
             )
         )
@@ -262,8 +370,33 @@ def markdown_report(payload: dict[str, Any]) -> str:
                 f"- follow_up_verdict: {run.get('follow_up_verdict') or '-'}",
                 f"- guidance_action: {run.get('guidance_action') or '-'}",
                 f"- current_seed: {log.get('current_seed') or '-'}",
+                f"- current_feature: {log.get('current_feature') or '-'}",
+                f"- current_epoch: {_fmt(log.get('current_epoch'))}",
+                f"- best_so_far: {log.get('best_so_far_feature') or '-'}@{_fmt(log.get('best_so_far_val_nll'))}",
+                f"- best_so_far_delta_vs_raw: {_fmt(log.get('best_so_far_delta_vs_raw'))}",
                 f"- completed_best_features: {log.get('completed_best_features') or 0}",
                 f"- latest_progress: `{log.get('latest_progress') or '-'}`",
+                "",
+                "| feature | latest_epoch | latest_nll | best_epoch | best_nll | best_acc_pct | delta_vs_raw |",
+                "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+            ]
+        )
+        for feature in log.get("feature_progress", []):
+            if not isinstance(feature, dict):
+                continue
+            lines.append(
+                "| {feature} | {latest_epoch} | {latest_nll} | {best_epoch} | {best_nll} | {best_acc} | {delta} |".format(
+                    feature=feature.get("feature") or "-",
+                    latest_epoch=_fmt(feature.get("latest_step")),
+                    latest_nll=_fmt(feature.get("latest_val_nll")),
+                    best_epoch=_fmt(feature.get("best_step")),
+                    best_nll=_fmt(feature.get("best_val_nll")),
+                    best_acc=_fmt(feature.get("best_accuracy_percent"), digits=2),
+                    delta=_fmt(feature.get("best_delta_vs_raw")),
+                )
+            )
+        lines.extend(
+            [
                 "",
                 "| seed | best_feature | best_nll | best_acc | delta_vs_raw | runner_up | margin |",
                 "| --- | --- | ---: | ---: | ---: | --- | ---: |",

@@ -47,6 +47,7 @@ class SummarizeCharVaeLiveRunsTests(unittest.TestCase):
                             "summary_json=/tmp/seed_001031/summary.json"
                         ),
                         "sweep_normalize=blocks sweep_scale=4 sweep_seed=1033",
+                        "raw[0] train_loss=4.5 val_nll=4.19 acc=17.00%",
                         "latent[10] train_loss=4.51 val_nll=4.17 acc=14.45%",
                     ]
                 ),
@@ -78,6 +79,8 @@ class SummarizeCharVaeLiveRunsTests(unittest.TestCase):
 
         self.assertFalse(summary["summary_exists"])
         self.assertEqual(summary["log"]["current_seed"], 1033)
+        self.assertEqual(summary["log"]["current_feature"], "latent")
+        self.assertEqual(summary["log"]["current_epoch"], 10)
         self.assertEqual(summary["log"]["completed_best_features"], 1)
         self.assertEqual(summary["completed_seed_count"], 1)
         self.assertEqual(summary["winner_counts"], {"reconstruction_latent": 1})
@@ -85,6 +88,17 @@ class SummarizeCharVaeLiveRunsTests(unittest.TestCase):
             summary["log"]["latest_progress"],
             "latent[10] train_loss=4.51 val_nll=4.17 acc=14.45%",
         )
+        self.assertEqual(summary["log"]["best_so_far_feature"], "latent")
+        self.assertAlmostEqual(summary["log"]["best_so_far_val_nll"], 4.17)
+        self.assertAlmostEqual(summary["log"]["best_so_far_delta_vs_raw"], -0.02)
+        progress = summary["log"]["feature_progress"]
+        self.assertEqual([item["feature"] for item in progress], ["raw", "latent"])
+        self.assertEqual(progress[0]["latest_step"], 0)
+        self.assertAlmostEqual(progress[0]["best_val_nll"], 4.19)
+        self.assertAlmostEqual(progress[0]["best_delta_vs_raw"], 0.0)
+        self.assertEqual(progress[1]["latest_step"], 10)
+        self.assertAlmostEqual(progress[1]["best_val_nll"], 4.17)
+        self.assertAlmostEqual(progress[1]["best_delta_vs_raw"], -0.02)
         self.assertEqual(summary["seed_results"][0]["seed"], 1031)
         self.assertEqual(
             summary["seed_results"][0]["best_feature"],
@@ -149,8 +163,12 @@ class SummarizeCharVaeLiveRunsTests(unittest.TestCase):
         self.assertEqual(payload["totals"]["run_count"], 1)
         self.assertEqual(payload["totals"]["completed_run_count"], 1)
         self.assertEqual(payload["runs"][0]["status"], "improved")
+        self.assertEqual(payload["runs"][0]["log"]["current_feature"], "raw")
+        self.assertEqual(payload["runs"][0]["log"]["best_so_far_feature"], "raw")
         self.assertIn("## Overview", markdown)
         self.assertIn("- completed_run_count: 1", markdown)
+        self.assertIn("- best_so_far: raw@4.190000", markdown)
+        self.assertIn("| raw | 0 | 4.190000 | 0 | 4.190000 | 17.00 | 0.000000 |", markdown)
         self.assertIn("follow_up_verdict: improved", markdown)
 
 
