@@ -2121,6 +2121,7 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
                 f"- source_feature_raw_verdict: {follow_up_result.get('source_feature_raw_verdict')}",
                 f"- current_best_raw_verdict: {follow_up_result.get('current_best_raw_verdict')}",
                 f"- source_best_feature_retained: {follow_up_result.get('source_best_feature_retained')}",
+                f"- source_best_family_retained: {follow_up_result.get('source_best_family_retained')}",
                 f"- match_found: {follow_up_result.get('match_found')}",
                 "- effective_source_feature_min_nll_delta: "
                 f"{_fmt_float(follow_up_result.get('effective_source_feature_min_nll_delta'))}",
@@ -4885,6 +4886,13 @@ def _follow_up_result(
         and source_feature is not None
         and evaluated.get("best_feature") == source_feature
     )
+    source_family = _feature_family(str(source_feature)) if source_feature else None
+    evaluated_family = _feature_family_from_config(evaluated)
+    source_best_family_retained = (
+        source_family is not None
+        and evaluated_family is not None
+        and evaluated_family == source_family
+    )
     source_run_budget = (
         follow_up.get("source_run_budget")
         if isinstance(follow_up.get("source_run_budget"), dict)
@@ -4932,6 +4940,7 @@ def _follow_up_result(
             min_nll_delta,
         ),
         "source_best_feature_retained": source_best_feature_retained,
+        "source_best_family_retained": source_best_family_retained,
         "verdict": source_feature_verdict
         if source_feature_verdict != "unknown"
         else config_verdict,
@@ -5035,6 +5044,9 @@ def _follow_up_ancestor_record(
         ),
         "source_best_feature_retained": follow_up_result.get(
             "source_best_feature_retained"
+        ),
+        "source_best_family_retained": follow_up_result.get(
+            "source_best_family_retained"
         ),
         "guidance_action": follow_up_guidance.get("action"),
         "guided_enabled": guided_next.get("enabled"),
@@ -5156,6 +5168,7 @@ def _follow_up_current_trajectory_point(
             "current_best_mean_best_nll_delta_vs_raw"
         ),
         "source_best_feature_retained": result.get("source_best_feature_retained"),
+        "source_best_family_retained": result.get("source_best_family_retained"),
         "guidance_action": guidance.get("action"),
         "guided_enabled": guided_next.get("enabled"),
         "gate_failed": gate.get("failed"),
@@ -5180,6 +5193,12 @@ def _trajectory_best_feature(point: dict[str, Any] | None) -> str | None:
     if point.get("best_feature") is not None:
         return str(point.get("best_feature"))
     return None
+
+
+def _feature_family_from_config(config: dict[str, Any] | None) -> str | None:
+    if not isinstance(config, dict) or config.get("best_feature") is None:
+        return None
+    return _feature_family(str(config.get("best_feature")))
 
 
 def _follow_up_trajectory_action(
@@ -5394,15 +5413,19 @@ def _follow_up_trajectory_record(
         current_point.get("source_feature_raw_verdict") or "unknown"
     )
     current_source_retained = current_point.get("source_best_feature_retained")
+    current_source_family_retained = current_point.get("source_best_family_retained")
     source_feature_tradeoff = (
         current_config_verdict == "improved"
         and (
             current_source_feature_verdict == "regressed"
-            or current_source_retained is False
+            or (
+                current_source_retained is False
+                and current_source_family_retained is not True
+            )
         )
     )
     current_raw_positive = (
-        current_source_retained is True
+        (current_source_retained is True or current_source_family_retained is True)
         and current_source_feature_raw_verdict == "improved"
         and not source_feature_tradeoff
     )
@@ -5571,6 +5594,9 @@ def _follow_up_guidance_record(
         follow_up_result.get("source_feature_raw_verdict") or "unknown"
     )
     source_retained = bool(follow_up_result.get("source_best_feature_retained"))
+    source_family_retained = bool(
+        follow_up_result.get("source_best_family_retained")
+    )
     gate_failed = (
         bool(follow_up_gate.get("failed"))
         if isinstance(follow_up_gate, dict)
@@ -5588,7 +5614,8 @@ def _follow_up_guidance_record(
     )
 
     source_feature_needs_review = (
-        source_feature_verdict == "regressed" or not source_retained
+        (source_feature_verdict == "regressed" or not source_retained)
+        and not source_family_retained
     )
     config_improved_while_source_regressed = (
         config_verdict == "improved" and source_feature_verdict == "regressed"
@@ -5624,6 +5651,8 @@ def _follow_up_guidance_record(
                 ),
             )
         )
+    if not source_retained and source_family_retained:
+        add_reason("source best feature stayed within the same family")
 
     if gate_failed:
         action = (
@@ -5769,6 +5798,7 @@ def _follow_up_guidance_record(
         "source_feature_verdict": source_feature_verdict,
         "source_feature_raw_verdict": source_feature_raw_verdict,
         "source_best_feature_retained": source_retained,
+        "source_best_family_retained": source_family_retained,
         "trajectory_action": trajectory_action,
         "trajectory_verdict": trajectory_verdict,
         "unsafe_promotion": unsafe_promotion,

@@ -1634,6 +1634,116 @@ class CharVaeContextGuidanceTests(unittest.TestCase):
         gate = mod._follow_up_gate_record(result, ["regressed", "unknown"])
         self.assertIs(gate["failed"], False)
 
+    def test_follow_up_guidance_accepts_same_family_feature_swap(self) -> None:
+        mod = _load_module()
+        source_best_config = {
+            "best_feature": "raw_latent",
+            "feature_normalize": "blocks",
+            "hybrid_latent_scale": 4.0,
+            "latent_dim": 12,
+            "hidden": 64,
+            "mean_best_nll": 4.1023,
+            "mean_best_nll_delta_vs_raw": -0.0867,
+        }
+        config_summary = {
+            "feature_normalize": "blocks",
+            "hybrid_latent_scale": 4.0,
+            "latent_dim": 12,
+            "hidden": 64,
+            "best_feature": "reconstruction_latent",
+            "status": "improved",
+            "ranking": [
+                {
+                    "feature": "reconstruction_latent",
+                    "mean_best_nll": 4.0891,
+                    "mean_best_nll_delta_vs_raw": -0.1002,
+                },
+                {
+                    "feature": "raw_latent",
+                    "mean_best_nll": 4.0905,
+                    "mean_best_nll_delta_vs_raw": -0.0989,
+                },
+                {
+                    "feature": "raw",
+                    "mean_best_nll": 4.1893,
+                    "mean_best_nll_delta_vs_raw": 0.0,
+                },
+            ],
+        }
+
+        result = mod._follow_up_result(
+            {
+                "source_summary_path": "/tmp/source/summary.json",
+                "source_best_config": source_best_config,
+                "source_run_budget": {},
+            },
+            [config_summary],
+            {
+                "best_feature": "reconstruction_latent",
+                "mean_best_nll_delta_vs_raw": -0.1002,
+            },
+            min_nll_delta=0.0,
+        )
+        gate = mod._follow_up_gate_record(result, ["regressed", "unknown"])
+        chain = {
+            "generation": 1,
+            "latest_verdict": result["verdict"],
+            "verdict_history": [result["verdict"]],
+            "improved_streak": 1 if result["verdict"] == "improved" else 0,
+            "regressed_streak": 0,
+        }
+        guidance = mod._follow_up_guidance_record(
+            result,
+            chain,
+            gate,
+            _next_follow_up(),
+        )
+
+        self.assertIs(result["source_best_feature_retained"], False)
+        self.assertIs(result["source_best_family_retained"], True)
+        self.assertEqual(result["source_feature_verdict"], "improved")
+        self.assertEqual(guidance["action"], "continue_fresh_seed_confirmation")
+        self.assertTrue(guidance["promote_current_best"])
+        self.assertTrue(guidance["use_next_follow_up_command"])
+        self.assertIn(
+            "source best feature stayed within the same family",
+            guidance["reasons"],
+        )
+        self.assertNotIn(
+            "source best feature did not retain its role",
+            guidance["reasons"],
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            summary = {
+                "status": "improved",
+                "best_feature": "reconstruction_latent",
+                "best_config": result["current_best_config"],
+                "follow_up_result": result,
+                "follow_up_chain": chain,
+                "follow_up_gate": gate,
+                "follow_up_guidance": guidance,
+            }
+            trajectory = mod._follow_up_trajectory_record(
+                root,
+                summary,
+                {
+                    "ancestors": [
+                        _ancestor(
+                            feature="raw_latent",
+                            nll=4.1023,
+                            raw_delta=-0.0867,
+                        )
+                    ]
+                },
+                min_nll_delta=0.0,
+            )
+
+        self.assertIs(trajectory["source_feature_tradeoff"], False)
+        self.assertIs(trajectory["unsafe_promotion"], False)
+        self.assertIs(trajectory["current_raw_positive"], True)
+
     def test_follow_up_result_combines_source_and_current_seed_noise(self) -> None:
         mod = _load_module()
         source_best_config = {
