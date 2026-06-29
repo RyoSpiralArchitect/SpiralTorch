@@ -315,6 +315,10 @@ class LlmCharFinetuneContractTests(unittest.TestCase):
             bigram_validation=bigram_validation,
             best_validation=final_validation,
             best_epoch=3,
+            training_final_validation={
+                "mean_nll": final_validation["mean_nll"] + 0.25,
+                "accuracy": 0.5,
+            },
         )
 
         expected_nll = (-math.log(0.7) - math.log(0.6)) / 2.0
@@ -325,6 +329,8 @@ class LlmCharFinetuneContractTests(unittest.TestCase):
         self.assertIn("mean_target_logprob_lift", final_validation)
         self.assertIn("mean_target_logprob_lift_vs_bigram", final_validation)
         self.assertAlmostEqual(payload["validation_nll_delta"], -0.5)
+        self.assertAlmostEqual(payload["training_final_nll_delta"], -0.25)
+        self.assertAlmostEqual(payload["training_final_accuracy_delta"], 0.5)
         self.assertAlmostEqual(
             payload["final_vs_unigram_nll_delta"],
             final_validation["mean_nll"] - unigram_validation["mean_nll"],
@@ -334,6 +340,7 @@ class LlmCharFinetuneContractTests(unittest.TestCase):
             final_validation["mean_nll"] - bigram_validation["mean_nll"],
         )
         self.assertAlmostEqual(payload["final_minus_best_validation_nll"], 0.0)
+        self.assertAlmostEqual(payload["training_final_minus_best_validation_nll"], 0.25)
         self.assertEqual(payload["best_validation_epoch"], 3)
         self.assertAlmostEqual(
             payload["best_validation_mean_nll"],
@@ -388,9 +395,12 @@ class LlmCharFinetuneContractTests(unittest.TestCase):
             validation_payload = {
                 "initial_validation": {"mean_nll": 3.0, "accuracy": 0.1},
                 "final_validation": {"mean_nll": 2.5, "accuracy": 0.3},
+                "training_final_validation": {"mean_nll": 2.7, "accuracy": 0.2},
                 "validation_nll_delta": -0.5,
+                "training_final_nll_delta": -0.3,
                 "best_validation_mean_nll": 2.4,
                 "final_minus_best_validation_nll": 0.1,
+                "training_final_minus_best_validation_nll": 0.3,
             }
 
             mod._write_completion_summary(
@@ -442,8 +452,11 @@ class LlmCharFinetuneContractTests(unittest.TestCase):
         self.assertEqual(summary["early_stopped_epoch"], 4)
         self.assertEqual(summary["epochs_completed"], 5)
         self.assertAlmostEqual(summary["final_validation"]["mean_nll"], 2.5)
+        self.assertAlmostEqual(summary["training_final_validation"]["mean_nll"], 2.7)
         self.assertAlmostEqual(summary["validation_nll_delta"], -0.5)
+        self.assertAlmostEqual(summary["training_final_nll_delta"], -0.3)
         self.assertAlmostEqual(summary["final_minus_best_validation_nll"], 0.1)
+        self.assertAlmostEqual(summary["training_final_minus_best_validation_nll"], 0.3)
 
 
 if __name__ == "__main__":

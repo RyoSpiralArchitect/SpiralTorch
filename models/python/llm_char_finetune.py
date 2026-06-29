@@ -747,17 +747,23 @@ def _validation_summary_payload(
     bigram_validation: dict[str, Any],
     best_validation: dict[str, Any],
     best_epoch: int | None,
+    training_final_validation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     initial_nll = initial_validation.get("mean_nll")
     final_nll = final_validation.get("mean_nll")
+    if training_final_validation is None:
+        training_final_validation = final_validation
+    training_final_nll = training_final_validation.get("mean_nll")
     unigram_nll = unigram_validation.get("mean_nll")
     bigram_nll = bigram_validation.get("mean_nll")
     initial_acc = initial_validation.get("accuracy")
     final_acc = final_validation.get("accuracy")
+    training_final_acc = training_final_validation.get("accuracy")
     best_nll = best_validation.get("mean_nll")
     return {
         "initial_validation": initial_validation,
         "final_validation": final_validation,
+        "training_final_validation": training_final_validation,
         "unigram_validation": unigram_validation,
         "bigram_validation": bigram_validation,
         "validation_nll_delta": (
@@ -769,6 +775,18 @@ def _validation_summary_payload(
         "validation_accuracy_delta": (
             final_acc - initial_acc
             if isinstance(final_acc, (int, float))
+            and isinstance(initial_acc, (int, float))
+            else None
+        ),
+        "training_final_nll_delta": (
+            training_final_nll - initial_nll
+            if isinstance(training_final_nll, (int, float))
+            and isinstance(initial_nll, (int, float))
+            else None
+        ),
+        "training_final_accuracy_delta": (
+            training_final_acc - initial_acc
+            if isinstance(training_final_acc, (int, float))
             and isinstance(initial_acc, (int, float))
             else None
         ),
@@ -790,6 +808,12 @@ def _validation_summary_payload(
         "final_minus_best_validation_nll": (
             final_nll - best_nll
             if isinstance(final_nll, (int, float))
+            and isinstance(best_nll, (int, float))
+            else None
+        ),
+        "training_final_minus_best_validation_nll": (
+            training_final_nll - best_nll
+            if isinstance(training_final_nll, (int, float))
             and isinstance(best_nll, (int, float))
             else None
         ),
@@ -1721,8 +1745,10 @@ def main() -> int:
         final_sample_path = samples_dir / "init.txt"
         final_sample_path.write_text(sample, encoding="utf-8")
     if restored_best_at_end:
+        training_final_validation = validation if epochs_completed > 0 else initial_validation
         final_validation = best_validation
     elif epochs > 0:
+        training_final_validation = validation
         final_validation = validation
     else:
         final_validation = _evaluate_model(
@@ -1734,6 +1760,7 @@ def main() -> int:
             unigram_rows=unigram_rows,
             bigram_rows=bigram_rows,
         )
+        training_final_validation = final_validation
     _write_completion_summary(
         run_dir,
         run_meta,
@@ -1755,6 +1782,7 @@ def main() -> int:
             bigram_validation=bigram_validation,
             best_validation=best_validation,
             best_epoch=best_validation_epoch,
+            training_final_validation=training_final_validation,
         ),
     )
     print("--- sample (prompt + gen) ---")

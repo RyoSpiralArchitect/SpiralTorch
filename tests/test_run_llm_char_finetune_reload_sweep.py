@@ -78,6 +78,7 @@ class RunLlmCharFinetuneReloadSweepTests(unittest.TestCase):
         self.assertEqual(len(manifest["cells"]), 4)
         self.assertEqual(manifest["summary"]["cells"], 4)
         self.assertEqual(manifest["summary"]["run_status_counts"], {"dry_run": 4})
+        self.assertEqual(manifest["summary"]["training_status_counts"], {"dry_run": 4})
         self.assertEqual(manifest["settings"]["eval_seed_offset"], 0)
         first = manifest["cells"][0]
         self.assertEqual(first["status"], "dry_run")
@@ -88,7 +89,10 @@ class RunLlmCharFinetuneReloadSweepTests(unittest.TestCase):
         self.assertIn("--restore-best-at-end", first["command"])
         self.assertIn("seed3_reloadlr0p02", first["name"])
         self.assertIn("# LLM Char Finetune Reload Sweep", markdown)
-        self.assertIn("| cell | status | run_status | seed | reload_seed | eval_seed |", markdown)
+        self.assertIn(
+            "| cell | status | training_status | run_status | seed | reload_seed | eval_seed |",
+            markdown,
+        )
         self.assertIn("seed3_reloadlr0p02", markdown)
 
     def test_sweep_summary_ranks_best_delta_and_counts_statuses(self) -> None:
@@ -99,7 +103,9 @@ class RunLlmCharFinetuneReloadSweepTests(unittest.TestCase):
                 "status": "ok",
                 "outcome": {
                     "status": "regressed",
+                    "reload_training_status": "regressed",
                     "reload_best_minus_base_best_nll": 0.1,
+                    "reload_training_final_minus_base_best_nll": 0.15,
                     "reload_final_minus_base_final_nll": 0.2,
                 },
             },
@@ -108,7 +114,9 @@ class RunLlmCharFinetuneReloadSweepTests(unittest.TestCase):
                 "status": "ok",
                 "outcome": {
                     "status": "improved",
+                    "reload_training_status": "improved",
                     "reload_best_minus_base_best_nll": -0.2,
+                    "reload_training_final_minus_base_best_nll": -0.3,
                     "reload_final_minus_base_final_nll": -0.1,
                 },
             },
@@ -125,11 +133,19 @@ class RunLlmCharFinetuneReloadSweepTests(unittest.TestCase):
         self.assertEqual(summary["status_counts"]["improved"], 1)
         self.assertEqual(summary["status_counts"]["regressed"], 1)
         self.assertEqual(summary["status_counts"]["missing_outcome"], 1)
+        self.assertEqual(summary["training_status_counts"]["improved"], 1)
+        self.assertEqual(summary["training_status_counts"]["regressed"], 1)
+        self.assertEqual(summary["training_status_counts"]["missing_outcome"], 1)
         self.assertEqual(summary["run_status_counts"]["ok"], 2)
         self.assertEqual(summary["best_cell"], "improved")
+        self.assertEqual(summary["best_training_cell"], "improved")
         self.assertAlmostEqual(
             summary["best_reload_best_minus_base_best_nll"],
             -0.2,
+        )
+        self.assertAlmostEqual(
+            summary["best_reload_training_final_minus_base_best_nll"],
+            -0.3,
         )
 
     def test_invalid_reload_lr_values_return_usage_error(self) -> None:

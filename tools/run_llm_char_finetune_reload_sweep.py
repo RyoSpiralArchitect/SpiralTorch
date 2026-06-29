@@ -284,6 +284,13 @@ def outcome_status(cell: dict[str, Any]) -> str:
     return str(cell.get("status") or "unknown")
 
 
+def outcome_training_status(cell: dict[str, Any]) -> str:
+    outcome = cell.get("outcome")
+    if isinstance(outcome, dict):
+        return str(outcome.get("reload_training_status") or "unknown")
+    return str(cell.get("status") or "unknown")
+
+
 def outcome_delta(cell: dict[str, Any], key: str) -> float | None:
     outcome = cell.get("outcome")
     if not isinstance(outcome, dict):
@@ -297,6 +304,7 @@ def outcome_delta(cell: dict[str, Any], key: str) -> float | None:
 
 def sweep_summary(cells: list[dict[str, Any]]) -> dict[str, Any]:
     status_counts = Counter(outcome_status(cell) for cell in cells)
+    training_status_counts = Counter(outcome_training_status(cell) for cell in cells)
     run_status_counts = Counter(str(cell.get("status") or "unknown") for cell in cells)
     ranked = [
         cell
@@ -310,14 +318,34 @@ def sweep_summary(cells: list[dict[str, Any]]) -> dict[str, Any]:
             str(cell.get("name") or ""),
         )
     )
+    training_ranked = [
+        cell
+        for cell in cells
+        if outcome_delta(cell, "reload_training_final_minus_base_best_nll")
+        is not None
+    ]
+    training_ranked.sort(
+        key=lambda cell: (
+            outcome_delta(cell, "reload_training_final_minus_base_best_nll"),
+            str(cell.get("name") or ""),
+        )
+    )
     best = ranked[0] if ranked else None
+    best_training = training_ranked[0] if training_ranked else None
     return {
         "cells": len(cells),
         "status_counts": dict(sorted(status_counts.items())),
+        "training_status_counts": dict(sorted(training_status_counts.items())),
         "run_status_counts": dict(sorted(run_status_counts.items())),
         "best_cell": best.get("name") if best else None,
         "best_reload_best_minus_base_best_nll": (
             outcome_delta(best, "reload_best_minus_base_best_nll") if best else None
+        ),
+        "best_training_cell": best_training.get("name") if best_training else None,
+        "best_reload_training_final_minus_base_best_nll": (
+            outcome_delta(best_training, "reload_training_final_minus_base_best_nll")
+            if best_training
+            else None
         ),
         "improved_cells": int(status_counts.get("improved", 0)),
         "regressed_cells": int(status_counts.get("regressed", 0)),
@@ -332,10 +360,12 @@ def render_markdown(manifest: dict[str, Any]) -> str:
         f"- schema: `{manifest.get('schema')}`",
         f"- cells: `{summary.get('cells', 0)}`",
         f"- status_counts: `{summary.get('status_counts', {})}`",
+        f"- training_status_counts: `{summary.get('training_status_counts', {})}`",
         f"- best_cell: `{summary.get('best_cell', '-')}`",
+        f"- best_training_cell: `{summary.get('best_training_cell', '-')}`",
         "",
-        "| cell | status | run_status | seed | reload_seed | eval_seed | reload_lr | best_delta | final_delta | reload_delta | manifest | outcome |",
-        "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |",
+        "| cell | status | training_status | run_status | seed | reload_seed | eval_seed | reload_lr | best_delta | training_delta | final_delta | reload_delta | manifest | outcome |",
+        "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |",
     ]
     for cell in manifest.get("cells", []):
         outcome = cell.get("outcome") if isinstance(cell.get("outcome"), dict) else {}
@@ -345,12 +375,16 @@ def render_markdown(manifest: dict[str, Any]) -> str:
                 [
                     md_cell(cell.get("name")),
                     md_cell(outcome_status(cell)),
+                    md_cell(outcome_training_status(cell)),
                     md_cell(cell.get("status")),
                     md_cell(cell.get("seed")),
                     md_cell(cell.get("reload_seed")),
                     md_cell(cell.get("eval_seed")),
                     fmt_float(cell.get("reload_lr")),
                     fmt_float(outcome.get("reload_best_minus_base_best_nll")),
+                    fmt_float(
+                        outcome.get("reload_training_final_minus_base_best_nll")
+                    ),
                     fmt_float(outcome.get("reload_final_minus_base_final_nll")),
                     fmt_float(outcome.get("reload_best_minus_reload_initial_nll")),
                     md_cell(cell.get("manifest_path")),
