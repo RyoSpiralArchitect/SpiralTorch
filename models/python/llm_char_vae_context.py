@@ -2572,6 +2572,8 @@ def _aggregate_report(summary: dict[str, Any]) -> str:
                 "## Broadened Follow-Up Command",
                 "",
                 f"- action: {broadened_follow_up.get('action')}",
+                "- promotion_budget_policy: "
+                f"{broadened_follow_up.get('promotion_budget_policy') or '-'}",
                 f"- default_follow_up_from: `{broadened_follow_up.get('default_follow_up_from')}`",
                 "- default_follow_up_fail_on_verdict: "
                 f"{broadened_follow_up.get('default_follow_up_fail_on_verdict') or '-'}",
@@ -4002,6 +4004,11 @@ def _broadened_follow_up_command_record(
         if stable_family_ready and not improved_ready
         else "promote_and_broaden_after_streak"
     )
+    promotion_budget_policy = (
+        "head_only"
+        if command_action == "promote_stable_family_confirmation"
+        else "full_broaden"
+    )
     default_run_dir = root_run_dir / (
         "promoted_family_train"
         if command_action == "promote_stable_family_confirmation"
@@ -4014,13 +4021,20 @@ def _broadened_follow_up_command_record(
         and str(args.follow_up_fail_on_verdict).strip()
         else None
     )
+    broadened_eval_samples = int(args.eval_samples)
+    broadened_vae_epochs = int(args.vae_epochs)
+    broadened_vae_batches = int(args.vae_batches)
+    if promotion_budget_policy == "full_broaden":
+        broadened_eval_samples = max(int(args.eval_samples) + 16, int(args.eval_samples) * 2)
+        broadened_vae_epochs = max(int(args.vae_epochs) + 1, int(args.vae_epochs) * 2)
+        broadened_vae_batches = max(int(args.vae_batches) + 1, int(args.vae_batches) * 2)
     broadened_args = _clone_args(
         args,
         epochs=max(int(args.epochs) + 1, int(args.epochs) * 2),
         batches=max(int(args.batches) + 1, int(args.batches) * 2),
-        eval_samples=max(int(args.eval_samples) + 16, int(args.eval_samples) * 2),
-        vae_epochs=max(int(args.vae_epochs) + 1, int(args.vae_epochs) * 2),
-        vae_batches=max(int(args.vae_batches) + 1, int(args.vae_batches) * 2),
+        eval_samples=broadened_eval_samples,
+        vae_epochs=broadened_vae_epochs,
+        vae_batches=broadened_vae_batches,
     )
     focused_features = (
         list(family_focus["focused_features"])
@@ -4067,6 +4081,7 @@ def _broadened_follow_up_command_record(
     return {
         "schema": "st.llm_char_vae_context.broadened_follow_up_command.v1",
         "action": command_action,
+        "promotion_budget_policy": promotion_budget_policy,
         "best_config": best_config,
         "default_new_seeds": default_new_seeds,
         "used_seed_history": used_seeds,
