@@ -51,7 +51,21 @@ def _write_report(
     cwd: Path,
     seeds: list[int],
     available_count: int | None = None,
+    planned_seeds: list[int] | None = None,
 ) -> None:
+    if planned_seeds is not None:
+        (cwd / "summary.json").write_text(
+            json.dumps(
+                {
+                    "mainline_scale_up_command": {
+                        "default_new_seeds": ",".join(
+                            str(seed) for seed in planned_seeds
+                        )
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
     path.write_text(
         json.dumps(
             {
@@ -88,7 +102,12 @@ class PromotedEvalSummaryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             report = root / "promoted_recipe_eval_run.json"
-            _write_report(report, cwd=root, seeds=[101, 103])
+            _write_report(
+                report,
+                cwd=root,
+                seeds=[101, 103],
+                planned_seeds=[101, 103],
+            )
             _write_eval_summary(
                 root / "seed_000101" / "eval_best" / "summary.json",
                 seed=101,
@@ -117,6 +136,9 @@ class PromotedEvalSummaryTests(unittest.TestCase):
             self.assertTrue(summary["complete_only"])
             self.assertTrue(summary["planned_eval_complete"])
             self.assertEqual(summary["remaining_eval_count"], 0)
+            self.assertEqual(summary["planned_eval_seeds"], [101, 103])
+            self.assertEqual(summary["evaluated_eval_seeds"], [101, 103])
+            self.assertEqual(summary["remaining_eval_seeds"], [])
             self.assertEqual(summary["winner_counts"], {"reconstruction_latent": 2})
             self.assertEqual(summary["target_feature_win_rate"], 1.0)
             self.assertAlmostEqual(summary["mean_target_delta_vs_raw"], -0.3)
@@ -131,7 +153,13 @@ class PromotedEvalSummaryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             report = root / "promoted_recipe_eval_run.json"
-            _write_report(report, cwd=root, seeds=[101, 103], available_count=3)
+            _write_report(
+                report,
+                cwd=root,
+                seeds=[101, 103],
+                available_count=3,
+                planned_seeds=[101, 103, 107],
+            )
             for seed, reconstruction_nll in ((101, 3.8), (103, 3.7)):
                 _write_eval_summary(
                     root / f"seed_{seed:06d}" / "eval_best" / "summary.json",
@@ -153,6 +181,9 @@ class PromotedEvalSummaryTests(unittest.TestCase):
             summary = payload["reports"][0]
             self.assertFalse(summary["planned_eval_complete"])
             self.assertEqual(summary["remaining_eval_count"], 1)
+            self.assertEqual(summary["planned_eval_seeds"], [101, 103, 107])
+            self.assertEqual(summary["evaluated_eval_seeds"], [101, 103])
+            self.assertEqual(summary["remaining_eval_seeds"], [107])
             self.assertEqual(summary["winner_counts"], {"reconstruction_latent": 2})
             self.assertEqual(summary["recommendation"], "continue_planned_eval")
             command = summary["recommended_next_eval_command"]

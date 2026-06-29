@@ -58,6 +58,22 @@ def _mean(values: list[Any]) -> float | None:
     return sum(floats) / len(floats) if floats else None
 
 
+def _int_list(value: Any) -> list[int]:
+    if isinstance(value, str):
+        raw_items: Any = value.split(",")
+    elif isinstance(value, list):
+        raw_items = value
+    else:
+        return []
+    items: list[int] = []
+    for item in raw_items:
+        try:
+            items.append(int(str(item).strip()))
+        except (TypeError, ValueError):
+            continue
+    return items
+
+
 def _winner_counts(seed_results: list[dict[str, Any]]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for seed in seed_results:
@@ -204,6 +220,34 @@ def _recommended_summary_command(report_path: str) -> str:
     )
 
 
+def _resolve_source_summary_path(value: Any, *, cwd: Path) -> Path | None:
+    if not isinstance(value, str) or not value:
+        return None
+    path = Path(value)
+    return path if path.is_absolute() else cwd / path
+
+
+def _planned_eval_seeds(source_summary: dict[str, Any] | None) -> list[int]:
+    if not isinstance(source_summary, dict):
+        return []
+    mainline = source_summary.get("mainline_scale_up_command")
+    mainline = mainline if isinstance(mainline, dict) else {}
+    recipe = mainline.get("promoted_learning_recipe")
+    if not isinstance(recipe, dict):
+        recipe = source_summary.get("promoted_learning_recipe")
+    recipe = recipe if isinstance(recipe, dict) else {}
+    commands = recipe.get("eval_reload_commands")
+    commands = commands if isinstance(commands, dict) else {}
+    items = commands.get("items")
+    if isinstance(items, list) and items:
+        seeds = _int_list(
+            [item.get("seed") for item in items if isinstance(item, dict)]
+        )
+        if seeds:
+            return seeds
+    return _int_list(mainline.get("default_new_seeds"))
+
+
 def summarize_report(path: Path) -> dict[str, Any]:
     report_path = _report_path(path)
     payload = _read_json(report_path)
@@ -215,6 +259,18 @@ def summarize_report(path: Path) -> dict[str, Any]:
         cwd = report_path.parent / cwd
     results = [item for item in payload.get("results") or [] if isinstance(item, dict)]
     seed_results = [_seed_result(item, cwd=cwd) for item in results]
+    source_summary_path = _resolve_source_summary_path(
+        payload.get("summary_path"),
+        cwd=cwd,
+    )
+    source_summary = (
+        _read_json(source_summary_path) if source_summary_path is not None else None
+    )
+    planned_eval_seeds = _planned_eval_seeds(source_summary)
+    evaluated_eval_seeds = _int_list([seed.get("seed") for seed in seed_results])
+    remaining_eval_seeds = [
+        seed for seed in planned_eval_seeds if seed not in set(evaluated_eval_seeds)
+    ]
     successful = [
         seed
         for seed in seed_results
@@ -239,7 +295,14 @@ def summarize_report(path: Path) -> dict[str, Any]:
     available_count = payload.get("available_count")
     remaining_eval_count = None
     planned_eval_complete = None
-    if isinstance(selected_count, int) and isinstance(available_count, int):
+    if planned_eval_seeds:
+        selected_count = (
+            selected_count if isinstance(selected_count, int) else len(seed_results)
+        )
+        available_count = len(planned_eval_seeds)
+        remaining_eval_count = len(remaining_eval_seeds)
+        planned_eval_complete = remaining_eval_count == 0
+    elif isinstance(selected_count, int) and isinstance(available_count, int):
         remaining_eval_count = max(available_count - selected_count, 0)
         planned_eval_complete = remaining_eval_count == 0
     report = {
@@ -253,6 +316,9 @@ def summarize_report(path: Path) -> dict[str, Any]:
         "complete_only": payload.get("complete_only"),
         "selected_count": selected_count,
         "available_count": available_count,
+        "planned_eval_seeds": planned_eval_seeds,
+        "evaluated_eval_seeds": evaluated_eval_seeds,
+        "remaining_eval_seeds": remaining_eval_seeds,
         "remaining_eval_count": remaining_eval_count,
         "planned_eval_complete": planned_eval_complete,
         "returncode": payload.get("returncode"),
@@ -324,6 +390,10 @@ def markdown_report(payload: dict[str, Any]) -> str:
                 f"- ready_only: {_fmt(report.get('ready_only'))}",
                 f"- complete_only: {_fmt(report.get('complete_only'))}",
                 f"- selected/available: {report.get('selected_count')}/{report.get('available_count')}",
+                "- planned_eval_seeds: "
+                f"{', '.join(str(seed) for seed in report.get('planned_eval_seeds') or []) or '-'}",
+                "- remaining_eval_seeds: "
+                f"{', '.join(str(seed) for seed in report.get('remaining_eval_seeds') or []) or '-'}",
                 f"- remaining_eval_count: {_fmt(report.get('remaining_eval_count'))}",
                 f"- planned_eval_complete: {_fmt(report.get('planned_eval_complete'))}",
                 f"- successful_eval_count: {report.get('successful_eval_count')}",
