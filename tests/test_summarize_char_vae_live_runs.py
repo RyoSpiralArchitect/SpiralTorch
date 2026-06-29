@@ -109,6 +109,23 @@ class SummarizeCharVaeLiveRunsTests(unittest.TestCase):
             evidence["latest_completed_best_feature"],
             "reconstruction_latent",
         )
+        feature_evidence = summary["completed_feature_evidence"]
+        self.assertEqual(
+            [item["feature"] for item in feature_evidence],
+            ["reconstruction_latent", "raw_latent"],
+        )
+        self.assertEqual(feature_evidence[0]["seed_count"], 1)
+        self.assertEqual(feature_evidence[0]["win_count"], 1)
+        self.assertAlmostEqual(feature_evidence[0]["win_rate"], 1.0)
+        self.assertAlmostEqual(feature_evidence[0]["mean_rank"], 1.0)
+        self.assertAlmostEqual(feature_evidence[0]["mean_delta_vs_raw"], -0.372221)
+        self.assertAlmostEqual(feature_evidence[0]["mean_gap_to_winner"], 0.0)
+        self.assertEqual(feature_evidence[1]["seed_count"], 1)
+        self.assertEqual(feature_evidence[1]["win_count"], 0)
+        self.assertAlmostEqual(feature_evidence[1]["win_rate"], 0.0)
+        self.assertAlmostEqual(feature_evidence[1]["mean_rank"], 2.0)
+        self.assertAlmostEqual(feature_evidence[1]["mean_delta_vs_raw"], -0.370624)
+        self.assertAlmostEqual(feature_evidence[1]["mean_gap_to_winner"], 0.001597)
         self.assertEqual(summary["progress"]["planned_seed_count"], 2)
         self.assertEqual(summary["progress"]["completed_seed_count"], 1)
         self.assertAlmostEqual(summary["progress"]["completed_seed_fraction"], 0.5)
@@ -229,6 +246,10 @@ class SummarizeCharVaeLiveRunsTests(unittest.TestCase):
         self.assertIn("- completed_seed_leader: - (0/0, rate=-)", markdown)
         self.assertIn("- completed_seed_mean_delta_vs_raw: -", markdown)
         self.assertIn("- completed_seed_mean_margin_to_runner_up: -", markdown)
+        self.assertIn(
+            "| completed_feature | seeds | wins | win_rate | mean_rank | mean_nll | mean_delta_vs_raw | mean_gap_to_winner |",
+            markdown,
+        )
         self.assertIn("- active_feature_index: 1/1", markdown)
         self.assertIn("- active_seed_progress_fraction: 1.000000", markdown)
         self.assertIn("- best_so_far: raw@4.190000", markdown)
