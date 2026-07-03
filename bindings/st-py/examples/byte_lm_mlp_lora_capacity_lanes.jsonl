@@ -1,0 +1,4 @@
+{"row_type":"byte_lm_lora_config","label":"r18_a96_lr4p5","rank":18,"alpha":96.0,"adapter_lr_scale":4.5}
+{"row_type":"byte_lm_lora_config","label":"r18_a128_lr5","rank":18,"alpha":128.0,"adapter_lr_scale":5.0}
+{"row_type":"byte_lm_lora_config","label":"r24_a96_lr4p5","rank":24,"alpha":96.0,"adapter_lr_scale":4.5}
+{"row_type":"byte_lm_lora_config","label":"r24_a128_lr5","rank":24,"alpha":128.0,"adapter_lr_scale":5.0}
