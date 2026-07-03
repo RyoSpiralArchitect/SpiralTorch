@@ -102,6 +102,15 @@ NumPy, no PyTorch, and no shim layers.
   `vision.stream_vision_training(...)` to wire frame streams into
   `SpiralTorchVision` + `ZSpaceTrainer` loops directly from Python.
 
+## Tokenizerless FT diagnostics
+
+The examples in `examples/byte_lm_*.py` provide a bounded byte-LM fine-tune
+diagnostic surface for local HF/PyTorch-style checkpoints without making Torch,
+safetensors, or Transformers hard dependencies of the binding. Start with
+`examples/byte_lm_profile_smoke.py --hf-state-dict <path> --key-preset auto` to
+run checkpoint preflight, LoRA/source/profile comparisons, promotion manifests,
+and dry-run continuation plans before scaling into heavier training runs.
+
 ## Building wheels
 
 The binding mirrors the Rust feature flags. Pick the backend(s) you need
