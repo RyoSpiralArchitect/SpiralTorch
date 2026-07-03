@@ -8,18 +8,38 @@ use st_tensor::pure::{LanguageWaveEncoder, OpenCartesianTopos, RewriteMonad, Ten
 pub struct ZSpaceProjector {
     topos: OpenCartesianTopos,
     encoder: LanguageWaveEncoder,
+    strength: f32,
 }
 
 impl ZSpaceProjector {
     /// Builds a projector with a guard topos and matching Z-space encoder.
     pub fn new(topos: OpenCartesianTopos, encoder: LanguageWaveEncoder) -> PureResult<Self> {
+        Self::with_strength(topos, encoder, 1.0)
+    }
+
+    /// Builds a projector that blends input activations with the Z-space projection.
+    ///
+    /// `strength=1.0` preserves the original full projection path, while
+    /// `strength=0.0` behaves as an identity pass-through. Intermediate values
+    /// are useful for sweeps that compare how much Z-space routing helps a
+    /// fine-tuning run.
+    pub fn with_strength(
+        topos: OpenCartesianTopos,
+        encoder: LanguageWaveEncoder,
+        strength: f32,
+    ) -> PureResult<Self> {
         if (topos.curvature() - encoder.curvature()).abs() > 1e-6 {
             return Err(crate::TensorError::CurvatureMismatch {
                 expected: topos.curvature(),
                 got: encoder.curvature(),
             });
         }
-        Ok(Self { topos, encoder })
+        Self::validate_strength(strength)?;
+        Ok(Self {
+            topos,
+            encoder,
+            strength,
+        })
     }
 
     /// Returns the open-cartesian guard backing the projector.
@@ -35,6 +55,33 @@ impl ZSpaceProjector {
     /// Returns the internal Z-space encoder for direct wave creation.
     pub fn encoder(&self) -> &LanguageWaveEncoder {
         &self.encoder
+    }
+
+    /// Returns the input/projection blend strength.
+    pub fn strength(&self) -> f32 {
+        self.strength
+    }
+
+    fn validate_strength(strength: f32) -> PureResult<()> {
+        if !strength.is_finite() || !(0.0..=1.0).contains(&strength) {
+            return Err(crate::TensorError::NonFiniteValue {
+                label: "zspace_projector_strength",
+                value: strength,
+            });
+        }
+        Ok(())
+    }
+
+    fn blend(&self, input: &Tensor, projected: &Tensor) -> PureResult<Tensor> {
+        if self.strength <= f32::EPSILON {
+            return Ok(input.clone());
+        }
+        if (self.strength - 1.0).abs() <= f32::EPSILON {
+            return Ok(projected.clone());
+        }
+        let mut blended = input.scale(1.0 - self.strength)?;
+        blended.add_scaled(projected, self.strength)?;
+        Ok(blended)
     }
 
     /// Applies a fractional regularisation penalty to the provided latent slice.
@@ -89,6 +136,7 @@ impl Module for ZSpaceProjector {
         let monad = RewriteMonad::new(&self.topos);
         monad.rewrite_tensor("zspace_projector_forward_rewrite", &mut rewritten)?;
         let projected = rewritten.project_to_poincare(self.topos.curvature())?;
+        let projected = self.blend(input, &projected)?;
         self.topos
             .guard_tensor("zspace_projector_forward_out", &projected)?;
         Ok(projected)
@@ -100,7 +148,7 @@ impl Module for ZSpaceProjector {
         let mut grad = grad_output.clone();
         let monad = RewriteMonad::new(&self.topos);
         monad.rewrite_tensor("zspace_projector_backward_rewrite", &mut grad)?;
-        Ok(grad)
+        self.blend(grad_output, &grad)
     }
 
     fn visit_parameters(
@@ -140,6 +188,56 @@ mod tests {
             Tensor::from_vec(2, 4, vec![0.2, -0.1, 0.05, -0.3, 0.4, -0.2, 0.1, -0.05]).unwrap();
         let grad_in = module.backward(&input, &grad_out).unwrap();
         assert_eq!(grad_in.shape(), grad_out.shape());
+    }
+
+    #[test]
+    fn projector_strength_zero_is_identity() {
+        let topos = demo_topos();
+        let encoder = LanguageWaveEncoder::new(topos.curvature(), 0.5).unwrap();
+        let mut module = ZSpaceProjector::with_strength(topos, encoder, 0.0).unwrap();
+        let input = Tensor::from_vec(2, 3, vec![0.2, -0.4, 0.6, -0.3, 0.5, -0.7]).unwrap();
+        let output = module.forward(&input).unwrap();
+        assert_eq!(output, input);
+
+        let grad = Tensor::from_vec(2, 3, vec![0.1, -0.2, 0.3, -0.4, 0.5, -0.6]).unwrap();
+        let grad_in = module.backward(&input, &grad).unwrap();
+        assert_eq!(grad_in, grad);
+    }
+
+    #[test]
+    fn projector_strength_blends_with_full_projection() {
+        let topos = demo_topos();
+        let encoder = LanguageWaveEncoder::new(topos.curvature(), 0.5).unwrap();
+        let input = Tensor::from_vec(1, 3, vec![1.2, -0.8, 0.4]).unwrap();
+        let full = ZSpaceProjector::new(topos.clone(), encoder.clone())
+            .unwrap()
+            .forward(&input)
+            .unwrap();
+        let blended = ZSpaceProjector::with_strength(topos, encoder, 0.5)
+            .unwrap()
+            .forward(&input)
+            .unwrap();
+        let expected = input.scale(0.5).unwrap();
+        let mut expected = expected;
+        expected.add_scaled(&full, 0.5).unwrap();
+        assert_eq!(blended.shape(), input.shape());
+        for (got, want) in blended.data().iter().zip(expected.data().iter()) {
+            assert!((got - want).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn projector_rejects_out_of_range_strength() {
+        let topos = demo_topos();
+        let encoder = LanguageWaveEncoder::new(topos.curvature(), 0.5).unwrap();
+        let err = ZSpaceProjector::with_strength(topos, encoder, 1.5).unwrap_err();
+        assert!(matches!(
+            err,
+            crate::TensorError::NonFiniteValue {
+                label: "zspace_projector_strength",
+                ..
+            }
+        ));
     }
 
     #[test]

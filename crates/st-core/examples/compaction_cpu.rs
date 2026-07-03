@@ -18,8 +18,14 @@ fn main() {
 
     let between = compact_between(&x, rows, cols, row_stride, 2.0, 4.0).unwrap();
     println!("between counts={:?}", between.counts);
-    println!("between row0 values={:?}", &between.values[0..cols as usize]);
-    println!("between row0 indices={:?}", &between.indices[0..cols as usize]);
+    println!(
+        "between row0 values={:?}",
+        &between.values[0..cols as usize]
+    );
+    println!(
+        "between row0 indices={:?}",
+        &between.indices[0..cols as usize]
+    );
 
     let below = compact_below(&x, rows, cols, row_stride, 1.0).unwrap();
     println!("below counts={:?}", below.counts);

@@ -28,10 +28,22 @@ use st_frac::{
 use st_nn::dataset::DataLoaderBatches as NnDataLoaderBatches;
 use st_nn::dataset_from_vec as nn_dataset_from_vec;
 use st_nn::{
-    Conv1d as NnConv1d, DataLoader as NnDataLoader, DifferentialTrace, DistConfig, DistMode,
-    EpochStats, Linear as NnLinear, Loss, MeanSquaredError, Module, ModuleTrainer,
-    RoundtableConfig, RoundtableSchedule, Sequential as NnSequential, SpiralSession,
-    SpiralSessionBuilder, WaveRnn as NnWaveRnn, ZSpaceProjector as NnZSpaceProjector,
+    byte_lm_corpus_windows as nn_byte_lm_corpus_windows,
+    byte_lm_sample_stats as nn_byte_lm_sample_stats, byte_lm_windows as nn_byte_lm_windows,
+    interleave_replay_samples as nn_interleave_replay_samples,
+    padded_byte_lm_samples as nn_padded_byte_lm_samples, summarize_epoch_history,
+    ByteLmSampleStats, Conv1d as NnConv1d, DataLoader as NnDataLoader, DifferentialTrace,
+    DistConfig, DistMode, EarlyStoppingConfig, EpochBestState, EpochHistory,
+    EpochSparseRetentionBestState, EpochStats, EpochValidationBestState, Linear as NnLinear,
+    LoraLinear as NnLoraLinear, Loss, LrPlateauConfig, MeanSquaredError, Module, ModuleTrainer,
+    ParameterMovementReport, ParameterTrainingFingerprint, Relu as NnRelu, RoundtableConfig,
+    RoundtableSchedule, Sequential as NnSequential, SoftmaxCrossEntropy, SparseClassificationDelta,
+    SparseClassificationMetrics, SparseFineTuneRegressionLimits, SparseFineTuneReport,
+    SparseFineTuneReportSummary, SparseRetentionGuardConfig, SpiralSession, SpiralSessionBuilder,
+    StateCompatibilityReport, StateFingerprint, StateKeyMapRule, StateLoadReport,
+    StateTensorTransform, TrainerStateFingerprint, TrainingResumeFingerprint,
+    ValidationTrainingControls, WaveRnn as NnWaveRnn, ZSpaceProjector as NnZSpaceProjector,
+    BYTE_LM_VOCAB,
 };
 use st_tensor::pure::{
     measure::{
@@ -100,6 +112,635 @@ fn pydict_to_state(dict: &Bound<'_, PyDict>) -> PyResult<HashMap<String, Tensor>
         state.insert(name, tensor.as_tensor().clone());
     }
     Ok(state)
+}
+
+fn pydict_to_key_rules(dict: &Bound<'_, PyDict>) -> PyResult<HashMap<String, StateKeyMapRule>> {
+    let mut rules = HashMap::new();
+    for (key, value) in dict.iter() {
+        let source: String = key.extract()?;
+        if let Ok(target) = value.extract::<String>() {
+            rules.insert(source, StateKeyMapRule::new(target));
+            continue;
+        }
+
+        let rule_dict: HashMap<String, String> = value.extract().map_err(|_| {
+            PyValueError::new_err(
+                "state key rules must map source keys to a target string or ".to_string()
+                    + "{'target': str, 'transform': str}",
+            )
+        })?;
+        let target = rule_dict
+            .get("target")
+            .ok_or_else(|| PyValueError::new_err("state key rule missing 'target'"))?
+            .clone();
+        let transform = match rule_dict.get("transform") {
+            Some(value) => convert(StateTensorTransform::parse(value))?,
+            None => StateTensorTransform::Identity,
+        };
+        rules.insert(source, StateKeyMapRule::with_transform(target, transform));
+    }
+    Ok(rules)
+}
+
+fn set_module_trainable<M: Module>(module: &mut M, trainable: bool) -> PyResult<()> {
+    convert(module.set_trainable(trainable))
+}
+
+fn set_module_parameter_trainable<M: Module>(
+    module: &mut M,
+    name: &str,
+    trainable: bool,
+) -> PyResult<()> {
+    convert(module.set_parameter_trainable(name, trainable))
+}
+
+fn set_module_parameters_trainable_by_prefix<M: Module>(
+    module: &mut M,
+    prefix: &str,
+    trainable: bool,
+) -> PyResult<usize> {
+    convert(module.set_parameters_trainable_by_prefix(prefix, trainable))
+}
+
+fn set_module_parameters_trainable_by_suffix<M: Module>(
+    module: &mut M,
+    suffix: &str,
+    trainable: bool,
+) -> PyResult<usize> {
+    convert(module.set_parameters_trainable_by_suffix(suffix, trainable))
+}
+
+fn set_module_parameters_trainable_by_contains<M: Module>(
+    module: &mut M,
+    needle: &str,
+    trainable: bool,
+) -> PyResult<usize> {
+    convert(module.set_parameters_trainable_by_contains(needle, trainable))
+}
+
+fn scale_module_parameter_learning_rate<M: Module>(
+    module: &mut M,
+    name: &str,
+    factor: f32,
+) -> PyResult<()> {
+    convert(module.scale_parameter_learning_rate(name, factor))
+}
+
+fn set_module_parameter_learning_rate_scale<M: Module>(
+    module: &mut M,
+    name: &str,
+    scale: f32,
+) -> PyResult<()> {
+    convert(module.set_parameter_learning_rate_scale(name, scale))
+}
+
+fn scale_module_parameters_learning_rate_by_prefix<M: Module>(
+    module: &mut M,
+    prefix: &str,
+    factor: f32,
+) -> PyResult<usize> {
+    convert(module.scale_parameters_learning_rate_by_prefix(prefix, factor))
+}
+
+fn scale_module_parameters_learning_rate_by_suffix<M: Module>(
+    module: &mut M,
+    suffix: &str,
+    factor: f32,
+) -> PyResult<usize> {
+    convert(module.scale_parameters_learning_rate_by_suffix(suffix, factor))
+}
+
+fn scale_module_parameters_learning_rate_by_contains<M: Module>(
+    module: &mut M,
+    needle: &str,
+    factor: f32,
+) -> PyResult<usize> {
+    convert(module.scale_parameters_learning_rate_by_contains(needle, factor))
+}
+
+fn set_module_parameters_learning_rate_scale_by_prefix<M: Module>(
+    module: &mut M,
+    prefix: &str,
+    scale: f32,
+) -> PyResult<usize> {
+    convert(module.set_parameters_learning_rate_scale_by_prefix(prefix, scale))
+}
+
+fn set_module_parameters_learning_rate_scale_by_suffix<M: Module>(
+    module: &mut M,
+    suffix: &str,
+    scale: f32,
+) -> PyResult<usize> {
+    convert(module.set_parameters_learning_rate_scale_by_suffix(suffix, scale))
+}
+
+fn set_module_parameters_learning_rate_scale_by_contains<M: Module>(
+    module: &mut M,
+    needle: &str,
+    scale: f32,
+) -> PyResult<usize> {
+    convert(module.set_parameters_learning_rate_scale_by_contains(needle, scale))
+}
+
+fn set_module_parameter_weight_decay<M: Module>(
+    module: &mut M,
+    name: &str,
+    weight_decay: f32,
+) -> PyResult<()> {
+    convert(module.set_parameter_weight_decay(name, weight_decay))
+}
+
+fn set_module_parameters_weight_decay_by_prefix<M: Module>(
+    module: &mut M,
+    prefix: &str,
+    weight_decay: f32,
+) -> PyResult<usize> {
+    convert(module.set_parameters_weight_decay_by_prefix(prefix, weight_decay))
+}
+
+fn set_module_parameters_weight_decay_by_suffix<M: Module>(
+    module: &mut M,
+    suffix: &str,
+    weight_decay: f32,
+) -> PyResult<usize> {
+    convert(module.set_parameters_weight_decay_by_suffix(suffix, weight_decay))
+}
+
+fn set_module_parameters_weight_decay_by_contains<M: Module>(
+    module: &mut M,
+    needle: &str,
+    weight_decay: f32,
+) -> PyResult<usize> {
+    convert(module.set_parameters_weight_decay_by_contains(needle, weight_decay))
+}
+
+fn validation_controls_from_py(
+    patience: Option<usize>,
+    min_delta: f32,
+    lr_decay_patience: Option<usize>,
+    lr_decay_factor: f32,
+    lr_decay_min_delta: f32,
+) -> PyResult<ValidationTrainingControls> {
+    let mut controls = ValidationTrainingControls::default();
+    if let Some(patience) = patience {
+        controls =
+            controls.with_early_stopping(convert(EarlyStoppingConfig::new(patience, min_delta))?);
+    }
+    if let Some(patience) = lr_decay_patience {
+        controls = controls.with_lr_plateau(convert(LrPlateauConfig::new(
+            patience,
+            lr_decay_factor,
+            lr_decay_min_delta,
+        ))?);
+    }
+    Ok(controls)
+}
+
+fn sparse_retention_guard_from_py(
+    max_loss_increase: f32,
+    max_accuracy_drop: f32,
+    max_perplexity_increase: Option<f32>,
+    target_min_loss_delta: f32,
+) -> PyResult<SparseRetentionGuardConfig> {
+    let mut guard = convert(SparseRetentionGuardConfig::new(
+        max_loss_increase,
+        max_accuracy_drop,
+    ))?;
+    if let Some(max_perplexity_increase) = max_perplexity_increase {
+        guard = convert(guard.with_max_perplexity_increase(max_perplexity_increase))?;
+    }
+    if target_min_loss_delta > 0.0 {
+        guard = convert(guard.with_target_min_loss_delta(target_min_loss_delta))?;
+    } else if target_min_loss_delta < 0.0 || !target_min_loss_delta.is_finite() {
+        guard = convert(guard.with_target_min_loss_delta(target_min_loss_delta))?;
+    }
+    Ok(guard)
+}
+
+fn capture_validation_best_with_controls<M: Module, L: Loss>(
+    trainer: &mut ModuleTrainer,
+    module: &mut M,
+    loss: &mut L,
+    train_loader: NnDataLoader,
+    validation_loader: NnDataLoader,
+    schedule: &RoundtableSchedule,
+    epochs: usize,
+    controls: ValidationTrainingControls,
+) -> PyResult<EpochValidationBestState> {
+    if controls.early_stopping.is_some() || controls.lr_plateau.is_some() {
+        convert(
+            trainer.train_epochs_capture_best_on_validation_with_controls(
+                module,
+                loss,
+                train_loader,
+                validation_loader,
+                schedule,
+                epochs,
+                controls,
+            ),
+        )
+    } else {
+        convert(trainer.train_epochs_capture_best_on_validation(
+            module,
+            loss,
+            train_loader,
+            validation_loader,
+            schedule,
+            epochs,
+        ))
+    }
+}
+
+fn restore_validation_best_with_controls<M: Module, L: Loss>(
+    trainer: &mut ModuleTrainer,
+    module: &mut M,
+    loss: &mut L,
+    train_loader: NnDataLoader,
+    validation_loader: NnDataLoader,
+    schedule: &RoundtableSchedule,
+    epochs: usize,
+    controls: ValidationTrainingControls,
+) -> PyResult<EpochValidationBestState> {
+    if controls.early_stopping.is_some() || controls.lr_plateau.is_some() {
+        convert(
+            trainer.train_epochs_restore_best_on_validation_with_controls(
+                module,
+                loss,
+                train_loader,
+                validation_loader,
+                schedule,
+                epochs,
+                controls,
+            ),
+        )
+    } else {
+        convert(trainer.train_epochs_restore_best_on_validation(
+            module,
+            loss,
+            train_loader,
+            validation_loader,
+            schedule,
+            epochs,
+        ))
+    }
+}
+
+fn capture_sparse_retention_best_with_controls<M: Module>(
+    trainer: &mut ModuleTrainer,
+    module: &mut M,
+    loss: &mut SoftmaxCrossEntropy,
+    train_loader: NnDataLoader,
+    validation_loader: NnDataLoader,
+    retention_loader: NnDataLoader,
+    schedule: &RoundtableSchedule,
+    epochs: usize,
+    guard: SparseRetentionGuardConfig,
+    controls: ValidationTrainingControls,
+) -> PyResult<EpochSparseRetentionBestState> {
+    if controls.early_stopping.is_some() || controls.lr_plateau.is_some() {
+        convert(
+            trainer.train_epochs_capture_best_sparse_with_retention_guard_and_controls(
+                module,
+                loss,
+                train_loader,
+                validation_loader,
+                retention_loader,
+                schedule,
+                epochs,
+                guard,
+                controls,
+            ),
+        )
+    } else {
+        convert(
+            trainer.train_epochs_capture_best_sparse_with_retention_guard(
+                module,
+                loss,
+                train_loader,
+                validation_loader,
+                retention_loader,
+                schedule,
+                epochs,
+                guard,
+            ),
+        )
+    }
+}
+
+fn restore_sparse_retention_best_with_controls<M: Module>(
+    trainer: &mut ModuleTrainer,
+    module: &mut M,
+    loss: &mut SoftmaxCrossEntropy,
+    train_loader: NnDataLoader,
+    validation_loader: NnDataLoader,
+    retention_loader: NnDataLoader,
+    schedule: &RoundtableSchedule,
+    epochs: usize,
+    guard: SparseRetentionGuardConfig,
+    controls: ValidationTrainingControls,
+) -> PyResult<EpochSparseRetentionBestState> {
+    if controls.early_stopping.is_some() || controls.lr_plateau.is_some() {
+        convert(
+            trainer.train_epochs_restore_best_sparse_with_retention_guard_and_controls(
+                module,
+                loss,
+                train_loader,
+                validation_loader,
+                retention_loader,
+                schedule,
+                epochs,
+                guard,
+                controls,
+            ),
+        )
+    } else {
+        convert(
+            trainer.train_epochs_restore_best_sparse_with_retention_guard(
+                module,
+                loss,
+                train_loader,
+                validation_loader,
+                retention_loader,
+                schedule,
+                epochs,
+                guard,
+            ),
+        )
+    }
+}
+
+fn restore_sparse_finetune_report_with_controls<M: Module>(
+    trainer: &mut ModuleTrainer,
+    module: &mut M,
+    loss: &mut SoftmaxCrossEntropy,
+    train_loader: NnDataLoader,
+    validation_loader: NnDataLoader,
+    retention_loader: NnDataLoader,
+    schedule: &RoundtableSchedule,
+    epochs: usize,
+    guard: SparseRetentionGuardConfig,
+    movement_tolerance: f32,
+    controls: ValidationTrainingControls,
+) -> PyResult<SparseFineTuneReport> {
+    if controls.early_stopping.is_some() || controls.lr_plateau.is_some() {
+        convert(
+            trainer.train_epochs_restore_best_sparse_with_finetune_report_and_controls(
+                module,
+                loss,
+                train_loader,
+                validation_loader,
+                retention_loader,
+                schedule,
+                epochs,
+                guard,
+                movement_tolerance,
+                controls,
+            ),
+        )
+    } else {
+        convert(
+            trainer.train_epochs_restore_best_sparse_with_finetune_report(
+                module,
+                loss,
+                train_loader,
+                validation_loader,
+                retention_loader,
+                schedule,
+                epochs,
+                guard,
+                movement_tolerance,
+            ),
+        )
+    }
+}
+
+fn movement_report_to_pydict<'py>(
+    py: Python<'py>,
+    report: &ParameterMovementReport,
+) -> PyResult<Bound<'py, PyDict>> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("status", report.status())?;
+    dict.set_item("frozen_stable", report.frozen_stable())?;
+    dict.set_item(
+        "trainable_movement_observed",
+        report.trainable_movement_observed(),
+    )?;
+    dict.set_item("trainable_changed", report.trainable_changed)?;
+    dict.set_item("trainable_unchanged", report.trainable_unchanged)?;
+    dict.set_item("frozen_changed", report.frozen_changed)?;
+    dict.set_item("frozen_unchanged", report.frozen_unchanged)?;
+    dict.set_item("max_trainable_l2_delta", report.max_trainable_l2_delta)?;
+    dict.set_item("max_frozen_l2_delta", report.max_frozen_l2_delta)?;
+    dict.set_item("max_frozen_abs_delta", report.max_frozen_abs_delta)?;
+
+    let parameters = PyList::empty_bound(py);
+    for movement in &report.parameters {
+        let entry = PyDict::new_bound(py);
+        entry.set_item("name", movement.name.as_str())?;
+        entry.set_item("trainable", movement.trainable)?;
+        entry.set_item("changed", movement.changed)?;
+        entry.set_item("l2_delta", movement.l2_delta)?;
+        entry.set_item("max_abs_delta", movement.max_abs_delta)?;
+        parameters.append(entry)?;
+    }
+    dict.set_item("parameters", parameters)?;
+    Ok(dict)
+}
+
+fn fingerprint_to_pydict<'py>(
+    py: Python<'py>,
+    fingerprint: &StateFingerprint,
+) -> PyResult<Bound<'py, PyDict>> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("hash", fingerprint.hash.as_str())?;
+    dict.set_item("parameters", fingerprint.parameters)?;
+    dict.set_item("values", fingerprint.values)?;
+    Ok(dict)
+}
+
+fn load_report_to_pydict<'py>(
+    py: Python<'py>,
+    report: &StateLoadReport,
+) -> PyResult<Bound<'py, PyDict>> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("matched", report.matched)?;
+    dict.set_item("source", fingerprint_to_pydict(py, &report.source)?)?;
+    dict.set_item("loaded", fingerprint_to_pydict(py, &report.loaded)?)?;
+    Ok(dict)
+}
+
+fn shape_to_pyobject(py: Python<'_>, shape: Option<(usize, usize)>) -> PyObject {
+    match shape {
+        Some((rows, cols)) => (rows, cols).into_py(py),
+        None => py.None(),
+    }
+}
+
+fn compatibility_report_to_pydict<'py>(
+    py: Python<'py>,
+    report: &StateCompatibilityReport,
+) -> PyResult<Bound<'py, PyDict>> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("compatible", report.compatible)?;
+    dict.set_item("expected_parameters", report.expected_parameters)?;
+    dict.set_item("source_parameters", report.source_parameters)?;
+    dict.set_item("matched", report.matched)?;
+    dict.set_item("missing", report.missing)?;
+    dict.set_item("shape_mismatched", report.shape_mismatched)?;
+    dict.set_item("extra", report.extra)?;
+    dict.set_item("source", fingerprint_to_pydict(py, &report.source)?)?;
+    dict.set_item(
+        "matched_subset",
+        fingerprint_to_pydict(py, &report.matched_subset)?,
+    )?;
+
+    let entries = PyList::empty_bound(py);
+    for entry in &report.entries {
+        let item = PyDict::new_bound(py);
+        item.set_item("name", entry.name.as_str())?;
+        item.set_item("status", entry.status.as_str())?;
+        match entry.source_name.as_ref() {
+            Some(source_name) => item.set_item("source_name", source_name.as_str())?,
+            None => item.set_item("source_name", py.None())?,
+        }
+        item.set_item("transform", entry.transform.as_str())?;
+        item.set_item(
+            "expected_shape",
+            shape_to_pyobject(py, entry.expected_shape),
+        )?;
+        item.set_item("source_shape", shape_to_pyobject(py, entry.source_shape))?;
+        item.set_item(
+            "original_source_shape",
+            shape_to_pyobject(py, entry.original_source_shape),
+        )?;
+        entries.append(item)?;
+    }
+    dict.set_item("entries", entries)?;
+    Ok(dict)
+}
+
+fn parameter_training_fingerprint_to_pydict<'py>(
+    py: Python<'py>,
+    fingerprint: &ParameterTrainingFingerprint,
+) -> PyResult<Bound<'py, PyDict>> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("hash", fingerprint.hash.as_str())?;
+    dict.set_item("parameters", fingerprint.parameters)?;
+    dict.set_item("trainable", fingerprint.trainable)?;
+    dict.set_item("frozen", fingerprint.frozen)?;
+    dict.set_item("hypergrad_tapes", fingerprint.hypergrad_tapes)?;
+    dict.set_item("accumulated_l2", fingerprint.accumulated_l2)?;
+    Ok(dict)
+}
+
+fn trainer_fingerprint_to_pydict<'py>(
+    py: Python<'py>,
+    fingerprint: &TrainerStateFingerprint,
+) -> PyResult<Bound<'py, PyDict>> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("hash", fingerprint.hash.as_str())?;
+    dict.set_item(
+        "gradient_accumulation_steps",
+        fingerprint.gradient_accumulation_steps,
+    )?;
+    dict.set_item("runtime_hooks", fingerprint.runtime_hooks)?;
+    Ok(dict)
+}
+
+fn resume_fingerprint_to_pydict<'py>(
+    py: Python<'py>,
+    fingerprint: &TrainingResumeFingerprint,
+) -> PyResult<Bound<'py, PyDict>> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("hash", fingerprint.hash.as_str())?;
+    dict.set_item(
+        "trainer",
+        trainer_fingerprint_to_pydict(py, &fingerprint.trainer)?,
+    )?;
+    dict.set_item(
+        "parameters",
+        fingerprint_to_pydict(py, &fingerprint.parameters)?,
+    )?;
+    dict.set_item(
+        "parameter_training",
+        parameter_training_fingerprint_to_pydict(py, &fingerprint.parameter_training)?,
+    )?;
+    Ok(dict)
+}
+
+fn parameter_movement_py<M: Module>(
+    py: Python<'_>,
+    module: &M,
+    before: &Bound<'_, PyDict>,
+    tolerance: f32,
+) -> PyResult<PyObject> {
+    let before_state = pydict_to_state(before)?;
+    let report = convert(module.audit_parameter_movement(&before_state, tolerance))?;
+    Ok(movement_report_to_pydict(py, &report)?.into_py(py))
+}
+
+fn state_fingerprint_py<M: Module>(py: Python<'_>, module: &M) -> PyResult<PyObject> {
+    let fingerprint = convert(module.state_fingerprint())?;
+    Ok(fingerprint_to_pydict(py, &fingerprint)?.into_py(py))
+}
+
+fn training_state_fingerprint_py<M: Module>(py: Python<'_>, module: &M) -> PyResult<PyObject> {
+    let fingerprint = convert(module.training_state_fingerprint())?;
+    Ok(parameter_training_fingerprint_to_pydict(py, &fingerprint)?.into_py(py))
+}
+
+fn checked_load_state_py<M: Module>(
+    py: Python<'_>,
+    module: &mut M,
+    state: &Bound<'_, PyDict>,
+) -> PyResult<PyObject> {
+    let state = pydict_to_state(state)?;
+    let report = convert(module.load_state_dict_checked(&state))?;
+    Ok(load_report_to_pydict(py, &report)?.into_py(py))
+}
+
+fn checked_load_state_subset_py<M: Module>(
+    py: Python<'_>,
+    module: &mut M,
+    state: &Bound<'_, PyDict>,
+) -> PyResult<PyObject> {
+    let state = pydict_to_state(state)?;
+    let report = convert(module.load_state_dict_subset_checked(&state))?;
+    Ok(load_report_to_pydict(py, &report)?.into_py(py))
+}
+
+fn checked_load_state_subset_mapped_py<M: Module>(
+    py: Python<'_>,
+    module: &mut M,
+    state: &Bound<'_, PyDict>,
+    key_map: &Bound<'_, PyDict>,
+) -> PyResult<PyObject> {
+    let state = pydict_to_state(state)?;
+    let key_rules = pydict_to_key_rules(key_map)?;
+    let report = convert(module.load_state_dict_subset_adapted_checked(&state, &key_rules))?;
+    Ok(load_report_to_pydict(py, &report)?.into_py(py))
+}
+
+fn state_dict_compatibility_py<M: Module>(
+    py: Python<'_>,
+    module: &M,
+    state: &Bound<'_, PyDict>,
+) -> PyResult<PyObject> {
+    let state = pydict_to_state(state)?;
+    let report = convert(module.state_dict_compatibility(&state))?;
+    Ok(compatibility_report_to_pydict(py, &report)?.into_py(py))
+}
+
+fn state_dict_compatibility_mapped_py<M: Module>(
+    py: Python<'_>,
+    module: &M,
+    state: &Bound<'_, PyDict>,
+    key_map: &Bound<'_, PyDict>,
+) -> PyResult<PyObject> {
+    let state = pydict_to_state(state)?;
+    let key_rules = pydict_to_key_rules(key_map)?;
+    let report = convert(module.state_dict_compatibility_with_key_rules(&state, &key_rules))?;
+    Ok(compatibility_report_to_pydict(py, &report)?.into_py(py))
 }
 
 fn py_device_info<'py>(py: Python<'py>, info: HipDeviceInfo) -> PyResult<Bound<'py, PyDict>> {
@@ -399,6 +1040,88 @@ fn dataset_from_vec_py(samples: Vec<(PyTensor, PyTensor)>) -> PyResult<PyDataLoa
         .map(|(input, target)| (input.into_tensor(), target.into_tensor()))
         .collect();
     Ok(PyDataLoader::from_loader(nn_dataset_from_vec(owned)))
+}
+
+fn samples_to_py(samples: Vec<(Tensor, Tensor)>) -> Vec<(PyTensor, PyTensor)> {
+    samples
+        .into_iter()
+        .map(|(input, target)| (PyTensor::from_tensor(input), PyTensor::from_tensor(target)))
+        .collect()
+}
+
+fn py_samples_to_rust(samples: Vec<(PyTensor, PyTensor)>) -> Vec<(Tensor, Tensor)> {
+    samples
+        .into_iter()
+        .map(|(input, target)| (input.into_tensor(), target.into_tensor()))
+        .collect()
+}
+
+fn byte_lm_sample_stats_to_pydict<'py>(
+    py: Python<'py>,
+    stats: ByteLmSampleStats,
+) -> PyResult<Bound<'py, PyDict>> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("samples", stats.samples)?;
+    dict.set_item("total_rows", stats.total_rows)?;
+    dict.set_item("active_rows", stats.active_rows)?;
+    Ok(dict)
+}
+
+#[pyfunction(name = "byte_lm_windows")]
+fn byte_lm_windows_py(text: &str, context: usize) -> PyResult<Vec<(PyTensor, PyTensor)>> {
+    Ok(samples_to_py(convert(nn_byte_lm_windows(text, context))?))
+}
+
+#[pyfunction(name = "byte_lm_corpus_windows")]
+fn byte_lm_corpus_windows_py(
+    texts: Vec<String>,
+    context: usize,
+) -> PyResult<Vec<(PyTensor, PyTensor)>> {
+    let refs: Vec<&str> = texts.iter().map(String::as_str).collect();
+    Ok(samples_to_py(convert(nn_byte_lm_corpus_windows(
+        &refs, context,
+    ))?))
+}
+
+#[pyfunction(name = "padded_byte_lm_samples")]
+fn padded_byte_lm_samples_py(
+    texts: Vec<String>,
+    pad_rows: usize,
+    ignore_index: i32,
+) -> PyResult<Vec<(PyTensor, PyTensor)>> {
+    let refs: Vec<&str> = texts.iter().map(String::as_str).collect();
+    Ok(samples_to_py(convert(nn_padded_byte_lm_samples(
+        &refs,
+        pad_rows,
+        ignore_index,
+    ))?))
+}
+
+#[pyfunction(name = "byte_lm_sample_stats")]
+#[pyo3(signature = (samples, ignore_index=None))]
+fn byte_lm_sample_stats_py<'py>(
+    py: Python<'py>,
+    samples: Vec<(PyTensor, PyTensor)>,
+    ignore_index: Option<i32>,
+) -> PyResult<Bound<'py, PyDict>> {
+    let owned = py_samples_to_rust(samples);
+    byte_lm_sample_stats_to_pydict(py, nn_byte_lm_sample_stats(&owned, ignore_index))
+}
+
+#[pyfunction(name = "interleave_replay_samples")]
+#[pyo3(signature = (target_samples, replay_samples, target_per_replay=1))]
+fn interleave_replay_samples_py(
+    target_samples: Vec<(PyTensor, PyTensor)>,
+    replay_samples: Vec<(PyTensor, PyTensor)>,
+    target_per_replay: usize,
+) -> PyResult<Vec<(PyTensor, PyTensor)>> {
+    let target = py_samples_to_rust(target_samples);
+    let replay = py_samples_to_rust(replay_samples);
+    Ok(samples_to_py(convert(nn_interleave_replay_samples(
+        &target,
+        &replay,
+        target_per_replay,
+    ))?))
 }
 
 #[pyclass(module = "spiraltorch", name = "ComplexTensor")]
@@ -1059,12 +1782,19 @@ impl PyZSpaceProjector {
 #[pymethods]
 impl PyZSpaceProjector {
     #[new]
-    fn new(topos: &PyOpenTopos, encoder: &PyLanguageWaveEncoder) -> PyResult<Self> {
-        let inner = convert(NnZSpaceProjector::new(
+    #[pyo3(signature = (topos, encoder, strength=1.0))]
+    fn new(topos: &PyOpenTopos, encoder: &PyLanguageWaveEncoder, strength: f32) -> PyResult<Self> {
+        let inner = convert(NnZSpaceProjector::with_strength(
             topos.inner.clone(),
             encoder.inner.clone(),
+            strength,
         ))?;
         Ok(Self { inner: Some(inner) })
+    }
+
+    #[getter]
+    fn strength(&self) -> PyResult<f32> {
+        Ok(self.borrow()?.strength())
     }
 
     fn forward(&self, input: &PyTensor) -> PyResult<PyTensor> {
@@ -1078,6 +1808,178 @@ impl PyZSpaceProjector {
             self.borrow_mut()?
                 .backward(input.as_tensor(), grad_output.as_tensor()),
         )?))
+    }
+
+    fn set_trainable(&mut self, trainable: bool) -> PyResult<()> {
+        set_module_trainable(self.borrow_mut()?, trainable)
+    }
+
+    fn set_parameter_trainable(&mut self, name: &str, trainable: bool) -> PyResult<()> {
+        set_module_parameter_trainable(self.borrow_mut()?, name, trainable)
+    }
+
+    fn set_parameters_trainable_by_prefix(
+        &mut self,
+        prefix: &str,
+        trainable: bool,
+    ) -> PyResult<usize> {
+        set_module_parameters_trainable_by_prefix(self.borrow_mut()?, prefix, trainable)
+    }
+
+    fn set_parameters_trainable_by_suffix(
+        &mut self,
+        suffix: &str,
+        trainable: bool,
+    ) -> PyResult<usize> {
+        set_module_parameters_trainable_by_suffix(self.borrow_mut()?, suffix, trainable)
+    }
+
+    fn set_parameters_trainable_by_contains(
+        &mut self,
+        needle: &str,
+        trainable: bool,
+    ) -> PyResult<usize> {
+        set_module_parameters_trainable_by_contains(self.borrow_mut()?, needle, trainable)
+    }
+
+    fn scale_parameter_learning_rate(&mut self, name: &str, factor: f32) -> PyResult<()> {
+        scale_module_parameter_learning_rate(self.borrow_mut()?, name, factor)
+    }
+
+    fn scale_parameters_learning_rate_by_prefix(
+        &mut self,
+        prefix: &str,
+        factor: f32,
+    ) -> PyResult<usize> {
+        scale_module_parameters_learning_rate_by_prefix(self.borrow_mut()?, prefix, factor)
+    }
+
+    fn scale_parameters_learning_rate_by_suffix(
+        &mut self,
+        suffix: &str,
+        factor: f32,
+    ) -> PyResult<usize> {
+        scale_module_parameters_learning_rate_by_suffix(self.borrow_mut()?, suffix, factor)
+    }
+
+    fn scale_parameters_learning_rate_by_contains(
+        &mut self,
+        needle: &str,
+        factor: f32,
+    ) -> PyResult<usize> {
+        scale_module_parameters_learning_rate_by_contains(self.borrow_mut()?, needle, factor)
+    }
+
+    fn set_parameter_learning_rate_scale(&mut self, name: &str, scale: f32) -> PyResult<()> {
+        set_module_parameter_learning_rate_scale(self.borrow_mut()?, name, scale)
+    }
+
+    fn set_parameters_learning_rate_scale_by_prefix(
+        &mut self,
+        prefix: &str,
+        scale: f32,
+    ) -> PyResult<usize> {
+        set_module_parameters_learning_rate_scale_by_prefix(self.borrow_mut()?, prefix, scale)
+    }
+
+    fn set_parameters_learning_rate_scale_by_suffix(
+        &mut self,
+        suffix: &str,
+        scale: f32,
+    ) -> PyResult<usize> {
+        set_module_parameters_learning_rate_scale_by_suffix(self.borrow_mut()?, suffix, scale)
+    }
+
+    fn set_parameters_learning_rate_scale_by_contains(
+        &mut self,
+        needle: &str,
+        scale: f32,
+    ) -> PyResult<usize> {
+        set_module_parameters_learning_rate_scale_by_contains(self.borrow_mut()?, needle, scale)
+    }
+
+    fn set_parameter_weight_decay(&mut self, name: &str, weight_decay: f32) -> PyResult<()> {
+        set_module_parameter_weight_decay(self.borrow_mut()?, name, weight_decay)
+    }
+
+    fn set_parameters_weight_decay_by_prefix(
+        &mut self,
+        prefix: &str,
+        weight_decay: f32,
+    ) -> PyResult<usize> {
+        set_module_parameters_weight_decay_by_prefix(self.borrow_mut()?, prefix, weight_decay)
+    }
+
+    fn set_parameters_weight_decay_by_suffix(
+        &mut self,
+        suffix: &str,
+        weight_decay: f32,
+    ) -> PyResult<usize> {
+        set_module_parameters_weight_decay_by_suffix(self.borrow_mut()?, suffix, weight_decay)
+    }
+
+    fn set_parameters_weight_decay_by_contains(
+        &mut self,
+        needle: &str,
+        weight_decay: f32,
+    ) -> PyResult<usize> {
+        set_module_parameters_weight_decay_by_contains(self.borrow_mut()?, needle, weight_decay)
+    }
+
+    #[pyo3(signature = (before, tolerance=0.0))]
+    fn parameter_movement(
+        &self,
+        py: Python<'_>,
+        before: &Bound<'_, PyDict>,
+        tolerance: f32,
+    ) -> PyResult<PyObject> {
+        parameter_movement_py(py, self.borrow()?, before, tolerance)
+    }
+
+    fn state_fingerprint(&self, py: Python<'_>) -> PyResult<PyObject> {
+        state_fingerprint_py(py, self.borrow()?)
+    }
+
+    fn load_state_dict_checked(
+        &mut self,
+        py: Python<'_>,
+        dict: &Bound<'_, PyDict>,
+    ) -> PyResult<PyObject> {
+        checked_load_state_py(py, self.borrow_mut()?, dict)
+    }
+
+    fn load_state_dict_subset_checked(
+        &mut self,
+        py: Python<'_>,
+        dict: &Bound<'_, PyDict>,
+    ) -> PyResult<PyObject> {
+        checked_load_state_subset_py(py, self.borrow_mut()?, dict)
+    }
+
+    fn load_state_dict_subset_mapped_checked(
+        &mut self,
+        py: Python<'_>,
+        dict: &Bound<'_, PyDict>,
+        key_map: &Bound<'_, PyDict>,
+    ) -> PyResult<PyObject> {
+        checked_load_state_subset_mapped_py(py, self.borrow_mut()?, dict, key_map)
+    }
+
+    fn state_dict_compatibility(
+        &self,
+        py: Python<'_>,
+        dict: &Bound<'_, PyDict>,
+    ) -> PyResult<PyObject> {
+        state_dict_compatibility_py(py, self.borrow()?, dict)
+    }
+
+    fn state_dict_compatibility_with_key_map(
+        &self,
+        py: Python<'_>,
+        dict: &Bound<'_, PyDict>,
+        key_map: &Bound<'_, PyDict>,
+    ) -> PyResult<PyObject> {
+        state_dict_compatibility_mapped_py(py, self.borrow()?, dict, key_map)
     }
 
     fn curvature(&self) -> PyResult<f32> {
@@ -1393,8 +2295,23 @@ impl PyEpochStats {
     }
 
     #[getter]
+    fn optimizer_steps(&self) -> usize {
+        self.inner.optimizer_steps
+    }
+
+    #[getter]
+    fn rows(&self) -> usize {
+        self.inner.rows
+    }
+
+    #[getter]
     fn total_loss(&self) -> f32 {
         self.inner.total_loss
+    }
+
+    #[getter]
+    fn total_row_weighted_loss(&self) -> f32 {
+        self.inner.total_row_weighted_loss
     }
 
     #[getter]
@@ -1402,14 +2319,1214 @@ impl PyEpochStats {
         self.inner.average_loss
     }
 
+    #[getter]
+    fn average_loss_per_row(&self) -> f32 {
+        self.inner.average_loss_per_row
+    }
+
     fn __repr__(&self) -> PyResult<String> {
         Ok(format!(
-            "EpochStats(batches={}, total_loss={:.6}, average_loss={:.6})",
+            "EpochStats(batches={}, optimizer_steps={}, rows={}, total_loss={:.6}, average_loss={:.6}, average_loss_per_row={:.6})",
             self.batches(),
+            self.optimizer_steps(),
+            self.rows(),
             self.total_loss(),
-            self.average_loss()
+            self.average_loss(),
+            self.average_loss_per_row()
         ))
     }
+}
+
+#[pyclass(module = "spiraltorch", name = "EpochHistory")]
+#[derive(Clone)]
+struct PyEpochHistory {
+    inner: EpochHistory,
+}
+
+impl PyEpochHistory {
+    fn from_history(inner: EpochHistory) -> Self {
+        Self { inner }
+    }
+}
+
+#[pymethods]
+impl PyEpochHistory {
+    #[getter]
+    fn epochs(&self) -> usize {
+        self.inner.epochs
+    }
+
+    #[getter]
+    fn batches(&self) -> usize {
+        self.inner.batches
+    }
+
+    #[getter]
+    fn optimizer_steps(&self) -> usize {
+        self.inner.optimizer_steps
+    }
+
+    #[getter]
+    fn rows(&self) -> usize {
+        self.inner.rows
+    }
+
+    #[getter]
+    fn initial_loss_per_row(&self) -> f32 {
+        self.inner.initial_loss_per_row
+    }
+
+    #[getter]
+    fn final_loss_per_row(&self) -> f32 {
+        self.inner.final_loss_per_row
+    }
+
+    #[getter]
+    fn best_epoch(&self) -> Option<usize> {
+        self.inner.best_epoch
+    }
+
+    #[getter]
+    fn best_loss_per_row(&self) -> f32 {
+        self.inner.best_loss_per_row
+    }
+
+    #[getter]
+    fn final_improvement(&self) -> f32 {
+        self.inner.final_improvement
+    }
+
+    #[getter]
+    fn best_improvement(&self) -> f32 {
+        self.inner.best_improvement
+    }
+
+    #[getter]
+    fn improved(&self) -> bool {
+        self.inner.improved
+    }
+
+    #[getter]
+    fn best_improved(&self) -> bool {
+        self.inner.best_improved
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "EpochHistory(epochs={}, batches={}, optimizer_steps={}, best_epoch={:?}, initial_loss_per_row={:.6}, final_loss_per_row={:.6}, best_loss_per_row={:.6}, final_improvement={:.6}, best_improvement={:.6})",
+            self.epochs(),
+            self.batches(),
+            self.optimizer_steps(),
+            self.best_epoch(),
+            self.initial_loss_per_row(),
+            self.final_loss_per_row(),
+            self.best_loss_per_row(),
+            self.final_improvement(),
+            self.best_improvement()
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "EpochBestState")]
+#[derive(Clone)]
+struct PyEpochBestState {
+    inner: EpochBestState,
+}
+
+impl PyEpochBestState {
+    fn from_best_state(inner: EpochBestState) -> Self {
+        Self { inner }
+    }
+}
+
+#[pymethods]
+impl PyEpochBestState {
+    #[getter]
+    fn history(&self, py: Python<'_>) -> PyResult<PyObject> {
+        epoch_history_to_pylist(py, self.inner.history.clone())
+    }
+
+    #[getter]
+    fn summary(&self) -> PyEpochHistory {
+        PyEpochHistory::from_history(self.inner.summary.clone())
+    }
+
+    #[getter]
+    fn best_state(&self, py: Python<'_>) -> PyResult<PyObject> {
+        state_to_pydict(py, self.inner.best_state.clone())
+    }
+
+    #[getter]
+    fn final_state(&self, py: Python<'_>) -> PyResult<PyObject> {
+        state_to_pydict(py, self.inner.final_state.clone())
+    }
+
+    #[getter]
+    fn best_fingerprint(&self, py: Python<'_>) -> PyResult<PyObject> {
+        Ok(fingerprint_to_pydict(py, &self.inner.best_fingerprint)?.into_py(py))
+    }
+
+    #[getter]
+    fn final_fingerprint(&self, py: Python<'_>) -> PyResult<PyObject> {
+        Ok(fingerprint_to_pydict(py, &self.inner.final_fingerprint)?.into_py(py))
+    }
+
+    #[getter]
+    fn best_differs_from_final(&self) -> bool {
+        self.inner.best_differs_from_final
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "EpochBestState(summary={:?}, best_hash={}, final_hash={}, best_differs_from_final={})",
+            self.inner.summary,
+            self.inner.best_fingerprint.hash,
+            self.inner.final_fingerprint.hash,
+            self.inner.best_differs_from_final
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "EpochValidationBestState")]
+#[derive(Clone)]
+struct PyEpochValidationBestState {
+    inner: EpochValidationBestState,
+}
+
+impl PyEpochValidationBestState {
+    fn from_validation_best_state(inner: EpochValidationBestState) -> Self {
+        Self { inner }
+    }
+}
+
+#[pymethods]
+impl PyEpochValidationBestState {
+    #[getter]
+    fn train_history(&self, py: Python<'_>) -> PyResult<PyObject> {
+        epoch_history_to_pylist(py, self.inner.train_history.clone())
+    }
+
+    #[getter]
+    fn validation_history(&self, py: Python<'_>) -> PyResult<PyObject> {
+        epoch_history_to_pylist(py, self.inner.validation_history.clone())
+    }
+
+    #[getter]
+    fn train_summary(&self) -> PyEpochHistory {
+        PyEpochHistory::from_history(self.inner.train_summary.clone())
+    }
+
+    #[getter]
+    fn validation_summary(&self) -> PyEpochHistory {
+        PyEpochHistory::from_history(self.inner.validation_summary.clone())
+    }
+
+    #[getter]
+    fn best_state(&self, py: Python<'_>) -> PyResult<PyObject> {
+        state_to_pydict(py, self.inner.best_state.clone())
+    }
+
+    #[getter]
+    fn final_state(&self, py: Python<'_>) -> PyResult<PyObject> {
+        state_to_pydict(py, self.inner.final_state.clone())
+    }
+
+    #[getter]
+    fn best_fingerprint(&self, py: Python<'_>) -> PyResult<PyObject> {
+        Ok(fingerprint_to_pydict(py, &self.inner.best_fingerprint)?.into_py(py))
+    }
+
+    #[getter]
+    fn final_fingerprint(&self, py: Python<'_>) -> PyResult<PyObject> {
+        Ok(fingerprint_to_pydict(py, &self.inner.final_fingerprint)?.into_py(py))
+    }
+
+    #[getter]
+    fn best_differs_from_final(&self) -> bool {
+        self.inner.best_differs_from_final
+    }
+
+    #[getter]
+    fn epochs_requested(&self) -> usize {
+        self.inner.epochs_requested
+    }
+
+    #[getter]
+    fn early_stopped(&self) -> bool {
+        self.inner.early_stopped
+    }
+
+    #[getter]
+    fn stop_epoch(&self) -> Option<usize> {
+        self.inner.stop_epoch
+    }
+
+    #[getter]
+    fn early_stopping(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+        let Some(config) = self.inner.early_stopping else {
+            return Ok(None);
+        };
+        let dict = PyDict::new_bound(py);
+        dict.set_item("patience", config.patience)?;
+        dict.set_item("min_delta", config.min_delta)?;
+        Ok(Some(dict.into_py(py)))
+    }
+
+    #[getter]
+    fn lr_plateau(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+        let Some(config) = self.inner.lr_plateau else {
+            return Ok(None);
+        };
+        let dict = PyDict::new_bound(py);
+        dict.set_item("patience", config.patience)?;
+        dict.set_item("factor", config.factor)?;
+        dict.set_item("min_delta", config.min_delta)?;
+        Ok(Some(dict.into_py(py)))
+    }
+
+    #[getter]
+    fn lr_decay_steps(&self) -> usize {
+        self.inner.lr_decay_steps
+    }
+
+    #[getter]
+    fn final_hyper_learning_rate(&self) -> f32 {
+        self.inner.final_hyper_learning_rate
+    }
+
+    #[getter]
+    fn final_fallback_learning_rate(&self) -> f32 {
+        self.inner.final_fallback_learning_rate
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "EpochValidationBestState(validation_summary={:?}, best_hash={}, final_hash={}, best_differs_from_final={}, early_stopped={}, lr_decay_steps={})",
+            self.inner.validation_summary,
+            self.inner.best_fingerprint.hash,
+            self.inner.final_fingerprint.hash,
+            self.inner.best_differs_from_final,
+            self.inner.early_stopped,
+            self.inner.lr_decay_steps
+        ))
+    }
+}
+
+fn epoch_history_to_pylist(py: Python<'_>, history: Vec<EpochStats>) -> PyResult<PyObject> {
+    let list = PyList::empty_bound(py);
+    for stats in history {
+        list.append(Py::new(py, PyEpochStats::from_stats(stats))?)?;
+    }
+    Ok(list.into_py(py))
+}
+
+#[pyclass(module = "spiraltorch", name = "EpochSparseRetentionBestState")]
+#[derive(Clone)]
+struct PyEpochSparseRetentionBestState {
+    inner: EpochSparseRetentionBestState,
+}
+
+impl PyEpochSparseRetentionBestState {
+    fn from_sparse_retention_best_state(inner: EpochSparseRetentionBestState) -> Self {
+        Self { inner }
+    }
+}
+
+#[pymethods]
+impl PyEpochSparseRetentionBestState {
+    #[getter]
+    fn train_history(&self, py: Python<'_>) -> PyResult<PyObject> {
+        epoch_history_to_pylist(py, self.inner.train_history.clone())
+    }
+
+    #[getter]
+    fn validation_history(&self, py: Python<'_>) -> PyResult<PyObject> {
+        sparse_metrics_history_to_pylist(py, self.inner.validation_history.clone())
+    }
+
+    #[getter]
+    fn retention_history(&self, py: Python<'_>) -> PyResult<PyObject> {
+        sparse_metrics_history_to_pylist(py, self.inner.retention_history.clone())
+    }
+
+    #[getter]
+    fn validation_baseline(&self, py: Python<'_>) -> PyResult<PyObject> {
+        Ok(sparse_metrics_to_pydict(py, self.inner.validation_baseline)?.into_py(py))
+    }
+
+    #[getter]
+    fn retention_baseline(&self, py: Python<'_>) -> PyResult<PyObject> {
+        Ok(sparse_metrics_to_pydict(py, self.inner.retention_baseline)?.into_py(py))
+    }
+
+    #[getter]
+    fn train_summary(&self) -> PyEpochHistory {
+        PyEpochHistory::from_history(self.inner.train_summary.clone())
+    }
+
+    #[getter]
+    fn retention_guard(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item(
+            "max_loss_increase",
+            self.inner.retention_guard.max_loss_increase,
+        )?;
+        dict.set_item(
+            "max_accuracy_drop",
+            self.inner.retention_guard.max_accuracy_drop,
+        )?;
+        dict.set_item(
+            "max_perplexity_increase",
+            self.inner.retention_guard.max_perplexity_increase,
+        )?;
+        dict.set_item(
+            "target_min_loss_delta",
+            self.inner.retention_guard.target_min_loss_delta,
+        )?;
+        Ok(dict.into_py(py))
+    }
+
+    #[getter]
+    fn max_allowed_retention_loss(&self) -> f32 {
+        self.inner.max_allowed_retention_loss
+    }
+
+    #[getter]
+    fn min_allowed_retention_accuracy(&self) -> f32 {
+        self.inner.min_allowed_retention_accuracy
+    }
+
+    #[getter]
+    fn max_allowed_retention_perplexity(&self) -> Option<f32> {
+        self.inner.max_allowed_retention_perplexity
+    }
+
+    #[getter]
+    fn guarded_best_epoch(&self) -> Option<usize> {
+        self.inner.guarded_best_epoch
+    }
+
+    #[getter]
+    fn guard_accepted_epochs(&self) -> usize {
+        self.inner.guard_accepted_epochs
+    }
+
+    #[getter]
+    fn guard_retention_rejected_epochs(&self) -> usize {
+        self.inner.guard_retention_rejected_epochs
+    }
+
+    #[getter]
+    fn guard_target_stale_epochs(&self) -> usize {
+        self.inner.guard_target_stale_epochs
+    }
+
+    #[getter]
+    fn best_validation_metrics(&self, py: Python<'_>) -> PyResult<PyObject> {
+        Ok(sparse_metrics_to_pydict(py, self.inner.best_validation_metrics)?.into_py(py))
+    }
+
+    #[getter]
+    fn best_retention_metrics(&self, py: Python<'_>) -> PyResult<PyObject> {
+        Ok(sparse_metrics_to_pydict(py, self.inner.best_retention_metrics)?.into_py(py))
+    }
+
+    #[getter]
+    fn best_retention_loss_increase(&self) -> f32 {
+        self.inner.best_retention_loss_increase
+    }
+
+    #[getter]
+    fn best_retention_accuracy_drop(&self) -> f32 {
+        self.inner.best_retention_accuracy_drop
+    }
+
+    #[getter]
+    fn best_retention_perplexity_increase(&self) -> f32 {
+        self.inner.best_retention_perplexity_increase
+    }
+
+    #[getter]
+    fn best_state(&self, py: Python<'_>) -> PyResult<PyObject> {
+        state_to_pydict(py, self.inner.best_state.clone())
+    }
+
+    #[getter]
+    fn final_state(&self, py: Python<'_>) -> PyResult<PyObject> {
+        state_to_pydict(py, self.inner.final_state.clone())
+    }
+
+    #[getter]
+    fn best_fingerprint(&self, py: Python<'_>) -> PyResult<PyObject> {
+        Ok(fingerprint_to_pydict(py, &self.inner.best_fingerprint)?.into_py(py))
+    }
+
+    #[getter]
+    fn final_fingerprint(&self, py: Python<'_>) -> PyResult<PyObject> {
+        Ok(fingerprint_to_pydict(py, &self.inner.final_fingerprint)?.into_py(py))
+    }
+
+    #[getter]
+    fn best_differs_from_final(&self) -> bool {
+        self.inner.best_differs_from_final
+    }
+
+    #[getter]
+    fn epochs_requested(&self) -> usize {
+        self.inner.epochs_requested
+    }
+
+    #[getter]
+    fn early_stopped(&self) -> bool {
+        self.inner.early_stopped
+    }
+
+    #[getter]
+    fn stop_epoch(&self) -> Option<usize> {
+        self.inner.stop_epoch
+    }
+
+    #[getter]
+    fn lr_decay_steps(&self) -> usize {
+        self.inner.lr_decay_steps
+    }
+
+    #[getter]
+    fn final_hyper_learning_rate(&self) -> f32 {
+        self.inner.final_hyper_learning_rate
+    }
+
+    #[getter]
+    fn final_fallback_learning_rate(&self) -> f32 {
+        self.inner.final_fallback_learning_rate
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "EpochSparseRetentionBestState(guarded_best_epoch={:?}, guard_accepted_epochs={}, guard_retention_rejected_epochs={}, guard_target_stale_epochs={}, best_validation_loss={:.6}, best_retention_loss={:.6}, best_retention_accuracy_drop={:.6}, best_hash={}, final_hash={})",
+            self.inner.guarded_best_epoch,
+            self.inner.guard_accepted_epochs,
+            self.inner.guard_retention_rejected_epochs,
+            self.inner.guard_target_stale_epochs,
+            self.inner.best_validation_metrics.mean_loss,
+            self.inner.best_retention_metrics.mean_loss,
+            self.inner.best_retention_accuracy_drop,
+            self.inner.best_fingerprint.hash,
+            self.inner.final_fingerprint.hash
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch", name = "SparseFineTuneReport")]
+#[derive(Clone)]
+struct PySparseFineTuneReport {
+    inner: SparseFineTuneReport,
+}
+
+impl PySparseFineTuneReport {
+    fn from_sparse_finetune_report(inner: SparseFineTuneReport) -> Self {
+        Self { inner }
+    }
+}
+
+#[pymethods]
+impl PySparseFineTuneReport {
+    #[getter]
+    fn captured(&self) -> PyEpochSparseRetentionBestState {
+        PyEpochSparseRetentionBestState::from_sparse_retention_best_state(
+            self.inner.captured.clone(),
+        )
+    }
+
+    #[getter]
+    fn target_after(&self, py: Python<'_>) -> PyResult<PyObject> {
+        Ok(sparse_metrics_to_pydict(py, self.inner.target_after)?.into_py(py))
+    }
+
+    #[getter]
+    fn retention_after(&self, py: Python<'_>) -> PyResult<PyObject> {
+        Ok(sparse_metrics_to_pydict(py, self.inner.retention_after)?.into_py(py))
+    }
+
+    #[getter]
+    fn target_delta(&self, py: Python<'_>) -> PyResult<PyObject> {
+        Ok(sparse_delta_to_pydict(py, self.inner.target_delta)?.into_py(py))
+    }
+
+    #[getter]
+    fn retention_delta(&self, py: Python<'_>) -> PyResult<PyObject> {
+        Ok(sparse_delta_to_pydict(py, self.inner.retention_delta)?.into_py(py))
+    }
+
+    #[getter]
+    fn movement(&self, py: Python<'_>) -> PyResult<PyObject> {
+        Ok(movement_report_to_pydict(py, &self.inner.movement)?.into_py(py))
+    }
+
+    #[getter]
+    fn accepted(&self) -> bool {
+        self.inner.accepted()
+    }
+
+    #[getter]
+    fn target_loss_improved(&self) -> bool {
+        self.inner.target_loss_improved()
+    }
+
+    #[getter]
+    fn movement_ok(&self) -> bool {
+        self.inner.movement_ok()
+    }
+
+    #[getter]
+    fn status(&self) -> &'static str {
+        self.inner.status()
+    }
+
+    fn summary(&self, py: Python<'_>) -> PyResult<PyObject> {
+        Ok(sparse_finetune_summary_to_pydict(py, self.inner.summary())?.into_py(py))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "SparseFineTuneReport(status={}, accepted={}, target_loss_delta={:.6}, retention_loss_delta={:.6}, movement_status={})",
+            self.inner.status(),
+            self.inner.accepted(),
+            self.inner.target_delta.loss_delta,
+            self.inner.retention_delta.loss_delta,
+            self.inner.movement.status()
+        ))
+    }
+}
+
+fn sparse_metrics_history_to_pylist(
+    py: Python<'_>,
+    history: Vec<SparseClassificationMetrics>,
+) -> PyResult<PyObject> {
+    let list = PyList::empty_bound(py);
+    for metrics in history {
+        list.append(sparse_metrics_to_pydict(py, metrics)?)?;
+    }
+    Ok(list.into_py(py))
+}
+
+fn sparse_metrics_to_pydict<'py>(
+    py: Python<'py>,
+    metrics: SparseClassificationMetrics,
+) -> PyResult<Bound<'py, PyDict>> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("active_rows", metrics.active_rows)?;
+    dict.set_item("correct", metrics.correct)?;
+    dict.set_item("accuracy", metrics.accuracy)?;
+    dict.set_item("mean_loss", metrics.mean_loss)?;
+    dict.set_item("perplexity", metrics.perplexity)?;
+    Ok(dict)
+}
+
+fn sparse_delta_to_pydict<'py>(
+    py: Python<'py>,
+    delta: SparseClassificationDelta,
+) -> PyResult<Bound<'py, PyDict>> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("before", sparse_metrics_to_pydict(py, delta.before)?)?;
+    dict.set_item("after", sparse_metrics_to_pydict(py, delta.after)?)?;
+    dict.set_item("loss_delta", delta.loss_delta)?;
+    dict.set_item("accuracy_delta", delta.accuracy_delta)?;
+    dict.set_item("perplexity_delta", delta.perplexity_delta)?;
+    Ok(dict)
+}
+
+fn sparse_finetune_summary_to_pydict<'py>(
+    py: Python<'py>,
+    summary: SparseFineTuneReportSummary,
+) -> PyResult<Bound<'py, PyDict>> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item("status", summary.status)?;
+    dict.set_item("accepted", summary.accepted)?;
+    dict.set_item("target_loss_improved", summary.target_loss_improved)?;
+    dict.set_item("movement_ok", summary.movement_ok)?;
+    dict.set_item("guarded_best_epoch", summary.guarded_best_epoch)?;
+    dict.set_item("guard_epochs_run", summary.guard_epochs_run)?;
+    dict.set_item("guard_accepted_epochs", summary.guard_accepted_epochs)?;
+    dict.set_item(
+        "guard_retention_rejected_epochs",
+        summary.guard_retention_rejected_epochs,
+    )?;
+    dict.set_item("guard_target_stale_epochs", summary.guard_target_stale_epochs)?;
+    dict.set_item("guard_acceptance_rate", summary.guard_acceptance_rate)?;
+    dict.set_item(
+        "guard_retention_rejected_rate",
+        summary.guard_retention_rejected_rate,
+    )?;
+    dict.set_item("guard_target_stale_rate", summary.guard_target_stale_rate)?;
+    dict.set_item("epochs_run", summary.epochs_run)?;
+    dict.set_item("train_rows", summary.train_rows)?;
+    dict.set_item("train_batches", summary.train_batches)?;
+    dict.set_item("optimizer_steps", summary.optimizer_steps)?;
+    dict.set_item("target_loss_delta", summary.target_loss_delta)?;
+    dict.set_item("target_accuracy_delta", summary.target_accuracy_delta)?;
+    dict.set_item("target_perplexity_delta", summary.target_perplexity_delta)?;
+    dict.set_item("retention_loss_delta", summary.retention_loss_delta)?;
+    dict.set_item("retention_accuracy_delta", summary.retention_accuracy_delta)?;
+    dict.set_item(
+        "retention_perplexity_delta",
+        summary.retention_perplexity_delta,
+    )?;
+    dict.set_item("target_retention_gap", summary.target_retention_gap)?;
+    dict.set_item("target_retention_ratio", summary.target_retention_ratio)?;
+    dict.set_item(
+        "best_retention_loss_increase",
+        summary.best_retention_loss_increase,
+    )?;
+    dict.set_item(
+        "best_retention_accuracy_drop",
+        summary.best_retention_accuracy_drop,
+    )?;
+    dict.set_item(
+        "best_retention_perplexity_increase",
+        summary.best_retention_perplexity_increase,
+    )?;
+    dict.set_item(
+        "retention_max_loss_increase",
+        summary.retention_max_loss_increase,
+    )?;
+    dict.set_item(
+        "retention_max_accuracy_drop",
+        summary.retention_max_accuracy_drop,
+    )?;
+    dict.set_item(
+        "retention_max_perplexity_increase",
+        summary.retention_max_perplexity_increase,
+    )?;
+    dict.set_item("target_min_loss_delta", summary.target_min_loss_delta)?;
+    dict.set_item("target_loss_margin", summary.target_loss_margin)?;
+    dict.set_item("retention_loss_margin", summary.retention_loss_margin)?;
+    dict.set_item(
+        "retention_accuracy_margin",
+        summary.retention_accuracy_margin,
+    )?;
+    dict.set_item(
+        "retention_perplexity_margin",
+        summary.retention_perplexity_margin,
+    )?;
+    dict.set_item(
+        "max_allowed_retention_loss",
+        summary.max_allowed_retention_loss,
+    )?;
+    dict.set_item(
+        "min_allowed_retention_accuracy",
+        summary.min_allowed_retention_accuracy,
+    )?;
+    dict.set_item(
+        "max_allowed_retention_perplexity",
+        summary.max_allowed_retention_perplexity,
+    )?;
+    dict.set_item("movement_status", summary.movement_status)?;
+    dict.set_item("frozen_stable", summary.frozen_stable)?;
+    dict.set_item(
+        "trainable_movement_observed",
+        summary.trainable_movement_observed,
+    )?;
+    dict.set_item("movement_tolerance", summary.movement_tolerance)?;
+    dict.set_item("trainable_changed", summary.trainable_changed)?;
+    dict.set_item("frozen_changed", summary.frozen_changed)?;
+    dict.set_item("max_trainable_l2_delta", summary.max_trainable_l2_delta)?;
+    dict.set_item("max_frozen_l2_delta", summary.max_frozen_l2_delta)?;
+    dict.set_item("resume_hash", summary.resume_hash)?;
+    dict.set_item("resume_trainer_hash", summary.resume_trainer_hash)?;
+    dict.set_item("resume_parameter_hash", summary.resume_parameter_hash)?;
+    dict.set_item(
+        "resume_parameter_training_hash",
+        summary.resume_parameter_training_hash,
+    )?;
+    dict.set_item("resume_trainable", summary.resume_trainable)?;
+    dict.set_item("resume_frozen", summary.resume_frozen)?;
+    dict.set_item("resume_hypergrad_tapes", summary.resume_hypergrad_tapes)?;
+    dict.set_item(
+        "resume_gradient_accumulation_steps",
+        summary.resume_gradient_accumulation_steps,
+    )?;
+    dict.set_item("resume_runtime_hooks", summary.resume_runtime_hooks)?;
+    dict.set_item("best_hash", summary.best_hash)?;
+    dict.set_item("final_hash", summary.final_hash)?;
+    dict.set_item("best_differs_from_final", summary.best_differs_from_final)?;
+    Ok(dict)
+}
+
+fn required_pydict<'py, T>(dict: &Bound<'py, PyDict>, key: &str) -> PyResult<T>
+where
+    T: FromPyObject<'py>,
+{
+    dict.get_item(key)?
+        .ok_or_else(|| PyValueError::new_err(format!("dict missing '{key}'")))?
+        .extract()
+}
+
+fn optional_pydict<'py, T>(dict: &Bound<'py, PyDict>, key: &str, default: T) -> PyResult<T>
+where
+    T: FromPyObject<'py>,
+{
+    match dict.get_item(key)? {
+        Some(value) => value.extract(),
+        None => Ok(default),
+    }
+}
+
+fn sparse_finetune_status_label(value: &str) -> PyResult<&'static str> {
+    match value {
+        "ok" => Ok("ok"),
+        "guard_rejected" => Ok("guard_rejected"),
+        "frozen_changed" => Ok("frozen_changed"),
+        "no_trainable_movement" => Ok("no_trainable_movement"),
+        "target_not_improved" => Ok("target_not_improved"),
+        _ => Err(PyValueError::new_err(format!(
+            "unknown sparse fine-tune status '{value}'"
+        ))),
+    }
+}
+
+fn sparse_finetune_movement_status_label(value: &str) -> PyResult<&'static str> {
+    match value {
+        "ok" => Ok("ok"),
+        "frozen_changed" => Ok("frozen_changed"),
+        "no_trainable_movement" => Ok("no_trainable_movement"),
+        _ => Err(PyValueError::new_err(format!(
+            "unknown sparse fine-tune movement_status '{value}'"
+        ))),
+    }
+}
+
+fn sparse_finetune_summary_from_pydict(
+    dict: &Bound<'_, PyDict>,
+) -> PyResult<SparseFineTuneReportSummary> {
+    let status: String = required_pydict(dict, "status")?;
+    let movement_status: String = required_pydict(dict, "movement_status")?;
+    let target_loss_delta: f32 = required_pydict(dict, "target_loss_delta")?;
+    let retention_loss_delta: f32 = required_pydict(dict, "retention_loss_delta")?;
+    let target_retention_gap: f32 = optional_pydict(
+        dict,
+        "target_retention_gap",
+        target_loss_delta - retention_loss_delta,
+    )?;
+    let target_retention_ratio: Option<f32> = optional_pydict(
+        dict,
+        "target_retention_ratio",
+        if retention_loss_delta > 0.0 {
+            Some(target_loss_delta / retention_loss_delta)
+        } else {
+            None
+        },
+    )?;
+    let best_retention_loss_increase: f32 = required_pydict(dict, "best_retention_loss_increase")?;
+    let best_retention_accuracy_drop: f32 = required_pydict(dict, "best_retention_accuracy_drop")?;
+    let best_retention_perplexity_increase: f32 =
+        required_pydict(dict, "best_retention_perplexity_increase")?;
+    let retention_max_loss_increase: f32 =
+        optional_pydict(dict, "retention_max_loss_increase", 0.0f32)?;
+    let retention_max_accuracy_drop: f32 =
+        optional_pydict(dict, "retention_max_accuracy_drop", 0.0f32)?;
+    let retention_max_perplexity_increase: Option<f32> =
+        optional_pydict(dict, "retention_max_perplexity_increase", None::<f32>)?;
+    let target_min_loss_delta: f32 = optional_pydict(dict, "target_min_loss_delta", 0.0f32)?;
+    let target_loss_margin = optional_pydict(
+        dict,
+        "target_loss_margin",
+        target_loss_delta - target_min_loss_delta,
+    )?;
+    let retention_loss_margin = optional_pydict(
+        dict,
+        "retention_loss_margin",
+        retention_max_loss_increase - best_retention_loss_increase,
+    )?;
+    let retention_accuracy_margin = optional_pydict(
+        dict,
+        "retention_accuracy_margin",
+        retention_max_accuracy_drop - best_retention_accuracy_drop,
+    )?;
+    let retention_perplexity_margin = optional_pydict(
+        dict,
+        "retention_perplexity_margin",
+        retention_max_perplexity_increase
+            .map(|ceiling| ceiling - best_retention_perplexity_increase),
+    )?;
+    let accepted: bool = required_pydict(dict, "accepted")?;
+    let guarded_best_epoch: Option<usize> = required_pydict(dict, "guarded_best_epoch")?;
+    let epochs_run: usize = required_pydict(dict, "epochs_run")?;
+    let guard_epochs_run = optional_pydict(dict, "guard_epochs_run", epochs_run)?;
+    let default_guard_accepted_epochs = if accepted { 1usize } else { 0usize };
+    let guard_accepted_epochs = optional_pydict(
+        dict,
+        "guard_accepted_epochs",
+        default_guard_accepted_epochs,
+    )?;
+    let guard_retention_rejected_epochs =
+        optional_pydict(dict, "guard_retention_rejected_epochs", 0usize)?;
+    let default_guard_target_stale_epochs = epochs_run.saturating_sub(
+        guard_accepted_epochs.saturating_add(guard_retention_rejected_epochs),
+    );
+    let guard_target_stale_epochs = optional_pydict(
+        dict,
+        "guard_target_stale_epochs",
+        default_guard_target_stale_epochs,
+    )?;
+    let guard_rate = |key: &str, count: usize| {
+        optional_pydict(
+            dict,
+            key,
+            if guard_epochs_run == 0 {
+                0.0f32
+            } else {
+                count as f32 / guard_epochs_run as f32
+            },
+        )
+    };
+    let guard_acceptance_rate = guard_rate("guard_acceptance_rate", guard_accepted_epochs)?;
+    let guard_retention_rejected_rate =
+        guard_rate("guard_retention_rejected_rate", guard_retention_rejected_epochs)?;
+    let guard_target_stale_rate =
+        guard_rate("guard_target_stale_rate", guard_target_stale_epochs)?;
+    Ok(SparseFineTuneReportSummary {
+        status: sparse_finetune_status_label(&status)?,
+        accepted,
+        target_loss_improved: required_pydict(dict, "target_loss_improved")?,
+        movement_ok: required_pydict(dict, "movement_ok")?,
+        guarded_best_epoch,
+        guard_epochs_run,
+        guard_accepted_epochs,
+        guard_retention_rejected_epochs,
+        guard_target_stale_epochs,
+        guard_acceptance_rate,
+        guard_retention_rejected_rate,
+        guard_target_stale_rate,
+        epochs_run,
+        train_rows: required_pydict(dict, "train_rows")?,
+        train_batches: required_pydict(dict, "train_batches")?,
+        optimizer_steps: required_pydict(dict, "optimizer_steps")?,
+        target_loss_delta,
+        target_accuracy_delta: required_pydict(dict, "target_accuracy_delta")?,
+        target_perplexity_delta: required_pydict(dict, "target_perplexity_delta")?,
+        retention_loss_delta,
+        retention_accuracy_delta: required_pydict(dict, "retention_accuracy_delta")?,
+        retention_perplexity_delta: required_pydict(dict, "retention_perplexity_delta")?,
+        target_retention_gap,
+        target_retention_ratio,
+        best_retention_loss_increase,
+        best_retention_accuracy_drop,
+        best_retention_perplexity_increase,
+        retention_max_loss_increase,
+        retention_max_accuracy_drop,
+        retention_max_perplexity_increase,
+        target_min_loss_delta,
+        target_loss_margin,
+        retention_loss_margin,
+        retention_accuracy_margin,
+        retention_perplexity_margin,
+        max_allowed_retention_loss: required_pydict(dict, "max_allowed_retention_loss")?,
+        min_allowed_retention_accuracy: required_pydict(dict, "min_allowed_retention_accuracy")?,
+        max_allowed_retention_perplexity: required_pydict(
+            dict,
+            "max_allowed_retention_perplexity",
+        )?,
+        movement_status: sparse_finetune_movement_status_label(&movement_status)?,
+        frozen_stable: required_pydict(dict, "frozen_stable")?,
+        trainable_movement_observed: required_pydict(dict, "trainable_movement_observed")?,
+        movement_tolerance: optional_pydict(dict, "movement_tolerance", 1e-8f32)?,
+        trainable_changed: required_pydict(dict, "trainable_changed")?,
+        frozen_changed: required_pydict(dict, "frozen_changed")?,
+        max_trainable_l2_delta: required_pydict(dict, "max_trainable_l2_delta")?,
+        max_frozen_l2_delta: required_pydict(dict, "max_frozen_l2_delta")?,
+        resume_hash: optional_pydict(dict, "resume_hash", String::new())?,
+        resume_trainer_hash: optional_pydict(dict, "resume_trainer_hash", String::new())?,
+        resume_parameter_hash: optional_pydict(dict, "resume_parameter_hash", String::new())?,
+        resume_parameter_training_hash: optional_pydict(
+            dict,
+            "resume_parameter_training_hash",
+            String::new(),
+        )?,
+        resume_trainable: optional_pydict(dict, "resume_trainable", 0usize)?,
+        resume_frozen: optional_pydict(dict, "resume_frozen", 0usize)?,
+        resume_hypergrad_tapes: optional_pydict(dict, "resume_hypergrad_tapes", 0usize)?,
+        resume_gradient_accumulation_steps: optional_pydict(
+            dict,
+            "resume_gradient_accumulation_steps",
+            0usize,
+        )?,
+        resume_runtime_hooks: optional_pydict(dict, "resume_runtime_hooks", 0usize)?,
+        best_hash: required_pydict(dict, "best_hash")?,
+        final_hash: required_pydict(dict, "final_hash")?,
+        best_differs_from_final: required_pydict(dict, "best_differs_from_final")?,
+    })
+}
+
+fn sparse_finetune_summary_comparison_to_pydict<'py>(
+    py: Python<'py>,
+    current: &SparseFineTuneReportSummary,
+    baseline: &SparseFineTuneReportSummary,
+    comparison: st_nn::SparseFineTuneSummaryComparison,
+) -> PyResult<Bound<'py, PyDict>> {
+    let dict = PyDict::new_bound(py);
+    dict.set_item(
+        "target_loss_delta_change",
+        comparison.target_loss_delta_change,
+    )?;
+    dict.set_item(
+        "retention_loss_delta_change",
+        comparison.retention_loss_delta_change,
+    )?;
+    dict.set_item(
+        "target_retention_gap_change",
+        comparison.target_retention_gap_change,
+    )?;
+    dict.set_item(
+        "target_retention_ratio_change",
+        comparison.target_retention_ratio_change,
+    )?;
+    dict.set_item("target_loss_regression", comparison.target_loss_regression)?;
+    dict.set_item(
+        "retention_loss_regression",
+        comparison.retention_loss_regression,
+    )?;
+    dict.set_item(
+        "target_retention_gap_regression",
+        comparison.target_retention_gap_regression,
+    )?;
+    dict.set_item(
+        "target_retention_ratio_regression",
+        comparison.target_retention_ratio_regression,
+    )?;
+    dict.set_item(
+        "target_loss_margin_shortfall",
+        comparison.target_loss_margin_shortfall,
+    )?;
+    dict.set_item(
+        "target_retention_ratio_shortfall",
+        comparison.target_retention_ratio_shortfall,
+    )?;
+    dict.set_item(
+        "retention_loss_margin_shortfall",
+        comparison.retention_loss_margin_shortfall,
+    )?;
+    dict.set_item(
+        "retention_accuracy_margin_shortfall",
+        comparison.retention_accuracy_margin_shortfall,
+    )?;
+    dict.set_item(
+        "retention_perplexity_margin_shortfall",
+        comparison.retention_perplexity_margin_shortfall,
+    )?;
+    dict.set_item("status_changed", comparison.status_changed)?;
+    dict.set_item("accepted_changed", comparison.accepted_changed)?;
+    dict.set_item("guard_changed", comparison.guard_changed)?;
+    dict.set_item(
+        "movement_tolerance_changed",
+        comparison.movement_tolerance_changed,
+    )?;
+    dict.set_item("resume_changed", comparison.resume_changed)?;
+    dict.set_item("passed", comparison.passed)?;
+    dict.set_item("current_status", current.status)?;
+    dict.set_item("baseline_status", baseline.status)?;
+    dict.set_item("current_accepted", current.accepted)?;
+    dict.set_item("baseline_accepted", baseline.accepted)?;
+    dict.set_item(
+        "current_retention_max_loss_increase",
+        current.retention_max_loss_increase,
+    )?;
+    dict.set_item(
+        "baseline_retention_max_loss_increase",
+        baseline.retention_max_loss_increase,
+    )?;
+    dict.set_item(
+        "current_retention_max_accuracy_drop",
+        current.retention_max_accuracy_drop,
+    )?;
+    dict.set_item(
+        "baseline_retention_max_accuracy_drop",
+        baseline.retention_max_accuracy_drop,
+    )?;
+    dict.set_item(
+        "current_retention_max_perplexity_increase",
+        current.retention_max_perplexity_increase,
+    )?;
+    dict.set_item(
+        "baseline_retention_max_perplexity_increase",
+        baseline.retention_max_perplexity_increase,
+    )?;
+    dict.set_item(
+        "current_target_min_loss_delta",
+        current.target_min_loss_delta,
+    )?;
+    dict.set_item(
+        "baseline_target_min_loss_delta",
+        baseline.target_min_loss_delta,
+    )?;
+    dict.set_item("current_target_loss_margin", current.target_loss_margin)?;
+    dict.set_item("baseline_target_loss_margin", baseline.target_loss_margin)?;
+    dict.set_item("current_target_retention_gap", current.target_retention_gap)?;
+    dict.set_item(
+        "baseline_target_retention_gap",
+        baseline.target_retention_gap,
+    )?;
+    dict.set_item(
+        "current_target_retention_ratio",
+        current.target_retention_ratio,
+    )?;
+    dict.set_item(
+        "baseline_target_retention_ratio",
+        baseline.target_retention_ratio,
+    )?;
+    dict.set_item(
+        "current_retention_loss_margin",
+        current.retention_loss_margin,
+    )?;
+    dict.set_item(
+        "baseline_retention_loss_margin",
+        baseline.retention_loss_margin,
+    )?;
+    dict.set_item(
+        "current_retention_accuracy_margin",
+        current.retention_accuracy_margin,
+    )?;
+    dict.set_item(
+        "baseline_retention_accuracy_margin",
+        baseline.retention_accuracy_margin,
+    )?;
+    dict.set_item(
+        "current_retention_perplexity_margin",
+        current.retention_perplexity_margin,
+    )?;
+    dict.set_item(
+        "baseline_retention_perplexity_margin",
+        baseline.retention_perplexity_margin,
+    )?;
+    dict.set_item("current_movement_tolerance", current.movement_tolerance)?;
+    dict.set_item("baseline_movement_tolerance", baseline.movement_tolerance)?;
+    dict.set_item("current_resume_hash", current.resume_hash.as_str())?;
+    dict.set_item("baseline_resume_hash", baseline.resume_hash.as_str())?;
+    dict.set_item(
+        "current_resume_trainer_hash",
+        current.resume_trainer_hash.as_str(),
+    )?;
+    dict.set_item(
+        "baseline_resume_trainer_hash",
+        baseline.resume_trainer_hash.as_str(),
+    )?;
+    dict.set_item(
+        "current_resume_parameter_training_hash",
+        current.resume_parameter_training_hash.as_str(),
+    )?;
+    dict.set_item(
+        "baseline_resume_parameter_training_hash",
+        baseline.resume_parameter_training_hash.as_str(),
+    )?;
+    Ok(dict)
+}
+
+#[pyfunction(name = "compare_sparse_finetune_summaries")]
+#[pyo3(signature = (current, baseline, max_target_loss_regression=None, max_retention_loss_regression=None, max_target_retention_gap_regression=None, max_target_retention_ratio_regression=None, min_target_loss_margin=None, min_target_retention_ratio=None, min_retention_loss_margin=None, min_retention_accuracy_margin=None, min_retention_perplexity_margin=None, require_status_match=false, require_accepted_match=false, require_guard_match=false, require_movement_tolerance_match=false, require_resume_match=false))]
+fn compare_sparse_finetune_summaries_py<'py>(
+    py: Python<'py>,
+    current: &Bound<'_, PyDict>,
+    baseline: &Bound<'_, PyDict>,
+    max_target_loss_regression: Option<f32>,
+    max_retention_loss_regression: Option<f32>,
+    max_target_retention_gap_regression: Option<f32>,
+    max_target_retention_ratio_regression: Option<f32>,
+    min_target_loss_margin: Option<f32>,
+    min_target_retention_ratio: Option<f32>,
+    min_retention_loss_margin: Option<f32>,
+    min_retention_accuracy_margin: Option<f32>,
+    min_retention_perplexity_margin: Option<f32>,
+    require_status_match: bool,
+    require_accepted_match: bool,
+    require_guard_match: bool,
+    require_movement_tolerance_match: bool,
+    require_resume_match: bool,
+) -> PyResult<Bound<'py, PyDict>> {
+    let current = sparse_finetune_summary_from_pydict(current)?;
+    let baseline = sparse_finetune_summary_from_pydict(baseline)?;
+    let mut limits = SparseFineTuneRegressionLimits::new()
+        .with_status_match_required(require_status_match)
+        .with_accepted_match_required(require_accepted_match)
+        .with_guard_match_required(require_guard_match)
+        .with_movement_tolerance_match_required(require_movement_tolerance_match)
+        .with_resume_match_required(require_resume_match);
+    if let Some(value) = max_target_loss_regression {
+        limits = convert(limits.with_max_target_loss_regression(value))?;
+    }
+    if let Some(value) = max_retention_loss_regression {
+        limits = convert(limits.with_max_retention_loss_regression(value))?;
+    }
+    if let Some(value) = max_target_retention_gap_regression {
+        limits = convert(limits.with_max_target_retention_gap_regression(value))?;
+    }
+    if let Some(value) = max_target_retention_ratio_regression {
+        limits = convert(limits.with_max_target_retention_ratio_regression(value))?;
+    }
+    if let Some(value) = min_target_loss_margin {
+        limits = convert(limits.with_min_target_loss_margin(value))?;
+    }
+    if let Some(value) = min_target_retention_ratio {
+        limits = convert(limits.with_min_target_retention_ratio(value))?;
+    }
+    if let Some(value) = min_retention_loss_margin {
+        limits = convert(limits.with_min_retention_loss_margin(value))?;
+    }
+    if let Some(value) = min_retention_accuracy_margin {
+        limits = convert(limits.with_min_retention_accuracy_margin(value))?;
+    }
+    if let Some(value) = min_retention_perplexity_margin {
+        limits = convert(limits.with_min_retention_perplexity_margin(value))?;
+    }
+    let comparison = convert(current.compare_to(&baseline, limits))?;
+    sparse_finetune_summary_comparison_to_pydict(py, &current, &baseline, comparison)
+}
+
+fn sparse_metrics_from_pydict(dict: &Bound<'_, PyDict>) -> PyResult<SparseClassificationMetrics> {
+    fn required<'py, T>(dict: &Bound<'py, PyDict>, key: &str) -> PyResult<T>
+    where
+        T: FromPyObject<'py>,
+    {
+        dict.get_item(key)?
+            .ok_or_else(|| PyValueError::new_err(format!("sparse metrics missing '{key}'")))?
+            .extract()
+    }
+
+    let active_rows = required(dict, "active_rows")?;
+    let correct = required(dict, "correct")?;
+    let accuracy = required(dict, "accuracy")?;
+    let mean_loss = required(dict, "mean_loss")?;
+    let perplexity = required(dict, "perplexity")?;
+    Ok(SparseClassificationMetrics {
+        active_rows,
+        correct,
+        accuracy,
+        mean_loss,
+        perplexity,
+    })
+}
+
+#[pyfunction(name = "sparse_classification_delta")]
+fn sparse_classification_delta_py<'py>(
+    py: Python<'py>,
+    before: &Bound<'_, PyDict>,
+    after: &Bound<'_, PyDict>,
+) -> PyResult<Bound<'py, PyDict>> {
+    let before = sparse_metrics_from_pydict(before)?;
+    let after = sparse_metrics_from_pydict(after)?;
+    sparse_delta_to_pydict(py, before.delta_to(after))
+}
+
+fn epoch_history_from_py(history: &Bound<'_, PyAny>) -> PyResult<Vec<EpochStats>> {
+    let stats: Vec<PyRef<'_, PyEpochStats>> = history.extract()?;
+    Ok(stats.iter().map(|stat| stat.inner).collect())
+}
+
+#[pyfunction(name = "summarize_epoch_history")]
+fn summarize_epoch_history_py(history: &Bound<'_, PyAny>) -> PyResult<PyEpochHistory> {
+    let stats = epoch_history_from_py(history)?;
+    Ok(PyEpochHistory::from_history(summarize_epoch_history(
+        &stats,
+    )))
 }
 
 #[pyclass(module = "spiraltorch", name = "ModuleTrainer", unsendable)]
@@ -1452,6 +3569,48 @@ impl PyModuleTrainer {
     #[getter]
     fn fallback_learning_rate(&self) -> f32 {
         self.inner.fallback_learning_rate()
+    }
+
+    #[getter]
+    fn max_grad_norm(&self) -> Option<f32> {
+        self.inner.max_grad_norm()
+    }
+
+    #[getter]
+    fn gradient_accumulation_steps(&self) -> usize {
+        self.inner.gradient_accumulation_steps()
+    }
+
+    #[pyo3(signature = (max_norm=None))]
+    fn set_max_grad_norm(&mut self, max_norm: Option<f32>) -> PyResult<()> {
+        convert(self.inner.set_max_grad_norm(max_norm))
+    }
+
+    fn set_gradient_accumulation_steps(&mut self, steps: usize) -> PyResult<()> {
+        convert(self.inner.set_gradient_accumulation_steps(steps))
+    }
+
+    fn state_fingerprint(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let fingerprint = self.inner.state_fingerprint();
+        Ok(trainer_fingerprint_to_pydict(py, &fingerprint)?.into_py(py))
+    }
+
+    fn resume_fingerprint(&self, py: Python<'_>, module: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+        if let Ok(seq) = module.extract::<PyRef<'_, PySequentialModule>>() {
+            let fingerprint = convert(self.inner.resume_fingerprint(seq.borrow()?))?;
+            return Ok(resume_fingerprint_to_pydict(py, &fingerprint)?.into_py(py));
+        }
+        if let Ok(linear) = module.extract::<PyRef<'_, PyLinearModule>>() {
+            let fingerprint = convert(self.inner.resume_fingerprint(linear.borrow()?))?;
+            return Ok(resume_fingerprint_to_pydict(py, &fingerprint)?.into_py(py));
+        }
+        if let Ok(lora) = module.extract::<PyRef<'_, PyLoraLinearModule>>() {
+            let fingerprint = convert(self.inner.resume_fingerprint(lora.borrow()?))?;
+            return Ok(resume_fingerprint_to_pydict(py, &fingerprint)?.into_py(py));
+        }
+        Err(PyValueError::new_err(
+            "ModuleTrainer.resume_fingerprint expects a Sequential, Linear, or LoraLinear module",
+        ))
     }
 
     #[pyo3(signature = (rows, cols, top_k=8, mid_k=8, bottom_k=8, here_tolerance=1e-5, psychoid=false, psychoid_log=false, psi=false, collapse=false, dist=None))]
@@ -1571,6 +3730,15 @@ impl PyModuleTrainer {
                     ))?;
                     return Ok(PyEpochStats::from_stats(stats));
                 }
+                if let Ok(mut ce) = loss.extract::<PyRefMut<'_, PySoftmaxCrossEntropy>>() {
+                    let stats = convert(self.inner.train_epoch(
+                        seq.borrow_mut()?,
+                        ce.inner_mut(),
+                        loader.clone_inner(),
+                        &schedule.inner,
+                    ))?;
+                    return Ok(PyEpochStats::from_stats(stats));
+                }
             }
 
             if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
@@ -1578,6 +3746,36 @@ impl PyModuleTrainer {
                     let stats = convert(self.inner.train_epoch(
                         linear.borrow_mut()?,
                         mse.inner_mut(),
+                        loader.clone_inner(),
+                        &schedule.inner,
+                    ))?;
+                    return Ok(PyEpochStats::from_stats(stats));
+                }
+                if let Ok(mut ce) = loss.extract::<PyRefMut<'_, PySoftmaxCrossEntropy>>() {
+                    let stats = convert(self.inner.train_epoch(
+                        linear.borrow_mut()?,
+                        ce.inner_mut(),
+                        loader.clone_inner(),
+                        &schedule.inner,
+                    ))?;
+                    return Ok(PyEpochStats::from_stats(stats));
+                }
+            }
+
+            if let Ok(mut lora) = module.extract::<PyRefMut<'_, PyLoraLinearModule>>() {
+                if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+                    let stats = convert(self.inner.train_epoch(
+                        lora.borrow_mut()?,
+                        mse.inner_mut(),
+                        loader.clone_inner(),
+                        &schedule.inner,
+                    ))?;
+                    return Ok(PyEpochStats::from_stats(stats));
+                }
+                if let Ok(mut ce) = loss.extract::<PyRefMut<'_, PySoftmaxCrossEntropy>>() {
+                    let stats = convert(self.inner.train_epoch(
+                        lora.borrow_mut()?,
+                        ce.inner_mut(),
                         loader.clone_inner(),
                         &schedule.inner,
                     ))?;
@@ -1602,6 +3800,15 @@ impl PyModuleTrainer {
                 ))?;
                 return Ok(PyEpochStats::from_stats(stats));
             }
+            if let Ok(mut ce) = loss.extract::<PyRefMut<'_, PySoftmaxCrossEntropy>>() {
+                let stats = convert(self.inner.train_epoch(
+                    seq.borrow_mut()?,
+                    ce.inner_mut(),
+                    dataset.clone(),
+                    &schedule.inner,
+                ))?;
+                return Ok(PyEpochStats::from_stats(stats));
+            }
         }
 
         if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
@@ -1614,19 +3821,1075 @@ impl PyModuleTrainer {
                 ))?;
                 return Ok(PyEpochStats::from_stats(stats));
             }
+            if let Ok(mut ce) = loss.extract::<PyRefMut<'_, PySoftmaxCrossEntropy>>() {
+                let stats = convert(self.inner.train_epoch(
+                    linear.borrow_mut()?,
+                    ce.inner_mut(),
+                    dataset,
+                    &schedule.inner,
+                ))?;
+                return Ok(PyEpochStats::from_stats(stats));
+            }
+        }
+
+        if let Ok(mut lora) = module.extract::<PyRefMut<'_, PyLoraLinearModule>>() {
+            if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+                let stats = convert(self.inner.train_epoch(
+                    lora.borrow_mut()?,
+                    mse.inner_mut(),
+                    dataset.clone(),
+                    &schedule.inner,
+                ))?;
+                return Ok(PyEpochStats::from_stats(stats));
+            }
+            if let Ok(mut ce) = loss.extract::<PyRefMut<'_, PySoftmaxCrossEntropy>>() {
+                let stats = convert(self.inner.train_epoch(
+                    lora.borrow_mut()?,
+                    ce.inner_mut(),
+                    dataset,
+                    &schedule.inner,
+                ))?;
+                return Ok(PyEpochStats::from_stats(stats));
+            }
         }
 
         Err(PyValueError::new_err(
-            "ModuleTrainer.train_epoch expects a Sequential or Linear module and a supported loss",
+            "ModuleTrainer.train_epoch expects a Sequential, Linear, or LoraLinear module and a supported loss",
+        ))
+    }
+
+    #[pyo3(signature = (module, loss, batches))]
+    fn evaluate_epoch(
+        &self,
+        module: &Bound<'_, PyAny>,
+        loss: &Bound<'_, PyAny>,
+        batches: &Bound<'_, PyAny>,
+    ) -> PyResult<PyEpochStats> {
+        let as_loader = batches.extract::<PyRef<PyDataLoader>>();
+        if let Ok(loader) = as_loader {
+            if let Ok(seq) = module.extract::<PyRef<'_, PySequentialModule>>() {
+                if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+                    let stats = convert(self.inner.evaluate_epoch(
+                        seq.borrow()?,
+                        mse.inner_mut(),
+                        loader.clone_inner(),
+                    ))?;
+                    return Ok(PyEpochStats::from_stats(stats));
+                }
+                if let Ok(mut ce) = loss.extract::<PyRefMut<'_, PySoftmaxCrossEntropy>>() {
+                    let stats = convert(self.inner.evaluate_epoch(
+                        seq.borrow()?,
+                        ce.inner_mut(),
+                        loader.clone_inner(),
+                    ))?;
+                    return Ok(PyEpochStats::from_stats(stats));
+                }
+            }
+
+            if let Ok(linear) = module.extract::<PyRef<'_, PyLinearModule>>() {
+                if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+                    let stats = convert(self.inner.evaluate_epoch(
+                        linear.borrow()?,
+                        mse.inner_mut(),
+                        loader.clone_inner(),
+                    ))?;
+                    return Ok(PyEpochStats::from_stats(stats));
+                }
+                if let Ok(mut ce) = loss.extract::<PyRefMut<'_, PySoftmaxCrossEntropy>>() {
+                    let stats = convert(self.inner.evaluate_epoch(
+                        linear.borrow()?,
+                        ce.inner_mut(),
+                        loader.clone_inner(),
+                    ))?;
+                    return Ok(PyEpochStats::from_stats(stats));
+                }
+            }
+
+            if let Ok(lora) = module.extract::<PyRef<'_, PyLoraLinearModule>>() {
+                if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+                    let stats = convert(self.inner.evaluate_epoch(
+                        lora.borrow()?,
+                        mse.inner_mut(),
+                        loader.clone_inner(),
+                    ))?;
+                    return Ok(PyEpochStats::from_stats(stats));
+                }
+                if let Ok(mut ce) = loss.extract::<PyRefMut<'_, PySoftmaxCrossEntropy>>() {
+                    let stats = convert(self.inner.evaluate_epoch(
+                        lora.borrow()?,
+                        ce.inner_mut(),
+                        loader.clone_inner(),
+                    ))?;
+                    return Ok(PyEpochStats::from_stats(stats));
+                }
+            }
+        }
+
+        let dataset: Vec<(Tensor, Tensor)> = batches
+            .extract::<Vec<(PyTensor, PyTensor)>>()?
+            .into_iter()
+            .map(|(input, target)| (input.into_tensor(), target.into_tensor()))
+            .collect();
+
+        if let Ok(seq) = module.extract::<PyRef<'_, PySequentialModule>>() {
+            if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+                let stats = convert(self.inner.evaluate_epoch(
+                    seq.borrow()?,
+                    mse.inner_mut(),
+                    dataset.clone(),
+                ))?;
+                return Ok(PyEpochStats::from_stats(stats));
+            }
+            if let Ok(mut ce) = loss.extract::<PyRefMut<'_, PySoftmaxCrossEntropy>>() {
+                let stats = convert(self.inner.evaluate_epoch(
+                    seq.borrow()?,
+                    ce.inner_mut(),
+                    dataset.clone(),
+                ))?;
+                return Ok(PyEpochStats::from_stats(stats));
+            }
+        }
+
+        if let Ok(linear) = module.extract::<PyRef<'_, PyLinearModule>>() {
+            if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+                let stats = convert(self.inner.evaluate_epoch(
+                    linear.borrow()?,
+                    mse.inner_mut(),
+                    dataset,
+                ))?;
+                return Ok(PyEpochStats::from_stats(stats));
+            }
+            if let Ok(mut ce) = loss.extract::<PyRefMut<'_, PySoftmaxCrossEntropy>>() {
+                let stats = convert(self.inner.evaluate_epoch(
+                    linear.borrow()?,
+                    ce.inner_mut(),
+                    dataset,
+                ))?;
+                return Ok(PyEpochStats::from_stats(stats));
+            }
+        }
+
+        if let Ok(lora) = module.extract::<PyRef<'_, PyLoraLinearModule>>() {
+            if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+                let stats = convert(self.inner.evaluate_epoch(
+                    lora.borrow()?,
+                    mse.inner_mut(),
+                    dataset.clone(),
+                ))?;
+                return Ok(PyEpochStats::from_stats(stats));
+            }
+            if let Ok(mut ce) = loss.extract::<PyRefMut<'_, PySoftmaxCrossEntropy>>() {
+                let stats = convert(self.inner.evaluate_epoch(
+                    lora.borrow()?,
+                    ce.inner_mut(),
+                    dataset,
+                ))?;
+                return Ok(PyEpochStats::from_stats(stats));
+            }
+        }
+
+        Err(PyValueError::new_err(
+            "ModuleTrainer.evaluate_epoch expects a Sequential, Linear, or LoraLinear module and a supported loss",
+        ))
+    }
+
+    #[pyo3(signature = (module, loss, batches))]
+    fn evaluate_sparse_classification_epoch<'py>(
+        &self,
+        py: Python<'py>,
+        module: &Bound<'_, PyAny>,
+        loss: &Bound<'_, PyAny>,
+        batches: &Bound<'_, PyAny>,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let ce = loss.extract::<PyRef<'_, PySoftmaxCrossEntropy>>()?;
+        let as_loader = batches.extract::<PyRef<PyDataLoader>>();
+        if let Ok(loader) = as_loader {
+            if let Ok(seq) = module.extract::<PyRef<'_, PySequentialModule>>() {
+                let metrics = convert(self.inner.evaluate_sparse_classification_epoch(
+                    seq.borrow()?,
+                    &ce.inner,
+                    loader.clone_inner(),
+                ))?;
+                return sparse_metrics_to_pydict(py, metrics);
+            }
+
+            if let Ok(linear) = module.extract::<PyRef<'_, PyLinearModule>>() {
+                let metrics = convert(self.inner.evaluate_sparse_classification_epoch(
+                    linear.borrow()?,
+                    &ce.inner,
+                    loader.clone_inner(),
+                ))?;
+                return sparse_metrics_to_pydict(py, metrics);
+            }
+
+            if let Ok(lora) = module.extract::<PyRef<'_, PyLoraLinearModule>>() {
+                let metrics = convert(self.inner.evaluate_sparse_classification_epoch(
+                    lora.borrow()?,
+                    &ce.inner,
+                    loader.clone_inner(),
+                ))?;
+                return sparse_metrics_to_pydict(py, metrics);
+            }
+        }
+
+        let dataset: Vec<(Tensor, Tensor)> = batches
+            .extract::<Vec<(PyTensor, PyTensor)>>()?
+            .into_iter()
+            .map(|(input, target)| (input.into_tensor(), target.into_tensor()))
+            .collect();
+
+        if let Ok(seq) = module.extract::<PyRef<'_, PySequentialModule>>() {
+            let metrics = convert(self.inner.evaluate_sparse_classification_epoch(
+                seq.borrow()?,
+                &ce.inner,
+                dataset.clone(),
+            ))?;
+            return sparse_metrics_to_pydict(py, metrics);
+        }
+
+        if let Ok(linear) = module.extract::<PyRef<'_, PyLinearModule>>() {
+            let metrics = convert(self.inner.evaluate_sparse_classification_epoch(
+                linear.borrow()?,
+                &ce.inner,
+                dataset,
+            ))?;
+            return sparse_metrics_to_pydict(py, metrics);
+        }
+
+        if let Ok(lora) = module.extract::<PyRef<'_, PyLoraLinearModule>>() {
+            let metrics = convert(self.inner.evaluate_sparse_classification_epoch(
+                lora.borrow()?,
+                &ce.inner,
+                dataset,
+            ))?;
+            return sparse_metrics_to_pydict(py, metrics);
+        }
+
+        Err(PyValueError::new_err(
+            "ModuleTrainer.evaluate_sparse_classification_epoch expects a Sequential, Linear, or LoraLinear module, SoftmaxCrossEntropy loss, and batches",
+        ))
+    }
+
+    #[pyo3(signature = (module, loss, loader, schedule, epochs))]
+    fn train_epochs(
+        &mut self,
+        py: Python<'_>,
+        module: &Bound<'_, PyAny>,
+        loss: &Bound<'_, PyAny>,
+        loader: &Bound<'_, PyAny>,
+        schedule: &PyRoundtableSchedule,
+        epochs: usize,
+    ) -> PyResult<PyObject> {
+        let loader = loader.extract::<PyRef<PyDataLoader>>()?;
+        if let Ok(mut seq) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
+            if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+                let history = convert(self.inner.train_epochs(
+                    seq.borrow_mut()?,
+                    mse.inner_mut(),
+                    loader.clone_inner(),
+                    &schedule.inner,
+                    epochs,
+                ))?;
+                return epoch_history_to_pylist(py, history);
+            }
+            if let Ok(mut ce) = loss.extract::<PyRefMut<'_, PySoftmaxCrossEntropy>>() {
+                let history = convert(self.inner.train_epochs(
+                    seq.borrow_mut()?,
+                    ce.inner_mut(),
+                    loader.clone_inner(),
+                    &schedule.inner,
+                    epochs,
+                ))?;
+                return epoch_history_to_pylist(py, history);
+            }
+        }
+
+        if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
+            if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+                let history = convert(self.inner.train_epochs(
+                    linear.borrow_mut()?,
+                    mse.inner_mut(),
+                    loader.clone_inner(),
+                    &schedule.inner,
+                    epochs,
+                ))?;
+                return epoch_history_to_pylist(py, history);
+            }
+            if let Ok(mut ce) = loss.extract::<PyRefMut<'_, PySoftmaxCrossEntropy>>() {
+                let history = convert(self.inner.train_epochs(
+                    linear.borrow_mut()?,
+                    ce.inner_mut(),
+                    loader.clone_inner(),
+                    &schedule.inner,
+                    epochs,
+                ))?;
+                return epoch_history_to_pylist(py, history);
+            }
+        }
+
+        if let Ok(mut lora) = module.extract::<PyRefMut<'_, PyLoraLinearModule>>() {
+            if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+                let history = convert(self.inner.train_epochs(
+                    lora.borrow_mut()?,
+                    mse.inner_mut(),
+                    loader.clone_inner(),
+                    &schedule.inner,
+                    epochs,
+                ))?;
+                return epoch_history_to_pylist(py, history);
+            }
+            if let Ok(mut ce) = loss.extract::<PyRefMut<'_, PySoftmaxCrossEntropy>>() {
+                let history = convert(self.inner.train_epochs(
+                    lora.borrow_mut()?,
+                    ce.inner_mut(),
+                    loader.clone_inner(),
+                    &schedule.inner,
+                    epochs,
+                ))?;
+                return epoch_history_to_pylist(py, history);
+            }
+        }
+
+        Err(PyValueError::new_err(
+            "ModuleTrainer.train_epochs expects a DataLoader, a Sequential, Linear, or LoraLinear module, and a supported loss",
+        ))
+    }
+
+    #[pyo3(signature = (module, loss, loader, schedule, epochs))]
+    fn train_epochs_capture_best(
+        &mut self,
+        module: &Bound<'_, PyAny>,
+        loss: &Bound<'_, PyAny>,
+        loader: &Bound<'_, PyAny>,
+        schedule: &PyRoundtableSchedule,
+        epochs: usize,
+    ) -> PyResult<PyEpochBestState> {
+        let loader = loader.extract::<PyRef<PyDataLoader>>()?;
+        if let Ok(mut seq) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
+            if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+                let captured = convert(self.inner.train_epochs_capture_best(
+                    seq.borrow_mut()?,
+                    mse.inner_mut(),
+                    loader.clone_inner(),
+                    &schedule.inner,
+                    epochs,
+                ))?;
+                return Ok(PyEpochBestState::from_best_state(captured));
+            }
+            if let Ok(mut ce) = loss.extract::<PyRefMut<'_, PySoftmaxCrossEntropy>>() {
+                let captured = convert(self.inner.train_epochs_capture_best(
+                    seq.borrow_mut()?,
+                    ce.inner_mut(),
+                    loader.clone_inner(),
+                    &schedule.inner,
+                    epochs,
+                ))?;
+                return Ok(PyEpochBestState::from_best_state(captured));
+            }
+        }
+
+        if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
+            if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+                let captured = convert(self.inner.train_epochs_capture_best(
+                    linear.borrow_mut()?,
+                    mse.inner_mut(),
+                    loader.clone_inner(),
+                    &schedule.inner,
+                    epochs,
+                ))?;
+                return Ok(PyEpochBestState::from_best_state(captured));
+            }
+            if let Ok(mut ce) = loss.extract::<PyRefMut<'_, PySoftmaxCrossEntropy>>() {
+                let captured = convert(self.inner.train_epochs_capture_best(
+                    linear.borrow_mut()?,
+                    ce.inner_mut(),
+                    loader.clone_inner(),
+                    &schedule.inner,
+                    epochs,
+                ))?;
+                return Ok(PyEpochBestState::from_best_state(captured));
+            }
+        }
+
+        if let Ok(mut lora) = module.extract::<PyRefMut<'_, PyLoraLinearModule>>() {
+            if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+                let captured = convert(self.inner.train_epochs_capture_best(
+                    lora.borrow_mut()?,
+                    mse.inner_mut(),
+                    loader.clone_inner(),
+                    &schedule.inner,
+                    epochs,
+                ))?;
+                return Ok(PyEpochBestState::from_best_state(captured));
+            }
+            if let Ok(mut ce) = loss.extract::<PyRefMut<'_, PySoftmaxCrossEntropy>>() {
+                let captured = convert(self.inner.train_epochs_capture_best(
+                    lora.borrow_mut()?,
+                    ce.inner_mut(),
+                    loader.clone_inner(),
+                    &schedule.inner,
+                    epochs,
+                ))?;
+                return Ok(PyEpochBestState::from_best_state(captured));
+            }
+        }
+
+        Err(PyValueError::new_err(
+            "ModuleTrainer.train_epochs_capture_best expects a DataLoader, a Sequential, Linear, or LoraLinear module, and a supported loss",
+        ))
+    }
+
+    #[pyo3(signature = (module, loss, loader, schedule, epochs))]
+    fn train_epochs_restore_best(
+        &mut self,
+        module: &Bound<'_, PyAny>,
+        loss: &Bound<'_, PyAny>,
+        loader: &Bound<'_, PyAny>,
+        schedule: &PyRoundtableSchedule,
+        epochs: usize,
+    ) -> PyResult<PyEpochBestState> {
+        let loader = loader.extract::<PyRef<PyDataLoader>>()?;
+        if let Ok(mut seq) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
+            if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+                let captured = convert(self.inner.train_epochs_restore_best(
+                    seq.borrow_mut()?,
+                    mse.inner_mut(),
+                    loader.clone_inner(),
+                    &schedule.inner,
+                    epochs,
+                ))?;
+                return Ok(PyEpochBestState::from_best_state(captured));
+            }
+            if let Ok(mut ce) = loss.extract::<PyRefMut<'_, PySoftmaxCrossEntropy>>() {
+                let captured = convert(self.inner.train_epochs_restore_best(
+                    seq.borrow_mut()?,
+                    ce.inner_mut(),
+                    loader.clone_inner(),
+                    &schedule.inner,
+                    epochs,
+                ))?;
+                return Ok(PyEpochBestState::from_best_state(captured));
+            }
+        }
+
+        if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
+            if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+                let captured = convert(self.inner.train_epochs_restore_best(
+                    linear.borrow_mut()?,
+                    mse.inner_mut(),
+                    loader.clone_inner(),
+                    &schedule.inner,
+                    epochs,
+                ))?;
+                return Ok(PyEpochBestState::from_best_state(captured));
+            }
+            if let Ok(mut ce) = loss.extract::<PyRefMut<'_, PySoftmaxCrossEntropy>>() {
+                let captured = convert(self.inner.train_epochs_restore_best(
+                    linear.borrow_mut()?,
+                    ce.inner_mut(),
+                    loader.clone_inner(),
+                    &schedule.inner,
+                    epochs,
+                ))?;
+                return Ok(PyEpochBestState::from_best_state(captured));
+            }
+        }
+
+        if let Ok(mut lora) = module.extract::<PyRefMut<'_, PyLoraLinearModule>>() {
+            if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+                let captured = convert(self.inner.train_epochs_restore_best(
+                    lora.borrow_mut()?,
+                    mse.inner_mut(),
+                    loader.clone_inner(),
+                    &schedule.inner,
+                    epochs,
+                ))?;
+                return Ok(PyEpochBestState::from_best_state(captured));
+            }
+            if let Ok(mut ce) = loss.extract::<PyRefMut<'_, PySoftmaxCrossEntropy>>() {
+                let captured = convert(self.inner.train_epochs_restore_best(
+                    lora.borrow_mut()?,
+                    ce.inner_mut(),
+                    loader.clone_inner(),
+                    &schedule.inner,
+                    epochs,
+                ))?;
+                return Ok(PyEpochBestState::from_best_state(captured));
+            }
+        }
+
+        Err(PyValueError::new_err(
+            "ModuleTrainer.train_epochs_restore_best expects a DataLoader, a Sequential, Linear, or LoraLinear module, and a supported loss",
+        ))
+    }
+
+    #[pyo3(signature = (module, loss, train_loader, validation_loader, schedule, epochs, patience=None, min_delta=0.0, lr_decay_patience=None, lr_decay_factor=0.5, lr_decay_min_delta=0.0))]
+    fn train_epochs_capture_best_on_validation(
+        &mut self,
+        module: &Bound<'_, PyAny>,
+        loss: &Bound<'_, PyAny>,
+        train_loader: &Bound<'_, PyAny>,
+        validation_loader: &Bound<'_, PyAny>,
+        schedule: &PyRoundtableSchedule,
+        epochs: usize,
+        patience: Option<usize>,
+        min_delta: f32,
+        lr_decay_patience: Option<usize>,
+        lr_decay_factor: f32,
+        lr_decay_min_delta: f32,
+    ) -> PyResult<PyEpochValidationBestState> {
+        let train_loader = train_loader.extract::<PyRef<PyDataLoader>>()?;
+        let validation_loader = validation_loader.extract::<PyRef<PyDataLoader>>()?;
+        let controls = validation_controls_from_py(
+            patience,
+            min_delta,
+            lr_decay_patience,
+            lr_decay_factor,
+            lr_decay_min_delta,
+        )?;
+        if let Ok(mut seq) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
+            if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+                let captured = capture_validation_best_with_controls(
+                    &mut self.inner,
+                    seq.borrow_mut()?,
+                    mse.inner_mut(),
+                    train_loader.clone_inner(),
+                    validation_loader.clone_inner(),
+                    &schedule.inner,
+                    epochs,
+                    controls,
+                )?;
+                return Ok(PyEpochValidationBestState::from_validation_best_state(
+                    captured,
+                ));
+            }
+            if let Ok(mut ce) = loss.extract::<PyRefMut<'_, PySoftmaxCrossEntropy>>() {
+                let captured = capture_validation_best_with_controls(
+                    &mut self.inner,
+                    seq.borrow_mut()?,
+                    ce.inner_mut(),
+                    train_loader.clone_inner(),
+                    validation_loader.clone_inner(),
+                    &schedule.inner,
+                    epochs,
+                    controls,
+                )?;
+                return Ok(PyEpochValidationBestState::from_validation_best_state(
+                    captured,
+                ));
+            }
+        }
+
+        if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
+            if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+                let captured = capture_validation_best_with_controls(
+                    &mut self.inner,
+                    linear.borrow_mut()?,
+                    mse.inner_mut(),
+                    train_loader.clone_inner(),
+                    validation_loader.clone_inner(),
+                    &schedule.inner,
+                    epochs,
+                    controls,
+                )?;
+                return Ok(PyEpochValidationBestState::from_validation_best_state(
+                    captured,
+                ));
+            }
+            if let Ok(mut ce) = loss.extract::<PyRefMut<'_, PySoftmaxCrossEntropy>>() {
+                let captured = capture_validation_best_with_controls(
+                    &mut self.inner,
+                    linear.borrow_mut()?,
+                    ce.inner_mut(),
+                    train_loader.clone_inner(),
+                    validation_loader.clone_inner(),
+                    &schedule.inner,
+                    epochs,
+                    controls,
+                )?;
+                return Ok(PyEpochValidationBestState::from_validation_best_state(
+                    captured,
+                ));
+            }
+        }
+
+        if let Ok(mut lora) = module.extract::<PyRefMut<'_, PyLoraLinearModule>>() {
+            if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+                let captured = capture_validation_best_with_controls(
+                    &mut self.inner,
+                    lora.borrow_mut()?,
+                    mse.inner_mut(),
+                    train_loader.clone_inner(),
+                    validation_loader.clone_inner(),
+                    &schedule.inner,
+                    epochs,
+                    controls,
+                )?;
+                return Ok(PyEpochValidationBestState::from_validation_best_state(
+                    captured,
+                ));
+            }
+            if let Ok(mut ce) = loss.extract::<PyRefMut<'_, PySoftmaxCrossEntropy>>() {
+                let captured = capture_validation_best_with_controls(
+                    &mut self.inner,
+                    lora.borrow_mut()?,
+                    ce.inner_mut(),
+                    train_loader.clone_inner(),
+                    validation_loader.clone_inner(),
+                    &schedule.inner,
+                    epochs,
+                    controls,
+                )?;
+                return Ok(PyEpochValidationBestState::from_validation_best_state(
+                    captured,
+                ));
+            }
+        }
+
+        Err(PyValueError::new_err(
+            "ModuleTrainer.train_epochs_capture_best_on_validation expects train/validation DataLoaders, a Sequential, Linear, or LoraLinear module, and a supported loss",
+        ))
+    }
+
+    #[pyo3(signature = (module, loss, train_loader, validation_loader, schedule, epochs, patience=None, min_delta=0.0, lr_decay_patience=None, lr_decay_factor=0.5, lr_decay_min_delta=0.0))]
+    fn train_epochs_restore_best_on_validation(
+        &mut self,
+        module: &Bound<'_, PyAny>,
+        loss: &Bound<'_, PyAny>,
+        train_loader: &Bound<'_, PyAny>,
+        validation_loader: &Bound<'_, PyAny>,
+        schedule: &PyRoundtableSchedule,
+        epochs: usize,
+        patience: Option<usize>,
+        min_delta: f32,
+        lr_decay_patience: Option<usize>,
+        lr_decay_factor: f32,
+        lr_decay_min_delta: f32,
+    ) -> PyResult<PyEpochValidationBestState> {
+        let train_loader = train_loader.extract::<PyRef<PyDataLoader>>()?;
+        let validation_loader = validation_loader.extract::<PyRef<PyDataLoader>>()?;
+        let controls = validation_controls_from_py(
+            patience,
+            min_delta,
+            lr_decay_patience,
+            lr_decay_factor,
+            lr_decay_min_delta,
+        )?;
+        if let Ok(mut seq) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
+            if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+                let captured = restore_validation_best_with_controls(
+                    &mut self.inner,
+                    seq.borrow_mut()?,
+                    mse.inner_mut(),
+                    train_loader.clone_inner(),
+                    validation_loader.clone_inner(),
+                    &schedule.inner,
+                    epochs,
+                    controls,
+                )?;
+                return Ok(PyEpochValidationBestState::from_validation_best_state(
+                    captured,
+                ));
+            }
+            if let Ok(mut ce) = loss.extract::<PyRefMut<'_, PySoftmaxCrossEntropy>>() {
+                let captured = restore_validation_best_with_controls(
+                    &mut self.inner,
+                    seq.borrow_mut()?,
+                    ce.inner_mut(),
+                    train_loader.clone_inner(),
+                    validation_loader.clone_inner(),
+                    &schedule.inner,
+                    epochs,
+                    controls,
+                )?;
+                return Ok(PyEpochValidationBestState::from_validation_best_state(
+                    captured,
+                ));
+            }
+        }
+
+        if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
+            if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+                let captured = restore_validation_best_with_controls(
+                    &mut self.inner,
+                    linear.borrow_mut()?,
+                    mse.inner_mut(),
+                    train_loader.clone_inner(),
+                    validation_loader.clone_inner(),
+                    &schedule.inner,
+                    epochs,
+                    controls,
+                )?;
+                return Ok(PyEpochValidationBestState::from_validation_best_state(
+                    captured,
+                ));
+            }
+            if let Ok(mut ce) = loss.extract::<PyRefMut<'_, PySoftmaxCrossEntropy>>() {
+                let captured = restore_validation_best_with_controls(
+                    &mut self.inner,
+                    linear.borrow_mut()?,
+                    ce.inner_mut(),
+                    train_loader.clone_inner(),
+                    validation_loader.clone_inner(),
+                    &schedule.inner,
+                    epochs,
+                    controls,
+                )?;
+                return Ok(PyEpochValidationBestState::from_validation_best_state(
+                    captured,
+                ));
+            }
+        }
+
+        if let Ok(mut lora) = module.extract::<PyRefMut<'_, PyLoraLinearModule>>() {
+            if let Ok(mut mse) = loss.extract::<PyRefMut<'_, PyMeanSquaredError>>() {
+                let captured = restore_validation_best_with_controls(
+                    &mut self.inner,
+                    lora.borrow_mut()?,
+                    mse.inner_mut(),
+                    train_loader.clone_inner(),
+                    validation_loader.clone_inner(),
+                    &schedule.inner,
+                    epochs,
+                    controls,
+                )?;
+                return Ok(PyEpochValidationBestState::from_validation_best_state(
+                    captured,
+                ));
+            }
+            if let Ok(mut ce) = loss.extract::<PyRefMut<'_, PySoftmaxCrossEntropy>>() {
+                let captured = restore_validation_best_with_controls(
+                    &mut self.inner,
+                    lora.borrow_mut()?,
+                    ce.inner_mut(),
+                    train_loader.clone_inner(),
+                    validation_loader.clone_inner(),
+                    &schedule.inner,
+                    epochs,
+                    controls,
+                )?;
+                return Ok(PyEpochValidationBestState::from_validation_best_state(
+                    captured,
+                ));
+            }
+        }
+
+        Err(PyValueError::new_err(
+            "ModuleTrainer.train_epochs_restore_best_on_validation expects train/validation DataLoaders, a Sequential, Linear, or LoraLinear module, and a supported loss",
+        ))
+    }
+
+    #[pyo3(signature = (module, loss, train_loader, validation_loader, retention_loader, schedule, epochs, max_loss_increase=0.5, max_accuracy_drop=0.25, max_perplexity_increase=None, target_min_loss_delta=0.0, patience=None, min_delta=0.0, lr_decay_patience=None, lr_decay_factor=0.5, lr_decay_min_delta=0.0))]
+    fn train_epochs_capture_best_sparse_with_retention_guard(
+        &mut self,
+        module: &Bound<'_, PyAny>,
+        loss: &Bound<'_, PyAny>,
+        train_loader: &Bound<'_, PyAny>,
+        validation_loader: &Bound<'_, PyAny>,
+        retention_loader: &Bound<'_, PyAny>,
+        schedule: &PyRoundtableSchedule,
+        epochs: usize,
+        max_loss_increase: f32,
+        max_accuracy_drop: f32,
+        max_perplexity_increase: Option<f32>,
+        target_min_loss_delta: f32,
+        patience: Option<usize>,
+        min_delta: f32,
+        lr_decay_patience: Option<usize>,
+        lr_decay_factor: f32,
+        lr_decay_min_delta: f32,
+    ) -> PyResult<PyEpochSparseRetentionBestState> {
+        let train_loader = train_loader.extract::<PyRef<PyDataLoader>>()?;
+        let validation_loader = validation_loader.extract::<PyRef<PyDataLoader>>()?;
+        let retention_loader = retention_loader.extract::<PyRef<PyDataLoader>>()?;
+        let controls = validation_controls_from_py(
+            patience,
+            min_delta,
+            lr_decay_patience,
+            lr_decay_factor,
+            lr_decay_min_delta,
+        )?;
+        let guard = sparse_retention_guard_from_py(
+            max_loss_increase,
+            max_accuracy_drop,
+            max_perplexity_increase,
+            target_min_loss_delta,
+        )?;
+
+        if let Ok(mut seq) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
+            if let Ok(mut ce) = loss.extract::<PyRefMut<'_, PySoftmaxCrossEntropy>>() {
+                let captured = capture_sparse_retention_best_with_controls(
+                    &mut self.inner,
+                    seq.borrow_mut()?,
+                    ce.inner_mut(),
+                    train_loader.clone_inner(),
+                    validation_loader.clone_inner(),
+                    retention_loader.clone_inner(),
+                    &schedule.inner,
+                    epochs,
+                    guard,
+                    controls,
+                )?;
+                return Ok(
+                    PyEpochSparseRetentionBestState::from_sparse_retention_best_state(captured),
+                );
+            }
+        }
+
+        if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
+            if let Ok(mut ce) = loss.extract::<PyRefMut<'_, PySoftmaxCrossEntropy>>() {
+                let captured = capture_sparse_retention_best_with_controls(
+                    &mut self.inner,
+                    linear.borrow_mut()?,
+                    ce.inner_mut(),
+                    train_loader.clone_inner(),
+                    validation_loader.clone_inner(),
+                    retention_loader.clone_inner(),
+                    &schedule.inner,
+                    epochs,
+                    guard,
+                    controls,
+                )?;
+                return Ok(
+                    PyEpochSparseRetentionBestState::from_sparse_retention_best_state(captured),
+                );
+            }
+        }
+
+        if let Ok(mut lora) = module.extract::<PyRefMut<'_, PyLoraLinearModule>>() {
+            if let Ok(mut ce) = loss.extract::<PyRefMut<'_, PySoftmaxCrossEntropy>>() {
+                let captured = capture_sparse_retention_best_with_controls(
+                    &mut self.inner,
+                    lora.borrow_mut()?,
+                    ce.inner_mut(),
+                    train_loader.clone_inner(),
+                    validation_loader.clone_inner(),
+                    retention_loader.clone_inner(),
+                    &schedule.inner,
+                    epochs,
+                    guard,
+                    controls,
+                )?;
+                return Ok(
+                    PyEpochSparseRetentionBestState::from_sparse_retention_best_state(captured),
+                );
+            }
+        }
+
+        Err(PyValueError::new_err(
+            "ModuleTrainer.train_epochs_capture_best_sparse_with_retention_guard expects train/validation/retention DataLoaders, a Sequential, Linear, or LoraLinear module, and SoftmaxCrossEntropy",
+        ))
+    }
+
+    #[pyo3(signature = (module, loss, train_loader, validation_loader, retention_loader, schedule, epochs, max_loss_increase=0.5, max_accuracy_drop=0.25, max_perplexity_increase=None, target_min_loss_delta=0.0, patience=None, min_delta=0.0, lr_decay_patience=None, lr_decay_factor=0.5, lr_decay_min_delta=0.0))]
+    fn train_epochs_restore_best_sparse_with_retention_guard(
+        &mut self,
+        module: &Bound<'_, PyAny>,
+        loss: &Bound<'_, PyAny>,
+        train_loader: &Bound<'_, PyAny>,
+        validation_loader: &Bound<'_, PyAny>,
+        retention_loader: &Bound<'_, PyAny>,
+        schedule: &PyRoundtableSchedule,
+        epochs: usize,
+        max_loss_increase: f32,
+        max_accuracy_drop: f32,
+        max_perplexity_increase: Option<f32>,
+        target_min_loss_delta: f32,
+        patience: Option<usize>,
+        min_delta: f32,
+        lr_decay_patience: Option<usize>,
+        lr_decay_factor: f32,
+        lr_decay_min_delta: f32,
+    ) -> PyResult<PyEpochSparseRetentionBestState> {
+        let train_loader = train_loader.extract::<PyRef<PyDataLoader>>()?;
+        let validation_loader = validation_loader.extract::<PyRef<PyDataLoader>>()?;
+        let retention_loader = retention_loader.extract::<PyRef<PyDataLoader>>()?;
+        let controls = validation_controls_from_py(
+            patience,
+            min_delta,
+            lr_decay_patience,
+            lr_decay_factor,
+            lr_decay_min_delta,
+        )?;
+        let guard = sparse_retention_guard_from_py(
+            max_loss_increase,
+            max_accuracy_drop,
+            max_perplexity_increase,
+            target_min_loss_delta,
+        )?;
+
+        if let Ok(mut seq) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
+            if let Ok(mut ce) = loss.extract::<PyRefMut<'_, PySoftmaxCrossEntropy>>() {
+                let captured = restore_sparse_retention_best_with_controls(
+                    &mut self.inner,
+                    seq.borrow_mut()?,
+                    ce.inner_mut(),
+                    train_loader.clone_inner(),
+                    validation_loader.clone_inner(),
+                    retention_loader.clone_inner(),
+                    &schedule.inner,
+                    epochs,
+                    guard,
+                    controls,
+                )?;
+                return Ok(
+                    PyEpochSparseRetentionBestState::from_sparse_retention_best_state(captured),
+                );
+            }
+        }
+
+        if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
+            if let Ok(mut ce) = loss.extract::<PyRefMut<'_, PySoftmaxCrossEntropy>>() {
+                let captured = restore_sparse_retention_best_with_controls(
+                    &mut self.inner,
+                    linear.borrow_mut()?,
+                    ce.inner_mut(),
+                    train_loader.clone_inner(),
+                    validation_loader.clone_inner(),
+                    retention_loader.clone_inner(),
+                    &schedule.inner,
+                    epochs,
+                    guard,
+                    controls,
+                )?;
+                return Ok(
+                    PyEpochSparseRetentionBestState::from_sparse_retention_best_state(captured),
+                );
+            }
+        }
+
+        if let Ok(mut lora) = module.extract::<PyRefMut<'_, PyLoraLinearModule>>() {
+            if let Ok(mut ce) = loss.extract::<PyRefMut<'_, PySoftmaxCrossEntropy>>() {
+                let captured = restore_sparse_retention_best_with_controls(
+                    &mut self.inner,
+                    lora.borrow_mut()?,
+                    ce.inner_mut(),
+                    train_loader.clone_inner(),
+                    validation_loader.clone_inner(),
+                    retention_loader.clone_inner(),
+                    &schedule.inner,
+                    epochs,
+                    guard,
+                    controls,
+                )?;
+                return Ok(
+                    PyEpochSparseRetentionBestState::from_sparse_retention_best_state(captured),
+                );
+            }
+        }
+
+        Err(PyValueError::new_err(
+            "ModuleTrainer.train_epochs_restore_best_sparse_with_retention_guard expects train/validation/retention DataLoaders, a Sequential, Linear, or LoraLinear module, and SoftmaxCrossEntropy",
+        ))
+    }
+
+    #[pyo3(signature = (module, loss, train_loader, validation_loader, retention_loader, schedule, epochs, movement_tolerance=1e-8, max_loss_increase=0.5, max_accuracy_drop=0.25, max_perplexity_increase=None, target_min_loss_delta=0.0, patience=None, min_delta=0.0, lr_decay_patience=None, lr_decay_factor=0.5, lr_decay_min_delta=0.0))]
+    fn train_epochs_restore_best_sparse_with_finetune_report(
+        &mut self,
+        module: &Bound<'_, PyAny>,
+        loss: &Bound<'_, PyAny>,
+        train_loader: &Bound<'_, PyAny>,
+        validation_loader: &Bound<'_, PyAny>,
+        retention_loader: &Bound<'_, PyAny>,
+        schedule: &PyRoundtableSchedule,
+        epochs: usize,
+        movement_tolerance: f32,
+        max_loss_increase: f32,
+        max_accuracy_drop: f32,
+        max_perplexity_increase: Option<f32>,
+        target_min_loss_delta: f32,
+        patience: Option<usize>,
+        min_delta: f32,
+        lr_decay_patience: Option<usize>,
+        lr_decay_factor: f32,
+        lr_decay_min_delta: f32,
+    ) -> PyResult<PySparseFineTuneReport> {
+        let train_loader = train_loader.extract::<PyRef<PyDataLoader>>()?;
+        let validation_loader = validation_loader.extract::<PyRef<PyDataLoader>>()?;
+        let retention_loader = retention_loader.extract::<PyRef<PyDataLoader>>()?;
+        let controls = validation_controls_from_py(
+            patience,
+            min_delta,
+            lr_decay_patience,
+            lr_decay_factor,
+            lr_decay_min_delta,
+        )?;
+        let guard = sparse_retention_guard_from_py(
+            max_loss_increase,
+            max_accuracy_drop,
+            max_perplexity_increase,
+            target_min_loss_delta,
+        )?;
+
+        if let Ok(mut seq) = module.extract::<PyRefMut<'_, PySequentialModule>>() {
+            if let Ok(mut ce) = loss.extract::<PyRefMut<'_, PySoftmaxCrossEntropy>>() {
+                let report = restore_sparse_finetune_report_with_controls(
+                    &mut self.inner,
+                    seq.borrow_mut()?,
+                    ce.inner_mut(),
+                    train_loader.clone_inner(),
+                    validation_loader.clone_inner(),
+                    retention_loader.clone_inner(),
+                    &schedule.inner,
+                    epochs,
+                    guard,
+                    movement_tolerance,
+                    controls,
+                )?;
+                return Ok(PySparseFineTuneReport::from_sparse_finetune_report(report));
+            }
+        }
+
+        if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
+            if let Ok(mut ce) = loss.extract::<PyRefMut<'_, PySoftmaxCrossEntropy>>() {
+                let report = restore_sparse_finetune_report_with_controls(
+                    &mut self.inner,
+                    linear.borrow_mut()?,
+                    ce.inner_mut(),
+                    train_loader.clone_inner(),
+                    validation_loader.clone_inner(),
+                    retention_loader.clone_inner(),
+                    &schedule.inner,
+                    epochs,
+                    guard,
+                    movement_tolerance,
+                    controls,
+                )?;
+                return Ok(PySparseFineTuneReport::from_sparse_finetune_report(report));
+            }
+        }
+
+        if let Ok(mut lora) = module.extract::<PyRefMut<'_, PyLoraLinearModule>>() {
+            if let Ok(mut ce) = loss.extract::<PyRefMut<'_, PySoftmaxCrossEntropy>>() {
+                let report = restore_sparse_finetune_report_with_controls(
+                    &mut self.inner,
+                    lora.borrow_mut()?,
+                    ce.inner_mut(),
+                    train_loader.clone_inner(),
+                    validation_loader.clone_inner(),
+                    retention_loader.clone_inner(),
+                    &schedule.inner,
+                    epochs,
+                    guard,
+                    movement_tolerance,
+                    controls,
+                )?;
+                return Ok(PySparseFineTuneReport::from_sparse_finetune_report(report));
+            }
+        }
+
+        Err(PyValueError::new_err(
+            "ModuleTrainer.train_epochs_restore_best_sparse_with_finetune_report expects train/validation/retention DataLoaders, a Sequential, Linear, or LoraLinear module, and SoftmaxCrossEntropy",
         ))
     }
 
     fn __repr__(&self) -> PyResult<String> {
         Ok(format!(
-            "ModuleTrainer(curvature={}, hyper_lr={:.4}, fallback_lr={:.4})",
+            "ModuleTrainer(curvature={}, hyper_lr={:.4}, fallback_lr={:.4}, gradient_accumulation_steps={})",
             self.curvature(),
             self.hyper_learning_rate(),
-            self.fallback_learning_rate()
+            self.fallback_learning_rate(),
+            self.gradient_accumulation_steps()
         ))
     }
 }
@@ -1841,6 +5104,9 @@ impl PySpiralSession {
         if let Ok(mut linear) = module.extract::<PyRefMut<'_, PyLinearModule>>() {
             return convert(self.inner.prepare_module(linear.borrow_mut()?));
         }
+        if let Ok(mut lora) = module.extract::<PyRefMut<'_, PyLoraLinearModule>>() {
+            return convert(self.inner.prepare_module(lora.borrow_mut()?));
+        }
         if let Ok(mut conv) = module.extract::<PyRefMut<'_, PyConv1dModule>>() {
             return convert(self.inner.prepare_module(conv.borrow_mut()?));
         }
@@ -1852,7 +5118,7 @@ impl PySpiralSession {
         }
 
         Err(PyValueError::new_err(
-            "prepare_module expects Linear, Conv1d, WaveRnn, ZSpaceProjector, or Sequential modules",
+            "prepare_module expects Linear, LoraLinear, Conv1d, WaveRnn, ZSpaceProjector, or Sequential modules",
         ))
     }
 
@@ -1866,6 +5132,256 @@ impl PySpiralSession {
         schedule: &PyRoundtableSchedule,
     ) -> PyResult<PyEpochStats> {
         trainer.train_epoch(module, loss, batches, schedule)
+    }
+
+    #[pyo3(signature = (trainer, module, loss, batches))]
+    fn evaluate_epoch(
+        &self,
+        trainer: &PyModuleTrainer,
+        module: &Bound<'_, PyAny>,
+        loss: &Bound<'_, PyAny>,
+        batches: &Bound<'_, PyAny>,
+    ) -> PyResult<PyEpochStats> {
+        trainer.evaluate_epoch(module, loss, batches)
+    }
+
+    #[pyo3(signature = (trainer, module, loss, batches))]
+    fn evaluate_sparse_classification_epoch<'py>(
+        &self,
+        py: Python<'py>,
+        trainer: &PyModuleTrainer,
+        module: &Bound<'_, PyAny>,
+        loss: &Bound<'_, PyAny>,
+        batches: &Bound<'_, PyAny>,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        trainer.evaluate_sparse_classification_epoch(py, module, loss, batches)
+    }
+
+    #[pyo3(signature = (trainer, module, loss, loader, schedule, epochs))]
+    fn train_epochs(
+        &self,
+        py: Python<'_>,
+        trainer: &mut PyModuleTrainer,
+        module: &Bound<'_, PyAny>,
+        loss: &Bound<'_, PyAny>,
+        loader: &Bound<'_, PyAny>,
+        schedule: &PyRoundtableSchedule,
+        epochs: usize,
+    ) -> PyResult<PyObject> {
+        trainer.train_epochs(py, module, loss, loader, schedule, epochs)
+    }
+
+    #[pyo3(signature = (trainer, module, loss, loader, schedule, epochs))]
+    fn train_epochs_capture_best(
+        &self,
+        trainer: &mut PyModuleTrainer,
+        module: &Bound<'_, PyAny>,
+        loss: &Bound<'_, PyAny>,
+        loader: &Bound<'_, PyAny>,
+        schedule: &PyRoundtableSchedule,
+        epochs: usize,
+    ) -> PyResult<PyEpochBestState> {
+        trainer.train_epochs_capture_best(module, loss, loader, schedule, epochs)
+    }
+
+    #[pyo3(signature = (trainer, module, loss, loader, schedule, epochs))]
+    fn train_epochs_restore_best(
+        &self,
+        trainer: &mut PyModuleTrainer,
+        module: &Bound<'_, PyAny>,
+        loss: &Bound<'_, PyAny>,
+        loader: &Bound<'_, PyAny>,
+        schedule: &PyRoundtableSchedule,
+        epochs: usize,
+    ) -> PyResult<PyEpochBestState> {
+        trainer.train_epochs_restore_best(module, loss, loader, schedule, epochs)
+    }
+
+    #[pyo3(signature = (trainer, module, loss, train_loader, validation_loader, schedule, epochs, patience=None, min_delta=0.0, lr_decay_patience=None, lr_decay_factor=0.5, lr_decay_min_delta=0.0))]
+    fn train_epochs_capture_best_on_validation(
+        &self,
+        trainer: &mut PyModuleTrainer,
+        module: &Bound<'_, PyAny>,
+        loss: &Bound<'_, PyAny>,
+        train_loader: &Bound<'_, PyAny>,
+        validation_loader: &Bound<'_, PyAny>,
+        schedule: &PyRoundtableSchedule,
+        epochs: usize,
+        patience: Option<usize>,
+        min_delta: f32,
+        lr_decay_patience: Option<usize>,
+        lr_decay_factor: f32,
+        lr_decay_min_delta: f32,
+    ) -> PyResult<PyEpochValidationBestState> {
+        trainer.train_epochs_capture_best_on_validation(
+            module,
+            loss,
+            train_loader,
+            validation_loader,
+            schedule,
+            epochs,
+            patience,
+            min_delta,
+            lr_decay_patience,
+            lr_decay_factor,
+            lr_decay_min_delta,
+        )
+    }
+
+    #[pyo3(signature = (trainer, module, loss, train_loader, validation_loader, schedule, epochs, patience=None, min_delta=0.0, lr_decay_patience=None, lr_decay_factor=0.5, lr_decay_min_delta=0.0))]
+    fn train_epochs_restore_best_on_validation(
+        &self,
+        trainer: &mut PyModuleTrainer,
+        module: &Bound<'_, PyAny>,
+        loss: &Bound<'_, PyAny>,
+        train_loader: &Bound<'_, PyAny>,
+        validation_loader: &Bound<'_, PyAny>,
+        schedule: &PyRoundtableSchedule,
+        epochs: usize,
+        patience: Option<usize>,
+        min_delta: f32,
+        lr_decay_patience: Option<usize>,
+        lr_decay_factor: f32,
+        lr_decay_min_delta: f32,
+    ) -> PyResult<PyEpochValidationBestState> {
+        trainer.train_epochs_restore_best_on_validation(
+            module,
+            loss,
+            train_loader,
+            validation_loader,
+            schedule,
+            epochs,
+            patience,
+            min_delta,
+            lr_decay_patience,
+            lr_decay_factor,
+            lr_decay_min_delta,
+        )
+    }
+
+    #[pyo3(signature = (trainer, module, loss, train_loader, validation_loader, retention_loader, schedule, epochs, max_loss_increase=0.5, max_accuracy_drop=0.25, max_perplexity_increase=None, target_min_loss_delta=0.0, patience=None, min_delta=0.0, lr_decay_patience=None, lr_decay_factor=0.5, lr_decay_min_delta=0.0))]
+    fn train_epochs_capture_best_sparse_with_retention_guard(
+        &self,
+        trainer: &mut PyModuleTrainer,
+        module: &Bound<'_, PyAny>,
+        loss: &Bound<'_, PyAny>,
+        train_loader: &Bound<'_, PyAny>,
+        validation_loader: &Bound<'_, PyAny>,
+        retention_loader: &Bound<'_, PyAny>,
+        schedule: &PyRoundtableSchedule,
+        epochs: usize,
+        max_loss_increase: f32,
+        max_accuracy_drop: f32,
+        max_perplexity_increase: Option<f32>,
+        target_min_loss_delta: f32,
+        patience: Option<usize>,
+        min_delta: f32,
+        lr_decay_patience: Option<usize>,
+        lr_decay_factor: f32,
+        lr_decay_min_delta: f32,
+    ) -> PyResult<PyEpochSparseRetentionBestState> {
+        trainer.train_epochs_capture_best_sparse_with_retention_guard(
+            module,
+            loss,
+            train_loader,
+            validation_loader,
+            retention_loader,
+            schedule,
+            epochs,
+            max_loss_increase,
+            max_accuracy_drop,
+            max_perplexity_increase,
+            target_min_loss_delta,
+            patience,
+            min_delta,
+            lr_decay_patience,
+            lr_decay_factor,
+            lr_decay_min_delta,
+        )
+    }
+
+    #[pyo3(signature = (trainer, module, loss, train_loader, validation_loader, retention_loader, schedule, epochs, max_loss_increase=0.5, max_accuracy_drop=0.25, max_perplexity_increase=None, target_min_loss_delta=0.0, patience=None, min_delta=0.0, lr_decay_patience=None, lr_decay_factor=0.5, lr_decay_min_delta=0.0))]
+    fn train_epochs_restore_best_sparse_with_retention_guard(
+        &self,
+        trainer: &mut PyModuleTrainer,
+        module: &Bound<'_, PyAny>,
+        loss: &Bound<'_, PyAny>,
+        train_loader: &Bound<'_, PyAny>,
+        validation_loader: &Bound<'_, PyAny>,
+        retention_loader: &Bound<'_, PyAny>,
+        schedule: &PyRoundtableSchedule,
+        epochs: usize,
+        max_loss_increase: f32,
+        max_accuracy_drop: f32,
+        max_perplexity_increase: Option<f32>,
+        target_min_loss_delta: f32,
+        patience: Option<usize>,
+        min_delta: f32,
+        lr_decay_patience: Option<usize>,
+        lr_decay_factor: f32,
+        lr_decay_min_delta: f32,
+    ) -> PyResult<PyEpochSparseRetentionBestState> {
+        trainer.train_epochs_restore_best_sparse_with_retention_guard(
+            module,
+            loss,
+            train_loader,
+            validation_loader,
+            retention_loader,
+            schedule,
+            epochs,
+            max_loss_increase,
+            max_accuracy_drop,
+            max_perplexity_increase,
+            target_min_loss_delta,
+            patience,
+            min_delta,
+            lr_decay_patience,
+            lr_decay_factor,
+            lr_decay_min_delta,
+        )
+    }
+
+    #[pyo3(signature = (trainer, module, loss, train_loader, validation_loader, retention_loader, schedule, epochs, movement_tolerance=1e-8, max_loss_increase=0.5, max_accuracy_drop=0.25, max_perplexity_increase=None, target_min_loss_delta=0.0, patience=None, min_delta=0.0, lr_decay_patience=None, lr_decay_factor=0.5, lr_decay_min_delta=0.0))]
+    fn train_epochs_restore_best_sparse_with_finetune_report(
+        &self,
+        trainer: &mut PyModuleTrainer,
+        module: &Bound<'_, PyAny>,
+        loss: &Bound<'_, PyAny>,
+        train_loader: &Bound<'_, PyAny>,
+        validation_loader: &Bound<'_, PyAny>,
+        retention_loader: &Bound<'_, PyAny>,
+        schedule: &PyRoundtableSchedule,
+        epochs: usize,
+        movement_tolerance: f32,
+        max_loss_increase: f32,
+        max_accuracy_drop: f32,
+        max_perplexity_increase: Option<f32>,
+        target_min_loss_delta: f32,
+        patience: Option<usize>,
+        min_delta: f32,
+        lr_decay_patience: Option<usize>,
+        lr_decay_factor: f32,
+        lr_decay_min_delta: f32,
+    ) -> PyResult<PySparseFineTuneReport> {
+        trainer.train_epochs_restore_best_sparse_with_finetune_report(
+            module,
+            loss,
+            train_loader,
+            validation_loader,
+            retention_loader,
+            schedule,
+            epochs,
+            movement_tolerance,
+            max_loss_increase,
+            max_accuracy_drop,
+            max_perplexity_increase,
+            target_min_loss_delta,
+            patience,
+            min_delta,
+            lr_decay_patience,
+            lr_decay_factor,
+            lr_decay_min_delta,
+        )
     }
 
     #[pyo3(signature = (seed, sot=None))]
@@ -2074,6 +5590,88 @@ impl PyMeanSquaredError {
     }
 }
 
+#[pyclass(module = "spiraltorch.nn", name = "SoftmaxCrossEntropy")]
+struct PySoftmaxCrossEntropy {
+    inner: SoftmaxCrossEntropy,
+}
+
+impl PySoftmaxCrossEntropy {
+    fn inner_mut(&mut self) -> &mut SoftmaxCrossEntropy {
+        &mut self.inner
+    }
+}
+
+#[pymethods]
+impl PySoftmaxCrossEntropy {
+    #[new]
+    #[pyo3(signature = (ignore_index=None, label_smoothing=0.0))]
+    fn new(ignore_index: Option<i32>, label_smoothing: f32) -> PyResult<Self> {
+        let mut inner = SoftmaxCrossEntropy::new();
+        inner.set_ignore_index(ignore_index);
+        convert(inner.set_label_smoothing(label_smoothing))?;
+        Ok(Self { inner })
+    }
+
+    #[getter]
+    fn ignore_index(&self) -> Option<i32> {
+        self.inner.ignore_index()
+    }
+
+    #[setter]
+    fn set_ignore_index(&mut self, ignore_index: Option<i32>) {
+        self.inner.set_ignore_index(ignore_index);
+    }
+
+    #[getter]
+    fn label_smoothing(&self) -> f32 {
+        self.inner.label_smoothing()
+    }
+
+    #[setter]
+    fn set_label_smoothing(&mut self, label_smoothing: f32) -> PyResult<()> {
+        convert(self.inner.set_label_smoothing(label_smoothing))
+    }
+
+    fn forward(&mut self, prediction: &PyTensor, target: &PyTensor) -> PyResult<PyTensor> {
+        Ok(PyTensor::from_tensor(convert(
+            self.inner
+                .forward(prediction.as_tensor(), target.as_tensor()),
+        )?))
+    }
+
+    fn backward(&mut self, prediction: &PyTensor, target: &PyTensor) -> PyResult<PyTensor> {
+        Ok(PyTensor::from_tensor(convert(
+            self.inner
+                .backward(prediction.as_tensor(), target.as_tensor()),
+        )?))
+    }
+
+    fn sparse_metrics<'py>(
+        &self,
+        py: Python<'py>,
+        prediction: &PyTensor,
+        target: &PyTensor,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let metrics = convert(
+            self.inner
+                .sparse_metrics(prediction.as_tensor(), target.as_tensor()),
+        )?;
+        sparse_metrics_to_pydict(py, metrics)
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        let ignore_index = match self.inner.ignore_index() {
+            Some(ignore_index) => format!("Some({ignore_index})"),
+            None => "None".to_string(),
+        };
+        Ok(format!(
+            "SoftmaxCrossEntropy(ignore_index={}, label_smoothing={:.6})",
+            ignore_index,
+            self.inner.label_smoothing()
+        ))
+    }
+}
+
 #[pyclass(module = "spiraltorch.nn", name = "Linear")]
 struct PyLinearModule {
     inner: Option<NnLinear>,
@@ -2138,6 +5736,140 @@ impl PyLinearModule {
         convert(self.borrow_mut()?.zero_accumulators())
     }
 
+    fn set_trainable(&mut self, trainable: bool) -> PyResult<()> {
+        set_module_trainable(self.borrow_mut()?, trainable)
+    }
+
+    fn set_parameter_trainable(&mut self, name: &str, trainable: bool) -> PyResult<()> {
+        set_module_parameter_trainable(self.borrow_mut()?, name, trainable)
+    }
+
+    fn set_parameters_trainable_by_prefix(
+        &mut self,
+        prefix: &str,
+        trainable: bool,
+    ) -> PyResult<usize> {
+        set_module_parameters_trainable_by_prefix(self.borrow_mut()?, prefix, trainable)
+    }
+
+    fn set_parameters_trainable_by_suffix(
+        &mut self,
+        suffix: &str,
+        trainable: bool,
+    ) -> PyResult<usize> {
+        set_module_parameters_trainable_by_suffix(self.borrow_mut()?, suffix, trainable)
+    }
+
+    fn set_parameters_trainable_by_contains(
+        &mut self,
+        needle: &str,
+        trainable: bool,
+    ) -> PyResult<usize> {
+        set_module_parameters_trainable_by_contains(self.borrow_mut()?, needle, trainable)
+    }
+
+    fn scale_parameter_learning_rate(&mut self, name: &str, factor: f32) -> PyResult<()> {
+        scale_module_parameter_learning_rate(self.borrow_mut()?, name, factor)
+    }
+
+    fn scale_parameters_learning_rate_by_prefix(
+        &mut self,
+        prefix: &str,
+        factor: f32,
+    ) -> PyResult<usize> {
+        scale_module_parameters_learning_rate_by_prefix(self.borrow_mut()?, prefix, factor)
+    }
+
+    fn scale_parameters_learning_rate_by_suffix(
+        &mut self,
+        suffix: &str,
+        factor: f32,
+    ) -> PyResult<usize> {
+        scale_module_parameters_learning_rate_by_suffix(self.borrow_mut()?, suffix, factor)
+    }
+
+    fn scale_parameters_learning_rate_by_contains(
+        &mut self,
+        needle: &str,
+        factor: f32,
+    ) -> PyResult<usize> {
+        scale_module_parameters_learning_rate_by_contains(self.borrow_mut()?, needle, factor)
+    }
+
+    fn set_parameter_learning_rate_scale(&mut self, name: &str, scale: f32) -> PyResult<()> {
+        set_module_parameter_learning_rate_scale(self.borrow_mut()?, name, scale)
+    }
+
+    fn set_parameters_learning_rate_scale_by_prefix(
+        &mut self,
+        prefix: &str,
+        scale: f32,
+    ) -> PyResult<usize> {
+        set_module_parameters_learning_rate_scale_by_prefix(self.borrow_mut()?, prefix, scale)
+    }
+
+    fn set_parameters_learning_rate_scale_by_suffix(
+        &mut self,
+        suffix: &str,
+        scale: f32,
+    ) -> PyResult<usize> {
+        set_module_parameters_learning_rate_scale_by_suffix(self.borrow_mut()?, suffix, scale)
+    }
+
+    fn set_parameters_learning_rate_scale_by_contains(
+        &mut self,
+        needle: &str,
+        scale: f32,
+    ) -> PyResult<usize> {
+        set_module_parameters_learning_rate_scale_by_contains(self.borrow_mut()?, needle, scale)
+    }
+
+    fn set_parameter_weight_decay(&mut self, name: &str, weight_decay: f32) -> PyResult<()> {
+        set_module_parameter_weight_decay(self.borrow_mut()?, name, weight_decay)
+    }
+
+    fn set_parameters_weight_decay_by_prefix(
+        &mut self,
+        prefix: &str,
+        weight_decay: f32,
+    ) -> PyResult<usize> {
+        set_module_parameters_weight_decay_by_prefix(self.borrow_mut()?, prefix, weight_decay)
+    }
+
+    fn set_parameters_weight_decay_by_suffix(
+        &mut self,
+        suffix: &str,
+        weight_decay: f32,
+    ) -> PyResult<usize> {
+        set_module_parameters_weight_decay_by_suffix(self.borrow_mut()?, suffix, weight_decay)
+    }
+
+    fn set_parameters_weight_decay_by_contains(
+        &mut self,
+        needle: &str,
+        weight_decay: f32,
+    ) -> PyResult<usize> {
+        set_module_parameters_weight_decay_by_contains(self.borrow_mut()?, needle, weight_decay)
+    }
+
+    #[pyo3(signature = (before, tolerance=0.0))]
+    fn parameter_movement(
+        &self,
+        py: Python<'_>,
+        before: &Bound<'_, PyDict>,
+        tolerance: f32,
+    ) -> PyResult<PyObject> {
+        parameter_movement_py(py, self.borrow()?, before, tolerance)
+    }
+
+    fn state_fingerprint(&self, py: Python<'_>) -> PyResult<PyObject> {
+        state_fingerprint_py(py, self.borrow()?)
+    }
+
+    fn training_state_fingerprint(&self, py: Python<'_>) -> PyResult<PyObject> {
+        training_state_fingerprint_py(py, self.borrow()?)
+    }
+
     fn state_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
         let state = convert(self.borrow()?.state_dict())?;
         state_to_pydict(py, state)
@@ -2146,6 +5878,463 @@ impl PyLinearModule {
     fn load_state_dict(&mut self, dict: &Bound<'_, PyDict>) -> PyResult<()> {
         let state = pydict_to_state(dict)?;
         convert(self.borrow_mut()?.load_state_dict(&state))
+    }
+
+    fn load_state_dict_checked(
+        &mut self,
+        py: Python<'_>,
+        dict: &Bound<'_, PyDict>,
+    ) -> PyResult<PyObject> {
+        checked_load_state_py(py, self.borrow_mut()?, dict)
+    }
+
+    fn load_state_dict_subset_checked(
+        &mut self,
+        py: Python<'_>,
+        dict: &Bound<'_, PyDict>,
+    ) -> PyResult<PyObject> {
+        checked_load_state_subset_py(py, self.borrow_mut()?, dict)
+    }
+
+    fn load_state_dict_subset_mapped_checked(
+        &mut self,
+        py: Python<'_>,
+        dict: &Bound<'_, PyDict>,
+        key_map: &Bound<'_, PyDict>,
+    ) -> PyResult<PyObject> {
+        checked_load_state_subset_mapped_py(py, self.borrow_mut()?, dict, key_map)
+    }
+
+    fn state_dict_compatibility(
+        &self,
+        py: Python<'_>,
+        dict: &Bound<'_, PyDict>,
+    ) -> PyResult<PyObject> {
+        state_dict_compatibility_py(py, self.borrow()?, dict)
+    }
+
+    fn state_dict_compatibility_with_key_map(
+        &self,
+        py: Python<'_>,
+        dict: &Bound<'_, PyDict>,
+        key_map: &Bound<'_, PyDict>,
+    ) -> PyResult<PyObject> {
+        state_dict_compatibility_mapped_py(py, self.borrow()?, dict, key_map)
+    }
+}
+
+#[pyclass(module = "spiraltorch.nn", name = "LoraLinear")]
+struct PyLoraLinearModule {
+    inner: Option<NnLoraLinear>,
+}
+
+impl PyLoraLinearModule {
+    fn borrow(&self) -> PyResult<&NnLoraLinear> {
+        self.inner
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("LoraLinear module has been moved"))
+    }
+
+    fn borrow_mut(&mut self) -> PyResult<&mut NnLoraLinear> {
+        self.inner
+            .as_mut()
+            .ok_or_else(|| PyValueError::new_err("LoraLinear module has been moved"))
+    }
+
+    fn take(&mut self) -> PyResult<NnLoraLinear> {
+        self.inner
+            .take()
+            .ok_or_else(|| PyValueError::new_err("LoraLinear module has been moved"))
+    }
+}
+
+#[pymethods]
+impl PyLoraLinearModule {
+    #[new]
+    #[pyo3(signature = (input_dim, output_dim, rank, alpha=None, name=None))]
+    fn new(
+        input_dim: usize,
+        output_dim: usize,
+        rank: usize,
+        alpha: Option<f32>,
+        name: Option<&str>,
+    ) -> PyResult<Self> {
+        let ident = name.unwrap_or("lora_linear");
+        let alpha = alpha.unwrap_or(rank as f32);
+        let inner = convert(NnLoraLinear::new(ident, input_dim, output_dim, rank, alpha))?;
+        Ok(Self { inner: Some(inner) })
+    }
+
+    fn forward(&self, input: &PyTensor) -> PyResult<PyTensor> {
+        let layer = self.borrow()?;
+        Ok(PyTensor::from_tensor(convert(
+            layer.forward(input.as_tensor()),
+        )?))
+    }
+
+    fn backward(&mut self, input: &PyTensor, grad_output: &PyTensor) -> PyResult<PyTensor> {
+        let layer = self.borrow_mut()?;
+        Ok(PyTensor::from_tensor(convert(
+            layer.backward(input.as_tensor(), grad_output.as_tensor()),
+        )?))
+    }
+
+    fn attach_hypergrad(&mut self, curvature: f32, learning_rate: f32) -> PyResult<()> {
+        convert(
+            self.borrow_mut()?
+                .attach_hypergrad(curvature, learning_rate),
+        )
+    }
+
+    fn apply_step(&mut self, fallback_lr: f32) -> PyResult<()> {
+        convert(self.borrow_mut()?.apply_step(fallback_lr))
+    }
+
+    fn zero_grad(&mut self) -> PyResult<()> {
+        convert(self.borrow_mut()?.zero_accumulators())
+    }
+
+    fn rank(&self) -> PyResult<usize> {
+        Ok(self.borrow()?.rank())
+    }
+
+    fn alpha(&self) -> PyResult<f32> {
+        Ok(self.borrow()?.alpha())
+    }
+
+    fn adapter_scale(&self) -> PyResult<f32> {
+        Ok(self.borrow()?.adapter_scale())
+    }
+
+    fn set_base_trainable(&mut self, trainable: bool) -> PyResult<()> {
+        self.borrow_mut()?.set_base_trainable(trainable);
+        Ok(())
+    }
+
+    fn set_adapter_trainable(&mut self, trainable: bool) -> PyResult<()> {
+        self.borrow_mut()?.set_adapter_trainable(trainable);
+        Ok(())
+    }
+
+    fn set_trainable(&mut self, trainable: bool) -> PyResult<()> {
+        set_module_trainable(self.borrow_mut()?, trainable)
+    }
+
+    fn set_parameter_trainable(&mut self, name: &str, trainable: bool) -> PyResult<()> {
+        set_module_parameter_trainable(self.borrow_mut()?, name, trainable)
+    }
+
+    fn set_parameters_trainable_by_prefix(
+        &mut self,
+        prefix: &str,
+        trainable: bool,
+    ) -> PyResult<usize> {
+        set_module_parameters_trainable_by_prefix(self.borrow_mut()?, prefix, trainable)
+    }
+
+    fn set_parameters_trainable_by_suffix(
+        &mut self,
+        suffix: &str,
+        trainable: bool,
+    ) -> PyResult<usize> {
+        set_module_parameters_trainable_by_suffix(self.borrow_mut()?, suffix, trainable)
+    }
+
+    fn set_parameters_trainable_by_contains(
+        &mut self,
+        needle: &str,
+        trainable: bool,
+    ) -> PyResult<usize> {
+        set_module_parameters_trainable_by_contains(self.borrow_mut()?, needle, trainable)
+    }
+
+    fn scale_parameter_learning_rate(&mut self, name: &str, factor: f32) -> PyResult<()> {
+        scale_module_parameter_learning_rate(self.borrow_mut()?, name, factor)
+    }
+
+    fn scale_parameters_learning_rate_by_prefix(
+        &mut self,
+        prefix: &str,
+        factor: f32,
+    ) -> PyResult<usize> {
+        scale_module_parameters_learning_rate_by_prefix(self.borrow_mut()?, prefix, factor)
+    }
+
+    fn scale_parameters_learning_rate_by_suffix(
+        &mut self,
+        suffix: &str,
+        factor: f32,
+    ) -> PyResult<usize> {
+        scale_module_parameters_learning_rate_by_suffix(self.borrow_mut()?, suffix, factor)
+    }
+
+    fn scale_parameters_learning_rate_by_contains(
+        &mut self,
+        needle: &str,
+        factor: f32,
+    ) -> PyResult<usize> {
+        scale_module_parameters_learning_rate_by_contains(self.borrow_mut()?, needle, factor)
+    }
+
+    fn set_parameter_learning_rate_scale(&mut self, name: &str, scale: f32) -> PyResult<()> {
+        set_module_parameter_learning_rate_scale(self.borrow_mut()?, name, scale)
+    }
+
+    fn set_parameters_learning_rate_scale_by_prefix(
+        &mut self,
+        prefix: &str,
+        scale: f32,
+    ) -> PyResult<usize> {
+        set_module_parameters_learning_rate_scale_by_prefix(self.borrow_mut()?, prefix, scale)
+    }
+
+    fn set_parameters_learning_rate_scale_by_suffix(
+        &mut self,
+        suffix: &str,
+        scale: f32,
+    ) -> PyResult<usize> {
+        set_module_parameters_learning_rate_scale_by_suffix(self.borrow_mut()?, suffix, scale)
+    }
+
+    fn set_parameters_learning_rate_scale_by_contains(
+        &mut self,
+        needle: &str,
+        scale: f32,
+    ) -> PyResult<usize> {
+        set_module_parameters_learning_rate_scale_by_contains(self.borrow_mut()?, needle, scale)
+    }
+
+    fn set_parameter_weight_decay(&mut self, name: &str, weight_decay: f32) -> PyResult<()> {
+        set_module_parameter_weight_decay(self.borrow_mut()?, name, weight_decay)
+    }
+
+    fn set_parameters_weight_decay_by_prefix(
+        &mut self,
+        prefix: &str,
+        weight_decay: f32,
+    ) -> PyResult<usize> {
+        set_module_parameters_weight_decay_by_prefix(self.borrow_mut()?, prefix, weight_decay)
+    }
+
+    fn set_parameters_weight_decay_by_suffix(
+        &mut self,
+        suffix: &str,
+        weight_decay: f32,
+    ) -> PyResult<usize> {
+        set_module_parameters_weight_decay_by_suffix(self.borrow_mut()?, suffix, weight_decay)
+    }
+
+    fn set_parameters_weight_decay_by_contains(
+        &mut self,
+        needle: &str,
+        weight_decay: f32,
+    ) -> PyResult<usize> {
+        set_module_parameters_weight_decay_by_contains(self.borrow_mut()?, needle, weight_decay)
+    }
+
+    #[pyo3(signature = (before, tolerance=0.0))]
+    fn parameter_movement(
+        &self,
+        py: Python<'_>,
+        before: &Bound<'_, PyDict>,
+        tolerance: f32,
+    ) -> PyResult<PyObject> {
+        parameter_movement_py(py, self.borrow()?, before, tolerance)
+    }
+
+    fn state_fingerprint(&self, py: Python<'_>) -> PyResult<PyObject> {
+        state_fingerprint_py(py, self.borrow()?)
+    }
+
+    fn training_state_fingerprint(&self, py: Python<'_>) -> PyResult<PyObject> {
+        training_state_fingerprint_py(py, self.borrow()?)
+    }
+
+    fn state_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let state = convert(self.borrow()?.state_dict())?;
+        state_to_pydict(py, state)
+    }
+
+    fn base_state_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        state_to_pydict(py, self.borrow()?.base_state_dict())
+    }
+
+    fn base_state_fingerprint(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let fingerprint = self.borrow()?.base_state_fingerprint();
+        Ok(fingerprint_to_pydict(py, &fingerprint)?.into_py(py))
+    }
+
+    fn base_state_dict_compatibility(
+        &self,
+        py: Python<'_>,
+        dict: &Bound<'_, PyDict>,
+    ) -> PyResult<PyObject> {
+        let state = pydict_to_state(dict)?;
+        let report = self.borrow()?.base_state_dict_compatibility(&state);
+        Ok(compatibility_report_to_pydict(py, &report)?.into_py(py))
+    }
+
+    fn base_state_dict_compatibility_with_key_map(
+        &self,
+        py: Python<'_>,
+        dict: &Bound<'_, PyDict>,
+        key_map: &Bound<'_, PyDict>,
+    ) -> PyResult<PyObject> {
+        let state = pydict_to_state(dict)?;
+        let key_rules = pydict_to_key_rules(key_map)?;
+        let report = convert(
+            self.borrow()?
+                .base_state_dict_compatibility_with_key_rules(&state, &key_rules),
+        )?;
+        Ok(compatibility_report_to_pydict(py, &report)?.into_py(py))
+    }
+
+    fn load_state_dict(&mut self, dict: &Bound<'_, PyDict>) -> PyResult<()> {
+        let state = pydict_to_state(dict)?;
+        convert(self.borrow_mut()?.load_state_dict(&state))
+    }
+
+    fn load_state_dict_checked(
+        &mut self,
+        py: Python<'_>,
+        dict: &Bound<'_, PyDict>,
+    ) -> PyResult<PyObject> {
+        checked_load_state_py(py, self.borrow_mut()?, dict)
+    }
+
+    fn load_state_dict_subset_checked(
+        &mut self,
+        py: Python<'_>,
+        dict: &Bound<'_, PyDict>,
+    ) -> PyResult<PyObject> {
+        checked_load_state_subset_py(py, self.borrow_mut()?, dict)
+    }
+
+    fn load_state_dict_subset_mapped_checked(
+        &mut self,
+        py: Python<'_>,
+        dict: &Bound<'_, PyDict>,
+        key_map: &Bound<'_, PyDict>,
+    ) -> PyResult<PyObject> {
+        checked_load_state_subset_mapped_py(py, self.borrow_mut()?, dict, key_map)
+    }
+
+    fn state_dict_compatibility(
+        &self,
+        py: Python<'_>,
+        dict: &Bound<'_, PyDict>,
+    ) -> PyResult<PyObject> {
+        state_dict_compatibility_py(py, self.borrow()?, dict)
+    }
+
+    fn state_dict_compatibility_with_key_map(
+        &self,
+        py: Python<'_>,
+        dict: &Bound<'_, PyDict>,
+        key_map: &Bound<'_, PyDict>,
+    ) -> PyResult<PyObject> {
+        state_dict_compatibility_mapped_py(py, self.borrow()?, dict, key_map)
+    }
+
+    fn load_base_from_state_dict(
+        &mut self,
+        py: Python<'_>,
+        dict: &Bound<'_, PyDict>,
+    ) -> PyResult<PyObject> {
+        let state = pydict_to_state(dict)?;
+        let report = convert(self.borrow_mut()?.load_base_from_state_dict(&state))?;
+        Ok(load_report_to_pydict(py, &report)?.into_py(py))
+    }
+
+    fn load_base_from_state_dict_mapped(
+        &mut self,
+        py: Python<'_>,
+        dict: &Bound<'_, PyDict>,
+        key_map: &Bound<'_, PyDict>,
+    ) -> PyResult<PyObject> {
+        let state = pydict_to_state(dict)?;
+        let key_rules = pydict_to_key_rules(key_map)?;
+        let report = convert(
+            self.borrow_mut()?
+                .load_base_from_state_dict_adapted(&state, &key_rules),
+        )?;
+        Ok(load_report_to_pydict(py, &report)?.into_py(py))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        let layer = self.borrow()?;
+        Ok(format!(
+            "LoraLinear(rank={}, alpha={:.6}, adapter_scale={:.6})",
+            layer.rank(),
+            layer.alpha(),
+            layer.adapter_scale()
+        ))
+    }
+}
+
+#[pyclass(module = "spiraltorch.nn", name = "Relu")]
+struct PyReluModule {
+    inner: Option<NnRelu>,
+}
+
+impl PyReluModule {
+    fn borrow(&self) -> PyResult<&NnRelu> {
+        self.inner
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("Relu module has been moved"))
+    }
+
+    fn borrow_mut(&mut self) -> PyResult<&mut NnRelu> {
+        self.inner
+            .as_mut()
+            .ok_or_else(|| PyValueError::new_err("Relu module has been moved"))
+    }
+
+    fn take(&mut self) -> PyResult<NnRelu> {
+        self.inner
+            .take()
+            .ok_or_else(|| PyValueError::new_err("Relu module has been moved"))
+    }
+}
+
+#[pymethods]
+impl PyReluModule {
+    #[new]
+    fn new() -> Self {
+        Self {
+            inner: Some(NnRelu::new()),
+        }
+    }
+
+    fn forward(&self, input: &PyTensor) -> PyResult<PyTensor> {
+        Ok(PyTensor::from_tensor(convert(
+            self.borrow()?.forward(input.as_tensor()),
+        )?))
+    }
+
+    fn backward(&mut self, input: &PyTensor, grad_output: &PyTensor) -> PyResult<PyTensor> {
+        Ok(PyTensor::from_tensor(convert(
+            self.borrow_mut()?
+                .backward(input.as_tensor(), grad_output.as_tensor()),
+        )?))
+    }
+
+    fn state_fingerprint(&self, py: Python<'_>) -> PyResult<PyObject> {
+        state_fingerprint_py(py, self.borrow()?)
+    }
+
+    fn training_state_fingerprint(&self, py: Python<'_>) -> PyResult<PyObject> {
+        training_state_fingerprint_py(py, self.borrow()?)
+    }
+
+    fn state_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let state = convert(self.borrow()?.state_dict())?;
+        state_to_pydict(py, state)
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        self.borrow()?;
+        Ok("Relu()".to_string())
     }
 }
 
@@ -2226,6 +6415,140 @@ impl PyConv1dModule {
         convert(self.borrow_mut()?.zero_accumulators())
     }
 
+    fn set_trainable(&mut self, trainable: bool) -> PyResult<()> {
+        set_module_trainable(self.borrow_mut()?, trainable)
+    }
+
+    fn set_parameter_trainable(&mut self, name: &str, trainable: bool) -> PyResult<()> {
+        set_module_parameter_trainable(self.borrow_mut()?, name, trainable)
+    }
+
+    fn set_parameters_trainable_by_prefix(
+        &mut self,
+        prefix: &str,
+        trainable: bool,
+    ) -> PyResult<usize> {
+        set_module_parameters_trainable_by_prefix(self.borrow_mut()?, prefix, trainable)
+    }
+
+    fn set_parameters_trainable_by_suffix(
+        &mut self,
+        suffix: &str,
+        trainable: bool,
+    ) -> PyResult<usize> {
+        set_module_parameters_trainable_by_suffix(self.borrow_mut()?, suffix, trainable)
+    }
+
+    fn set_parameters_trainable_by_contains(
+        &mut self,
+        needle: &str,
+        trainable: bool,
+    ) -> PyResult<usize> {
+        set_module_parameters_trainable_by_contains(self.borrow_mut()?, needle, trainable)
+    }
+
+    fn scale_parameter_learning_rate(&mut self, name: &str, factor: f32) -> PyResult<()> {
+        scale_module_parameter_learning_rate(self.borrow_mut()?, name, factor)
+    }
+
+    fn scale_parameters_learning_rate_by_prefix(
+        &mut self,
+        prefix: &str,
+        factor: f32,
+    ) -> PyResult<usize> {
+        scale_module_parameters_learning_rate_by_prefix(self.borrow_mut()?, prefix, factor)
+    }
+
+    fn scale_parameters_learning_rate_by_suffix(
+        &mut self,
+        suffix: &str,
+        factor: f32,
+    ) -> PyResult<usize> {
+        scale_module_parameters_learning_rate_by_suffix(self.borrow_mut()?, suffix, factor)
+    }
+
+    fn scale_parameters_learning_rate_by_contains(
+        &mut self,
+        needle: &str,
+        factor: f32,
+    ) -> PyResult<usize> {
+        scale_module_parameters_learning_rate_by_contains(self.borrow_mut()?, needle, factor)
+    }
+
+    fn set_parameter_learning_rate_scale(&mut self, name: &str, scale: f32) -> PyResult<()> {
+        set_module_parameter_learning_rate_scale(self.borrow_mut()?, name, scale)
+    }
+
+    fn set_parameters_learning_rate_scale_by_prefix(
+        &mut self,
+        prefix: &str,
+        scale: f32,
+    ) -> PyResult<usize> {
+        set_module_parameters_learning_rate_scale_by_prefix(self.borrow_mut()?, prefix, scale)
+    }
+
+    fn set_parameters_learning_rate_scale_by_suffix(
+        &mut self,
+        suffix: &str,
+        scale: f32,
+    ) -> PyResult<usize> {
+        set_module_parameters_learning_rate_scale_by_suffix(self.borrow_mut()?, suffix, scale)
+    }
+
+    fn set_parameters_learning_rate_scale_by_contains(
+        &mut self,
+        needle: &str,
+        scale: f32,
+    ) -> PyResult<usize> {
+        set_module_parameters_learning_rate_scale_by_contains(self.borrow_mut()?, needle, scale)
+    }
+
+    fn set_parameter_weight_decay(&mut self, name: &str, weight_decay: f32) -> PyResult<()> {
+        set_module_parameter_weight_decay(self.borrow_mut()?, name, weight_decay)
+    }
+
+    fn set_parameters_weight_decay_by_prefix(
+        &mut self,
+        prefix: &str,
+        weight_decay: f32,
+    ) -> PyResult<usize> {
+        set_module_parameters_weight_decay_by_prefix(self.borrow_mut()?, prefix, weight_decay)
+    }
+
+    fn set_parameters_weight_decay_by_suffix(
+        &mut self,
+        suffix: &str,
+        weight_decay: f32,
+    ) -> PyResult<usize> {
+        set_module_parameters_weight_decay_by_suffix(self.borrow_mut()?, suffix, weight_decay)
+    }
+
+    fn set_parameters_weight_decay_by_contains(
+        &mut self,
+        needle: &str,
+        weight_decay: f32,
+    ) -> PyResult<usize> {
+        set_module_parameters_weight_decay_by_contains(self.borrow_mut()?, needle, weight_decay)
+    }
+
+    #[pyo3(signature = (before, tolerance=0.0))]
+    fn parameter_movement(
+        &self,
+        py: Python<'_>,
+        before: &Bound<'_, PyDict>,
+        tolerance: f32,
+    ) -> PyResult<PyObject> {
+        parameter_movement_py(py, self.borrow()?, before, tolerance)
+    }
+
+    fn state_fingerprint(&self, py: Python<'_>) -> PyResult<PyObject> {
+        state_fingerprint_py(py, self.borrow()?)
+    }
+
+    fn training_state_fingerprint(&self, py: Python<'_>) -> PyResult<PyObject> {
+        training_state_fingerprint_py(py, self.borrow()?)
+    }
+
     fn state_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
         let state = convert(self.borrow()?.state_dict())?;
         state_to_pydict(py, state)
@@ -2234,6 +6557,48 @@ impl PyConv1dModule {
     fn load_state_dict(&mut self, dict: &Bound<'_, PyDict>) -> PyResult<()> {
         let state = pydict_to_state(dict)?;
         convert(self.borrow_mut()?.load_state_dict(&state))
+    }
+
+    fn load_state_dict_checked(
+        &mut self,
+        py: Python<'_>,
+        dict: &Bound<'_, PyDict>,
+    ) -> PyResult<PyObject> {
+        checked_load_state_py(py, self.borrow_mut()?, dict)
+    }
+
+    fn load_state_dict_subset_checked(
+        &mut self,
+        py: Python<'_>,
+        dict: &Bound<'_, PyDict>,
+    ) -> PyResult<PyObject> {
+        checked_load_state_subset_py(py, self.borrow_mut()?, dict)
+    }
+
+    fn load_state_dict_subset_mapped_checked(
+        &mut self,
+        py: Python<'_>,
+        dict: &Bound<'_, PyDict>,
+        key_map: &Bound<'_, PyDict>,
+    ) -> PyResult<PyObject> {
+        checked_load_state_subset_mapped_py(py, self.borrow_mut()?, dict, key_map)
+    }
+
+    fn state_dict_compatibility(
+        &self,
+        py: Python<'_>,
+        dict: &Bound<'_, PyDict>,
+    ) -> PyResult<PyObject> {
+        state_dict_compatibility_py(py, self.borrow()?, dict)
+    }
+
+    fn state_dict_compatibility_with_key_map(
+        &self,
+        py: Python<'_>,
+        dict: &Bound<'_, PyDict>,
+        key_map: &Bound<'_, PyDict>,
+    ) -> PyResult<PyObject> {
+        state_dict_compatibility_mapped_py(py, self.borrow()?, dict, key_map)
     }
 }
 
@@ -2318,6 +6683,136 @@ impl PyWaveRnnModule {
         convert(self.borrow_mut()?.zero_accumulators())
     }
 
+    fn set_trainable(&mut self, trainable: bool) -> PyResult<()> {
+        set_module_trainable(self.borrow_mut()?, trainable)
+    }
+
+    fn set_parameter_trainable(&mut self, name: &str, trainable: bool) -> PyResult<()> {
+        set_module_parameter_trainable(self.borrow_mut()?, name, trainable)
+    }
+
+    fn set_parameters_trainable_by_prefix(
+        &mut self,
+        prefix: &str,
+        trainable: bool,
+    ) -> PyResult<usize> {
+        set_module_parameters_trainable_by_prefix(self.borrow_mut()?, prefix, trainable)
+    }
+
+    fn set_parameters_trainable_by_suffix(
+        &mut self,
+        suffix: &str,
+        trainable: bool,
+    ) -> PyResult<usize> {
+        set_module_parameters_trainable_by_suffix(self.borrow_mut()?, suffix, trainable)
+    }
+
+    fn set_parameters_trainable_by_contains(
+        &mut self,
+        needle: &str,
+        trainable: bool,
+    ) -> PyResult<usize> {
+        set_module_parameters_trainable_by_contains(self.borrow_mut()?, needle, trainable)
+    }
+
+    fn scale_parameter_learning_rate(&mut self, name: &str, factor: f32) -> PyResult<()> {
+        scale_module_parameter_learning_rate(self.borrow_mut()?, name, factor)
+    }
+
+    fn scale_parameters_learning_rate_by_prefix(
+        &mut self,
+        prefix: &str,
+        factor: f32,
+    ) -> PyResult<usize> {
+        scale_module_parameters_learning_rate_by_prefix(self.borrow_mut()?, prefix, factor)
+    }
+
+    fn scale_parameters_learning_rate_by_suffix(
+        &mut self,
+        suffix: &str,
+        factor: f32,
+    ) -> PyResult<usize> {
+        scale_module_parameters_learning_rate_by_suffix(self.borrow_mut()?, suffix, factor)
+    }
+
+    fn scale_parameters_learning_rate_by_contains(
+        &mut self,
+        needle: &str,
+        factor: f32,
+    ) -> PyResult<usize> {
+        scale_module_parameters_learning_rate_by_contains(self.borrow_mut()?, needle, factor)
+    }
+
+    fn set_parameter_learning_rate_scale(&mut self, name: &str, scale: f32) -> PyResult<()> {
+        set_module_parameter_learning_rate_scale(self.borrow_mut()?, name, scale)
+    }
+
+    fn set_parameters_learning_rate_scale_by_prefix(
+        &mut self,
+        prefix: &str,
+        scale: f32,
+    ) -> PyResult<usize> {
+        set_module_parameters_learning_rate_scale_by_prefix(self.borrow_mut()?, prefix, scale)
+    }
+
+    fn set_parameters_learning_rate_scale_by_suffix(
+        &mut self,
+        suffix: &str,
+        scale: f32,
+    ) -> PyResult<usize> {
+        set_module_parameters_learning_rate_scale_by_suffix(self.borrow_mut()?, suffix, scale)
+    }
+
+    fn set_parameters_learning_rate_scale_by_contains(
+        &mut self,
+        needle: &str,
+        scale: f32,
+    ) -> PyResult<usize> {
+        set_module_parameters_learning_rate_scale_by_contains(self.borrow_mut()?, needle, scale)
+    }
+
+    fn set_parameter_weight_decay(&mut self, name: &str, weight_decay: f32) -> PyResult<()> {
+        set_module_parameter_weight_decay(self.borrow_mut()?, name, weight_decay)
+    }
+
+    fn set_parameters_weight_decay_by_prefix(
+        &mut self,
+        prefix: &str,
+        weight_decay: f32,
+    ) -> PyResult<usize> {
+        set_module_parameters_weight_decay_by_prefix(self.borrow_mut()?, prefix, weight_decay)
+    }
+
+    fn set_parameters_weight_decay_by_suffix(
+        &mut self,
+        suffix: &str,
+        weight_decay: f32,
+    ) -> PyResult<usize> {
+        set_module_parameters_weight_decay_by_suffix(self.borrow_mut()?, suffix, weight_decay)
+    }
+
+    fn set_parameters_weight_decay_by_contains(
+        &mut self,
+        needle: &str,
+        weight_decay: f32,
+    ) -> PyResult<usize> {
+        set_module_parameters_weight_decay_by_contains(self.borrow_mut()?, needle, weight_decay)
+    }
+
+    #[pyo3(signature = (before, tolerance=0.0))]
+    fn parameter_movement(
+        &self,
+        py: Python<'_>,
+        before: &Bound<'_, PyDict>,
+        tolerance: f32,
+    ) -> PyResult<PyObject> {
+        parameter_movement_py(py, self.borrow()?, before, tolerance)
+    }
+
+    fn state_fingerprint(&self, py: Python<'_>) -> PyResult<PyObject> {
+        state_fingerprint_py(py, self.borrow()?)
+    }
+
     fn state_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
         let state = convert(self.borrow()?.state_dict())?;
         state_to_pydict(py, state)
@@ -2326,6 +6821,48 @@ impl PyWaveRnnModule {
     fn load_state_dict(&mut self, dict: &Bound<'_, PyDict>) -> PyResult<()> {
         let state = pydict_to_state(dict)?;
         convert(self.borrow_mut()?.load_state_dict(&state))
+    }
+
+    fn load_state_dict_checked(
+        &mut self,
+        py: Python<'_>,
+        dict: &Bound<'_, PyDict>,
+    ) -> PyResult<PyObject> {
+        checked_load_state_py(py, self.borrow_mut()?, dict)
+    }
+
+    fn load_state_dict_subset_checked(
+        &mut self,
+        py: Python<'_>,
+        dict: &Bound<'_, PyDict>,
+    ) -> PyResult<PyObject> {
+        checked_load_state_subset_py(py, self.borrow_mut()?, dict)
+    }
+
+    fn load_state_dict_subset_mapped_checked(
+        &mut self,
+        py: Python<'_>,
+        dict: &Bound<'_, PyDict>,
+        key_map: &Bound<'_, PyDict>,
+    ) -> PyResult<PyObject> {
+        checked_load_state_subset_mapped_py(py, self.borrow_mut()?, dict, key_map)
+    }
+
+    fn state_dict_compatibility(
+        &self,
+        py: Python<'_>,
+        dict: &Bound<'_, PyDict>,
+    ) -> PyResult<PyObject> {
+        state_dict_compatibility_py(py, self.borrow()?, dict)
+    }
+
+    fn state_dict_compatibility_with_key_map(
+        &self,
+        py: Python<'_>,
+        dict: &Bound<'_, PyDict>,
+        key_map: &Bound<'_, PyDict>,
+    ) -> PyResult<PyObject> {
+        state_dict_compatibility_mapped_py(py, self.borrow()?, dict, key_map)
     }
 }
 
@@ -2358,6 +6895,10 @@ impl PySequentialModule {
             let obj = item?;
             if let Ok(mut linear) = obj.extract::<PyRefMut<'_, PyLinearModule>>() {
                 seq.push(linear.take()?);
+            } else if let Ok(mut lora) = obj.extract::<PyRefMut<'_, PyLoraLinearModule>>() {
+                seq.push(lora.take()?);
+            } else if let Ok(mut relu) = obj.extract::<PyRefMut<'_, PyReluModule>>() {
+                seq.push(relu.take()?);
             } else if let Ok(mut conv) = obj.extract::<PyRefMut<'_, PyConv1dModule>>() {
                 seq.push(conv.take()?);
             } else if let Ok(mut wave) = obj.extract::<PyRefMut<'_, PyWaveRnnModule>>() {
@@ -2366,7 +6907,7 @@ impl PySequentialModule {
                 seq.push(projector.take()?);
             } else {
                 return Err(PyValueError::new_err(
-                    "Sequential expects Linear, Conv1d, WaveRnn, or ZSpaceProjector modules",
+                    "Sequential expects Linear, LoraLinear, Relu, Conv1d, WaveRnn, or ZSpaceProjector modules",
                 ));
             }
         }
@@ -2401,6 +6942,140 @@ impl PySequentialModule {
         convert(self.borrow_mut()?.zero_accumulators())
     }
 
+    fn set_trainable(&mut self, trainable: bool) -> PyResult<()> {
+        set_module_trainable(self.borrow_mut()?, trainable)
+    }
+
+    fn set_parameter_trainable(&mut self, name: &str, trainable: bool) -> PyResult<()> {
+        set_module_parameter_trainable(self.borrow_mut()?, name, trainable)
+    }
+
+    fn set_parameters_trainable_by_prefix(
+        &mut self,
+        prefix: &str,
+        trainable: bool,
+    ) -> PyResult<usize> {
+        set_module_parameters_trainable_by_prefix(self.borrow_mut()?, prefix, trainable)
+    }
+
+    fn set_parameters_trainable_by_suffix(
+        &mut self,
+        suffix: &str,
+        trainable: bool,
+    ) -> PyResult<usize> {
+        set_module_parameters_trainable_by_suffix(self.borrow_mut()?, suffix, trainable)
+    }
+
+    fn set_parameters_trainable_by_contains(
+        &mut self,
+        needle: &str,
+        trainable: bool,
+    ) -> PyResult<usize> {
+        set_module_parameters_trainable_by_contains(self.borrow_mut()?, needle, trainable)
+    }
+
+    fn scale_parameter_learning_rate(&mut self, name: &str, factor: f32) -> PyResult<()> {
+        scale_module_parameter_learning_rate(self.borrow_mut()?, name, factor)
+    }
+
+    fn scale_parameters_learning_rate_by_prefix(
+        &mut self,
+        prefix: &str,
+        factor: f32,
+    ) -> PyResult<usize> {
+        scale_module_parameters_learning_rate_by_prefix(self.borrow_mut()?, prefix, factor)
+    }
+
+    fn scale_parameters_learning_rate_by_suffix(
+        &mut self,
+        suffix: &str,
+        factor: f32,
+    ) -> PyResult<usize> {
+        scale_module_parameters_learning_rate_by_suffix(self.borrow_mut()?, suffix, factor)
+    }
+
+    fn scale_parameters_learning_rate_by_contains(
+        &mut self,
+        needle: &str,
+        factor: f32,
+    ) -> PyResult<usize> {
+        scale_module_parameters_learning_rate_by_contains(self.borrow_mut()?, needle, factor)
+    }
+
+    fn set_parameter_learning_rate_scale(&mut self, name: &str, scale: f32) -> PyResult<()> {
+        set_module_parameter_learning_rate_scale(self.borrow_mut()?, name, scale)
+    }
+
+    fn set_parameters_learning_rate_scale_by_prefix(
+        &mut self,
+        prefix: &str,
+        scale: f32,
+    ) -> PyResult<usize> {
+        set_module_parameters_learning_rate_scale_by_prefix(self.borrow_mut()?, prefix, scale)
+    }
+
+    fn set_parameters_learning_rate_scale_by_suffix(
+        &mut self,
+        suffix: &str,
+        scale: f32,
+    ) -> PyResult<usize> {
+        set_module_parameters_learning_rate_scale_by_suffix(self.borrow_mut()?, suffix, scale)
+    }
+
+    fn set_parameters_learning_rate_scale_by_contains(
+        &mut self,
+        needle: &str,
+        scale: f32,
+    ) -> PyResult<usize> {
+        set_module_parameters_learning_rate_scale_by_contains(self.borrow_mut()?, needle, scale)
+    }
+
+    fn set_parameter_weight_decay(&mut self, name: &str, weight_decay: f32) -> PyResult<()> {
+        set_module_parameter_weight_decay(self.borrow_mut()?, name, weight_decay)
+    }
+
+    fn set_parameters_weight_decay_by_prefix(
+        &mut self,
+        prefix: &str,
+        weight_decay: f32,
+    ) -> PyResult<usize> {
+        set_module_parameters_weight_decay_by_prefix(self.borrow_mut()?, prefix, weight_decay)
+    }
+
+    fn set_parameters_weight_decay_by_suffix(
+        &mut self,
+        suffix: &str,
+        weight_decay: f32,
+    ) -> PyResult<usize> {
+        set_module_parameters_weight_decay_by_suffix(self.borrow_mut()?, suffix, weight_decay)
+    }
+
+    fn set_parameters_weight_decay_by_contains(
+        &mut self,
+        needle: &str,
+        weight_decay: f32,
+    ) -> PyResult<usize> {
+        set_module_parameters_weight_decay_by_contains(self.borrow_mut()?, needle, weight_decay)
+    }
+
+    #[pyo3(signature = (before, tolerance=0.0))]
+    fn parameter_movement(
+        &self,
+        py: Python<'_>,
+        before: &Bound<'_, PyDict>,
+        tolerance: f32,
+    ) -> PyResult<PyObject> {
+        parameter_movement_py(py, self.borrow()?, before, tolerance)
+    }
+
+    fn state_fingerprint(&self, py: Python<'_>) -> PyResult<PyObject> {
+        state_fingerprint_py(py, self.borrow()?)
+    }
+
+    fn training_state_fingerprint(&self, py: Python<'_>) -> PyResult<PyObject> {
+        training_state_fingerprint_py(py, self.borrow()?)
+    }
+
     fn state_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
         let state = convert(self.borrow()?.state_dict())?;
         state_to_pydict(py, state)
@@ -2409,6 +7084,48 @@ impl PySequentialModule {
     fn load_state_dict(&mut self, dict: &Bound<'_, PyDict>) -> PyResult<()> {
         let state = pydict_to_state(dict)?;
         convert(self.borrow_mut()?.load_state_dict(&state))
+    }
+
+    fn load_state_dict_checked(
+        &mut self,
+        py: Python<'_>,
+        dict: &Bound<'_, PyDict>,
+    ) -> PyResult<PyObject> {
+        checked_load_state_py(py, self.borrow_mut()?, dict)
+    }
+
+    fn load_state_dict_subset_checked(
+        &mut self,
+        py: Python<'_>,
+        dict: &Bound<'_, PyDict>,
+    ) -> PyResult<PyObject> {
+        checked_load_state_subset_py(py, self.borrow_mut()?, dict)
+    }
+
+    fn load_state_dict_subset_mapped_checked(
+        &mut self,
+        py: Python<'_>,
+        dict: &Bound<'_, PyDict>,
+        key_map: &Bound<'_, PyDict>,
+    ) -> PyResult<PyObject> {
+        checked_load_state_subset_mapped_py(py, self.borrow_mut()?, dict, key_map)
+    }
+
+    fn state_dict_compatibility(
+        &self,
+        py: Python<'_>,
+        dict: &Bound<'_, PyDict>,
+    ) -> PyResult<PyObject> {
+        state_dict_compatibility_py(py, self.borrow()?, dict)
+    }
+
+    fn state_dict_compatibility_with_key_map(
+        &self,
+        py: Python<'_>,
+        dict: &Bound<'_, PyDict>,
+        key_map: &Bound<'_, PyDict>,
+    ) -> PyResult<PyObject> {
+        state_dict_compatibility_mapped_py(py, self.borrow()?, dict, key_map)
     }
 }
 
@@ -2601,8 +7318,13 @@ fn frac_fft_py(signal: Vec<Complex64>, inverse: bool) -> PyResult<Vec<Complex64>
 
 #[pymodule]
 fn nn(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(sparse_classification_delta_py, m)?)?;
+    m.add_function(wrap_pyfunction!(compare_sparse_finetune_summaries_py, m)?)?;
     m.add_class::<PyMeanSquaredError>()?;
+    m.add_class::<PySoftmaxCrossEntropy>()?;
     m.add_class::<PyLinearModule>()?;
+    m.add_class::<PyLoraLinearModule>()?;
+    m.add_class::<PyReluModule>()?;
     m.add_class::<PyConv1dModule>()?;
     m.add_class::<PyWaveRnnModule>()?;
     m.add_class::<PyZSpaceProjector>()?;
@@ -2611,7 +7333,12 @@ fn nn(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
         "__all__",
         vec![
             "MeanSquaredError",
+            "SoftmaxCrossEntropy",
+            "sparse_classification_delta",
+            "compare_sparse_finetune_summaries",
             "Linear",
+            "LoraLinear",
+            "Relu",
             "Conv1d",
             "WaveRnn",
             "ZSpaceProjector",
@@ -2620,7 +7347,7 @@ fn nn(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     )?;
     m.setattr(
         "__doc__",
-        "Rust-backed neural network modules: Linear, Conv1d, WaveRnn, ZSpaceProjector, Sequential.",
+        "Rust-backed neural network modules and losses: Linear, LoraLinear, Relu, Conv1d, WaveRnn, ZSpaceProjector, Sequential, MeanSquaredError, SoftmaxCrossEntropy.",
     )?;
     Ok(())
 }
@@ -2645,12 +7372,30 @@ fn frac(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
 #[pymodule]
 fn dataset(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(dataset_from_vec_py, m)?)?;
+    m.add_function(wrap_pyfunction!(byte_lm_windows_py, m)?)?;
+    m.add_function(wrap_pyfunction!(byte_lm_corpus_windows_py, m)?)?;
+    m.add_function(wrap_pyfunction!(padded_byte_lm_samples_py, m)?)?;
+    m.add_function(wrap_pyfunction!(byte_lm_sample_stats_py, m)?)?;
+    m.add_function(wrap_pyfunction!(interleave_replay_samples_py, m)?)?;
     m.add_class::<PyDataLoader>()?;
     m.add_class::<PyDataLoaderIter>()?;
-    m.setattr("__all__", vec!["from_vec", "DataLoader"])?;
+    m.setattr("BYTE_LM_VOCAB", BYTE_LM_VOCAB)?;
+    m.setattr(
+        "__all__",
+        vec![
+            "from_vec",
+            "byte_lm_windows",
+            "byte_lm_corpus_windows",
+            "padded_byte_lm_samples",
+            "byte_lm_sample_stats",
+            "interleave_replay_samples",
+            "BYTE_LM_VOCAB",
+            "DataLoader",
+        ],
+    )?;
     m.setattr(
         "__doc__",
-        "Dataset helpers for SpiralTorch sessions: shuffle, batch, and prefetch in Rust.",
+        "Dataset helpers for SpiralTorch sessions: tokenizerless byte-LM samples, shuffle, batch, and prefetch in Rust.",
     )?;
     Ok(())
 }
@@ -2765,18 +7510,32 @@ fn describe_device(py: Python<'_>, device: Option<&str>) -> PyResult<PyObject> {
 /// SpiralTorch Python module.
 #[pymodule]
 fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
-    let nn_mod = PyModule::new_bound(_py, "nn")?;
+    let sys_modules = _py.import_bound("sys")?.getattr("modules")?;
+
+    let nn_mod = PyModule::new_bound(_py, "spiraltorch.nn")?;
     nn(_py, &nn_mod)?;
     m.add_submodule(&nn_mod)?;
-    let frac_mod = PyModule::new_bound(_py, "frac")?;
+    m.setattr("nn", &nn_mod)?;
+    sys_modules.set_item("spiraltorch.nn", &nn_mod)?;
+    sys_modules.set_item("spiraltorch.spiraltorch.nn", &nn_mod)?;
+    let frac_mod = PyModule::new_bound(_py, "spiraltorch.frac")?;
     frac(_py, &frac_mod)?;
     m.add_submodule(&frac_mod)?;
-    let dataset_mod = PyModule::new_bound(_py, "dataset")?;
+    m.setattr("frac", &frac_mod)?;
+    sys_modules.set_item("spiraltorch.frac", &frac_mod)?;
+    sys_modules.set_item("spiraltorch.spiraltorch.frac", &frac_mod)?;
+    let dataset_mod = PyModule::new_bound(_py, "spiraltorch.dataset")?;
     dataset(_py, &dataset_mod)?;
     m.add_submodule(&dataset_mod)?;
-    let sot_mod = PyModule::new_bound(_py, "sot")?;
+    m.setattr("dataset", &dataset_mod)?;
+    sys_modules.set_item("spiraltorch.dataset", &dataset_mod)?;
+    sys_modules.set_item("spiraltorch.spiraltorch.dataset", &dataset_mod)?;
+    let sot_mod = PyModule::new_bound(_py, "spiraltorch.sot")?;
     sot::module(_py, &sot_mod)?;
     m.add_submodule(&sot_mod)?;
+    m.setattr("sot", &sot_mod)?;
+    sys_modules.set_item("spiraltorch.sot", &sot_mod)?;
+    sys_modules.set_item("spiraltorch.spiraltorch.sot", &sot_mod)?;
     m.add_function(wrap_pyfunction!(plan, m)?)?;
     m.add_function(wrap_pyfunction!(plan_compaction_py, m)?)?;
     m.add_function(wrap_pyfunction!(plan_topk, m)?)?;
@@ -2785,6 +7544,7 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(hip_probe, m)?)?;
     m.add_function(wrap_pyfunction!(describe_device, m)?)?;
     m.add_function(wrap_pyfunction!(get_psychoid_stats, m)?)?;
+    m.add_function(wrap_pyfunction!(summarize_epoch_history_py, m)?)?;
     m.add_class::<PyTensor>()?;
     m.add_class::<PyComplexTensor>()?;
     m.add_class::<PyBarycenterIntermediate>()?;
@@ -2798,6 +7558,11 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyDistConfig>()?;
     m.add_class::<PyRoundtableSchedule>()?;
     m.add_class::<PyEpochStats>()?;
+    m.add_class::<PyEpochHistory>()?;
+    m.add_class::<PyEpochBestState>()?;
+    m.add_class::<PyEpochValidationBestState>()?;
+    m.add_class::<PyEpochSparseRetentionBestState>()?;
+    m.add_class::<PySparseFineTuneReport>()?;
     m.add_class::<PyModuleTrainer>()?;
     m.add_class::<PySpiralSessionBuilder>()?;
     m.add_class::<PySpiralSession>()?;
@@ -2812,6 +7577,7 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
             "hip_probe",
             "describe_device",
             "get_psychoid_stats",
+            "summarize_epoch_history",
             "Tensor",
             "ComplexTensor",
             "BarycenterIntermediate",
@@ -2825,6 +7591,11 @@ fn spiraltorch(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
             "DistConfig",
             "RoundtableSchedule",
             "EpochStats",
+            "EpochHistory",
+            "EpochBestState",
+            "EpochValidationBestState",
+            "EpochSparseRetentionBestState",
+            "SparseFineTuneReport",
             "ModuleTrainer",
             "SpiralSessionBuilder",
             "SpiralSession",

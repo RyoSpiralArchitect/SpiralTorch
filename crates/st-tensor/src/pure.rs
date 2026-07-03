@@ -38,6 +38,8 @@ pub enum TensorError {
         left: (usize, usize),
         right: (usize, usize),
     },
+    /// A sparse class target was not an integer class id within the vocabulary.
+    InvalidClassIndex { index: f32, classes: usize },
     /// A value that must be strictly negative curvature was not.
     NonHyperbolicCurvature { curvature: f32 },
     /// Temperature must stay positive for wave encoders.
@@ -93,6 +95,12 @@ impl fmt::Display for TensorError {
                     f,
                     "shape mismatch: left={:?}, right={:?} cannot be combined",
                     left, right
+                )
+            }
+            TensorError::InvalidClassIndex { index, classes } => {
+                write!(
+                    f,
+                    "class index {index} is outside 0..{classes} or is not an integer"
                 )
             }
             TensorError::NonHyperbolicCurvature { curvature } => {

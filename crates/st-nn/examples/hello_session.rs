@@ -48,6 +48,7 @@ fn main() -> PureResult<()> {
     session.prepare_module(&mut model)?;
 
     let mut trainer = session.trainer();
+    trainer.set_gradient_accumulation_steps(2)?;
     #[allow(unused_mut)]
     let mut config = RoundtableConfig::default();
     #[cfg(feature = "psi")]
@@ -72,13 +73,28 @@ fn main() -> PureResult<()> {
         ),
     ])
     .shuffle(0xC0FFEE)
-    .batched(2)
+    .batched(1)
     .prefetch(2);
 
-    let stats = trainer.train_epoch(&mut model, &mut loss, dataset, &schedule)?;
+    let eval_before = session.evaluate_epoch(&trainer, &model, &mut loss, dataset.clone())?;
+    let best = session.train_epochs_restore_best_on_validation(
+        &mut trainer,
+        &mut model,
+        &mut loss,
+        dataset.clone(),
+        dataset.clone(),
+        &schedule,
+        3,
+    )?;
+    let eval_after = session.evaluate_epoch(&trainer, &model, &mut loss, dataset)?;
     println!(
-        "roundtable avg loss {:.6} over {} batches",
-        stats.average_loss, stats.batches
+        "roundtable eval row loss {:.6} -> {:.6}; best validation row loss {:.6} at epoch {:?} over {} train batches / {} optimizer steps",
+        eval_before.average_loss_per_row,
+        eval_after.average_loss_per_row,
+        best.validation_summary.best_loss_per_row,
+        best.validation_summary.best_epoch,
+        best.train_summary.batches,
+        best.train_summary.optimizer_steps
     );
 
     Ok(())

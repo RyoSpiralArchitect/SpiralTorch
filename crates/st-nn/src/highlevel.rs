@@ -1,5 +1,11 @@
+use crate::dataset::DataLoader;
+use crate::loss::{SoftmaxCrossEntropy, SparseClassificationMetrics};
 use crate::module::Module;
-use crate::trainer::ModuleTrainer;
+use crate::trainer::{
+    EarlyStoppingConfig, EpochBestState, EpochRetentionBestState, EpochSparseRetentionBestState,
+    EpochStats, EpochValidationBestState, IntoBatch, ModuleTrainer, RetentionGuardConfig,
+    SparseFineTuneReport, SparseRetentionGuardConfig, ValidationTrainingControls,
+};
 use crate::{BandEnergy, GradientBands, Loss, RoundtableConfig, RoundtableSchedule};
 use st_core::backend::device_caps::{BackendKind, DeviceCaps};
 use st_core::backend::unison_heuristics::RankKind;
@@ -658,13 +664,562 @@ impl SpiralSession {
         loss: &mut L,
         batches: I,
         schedule: &RoundtableSchedule,
-    ) -> PureResult<crate::trainer::EpochStats>
+    ) -> PureResult<EpochStats>
     where
         M: Module,
         L: Loss,
-        I: IntoIterator<Item = (Tensor, Tensor)>,
+        I: IntoIterator,
+        I::Item: IntoBatch,
     {
         trainer.train_epoch(module, loss, batches, schedule)
+    }
+
+    /// Evaluates a module without mutating parameters or accumulators.
+    pub fn evaluate_epoch<M, L, I>(
+        &self,
+        trainer: &ModuleTrainer,
+        module: &M,
+        loss: &mut L,
+        batches: I,
+    ) -> PureResult<EpochStats>
+    where
+        M: Module,
+        L: Loss,
+        I: IntoIterator,
+        I::Item: IntoBatch,
+    {
+        trainer.evaluate_epoch(module, loss, batches)
+    }
+
+    /// Evaluates sparse class-id targets with active-row accuracy and perplexity.
+    pub fn evaluate_sparse_classification_epoch<M, I>(
+        &self,
+        trainer: &ModuleTrainer,
+        module: &M,
+        loss: &SoftmaxCrossEntropy,
+        batches: I,
+    ) -> PureResult<SparseClassificationMetrics>
+    where
+        M: Module,
+        I: IntoIterator,
+        I::Item: IntoBatch,
+    {
+        trainer.evaluate_sparse_classification_epoch(module, loss, batches)
+    }
+
+    /// Runs multiple epochs through the session-level trainer surface.
+    pub fn train_epochs<M, L>(
+        &self,
+        trainer: &mut ModuleTrainer,
+        module: &mut M,
+        loss: &mut L,
+        loader: DataLoader,
+        schedule: &RoundtableSchedule,
+        epochs: usize,
+    ) -> PureResult<Vec<EpochStats>>
+    where
+        M: Module,
+        L: Loss,
+    {
+        trainer.train_epochs(module, loss, loader, schedule, epochs)
+    }
+
+    /// Runs multiple epochs and captures best/final states without restoring.
+    pub fn train_epochs_capture_best<M, L>(
+        &self,
+        trainer: &mut ModuleTrainer,
+        module: &mut M,
+        loss: &mut L,
+        loader: DataLoader,
+        schedule: &RoundtableSchedule,
+        epochs: usize,
+    ) -> PureResult<EpochBestState>
+    where
+        M: Module,
+        L: Loss,
+    {
+        trainer.train_epochs_capture_best(module, loss, loader, schedule, epochs)
+    }
+
+    /// Runs multiple epochs and restores the module to the best row-weighted epoch.
+    pub fn train_epochs_restore_best<M, L>(
+        &self,
+        trainer: &mut ModuleTrainer,
+        module: &mut M,
+        loss: &mut L,
+        loader: DataLoader,
+        schedule: &RoundtableSchedule,
+        epochs: usize,
+    ) -> PureResult<EpochBestState>
+    where
+        M: Module,
+        L: Loss,
+    {
+        trainer.train_epochs_restore_best(module, loss, loader, schedule, epochs)
+    }
+
+    /// Runs multiple epochs and captures the best state using validation loss.
+    pub fn train_epochs_capture_best_on_validation<M, L>(
+        &self,
+        trainer: &mut ModuleTrainer,
+        module: &mut M,
+        loss: &mut L,
+        train_loader: DataLoader,
+        validation_loader: DataLoader,
+        schedule: &RoundtableSchedule,
+        epochs: usize,
+    ) -> PureResult<EpochValidationBestState>
+    where
+        M: Module,
+        L: Loss,
+    {
+        trainer.train_epochs_capture_best_on_validation(
+            module,
+            loss,
+            train_loader,
+            validation_loader,
+            schedule,
+            epochs,
+        )
+    }
+
+    /// Runs multiple epochs, captures the best validation state, and can stop early.
+    pub fn train_epochs_capture_best_on_validation_with_early_stopping<M, L>(
+        &self,
+        trainer: &mut ModuleTrainer,
+        module: &mut M,
+        loss: &mut L,
+        train_loader: DataLoader,
+        validation_loader: DataLoader,
+        schedule: &RoundtableSchedule,
+        epochs: usize,
+        early_stopping: EarlyStoppingConfig,
+    ) -> PureResult<EpochValidationBestState>
+    where
+        M: Module,
+        L: Loss,
+    {
+        trainer.train_epochs_capture_best_on_validation_with_early_stopping(
+            module,
+            loss,
+            train_loader,
+            validation_loader,
+            schedule,
+            epochs,
+            early_stopping,
+        )
+    }
+
+    /// Runs multiple epochs, captures the best validation state, and applies FT controls.
+    pub fn train_epochs_capture_best_on_validation_with_controls<M, L>(
+        &self,
+        trainer: &mut ModuleTrainer,
+        module: &mut M,
+        loss: &mut L,
+        train_loader: DataLoader,
+        validation_loader: DataLoader,
+        schedule: &RoundtableSchedule,
+        epochs: usize,
+        controls: ValidationTrainingControls,
+    ) -> PureResult<EpochValidationBestState>
+    where
+        M: Module,
+        L: Loss,
+    {
+        trainer.train_epochs_capture_best_on_validation_with_controls(
+            module,
+            loss,
+            train_loader,
+            validation_loader,
+            schedule,
+            epochs,
+            controls,
+        )
+    }
+
+    /// Runs multiple epochs and restores the module to the best validation epoch.
+    pub fn train_epochs_restore_best_on_validation<M, L>(
+        &self,
+        trainer: &mut ModuleTrainer,
+        module: &mut M,
+        loss: &mut L,
+        train_loader: DataLoader,
+        validation_loader: DataLoader,
+        schedule: &RoundtableSchedule,
+        epochs: usize,
+    ) -> PureResult<EpochValidationBestState>
+    where
+        M: Module,
+        L: Loss,
+    {
+        trainer.train_epochs_restore_best_on_validation(
+            module,
+            loss,
+            train_loader,
+            validation_loader,
+            schedule,
+            epochs,
+        )
+    }
+
+    /// Runs validation-selected epochs with early stopping and restores the best state.
+    pub fn train_epochs_restore_best_on_validation_with_early_stopping<M, L>(
+        &self,
+        trainer: &mut ModuleTrainer,
+        module: &mut M,
+        loss: &mut L,
+        train_loader: DataLoader,
+        validation_loader: DataLoader,
+        schedule: &RoundtableSchedule,
+        epochs: usize,
+        early_stopping: EarlyStoppingConfig,
+    ) -> PureResult<EpochValidationBestState>
+    where
+        M: Module,
+        L: Loss,
+    {
+        trainer.train_epochs_restore_best_on_validation_with_early_stopping(
+            module,
+            loss,
+            train_loader,
+            validation_loader,
+            schedule,
+            epochs,
+            early_stopping,
+        )
+    }
+
+    /// Runs validation-selected epochs with FT controls and restores the best state.
+    pub fn train_epochs_restore_best_on_validation_with_controls<M, L>(
+        &self,
+        trainer: &mut ModuleTrainer,
+        module: &mut M,
+        loss: &mut L,
+        train_loader: DataLoader,
+        validation_loader: DataLoader,
+        schedule: &RoundtableSchedule,
+        epochs: usize,
+        controls: ValidationTrainingControls,
+    ) -> PureResult<EpochValidationBestState>
+    where
+        M: Module,
+        L: Loss,
+    {
+        trainer.train_epochs_restore_best_on_validation_with_controls(
+            module,
+            loss,
+            train_loader,
+            validation_loader,
+            schedule,
+            epochs,
+            controls,
+        )
+    }
+
+    /// Runs fine-tuning epochs and captures the best validation state that
+    /// stays within a source-retention loss guard.
+    pub fn train_epochs_capture_best_with_retention_guard<M, L>(
+        &self,
+        trainer: &mut ModuleTrainer,
+        module: &mut M,
+        loss: &mut L,
+        train_loader: DataLoader,
+        validation_loader: DataLoader,
+        retention_loader: DataLoader,
+        schedule: &RoundtableSchedule,
+        epochs: usize,
+        retention_guard: RetentionGuardConfig,
+    ) -> PureResult<EpochRetentionBestState>
+    where
+        M: Module,
+        L: Loss,
+    {
+        trainer.train_epochs_capture_best_with_retention_guard(
+            module,
+            loss,
+            train_loader,
+            validation_loader,
+            retention_loader,
+            schedule,
+            epochs,
+            retention_guard,
+        )
+    }
+
+    /// Runs retention-guarded fine-tuning with validation controls and captures
+    /// the selected state without restoring it.
+    pub fn train_epochs_capture_best_with_retention_guard_and_controls<M, L>(
+        &self,
+        trainer: &mut ModuleTrainer,
+        module: &mut M,
+        loss: &mut L,
+        train_loader: DataLoader,
+        validation_loader: DataLoader,
+        retention_loader: DataLoader,
+        schedule: &RoundtableSchedule,
+        epochs: usize,
+        retention_guard: RetentionGuardConfig,
+        controls: ValidationTrainingControls,
+    ) -> PureResult<EpochRetentionBestState>
+    where
+        M: Module,
+        L: Loss,
+    {
+        trainer.train_epochs_capture_best_with_retention_guard_and_controls(
+            module,
+            loss,
+            train_loader,
+            validation_loader,
+            retention_loader,
+            schedule,
+            epochs,
+            retention_guard,
+            controls,
+        )
+    }
+
+    /// Runs retention-guarded fine-tuning and restores the selected state.
+    pub fn train_epochs_restore_best_with_retention_guard<M, L>(
+        &self,
+        trainer: &mut ModuleTrainer,
+        module: &mut M,
+        loss: &mut L,
+        train_loader: DataLoader,
+        validation_loader: DataLoader,
+        retention_loader: DataLoader,
+        schedule: &RoundtableSchedule,
+        epochs: usize,
+        retention_guard: RetentionGuardConfig,
+    ) -> PureResult<EpochRetentionBestState>
+    where
+        M: Module,
+        L: Loss,
+    {
+        trainer.train_epochs_restore_best_with_retention_guard(
+            module,
+            loss,
+            train_loader,
+            validation_loader,
+            retention_loader,
+            schedule,
+            epochs,
+            retention_guard,
+        )
+    }
+
+    /// Runs retention-guarded fine-tuning with validation controls and restores
+    /// the selected state.
+    pub fn train_epochs_restore_best_with_retention_guard_and_controls<M, L>(
+        &self,
+        trainer: &mut ModuleTrainer,
+        module: &mut M,
+        loss: &mut L,
+        train_loader: DataLoader,
+        validation_loader: DataLoader,
+        retention_loader: DataLoader,
+        schedule: &RoundtableSchedule,
+        epochs: usize,
+        retention_guard: RetentionGuardConfig,
+        controls: ValidationTrainingControls,
+    ) -> PureResult<EpochRetentionBestState>
+    where
+        M: Module,
+        L: Loss,
+    {
+        trainer.train_epochs_restore_best_with_retention_guard_and_controls(
+            module,
+            loss,
+            train_loader,
+            validation_loader,
+            retention_loader,
+            schedule,
+            epochs,
+            retention_guard,
+            controls,
+        )
+    }
+
+    /// Runs sparse-classification fine-tuning and captures the best target
+    /// validation state that satisfies source-retention metric guards.
+    pub fn train_epochs_capture_best_sparse_with_retention_guard<M>(
+        &self,
+        trainer: &mut ModuleTrainer,
+        module: &mut M,
+        loss: &mut SoftmaxCrossEntropy,
+        train_loader: DataLoader,
+        validation_loader: DataLoader,
+        retention_loader: DataLoader,
+        schedule: &RoundtableSchedule,
+        epochs: usize,
+        retention_guard: SparseRetentionGuardConfig,
+    ) -> PureResult<EpochSparseRetentionBestState>
+    where
+        M: Module,
+    {
+        trainer.train_epochs_capture_best_sparse_with_retention_guard(
+            module,
+            loss,
+            train_loader,
+            validation_loader,
+            retention_loader,
+            schedule,
+            epochs,
+            retention_guard,
+        )
+    }
+
+    /// Runs sparse-classification fine-tuning with validation controls and
+    /// captures the selected guarded state without restoring it.
+    pub fn train_epochs_capture_best_sparse_with_retention_guard_and_controls<M>(
+        &self,
+        trainer: &mut ModuleTrainer,
+        module: &mut M,
+        loss: &mut SoftmaxCrossEntropy,
+        train_loader: DataLoader,
+        validation_loader: DataLoader,
+        retention_loader: DataLoader,
+        schedule: &RoundtableSchedule,
+        epochs: usize,
+        retention_guard: SparseRetentionGuardConfig,
+        controls: ValidationTrainingControls,
+    ) -> PureResult<EpochSparseRetentionBestState>
+    where
+        M: Module,
+    {
+        trainer.train_epochs_capture_best_sparse_with_retention_guard_and_controls(
+            module,
+            loss,
+            train_loader,
+            validation_loader,
+            retention_loader,
+            schedule,
+            epochs,
+            retention_guard,
+            controls,
+        )
+    }
+
+    /// Runs sparse-classification fine-tuning and restores the selected guarded state.
+    pub fn train_epochs_restore_best_sparse_with_retention_guard<M>(
+        &self,
+        trainer: &mut ModuleTrainer,
+        module: &mut M,
+        loss: &mut SoftmaxCrossEntropy,
+        train_loader: DataLoader,
+        validation_loader: DataLoader,
+        retention_loader: DataLoader,
+        schedule: &RoundtableSchedule,
+        epochs: usize,
+        retention_guard: SparseRetentionGuardConfig,
+    ) -> PureResult<EpochSparseRetentionBestState>
+    where
+        M: Module,
+    {
+        trainer.train_epochs_restore_best_sparse_with_retention_guard(
+            module,
+            loss,
+            train_loader,
+            validation_loader,
+            retention_loader,
+            schedule,
+            epochs,
+            retention_guard,
+        )
+    }
+
+    /// Runs sparse-classification fine-tuning with validation controls and
+    /// restores the selected guarded state.
+    pub fn train_epochs_restore_best_sparse_with_retention_guard_and_controls<M>(
+        &self,
+        trainer: &mut ModuleTrainer,
+        module: &mut M,
+        loss: &mut SoftmaxCrossEntropy,
+        train_loader: DataLoader,
+        validation_loader: DataLoader,
+        retention_loader: DataLoader,
+        schedule: &RoundtableSchedule,
+        epochs: usize,
+        retention_guard: SparseRetentionGuardConfig,
+        controls: ValidationTrainingControls,
+    ) -> PureResult<EpochSparseRetentionBestState>
+    where
+        M: Module,
+    {
+        trainer.train_epochs_restore_best_sparse_with_retention_guard_and_controls(
+            module,
+            loss,
+            train_loader,
+            validation_loader,
+            retention_loader,
+            schedule,
+            epochs,
+            retention_guard,
+            controls,
+        )
+    }
+
+    /// Runs sparse-classification fine-tuning, restores the selected guarded
+    /// state, and returns target/retention deltas plus parameter movement.
+    pub fn train_epochs_restore_best_sparse_with_finetune_report<M>(
+        &self,
+        trainer: &mut ModuleTrainer,
+        module: &mut M,
+        loss: &mut SoftmaxCrossEntropy,
+        train_loader: DataLoader,
+        validation_loader: DataLoader,
+        retention_loader: DataLoader,
+        schedule: &RoundtableSchedule,
+        epochs: usize,
+        retention_guard: SparseRetentionGuardConfig,
+        movement_tolerance: f32,
+    ) -> PureResult<SparseFineTuneReport>
+    where
+        M: Module,
+    {
+        trainer.train_epochs_restore_best_sparse_with_finetune_report(
+            module,
+            loss,
+            train_loader,
+            validation_loader,
+            retention_loader,
+            schedule,
+            epochs,
+            retention_guard,
+            movement_tolerance,
+        )
+    }
+
+    /// Runs sparse-classification fine-tuning with validation controls,
+    /// restores the selected guarded state, and returns FT diagnostics.
+    pub fn train_epochs_restore_best_sparse_with_finetune_report_and_controls<M>(
+        &self,
+        trainer: &mut ModuleTrainer,
+        module: &mut M,
+        loss: &mut SoftmaxCrossEntropy,
+        train_loader: DataLoader,
+        validation_loader: DataLoader,
+        retention_loader: DataLoader,
+        schedule: &RoundtableSchedule,
+        epochs: usize,
+        retention_guard: SparseRetentionGuardConfig,
+        movement_tolerance: f32,
+        controls: ValidationTrainingControls,
+    ) -> PureResult<SparseFineTuneReport>
+    where
+        M: Module,
+    {
+        trainer.train_epochs_restore_best_sparse_with_finetune_report_and_controls(
+            module,
+            loss,
+            train_loader,
+            validation_loader,
+            retention_loader,
+            schedule,
+            epochs,
+            retention_guard,
+            movement_tolerance,
+            controls,
+        )
     }
 
     /// Creates a roundtable schedule for the provided configuration.
@@ -677,7 +1232,7 @@ impl SpiralSession {
 mod tests {
     use super::*;
     use crate::layers::linear::Linear;
-    use crate::loss::MeanSquaredError;
+    use crate::loss::{MeanSquaredError, SoftmaxCrossEntropy};
     use st_tensor::pure::measure::BarycenterIntermediate;
 
     fn toy_tensor(a: &[f32]) -> Tensor {
@@ -740,6 +1295,151 @@ mod tests {
         assert!(energy.here >= 0.0);
         let bands = session.split_bands(&toy_tensor(&[0.1]), &schedule).unwrap();
         assert_eq!(bands.here().shape(), (1, 1));
+    }
+
+    #[test]
+    fn session_restores_best_epoch_from_dataloader() {
+        let session = SpiralSession::builder(DeviceCaps::wgpu(32, true, 256))
+            .with_curvature(-1.0)
+            .with_hyper_learning_rate(0.05)
+            .with_fallback_learning_rate(0.01)
+            .build()
+            .unwrap();
+        let mut module = Linear::new("toy", 1, 1).unwrap();
+        session.prepare_module(&mut module).unwrap();
+        let mut trainer = session.trainer();
+        let schedule = session.roundtable(1, 1, RoundtableConfig::default());
+        let mut loss = MeanSquaredError::default();
+        let loader = crate::dataset::from_vec(vec![
+            (toy_tensor(&[0.0]), toy_tensor(&[0.0])),
+            (toy_tensor(&[1.0]), toy_tensor(&[1.0])),
+        ])
+        .batched(1);
+
+        let captured = session
+            .train_epochs_restore_best(&mut trainer, &mut module, &mut loss, loader, &schedule, 3)
+            .unwrap();
+
+        assert_eq!(captured.history.len(), 3);
+        assert_eq!(captured.summary.epochs, 3);
+        assert_eq!(captured.summary.rows, 6);
+        assert!(captured.summary.best_epoch.is_some());
+        assert_eq!(
+            module.state_fingerprint().unwrap(),
+            captured.best_fingerprint
+        );
+    }
+
+    #[test]
+    fn session_evaluates_dataloader_without_state_change() {
+        let session = SpiralSession::builder(DeviceCaps::wgpu(32, true, 256))
+            .with_curvature(-1.0)
+            .with_hyper_learning_rate(0.05)
+            .with_fallback_learning_rate(0.01)
+            .build()
+            .unwrap();
+        let mut module = Linear::new("eval", 1, 1).unwrap();
+        session.prepare_module(&mut module).unwrap();
+        let trainer = session.trainer();
+        let before = module.state_fingerprint().unwrap();
+        let loader = crate::dataset::from_vec(vec![
+            (toy_tensor(&[0.0]), toy_tensor(&[0.0])),
+            (toy_tensor(&[1.0]), toy_tensor(&[1.0])),
+        ])
+        .batched(1);
+        let mut loss = MeanSquaredError::default();
+
+        let stats = session
+            .evaluate_epoch(&trainer, &module, &mut loss, loader)
+            .unwrap();
+
+        assert_eq!(stats.batches, 2);
+        assert_eq!(stats.rows, 2);
+        assert!(stats.average_loss_per_row.is_finite());
+        assert_eq!(module.state_fingerprint().unwrap(), before);
+    }
+
+    #[test]
+    fn session_evaluates_sparse_classification_metrics_without_state_change() {
+        let session = SpiralSession::builder(DeviceCaps::wgpu(32, true, 256))
+            .with_curvature(-1.0)
+            .with_hyper_learning_rate(0.05)
+            .with_fallback_learning_rate(0.01)
+            .build()
+            .unwrap();
+        let mut module = Linear::new("sparse_eval", 2, 2).unwrap();
+        session.prepare_module(&mut module).unwrap();
+        let trainer = session.trainer();
+        let before = module.state_fingerprint().unwrap();
+        let loader = crate::dataset::from_vec(vec![
+            (
+                Tensor::from_vec(1, 2, vec![1.0, 0.0]).unwrap(),
+                Tensor::from_vec(1, 1, vec![0.0]).unwrap(),
+            ),
+            (
+                Tensor::from_vec(1, 2, vec![0.0, 1.0]).unwrap(),
+                Tensor::from_vec(1, 1, vec![1.0]).unwrap(),
+            ),
+        ])
+        .batched(1);
+        let loss = SoftmaxCrossEntropy::new();
+
+        let metrics = session
+            .evaluate_sparse_classification_epoch(&trainer, &module, &loss, loader)
+            .unwrap();
+
+        assert_eq!(metrics.active_rows, 2);
+        assert!(metrics.accuracy.is_finite());
+        assert!(metrics.mean_loss.is_finite());
+        assert!(metrics.perplexity.is_finite());
+        assert_eq!(module.state_fingerprint().unwrap(), before);
+    }
+
+    #[test]
+    fn session_restores_best_epoch_from_validation_loader() {
+        let session = SpiralSession::builder(DeviceCaps::wgpu(32, true, 256))
+            .with_curvature(-1.0)
+            .with_hyper_learning_rate(0.05)
+            .with_fallback_learning_rate(0.01)
+            .build()
+            .unwrap();
+        let mut module = Linear::new("validation", 1, 1).unwrap();
+        session.prepare_module(&mut module).unwrap();
+        let mut trainer = session.trainer();
+        let schedule = session.roundtable(1, 1, RoundtableConfig::default());
+        let train_loader = crate::dataset::from_vec(vec![
+            (toy_tensor(&[0.0]), toy_tensor(&[0.0])),
+            (toy_tensor(&[1.0]), toy_tensor(&[1.0])),
+        ])
+        .batched(1);
+        let validation_loader = crate::dataset::from_vec(vec![
+            (toy_tensor(&[0.25]), toy_tensor(&[0.25])),
+            (toy_tensor(&[0.75]), toy_tensor(&[0.75])),
+        ])
+        .batched(1);
+        let mut loss = MeanSquaredError::default();
+
+        let captured = session
+            .train_epochs_restore_best_on_validation(
+                &mut trainer,
+                &mut module,
+                &mut loss,
+                train_loader,
+                validation_loader,
+                &schedule,
+                3,
+            )
+            .unwrap();
+
+        assert_eq!(captured.train_history.len(), 3);
+        assert_eq!(captured.validation_history.len(), 3);
+        assert_eq!(captured.train_summary.epochs, 3);
+        assert_eq!(captured.validation_summary.epochs, 3);
+        assert!(captured.validation_summary.best_epoch.is_some());
+        assert_eq!(
+            module.state_fingerprint().unwrap(),
+            captured.best_fingerprint
+        );
     }
 
     #[test]

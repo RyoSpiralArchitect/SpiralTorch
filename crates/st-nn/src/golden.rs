@@ -163,30 +163,55 @@ impl GoldenRetriever {
 pub struct GoldenEpochReport {
     pub workers: usize,
     pub batches: usize,
+    pub rows: usize,
     pub total_loss: f32,
+    pub total_row_weighted_loss: f32,
     pub average_loss: f32,
+    pub average_loss_per_row: f32,
     pub per_worker: Vec<EpochStats>,
 }
 
 impl GoldenEpochReport {
     fn from_stats(runtime: &GoldenRuntime, per_worker: Vec<EpochStats>) -> Self {
         let workers = per_worker.len();
-        let (total_loss, total_batches) = runtime.reduce(
+        let (total_loss, total_batches, total_row_weighted_loss, total_rows) = runtime.reduce(
             &per_worker,
-            |stats| (stats.total_loss, stats.batches),
-            |left, right| (left.0 + right.0, left.1 + right.1),
-            (0.0f32, 0usize),
+            |stats| {
+                (
+                    stats.total_loss,
+                    stats.batches,
+                    stats.total_row_weighted_loss,
+                    stats.rows,
+                )
+            },
+            |left, right| {
+                (
+                    left.0 + right.0,
+                    left.1 + right.1,
+                    left.2 + right.2,
+                    left.3 + right.3,
+                )
+            },
+            (0.0f32, 0usize, 0.0f32, 0usize),
         );
         let average_loss = if total_batches > 0 {
             total_loss / total_batches as f32
         } else {
             0.0
         };
+        let average_loss_per_row = if total_rows > 0 {
+            total_row_weighted_loss / total_rows as f32
+        } else {
+            0.0
+        };
         Self {
             workers,
             batches: total_batches,
+            rows: total_rows,
             total_loss,
+            total_row_weighted_loss,
             average_loss,
+            average_loss_per_row,
             per_worker,
         }
     }

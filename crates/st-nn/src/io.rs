@@ -1,4 +1,4 @@
-use crate::module::Module;
+use crate::module::{Module, StateLoadReport};
 use crate::{PureResult, Tensor, TensorError};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -77,6 +77,17 @@ pub fn load_json<M: Module, P: AsRef<Path>>(module: &mut M, path: P) -> PureResu
     module.load_state_dict(&state)
 }
 
+pub fn load_json_checked<M: Module, P: AsRef<Path>>(
+    module: &mut M,
+    path: P,
+) -> PureResult<StateLoadReport> {
+    let file = File::open(path.as_ref()).map_err(io_error)?;
+    let reader = BufReader::new(file);
+    let snapshot: ModuleSnapshot = serde_json::from_reader(reader).map_err(serde_error)?;
+    let state = from_snapshot(snapshot)?;
+    module.load_state_dict_checked(&state)
+}
+
 pub fn save_bincode<M: Module, P: AsRef<Path>>(module: &M, path: P) -> PureResult<()> {
     let snapshot = to_snapshot(module)?;
     let file = File::create(path.as_ref()).map_err(io_error)?;
@@ -91,6 +102,17 @@ pub fn load_bincode<M: Module, P: AsRef<Path>>(module: &mut M, path: P) -> PureR
     let snapshot: ModuleSnapshot = bincode::deserialize_from(reader).map_err(serde_error)?;
     let state = from_snapshot(snapshot)?;
     module.load_state_dict(&state)
+}
+
+pub fn load_bincode_checked<M: Module, P: AsRef<Path>>(
+    module: &mut M,
+    path: P,
+) -> PureResult<StateLoadReport> {
+    let file = File::open(path.as_ref()).map_err(io_error)?;
+    let reader = BufReader::new(file);
+    let snapshot: ModuleSnapshot = bincode::deserialize_from(reader).map_err(serde_error)?;
+    let state = from_snapshot(snapshot)?;
+    module.load_state_dict_checked(&state)
 }
 
 #[cfg(test)]
@@ -114,6 +136,19 @@ mod tests {
     }
 
     #[test]
+    fn checked_json_load_reports_matching_fingerprint() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("linear.json");
+        let mut layer = Linear::new("io", 2, 2).unwrap();
+        save_json(&layer, &path).unwrap();
+        layer.apply_step(0.01).unwrap();
+        let report = load_json_checked(&mut layer, &path).unwrap();
+        assert!(report.matched);
+        assert_eq!(report.source, report.loaded);
+        assert_eq!(report.loaded.parameters, 2);
+    }
+
+    #[test]
     fn save_and_load_roundtrip_bincode() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("linear.bin");
@@ -124,5 +159,18 @@ mod tests {
         let state = layer.state_dict().unwrap();
         assert!(fs::metadata(&path).unwrap().len() > 0);
         assert_eq!(state.len(), 2);
+    }
+
+    #[test]
+    fn checked_bincode_load_reports_matching_fingerprint() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("linear.bin");
+        let mut layer = Linear::new("io", 2, 2).unwrap();
+        save_bincode(&layer, &path).unwrap();
+        layer.apply_step(0.01).unwrap();
+        let report = load_bincode_checked(&mut layer, &path).unwrap();
+        assert!(report.matched);
+        assert_eq!(report.source.hash, report.loaded.hash);
+        assert_eq!(report.loaded.parameters, 2);
     }
 }
