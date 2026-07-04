@@ -135,6 +135,15 @@ def parse_args():
         help="Fail when prompt scope or gated trace metrics differ from --compare-jsonl.",
     )
     parser.add_argument(
+        "--require-runtime-metadata-match",
+        action="store_true",
+        help=(
+            "Fail when trace manifest runtime metadata differs from "
+            "--compare-jsonl. This catches config/tokenizer/model swaps before "
+            "prompt logits are interpreted."
+        ),
+    )
+    parser.add_argument(
         "--require-top-token-match",
         action="store_true",
         help="Fail when a prompt's top next-token id differs from --compare-jsonl.",
@@ -189,6 +198,7 @@ def parse_args():
         )
     compare_gates = [
         args.require_trace_match,
+        args.require_runtime_metadata_match,
         args.require_top_token_match,
         args.max_top_logit_regression is not None,
         args.max_top_probability_regression is not None,
@@ -684,6 +694,63 @@ def prompt_trace_rows(rows):
     return [row for row in rows if row.get("row_type") == "transformers_prompt_trace"]
 
 
+TRACE_RUNTIME_METADATA_FIELDS = [
+    "model_path",
+    "top_k",
+    "local_files_only",
+    "trust_remote_code",
+    "revision",
+    "metadata_only",
+    "capture_hidden_states",
+    "zspace_project",
+    "zspace_source",
+    "transformers_version",
+    "model_loaded",
+    "transformers_config_class",
+    "transformers_model_type",
+    "transformers_architectures",
+    "transformers_config_vocab_size",
+    "transformers_config_hidden_size",
+    "transformers_config_num_hidden_layers",
+    "transformers_config_num_attention_heads",
+    "transformers_config_max_position_embeddings",
+    "transformers_tokenizer_class",
+    "transformers_tokenizer_vocab_size",
+    "transformers_tokenizer_len",
+    "transformers_model_class",
+    "transformers_model_parameter_count",
+]
+
+
+def trace_manifest_row(rows):
+    manifests = [
+        row for row in rows if row.get("row_type") == "transformers_trace_manifest"
+    ]
+    if len(manifests) > 1:
+        raise ValueError("trace JSONL has multiple transformers_trace_manifest rows")
+    return manifests[0] if manifests else None
+
+
+def changed_runtime_metadata_fields(current, baseline):
+    if current is None or baseline is None:
+        return []
+    return [
+        field
+        for field in TRACE_RUNTIME_METADATA_FIELDS
+        if current.get(field) != baseline.get(field)
+    ]
+
+
+def runtime_metadata_failures(current, baseline, changed_fields, args):
+    if not getattr(args, "require_runtime_metadata_match", False):
+        return []
+    if current is None or baseline is None:
+        return ["runtime_metadata_missing"]
+    if changed_fields:
+        return ["runtime_metadata_changed"]
+    return []
+
+
 def prompt_rows_by_index(rows, label):
     by_index = {}
     for row in prompt_trace_rows(rows):
@@ -863,10 +930,22 @@ def compare_prompt_rows(current, baseline, args):
 
 
 def compare_trace_rows(current_rows, baseline_rows, args):
+    current_manifest = trace_manifest_row(current_rows)
+    baseline_manifest = trace_manifest_row(baseline_rows)
+    changed_runtime_fields = changed_runtime_metadata_fields(
+        current_manifest,
+        baseline_manifest,
+    )
+    runtime_failures = runtime_metadata_failures(
+        current_manifest,
+        baseline_manifest,
+        changed_runtime_fields,
+        args,
+    )
     current = prompt_rows_by_index(current_rows, "current")
     baseline = prompt_rows_by_index(baseline_rows, "baseline")
     details = []
-    failures = 0
+    failures = len(runtime_failures)
     missing = sorted(set(baseline) - set(current))
     extra = sorted(set(current) - set(baseline))
     if args.require_trace_match:
@@ -909,6 +988,17 @@ def compare_trace_rows(current_rows, baseline_rows, args):
         "extra_prompt_rows": len(extra),
         "compared_prompt_rows": len(set(current) & set(baseline)),
         "require_trace_match": args.require_trace_match,
+        "require_runtime_metadata_match": getattr(
+            args,
+            "require_runtime_metadata_match",
+            False,
+        ),
+        "runtime_metadata_available": (
+            current_manifest is not None and baseline_manifest is not None
+        ),
+        "runtime_metadata_changed_count": len(changed_runtime_fields),
+        "runtime_metadata_changed_fields": failure_label(changed_runtime_fields),
+        "runtime_metadata_failures": failure_label(runtime_failures),
         "require_top_token_match": args.require_top_token_match,
         "max_top_logit_regression": args.max_top_logit_regression,
         "max_top_probability_regression": args.max_top_probability_regression,
@@ -952,6 +1042,8 @@ def print_compare_summary(row):
         f"current_prompt_rows={row['current_prompt_rows']} "
         f"missing_prompt_rows={row['missing_prompt_rows']} "
         f"extra_prompt_rows={row['extra_prompt_rows']} "
+        f"runtime_metadata_changed_count={row['runtime_metadata_changed_count']} "
+        f"runtime_metadata_failures={row['runtime_metadata_failures']} "
         f"prompt_changed_rows={row['prompt_changed_rows']} "
         f"top_token_changed_rows={row['top_token_changed_rows']} "
         f"zspace_status_changed_rows={row['zspace_status_changed_rows']} "

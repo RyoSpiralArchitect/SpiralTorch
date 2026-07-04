@@ -115,7 +115,9 @@ co-imported into the same JSONL evidence without making Transformers mandatory.
 For pre-FT inference evidence, `examples/byte_lm_transformers_trace.py` loads a
 local Transformers model, records prompt-level next-token top-k logits and
 hidden-state summaries, co-imports config/tokenizer/model runtime metadata, and
-can attach `--zspace-project` projection metrics.
+can attach `--zspace-project` projection metrics. Add
+`--require-runtime-metadata-match` when comparing traces to fail fast on
+config/tokenizer/model swaps before reading prompt-level drift.
 
 ## Building wheels
 
