@@ -784,6 +784,19 @@ def optional_path(path):
     return str(path) if path is not None else None
 
 
+def default_manifest_validation_jsonl(manifest_jsonl):
+    path = Path(manifest_jsonl)
+    if path.suffix:
+        return path.with_name(f"{path.stem}-validation{path.suffix}")
+    return path.with_name(f"{path.name}-validation.jsonl")
+
+
+def produced_manifest_validation_jsonl(args, manifest_jsonl):
+    return args.manifest_validation_jsonl or default_manifest_validation_jsonl(
+        manifest_jsonl
+    )
+
+
 def required_manifest_artifact_fields(row):
     fields = [
         "out_dir",
@@ -2038,6 +2051,11 @@ def continue_profile_smoke_from_manifest(args):
             final_artifacts["promotion_jsonl"]
         )
 
+    validation_jsonl = (
+        produced_manifest_validation_jsonl(args, output_manifest_jsonl)
+        if args.validate_produced_manifest
+        else None
+    )
     if not args.dry_run:
         write_jsonl(output_manifest_jsonl, [updated])
         validate_profile_smoke_manifest_artifacts(updated)
@@ -2045,7 +2063,7 @@ def continue_profile_smoke_from_manifest(args):
         if args.validate_produced_manifest:
             validate_profile_smoke_manifest_file(
                 output_manifest_jsonl,
-                validation_jsonl=args.manifest_validation_jsonl,
+                validation_jsonl=validation_jsonl,
                 args=args,
             )
 
@@ -2062,10 +2080,7 @@ def continue_profile_smoke_from_manifest(args):
     ]
     if args.validate_produced_manifest:
         output_parts.append("validated_produced_manifest=True")
-        if args.manifest_validation_jsonl is not None:
-            output_parts.append(
-                f"manifest_validation_jsonl={args.manifest_validation_jsonl}"
-            )
+        output_parts.append(f"manifest_validation_jsonl={validation_jsonl}")
     print(" ".join(output_parts))
 
 
@@ -2439,6 +2454,11 @@ def main():
         promoted_rungs_jsonl=promoted_rungs_jsonl,
         promoted_artifacts=promoted_artifacts,
     )
+    validation_jsonl = (
+        produced_manifest_validation_jsonl(args, manifest_jsonl)
+        if args.validate_produced_manifest
+        else None
+    )
     if not args.dry_run:
         write_jsonl(manifest_jsonl, [manifest_row])
         validate_profile_smoke_manifest_artifacts(manifest_row)
@@ -2449,7 +2469,7 @@ def main():
         if args.validate_produced_manifest:
             validate_profile_smoke_manifest_file(
                 manifest_jsonl,
-                validation_jsonl=args.manifest_validation_jsonl,
+                validation_jsonl=validation_jsonl,
                 args=args,
             )
 
@@ -2478,10 +2498,7 @@ def main():
         )
     if args.validate_produced_manifest:
         output_parts.append("validated_produced_manifest=True")
-        if args.manifest_validation_jsonl is not None:
-            output_parts.append(
-                f"manifest_validation_jsonl={args.manifest_validation_jsonl}"
-            )
+        output_parts.append(f"manifest_validation_jsonl={validation_jsonl}")
     if args.transformers_trace:
         output_parts.append(f"transformers_trace_jsonl={transformers_trace_jsonl}")
         if args.compare_transformers_trace_jsonl is not None:

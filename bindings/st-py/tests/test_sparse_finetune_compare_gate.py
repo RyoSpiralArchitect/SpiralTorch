@@ -3879,8 +3879,6 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                 "--continue-rungs",
                 "1",
                 "--validate-produced-manifest",
-                "--manifest-validation-jsonl",
-                str(continued_validation_path),
                 "--require-manifest-transformers-trace",
                 "--require-manifest-transformers-trace-coimport",
             ]
@@ -4258,8 +4256,6 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             "/models/llama",
             "--transformers-trace",
             "--validate-produced-manifest",
-            "--manifest-validation-jsonl",
-            "/tmp/profile-smoke-real-hf/profile-smoke-manifest-validation.jsonl",
             "--require-manifest-transformers-trace",
             "--require-manifest-transformers-trace-coimport",
         ]
@@ -4271,8 +4267,12 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertTrue(args.validate_produced_manifest)
         self.assertTrue(args.require_manifest_transformers_trace)
         self.assertTrue(args.require_manifest_transformers_trace_coimport)
+        self.assertIsNone(args.manifest_validation_jsonl)
         self.assertEqual(
-            args.manifest_validation_jsonl,
+            module.produced_manifest_validation_jsonl(
+                args,
+                Path("/tmp/profile-smoke-real-hf/profile-smoke-manifest.jsonl"),
+            ),
             Path("/tmp/profile-smoke-real-hf/profile-smoke-manifest-validation.jsonl"),
         )
 
