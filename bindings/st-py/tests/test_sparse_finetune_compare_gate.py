@@ -3887,6 +3887,9 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         failures=0,
         top_token_changed_rows=1,
         top_probability_regression=0.15,
+        coimport_status="ok",
+        spiraltorch_imported=True,
+        transformers_imported=True,
     ):
         trace_jsonl = out_dir / "transformers-trace.jsonl"
         baseline_trace_jsonl = out_dir / "transformers-trace-baseline.jsonl"
@@ -3948,6 +3951,27 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             path = Path(row[field])
             if field in {"out_dir", "profile_run_dir"}:
                 path.mkdir(parents=True, exist_ok=True)
+            elif field == "transformers_trace_jsonl":
+                module.write_jsonl(
+                    path,
+                    [
+                        {
+                            "row_type": "transformers_trace_manifest",
+                            "model_path": str(out_dir),
+                            "prompt_count": 1,
+                            "top_k": 3,
+                            "spiraltorch_imported": spiraltorch_imported,
+                            "spiraltorch_version": "0.1.0",
+                            "spiraltorch_module_name": "spiraltorch",
+                            "transformers_imported": transformers_imported,
+                            "transformers_version": "9.9.9",
+                            "transformers_module_name": "transformers",
+                            "transformers_spiraltorch_coimport_status": (
+                                coimport_status
+                            ),
+                        }
+                    ],
+                )
             elif field == "transformers_trace_compare_jsonl":
                 module.write_jsonl(
                     path,
@@ -4011,8 +4035,17 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             validation_row = module.load_jsonl(validation_path)[0]
 
         self.assertIn("transformers_trace_compare_passed=True", text)
+        self.assertIn("transformers_trace_coimport_status=ok", text)
         self.assertIn("transformers_trace_top_token_changed_rows=1", text)
         self.assertTrue(validation_row["transformers_trace"])
+        self.assertTrue(validation_row["transformers_trace_manifest_available"])
+        self.assertTrue(validation_row["transformers_trace_spiraltorch_imported"])
+        self.assertTrue(validation_row["transformers_trace_transformers_imported"])
+        self.assertEqual(validation_row["transformers_trace_coimport_status"], "ok")
+        self.assertEqual(
+            validation_row["transformers_trace_transformers_version"],
+            "9.9.9",
+        )
         self.assertTrue(validation_row["transformers_trace_compare_passed"])
         self.assertEqual(validation_row["transformers_trace_compare_failures"], 0)
         self.assertEqual(validation_row["transformers_trace_compared_prompt_rows"], 2)
@@ -4052,6 +4085,7 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                 str(validation_path),
                 "--require-manifest-transformers-trace",
                 "--require-manifest-transformers-trace-compare-pass",
+                "--require-manifest-transformers-trace-coimport",
                 "--require-manifest-transformers-trace-runtime-metadata-match",
                 "--max-manifest-transformers-trace-top-token-changed-rows",
                 "1",
@@ -4090,6 +4124,41 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             text = failing_output.getvalue()
             self.assertIn("transformers_trace_top_token_changed_rows", text)
             self.assertIn("passed=False", text)
+
+    def test_byte_lm_profile_smoke_validation_gates_transformers_trace_coimport(self):
+        module = load_example("byte_lm_profile_smoke")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out_dir = Path(tmpdir)
+            manifest_path, _validation_path = (
+                self.write_profile_smoke_manifest_with_transformers_trace_compare(
+                    module,
+                    out_dir,
+                    coimport_status="transformers_missing",
+                    transformers_imported=False,
+                )
+            )
+            old_argv = sys.argv
+            sys.argv = [
+                "byte_lm_profile_smoke.py",
+                "--validate-manifest-jsonl",
+                str(manifest_path),
+                "--require-manifest-transformers-trace",
+                "--require-manifest-transformers-trace-coimport",
+            ]
+            output = io.StringIO()
+            try:
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "profile smoke manifest trace validation gate failed",
+                ):
+                    with contextlib.redirect_stdout(output):
+                        module.main()
+            finally:
+                sys.argv = old_argv
+            text = output.getvalue()
+
+        self.assertIn("transformers_trace_coimport_failed", text)
+        self.assertIn("passed=False", text)
 
     def test_byte_lm_profile_smoke_builds_checkpoint_policy_args(self):
         module = load_example("byte_lm_profile_smoke")
