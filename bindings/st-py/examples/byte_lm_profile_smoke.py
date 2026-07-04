@@ -432,8 +432,17 @@ def parse_args():
         type=Path,
         default=None,
         help=(
-            "Optional JSONL report path for --validate-manifest-jsonl. Writes "
-            "one profile_smoke_manifest_validation row after validation passes."
+            "Optional JSONL report path for --validate-manifest-jsonl or "
+            "--validate-produced-manifest. Writes one "
+            "profile_smoke_manifest_validation row after validation passes."
+        ),
+    )
+    parser.add_argument(
+        "--validate-produced-manifest",
+        action="store_true",
+        help=(
+            "After a normal profile smoke run, validate the manifest produced by "
+            "this invocation and apply any manifest trace validation gates."
         ),
     )
     parser.add_argument(
@@ -572,8 +581,25 @@ def parse_args():
         parser.error(
             "--continue-manifest-jsonl and --validate-manifest-jsonl are mutually exclusive"
         )
-    if args.manifest_validation_jsonl is not None and args.validate_manifest_jsonl is None:
-        parser.error("--manifest-validation-jsonl requires --validate-manifest-jsonl")
+    if args.validate_produced_manifest and args.validate_manifest_jsonl is not None:
+        parser.error(
+            "--validate-produced-manifest is only valid for normal profile smoke runs"
+        )
+    if args.validate_produced_manifest and args.continue_manifest_jsonl is not None:
+        parser.error(
+            "--validate-produced-manifest is not supported with --continue-manifest-jsonl"
+        )
+    if args.validate_produced_manifest and args.dry_run:
+        parser.error("--validate-produced-manifest cannot be used with --dry-run")
+    if (
+        args.manifest_validation_jsonl is not None
+        and args.validate_manifest_jsonl is None
+        and not args.validate_produced_manifest
+    ):
+        parser.error(
+            "--manifest-validation-jsonl requires --validate-manifest-jsonl "
+            "or --validate-produced-manifest"
+        )
     manifest_trace_validation_requested = any(
         [
             args.require_manifest_transformers_trace,
@@ -585,8 +611,15 @@ def parse_args():
             is not None,
         ]
     )
-    if manifest_trace_validation_requested and args.validate_manifest_jsonl is None:
-        parser.error("manifest trace validation gates require --validate-manifest-jsonl")
+    if (
+        manifest_trace_validation_requested
+        and args.validate_manifest_jsonl is None
+        and not args.validate_produced_manifest
+    ):
+        parser.error(
+            "manifest trace validation gates require --validate-manifest-jsonl "
+            "or --validate-produced-manifest"
+        )
     if (
         args.max_manifest_transformers_trace_top_token_changed_rows is not None
         and args.max_manifest_transformers_trace_top_token_changed_rows < 0
@@ -2402,6 +2435,12 @@ def main():
             manifest_row,
             promoted_manifest_rows,
         )
+        if args.validate_produced_manifest:
+            validate_profile_smoke_manifest_file(
+                manifest_jsonl,
+                validation_jsonl=args.manifest_validation_jsonl,
+                args=args,
+            )
 
     output_parts = [
         "profile_smoke_outputs",
@@ -2426,6 +2465,12 @@ def main():
         output_parts.append(
             f"compare_checkpoint_preflight_jsonl={args.compare_checkpoint_preflight_jsonl}"
         )
+    if args.validate_produced_manifest:
+        output_parts.append("validated_produced_manifest=True")
+        if args.manifest_validation_jsonl is not None:
+            output_parts.append(
+                f"manifest_validation_jsonl={args.manifest_validation_jsonl}"
+            )
     if args.transformers_trace:
         output_parts.append(f"transformers_trace_jsonl={transformers_trace_jsonl}")
         if args.compare_transformers_trace_jsonl is not None:
