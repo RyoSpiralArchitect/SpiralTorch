@@ -228,6 +228,14 @@ def parse_args():
         help="Fail when current Transformers trace scope differs from the baseline.",
     )
     parser.add_argument(
+        "--require-transformers-trace-runtime-metadata-match",
+        action="store_true",
+        help=(
+            "Fail when current Transformers trace runtime metadata differs "
+            "from the baseline trace manifest."
+        ),
+    )
+    parser.add_argument(
         "--require-transformers-trace-top-token-match",
         action="store_true",
         help="Fail when a traced prompt's top token differs from the baseline.",
@@ -442,6 +450,14 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--require-manifest-transformers-trace-runtime-metadata-match",
+        action="store_true",
+        help=(
+            "Fail --validate-manifest-jsonl when the manifest's Transformers "
+            "trace compare summary reports config/tokenizer/model metadata drift."
+        ),
+    )
+    parser.add_argument(
         "--max-manifest-transformers-trace-top-token-changed-rows",
         type=int,
         default=None,
@@ -554,6 +570,7 @@ def parse_args():
         [
             args.require_manifest_transformers_trace,
             args.require_manifest_transformers_trace_compare_pass,
+            args.require_manifest_transformers_trace_runtime_metadata_match,
             args.max_manifest_transformers_trace_top_token_changed_rows is not None,
             args.max_manifest_transformers_trace_top_probability_regression
             is not None,
@@ -592,6 +609,7 @@ def parse_args():
             args.transformers_trace_prompt_file is not None,
             args.transformers_trace_zspace_project,
             args.require_transformers_trace_match,
+            args.require_transformers_trace_runtime_metadata_match,
             args.require_transformers_trace_top_token_match,
             args.transformers_trace_max_top_logit_regression is not None,
             args.transformers_trace_max_top_probability_regression is not None,
@@ -606,6 +624,7 @@ def parse_args():
         parser.error("--transformers-trace-top-k must be positive")
     trace_compare_gates = [
         args.require_transformers_trace_match,
+        args.require_transformers_trace_runtime_metadata_match,
         args.require_transformers_trace_top_token_match,
         args.transformers_trace_max_top_logit_regression is not None,
         args.transformers_trace_max_top_probability_regression is not None,
@@ -978,6 +997,10 @@ def transformers_trace_validation_fields(row):
         "transformers_trace_compare_passed": None,
         "transformers_trace_compare_failures": None,
         "transformers_trace_compared_prompt_rows": None,
+        "transformers_trace_runtime_metadata_available": None,
+        "transformers_trace_runtime_metadata_changed_count": None,
+        "transformers_trace_runtime_metadata_changed_fields": None,
+        "transformers_trace_runtime_metadata_failures": None,
         "transformers_trace_missing_prompt_rows": None,
         "transformers_trace_extra_prompt_rows": None,
         "transformers_trace_prompt_changed_rows": None,
@@ -1003,6 +1026,18 @@ def transformers_trace_validation_fields(row):
             "transformers_trace_compare_failures": summary.get("failures"),
             "transformers_trace_compared_prompt_rows": summary.get(
                 "compared_prompt_rows"
+            ),
+            "transformers_trace_runtime_metadata_available": summary.get(
+                "runtime_metadata_available"
+            ),
+            "transformers_trace_runtime_metadata_changed_count": summary.get(
+                "runtime_metadata_changed_count"
+            ),
+            "transformers_trace_runtime_metadata_changed_fields": summary.get(
+                "runtime_metadata_changed_fields"
+            ),
+            "transformers_trace_runtime_metadata_failures": summary.get(
+                "runtime_metadata_failures"
             ),
             "transformers_trace_missing_prompt_rows": summary.get(
                 "missing_prompt_rows"
@@ -1099,6 +1134,23 @@ def manifest_trace_validation_gate_failures(validation_row, args):
             failures.append("transformers_trace_compare_summary_missing")
         elif validation_row["transformers_trace_compare_passed"] is not True:
             failures.append("transformers_trace_compare_failed")
+    if args.require_manifest_transformers_trace_runtime_metadata_match:
+        if not validation_row["transformers_trace_compare_summary_available"]:
+            failures.append("transformers_trace_compare_summary_missing")
+        elif (
+            validation_row["transformers_trace_runtime_metadata_available"]
+            is not True
+        ):
+            failures.append("transformers_trace_runtime_metadata_unavailable")
+        else:
+            changed_count = manifest_validation_int(
+                validation_row,
+                "transformers_trace_runtime_metadata_changed_count",
+            )
+            if changed_count is None:
+                failures.append("transformers_trace_runtime_metadata_unavailable")
+            elif changed_count != 0:
+                failures.append("transformers_trace_runtime_metadata_changed")
 
     top_token_limit = args.max_manifest_transformers_trace_top_token_changed_rows
     if top_token_limit is not None:
@@ -1134,6 +1186,7 @@ def check_manifest_trace_validation_gates(validation_row, args):
         [
             args.require_manifest_transformers_trace,
             args.require_manifest_transformers_trace_compare_pass,
+            args.require_manifest_transformers_trace_runtime_metadata_match,
             args.max_manifest_transformers_trace_top_token_changed_rows
             is not None,
             args.max_manifest_transformers_trace_top_probability_regression
@@ -1187,6 +1240,8 @@ def validate_profile_smoke_manifest_file(path, validation_jsonl=None, args=None)
                 f"transformers_trace_jsonl={validation_row['transformers_trace_jsonl']}",
                 "transformers_trace_compare_passed="
                 f"{validation_row['transformers_trace_compare_passed']}",
+                "transformers_trace_runtime_metadata_changed_count="
+                f"{validation_row['transformers_trace_runtime_metadata_changed_count']}",
                 "transformers_trace_top_token_changed_rows="
                 f"{validation_row['transformers_trace_top_token_changed_rows']}",
                 "transformers_trace_observed_max_top_probability_regression="
@@ -1314,6 +1369,8 @@ def transformers_trace_args(args, model_path, trace_jsonl, trace_compare_jsonl):
         flags.extend(["--compare-output-jsonl", trace_compare_jsonl])
     if args.require_transformers_trace_match:
         flags.append("--require-trace-match")
+    if args.require_transformers_trace_runtime_metadata_match:
+        flags.append("--require-runtime-metadata-match")
     if args.require_transformers_trace_top_token_match:
         flags.append("--require-top-token-match")
     for name, flag in [
@@ -1606,6 +1663,9 @@ def profile_smoke_manifest_row(
         ),
         "require_transformers_trace_match": bool(
             getattr(args, "require_transformers_trace_match", False)
+        ),
+        "require_transformers_trace_runtime_metadata_match": bool(
+            getattr(args, "require_transformers_trace_runtime_metadata_match", False)
         ),
         "require_transformers_trace_top_token_match": bool(
             getattr(args, "require_transformers_trace_top_token_match", False)

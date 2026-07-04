@@ -3898,6 +3898,10 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                             "passed": passed,
                             "failures": failures,
                             "compared_prompt_rows": 2,
+                            "runtime_metadata_available": True,
+                            "runtime_metadata_changed_count": 0,
+                            "runtime_metadata_changed_fields": "none",
+                            "runtime_metadata_failures": "none",
                             "missing_prompt_rows": 0,
                             "extra_prompt_rows": 0,
                             "prompt_changed_rows": 0,
@@ -3953,6 +3957,11 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertTrue(validation_row["transformers_trace_compare_passed"])
         self.assertEqual(validation_row["transformers_trace_compare_failures"], 0)
         self.assertEqual(validation_row["transformers_trace_compared_prompt_rows"], 2)
+        self.assertTrue(validation_row["transformers_trace_runtime_metadata_available"])
+        self.assertEqual(
+            validation_row["transformers_trace_runtime_metadata_changed_count"],
+            0,
+        )
         self.assertEqual(validation_row["transformers_trace_top_token_changed_rows"], 1)
         self.assertEqual(
             validation_row["transformers_trace_zspace_status_changed_rows"],
@@ -3984,6 +3993,7 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                 str(validation_path),
                 "--require-manifest-transformers-trace",
                 "--require-manifest-transformers-trace-compare-pass",
+                "--require-manifest-transformers-trace-runtime-metadata-match",
                 "--max-manifest-transformers-trace-top-token-changed-rows",
                 "1",
                 "--max-manifest-transformers-trace-top-probability-regression",
@@ -4091,6 +4101,7 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         args.transformers_trace_zspace_source = "top_logits"
         args.compare_transformers_trace_jsonl = Path("/tmp/baseline-trace.jsonl")
         args.require_transformers_trace_match = True
+        args.require_transformers_trace_runtime_metadata_match = True
         args.require_transformers_trace_top_token_match = True
         args.transformers_trace_max_top_logit_regression = 0.0
         args.transformers_trace_max_top_probability_regression = 0.1
@@ -4127,6 +4138,7 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                 "--compare-output-jsonl",
                 Path("/tmp/trace-compare.jsonl"),
                 "--require-trace-match",
+                "--require-runtime-metadata-match",
                 "--require-top-token-match",
                 "--max-top-logit-regression",
                 "0",
@@ -4175,6 +4187,7 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             "--compare-transformers-trace-jsonl",
             "/tmp/profile-smoke-real-hf/transformers-trace-baseline.jsonl",
             "--require-transformers-trace-match",
+            "--require-transformers-trace-runtime-metadata-match",
             "--require-transformers-trace-top-token-match",
             "--transformers-trace-max-top-logit-regression",
             "0.0",
@@ -4229,6 +4242,7 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             text,
         )
         self.assertIn("--require-trace-match", text)
+        self.assertIn("--require-runtime-metadata-match", text)
         self.assertIn("--require-top-token-match", text)
         self.assertIn("--max-top-logit-regression 0", text)
         self.assertIn("--max-top-probability-regression 0.1", text)
@@ -6321,6 +6335,7 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         module = load_example("byte_lm_transformers_trace")
         args = argparse.Namespace(
             require_trace_match=True,
+            require_runtime_metadata_match=False,
             require_top_token_match=True,
             max_top_logit_regression=None,
             max_top_probability_regression=None,
@@ -6346,10 +6361,55 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertFalse(rows[1]["passed"])
         self.assertIn("top_token_changed", rows[1]["failures"])
 
+    def test_transformers_trace_compare_gate_detects_runtime_metadata_drift(self):
+        module = load_example("byte_lm_transformers_trace")
+        args = argparse.Namespace(
+            require_trace_match=False,
+            require_runtime_metadata_match=True,
+            require_top_token_match=False,
+            max_top_logit_regression=None,
+            max_top_probability_regression=None,
+            max_logit_l2_change=None,
+            max_hidden_state_l2_change=None,
+        )
+        manifest = {
+            "row_type": "transformers_trace_manifest",
+            "model_path": "/models/llama",
+            "top_k": 2,
+            "transformers_model_type": "llama",
+            "transformers_tokenizer_class": "FakeTokenizer",
+            "transformers_tokenizer_vocab_size": 320,
+            "transformers_config_hidden_size": 32,
+        }
+        prompt = {
+            "row_type": "transformers_prompt_trace",
+            "prompt_index": 0,
+            "prompt": "spiral",
+            "top_token_ids": "3,1",
+        }
+        current = [
+            dict(
+                manifest,
+                transformers_tokenizer_class="OtherTokenizer",
+            ),
+            prompt,
+        ]
+        rows = module.compare_trace_rows(current, [manifest, prompt], args)
+
+        self.assertFalse(rows[0]["passed"])
+        self.assertEqual(rows[0]["runtime_metadata_changed_count"], 1)
+        self.assertEqual(
+            rows[0]["runtime_metadata_changed_fields"],
+            "transformers_tokenizer_class",
+        )
+        self.assertEqual(rows[0]["runtime_metadata_failures"], "runtime_metadata_changed")
+        self.assertTrue(rows[1]["passed"])
+
     def test_transformers_trace_compare_summary_reports_drift_metrics(self):
         module = load_example("byte_lm_transformers_trace")
         args = argparse.Namespace(
             require_trace_match=False,
+            require_runtime_metadata_match=False,
             require_top_token_match=False,
             max_top_logit_regression=None,
             max_top_probability_regression=None,
@@ -6481,6 +6541,9 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertEqual(rows[0]["row_type"], "transformers_trace_compare_summary")
         self.assertTrue(rows[0]["passed"])
         self.assertEqual(rows[0]["compared_prompt_rows"], 1)
+        self.assertTrue(rows[0]["runtime_metadata_available"])
+        self.assertEqual(rows[0]["runtime_metadata_changed_count"], 0)
+        self.assertEqual(rows[0]["runtime_metadata_changed_fields"], "none")
         self.assertIn("transformers_trace_compare", output.getvalue())
 
     def test_checkpoint_preflight_shape_audit_accepts_tied_lm_head_weight(self):
