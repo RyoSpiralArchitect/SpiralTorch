@@ -116,6 +116,15 @@ def fake_transformers_module(*, tokenizer_error=False, model_error=False):
         def __len__(self):
             return 320
 
+        def __call__(self, prompt, return_tensors=None):
+            del return_tensors
+            return {"input_ids": [[1, 2, min(319, len(prompt))]]}
+
+        def decode(self, token_id):
+            if isinstance(token_id, (list, tuple)):
+                token_id = token_id[0]
+            return f"<tok:{int(token_id)}>"
+
     class FakeParam:
         def __init__(self, count):
             self.count = count
@@ -124,8 +133,21 @@ def fake_transformers_module(*, tokenizer_error=False, model_error=False):
             return self.count
 
     class FakeModel:
+        def eval(self):
+            return self
+
         def parameters(self):
             return [FakeParam(3), FakeParam(4)]
+
+        def __call__(self, **kwargs):
+            del kwargs
+            return types.SimpleNamespace(
+                logits=[[[0.1, 0.4, -0.2, 1.1]]],
+                hidden_states=[
+                    [[[0.0, 0.0, 0.0]]],
+                    [[[0.5, -0.25, 0.75]]],
+                ],
+            )
 
     class FakeAutoConfig:
         @staticmethod
@@ -5856,6 +5878,88 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertIn("tokenizer fixture missing", row["transformers_tokenizer_error"])
         with self.assertRaisesRegex(RuntimeError, "Transformers audit gate failed"):
             helper.check_transformers_audit_gate(row, args)
+
+    def test_transformers_trace_records_prompt_logits_and_hidden_state(self):
+        module = load_example("byte_lm_transformers_trace")
+        with tempfile.TemporaryDirectory() as tmp:
+            args = types.SimpleNamespace(
+                model_path=Path(tmp),
+                top_k=2,
+                allow_remote=False,
+                trust_remote_code=False,
+                revision=None,
+                metadata_only=False,
+                capture_hidden_states=True,
+                zspace_project=False,
+                zspace_source="hidden",
+                zspace_curvature=-0.04,
+                zspace_frequency=0.65,
+                zspace_strength=1.0,
+                require_hidden_states=False,
+                require_zspace_projection=False,
+            )
+            with fake_transformers_module() as (fake, _calls):
+                config = fake.AutoConfig.from_pretrained(str(args.model_path))
+                tokenizer = fake.AutoTokenizer.from_pretrained(str(args.model_path))
+                model = fake.AutoModelForCausalLM.from_pretrained(str(args.model_path))
+                manifest = module.manifest_row(
+                    args,
+                    ["spiral"],
+                    fake,
+                    config,
+                    tokenizer,
+                    model_loaded=True,
+                )
+                row = module.trace_prompt(args, tokenizer, model, "spiral", 0)
+
+        self.assertEqual(manifest["row_type"], "transformers_trace_manifest")
+        self.assertEqual(manifest["transformers_model_type"], "llama")
+        self.assertEqual(row["row_type"], "transformers_prompt_trace")
+        self.assertEqual(row["input_token_count"], 3)
+        self.assertEqual(row["logit_vocab_size"], 4)
+        self.assertEqual(row["top_token_ids"], "3,1")
+        self.assertEqual(json.loads(row["top_token_texts"]), ["<tok:3>", "<tok:1>"])
+        self.assertTrue(row["top_probability_sum"] > 0.5)
+        self.assertTrue(row["hidden_state_available"])
+        self.assertEqual(row["hidden_state_shape"], "1x1x3")
+        self.assertEqual(row["hidden_state_dims"], 3)
+        self.assertFalse(row["zspace_projection_requested"])
+
+    def test_transformers_trace_cli_writes_jsonl_without_real_transformers(self):
+        module = load_example("byte_lm_transformers_trace")
+        old_argv = sys.argv
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "trace.jsonl"
+            sys.argv = [
+                "byte_lm_transformers_trace.py",
+                "--model-path",
+                tmp,
+                "--prompt",
+                "spiral",
+                "--top-k",
+                "2",
+                "--jsonl",
+                str(out),
+            ]
+            output = io.StringIO()
+            try:
+                with fake_transformers_module(), contextlib.redirect_stdout(output):
+                    module.main()
+            finally:
+                sys.argv = old_argv
+            rows = [
+                json.loads(line)
+                for line in out.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+
+        self.assertEqual([row["row_type"] for row in rows], [
+            "transformers_trace_manifest",
+            "transformers_prompt_trace",
+        ])
+        self.assertTrue(rows[0]["model_loaded"])
+        self.assertEqual(rows[1]["top_token_ids"], "3,1")
+        self.assertIn("transformers_prompt_trace", output.getvalue())
 
     def test_checkpoint_preflight_shape_audit_accepts_tied_lm_head_weight(self):
         helper = load_checkpoint_helper()
