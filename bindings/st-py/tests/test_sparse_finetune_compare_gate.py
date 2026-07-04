@@ -3719,6 +3719,25 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                 path = Path(row[field])
                 if field in {"out_dir", "profile_run_dir"}:
                     path.mkdir(parents=True, exist_ok=True)
+                elif field == "transformers_trace_jsonl":
+                    module.write_jsonl(
+                        path,
+                        [
+                            {
+                                "row_type": "transformers_trace_manifest",
+                                "model_path": str(out_dir),
+                                "prompt_count": 1,
+                                "top_k": 3,
+                                "spiraltorch_imported": True,
+                                "spiraltorch_version": "0.1.0",
+                                "spiraltorch_module_name": "spiraltorch",
+                                "transformers_imported": True,
+                                "transformers_version": "9.9.9",
+                                "transformers_module_name": "transformers",
+                                "transformers_spiraltorch_coimport_status": "ok",
+                            }
+                        ],
+                    )
                 elif field == "transformers_trace_compare_jsonl":
                     module.write_jsonl(
                         path,
@@ -3822,6 +3841,59 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                 sys.argv = old_argv
             text = output.getvalue()
             continue_plan_rows = module.load_jsonl(continue_plan_path)
+
+            continued_manifest_path = out_dir / "continued-manifest.jsonl"
+            continued_validation_path = (
+                out_dir / "continued-manifest-validation.jsonl"
+            )
+
+            def fake_run_command(cmd, *, dry_run=False):
+                self.assertFalse(dry_run)
+                for flag in [
+                    "--commands-jsonl",
+                    "--promotion-selection-jsonl",
+                    "--run-events-jsonl",
+                    "--run-summary-jsonl",
+                    "--promotion-jsonl",
+                ]:
+                    if flag in cmd:
+                        module.write_jsonl(
+                            Path(cmd[cmd.index(flag) + 1]),
+                            [{"row_type": f"fake_{flag.removeprefix('--')}"}],
+                        )
+                if "--output-dir" in cmd:
+                    Path(cmd[cmd.index("--output-dir") + 1]).mkdir(
+                        parents=True,
+                        exist_ok=True,
+                    )
+
+            old_run_command = module.run_command
+            old_argv = sys.argv
+            module.run_command = fake_run_command
+            sys.argv = [
+                "byte_lm_profile_smoke.py",
+                "--continue-manifest-jsonl",
+                str(manifest_path),
+                "--continue-manifest-output-jsonl",
+                str(continued_manifest_path),
+                "--continue-rungs",
+                "1",
+                "--validate-produced-manifest",
+                "--manifest-validation-jsonl",
+                str(continued_validation_path),
+                "--require-manifest-transformers-trace",
+                "--require-manifest-transformers-trace-coimport",
+            ]
+            continued_output = io.StringIO()
+            try:
+                with contextlib.redirect_stdout(continued_output):
+                    module.main()
+            finally:
+                module.run_command = old_run_command
+                sys.argv = old_argv
+            continued_text = continued_output.getvalue()
+            continued_manifest_rows = module.load_jsonl(continued_manifest_path)
+            continued_validation_rows = module.load_jsonl(continued_validation_path)
         self.assertIn("--promotion-input-jsonl", text)
         self.assertIn(str(out_dir / "promoted-promotion.jsonl"), text)
         self.assertIn("--output-prefix profile-smoke-promoted-rung2", text)
@@ -3876,6 +3948,21 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                 str(out_dir / "transformers-trace-compare.jsonl"),
                 str(out_dir / "transformers-trace-compare.jsonl"),
             ],
+        )
+        self.assertIn("profile_smoke_manifest_validate", continued_text)
+        self.assertIn("profile_smoke_manifest_continue", continued_text)
+        self.assertIn("validated_produced_manifest=True", continued_text)
+        self.assertIn(
+            f"manifest_validation_jsonl={continued_validation_path}",
+            continued_text,
+        )
+        self.assertEqual(continued_manifest_rows[0]["promoted_rungs"], 2)
+        self.assertEqual(continued_manifest_rows[0]["promoted_ft_epochs"], [2, 3])
+        self.assertEqual(continued_validation_rows[0]["promoted_rungs"], 2)
+        self.assertEqual(continued_validation_rows[0]["next_promoted_rung"], 3)
+        self.assertEqual(
+            continued_validation_rows[0]["transformers_trace_coimport_status"],
+            "ok",
         )
 
     def write_profile_smoke_manifest_with_transformers_trace_compare(
