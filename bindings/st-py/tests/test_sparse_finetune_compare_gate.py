@@ -93,6 +93,75 @@ def load_checkpoint_helper():
     return module
 
 
+@contextlib.contextmanager
+def fake_transformers_module(*, tokenizer_error=False, model_error=False):
+    previous = sys.modules.get("transformers")
+    calls = {"config": [], "tokenizer": [], "model": []}
+    fake = types.ModuleType("transformers")
+    fake.__version__ = "9.9.9"
+
+    class FakeConfig:
+        model_type = "llama"
+        architectures = ["LlamaForCausalLM"]
+        vocab_size = 320
+        hidden_size = 32
+        num_hidden_layers = 2
+        num_attention_heads = 4
+        max_position_embeddings = 2048
+
+    class FakeTokenizer:
+        vocab_size = 319
+        model_max_length = 4096
+
+        def __len__(self):
+            return 320
+
+    class FakeParam:
+        def __init__(self, count):
+            self.count = count
+
+        def numel(self):
+            return self.count
+
+    class FakeModel:
+        def parameters(self):
+            return [FakeParam(3), FakeParam(4)]
+
+    class FakeAutoConfig:
+        @staticmethod
+        def from_pretrained(path, **kwargs):
+            calls["config"].append((path, dict(kwargs)))
+            return FakeConfig()
+
+    class FakeAutoTokenizer:
+        @staticmethod
+        def from_pretrained(path, **kwargs):
+            calls["tokenizer"].append((path, dict(kwargs)))
+            if tokenizer_error:
+                raise RuntimeError("tokenizer fixture missing")
+            return FakeTokenizer()
+
+    class FakeAutoModelForCausalLM:
+        @staticmethod
+        def from_pretrained(path, **kwargs):
+            calls["model"].append((path, dict(kwargs)))
+            if model_error:
+                raise RuntimeError("model fixture missing")
+            return FakeModel()
+
+    fake.AutoConfig = FakeAutoConfig
+    fake.AutoTokenizer = FakeAutoTokenizer
+    fake.AutoModelForCausalLM = FakeAutoModelForCausalLM
+    sys.modules["transformers"] = fake
+    try:
+        yield fake, calls
+    finally:
+        if previous is None:
+            sys.modules.pop("transformers", None)
+        else:
+            sys.modules["transformers"] = previous
+
+
 def old_compare_signature(current, baseline, **kwargs):
     unsupported = [
         "require_accepted_match",
@@ -3766,6 +3835,29 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             module.checkpoint_shape_args(),
             ["--vocab", "256", "--hidden", "24", "--target-classes", "256"],
         )
+        args.transformers_audit = True
+        args.transformers_model_path = Path("/models/llama")
+        args.transformers_revision = "main"
+        args.allow_transformers_remote = True
+        args.transformers_trust_remote_code = True
+        args.skip_transformers_tokenizer = True
+        args.transformers_load_model = True
+        args.require_transformers_audit = True
+        self.assertEqual(
+            module.checkpoint_transformers_args(args),
+            [
+                "--transformers-audit",
+                "--transformers-model-path",
+                Path("/models/llama"),
+                "--transformers-revision",
+                "main",
+                "--allow-transformers-remote",
+                "--transformers-trust-remote-code",
+                "--skip-transformers-tokenizer",
+                "--transformers-load-model",
+                "--require-transformers-audit",
+            ],
+        )
 
     def test_byte_lm_profile_smoke_dry_run_external_checkpoint_preflights(self):
         module = load_example("byte_lm_profile_smoke")
@@ -3785,6 +3877,14 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             "healthy",
             "--checkpoint-source-gain",
             "2.0",
+            "--transformers-audit",
+            "--transformers-model-path",
+            "/models/llama",
+            "--transformers-revision",
+            "main",
+            "--transformers-trust-remote-code",
+            "--skip-transformers-tokenizer",
+            "--require-transformers-audit",
             "--compare-checkpoint-preflight-jsonl",
             "/tmp/profile-smoke-real-hf/checkpoint-preflight-baseline.jsonl",
             "--require-checkpoint-preflight-match",
@@ -3812,6 +3912,12 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertIn("--allow-overlap-resize", text)
         self.assertIn("--checkpoint-projection-preset healthy", text)
         self.assertIn("--checkpoint-source-gain 2", text)
+        self.assertIn("--transformers-audit", text)
+        self.assertIn("--transformers-model-path /models/llama", text)
+        self.assertIn("--transformers-revision main", text)
+        self.assertIn("--transformers-trust-remote-code", text)
+        self.assertIn("--skip-transformers-tokenizer", text)
+        self.assertIn("--require-transformers-audit", text)
         self.assertIn(
             "--compare-jsonl /tmp/profile-smoke-real-hf/checkpoint-preflight-baseline.jsonl",
             text,
@@ -5671,6 +5777,85 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertEqual(row["checkpoint_projection"], "zspace")
         self.assertEqual(row["checkpoint_projection_strength"], 1.0)
         self.assertEqual(row["checkpoint_projection_curvature"], -0.04)
+
+    def test_checkpoint_preflight_transformers_audit_imports_runtime_metadata(self):
+        helper = load_checkpoint_helper()
+        with tempfile.TemporaryDirectory() as tmp:
+            args = types.SimpleNamespace(
+                transformers_audit=True,
+                transformers_model_path=Path(tmp),
+                hf_state_dict=None,
+                allow_transformers_remote=False,
+                transformers_trust_remote_code=True,
+                transformers_revision="main",
+                skip_transformers_tokenizer=False,
+                transformers_load_model=True,
+            )
+            with fake_transformers_module() as (_fake, calls):
+                fields = helper.transformers_runtime_audit_fields(args, (320, 32, 320))
+
+        self.assertEqual(fields["transformers_audit_status"], "ok")
+        self.assertTrue(fields["transformers_available"])
+        self.assertEqual(fields["transformers_version"], "9.9.9")
+        self.assertEqual(fields["transformers_model_type"], "llama")
+        self.assertEqual(fields["transformers_architectures"], "LlamaForCausalLM")
+        self.assertEqual(fields["transformers_config_vocab_size"], 320)
+        self.assertEqual(fields["transformers_config_hidden_size"], 32)
+        self.assertTrue(fields["transformers_config_vocab_matches_checkpoint"])
+        self.assertTrue(fields["transformers_config_hidden_matches_checkpoint"])
+        self.assertTrue(fields["transformers_config_lm_head_matches_checkpoint"])
+        self.assertEqual(fields["transformers_tokenizer_class"], "FakeTokenizer")
+        self.assertEqual(fields["transformers_tokenizer_vocab_size"], 320)
+        self.assertEqual(fields["transformers_model_class"], "FakeModel")
+        self.assertEqual(fields["transformers_model_parameter_count"], 7)
+        self.assertEqual(calls["config"][0][1]["local_files_only"], True)
+        self.assertEqual(calls["config"][0][1]["trust_remote_code"], True)
+        self.assertEqual(calls["config"][0][1]["revision"], "main")
+        self.assertEqual(calls["model"][0][1]["local_files_only"], True)
+
+    def test_checkpoint_preflight_transformers_audit_gate_rejects_partial_runtime(self):
+        helper = load_checkpoint_helper()
+        with tempfile.TemporaryDirectory() as tmp:
+            args = types.SimpleNamespace(
+                key_preset="auto",
+                include_extra_keys=[],
+                no_synthesize_missing_biases=False,
+                allow_overlap_resize=False,
+                vocab=None,
+                hidden=None,
+                target_classes=None,
+                checkpoint_projection="none",
+                checkpoint_projection_preset=None,
+                checkpoint_projection_strength=0.5,
+                checkpoint_projection_curvature=-0.5,
+                checkpoint_projection_frequency=0.65,
+                transformers_audit=True,
+                transformers_model_path=Path(tmp),
+                hf_state_dict=None,
+                allow_transformers_remote=False,
+                transformers_trust_remote_code=False,
+                transformers_revision=None,
+                skip_transformers_tokenizer=False,
+                transformers_load_model=False,
+                require_transformers_audit=True,
+            )
+            with fake_transformers_module(tokenizer_error=True):
+                row = helper.hf_lm_shape_audit_row(
+                    args,
+                    "hf-state-dict:auto",
+                    ["model.safetensors"],
+                    {
+                        "model.embed_tokens.weight": (320, 32),
+                        "lm_head.weight": (320, 32),
+                    },
+                )
+
+        self.assertEqual(row["transformers_audit_status"], "tokenizer_error")
+        self.assertTrue(row["transformers_config_loaded"])
+        self.assertFalse(row["transformers_tokenizer_loaded"])
+        self.assertIn("tokenizer fixture missing", row["transformers_tokenizer_error"])
+        with self.assertRaisesRegex(RuntimeError, "Transformers audit gate failed"):
+            helper.check_transformers_audit_gate(row, args)
 
     def test_checkpoint_preflight_shape_audit_accepts_tied_lm_head_weight(self):
         helper = load_checkpoint_helper()
