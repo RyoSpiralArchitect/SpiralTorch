@@ -429,6 +429,37 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--require-manifest-transformers-trace",
+        action="store_true",
+        help="Fail --validate-manifest-jsonl when the manifest has no Transformers trace artifact.",
+    )
+    parser.add_argument(
+        "--require-manifest-transformers-trace-compare-pass",
+        action="store_true",
+        help=(
+            "Fail --validate-manifest-jsonl when the manifest's Transformers "
+            "trace compare summary is missing or did not pass."
+        ),
+    )
+    parser.add_argument(
+        "--max-manifest-transformers-trace-top-token-changed-rows",
+        type=int,
+        default=None,
+        help=(
+            "Fail --validate-manifest-jsonl when the trace compare summary "
+            "reports more top-token drift rows than this value."
+        ),
+    )
+    parser.add_argument(
+        "--max-manifest-transformers-trace-top-probability-regression",
+        type=float,
+        default=None,
+        help=(
+            "Fail --validate-manifest-jsonl when observed max top-probability "
+            "regression exceeds this value."
+        ),
+    )
+    parser.add_argument(
         "--continue-manifest-output-jsonl",
         type=Path,
         default=None,
@@ -519,6 +550,33 @@ def parse_args():
         )
     if args.manifest_validation_jsonl is not None and args.validate_manifest_jsonl is None:
         parser.error("--manifest-validation-jsonl requires --validate-manifest-jsonl")
+    manifest_trace_validation_requested = any(
+        [
+            args.require_manifest_transformers_trace,
+            args.require_manifest_transformers_trace_compare_pass,
+            args.max_manifest_transformers_trace_top_token_changed_rows is not None,
+            args.max_manifest_transformers_trace_top_probability_regression
+            is not None,
+        ]
+    )
+    if manifest_trace_validation_requested and args.validate_manifest_jsonl is None:
+        parser.error("manifest trace validation gates require --validate-manifest-jsonl")
+    if (
+        args.max_manifest_transformers_trace_top_token_changed_rows is not None
+        and args.max_manifest_transformers_trace_top_token_changed_rows < 0
+    ):
+        parser.error(
+            "--max-manifest-transformers-trace-top-token-changed-rows "
+            "must be non-negative"
+        )
+    if (
+        args.max_manifest_transformers_trace_top_probability_regression is not None
+        and args.max_manifest_transformers_trace_top_probability_regression < 0.0
+    ):
+        parser.error(
+            "--max-manifest-transformers-trace-top-probability-regression "
+            "must be non-negative"
+        )
     if args.continue_plan_jsonl is not None and args.continue_manifest_jsonl is None:
         parser.error("--continue-plan-jsonl requires --continue-manifest-jsonl")
     if args.checkpoint_source_gain is not None and args.checkpoint_source_gain <= 0.0:
@@ -1007,7 +1065,98 @@ def profile_smoke_manifest_validation_row(path, row, promoted_rungs_jsonl, rung_
     return validation
 
 
-def validate_profile_smoke_manifest_file(path, validation_jsonl=None):
+def manifest_validation_float(row, key):
+    value = row.get(key)
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def manifest_validation_int(row, key):
+    value = row.get(key)
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def manifest_trace_validation_gate_failures(validation_row, args):
+    failures = []
+    if args is None:
+        return failures
+    if (
+        args.require_manifest_transformers_trace
+        and not validation_row["transformers_trace"]
+    ):
+        failures.append("transformers_trace_missing")
+    if args.require_manifest_transformers_trace_compare_pass:
+        if not validation_row["transformers_trace_compare_summary_available"]:
+            failures.append("transformers_trace_compare_summary_missing")
+        elif validation_row["transformers_trace_compare_passed"] is not True:
+            failures.append("transformers_trace_compare_failed")
+
+    top_token_limit = args.max_manifest_transformers_trace_top_token_changed_rows
+    if top_token_limit is not None:
+        top_token_changed = manifest_validation_int(
+            validation_row,
+            "transformers_trace_top_token_changed_rows",
+        )
+        if top_token_changed is None:
+            failures.append("transformers_trace_top_token_changed_rows_unavailable")
+        elif top_token_changed > top_token_limit:
+            failures.append("transformers_trace_top_token_changed_rows")
+
+    probability_limit = (
+        args.max_manifest_transformers_trace_top_probability_regression
+    )
+    if probability_limit is not None:
+        probability_regression = manifest_validation_float(
+            validation_row,
+            "transformers_trace_observed_max_top_probability_regression",
+        )
+        if probability_regression is None:
+            failures.append("transformers_trace_top_probability_regression_unavailable")
+        elif probability_regression > probability_limit:
+            failures.append("transformers_trace_top_probability_regression")
+    return failures
+
+
+def check_manifest_trace_validation_gates(validation_row, args):
+    failures = manifest_trace_validation_gate_failures(validation_row, args)
+    if args is None:
+        return True
+    gate_requested = any(
+        [
+            args.require_manifest_transformers_trace,
+            args.require_manifest_transformers_trace_compare_pass,
+            args.max_manifest_transformers_trace_top_token_changed_rows
+            is not None,
+            args.max_manifest_transformers_trace_top_probability_regression
+            is not None,
+        ]
+    )
+    if not gate_requested:
+        return True
+    print(
+        "profile_smoke_manifest_gate "
+        f"gate=transformers_trace "
+        f"failures={','.join(failures) if failures else 'none'} "
+        f"passed={not failures}"
+    )
+    if failures:
+        raise RuntimeError(
+            "profile smoke manifest trace validation gate failed: "
+            + ", ".join(failures)
+        )
+    return True
+
+
+def validate_profile_smoke_manifest_file(path, validation_jsonl=None, args=None):
     row, promoted_rungs_jsonl, rung_rows = load_profile_smoke_manifest_with_rungs(path)
     validation_row = profile_smoke_manifest_validation_row(
         path,
@@ -1015,6 +1164,7 @@ def validate_profile_smoke_manifest_file(path, validation_jsonl=None):
         promoted_rungs_jsonl,
         rung_rows,
     )
+    check_manifest_trace_validation_gates(validation_row, args)
     if validation_jsonl is not None:
         write_jsonl(validation_jsonl, [validation_row])
     output_parts = [
@@ -1685,6 +1835,7 @@ def main():
         validate_profile_smoke_manifest_file(
             args.validate_manifest_jsonl,
             validation_jsonl=args.manifest_validation_jsonl,
+            args=args,
         )
         return
     if args.continue_manifest_jsonl is not None:
