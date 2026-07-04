@@ -1,4 +1,5 @@
 import argparse
+import importlib
 import json
 from collections.abc import Mapping
 from numbers import Real
@@ -417,6 +418,63 @@ def add_checkpoint_source_gain_args(parser):
     )
 
 
+def add_transformers_audit_args(parser):
+    parser.add_argument(
+        "--transformers-audit",
+        action="store_true",
+        help=(
+            "Optionally co-import local Hugging Face Transformers config/tokenizer "
+            "metadata beside the checkpoint audit. Transformers remains an "
+            "optional dependency."
+        ),
+    )
+    parser.add_argument(
+        "--transformers-model-path",
+        type=Path,
+        default=None,
+        help=(
+            "Local Transformers model/config/tokenizer directory. Defaults to "
+            "--hf-state-dict when it is a directory, otherwise the state-dict parent."
+        ),
+    )
+    parser.add_argument(
+        "--transformers-revision",
+        default=None,
+        help="Optional Transformers revision forwarded to from_pretrained(...).",
+    )
+    parser.add_argument(
+        "--allow-transformers-remote",
+        action="store_true",
+        help=(
+            "Allow Transformers from_pretrained(...) to resolve remote files. "
+            "By default audits are local_files_only to keep checkpoint preflight bounded."
+        ),
+    )
+    parser.add_argument(
+        "--transformers-trust-remote-code",
+        action="store_true",
+        help="Forward trust_remote_code=True to Transformers loaders.",
+    )
+    parser.add_argument(
+        "--skip-transformers-tokenizer",
+        action="store_true",
+        help="Only load AutoConfig metadata during --transformers-audit.",
+    )
+    parser.add_argument(
+        "--transformers-load-model",
+        action="store_true",
+        help=(
+            "Also instantiate AutoModelForCausalLM during --transformers-audit. "
+            "This can be heavy and is off by default."
+        ),
+    )
+    parser.add_argument(
+        "--require-transformers-audit",
+        action="store_true",
+        help="Fail when the optional Transformers audit is requested but not clean.",
+    )
+
+
 def checkpoint_projection_preset_values(args):
     preset = getattr(args, "checkpoint_projection_preset", None)
     if preset is None:
@@ -535,6 +593,7 @@ def parse_args():
     )
     add_checkpoint_projection_args(parser)
     add_checkpoint_source_gain_args(parser)
+    add_transformers_audit_args(parser)
     parser.add_argument(
         "--vocab",
         type=int,
@@ -562,6 +621,10 @@ def parse_args():
         parser.error("--key-preset auto requires --hf-state-dict")
     if args.shape_only and args.compare_jsonl is not None:
         parser.error("--shape-only does not support --compare-jsonl")
+    if args.require_transformers_audit and not args.transformers_audit:
+        parser.error("--require-transformers-audit requires --transformers-audit")
+    if args.transformers_audit and args.hf_state_dict is None and args.transformers_model_path is None:
+        parser.error("--transformers-audit requires --hf-state-dict or --transformers-model-path")
     for name in [
         "require_shape_materializable",
         "require_exact_shape_match",
@@ -607,6 +670,314 @@ def checkpoint_projection_fields(args):
             resolved_checkpoint_projection_value(args, "checkpoint_projection_frequency")
         ),
     }
+
+
+def transformers_audit_requested(args):
+    return bool(getattr(args, "transformers_audit", False))
+
+
+def resolved_transformers_model_path(args):
+    explicit = getattr(args, "transformers_model_path", None)
+    if explicit is not None:
+        return Path(explicit)
+    hf_state_dict = getattr(args, "hf_state_dict", None)
+    if hf_state_dict is None:
+        return None
+    path = Path(hf_state_dict)
+    return path if path.is_dir() else path.parent
+
+
+def _class_name(value):
+    if value is None:
+        return None
+    return value.__class__.__name__
+
+
+def _error_label(exc):
+    return f"{exc.__class__.__name__}: {exc}"
+
+
+def _string_list_label(value):
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (list, tuple)):
+        return ",".join(str(item) for item in value) if value else None
+    return str(value)
+
+
+def _first_attr(value, names):
+    for name in names:
+        if hasattr(value, name):
+            attr = getattr(value, name)
+            if attr is not None:
+                return attr
+    return None
+
+
+def _safe_int(value):
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _tokenizer_vocab_size(tokenizer):
+    length = None
+    try:
+        length = len(tokenizer)
+    except TypeError:
+        length = None
+    return _safe_int(length if length is not None else getattr(tokenizer, "vocab_size", None))
+
+
+def _model_parameter_count(model):
+    parameters = getattr(model, "parameters", None)
+    if not callable(parameters):
+        return None
+    total = 0
+    for parameter in parameters():
+        numel = getattr(parameter, "numel", None)
+        if callable(numel):
+            total += int(numel())
+    return total
+
+
+def _transformers_loader_kwargs(args):
+    kwargs = {
+        "local_files_only": not bool(getattr(args, "allow_transformers_remote", False)),
+        "trust_remote_code": bool(getattr(args, "transformers_trust_remote_code", False)),
+    }
+    revision = getattr(args, "transformers_revision", None)
+    if revision:
+        kwargs["revision"] = revision
+    return kwargs
+
+
+def _base_transformers_audit_fields(args, path, module_shapes):
+    vocab, hidden, target_classes = module_shapes
+    return {
+        "transformers_audit_requested": True,
+        "transformers_audit_status": "not_run",
+        "transformers_audit_error": None,
+        "transformers_model_path": None if path is None else str(path),
+        "transformers_local_files_only": not bool(
+            getattr(args, "allow_transformers_remote", False)
+        ),
+        "transformers_trust_remote_code": bool(
+            getattr(args, "transformers_trust_remote_code", False)
+        ),
+        "transformers_revision": getattr(args, "transformers_revision", None),
+        "transformers_available": False,
+        "transformers_version": None,
+        "transformers_config_loaded": False,
+        "transformers_config_class": None,
+        "transformers_model_type": None,
+        "transformers_architectures": None,
+        "transformers_config_vocab_size": None,
+        "transformers_config_hidden_size": None,
+        "transformers_config_num_hidden_layers": None,
+        "transformers_config_num_attention_heads": None,
+        "transformers_config_max_position_embeddings": None,
+        "transformers_config_vocab_matches_checkpoint": None,
+        "transformers_config_hidden_matches_checkpoint": None,
+        "transformers_config_lm_head_matches_checkpoint": None,
+        "transformers_checkpoint_vocab": vocab,
+        "transformers_checkpoint_hidden": hidden,
+        "transformers_checkpoint_target_classes": target_classes,
+        "transformers_tokenizer_requested": not bool(
+            getattr(args, "skip_transformers_tokenizer", False)
+        ),
+        "transformers_tokenizer_loaded": False,
+        "transformers_tokenizer_error": None,
+        "transformers_tokenizer_class": None,
+        "transformers_tokenizer_vocab_size": None,
+        "transformers_tokenizer_model_max_length": None,
+        "transformers_load_model_requested": bool(
+            getattr(args, "transformers_load_model", False)
+        ),
+        "transformers_model_loaded": False,
+        "transformers_model_error": None,
+        "transformers_model_class": None,
+        "transformers_model_parameter_count": None,
+    }
+
+
+def transformers_runtime_audit_fields(args, module_shapes):
+    if not transformers_audit_requested(args):
+        return {}
+
+    path = resolved_transformers_model_path(args)
+    fields = _base_transformers_audit_fields(args, path, module_shapes)
+    if path is None:
+        fields.update(
+            {
+                "transformers_audit_status": "missing_path",
+                "transformers_audit_error": "no Transformers model path resolved",
+            }
+        )
+        return fields
+
+    local_files_only = fields["transformers_local_files_only"]
+    if local_files_only and not path.exists():
+        fields.update(
+            {
+                "transformers_audit_status": "path_missing",
+                "transformers_audit_error": f"{path} does not exist",
+            }
+        )
+        return fields
+
+    try:
+        transformers = importlib.import_module("transformers")
+    except ImportError as exc:
+        fields.update(
+            {
+                "transformers_audit_status": "missing_dependency",
+                "transformers_audit_error": _error_label(exc),
+            }
+        )
+        return fields
+
+    fields["transformers_available"] = True
+    fields["transformers_version"] = getattr(transformers, "__version__", None)
+    loader_kwargs = _transformers_loader_kwargs(args)
+    path_label = str(path)
+
+    try:
+        config = transformers.AutoConfig.from_pretrained(path_label, **loader_kwargs)
+    except Exception as exc:  # pragma: no cover - exercised through tests with stubs.
+        fields.update(
+            {
+                "transformers_audit_status": "config_error",
+                "transformers_audit_error": _error_label(exc),
+            }
+        )
+        return fields
+
+    config_vocab = _safe_int(getattr(config, "vocab_size", None))
+    config_hidden = _safe_int(
+        _first_attr(config, ["hidden_size", "n_embd", "d_model"])
+    )
+    fields.update(
+        {
+            "transformers_config_loaded": True,
+            "transformers_config_class": _class_name(config),
+            "transformers_model_type": getattr(config, "model_type", None),
+            "transformers_architectures": _string_list_label(
+                getattr(config, "architectures", None)
+            ),
+            "transformers_config_vocab_size": config_vocab,
+            "transformers_config_hidden_size": config_hidden,
+            "transformers_config_num_hidden_layers": _safe_int(
+                _first_attr(config, ["num_hidden_layers", "n_layer", "num_layers"])
+            ),
+            "transformers_config_num_attention_heads": _safe_int(
+                _first_attr(config, ["num_attention_heads", "n_head"])
+            ),
+            "transformers_config_max_position_embeddings": _safe_int(
+                _first_attr(config, ["max_position_embeddings", "n_positions"])
+            ),
+            "transformers_config_vocab_matches_checkpoint": (
+                None if config_vocab is None else config_vocab == module_shapes[0]
+            ),
+            "transformers_config_hidden_matches_checkpoint": (
+                None if config_hidden is None else config_hidden == module_shapes[1]
+            ),
+            "transformers_config_lm_head_matches_checkpoint": (
+                None if config_vocab is None else config_vocab == module_shapes[2]
+            ),
+        }
+    )
+
+    status = "ok"
+    if fields["transformers_tokenizer_requested"]:
+        try:
+            tokenizer = transformers.AutoTokenizer.from_pretrained(
+                path_label,
+                **loader_kwargs,
+            )
+            fields.update(
+                {
+                    "transformers_tokenizer_loaded": True,
+                    "transformers_tokenizer_class": _class_name(tokenizer),
+                    "transformers_tokenizer_vocab_size": _tokenizer_vocab_size(tokenizer),
+                    "transformers_tokenizer_model_max_length": _safe_int(
+                        getattr(tokenizer, "model_max_length", None)
+                    ),
+                }
+            )
+        except Exception as exc:  # pragma: no cover - exercised through tests with stubs.
+            status = "tokenizer_error"
+            fields["transformers_tokenizer_error"] = _error_label(exc)
+
+    if fields["transformers_load_model_requested"]:
+        try:
+            model = transformers.AutoModelForCausalLM.from_pretrained(
+                path_label,
+                config=config,
+                **loader_kwargs,
+            )
+            fields.update(
+                {
+                    "transformers_model_loaded": True,
+                    "transformers_model_class": _class_name(model),
+                    "transformers_model_parameter_count": _model_parameter_count(model),
+                }
+            )
+        except Exception as exc:  # pragma: no cover - exercised through tests with stubs.
+            status = "model_error" if status == "ok" else "partial_error"
+            fields["transformers_model_error"] = _error_label(exc)
+
+    fields["transformers_audit_status"] = status
+    return fields
+
+
+def print_transformers_audit(row):
+    if "transformers_audit_status" not in row:
+        return
+    print(
+        "transformers_audit "
+        f"status={row['transformers_audit_status']} "
+        f"path={row['transformers_model_path']} "
+        f"available={row['transformers_available']} "
+        f"config_loaded={row['transformers_config_loaded']} "
+        f"model_type={row['transformers_model_type']} "
+        f"config_vocab={row['transformers_config_vocab_size']} "
+        f"config_hidden={row['transformers_config_hidden_size']} "
+        "config_vocab_matches_checkpoint="
+        f"{row['transformers_config_vocab_matches_checkpoint']} "
+        "config_hidden_matches_checkpoint="
+        f"{row['transformers_config_hidden_matches_checkpoint']} "
+        f"tokenizer_loaded={row['transformers_tokenizer_loaded']} "
+        f"tokenizer_vocab={row['transformers_tokenizer_vocab_size']} "
+        f"model_loaded={row['transformers_model_loaded']} "
+        f"model_parameters={row['transformers_model_parameter_count']} "
+        f"error={row['transformers_audit_error']!r}"
+    )
+
+
+def check_transformers_audit_gate(row, args):
+    if not getattr(args, "require_transformers_audit", False):
+        return True
+    status = row.get("transformers_audit_status", "not_requested")
+    passed = status == "ok"
+    print(
+        "transformers_audit_gate "
+        f"passed={passed} "
+        f"status={status}"
+    )
+    if not passed:
+        detail = row.get("transformers_audit_error") or row.get(
+            "transformers_tokenizer_error"
+        ) or row.get("transformers_model_error")
+        raise RuntimeError(
+            f"Transformers audit gate failed: status={status} error={detail}"
+        )
+    return True
 
 
 def projection_value_label(value):
@@ -1505,7 +1876,7 @@ def hf_lm_shape_audit_row(args, source_label, loaded_files, shape_state):
     source_gain_fields = checkpoint_source_gain_fields(args)
     exact_shape_match = inferred_shapes == requested_shapes
     can_materialize_requested = exact_shape_match or args.allow_overlap_resize
-    return {
+    row = {
         "row_type": "shape_audit",
         "checkpoint_source": source_label,
         "checkpoint_loaded_files": len(loaded_files),
@@ -1554,6 +1925,8 @@ def hf_lm_shape_audit_row(args, source_label, loaded_files, shape_state):
         **projection_fields,
         **source_gain_fields,
     }
+    row.update(transformers_runtime_audit_fields(args, inferred_shapes))
+    return row
 
 
 def print_shape_audit(row):
@@ -1579,6 +1952,7 @@ def print_shape_audit(row):
         f"checkpoint_projection_frequency={projection_value_label(row['checkpoint_projection_frequency'])} "
         f"checkpoint_source_gain={row['checkpoint_source_gain']:.6f}"
     )
+    print_transformers_audit(row)
 
 
 def shape_audit_gate_failures(row, args):
@@ -1919,6 +2293,7 @@ def main():
             print(f"shape_audit_jsonl={args.jsonl} rows=1")
         if shape_audit_gate_requested(args):
             check_shape_audit_gates(row, args)
+        check_transformers_audit_gate(row, args)
         return
 
     checkpoint, rules, source_label, loaded_files, inferred_shapes = (
@@ -1933,6 +2308,9 @@ def main():
         loaded_files,
         (vocab, hidden, target_classes),
     )
+    context_fields.update(transformers_runtime_audit_fields(args, inferred_shapes))
+    print_transformers_audit(context_fields)
+    check_transformers_audit_gate(context_fields, args)
 
     embed = Linear(vocab, hidden, name="embed")
     embed_report, embed_load = preflight_and_load(

@@ -111,6 +111,53 @@ def parse_args():
         help="Optional positive checkpoint source gain shared by preflight and sweep.",
     )
     parser.add_argument(
+        "--transformers-audit",
+        action="store_true",
+        help=(
+            "Forward an optional Transformers config/tokenizer runtime audit to "
+            "checkpoint_preflight.py without making Transformers a hard dependency."
+        ),
+    )
+    parser.add_argument(
+        "--transformers-model-path",
+        type=Path,
+        default=None,
+        help=(
+            "Local Transformers model/config/tokenizer directory for the audit. "
+            "Defaults to the HF state-dict directory or parent."
+        ),
+    )
+    parser.add_argument(
+        "--transformers-revision",
+        default=None,
+        help="Optional Transformers revision forwarded to checkpoint_preflight.py.",
+    )
+    parser.add_argument(
+        "--allow-transformers-remote",
+        action="store_true",
+        help="Allow the Transformers audit to resolve non-local files.",
+    )
+    parser.add_argument(
+        "--transformers-trust-remote-code",
+        action="store_true",
+        help="Forward trust_remote_code=True to the Transformers audit.",
+    )
+    parser.add_argument(
+        "--skip-transformers-tokenizer",
+        action="store_true",
+        help="Only audit AutoConfig metadata when --transformers-audit is set.",
+    )
+    parser.add_argument(
+        "--transformers-load-model",
+        action="store_true",
+        help="Also instantiate AutoModelForCausalLM during the optional audit.",
+    )
+    parser.add_argument(
+        "--require-transformers-audit",
+        action="store_true",
+        help="Fail checkpoint preflight when the optional Transformers audit is not clean.",
+    )
+    parser.add_argument(
         "--skip-checkpoint-shape-audit",
         action="store_true",
         help="Skip the checkpoint_preflight.py --shape-only audit before sweep.",
@@ -372,6 +419,8 @@ def parse_args():
         parser.error("--continue-plan-jsonl requires --continue-manifest-jsonl")
     if args.checkpoint_source_gain is not None and args.checkpoint_source_gain <= 0.0:
         parser.error("--checkpoint-source-gain must be positive")
+    if args.require_transformers_audit and not args.transformers_audit:
+        parser.error("--require-transformers-audit requires --transformers-audit")
     if (
         args.require_checkpoint_preflight_match
         and args.compare_checkpoint_preflight_jsonl is None
@@ -777,6 +826,27 @@ def checkpoint_policy_args(args):
     return flags
 
 
+def checkpoint_transformers_args(args):
+    if not args.transformers_audit:
+        return []
+    flags = ["--transformers-audit"]
+    if args.transformers_model_path is not None:
+        flags.extend(["--transformers-model-path", args.transformers_model_path])
+    if args.transformers_revision is not None:
+        flags.extend(["--transformers-revision", args.transformers_revision])
+    if args.allow_transformers_remote:
+        flags.append("--allow-transformers-remote")
+    if args.transformers_trust_remote_code:
+        flags.append("--transformers-trust-remote-code")
+    if args.skip_transformers_tokenizer:
+        flags.append("--skip-transformers-tokenizer")
+    if args.transformers_load_model:
+        flags.append("--transformers-load-model")
+    if args.require_transformers_audit:
+        flags.append("--require-transformers-audit")
+    return flags
+
+
 def run_guard_args(ft_epochs):
     return [
         "--require-run-guard-counts-available",
@@ -991,6 +1061,26 @@ def profile_smoke_manifest_row(
             args.compare_checkpoint_preflight_jsonl
         ),
         "require_checkpoint_preflight_match": args.require_checkpoint_preflight_match,
+        "transformers_audit": bool(getattr(args, "transformers_audit", False)),
+        "transformers_model_path": optional_path(
+            getattr(args, "transformers_model_path", None)
+        ),
+        "transformers_revision": getattr(args, "transformers_revision", None),
+        "allow_transformers_remote": bool(
+            getattr(args, "allow_transformers_remote", False)
+        ),
+        "transformers_trust_remote_code": bool(
+            getattr(args, "transformers_trust_remote_code", False)
+        ),
+        "skip_transformers_tokenizer": bool(
+            getattr(args, "skip_transformers_tokenizer", False)
+        ),
+        "transformers_load_model": bool(
+            getattr(args, "transformers_load_model", False)
+        ),
+        "require_transformers_audit": bool(
+            getattr(args, "require_transformers_audit", False)
+        ),
         "sweep_jsonl": str(sweep_jsonl),
         "sweep_aggregate_jsonl": str(sweep_aggregate_jsonl),
         "source_compare_jsonl": str(source_compare_jsonl),
@@ -1293,6 +1383,7 @@ def main():
         ]
         shape_audit_cmd.extend(checkpoint_shape_args())
         shape_audit_cmd.extend(checkpoint_policy_args(args))
+        shape_audit_cmd.extend(checkpoint_transformers_args(args))
         if args.shape_audit_require_exact_shape_match:
             shape_audit_cmd.append("--require-exact-shape-match")
         if args.shape_audit_require_detected_key_preset is not None:
@@ -1315,6 +1406,7 @@ def main():
         ]
         checkpoint_preflight_cmd.extend(checkpoint_shape_args())
         checkpoint_preflight_cmd.extend(checkpoint_policy_args(args))
+        checkpoint_preflight_cmd.extend(checkpoint_transformers_args(args))
         if args.compare_checkpoint_preflight_jsonl is not None:
             checkpoint_preflight_cmd.extend(
                 ["--compare-jsonl", args.compare_checkpoint_preflight_jsonl]

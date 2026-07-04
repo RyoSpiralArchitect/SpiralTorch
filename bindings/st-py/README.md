@@ -109,7 +109,9 @@ diagnostic surface for local HF/PyTorch-style checkpoints without making Torch,
 safetensors, or Transformers hard dependencies of the binding. Start with
 `examples/byte_lm_profile_smoke.py --hf-state-dict <path> --key-preset auto` to
 run checkpoint preflight, LoRA/source/profile comparisons, promotion manifests,
-and dry-run continuation plans before scaling into heavier training runs.
+and dry-run continuation plans before scaling into heavier training runs. Add
+`--transformers-audit` when a local Transformers config/tokenizer should be
+co-imported into the same JSONL evidence without making Transformers mandatory.
 
 ## Building wheels
 
