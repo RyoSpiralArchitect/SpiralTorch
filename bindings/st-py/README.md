@@ -114,7 +114,8 @@ and dry-run continuation plans before scaling into heavier training runs. Add
 co-imported into the same JSONL evidence without making Transformers mandatory.
 For pre-FT inference evidence, `examples/byte_lm_transformers_trace.py` loads a
 local Transformers model, records prompt-level next-token top-k logits and
-hidden-state summaries, and can attach `--zspace-project` projection metrics.
+hidden-state summaries, co-imports config/tokenizer/model runtime metadata, and
+can attach `--zspace-project` projection metrics.
 
 ## Building wheels
 

@@ -6217,11 +6217,23 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                     config,
                     tokenizer,
                     model_loaded=True,
+                    model=model,
                 )
                 row = module.trace_prompt(args, tokenizer, model, "spiral", 0)
 
         self.assertEqual(manifest["row_type"], "transformers_trace_manifest")
         self.assertEqual(manifest["transformers_model_type"], "llama")
+        self.assertEqual(manifest["transformers_config_num_hidden_layers"], 2)
+        self.assertEqual(manifest["transformers_config_num_attention_heads"], 4)
+        self.assertEqual(
+            manifest["transformers_config_max_position_embeddings"],
+            2048,
+        )
+        self.assertEqual(manifest["transformers_tokenizer_class"], "FakeTokenizer")
+        self.assertEqual(manifest["transformers_tokenizer_vocab_size"], 320)
+        self.assertEqual(manifest["transformers_tokenizer_len"], 320)
+        self.assertEqual(manifest["transformers_model_class"], "FakeModel")
+        self.assertEqual(manifest["transformers_model_parameter_count"], 7)
         self.assertEqual(row["row_type"], "transformers_prompt_trace")
         self.assertEqual(row["input_token_count"], 3)
         self.assertEqual(row["logit_vocab_size"], 4)

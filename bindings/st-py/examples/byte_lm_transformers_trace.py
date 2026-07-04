@@ -219,6 +219,60 @@ def loader_kwargs(args):
     return kwargs
 
 
+def safe_int(value):
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def first_attr(value, names):
+    for name in names:
+        if hasattr(value, name):
+            candidate = getattr(value, name)
+            if candidate is not None:
+                return candidate
+    return None
+
+
+def string_list_label(value):
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (list, tuple)):
+        return ",".join(str(item) for item in value) or None
+    return str(value)
+
+
+def tokenizer_len(tokenizer):
+    try:
+        return safe_int(len(tokenizer))
+    except TypeError:
+        return None
+
+
+def model_parameter_count(model):
+    if model is None:
+        return None
+    parameters = getattr(model, "parameters", None)
+    if not callable(parameters):
+        return None
+    total = 0
+    try:
+        for parameter in parameters():
+            numel = getattr(parameter, "numel", None)
+            count = safe_int(numel() if callable(numel) else None)
+            if count is None:
+                return None
+            total += count
+    except TypeError:
+        return None
+    return total
+
+
 def load_prompts(args):
     prompts = list(args.prompt)
     if args.prompt_file is not None:
@@ -483,20 +537,55 @@ def config_fields(config):
     return {
         "transformers_config_class": config.__class__.__name__,
         "transformers_model_type": getattr(config, "model_type", None),
-        "transformers_architectures": ",".join(
-            str(item) for item in (getattr(config, "architectures", None) or [])
+        "transformers_architectures": string_list_label(
+            getattr(config, "architectures", None)
         )
         or None,
-        "transformers_config_vocab_size": getattr(config, "vocab_size", None),
-        "transformers_config_hidden_size": getattr(
-            config,
-            "hidden_size",
-            getattr(config, "n_embd", None),
+        "transformers_config_vocab_size": safe_int(getattr(config, "vocab_size", None)),
+        "transformers_config_hidden_size": safe_int(
+            first_attr(config, ["hidden_size", "n_embd", "d_model"])
+        ),
+        "transformers_config_num_hidden_layers": safe_int(
+            first_attr(config, ["num_hidden_layers", "n_layer", "num_layers"])
+        ),
+        "transformers_config_num_attention_heads": safe_int(
+            first_attr(config, ["num_attention_heads", "n_head"])
+        ),
+        "transformers_config_max_position_embeddings": safe_int(
+            first_attr(config, ["max_position_embeddings", "n_positions", "seq_length"])
         ),
     }
 
 
-def manifest_row(args, prompts, transformers, config, tokenizer, model_loaded):
+def tokenizer_fields(tokenizer):
+    length = tokenizer_len(tokenizer)
+    vocab_size = safe_int(getattr(tokenizer, "vocab_size", None))
+    return {
+        "tokenizer_class": tokenizer.__class__.__name__,
+        "transformers_tokenizer_class": tokenizer.__class__.__name__,
+        "transformers_tokenizer_vocab_size": (
+            length if length is not None else vocab_size
+        ),
+        "transformers_tokenizer_len": length,
+    }
+
+
+def model_fields(model):
+    return {
+        "transformers_model_class": None if model is None else model.__class__.__name__,
+        "transformers_model_parameter_count": model_parameter_count(model),
+    }
+
+
+def manifest_row(
+    args,
+    prompts,
+    transformers,
+    config,
+    tokenizer,
+    model_loaded,
+    model=None,
+):
     row = {
         "row_type": "transformers_trace_manifest",
         "model_path": str(args.model_path),
@@ -510,10 +599,11 @@ def manifest_row(args, prompts, transformers, config, tokenizer, model_loaded):
         "zspace_project": args.zspace_project,
         "zspace_source": args.zspace_source if args.zspace_project else None,
         "transformers_version": getattr(transformers, "__version__", None),
-        "tokenizer_class": tokenizer.__class__.__name__,
         "model_loaded": model_loaded,
     }
     row.update(config_fields(config))
+    row.update(tokenizer_fields(tokenizer))
+    row.update(model_fields(model if model_loaded else None))
     return row
 
 
@@ -929,6 +1019,7 @@ def main():
             config,
             tokenizer,
             model_loaded=model is not None,
+            model=model,
         )
     )
     if model is not None:
