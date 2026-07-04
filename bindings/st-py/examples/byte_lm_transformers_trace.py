@@ -644,6 +644,30 @@ def failure_label(failures):
     return ",".join(failures) if failures else "none"
 
 
+def numeric_detail_values(rows, key):
+    values = []
+    for row in rows:
+        value = row.get(key)
+        if value is None or isinstance(value, bool):
+            continue
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            continue
+        if not math.isnan(number):
+            values.append(number)
+    return values
+
+
+def max_detail_value(rows, key):
+    values = numeric_detail_values(rows, key)
+    return max(values) if values else None
+
+
+def count_detail_flag(rows, key):
+    return sum(1 for row in rows if row.get(key) is True)
+
+
 def current_trace_gate_rows(rows, args):
     if args.require_zspace_status is None:
         return []
@@ -700,6 +724,12 @@ def compare_prompt_rows(current, baseline, args):
     )
     prompt_changed = current.get("prompt") != baseline.get("prompt")
     top_token_changed = before_top_token != after_top_token
+    zspace_status_before = baseline.get("zspace_projection_status")
+    zspace_status_after = current.get("zspace_projection_status")
+    zspace_status_changed = (
+        zspace_status_before != zspace_status_after
+        and (zspace_status_before is not None or zspace_status_after is not None)
+    )
     failures = []
     if args.require_trace_match and prompt_changed:
         failures.append("prompt_changed")
@@ -734,8 +764,9 @@ def compare_prompt_rows(current, baseline, args):
         "hidden_state_l2_before": numeric(baseline, "hidden_state_l2"),
         "hidden_state_l2_after": numeric(current, "hidden_state_l2"),
         "hidden_state_l2_change": hidden_state_l2_change,
-        "zspace_status_before": baseline.get("zspace_projection_status"),
-        "zspace_status_after": current.get("zspace_projection_status"),
+        "zspace_status_before": zspace_status_before,
+        "zspace_status_after": zspace_status_after,
+        "zspace_status_changed": zspace_status_changed,
         "failures": failure_label(failures),
         "passed": not failures,
     }
@@ -775,6 +806,11 @@ def compare_trace_rows(current_rows, baseline_rows, args):
         if not detail["passed"]:
             failures += 1
         details.append(detail)
+    compared_details = [
+        row
+        for row in details
+        if row.get("status") not in {"missing", "extra"}
+    ]
     summary = {
         "row_type": "transformers_trace_compare_summary",
         "baseline_prompt_rows": len(baseline),
@@ -788,6 +824,31 @@ def compare_trace_rows(current_rows, baseline_rows, args):
         "max_top_probability_regression": args.max_top_probability_regression,
         "max_logit_l2_change": args.max_logit_l2_change,
         "max_hidden_state_l2_change": args.max_hidden_state_l2_change,
+        "prompt_changed_rows": count_detail_flag(compared_details, "prompt_changed"),
+        "top_token_changed_rows": count_detail_flag(
+            compared_details,
+            "top_token_changed",
+        ),
+        "zspace_status_changed_rows": count_detail_flag(
+            compared_details,
+            "zspace_status_changed",
+        ),
+        "observed_max_top_logit_regression": max_detail_value(
+            compared_details,
+            "top_logit_regression",
+        ),
+        "observed_max_top_probability_regression": max_detail_value(
+            compared_details,
+            "top_probability_regression",
+        ),
+        "observed_max_logit_l2_change": max_detail_value(
+            compared_details,
+            "logit_l2_change",
+        ),
+        "observed_max_hidden_state_l2_change": max_detail_value(
+            compared_details,
+            "hidden_state_l2_change",
+        ),
         "failures": failures,
         "passed": failures == 0,
     }
@@ -801,6 +862,13 @@ def print_compare_summary(row):
         f"current_prompt_rows={row['current_prompt_rows']} "
         f"missing_prompt_rows={row['missing_prompt_rows']} "
         f"extra_prompt_rows={row['extra_prompt_rows']} "
+        f"prompt_changed_rows={row['prompt_changed_rows']} "
+        f"top_token_changed_rows={row['top_token_changed_rows']} "
+        f"zspace_status_changed_rows={row['zspace_status_changed_rows']} "
+        "observed_max_top_logit_regression="
+        f"{row['observed_max_top_logit_regression']} "
+        "observed_max_top_probability_regression="
+        f"{row['observed_max_top_probability_regression']} "
         f"failures={row['failures']} "
         f"passed={row['passed']}"
     )

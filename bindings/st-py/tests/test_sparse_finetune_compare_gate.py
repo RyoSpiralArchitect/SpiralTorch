@@ -6094,6 +6094,12 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertEqual(rows[0]["row_type"], "transformers_trace_compare_summary")
         self.assertTrue(rows[0]["passed"])
         self.assertEqual(rows[0]["failures"], 0)
+        self.assertEqual(rows[0]["top_token_changed_rows"], 0)
+        self.assertEqual(rows[0]["zspace_status_changed_rows"], 0)
+        self.assertEqual(rows[0]["observed_max_top_logit_regression"], 0.0)
+        self.assertEqual(rows[0]["observed_max_top_probability_regression"], 0.0)
+        self.assertEqual(rows[0]["observed_max_logit_l2_change"], 0.0)
+        self.assertEqual(rows[0]["observed_max_hidden_state_l2_change"], 0.0)
         self.assertTrue(rows[1]["passed"])
 
     def test_transformers_trace_compare_gate_detects_top_token_drift(self):
@@ -6124,6 +6130,69 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertFalse(rows[0]["passed"])
         self.assertFalse(rows[1]["passed"])
         self.assertIn("top_token_changed", rows[1]["failures"])
+
+    def test_transformers_trace_compare_summary_reports_drift_metrics(self):
+        module = load_example("byte_lm_transformers_trace")
+        args = argparse.Namespace(
+            require_trace_match=False,
+            require_top_token_match=False,
+            max_top_logit_regression=None,
+            max_top_probability_regression=None,
+            max_logit_l2_change=None,
+            max_hidden_state_l2_change=None,
+        )
+        baseline = [
+            {
+                "row_type": "transformers_prompt_trace",
+                "prompt_index": 0,
+                "prompt": "spiral",
+                "top_token_ids": "3,1",
+                "top_logits": "1.1,0.4",
+                "top_probabilities": "0.5,0.2",
+                "logit_l2": 1.2,
+                "hidden_state_l2": 0.9,
+                "zspace_projection_status": "ok",
+            },
+            {
+                "row_type": "transformers_prompt_trace",
+                "prompt_index": 1,
+                "prompt": "torch",
+                "top_token_ids": "2,1",
+                "top_logits": "0.8,0.4",
+                "top_probabilities": "0.4,0.2",
+                "logit_l2": 0.7,
+                "hidden_state_l2": 0.5,
+                "zspace_projection_status": "ok",
+            },
+        ]
+        current = [
+            dict(
+                baseline[0],
+                top_logits="0.9,0.4",
+                top_probabilities="0.35,0.2",
+                logit_l2=1.8,
+                hidden_state_l2=0.6,
+            ),
+            dict(
+                baseline[1],
+                top_token_ids="1,2",
+                zspace_projection_status="error",
+            ),
+        ]
+
+        rows = module.compare_trace_rows(current, baseline, args)
+        summary = rows[0]
+
+        self.assertTrue(summary["passed"])
+        self.assertEqual(summary["top_token_changed_rows"], 1)
+        self.assertEqual(summary["zspace_status_changed_rows"], 1)
+        self.assertAlmostEqual(summary["observed_max_top_logit_regression"], 0.2)
+        self.assertAlmostEqual(
+            summary["observed_max_top_probability_regression"],
+            0.15,
+        )
+        self.assertAlmostEqual(summary["observed_max_logit_l2_change"], 0.6)
+        self.assertAlmostEqual(summary["observed_max_hidden_state_l2_change"], 0.3)
 
     def test_transformers_trace_zspace_status_gate_checks_current_rows(self):
         module = load_example("byte_lm_transformers_trace")
