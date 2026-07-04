@@ -441,8 +441,9 @@ def parse_args():
         "--validate-produced-manifest",
         action="store_true",
         help=(
-            "After a normal profile smoke run, validate the manifest produced by "
-            "this invocation and apply any manifest trace validation gates."
+            "After a normal profile smoke run or manifest continuation, validate "
+            "the manifest produced by this invocation and apply any manifest trace "
+            "validation gates."
         ),
     )
     parser.add_argument(
@@ -584,10 +585,6 @@ def parse_args():
     if args.validate_produced_manifest and args.validate_manifest_jsonl is not None:
         parser.error(
             "--validate-produced-manifest is only valid for normal profile smoke runs"
-        )
-    if args.validate_produced_manifest and args.continue_manifest_jsonl is not None:
-        parser.error(
-            "--validate-produced-manifest is not supported with --continue-manifest-jsonl"
         )
     if args.validate_produced_manifest and args.dry_run:
         parser.error("--validate-produced-manifest cannot be used with --dry-run")
@@ -2045,17 +2042,31 @@ def continue_profile_smoke_from_manifest(args):
         write_jsonl(output_manifest_jsonl, [updated])
         validate_profile_smoke_manifest_artifacts(updated)
         validate_promoted_rung_manifest_consistency(updated, rung_manifest_rows)
+        if args.validate_produced_manifest:
+            validate_profile_smoke_manifest_file(
+                output_manifest_jsonl,
+                validation_jsonl=args.manifest_validation_jsonl,
+                args=args,
+            )
 
-    print(
-        "profile_smoke_manifest_continue "
-        f"manifest={manifest_path} "
-        f"output_manifest={output_manifest_jsonl} "
-        f"continue_plan_jsonl={args.continue_plan_jsonl} "
-        f"continued_rungs={args.continue_rungs} "
-        f"promoted_rungs={updated['promoted_rungs']} "
-        f"continued_ft_epochs={','.join(str(epoch) for epoch in continued_epochs)} "
-        f"promoted_final_promotion_jsonl={updated.get('promoted_final_promotion_jsonl')}"
-    )
+    output_parts = [
+        "profile_smoke_manifest_continue",
+        f"manifest={manifest_path}",
+        f"output_manifest={output_manifest_jsonl}",
+        f"continue_plan_jsonl={args.continue_plan_jsonl}",
+        f"continued_rungs={args.continue_rungs}",
+        f"promoted_rungs={updated['promoted_rungs']}",
+        f"continued_ft_epochs={','.join(str(epoch) for epoch in continued_epochs)}",
+        "promoted_final_promotion_jsonl="
+        f"{updated.get('promoted_final_promotion_jsonl')}",
+    ]
+    if args.validate_produced_manifest:
+        output_parts.append("validated_produced_manifest=True")
+        if args.manifest_validation_jsonl is not None:
+            output_parts.append(
+                f"manifest_validation_jsonl={args.manifest_validation_jsonl}"
+            )
+    print(" ".join(output_parts))
 
 
 def main():
