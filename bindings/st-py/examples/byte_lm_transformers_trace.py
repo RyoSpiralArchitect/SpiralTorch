@@ -587,6 +587,37 @@ def model_fields(model):
     }
 
 
+def module_version(module):
+    version = getattr(module, "__version__", None)
+    return None if version is None else str(version)
+
+
+def module_name(module):
+    name = getattr(module, "__name__", None)
+    return None if name is None else str(name)
+
+
+def module_file(module):
+    file = getattr(module, "__file__", None)
+    return None if file is None else str(file)
+
+
+def import_context_fields(transformers):
+    transformers_imported = transformers is not None
+    return {
+        "spiraltorch_imported": True,
+        "spiraltorch_version": module_version(st),
+        "spiraltorch_module_name": module_name(st),
+        "spiraltorch_module_file": module_file(st),
+        "transformers_imported": transformers_imported,
+        "transformers_module_name": module_name(transformers),
+        "transformers_module_file": module_file(transformers),
+        "transformers_spiraltorch_coimport_status": (
+            "ok" if transformers_imported else "transformers_missing"
+        ),
+    }
+
+
 def manifest_row(
     args,
     prompts,
@@ -611,6 +642,7 @@ def manifest_row(
         "transformers_version": getattr(transformers, "__version__", None),
         "model_loaded": model_loaded,
     }
+    row.update(import_context_fields(transformers))
     row.update(config_fields(config))
     row.update(tokenizer_fields(tokenizer))
     row.update(model_fields(model if model_loaded else None))
@@ -704,6 +736,12 @@ TRACE_RUNTIME_METADATA_FIELDS = [
     "capture_hidden_states",
     "zspace_project",
     "zspace_source",
+    "spiraltorch_imported",
+    "spiraltorch_version",
+    "spiraltorch_module_name",
+    "transformers_imported",
+    "transformers_module_name",
+    "transformers_spiraltorch_coimport_status",
     "transformers_version",
     "model_loaded",
     "transformers_config_class",

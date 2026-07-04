@@ -6295,6 +6295,14 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                 row = module.trace_prompt(args, tokenizer, model, "spiral", 0)
 
         self.assertEqual(manifest["row_type"], "transformers_trace_manifest")
+        self.assertTrue(manifest["spiraltorch_imported"])
+        self.assertEqual(manifest["spiraltorch_module_name"], "spiraltorch")
+        self.assertTrue(manifest["transformers_imported"])
+        self.assertEqual(manifest["transformers_module_name"], "transformers")
+        self.assertEqual(
+            manifest["transformers_spiraltorch_coimport_status"],
+            "ok",
+        )
         self.assertEqual(manifest["transformers_model_type"], "llama")
         self.assertEqual(manifest["transformers_config_num_hidden_layers"], 2)
         self.assertEqual(manifest["transformers_config_num_attention_heads"], 4)
@@ -6461,7 +6469,59 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             rows[0]["runtime_metadata_changed_fields"],
             "transformers_tokenizer_class",
         )
-        self.assertEqual(rows[0]["runtime_metadata_failures"], "runtime_metadata_changed")
+        self.assertEqual(
+            rows[0]["runtime_metadata_failures"],
+            "runtime_metadata_changed",
+        )
+        self.assertTrue(rows[1]["passed"])
+
+    def test_transformers_trace_compare_gate_detects_import_context_drift(self):
+        module = load_example("byte_lm_transformers_trace")
+        args = argparse.Namespace(
+            require_trace_match=False,
+            require_runtime_metadata_match=True,
+            require_top_token_match=False,
+            max_top_logit_regression=None,
+            max_top_probability_regression=None,
+            max_logit_l2_change=None,
+            max_hidden_state_l2_change=None,
+        )
+        manifest = {
+            "row_type": "transformers_trace_manifest",
+            "model_path": "/models/llama",
+            "top_k": 2,
+            "spiraltorch_imported": True,
+            "spiraltorch_version": "0.1.0",
+            "spiraltorch_module_name": "spiraltorch",
+            "transformers_imported": True,
+            "transformers_module_name": "transformers",
+            "transformers_spiraltorch_coimport_status": "ok",
+        }
+        prompt = {
+            "row_type": "transformers_prompt_trace",
+            "prompt_index": 0,
+            "prompt": "spiral",
+            "top_token_ids": "3,1",
+        }
+        current = [
+            dict(
+                manifest,
+                transformers_spiraltorch_coimport_status="transformers_missing",
+            ),
+            prompt,
+        ]
+        rows = module.compare_trace_rows(current, [manifest, prompt], args)
+
+        self.assertFalse(rows[0]["passed"])
+        self.assertEqual(rows[0]["runtime_metadata_changed_count"], 1)
+        self.assertEqual(
+            rows[0]["runtime_metadata_changed_fields"],
+            "transformers_spiraltorch_coimport_status",
+        )
+        self.assertEqual(
+            rows[0]["runtime_metadata_failures"],
+            "runtime_metadata_changed",
+        )
         self.assertTrue(rows[1]["passed"])
 
     def test_transformers_trace_compare_summary_reports_drift_metrics(self):
