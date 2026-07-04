@@ -1555,7 +1555,58 @@ def continuation_plan_row(
             "strict_aggregate_gates": strict_aggregate_gates,
         }
     )
+    row.update(trace_policy_fields(source_row))
     return row
+
+
+def trace_policy_fields(source):
+    return {
+        "transformers_trace": bool(source.get("transformers_trace", False)),
+        "transformers_trace_jsonl": source.get("transformers_trace_jsonl"),
+        "compare_transformers_trace_jsonl": source.get(
+            "compare_transformers_trace_jsonl"
+        ),
+        "transformers_trace_compare_jsonl": source.get(
+            "transformers_trace_compare_jsonl"
+        ),
+        "transformers_trace_prompts": list(
+            source.get("transformers_trace_prompts") or []
+        ),
+        "transformers_trace_prompt_file": source.get(
+            "transformers_trace_prompt_file"
+        ),
+        "transformers_trace_top_k": source.get("transformers_trace_top_k"),
+        "transformers_trace_zspace_project": bool(
+            source.get("transformers_trace_zspace_project", False)
+        ),
+        "transformers_trace_zspace_source": source.get(
+            "transformers_trace_zspace_source"
+        ),
+        "require_transformers_trace_match": bool(
+            source.get("require_transformers_trace_match", False)
+        ),
+        "require_transformers_trace_runtime_metadata_match": bool(
+            source.get("require_transformers_trace_runtime_metadata_match", False)
+        ),
+        "require_transformers_trace_top_token_match": bool(
+            source.get("require_transformers_trace_top_token_match", False)
+        ),
+        "transformers_trace_max_top_logit_regression": source.get(
+            "transformers_trace_max_top_logit_regression"
+        ),
+        "transformers_trace_max_top_probability_regression": source.get(
+            "transformers_trace_max_top_probability_regression"
+        ),
+        "transformers_trace_max_logit_l2_change": source.get(
+            "transformers_trace_max_logit_l2_change"
+        ),
+        "transformers_trace_max_hidden_state_l2_change": source.get(
+            "transformers_trace_max_hidden_state_l2_change"
+        ),
+        "transformers_trace_require_zspace_status": source.get(
+            "transformers_trace_require_zspace_status"
+        ),
+    }
 
 
 def profile_smoke_manifest_row(
@@ -1589,7 +1640,7 @@ def profile_smoke_manifest_row(
         for rung in range(1, promoted_rungs + 1)
     ]
     final_artifacts = promoted_artifacts[-1] if promoted_artifacts else None
-    return {
+    row = {
         "row_type": "profile_smoke_manifest",
         "out_dir": str(out_dir),
         "checkpoint": str(checkpoint_path),
@@ -1634,67 +1685,6 @@ def profile_smoke_manifest_row(
         "require_transformers_audit": bool(
             getattr(args, "require_transformers_audit", False)
         ),
-        "transformers_trace": bool(getattr(args, "transformers_trace", False)),
-        "transformers_trace_jsonl": optional_path(
-            transformers_trace_jsonl
-            if getattr(args, "transformers_trace", False)
-            else None
-        ),
-        "compare_transformers_trace_jsonl": optional_path(
-            getattr(args, "compare_transformers_trace_jsonl", None)
-        ),
-        "transformers_trace_compare_jsonl": optional_path(
-            transformers_trace_compare_jsonl
-        ),
-        "transformers_trace_prompts": list(
-            getattr(args, "transformers_trace_prompts", []) or []
-        ),
-        "transformers_trace_prompt_file": optional_path(
-            getattr(args, "transformers_trace_prompt_file", None)
-        ),
-        "transformers_trace_top_k": getattr(args, "transformers_trace_top_k", None),
-        "transformers_trace_zspace_project": bool(
-            getattr(args, "transformers_trace_zspace_project", False)
-        ),
-        "transformers_trace_zspace_source": getattr(
-            args,
-            "transformers_trace_zspace_source",
-            None,
-        ),
-        "require_transformers_trace_match": bool(
-            getattr(args, "require_transformers_trace_match", False)
-        ),
-        "require_transformers_trace_runtime_metadata_match": bool(
-            getattr(args, "require_transformers_trace_runtime_metadata_match", False)
-        ),
-        "require_transformers_trace_top_token_match": bool(
-            getattr(args, "require_transformers_trace_top_token_match", False)
-        ),
-        "transformers_trace_max_top_logit_regression": getattr(
-            args,
-            "transformers_trace_max_top_logit_regression",
-            None,
-        ),
-        "transformers_trace_max_top_probability_regression": getattr(
-            args,
-            "transformers_trace_max_top_probability_regression",
-            None,
-        ),
-        "transformers_trace_max_logit_l2_change": getattr(
-            args,
-            "transformers_trace_max_logit_l2_change",
-            None,
-        ),
-        "transformers_trace_max_hidden_state_l2_change": getattr(
-            args,
-            "transformers_trace_max_hidden_state_l2_change",
-            None,
-        ),
-        "transformers_trace_require_zspace_status": getattr(
-            args,
-            "transformers_trace_require_zspace_status",
-            None,
-        ),
         "sweep_jsonl": str(sweep_jsonl),
         "sweep_aggregate_jsonl": str(sweep_aggregate_jsonl),
         "source_compare_jsonl": str(source_compare_jsonl),
@@ -1716,6 +1706,84 @@ def profile_smoke_manifest_row(
             final_artifacts["promotion_jsonl"] if final_artifacts else None
         ),
     }
+    row.update(
+        trace_policy_fields(
+            {
+                "transformers_trace": bool(
+                    getattr(args, "transformers_trace", False)
+                ),
+                "transformers_trace_jsonl": optional_path(
+                    transformers_trace_jsonl
+                    if getattr(args, "transformers_trace", False)
+                    else None
+                ),
+                "compare_transformers_trace_jsonl": optional_path(
+                    getattr(args, "compare_transformers_trace_jsonl", None)
+                ),
+                "transformers_trace_compare_jsonl": optional_path(
+                    transformers_trace_compare_jsonl
+                ),
+                "transformers_trace_prompts": list(
+                    getattr(args, "transformers_trace_prompts", []) or []
+                ),
+                "transformers_trace_prompt_file": optional_path(
+                    getattr(args, "transformers_trace_prompt_file", None)
+                ),
+                "transformers_trace_top_k": getattr(
+                    args,
+                    "transformers_trace_top_k",
+                    None,
+                ),
+                "transformers_trace_zspace_project": bool(
+                    getattr(args, "transformers_trace_zspace_project", False)
+                ),
+                "transformers_trace_zspace_source": getattr(
+                    args,
+                    "transformers_trace_zspace_source",
+                    None,
+                ),
+                "require_transformers_trace_match": bool(
+                    getattr(args, "require_transformers_trace_match", False)
+                ),
+                "require_transformers_trace_runtime_metadata_match": bool(
+                    getattr(
+                        args,
+                        "require_transformers_trace_runtime_metadata_match",
+                        False,
+                    )
+                ),
+                "require_transformers_trace_top_token_match": bool(
+                    getattr(args, "require_transformers_trace_top_token_match", False)
+                ),
+                "transformers_trace_max_top_logit_regression": getattr(
+                    args,
+                    "transformers_trace_max_top_logit_regression",
+                    None,
+                ),
+                "transformers_trace_max_top_probability_regression": getattr(
+                    args,
+                    "transformers_trace_max_top_probability_regression",
+                    None,
+                ),
+                "transformers_trace_max_logit_l2_change": getattr(
+                    args,
+                    "transformers_trace_max_logit_l2_change",
+                    None,
+                ),
+                "transformers_trace_max_hidden_state_l2_change": getattr(
+                    args,
+                    "transformers_trace_max_hidden_state_l2_change",
+                    None,
+                ),
+                "transformers_trace_require_zspace_status": getattr(
+                    args,
+                    "transformers_trace_require_zspace_status",
+                    None,
+                ),
+            }
+        )
+    )
+    return row
 
 
 def continue_profile_smoke_from_manifest(args):
