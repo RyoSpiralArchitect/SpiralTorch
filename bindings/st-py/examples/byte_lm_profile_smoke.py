@@ -158,6 +158,110 @@ def parse_args():
         help="Fail checkpoint preflight when the optional Transformers audit is not clean.",
     )
     parser.add_argument(
+        "--transformers-trace",
+        action="store_true",
+        help=(
+            "Run byte_lm_transformers_trace.py against the same local "
+            "Transformers runtime before the FT smoke."
+        ),
+    )
+    parser.add_argument(
+        "--transformers-trace-jsonl",
+        type=Path,
+        default=None,
+        help=(
+            "Optional JSONL path for the Transformers prompt trace. Defaults "
+            "to --out-dir/transformers-trace.jsonl when --transformers-trace is set."
+        ),
+    )
+    parser.add_argument(
+        "--compare-transformers-trace-jsonl",
+        type=Path,
+        default=None,
+        help="Optional baseline Transformers prompt trace JSONL to compare.",
+    )
+    parser.add_argument(
+        "--transformers-trace-compare-jsonl",
+        type=Path,
+        default=None,
+        help=(
+            "Optional JSONL path for Transformers trace comparison/gate rows. "
+            "Defaults to --out-dir/transformers-trace-compare.jsonl when needed."
+        ),
+    )
+    parser.add_argument(
+        "--transformers-trace-prompt",
+        dest="transformers_trace_prompts",
+        action="append",
+        default=[],
+        help=(
+            "Prompt forwarded to byte_lm_transformers_trace.py. May be repeated; "
+            "the trace script supplies a default when omitted."
+        ),
+    )
+    parser.add_argument(
+        "--transformers-trace-prompt-file",
+        type=Path,
+        default=None,
+        help="Optional prompt file forwarded to byte_lm_transformers_trace.py.",
+    )
+    parser.add_argument(
+        "--transformers-trace-top-k",
+        type=int,
+        default=5,
+        help="Top-k next-token candidates kept by byte_lm_transformers_trace.py.",
+    )
+    parser.add_argument(
+        "--transformers-trace-zspace-project",
+        action="store_true",
+        help="Ask byte_lm_transformers_trace.py to attach Z-space projection metrics.",
+    )
+    parser.add_argument(
+        "--transformers-trace-zspace-source",
+        choices=["hidden", "top_logits"],
+        default="hidden",
+        help="Trace vector source used when --transformers-trace-zspace-project is set.",
+    )
+    parser.add_argument(
+        "--require-transformers-trace-match",
+        action="store_true",
+        help="Fail when current Transformers trace scope differs from the baseline.",
+    )
+    parser.add_argument(
+        "--require-transformers-trace-top-token-match",
+        action="store_true",
+        help="Fail when a traced prompt's top token differs from the baseline.",
+    )
+    parser.add_argument(
+        "--transformers-trace-max-top-logit-regression",
+        type=float,
+        default=None,
+        help="Maximum allowed top-1 logit regression versus the baseline trace.",
+    )
+    parser.add_argument(
+        "--transformers-trace-max-top-probability-regression",
+        type=float,
+        default=None,
+        help="Maximum allowed top-1 probability regression versus the baseline trace.",
+    )
+    parser.add_argument(
+        "--transformers-trace-max-logit-l2-change",
+        type=float,
+        default=None,
+        help="Maximum allowed prompt logit L2 change versus the baseline trace.",
+    )
+    parser.add_argument(
+        "--transformers-trace-max-hidden-state-l2-change",
+        type=float,
+        default=None,
+        help="Maximum allowed hidden-state L2 change versus the baseline trace.",
+    )
+    parser.add_argument(
+        "--transformers-trace-require-zspace-status",
+        default=None,
+        help="Required zspace_projection_status for current prompt trace rows.",
+    )
+    parser.add_argument(
         "--skip-checkpoint-shape-audit",
         action="store_true",
         help="Skip the checkpoint_preflight.py --shape-only audit before sweep.",
@@ -421,6 +525,68 @@ def parse_args():
         parser.error("--checkpoint-source-gain must be positive")
     if args.require_transformers_audit and not args.transformers_audit:
         parser.error("--require-transformers-audit requires --transformers-audit")
+    trace_requested_by_arg = any(
+        [
+            args.transformers_trace_jsonl is not None,
+            args.compare_transformers_trace_jsonl is not None,
+            args.transformers_trace_compare_jsonl is not None,
+            bool(args.transformers_trace_prompts),
+            args.transformers_trace_prompt_file is not None,
+            args.transformers_trace_zspace_project,
+            args.require_transformers_trace_match,
+            args.require_transformers_trace_top_token_match,
+            args.transformers_trace_max_top_logit_regression is not None,
+            args.transformers_trace_max_top_probability_regression is not None,
+            args.transformers_trace_max_logit_l2_change is not None,
+            args.transformers_trace_max_hidden_state_l2_change is not None,
+            args.transformers_trace_require_zspace_status is not None,
+        ]
+    )
+    if trace_requested_by_arg and not args.transformers_trace:
+        parser.error("Transformers trace options require --transformers-trace")
+    if args.transformers_trace and args.transformers_trace_top_k <= 0:
+        parser.error("--transformers-trace-top-k must be positive")
+    trace_compare_gates = [
+        args.require_transformers_trace_match,
+        args.require_transformers_trace_top_token_match,
+        args.transformers_trace_max_top_logit_regression is not None,
+        args.transformers_trace_max_top_probability_regression is not None,
+        args.transformers_trace_max_logit_l2_change is not None,
+        args.transformers_trace_max_hidden_state_l2_change is not None,
+    ]
+    if any(trace_compare_gates) and args.compare_transformers_trace_jsonl is None:
+        parser.error(
+            "Transformers trace comparison gates require "
+            "--compare-transformers-trace-jsonl"
+        )
+    if (
+        args.transformers_trace_compare_jsonl is not None
+        and args.compare_transformers_trace_jsonl is None
+        and args.transformers_trace_require_zspace_status is None
+    ):
+        parser.error(
+            "--transformers-trace-compare-jsonl requires "
+            "--compare-transformers-trace-jsonl or "
+            "--transformers-trace-require-zspace-status"
+        )
+    for name in [
+        "transformers_trace_max_top_logit_regression",
+        "transformers_trace_max_top_probability_regression",
+        "transformers_trace_max_logit_l2_change",
+        "transformers_trace_max_hidden_state_l2_change",
+    ]:
+        value = getattr(args, name)
+        if value is not None and value < 0.0:
+            parser.error(f"--{name.replace('_', '-')} must be non-negative")
+    if (
+        args.transformers_trace
+        and args.transformers_model_path is None
+        and args.hf_state_dict is None
+    ):
+        parser.error(
+            "--transformers-trace requires --transformers-model-path when "
+            "the smoke writes a generated checkpoint fixture"
+        )
     if (
         args.require_checkpoint_preflight_match
         and args.compare_checkpoint_preflight_jsonl is None
@@ -510,6 +676,9 @@ def required_manifest_artifact_fields(row):
         "checkpoint_shape_audit_jsonl",
         "checkpoint_preflight_jsonl",
         "compare_checkpoint_preflight_jsonl",
+        "transformers_trace_jsonl",
+        "compare_transformers_trace_jsonl",
+        "transformers_trace_compare_jsonl",
         "promoted_rungs_jsonl",
         "promoted_final_run_summary_jsonl",
         "promoted_final_promotion_jsonl",
@@ -847,6 +1016,86 @@ def checkpoint_transformers_args(args):
     return flags
 
 
+def inferred_transformers_model_path(args, checkpoint_path):
+    if args.transformers_model_path is not None:
+        return args.transformers_model_path
+    if args.hf_state_dict is None:
+        return None
+    checkpoint_path = Path(checkpoint_path)
+    if checkpoint_path.suffix:
+        return checkpoint_path.parent
+    return checkpoint_path
+
+
+def transformers_trace_compare_requested(args):
+    return (
+        args.compare_transformers_trace_jsonl is not None
+        or args.transformers_trace_require_zspace_status is not None
+    )
+
+
+def transformers_trace_args(args, model_path, trace_jsonl, trace_compare_jsonl):
+    if not args.transformers_trace:
+        return []
+    flags = [
+        "--model-path",
+        model_path,
+        "--jsonl",
+        trace_jsonl,
+        "--top-k",
+        str(args.transformers_trace_top_k),
+    ]
+    for prompt in args.transformers_trace_prompts:
+        flags.extend(["--prompt", prompt])
+    if args.transformers_trace_prompt_file is not None:
+        flags.extend(["--prompt-file", args.transformers_trace_prompt_file])
+    if args.transformers_revision is not None:
+        flags.extend(["--revision", args.transformers_revision])
+    if args.allow_transformers_remote:
+        flags.append("--allow-remote")
+    if args.transformers_trust_remote_code:
+        flags.append("--trust-remote-code")
+    if args.transformers_trace_zspace_project:
+        flags.extend(
+            [
+                "--zspace-project",
+                "--zspace-source",
+                args.transformers_trace_zspace_source,
+            ]
+        )
+    if args.compare_transformers_trace_jsonl is not None:
+        flags.extend(["--compare-jsonl", args.compare_transformers_trace_jsonl])
+    if trace_compare_jsonl is not None:
+        flags.extend(["--compare-output-jsonl", trace_compare_jsonl])
+    if args.require_transformers_trace_match:
+        flags.append("--require-trace-match")
+    if args.require_transformers_trace_top_token_match:
+        flags.append("--require-top-token-match")
+    for name, flag in [
+        ("transformers_trace_max_top_logit_regression", "--max-top-logit-regression"),
+        (
+            "transformers_trace_max_top_probability_regression",
+            "--max-top-probability-regression",
+        ),
+        ("transformers_trace_max_logit_l2_change", "--max-logit-l2-change"),
+        (
+            "transformers_trace_max_hidden_state_l2_change",
+            "--max-hidden-state-l2-change",
+        ),
+    ]:
+        value = getattr(args, name)
+        if value is not None:
+            flags.extend([flag, f"{float(value):g}"])
+    if args.transformers_trace_require_zspace_status is not None:
+        flags.extend(
+            [
+                "--require-zspace-status",
+                args.transformers_trace_require_zspace_status,
+            ]
+        )
+    return flags
+
+
 def run_guard_args(ft_epochs):
     return [
         "--require-run-guard-counts-available",
@@ -1030,6 +1279,8 @@ def profile_smoke_manifest_row(
     promoted_rungs,
     promoted_rungs_jsonl,
     promoted_artifacts,
+    transformers_trace_jsonl=None,
+    transformers_trace_compare_jsonl=None,
 ):
     promoted_epochs = [
         promoted_ft_epochs_for_rung(args, rung)
@@ -1080,6 +1331,64 @@ def profile_smoke_manifest_row(
         ),
         "require_transformers_audit": bool(
             getattr(args, "require_transformers_audit", False)
+        ),
+        "transformers_trace": bool(getattr(args, "transformers_trace", False)),
+        "transformers_trace_jsonl": optional_path(
+            transformers_trace_jsonl
+            if getattr(args, "transformers_trace", False)
+            else None
+        ),
+        "compare_transformers_trace_jsonl": optional_path(
+            getattr(args, "compare_transformers_trace_jsonl", None)
+        ),
+        "transformers_trace_compare_jsonl": optional_path(
+            transformers_trace_compare_jsonl
+        ),
+        "transformers_trace_prompts": list(
+            getattr(args, "transformers_trace_prompts", []) or []
+        ),
+        "transformers_trace_prompt_file": optional_path(
+            getattr(args, "transformers_trace_prompt_file", None)
+        ),
+        "transformers_trace_top_k": getattr(args, "transformers_trace_top_k", None),
+        "transformers_trace_zspace_project": bool(
+            getattr(args, "transformers_trace_zspace_project", False)
+        ),
+        "transformers_trace_zspace_source": getattr(
+            args,
+            "transformers_trace_zspace_source",
+            None,
+        ),
+        "require_transformers_trace_match": bool(
+            getattr(args, "require_transformers_trace_match", False)
+        ),
+        "require_transformers_trace_top_token_match": bool(
+            getattr(args, "require_transformers_trace_top_token_match", False)
+        ),
+        "transformers_trace_max_top_logit_regression": getattr(
+            args,
+            "transformers_trace_max_top_logit_regression",
+            None,
+        ),
+        "transformers_trace_max_top_probability_regression": getattr(
+            args,
+            "transformers_trace_max_top_probability_regression",
+            None,
+        ),
+        "transformers_trace_max_logit_l2_change": getattr(
+            args,
+            "transformers_trace_max_logit_l2_change",
+            None,
+        ),
+        "transformers_trace_max_hidden_state_l2_change": getattr(
+            args,
+            "transformers_trace_max_hidden_state_l2_change",
+            None,
+        ),
+        "transformers_trace_require_zspace_status": getattr(
+            args,
+            "transformers_trace_require_zspace_status",
+            None,
         ),
         "sweep_jsonl": str(sweep_jsonl),
         "sweep_aggregate_jsonl": str(sweep_aggregate_jsonl),
@@ -1308,6 +1617,17 @@ def main():
     checkpoint_preflight_jsonl = args.checkpoint_preflight_jsonl or (
         out_dir / "checkpoint-preflight.jsonl"
     )
+    transformers_trace_jsonl = None
+    transformers_trace_compare_jsonl = None
+    if args.transformers_trace:
+        transformers_trace_jsonl = args.transformers_trace_jsonl or (
+            out_dir / "transformers-trace.jsonl"
+        )
+        if transformers_trace_compare_requested(args):
+            transformers_trace_compare_jsonl = (
+                args.transformers_trace_compare_jsonl
+                or (out_dir / "transformers-trace-compare.jsonl")
+            )
     sweep_jsonl = out_dir / "sweep.jsonl"
     sweep_aggregate_jsonl = out_dir / "sweep-aggregate.jsonl"
     source_compare_jsonl = out_dir / "source-compare.jsonl"
@@ -1350,6 +1670,10 @@ def main():
             output_paths.append(checkpoint_shape_audit_jsonl)
         if not args.skip_checkpoint_preflight:
             output_paths.append(checkpoint_preflight_jsonl)
+        if args.transformers_trace:
+            output_paths.append(transformers_trace_jsonl)
+            if transformers_trace_compare_jsonl is not None:
+                output_paths.append(transformers_trace_compare_jsonl)
         clean_previous_outputs(
             output_paths,
             [run_dir, *[artifacts["run_dir"] for artifacts in promoted_artifacts]],
@@ -1369,6 +1693,24 @@ def main():
             "--include-biases",
         ]
         run_command(write_checkpoint_cmd, dry_run=args.dry_run)
+
+    if args.transformers_trace:
+        transformers_model_path = inferred_transformers_model_path(args, checkpoint_path)
+        if transformers_model_path is None:
+            raise ValueError("--transformers-trace requires a Transformers model path")
+        transformers_trace_cmd = [
+            args.python,
+            SCRIPT_DIR / "byte_lm_transformers_trace.py",
+        ]
+        transformers_trace_cmd.extend(
+            transformers_trace_args(
+                args,
+                transformers_model_path,
+                transformers_trace_jsonl,
+                transformers_trace_compare_jsonl,
+            )
+        )
+        run_command(transformers_trace_cmd, dry_run=args.dry_run)
 
     if not args.skip_checkpoint_shape_audit:
         shape_audit_cmd = [
@@ -1596,6 +1938,8 @@ def main():
         profiles=profiles,
         checkpoint_shape_audit_jsonl=checkpoint_shape_audit_jsonl,
         checkpoint_preflight_jsonl=checkpoint_preflight_jsonl,
+        transformers_trace_jsonl=transformers_trace_jsonl,
+        transformers_trace_compare_jsonl=transformers_trace_compare_jsonl,
         sweep_jsonl=sweep_jsonl,
         sweep_aggregate_jsonl=sweep_aggregate_jsonl,
         source_compare_jsonl=source_compare_jsonl,
@@ -1640,6 +1984,16 @@ def main():
         output_parts.append(
             f"compare_checkpoint_preflight_jsonl={args.compare_checkpoint_preflight_jsonl}"
         )
+    if args.transformers_trace:
+        output_parts.append(f"transformers_trace_jsonl={transformers_trace_jsonl}")
+        if args.compare_transformers_trace_jsonl is not None:
+            output_parts.append(
+                f"compare_transformers_trace_jsonl={args.compare_transformers_trace_jsonl}"
+            )
+        if transformers_trace_compare_jsonl is not None:
+            output_parts.append(
+                f"transformers_trace_compare_jsonl={transformers_trace_compare_jsonl}"
+            )
     if promoted_rungs == 0:
         output_parts.append("promoted_follow_up=skipped")
     else:

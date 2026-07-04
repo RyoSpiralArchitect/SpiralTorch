@@ -3880,6 +3880,63 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                 "--require-transformers-audit",
             ],
         )
+        args.transformers_trace = True
+        args.transformers_trace_prompts = ["spiral"]
+        args.transformers_trace_prompt_file = Path("/tmp/prompts.txt")
+        args.transformers_trace_top_k = 3
+        args.transformers_trace_zspace_project = True
+        args.transformers_trace_zspace_source = "top_logits"
+        args.compare_transformers_trace_jsonl = Path("/tmp/baseline-trace.jsonl")
+        args.require_transformers_trace_match = True
+        args.require_transformers_trace_top_token_match = True
+        args.transformers_trace_max_top_logit_regression = 0.0
+        args.transformers_trace_max_top_probability_regression = 0.1
+        args.transformers_trace_max_logit_l2_change = 0.2
+        args.transformers_trace_max_hidden_state_l2_change = 0.3
+        args.transformers_trace_require_zspace_status = "ok"
+        self.assertEqual(
+            module.transformers_trace_args(
+                args,
+                Path("/models/llama"),
+                Path("/tmp/current-trace.jsonl"),
+                Path("/tmp/trace-compare.jsonl"),
+            ),
+            [
+                "--model-path",
+                Path("/models/llama"),
+                "--jsonl",
+                Path("/tmp/current-trace.jsonl"),
+                "--top-k",
+                "3",
+                "--prompt",
+                "spiral",
+                "--prompt-file",
+                Path("/tmp/prompts.txt"),
+                "--revision",
+                "main",
+                "--allow-remote",
+                "--trust-remote-code",
+                "--zspace-project",
+                "--zspace-source",
+                "top_logits",
+                "--compare-jsonl",
+                Path("/tmp/baseline-trace.jsonl"),
+                "--compare-output-jsonl",
+                Path("/tmp/trace-compare.jsonl"),
+                "--require-trace-match",
+                "--require-top-token-match",
+                "--max-top-logit-regression",
+                "0",
+                "--max-top-probability-regression",
+                "0.1",
+                "--max-logit-l2-change",
+                "0.2",
+                "--max-hidden-state-l2-change",
+                "0.3",
+                "--require-zspace-status",
+                "ok",
+            ],
+        )
 
     def test_byte_lm_profile_smoke_dry_run_external_checkpoint_preflights(self):
         module = load_example("byte_lm_profile_smoke")
@@ -3907,6 +3964,21 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             "--transformers-trust-remote-code",
             "--skip-transformers-tokenizer",
             "--require-transformers-audit",
+            "--transformers-trace",
+            "--transformers-trace-prompt",
+            "spiral",
+            "--transformers-trace-top-k",
+            "3",
+            "--compare-transformers-trace-jsonl",
+            "/tmp/profile-smoke-real-hf/transformers-trace-baseline.jsonl",
+            "--require-transformers-trace-match",
+            "--require-transformers-trace-top-token-match",
+            "--transformers-trace-max-top-logit-regression",
+            "0.0",
+            "--transformers-trace-max-top-probability-regression",
+            "0.1",
+            "--transformers-trace-require-zspace-status",
+            "not_requested",
             "--compare-checkpoint-preflight-jsonl",
             "/tmp/profile-smoke-real-hf/checkpoint-preflight-baseline.jsonl",
             "--require-checkpoint-preflight-match",
@@ -3940,6 +4012,24 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertIn("--transformers-trust-remote-code", text)
         self.assertIn("--skip-transformers-tokenizer", text)
         self.assertIn("--require-transformers-audit", text)
+        self.assertIn("byte_lm_transformers_trace.py", text)
+        self.assertIn("--model-path /models/llama", text)
+        self.assertIn("--jsonl /tmp/profile-smoke-real-hf/transformers-trace.jsonl", text)
+        self.assertIn("--top-k 3", text)
+        self.assertIn("--prompt spiral", text)
+        self.assertIn(
+            "--compare-jsonl /tmp/profile-smoke-real-hf/transformers-trace-baseline.jsonl",
+            text,
+        )
+        self.assertIn(
+            "--compare-output-jsonl /tmp/profile-smoke-real-hf/transformers-trace-compare.jsonl",
+            text,
+        )
+        self.assertIn("--require-trace-match", text)
+        self.assertIn("--require-top-token-match", text)
+        self.assertIn("--max-top-logit-regression 0", text)
+        self.assertIn("--max-top-probability-regression 0.1", text)
+        self.assertIn("--require-zspace-status not_requested", text)
         self.assertIn(
             "--compare-jsonl /tmp/profile-smoke-real-hf/checkpoint-preflight-baseline.jsonl",
             text,
@@ -3950,7 +4040,22 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertIn("checkpoint_shape_audit_jsonl=", text)
         self.assertIn("checkpoint_preflight_jsonl=", text)
         self.assertIn(
-            "compare_checkpoint_preflight_jsonl=/tmp/profile-smoke-real-hf/checkpoint-preflight-baseline.jsonl",
+            "compare_checkpoint_preflight_jsonl="
+            "/tmp/profile-smoke-real-hf/checkpoint-preflight-baseline.jsonl",
+            text,
+        )
+        self.assertIn(
+            "transformers_trace_jsonl=/tmp/profile-smoke-real-hf/transformers-trace.jsonl",
+            text,
+        )
+        self.assertIn(
+            "compare_transformers_trace_jsonl="
+            "/tmp/profile-smoke-real-hf/transformers-trace-baseline.jsonl",
+            text,
+        )
+        self.assertIn(
+            "transformers_trace_compare_jsonl="
+            "/tmp/profile-smoke-real-hf/transformers-trace-compare.jsonl",
             text,
         )
         self.assertIn("promoted_follow_up=skipped", text)
@@ -5960,6 +6065,139 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertTrue(rows[0]["model_loaded"])
         self.assertEqual(rows[1]["top_token_ids"], "3,1")
         self.assertIn("transformers_prompt_trace", output.getvalue())
+
+    def test_transformers_trace_compares_prompt_rows_with_gates(self):
+        module = load_example("byte_lm_transformers_trace")
+        args = argparse.Namespace(
+            require_trace_match=True,
+            require_top_token_match=True,
+            max_top_logit_regression=0.0,
+            max_top_probability_regression=0.0,
+            max_logit_l2_change=0.0,
+            max_hidden_state_l2_change=0.0,
+        )
+        baseline = [
+            {
+                "row_type": "transformers_prompt_trace",
+                "prompt_index": 0,
+                "prompt": "spiral",
+                "top_token_ids": "3,1",
+                "top_logits": "1.1,0.4",
+                "top_probabilities": "0.5,0.2",
+                "logit_l2": 1.2,
+                "hidden_state_l2": 0.9,
+                "zspace_projection_status": "not_requested",
+            }
+        ]
+        rows = module.compare_trace_rows(list(baseline), baseline, args)
+
+        self.assertEqual(rows[0]["row_type"], "transformers_trace_compare_summary")
+        self.assertTrue(rows[0]["passed"])
+        self.assertEqual(rows[0]["failures"], 0)
+        self.assertTrue(rows[1]["passed"])
+
+    def test_transformers_trace_compare_gate_detects_top_token_drift(self):
+        module = load_example("byte_lm_transformers_trace")
+        args = argparse.Namespace(
+            require_trace_match=True,
+            require_top_token_match=True,
+            max_top_logit_regression=None,
+            max_top_probability_regression=None,
+            max_logit_l2_change=None,
+            max_hidden_state_l2_change=None,
+        )
+        baseline = [
+            {
+                "row_type": "transformers_prompt_trace",
+                "prompt_index": 0,
+                "prompt": "spiral",
+                "top_token_ids": "3,1",
+                "top_logits": "1.1,0.4",
+                "top_probabilities": "0.5,0.2",
+                "logit_l2": 1.2,
+                "hidden_state_l2": 0.9,
+            }
+        ]
+        current = [dict(baseline[0], top_token_ids="1,3")]
+        rows = module.compare_trace_rows(current, baseline, args)
+
+        self.assertFalse(rows[0]["passed"])
+        self.assertFalse(rows[1]["passed"])
+        self.assertIn("top_token_changed", rows[1]["failures"])
+
+    def test_transformers_trace_zspace_status_gate_checks_current_rows(self):
+        module = load_example("byte_lm_transformers_trace")
+        args = argparse.Namespace(require_zspace_status="ok")
+        rows = module.current_trace_gate_rows(
+            [
+                {
+                    "row_type": "transformers_prompt_trace",
+                    "prompt_index": 0,
+                    "prompt": "spiral",
+                    "zspace_projection_status": "not_requested",
+                }
+            ],
+            args,
+        )
+
+        self.assertEqual(rows[0]["row_type"], "transformers_trace_gate_summary")
+        self.assertFalse(rows[0]["passed"])
+        self.assertEqual(rows[0]["failures"], 1)
+        self.assertFalse(rows[1]["passed"])
+
+    def test_transformers_trace_cli_writes_compare_jsonl(self):
+        module = load_example("byte_lm_transformers_trace")
+        old_argv = sys.argv
+        with tempfile.TemporaryDirectory() as tmp:
+            baseline = Path(tmp) / "baseline.jsonl"
+            current = Path(tmp) / "current.jsonl"
+            compare = Path(tmp) / "compare.jsonl"
+            try:
+                sys.argv = [
+                    "byte_lm_transformers_trace.py",
+                    "--model-path",
+                    tmp,
+                    "--prompt",
+                    "spiral",
+                    "--top-k",
+                    "2",
+                    "--jsonl",
+                    str(baseline),
+                ]
+                with fake_transformers_module(), contextlib.redirect_stdout(io.StringIO()):
+                    module.main()
+                sys.argv = [
+                    "byte_lm_transformers_trace.py",
+                    "--model-path",
+                    tmp,
+                    "--prompt",
+                    "spiral",
+                    "--top-k",
+                    "2",
+                    "--jsonl",
+                    str(current),
+                    "--compare-jsonl",
+                    str(baseline),
+                    "--compare-output-jsonl",
+                    str(compare),
+                    "--require-trace-match",
+                    "--require-top-token-match",
+                ]
+                output = io.StringIO()
+                with fake_transformers_module(), contextlib.redirect_stdout(output):
+                    module.main()
+            finally:
+                sys.argv = old_argv
+            rows = [
+                json.loads(line)
+                for line in compare.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+
+        self.assertEqual(rows[0]["row_type"], "transformers_trace_compare_summary")
+        self.assertTrue(rows[0]["passed"])
+        self.assertEqual(rows[0]["compared_prompt_rows"], 1)
+        self.assertIn("transformers_trace_compare", output.getvalue())
 
     def test_checkpoint_preflight_shape_audit_accepts_tied_lm_head_weight(self):
         helper = load_checkpoint_helper()

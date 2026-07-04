@@ -47,6 +47,18 @@ def parse_args():
         help="Optional JSONL output path for manifest and per-prompt trace rows.",
     )
     parser.add_argument(
+        "--compare-jsonl",
+        type=Path,
+        default=None,
+        help="Optional previous Transformers trace JSONL to compare against.",
+    )
+    parser.add_argument(
+        "--compare-output-jsonl",
+        type=Path,
+        default=None,
+        help="Optional JSONL output path for trace comparison rows.",
+    )
+    parser.add_argument(
         "--top-k",
         type=int,
         default=5,
@@ -117,6 +129,48 @@ def parse_args():
         action="store_true",
         help="Fail if --zspace-project cannot produce projection metrics.",
     )
+    parser.add_argument(
+        "--require-trace-match",
+        action="store_true",
+        help="Fail when prompt scope or gated trace metrics differ from --compare-jsonl.",
+    )
+    parser.add_argument(
+        "--require-top-token-match",
+        action="store_true",
+        help="Fail when a prompt's top next-token id differs from --compare-jsonl.",
+    )
+    parser.add_argument(
+        "--max-top-logit-regression",
+        type=float,
+        default=None,
+        help="Maximum allowed drop in top-1 logit relative to --compare-jsonl.",
+    )
+    parser.add_argument(
+        "--max-top-probability-regression",
+        type=float,
+        default=None,
+        help="Maximum allowed drop in top-1 probability relative to --compare-jsonl.",
+    )
+    parser.add_argument(
+        "--max-logit-l2-change",
+        type=float,
+        default=None,
+        help="Maximum allowed absolute change in prompt logit L2 relative to --compare-jsonl.",
+    )
+    parser.add_argument(
+        "--max-hidden-state-l2-change",
+        type=float,
+        default=None,
+        help=(
+            "Maximum allowed absolute change in final hidden-state L2 relative "
+            "to --compare-jsonl."
+        ),
+    )
+    parser.add_argument(
+        "--require-zspace-status",
+        default=None,
+        help="Fail when prompt trace zspace_projection_status does not match this value.",
+    )
     args = parser.parse_args()
     if args.top_k <= 0:
         parser.error("--top-k must be positive")
@@ -124,6 +178,34 @@ def parse_args():
         parser.error("--require-hidden-states is incompatible with --metadata-only")
     if args.require_zspace_projection and not args.zspace_project:
         parser.error("--require-zspace-projection requires --zspace-project")
+    if (
+        args.compare_output_jsonl is not None
+        and args.compare_jsonl is None
+        and args.require_zspace_status is None
+    ):
+        parser.error(
+            "--compare-output-jsonl requires --compare-jsonl or "
+            "--require-zspace-status"
+        )
+    compare_gates = [
+        args.require_trace_match,
+        args.require_top_token_match,
+        args.max_top_logit_regression is not None,
+        args.max_top_probability_regression is not None,
+        args.max_logit_l2_change is not None,
+        args.max_hidden_state_l2_change is not None,
+    ]
+    if any(compare_gates) and args.compare_jsonl is None:
+        parser.error("trace comparison gates require --compare-jsonl")
+    for name in [
+        "max_top_logit_regression",
+        "max_top_probability_regression",
+        "max_logit_l2_change",
+        "max_hidden_state_l2_change",
+    ]:
+        value = getattr(args, name)
+        if value is not None and value < 0.0:
+            parser.error(f"--{name.replace('_', '-')} must be non-negative")
     return args
 
 
@@ -492,6 +574,252 @@ def write_jsonl(path, rows):
             handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
 
 
+def load_jsonl(path):
+    rows = []
+    with open(path, "r", encoding="utf-8") as handle:
+        for line_no, raw_line in enumerate(handle, 1):
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                rows.append(json.loads(line))
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"{path}:{line_no} invalid JSONL row: {exc}") from exc
+    if not rows:
+        raise ValueError(f"{path} did not contain any trace rows")
+    return rows
+
+
+def prompt_trace_rows(rows):
+    return [row for row in rows if row.get("row_type") == "transformers_prompt_trace"]
+
+
+def prompt_rows_by_index(rows, label):
+    by_index = {}
+    for row in prompt_trace_rows(rows):
+        index = row.get("prompt_index")
+        if index in by_index:
+            raise ValueError(f"{label} has duplicate prompt_index={index!r}")
+        by_index[index] = row
+    return by_index
+
+
+def csv_values(value, cast):
+    if value is None or value == "":
+        return []
+    if isinstance(value, (list, tuple)):
+        return [cast(item) for item in value]
+    return [cast(part) for part in str(value).split(",") if part != ""]
+
+
+def csv_first(value, cast):
+    values = csv_values(value, cast)
+    return values[0] if values else None
+
+
+def numeric(row, key):
+    value = row.get(key)
+    if value is None:
+        return None
+    return float(value)
+
+
+def positive_drop(before, after):
+    if before is None or after is None:
+        return None
+    return max(0.0, before - after)
+
+
+def absolute_change(before, after):
+    if before is None or after is None:
+        return None
+    return abs(after - before)
+
+
+def exceeds(value, limit):
+    return value is not None and limit is not None and value > limit
+
+
+def failure_label(failures):
+    return ",".join(failures) if failures else "none"
+
+
+def current_trace_gate_rows(rows, args):
+    if args.require_zspace_status is None:
+        return []
+    prompt_rows = prompt_trace_rows(rows)
+    details = []
+    failures = 0
+    for row in prompt_rows:
+        status = row.get("zspace_projection_status")
+        passed = status == args.require_zspace_status
+        if not passed:
+            failures += 1
+        details.append(
+            {
+                "row_type": "transformers_trace_gate",
+                "prompt_index": row.get("prompt_index"),
+                "prompt": row.get("prompt"),
+                "gate": "zspace_status",
+                "expected": args.require_zspace_status,
+                "actual": status,
+                "passed": passed,
+            }
+        )
+    return [
+        {
+            "row_type": "transformers_trace_gate_summary",
+            "gate": "zspace_status",
+            "prompt_rows": len(prompt_rows),
+            "failures": failures,
+            "passed": failures == 0,
+        },
+        *details,
+    ]
+
+
+def compare_prompt_rows(current, baseline, args):
+    before_top_token = csv_first(baseline.get("top_token_ids"), int)
+    after_top_token = csv_first(current.get("top_token_ids"), int)
+    before_top_logit = csv_first(baseline.get("top_logits"), float)
+    after_top_logit = csv_first(current.get("top_logits"), float)
+    before_top_probability = csv_first(baseline.get("top_probabilities"), float)
+    after_top_probability = csv_first(current.get("top_probabilities"), float)
+    top_logit_regression = positive_drop(before_top_logit, after_top_logit)
+    top_probability_regression = positive_drop(
+        before_top_probability,
+        after_top_probability,
+    )
+    logit_l2_change = absolute_change(
+        numeric(baseline, "logit_l2"),
+        numeric(current, "logit_l2"),
+    )
+    hidden_state_l2_change = absolute_change(
+        numeric(baseline, "hidden_state_l2"),
+        numeric(current, "hidden_state_l2"),
+    )
+    prompt_changed = current.get("prompt") != baseline.get("prompt")
+    top_token_changed = before_top_token != after_top_token
+    failures = []
+    if args.require_trace_match and prompt_changed:
+        failures.append("prompt_changed")
+    if args.require_top_token_match and top_token_changed:
+        failures.append("top_token_changed")
+    if exceeds(top_logit_regression, args.max_top_logit_regression):
+        failures.append("top_logit_regression")
+    if exceeds(top_probability_regression, args.max_top_probability_regression):
+        failures.append("top_probability_regression")
+    if exceeds(logit_l2_change, args.max_logit_l2_change):
+        failures.append("logit_l2_change")
+    if exceeds(hidden_state_l2_change, args.max_hidden_state_l2_change):
+        failures.append("hidden_state_l2_change")
+    return {
+        "row_type": "transformers_trace_compare_prompt",
+        "prompt_index": current.get("prompt_index"),
+        "prompt_before": baseline.get("prompt"),
+        "prompt_after": current.get("prompt"),
+        "prompt_changed": prompt_changed,
+        "top_token_before": before_top_token,
+        "top_token_after": after_top_token,
+        "top_token_changed": top_token_changed,
+        "top_logit_before": before_top_logit,
+        "top_logit_after": after_top_logit,
+        "top_logit_regression": top_logit_regression,
+        "top_probability_before": before_top_probability,
+        "top_probability_after": after_top_probability,
+        "top_probability_regression": top_probability_regression,
+        "logit_l2_before": numeric(baseline, "logit_l2"),
+        "logit_l2_after": numeric(current, "logit_l2"),
+        "logit_l2_change": logit_l2_change,
+        "hidden_state_l2_before": numeric(baseline, "hidden_state_l2"),
+        "hidden_state_l2_after": numeric(current, "hidden_state_l2"),
+        "hidden_state_l2_change": hidden_state_l2_change,
+        "zspace_status_before": baseline.get("zspace_projection_status"),
+        "zspace_status_after": current.get("zspace_projection_status"),
+        "failures": failure_label(failures),
+        "passed": not failures,
+    }
+
+
+def compare_trace_rows(current_rows, baseline_rows, args):
+    current = prompt_rows_by_index(current_rows, "current")
+    baseline = prompt_rows_by_index(baseline_rows, "baseline")
+    details = []
+    failures = 0
+    missing = sorted(set(baseline) - set(current))
+    extra = sorted(set(current) - set(baseline))
+    if args.require_trace_match:
+        failures += len(missing) + len(extra)
+    for index in missing:
+        details.append(
+            {
+                "row_type": "transformers_trace_compare_prompt",
+                "prompt_index": index,
+                "status": "missing",
+                "failures": "missing_prompt" if args.require_trace_match else "none",
+                "passed": not args.require_trace_match,
+            }
+        )
+    for index in extra:
+        details.append(
+            {
+                "row_type": "transformers_trace_compare_prompt",
+                "prompt_index": index,
+                "status": "extra",
+                "failures": "extra_prompt" if args.require_trace_match else "none",
+                "passed": not args.require_trace_match,
+            }
+        )
+    for index in sorted(set(current) & set(baseline)):
+        detail = compare_prompt_rows(current[index], baseline[index], args)
+        if not detail["passed"]:
+            failures += 1
+        details.append(detail)
+    summary = {
+        "row_type": "transformers_trace_compare_summary",
+        "baseline_prompt_rows": len(baseline),
+        "current_prompt_rows": len(current),
+        "missing_prompt_rows": len(missing),
+        "extra_prompt_rows": len(extra),
+        "compared_prompt_rows": len(set(current) & set(baseline)),
+        "require_trace_match": args.require_trace_match,
+        "require_top_token_match": args.require_top_token_match,
+        "max_top_logit_regression": args.max_top_logit_regression,
+        "max_top_probability_regression": args.max_top_probability_regression,
+        "max_logit_l2_change": args.max_logit_l2_change,
+        "max_hidden_state_l2_change": args.max_hidden_state_l2_change,
+        "failures": failures,
+        "passed": failures == 0,
+    }
+    return [summary, *details]
+
+
+def print_compare_summary(row):
+    print(
+        "transformers_trace_compare "
+        f"baseline_prompt_rows={row['baseline_prompt_rows']} "
+        f"current_prompt_rows={row['current_prompt_rows']} "
+        f"missing_prompt_rows={row['missing_prompt_rows']} "
+        f"extra_prompt_rows={row['extra_prompt_rows']} "
+        f"failures={row['failures']} "
+        f"passed={row['passed']}"
+    )
+
+
+def print_gate_summary(row):
+    print(
+        "transformers_trace_gate "
+        f"gate={row['gate']} "
+        f"prompt_rows={row['prompt_rows']} "
+        f"failures={row['failures']} "
+        f"passed={row['passed']}"
+    )
+
+
+def comparison_failed(rows):
+    return any(row.get("passed") is False for row in rows)
+
+
 def print_trace(row):
     print(
         "transformers_prompt_trace "
@@ -547,6 +875,25 @@ def main():
     else:
         for row in rows:
             print(json.dumps(row, ensure_ascii=False, sort_keys=True))
+
+    comparison_rows = current_trace_gate_rows(rows, args)
+    if args.compare_jsonl is not None:
+        comparison_rows.extend(
+            compare_trace_rows(rows, load_jsonl(args.compare_jsonl), args)
+        )
+    for row in comparison_rows:
+        if row.get("row_type") == "transformers_trace_compare_summary":
+            print_compare_summary(row)
+        elif row.get("row_type") == "transformers_trace_gate_summary":
+            print_gate_summary(row)
+    if args.compare_output_jsonl is not None:
+        write_jsonl(args.compare_output_jsonl, comparison_rows)
+        print(
+            f"transformers_trace_compare_jsonl={args.compare_output_jsonl} "
+            f"rows={len(comparison_rows)}"
+        )
+    if comparison_failed(comparison_rows):
+        raise RuntimeError("Transformers trace comparison gate failed")
 
 
 if __name__ == "__main__":
