@@ -4160,6 +4160,54 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertIn("transformers_trace_coimport_failed", text)
         self.assertIn("passed=False", text)
 
+    def test_byte_lm_profile_smoke_accepts_produced_manifest_trace_gates(self):
+        module = load_example("byte_lm_profile_smoke")
+        old_argv = sys.argv
+        sys.argv = [
+            "byte_lm_profile_smoke.py",
+            "--out-dir",
+            "/tmp/profile-smoke-real-hf",
+            "--hf-state-dict",
+            "/models/llama",
+            "--transformers-trace",
+            "--validate-produced-manifest",
+            "--manifest-validation-jsonl",
+            "/tmp/profile-smoke-real-hf/profile-smoke-manifest-validation.jsonl",
+            "--require-manifest-transformers-trace",
+            "--require-manifest-transformers-trace-coimport",
+        ]
+        try:
+            args = module.parse_args()
+        finally:
+            sys.argv = old_argv
+
+        self.assertTrue(args.validate_produced_manifest)
+        self.assertTrue(args.require_manifest_transformers_trace)
+        self.assertTrue(args.require_manifest_transformers_trace_coimport)
+        self.assertEqual(
+            args.manifest_validation_jsonl,
+            Path("/tmp/profile-smoke-real-hf/profile-smoke-manifest-validation.jsonl"),
+        )
+
+    def test_byte_lm_profile_smoke_rejects_produced_manifest_validation_dry_run(self):
+        module = load_example("byte_lm_profile_smoke")
+        old_argv = sys.argv
+        sys.argv = [
+            "byte_lm_profile_smoke.py",
+            "--out-dir",
+            "/tmp/profile-smoke-real-hf",
+            "--hf-state-dict",
+            "/models/llama",
+            "--validate-produced-manifest",
+            "--dry-run",
+        ]
+        try:
+            with contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit):
+                    module.parse_args()
+        finally:
+            sys.argv = old_argv
+
     def test_byte_lm_profile_smoke_builds_checkpoint_policy_args(self):
         module = load_example("byte_lm_profile_smoke")
         args = argparse.Namespace(
