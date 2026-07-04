@@ -458,6 +458,14 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--require-manifest-transformers-trace-coimport",
+        action="store_true",
+        help=(
+            "Fail --validate-manifest-jsonl when the current Transformers trace "
+            "manifest does not report a clean SpiralTorch/Transformers co-import."
+        ),
+    )
+    parser.add_argument(
         "--max-manifest-transformers-trace-top-token-changed-rows",
         type=int,
         default=None,
@@ -571,6 +579,7 @@ def parse_args():
             args.require_manifest_transformers_trace,
             args.require_manifest_transformers_trace_compare_pass,
             args.require_manifest_transformers_trace_runtime_metadata_match,
+            args.require_manifest_transformers_trace_coimport,
             args.max_manifest_transformers_trace_top_token_changed_rows is not None,
             args.max_manifest_transformers_trace_top_probability_regression
             is not None,
@@ -993,6 +1002,15 @@ def transformers_trace_validation_fields(row):
         "transformers_trace_compare_jsonl": row.get(
             "transformers_trace_compare_jsonl"
         ),
+        "transformers_trace_manifest_available": False,
+        "transformers_trace_manifest_error": None,
+        "transformers_trace_spiraltorch_imported": None,
+        "transformers_trace_spiraltorch_version": None,
+        "transformers_trace_spiraltorch_module_name": None,
+        "transformers_trace_transformers_imported": None,
+        "transformers_trace_transformers_version": None,
+        "transformers_trace_transformers_module_name": None,
+        "transformers_trace_coimport_status": None,
         "transformers_trace_compare_summary_available": False,
         "transformers_trace_compare_passed": None,
         "transformers_trace_compare_failures": None,
@@ -1011,6 +1029,44 @@ def transformers_trace_validation_fields(row):
         "transformers_trace_observed_max_logit_l2_change": None,
         "transformers_trace_observed_max_hidden_state_l2_change": None,
     }
+    trace_jsonl = row.get("transformers_trace_jsonl")
+    if trace_jsonl:
+        try:
+            manifest = load_single_jsonl_row_type(
+                trace_jsonl,
+                "transformers_trace_manifest",
+            )
+        except (OSError, ValueError) as exc:
+            fields["transformers_trace_manifest_error"] = (
+                f"{exc.__class__.__name__}: {exc}"
+            )
+        else:
+            fields.update(
+                {
+                    "transformers_trace_manifest_available": True,
+                    "transformers_trace_spiraltorch_imported": manifest.get(
+                        "spiraltorch_imported"
+                    ),
+                    "transformers_trace_spiraltorch_version": manifest.get(
+                        "spiraltorch_version"
+                    ),
+                    "transformers_trace_spiraltorch_module_name": manifest.get(
+                        "spiraltorch_module_name"
+                    ),
+                    "transformers_trace_transformers_imported": manifest.get(
+                        "transformers_imported"
+                    ),
+                    "transformers_trace_transformers_version": manifest.get(
+                        "transformers_version"
+                    ),
+                    "transformers_trace_transformers_module_name": manifest.get(
+                        "transformers_module_name"
+                    ),
+                    "transformers_trace_coimport_status": manifest.get(
+                        "transformers_spiraltorch_coimport_status"
+                    ),
+                }
+            )
     compare_jsonl = row.get("transformers_trace_compare_jsonl")
     if not compare_jsonl:
         return fields
@@ -1134,6 +1190,15 @@ def manifest_trace_validation_gate_failures(validation_row, args):
             failures.append("transformers_trace_compare_summary_missing")
         elif validation_row["transformers_trace_compare_passed"] is not True:
             failures.append("transformers_trace_compare_failed")
+    if args.require_manifest_transformers_trace_coimport:
+        if not validation_row["transformers_trace_manifest_available"]:
+            failures.append("transformers_trace_manifest_missing")
+        elif (
+            validation_row["transformers_trace_spiraltorch_imported"] is not True
+            or validation_row["transformers_trace_transformers_imported"] is not True
+            or validation_row["transformers_trace_coimport_status"] != "ok"
+        ):
+            failures.append("transformers_trace_coimport_failed")
     if args.require_manifest_transformers_trace_runtime_metadata_match:
         if not validation_row["transformers_trace_compare_summary_available"]:
             failures.append("transformers_trace_compare_summary_missing")
@@ -1187,6 +1252,7 @@ def check_manifest_trace_validation_gates(validation_row, args):
             args.require_manifest_transformers_trace,
             args.require_manifest_transformers_trace_compare_pass,
             args.require_manifest_transformers_trace_runtime_metadata_match,
+            args.require_manifest_transformers_trace_coimport,
             args.max_manifest_transformers_trace_top_token_changed_rows
             is not None,
             args.max_manifest_transformers_trace_top_probability_regression
@@ -1238,6 +1304,8 @@ def validate_profile_smoke_manifest_file(path, validation_jsonl=None, args=None)
         output_parts.extend(
             [
                 f"transformers_trace_jsonl={validation_row['transformers_trace_jsonl']}",
+                "transformers_trace_coimport_status="
+                f"{validation_row['transformers_trace_coimport_status']}",
                 "transformers_trace_compare_passed="
                 f"{validation_row['transformers_trace_compare_passed']}",
                 "transformers_trace_runtime_metadata_changed_count="
