@@ -112,6 +112,9 @@ run checkpoint preflight, LoRA/source/profile comparisons, promotion manifests,
 and dry-run continuation plans before scaling into heavier training runs. Add
 `--transformers-audit` when a local Transformers config/tokenizer should be
 co-imported into the same JSONL evidence without making Transformers mandatory.
+For pre-FT inference evidence, `examples/byte_lm_transformers_trace.py` loads a
+local Transformers model, records prompt-level next-token top-k logits and
+hidden-state summaries, and can attach `--zspace-project` projection metrics.
 
 ## Building wheels
 
