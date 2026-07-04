@@ -645,6 +645,16 @@ def load_jsonl(path):
     return rows
 
 
+def load_single_jsonl_row_type(path, row_type):
+    rows = load_jsonl(path)
+    matches = [row for row in rows if row.get("row_type") == row_type]
+    if len(matches) != 1:
+        raise ValueError(
+            f"{path} must contain exactly one {row_type} row; found {len(matches)}"
+        )
+    return matches[0]
+
+
 def load_single_profile_smoke_manifest(path):
     rows = load_jsonl(path)
     if len(rows) != 1:
@@ -896,10 +906,80 @@ def load_profile_smoke_manifest_with_rungs(path):
     return row, promoted_rungs_jsonl, rung_rows
 
 
+def transformers_trace_validation_fields(row):
+    fields = {
+        "transformers_trace": bool(row.get("transformers_trace", False)),
+        "transformers_trace_jsonl": row.get("transformers_trace_jsonl"),
+        "compare_transformers_trace_jsonl": row.get(
+            "compare_transformers_trace_jsonl"
+        ),
+        "transformers_trace_compare_jsonl": row.get(
+            "transformers_trace_compare_jsonl"
+        ),
+        "transformers_trace_compare_summary_available": False,
+        "transformers_trace_compare_passed": None,
+        "transformers_trace_compare_failures": None,
+        "transformers_trace_compared_prompt_rows": None,
+        "transformers_trace_missing_prompt_rows": None,
+        "transformers_trace_extra_prompt_rows": None,
+        "transformers_trace_prompt_changed_rows": None,
+        "transformers_trace_top_token_changed_rows": None,
+        "transformers_trace_zspace_status_changed_rows": None,
+        "transformers_trace_observed_max_top_logit_regression": None,
+        "transformers_trace_observed_max_top_probability_regression": None,
+        "transformers_trace_observed_max_logit_l2_change": None,
+        "transformers_trace_observed_max_hidden_state_l2_change": None,
+    }
+    compare_jsonl = row.get("transformers_trace_compare_jsonl")
+    if not compare_jsonl:
+        return fields
+
+    summary = load_single_jsonl_row_type(
+        compare_jsonl,
+        "transformers_trace_compare_summary",
+    )
+    fields.update(
+        {
+            "transformers_trace_compare_summary_available": True,
+            "transformers_trace_compare_passed": summary.get("passed"),
+            "transformers_trace_compare_failures": summary.get("failures"),
+            "transformers_trace_compared_prompt_rows": summary.get(
+                "compared_prompt_rows"
+            ),
+            "transformers_trace_missing_prompt_rows": summary.get(
+                "missing_prompt_rows"
+            ),
+            "transformers_trace_extra_prompt_rows": summary.get("extra_prompt_rows"),
+            "transformers_trace_prompt_changed_rows": summary.get(
+                "prompt_changed_rows"
+            ),
+            "transformers_trace_top_token_changed_rows": summary.get(
+                "top_token_changed_rows"
+            ),
+            "transformers_trace_zspace_status_changed_rows": summary.get(
+                "zspace_status_changed_rows"
+            ),
+            "transformers_trace_observed_max_top_logit_regression": summary.get(
+                "observed_max_top_logit_regression"
+            ),
+            "transformers_trace_observed_max_top_probability_regression": summary.get(
+                "observed_max_top_probability_regression"
+            ),
+            "transformers_trace_observed_max_logit_l2_change": summary.get(
+                "observed_max_logit_l2_change"
+            ),
+            "transformers_trace_observed_max_hidden_state_l2_change": summary.get(
+                "observed_max_hidden_state_l2_change"
+            ),
+        }
+    )
+    return fields
+
+
 def profile_smoke_manifest_validation_row(path, row, promoted_rungs_jsonl, rung_rows):
     promoted_rungs = manifest_int(row, "promoted_rungs", 0)
     promoted_epochs = manifest_promoted_ft_epochs(row)
-    return {
+    validation = {
         "row_type": "profile_smoke_manifest_validation",
         "valid": True,
         "manifest_jsonl": str(path),
@@ -923,6 +1003,8 @@ def profile_smoke_manifest_validation_row(path, row, promoted_rungs_jsonl, rung_
         "promoted_rung_artifacts_checked": len(rung_rows)
         * (1 + len(PROMOTED_RUNG_ARTIFACT_FIELDS)),
     }
+    validation.update(transformers_trace_validation_fields(row))
+    return validation
 
 
 def validate_profile_smoke_manifest_file(path, validation_jsonl=None):
@@ -935,20 +1017,33 @@ def validate_profile_smoke_manifest_file(path, validation_jsonl=None):
     )
     if validation_jsonl is not None:
         write_jsonl(validation_jsonl, [validation_row])
-    print(
-        "profile_smoke_manifest_validate "
-        f"manifest={path} "
-        f"out_dir={validation_row['out_dir']} "
-        f"promoted_rungs={validation_row['promoted_rungs']} "
+    output_parts = [
+        "profile_smoke_manifest_validate",
+        f"manifest={path}",
+        f"out_dir={validation_row['out_dir']}",
+        f"promoted_rungs={validation_row['promoted_rungs']}",
         "promoted_ft_epochs="
-        f"{','.join(str(epoch) for epoch in validation_row['promoted_ft_epochs']) or 'none'} "
-        f"promoted_rung_rows={validation_row['promoted_rung_rows']} "
-        f"promoted_rungs_jsonl={validation_row['promoted_rungs_jsonl']} "
-        f"next_promoted_rung={validation_row['next_promoted_rung']} "
-        f"next_ft_epochs={validation_row['next_ft_epochs']} "
+        f"{','.join(str(epoch) for epoch in validation_row['promoted_ft_epochs']) or 'none'}",
+        f"promoted_rung_rows={validation_row['promoted_rung_rows']}",
+        f"promoted_rungs_jsonl={validation_row['promoted_rungs_jsonl']}",
+        f"next_promoted_rung={validation_row['next_promoted_rung']}",
+        f"next_ft_epochs={validation_row['next_ft_epochs']}",
         "promoted_final_promotion_jsonl="
-        f"{validation_row['promoted_final_promotion_jsonl']}"
-    )
+        f"{validation_row['promoted_final_promotion_jsonl']}",
+    ]
+    if validation_row["transformers_trace"]:
+        output_parts.extend(
+            [
+                f"transformers_trace_jsonl={validation_row['transformers_trace_jsonl']}",
+                "transformers_trace_compare_passed="
+                f"{validation_row['transformers_trace_compare_passed']}",
+                "transformers_trace_top_token_changed_rows="
+                f"{validation_row['transformers_trace_top_token_changed_rows']}",
+                "transformers_trace_observed_max_top_probability_regression="
+                f"{validation_row['transformers_trace_observed_max_top_probability_regression']}",
+            ]
+        )
+    print(" ".join(output_parts))
     return row, promoted_rungs_jsonl, rung_rows, validation_row
 
 

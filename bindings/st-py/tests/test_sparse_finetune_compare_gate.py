@@ -3819,6 +3819,133 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             ["profile-smoke-promoted-rung2", "profile-smoke-promoted-rung3"],
         )
 
+    def test_byte_lm_profile_smoke_validation_reads_transformers_trace_compare(self):
+        module = load_example("byte_lm_profile_smoke")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out_dir = Path(tmpdir)
+            trace_jsonl = out_dir / "transformers-trace.jsonl"
+            baseline_trace_jsonl = out_dir / "transformers-trace-baseline.jsonl"
+            trace_compare_jsonl = out_dir / "transformers-trace-compare.jsonl"
+            smoke_args = argparse.Namespace(
+                source_label="llama-3.2-3b",
+                key_preset="auto",
+                ft_epochs=1,
+                promoted_ft_epochs=None,
+                promoted_ft_epochs_step=1,
+                promotion_metric="target_loss_delta_mean",
+                promoted_output_prefix="profile-smoke-promoted",
+                strict_aggregate_gates=False,
+                skip_checkpoint_shape_audit=False,
+                skip_checkpoint_preflight=False,
+                compare_checkpoint_preflight_jsonl=None,
+                require_checkpoint_preflight_match=False,
+                transformers_trace=True,
+                compare_transformers_trace_jsonl=baseline_trace_jsonl,
+                transformers_trace_prompts=["spiral"],
+                transformers_trace_prompt_file=None,
+                transformers_trace_top_k=3,
+                transformers_trace_zspace_project=True,
+                transformers_trace_zspace_source="hidden",
+                require_transformers_trace_match=True,
+                require_transformers_trace_top_token_match=True,
+                transformers_trace_max_top_logit_regression=0.0,
+                transformers_trace_max_top_probability_regression=0.1,
+                transformers_trace_max_logit_l2_change=None,
+                transformers_trace_max_hidden_state_l2_change=None,
+                transformers_trace_require_zspace_status="ok",
+            )
+            row = module.profile_smoke_manifest_row(
+                args=smoke_args,
+                out_dir=out_dir,
+                checkpoint_path=out_dir / "pytorch_model.bin",
+                checkpoint_source_kind="external",
+                cases=["adapter_ja"],
+                configs=["r12_a64_lr4"],
+                profiles=["strong_effect"],
+                checkpoint_shape_audit_jsonl=out_dir / "checkpoint-shape-audit.jsonl",
+                checkpoint_preflight_jsonl=out_dir / "checkpoint-preflight.jsonl",
+                sweep_jsonl=out_dir / "sweep.jsonl",
+                sweep_aggregate_jsonl=out_dir / "sweep-aggregate.jsonl",
+                source_compare_jsonl=out_dir / "source-compare.jsonl",
+                profile_jsonl=out_dir / "profiles.jsonl",
+                run_dir=out_dir / "profile-runs",
+                run_events_jsonl=out_dir / "profile-run-events.jsonl",
+                run_summary_jsonl=out_dir / "profile-run-summary.jsonl",
+                promotion_jsonl=out_dir / "promotion.jsonl",
+                promotion_compare_jsonl=out_dir / "promotion-compare.jsonl",
+                promoted_rungs=0,
+                promoted_rungs_jsonl=out_dir / "promoted-rungs.jsonl",
+                promoted_artifacts=[],
+                transformers_trace_jsonl=trace_jsonl,
+                transformers_trace_compare_jsonl=trace_compare_jsonl,
+            )
+            for field in module.required_manifest_artifact_fields(row):
+                path = Path(row[field])
+                if field in {"out_dir", "profile_run_dir"}:
+                    path.mkdir(parents=True, exist_ok=True)
+                elif field == "transformers_trace_compare_jsonl":
+                    module.write_jsonl(
+                        path,
+                        [
+                            {
+                                "row_type": "transformers_trace_compare_summary",
+                                "passed": True,
+                                "failures": 0,
+                                "compared_prompt_rows": 2,
+                                "missing_prompt_rows": 0,
+                                "extra_prompt_rows": 0,
+                                "prompt_changed_rows": 0,
+                                "top_token_changed_rows": 1,
+                                "zspace_status_changed_rows": 1,
+                                "observed_max_top_logit_regression": 0.2,
+                                "observed_max_top_probability_regression": 0.15,
+                                "observed_max_logit_l2_change": 0.6,
+                                "observed_max_hidden_state_l2_change": 0.3,
+                            }
+                        ],
+                    )
+                else:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.touch()
+            manifest_path = out_dir / "profile-smoke-manifest.jsonl"
+            validation_path = out_dir / "profile-smoke-manifest-validation.jsonl"
+            module.write_jsonl(manifest_path, [row])
+
+            old_argv = sys.argv
+            sys.argv = [
+                "byte_lm_profile_smoke.py",
+                "--validate-manifest-jsonl",
+                str(manifest_path),
+                "--manifest-validation-jsonl",
+                str(validation_path),
+            ]
+            output = io.StringIO()
+            try:
+                with contextlib.redirect_stdout(output):
+                    module.main()
+            finally:
+                sys.argv = old_argv
+            text = output.getvalue()
+            validation_row = module.load_jsonl(validation_path)[0]
+
+        self.assertIn("transformers_trace_compare_passed=True", text)
+        self.assertIn("transformers_trace_top_token_changed_rows=1", text)
+        self.assertTrue(validation_row["transformers_trace"])
+        self.assertTrue(validation_row["transformers_trace_compare_passed"])
+        self.assertEqual(validation_row["transformers_trace_compare_failures"], 0)
+        self.assertEqual(validation_row["transformers_trace_compared_prompt_rows"], 2)
+        self.assertEqual(validation_row["transformers_trace_top_token_changed_rows"], 1)
+        self.assertEqual(
+            validation_row["transformers_trace_zspace_status_changed_rows"],
+            1,
+        )
+        self.assertAlmostEqual(
+            validation_row[
+                "transformers_trace_observed_max_top_probability_regression"
+            ],
+            0.15,
+        )
+
     def test_byte_lm_profile_smoke_builds_checkpoint_policy_args(self):
         module = load_example("byte_lm_profile_smoke")
         args = argparse.Namespace(
