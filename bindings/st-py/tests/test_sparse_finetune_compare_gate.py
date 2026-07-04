@@ -3674,6 +3674,21 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                 skip_checkpoint_preflight=False,
                 compare_checkpoint_preflight_jsonl=None,
                 require_checkpoint_preflight_match=False,
+                transformers_trace=True,
+                compare_transformers_trace_jsonl=out_dir / "baseline-trace.jsonl",
+                transformers_trace_prompts=["spiral"],
+                transformers_trace_prompt_file=None,
+                transformers_trace_top_k=3,
+                transformers_trace_zspace_project=True,
+                transformers_trace_zspace_source="hidden",
+                require_transformers_trace_match=True,
+                require_transformers_trace_runtime_metadata_match=True,
+                require_transformers_trace_top_token_match=True,
+                transformers_trace_max_top_logit_regression=0.0,
+                transformers_trace_max_top_probability_regression=0.1,
+                transformers_trace_max_logit_l2_change=None,
+                transformers_trace_max_hidden_state_l2_change=None,
+                transformers_trace_require_zspace_status="ok",
             )
             row = module.profile_smoke_manifest_row(
                 args=smoke_args,
@@ -3697,11 +3712,34 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                 promoted_rungs=1,
                 promoted_rungs_jsonl=out_dir / "promoted-rungs.jsonl",
                 promoted_artifacts=[first],
+                transformers_trace_jsonl=out_dir / "transformers-trace.jsonl",
+                transformers_trace_compare_jsonl=out_dir / "transformers-trace-compare.jsonl",
             )
             for field in module.required_manifest_artifact_fields(row):
                 path = Path(row[field])
                 if field in {"out_dir", "profile_run_dir"}:
                     path.mkdir(parents=True, exist_ok=True)
+                elif field == "transformers_trace_compare_jsonl":
+                    module.write_jsonl(
+                        path,
+                        [
+                            {
+                                "row_type": "transformers_trace_compare_summary",
+                                "passed": True,
+                                "failures": 0,
+                                "compared_prompt_rows": 1,
+                                "runtime_metadata_available": True,
+                                "runtime_metadata_changed_count": 0,
+                                "runtime_metadata_changed_fields": "none",
+                                "runtime_metadata_failures": "none",
+                                "missing_prompt_rows": 0,
+                                "extra_prompt_rows": 0,
+                                "prompt_changed_rows": 0,
+                                "top_token_changed_rows": 0,
+                                "zspace_status_changed_rows": 0,
+                            }
+                        ],
+                    )
                 else:
                     path.parent.mkdir(parents=True, exist_ok=True)
                     path.touch()
@@ -3817,6 +3855,27 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertEqual(
             [plan["output_prefix"] for plan in continue_plan_rows],
             ["profile-smoke-promoted-rung2", "profile-smoke-promoted-rung3"],
+        )
+        self.assertEqual(
+            [plan["transformers_trace"] for plan in continue_plan_rows],
+            [True, True],
+        )
+        self.assertEqual(
+            [
+                plan["require_transformers_trace_runtime_metadata_match"]
+                for plan in continue_plan_rows
+            ],
+            [True, True],
+        )
+        self.assertEqual(
+            [
+                plan["transformers_trace_compare_jsonl"]
+                for plan in continue_plan_rows
+            ],
+            [
+                str(out_dir / "transformers-trace-compare.jsonl"),
+                str(out_dir / "transformers-trace-compare.jsonl"),
+            ],
         )
 
     def write_profile_smoke_manifest_with_transformers_trace_compare(
