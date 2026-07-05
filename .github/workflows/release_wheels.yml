@@ -187,6 +187,7 @@ jobs:
       name: pypi
       url: https://pypi.org/p/spiraltorch
     env:
+      RELEASE_TAG: ${{ inputs.release_tag }}
       PUBLISH_METHOD: ${{ inputs.pypi_publish_method }}
       PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
     permissions:
@@ -206,6 +207,10 @@ jobs:
       - name: Validate PyPI publish method
         run: |
           set -euo pipefail
+          if [ -z "$RELEASE_TAG" ]; then
+            echo "publish_pypi=true requires release_tag so PyPI files can be verified against GitHub Release assets." >&2
+            exit 1
+          fi
           case "$PUBLISH_METHOD" in
             token)
               if [ -z "$PYPI_API_TOKEN" ]; then
@@ -233,6 +238,33 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: pypi_dist
+
+  verify_pypi:
+    name: Verify PyPI release digests
+    needs:
+      - pypi
+      - attach
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_pypi == 'true' && inputs.release_tag != ''
+    runs-on: ubuntu-22.04
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify PyPI wheels against GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python scripts/security/verify_pypi_release.py \
+            --version "${RELEASE_TAG#v}" \
+            --release-tag "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --expected-wheels 3 \
+            --timeout 240
 
   attach:
     name: Attach wheels to GitHub Release

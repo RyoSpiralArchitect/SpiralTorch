@@ -536,6 +536,8 @@ gh workflow run release_wheels.yml \
   -f publish_pypi=false
 
 # If you intentionally publish from a rebuild, choose the auth path explicitly.
+# publish_pypi=true requires release_tag; after upload, CI verifies PyPI wheel
+# digests against the GitHub Release wheels.sha256 emitted by the attach job.
 gh workflow run release_wheels.yml \
   --ref main \
   -f release_tag="$TAG" \
