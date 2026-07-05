@@ -943,6 +943,93 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--min-run-epoch-wgpu-hit-rate",
+        type=float,
+        default=None,
+        help=(
+            "Forward a profile-run epoch WGPU hit-rate floor to "
+            "profile_runner run-summary gates. Also becomes the default "
+            "promotion-ready WGPU hit-rate floor when the promotion-specific "
+            "flag is omitted."
+        ),
+    )
+    parser.add_argument(
+        "--max-run-epoch-wgpu-runtime-fallback-rate",
+        type=float,
+        default=None,
+        help=(
+            "Forward a profile-run epoch WGPU runtime-fallback-rate ceiling "
+            "to profile_runner run-summary gates. Also becomes the default "
+            "promotion-ready runtime-fallback ceiling when omitted."
+        ),
+    )
+    parser.add_argument(
+        "--max-run-epoch-wgpu-component-fallback-rate",
+        type=float,
+        default=None,
+        help=(
+            "Forward a profile-run epoch WGPU component-fallback-rate ceiling "
+            "to profile_runner run-summary gates. Also becomes the default "
+            "promotion-ready component-fallback ceiling when omitted."
+        ),
+    )
+    parser.add_argument(
+        "--max-run-epoch-wgpu-hit-rate-regression",
+        type=float,
+        default=None,
+        help=(
+            "Forward a max epoch WGPU hit-rate regression gate to "
+            "profile_runner run-summary comparisons."
+        ),
+    )
+    parser.add_argument(
+        "--max-run-epoch-wgpu-runtime-fallback-rate-regression",
+        type=float,
+        default=None,
+        help=(
+            "Forward a max epoch WGPU runtime-fallback-rate regression gate "
+            "to profile_runner run-summary comparisons."
+        ),
+    )
+    parser.add_argument(
+        "--max-run-epoch-wgpu-component-fallback-rate-regression",
+        type=float,
+        default=None,
+        help=(
+            "Forward a max epoch WGPU component-fallback-rate regression gate "
+            "to profile_runner run-summary comparisons."
+        ),
+    )
+    parser.add_argument(
+        "--promotion-ready-min-epoch-wgpu-hit-rate",
+        type=float,
+        default=None,
+        help=(
+            "Forward a promotion-ready epoch WGPU hit-rate floor to "
+            "profile_runner. Defaults to --min-run-epoch-wgpu-hit-rate."
+        ),
+    )
+    parser.add_argument(
+        "--promotion-ready-max-epoch-wgpu-runtime-fallback-rate",
+        type=float,
+        default=None,
+        help=(
+            "Forward a promotion-ready epoch WGPU runtime-fallback-rate "
+            "ceiling to profile_runner. Defaults to "
+            "--max-run-epoch-wgpu-runtime-fallback-rate."
+        ),
+    )
+    parser.add_argument(
+        "--promotion-ready-max-epoch-wgpu-component-fallback-rate",
+        type=float,
+        default=None,
+        help=(
+            "Forward a promotion-ready epoch WGPU component-fallback-rate "
+            "ceiling to profile_runner. Defaults to "
+            "--max-run-epoch-wgpu-component-fallback-rate."
+        ),
+    )
+    parser.add_argument(
         "--keep-existing",
         action="store_true",
         help="Keep existing output files in --out-dir instead of cleaning this smoke's artifacts first.",
@@ -1058,6 +1145,42 @@ def parse_args():
         (
             "max_aggregate_epoch_wgpu_component_fallback_rate",
             "--max-aggregate-epoch-wgpu-component-fallback-rate",
+        ),
+        (
+            "min_run_epoch_wgpu_hit_rate",
+            "--min-run-epoch-wgpu-hit-rate",
+        ),
+        (
+            "max_run_epoch_wgpu_runtime_fallback_rate",
+            "--max-run-epoch-wgpu-runtime-fallback-rate",
+        ),
+        (
+            "max_run_epoch_wgpu_component_fallback_rate",
+            "--max-run-epoch-wgpu-component-fallback-rate",
+        ),
+        (
+            "max_run_epoch_wgpu_hit_rate_regression",
+            "--max-run-epoch-wgpu-hit-rate-regression",
+        ),
+        (
+            "max_run_epoch_wgpu_runtime_fallback_rate_regression",
+            "--max-run-epoch-wgpu-runtime-fallback-rate-regression",
+        ),
+        (
+            "max_run_epoch_wgpu_component_fallback_rate_regression",
+            "--max-run-epoch-wgpu-component-fallback-rate-regression",
+        ),
+        (
+            "promotion_ready_min_epoch_wgpu_hit_rate",
+            "--promotion-ready-min-epoch-wgpu-hit-rate",
+        ),
+        (
+            "promotion_ready_max_epoch_wgpu_runtime_fallback_rate",
+            "--promotion-ready-max-epoch-wgpu-runtime-fallback-rate",
+        ),
+        (
+            "promotion_ready_max_epoch_wgpu_component_fallback_rate",
+            "--promotion-ready-max-epoch-wgpu-component-fallback-rate",
         ),
         (
             "min_manifest_transformers_trainer_wgpu_hit_rate",
@@ -3410,8 +3533,131 @@ def aggregate_epoch_wgpu_gate_args(source):
     return flags
 
 
-def promotion_ready_args(ft_epochs, profiles, promotion_metric, promotion_jsonl):
-    return [
+RUN_EPOCH_WGPU_GATE_FLAGS = (
+    ("min_run_epoch_wgpu_hit_rate", "--min-run-epoch-wgpu-hit-rate"),
+    (
+        "max_run_epoch_wgpu_runtime_fallback_rate",
+        "--max-run-epoch-wgpu-runtime-fallback-rate",
+    ),
+    (
+        "max_run_epoch_wgpu_component_fallback_rate",
+        "--max-run-epoch-wgpu-component-fallback-rate",
+    ),
+)
+
+
+RUN_EPOCH_WGPU_REGRESSION_FLAGS = (
+    (
+        "max_run_epoch_wgpu_hit_rate_regression",
+        "--max-run-epoch-wgpu-hit-rate-regression",
+    ),
+    (
+        "max_run_epoch_wgpu_runtime_fallback_rate_regression",
+        "--max-run-epoch-wgpu-runtime-fallback-rate-regression",
+    ),
+    (
+        "max_run_epoch_wgpu_component_fallback_rate_regression",
+        "--max-run-epoch-wgpu-component-fallback-rate-regression",
+    ),
+)
+
+
+def run_epoch_wgpu_gate_fields(source):
+    return {
+        key: source_value(source, key) for key, _flag in RUN_EPOCH_WGPU_GATE_FLAGS
+    }
+
+
+def run_epoch_wgpu_regression_fields(source):
+    return {
+        key: source_value(source, key) for key, _flag in RUN_EPOCH_WGPU_REGRESSION_FLAGS
+    }
+
+
+def flag_args_from_fields(fields, field_flags):
+    flags = []
+    for key, flag in field_flags:
+        value = fields.get(key)
+        if value is not None:
+            flags.extend([flag, f"{float(value):g}"])
+    return flags
+
+
+def run_epoch_wgpu_gate_args(source):
+    return flag_args_from_fields(
+        run_epoch_wgpu_gate_fields(source),
+        RUN_EPOCH_WGPU_GATE_FLAGS,
+    )
+
+
+def run_epoch_wgpu_regression_args(source):
+    return flag_args_from_fields(
+        run_epoch_wgpu_regression_fields(source),
+        RUN_EPOCH_WGPU_REGRESSION_FLAGS,
+    )
+
+
+def effective_promotion_ready_epoch_wgpu_value(source, promotion_key, run_key):
+    value = source_value(source, promotion_key)
+    if value is not None:
+        return value
+    return source_value(source, run_key)
+
+
+def promotion_ready_epoch_wgpu_fields(source):
+    return {
+        "promotion_ready_min_epoch_wgpu_hit_rate": (
+            effective_promotion_ready_epoch_wgpu_value(
+                source,
+                "promotion_ready_min_epoch_wgpu_hit_rate",
+                "min_run_epoch_wgpu_hit_rate",
+            )
+        ),
+        "promotion_ready_max_epoch_wgpu_runtime_fallback_rate": (
+            effective_promotion_ready_epoch_wgpu_value(
+                source,
+                "promotion_ready_max_epoch_wgpu_runtime_fallback_rate",
+                "max_run_epoch_wgpu_runtime_fallback_rate",
+            )
+        ),
+        "promotion_ready_max_epoch_wgpu_component_fallback_rate": (
+            effective_promotion_ready_epoch_wgpu_value(
+                source,
+                "promotion_ready_max_epoch_wgpu_component_fallback_rate",
+                "max_run_epoch_wgpu_component_fallback_rate",
+            )
+        ),
+    }
+
+
+def promotion_ready_epoch_wgpu_args(source):
+    return flag_args_from_fields(
+        promotion_ready_epoch_wgpu_fields(source),
+        [
+            (
+                "promotion_ready_min_epoch_wgpu_hit_rate",
+                "--promotion-ready-min-epoch-wgpu-hit-rate",
+            ),
+            (
+                "promotion_ready_max_epoch_wgpu_runtime_fallback_rate",
+                "--promotion-ready-max-epoch-wgpu-runtime-fallback-rate",
+            ),
+            (
+                "promotion_ready_max_epoch_wgpu_component_fallback_rate",
+                "--promotion-ready-max-epoch-wgpu-component-fallback-rate",
+            ),
+        ],
+    )
+
+
+def promotion_ready_args(
+    ft_epochs,
+    profiles,
+    promotion_metric,
+    promotion_jsonl,
+    source=None,
+):
+    flags = [
         "--promotion-jsonl",
         str(promotion_jsonl),
         "--promotion-metric",
@@ -3435,10 +3681,13 @@ def promotion_ready_args(ft_epochs, profiles, promotion_metric, promotion_jsonl)
         "1",
         "--require-promotion-ready-guard-policy",
     ]
+    if source is not None:
+        flags.extend(promotion_ready_epoch_wgpu_args(source))
+    return flags
 
 
-def run_summary_compare_args():
-    return [
+def run_summary_compare_args(source=None):
+    flags = [
         "--max-run-target-loss-regression",
         "0.0",
         "--max-run-retention-loss-regression",
@@ -3456,6 +3705,9 @@ def run_summary_compare_args():
         "--max-run-guard-target-stale-rate-regression",
         "0.0",
     ]
+    if source is not None:
+        flags.extend(run_epoch_wgpu_regression_args(source))
+    return flags
 
 
 def run_summary_identity_args():
@@ -3560,6 +3812,9 @@ def continuation_plan_row(
             ),
         }
     )
+    row.update(run_epoch_wgpu_gate_fields(source_row))
+    row.update(run_epoch_wgpu_regression_fields(source_row))
+    row.update(promotion_ready_epoch_wgpu_fields(source_row))
     row.update(trace_policy_fields(source_row))
     row.update(checkpoint_policy_fields(source_row))
     row.update(runtime_contract_evidence_fields(source_row))
@@ -3793,6 +4048,9 @@ def profile_smoke_manifest_row(
         "max_aggregate_epoch_wgpu_component_fallback_rate": (
             source_value(args, "max_aggregate_epoch_wgpu_component_fallback_rate")
         ),
+        **run_epoch_wgpu_gate_fields(args),
+        **run_epoch_wgpu_regression_fields(args),
+        **promotion_ready_epoch_wgpu_fields(args),
         "checkpoint_shape_audit_jsonl": optional_path(
             None if args.skip_checkpoint_shape_audit else checkpoint_shape_audit_jsonl
         ),
@@ -4027,6 +4285,7 @@ def continue_profile_smoke_from_manifest(args):
         ]
         promoted_runner_cmd.extend(run_guard_args(promoted_ft_epochs))
         promoted_runner_cmd.extend(aggregate_epoch_wgpu_gate_args(row))
+        promoted_runner_cmd.extend(run_epoch_wgpu_gate_args(row))
         if not strict_aggregate_gates:
             promoted_runner_cmd.append("--no-aggregate-gates")
         extend_profile_filters(promoted_runner_cmd, profiles)
@@ -4042,8 +4301,9 @@ def continue_profile_smoke_from_manifest(args):
             "--max-run-input-promotion-metric-regression",
             "0.0",
         ]
-        promoted_compare_cmd.extend(run_summary_compare_args())
+        promoted_compare_cmd.extend(run_summary_compare_args(row))
         promoted_compare_cmd.extend(run_guard_args(promoted_ft_epochs))
+        promoted_compare_cmd.extend(run_epoch_wgpu_gate_args(row))
         promoted_compare_cmd.extend(run_summary_identity_args())
         promoted_compare_cmd.extend(
             promotion_ready_args(
@@ -4051,6 +4311,7 @@ def continue_profile_smoke_from_manifest(args):
                 profiles,
                 promotion_metric,
                 artifacts["promotion_jsonl"],
+                source=row,
             )
         )
         run_command(promoted_compare_cmd, dry_run=args.dry_run)
@@ -4356,8 +4617,15 @@ def main():
     ]
     profile_runner_cmd.extend(run_guard_args(args.ft_epochs))
     profile_runner_cmd.extend(aggregate_epoch_wgpu_gate_args(args))
+    profile_runner_cmd.extend(run_epoch_wgpu_gate_args(args))
     profile_runner_cmd.extend(
-        promotion_ready_args(args.ft_epochs, profiles, args.promotion_metric, promotion_jsonl)
+        promotion_ready_args(
+            args.ft_epochs,
+            profiles,
+            args.promotion_metric,
+            promotion_jsonl,
+            source=args,
+        )
     )
     if not args.strict_aggregate_gates:
         profile_runner_cmd.append("--no-aggregate-gates")
@@ -4372,8 +4640,9 @@ def main():
         "--compare-run-summary-jsonl",
         run_summary_jsonl,
     ]
-    compare_cmd.extend(run_summary_compare_args())
+    compare_cmd.extend(run_summary_compare_args(args))
     compare_cmd.extend(run_guard_args(args.ft_epochs))
+    compare_cmd.extend(run_epoch_wgpu_gate_args(args))
     compare_cmd.extend(run_summary_identity_args())
     compare_cmd.extend(
         promotion_ready_args(
@@ -4381,6 +4650,7 @@ def main():
             profiles,
             args.promotion_metric,
             promotion_compare_jsonl,
+            source=args,
         )
     )
     run_command(compare_cmd, dry_run=args.dry_run)
@@ -4425,6 +4695,7 @@ def main():
         ]
         promoted_runner_cmd.extend(run_guard_args(promoted_ft_epochs))
         promoted_runner_cmd.extend(aggregate_epoch_wgpu_gate_args(args))
+        promoted_runner_cmd.extend(run_epoch_wgpu_gate_args(args))
         if not args.strict_aggregate_gates:
             promoted_runner_cmd.append("--no-aggregate-gates")
         extend_profile_filters(promoted_runner_cmd, profiles)
@@ -4440,8 +4711,9 @@ def main():
             "--max-run-input-promotion-metric-regression",
             "0.0",
         ]
-        promoted_compare_cmd.extend(run_summary_compare_args())
+        promoted_compare_cmd.extend(run_summary_compare_args(args))
         promoted_compare_cmd.extend(run_guard_args(promoted_ft_epochs))
+        promoted_compare_cmd.extend(run_epoch_wgpu_gate_args(args))
         promoted_compare_cmd.extend(run_summary_identity_args())
         promoted_compare_cmd.extend(
             promotion_ready_args(
@@ -4449,6 +4721,7 @@ def main():
                 profiles,
                 args.promotion_metric,
                 artifacts["promotion_jsonl"],
+                source=args,
             )
         )
         run_command(promoted_compare_cmd, dry_run=args.dry_run)

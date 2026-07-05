@@ -3624,6 +3624,15 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             min_aggregate_epoch_wgpu_hit_rate=0.8,
             max_aggregate_epoch_wgpu_runtime_fallback_rate=0.1,
             max_aggregate_epoch_wgpu_component_fallback_rate=0.25,
+            min_run_epoch_wgpu_hit_rate=0.75,
+            max_run_epoch_wgpu_runtime_fallback_rate=0.2,
+            max_run_epoch_wgpu_component_fallback_rate=0.3,
+            max_run_epoch_wgpu_hit_rate_regression=0.05,
+            max_run_epoch_wgpu_runtime_fallback_rate_regression=0.06,
+            max_run_epoch_wgpu_component_fallback_rate_regression=0.07,
+            promotion_ready_min_epoch_wgpu_hit_rate=None,
+            promotion_ready_max_epoch_wgpu_runtime_fallback_rate=0.15,
+            promotion_ready_max_epoch_wgpu_component_fallback_rate=None,
             skip_checkpoint_shape_audit=False,
             skip_checkpoint_preflight=False,
             compare_checkpoint_preflight_jsonl=out_dir / "checkpoint-preflight-baseline.jsonl",
@@ -3669,6 +3678,47 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                 "max_aggregate_epoch_wgpu_component_fallback_rate"
             ],
             0.25,
+        )
+        self.assertEqual(smoke_manifest_row["min_run_epoch_wgpu_hit_rate"], 0.75)
+        self.assertEqual(
+            smoke_manifest_row["max_run_epoch_wgpu_runtime_fallback_rate"],
+            0.2,
+        )
+        self.assertEqual(
+            smoke_manifest_row["max_run_epoch_wgpu_component_fallback_rate"],
+            0.3,
+        )
+        self.assertEqual(
+            smoke_manifest_row["max_run_epoch_wgpu_hit_rate_regression"],
+            0.05,
+        )
+        self.assertEqual(
+            smoke_manifest_row[
+                "max_run_epoch_wgpu_runtime_fallback_rate_regression"
+            ],
+            0.06,
+        )
+        self.assertEqual(
+            smoke_manifest_row[
+                "max_run_epoch_wgpu_component_fallback_rate_regression"
+            ],
+            0.07,
+        )
+        self.assertEqual(
+            smoke_manifest_row["promotion_ready_min_epoch_wgpu_hit_rate"],
+            0.75,
+        )
+        self.assertEqual(
+            smoke_manifest_row[
+                "promotion_ready_max_epoch_wgpu_runtime_fallback_rate"
+            ],
+            0.15,
+        )
+        self.assertEqual(
+            smoke_manifest_row[
+                "promotion_ready_max_epoch_wgpu_component_fallback_rate"
+            ],
+            0.3,
         )
         self.assertTrue(smoke_manifest_row["require_checkpoint_preflight_match"])
         self.assertEqual(
@@ -3833,6 +3883,15 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                 promotion_metric="target_loss_delta_mean",
                 promoted_output_prefix="profile-smoke-promoted",
                 strict_aggregate_gates=False,
+                min_run_epoch_wgpu_hit_rate=0.7,
+                max_run_epoch_wgpu_runtime_fallback_rate=0.2,
+                max_run_epoch_wgpu_component_fallback_rate=0.3,
+                max_run_epoch_wgpu_hit_rate_regression=0.05,
+                max_run_epoch_wgpu_runtime_fallback_rate_regression=0.06,
+                max_run_epoch_wgpu_component_fallback_rate_regression=0.07,
+                promotion_ready_min_epoch_wgpu_hit_rate=None,
+                promotion_ready_max_epoch_wgpu_runtime_fallback_rate=None,
+                promotion_ready_max_epoch_wgpu_component_fallback_rate=0.25,
                 skip_checkpoint_shape_audit=False,
                 skip_checkpoint_preflight=False,
                 compare_checkpoint_preflight_jsonl=None,
@@ -4164,6 +4223,27 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertIn("--output-prefix profile-smoke-promoted-rung3", text)
         self.assertIn("--override-ft-epochs 3", text)
         self.assertIn("--override-ft-epochs 4", text)
+        self.assertIn("--min-run-epoch-wgpu-hit-rate 0.7", text)
+        self.assertIn("--max-run-epoch-wgpu-runtime-fallback-rate 0.2", text)
+        self.assertIn("--max-run-epoch-wgpu-component-fallback-rate 0.3", text)
+        self.assertIn("--max-run-epoch-wgpu-hit-rate-regression 0.05", text)
+        self.assertIn(
+            "--max-run-epoch-wgpu-runtime-fallback-rate-regression 0.06",
+            text,
+        )
+        self.assertIn(
+            "--max-run-epoch-wgpu-component-fallback-rate-regression 0.07",
+            text,
+        )
+        self.assertIn("--promotion-ready-min-epoch-wgpu-hit-rate 0.7", text)
+        self.assertIn(
+            "--promotion-ready-max-epoch-wgpu-runtime-fallback-rate 0.2",
+            text,
+        )
+        self.assertIn(
+            "--promotion-ready-max-epoch-wgpu-component-fallback-rate 0.25",
+            text,
+        )
         self.assertIn("profile_smoke_manifest_continue", text)
         self.assertIn("promoted_rungs=3", text)
         self.assertIn(f"continue_plan_jsonl={continue_plan_path}", text)
@@ -4240,6 +4320,66 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                 for plan in continue_plan_rows
             ],
             [["transformers"], ["transformers"]],
+        )
+        self.assertEqual(
+            [plan["min_run_epoch_wgpu_hit_rate"] for plan in continue_plan_rows],
+            [0.7, 0.7],
+        )
+        self.assertEqual(
+            [
+                plan["max_run_epoch_wgpu_runtime_fallback_rate"]
+                for plan in continue_plan_rows
+            ],
+            [0.2, 0.2],
+        )
+        self.assertEqual(
+            [
+                plan["max_run_epoch_wgpu_component_fallback_rate"]
+                for plan in continue_plan_rows
+            ],
+            [0.3, 0.3],
+        )
+        self.assertEqual(
+            [
+                plan["max_run_epoch_wgpu_hit_rate_regression"]
+                for plan in continue_plan_rows
+            ],
+            [0.05, 0.05],
+        )
+        self.assertEqual(
+            [
+                plan["max_run_epoch_wgpu_runtime_fallback_rate_regression"]
+                for plan in continue_plan_rows
+            ],
+            [0.06, 0.06],
+        )
+        self.assertEqual(
+            [
+                plan["max_run_epoch_wgpu_component_fallback_rate_regression"]
+                for plan in continue_plan_rows
+            ],
+            [0.07, 0.07],
+        )
+        self.assertEqual(
+            [
+                plan["promotion_ready_min_epoch_wgpu_hit_rate"]
+                for plan in continue_plan_rows
+            ],
+            [0.7, 0.7],
+        )
+        self.assertEqual(
+            [
+                plan["promotion_ready_max_epoch_wgpu_runtime_fallback_rate"]
+                for plan in continue_plan_rows
+            ],
+            [0.2, 0.2],
+        )
+        self.assertEqual(
+            [
+                plan["promotion_ready_max_epoch_wgpu_component_fallback_rate"]
+                for plan in continue_plan_rows
+            ],
+            [0.25, 0.25],
         )
         self.assertEqual(
             [
@@ -7019,6 +7159,18 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             "0.1",
             "--max-aggregate-epoch-wgpu-component-fallback-rate",
             "0.25",
+            "--min-run-epoch-wgpu-hit-rate",
+            "0.75",
+            "--max-run-epoch-wgpu-runtime-fallback-rate",
+            "0.2",
+            "--max-run-epoch-wgpu-component-fallback-rate",
+            "0.3",
+            "--max-run-epoch-wgpu-hit-rate-regression",
+            "0.05",
+            "--max-run-epoch-wgpu-runtime-fallback-rate-regression",
+            "0.06",
+            "--max-run-epoch-wgpu-component-fallback-rate-regression",
+            "0.07",
             "--skip-promoted-follow-up",
             "--dry-run",
         ]
@@ -7044,6 +7196,27 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertIn("--min-aggregate-epoch-wgpu-hit-rate 0.8", text)
         self.assertIn("--max-aggregate-epoch-wgpu-runtime-fallback-rate 0.1", text)
         self.assertIn("--max-aggregate-epoch-wgpu-component-fallback-rate 0.25", text)
+        self.assertIn("--min-run-epoch-wgpu-hit-rate 0.75", text)
+        self.assertIn("--max-run-epoch-wgpu-runtime-fallback-rate 0.2", text)
+        self.assertIn("--max-run-epoch-wgpu-component-fallback-rate 0.3", text)
+        self.assertIn("--max-run-epoch-wgpu-hit-rate-regression 0.05", text)
+        self.assertIn(
+            "--max-run-epoch-wgpu-runtime-fallback-rate-regression 0.06",
+            text,
+        )
+        self.assertIn(
+            "--max-run-epoch-wgpu-component-fallback-rate-regression 0.07",
+            text,
+        )
+        self.assertIn("--promotion-ready-min-epoch-wgpu-hit-rate 0.75", text)
+        self.assertIn(
+            "--promotion-ready-max-epoch-wgpu-runtime-fallback-rate 0.2",
+            text,
+        )
+        self.assertIn(
+            "--promotion-ready-max-epoch-wgpu-component-fallback-rate 0.3",
+            text,
+        )
         self.assertIn("--transformers-audit", text)
         self.assertIn("--transformers-model-path /models/llama", text)
         self.assertIn("--transformers-revision main", text)
