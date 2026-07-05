@@ -64,6 +64,9 @@ class RunLlmCharFinetuneReloadSweepTests(unittest.TestCase):
                         "2",
                         "--restore-best-at-end",
                         "--rollback-on-validation-regression",
+                        "--runtime-import-preset",
+                        "hf-finetune",
+                        "--require-runtime-imports",
                         "--dry-run",
                     ]
                 )
@@ -81,6 +84,10 @@ class RunLlmCharFinetuneReloadSweepTests(unittest.TestCase):
         self.assertEqual(manifest["summary"]["run_status_counts"], {"dry_run": 4})
         self.assertEqual(manifest["summary"]["training_status_counts"], {"dry_run": 4})
         self.assertEqual(manifest["summary"]["adoption_status_counts"], {"dry_run": 4})
+        self.assertEqual(
+            manifest["summary"]["runtime_preflight_status_counts"],
+            {"dry_run": 4},
+        )
         self.assertEqual(len(manifest["summary"]["reload_lr_groups"]), 2)
         self.assertEqual(
             [group["cells"] for group in manifest["summary"]["reload_lr_groups"]],
@@ -88,6 +95,12 @@ class RunLlmCharFinetuneReloadSweepTests(unittest.TestCase):
         )
         self.assertEqual(manifest["settings"]["eval_seed_offset"], 0)
         self.assertTrue(manifest["settings"]["rollback_on_validation_regression"])
+        self.assertEqual(
+            manifest["settings"]["runtime_import_presets"],
+            ["hf-finetune"],
+        )
+        self.assertTrue(manifest["settings"]["require_runtime_imports"])
+        self.assertTrue(manifest["settings"]["runtime_import_preflight_requested"])
         first = manifest["cells"][0]
         self.assertEqual(first["status"], "dry_run")
         self.assertEqual(first["eval_seed"], first["seed"])
@@ -96,8 +109,12 @@ class RunLlmCharFinetuneReloadSweepTests(unittest.TestCase):
         self.assertIn("--early-stop-patience", first["command"])
         self.assertIn("--restore-best-at-end", first["command"])
         self.assertIn("--rollback-on-validation-regression", first["command"])
+        self.assertIn("--runtime-import-preset", first["command"])
+        self.assertIn("hf-finetune", first["command"])
+        self.assertIn("--require-runtime-imports", first["command"])
         self.assertIn("seed3_reloadlr0p02", first["name"])
         self.assertIn("# LLM Char Finetune Reload Sweep", markdown)
+        self.assertIn("runtime_preflight_status_counts", markdown)
         self.assertIn("## Reload LR Groups", markdown)
         self.assertIn("| 0.02 | 2 |", markdown)
         self.assertIn(
@@ -174,6 +191,10 @@ class RunLlmCharFinetuneReloadSweepTests(unittest.TestCase):
         self.assertEqual(summary["adoption_status_counts"]["protected_noop"], 1)
         self.assertEqual(summary["adoption_status_counts"]["missing_outcome"], 1)
         self.assertEqual(summary["run_status_counts"]["ok"], 3)
+        self.assertEqual(
+            summary["runtime_preflight_status_counts"],
+            {"missing_outcome": 1, "ok": 3},
+        )
         self.assertEqual(summary["protected_noop_cells"], 1)
         self.assertEqual(summary["accepted_improved_cells"], 1)
         self.assertEqual(summary["best_cell"], "improved")

@@ -50,6 +50,16 @@ BACKEND_FEATURE_REQUIREMENTS = {
     "hip": ["hip", "hip-real"],
     "rocm": ["hip", "hip-real"],
 }
+RUNTIME_IMPORT_PRESET_CHOICES = [
+    "transformers",
+    "torch",
+    "tokenizers",
+    "torch-transformers",
+    "hf-runtime",
+    "hf-datasets",
+    "hf-finetune",
+    "hf-peft",
+]
 
 
 def default_run_root() -> Path:
@@ -141,13 +151,69 @@ def backend_readiness(backend: str, features: dict[str, bool]) -> dict[str, Any]
     }
 
 
+def runtime_import_contract_requested(source: argparse.Namespace) -> bool:
+    return bool(
+        getattr(source, "runtime_imports", None)
+        or getattr(source, "runtime_import_presets", None)
+        or getattr(source, "required_runtime_imports", None)
+        or getattr(source, "required_runtime_import_presets", None)
+        or getattr(source, "require_runtime_imports", False)
+    )
+
+
+def runtime_import_contract_settings(source: argparse.Namespace) -> dict[str, Any]:
+    return {
+        "runtime_imports": list(getattr(source, "runtime_imports", []) or []),
+        "runtime_import_presets": list(
+            getattr(source, "runtime_import_presets", []) or []
+        ),
+        "required_runtime_imports": list(
+            getattr(source, "required_runtime_imports", []) or []
+        ),
+        "required_runtime_import_presets": list(
+            getattr(source, "required_runtime_import_presets", []) or []
+        ),
+        "require_runtime_imports": bool(
+            getattr(source, "require_runtime_imports", False)
+        ),
+        "runtime_import_preflight_requested": runtime_import_contract_requested(
+            source
+        ),
+    }
+
+
+def runtime_import_cli_flags(
+    source: argparse.Namespace,
+    *,
+    runtime_preflight_json_out: Path | None = None,
+) -> list[str]:
+    flags: list[str] = []
+    for name in getattr(source, "runtime_imports", []) or []:
+        flags.extend(["--runtime-import", str(name)])
+    for preset in getattr(source, "runtime_import_presets", []) or []:
+        flags.extend(["--runtime-import-preset", str(preset)])
+    for name in getattr(source, "required_runtime_imports", []) or []:
+        flags.extend(["--require-runtime-import", str(name)])
+    for preset in getattr(source, "required_runtime_import_presets", []) or []:
+        flags.extend(["--require-runtime-import-preset", str(preset)])
+    if getattr(source, "require_runtime_imports", False):
+        flags.append("--require-runtime-imports")
+    if runtime_preflight_json_out is not None and runtime_import_contract_requested(
+        source
+    ):
+        flags.extend(["--runtime-preflight-json-out", str(runtime_preflight_json_out)])
+    return flags
+
+
 def preflight_command(
     data_paths: list[Path],
     *,
     run_dir: Path,
     backend: str,
+    runtime_import_args: argparse.Namespace,
+    runtime_preflight_json_out: Path | None = None,
 ) -> list[str]:
-    return [
+    command = [
         sys.executable,
         "-S",
         "-s",
@@ -159,6 +225,13 @@ def preflight_command(
         backend,
         "--preflight-only",
     ]
+    command.extend(
+        runtime_import_cli_flags(
+            runtime_import_args,
+            runtime_preflight_json_out=runtime_preflight_json_out,
+        )
+    )
+    return command
 
 
 def run_finetune_preflight(
@@ -166,11 +239,22 @@ def run_finetune_preflight(
     *,
     run_root: Path,
     backend: str,
+    runtime_import_args: argparse.Namespace,
 ) -> dict[str, Any]:
     preflight_run_dir = run_root / "_preflight"
     child_preflight_path = preflight_run_dir / "preflight.json"
+    child_runtime_preflight_path = preflight_run_dir / "runtime_preflight.json"
     child_summary_path = preflight_run_dir / "summary.json"
-    command = preflight_command(data_paths, run_dir=preflight_run_dir, backend=backend)
+    runtime_requested = runtime_import_contract_requested(runtime_import_args)
+    command = preflight_command(
+        data_paths,
+        run_dir=preflight_run_dir,
+        backend=backend,
+        runtime_import_args=runtime_import_args,
+        runtime_preflight_json_out=(
+            child_runtime_preflight_path if runtime_requested else None
+        ),
+    )
     returncode, elapsed = run_command(
         command,
         preflight_run_dir / "process.log",
@@ -182,6 +266,14 @@ def run_finetune_preflight(
         )
     except Exception as exc:
         child_preflight = {"error": str(exc)}
+    try:
+        child_runtime_preflight = (
+            read_json(child_runtime_preflight_path)
+            if child_runtime_preflight_path.exists()
+            else None
+        )
+    except Exception as exc:
+        child_runtime_preflight = {"error": str(exc)}
     child_ready = child_preflight.get("ready") is True and returncode == 0
     issues = child_preflight.get("issues")
     if not isinstance(issues, list):
@@ -207,8 +299,13 @@ def run_finetune_preflight(
         "command": command,
         "shell_command": shell_command(command),
         "child_preflight_path": str(child_preflight_path),
+        "child_runtime_preflight_path": (
+            str(child_runtime_preflight_path) if runtime_requested else None
+        ),
         "child_summary_path": str(child_summary_path),
         "child_preflight": child_preflight,
+        "child_runtime_preflight": child_runtime_preflight,
+        **runtime_import_contract_settings(runtime_import_args),
     }
     for key in (
         "backend_normalized",
@@ -220,9 +317,30 @@ def run_finetune_preflight(
         "missing_nn_symbols",
         "build_info_error",
         "spiraltorch_module",
+        "runtime_import_preflight",
+        "runtime_import_preflight_path",
     ):
         if key in child_preflight:
             payload[key] = child_preflight[key]
+    runtime_preflight = (
+        child_runtime_preflight
+        if isinstance(child_runtime_preflight, dict)
+        else child_preflight.get("runtime_import_preflight")
+    )
+    if isinstance(runtime_preflight, dict):
+        for key in (
+            "runtime_import_preflight_requested",
+            "runtime_import_preflight_passed",
+            "runtime_import_preflight_failures",
+            "runtime_import_presets",
+            "runtime_imports_requested",
+            "required_runtime_imports",
+            "required_runtime_import_presets",
+            "runtime_imports_failed",
+            "runtime_import_failed_install_hints",
+        ):
+            if key in runtime_preflight:
+                payload[key] = runtime_preflight[key]
     return payload
 
 
@@ -274,6 +392,8 @@ def finetune_command(
     early_stop_patience: int,
     restore_best_at_end: bool,
     rollback_on_validation_regression: bool,
+    runtime_import_args: argparse.Namespace,
+    runtime_preflight_json_out: Path | None = None,
     load_run: Path | None = None,
 ) -> list[str]:
     command = [
@@ -321,6 +441,12 @@ def finetune_command(
         command.append("--rollback-on-validation-regression")
     if load_run is not None:
         command.extend(["--load-run", str(load_run)])
+    command.extend(
+        runtime_import_cli_flags(
+            runtime_import_args,
+            runtime_preflight_json_out=runtime_preflight_json_out,
+        )
+    )
     return command
 
 
@@ -366,7 +492,24 @@ def run_item(
         "status": "dry_run" if dry_run else ("ok" if returncode == 0 else "failed"),
         "summary_path": str(run_dir / "summary.json"),
         "run_json_path": str(run_dir / "run.json"),
+        "runtime_preflight_path": str(run_dir / "runtime_preflight.json"),
     }
+
+
+def runtime_contract_from_run(
+    summary: dict[str, Any],
+    run_json: dict[str, Any],
+) -> dict[str, Any]:
+    for source in (
+        run_json.get("training_contract"),
+        summary.get("training_contract"),
+    ):
+        if not isinstance(source, dict):
+            continue
+        runtime = source.get("runtime")
+        if isinstance(runtime, dict):
+            return runtime
+    return {}
 
 
 def run_summary_contract(run_dir: Path) -> dict[str, Any]:
@@ -374,6 +517,7 @@ def run_summary_contract(run_dir: Path) -> dict[str, Any]:
     run_json_path = run_dir / "run.json"
     summary = read_json(summary_path) if summary_path.exists() else {}
     run_json = read_json(run_json_path) if run_json_path.exists() else {}
+    runtime_contract = runtime_contract_from_run(summary, run_json)
     final_nll = metric_value(summary, "final_validation", "mean_nll")
     training_final_nll = metric_value(summary, "training_final_validation", "mean_nll")
     best_nll = finite_float(summary.get("best_validation_mean_nll"))
@@ -389,6 +533,30 @@ def run_summary_contract(run_dir: Path) -> dict[str, Any]:
         "validation_sample_seed": run_json.get("validation_sample_seed"),
         "data_paths": run_json.get("data_paths"),
         "validation_tokens": run_json.get("validation_tokens"),
+        "runtime_import_preflight_path": runtime_contract.get(
+            "runtime_import_preflight_path"
+        ),
+        "runtime_import_preflight_requested": runtime_contract.get(
+            "runtime_import_preflight_requested"
+        ),
+        "runtime_import_preflight_passed": runtime_contract.get(
+            "runtime_import_preflight_passed"
+        ),
+        "runtime_import_preflight_failures": runtime_contract.get(
+            "runtime_import_preflight_failures"
+        ),
+        "runtime_import_presets": runtime_contract.get("runtime_import_presets"),
+        "runtime_imports_requested": runtime_contract.get(
+            "runtime_imports_requested"
+        ),
+        "required_runtime_imports": runtime_contract.get("required_runtime_imports"),
+        "required_runtime_import_presets": runtime_contract.get(
+            "required_runtime_import_presets"
+        ),
+        "runtime_imports_failed": runtime_contract.get("runtime_imports_failed"),
+        "runtime_import_failed_install_hints": runtime_contract.get(
+            "runtime_import_failed_install_hints"
+        ),
         "initial_nll": initial_nll,
         "final_nll": final_nll,
         "training_final_nll": training_final_nll,
@@ -544,6 +712,41 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--early-stop-patience", type=int, default=0)
     parser.add_argument("--restore-best-at-end", action="store_true")
     parser.add_argument("--rollback-on-validation-regression", action="store_true")
+    parser.add_argument(
+        "--runtime-import",
+        dest="runtime_imports",
+        action="append",
+        default=[],
+        help="optional module to import during child LLM FT preflights/runs; repeatable",
+    )
+    parser.add_argument(
+        "--runtime-import-preset",
+        dest="runtime_import_presets",
+        action="append",
+        choices=RUNTIME_IMPORT_PRESET_CHOICES,
+        default=[],
+        help="named runtime import bundle forwarded to child LLM FT preflights/runs",
+    )
+    parser.add_argument(
+        "--require-runtime-import",
+        dest="required_runtime_imports",
+        action="append",
+        default=[],
+        help="module that must import successfully in child LLM FT preflights/runs",
+    )
+    parser.add_argument(
+        "--require-runtime-import-preset",
+        dest="required_runtime_import_presets",
+        action="append",
+        choices=RUNTIME_IMPORT_PRESET_CHOICES,
+        default=[],
+        help="preset that must be satisfied in child LLM FT preflights/runs",
+    )
+    parser.add_argument(
+        "--require-runtime-imports",
+        action="store_true",
+        help="require every requested runtime import/preset in child LLM FT preflights/runs",
+    )
     parser.add_argument("--curves", action="store_true")
     parser.add_argument("--summary-limit", type=int, default=8)
     parser.add_argument(
@@ -597,6 +800,7 @@ def main(argv: list[str] | None = None) -> int:
     reload_seed = args.reload_seed if args.reload_seed is not None else args.seed + 1
     eval_seed = args.eval_seed if args.eval_seed is not None else args.seed
     reload_lr = args.reload_lr if args.reload_lr is not None else args.lr
+    runtime_requested = runtime_import_contract_requested(args)
 
     base_command = finetune_command(
         list(args.data_paths),
@@ -618,6 +822,10 @@ def main(argv: list[str] | None = None) -> int:
         early_stop_patience=args.early_stop_patience,
         restore_best_at_end=args.restore_best_at_end,
         rollback_on_validation_regression=args.rollback_on_validation_regression,
+        runtime_import_args=args,
+        runtime_preflight_json_out=(
+            base_run_dir / "runtime_preflight.json" if runtime_requested else None
+        ),
     )
     reload_command = finetune_command(
         reload_data_paths,
@@ -639,6 +847,10 @@ def main(argv: list[str] | None = None) -> int:
         early_stop_patience=args.early_stop_patience,
         restore_best_at_end=args.restore_best_at_end,
         rollback_on_validation_regression=args.rollback_on_validation_regression,
+        runtime_import_args=args,
+        runtime_preflight_json_out=(
+            reload_run_dir / "runtime_preflight.json" if runtime_requested else None
+        ),
         load_run=base_run_dir,
     )
     planned_compare_command = compare_command(
@@ -654,6 +866,7 @@ def main(argv: list[str] | None = None) -> int:
         list(args.data_paths),
         run_root=run_root,
         backend=args.backend,
+        runtime_import_args=args,
     )
     write_json(preflight_path, preflight)
     manifest: dict[str, Any] = {
@@ -691,6 +904,7 @@ def main(argv: list[str] | None = None) -> int:
             "rollback_on_validation_regression": bool(
                 args.rollback_on_validation_regression
             ),
+            **runtime_import_contract_settings(args),
         },
         "runs": [],
         "compare_command": planned_compare_command,
