@@ -19,7 +19,9 @@ use crate::json::json_to_py;
 #[cfg(feature = "nn")]
 use crate::planner::{build_caps, parse_backend, PyRankPlan};
 #[cfg(feature = "nn")]
-use crate::pure::{PyGradientSummary, PyNonCollapseSnapshot, PyOpenCartesianTopos};
+use crate::pure::{
+    PyGradientSummary, PyLanguageWaveEncoder, PyNonCollapseSnapshot, PyOpenCartesianTopos,
+};
 #[cfg(feature = "nn")]
 use crate::tensor::{tensor_err_to_py, tensor_to_torch, PyTensor};
 #[cfg(feature = "nn")]
@@ -76,15 +78,15 @@ use st_nn::{
     DesireRoundtableSummary, DesireTelemetryBundle, DesireTrainerBridge, DesireWeights,
     EpochStats as RustEpochStats, Gelu, GeometryBiasContext, GeometryBiasMetrics,
     GeometryBiasUpdate, GeometryCoherenceSample, HyperbolicCrossEntropy, LayerNorm, Linear,
-    MaxPool2d, MaxwellDesireBridge, MeanSquaredError, MellinBasis,
+    LoraLinear as RustLoraLinear, MaxPool2d, MaxwellDesireBridge, MeanSquaredError, MellinBasis,
     ModuleTrainer as RustModuleTrainer, NarrativeHint, NarrativeSummary, Relu, RepressionField,
     RoundtableConfig as RustRoundtableConfig, RoundtableSchedule as RustRoundtableSchedule,
     SemanticBridge, Sequential, SparseKernel, SymbolGeometry, TemperatureController,
     TextInfusionEvery, TextInfusionMode, TrainingRunConfig as RustTrainingRunConfig,
     TrainingRunReport as RustTrainingRunReport, WaveGate, WaveRnn, ZRelativityModule,
-    ZSpaceBatchNorm1d, ZSpaceCoherenceSequencer, ZSpaceLayerNorm, ZSpaceMixer, ZSpaceTextVae,
-    ZSpaceTraceConfig, ZSpaceTraceRecorder, ZSpaceVae, ZSpaceVaeBatchStats, ZSpaceVaeState,
-    ZSpaceVaeStats,
+    ZSpaceBatchNorm1d, ZSpaceCoherenceSequencer, ZSpaceLayerNorm, ZSpaceMixer,
+    ZSpaceProjector as RustZSpaceProjector, ZSpaceTextVae, ZSpaceTraceConfig, ZSpaceTraceRecorder,
+    ZSpaceVae, ZSpaceVaeBatchStats, ZSpaceVaeState, ZSpaceVaeStats,
 };
 #[cfg(feature = "nn")]
 use st_nn::{EpochTensorBackendStats as RustEpochTensorBackendStats, Module, Parameter};
@@ -1388,6 +1390,333 @@ impl PyLinear {
         self.inner_mut()?
             .load_state_dict(&map)
             .map_err(tensor_err_to_py)
+    }
+
+    #[pyo3(signature = (x))]
+    pub fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
+        self.forward(x)
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pyclass(module = "spiraltorch.nn", name = "LoraLinear", unsendable)]
+pub(crate) struct PyLoraLinear {
+    inner: Option<RustLoraLinear>,
+}
+
+#[cfg(feature = "nn")]
+impl PyLoraLinear {
+    fn inner(&self) -> PyResult<&RustLoraLinear> {
+        self.inner.as_ref().ok_or_else(|| {
+            PyValueError::new_err("LoraLinear was moved into a container and can no longer be used")
+        })
+    }
+
+    fn inner_mut(&mut self) -> PyResult<&mut RustLoraLinear> {
+        self.inner.as_mut().ok_or_else(|| {
+            PyValueError::new_err("LoraLinear was moved into a container and can no longer be used")
+        })
+    }
+
+    fn take_inner(&mut self) -> PyResult<RustLoraLinear> {
+        self.inner.take().ok_or_else(|| {
+            PyValueError::new_err("LoraLinear was moved into a container and can no longer be used")
+        })
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyLoraLinear {
+    #[new]
+    #[pyo3(signature = (input_dim, output_dim, rank, *, alpha=1.0, name="lora"))]
+    pub fn new(
+        input_dim: usize,
+        output_dim: usize,
+        rank: usize,
+        alpha: f32,
+        name: &str,
+    ) -> PyResult<Self> {
+        let inner = RustLoraLinear::new(name, input_dim, output_dim, rank, alpha)
+            .map_err(tensor_err_to_py)?;
+        Ok(Self { inner: Some(inner) })
+    }
+
+    pub fn forward(&self, input: &PyTensor) -> PyResult<PyTensor> {
+        let output = self
+            .inner()?
+            .forward(&input.inner)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(output))
+    }
+
+    pub fn backward(&mut self, input: &PyTensor, grad_output: &PyTensor) -> PyResult<PyTensor> {
+        let grad = self
+            .inner_mut()?
+            .backward(&input.inner, &grad_output.inner)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(grad))
+    }
+
+    #[pyo3(signature = (curvature, learning_rate, *, topos=None))]
+    pub fn attach_hypergrad(
+        &mut self,
+        curvature: f32,
+        learning_rate: f32,
+        topos: Option<&PyOpenCartesianTopos>,
+    ) -> PyResult<()> {
+        if let Some(topos) = topos {
+            self.inner_mut()?
+                .attach_hypergrad_with_topos(curvature, learning_rate, topos.inner.clone())
+                .map_err(tensor_err_to_py)
+        } else {
+            self.inner_mut()?
+                .attach_hypergrad(curvature, learning_rate)
+                .map_err(tensor_err_to_py)
+        }
+    }
+
+    pub fn attach_realgrad(&mut self, learning_rate: f32) -> PyResult<()> {
+        self.inner_mut()?
+            .attach_realgrad(learning_rate)
+            .map_err(tensor_err_to_py)
+    }
+
+    pub fn zero_accumulators(&mut self) -> PyResult<()> {
+        self.inner_mut()?
+            .zero_accumulators()
+            .map_err(tensor_err_to_py)
+    }
+
+    pub fn apply_step(&mut self, fallback_lr: f32) -> PyResult<()> {
+        self.inner_mut()?
+            .apply_step(fallback_lr)
+            .map_err(tensor_err_to_py)
+    }
+
+    pub fn state_dict(&self) -> PyResult<Vec<(String, PyTensor)>> {
+        let mut entries: Vec<_> = self
+            .inner()?
+            .state_dict()
+            .map_err(tensor_err_to_py)?
+            .into_iter()
+            .collect();
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(entries
+            .into_iter()
+            .map(|(name, tensor)| (name, PyTensor::from_tensor(tensor)))
+            .collect())
+    }
+
+    pub fn load_state_dict(&mut self, state: Vec<(String, PyTensor)>) -> PyResult<()> {
+        let mut map = std::collections::HashMap::new();
+        for (name, tensor) in state {
+            map.insert(name, tensor.inner.clone());
+        }
+        self.inner_mut()?
+            .load_state_dict(&map)
+            .map_err(tensor_err_to_py)
+    }
+
+    pub fn base_state_dict(&self) -> PyResult<Vec<(String, PyTensor)>> {
+        let mut entries: Vec<_> = self
+            .inner()?
+            .base_state_dict()
+            .map_err(tensor_err_to_py)?
+            .into_iter()
+            .collect();
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(entries
+            .into_iter()
+            .map(|(name, tensor)| (name, PyTensor::from_tensor(tensor)))
+            .collect())
+    }
+
+    pub fn load_base_state_dict(&mut self, state: Vec<(String, PyTensor)>) -> PyResult<()> {
+        let mut map = std::collections::HashMap::new();
+        for (name, tensor) in state {
+            map.insert(name, tensor.inner.clone());
+        }
+        self.inner_mut()?
+            .load_base_state_dict(&map)
+            .map_err(tensor_err_to_py)
+    }
+
+    pub fn load_state_dict_checked(
+        &mut self,
+        py: Python<'_>,
+        state: &Bound<'_, PyAny>,
+    ) -> PyResult<PyObject> {
+        let expected = self.inner()?.state_dict().map_err(tensor_err_to_py)?;
+        let incoming = extract_state_dict_required(py, state)?;
+        let report = exact_state_dict_report(py, &expected, &incoming)?;
+        if report.compatible {
+            self.inner_mut()?
+                .load_state_dict(&incoming)
+                .map_err(tensor_err_to_py)?;
+        }
+        report.into_py(py)
+    }
+
+    pub fn state_dict_compatibility_with_key_map(
+        &self,
+        py: Python<'_>,
+        checkpoint: &Bound<'_, PyAny>,
+        key_map: &Bound<'_, PyAny>,
+    ) -> PyResult<PyObject> {
+        let expected = self.inner()?.state_dict().map_err(tensor_err_to_py)?;
+        mapped_state_dict_report(py, &expected, checkpoint, key_map)
+    }
+
+    pub fn load_state_dict_subset_mapped_checked(
+        &mut self,
+        py: Python<'_>,
+        checkpoint: &Bound<'_, PyAny>,
+        key_map: &Bound<'_, PyAny>,
+    ) -> PyResult<PyObject> {
+        let expected = self.inner()?.state_dict().map_err(tensor_err_to_py)?;
+        let (report, adapted) =
+            mapped_state_dict_report_and_subset(py, &expected, checkpoint, key_map)?;
+        if report.compatible {
+            self.inner_mut()?
+                .load_state_dict(&adapted)
+                .map_err(tensor_err_to_py)?;
+        }
+        report.into_load_py(py)
+    }
+
+    pub fn base_state_dict_compatibility_with_key_map(
+        &self,
+        py: Python<'_>,
+        checkpoint: &Bound<'_, PyAny>,
+        key_map: &Bound<'_, PyAny>,
+    ) -> PyResult<PyObject> {
+        let expected = self.inner()?.base_state_dict().map_err(tensor_err_to_py)?;
+        mapped_state_dict_report(py, &expected, checkpoint, key_map)
+    }
+
+    pub fn load_base_from_state_dict_mapped(
+        &mut self,
+        py: Python<'_>,
+        checkpoint: &Bound<'_, PyAny>,
+        key_map: &Bound<'_, PyAny>,
+    ) -> PyResult<PyObject> {
+        let expected = self.inner()?.base_state_dict().map_err(tensor_err_to_py)?;
+        let (report, adapted) =
+            mapped_state_dict_report_and_subset(py, &expected, checkpoint, key_map)?;
+        if report.compatible {
+            self.inner_mut()?
+                .load_base_state_dict(&adapted)
+                .map_err(tensor_err_to_py)?;
+        }
+        report.into_load_py(py)
+    }
+
+    #[getter]
+    pub fn rank(&self) -> PyResult<usize> {
+        Ok(self.inner()?.rank())
+    }
+
+    #[getter]
+    pub fn alpha(&self) -> PyResult<f32> {
+        Ok(self.inner()?.alpha())
+    }
+
+    #[getter]
+    pub fn scale(&self) -> PyResult<f32> {
+        Ok(self.inner()?.scale())
+    }
+
+    #[pyo3(signature = (x))]
+    pub fn __call__(&self, x: &PyTensor) -> PyResult<PyTensor> {
+        self.forward(x)
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pyclass(module = "spiraltorch.nn", name = "ZSpaceProjector", unsendable)]
+pub(crate) struct PyZSpaceProjector {
+    inner: Option<RustZSpaceProjector>,
+}
+
+#[cfg(feature = "nn")]
+impl PyZSpaceProjector {
+    fn inner(&self) -> PyResult<&RustZSpaceProjector> {
+        self.inner.as_ref().ok_or_else(|| {
+            PyValueError::new_err(
+                "ZSpaceProjector was moved into a container and can no longer be used",
+            )
+        })
+    }
+
+    fn inner_mut(&mut self) -> PyResult<&mut RustZSpaceProjector> {
+        self.inner.as_mut().ok_or_else(|| {
+            PyValueError::new_err(
+                "ZSpaceProjector was moved into a container and can no longer be used",
+            )
+        })
+    }
+
+    fn take_inner(&mut self) -> PyResult<RustZSpaceProjector> {
+        self.inner.take().ok_or_else(|| {
+            PyValueError::new_err(
+                "ZSpaceProjector was moved into a container and can no longer be used",
+            )
+        })
+    }
+}
+
+#[cfg(feature = "nn")]
+#[pymethods]
+impl PyZSpaceProjector {
+    #[new]
+    #[pyo3(signature = (topos, encoder, *, strength=1.0))]
+    pub fn new(
+        topos: &PyOpenCartesianTopos,
+        encoder: &PyLanguageWaveEncoder,
+        strength: f32,
+    ) -> PyResult<Self> {
+        let inner = RustZSpaceProjector::new_with_strength(
+            topos.inner.clone(),
+            encoder.inner.clone(),
+            strength,
+        )
+        .map_err(tensor_err_to_py)?;
+        Ok(Self { inner: Some(inner) })
+    }
+
+    pub fn forward(&self, input: &PyTensor) -> PyResult<PyTensor> {
+        let output = self
+            .inner()?
+            .forward(&input.inner)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(output))
+    }
+
+    pub fn backward(&mut self, input: &PyTensor, grad_output: &PyTensor) -> PyResult<PyTensor> {
+        let grad = self
+            .inner_mut()?
+            .backward(&input.inner, &grad_output.inner)
+            .map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(grad))
+    }
+
+    pub fn state_dict(&self) -> PyResult<Vec<(String, PyTensor)>> {
+        Ok(Vec::new())
+    }
+
+    pub fn load_state_dict(&mut self, _state: Vec<(String, PyTensor)>) -> PyResult<()> {
+        Ok(())
+    }
+
+    #[getter]
+    pub fn curvature(&self) -> PyResult<f32> {
+        Ok(self.inner()?.curvature())
+    }
+
+    #[getter]
+    pub fn strength(&self) -> PyResult<f32> {
+        Ok(self.inner()?.strength())
     }
 
     #[pyo3(signature = (x))]
@@ -3333,6 +3662,13 @@ impl PySequential {
             return Ok(());
         }
 
+        if let Ok(handle) = layer.extract::<Py<PyLoraLinear>>() {
+            let mut layer = handle.bind(py).borrow_mut();
+            let inner = layer.take_inner()?;
+            self.inner.push(inner);
+            return Ok(());
+        }
+
         if let Ok(handle) = layer.extract::<Py<PyEmbedding>>() {
             let mut layer = handle.bind(py).borrow_mut();
             let inner = layer.take_inner()?;
@@ -3369,6 +3705,13 @@ impl PySequential {
         }
 
         if let Ok(handle) = layer.extract::<Py<PyZSpaceMixer>>() {
+            let mut layer = handle.bind(py).borrow_mut();
+            let inner = layer.take_inner()?;
+            self.inner.push(inner);
+            return Ok(());
+        }
+
+        if let Ok(handle) = layer.extract::<Py<PyZSpaceProjector>>() {
             let mut layer = handle.bind(py).borrow_mut();
             let inner = layer.take_inner()?;
             self.inner.push(inner);
@@ -4378,6 +4721,11 @@ fn with_module_ref<R>(
         let inner = model.inner()?;
         return f(inner).map_err(tensor_err_to_py);
     }
+    if let Ok(handle) = module.extract::<Py<PyLoraLinear>>() {
+        let model = handle.bind(py).borrow();
+        let inner = model.inner()?;
+        return f(inner).map_err(tensor_err_to_py);
+    }
     if let Ok(handle) = module.extract::<Py<PyEmbedding>>() {
         let model = handle.bind(py).borrow();
         let inner = model.inner()?;
@@ -4404,6 +4752,11 @@ fn with_module_ref<R>(
         return f(inner).map_err(tensor_err_to_py);
     }
     if let Ok(handle) = module.extract::<Py<PyZSpaceMixer>>() {
+        let model = handle.bind(py).borrow();
+        let inner = model.inner()?;
+        return f(inner).map_err(tensor_err_to_py);
+    }
+    if let Ok(handle) = module.extract::<Py<PyZSpaceProjector>>() {
         let model = handle.bind(py).borrow();
         let inner = model.inner()?;
         return f(inner).map_err(tensor_err_to_py);
@@ -4481,7 +4834,7 @@ fn with_module_ref<R>(
     }
 
     Err(PyTypeError::new_err(
-        "module must be a spiraltorch.nn module (supported: Linear, Embedding, FeatureReorder2d, SpiralRnn, WaveGate, WaveRnn, ZSpaceMixer, ZSpaceSoftmax, ZSpaceCoherenceScan, ZSpaceCoherenceWaveBlock, Sequential, Identity, Relu, Gelu, NonLiner, Scaler, LayerNorm, ZSpaceLayerNorm, BatchNorm1d, ZSpaceBatchNorm1d, Dropout, ZConv, ZConv6DA, ZRelativityModule)",
+        "module must be a spiraltorch.nn module (supported: Linear, LoraLinear, Embedding, FeatureReorder2d, SpiralRnn, WaveGate, WaveRnn, ZSpaceMixer, ZSpaceProjector, ZSpaceSoftmax, ZSpaceCoherenceScan, ZSpaceCoherenceWaveBlock, Sequential, Identity, Relu, Gelu, NonLiner, Scaler, LayerNorm, ZSpaceLayerNorm, BatchNorm1d, ZSpaceBatchNorm1d, Dropout, ZConv, ZConv6DA, ZRelativityModule)",
     ))
 }
 
@@ -4496,6 +4849,11 @@ fn with_module_mut<R>(
         let inner = model.inner_mut()?;
         return f(inner).map_err(tensor_err_to_py);
     }
+    if let Ok(handle) = module.extract::<Py<PyLoraLinear>>() {
+        let mut model = handle.bind(py).borrow_mut();
+        let inner = model.inner_mut()?;
+        return f(inner).map_err(tensor_err_to_py);
+    }
     if let Ok(handle) = module.extract::<Py<PyEmbedding>>() {
         let mut model = handle.bind(py).borrow_mut();
         let inner = model.inner_mut()?;
@@ -4522,6 +4880,11 @@ fn with_module_mut<R>(
         return f(inner).map_err(tensor_err_to_py);
     }
     if let Ok(handle) = module.extract::<Py<PyZSpaceMixer>>() {
+        let mut model = handle.bind(py).borrow_mut();
+        let inner = model.inner_mut()?;
+        return f(inner).map_err(tensor_err_to_py);
+    }
+    if let Ok(handle) = module.extract::<Py<PyZSpaceProjector>>() {
         let mut model = handle.bind(py).borrow_mut();
         let inner = model.inner_mut()?;
         return f(inner).map_err(tensor_err_to_py);
@@ -4599,7 +4962,7 @@ fn with_module_mut<R>(
     }
 
     Err(PyTypeError::new_err(
-        "module must be a spiraltorch.nn module (supported: Linear, Embedding, FeatureReorder2d, SpiralRnn, WaveGate, WaveRnn, ZSpaceMixer, ZSpaceSoftmax, ZSpaceCoherenceScan, ZSpaceCoherenceWaveBlock, Sequential, Identity, Relu, Gelu, NonLiner, Scaler, LayerNorm, ZSpaceLayerNorm, BatchNorm1d, ZSpaceBatchNorm1d, Dropout, ZConv, ZConv6DA, ZRelativityModule)",
+        "module must be a spiraltorch.nn module (supported: Linear, LoraLinear, Embedding, FeatureReorder2d, SpiralRnn, WaveGate, WaveRnn, ZSpaceMixer, ZSpaceProjector, ZSpaceSoftmax, ZSpaceCoherenceScan, ZSpaceCoherenceWaveBlock, Sequential, Identity, Relu, Gelu, NonLiner, Scaler, LayerNorm, ZSpaceLayerNorm, BatchNorm1d, ZSpaceBatchNorm1d, Dropout, ZConv, ZConv6DA, ZRelativityModule)",
     ))
 }
 
@@ -4659,6 +5022,414 @@ fn extract_state_dict(
         return Ok(Some(state));
     }
     Ok(None)
+}
+
+#[cfg(feature = "nn")]
+fn extract_state_dict_required(
+    py: Python<'_>,
+    target: &Bound<'_, PyAny>,
+) -> PyResult<std::collections::HashMap<String, Tensor>> {
+    extract_state_dict(py, target)?.ok_or_else(|| {
+        PyTypeError::new_err(
+            "state dict must be a mapping of str -> Tensor or a sequence of (str, Tensor)",
+        )
+    })
+}
+
+#[cfg(feature = "nn")]
+#[derive(Clone, Debug)]
+struct StateDictKeyRule {
+    source_name: String,
+    target_name: String,
+    transform: String,
+}
+
+#[cfg(feature = "nn")]
+fn parse_state_dict_key_rules(key_map: &Bound<'_, PyAny>) -> PyResult<Vec<StateDictKeyRule>> {
+    let dict = key_map.downcast::<PyDict>().map_err(|_| {
+        PyTypeError::new_err(
+            "key_map must be a dict mapping source keys to target keys or rule dicts",
+        )
+    })?;
+    let mut rules = Vec::with_capacity(dict.len());
+    for (source_obj, rule_obj) in dict.iter() {
+        let source_name: String = source_obj.extract()?;
+        if let Ok(target_name) = rule_obj.extract::<String>() {
+            rules.push(StateDictKeyRule {
+                source_name,
+                target_name,
+                transform: "identity".to_string(),
+            });
+            continue;
+        }
+        let rule_dict = rule_obj.downcast::<PyDict>().map_err(|_| {
+            PyTypeError::new_err(
+                "key_map values must be target strings or dicts with target/transform fields",
+            )
+        })?;
+        let target_obj = rule_dict
+            .get_item("target")?
+            .ok_or_else(|| PyValueError::new_err("key_map rule missing 'target'"))?;
+        let target_name: String = target_obj.extract()?;
+        let transform = match rule_dict.get_item("transform")? {
+            Some(value) => value.extract()?,
+            None => "identity".to_string(),
+        };
+        rules.push(StateDictKeyRule {
+            source_name,
+            target_name,
+            transform,
+        });
+    }
+    Ok(rules)
+}
+
+#[cfg(feature = "nn")]
+#[derive(Clone, Debug)]
+struct StateDictEntryReport {
+    name: String,
+    status: String,
+    source_name: String,
+    transform: String,
+    expected_shape: Option<(usize, usize)>,
+    source_shape: Option<(usize, usize)>,
+    original_source_shape: Option<(usize, usize)>,
+}
+
+#[cfg(feature = "nn")]
+#[derive(Clone, Debug)]
+struct StateDictReport {
+    compatible: bool,
+    matched: usize,
+    missing: usize,
+    shape_mismatched: usize,
+    extra: usize,
+    entries: Vec<StateDictEntryReport>,
+    source_hash: String,
+    matched_subset_hash: String,
+}
+
+#[cfg(feature = "nn")]
+fn state_hash(state: &std::collections::HashMap<String, Tensor>) -> String {
+    let mut entries: Vec<_> = state.iter().collect();
+    entries.sort_by(|a, b| a.0.cmp(b.0));
+    let mut hash = 0xcbf29ce484222325u64;
+    let prime = 0x100000001b3u64;
+    let mut mix = |byte: u8| {
+        hash ^= byte as u64;
+        hash = hash.wrapping_mul(prime);
+    };
+    for (name, tensor) in entries {
+        for byte in name.as_bytes() {
+            mix(*byte);
+        }
+        let (rows, cols) = tensor.shape();
+        for byte in rows.to_le_bytes() {
+            mix(byte);
+        }
+        for byte in cols.to_le_bytes() {
+            mix(byte);
+        }
+        for value in tensor.data() {
+            for byte in value.to_bits().to_le_bytes() {
+                mix(byte);
+            }
+        }
+    }
+    format!("{hash:016x}")
+}
+
+#[cfg(feature = "nn")]
+fn copy_overlap_zeros(source: &Tensor, target_shape: (usize, usize)) -> PyResult<Tensor> {
+    let (target_rows, target_cols) = target_shape;
+    let (source_rows, source_cols) = source.shape();
+    let mut output = Tensor::zeros(target_rows, target_cols).map_err(tensor_err_to_py)?;
+    let rows = source_rows.min(target_rows);
+    let cols = source_cols.min(target_cols);
+    {
+        let output_data = output.data_mut();
+        for row in 0..rows {
+            let source_offset = row * source_cols;
+            let target_offset = row * target_cols;
+            output_data[target_offset..target_offset + cols]
+                .copy_from_slice(&source.data()[source_offset..source_offset + cols]);
+        }
+    }
+    Ok(output)
+}
+
+#[cfg(feature = "nn")]
+fn transform_state_tensor(
+    source: &Tensor,
+    transform: &str,
+    target_shape: (usize, usize),
+) -> PyResult<Tensor> {
+    match transform {
+        "identity" => Ok(source.clone()),
+        "transpose" => Ok(source.transpose()),
+        "copy_overlap_zeros" | "copy_overlap" => copy_overlap_zeros(source, target_shape),
+        "transpose_copy_overlap_zeros" | "transpose_copy_overlap" => {
+            let transposed = source.transpose();
+            copy_overlap_zeros(&transposed, target_shape)
+        }
+        other => Err(PyValueError::new_err(format!(
+            "unsupported state_dict transform '{other}'"
+        ))),
+    }
+}
+
+#[cfg(feature = "nn")]
+fn shape_to_py(py: Python<'_>, shape: Option<(usize, usize)>) -> PyObject {
+    match shape {
+        Some((rows, cols)) => (rows, cols).into_py(py),
+        None => py.None(),
+    }
+}
+
+#[cfg(feature = "nn")]
+impl StateDictEntryReport {
+    fn to_py(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new(py);
+        dict.set_item("name", &self.name)?;
+        dict.set_item("status", &self.status)?;
+        dict.set_item("source_name", &self.source_name)?;
+        dict.set_item("transform", &self.transform)?;
+        dict.set_item("expected_shape", shape_to_py(py, self.expected_shape))?;
+        dict.set_item("source_shape", shape_to_py(py, self.source_shape))?;
+        dict.set_item(
+            "original_source_shape",
+            shape_to_py(py, self.original_source_shape),
+        )?;
+        Ok(dict.into_py(py))
+    }
+}
+
+#[cfg(feature = "nn")]
+impl StateDictReport {
+    fn into_py(self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new(py);
+        dict.set_item("compatible", self.compatible)?;
+        dict.set_item("matched", self.matched)?;
+        dict.set_item("missing", self.missing)?;
+        dict.set_item("shape_mismatched", self.shape_mismatched)?;
+        dict.set_item("extra", self.extra)?;
+        let source = PyDict::new(py);
+        source.set_item("hash", self.source_hash)?;
+        dict.set_item("source", source)?;
+        let matched_subset = PyDict::new(py);
+        matched_subset.set_item("hash", self.matched_subset_hash)?;
+        dict.set_item("matched_subset", matched_subset)?;
+        let entries = PyList::empty(py);
+        for entry in self.entries {
+            entries.append(entry.to_py(py)?)?;
+        }
+        dict.set_item("entries", entries)?;
+        Ok(dict.into_py(py))
+    }
+
+    fn into_load_py(self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new(py);
+        dict.set_item("matched", self.compatible)?;
+        dict.set_item("compatible", self.compatible)?;
+        dict.set_item("matched_count", self.matched)?;
+        dict.set_item("missing", self.missing)?;
+        dict.set_item("shape_mismatched", self.shape_mismatched)?;
+        dict.set_item("extra", self.extra)?;
+        let source = PyDict::new(py);
+        source.set_item("hash", self.source_hash)?;
+        dict.set_item("source", source)?;
+        let matched_subset = PyDict::new(py);
+        matched_subset.set_item("hash", self.matched_subset_hash)?;
+        dict.set_item("matched_subset", matched_subset)?;
+        Ok(dict.into_py(py))
+    }
+}
+
+#[cfg(feature = "nn")]
+fn exact_state_dict_report(
+    _py: Python<'_>,
+    expected: &std::collections::HashMap<String, Tensor>,
+    incoming: &std::collections::HashMap<String, Tensor>,
+) -> PyResult<StateDictReport> {
+    let mut entries = Vec::new();
+    let mut matched = 0usize;
+    let mut missing = 0usize;
+    let mut shape_mismatched = 0usize;
+    for (name, expected_tensor) in expected {
+        match incoming.get(name) {
+            Some(source) if source.shape() == expected_tensor.shape() => {
+                matched += 1;
+                entries.push(StateDictEntryReport {
+                    name: name.clone(),
+                    status: "matched".to_string(),
+                    source_name: name.clone(),
+                    transform: "identity".to_string(),
+                    expected_shape: Some(expected_tensor.shape()),
+                    source_shape: Some(source.shape()),
+                    original_source_shape: Some(source.shape()),
+                });
+            }
+            Some(source) => {
+                shape_mismatched += 1;
+                entries.push(StateDictEntryReport {
+                    name: name.clone(),
+                    status: "shape_mismatch".to_string(),
+                    source_name: name.clone(),
+                    transform: "identity".to_string(),
+                    expected_shape: Some(expected_tensor.shape()),
+                    source_shape: Some(source.shape()),
+                    original_source_shape: Some(source.shape()),
+                });
+            }
+            None => {
+                missing += 1;
+                entries.push(StateDictEntryReport {
+                    name: name.clone(),
+                    status: "missing_source".to_string(),
+                    source_name: name.clone(),
+                    transform: "identity".to_string(),
+                    expected_shape: Some(expected_tensor.shape()),
+                    source_shape: None,
+                    original_source_shape: None,
+                });
+            }
+        }
+    }
+    let extra = incoming
+        .keys()
+        .filter(|name| !expected.contains_key(*name))
+        .count();
+    let compatible = missing == 0 && shape_mismatched == 0;
+    Ok(StateDictReport {
+        compatible,
+        matched,
+        missing,
+        shape_mismatched,
+        extra,
+        entries,
+        source_hash: state_hash(incoming),
+        matched_subset_hash: state_hash(incoming),
+    })
+}
+
+#[cfg(feature = "nn")]
+fn mapped_state_dict_report_and_subset(
+    py: Python<'_>,
+    expected: &std::collections::HashMap<String, Tensor>,
+    checkpoint: &Bound<'_, PyAny>,
+    key_map: &Bound<'_, PyAny>,
+) -> PyResult<(StateDictReport, std::collections::HashMap<String, Tensor>)> {
+    let checkpoint_state = extract_state_dict_required(py, checkpoint)?;
+    let rules = parse_state_dict_key_rules(key_map)?;
+    let mut entries = Vec::new();
+    let mut adapted = std::collections::HashMap::new();
+    let mut seen_targets = std::collections::HashSet::new();
+    let mut matched = 0usize;
+    let mut missing = 0usize;
+    let mut shape_mismatched = 0usize;
+    let mut extra_unknown_targets = 0usize;
+    let mut mapped_sources = std::collections::HashSet::new();
+
+    for rule in &rules {
+        mapped_sources.insert(rule.source_name.clone());
+        let Some(expected_tensor) = expected.get(&rule.target_name) else {
+            extra_unknown_targets += 1;
+            entries.push(StateDictEntryReport {
+                name: rule.target_name.clone(),
+                status: "unexpected_target".to_string(),
+                source_name: rule.source_name.clone(),
+                transform: rule.transform.clone(),
+                expected_shape: None,
+                source_shape: checkpoint_state.get(&rule.source_name).map(Tensor::shape),
+                original_source_shape: checkpoint_state.get(&rule.source_name).map(Tensor::shape),
+            });
+            continue;
+        };
+        seen_targets.insert(rule.target_name.clone());
+        let Some(source) = checkpoint_state.get(&rule.source_name) else {
+            missing += 1;
+            entries.push(StateDictEntryReport {
+                name: rule.target_name.clone(),
+                status: "missing_source".to_string(),
+                source_name: rule.source_name.clone(),
+                transform: rule.transform.clone(),
+                expected_shape: Some(expected_tensor.shape()),
+                source_shape: None,
+                original_source_shape: None,
+            });
+            continue;
+        };
+        let original_shape = source.shape();
+        let transformed = transform_state_tensor(source, &rule.transform, expected_tensor.shape())?;
+        if transformed.shape() == expected_tensor.shape() {
+            matched += 1;
+            adapted.insert(rule.target_name.clone(), transformed);
+            entries.push(StateDictEntryReport {
+                name: rule.target_name.clone(),
+                status: "matched".to_string(),
+                source_name: rule.source_name.clone(),
+                transform: rule.transform.clone(),
+                expected_shape: Some(expected_tensor.shape()),
+                source_shape: Some(expected_tensor.shape()),
+                original_source_shape: Some(original_shape),
+            });
+        } else {
+            shape_mismatched += 1;
+            entries.push(StateDictEntryReport {
+                name: rule.target_name.clone(),
+                status: "shape_mismatch".to_string(),
+                source_name: rule.source_name.clone(),
+                transform: rule.transform.clone(),
+                expected_shape: Some(expected_tensor.shape()),
+                source_shape: Some(transformed.shape()),
+                original_source_shape: Some(original_shape),
+            });
+        }
+    }
+
+    for (name, tensor) in expected {
+        if !seen_targets.contains(name) {
+            missing += 1;
+            entries.push(StateDictEntryReport {
+                name: name.clone(),
+                status: "missing_rule".to_string(),
+                source_name: String::new(),
+                transform: "identity".to_string(),
+                expected_shape: Some(tensor.shape()),
+                source_shape: None,
+                original_source_shape: None,
+            });
+        }
+    }
+
+    let extra_checkpoint_keys = checkpoint_state
+        .keys()
+        .filter(|name| !mapped_sources.contains(*name))
+        .count();
+    let extra = extra_checkpoint_keys + extra_unknown_targets;
+    let compatible = missing == 0 && shape_mismatched == 0 && matched > 0;
+    let report = StateDictReport {
+        compatible,
+        matched,
+        missing,
+        shape_mismatched,
+        extra,
+        entries,
+        source_hash: state_hash(&checkpoint_state),
+        matched_subset_hash: state_hash(&adapted),
+    };
+    Ok((report, adapted))
+}
+
+#[cfg(feature = "nn")]
+fn mapped_state_dict_report(
+    py: Python<'_>,
+    expected: &std::collections::HashMap<String, Tensor>,
+    checkpoint: &Bound<'_, PyAny>,
+    key_map: &Bound<'_, PyAny>,
+) -> PyResult<PyObject> {
+    let (report, _) = mapped_state_dict_report_and_subset(py, expected, checkpoint, key_map)?;
+    report.into_py(py)
 }
 
 #[cfg(feature = "nn")]
@@ -9180,12 +9951,14 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     module.add("__doc__", "SpiralTorch neural network primitives")?;
     module.add_class::<PyIdentity>()?;
     module.add_class::<PyLinear>()?;
+    module.add_class::<PyLoraLinear>()?;
     module.add_class::<PyEmbedding>()?;
     module.add_class::<PyFeatureReorder2d>()?;
     module.add_class::<PySpiralRnn>()?;
     module.add_class::<PyWaveGate>()?;
     module.add_class::<PyWaveRnn>()?;
     module.add_class::<PyZSpaceMixer>()?;
+    module.add_class::<PyZSpaceProjector>()?;
     module.add_class::<PyZSpaceSoftmax>()?;
     module.add_class::<PyZSpaceCoherenceScan>()?;
     module.add_class::<PyZSpaceCoherenceWaveBlock>()?;
@@ -9260,12 +10033,14 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
         vec![
             "Identity",
             "Linear",
+            "LoraLinear",
             "Embedding",
             "FeatureReorder2d",
             "SpiralRnn",
             "WaveGate",
             "WaveRnn",
             "ZSpaceMixer",
+            "ZSpaceProjector",
             "ZSpaceSoftmax",
             "ZSpaceCoherenceScan",
             "ZSpaceCoherenceWaveBlock",
@@ -9337,6 +10112,12 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     }
     if let Ok(linear) = module.getattr("Linear") {
         parent.add("Linear", linear)?;
+    }
+    if let Ok(lora_linear) = module.getattr("LoraLinear") {
+        parent.add("LoraLinear", lora_linear)?;
+    }
+    if let Ok(zspace_projector) = module.getattr("ZSpaceProjector") {
+        parent.add("ZSpaceProjector", zspace_projector)?;
     }
     if let Ok(relu) = module.getattr("Relu") {
         parent.add("Relu", relu)?;

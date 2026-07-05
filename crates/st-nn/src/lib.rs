@@ -84,6 +84,7 @@ pub use language::{
 pub use language::{DesirePsiBridge, DesirePsiEvent, DesirePsiSummary};
 pub use layers::conv::{AvgPool2d, Conv1d, Conv2d, Conv3d, Conv4d, Conv6da, MaxPool2d};
 pub use layers::linear::Linear;
+pub use layers::lora_linear::LoraLinear;
 pub use layers::sequential::Sequential;
 pub use layers::wave_gate::WaveGate;
 pub use layers::wave_rnn::WaveRnn;

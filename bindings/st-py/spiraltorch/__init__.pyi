@@ -3369,6 +3369,10 @@ class _NnLoraLinear:
 
     def load_state_dict(self, state: Sequence[Tuple[str, Tensor]]) -> None: ...
 
+    def base_state_dict(self) -> List[Tuple[str, Tensor]]: ...
+
+    def load_base_state_dict(self, state: Sequence[Tuple[str, Tensor]]) -> None: ...
+
     def load_state_dict_checked(self, state: Sequence[Tuple[str, Tensor]]) -> Dict[str, Any]: ...
 
     def state_dict_compatibility_with_key_map(
@@ -3395,6 +3399,15 @@ class _NnLoraLinear:
         key_map: object,
     ) -> Dict[str, Any]: ...
 
+    @property
+    def rank(self) -> int: ...
+
+    @property
+    def alpha(self) -> float: ...
+
+    @property
+    def scale(self) -> float: ...
+
 
 class _NnZSpaceProjector:
     def __init__(
@@ -3414,6 +3427,12 @@ class _NnZSpaceProjector:
     def state_dict(self) -> List[Tuple[str, Tensor]]: ...
 
     def load_state_dict(self, state: Sequence[Tuple[str, Tensor]]) -> None: ...
+
+    @property
+    def curvature(self) -> float: ...
+
+    @property
+    def strength(self) -> float: ...
 
 
 class _NnEmbedding:
