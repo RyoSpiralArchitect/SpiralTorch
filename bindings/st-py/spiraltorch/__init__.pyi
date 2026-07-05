@@ -3332,6 +3332,90 @@ class _NnLinear:
     def load_state_dict(self, state: Sequence[Tuple[str, Tensor]]) -> None: ...
 
 
+class _NnLoraLinear:
+    def __init__(
+        self,
+        input_dim: int,
+        output_dim: int,
+        rank: int,
+        *,
+        alpha: float = ...,
+        name: str = ...,
+    ) -> None: ...
+
+    def forward(self, input: Tensor) -> Tensor: ...
+
+    def backward(self, input: Tensor, grad_output: Tensor) -> Tensor: ...
+
+    def __call__(self, x: Tensor) -> Tensor: ...
+
+    def attach_hypergrad(
+        self,
+        curvature: float,
+        learning_rate: float,
+        *,
+        topos: OpenCartesianTopos | None = ...,
+    ) -> None: ...
+
+    def attach_realgrad(self, learning_rate: float) -> None: ...
+
+    def zero_accumulators(self) -> None: ...
+
+    def apply_step(self, fallback_lr: float) -> None: ...
+
+    def set_trainable(self, trainable: bool) -> None: ...
+
+    def state_dict(self) -> List[Tuple[str, Tensor]]: ...
+
+    def load_state_dict(self, state: Sequence[Tuple[str, Tensor]]) -> None: ...
+
+    def load_state_dict_checked(self, state: Sequence[Tuple[str, Tensor]]) -> Dict[str, Any]: ...
+
+    def state_dict_compatibility_with_key_map(
+        self,
+        state: Mapping[str, object] | Sequence[Tuple[str, object]],
+        key_map: object,
+    ) -> Dict[str, Any]: ...
+
+    def load_state_dict_subset_mapped_checked(
+        self,
+        state: Mapping[str, object] | Sequence[Tuple[str, object]],
+        key_map: object,
+    ) -> Dict[str, Any]: ...
+
+    def base_state_dict_compatibility_with_key_map(
+        self,
+        state: Mapping[str, object] | Sequence[Tuple[str, object]],
+        key_map: object,
+    ) -> Dict[str, Any]: ...
+
+    def load_base_from_state_dict_mapped(
+        self,
+        state: Mapping[str, object] | Sequence[Tuple[str, object]],
+        key_map: object,
+    ) -> Dict[str, Any]: ...
+
+
+class _NnZSpaceProjector:
+    def __init__(
+        self,
+        topos: object,
+        encoder: object,
+        *,
+        strength: float = ...,
+    ) -> None: ...
+
+    def forward(self, input: Tensor) -> Tensor: ...
+
+    def backward(self, input: Tensor, grad_output: Tensor) -> Tensor: ...
+
+    def __call__(self, x: Tensor) -> Tensor: ...
+
+    def state_dict(self) -> List[Tuple[str, Tensor]]: ...
+
+    def load_state_dict(self, state: Sequence[Tuple[str, Tensor]]) -> None: ...
+
+
 class _NnEmbedding:
     def __init__(self, name: str, vocab_size: int, embed_dim: int) -> None: ...
 
@@ -4252,6 +4336,7 @@ class _NnModule(ModuleType):
     Sequential: type[_NnSequential]
     MeanSquaredError: type[_NnMeanSquaredError]
     CategoricalCrossEntropy: type[_NnCategoricalCrossEntropy]
+    SoftmaxCrossEntropy: type[_NnCategoricalCrossEntropy]
     HyperbolicCrossEntropy: type[_NnHyperbolicCrossEntropy]
     CrossEntropy: type[_NnHyperbolicCrossEntropy]
     FocalLoss: type[_NnFocalLoss]
@@ -4269,6 +4354,8 @@ class _NnModule(ModuleType):
     Scaler: type[_NnScaler]
     NonLiner: type[_NnNonLiner]
     Dropout: type[_NnDropout]
+    LoraLinear: type[_NnLoraLinear]
+    ZSpaceProjector: type[_NnZSpaceProjector]
     Dataset: type[_NnDataset]
     DataLoader: type[_NnDataLoader]
     DataLoaderIter: type[_NnDataLoaderIter]
@@ -4305,6 +4392,10 @@ class _NnModule(ModuleType):
         path: Any,
         target: object | None = ...,
     ) -> List[Tuple[str, Tensor]] | None: ...
+    def sparse_classification_delta(
+        before: Mapping[str, object] | object,
+        after: Mapping[str, object] | object,
+    ) -> Dict[str, float | None]: ...
     def save_bincode(
         target: object | Mapping[str, Tensor] | Sequence[Tuple[str, Tensor]],
         path: str,
@@ -4337,6 +4428,14 @@ class Identity(_NnIdentity):
 
 
 class Linear(_NnLinear):
+    ...
+
+
+class LoraLinear(_NnLoraLinear):
+    ...
+
+
+class ZSpaceProjector(_NnZSpaceProjector):
     ...
 
 
@@ -4393,6 +4492,10 @@ class MeanSquaredError(_NnMeanSquaredError):
 
 
 class CategoricalCrossEntropy(_NnCategoricalCrossEntropy):
+    ...
+
+
+class SoftmaxCrossEntropy(_NnCategoricalCrossEntropy):
     ...
 
 
@@ -5017,6 +5120,8 @@ class _FracModule(ModuleType):
 frac: _FracModule
 
 class _DatasetModule(ModuleType):
+    BYTE_LM_VOCAB: int
+
     class Dataset:
         def __init__(self) -> None: ...
 
@@ -5073,6 +5178,36 @@ class _DatasetModule(ModuleType):
         def __iter__(self) -> "_DatasetModule.DataLoaderIterator": ...
 
         def __next__(self) -> Tuple[Tensor, Tensor]: ...
+
+    def from_vec(
+        self,
+        samples: Iterable[Tuple[Tensor, Tensor]],
+    ) -> "_DatasetModule.DataLoader": ...
+
+    def byte_lm_windows(
+        self,
+        text: str | bytes,
+        context: int,
+    ) -> List[Tuple[Tensor, Tensor]]: ...
+
+    def byte_lm_corpus_windows(
+        self,
+        docs: Iterable[str | bytes],
+        context: int,
+    ) -> List[Tuple[Tensor, Tensor]]: ...
+
+    def byte_lm_sample_stats(
+        self,
+        samples: Iterable[Tuple[Tensor, Tensor]],
+    ) -> Dict[str, int]: ...
+
+    def interleave_replay_samples(
+        self,
+        target_samples: Iterable[Tuple[Tensor, Tensor]],
+        replay_samples: Iterable[Tuple[Tensor, Tensor]],
+        *,
+        target_per_replay: int = ...,
+    ) -> List[Tuple[Tensor, Tensor]]: ...
 
 
 dataset: _DatasetModule

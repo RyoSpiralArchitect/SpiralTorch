@@ -1,3 +1,5 @@
+import argparse
+
 import spiraltorch as st
 from spiraltorch.nn import Linear, SoftmaxCrossEntropy, sparse_classification_delta
 
@@ -9,6 +11,13 @@ ACCUMULATION_STEPS = 2
 FT_EPOCHS = 3
 FT_TARGET_MIN_LOSS_DELTA = 1e-4
 FT_MOVEMENT_TOLERANCE = 1e-6
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Run a tiny tokenizerless byte-LM sparse fine-tune smoke."
+    )
+    return parser.parse_args()
 
 
 def loader(samples, seed):
@@ -39,6 +48,7 @@ def print_delta(label, delta):
 
 
 def main():
+    parse_args()
     source_docs = [
         "spiraltorch learns from source bytes",
         "byte windows keep tokenizerless FT honest",

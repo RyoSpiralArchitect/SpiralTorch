@@ -4950,6 +4950,36 @@ def _install_plugin_helpers() -> None:
     _register_module_export(plugin_module, "watch_path")
 
 
+def _install_ecosystem_helpers() -> None:
+    ecosystem_module = _ensure_submodule("ecosystem")
+    helper_path = _pathlib.Path(__file__).with_name("ecosystem.py")
+    spec = _importlib_util.spec_from_file_location(
+        f"{__name__}._ecosystem_impl",
+        helper_path,
+    )
+    if spec is None or spec.loader is None:
+        return
+
+    impl = _importlib_util.module_from_spec(spec)
+    sys.modules[spec.name] = impl
+    try:
+        spec.loader.exec_module(impl)
+    finally:
+        sys.modules.pop(spec.name, None)
+
+    for helper_name in getattr(impl, "__all__", ()):
+        value = getattr(impl, helper_name, None)
+        if value is None:
+            continue
+        try:
+            if getattr(value, "__module__", None) == spec.name:
+                value.__module__ = ecosystem_module.__name__
+        except Exception:
+            pass
+        setattr(ecosystem_module, helper_name, value)
+        _register_module_export(ecosystem_module, helper_name)
+
+
 def _install_nn_helpers() -> None:
     nn_module = _ensure_submodule("nn")
 
@@ -5014,6 +5044,169 @@ def _install_nn_helpers() -> None:
     globals()["compare_sparse_finetune_summaries"] = compare_sparse_ft
     nn_module.compare_sparse_finetune_summaries = compare_sparse_ft
     _register_module_export(nn_module, "compare_sparse_finetune_summaries")
+
+    softmax_cross_entropy = (
+        _resolve_rs_attr("nn.SoftmaxCrossEntropy")
+        or _resolve_rs_attr("SoftmaxCrossEntropy")
+        or _resolve_rs_attr("nn.CategoricalCrossEntropy")
+        or _resolve_rs_attr("CategoricalCrossEntropy")
+        or getattr(nn_module, "CategoricalCrossEntropy", None)
+    )
+    if softmax_cross_entropy is None:
+
+        class SoftmaxCrossEntropy:  # pragma: no cover - exercised in no-native wheels
+            """Import-safe placeholder for the native softmax cross-entropy loss."""
+
+            def __init__(self, *args: _Any, **kwargs: _Any) -> None:
+                raise RuntimeError(
+                    "spiraltorch.nn.SoftmaxCrossEntropy requires the compiled nn extension "
+                    "with CategoricalCrossEntropy support."
+                )
+
+        SoftmaxCrossEntropy.__module__ = nn_module.__name__
+        SoftmaxCrossEntropy.__qualname__ = "SoftmaxCrossEntropy"
+        softmax_cross_entropy = SoftmaxCrossEntropy
+
+    globals()["SoftmaxCrossEntropy"] = softmax_cross_entropy
+    nn_module.SoftmaxCrossEntropy = softmax_cross_entropy
+    _register_module_export(nn_module, "SoftmaxCrossEntropy")
+
+    lora_linear = _resolve_rs_attr("nn.LoraLinear") or _resolve_rs_attr("LoraLinear")
+    if lora_linear is None:
+
+        class LoraLinear:  # pragma: no cover - constructor is intentionally failing
+            """Import-safe placeholder for a future native LoRA linear layer."""
+
+            def __init__(self, *args: _Any, **kwargs: _Any) -> None:
+                raise RuntimeError(
+                    "spiraltorch.nn.LoraLinear is not available in this build yet. "
+                    "Use a SpiralTorch wheel/native extension that exposes the Rust LoRA layer, "
+                    "or keep this import for CLI/help surfaces until the backend is enabled."
+                )
+
+        LoraLinear.__module__ = nn_module.__name__
+        LoraLinear.__qualname__ = "LoraLinear"
+        lora_linear = LoraLinear
+
+    globals()["LoraLinear"] = lora_linear
+    nn_module.LoraLinear = lora_linear
+    _register_module_export(nn_module, "LoraLinear")
+
+    zspace_projector = _resolve_rs_attr("nn.ZSpaceProjector") or _resolve_rs_attr(
+        "ZSpaceProjector"
+    )
+    if zspace_projector is None:
+
+        class ZSpaceProjector:  # pragma: no cover - constructor is intentionally failing
+            """Import-safe placeholder for the native Z-space projector layer."""
+
+            def __init__(self, *args: _Any, **kwargs: _Any) -> None:
+                raise RuntimeError(
+                    "spiraltorch.nn.ZSpaceProjector is not available in this build yet. "
+                    "Use a SpiralTorch wheel/native extension that exposes the Rust ZSpaceProjector."
+                )
+
+        ZSpaceProjector.__module__ = nn_module.__name__
+        ZSpaceProjector.__qualname__ = "ZSpaceProjector"
+        zspace_projector = ZSpaceProjector
+
+    globals()["ZSpaceProjector"] = zspace_projector
+    nn_module.ZSpaceProjector = zspace_projector
+    _register_module_export(nn_module, "ZSpaceProjector")
+
+    def _metric_value(
+        payload: _Any,
+        names: _Iterable[str],
+        default: float | None = None,
+    ) -> float | None:
+        for metric_name in names:
+            value = None
+            if isinstance(payload, _Mapping):
+                value = payload.get(metric_name)
+            else:
+                try:
+                    value = getattr(payload, metric_name)
+                except Exception:
+                    value = None
+            if callable(value):
+                try:
+                    value = value()
+                except Exception:
+                    value = None
+            if value is None:
+                continue
+            try:
+                numeric = float(value)
+            except (TypeError, ValueError):
+                continue
+            if _math.isfinite(numeric):
+                return numeric
+        return default
+
+    def _perplexity_value(payload: _Any, loss: float | None) -> float | None:
+        value = _metric_value(
+            payload,
+            (
+                "perplexity",
+                "perplexity_mean",
+                "mean_perplexity",
+                "average_perplexity",
+            ),
+        )
+        if value is not None:
+            return value
+        if loss is None:
+            return None
+        return float(_math.exp(min(max(loss, -80.0), 80.0)))
+
+    def sparse_classification_delta(before: _Any, after: _Any) -> dict[str, float | None]:
+        """Return improvement-oriented deltas for sparse classification metrics."""
+
+        loss_names = ("average_loss", "loss", "loss_mean", "mean_loss")
+        before_loss = _metric_value(before, loss_names)
+        after_loss = _metric_value(after, loss_names)
+        before_accuracy = _metric_value(
+            before,
+            ("accuracy", "accuracy_mean", "mean_accuracy", "average_accuracy"),
+        )
+        after_accuracy = _metric_value(
+            after,
+            ("accuracy", "accuracy_mean", "mean_accuracy", "average_accuracy"),
+        )
+        before_perplexity = _perplexity_value(before, before_loss)
+        after_perplexity = _perplexity_value(after, after_loss)
+
+        loss_delta = (
+            before_loss - after_loss
+            if before_loss is not None and after_loss is not None
+            else 0.0
+        )
+        accuracy_delta = (
+            after_accuracy - before_accuracy
+            if before_accuracy is not None and after_accuracy is not None
+            else 0.0
+        )
+        perplexity_delta = (
+            before_perplexity - after_perplexity
+            if before_perplexity is not None and after_perplexity is not None
+            else 0.0
+        )
+        return {
+            "loss_before": before_loss,
+            "loss_after": after_loss,
+            "loss_delta": float(loss_delta),
+            "accuracy_before": before_accuracy,
+            "accuracy_after": after_accuracy,
+            "accuracy_delta": float(accuracy_delta),
+            "perplexity_before": before_perplexity,
+            "perplexity_after": after_perplexity,
+            "perplexity_delta": float(perplexity_delta),
+        }
+
+    sparse_classification_delta.__module__ = nn_module.__name__
+    globals()["sparse_classification_delta"] = sparse_classification_delta
+    nn_module.sparse_classification_delta = sparse_classification_delta
+    _register_module_export(nn_module, "sparse_classification_delta")
 
     save_json = _resolve_rs_attr("nn.save_json")
     load_json = _resolve_rs_attr("nn.load_json")
@@ -5162,6 +5355,7 @@ for _name, _doc in _PREDECLARED_SUBMODULES:
 
 _install_ops_helpers()
 _install_plugin_helpers()
+_install_ecosystem_helpers()
 _install_nn_helpers()
 
 
@@ -5382,6 +5576,96 @@ _mirror_into_module(
     },
     reexport=False,
 )
+
+
+def _install_dataset_helpers() -> None:
+    dataset_module = _ensure_submodule("dataset")
+    dataset_module.BYTE_LM_VOCAB = 256
+    _register_module_export(dataset_module, "BYTE_LM_VOCAB")
+
+    def _byte_tensor(values: _Sequence[int]) -> _Any:
+        rows = len(values)
+        cols = int(dataset_module.BYTE_LM_VOCAB)
+        data = [0.0] * (rows * cols)
+        for row, value in enumerate(values):
+            data[row * cols + int(value)] = 1.0
+        return Tensor(rows, cols, data)
+
+    def byte_lm_windows(text: str | bytes, context: int) -> list[tuple[_Any, _Any]]:
+        context = int(context)
+        if context <= 0:
+            raise ValueError("context must be positive")
+        raw = text if isinstance(text, bytes) else str(text).encode("utf-8")
+        if len(raw) <= context:
+            return []
+        samples: list[tuple[_Any, _Any]] = []
+        for start in range(len(raw) - context):
+            window = raw[start : start + context + 1]
+            samples.append((_byte_tensor(window[:-1]), _byte_tensor(window[1:])))
+        return samples
+
+    def byte_lm_corpus_windows(
+        docs: _Iterable[str | bytes],
+        context: int,
+    ) -> list[tuple[_Any, _Any]]:
+        samples: list[tuple[_Any, _Any]] = []
+        for doc in docs:
+            samples.extend(byte_lm_windows(doc, context))
+        return samples
+
+    def byte_lm_sample_stats(samples: _Iterable[tuple[_Any, _Any]]) -> dict[str, int]:
+        sample_count = 0
+        active_rows = 0
+        target_rows = 0
+        for input_tensor, target_tensor in samples:
+            sample_count += 1
+            active_rows += int(getattr(input_tensor, "rows", 0))
+            target_rows += int(getattr(target_tensor, "rows", 0))
+        return {
+            "samples": sample_count,
+            "active_rows": active_rows,
+            "target_rows": target_rows,
+        }
+
+    def interleave_replay_samples(
+        target_samples: _Iterable[tuple[_Any, _Any]],
+        replay_samples: _Iterable[tuple[_Any, _Any]],
+        *,
+        target_per_replay: int = 1,
+    ) -> list[tuple[_Any, _Any]]:
+        target_per_replay = int(target_per_replay)
+        if target_per_replay <= 0:
+            raise ValueError("target_per_replay must be positive")
+        replay = list(replay_samples)
+        if not replay:
+            return list(target_samples)
+        mixed: list[tuple[_Any, _Any]] = []
+        replay_index = 0
+        for index, sample in enumerate(target_samples, start=1):
+            mixed.append(sample)
+            if index % target_per_replay == 0:
+                mixed.append(replay[replay_index % len(replay)])
+                replay_index += 1
+        return mixed
+
+    def from_vec(samples: _Iterable[tuple[_Any, _Any]]) -> _Any:
+        if not _DATASET_NATIVE_AVAILABLE or _dataset is None:
+            _require_dataset_native("spiraltorch.dataset.from_vec()")
+        return _dataset.DataLoader.from_samples(list(samples))
+
+    for helper_name, helper in {
+        "byte_lm_windows": byte_lm_windows,
+        "byte_lm_corpus_windows": byte_lm_corpus_windows,
+        "byte_lm_sample_stats": byte_lm_sample_stats,
+        "interleave_replay_samples": interleave_replay_samples,
+        "from_vec": from_vec,
+    }.items():
+        helper.__module__ = dataset_module.__name__
+        setattr(dataset_module, helper_name, helper)
+        _register_module_export(dataset_module, helper_name)
+
+
+_install_dataset_helpers()
 
 _dataset = globals().get("dataset")
 if isinstance(_dataset, _types.ModuleType):
