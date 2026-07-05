@@ -20,6 +20,8 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for older interpreter
 
 DEFAULT_CANONICAL_LICENSE = "LICENSE .txt"
 REQUIRED_LICENSE_TOKEN = "AGPL-3.0-or-later"
+CANONICAL_AGPL_PHRASE = "gnu affero general public license"
+CANONICAL_AGPL_VERSION = "version 3"
 
 
 @dataclass
@@ -73,6 +75,13 @@ def digest(path: Path, algorithm: str) -> str:
     return hasher.hexdigest()
 
 
+def references_agpl_license(text: str) -> bool:
+    normalized = text.casefold()
+    return REQUIRED_LICENSE_TOKEN.casefold() in normalized or (
+        CANONICAL_AGPL_PHRASE in normalized and CANONICAL_AGPL_VERSION in normalized
+    )
+
+
 def git_ls_files(root: Path) -> Iterable[Path]:
     result = subprocess.run(
         ["git", "ls-files", "-z"],
@@ -111,9 +120,10 @@ def validate_canonical_license(license_path: Path, relative_path: Path) -> dict[
     if not license_path.is_file():
         raise SystemExit(f"Canonical AGPL license not found at {license_path}")
     content = license_path.read_text(encoding="utf-8", errors="ignore")
-    if REQUIRED_LICENSE_TOKEN not in content:
+    if not references_agpl_license(content):
         raise SystemExit(
-            f"Canonical license file at {license_path} does not reference {REQUIRED_LICENSE_TOKEN}."
+            f"Canonical license file at {license_path} does not reference {REQUIRED_LICENSE_TOKEN} "
+            "or the GNU Affero GPL v3 license text."
         )
     return {
         "path": relative_path.as_posix(),
@@ -154,9 +164,10 @@ def record_cargo_packages(root: Path, manifest_path: Path) -> PackageRecord | No
         if not license_file_path.is_file():
             raise SystemExit(f"{manifest_path}: referenced license file '{license_file}' is missing.")
         embedded = license_file_path.read_text(encoding="utf-8", errors="ignore")
-        if REQUIRED_LICENSE_TOKEN not in embedded:
+        if not references_agpl_license(embedded):
             raise SystemExit(
-                f"{manifest_path}: referenced license file '{license_file}' does not mention {REQUIRED_LICENSE_TOKEN}."
+                f"{manifest_path}: referenced license file '{license_file}' does not mention "
+                f"{REQUIRED_LICENSE_TOKEN} or the GNU Affero GPL v3 license text."
             )
         license_expression = f"file:{license_file}"
     else:

@@ -29,6 +29,8 @@ from urllib.request import Request, urlopen
 
 
 REQUIRED_LICENSE_TOKEN = "AGPL-3.0-or-later"
+CANONICAL_AGPL_PHRASE = "gnu affero general public license"
+CANONICAL_AGPL_VERSION = "version 3"
 
 
 SCHEMA = "https://spiraltorch.org/security/compliance-seal/v1"
@@ -56,6 +58,13 @@ class VerificationReport:
     @property
     def success(self) -> bool:
         return not self.failures
+
+
+def references_agpl_license(text: str) -> bool:
+    normalized = text.casefold()
+    return REQUIRED_LICENSE_TOKEN.casefold() in normalized or (
+        CANONICAL_AGPL_PHRASE in normalized and CANONICAL_AGPL_VERSION in normalized
+    )
 
 
 def parse_args() -> argparse.Namespace:
@@ -578,7 +587,7 @@ def validate_clone(
             if digest(license_path, "sha512") != canonical_sha512:
                 report.add_failure("Canonical license SHA512 mismatch.")
             license_text = license_path.read_text(encoding="utf-8", errors="ignore")
-            if REQUIRED_LICENSE_TOKEN not in license_text:
+            if not references_agpl_license(license_text):
                 report.add_failure(
                     "Canonical license file does not reference the AGPL obligations."
                 )
