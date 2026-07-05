@@ -5163,6 +5163,8 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             runtime_import_preset_missing_modules_label,
             runtime_import_preset_modules_label,
             runtime_import_preset_status_rows,
+            runtime_import_required_gate_fields,
+            runtime_import_requirement_failures,
         )
 
         self.assertEqual(
@@ -5201,6 +5203,59 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             "hf-runtime=tokenizers",
         )
         self.assertFalse(status_rows[0]["passed"])
+        gate_fields = runtime_import_required_gate_fields(
+            ["tokenizers"],
+            ["hf-runtime"],
+            probes=[
+                {"module": "transformers", "imported": True},
+                {"module": "torch", "imported": True},
+                {"module": "tokenizers", "imported": False},
+            ],
+            preset_status=status_rows,
+        )
+        self.assertEqual(gate_fields["required_runtime_imports"], "tokenizers")
+        self.assertEqual(
+            gate_fields["required_runtime_imports_missing"],
+            "tokenizers",
+        )
+        self.assertEqual(
+            gate_fields["required_runtime_import_presets_unsatisfied"],
+            "hf-runtime",
+        )
+        self.assertEqual(
+            runtime_import_requirement_failures(gate_fields),
+            [
+                "runtime_import_missing:tokenizers",
+                "runtime_import_preset_unsatisfied:hf-runtime",
+            ],
+        )
+        prefixed_gate_fields = runtime_import_required_gate_fields(
+            ["tokenizers"],
+            ["hf-runtime"],
+            imported_modules=["transformers", "torch"],
+            observed_presets=["hf-runtime"],
+            satisfied_presets=[],
+            failed_presets=["hf-runtime"],
+            field_prefix="transformers_trace_",
+            include_failed_presets=True,
+        )
+        self.assertEqual(
+            prefixed_gate_fields[
+                "transformers_trace_required_runtime_import_presets_failed"
+            ],
+            "hf-runtime",
+        )
+        self.assertEqual(
+            runtime_import_requirement_failures(
+                prefixed_gate_fields,
+                field_prefix="transformers_trace_",
+                failure_prefix="transformers_trace_runtime_import",
+            ),
+            [
+                "transformers_trace_runtime_import_missing:tokenizers",
+                "transformers_trace_runtime_import_preset_unsatisfied:hf-runtime",
+            ],
+        )
 
     def test_byte_lm_profile_smoke_rejects_produced_manifest_validation_dry_run(self):
         module = load_example("byte_lm_profile_smoke")
