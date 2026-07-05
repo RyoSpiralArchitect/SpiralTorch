@@ -222,6 +222,9 @@ def _runtime_import_preflight_requested(
     runtime_import_presets: object = None,
     required_runtime_imports: object = None,
     required_runtime_import_presets: object = None,
+    runtime_device_backends: object = None,
+    required_runtime_device_backends: object = None,
+    required_runtime_device_ready_backends: object = None,
     require_runtime_imports: bool = False,
 ) -> bool:
     return bool(
@@ -229,6 +232,9 @@ def _runtime_import_preflight_requested(
         or _runtime_imports.csv_values(runtime_import_presets)
         or _runtime_imports.csv_values(required_runtime_imports)
         or _runtime_imports.csv_values(required_runtime_import_presets)
+        or _runtime_imports.csv_values(runtime_device_backends)
+        or _runtime_imports.csv_values(required_runtime_device_backends)
+        or _runtime_imports.csv_values(required_runtime_device_ready_backends)
         or require_runtime_imports
     )
 
@@ -239,6 +245,9 @@ def _runtime_import_preflight_payload(
     runtime_import_presets: object = None,
     required_runtime_imports: object = None,
     required_runtime_import_presets: object = None,
+    runtime_device_backends: object = None,
+    required_runtime_device_backends: object = None,
+    required_runtime_device_ready_backends: object = None,
     require_runtime_imports: bool = False,
 ) -> dict[str, Any]:
     requested = _runtime_import_preflight_requested(
@@ -246,6 +255,9 @@ def _runtime_import_preflight_payload(
         runtime_import_presets=runtime_import_presets,
         required_runtime_imports=required_runtime_imports,
         required_runtime_import_presets=required_runtime_import_presets,
+        runtime_device_backends=runtime_device_backends,
+        required_runtime_device_backends=required_runtime_device_backends,
+        required_runtime_device_ready_backends=required_runtime_device_ready_backends,
         require_runtime_imports=require_runtime_imports,
     )
     report = dict(
@@ -254,6 +266,11 @@ def _runtime_import_preflight_payload(
             runtime_import_presets=runtime_import_presets,
             required_runtime_imports=required_runtime_imports,
             required_runtime_import_presets=required_runtime_import_presets,
+            runtime_device_backends=runtime_device_backends,
+            required_runtime_device_backends=required_runtime_device_backends,
+            required_runtime_device_ready_backends=(
+                required_runtime_device_ready_backends
+            ),
             require_all=require_runtime_imports,
         )
     )
@@ -281,6 +298,9 @@ def _learning_preflight_payload(
     runtime_import_presets: object = None,
     required_runtime_imports: object = None,
     required_runtime_import_presets: object = None,
+    runtime_device_backends: object = None,
+    required_runtime_device_backends: object = None,
+    required_runtime_device_ready_backends: object = None,
     require_runtime_imports: bool = False,
 ) -> dict[str, Any]:
     flags, build_info_error = _native_feature_flags_with_error()
@@ -293,6 +313,9 @@ def _learning_preflight_payload(
         runtime_import_presets=runtime_import_presets,
         required_runtime_imports=required_runtime_imports,
         required_runtime_import_presets=required_runtime_import_presets,
+        runtime_device_backends=runtime_device_backends,
+        required_runtime_device_backends=required_runtime_device_backends,
+        required_runtime_device_ready_backends=required_runtime_device_ready_backends,
         require_runtime_imports=require_runtime_imports,
     )
 
@@ -412,6 +435,46 @@ def _build_training_contract(
         "runtime_imports_failed": run_meta.get("runtime_imports_failed"),
         "runtime_import_failed_install_hints": run_meta.get(
             "runtime_import_failed_install_hints"
+        ),
+        "runtime_device_report_requested": run_meta.get(
+            "runtime_device_report_requested"
+        ),
+        "runtime_device_report_backends": run_meta.get(
+            "runtime_device_report_backends"
+        ),
+        "runtime_device_report_available_backends": run_meta.get(
+            "runtime_device_report_available_backends"
+        ),
+        "runtime_device_report_ready_backends": run_meta.get(
+            "runtime_device_report_ready_backends"
+        ),
+        "runtime_device_report_not_ready_backends": run_meta.get(
+            "runtime_device_report_not_ready_backends"
+        ),
+        "runtime_device_report_error_backends": run_meta.get(
+            "runtime_device_report_error_backends"
+        ),
+        "runtime_device_report_statuses": run_meta.get(
+            "runtime_device_report_statuses"
+        ),
+        "runtime_device_reports_json": run_meta.get("runtime_device_reports_json"),
+        "required_runtime_device_backends": run_meta.get(
+            "required_runtime_device_backends"
+        ),
+        "required_runtime_device_backends_missing": run_meta.get(
+            "required_runtime_device_backends_missing"
+        ),
+        "required_runtime_device_backends_passed": run_meta.get(
+            "required_runtime_device_backends_passed"
+        ),
+        "required_runtime_device_ready_backends": run_meta.get(
+            "required_runtime_device_ready_backends"
+        ),
+        "required_runtime_device_ready_backends_missing": run_meta.get(
+            "required_runtime_device_ready_backends_missing"
+        ),
+        "required_runtime_device_ready_backends_passed": run_meta.get(
+            "required_runtime_device_ready_backends_passed"
         ),
     }
     if isinstance(runtime_import_preflight, dict):
@@ -1260,6 +1323,8 @@ def main() -> int:
             "[--preflight-only] [--ignore-preflight] "
             "[--runtime-import MODULE] [--runtime-import-preset hf-runtime|hf-finetune|hf-peft] "
             "[--require-runtime-import MODULE] [--require-runtime-import-preset PRESET] [--require-runtime-imports] "
+            "[--runtime-device-backend BACKEND] [--require-runtime-device-backend BACKEND] "
+            "[--require-runtime-device-ready-backend BACKEND] "
             "[--runtime-preflight-json-out PATH] "
             "[--events PATH] [--events-types A,B,C] "
             "[--atlas] [--atlas-bound N] [--atlas-district NAME] "
@@ -1323,6 +1388,9 @@ def main() -> int:
     runtime_import_presets: list[str] = []
     required_runtime_imports: list[str] = []
     required_runtime_import_presets: list[str] = []
+    runtime_device_backends: list[str] = []
+    required_runtime_device_backends: list[str] = []
+    required_runtime_device_ready_backends: list[str] = []
     require_runtime_imports = False
     runtime_preflight_json_out: pathlib.Path | None = None
 
@@ -1395,6 +1463,15 @@ def main() -> int:
             required_runtime_import_presets.append(preset)
         elif flag == "--require-runtime-imports":
             require_runtime_imports = True
+        elif flag in {"--runtime-device-backend", "--device-backend"}:
+            runtime_device_backends.append(str(next(it)).strip())
+        elif flag in {"--require-runtime-device-backend", "--require-device-backend"}:
+            required_runtime_device_backends.append(str(next(it)).strip())
+        elif flag in {
+            "--require-runtime-device-ready-backend",
+            "--require-device-ready-backend",
+        }:
+            required_runtime_device_ready_backends.append(str(next(it)).strip())
         elif flag == "--runtime-preflight-json-out":
             runtime_preflight_json_out = pathlib.Path(str(next(it)))
         elif flag == "--events":
@@ -1453,6 +1530,9 @@ def main() -> int:
             runtime_import_presets=runtime_import_presets,
             required_runtime_imports=required_runtime_imports,
             required_runtime_import_presets=required_runtime_import_presets,
+            runtime_device_backends=runtime_device_backends,
+            required_runtime_device_backends=required_runtime_device_backends,
+            required_runtime_device_ready_backends=required_runtime_device_ready_backends,
             require_runtime_imports=require_runtime_imports,
         )
     )
@@ -1466,6 +1546,9 @@ def main() -> int:
         runtime_import_presets=runtime_import_presets,
         required_runtime_imports=required_runtime_imports,
         required_runtime_import_presets=required_runtime_import_presets,
+        runtime_device_backends=runtime_device_backends,
+        required_runtime_device_backends=required_runtime_device_backends,
+        required_runtime_device_ready_backends=required_runtime_device_ready_backends,
         require_runtime_imports=require_runtime_imports,
     )
     runtime_import_preflight = preflight["runtime_import_preflight"]
@@ -1662,6 +1745,48 @@ def main() -> int:
         ),
         "runtime_import_failed_install_hints": runtime_import_preflight.get(
             "runtime_import_failed_install_hints"
+        ),
+        "runtime_device_report_requested": runtime_import_preflight.get(
+            "runtime_device_report_requested"
+        ),
+        "runtime_device_report_backends": runtime_import_preflight.get(
+            "runtime_device_report_backends"
+        ),
+        "runtime_device_report_available_backends": runtime_import_preflight.get(
+            "runtime_device_report_available_backends"
+        ),
+        "runtime_device_report_ready_backends": runtime_import_preflight.get(
+            "runtime_device_report_ready_backends"
+        ),
+        "runtime_device_report_not_ready_backends": runtime_import_preflight.get(
+            "runtime_device_report_not_ready_backends"
+        ),
+        "runtime_device_report_error_backends": runtime_import_preflight.get(
+            "runtime_device_report_error_backends"
+        ),
+        "runtime_device_report_statuses": runtime_import_preflight.get(
+            "runtime_device_report_statuses"
+        ),
+        "runtime_device_reports_json": runtime_import_preflight.get(
+            "runtime_device_reports_json"
+        ),
+        "required_runtime_device_backends": runtime_import_preflight.get(
+            "required_runtime_device_backends"
+        ),
+        "required_runtime_device_backends_missing": runtime_import_preflight.get(
+            "required_runtime_device_backends_missing"
+        ),
+        "required_runtime_device_backends_passed": runtime_import_preflight.get(
+            "required_runtime_device_backends_passed"
+        ),
+        "required_runtime_device_ready_backends": runtime_import_preflight.get(
+            "required_runtime_device_ready_backends"
+        ),
+        "required_runtime_device_ready_backends_missing": runtime_import_preflight.get(
+            "required_runtime_device_ready_backends_missing"
+        ),
+        "required_runtime_device_ready_backends_passed": runtime_import_preflight.get(
+            "required_runtime_device_ready_backends_passed"
         ),
     }
 

@@ -127,6 +127,55 @@ class LlmCharFinetuneContractTests(unittest.TestCase):
             "runtime_import_preset_unsatisfied:hf-peft",
         )
 
+    def test_learning_preflight_gates_required_runtime_device_ready_backend(self) -> None:
+        mod = _load_module()
+        original_st = mod.st
+        mod.st = _fake_spiraltorch(symbols=mod.REQUIRED_NN_SYMBOLS, features={})
+
+        def fake_describe(backends, *, continue_on_error=True):
+            self.assertTrue(continue_on_error)
+            return {
+                "reports": [
+                    {
+                        "backend": backend,
+                        "requested_backend": backend,
+                        "runtime_ready": False,
+                        "runtime_status": "feature_disabled",
+                    }
+                    for backend in mod._runtime_imports.csv_values(backends)
+                ]
+            }
+
+        try:
+            with mock.patch.object(
+                mod._runtime_imports,
+                "_default_describe_runtime_devices",
+                return_value=fake_describe,
+            ):
+                payload = mod._learning_preflight_payload(
+                    backend="cpu",
+                    desire=False,
+                    runtime_device_backends=["wgpu"],
+                    required_runtime_device_ready_backends=["wgpu"],
+                )
+        finally:
+            mod.st = original_st
+
+        self.assertFalse(payload["ready"])
+        self.assertEqual(payload["reason"], "runtime_import_preflight_failed")
+        runtime_preflight = payload["runtime_import_preflight"]
+        self.assertTrue(runtime_preflight["runtime_import_preflight_requested"])
+        self.assertFalse(runtime_preflight["runtime_import_preflight_passed"])
+        self.assertEqual(runtime_preflight["runtime_device_report_backends"], "wgpu")
+        self.assertEqual(
+            runtime_preflight["runtime_device_report_statuses"],
+            "wgpu=feature_disabled",
+        )
+        self.assertEqual(
+            runtime_preflight["runtime_import_preflight_failures"],
+            "runtime_device_not_ready:wgpu",
+        )
+
     def test_preflight_only_writes_summary_without_training(self) -> None:
         mod = _load_module()
         original_st = mod.st
@@ -168,6 +217,23 @@ class LlmCharFinetuneContractTests(unittest.TestCase):
         original_st = mod.st
         original_argv = sys.argv
         mod.st = _fake_spiraltorch(symbols=mod.REQUIRED_NN_SYMBOLS, features={})
+
+        def fake_describe(backends, *, continue_on_error=True):
+            self.assertTrue(continue_on_error)
+            return {
+                "reports": [
+                    {
+                        "backend": backend,
+                        "requested_backend": backend,
+                        "runtime_ready": backend == "wgpu",
+                        "runtime_status": (
+                            "kernel_wired" if backend == "wgpu" else "not_ready"
+                        ),
+                    }
+                    for backend in mod._runtime_imports.csv_values(backends)
+                ]
+            }
+
         try:
             with tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
@@ -184,11 +250,20 @@ class LlmCharFinetuneContractTests(unittest.TestCase):
                     "--runtime-import",
                     "math",
                     "--require-runtime-imports",
+                    "--runtime-device-backend",
+                    "wgpu",
+                    "--require-runtime-device-ready-backend",
+                    "wgpu",
                     "--runtime-preflight-json-out",
                     str(runtime_preflight_path),
                 ]
-                with contextlib.redirect_stdout(io.StringIO()):
-                    code = mod.main()
+                with mock.patch.object(
+                    mod._runtime_imports,
+                    "_default_describe_runtime_devices",
+                    return_value=fake_describe,
+                ):
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        code = mod.main()
                 preflight = json.loads(
                     (run_dir / "preflight.json").read_text(encoding="utf-8")
                 )
@@ -206,6 +281,16 @@ class LlmCharFinetuneContractTests(unittest.TestCase):
         self.assertTrue(runtime_preflight["runtime_import_preflight_passed"])
         self.assertEqual(runtime_preflight["runtime_imports_requested"], "math")
         self.assertEqual(runtime_preflight["required_runtime_imports"], "math")
+        self.assertTrue(runtime_preflight["runtime_device_report_requested"])
+        self.assertEqual(runtime_preflight["runtime_device_report_backends"], "wgpu")
+        self.assertEqual(
+            runtime_preflight["runtime_device_report_ready_backends"],
+            "wgpu",
+        )
+        self.assertEqual(
+            runtime_preflight["required_runtime_device_ready_backends"],
+            "wgpu",
+        )
         self.assertEqual(
             preflight["runtime_import_preflight_path"],
             str(runtime_preflight_path),
@@ -346,6 +431,30 @@ class LlmCharFinetuneContractTests(unittest.TestCase):
                 "required_runtime_import_presets": "hf-runtime",
                 "runtime_imports_failed": "none",
                 "runtime_import_failed_install_hints": "none",
+                "runtime_device_report_requested": True,
+                "runtime_device_report_backends": "wgpu",
+                "runtime_device_report_available_backends": "wgpu",
+                "runtime_device_report_ready_backends": "wgpu",
+                "runtime_device_report_not_ready_backends": "none",
+                "runtime_device_report_error_backends": "none",
+                "runtime_device_report_statuses": "wgpu=kernel_wired",
+                "runtime_device_reports_json": json.dumps(
+                    [
+                        {
+                            "backend": "wgpu",
+                            "requested_backend": "wgpu",
+                            "runtime_ready": True,
+                            "runtime_status": "kernel_wired",
+                        }
+                    ],
+                    sort_keys=True,
+                ),
+                "required_runtime_device_backends": "none",
+                "required_runtime_device_backends_missing": "none",
+                "required_runtime_device_backends_passed": None,
+                "required_runtime_device_ready_backends": "wgpu",
+                "required_runtime_device_ready_backends_missing": "none",
+                "required_runtime_device_ready_backends_passed": True,
             }
 
             contract = mod._build_training_contract(
@@ -378,6 +487,16 @@ class LlmCharFinetuneContractTests(unittest.TestCase):
         self.assertEqual(
             contract["runtime"]["runtime_imports_requested"],
             "transformers,torch,tokenizers",
+        )
+        self.assertTrue(contract["runtime"]["runtime_device_report_requested"])
+        self.assertEqual(contract["runtime"]["runtime_device_report_backends"], "wgpu")
+        self.assertEqual(
+            contract["runtime"]["runtime_device_report_ready_backends"],
+            "wgpu",
+        )
+        self.assertEqual(
+            contract["runtime"]["required_runtime_device_ready_backends"],
+            "wgpu",
         )
         self.assertEqual(contract["optimization"]["early_stop_patience"], 2)
         self.assertTrue(contract["optimization"]["restore_best_at_end"])
