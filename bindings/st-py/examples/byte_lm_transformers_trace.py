@@ -22,6 +22,11 @@ from spiraltorch.runtime_imports import (
 )
 
 import spiraltorch as st
+from spiraltorch.ecosystem import (
+    external_tensor_last_token,
+    external_tensor_shape,
+    external_tensor_to_list,
+)
 from spiraltorch.nn import ZSpaceProjector
 
 
@@ -399,67 +404,6 @@ def load_prompts(args):
     return prompts or [DEFAULT_PROMPT]
 
 
-def tensor_shape(value):
-    shape = getattr(value, "shape", None)
-    if shape is None:
-        size = getattr(value, "size", None)
-        shape = size() if callable(size) else None
-    if shape is not None:
-        return tuple(int(dim) for dim in shape)
-    if isinstance(value, (list, tuple)):
-        if value and isinstance(value[0], (list, tuple)):
-            if value[0] and isinstance(value[0][0], (list, tuple)):
-                return (len(value), len(value[0]), len(value[0][0]))
-            return (len(value), len(value[0]))
-        return (len(value),)
-    return None
-
-
-def materialize_tensor(value):
-    tensor = value
-    for method_name in ["detach", "cpu", "float"]:
-        method = getattr(tensor, method_name, None)
-        if callable(method):
-            tensor = method()
-    return tensor
-
-
-def flatten_nested(value):
-    if isinstance(value, (list, tuple)):
-        flattened = []
-        for item in value:
-            flattened.extend(flatten_nested(item))
-        return flattened
-    return [value]
-
-
-def tensor_to_list(value):
-    materialized = materialize_tensor(value)
-    tolist = getattr(materialized, "tolist", None)
-    if callable(tolist):
-        materialized = tolist()
-    if isinstance(materialized, (list, tuple)):
-        return [float(item) for item in flatten_nested(materialized)]
-    return [float(materialized)]
-
-
-def index_last_token(value):
-    shape = tensor_shape(value)
-    if shape is None:
-        return value
-    if len(shape) == 3:
-        try:
-            return value[0, shape[1] - 1, :]
-        except (TypeError, IndexError):
-            return value[0][shape[1] - 1]
-    if len(shape) == 2:
-        try:
-            return value[shape[0] - 1, :]
-        except (TypeError, IndexError):
-            return value[shape[0] - 1]
-    return value
-
-
 def output_value(outputs, name):
     if isinstance(outputs, Mapping):
         return outputs.get(name)
@@ -470,7 +414,10 @@ def logits_vector(outputs):
     logits = output_value(outputs, "logits")
     if logits is None:
         raise RuntimeError("Transformers output did not include logits")
-    return tensor_to_list(index_last_token(logits))
+    return external_tensor_to_list(
+        external_tensor_last_token(logits, name="logits"),
+        name="logits",
+    )
 
 
 def hidden_vector(outputs):
@@ -478,8 +425,11 @@ def hidden_vector(outputs):
     if not hidden_states:
         return None, None
     last_hidden = hidden_states[-1]
-    selected = index_last_token(last_hidden)
-    return tensor_to_list(selected), tensor_shape(last_hidden)
+    selected = external_tensor_last_token(last_hidden, name="hidden_states[-1]")
+    return (
+        external_tensor_to_list(selected, name="hidden_states[-1]"),
+        external_tensor_shape(last_hidden, name="hidden_states[-1]"),
+    )
 
 
 def stable_softmax(values):
@@ -521,8 +471,11 @@ def encoded_token_count(encoded):
         "input_ids",
         None,
     )
-    shape = tensor_shape(input_ids)
-    if shape is None:
+    if input_ids is None:
+        return None
+    try:
+        shape = external_tensor_shape(input_ids, name="input_ids")
+    except (TypeError, ValueError):
         return None
     if len(shape) >= 2:
         return shape[-1]

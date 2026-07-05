@@ -13,7 +13,9 @@ from . import Tensor
 __all__ = [
     "bound_external_state_tensors",
     "checkpoint_from_external_state",
+    "external_tensor_last_token",
     "external_tensor_shape",
+    "external_tensor_to_list",
     "slice_external_tensor",
     "tensor_from_external",
     "tensor_to_torch",
@@ -149,13 +151,13 @@ def _shape_from_sequence(value: Any, name: str) -> tuple[int, ...]:
     if not value:
         raise ValueError(f"{name} is empty")
     if isinstance(value[0], (list, tuple)):
-        cols = len(value[0])
-        if cols == 0:
-            raise ValueError(f"{name} contains an empty row")
+        child_shape = _shape_from_sequence(value[0], name)
         for row in value:
-            if not isinstance(row, (list, tuple)) or len(row) != cols:
-                raise ValueError(f"{name} must be a rectangular 2D sequence")
-        return (len(value), cols)
+            if not isinstance(row, (list, tuple)):
+                raise ValueError(f"{name} must be a rectangular sequence")
+            if _shape_from_sequence(row, name) != child_shape:
+                raise ValueError(f"{name} must be a rectangular sequence")
+        return (len(value), *child_shape)
     return (len(value),)
 
 
@@ -182,6 +184,15 @@ def _flatten_sequence(value: Any) -> list[Any]:
     if isinstance(value, (list, tuple)) and value and isinstance(value[0], (list, tuple)):
         return [item for row in value for item in row]
     return list(value)
+
+
+def _flatten_nested_sequence(value: Any) -> list[Any]:
+    if isinstance(value, (list, tuple)):
+        flattened = []
+        for item in value:
+            flattened.extend(_flatten_nested_sequence(item))
+        return flattened
+    return [value]
 
 
 def _flat_external_data(value: Any, name: str) -> list[Any]:
@@ -317,6 +328,47 @@ def _external_numeric_value(value: Any, name: str, index: int) -> float:
     if not isinstance(value, numbers.Real):
         raise TypeError(f"{name} contains non-numeric checkpoint value at index {index}")
     return float(value)
+
+
+def external_tensor_to_list(value: Any, *, name: str = "tensor") -> list[float]:
+    """Materialize and flatten a torch/numpy/list-like tensor into floats."""
+
+    materialized = _materialize_external_tensor(value)
+    tolist = getattr(materialized, "tolist", None)
+    if callable(tolist):
+        materialized = tolist()
+    values = _flatten_nested_sequence(materialized)
+    return [
+        _external_numeric_value(item, name, index)
+        for index, item in enumerate(values)
+    ]
+
+
+def external_tensor_last_token(value: Any, *, name: str = "tensor") -> Any:
+    """Select the final token row from a 2D/3D tensor-like value.
+
+    Transformers logits commonly arrive as ``(batch, sequence, vocab)`` and
+    hidden states as ``(batch, sequence, hidden)``. This helper extracts the
+    last sequence vector while keeping unknown-shape values unchanged.
+    """
+
+    materialized = _materialize_external_tensor(value)
+    try:
+        shape = _external_shape_from_materialized(materialized, name)
+    except (TypeError, ValueError):
+        return materialized
+
+    if len(shape) == 3:
+        try:
+            return materialized[0, shape[1] - 1, :]
+        except (TypeError, IndexError):
+            return materialized[0][shape[1] - 1]
+    if len(shape) == 2:
+        try:
+            return materialized[shape[0] - 1, :]
+        except (TypeError, IndexError):
+            return materialized[shape[0] - 1]
+    return materialized
 
 
 def tensor_from_external(value: Any, *, name: str = "tensor") -> Tensor:
