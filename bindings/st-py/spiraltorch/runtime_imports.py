@@ -13,6 +13,10 @@ __all__ = [
     "runtime_import_preset_modules_label",
     "runtime_import_preset_missing_modules_label",
     "runtime_import_preset_status_rows",
+    "required_runtime_import_presets_from_args",
+    "required_runtime_imports_from_args",
+    "runtime_import_names_from_args",
+    "runtime_import_presets_from_args",
     "runtime_import_required_gate_fields",
     "runtime_import_requirement_failures",
 ]
@@ -36,6 +40,16 @@ def csv_values(value: object) -> list[str]:
 
 def unique_csv_values(value: object) -> list[str]:
     return list(dict.fromkeys(csv_values(value)))
+
+
+def unique_stripped_values(value: object) -> list[str]:
+    return list(
+        dict.fromkeys(
+            item.strip()
+            for item in csv_values(value)
+            if item.strip()
+        )
+    )
 
 
 def csv_label(values: object) -> str:
@@ -126,6 +140,41 @@ def runtime_import_preset_missing_modules_label(
             if row["missing"]
         ]
     )
+
+
+def runtime_import_presets_from_args(args: object) -> list[str]:
+    return unique_stripped_values(
+        [
+            *(getattr(args, "runtime_import_presets", []) or []),
+            *(getattr(args, "required_runtime_import_presets", []) or []),
+        ]
+    )
+
+
+def required_runtime_imports_from_args(args: object) -> list[str]:
+    return unique_stripped_values(
+        getattr(args, "required_runtime_imports", []) or []
+    )
+
+
+def required_runtime_import_presets_from_args(args: object) -> list[str]:
+    return unique_stripped_values(
+        getattr(args, "required_runtime_import_presets", []) or []
+    )
+
+
+def runtime_import_names_from_args(
+    args: object,
+    *,
+    preset_modules: Mapping[str, Iterable[str]] | None = None,
+) -> list[str]:
+    module_map = preset_modules or TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS
+    names = []
+    for preset in runtime_import_presets_from_args(args):
+        names.extend(str(module) for module in module_map.get(preset, []))
+    names.extend(getattr(args, "runtime_imports", []) or [])
+    names.extend(getattr(args, "required_runtime_imports", []) or [])
+    return unique_stripped_values(names)
 
 
 def runtime_import_required_gate_fields(
