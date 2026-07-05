@@ -4222,6 +4222,15 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             validation_row["transformers_trace_required_runtime_imports_passed"]
         )
         self.assertEqual(
+            validation_row["transformers_trace_required_runtime_import_presets"],
+            "none",
+        )
+        self.assertIsNone(
+            validation_row[
+                "transformers_trace_required_runtime_import_presets_passed"
+            ]
+        )
+        self.assertEqual(
             validation_row["transformers_trace_zspace_status_changed_rows"],
             1,
         )
@@ -4383,6 +4392,8 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                 "--require-manifest-transformers-trace",
                 "--require-manifest-transformers-trace-runtime-import",
                 "torch",
+                "--require-manifest-transformers-trace-runtime-import-preset",
+                "torch-transformers",
             ]
             passing_output = io.StringIO()
             try:
@@ -4413,6 +4424,26 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                 sys.argv = old_argv
             failing_text = failing_output.getvalue()
 
+            sys.argv = [
+                "byte_lm_profile_smoke.py",
+                "--validate-manifest-jsonl",
+                str(manifest_path),
+                "--require-manifest-transformers-trace",
+                "--require-manifest-transformers-trace-runtime-import-preset",
+                "hf-runtime",
+            ]
+            preset_failing_output = io.StringIO()
+            try:
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "profile smoke manifest trace validation gate failed",
+                ):
+                    with contextlib.redirect_stdout(preset_failing_output):
+                        module.main()
+            finally:
+                sys.argv = old_argv
+            preset_failing_text = preset_failing_output.getvalue()
+
         self.assertIn(
             "transformers_trace_runtime_imports_imported=torch",
             passing_text,
@@ -4433,11 +4464,37 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertTrue(
             passing_validation["transformers_trace_required_runtime_imports_passed"]
         )
+        self.assertEqual(
+            passing_validation["transformers_trace_required_runtime_import_presets"],
+            "torch-transformers",
+        )
+        self.assertEqual(
+            passing_validation[
+                "transformers_trace_required_runtime_import_presets_observed"
+            ],
+            "torch-transformers",
+        )
+        self.assertEqual(
+            passing_validation[
+                "transformers_trace_required_runtime_import_presets_missing"
+            ],
+            "none",
+        )
+        self.assertTrue(
+            passing_validation[
+                "transformers_trace_required_runtime_import_presets_passed"
+            ]
+        )
         self.assertIn(
             "transformers_trace_runtime_import_missing:tokenizers",
             failing_text,
         )
         self.assertIn("passed=False", failing_text)
+        self.assertIn(
+            "transformers_trace_runtime_import_preset_missing:hf-runtime",
+            preset_failing_text,
+        )
+        self.assertIn("passed=False", preset_failing_text)
 
     def test_byte_lm_profile_smoke_accepts_produced_manifest_trace_gates(self):
         module = load_example("byte_lm_profile_smoke")
@@ -4460,6 +4517,8 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             "--require-manifest-transformers-trace-runtime-imports",
             "--require-manifest-transformers-trace-runtime-import",
             "torch",
+            "--require-manifest-transformers-trace-runtime-import-preset",
+            "torch-transformers",
         ]
         try:
             args = module.parse_args()
@@ -4479,6 +4538,10 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertEqual(
             args.require_manifest_transformers_trace_runtime_import,
             ["torch"],
+        )
+        self.assertEqual(
+            args.require_manifest_transformers_trace_runtime_import_preset,
+            ["torch-transformers"],
         )
         self.assertIsNone(args.manifest_validation_jsonl)
         self.assertEqual(
