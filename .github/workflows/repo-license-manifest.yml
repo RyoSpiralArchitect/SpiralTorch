@@ -30,7 +30,7 @@ jobs:
             --repo-root . \
             --output spiraltorch-compliance-seal.json
       - name: Sign manifest and compliance seal
-        uses: sigstore/gh-action-sigstore@v2.3.1
+        uses: sigstore/gh-action-sigstore-python@v3.4.0
         with:
           inputs: |
             spiraltorch-repo-license-manifest.json
