@@ -4755,6 +4755,27 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                         },
                     ],
                 )
+            elif field == "run_summary_jsonl":
+                module.write_jsonl(
+                    path,
+                    [
+                        {
+                            "row_type": "checkpoint_source_profile_run",
+                            (
+                                "tensor_op_backend_requested_wgpu_component_fallback_"
+                                "non_liner_forward_activation_cpu"
+                            ): 2,
+                            (
+                                "tensor_op_backend_requested_wgpu_component_fallback_"
+                                "wave_scan_stack_forward_merge_cpu"
+                            ): 1,
+                            (
+                                "tensor_op_backend_requested_wgpu_component_hit_"
+                                "non_liner_forward_preactivation_wgpu"
+                            ): 3,
+                        }
+                    ],
+                )
             elif field == "checkpoint_preflight_jsonl":
                 module.write_jsonl(
                     path,
@@ -4994,6 +5015,17 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             "transformers_trainer_runtime_requested_wgpu_component_fallback_rate=0.5",
             text,
         )
+        self.assertIn(
+            "run_summary_wgpu_component_fallback_top="
+            "non_liner_forward_activation_cpu:2,"
+            "wave_scan_stack_forward_merge_cpu:1",
+            text,
+        )
+        self.assertIn(
+            "run_summary_wgpu_component_hit_top="
+            "non_liner_forward_preactivation_wgpu:3",
+            text,
+        )
         self.assertIn("checkpoint_transformers_audit_status=ok", text)
         self.assertIn("checkpoint_transformers_runtime_imports_all_ok=True", text)
         self.assertIn(
@@ -5103,6 +5135,28 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                 "transformers_trainer_runtime_requested_wgpu_component_fallback_rate"
             ],
             0.5,
+        )
+        self.assertTrue(validation_row["run_summary_available"])
+        self.assertTrue(validation_row["run_summary_component_hotspots"])
+        self.assertEqual(validation_row["run_summary_rows"], 1)
+        self.assertEqual(
+            validation_row[
+                "run_summary_tensor_backend_requested_wgpu_component_fallback_top"
+            ],
+            "non_liner_forward_activation_cpu:2,"
+            "wave_scan_stack_forward_merge_cpu:1",
+        )
+        self.assertEqual(
+            validation_row[
+                "run_summary_tensor_backend_requested_wgpu_component_hit_top"
+            ],
+            "non_liner_forward_preactivation_wgpu:3",
+        )
+        self.assertEqual(
+            validation_row[
+                "run_summary_tensor_backend_requested_wgpu_component_fallback_distinct"
+            ],
+            2,
         )
         self.assertEqual(
             validation_row["transformers_trace_runtime_import_probe_count"],
