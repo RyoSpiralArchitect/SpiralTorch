@@ -931,6 +931,12 @@ def test_summarize_trainer_trace_events_recovers_runtime_component_backends(
     assert metrics["tensor_backend_requested_wgpu_component_fallbacks"][
         "last"
     ] == pytest.approx(4.0)
+    assert metrics["tensor_backend_requested_wgpu_component_hit_rate"][
+        "last"
+    ] == pytest.approx(0.6)
+    assert metrics["tensor_backend_requested_wgpu_component_fallback_rate"][
+        "last"
+    ] == pytest.approx(0.4)
     assert metrics["tensor_op_backend_non_liner_forward_preactivation_wgpu"][
         "last"
     ] == pytest.approx(1.0)
@@ -1061,6 +1067,12 @@ def test_summarize_trainer_trace_events_recovers_wgpu_runtime_fallbacks(tmp_path
         "last"
     ] == pytest.approx(1.0)
     assert metrics["tensor_backend_requested_wgpu_hits"]["last"] == pytest.approx(1.0)
+    assert metrics["tensor_backend_requested_wgpu_hit_rate"]["last"] == pytest.approx(
+        0.5
+    )
+    assert metrics["tensor_backend_requested_wgpu_runtime_fallback_rate"][
+        "last"
+    ] == pytest.approx(0.5)
     assert metrics["tensor_op_backend_requested_wgpu_hit_matmul_prepacked_bias_wgpu"][
         "last"
     ] == pytest.approx(1.0)
