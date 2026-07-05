@@ -3988,10 +3988,74 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         runtime_imports_all_ok=True,
         runtime_imports_failed="none",
         runtime_import_presets="torch-transformers",
+        runtime_import_presets_satisfied=None,
+        runtime_import_presets_failed=None,
+        runtime_import_preset_missing_modules=None,
     ):
         trace_jsonl = out_dir / "transformers-trace.jsonl"
         baseline_trace_jsonl = out_dir / "transformers-trace-baseline.jsonl"
         trace_compare_jsonl = out_dir / "transformers-trace-compare.jsonl"
+        preset_module_map = {
+            "transformers": ["transformers"],
+            "torch-transformers": ["transformers", "torch"],
+            "hf-runtime": ["transformers", "torch", "tokenizers"],
+        }
+        requested_presets = [
+            preset
+            for preset in str(runtime_import_presets).split(",")
+            if preset and preset != "none"
+        ]
+        if runtime_import_presets_satisfied is None:
+            runtime_import_presets_satisfied = (
+                runtime_import_presets if runtime_imports_all_ok else "none"
+            )
+        if runtime_import_presets_failed is None:
+            runtime_import_presets_failed = (
+                "none" if runtime_imports_all_ok else runtime_import_presets
+            )
+        if runtime_import_preset_missing_modules is None:
+            runtime_import_preset_missing_modules = (
+                "none"
+                if runtime_imports_all_ok
+                else ",".join(
+                    f"{preset}=torch" for preset in requested_presets
+                )
+                or "none"
+            )
+        satisfied_set = {
+            preset
+            for preset in str(runtime_import_presets_satisfied).split(",")
+            if preset and preset != "none"
+        }
+        failed_set = {
+            preset
+            for preset in str(runtime_import_presets_failed).split(",")
+            if preset and preset != "none"
+        }
+        runtime_import_preset_status_rows = []
+        for preset in requested_presets:
+            modules = preset_module_map.get(preset, [])
+            missing = ["torch"] if preset in failed_set and "torch" in modules else []
+            runtime_import_preset_status_rows.append(
+                {
+                    "preset": preset,
+                    "modules": modules,
+                    "imported": [
+                        module_name
+                        for module_name in modules
+                        if module_name not in missing
+                    ],
+                    "missing": missing,
+                    "passed": preset in satisfied_set,
+                }
+            )
+        runtime_import_preset_modules = (
+            ",".join(
+                f"{preset}={'|'.join(preset_module_map.get(preset, [])) or 'none'}"
+                for preset in requested_presets
+            )
+            or "none"
+        )
         smoke_args = argparse.Namespace(
             source_label="llama-3.2-3b",
             key_preset="auto",
@@ -4071,6 +4135,18 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                                 coimport_status
                             ),
                             "runtime_import_presets": runtime_import_presets,
+                            "runtime_import_preset_modules": (
+                                runtime_import_preset_modules
+                            ),
+                            "runtime_import_presets_satisfied": (
+                                runtime_import_presets_satisfied
+                            ),
+                            "runtime_import_presets_failed": (
+                                runtime_import_presets_failed
+                            ),
+                            "runtime_import_preset_missing_modules": (
+                                runtime_import_preset_missing_modules
+                            ),
                             "runtime_imports_requested": "torch",
                             "runtime_import_probe_count": runtime_import_probe_count,
                             "runtime_imports_imported": (
@@ -4111,6 +4187,10 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                                         ),
                                     }
                                 ],
+                                sort_keys=True,
+                            ),
+                            "runtime_import_preset_status_json": json.dumps(
+                                runtime_import_preset_status_rows,
                                 sort_keys=True,
                             ),
                         }
@@ -4210,6 +4290,18 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertEqual(
             validation_row["transformers_trace_runtime_import_presets"],
             "torch-transformers",
+        )
+        self.assertEqual(
+            validation_row["transformers_trace_runtime_import_preset_modules"],
+            "torch-transformers=transformers|torch",
+        )
+        self.assertEqual(
+            validation_row["transformers_trace_runtime_import_presets_satisfied"],
+            "torch-transformers",
+        )
+        self.assertEqual(
+            validation_row["transformers_trace_runtime_import_presets_failed"],
+            "none",
         )
         self.assertEqual(
             validation_row["declared_transformers_trace_runtime_import_presets"],
@@ -4482,6 +4574,18 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         )
         self.assertEqual(
             passing_validation[
+                "transformers_trace_required_runtime_import_presets_satisfied"
+            ],
+            "torch-transformers",
+        )
+        self.assertEqual(
+            passing_validation[
+                "transformers_trace_required_runtime_import_presets_unsatisfied"
+            ],
+            "none",
+        )
+        self.assertEqual(
+            passing_validation[
                 "transformers_trace_required_runtime_import_presets_missing"
             ],
             "none",
@@ -4543,6 +4647,18 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                     runtime_import_presets="hf-runtime",
                 )
             )
+            unsatisfied_manifest, _unsatisfied_validation_path = (
+                self.write_profile_smoke_manifest_with_transformers_trace_compare(
+                    module,
+                    out_dir / "unsatisfied",
+                    runtime_import_presets="torch-transformers",
+                    runtime_import_presets_satisfied="none",
+                    runtime_import_presets_failed="torch-transformers",
+                    runtime_import_preset_missing_modules=(
+                        "torch-transformers=torch"
+                    ),
+                )
+            )
             failing_output = io.StringIO()
             with self.assertRaisesRegex(
                 RuntimeError,
@@ -4551,6 +4667,16 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                 with contextlib.redirect_stdout(failing_output):
                     module.validate_profile_smoke_manifest_file(
                         failing_manifest,
+                        args=produced_validation_args(),
+                    )
+            unsatisfied_output = io.StringIO()
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "profile smoke manifest trace validation gate failed",
+            ):
+                with contextlib.redirect_stdout(unsatisfied_output):
+                    module.validate_profile_smoke_manifest_file(
+                        unsatisfied_manifest,
                         args=produced_validation_args(),
                     )
 
@@ -4564,6 +4690,12 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             passing_validation["transformers_trace_required_runtime_import_presets"],
             "torch-transformers",
         )
+        self.assertEqual(
+            passing_validation[
+                "transformers_trace_required_runtime_import_presets_satisfied"
+            ],
+            "torch-transformers",
+        )
         self.assertTrue(
             passing_validation[
                 "transformers_trace_required_runtime_import_presets_passed"
@@ -4575,6 +4707,12 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             failing_text,
         )
         self.assertIn("passed=False", failing_text)
+        unsatisfied_text = unsatisfied_output.getvalue()
+        self.assertIn(
+            "transformers_trace_runtime_import_preset_unsatisfied:torch-transformers",
+            unsatisfied_text,
+        )
+        self.assertIn("passed=False", unsatisfied_text)
 
     def test_byte_lm_profile_smoke_accepts_produced_manifest_trace_gates(self):
         module = load_example("byte_lm_profile_smoke")
@@ -6885,6 +7023,13 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             "ok",
         )
         self.assertEqual(manifest["runtime_import_presets"], "transformers")
+        self.assertEqual(
+            manifest["runtime_import_preset_modules"],
+            "transformers=transformers",
+        )
+        self.assertEqual(manifest["runtime_import_presets_satisfied"], "transformers")
+        self.assertEqual(manifest["runtime_import_presets_failed"], "none")
+        self.assertEqual(manifest["runtime_import_preset_missing_modules"], "none")
         self.assertEqual(manifest["runtime_import_probe_count"], 2)
         self.assertEqual(manifest["runtime_imports_requested"], "transformers,math")
         self.assertEqual(manifest["runtime_imports_imported"], "transformers,math")
@@ -6904,6 +7049,19 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             ["transformers", "math"],
         )
         self.assertTrue(all(row["imported"] for row in probe_rows))
+        preset_status_rows = json.loads(manifest["runtime_import_preset_status_json"])
+        self.assertEqual(
+            preset_status_rows,
+            [
+                {
+                    "preset": "transformers",
+                    "modules": ["transformers"],
+                    "imported": ["transformers"],
+                    "missing": [],
+                    "passed": True,
+                }
+            ],
+        )
         self.assertEqual(manifest["transformers_model_type"], "llama")
         self.assertEqual(manifest["transformers_config_num_hidden_layers"], 2)
         self.assertEqual(manifest["transformers_config_num_attention_heads"], 4)
@@ -6964,10 +7122,51 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         ])
         self.assertTrue(rows[0]["model_loaded"])
         self.assertEqual(rows[0]["runtime_import_presets"], "transformers")
+        self.assertEqual(rows[0]["runtime_import_presets_satisfied"], "transformers")
+        self.assertEqual(rows[0]["runtime_import_presets_failed"], "none")
         self.assertEqual(rows[0]["runtime_imports_requested"], "transformers")
         self.assertTrue(rows[0]["runtime_imports_all_ok"])
         self.assertEqual(rows[1]["top_token_ids"], "3,1")
         self.assertIn("transformers_prompt_trace", output.getvalue())
+
+    def test_transformers_trace_runtime_import_preset_status_tracks_missing_modules(self):
+        module = load_example("byte_lm_transformers_trace")
+        original = dict(module.RUNTIME_IMPORT_PRESETS)
+        try:
+            module.RUNTIME_IMPORT_PRESETS["fixture-runtime"] = [
+                "transformers",
+                "spiraltorch_missing_runtime_fixture",
+            ]
+            args = types.SimpleNamespace(
+                runtime_import_presets=["fixture-runtime"],
+                runtime_imports=[],
+            )
+            with fake_transformers_module():
+                fields = module.runtime_import_fields(args)
+        finally:
+            module.RUNTIME_IMPORT_PRESETS.clear()
+            module.RUNTIME_IMPORT_PRESETS.update(original)
+
+        self.assertEqual(fields["runtime_import_presets"], "fixture-runtime")
+        self.assertEqual(
+            fields["runtime_import_preset_modules"],
+            "fixture-runtime=transformers|spiraltorch_missing_runtime_fixture",
+        )
+        self.assertEqual(fields["runtime_import_presets_satisfied"], "none")
+        self.assertEqual(fields["runtime_import_presets_failed"], "fixture-runtime")
+        self.assertEqual(
+            fields["runtime_import_preset_missing_modules"],
+            "fixture-runtime=spiraltorch_missing_runtime_fixture",
+        )
+        self.assertFalse(fields["runtime_imports_all_ok"])
+        status_rows = json.loads(fields["runtime_import_preset_status_json"])
+        self.assertEqual(status_rows[0]["preset"], "fixture-runtime")
+        self.assertEqual(status_rows[0]["imported"], ["transformers"])
+        self.assertEqual(
+            status_rows[0]["missing"],
+            ["spiraltorch_missing_runtime_fixture"],
+        )
+        self.assertFalse(status_rows[0]["passed"])
 
     def test_transformers_trace_runtime_import_gate_rejects_missing_module(self):
         module = load_example("byte_lm_transformers_trace")
