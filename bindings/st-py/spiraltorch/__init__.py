@@ -671,6 +671,7 @@ from .zspace_trace import (
 from .trainer_trace import (
     load_trainer_trace_events,
     summarize_trainer_trace_events,
+    summarize_transformers_trainer_runtime_bridge,
     write_trainer_trace_html,
 )
 
@@ -734,7 +735,8 @@ _EXTRAS = [
     "describe_device","hip_probe","mps_probe","probe_gpu_path","z_space_barycenter",
     "hypergrad","realgrad","hypergrad_topos","encode_zspace","z_metrics",
     "load_zspace_trace_events","write_zspace_trace_html",
-    "load_trainer_trace_events","summarize_trainer_trace_events","write_trainer_trace_html",
+    "load_trainer_trace_events","summarize_trainer_trace_events",
+    "summarize_transformers_trainer_runtime_bridge","write_trainer_trace_html",
     "load_gnn_band_replay_trace","flatten_gnn_band_replay_rows",
     "summarize_gnn_band_replays","compare_gnn_band_replay_runs","write_gnn_band_replay_html",
     "load_kdsl_trace_events","write_kdsl_trace_jsonl","write_kdsl_trace_html",

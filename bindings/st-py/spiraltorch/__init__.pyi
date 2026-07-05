@@ -30,6 +30,13 @@ def summarize_trainer_trace_events(
     keys: Iterable[str] | None = ...,
 ) -> Dict[str, Any]: ...
 
+def summarize_transformers_trainer_runtime_bridge(
+    transformers_trace_jsonl: str,
+    trainer_trace_jsonl: str,
+    *,
+    trainer_event_type: str = ...,
+) -> Dict[str, Any]: ...
+
 def write_trainer_trace_html(
     trace_jsonl: str,
     html_path: str | None = ...,
