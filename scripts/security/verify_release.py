@@ -21,6 +21,7 @@ CHUNK_SIZE = 1024 * 1024
 REQUIRED_LICENSE_TOKEN = "AGPL-3.0-or-later"
 COMPLIANCE_SEAL_NAME = "spiraltorch-compliance-seal.json"
 COMPLIANCE_SEAL_SCHEMA = "https://spiraltorch.org/security/compliance-seal/v1"
+REPO_LICENSE_MANIFEST_NAME = "spiraltorch-repo-license-manifest.json"
 RELEASE_MANIFEST_SCHEMA = "https://spiraltorch.org/security/release-manifest/v1"
 
 
@@ -306,6 +307,7 @@ def verify_release(args: argparse.Namespace) -> None:
                     failures.append(f"No canonical AGPL license match found inside {filename}.")
 
         compliance_seal_path: Path | None = None
+        repo_license_manifest_path: Path | None = None
 
         for entry in manifest_files:
             asset_name = entry.get("asset")
@@ -323,6 +325,8 @@ def verify_release(args: argparse.Namespace) -> None:
 
             if asset_name == COMPLIANCE_SEAL_NAME:
                 compliance_seal_path = asset_path
+            elif asset_name == REPO_LICENSE_MANIFEST_NAME:
+                repo_license_manifest_path = asset_path
 
             expected_sha256 = entry.get("sha256")
             expected_sha512 = entry.get("sha512")
@@ -350,8 +354,15 @@ def verify_release(args: argparse.Namespace) -> None:
 
         if compliance_seal_path is None:
             failures.append(f"Release missing compliance seal asset: {COMPLIANCE_SEAL_NAME}")
+        elif repo_license_manifest_path is None:
+            failures.append(f"Release missing repo license manifest asset: {REPO_LICENSE_MANIFEST_NAME}")
         else:
-            validate_compliance_seal(compliance_seal_path, manifest_path, license_report, failures)
+            validate_compliance_seal(
+                compliance_seal_path,
+                repo_license_manifest_path,
+                license_report,
+                failures,
+            )
 
         if failures:
             summary = "\n - ".join(failures)
