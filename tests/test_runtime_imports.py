@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import contextlib
+import io
 import importlib.util
+import json
 import types
 import unittest
 from pathlib import Path
@@ -97,6 +100,87 @@ class RuntimeImportsTest(unittest.TestCase):
             ),
             "torch=pip install torch",
         )
+
+    def test_preflight_report_requires_requested_preset_when_require_all(self) -> None:
+        module = load_runtime_imports()
+
+        def fake_import(name: str):
+            if name == "math":
+                imported = types.ModuleType(name)
+                imported.__version__ = "math-test"
+                return imported
+            raise ModuleNotFoundError(f"No module named {name!r}", name=name)
+
+        with mock.patch.object(
+            module.importlib,
+            "import_module",
+            side_effect=fake_import,
+        ):
+            report = module.runtime_import_preflight_report(
+                runtime_imports=["math"],
+                runtime_import_presets=["hf-finetune"],
+                require_all=True,
+            )
+
+        self.assertEqual(report["runtime_imports_imported"], "math")
+        self.assertEqual(
+            report["required_runtime_import_presets"],
+            "hf-finetune",
+        )
+        self.assertFalse(report["runtime_import_preflight_passed"])
+        self.assertEqual(
+            report["runtime_import_preflight_failures"],
+            "runtime_import_preset_unsatisfied:hf-finetune",
+        )
+        self.assertIn(
+            "runtime_import_preflight_failures",
+            "\n".join(module.runtime_import_preflight_summary_lines(report)),
+        )
+
+    def test_cli_json_returns_nonzero_for_required_missing_preset(self) -> None:
+        module = load_runtime_imports()
+
+        def fake_import(name: str):
+            if name in {"transformers", "torch", "tokenizers"}:
+                return types.ModuleType(name)
+            raise ModuleNotFoundError(f"No module named {name!r}", name=name)
+
+        stdout = io.StringIO()
+        with mock.patch.object(
+            module.importlib,
+            "import_module",
+            side_effect=fake_import,
+        ):
+            with contextlib.redirect_stdout(stdout):
+                exit_code = module.main(
+                    ["--preset", "hf-peft", "--require", "--json"]
+                )
+
+        self.assertEqual(exit_code, 1)
+        payload = json.loads(stdout.getvalue())
+        self.assertFalse(payload["runtime_import_preflight_passed"])
+        self.assertEqual(
+            payload["runtime_imports_failed"],
+            "accelerate,peft,safetensors",
+        )
+        self.assertEqual(
+            payload["runtime_import_failed_install_hints"],
+            (
+                "accelerate=pip install accelerate,"
+                "peft=pip install peft,"
+                "safetensors=pip install safetensors"
+            ),
+        )
+
+    def test_cli_lists_presets(self) -> None:
+        module = load_runtime_imports()
+        stdout = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout):
+            exit_code = module.main(["--list-presets"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn("hf-finetune=", stdout.getvalue())
 
 
 if __name__ == "__main__":

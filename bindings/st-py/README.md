@@ -222,6 +222,14 @@ pip install --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl
 PYTHONNOUSERSITE=1 python3 -s -m unittest bindings/st-py/tests/test_unittest_smoke.py
 ```
 
+After installing a wheel, optional Hugging Face/FT dependencies can be checked
+without launching a training job:
+
+```bash
+python -m spiraltorch.runtime_imports --preset hf-finetune --require
+python -m spiraltorch.runtime_imports --preset hf-peft --require --json
+```
+
 ## Minimal usage
 
 ### Model Zoo discovery + launch
