@@ -171,7 +171,63 @@ class ReleaseStatusTests(unittest.TestCase):
         self.assertEqual(status["version"], "0.4.11")
         self.assertTrue(status["ready"]["github_release"])
         self.assertFalse(status["ready"]["pypi_published"])
-        self.assertIn("provide a PyPI token", status["next_action"])
+        self.assertIn("scripts/configure_pypi_token_secret.py", status["next_action"])
+        self.assertIn("PyPI Trusted Publishing", status["next_action"])
+        self.assertEqual(
+            status["commands"]["token_secret_setup"],
+            "python scripts/configure_pypi_token_secret.py --token-source prompt",
+        )
+        self.assertIn("publish_method=token", status["commands"]["publish_token_workflow"])
+        self.assertEqual(
+            status["trusted_publisher"]["sub"],
+            "repo:RyoSpiralArchitect/SpiralTorch:environment:pypi",
+        )
+
+    def test_build_status_points_to_publish_workflow_when_secret_is_present(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "bindings" / "st-py").mkdir(parents=True)
+            (root / "bindings" / "st-py" / "pyproject.toml").write_text(
+                "[project]\nversion = \"0.4.11\"\n",
+                encoding="utf-8",
+            )
+            (root / "bindings" / "st-py" / "Cargo.toml").write_text(
+                "[package]\nversion = \"0.4.11\"\n",
+                encoding="utf-8",
+            )
+            args = argparse.Namespace(
+                package="spiraltorch",
+                version=None,
+                release_tag=None,
+                repo="RyoSpiralArchitect/SpiralTorch",
+                expected_wheels=3,
+                token_env="PYPI_API_TOKEN",
+                github_secret_environment="pypi",
+                no_clipboard=True,
+                dist=None,
+                json=False,
+                root=root,
+            )
+            with mock.patch.object(
+                release_status,
+                "github_release_status",
+                return_value={"ready": True, "exists": True, "wheel_count": 3, "has_wheels_sha256": True},
+            ):
+                with mock.patch.object(
+                    release_status,
+                    "pypi_status",
+                    return_value={"published": False, "latest": "0.4.10", "file_count": 0, "wheel_count": 0},
+                ):
+                    with mock.patch.object(
+                        release_status,
+                        "github_secret_status",
+                        return_value={"present": True, "available": True},
+                    ):
+                        with mock.patch.dict("os.environ", {"PYPI_API_TOKEN": ""}, clear=False):
+                            status = release_status.build_status(args)
+
+        self.assertEqual(status["next_action"], status["commands"]["publish_token_workflow"])
+        self.assertIn("publish_method=token", status["next_action"])
 
     def test_build_status_points_to_local_wheel_payloads_when_dist_is_bad(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

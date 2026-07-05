@@ -39,7 +39,17 @@ Expected pre-publish shape for `0.4.11` is:
 local_versions ... consistent=yes
 github_release ... ready=yes wheels=3/3 wheels_sha256=yes
 pypi ... published=no
-next_action: provide a PyPI token via prompt/env/GitHub secret or configure PyPI Trusted Publishing
+next_action: python scripts/configure_pypi_token_secret.py --token-source prompt OR configure PyPI Trusted Publishing
+```
+
+Current helpers also print concrete resume commands:
+
+```text
+token_secret_setup: python scripts/configure_pypi_token_secret.py --token-source prompt
+publish_token_workflow: gh workflow run publish_pypi_from_release.yml --ref main -f release_tag=v0.4.11 -f expected_wheels=3 -f publish_method=token -f skip_existing=true
+publish_trusted_workflow: gh workflow run publish_pypi_from_release.yml --ref main -f release_tag=v0.4.11 -f expected_wheels=3 -f publish_method=trusted -f skip_existing=true
+trusted_publisher sub=repo:RyoSpiralArchitect/SpiralTorch:environment:pypi workflow_ref=RyoSpiralArchitect/SpiralTorch/.github/workflows/publish_pypi_from_release.yml@refs/heads/main environment=pypi
+next_action: python scripts/configure_pypi_token_secret.py --token-source prompt OR configure PyPI Trusted Publishing
 ```
 
 ## GitHub Actions Dry-Run
