@@ -159,18 +159,41 @@ fn poincare_projection_backward(
 pub struct ZSpaceProjector {
     topos: OpenCartesianTopos,
     encoder: LanguageWaveEncoder,
+    strength: f32,
 }
 
 impl ZSpaceProjector {
     /// Builds a projector with a guard topos and matching Z-space encoder.
     pub fn new(topos: OpenCartesianTopos, encoder: LanguageWaveEncoder) -> PureResult<Self> {
+        Self::new_with_strength(topos, encoder, 1.0)
+    }
+
+    /// Builds a projector whose output is blended with the input by `strength`.
+    ///
+    /// `1.0` keeps the historical full projection, while `0.0` behaves like an
+    /// identity layer. Intermediate values are useful for gentle FT-time
+    /// geometric regularisation.
+    pub fn new_with_strength(
+        topos: OpenCartesianTopos,
+        encoder: LanguageWaveEncoder,
+        strength: f32,
+    ) -> PureResult<Self> {
         if (topos.curvature() - encoder.curvature()).abs() > 1e-6 {
             return Err(crate::TensorError::CurvatureMismatch {
                 expected: topos.curvature(),
                 got: encoder.curvature(),
             });
         }
-        Ok(Self { topos, encoder })
+        if !strength.is_finite() || strength < 0.0 {
+            return Err(crate::TensorError::InvalidValue {
+                label: "zspace_projector_strength",
+            });
+        }
+        Ok(Self {
+            topos,
+            encoder,
+            strength,
+        })
     }
 
     /// Returns the open-cartesian guard backing the projector.
@@ -181,6 +204,11 @@ impl ZSpaceProjector {
     /// Returns the curvature enforced by the projector.
     pub fn curvature(&self) -> f32 {
         self.topos.curvature()
+    }
+
+    /// Returns the residual blend strength applied after projection.
+    pub fn strength(&self) -> f32 {
+        self.strength
     }
 
     /// Returns the internal Z-space encoder for direct wave creation.
@@ -242,14 +270,38 @@ impl Module for ZSpaceProjector {
         let (rows, cols) = input.shape();
         self.topos
             .guard_tensor("zspace_projector_forward_in", input)?;
+        if self.strength == 0.0 {
+            emit_zspace_projector_meta(
+                "zspace_projector_forward",
+                "identity",
+                rows,
+                cols,
+                false,
+                self.topos.curvature(),
+                None,
+                false,
+                "identity",
+            );
+            return Ok(input.clone());
+        }
         let mut rewritten = input.clone();
         let monad = RewriteMonad::new(&self.topos);
         monad.rewrite_tensor("zspace_projector_forward_rewrite", &mut rewritten)?;
         let projection_backend = current_tensor_util_backend_for_values(rows.saturating_mul(cols));
         let projected = rewritten
             .project_to_poincare_with_backend(self.topos.curvature(), projection_backend)?;
+        let output = if self.strength == 1.0 {
+            projected
+        } else if self.strength == 0.0 {
+            input.clone()
+        } else {
+            let delta = projected.sub(input)?;
+            let mut blended = input.clone();
+            blended.add_scaled_with_backend(&delta, self.strength, projection_backend)?;
+            blended
+        };
         self.topos
-            .guard_tensor("zspace_projector_forward_out", &projected)?;
+            .guard_tensor("zspace_projector_forward_out", &output)?;
         emit_zspace_projector_meta(
             "zspace_projector_forward",
             "composite",
@@ -261,7 +313,7 @@ impl Module for ZSpaceProjector {
             false,
             "forward_only",
         );
-        Ok(projected)
+        Ok(output)
     }
 
     fn backward(&mut self, input: &Tensor, grad_output: &Tensor) -> PureResult<Tensor> {
@@ -274,17 +326,43 @@ impl Module for ZSpaceProjector {
         let (rows, cols) = input.shape();
         self.topos
             .guard_tensor("zspace_projector_backward_in", grad_output)?;
+        if self.strength == 0.0 {
+            emit_zspace_projector_meta(
+                "zspace_projector_backward",
+                "identity",
+                rows,
+                cols,
+                false,
+                self.topos.curvature(),
+                None,
+                false,
+                "identity",
+            );
+            return Ok(grad_output.clone());
+        }
         let monad = RewriteMonad::new(&self.topos);
         let mut preprojected = input.clone();
         monad.rewrite_tensor("zspace_projector_backward_rewrite", &mut preprojected)?;
         let grad_saturated =
             poincare_projection_backward(&preprojected, grad_output, self.topos.curvature())?;
-        let grad = porous_saturation_backward(
+        let projected_grad = porous_saturation_backward(
             input,
             &grad_saturated,
             self.topos.saturation(),
             self.topos.porosity(),
         )?;
+        let grad = if self.strength == 1.0 {
+            projected_grad
+        } else if self.strength == 0.0 {
+            grad_output.clone()
+        } else {
+            let projection_backend =
+                current_tensor_util_backend_for_values(rows.saturating_mul(cols));
+            let mut blended =
+                grad_output.scale_with_backend(1.0 - self.strength, projection_backend)?;
+            blended.add_scaled_with_backend(&projected_grad, self.strength, projection_backend)?;
+            blended
+        };
         emit_zspace_projector_meta(
             "zspace_projector_backward",
             "cpu",
@@ -395,6 +473,20 @@ mod tests {
             Tensor::from_vec(2, 4, vec![0.2, -0.1, 0.05, -0.3, 0.4, -0.2, 0.1, -0.05]).unwrap();
         let grad_in = module.backward(&input, &grad_out).unwrap();
         assert_eq!(grad_in.shape(), grad_out.shape());
+    }
+
+    #[test]
+    fn projector_strength_zero_behaves_like_identity() {
+        let topos = demo_topos();
+        let encoder = LanguageWaveEncoder::new(topos.curvature(), 0.5).unwrap();
+        let mut module = ZSpaceProjector::new_with_strength(topos, encoder, 0.0).unwrap();
+        let input = Tensor::from_vec(1, 4, vec![0.1, -0.2, 0.3, -0.4]).unwrap();
+        let output = module.forward(&input).unwrap();
+        assert_eq!(output, input);
+
+        let grad_out = Tensor::from_vec(1, 4, vec![0.2, -0.1, 0.05, -0.3]).unwrap();
+        let grad_in = module.backward(&input, &grad_out).unwrap();
+        assert_eq!(grad_in, grad_out);
     }
 
     #[test]

@@ -14,6 +14,7 @@ pub mod embedding;
 pub mod gelu;
 pub mod identity;
 pub mod linear;
+pub mod lora_linear;
 pub mod lstm;
 pub mod non_liner;
 pub mod normalization;
@@ -38,6 +39,7 @@ pub use dynamic_field::{HamiltonJacobiFlow, KleinGordonPropagation, StochasticSc
 pub use embedding::Embedding;
 pub use gelu::Gelu;
 pub use identity::Identity;
+pub use lora_linear::LoraLinear;
 pub use lstm::Lstm;
 pub use non_liner::{
     NonLiner, NonLinerActivation, NonLinerEllipticConfig, NonLinerGeometry,
