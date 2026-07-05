@@ -890,53 +890,61 @@ impl TensorBackendStepTrace {
                 self.fallbacks = self.fallbacks.saturating_add(1);
             }
         }
-        for field in [
-            "input_gradient_backend",
-            "input_gradient_reduction_backend",
-            "gradient_reduction_backend",
-            "affine_gradient_backend",
-            "normalization_backend",
-            "input_projection_backend",
-            "bias_backend",
-            "recurrent_backend",
-            "gate_activation_backend",
-            "bptt_backend",
-            "bptt_scan_backend",
-            "bptt_gate_derivative_backend",
-            "bptt_cell_recurrence_backend",
-            "bptt_state_carry_backend",
-            "raw_parameter_gradient_backend",
-            "parameter_gradient_reduction_backend",
-            "bias_gradient_backend",
-            "parameter_gradient_scale_backend",
-            "broadcast_backend",
-            "accumulation_backend",
-            "normalise_backend",
-            "rewrite_backend",
-            "projection_backend",
-            "projection_gradient_backend",
-            "saturation_gradient_backend",
-            "softmax_backend",
-            "exp_backend",
-            "sanitize_backend",
-            "distribution_scale_backend",
-            "semantic_inference_backend",
-            "semantic_sparse_scan_backend",
-            "semantic_accumulation_backend",
-            "semantic_sanitize_backend",
-            "window_energy_backend",
-            "fusion_accumulation_backend",
-            "marginal_scan_backend",
-            "marginal_sum_backend",
-            "row_scan_backend",
-            "row_sum_backend",
-            "state_sum_backend",
-            "precision_backend",
-            "reduction_backend",
-            "covariance_centering_backend",
-            "covariance_accumulation_backend",
-            "low_rank_projection_backend",
-            "psd_projection_backend",
+        for (field, count_fallback) in [
+            ("input_gradient_backend", true),
+            ("input_gradient_reduction_backend", true),
+            ("gradient_reduction_backend", true),
+            ("affine_gradient_backend", true),
+            ("normalization_backend", true),
+            ("input_projection_backend", true),
+            ("bias_backend", true),
+            ("recurrent_backend", true),
+            ("gate_activation_backend", true),
+            ("bptt_backend", true),
+            ("bptt_scan_backend", false),
+            ("bptt_gate_derivative_backend", true),
+            ("bptt_cell_recurrence_backend", true),
+            ("bptt_state_carry_backend", true),
+            ("raw_parameter_gradient_backend", true),
+            ("parameter_gradient_reduction_backend", true),
+            ("bias_gradient_backend", true),
+            ("parameter_gradient_scale_backend", true),
+            ("broadcast_backend", true),
+            ("activation_backend", true),
+            ("preactivation_backend", true),
+            ("geometry_backend", true),
+            ("mask_backend", true),
+            ("rng_backend", false),
+            ("deterministic_backend", true),
+            ("gradient_scale_backend", true),
+            ("merge_backend", true),
+            ("accumulation_backend", true),
+            ("normalise_backend", true),
+            ("rewrite_backend", true),
+            ("projection_backend", true),
+            ("projection_gradient_backend", true),
+            ("saturation_gradient_backend", true),
+            ("softmax_backend", true),
+            ("exp_backend", true),
+            ("sanitize_backend", true),
+            ("distribution_scale_backend", true),
+            ("semantic_inference_backend", true),
+            ("semantic_sparse_scan_backend", true),
+            ("semantic_accumulation_backend", true),
+            ("semantic_sanitize_backend", true),
+            ("window_energy_backend", true),
+            ("fusion_accumulation_backend", true),
+            ("marginal_scan_backend", true),
+            ("marginal_sum_backend", true),
+            ("row_scan_backend", true),
+            ("row_sum_backend", true),
+            ("state_sum_backend", true),
+            ("precision_backend", true),
+            ("reduction_backend", true),
+            ("covariance_centering_backend", true),
+            ("covariance_accumulation_backend", true),
+            ("low_rank_projection_backend", true),
+            ("psd_projection_backend", true),
         ] {
             if let Some(sub_backend) = event.data.get(field).and_then(|value| value.as_str()) {
                 self.record_sub_backend(
@@ -944,7 +952,7 @@ impl TensorBackendStepTrace {
                     requested_backend.as_deref(),
                     field,
                     sub_backend,
-                    field != "bptt_scan_backend",
+                    count_fallback,
                 );
             }
         }
@@ -10078,6 +10086,126 @@ mod tests {
             Some(1.0)
         );
         assert_eq!(extra.get("tensor_backend_fallbacks").copied(), Some(5.0));
+    }
+
+    #[test]
+    fn strict_backend_trace_counts_activation_runtime_component_backends() {
+        let mut trace = TensorBackendStepTrace::default();
+        trace.record(&TensorOpMetaEvent {
+            op_name: "scale",
+            data: serde_json::json!({
+                "backend": "wgpu_dense",
+                "requested_backend": "wgpu",
+            }),
+        });
+        trace.record(&TensorOpMetaEvent {
+            op_name: "non_liner_forward",
+            data: serde_json::json!({
+                "backend": "composite",
+                "requested_backend": "wgpu",
+                "preactivation_backend": "wgpu",
+                "activation_backend": "cpu",
+                "geometry_backend": "cpu",
+                "broadcast_backend": "wgpu",
+            }),
+        });
+        trace.record(&TensorOpMetaEvent {
+            op_name: "dropout_forward",
+            data: serde_json::json!({
+                "backend": "composite",
+                "requested_backend": "wgpu",
+                "mask_backend": "wgpu",
+                "rng_backend": "cpu",
+            }),
+        });
+        trace.record(&TensorOpMetaEvent {
+            op_name: "dynamic_field_stochastic_schrodinger_forward",
+            data: serde_json::json!({
+                "backend": "hybrid",
+                "requested_backend": "wgpu",
+                "deterministic_backend": "wgpu",
+                "rng_backend": "cpu",
+            }),
+        });
+        trace.record(&TensorOpMetaEvent {
+            op_name: "dynamic_field_stochastic_schrodinger_backward",
+            data: serde_json::json!({
+                "backend": "hybrid",
+                "requested_backend": "wgpu",
+                "input_gradient_backend": "wgpu",
+                "gradient_reduction_backend": "wgpu",
+                "gradient_scale_backend": "cpu",
+            }),
+        });
+        trace.record(&TensorOpMetaEvent {
+            op_name: "wave_scan_stack_forward",
+            data: serde_json::json!({
+                "backend": "composite",
+                "requested_backend": "wgpu",
+                "merge_backend": "cpu",
+            }),
+        });
+
+        trace
+            .validate_expected_backend(BackendKind::Wgpu)
+            .expect("runtime component metadata has WGPU kernel evidence");
+        let mut extra = HashMap::new();
+        trace.write_extra(&mut extra);
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_non_liner_forward_preactivation_wgpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_non_liner_forward_activation_cpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_non_liner_forward_geometry_cpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_dropout_forward_mask_wgpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_dropout_forward_rng_cpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_dynamic_field_stochastic_schrodinger_forward_deterministic_wgpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_dynamic_field_stochastic_schrodinger_forward_rng_cpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_dynamic_field_stochastic_schrodinger_backward_gradient_scale_cpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_wave_scan_stack_forward_merge_cpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(extra.get("tensor_backend_fallbacks").copied(), Some(4.0));
     }
 
     #[test]
