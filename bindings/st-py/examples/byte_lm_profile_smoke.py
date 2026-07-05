@@ -1172,6 +1172,16 @@ def transformers_trace_validation_fields(row):
         "transformers_trace_runtime_import_module_names": None,
         "transformers_trace_runtime_imports_json": None,
         "transformers_trace_runtime_import_preset_status_json": None,
+        "transformers_trace_direct_required_runtime_imports": None,
+        "transformers_trace_direct_required_runtime_imports_imported": None,
+        "transformers_trace_direct_required_runtime_imports_missing": None,
+        "transformers_trace_direct_required_runtime_imports_passed": None,
+        "transformers_trace_direct_required_runtime_import_presets": None,
+        "transformers_trace_direct_required_runtime_import_presets_observed": None,
+        "transformers_trace_direct_required_runtime_import_presets_satisfied": None,
+        "transformers_trace_direct_required_runtime_import_presets_missing": None,
+        "transformers_trace_direct_required_runtime_import_presets_unsatisfied": None,
+        "transformers_trace_direct_required_runtime_import_presets_passed": None,
         "transformers_trace_compare_summary_available": False,
         "transformers_trace_compare_passed": None,
         "transformers_trace_compare_failures": None,
@@ -1267,6 +1277,36 @@ def transformers_trace_validation_fields(row):
                     ),
                     "transformers_trace_runtime_import_preset_status_json": (
                         manifest.get("runtime_import_preset_status_json")
+                    ),
+                    "transformers_trace_direct_required_runtime_imports": (
+                        manifest.get("required_runtime_imports")
+                    ),
+                    "transformers_trace_direct_required_runtime_imports_imported": (
+                        manifest.get("required_runtime_imports_imported")
+                    ),
+                    "transformers_trace_direct_required_runtime_imports_missing": (
+                        manifest.get("required_runtime_imports_missing")
+                    ),
+                    "transformers_trace_direct_required_runtime_imports_passed": (
+                        manifest.get("required_runtime_imports_passed")
+                    ),
+                    "transformers_trace_direct_required_runtime_import_presets": (
+                        manifest.get("required_runtime_import_presets")
+                    ),
+                    "transformers_trace_direct_required_runtime_import_presets_observed": (
+                        manifest.get("required_runtime_import_presets_observed")
+                    ),
+                    "transformers_trace_direct_required_runtime_import_presets_satisfied": (
+                        manifest.get("required_runtime_import_presets_satisfied")
+                    ),
+                    "transformers_trace_direct_required_runtime_import_presets_missing": (
+                        manifest.get("required_runtime_import_presets_missing")
+                    ),
+                    "transformers_trace_direct_required_runtime_import_presets_unsatisfied": (
+                        manifest.get("required_runtime_import_presets_unsatisfied")
+                    ),
+                    "transformers_trace_direct_required_runtime_import_presets_passed": (
+                        manifest.get("required_runtime_import_presets_passed")
                     ),
                 }
             )
@@ -1545,6 +1585,50 @@ def runtime_import_gate_fields(validation_row, args):
     }
 
 
+def direct_runtime_requirement_failures(validation_row):
+    failures = []
+    if (
+        validation_row.get("transformers_trace_direct_required_runtime_imports_passed")
+        is False
+    ):
+        for module_name in sorted(
+            manifest_validation_csv_set(
+                validation_row,
+                "transformers_trace_direct_required_runtime_imports_missing",
+            )
+        ):
+            failures.append(
+                f"transformers_trace_direct_runtime_import_missing:{module_name}"
+            )
+    if (
+        validation_row.get(
+            "transformers_trace_direct_required_runtime_import_presets_passed"
+        )
+        is False
+    ):
+        for preset in sorted(
+            manifest_validation_csv_set(
+                validation_row,
+                "transformers_trace_direct_required_runtime_import_presets_missing",
+            )
+        ):
+            failures.append(
+                "transformers_trace_direct_runtime_import_preset_missing:"
+                f"{preset}"
+            )
+        for preset in sorted(
+            manifest_validation_csv_set(
+                validation_row,
+                "transformers_trace_direct_required_runtime_import_presets_unsatisfied",
+            )
+        ):
+            failures.append(
+                "transformers_trace_direct_runtime_import_preset_unsatisfied:"
+                f"{preset}"
+            )
+    return failures
+
+
 def manifest_trace_validation_gate_failures(validation_row, args):
     failures = []
     if args is None:
@@ -1623,6 +1707,8 @@ def manifest_trace_validation_gate_failures(validation_row, args):
                         "transformers_trace_runtime_import_preset_unsatisfied:"
                         f"{preset}"
                     )
+    if getattr(args, "validate_produced_manifest", False):
+        failures.extend(direct_runtime_requirement_failures(validation_row))
     if args.require_manifest_transformers_trace_runtime_metadata_match:
         if not validation_row["transformers_trace_compare_summary_available"]:
             failures.append("transformers_trace_compare_summary_missing")
@@ -1695,6 +1781,7 @@ def check_manifest_trace_validation_gates(validation_row, args):
             is not None,
             args.max_manifest_transformers_trace_top_probability_regression
             is not None,
+            bool(failures),
         ]
     )
     if not gate_requested:
@@ -1763,6 +1850,18 @@ def validate_profile_smoke_manifest_file(path, validation_jsonl=None, args=None)
                 f"{validation_row['transformers_trace_runtime_imports_failed']}",
                 "transformers_trace_runtime_imports_imported="
                 f"{validation_row['transformers_trace_runtime_imports_imported']}",
+                "transformers_trace_direct_required_runtime_imports="
+                f"{validation_row['transformers_trace_direct_required_runtime_imports']}",
+                "transformers_trace_direct_required_runtime_imports_missing="
+                f"{validation_row['transformers_trace_direct_required_runtime_imports_missing']}",
+                "transformers_trace_direct_required_runtime_imports_passed="
+                f"{validation_row['transformers_trace_direct_required_runtime_imports_passed']}",
+                "transformers_trace_direct_required_runtime_import_presets="
+                f"{validation_row['transformers_trace_direct_required_runtime_import_presets']}",
+                "transformers_trace_direct_required_runtime_import_presets_unsatisfied="
+                f"{validation_row['transformers_trace_direct_required_runtime_import_presets_unsatisfied']}",
+                "transformers_trace_direct_required_runtime_import_presets_passed="
+                f"{validation_row['transformers_trace_direct_required_runtime_import_presets_passed']}",
                 "transformers_trace_required_runtime_imports="
                 f"{validation_row['transformers_trace_required_runtime_imports']}",
                 "transformers_trace_required_runtime_imports_missing="
