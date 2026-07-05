@@ -770,6 +770,10 @@ struct TensorBackendStepTrace {
     by_op: HashMap<String, usize>,
     by_op_backend: HashMap<String, usize>,
     by_op_kernel_backend: HashMap<String, usize>,
+    requested_wgpu_hits: usize,
+    requested_wgpu_runtime_fallbacks: usize,
+    requested_wgpu_hits_by_op_backend: HashMap<String, usize>,
+    requested_wgpu_runtime_fallbacks_by_op_backend: HashMap<String, usize>,
     requested_wgpu_component_hits: usize,
     requested_wgpu_component_fallbacks: usize,
     requested_wgpu_component_hits_by_op_backend: HashMap<String, usize>,
@@ -908,6 +912,24 @@ impl TensorBackendStepTrace {
             .and_then(|value| value.as_str())
             .map(backend_metric_fragment);
         if let Some(requested) = requested_backend.as_deref() {
+            if requested == "wgpu" {
+                let op_backend = format!("{op}_{backend}");
+                if backend == "wgpu" {
+                    self.requested_wgpu_hits = self.requested_wgpu_hits.saturating_add(1);
+                    *self
+                        .requested_wgpu_hits_by_op_backend
+                        .entry(op_backend)
+                        .or_default() += 1;
+                } else if is_cpu_runtime_backend(&backend) && is_wgpu_runtime_fallback(&event.data)
+                {
+                    self.requested_wgpu_runtime_fallbacks =
+                        self.requested_wgpu_runtime_fallbacks.saturating_add(1);
+                    *self
+                        .requested_wgpu_runtime_fallbacks_by_op_backend
+                        .entry(op_backend)
+                        .or_default() += 1;
+                }
+            }
             if requested != "auto" && requested != backend && !is_metadata_only_backend(&backend) {
                 self.fallbacks = self.fallbacks.saturating_add(1);
             }
@@ -1225,6 +1247,31 @@ impl TensorBackendStepTrace {
                     format!("tensor_op_kernel_backend_{op_backend}"),
                     count as f64,
                 );
+            }
+            let requested_wgpu_total = self
+                .requested_wgpu_hits
+                .saturating_add(self.requested_wgpu_runtime_fallbacks);
+            if requested_wgpu_total > 0 {
+                extra.insert(
+                    "tensor_backend_requested_wgpu_hits".to_string(),
+                    self.requested_wgpu_hits as f64,
+                );
+                extra.insert(
+                    "tensor_backend_requested_wgpu_runtime_fallbacks".to_string(),
+                    self.requested_wgpu_runtime_fallbacks as f64,
+                );
+                for (op_backend, count) in self.requested_wgpu_hits_by_op_backend {
+                    extra.insert(
+                        format!("tensor_op_backend_requested_wgpu_hit_{op_backend}"),
+                        count as f64,
+                    );
+                }
+                for (op_backend, count) in self.requested_wgpu_runtime_fallbacks_by_op_backend {
+                    extra.insert(
+                        format!("tensor_op_backend_wgpu_runtime_fallback_{op_backend}"),
+                        count as f64,
+                    );
+                }
             }
             let requested_wgpu_component_total = self
                 .requested_wgpu_component_hits
@@ -1559,6 +1606,8 @@ pub struct EpochTensorBackendStats {
     pub kernel_backend_wgpu_dense: usize,
     pub kernel_backend_simd: usize,
     pub kernel_backend_other: usize,
+    pub requested_wgpu_hits: usize,
+    pub requested_wgpu_runtime_fallbacks: usize,
     pub requested_wgpu_component_hits: usize,
     pub requested_wgpu_component_fallbacks: usize,
     pub embedding_tokens: usize,
@@ -1571,6 +1620,12 @@ impl EpochTensorBackendStats {
     fn accumulate_trace(&mut self, trace: &TensorBackendStepTrace) {
         self.ops_total = self.ops_total.saturating_add(trace.total);
         self.fallbacks = self.fallbacks.saturating_add(trace.fallbacks);
+        self.requested_wgpu_hits = self
+            .requested_wgpu_hits
+            .saturating_add(trace.requested_wgpu_hits);
+        self.requested_wgpu_runtime_fallbacks = self
+            .requested_wgpu_runtime_fallbacks
+            .saturating_add(trace.requested_wgpu_runtime_fallbacks);
         self.requested_wgpu_component_hits = self
             .requested_wgpu_component_hits
             .saturating_add(trace.requested_wgpu_component_hits);
@@ -1631,6 +1686,14 @@ impl EpochTensorBackendStats {
         extra.insert(
             "epoch_tensor_backend_fallbacks".to_string(),
             self.fallbacks as f64,
+        );
+        extra.insert(
+            "epoch_tensor_backend_requested_wgpu_hits".to_string(),
+            self.requested_wgpu_hits as f64,
+        );
+        extra.insert(
+            "epoch_tensor_backend_requested_wgpu_runtime_fallbacks".to_string(),
+            self.requested_wgpu_runtime_fallbacks as f64,
         );
         extra.insert(
             "epoch_tensor_backend_requested_wgpu_component_hits".to_string(),
@@ -2367,6 +2430,39 @@ fn is_metadata_only_backend(label: &str) -> bool {
         label,
         "composite" | "hybrid" | "view" | "semantic_bridge_window_distribution"
     )
+}
+
+fn is_cpu_runtime_backend(label: &str) -> bool {
+    matches!(
+        label,
+        "cpu"
+            | "cpu_eigen"
+            | "cpu_simd"
+            | "f64_cpu"
+            | "faer"
+            | "naive"
+            | "probability_cpu"
+            | "semantic_cpu"
+            | "topos_cpu"
+    )
+}
+
+fn is_wgpu_runtime_fallback(data: &Value) -> bool {
+    let Some(fallback) = data.get("fallback") else {
+        return false;
+    };
+    if fallback.get("from").and_then(Value::as_str) != Some("wgpu") {
+        return false;
+    }
+    if fallback.get("reason").and_then(Value::as_str) == Some("runtime_unavailable") {
+        return true;
+    }
+    let Some(message) = fallback.get("message").and_then(Value::as_str) else {
+        return false;
+    };
+    message.contains("no suitable WGPU adapter")
+        || message.contains("failed to initialize WGPU")
+        || message.contains("WGPU backend not available")
 }
 
 fn strict_gpu_path() -> bool {
@@ -10364,6 +10460,84 @@ mod tests {
             Some(1.0)
         );
         assert_eq!(extra.get("tensor_backend_fallbacks").copied(), Some(4.0));
+    }
+
+    #[test]
+    fn tensor_backend_trace_counts_requested_wgpu_runtime_fallbacks() {
+        let mut trace = TensorBackendStepTrace::default();
+        trace.record(&TensorOpMetaEvent {
+            op_name: "matmul",
+            data: serde_json::json!({
+                "backend": "naive",
+                "requested_backend": "wgpu",
+                "fallback": {
+                    "from": "wgpu",
+                    "reason": "runtime_unavailable",
+                },
+            }),
+        });
+        trace.record(&TensorOpMetaEvent {
+            op_name: "matmul_prepacked_bias",
+            data: serde_json::json!({
+                "backend": "wgpu",
+                "requested_backend": "wgpu",
+            }),
+        });
+        trace.record(&TensorOpMetaEvent {
+            op_name: "sum_abs",
+            data: serde_json::json!({
+                "backend": "cpu",
+                "requested_backend": "wgpu",
+            }),
+        });
+
+        let mut epoch = EpochTensorBackendStats::default();
+        epoch.accumulate_trace(&trace);
+        assert_eq!(epoch.requested_wgpu_hits, 1);
+        assert_eq!(epoch.requested_wgpu_runtime_fallbacks, 1);
+        let mut epoch_extra = HashMap::new();
+        epoch.write_extra(&mut epoch_extra);
+        assert_eq!(
+            epoch_extra
+                .get("epoch_tensor_backend_requested_wgpu_hits")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            epoch_extra
+                .get("epoch_tensor_backend_requested_wgpu_runtime_fallbacks")
+                .copied(),
+            Some(1.0)
+        );
+
+        let mut extra = HashMap::new();
+        trace.write_extra(&mut extra);
+        assert_eq!(
+            extra.get("tensor_backend_requested_wgpu_hits").copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_backend_requested_wgpu_runtime_fallbacks")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_requested_wgpu_hit_matmul_prepacked_bias_wgpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_wgpu_runtime_fallback_matmul_naive")
+                .copied(),
+            Some(1.0)
+        );
+        assert!(extra
+            .get("tensor_op_backend_wgpu_runtime_fallback_sum_abs_cpu")
+            .is_none());
+        assert_eq!(extra.get("tensor_backend_fallbacks").copied(), Some(2.0));
     }
 
     #[test]
