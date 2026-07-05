@@ -21,6 +21,7 @@ on:
 
 permissions:
   actions: read
+  attestations: write
   contents: write
   id-token: write
 
