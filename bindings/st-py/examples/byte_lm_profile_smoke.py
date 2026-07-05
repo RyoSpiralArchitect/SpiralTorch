@@ -54,6 +54,29 @@ REQUIRE_CHECKPOINT_TRANSFORMERS_RUNTIME_IMPORT_KEY = (
 REQUIRE_CHECKPOINT_TRANSFORMERS_RUNTIME_IMPORT_PRESET_KEY = (
     "require_checkpoint_transformers_runtime_import_preset"
 )
+WGPU_READINESS_PRESETS = {
+    "observed": {
+        "min_run_epoch_wgpu_hit_rate": 0.0,
+        "max_run_epoch_wgpu_runtime_fallback_rate": 1.0,
+        "max_run_epoch_wgpu_component_fallback_rate": 1.0,
+    },
+    "balanced": {
+        "min_run_epoch_wgpu_hit_rate": 0.5,
+        "max_run_epoch_wgpu_runtime_fallback_rate": 0.5,
+        "max_run_epoch_wgpu_component_fallback_rate": 0.5,
+        "max_run_epoch_wgpu_hit_rate_regression": 0.0,
+        "max_run_epoch_wgpu_runtime_fallback_rate_regression": 0.0,
+        "max_run_epoch_wgpu_component_fallback_rate_regression": 0.0,
+    },
+    "strict": {
+        "min_run_epoch_wgpu_hit_rate": 0.9,
+        "max_run_epoch_wgpu_runtime_fallback_rate": 0.1,
+        "max_run_epoch_wgpu_component_fallback_rate": 0.1,
+        "max_run_epoch_wgpu_hit_rate_regression": 0.0,
+        "max_run_epoch_wgpu_runtime_fallback_rate_regression": 0.0,
+        "max_run_epoch_wgpu_component_fallback_rate_regression": 0.0,
+    },
+}
 
 
 def source_value(source, key, default=None):
@@ -373,6 +396,21 @@ def parse_args():
             "Transformers trace, and produced-manifest validation. "
             "Use 'hf-runtime' to probe transformers, torch, and tokenizers. "
             "May be repeated."
+        ),
+    )
+    parser.add_argument(
+        "--wgpu-readiness-preset",
+        dest="wgpu_readiness_presets",
+        action="append",
+        choices=sorted(WGPU_READINESS_PRESETS),
+        default=[],
+        help=(
+            "Shortcut WGPU readiness gate bundle for profile_runner run-summary "
+            "and promotion checks. 'observed' requires WGPU metrics to be "
+            "available, 'balanced' requires at least 0.5 hit-rate with at most "
+            "0.5 fallback rates, and 'strict' requires at least 0.9 hit-rate "
+            "with at most 0.1 fallback rates. Explicit gate flags win. May be "
+            "repeated."
         ),
     )
     parser.add_argument(
@@ -1054,6 +1092,7 @@ def parse_args():
         parser.error("--continue-ft-epochs must be positive")
     if args.continue_ft_epochs_step is not None and args.continue_ft_epochs_step <= 0:
         parser.error("--continue-ft-epochs-step must be positive")
+    apply_wgpu_readiness_presets(args)
     apply_runtime_contract_presets(args)
     if (
         args.continue_manifest_jsonl is None
@@ -1363,6 +1402,17 @@ def apply_runtime_contract_presets(args):
     if not validation_only:
         args.validate_produced_manifest = True
     apply_runtime_contract_manifest_gates(args, presets)
+    return args
+
+
+def apply_wgpu_readiness_presets(args):
+    presets = list(dict.fromkeys(args.wgpu_readiness_presets or []))
+    defaults = {}
+    for preset in presets:
+        defaults.update(WGPU_READINESS_PRESETS[preset])
+    for attr, value in defaults.items():
+        if getattr(args, attr) is None:
+            setattr(args, attr, value)
     return args
 
 
@@ -2366,6 +2416,9 @@ def profile_smoke_manifest_validation_row(path, row, promoted_rungs_jsonl, rung_
         "configs": list(row.get("configs") or []),
         "profiles": list(row.get("profiles") or []),
         "promotion_metric": row.get("promotion_metric"),
+        "wgpu_readiness_presets": manifest_validation_csv_label(
+            row.get("wgpu_readiness_presets")
+        ),
         "declared_transformers_trace_runtime_import_presets": (
             manifest_validation_csv_label(declared_runtime_import_presets)
         ),
@@ -3823,6 +3876,9 @@ def continuation_plan_row(
             "profiles": list(profiles),
             "promotion_metric": promotion_metric,
             "strict_aggregate_gates": strict_aggregate_gates,
+            "wgpu_readiness_presets": list(
+                source_row.get("wgpu_readiness_presets") or []
+            ),
             "min_aggregate_epoch_wgpu_hit_rate": source_row.get(
                 "min_aggregate_epoch_wgpu_hit_rate"
             ),
@@ -4060,6 +4116,9 @@ def profile_smoke_manifest_row(
         "promoted_output_prefix": args.promoted_output_prefix,
         "promoted_ft_epochs_step": args.promoted_ft_epochs_step,
         "strict_aggregate_gates": args.strict_aggregate_gates,
+        "wgpu_readiness_presets": list(
+            getattr(args, "wgpu_readiness_presets", []) or []
+        ),
         "min_aggregate_epoch_wgpu_hit_rate": source_value(
             args,
             "min_aggregate_epoch_wgpu_hit_rate",
