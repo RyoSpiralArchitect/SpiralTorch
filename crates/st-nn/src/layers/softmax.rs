@@ -4,7 +4,8 @@
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
 use crate::execution::{
-    current_backend_policy, current_softmax_backend, current_tensor_util_backend_for_values,
+    current_backend_policy, current_softmax_backend, current_tensor_util_backend,
+    current_tensor_util_backend_for_values,
 };
 use crate::module::Module;
 use crate::{PureResult, Tensor};
@@ -62,6 +63,82 @@ fn zspace_softmax_wgpu_error(op_name: &'static str, message: String) -> TensorEr
         backend: "wgpu",
         message: format!("{op_name} wgpu path failed ({message}); fallback disabled"),
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_zspace_softmax_forward_meta(
+    rows: usize,
+    cols: usize,
+    requested_backend: &'static str,
+    backend: &'static str,
+    kernel: &'static str,
+    adaptive_temperature: bool,
+    entropy_rows: usize,
+    temperature_rows: usize,
+    curvature: f32,
+    base_temperature: f32,
+    min_temperature: f32,
+    max_temperature: f32,
+    entropy_target: Option<f32>,
+) {
+    emit_tensor_op("zspace_softmax_forward", &[rows, cols], &[rows, cols]);
+    emit_tensor_op_meta("zspace_softmax_forward", || {
+        let mut data = serde_json::Map::new();
+        data.insert("backend".to_string(), serde_json::json!(backend));
+        data.insert(
+            "requested_backend".to_string(),
+            serde_json::json!(requested_backend),
+        );
+        data.insert(
+            "softmax_requested_backend".to_string(),
+            serde_json::json!(current_softmax_requested_label()),
+        );
+        data.insert("kernel".to_string(), serde_json::json!(kernel));
+        data.insert("kind".to_string(), serde_json::json!("activation_forward"));
+        data.insert("rows".to_string(), serde_json::json!(rows));
+        data.insert("cols".to_string(), serde_json::json!(cols));
+        data.insert(
+            "values".to_string(),
+            serde_json::json!(rows.saturating_mul(cols)),
+        );
+        data.insert("output_rows".to_string(), serde_json::json!(rows));
+        data.insert("output_cols".to_string(), serde_json::json!(cols));
+        data.insert(
+            "output_values".to_string(),
+            serde_json::json!(rows.saturating_mul(cols)),
+        );
+        data.insert("curvature".to_string(), serde_json::json!(curvature));
+        data.insert(
+            "temperature".to_string(),
+            serde_json::json!(base_temperature),
+        );
+        data.insert(
+            "min_temperature".to_string(),
+            serde_json::json!(min_temperature),
+        );
+        data.insert(
+            "max_temperature".to_string(),
+            serde_json::json!(max_temperature),
+        );
+        data.insert(
+            "adaptive_temperature".to_string(),
+            serde_json::json!(adaptive_temperature),
+        );
+        data.insert(
+            "entropy_target".to_string(),
+            serde_json::json!(entropy_target),
+        );
+        data.insert("entropy_rows".to_string(), serde_json::json!(entropy_rows));
+        data.insert(
+            "temperature_rows".to_string(),
+            serde_json::json!(temperature_rows),
+        );
+        data.insert(
+            "empty".to_string(),
+            serde_json::json!(rows == 0 || cols == 0),
+        );
+        serde_json::Value::Object(data)
+    });
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -309,14 +386,15 @@ impl ZSpaceSoftmax {
         Ok((effective_temperature, true, gradient_active))
     }
 
-    fn batch_softmax_fixed_temperature(&self, input: &Tensor) -> PureResult<Tensor> {
+    fn batch_softmax_fixed_temperature(
+        &self,
+        input: &Tensor,
+        route_backend: TensorUtilBackend,
+    ) -> PureResult<Tensor> {
         let (_rows, cols) = input.shape();
         let factor = self.curvature_scale() / self.fixed_temperature();
         validate_finite_value("zspace_softmax_scale", factor)?;
-        let logits = input.scale_with_backend(
-            factor,
-            current_tensor_util_backend_for_values(input.data().len()),
-        )?;
+        let logits = input.scale_with_backend(factor, route_backend)?;
         let mut probs = logits.row_softmax_with_backend(current_softmax_backend())?;
         let data = probs.data_mut();
         for row in data.chunks_exact_mut(cols) {
@@ -412,10 +490,26 @@ impl Module for ZSpaceSoftmax {
             validate_finite_slice("zspace_softmax_temperature", &temperatures)?;
             self.last_entropies.replace(entropies);
             self.last_temperatures.replace(temperatures);
+            emit_zspace_softmax_forward_meta(
+                rows,
+                cols,
+                tensor_util_backend_label(current_tensor_util_backend()),
+                "cpu",
+                "zspace_softmax.forward_empty",
+                self.entropy_target.is_some(),
+                rows,
+                rows,
+                self.curvature,
+                self.temperature,
+                self.min_temperature,
+                self.max_temperature,
+                self.entropy_target,
+            );
             return Ok(output);
         }
         if self.entropy_target.is_none() {
-            let output = self.batch_softmax_fixed_temperature(input)?;
+            let route_backend = current_tensor_util_backend_for_values(input.data().len());
+            let output = self.batch_softmax_fixed_temperature(input, route_backend)?;
             let entropies = output
                 .data()
                 .chunks_exact(cols)
@@ -426,6 +520,21 @@ impl Module for ZSpaceSoftmax {
             validate_finite_slice("zspace_softmax_temperature", &temperatures)?;
             self.last_entropies.replace(entropies);
             self.last_temperatures.replace(temperatures);
+            emit_zspace_softmax_forward_meta(
+                rows,
+                cols,
+                tensor_util_backend_label(current_tensor_util_backend()),
+                tensor_util_backend_label(route_backend),
+                "zspace_softmax.forward_fixed",
+                false,
+                rows,
+                rows,
+                self.curvature,
+                self.temperature,
+                self.min_temperature,
+                self.max_temperature,
+                self.entropy_target,
+            );
             return Ok(output);
         }
 
@@ -447,6 +556,21 @@ impl Module for ZSpaceSoftmax {
         let output = Tensor::from_vec(rows, cols, output)?;
         self.last_entropies.replace(entropies);
         self.last_temperatures.replace(temperatures);
+        emit_zspace_softmax_forward_meta(
+            rows,
+            cols,
+            tensor_util_backend_label(current_tensor_util_backend()),
+            "cpu_adaptive",
+            "zspace_softmax.forward_adaptive",
+            true,
+            rows,
+            rows,
+            self.curvature,
+            self.temperature,
+            self.min_temperature,
+            self.max_temperature,
+            self.entropy_target,
+        );
         Ok(output)
     }
 
@@ -527,7 +651,7 @@ impl Module for ZSpaceSoftmax {
                 }
             }
 
-            let probs = self.batch_softmax_fixed_temperature(input)?;
+            let probs = self.batch_softmax_fixed_temperature(input, route_backend)?;
             let factor = scale / self.fixed_temperature();
             validate_finite_value("zspace_softmax_backward_factor", factor)?;
             let mut grad = Vec::with_capacity(rows * cols);
@@ -727,6 +851,21 @@ mod tests {
             })
             .expect("row softmax metadata event");
         assert!(softmax.1["backend"].as_str().is_some());
+
+        let zspace = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "zspace_softmax_forward" && data["rows"] == 2 && data["cols"] == 3
+            })
+            .expect("zspace softmax forward metadata event");
+        assert_eq!(zspace.1["kind"], "activation_forward");
+        assert_eq!(zspace.1["kernel"], "zspace_softmax.forward_fixed");
+        assert_eq!(zspace.1["requested_backend"], "auto");
+        assert_eq!(zspace.1["backend"], "auto");
+        assert_eq!(zspace.1["softmax_requested_backend"], "auto");
+        assert_eq!(zspace.1["adaptive_temperature"], false);
+        assert_eq!(zspace.1["entropy_rows"], 2);
+        assert_eq!(zspace.1["temperature_rows"], 2);
     }
 
     #[test]
@@ -905,6 +1044,44 @@ mod tests {
         let temps = layer.last_temperatures();
         assert_eq!(temps.len(), 1);
         assert!(temps[0] < 1.0);
+    }
+
+    #[test]
+    fn zspace_softmax_adaptive_forward_emits_meta() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let layer = ZSpaceSoftmax::new(-1.0, 1.0)
+            .unwrap()
+            .with_entropy_target(0.1, 1e-3, 1.0)
+            .unwrap()
+            .with_temperature_bounds(0.05, 2.0)
+            .unwrap();
+        let input = Tensor::from_vec(1, 3, vec![0.0, 0.0, 0.0]).unwrap();
+        let _ = layer.forward(&input).unwrap();
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        let events = events.lock().unwrap();
+        let zspace = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "zspace_softmax_forward" && data["rows"] == 1 && data["cols"] == 3
+            })
+            .expect("adaptive zspace softmax forward metadata event");
+        assert_eq!(zspace.1["backend"], "cpu_adaptive");
+        assert_eq!(zspace.1["kernel"], "zspace_softmax.forward_adaptive");
+        assert_eq!(zspace.1["adaptive_temperature"], true);
+        let entropy_target = zspace.1["entropy_target"].as_f64().unwrap();
+        assert!((entropy_target - 0.1).abs() < 1.0e-6);
+        assert_eq!(zspace.1["entropy_rows"], 1);
+        assert_eq!(zspace.1["temperature_rows"], 1);
     }
 
     #[test]
