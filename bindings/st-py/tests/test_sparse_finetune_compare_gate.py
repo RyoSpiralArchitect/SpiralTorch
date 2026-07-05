@@ -2992,6 +2992,9 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             case_jsonls=[Path("/tmp/external-cases.jsonl")],
             lora_config_jsonls=[Path("/tmp/lora-configs.jsonl")],
             extra_args=["--min-aggregate-retention-accuracy-margin", "0.5"],
+            min_aggregate_epoch_wgpu_hit_rate=0.8,
+            max_aggregate_epoch_wgpu_runtime_fallback_rate=0.1,
+            max_aggregate_epoch_wgpu_component_fallback_rate=0.25,
         )
         self.assertEqual(len(command_rows), 1)
         row = command_rows[0]
@@ -3044,6 +3047,12 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertIn("--require-aggregate-case", command)
         self.assertIn("--aggregate-jsonl", command)
         self.assertIn("--min-aggregate-retention-accuracy-margin", command)
+        self.assertIn("--min-aggregate-epoch-wgpu-hit-rate", command)
+        self.assertIn("0.8", command)
+        self.assertIn("--max-aggregate-epoch-wgpu-runtime-fallback-rate", command)
+        self.assertIn("0.1", command)
+        self.assertIn("--max-aggregate-epoch-wgpu-component-fallback-rate", command)
+        self.assertIn("0.25", command)
         self.assertEqual(row["configs"], "r12_a64_lr4")
         self.assertIn(
             "profile-selective-ratio-llama-3-2-3b-r12-a64-lr4-zspace-s1-cm0p04-f0p65-gain-g2-wd0p01-gn1p5-accum4-ep6-tmin0p001-pat3-md0-ldp2-ldf0p8-ldmd0",
@@ -3612,6 +3621,9 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             promotion_metric="target_loss_delta_mean",
             promoted_output_prefix="profile-smoke-promoted",
             strict_aggregate_gates=False,
+            min_aggregate_epoch_wgpu_hit_rate=0.8,
+            max_aggregate_epoch_wgpu_runtime_fallback_rate=0.1,
+            max_aggregate_epoch_wgpu_component_fallback_rate=0.25,
             skip_checkpoint_shape_audit=False,
             skip_checkpoint_preflight=False,
             compare_checkpoint_preflight_jsonl=out_dir / "checkpoint-preflight-baseline.jsonl",
@@ -3645,6 +3657,19 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertEqual(smoke_manifest_row["source_label"], "llama-3.2-3b")
         self.assertEqual(smoke_manifest_row["cases"], ["adapter_ja", "route_cats"])
         self.assertEqual(smoke_manifest_row["promoted_ft_epochs"], [2, 3])
+        self.assertEqual(smoke_manifest_row["min_aggregate_epoch_wgpu_hit_rate"], 0.8)
+        self.assertEqual(
+            smoke_manifest_row[
+                "max_aggregate_epoch_wgpu_runtime_fallback_rate"
+            ],
+            0.1,
+        )
+        self.assertEqual(
+            smoke_manifest_row[
+                "max_aggregate_epoch_wgpu_component_fallback_rate"
+            ],
+            0.25,
+        )
         self.assertTrue(smoke_manifest_row["require_checkpoint_preflight_match"])
         self.assertEqual(
             smoke_manifest_row["compare_checkpoint_preflight_jsonl"],
@@ -6987,6 +7012,13 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             "--require-checkpoint-preflight-match",
             "--shape-audit-require-detected-key-preset",
             "llama",
+            "--strict-aggregate-gates",
+            "--min-aggregate-epoch-wgpu-hit-rate",
+            "0.8",
+            "--max-aggregate-epoch-wgpu-runtime-fallback-rate",
+            "0.1",
+            "--max-aggregate-epoch-wgpu-component-fallback-rate",
+            "0.25",
             "--skip-promoted-follow-up",
             "--dry-run",
         ]
@@ -7009,6 +7041,9 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertIn("--allow-overlap-resize", text)
         self.assertIn("--checkpoint-projection-preset healthy", text)
         self.assertIn("--checkpoint-source-gain 2", text)
+        self.assertIn("--min-aggregate-epoch-wgpu-hit-rate 0.8", text)
+        self.assertIn("--max-aggregate-epoch-wgpu-runtime-fallback-rate 0.1", text)
+        self.assertIn("--max-aggregate-epoch-wgpu-component-fallback-rate 0.25", text)
         self.assertIn("--transformers-audit", text)
         self.assertIn("--transformers-model-path /models/llama", text)
         self.assertIn("--transformers-revision main", text)
@@ -7073,6 +7108,27 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             text,
         )
         self.assertIn("promoted_follow_up=skipped", text)
+
+    def test_mlp_lora_profile_runner_rejects_disabled_epoch_wgpu_aggregate_gates(self):
+        module = load_example("byte_lm_mlp_lora_profile_runner")
+        old_argv = sys.argv
+        sys.argv = [
+            "byte_lm_mlp_lora_profile_runner.py",
+            "--profile-jsonl",
+            "/tmp/profiles.jsonl",
+            "--source-path",
+            "fixture=/models/fixture",
+            "--no-aggregate-gates",
+            "--min-aggregate-epoch-wgpu-hit-rate",
+            "0.8",
+        ]
+        try:
+            stderr = io.StringIO()
+            with self.assertRaises(SystemExit), contextlib.redirect_stderr(stderr):
+                module.parse_args()
+        finally:
+            sys.argv = old_argv
+        self.assertIn("cannot be combined with --no-aggregate-gates", stderr.getvalue())
 
     def test_mlp_lora_profile_runner_rejects_missing_source_path(self):
         module = load_example("byte_lm_mlp_lora_profile_runner")

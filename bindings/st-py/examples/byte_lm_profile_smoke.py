@@ -913,6 +913,36 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--min-aggregate-epoch-wgpu-hit-rate",
+        type=float,
+        default=None,
+        help=(
+            "Forward an aggregate epoch WGPU hit-rate floor to the initial "
+            "sweep and promoted profile_runner commands. Requires "
+            "--strict-aggregate-gates."
+        ),
+    )
+    parser.add_argument(
+        "--max-aggregate-epoch-wgpu-runtime-fallback-rate",
+        type=float,
+        default=None,
+        help=(
+            "Forward an aggregate epoch WGPU runtime-fallback-rate ceiling to "
+            "the initial sweep and promoted profile_runner commands. Requires "
+            "--strict-aggregate-gates."
+        ),
+    )
+    parser.add_argument(
+        "--max-aggregate-epoch-wgpu-component-fallback-rate",
+        type=float,
+        default=None,
+        help=(
+            "Forward an aggregate epoch WGPU component-fallback-rate ceiling "
+            "to the initial sweep and promoted profile_runner commands. "
+            "Requires --strict-aggregate-gates."
+        ),
+    )
+    parser.add_argument(
         "--keep-existing",
         action="store_true",
         help="Keep existing output files in --out-dir instead of cleaning this smoke's artifacts first.",
@@ -1018,6 +1048,18 @@ def parse_args():
         )
     for attr, flag in [
         (
+            "min_aggregate_epoch_wgpu_hit_rate",
+            "--min-aggregate-epoch-wgpu-hit-rate",
+        ),
+        (
+            "max_aggregate_epoch_wgpu_runtime_fallback_rate",
+            "--max-aggregate-epoch-wgpu-runtime-fallback-rate",
+        ),
+        (
+            "max_aggregate_epoch_wgpu_component_fallback_rate",
+            "--max-aggregate-epoch-wgpu-component-fallback-rate",
+        ),
+        (
             "min_manifest_transformers_trainer_wgpu_hit_rate",
             "--min-manifest-transformers-trainer-wgpu-hit-rate",
         ),
@@ -1033,6 +1075,13 @@ def parse_args():
         rate = getattr(args, attr)
         if rate is not None and not (0.0 <= rate <= 1.0):
             parser.error(f"{flag} must be between 0.0 and 1.0")
+    aggregate_epoch_wgpu_gate_requested = (
+        args.min_aggregate_epoch_wgpu_hit_rate is not None
+        or args.max_aggregate_epoch_wgpu_runtime_fallback_rate is not None
+        or args.max_aggregate_epoch_wgpu_component_fallback_rate is not None
+    )
+    if aggregate_epoch_wgpu_gate_requested and not args.strict_aggregate_gates:
+        parser.error("aggregate epoch WGPU gates require --strict-aggregate-gates")
     if args.continue_plan_jsonl is not None and args.continue_manifest_jsonl is None:
         parser.error("--continue-plan-jsonl requires --continue-manifest-jsonl")
     if args.checkpoint_source_gain is not None and args.checkpoint_source_gain <= 0.0:
@@ -3339,6 +3388,28 @@ def run_guard_args(ft_epochs):
     ]
 
 
+def aggregate_epoch_wgpu_gate_args(source):
+    flags = []
+    for key, flag in [
+        (
+            "min_aggregate_epoch_wgpu_hit_rate",
+            "--min-aggregate-epoch-wgpu-hit-rate",
+        ),
+        (
+            "max_aggregate_epoch_wgpu_runtime_fallback_rate",
+            "--max-aggregate-epoch-wgpu-runtime-fallback-rate",
+        ),
+        (
+            "max_aggregate_epoch_wgpu_component_fallback_rate",
+            "--max-aggregate-epoch-wgpu-component-fallback-rate",
+        ),
+    ]:
+        value = source_value(source, key)
+        if value is not None:
+            flags.extend([flag, f"{float(value):g}"])
+    return flags
+
+
 def promotion_ready_args(ft_epochs, profiles, promotion_metric, promotion_jsonl):
     return [
         "--promotion-jsonl",
@@ -3478,6 +3549,15 @@ def continuation_plan_row(
             "profiles": list(profiles),
             "promotion_metric": promotion_metric,
             "strict_aggregate_gates": strict_aggregate_gates,
+            "min_aggregate_epoch_wgpu_hit_rate": source_row.get(
+                "min_aggregate_epoch_wgpu_hit_rate"
+            ),
+            "max_aggregate_epoch_wgpu_runtime_fallback_rate": source_row.get(
+                "max_aggregate_epoch_wgpu_runtime_fallback_rate"
+            ),
+            "max_aggregate_epoch_wgpu_component_fallback_rate": source_row.get(
+                "max_aggregate_epoch_wgpu_component_fallback_rate"
+            ),
         }
     )
     row.update(trace_policy_fields(source_row))
@@ -3703,6 +3783,16 @@ def profile_smoke_manifest_row(
         "promoted_output_prefix": args.promoted_output_prefix,
         "promoted_ft_epochs_step": args.promoted_ft_epochs_step,
         "strict_aggregate_gates": args.strict_aggregate_gates,
+        "min_aggregate_epoch_wgpu_hit_rate": source_value(
+            args,
+            "min_aggregate_epoch_wgpu_hit_rate",
+        ),
+        "max_aggregate_epoch_wgpu_runtime_fallback_rate": (
+            source_value(args, "max_aggregate_epoch_wgpu_runtime_fallback_rate")
+        ),
+        "max_aggregate_epoch_wgpu_component_fallback_rate": (
+            source_value(args, "max_aggregate_epoch_wgpu_component_fallback_rate")
+        ),
         "checkpoint_shape_audit_jsonl": optional_path(
             None if args.skip_checkpoint_shape_audit else checkpoint_shape_audit_jsonl
         ),
@@ -3936,6 +4026,7 @@ def continue_profile_smoke_from_manifest(args):
             "--require-promotion-ready-guard-policy",
         ]
         promoted_runner_cmd.extend(run_guard_args(promoted_ft_epochs))
+        promoted_runner_cmd.extend(aggregate_epoch_wgpu_gate_args(row))
         if not strict_aggregate_gates:
             promoted_runner_cmd.append("--no-aggregate-gates")
         extend_profile_filters(promoted_runner_cmd, profiles)
@@ -4219,6 +4310,7 @@ def main():
         sweep_cmd.extend(["--case", case, "--require-aggregate-case", case])
     for config in configs:
         sweep_cmd.extend(["--config", config])
+    sweep_cmd.extend(aggregate_epoch_wgpu_gate_args(args))
     run_command(sweep_cmd, dry_run=args.dry_run)
 
     source_compare_cmd = [
@@ -4263,6 +4355,7 @@ def main():
         run_summary_jsonl,
     ]
     profile_runner_cmd.extend(run_guard_args(args.ft_epochs))
+    profile_runner_cmd.extend(aggregate_epoch_wgpu_gate_args(args))
     profile_runner_cmd.extend(
         promotion_ready_args(args.ft_epochs, profiles, args.promotion_metric, promotion_jsonl)
     )
@@ -4331,6 +4424,7 @@ def main():
             "--require-promotion-ready-guard-policy",
         ]
         promoted_runner_cmd.extend(run_guard_args(promoted_ft_epochs))
+        promoted_runner_cmd.extend(aggregate_epoch_wgpu_gate_args(args))
         if not args.strict_aggregate_gates:
             promoted_runner_cmd.append("--no-aggregate-gates")
         extend_profile_filters(promoted_runner_cmd, profiles)

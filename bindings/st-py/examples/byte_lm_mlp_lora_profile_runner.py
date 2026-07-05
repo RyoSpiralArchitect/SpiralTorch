@@ -636,6 +636,36 @@ def parse_args():
         help="Do not add multi-case aggregate coverage gates to generated commands.",
     )
     parser.add_argument(
+        "--min-aggregate-epoch-wgpu-hit-rate",
+        type=float,
+        default=None,
+        help=(
+            "Forward a current aggregate "
+            "epoch_tensor_backend_requested_wgpu_hit_rate_mean floor to every "
+            "materialized sweep command."
+        ),
+    )
+    parser.add_argument(
+        "--max-aggregate-epoch-wgpu-runtime-fallback-rate",
+        type=float,
+        default=None,
+        help=(
+            "Forward a current aggregate "
+            "epoch_tensor_backend_requested_wgpu_runtime_fallback_rate_mean "
+            "ceiling to every materialized sweep command."
+        ),
+    )
+    parser.add_argument(
+        "--max-aggregate-epoch-wgpu-component-fallback-rate",
+        type=float,
+        default=None,
+        help=(
+            "Forward a current aggregate "
+            "epoch_tensor_backend_requested_wgpu_component_fallback_rate_mean "
+            "ceiling to every materialized sweep command."
+        ),
+    )
+    parser.add_argument(
         "--run",
         action="store_true",
         help="Actually run generated commands. Without this, commands are only printed/written.",
@@ -756,6 +786,9 @@ def parse_args():
         "max_run_guard_target_stale_epochs_mean",
         "max_run_guard_retention_rejected_rate_mean",
         "max_run_guard_target_stale_rate_mean",
+        "min_aggregate_epoch_wgpu_hit_rate",
+        "max_aggregate_epoch_wgpu_runtime_fallback_rate",
+        "max_aggregate_epoch_wgpu_component_fallback_rate",
     ]:
         value = getattr(args, name)
         if value is not None and value < 0.0:
@@ -766,6 +799,15 @@ def parse_args():
             and value > 1.0
         ):
             parser.error(f"--{name.replace('_', '-')} must be at most 1.0")
+    aggregate_epoch_wgpu_gate_requested = (
+        args.min_aggregate_epoch_wgpu_hit_rate is not None
+        or args.max_aggregate_epoch_wgpu_runtime_fallback_rate is not None
+        or args.max_aggregate_epoch_wgpu_component_fallback_rate is not None
+    )
+    if args.no_aggregate_gates and aggregate_epoch_wgpu_gate_requested:
+        parser.error(
+            "aggregate epoch WGPU gates cannot be combined with --no-aggregate-gates"
+        )
     run_gate_requested = (
         args.max_run_target_loss_regression is not None
         or args.max_run_retention_loss_regression is not None
@@ -1655,6 +1697,9 @@ def build_profile_command(
     lora_config_jsonls=None,
     extra_args=None,
     aggregate_gates=True,
+    min_aggregate_epoch_wgpu_hit_rate=None,
+    max_aggregate_epoch_wgpu_runtime_fallback_rate=None,
+    max_aggregate_epoch_wgpu_component_fallback_rate=None,
     ft_control_override=None,
 ):
     effective_row = apply_ft_control_override(row, ft_control_override)
@@ -1705,6 +1750,27 @@ def build_profile_command(
                 "1.0",
             ]
         )
+        if min_aggregate_epoch_wgpu_hit_rate is not None:
+            command.extend(
+                [
+                    "--min-aggregate-epoch-wgpu-hit-rate",
+                    f"{float(min_aggregate_epoch_wgpu_hit_rate):g}",
+                ]
+            )
+        if max_aggregate_epoch_wgpu_runtime_fallback_rate is not None:
+            command.extend(
+                [
+                    "--max-aggregate-epoch-wgpu-runtime-fallback-rate",
+                    f"{float(max_aggregate_epoch_wgpu_runtime_fallback_rate):g}",
+                ]
+            )
+        if max_aggregate_epoch_wgpu_component_fallback_rate is not None:
+            command.extend(
+                [
+                    "--max-aggregate-epoch-wgpu-component-fallback-rate",
+                    f"{float(max_aggregate_epoch_wgpu_component_fallback_rate):g}",
+                ]
+            )
     command.extend(["--jsonl", str(jsonl_path), "--aggregate-jsonl", str(aggregate_path)])
     command.extend(extra_args or [])
     return {
@@ -1806,6 +1872,9 @@ def command_rows_for_profiles(
     lora_config_jsonls=None,
     extra_args=None,
     aggregate_gates=True,
+    min_aggregate_epoch_wgpu_hit_rate=None,
+    max_aggregate_epoch_wgpu_runtime_fallback_rate=None,
+    max_aggregate_epoch_wgpu_component_fallback_rate=None,
     promotion_rows=None,
     promotion_ready_only=True,
     ft_control_override=None,
@@ -1834,6 +1903,13 @@ def command_rows_for_profiles(
             lora_config_jsonls=lora_config_jsonls,
             extra_args=extra_args,
             aggregate_gates=aggregate_gates,
+            min_aggregate_epoch_wgpu_hit_rate=min_aggregate_epoch_wgpu_hit_rate,
+            max_aggregate_epoch_wgpu_runtime_fallback_rate=(
+                max_aggregate_epoch_wgpu_runtime_fallback_rate
+            ),
+            max_aggregate_epoch_wgpu_component_fallback_rate=(
+                max_aggregate_epoch_wgpu_component_fallback_rate
+            ),
             ft_control_override=ft_control_override,
         )
         for row in selected
@@ -3538,6 +3614,13 @@ def main():
         lora_config_jsonls=args.lora_config_jsonls,
         extra_args=args.extra_args,
         aggregate_gates=not args.no_aggregate_gates,
+        min_aggregate_epoch_wgpu_hit_rate=args.min_aggregate_epoch_wgpu_hit_rate,
+        max_aggregate_epoch_wgpu_runtime_fallback_rate=(
+            args.max_aggregate_epoch_wgpu_runtime_fallback_rate
+        ),
+        max_aggregate_epoch_wgpu_component_fallback_rate=(
+            args.max_aggregate_epoch_wgpu_component_fallback_rate
+        ),
         promotion_rows=promotion_jsonl_rows,
         promotion_ready_only=not args.include_non_ready_promotions,
         ft_control_override=args.ft_control_override,
