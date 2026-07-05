@@ -14,6 +14,7 @@ __all__ = [
     "bound_external_state_tensors",
     "checkpoint_from_external_state",
     "external_tensor_last_token",
+    "external_tensor_metadata",
     "external_tensor_shape",
     "external_tensor_to_list",
     "slice_external_tensor",
@@ -173,11 +174,88 @@ def _external_shape_from_materialized(value: Any, name: str) -> tuple[int, ...]:
     return tuple(int(dim) for dim in shape)
 
 
+def _external_device_kind(device: Any | None) -> str | None:
+    if device is None:
+        return None
+    label = str(device).strip().lower()
+    if not label:
+        return None
+    return label.split(":", 1)[0]
+
+
+def _external_tensor_backend(value: Any, device: Any | None) -> str:
+    if _looks_like_spiraltorch_tensor(value):
+        return "spiraltorch"
+    if isinstance(value, (list, tuple)):
+        return "python_sequence"
+
+    module = type(value).__module__.split(".", 1)[0]
+    if module in {"torch", "numpy", "jax", "tensorflow", "cupy", "mlx"}:
+        return module
+    if callable(getattr(value, "detach", None)) and _external_device_kind(device) in {
+        "cpu",
+        "cuda",
+        "mps",
+    }:
+        return "torch"
+    if module and module != "builtins":
+        return module
+    return type(value).__name__
+
+
+def _external_bool_metadata(value: Any) -> bool | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    return None
+
+
+def _external_shape_label(shape: tuple[int, ...] | None) -> str | None:
+    if shape is None:
+        return None
+    return "x".join(str(dim) for dim in shape)
+
+
 def external_tensor_shape(value: Any, *, name: str = "tensor") -> tuple[int, ...]:
     """Return shape metadata for a torch/numpy/list-like external tensor."""
 
     materialized = _materialize_external_tensor(value)
     return _external_shape_from_materialized(materialized, name)
+
+
+def external_tensor_metadata(value: Any, *, name: str = "tensor") -> dict[str, Any]:
+    """Return non-materializing metadata for a torch/numpy/list-like tensor.
+
+    Unlike conversion helpers, this intentionally avoids ``cpu()``/``float()`` so
+    traces can preserve the runtime/device where an external tensor originated.
+    """
+
+    shape = None
+    shape_error = None
+    try:
+        shape = _external_shape_from_materialized(value, name)
+    except (TypeError, ValueError) as exc:
+        shape_error = f"{exc.__class__.__name__}: {exc}"
+
+    dtype = getattr(value, "dtype", None)
+    device = getattr(value, "device", None)
+    requires_grad = getattr(value, "requires_grad", None)
+    module = type(value).__module__
+    return {
+        "name": name,
+        "type": type(value).__name__,
+        "module": module,
+        "backend": _external_tensor_backend(value, device),
+        "shape": shape,
+        "shape_label": _external_shape_label(shape),
+        "shape_rank": None if shape is None else len(shape),
+        "shape_error": shape_error,
+        "dtype": None if dtype is None else str(dtype),
+        "device": None if device is None else str(device),
+        "device_kind": _external_device_kind(device),
+        "requires_grad": _external_bool_metadata(requires_grad),
+    }
 
 
 def _flatten_sequence(value: Any) -> list[Any]:

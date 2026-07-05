@@ -237,6 +237,54 @@ def test_external_tensor_last_token_handles_transformers_shapes(
     ]
 
 
+def test_external_tensor_metadata_preserves_runtime_device_without_materializing(
+    stub_spiraltorch, monkeypatch
+):
+    ecosystem = _load_ecosystem(stub_spiraltorch, monkeypatch)
+
+    nested = [[[0.1, 0.2], [0.3, 0.4]]]
+    assert ecosystem.external_tensor_metadata(nested, name="logits") == {
+        "name": "logits",
+        "type": "list",
+        "module": "builtins",
+        "backend": "python_sequence",
+        "shape": (1, 2, 2),
+        "shape_label": "1x2x2",
+        "shape_rank": 3,
+        "shape_error": None,
+        "dtype": None,
+        "device": None,
+        "device_kind": None,
+        "requires_grad": None,
+    }
+
+    class TorchLike:
+        shape = (1, 2, 3)
+        dtype = "torch.float16"
+        device = "cuda:0"
+        requires_grad = True
+
+        def __init__(self):
+            self.calls: list[str] = []
+
+        def detach(self):
+            self.calls.append("detach")
+            return self
+
+    value = TorchLike()
+    metadata = ecosystem.external_tensor_metadata(value, name="hidden_state")
+
+    assert metadata["backend"] == "torch"
+    assert metadata["shape"] == (1, 2, 3)
+    assert metadata["shape_label"] == "1x2x3"
+    assert metadata["shape_rank"] == 3
+    assert metadata["dtype"] == "torch.float16"
+    assert metadata["device"] == "cuda:0"
+    assert metadata["device_kind"] == "cuda"
+    assert metadata["requires_grad"] is True
+    assert value.calls == []
+
+
 def test_slice_external_tensor_prefers_bounded_external_slice(
     stub_spiraltorch, monkeypatch
 ):

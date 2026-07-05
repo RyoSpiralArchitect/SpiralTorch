@@ -24,6 +24,7 @@ from spiraltorch.runtime_imports import (
 import spiraltorch as st
 from spiraltorch.ecosystem import (
     external_tensor_last_token,
+    external_tensor_metadata,
     external_tensor_shape,
     external_tensor_to_list,
 )
@@ -465,12 +466,16 @@ def decode_token(tokenizer, token_id):
         return decode(int(token_id))
 
 
-def encoded_token_count(encoded):
-    input_ids = encoded.get("input_ids") if isinstance(encoded, Mapping) else getattr(
+def encoded_input_ids(encoded):
+    return encoded.get("input_ids") if isinstance(encoded, Mapping) else getattr(
         encoded,
         "input_ids",
         None,
     )
+
+
+def encoded_token_count(encoded):
+    input_ids = encoded_input_ids(encoded)
     if input_ids is None:
         return None
     try:
@@ -480,6 +485,41 @@ def encoded_token_count(encoded):
     if len(shape) >= 2:
         return shape[-1]
     return shape[0]
+
+
+def tensor_metadata_fields(prefix, value):
+    fields = {
+        f"{prefix}_tensor_available": value is not None,
+        f"{prefix}_tensor_backend": None,
+        f"{prefix}_tensor_type": None,
+        f"{prefix}_tensor_module": None,
+        f"{prefix}_tensor_shape": None,
+        f"{prefix}_tensor_shape_rank": None,
+        f"{prefix}_tensor_shape_error": None,
+        f"{prefix}_tensor_dtype": None,
+        f"{prefix}_tensor_device": None,
+        f"{prefix}_tensor_device_kind": None,
+        f"{prefix}_tensor_requires_grad": None,
+    }
+    if value is None:
+        return fields
+
+    metadata = external_tensor_metadata(value, name=prefix)
+    fields.update(
+        {
+            f"{prefix}_tensor_backend": metadata.get("backend"),
+            f"{prefix}_tensor_type": metadata.get("type"),
+            f"{prefix}_tensor_module": metadata.get("module"),
+            f"{prefix}_tensor_shape": metadata.get("shape_label"),
+            f"{prefix}_tensor_shape_rank": metadata.get("shape_rank"),
+            f"{prefix}_tensor_shape_error": metadata.get("shape_error"),
+            f"{prefix}_tensor_dtype": metadata.get("dtype"),
+            f"{prefix}_tensor_device": metadata.get("device"),
+            f"{prefix}_tensor_device_kind": metadata.get("device_kind"),
+            f"{prefix}_tensor_requires_grad": metadata.get("requires_grad"),
+        }
+    )
+    return fields
 
 
 def call_tokenizer(tokenizer, prompt):
@@ -721,6 +761,10 @@ def trace_prompt(args, tokenizer, model, prompt, index):
         encoded,
         capture_hidden_states=args.capture_hidden_states,
     )
+    input_ids = encoded_input_ids(encoded)
+    logits_tensor = output_value(outputs, "logits")
+    hidden_states = output_value(outputs, "hidden_states")
+    hidden_tensor = hidden_states[-1] if hidden_states else None
     logits = logits_vector(outputs)
     top = top_k_logits(logits, args.top_k)
     hidden, hidden_shape = hidden_vector(outputs)
@@ -761,6 +805,9 @@ def trace_prompt(args, tokenizer, model, prompt, index):
         ),
         "top_probability_sum": top["top_probability_sum"],
     }
+    row.update(tensor_metadata_fields("input_ids", input_ids))
+    row.update(tensor_metadata_fields("logits", logits_tensor))
+    row.update(tensor_metadata_fields("hidden_state", hidden_tensor))
     row.update(projection)
     return row
 
@@ -930,6 +977,32 @@ def failure_label(failures):
     return ",".join(failures) if failures else "none"
 
 
+TRACE_TENSOR_RUNTIME_FIELDS = [
+    "input_ids_tensor_backend",
+    "input_ids_tensor_device",
+    "input_ids_tensor_device_kind",
+    "input_ids_tensor_dtype",
+    "logits_tensor_backend",
+    "logits_tensor_device",
+    "logits_tensor_device_kind",
+    "logits_tensor_dtype",
+    "hidden_state_tensor_backend",
+    "hidden_state_tensor_device",
+    "hidden_state_tensor_device_kind",
+    "hidden_state_tensor_dtype",
+]
+
+
+def changed_tensor_runtime_fields(current, baseline):
+    changed = []
+    for field in TRACE_TENSOR_RUNTIME_FIELDS:
+        before = baseline.get(field)
+        after = current.get(field)
+        if before != after and (before is not None or after is not None):
+            changed.append(field)
+    return changed
+
+
 def numeric_detail_values(rows, key):
     values = []
     for row in rows:
@@ -1016,6 +1089,7 @@ def compare_prompt_rows(current, baseline, args):
         zspace_status_before != zspace_status_after
         and (zspace_status_before is not None or zspace_status_after is not None)
     )
+    tensor_runtime_changes = changed_tensor_runtime_fields(current, baseline)
     failures = []
     if args.require_trace_match and prompt_changed:
         failures.append("prompt_changed")
@@ -1053,6 +1127,8 @@ def compare_prompt_rows(current, baseline, args):
         "zspace_status_before": zspace_status_before,
         "zspace_status_after": zspace_status_after,
         "zspace_status_changed": zspace_status_changed,
+        "tensor_runtime_changed": bool(tensor_runtime_changes),
+        "tensor_runtime_changed_fields": failure_label(tensor_runtime_changes),
         "failures": failure_label(failures),
         "passed": not failures,
     }
@@ -1142,6 +1218,10 @@ def compare_trace_rows(current_rows, baseline_rows, args):
             compared_details,
             "zspace_status_changed",
         ),
+        "tensor_runtime_changed_rows": count_detail_flag(
+            compared_details,
+            "tensor_runtime_changed",
+        ),
         "observed_max_top_logit_regression": max_detail_value(
             compared_details,
             "top_logit_regression",
@@ -1176,6 +1256,7 @@ def print_compare_summary(row):
         f"prompt_changed_rows={row['prompt_changed_rows']} "
         f"top_token_changed_rows={row['top_token_changed_rows']} "
         f"zspace_status_changed_rows={row['zspace_status_changed_rows']} "
+        f"tensor_runtime_changed_rows={row['tensor_runtime_changed_rows']} "
         "observed_max_top_logit_regression="
         f"{row['observed_max_top_logit_regression']} "
         "observed_max_top_probability_regression="

@@ -8788,6 +8788,18 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertTrue(row["hidden_state_available"])
         self.assertEqual(row["hidden_state_shape"], "1x1x3")
         self.assertEqual(row["hidden_state_dims"], 3)
+        self.assertTrue(row["input_ids_tensor_available"])
+        self.assertEqual(row["input_ids_tensor_backend"], "python_sequence")
+        self.assertEqual(row["input_ids_tensor_shape"], "1x3")
+        self.assertEqual(row["input_ids_tensor_shape_rank"], 2)
+        self.assertEqual(row["logits_tensor_backend"], "python_sequence")
+        self.assertEqual(row["logits_tensor_shape"], "1x1x4")
+        self.assertEqual(row["logits_tensor_shape_rank"], 3)
+        self.assertTrue(row["hidden_state_tensor_available"])
+        self.assertEqual(row["hidden_state_tensor_backend"], "python_sequence")
+        self.assertEqual(row["hidden_state_tensor_shape"], "1x1x3")
+        self.assertEqual(row["hidden_state_tensor_shape_rank"], 3)
+        self.assertIsNone(row["hidden_state_tensor_device"])
         self.assertFalse(row["zspace_projection_requested"])
 
     def test_transformers_trace_cli_writes_jsonl_without_real_transformers(self):
@@ -8852,6 +8864,10 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertIs(
             module.external_tensor_to_list,
             ecosystem.external_tensor_to_list,
+        )
+        self.assertIs(
+            module.external_tensor_metadata,
+            ecosystem.external_tensor_metadata,
         )
 
     def test_transformers_trace_runtime_contract_preset_expands_direct_gates(self):
@@ -9389,6 +9405,62 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         )
         self.assertAlmostEqual(summary["observed_max_logit_l2_change"], 0.6)
         self.assertAlmostEqual(summary["observed_max_hidden_state_l2_change"], 0.3)
+        self.assertEqual(summary["tensor_runtime_changed_rows"], 0)
+
+    def test_transformers_trace_compare_reports_tensor_runtime_drift(self):
+        module = load_example("byte_lm_transformers_trace")
+        args = argparse.Namespace(
+            require_trace_match=False,
+            require_runtime_metadata_match=False,
+            require_top_token_match=False,
+            max_top_logit_regression=None,
+            max_top_probability_regression=None,
+            max_logit_l2_change=None,
+            max_hidden_state_l2_change=None,
+        )
+        baseline = [
+            {
+                "row_type": "transformers_prompt_trace",
+                "prompt_index": 0,
+                "prompt": "spiral",
+                "top_token_ids": "3",
+                "top_logits": "1.1",
+                "top_probabilities": "0.5",
+                "logit_l2": 1.2,
+                "hidden_state_l2": 0.9,
+                "logits_tensor_backend": "torch",
+                "logits_tensor_device": "mps:0",
+                "logits_tensor_device_kind": "mps",
+                "hidden_state_tensor_backend": "torch",
+                "hidden_state_tensor_device": "mps:0",
+                "hidden_state_tensor_device_kind": "mps",
+            }
+        ]
+        current = [
+            dict(
+                baseline[0],
+                logits_tensor_device="cuda:0",
+                logits_tensor_device_kind="cuda",
+                hidden_state_tensor_backend="python_sequence",
+                hidden_state_tensor_device=None,
+                hidden_state_tensor_device_kind=None,
+            )
+        ]
+
+        rows = module.compare_trace_rows(current, baseline, args)
+        summary, detail = rows
+
+        self.assertTrue(summary["passed"])
+        self.assertEqual(summary["tensor_runtime_changed_rows"], 1)
+        self.assertTrue(detail["tensor_runtime_changed"])
+        self.assertIn(
+            "logits_tensor_device",
+            detail["tensor_runtime_changed_fields"],
+        )
+        self.assertIn(
+            "hidden_state_tensor_backend",
+            detail["tensor_runtime_changed_fields"],
+        )
 
     def test_transformers_trace_zspace_status_gate_checks_current_rows(self):
         module = load_example("byte_lm_transformers_trace")
