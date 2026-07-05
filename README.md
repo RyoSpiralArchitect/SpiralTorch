@@ -491,6 +491,7 @@ Linux note: for manylinux2014 wheels you either need a manylinux container (e.g.
 python scripts/publish_pypi_wheels.py \
   --dist /tmp/spiraltorch-0.4.10-dist \
   --expected-version 0.4.10 \
+  --github-release-tag v0.4.10 \
   --dry-run
 
 # Real upload: reads a `pypi-...` token from the macOS clipboard, uploads the
@@ -498,6 +499,7 @@ python scripts/publish_pypi_wheels.py \
 python scripts/publish_pypi_wheels.py \
   --dist /tmp/spiraltorch-0.4.10-dist \
   --expected-version 0.4.10 \
+  --github-release-tag v0.4.10 \
   --skip-existing
 
 # Signed GitHub Release recovery: run the fixed workflow from main, rebuild
