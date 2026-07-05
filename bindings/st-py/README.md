@@ -109,9 +109,17 @@ diagnostic surface for local HF/PyTorch-style checkpoints without making Torch,
 safetensors, or Transformers hard dependencies of the binding. Start with
 `examples/byte_lm_profile_smoke.py --hf-state-dict <path> --key-preset auto` to
 run checkpoint preflight, LoRA/source/profile comparisons, promotion manifests,
-and dry-run continuation plans before scaling into heavier training runs. Add
-`--transformers-audit` when a local Transformers config/tokenizer should be
-co-imported into the same JSONL evidence without making Transformers mandatory.
+and dry-run continuation plans before scaling into heavier training runs. For a
+practical Transformers fine-tune readiness smoke, add
+`--runtime-contract-preset hf-runtime --wgpu-readiness-preset balanced`; this
+turns on checkpoint audit, Transformers trace, produced-manifest validation,
+same-process `transformers`/`torch`/`tokenizers` co-import evidence, the
+Transformers/trainer runtime bridge gate, and WGPU run-summary/promotion gates.
+Use `--wgpu-readiness-preset observed` to only require WGPU metrics or `strict`
+for a high-readiness gate; explicit run, promotion, or manifest WGPU thresholds
+override the preset. Add `--transformers-audit` when a local Transformers
+config/tokenizer should be co-imported into the same JSONL evidence without
+making Transformers mandatory.
 For pre-FT inference evidence, `examples/byte_lm_transformers_trace.py` loads a
 local Transformers model, records prompt-level next-token top-k logits and
 hidden-state summaries, co-imports config/tokenizer/model runtime metadata, and
