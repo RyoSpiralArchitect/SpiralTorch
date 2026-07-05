@@ -215,7 +215,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.checkout_ref || github.ref }}
+          ref: ${{ github.ref }}
           persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
