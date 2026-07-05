@@ -1306,6 +1306,52 @@ def manifest_validation_csv_set(row, key):
     return {part for part in str(value).split(",") if part}
 
 
+def manifest_validation_csv_label(values):
+    items = [str(item) for item in values if str(item)]
+    return ",".join(items) if items else "none"
+
+
+def manifest_required_runtime_imports(args):
+    if args is None:
+        return []
+    return list(
+        dict.fromkeys(
+            getattr(
+                args,
+                "require_manifest_transformers_trace_runtime_import",
+                [],
+            )
+            or []
+        )
+    )
+
+
+def runtime_import_gate_fields(validation_row, args):
+    required = manifest_required_runtime_imports(args)
+    imported = sorted(
+        manifest_validation_csv_set(
+            validation_row,
+            "transformers_trace_runtime_imports_imported",
+        )
+    )
+    missing = [module_name for module_name in required if module_name not in imported]
+    gate_requested = bool(required)
+    return {
+        "transformers_trace_required_runtime_imports": manifest_validation_csv_label(
+            required
+        ),
+        "transformers_trace_required_runtime_imports_imported": (
+            manifest_validation_csv_label(imported) if gate_requested else "none"
+        ),
+        "transformers_trace_required_runtime_imports_missing": (
+            manifest_validation_csv_label(missing) if gate_requested else "none"
+        ),
+        "transformers_trace_required_runtime_imports_passed": (
+            None if not gate_requested else not missing
+        ),
+    }
+
+
 def manifest_trace_validation_gate_failures(validation_row, args):
     failures = []
     if args is None:
@@ -1344,11 +1390,7 @@ def manifest_trace_validation_gate_failures(validation_row, args):
                 is not True
             ):
                 failures.append("transformers_trace_runtime_imports_failed")
-    required_runtime_imports = getattr(
-        args,
-        "require_manifest_transformers_trace_runtime_import",
-        [],
-    ) or []
+    required_runtime_imports = manifest_required_runtime_imports(args)
     if required_runtime_imports:
         if not validation_row["transformers_trace_manifest_available"]:
             failures.append("transformers_trace_manifest_missing")
@@ -1454,6 +1496,7 @@ def validate_profile_smoke_manifest_file(path, validation_jsonl=None, args=None)
         promoted_rungs_jsonl,
         rung_rows,
     )
+    validation_row.update(runtime_import_gate_fields(validation_row, args))
     check_manifest_trace_validation_gates(validation_row, args)
     if validation_jsonl is not None:
         write_jsonl(validation_jsonl, [validation_row])
@@ -1487,6 +1530,12 @@ def validate_profile_smoke_manifest_file(path, validation_jsonl=None, args=None)
                 f"{validation_row['transformers_trace_runtime_imports_failed']}",
                 "transformers_trace_runtime_imports_imported="
                 f"{validation_row['transformers_trace_runtime_imports_imported']}",
+                "transformers_trace_required_runtime_imports="
+                f"{validation_row['transformers_trace_required_runtime_imports']}",
+                "transformers_trace_required_runtime_imports_missing="
+                f"{validation_row['transformers_trace_required_runtime_imports_missing']}",
+                "transformers_trace_required_runtime_imports_passed="
+                f"{validation_row['transformers_trace_required_runtime_imports_passed']}",
                 "transformers_trace_top_token_changed_rows="
                 f"{validation_row['transformers_trace_top_token_changed_rows']}",
                 "transformers_trace_observed_max_top_probability_regression="
