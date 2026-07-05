@@ -5,6 +5,7 @@ import importlib
 import json
 import sys
 from collections.abc import Iterable, Mapping
+from pathlib import Path
 
 __all__ = [
     "RUNTIME_IMPORT_INSTALL_HINTS",
@@ -42,6 +43,7 @@ __all__ = [
     "runtime_imports_from_source",
     "runtime_import_required_gate_fields",
     "runtime_import_requirement_failures",
+    "write_runtime_import_preflight_report",
 ]
 
 TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS: dict[str, list[str]] = {
@@ -695,6 +697,20 @@ def runtime_import_preflight_summary_lines(
     return lines
 
 
+def write_runtime_import_preflight_report(
+    report: Mapping[str, object],
+    path: str | Path,
+) -> str:
+    output_path = Path(path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        json.dumps(dict(report), ensure_ascii=False, indent=2, sort_keys=True)
+        + "\n",
+        encoding="utf-8",
+    )
+    return str(output_path)
+
+
 def _runtime_import_arg_parser() -> argparse.ArgumentParser:
     preset_choices = sorted(TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS)
     parser = argparse.ArgumentParser(
@@ -758,6 +774,10 @@ def _runtime_import_arg_parser() -> argparse.ArgumentParser:
         help="Print machine-readable JSON instead of summary lines.",
     )
     parser.add_argument(
+        "--json-out",
+        help="Optional path for a machine-readable preflight JSON artifact.",
+    )
+    parser.add_argument(
         "--quiet",
         action="store_true",
         help="Suppress human-readable output; exit code still reflects gates.",
@@ -791,6 +811,8 @@ def main(argv: list[str] | None = None) -> int:
         required_runtime_import_presets=args.required_runtime_import_presets,
         require_all=args.require_all,
     )
+    if args.json_out:
+        write_runtime_import_preflight_report(report, args.json_out)
     if args.json:
         print(json.dumps(report, ensure_ascii=False, sort_keys=True))
     elif not args.quiet:

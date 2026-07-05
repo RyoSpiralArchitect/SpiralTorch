@@ -226,7 +226,7 @@ After installing a wheel, optional Hugging Face/FT dependencies can be checked
 without launching a training job:
 
 ```bash
-spiral-runtime-preflight --preset hf-finetune --require
+spiral-runtime-preflight --preset hf-finetune --require --json-out ft-runtime.json
 spiral-runtime-preflight --preset hf-peft --require --json
 ```
 

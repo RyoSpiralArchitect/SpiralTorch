@@ -4,6 +4,7 @@ import contextlib
 import io
 import importlib.util
 import json
+import tempfile
 import types
 import unittest
 from pathlib import Path
@@ -190,6 +191,32 @@ class RuntimeImportsTest(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         self.assertIn("hf-finetune=", stdout.getvalue())
+
+    def test_cli_writes_json_out_in_quiet_mode(self) -> None:
+        module = load_runtime_imports()
+        with tempfile.TemporaryDirectory() as tmp:
+            output_path = Path(tmp) / "nested" / "runtime-preflight.json"
+            stdout = io.StringIO()
+
+            with contextlib.redirect_stdout(stdout):
+                exit_code = module.main(
+                    [
+                        "--import",
+                        "math",
+                        "--require",
+                        "--json-out",
+                        str(output_path),
+                        "--quiet",
+                    ]
+                )
+
+            payload = json.loads(output_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertTrue(payload["runtime_import_preflight_passed"])
+        self.assertEqual(payload["runtime_imports_requested"], "math")
+        self.assertEqual(payload["required_runtime_imports"], "math")
 
 
 if __name__ == "__main__":
