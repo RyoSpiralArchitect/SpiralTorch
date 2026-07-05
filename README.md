@@ -507,6 +507,7 @@ Linux note: for manylinux2014 wheels you either need a manylinux container (e.g.
 - Official release build + attached assets: `.github/workflows/release_wheels.yml`
 - Publish existing signed GitHub Release wheels: `.github/workflows/publish_pypi_from_release.yml`
 - Release readiness summary: `scripts/release_status.py`
+- Safe PyPI token secret setup: `scripts/configure_pypi_token_secret.py`
 - Safe manual PyPI publish helper: `scripts/publish_pypi_wheels.py`
 - Full release runbook: [`docs/ops/release.md`](docs/ops/release.md)
 
@@ -522,33 +523,9 @@ python scripts/release_status.py \
   --expected-wheels 3
 
 # If local clipboard access is unavailable, install the PyPI token as a hidden
-# GitHub Actions environment secret. The token is read from a non-echoing prompt
-# and passed to `gh secret set` through stdin, not through shell history.
-python - <<'PY'
-import getpass
-import subprocess
-
-token = getpass.getpass("PyPI token for spiraltorch (hidden): ").strip()
-if not token.startswith("pypi-"):
-    raise SystemExit("Refusing to store a value that does not look like a PyPI API token")
-subprocess.run(
-    [
-        "gh",
-        "secret",
-        "set",
-        "PYPI_API_TOKEN",
-        "--repo",
-        "RyoSpiralArchitect/SpiralTorch",
-        "--env",
-        "pypi",
-        "--app",
-        "actions",
-    ],
-    input=token,
-    text=True,
-    check=True,
-)
-PY
+# GitHub Actions environment secret. The helper validates token shape, never
+# prints the token, and passes it to `gh secret set` through stdin.
+python scripts/configure_pypi_token_secret.py --token-source prompt
 
 # Safe GitHub Actions preflight: validates the signed release wheels and PyPI
 # state, but never uploads. This is the default publish_method for the workflow.
