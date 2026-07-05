@@ -2049,12 +2049,35 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                 "movement_not_ok_cases": 1,
                 "movement_ok_rate": 0.5,
                 "movement_ok_all": False,
+                "epoch_tensor_backend_requested_wgpu_hit_rate_mean": 0.6,
+                "epoch_tensor_backend_requested_wgpu_runtime_fallback_rate_mean": 0.4,
+                "epoch_tensor_backend_requested_wgpu_component_fallback_rate_mean": 0.3,
             }
         ]
         with self.assertRaisesRegex(RuntimeError, "accepted_rate"):
             module.check_aggregate_coverage(rows, min_accepted_rate=0.75)
         with self.assertRaisesRegex(RuntimeError, "movement_ok_rate"):
             module.check_aggregate_coverage(rows, min_movement_ok_rate=0.75)
+        with self.assertRaisesRegex(RuntimeError, "epoch WGPU hit_rate_mean"):
+            module.check_aggregate_coverage(rows, min_epoch_wgpu_hit_rate=0.75)
+        with self.assertRaisesRegex(RuntimeError, "runtime_fallback_rate_mean"):
+            module.check_aggregate_coverage(
+                rows,
+                max_epoch_wgpu_runtime_fallback_rate=0.25,
+            )
+        with self.assertRaisesRegex(RuntimeError, "component_fallback_rate_mean"):
+            module.check_aggregate_coverage(
+                rows,
+                max_epoch_wgpu_component_fallback_rate=0.25,
+            )
+
+        missing_wgpu = [dict(rows[0])]
+        missing_wgpu[0].pop("epoch_tensor_backend_requested_wgpu_hit_rate_mean")
+        with self.assertRaisesRegex(ValueError, "requested_wgpu_hit_rate_mean"):
+            module.check_aggregate_coverage(
+                missing_wgpu,
+                min_epoch_wgpu_hit_rate=0.75,
+            )
 
     def test_mlp_lora_sweep_aggregate_coverage_requires_acceptance_fields(self):
         module = load_example("byte_lm_mlp_lora_sweep")
