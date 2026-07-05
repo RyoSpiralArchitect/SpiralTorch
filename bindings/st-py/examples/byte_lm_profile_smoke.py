@@ -91,6 +91,23 @@ FT_READINESS_PRESETS = {
         "wgpu_readiness_presets": ["strict"],
     },
 }
+WGPU_RUNTIME_DEVICE_REPORT_TRIGGER_ATTRS = (
+    "min_run_epoch_wgpu_hit_rate",
+    "max_run_epoch_wgpu_runtime_fallback_rate",
+    "max_run_epoch_wgpu_component_fallback_rate",
+    "max_run_epoch_wgpu_hit_rate_regression",
+    "max_run_epoch_wgpu_runtime_fallback_rate_regression",
+    "max_run_epoch_wgpu_component_fallback_rate_regression",
+    "promotion_ready_min_epoch_wgpu_hit_rate",
+    "promotion_ready_max_epoch_wgpu_runtime_fallback_rate",
+    "promotion_ready_max_epoch_wgpu_component_fallback_rate",
+    "min_aggregate_epoch_wgpu_hit_rate",
+    "max_aggregate_epoch_wgpu_runtime_fallback_rate",
+    "max_aggregate_epoch_wgpu_component_fallback_rate",
+    "min_manifest_transformers_trainer_wgpu_hit_rate",
+    "max_manifest_transformers_trainer_wgpu_runtime_fallback_rate",
+    "max_manifest_transformers_trainer_wgpu_component_fallback_rate",
+)
 
 
 def source_value(source, key, default=None):
@@ -101,6 +118,38 @@ def source_value(source, key, default=None):
 
 def append_unique(values, additions):
     return list(dict.fromkeys([*(values or []), *(additions or [])]))
+
+
+def runtime_device_report_default_backends(source):
+    if source_value(source, "skip_runtime_device_report", False):
+        return []
+    wgpu_requested = (
+        bool(source_value(source, "ft_readiness_presets", []))
+        or bool(source_value(source, "wgpu_readiness_presets", []))
+        or any(
+            source_value(source, attr) is not None
+            for attr in WGPU_RUNTIME_DEVICE_REPORT_TRIGGER_ATTRS
+        )
+    )
+    return ["wgpu"] if wgpu_requested else []
+
+
+def normalize_runtime_device_report_backends(source):
+    if source_value(source, "skip_runtime_device_report", False):
+        return []
+    raw_backends = list(source_value(source, "runtime_device_report_backends", []) or [])
+    if not raw_backends:
+        return runtime_device_report_default_backends(source)
+    backends = []
+    for backend in raw_backends:
+        if backend == "auto":
+            backends = append_unique(
+                backends,
+                runtime_device_report_default_backends(source) or ["cpu"],
+            )
+        elif backend:
+            backends.append(str(backend))
+    return list(dict.fromkeys(backends))
 
 
 def transformers_trace_runtime_imports(source):
@@ -440,6 +489,23 @@ def parse_args():
             "with at most 0.1 fallback rates. Explicit gate flags win. May be "
             "repeated."
         ),
+    )
+    parser.add_argument(
+        "--runtime-device-report-backend",
+        dest="runtime_device_report_backends",
+        action="append",
+        choices=["auto", "wgpu", "mps", "cpu", "cuda", "hip"],
+        default=[],
+        help=(
+            "Capture spiraltorch.describe_device(<backend>) readiness evidence "
+            "in the profile smoke manifest. FT/WGPU readiness presets default "
+            "to 'wgpu'. May be repeated."
+        ),
+    )
+    parser.add_argument(
+        "--skip-runtime-device-report",
+        action="store_true",
+        help="Do not capture describe_device readiness evidence in the manifest.",
     )
     parser.add_argument(
         "--transformers-trace",
@@ -1122,6 +1188,7 @@ def parse_args():
         parser.error("--continue-ft-epochs-step must be positive")
     apply_ft_readiness_presets(args)
     apply_wgpu_readiness_presets(args)
+    apply_runtime_device_report_defaults(args)
     apply_runtime_contract_presets(args)
     if (
         args.continue_manifest_jsonl is None
@@ -1468,6 +1535,11 @@ def apply_wgpu_readiness_presets(args):
     return args
 
 
+def apply_runtime_device_report_defaults(args):
+    args.runtime_device_report_backends = normalize_runtime_device_report_backends(args)
+    return args
+
+
 def apply_runtime_contract_manifest_gates(args, presets):
     args.require_manifest_checkpoint_transformers_runtime_imports = True
     args.require_manifest_checkpoint_transformers_runtime_import_preset = append_unique(
@@ -1575,6 +1647,107 @@ def load_single_profile_smoke_manifest(path):
 
 def optional_path(path):
     return str(path) if path is not None else None
+
+
+def json_ready_value(value):
+    if isinstance(value, Mapping):
+        return {str(key): json_ready_value(item) for key, item in value.items()}
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, (list, tuple, set)):
+        return [json_ready_value(item) for item in value]
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    return str(value)
+
+
+def default_describe_device():
+    try:
+        import spiraltorch as st
+    except Exception as exc:
+        return None, f"import spiraltorch failed: {exc}"
+    describe = getattr(st, "describe_device", None)
+    if not callable(describe):
+        return None, "spiraltorch.describe_device is unavailable"
+    return describe, None
+
+
+def runtime_device_report_rows(source, *, describe_device=None):
+    backends = normalize_runtime_device_report_backends(source)
+    if not backends:
+        return []
+    describe_error = None
+    if describe_device is None:
+        describe_device, describe_error = default_describe_device()
+
+    rows = []
+    for backend in backends:
+        row = {
+            "backend": backend,
+            "available": False,
+            "error": None,
+        }
+        if not callable(describe_device):
+            row["error"] = describe_error or "spiraltorch.describe_device is unavailable"
+            rows.append(row)
+            continue
+
+        try:
+            report = describe_device(backend)
+        except Exception as exc:
+            row["error"] = str(exc)
+            rows.append(row)
+            continue
+
+        if isinstance(report, Mapping):
+            report_payload = dict(report)
+        else:
+            report_payload = {"value": report}
+        runtime_status = (
+            report_payload.get("runtime_status")
+            or report_payload.get("effective_backend_runtime_status")
+            or report_payload.get("requested_backend_runtime_status")
+        )
+        runtime_ready = report_payload.get("runtime_ready")
+        if runtime_ready is None:
+            runtime_ready = report_payload.get("effective_backend_runtime_ready")
+        runtime_recommendation = (
+            report_payload.get("runtime_recommendation")
+            or report_payload.get("effective_backend_runtime_recommendation")
+            or report_payload.get("requested_backend_runtime_recommendation")
+        )
+        row.update(
+            {
+                "available": True,
+                "reported_backend": report_payload.get("backend", backend),
+                "requested_backend": report_payload.get(
+                    "requested_backend",
+                    report_payload.get("backend", backend),
+                ),
+                "effective_backend": report_payload.get(
+                    "effective_backend",
+                    report_payload.get("backend", backend),
+                ),
+                "runtime_status": runtime_status,
+                "runtime_ready": runtime_ready,
+                "runtime_recommendation": runtime_recommendation,
+                "requested_backend_runtime_status": report_payload.get(
+                    "requested_backend_runtime_status"
+                ),
+                "requested_backend_runtime_ready": report_payload.get(
+                    "requested_backend_runtime_ready"
+                ),
+                "effective_backend_runtime_status": report_payload.get(
+                    "effective_backend_runtime_status"
+                ),
+                "effective_backend_runtime_ready": report_payload.get(
+                    "effective_backend_runtime_ready"
+                ),
+                "report": json_ready_value(report_payload),
+            }
+        )
+        rows.append(row)
+    return rows
 
 
 def default_manifest_validation_jsonl(manifest_jsonl):
@@ -2526,6 +2699,7 @@ def profile_smoke_manifest_validation_row(path, row, promoted_rungs_jsonl, rung_
     validation.update(checkpoint_transformers_validation_fields(row))
     validation.update(transformers_trace_validation_fields(row))
     validation.update(transformers_trainer_runtime_bridge_validation_fields(row))
+    validation.update(runtime_device_report_validation_fields(row))
     validation.update(
         run_summary_wgpu_component_validation_fields(
             row,
@@ -2596,6 +2770,64 @@ def manifest_validation_csv_set(row, key):
 def manifest_validation_csv_label(values):
     items = [str(item) for item in values if str(item)]
     return ",".join(items) if items else "none"
+
+
+def runtime_device_report_validation_fields(row):
+    reports = row.get("runtime_device_reports") or []
+    if not isinstance(reports, list):
+        reports = []
+    declared_backends = row.get("runtime_device_report_backends") or [
+        report.get("backend") for report in reports if isinstance(report, Mapping)
+    ]
+    available_backends = []
+    ready_backends = []
+    effective_backends = []
+    statuses = []
+    recommendations = []
+    errors = []
+    for report in reports:
+        if not isinstance(report, Mapping):
+            continue
+        backend = str(report.get("backend") or "unknown")
+        if report.get("available"):
+            available_backends.append(backend)
+        if report.get("runtime_ready") is True or (
+            report.get("effective_backend_runtime_ready") is True
+        ):
+            ready_backends.append(backend)
+        effective_backend = report.get("effective_backend")
+        if effective_backend:
+            effective_backends.append(f"{backend}={effective_backend}")
+        status = report.get("runtime_status") or report.get(
+            "effective_backend_runtime_status"
+        )
+        if status:
+            statuses.append(f"{backend}={status}")
+        recommendation = report.get("runtime_recommendation")
+        if recommendation:
+            recommendations.append(f"{backend}={recommendation}")
+        error = report.get("error")
+        if error:
+            errors.append(f"{backend}={error}")
+    return {
+        "runtime_device_report_backends": manifest_validation_csv_label(
+            declared_backends
+        ),
+        "runtime_device_report_available_backends": manifest_validation_csv_label(
+            available_backends
+        ),
+        "runtime_device_report_ready_backends": manifest_validation_csv_label(
+            ready_backends
+        ),
+        "runtime_device_report_effective_backends": manifest_validation_csv_label(
+            effective_backends
+        ),
+        "runtime_device_report_statuses": manifest_validation_csv_label(statuses),
+        "runtime_device_report_recommendations": manifest_validation_csv_label(
+            recommendations
+        ),
+        "runtime_device_report_errors": manifest_validation_csv_label(errors),
+    }
 
 
 def manifest_required_runtime_imports(args):
@@ -3937,6 +4169,12 @@ def continuation_plan_row(
             "wgpu_readiness_presets": list(
                 source_row.get("wgpu_readiness_presets") or []
             ),
+            "runtime_device_report_backends": list(
+                source_row.get("runtime_device_report_backends") or []
+            ),
+            "runtime_device_reports": list(
+                source_row.get("runtime_device_reports") or []
+            ),
             "min_aggregate_epoch_wgpu_hit_rate": source_row.get(
                 "min_aggregate_epoch_wgpu_hit_rate"
             ),
@@ -4153,6 +4391,7 @@ def profile_smoke_manifest_row(
     promoted_artifacts,
     transformers_trace_jsonl=None,
     transformers_trace_compare_jsonl=None,
+    describe_device=None,
 ):
     promoted_epochs = [
         promoted_ft_epochs_for_rung(args, rung)
@@ -4179,6 +4418,13 @@ def profile_smoke_manifest_row(
         ),
         "wgpu_readiness_presets": list(
             getattr(args, "wgpu_readiness_presets", []) or []
+        ),
+        "runtime_device_report_backends": normalize_runtime_device_report_backends(
+            args
+        ),
+        "runtime_device_reports": runtime_device_report_rows(
+            args,
+            describe_device=describe_device,
         ),
         "min_aggregate_epoch_wgpu_hit_rate": source_value(
             args,
