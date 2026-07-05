@@ -3736,6 +3736,7 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                                 "transformers_version": "9.9.9",
                                 "transformers_module_name": "transformers",
                                 "transformers_spiraltorch_coimport_status": "ok",
+                                "runtime_import_presets": "torch-transformers",
                             }
                         ],
                     )
@@ -3986,6 +3987,7 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         runtime_import_probe_count=1,
         runtime_imports_all_ok=True,
         runtime_imports_failed="none",
+        runtime_import_presets="torch-transformers",
     ):
         trace_jsonl = out_dir / "transformers-trace.jsonl"
         baseline_trace_jsonl = out_dir / "transformers-trace-baseline.jsonl"
@@ -4068,7 +4070,7 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                             "transformers_spiraltorch_coimport_status": (
                                 coimport_status
                             ),
-                            "runtime_import_presets": "torch-transformers",
+                            "runtime_import_presets": runtime_import_presets,
                             "runtime_imports_requested": "torch",
                             "runtime_import_probe_count": runtime_import_probe_count,
                             "runtime_imports_imported": (
@@ -4207,6 +4209,10 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         )
         self.assertEqual(
             validation_row["transformers_trace_runtime_import_presets"],
+            "torch-transformers",
+        )
+        self.assertEqual(
+            validation_row["declared_transformers_trace_runtime_import_presets"],
             "torch-transformers",
         )
         self.assertTrue(validation_row["transformers_trace_runtime_imports_all_ok"])
@@ -4495,6 +4501,80 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             preset_failing_text,
         )
         self.assertIn("passed=False", preset_failing_text)
+
+    def test_byte_lm_profile_smoke_produced_validation_gates_declared_runtime_import_preset(self):
+        module = load_example("byte_lm_profile_smoke")
+
+        def produced_validation_args():
+            return argparse.Namespace(
+                validate_produced_manifest=True,
+                require_manifest_transformers_trace=False,
+                require_manifest_transformers_trace_compare_pass=False,
+                require_manifest_transformers_trace_runtime_metadata_match=False,
+                require_manifest_transformers_trace_coimport=False,
+                require_manifest_transformers_trace_runtime_imports=False,
+                require_manifest_transformers_trace_runtime_import=[],
+                require_manifest_transformers_trace_runtime_import_preset=[],
+                max_manifest_transformers_trace_top_token_changed_rows=None,
+                max_manifest_transformers_trace_top_probability_regression=None,
+            )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out_dir = Path(tmpdir)
+            passing_manifest, passing_validation_path = (
+                self.write_profile_smoke_manifest_with_transformers_trace_compare(
+                    module,
+                    out_dir / "passing",
+                )
+            )
+            passing_output = io.StringIO()
+            with contextlib.redirect_stdout(passing_output):
+                module.validate_profile_smoke_manifest_file(
+                    passing_manifest,
+                    validation_jsonl=passing_validation_path,
+                    args=produced_validation_args(),
+                )
+            passing_validation = module.load_jsonl(passing_validation_path)[0]
+
+            failing_manifest, _failing_validation_path = (
+                self.write_profile_smoke_manifest_with_transformers_trace_compare(
+                    module,
+                    out_dir / "failing",
+                    runtime_import_presets="hf-runtime",
+                )
+            )
+            failing_output = io.StringIO()
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "profile smoke manifest trace validation gate failed",
+            ):
+                with contextlib.redirect_stdout(failing_output):
+                    module.validate_profile_smoke_manifest_file(
+                        failing_manifest,
+                        args=produced_validation_args(),
+                    )
+
+        self.assertIn("profile_smoke_manifest_gate", passing_output.getvalue())
+        self.assertIn("passed=True", passing_output.getvalue())
+        self.assertEqual(
+            passing_validation["declared_transformers_trace_runtime_import_presets"],
+            "torch-transformers",
+        )
+        self.assertEqual(
+            passing_validation["transformers_trace_required_runtime_import_presets"],
+            "torch-transformers",
+        )
+        self.assertTrue(
+            passing_validation[
+                "transformers_trace_required_runtime_import_presets_passed"
+            ]
+        )
+        failing_text = failing_output.getvalue()
+        self.assertIn(
+            "transformers_trace_runtime_import_preset_missing:torch-transformers",
+            failing_text,
+        )
+        self.assertIn("passed=False", failing_text)
 
     def test_byte_lm_profile_smoke_accepts_produced_manifest_trace_gates(self):
         module = load_example("byte_lm_profile_smoke")

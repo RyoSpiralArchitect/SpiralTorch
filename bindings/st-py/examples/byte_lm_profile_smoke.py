@@ -1297,6 +1297,11 @@ def profile_smoke_manifest_validation_row(path, row, promoted_rungs_jsonl, rung_
         "configs": list(row.get("configs") or []),
         "profiles": list(row.get("profiles") or []),
         "promotion_metric": row.get("promotion_metric"),
+        "declared_transformers_trace_runtime_import_presets": (
+            manifest_validation_csv_label(
+                row.get("transformers_trace_runtime_import_presets") or []
+            )
+        ),
         "promoted_rungs": promoted_rungs,
         "promoted_ft_epochs": promoted_epochs,
         "promoted_rung_rows": len(rung_rows),
@@ -1362,24 +1367,42 @@ def manifest_required_runtime_imports(args):
     )
 
 
-def manifest_required_runtime_import_presets(args):
+def manifest_required_runtime_import_presets(args, validation_row=None):
     if args is None:
         return []
+    required = list(
+        getattr(
+            args,
+            "require_manifest_transformers_trace_runtime_import_preset",
+            [],
+        )
+        or []
+    )
+    if (
+        getattr(args, "validate_produced_manifest", False)
+        and validation_row is not None
+    ):
+        required.extend(
+            sorted(
+                manifest_validation_csv_set(
+                    validation_row,
+                    "declared_transformers_trace_runtime_import_presets",
+                )
+            )
+        )
     return list(
         dict.fromkeys(
-            getattr(
-                args,
-                "require_manifest_transformers_trace_runtime_import_preset",
-                [],
-            )
-            or []
+            preset for preset in required if preset
         )
     )
 
 
 def runtime_import_gate_fields(validation_row, args):
     required = manifest_required_runtime_imports(args)
-    required_presets = manifest_required_runtime_import_presets(args)
+    required_presets = manifest_required_runtime_import_presets(
+        args,
+        validation_row,
+    )
     imported = sorted(
         manifest_validation_csv_set(
             validation_row,
@@ -1482,7 +1505,10 @@ def manifest_trace_validation_gate_failures(validation_row, args):
                     failures.append(
                         f"transformers_trace_runtime_import_missing:{module_name}"
                     )
-    required_runtime_import_presets = manifest_required_runtime_import_presets(args)
+    required_runtime_import_presets = manifest_required_runtime_import_presets(
+        args,
+        validation_row,
+    )
     if required_runtime_import_presets:
         if not validation_row["transformers_trace_manifest_available"]:
             failures.append("transformers_trace_manifest_missing")
@@ -1560,10 +1586,9 @@ def check_manifest_trace_validation_gates(validation_row, args):
                 )
             ),
             bool(
-                getattr(
+                manifest_required_runtime_import_presets(
                     args,
-                    "require_manifest_transformers_trace_runtime_import_preset",
-                    [],
+                    validation_row,
                 )
             ),
             args.max_manifest_transformers_trace_top_token_changed_rows
@@ -1626,6 +1651,8 @@ def validate_profile_smoke_manifest_file(path, validation_jsonl=None, args=None)
                 f"{validation_row['transformers_trace_runtime_metadata_changed_count']}",
                 "transformers_trace_runtime_imports_all_ok="
                 f"{validation_row['transformers_trace_runtime_imports_all_ok']}",
+                "declared_transformers_trace_runtime_import_presets="
+                f"{validation_row['declared_transformers_trace_runtime_import_presets']}",
                 "transformers_trace_runtime_import_presets="
                 f"{validation_row['transformers_trace_runtime_import_presets']}",
                 "transformers_trace_runtime_imports_failed="
