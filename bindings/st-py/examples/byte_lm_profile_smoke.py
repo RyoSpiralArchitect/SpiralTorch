@@ -255,6 +255,27 @@ def parse_args():
         help="Fail the Transformers trace when any runtime import probe fails.",
     )
     parser.add_argument(
+        "--require-transformers-trace-runtime-import",
+        dest="require_transformers_trace_runtime_import",
+        action="append",
+        default=[],
+        help=(
+            "Require byte_lm_transformers_trace.py to import this module in "
+            "the same trace process. May be repeated."
+        ),
+    )
+    parser.add_argument(
+        "--require-transformers-trace-runtime-import-preset",
+        dest="require_transformers_trace_runtime_import_preset",
+        action="append",
+        choices=sorted(TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS),
+        default=[],
+        help=(
+            "Require byte_lm_transformers_trace.py to satisfy this named "
+            "runtime import preset. May be repeated."
+        ),
+    )
+    parser.add_argument(
         "--require-transformers-trace-match",
         action="store_true",
         help="Fail when current Transformers trace scope differs from the baseline.",
@@ -715,6 +736,8 @@ def parse_args():
             bool(args.transformers_trace_runtime_imports),
             bool(args.transformers_trace_runtime_import_presets),
             args.require_transformers_trace_runtime_imports,
+            bool(args.require_transformers_trace_runtime_import),
+            bool(args.require_transformers_trace_runtime_import_preset),
             args.require_transformers_trace_match,
             args.require_transformers_trace_runtime_metadata_match,
             args.require_transformers_trace_top_token_match,
@@ -742,11 +765,14 @@ def parse_args():
         args.require_transformers_trace_runtime_imports
         and not args.transformers_trace_runtime_imports
         and not args.transformers_trace_runtime_import_presets
+        and not args.require_transformers_trace_runtime_import
+        and not args.require_transformers_trace_runtime_import_preset
     ):
         parser.error(
             "--require-transformers-trace-runtime-imports requires "
             "--transformers-trace-runtime-import or "
-            "--transformers-trace-runtime-import-preset"
+            "--transformers-trace-runtime-import-preset or a direct "
+            "--require-transformers-trace-runtime-import gate"
         )
     if any(trace_compare_gates) and args.compare_transformers_trace_jsonl is None:
         parser.error(
@@ -1880,6 +1906,14 @@ def transformers_trace_args(args, model_path, trace_jsonl, trace_compare_jsonl):
         flags.extend(["--runtime-import", module_name])
     if getattr(args, "require_transformers_trace_runtime_imports", False):
         flags.append("--require-runtime-imports")
+    for module_name in (
+        getattr(args, "require_transformers_trace_runtime_import", []) or []
+    ):
+        flags.extend(["--require-runtime-import", module_name])
+    for preset in (
+        getattr(args, "require_transformers_trace_runtime_import_preset", []) or []
+    ):
+        flags.extend(["--require-runtime-import-preset", preset])
     if args.compare_transformers_trace_jsonl is not None:
         flags.extend(["--compare-jsonl", args.compare_transformers_trace_jsonl])
     if trace_compare_jsonl is not None:
@@ -2108,6 +2142,12 @@ def trace_policy_fields(source):
         "require_transformers_trace_runtime_imports": bool(
             source.get("require_transformers_trace_runtime_imports", False)
         ),
+        "require_transformers_trace_runtime_import": list(
+            source.get("require_transformers_trace_runtime_import") or []
+        ),
+        "require_transformers_trace_runtime_import_preset": list(
+            source.get("require_transformers_trace_runtime_import_preset") or []
+        ),
         "require_transformers_trace_match": bool(
             source.get("require_transformers_trace_match", False)
         ),
@@ -2277,6 +2317,18 @@ def profile_smoke_manifest_row(
                 ),
                 "require_transformers_trace_runtime_imports": bool(
                     getattr(args, "require_transformers_trace_runtime_imports", False)
+                ),
+                "require_transformers_trace_runtime_import": list(
+                    getattr(args, "require_transformers_trace_runtime_import", [])
+                    or []
+                ),
+                "require_transformers_trace_runtime_import_preset": list(
+                    getattr(
+                        args,
+                        "require_transformers_trace_runtime_import_preset",
+                        [],
+                    )
+                    or []
                 ),
                 "require_transformers_trace_match": bool(
                     getattr(args, "require_transformers_trace_match", False)
