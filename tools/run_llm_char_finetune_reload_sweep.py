@@ -412,14 +412,80 @@ def runtime_preflight_payload(
     return preflight, runtime if isinstance(runtime, dict) else None
 
 
+def pair_outcome(cell: dict[str, Any]) -> dict[str, Any] | None:
+    outcome = cell.get("outcome")
+    if isinstance(outcome, dict):
+        return outcome
+    pair_manifest = cell.get("pair_manifest")
+    if isinstance(pair_manifest, dict):
+        embedded = pair_manifest.get("outcome")
+        if isinstance(embedded, dict):
+            return embedded
+    return None
+
+
+def outcome_runtime_status(cell: dict[str, Any]) -> str | None:
+    outcome = pair_outcome(cell)
+    if not isinstance(outcome, dict):
+        return None
+    trusted = outcome.get("runtime_preflight_trusted")
+    statuses = outcome.get("runtime_preflight_statuses")
+    if isinstance(statuses, dict):
+        values = [
+            str(value)
+            for value in (statuses.get("base"), statuses.get("reload"))
+            if value is not None
+        ]
+        if values:
+            if any(value == "failed" for value in values):
+                return "failed"
+            if any(value == "unknown" for value in values):
+                return "unknown"
+            if all(value in {"passed", "not_requested"} for value in values):
+                return (
+                    "passed"
+                    if any(value == "passed" for value in values)
+                    else "not_requested"
+                )
+    if trusted is True:
+        return "passed"
+    if trusted is False:
+        return "failed"
+    return None
+
+
+def outcome_runtime_detail(cell: dict[str, Any]) -> str | None:
+    outcome = pair_outcome(cell)
+    if not isinstance(outcome, dict):
+        return None
+    details = outcome.get("runtime_preflight_details")
+    if isinstance(details, dict):
+        parts: list[str] = []
+        parts.extend(csv_parts(details.get("base")))
+        parts.extend(csv_parts(details.get("reload")))
+        unique = list(dict.fromkeys(parts))
+        if unique:
+            return ";".join(unique)
+    parts = []
+    parts.extend(csv_parts(outcome.get("base_runtime_preflight_detail")))
+    parts.extend(csv_parts(outcome.get("reload_runtime_preflight_detail")))
+    unique = list(dict.fromkeys(parts))
+    if unique:
+        return ";".join(unique)
+    return None
+
+
 def runtime_preflight_status(cell: dict[str, Any]) -> str:
     pair_manifest = cell.get("pair_manifest")
     if not isinstance(pair_manifest, dict):
+        fallback = outcome_runtime_status(cell)
+        if fallback:
+            return fallback
         status = str(cell.get("status") or "unknown")
         return status if status in {"dry_run", "failed"} else "unobserved"
     preflight, runtime = runtime_preflight_payload(cell)
     if not isinstance(preflight, dict):
-        return "missing_preflight"
+        return outcome_runtime_status(cell) or "missing_preflight"
     requested = preflight.get("runtime_import_preflight_requested")
     if isinstance(runtime, dict):
         requested = runtime.get("runtime_import_preflight_requested", requested)
@@ -438,6 +504,10 @@ def runtime_preflight_status(cell: dict[str, Any]) -> str:
 def runtime_preflight_detail(cell: dict[str, Any]) -> str:
     status = runtime_preflight_status(cell)
     preflight, runtime = runtime_preflight_payload(cell)
+    if not isinstance(preflight, dict):
+        fallback = outcome_runtime_detail(cell)
+        if fallback:
+            return fallback
     details: list[str] = []
     if isinstance(runtime, dict):
         details.extend(csv_parts(runtime.get("runtime_import_preflight_failures")))
