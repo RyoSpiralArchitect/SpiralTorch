@@ -415,8 +415,8 @@ cargo build -p st-vision      # vision kernels/pipelines
 ## Build Python wheel (maturin)
 
 ```bash
-# Install maturin (once)
-python -m pip install -U "maturin>=1,<2"
+# Install maturin (once). 1.9+ is required so wheel license-files are emitted.
+python -m pip install -U "maturin>=1.9,<2"
 
 # Default binding build (WGPU-first; CPU fallback remains available)
 maturin build -m bindings/st-py/Cargo.toml --release --locked
@@ -457,15 +457,15 @@ Linux note: for manylinux2014 wheels you either need a manylinux container (e.g.
 # Dry-run first: validates wheels, twine metadata, PyPI state, and token shape
 # without printing the token or uploading anything.
 python scripts/publish_pypi_wheels.py \
-  --dist /tmp/spiraltorch-0.4.8-dist \
-  --expected-version 0.4.8 \
+  --dist /tmp/spiraltorch-0.4.9-dist \
+  --expected-version 0.4.9 \
   --dry-run
 
 # Real upload: reads a `pypi-...` token from the macOS clipboard, uploads the
 # wheels with twine, waits for PyPI JSON, then installs/import-smokes the release.
 python scripts/publish_pypi_wheels.py \
-  --dist /tmp/spiraltorch-0.4.8-dist \
-  --expected-version 0.4.8 \
+  --dist /tmp/spiraltorch-0.4.9-dist \
+  --expected-version 0.4.9 \
   --skip-existing
 
 # Signed GitHub Release recovery: run the fixed workflow from main, rebuild
@@ -473,11 +473,11 @@ python scripts/publish_pypi_wheels.py \
 # overwrite the assets on that tag's release.
 gh workflow run release_wheels.yml \
   --ref main \
-  -f release_tag=v0.4.8 \
-  -f checkout_ref=v0.4.8
+  -f release_tag=v0.4.9 \
+  -f checkout_ref=v0.4.9
 
 # Re-run integrity verification for that recovered release.
-gh workflow run verify-release.yml --ref main -f release_tag=v0.4.8
+gh workflow run verify-release.yml --ref main -f release_tag=v0.4.9
 ```
 
 ---

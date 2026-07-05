@@ -1,5 +1,12 @@
 # SpiralTorch (Python) changelog
 
+## 0.4.9
+
+- Packaging: include the canonical AGPL license payload in wheels via
+  `project.license-files` and require `maturin>=1.9` for PEP 639 support.
+- Release: bump Python binding metadata to 0.4.9 after the unsigned 0.4.8
+  recovery path exposed missing wheel license payloads.
+
 ## 0.4.7
 
 - `nn`: add training-mode handling, norm-state propagation, and gradient-clipping support in module training workflows.

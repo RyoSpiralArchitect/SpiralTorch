@@ -61,7 +61,7 @@ pwsh -File scripts/dev.ps1 wheel
 From the repository root:
 
 ```bash
-python -m pip install -U "maturin>=1,<2"
+python -m pip install -U "maturin>=1.9,<2"
 maturin build -m bindings/st-py/Cargo.toml --release --locked --features logic,kdsl
 # CPU-only fallback:
 # maturin build -m bindings/st-py/Cargo.toml --release --locked --no-default-features --features python-default

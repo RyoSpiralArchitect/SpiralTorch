@@ -59,7 +59,7 @@ switch ($Task) {
         RunCommand cargo build -p st-rec --release
     }
     "wheel" {
-        RunCommand python -m pip install -U pip wheel "maturin>=1,<2"
+        RunCommand python -m pip install -U pip wheel "maturin>=1.9,<2"
         RunCommand maturin build -m bindings/st-py/Cargo.toml --release --locked --features logic,kdsl
         RunCommand python -m pip install --force-reinstall --no-cache-dir target/wheels/spiraltorch-*.whl
     }
