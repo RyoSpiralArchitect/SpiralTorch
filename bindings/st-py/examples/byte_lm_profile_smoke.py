@@ -746,6 +746,36 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--require-manifest-checkpoint-transformers-runtime-imports",
+        action="store_true",
+        help=(
+            "Fail --validate-manifest-jsonl when checkpoint preflight has "
+            "missing or failed Transformers runtime import probes."
+        ),
+    )
+    parser.add_argument(
+        "--require-manifest-checkpoint-transformers-runtime-import",
+        dest="require_manifest_checkpoint_transformers_runtime_import",
+        action="append",
+        default=[],
+        help=(
+            "Fail --validate-manifest-jsonl unless this module appears in the "
+            "checkpoint preflight Transformers runtime import probes. May be "
+            "repeated."
+        ),
+    )
+    parser.add_argument(
+        "--require-manifest-checkpoint-transformers-runtime-import-preset",
+        dest="require_manifest_checkpoint_transformers_runtime_import_preset",
+        action="append",
+        choices=sorted(TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS),
+        default=[],
+        help=(
+            "Fail --validate-manifest-jsonl unless this named runtime import "
+            "preset appears in checkpoint preflight. May be repeated."
+        ),
+    )
+    parser.add_argument(
         "--max-manifest-transformers-trace-top-token-changed-rows",
         type=int,
         default=None,
@@ -867,7 +897,7 @@ def parse_args():
             "--manifest-validation-jsonl requires --validate-manifest-jsonl "
             "or --validate-produced-manifest"
         )
-    manifest_trace_validation_requested = any(
+    manifest_validation_requested = any(
         [
             args.require_manifest_transformers_trace,
             args.require_manifest_transformers_trace_compare_pass,
@@ -876,18 +906,21 @@ def parse_args():
             args.require_manifest_transformers_trace_runtime_imports,
             bool(args.require_manifest_transformers_trace_runtime_import),
             bool(args.require_manifest_transformers_trace_runtime_import_preset),
+            args.require_manifest_checkpoint_transformers_runtime_imports,
+            bool(args.require_manifest_checkpoint_transformers_runtime_import),
+            bool(args.require_manifest_checkpoint_transformers_runtime_import_preset),
             args.max_manifest_transformers_trace_top_token_changed_rows is not None,
             args.max_manifest_transformers_trace_top_probability_regression
             is not None,
         ]
     )
     if (
-        manifest_trace_validation_requested
+        manifest_validation_requested
         and args.validate_manifest_jsonl is None
         and not args.validate_produced_manifest
     ):
         parser.error(
-            "manifest trace validation gates require --validate-manifest-jsonl "
+            "manifest validation gates require --validate-manifest-jsonl "
             "or --validate-produced-manifest"
         )
     if (
@@ -1075,6 +1108,14 @@ def load_single_jsonl_row_type(path, row_type):
             f"{path} must contain exactly one {row_type} row; found {len(matches)}"
         )
     return matches[0]
+
+
+def load_first_jsonl_row_type(path, row_type):
+    rows = load_jsonl(path)
+    for row in rows:
+        if row.get("row_type") == row_type:
+            return row
+    raise ValueError(f"{path} must contain at least one {row_type} row")
 
 
 def load_single_profile_smoke_manifest(path):
@@ -1570,9 +1611,184 @@ def transformers_trace_validation_fields(row):
     return fields
 
 
+def checkpoint_transformers_validation_fields(row):
+    fields = {
+        "checkpoint_transformers_audit_source_jsonl": None,
+        "checkpoint_transformers_audit_source_row_type": None,
+        "checkpoint_transformers_audit_available": False,
+        "checkpoint_transformers_audit_error": None,
+        "checkpoint_transformers_audit_requested": None,
+        "checkpoint_transformers_audit_status": None,
+        "checkpoint_transformers_audit_detail_error": None,
+        "checkpoint_transformers_model_path": None,
+        "checkpoint_transformers_available": None,
+        "checkpoint_transformers_version": None,
+        "checkpoint_transformers_config_loaded": None,
+        "checkpoint_transformers_tokenizer_loaded": None,
+        "checkpoint_transformers_model_loaded": None,
+        "checkpoint_transformers_runtime_import_presets": None,
+        "checkpoint_transformers_runtime_import_preset_modules": None,
+        "checkpoint_transformers_runtime_import_presets_satisfied": None,
+        "checkpoint_transformers_runtime_import_presets_failed": None,
+        "checkpoint_transformers_runtime_import_preset_missing_modules": None,
+        "checkpoint_transformers_runtime_imports_requested": None,
+        "checkpoint_transformers_runtime_import_probe_count": None,
+        "checkpoint_transformers_runtime_imports_imported": None,
+        "checkpoint_transformers_runtime_imports_failed": None,
+        "checkpoint_transformers_runtime_imports_all_ok": None,
+        "checkpoint_transformers_runtime_import_versions": None,
+        "checkpoint_transformers_runtime_import_module_names": None,
+        "checkpoint_transformers_runtime_imports_json": None,
+        "checkpoint_transformers_runtime_import_preset_status_json": None,
+        "checkpoint_transformers_direct_required_runtime_imports": None,
+        "checkpoint_transformers_direct_required_runtime_imports_imported": None,
+        "checkpoint_transformers_direct_required_runtime_imports_missing": None,
+        "checkpoint_transformers_direct_required_runtime_imports_passed": None,
+        "checkpoint_transformers_direct_required_runtime_import_presets": None,
+        "checkpoint_transformers_direct_required_runtime_import_presets_observed": None,
+        "checkpoint_transformers_direct_required_runtime_import_presets_satisfied": None,
+        "checkpoint_transformers_direct_required_runtime_import_presets_missing": None,
+        "checkpoint_transformers_direct_required_runtime_import_presets_unsatisfied": None,
+        "checkpoint_transformers_direct_required_runtime_import_presets_passed": None,
+    }
+    first_error = None
+    for source_field, row_type in [
+        ("checkpoint_preflight_jsonl", "report"),
+        ("checkpoint_shape_audit_jsonl", "shape_audit"),
+    ]:
+        source_jsonl = row.get(source_field)
+        if not source_jsonl:
+            continue
+        try:
+            audit_row = load_first_jsonl_row_type(source_jsonl, row_type)
+        except (OSError, ValueError) as exc:
+            if first_error is None:
+                first_error = f"{source_field}: {exc.__class__.__name__}: {exc}"
+            continue
+        fields.update(
+            {
+                "checkpoint_transformers_audit_source_jsonl": source_jsonl,
+                "checkpoint_transformers_audit_source_row_type": row_type,
+                "checkpoint_transformers_audit_available": (
+                    "transformers_audit_status" in audit_row
+                ),
+                "checkpoint_transformers_audit_requested": audit_row.get(
+                    "transformers_audit_requested"
+                ),
+                "checkpoint_transformers_audit_status": audit_row.get(
+                    "transformers_audit_status"
+                ),
+                "checkpoint_transformers_audit_detail_error": audit_row.get(
+                    "transformers_audit_error"
+                ),
+                "checkpoint_transformers_model_path": audit_row.get(
+                    "transformers_model_path"
+                ),
+                "checkpoint_transformers_available": audit_row.get(
+                    "transformers_available"
+                ),
+                "checkpoint_transformers_version": audit_row.get(
+                    "transformers_version"
+                ),
+                "checkpoint_transformers_config_loaded": audit_row.get(
+                    "transformers_config_loaded"
+                ),
+                "checkpoint_transformers_tokenizer_loaded": audit_row.get(
+                    "transformers_tokenizer_loaded"
+                ),
+                "checkpoint_transformers_model_loaded": audit_row.get(
+                    "transformers_model_loaded"
+                ),
+                "checkpoint_transformers_runtime_import_presets": audit_row.get(
+                    "runtime_import_presets"
+                ),
+                "checkpoint_transformers_runtime_import_preset_modules": (
+                    audit_row.get("runtime_import_preset_modules")
+                ),
+                "checkpoint_transformers_runtime_import_presets_satisfied": (
+                    audit_row.get("runtime_import_presets_satisfied")
+                ),
+                "checkpoint_transformers_runtime_import_presets_failed": (
+                    audit_row.get("runtime_import_presets_failed")
+                ),
+                "checkpoint_transformers_runtime_import_preset_missing_modules": (
+                    audit_row.get("runtime_import_preset_missing_modules")
+                ),
+                "checkpoint_transformers_runtime_imports_requested": audit_row.get(
+                    "runtime_imports_requested"
+                ),
+                "checkpoint_transformers_runtime_import_probe_count": audit_row.get(
+                    "runtime_import_probe_count"
+                ),
+                "checkpoint_transformers_runtime_imports_imported": audit_row.get(
+                    "runtime_imports_imported"
+                ),
+                "checkpoint_transformers_runtime_imports_failed": audit_row.get(
+                    "runtime_imports_failed"
+                ),
+                "checkpoint_transformers_runtime_imports_all_ok": audit_row.get(
+                    "runtime_imports_all_ok"
+                ),
+                "checkpoint_transformers_runtime_import_versions": audit_row.get(
+                    "runtime_import_versions"
+                ),
+                "checkpoint_transformers_runtime_import_module_names": audit_row.get(
+                    "runtime_import_module_names"
+                ),
+                "checkpoint_transformers_runtime_imports_json": audit_row.get(
+                    "runtime_imports_json"
+                ),
+                "checkpoint_transformers_runtime_import_preset_status_json": (
+                    audit_row.get("runtime_import_preset_status_json")
+                ),
+                "checkpoint_transformers_direct_required_runtime_imports": (
+                    audit_row.get("required_runtime_imports")
+                ),
+                "checkpoint_transformers_direct_required_runtime_imports_imported": (
+                    audit_row.get("required_runtime_imports_imported")
+                ),
+                "checkpoint_transformers_direct_required_runtime_imports_missing": (
+                    audit_row.get("required_runtime_imports_missing")
+                ),
+                "checkpoint_transformers_direct_required_runtime_imports_passed": (
+                    audit_row.get("required_runtime_imports_passed")
+                ),
+                "checkpoint_transformers_direct_required_runtime_import_presets": (
+                    audit_row.get("required_runtime_import_presets")
+                ),
+                "checkpoint_transformers_direct_required_runtime_import_presets_observed": (
+                    audit_row.get("required_runtime_import_presets_observed")
+                ),
+                "checkpoint_transformers_direct_required_runtime_import_presets_satisfied": (
+                    audit_row.get("required_runtime_import_presets_satisfied")
+                ),
+                "checkpoint_transformers_direct_required_runtime_import_presets_missing": (
+                    audit_row.get("required_runtime_import_presets_missing")
+                ),
+                "checkpoint_transformers_direct_required_runtime_import_presets_unsatisfied": (
+                    audit_row.get("required_runtime_import_presets_unsatisfied")
+                ),
+                "checkpoint_transformers_direct_required_runtime_import_presets_passed": (
+                    audit_row.get("required_runtime_import_presets_passed")
+                ),
+            }
+        )
+        return fields
+    fields["checkpoint_transformers_audit_error"] = first_error
+    return fields
+
+
 def profile_smoke_manifest_validation_row(path, row, promoted_rungs_jsonl, rung_rows):
     promoted_rungs = manifest_int(row, "promoted_rungs", 0)
     promoted_epochs = manifest_promoted_ft_epochs(row)
+    declared_checkpoint_runtime_import_presets = (
+        checkpoint_transformers_runtime_import_presets(row)
+    )
+    declared_checkpoint_runtime_import_preset_modules = (
+        transformers_trace_runtime_import_preset_modules(
+            declared_checkpoint_runtime_import_presets
+        )
+    )
     declared_runtime_import_presets = csv_values(
         row.get("transformers_trace_runtime_import_presets")
     )
@@ -1631,6 +1847,29 @@ def profile_smoke_manifest_validation_row(path, row, promoted_rungs_jsonl, rung_
         "declared_transformers_trace_runtime_import_preset_modules_match": (
             declared_module_match
         ),
+        "declared_checkpoint_transformers_runtime_import_presets": (
+            manifest_validation_csv_label(declared_checkpoint_runtime_import_presets)
+        ),
+        "declared_checkpoint_transformers_runtime_import_preset_modules": (
+            manifest_validation_csv_label(
+                declared_checkpoint_runtime_import_preset_modules
+            )
+        ),
+        "declared_checkpoint_transformers_runtime_imports": (
+            manifest_validation_csv_label(
+                checkpoint_transformers_runtime_imports(row)
+            )
+        ),
+        "declared_checkpoint_transformers_required_runtime_imports": (
+            manifest_validation_csv_label(
+                checkpoint_transformers_required_runtime_imports(row)
+            )
+        ),
+        "declared_checkpoint_transformers_required_runtime_import_presets": (
+            manifest_validation_csv_label(
+                checkpoint_transformers_required_runtime_import_presets(row)
+            )
+        ),
         "promoted_rungs": promoted_rungs,
         "promoted_ft_epochs": promoted_epochs,
         "promoted_rung_rows": len(rung_rows),
@@ -1643,6 +1882,7 @@ def profile_smoke_manifest_validation_row(path, row, promoted_rungs_jsonl, rung_
         "promoted_rung_artifacts_checked": len(rung_rows)
         * (1 + len(PROMOTED_RUNG_ARTIFACT_FIELDS)),
     }
+    validation.update(checkpoint_transformers_validation_fields(row))
     validation.update(transformers_trace_validation_fields(row))
     trace_declared_preset_modules = runtime_import_preset_module_rows(
         validation.get("transformers_trace_runtime_import_preset_modules"),
@@ -1801,11 +2041,116 @@ def runtime_import_gate_fields(validation_row, args):
     )
 
 
+def manifest_required_checkpoint_runtime_imports(args):
+    if args is None:
+        return []
+    return list(
+        dict.fromkeys(
+            getattr(
+                args,
+                "require_manifest_checkpoint_transformers_runtime_import",
+                [],
+            )
+            or []
+        )
+    )
+
+
+def manifest_required_checkpoint_runtime_import_presets(args, validation_row=None):
+    if args is None:
+        return []
+    required = list(
+        getattr(
+            args,
+            "require_manifest_checkpoint_transformers_runtime_import_preset",
+            [],
+        )
+        or []
+    )
+    if (
+        getattr(args, "validate_produced_manifest", False)
+        and validation_row is not None
+    ):
+        required.extend(
+            sorted(
+                manifest_validation_csv_set(
+                    validation_row,
+                    "declared_checkpoint_transformers_runtime_import_presets",
+                )
+            )
+        )
+    return list(dict.fromkeys(preset for preset in required if preset))
+
+
+def manifest_checkpoint_satisfied_runtime_import_presets(validation_row):
+    satisfied = manifest_validation_csv_set(
+        validation_row,
+        "checkpoint_transformers_runtime_import_presets_satisfied",
+    )
+    failed = manifest_validation_csv_set(
+        validation_row,
+        "checkpoint_transformers_runtime_import_presets_failed",
+    )
+    if satisfied or failed:
+        return satisfied
+    return manifest_validation_csv_set(
+        validation_row,
+        "checkpoint_transformers_runtime_import_presets",
+    )
+
+
+def checkpoint_runtime_import_gate_fields(validation_row, args):
+    required = manifest_required_checkpoint_runtime_imports(args)
+    required_presets = manifest_required_checkpoint_runtime_import_presets(
+        args,
+        validation_row,
+    )
+    imported = sorted(
+        manifest_validation_csv_set(
+            validation_row,
+            "checkpoint_transformers_runtime_imports_imported",
+        )
+    )
+    observed_presets = sorted(
+        manifest_validation_csv_set(
+            validation_row,
+            "checkpoint_transformers_runtime_import_presets",
+        )
+    )
+    satisfied_presets = sorted(
+        manifest_checkpoint_satisfied_runtime_import_presets(validation_row)
+    )
+    failed_presets = sorted(
+        manifest_validation_csv_set(
+            validation_row,
+            "checkpoint_transformers_runtime_import_presets_failed",
+        )
+    )
+    return shared_runtime_import_required_gate_fields(
+        required,
+        required_presets,
+        imported_modules=imported,
+        observed_presets=observed_presets,
+        satisfied_presets=satisfied_presets,
+        failed_presets=failed_presets,
+        field_prefix="checkpoint_transformers_",
+        include_failed_presets=True,
+    )
+
+
 def direct_runtime_requirement_failures(validation_row):
     return runtime_import_requirement_failures(
         validation_row,
         field_prefix="transformers_trace_direct_",
         failure_prefix="transformers_trace_direct_runtime_import",
+    )
+
+
+def direct_checkpoint_runtime_requirement_failures(validation_row):
+    return runtime_import_requirement_failures(
+        validation_row,
+        field_prefix="checkpoint_transformers_direct_",
+        failure_prefix="checkpoint_transformers_direct_runtime_import",
     )
 
 
@@ -1957,6 +2302,77 @@ def manifest_trace_validation_gate_failures(validation_row, args):
     return failures
 
 
+def manifest_checkpoint_validation_gate_failures(validation_row, args):
+    failures = []
+    if args is None:
+        return failures
+    if getattr(
+        args,
+        "require_manifest_checkpoint_transformers_runtime_imports",
+        False,
+    ):
+        if not validation_row["checkpoint_transformers_audit_available"]:
+            failures.append("checkpoint_transformers_audit_missing")
+        else:
+            probe_count = manifest_validation_int(
+                validation_row,
+                "checkpoint_transformers_runtime_import_probe_count",
+            )
+            if probe_count is None or probe_count <= 0:
+                failures.append("checkpoint_transformers_runtime_imports_missing")
+            elif (
+                validation_row["checkpoint_transformers_runtime_imports_all_ok"]
+                is not True
+            ):
+                failures.append("checkpoint_transformers_runtime_imports_failed")
+    required_runtime_imports = manifest_required_checkpoint_runtime_imports(args)
+    if required_runtime_imports:
+        if not validation_row["checkpoint_transformers_audit_available"]:
+            failures.append("checkpoint_transformers_audit_missing")
+        else:
+            imported = manifest_validation_csv_set(
+                validation_row,
+                "checkpoint_transformers_runtime_imports_imported",
+            )
+            for module_name in required_runtime_imports:
+                if module_name not in imported:
+                    failures.append(
+                        "checkpoint_transformers_runtime_import_missing:"
+                        f"{module_name}"
+                    )
+    required_runtime_import_presets = (
+        manifest_required_checkpoint_runtime_import_presets(
+            args,
+            validation_row,
+        )
+    )
+    if required_runtime_import_presets:
+        if not validation_row["checkpoint_transformers_audit_available"]:
+            failures.append("checkpoint_transformers_audit_missing")
+        else:
+            observed_presets = manifest_validation_csv_set(
+                validation_row,
+                "checkpoint_transformers_runtime_import_presets",
+            )
+            satisfied_presets = (
+                manifest_checkpoint_satisfied_runtime_import_presets(validation_row)
+            )
+            for preset in required_runtime_import_presets:
+                if preset not in observed_presets:
+                    failures.append(
+                        "checkpoint_transformers_runtime_import_preset_missing:"
+                        f"{preset}"
+                    )
+                elif preset not in satisfied_presets:
+                    failures.append(
+                        "checkpoint_transformers_runtime_import_preset_unsatisfied:"
+                        f"{preset}"
+                    )
+    if getattr(args, "validate_produced_manifest", False):
+        failures.extend(direct_checkpoint_runtime_requirement_failures(validation_row))
+    return failures
+
+
 def check_manifest_trace_validation_gates(validation_row, args):
     failures = manifest_trace_validation_gate_failures(validation_row, args)
     if args is None:
@@ -2004,6 +2420,49 @@ def check_manifest_trace_validation_gates(validation_row, args):
     return True
 
 
+def check_manifest_checkpoint_validation_gates(validation_row, args):
+    failures = manifest_checkpoint_validation_gate_failures(validation_row, args)
+    if args is None:
+        return True
+    gate_requested = any(
+        [
+            getattr(
+                args,
+                "require_manifest_checkpoint_transformers_runtime_imports",
+                False,
+            ),
+            bool(
+                getattr(
+                    args,
+                    "require_manifest_checkpoint_transformers_runtime_import",
+                    [],
+                )
+            ),
+            bool(
+                manifest_required_checkpoint_runtime_import_presets(
+                    args,
+                    validation_row,
+                )
+            ),
+            bool(failures),
+        ]
+    )
+    if not gate_requested:
+        return True
+    print(
+        "profile_smoke_manifest_gate "
+        f"gate=checkpoint_transformers "
+        f"failures={','.join(failures) if failures else 'none'} "
+        f"passed={not failures}"
+    )
+    if failures:
+        raise RuntimeError(
+            "profile smoke manifest checkpoint Transformers validation gate failed: "
+            + ", ".join(failures)
+        )
+    return True
+
+
 def validate_profile_smoke_manifest_file(path, validation_jsonl=None, args=None):
     row, promoted_rungs_jsonl, rung_rows = load_profile_smoke_manifest_with_rungs(path)
     validation_row = profile_smoke_manifest_validation_row(
@@ -2013,7 +2472,9 @@ def validate_profile_smoke_manifest_file(path, validation_jsonl=None, args=None)
         rung_rows,
     )
     validation_row.update(runtime_import_gate_fields(validation_row, args))
+    validation_row.update(checkpoint_runtime_import_gate_fields(validation_row, args))
     check_manifest_trace_validation_gates(validation_row, args)
+    check_manifest_checkpoint_validation_gates(validation_row, args)
     if validation_jsonl is not None:
         write_jsonl(validation_jsonl, [validation_row])
     output_parts = [
@@ -2096,6 +2557,55 @@ def validate_profile_smoke_manifest_file(path, validation_jsonl=None, args=None)
                 f"{validation_row['transformers_trace_top_token_changed_rows']}",
                 "transformers_trace_observed_max_top_probability_regression="
                 f"{validation_row['transformers_trace_observed_max_top_probability_regression']}",
+            ]
+        )
+    if validation_row["checkpoint_transformers_audit_available"]:
+        output_parts.extend(
+            [
+                "checkpoint_transformers_audit_source_jsonl="
+                f"{validation_row['checkpoint_transformers_audit_source_jsonl']}",
+                "checkpoint_transformers_audit_status="
+                f"{validation_row['checkpoint_transformers_audit_status']}",
+                "checkpoint_transformers_runtime_imports_all_ok="
+                f"{validation_row['checkpoint_transformers_runtime_imports_all_ok']}",
+                "checkpoint_transformers_runtime_import_presets="
+                f"{validation_row['checkpoint_transformers_runtime_import_presets']}",
+                "checkpoint_transformers_runtime_import_presets_satisfied="
+                f"{validation_row['checkpoint_transformers_runtime_import_presets_satisfied']}",
+                "checkpoint_transformers_runtime_import_presets_failed="
+                f"{validation_row['checkpoint_transformers_runtime_import_presets_failed']}",
+                "checkpoint_transformers_runtime_imports_failed="
+                f"{validation_row['checkpoint_transformers_runtime_imports_failed']}",
+                "checkpoint_transformers_runtime_imports_imported="
+                f"{validation_row['checkpoint_transformers_runtime_imports_imported']}",
+                "checkpoint_transformers_direct_required_runtime_imports="
+                f"{validation_row['checkpoint_transformers_direct_required_runtime_imports']}",
+                "checkpoint_transformers_direct_required_runtime_imports_missing="
+                f"{validation_row['checkpoint_transformers_direct_required_runtime_imports_missing']}",
+                "checkpoint_transformers_direct_required_runtime_imports_passed="
+                f"{validation_row['checkpoint_transformers_direct_required_runtime_imports_passed']}",
+                "checkpoint_transformers_direct_required_runtime_import_presets="
+                f"{validation_row['checkpoint_transformers_direct_required_runtime_import_presets']}",
+                "checkpoint_transformers_direct_required_runtime_import_presets_unsatisfied="
+                f"{validation_row['checkpoint_transformers_direct_required_runtime_import_presets_unsatisfied']}",
+                "checkpoint_transformers_direct_required_runtime_import_presets_passed="
+                f"{validation_row['checkpoint_transformers_direct_required_runtime_import_presets_passed']}",
+                "checkpoint_transformers_required_runtime_imports="
+                f"{validation_row['checkpoint_transformers_required_runtime_imports']}",
+                "checkpoint_transformers_required_runtime_imports_missing="
+                f"{validation_row['checkpoint_transformers_required_runtime_imports_missing']}",
+                "checkpoint_transformers_required_runtime_imports_passed="
+                f"{validation_row['checkpoint_transformers_required_runtime_imports_passed']}",
+                "checkpoint_transformers_required_runtime_import_presets="
+                f"{validation_row['checkpoint_transformers_required_runtime_import_presets']}",
+                "checkpoint_transformers_required_runtime_import_presets_satisfied="
+                f"{validation_row['checkpoint_transformers_required_runtime_import_presets_satisfied']}",
+                "checkpoint_transformers_required_runtime_import_presets_unsatisfied="
+                f"{validation_row['checkpoint_transformers_required_runtime_import_presets_unsatisfied']}",
+                "checkpoint_transformers_required_runtime_import_presets_missing="
+                f"{validation_row['checkpoint_transformers_required_runtime_import_presets_missing']}",
+                "checkpoint_transformers_required_runtime_import_presets_passed="
+                f"{validation_row['checkpoint_transformers_required_runtime_import_presets_passed']}",
             ]
         )
     print(" ".join(output_parts))
