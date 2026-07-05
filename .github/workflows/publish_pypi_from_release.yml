@@ -15,13 +15,14 @@ on:
         required: false
         default: "true"
       publish_method:
-        description: "PyPI authentication method: token requires PYPI_API_TOKEN; trusted requires a PyPI trusted publisher"
+        description: "PyPI authentication method: dry-run validates only; token/trusted upload"
         required: false
         type: choice
         options:
+          - dry-run
           - token
           - trusted
-        default: "token"
+        default: "dry-run"
 
 permissions:
   contents: read
@@ -54,6 +55,9 @@ jobs:
             trusted)
               echo "publish_method=trusted selected."
               echo "PyPI must define a trusted publisher for repo=$GITHUB_REPOSITORY, workflow=publish_pypi_from_release.yml, environment=pypi."
+              ;;
+            dry-run)
+              echo "publish_method=dry-run selected; release wheels will be validated but not uploaded."
               ;;
             *)
               echo "Unknown publish_method: $PUBLISH_METHOD" >&2
@@ -119,6 +123,26 @@ jobs:
           mkdir -p pypi-dist
           cp release-dist/*.whl pypi-dist/
 
+      - name: Dry-run release publish preflight
+        if: inputs.publish_method == 'dry-run'
+        run: |
+          set -euo pipefail
+          python scripts/release_status.py \
+            --version "${RELEASE_TAG#v}" \
+            --release-tag "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --expected-wheels "$EXPECTED_WHEELS" \
+            --no-clipboard
+          python scripts/publish_pypi_wheels.py \
+            --dist release-dist \
+            --expected-version "${RELEASE_TAG#v}" \
+            --github-release-tag "$RELEASE_TAG" \
+            --github-release-repo "$GITHUB_REPOSITORY" \
+            --token-source none \
+            --dry-run \
+            --no-smoke
+          echo "Dry-run completed without uploading to PyPI."
+
       - name: Publish to PyPI (token)
         if: inputs.publish_method == 'token'
         uses: pypa/gh-action-pypi-publish@release/v1
@@ -135,6 +159,7 @@ jobs:
           skip-existing: ${{ env.SKIP_EXISTING }}
 
       - name: Verify PyPI release and smoke install
+        if: inputs.publish_method != 'dry-run'
         run: |
           set -euo pipefail
           python scripts/security/verify_pypi_release.py \

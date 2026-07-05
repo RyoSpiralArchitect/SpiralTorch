@@ -521,6 +521,15 @@ python scripts/release_status.py \
   --release-tag "$TAG" \
   --expected-wheels 3
 
+# Safe GitHub Actions preflight: validates the signed release wheels and PyPI
+# state, but never uploads. This is the default publish_method for the workflow.
+gh workflow run publish_pypi_from_release.yml \
+  --ref main \
+  -f release_tag="$TAG" \
+  -f expected_wheels=3 \
+  -f publish_method=dry-run \
+  -f skip_existing=true
+
 # One-time token auth setup for the GitHub publish workflow. Prefer the `pypi`
 # environment secret so the credential scope matches the workflow environment.
 # This prompt does not echo the token and does not write it into shell history.
