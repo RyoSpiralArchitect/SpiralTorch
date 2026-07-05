@@ -14,6 +14,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 RUNTIME_IMPORTS_PATH = (
     REPO_ROOT / "bindings" / "st-py" / "spiraltorch" / "runtime_imports.py"
 )
+PYPROJECT_PATH = REPO_ROOT / "bindings" / "st-py" / "pyproject.toml"
 
 
 def load_runtime_imports():
@@ -28,6 +29,14 @@ def load_runtime_imports():
 
 
 class RuntimeImportsTest(unittest.TestCase):
+    def test_pyproject_exposes_runtime_preflight_script(self) -> None:
+        pyproject = PYPROJECT_PATH.read_text(encoding="utf-8")
+
+        self.assertIn(
+            'spiral-runtime-preflight = "spiraltorch.runtime_imports:main"',
+            pyproject,
+        )
+
     def test_ft_presets_extend_without_changing_hf_runtime(self) -> None:
         module = load_runtime_imports()
 

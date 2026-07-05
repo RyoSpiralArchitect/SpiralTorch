@@ -226,8 +226,8 @@ After installing a wheel, optional Hugging Face/FT dependencies can be checked
 without launching a training job:
 
 ```bash
-python -m spiraltorch.runtime_imports --preset hf-finetune --require
-python -m spiraltorch.runtime_imports --preset hf-peft --require --json
+spiral-runtime-preflight --preset hf-finetune --require
+spiral-runtime-preflight --preset hf-peft --require --json
 ```
 
 ## Minimal usage

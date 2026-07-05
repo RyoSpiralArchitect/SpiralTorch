@@ -35,6 +35,7 @@ spiral-train = "spiral.cli:main"
 spiral-model-zoo = "spiraltorch.model_zoo:main"
 spiral-export = "spiral.export:main"
 spiral-plugin = "spiraltorch.plugin_cli:main"
+spiral-runtime-preflight = "spiraltorch.runtime_imports:main"
 
 [project.urls]
 Homepage = "https://github.com/RyoSpiralArchitect/SpiralTorch"
