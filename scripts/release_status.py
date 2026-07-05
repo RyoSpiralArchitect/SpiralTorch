@@ -7,6 +7,7 @@ from email.parser import Parser
 import json
 import os
 from pathlib import Path
+import shlex
 import subprocess
 import sys
 from typing import Any
@@ -338,6 +339,59 @@ def github_secret_status(secret_name: str, *, environment: str) -> dict[str, Any
     }
 
 
+def shell_join(command: list[str]) -> str:
+    return " ".join(shlex.quote(part) for part in command)
+
+
+def token_secret_setup_command(*, secret_name: str, environment: str) -> str:
+    command = [
+        "python",
+        "scripts/configure_pypi_token_secret.py",
+        "--token-source",
+        "prompt",
+    ]
+    if secret_name != DEFAULT_TOKEN_SECRET:
+        command.extend(["--secret-name", secret_name])
+    if environment != DEFAULT_SECRET_ENVIRONMENT:
+        command.extend(["--environment", environment])
+    return shell_join(command)
+
+
+def publish_from_release_command(*, tag: str, expected_wheels: int, publish_method: str) -> str:
+    return shell_join(
+        [
+            "gh",
+            "workflow",
+            "run",
+            "publish_pypi_from_release.yml",
+            "--ref",
+            "main",
+            "-f",
+            f"release_tag={tag}",
+            "-f",
+            f"expected_wheels={expected_wheels}",
+            "-f",
+            f"publish_method={publish_method}",
+            "-f",
+            "skip_existing=true",
+        ]
+    )
+
+
+def trusted_publisher_claims(
+    repo: str,
+    *,
+    environment: str,
+    workflow: str = "publish_pypi_from_release.yml",
+) -> dict[str, str]:
+    return {
+        "sub": f"repo:{repo}:environment:{environment}",
+        "repository": repo,
+        "workflow_ref": f"{repo}/.github/workflows/{workflow}@refs/heads/main",
+        "environment": environment,
+    }
+
+
 def build_status(args: argparse.Namespace) -> dict[str, Any]:
     root = args.root.resolve()
     versions = local_versions(root)
@@ -372,6 +426,20 @@ def build_status(args: argparse.Namespace) -> dict[str, Any]:
     pypi_published = bool(pypi.get("published"))
     token_ready = bool(tokens["env"].get("upload_ready")) or bool(tokens.get("clipboard", {}).get("upload_ready"))
     github_secret_ready = bool(tokens["github_environment_secret"].get("present"))
+    token_secret_command = token_secret_setup_command(
+        secret_name=args.token_env,
+        environment=args.github_secret_environment,
+    )
+    token_publish_command = publish_from_release_command(
+        tag=tag,
+        expected_wheels=args.expected_wheels,
+        publish_method="token",
+    )
+    trusted_publish_command = publish_from_release_command(
+        tag=tag,
+        expected_wheels=args.expected_wheels,
+        publish_method="trusted",
+    )
     if pypi_published:
         next_action = "verify published PyPI wheels against the GitHub Release manifest"
     elif not local_ready:
@@ -381,11 +449,11 @@ def build_status(args: argparse.Namespace) -> dict[str, Any]:
     elif not release_ready:
         next_action = "fix or rebuild the GitHub Release wheel assets before publishing"
     elif github_secret_ready:
-        next_action = "run publish_pypi_from_release.yml with publish_method=token"
+        next_action = token_publish_command
     elif token_ready:
         next_action = "run scripts/publish_pypi_wheels.py with the ready local token source"
     else:
-        next_action = "provide a PyPI token via prompt/env/GitHub secret or configure PyPI Trusted Publishing"
+        next_action = f"{token_secret_command} OR configure PyPI Trusted Publishing"
 
     return {
         "package": args.package,
@@ -398,6 +466,12 @@ def build_status(args: argparse.Namespace) -> dict[str, Any]:
         "github_release": release,
         "pypi": pypi,
         "tokens": tokens,
+        "commands": {
+            "token_secret_setup": token_secret_command,
+            "publish_token_workflow": token_publish_command,
+            "publish_trusted_workflow": trusted_publish_command,
+        },
+        "trusted_publisher": trusted_publisher_claims(args.repo, environment=args.github_secret_environment),
         "ready": {
             "local_versions": local_ready,
             "local_wheel_payloads": local_wheel_payloads_ready,
@@ -463,6 +537,25 @@ def print_text(status: dict[str, Any]) -> None:
         f"github_env_secret_present={yes_no(gh_secret.get('present'))} "
         "prompt_available=yes"
     )
+    commands = status.get("commands", {})
+    if isinstance(commands, dict):
+        token_secret_setup = commands.get("token_secret_setup")
+        publish_token_workflow = commands.get("publish_token_workflow")
+        publish_trusted_workflow = commands.get("publish_trusted_workflow")
+        if token_secret_setup:
+            print(f"token_secret_setup: {token_secret_setup}")
+        if publish_token_workflow:
+            print(f"publish_token_workflow: {publish_token_workflow}")
+        if publish_trusted_workflow:
+            print(f"publish_trusted_workflow: {publish_trusted_workflow}")
+    trusted_publisher = status.get("trusted_publisher", {})
+    if isinstance(trusted_publisher, dict):
+        print(
+            "trusted_publisher "
+            f"sub={trusted_publisher.get('sub')} "
+            f"workflow_ref={trusted_publisher.get('workflow_ref')} "
+            f"environment={trusted_publisher.get('environment')}"
+        )
     print(f"next_action: {status['next_action']}")
 
 
