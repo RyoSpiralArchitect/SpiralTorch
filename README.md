@@ -468,8 +468,9 @@ python scripts/publish_pypi_wheels.py \
   --expected-version 0.4.8 \
   --skip-existing
 
-# Signed GitHub Release recovery: rebuild from the release tag, regenerate the
-# manifest/Sigstore bundles, and overwrite the assets on that tag's release.
+# Signed GitHub Release recovery: run the fixed workflow from main, rebuild
+# wheels from the release tag, regenerate manifest/Sigstore bundles, and
+# overwrite the assets on that tag's release.
 gh workflow run release_wheels.yml \
   --ref main \
   -f release_tag=v0.4.8 \
