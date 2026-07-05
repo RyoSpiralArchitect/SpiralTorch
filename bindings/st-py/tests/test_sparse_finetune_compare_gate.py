@@ -5159,6 +5159,11 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
     def test_transformers_trace_runtime_import_presets_are_shared(self):
         profile_module = load_example("byte_lm_profile_smoke")
         trace_module = load_example("byte_lm_transformers_trace")
+        from spiraltorch.runtime_imports import (
+            runtime_import_preset_missing_modules_label,
+            runtime_import_preset_modules_label,
+            runtime_import_preset_status_rows,
+        )
 
         self.assertEqual(
             profile_module.TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS,
@@ -5179,6 +5184,23 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             ),
             ["hf-runtime"],
         )
+        status_rows = runtime_import_preset_status_rows(
+            ["hf-runtime"],
+            [
+                {"module": "transformers", "imported": True},
+                {"module": "torch", "imported": True},
+                {"module": "tokenizers", "imported": False},
+            ],
+        )
+        self.assertEqual(
+            runtime_import_preset_modules_label(status_rows),
+            "hf-runtime=transformers|torch|tokenizers",
+        )
+        self.assertEqual(
+            runtime_import_preset_missing_modules_label(status_rows),
+            "hf-runtime=tokenizers",
+        )
+        self.assertFalse(status_rows[0]["passed"])
 
     def test_byte_lm_profile_smoke_rejects_produced_manifest_validation_dry_run(self):
         module = load_example("byte_lm_profile_smoke")
