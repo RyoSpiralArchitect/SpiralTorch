@@ -70,8 +70,12 @@ TRACE_SPOTLIGHT_KEYS = (
     "tensor_backend_fallbacks",
     "tensor_backend_requested_wgpu_hits",
     "tensor_backend_requested_wgpu_runtime_fallbacks",
+    "tensor_backend_requested_wgpu_hit_rate",
+    "tensor_backend_requested_wgpu_runtime_fallback_rate",
     "tensor_backend_requested_wgpu_component_hits",
     "tensor_backend_requested_wgpu_component_fallbacks",
+    "tensor_backend_requested_wgpu_component_hit_rate",
+    "tensor_backend_requested_wgpu_component_fallback_rate",
     "tensor_op_backend_matmul_scaled_wgpu",
     "tensor_op_backend_matmul_scaled_faer",
     "tensor_op_backend_matmul_scaled_naive",
@@ -868,6 +872,19 @@ def _tensor_backend_metrics_from_tensor_meta(
 
     if counts:
         counts["tensor_backend_fallbacks"] = fallback_count
+    component_hits = counts.get("tensor_backend_requested_wgpu_component_hits", 0.0)
+    component_fallbacks = counts.get(
+        "tensor_backend_requested_wgpu_component_fallbacks",
+        0.0,
+    )
+    component_total = component_hits + component_fallbacks
+    if component_total > 0.0:
+        counts["tensor_backend_requested_wgpu_component_hit_rate"] = (
+            component_hits / component_total
+        )
+        counts["tensor_backend_requested_wgpu_component_fallback_rate"] = (
+            component_fallbacks / component_total
+        )
 
     metrics: dict[str, dict[str, Any]] = {}
     for key, value in counts.items():
@@ -980,6 +997,19 @@ def _backend_request_metrics_from_tensor_meta(
             inc(f"tensor_op_backend_wgpu_runtime_fallback_{op_fragment}_{backend_fragment}")
 
     metrics: dict[str, dict[str, Any]] = {}
+    requested_wgpu_hits = counts.get("tensor_backend_requested_wgpu_hits", 0.0)
+    requested_wgpu_runtime_fallbacks = counts.get(
+        "tensor_backend_requested_wgpu_runtime_fallbacks",
+        0.0,
+    )
+    requested_wgpu_total = requested_wgpu_hits + requested_wgpu_runtime_fallbacks
+    if requested_wgpu_total > 0.0:
+        counts["tensor_backend_requested_wgpu_hit_rate"] = (
+            requested_wgpu_hits / requested_wgpu_total
+        )
+        counts["tensor_backend_requested_wgpu_runtime_fallback_rate"] = (
+            requested_wgpu_runtime_fallbacks / requested_wgpu_total
+        )
     for key, value in counts.items():
         _insert_metric_value(metrics, key, value)
     return metrics

@@ -1260,6 +1260,14 @@ impl TensorBackendStepTrace {
                     "tensor_backend_requested_wgpu_runtime_fallbacks".to_string(),
                     self.requested_wgpu_runtime_fallbacks as f64,
                 );
+                extra.insert(
+                    "tensor_backend_requested_wgpu_hit_rate".to_string(),
+                    self.requested_wgpu_hits as f64 / requested_wgpu_total as f64,
+                );
+                extra.insert(
+                    "tensor_backend_requested_wgpu_runtime_fallback_rate".to_string(),
+                    self.requested_wgpu_runtime_fallbacks as f64 / requested_wgpu_total as f64,
+                );
                 for (op_backend, count) in self.requested_wgpu_hits_by_op_backend {
                     extra.insert(
                         format!("tensor_op_backend_requested_wgpu_hit_{op_backend}"),
@@ -1284,6 +1292,16 @@ impl TensorBackendStepTrace {
                 extra.insert(
                     "tensor_backend_requested_wgpu_component_fallbacks".to_string(),
                     self.requested_wgpu_component_fallbacks as f64,
+                );
+                extra.insert(
+                    "tensor_backend_requested_wgpu_component_hit_rate".to_string(),
+                    self.requested_wgpu_component_hits as f64
+                        / requested_wgpu_component_total as f64,
+                );
+                extra.insert(
+                    "tensor_backend_requested_wgpu_component_fallback_rate".to_string(),
+                    self.requested_wgpu_component_fallbacks as f64
+                        / requested_wgpu_component_total as f64,
                 );
                 for (op_backend, count) in self.requested_wgpu_component_hits_by_op_backend {
                     extra.insert(
@@ -1695,6 +1713,19 @@ impl EpochTensorBackendStats {
             "epoch_tensor_backend_requested_wgpu_runtime_fallbacks".to_string(),
             self.requested_wgpu_runtime_fallbacks as f64,
         );
+        let requested_wgpu_total = self
+            .requested_wgpu_hits
+            .saturating_add(self.requested_wgpu_runtime_fallbacks);
+        if requested_wgpu_total > 0 {
+            extra.insert(
+                "epoch_tensor_backend_requested_wgpu_hit_rate".to_string(),
+                self.requested_wgpu_hits as f64 / requested_wgpu_total as f64,
+            );
+            extra.insert(
+                "epoch_tensor_backend_requested_wgpu_runtime_fallback_rate".to_string(),
+                self.requested_wgpu_runtime_fallbacks as f64 / requested_wgpu_total as f64,
+            );
+        }
         extra.insert(
             "epoch_tensor_backend_requested_wgpu_component_hits".to_string(),
             self.requested_wgpu_component_hits as f64,
@@ -1703,6 +1734,20 @@ impl EpochTensorBackendStats {
             "epoch_tensor_backend_requested_wgpu_component_fallbacks".to_string(),
             self.requested_wgpu_component_fallbacks as f64,
         );
+        let requested_wgpu_component_total = self
+            .requested_wgpu_component_hits
+            .saturating_add(self.requested_wgpu_component_fallbacks);
+        if requested_wgpu_component_total > 0 {
+            extra.insert(
+                "epoch_tensor_backend_requested_wgpu_component_hit_rate".to_string(),
+                self.requested_wgpu_component_hits as f64 / requested_wgpu_component_total as f64,
+            );
+            extra.insert(
+                "epoch_tensor_backend_requested_wgpu_component_fallback_rate".to_string(),
+                self.requested_wgpu_component_fallbacks as f64
+                    / requested_wgpu_component_total as f64,
+            );
+        }
         extra.insert(
             "epoch_tensor_meta_events".to_string(),
             self.meta_events as f64,
@@ -10326,6 +10371,18 @@ mod tests {
                 .copied(),
             Some(4.0)
         );
+        assert_eq!(
+            epoch_extra
+                .get("epoch_tensor_backend_requested_wgpu_component_hit_rate")
+                .copied(),
+            Some(0.6)
+        );
+        assert_eq!(
+            epoch_extra
+                .get("epoch_tensor_backend_requested_wgpu_component_fallback_rate")
+                .copied(),
+            Some(0.4)
+        );
 
         let mut extra = HashMap::new();
         trace.write_extra(&mut extra);
@@ -10340,6 +10397,18 @@ mod tests {
                 .get("tensor_backend_requested_wgpu_component_fallbacks")
                 .copied(),
             Some(4.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_backend_requested_wgpu_component_hit_rate")
+                .copied(),
+            Some(0.6)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_backend_requested_wgpu_component_fallback_rate")
+                .copied(),
+            Some(0.4)
         );
         assert_eq!(
             extra
@@ -10509,6 +10578,18 @@ mod tests {
                 .copied(),
             Some(1.0)
         );
+        assert_eq!(
+            epoch_extra
+                .get("epoch_tensor_backend_requested_wgpu_hit_rate")
+                .copied(),
+            Some(0.5)
+        );
+        assert_eq!(
+            epoch_extra
+                .get("epoch_tensor_backend_requested_wgpu_runtime_fallback_rate")
+                .copied(),
+            Some(0.5)
+        );
 
         let mut extra = HashMap::new();
         trace.write_extra(&mut extra);
@@ -10521,6 +10602,16 @@ mod tests {
                 .get("tensor_backend_requested_wgpu_runtime_fallbacks")
                 .copied(),
             Some(1.0)
+        );
+        assert_eq!(
+            extra.get("tensor_backend_requested_wgpu_hit_rate").copied(),
+            Some(0.5)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_backend_requested_wgpu_runtime_fallback_rate")
+                .copied(),
+            Some(0.5)
         );
         assert_eq!(
             extra
