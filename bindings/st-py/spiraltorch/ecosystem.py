@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import importlib
 import inspect
 import numbers
 from collections.abc import Mapping
 from typing import Any, Callable, Iterable
 
-from . import Tensor, compat
+from . import Tensor
 
 __all__ = [
     "bound_external_state_tensors",
@@ -35,8 +36,9 @@ def _compat_namespace(name: str) -> Any:
     """Return a compat child module or raise a descriptive error."""
 
     try:
+        compat = importlib.import_module(f"{__package__}.compat")
         module = getattr(compat, name)
-    except AttributeError as exc:  # pragma: no cover - exercised via tests
+    except (AttributeError, ModuleNotFoundError) as exc:  # pragma: no cover - exercised via tests
         raise RuntimeError(
             f"spiraltorch.compat.{name} is unavailable. {_NATIVE_EXTENSION_HINT}"
         ) from exc
