@@ -5658,6 +5658,97 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             Path("/tmp/profile-smoke-real-hf/profile-smoke-manifest-validation.jsonl"),
         )
 
+    def test_byte_lm_profile_smoke_runtime_contract_preset_expands_execution_gates(self):
+        module = load_example("byte_lm_profile_smoke")
+        old_argv = sys.argv
+        sys.argv = [
+            "byte_lm_profile_smoke.py",
+            "--out-dir",
+            "/tmp/profile-smoke-real-hf",
+            "--hf-state-dict",
+            "/models/llama",
+            "--runtime-contract-preset",
+            "hf-runtime",
+        ]
+        try:
+            args = module.parse_args()
+        finally:
+            sys.argv = old_argv
+
+        self.assertTrue(args.transformers_audit)
+        self.assertTrue(args.transformers_trace)
+        self.assertTrue(args.validate_produced_manifest)
+        self.assertEqual(
+            args.checkpoint_transformers_runtime_import_presets,
+            ["hf-runtime"],
+        )
+        self.assertTrue(args.require_checkpoint_transformers_runtime_imports)
+        self.assertEqual(
+            args.require_checkpoint_transformers_runtime_import_preset,
+            ["hf-runtime"],
+        )
+        self.assertEqual(
+            args.transformers_trace_runtime_import_presets,
+            ["hf-runtime"],
+        )
+        self.assertTrue(args.require_transformers_trace_runtime_imports)
+        self.assertEqual(
+            args.require_transformers_trace_runtime_import_preset,
+            ["hf-runtime"],
+        )
+        self.assertTrue(args.require_manifest_checkpoint_transformers_runtime_imports)
+        self.assertEqual(
+            args.require_manifest_checkpoint_transformers_runtime_import_preset,
+            ["hf-runtime"],
+        )
+        self.assertTrue(args.require_manifest_transformers_trace)
+        self.assertTrue(args.require_manifest_transformers_trace_coimport)
+        self.assertTrue(args.require_manifest_transformers_trace_runtime_imports)
+        self.assertEqual(
+            args.require_manifest_transformers_trace_runtime_import_preset,
+            ["hf-runtime"],
+        )
+        checkpoint_args = module.checkpoint_transformers_args(args)
+        self.assertIn("--transformers-audit", checkpoint_args)
+        self.assertIn("--transformers-runtime-import-preset", checkpoint_args)
+        self.assertIn("hf-runtime", checkpoint_args)
+        self.assertIn("--require-transformers-runtime-imports", checkpoint_args)
+        self.assertIn("--require-transformers-runtime-import-preset", checkpoint_args)
+        trace_args = module.transformers_trace_args(
+            args,
+            Path("/models/llama"),
+            Path("/tmp/trace.jsonl"),
+            None,
+        )
+        self.assertIn("--runtime-import-preset", trace_args)
+        self.assertIn("hf-runtime", trace_args)
+        self.assertIn("--require-runtime-imports", trace_args)
+        self.assertIn("--require-runtime-import-preset", trace_args)
+
+        sys.argv = [
+            "byte_lm_profile_smoke.py",
+            "--out-dir",
+            "/tmp/profile-smoke-real-hf",
+            "--hf-state-dict",
+            "/models/llama",
+            "--runtime-contract-preset",
+            "hf-runtime",
+            "--dry-run",
+        ]
+        try:
+            dry_run_args = module.parse_args()
+        finally:
+            sys.argv = old_argv
+        self.assertTrue(dry_run_args.transformers_audit)
+        self.assertTrue(dry_run_args.transformers_trace)
+        self.assertTrue(dry_run_args.require_checkpoint_transformers_runtime_imports)
+        self.assertTrue(dry_run_args.require_transformers_trace_runtime_imports)
+        self.assertFalse(dry_run_args.validate_produced_manifest)
+        self.assertFalse(
+            dry_run_args.require_manifest_checkpoint_transformers_runtime_imports
+        )
+        self.assertFalse(dry_run_args.require_manifest_transformers_trace)
+
     def test_transformers_trace_runtime_import_presets_are_shared(self):
         profile_module = load_example("byte_lm_profile_smoke")
         trace_module = load_example("byte_lm_transformers_trace")

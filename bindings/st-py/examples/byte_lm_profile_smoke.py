@@ -60,6 +60,10 @@ def source_value(source, key, default=None):
     return getattr(source, key, default)
 
 
+def append_unique(values, additions):
+    return list(dict.fromkeys([*(values or []), *(additions or [])]))
+
+
 def transformers_trace_runtime_imports(source):
     return runtime_imports_from_source(
         source,
@@ -354,6 +358,19 @@ def parse_args():
         help=(
             "Require checkpoint_preflight.py to satisfy this named runtime import "
             "preset during --transformers-audit. May be repeated."
+        ),
+    )
+    parser.add_argument(
+        "--runtime-contract-preset",
+        dest="runtime_contract_presets",
+        action="append",
+        choices=sorted(TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS),
+        default=[],
+        help=(
+            "Shortcut runtime contract preset shared by checkpoint preflight, "
+            "Transformers trace, and produced-manifest validation. "
+            "Use 'hf-runtime' to probe transformers, torch, and tokenizers. "
+            "May be repeated."
         ),
     )
     parser.add_argument(
@@ -875,6 +892,7 @@ def parse_args():
         parser.error("--continue-ft-epochs must be positive")
     if args.continue_ft_epochs_step is not None and args.continue_ft_epochs_step <= 0:
         parser.error("--continue-ft-epochs-step must be positive")
+    apply_runtime_contract_presets(args)
     if (
         args.continue_manifest_jsonl is None
         and args.validate_manifest_jsonl is None
@@ -1064,6 +1082,51 @@ def parse_args():
         parser.error("checkpoint preflight compare gates require checkpoint preflight")
     if not args.source_label:
         parser.error("--source-label must be non-empty")
+    return args
+
+
+def apply_runtime_contract_presets(args):
+    presets = list(dict.fromkeys(args.runtime_contract_presets or []))
+    if not presets:
+        return args
+    args.transformers_audit = True
+    args.transformers_trace = True
+    args.checkpoint_transformers_runtime_import_presets = append_unique(
+        args.checkpoint_transformers_runtime_import_presets,
+        presets,
+    )
+    args.require_checkpoint_transformers_runtime_imports = True
+    args.require_checkpoint_transformers_runtime_import_preset = append_unique(
+        args.require_checkpoint_transformers_runtime_import_preset,
+        presets,
+    )
+    args.transformers_trace_runtime_import_presets = append_unique(
+        args.transformers_trace_runtime_import_presets,
+        presets,
+    )
+    args.require_transformers_trace_runtime_imports = True
+    args.require_transformers_trace_runtime_import_preset = append_unique(
+        args.require_transformers_trace_runtime_import_preset,
+        presets,
+    )
+    if not args.dry_run:
+        args.validate_produced_manifest = True
+        args.require_manifest_checkpoint_transformers_runtime_imports = True
+        args.require_manifest_checkpoint_transformers_runtime_import_preset = (
+            append_unique(
+                args.require_manifest_checkpoint_transformers_runtime_import_preset,
+                presets,
+            )
+        )
+        args.require_manifest_transformers_trace = True
+        args.require_manifest_transformers_trace_coimport = True
+        args.require_manifest_transformers_trace_runtime_imports = True
+        args.require_manifest_transformers_trace_runtime_import_preset = (
+            append_unique(
+                args.require_manifest_transformers_trace_runtime_import_preset,
+                presets,
+            )
+        )
     return args
 
 
