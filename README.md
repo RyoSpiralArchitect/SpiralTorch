@@ -510,8 +510,8 @@ python scripts/publish_pypi_wheels.py \
   --github-release-tag "$TAG" \
   --dry-run
 
-# Real upload: reads a `pypi-...` token from the macOS clipboard, uploads the
-# wheels with twine, waits for PyPI JSON, then installs/import-smokes the release.
+# Real upload: reads a `pypi-...` token from the macOS clipboard, uploads with
+# twine, verifies PyPI wheel digests, then installs/import-smokes the release.
 python scripts/publish_pypi_wheels.py \
   --dist "$DIST" \
   --expected-version "$VERSION" \
