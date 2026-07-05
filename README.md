@@ -508,12 +508,12 @@ Linux note: for manylinux2014 wheels you either need a manylinux container (e.g.
 - Publish existing signed GitHub Release wheels: `.github/workflows/publish_pypi_from_release.yml`
 - Release readiness summary: `scripts/release_status.py`
 - Safe manual PyPI publish helper: `scripts/publish_pypi_wheels.py`
+- Full release runbook: [`docs/ops/release.md`](docs/ops/release.md)
 
 ```bash
 # Replace these with the version/tag you are publishing.
 VERSION=0.4.11
 TAG="v${VERSION}"
-DIST="/tmp/spiraltorch-${VERSION}-dist"
 
 # Snapshot release readiness without exposing any secret values.
 python scripts/release_status.py \
@@ -530,128 +530,15 @@ gh workflow run publish_pypi_from_release.yml \
   -f publish_method=dry-run \
   -f skip_existing=true
 
-# One-time token auth setup for the GitHub publish workflow. Prefer the `pypi`
-# environment secret so the credential scope matches the workflow environment.
-# This prompt does not echo the token and does not write it into shell history.
-python - <<'PY'
-import getpass
-import subprocess
-
-token = getpass.getpass("PyPI token for spiraltorch (hidden): ").strip()
-if not token.startswith("pypi-"):
-    raise SystemExit("Refusing to store a value that does not look like a PyPI API token")
-subprocess.run(
-    ["gh", "secret", "set", "PYPI_API_TOKEN", "--env", "pypi", "--body-file", "-"],
-    input=token,
-    text=True,
-    check=True,
-)
-PY
-
-# Preferred PyPI publish path: reuse the already-signed GitHub Release wheels.
-# publish_method=token requires a PYPI_API_TOKEN repo/environment secret.
-# publish_method=trusted requires a matching PyPI trusted publisher.
+# Real publish is intentionally explicit: provide PYPI_API_TOKEN as the `pypi`
+# environment secret, or configure a matching PyPI Trusted Publisher first.
 gh workflow run publish_pypi_from_release.yml \
   --ref main \
   -f release_tag="$TAG" \
   -f expected_wheels=3 \
   -f publish_method=token \
   -f skip_existing=true
-
-# If the token secret is intentionally repo-wide instead of environment-scoped,
-# omit `--env pypi` in the setup command above. If the workflow fails with
-# "publish_method=token requires a PYPI_API_TOKEN", the selected GitHub
-# environment cannot see that secret yet.
-
-# Local release-wheel download for dry-runs or emergency manual publish.
-mkdir -p "$DIST"
-gh release download "$TAG" \
-  --dir "$DIST" \
-  --clobber \
-  --pattern 'spiraltorch-*.whl' \
-  --pattern 'wheels.sha256'
-
-# Dry-run first: validates wheels, twine metadata, PyPI state, and token shape
-# without printing the token or uploading anything. Use --token-source none
-# when you only want wheel/release validation without credential readiness.
-python scripts/publish_pypi_wheels.py \
-  --dist "$DIST" \
-  --expected-version "$VERSION" \
-  --github-release-tag "$TAG" \
-  --token-source prompt \
-  --dry-run
-
-# Real upload: reads a `pypi-...` token from a hidden prompt, uploads with
-# twine, verifies PyPI wheel digests, then installs/import-smokes the release.
-python scripts/publish_pypi_wheels.py \
-  --dist "$DIST" \
-  --expected-version "$VERSION" \
-  --github-release-tag "$TAG" \
-  --token-source prompt \
-  --skip-existing
-
-# If a local multi-wheel upload stalls on a slow uplink, upload one wheel at a
-# time from a clean twine venv. Keep --skip-existing so interrupted retries are
-# safe after PyPI accepts an earlier file. `read -s` keeps the token out of
-# stdout and shell history.
-read -rsp "PyPI token for spiraltorch (hidden): " TWINE_PASSWORD
-echo
-for wheel in "$DIST"/spiraltorch-"$VERSION"-*.whl; do
-  TWINE_USERNAME=__token__ TWINE_PASSWORD="$TWINE_PASSWORD" \
-    python -m twine upload --non-interactive --skip-existing --disable-progress-bar "$wheel"
-done
-unset TWINE_PASSWORD
-
-# Signed GitHub Release recovery: run the fixed workflow from main, rebuild
-# wheels from the release tag, regenerate manifest/Sigstore bundles, and
-# overwrite the assets on that tag's release.
-gh workflow run release_wheels.yml \
-  --ref main \
-  -f release_tag="$TAG" \
-  -f checkout_ref="$TAG" \
-  -f publish_pypi=false
-
-# If you intentionally publish from a rebuild, choose the auth path explicitly.
-# publish_pypi=true requires release_tag; after upload, CI verifies PyPI wheel
-# digests against the GitHub Release wheels.sha256 emitted by the attach job.
-gh workflow run release_wheels.yml \
-  --ref main \
-  -f release_tag="$TAG" \
-  -f checkout_ref="$TAG" \
-  -f publish_pypi=true \
-  -f pypi_publish_method=token
-
-# Re-run integrity verification for that recovered release.
-gh workflow run verify-release.yml --ref main -f release_tag="$TAG"
-
-# Confirm the published PyPI wheels are byte-identical to the GitHub Release
-# wheel manifest. Add --require-latest when publishing the current release.
-python scripts/security/verify_pypi_release.py \
-  --version "$VERSION" \
-  --release-tag "$TAG" \
-  --expected-wheels 3 \
-  --require-latest
 ```
-
-Trusted publishing is intentionally explicit. For PyPI OIDC, configure the
-PyPI publisher for project `spiraltorch` with owner `RyoSpiralArchitect`,
-repository `SpiralTorch`, environment `pypi`, and the workflow file you are
-using (`publish_pypi_from_release.yml` or `release_wheels.yml`). For the
-release-wheel reuse workflow, the expected OIDC shape is:
-
-```text
-sub=repo:RyoSpiralArchitect/SpiralTorch:environment:pypi
-repository=RyoSpiralArchitect/SpiralTorch
-workflow_ref=RyoSpiralArchitect/SpiralTorch/.github/workflows/publish_pypi_from_release.yml@refs/heads/main
-environment=pypi
-```
-
-If the trusted path fails with `invalid-publisher`, the PyPI-side publisher is
-missing or one of those fields does not match. Without that PyPI-side publisher,
-select `token` and provide `PYPI_API_TOKEN` as a GitHub secret, or use the local
-helper above with `--token-source prompt` when `pbpaste` is not visible from the
-current shell. `--token-source env --token-env PYPI_API_TOKEN` is also available
-for non-interactive local automation.
 
 ---
 
