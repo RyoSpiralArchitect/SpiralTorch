@@ -21,6 +21,7 @@ CHUNK_SIZE = 1024 * 1024
 REQUIRED_LICENSE_TOKEN = "AGPL-3.0-or-later"
 COMPLIANCE_SEAL_NAME = "spiraltorch-compliance-seal.json"
 COMPLIANCE_SEAL_SCHEMA = "https://spiraltorch.org/security/compliance-seal/v1"
+RELEASE_MANIFEST_SCHEMA = "https://spiraltorch.org/security/release-manifest/v1"
 
 
 def parse_args() -> argparse.Namespace:
@@ -235,13 +236,18 @@ def verify_release(args: argparse.Namespace) -> None:
     if not assets:
         raise SystemExit(f"Release {tag_name} does not expose any downloadable assets.")
 
-    manifest_asset = next((asset for asset in assets if asset["name"].endswith("-manifest.json")), None)
-    if not manifest_asset:
-        raise SystemExit(
-            "No authenticated manifest was found in the release assets. Ensure the release workflow has run successfully."
-        )
-
     asset_index = {asset["name"]: asset for asset in assets}
+    manifest_name = f"spiraltorch-{tag_name}-manifest.json"
+    manifest_asset = asset_index.get(manifest_name)
+    if not manifest_asset:
+        manifest_candidates = sorted(
+            asset["name"] for asset in assets if asset["name"].endswith("-manifest.json")
+        )
+        candidate_summary = ", ".join(manifest_candidates) if manifest_candidates else "<none>"
+        raise SystemExit(
+            "No authenticated release manifest was found in the release assets. "
+            f"Expected {manifest_name}; saw manifest-like assets: {candidate_summary}."
+        )
 
     with contextlib.ExitStack() as stack:
         if args.work_dir:
@@ -261,6 +267,11 @@ def verify_release(args: argparse.Namespace) -> None:
         run_sigstore_verify(manifest_path, args.repo, tag_name, args.allow_workflow_dispatch_ref)
 
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if manifest.get("schema") != RELEASE_MANIFEST_SCHEMA:
+            raise SystemExit(f"Release manifest schema mismatch in {manifest_path.name}.")
+        if manifest.get("tag") != tag_name:
+            raise SystemExit(f"Release manifest tag mismatch in {manifest_path.name}.")
+
         manifest_files = manifest.get("files", [])
         if not manifest_files:
             raise SystemExit("Release manifest did not contain any file entries to validate.")
