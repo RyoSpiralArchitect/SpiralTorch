@@ -5,10 +5,55 @@ Rust-first training stack. The wheel ships the same Z-space tensors,
 hypergrad tapes, and unified rank planners that power the Rust API—no
 NumPy, no PyTorch, and no shim layers.
 
+## Install
+
+```bash
+pip install -U spiraltorch
+```
+
+The published wheel is WGPU-first with CPU fallback. In plain Python terms,
+start with three handles:
+
+- `spiraltorch.Tensor` for dependency-light native tensors.
+- `spiraltorch.nn` for modules, losses, trainers, LoRA adapters, and checked
+  checkpoint handoff.
+- `spiraltorch.ecosystem` when a PyTorch/JAX/CuPy/TensorFlow tensor needs to
+  cross the Z-space membrane.
+
+```bash
+python - <<'PY'
+import spiraltorch as st
+from spiraltorch.nn import Linear, Sequential
+
+print("runtime:", st.describe_device("cpu")["backend"])
+
+model = Sequential()
+model.add(Linear(2, 2, name="head"))
+print("forward:", model(st.Tensor(1, 2, [0.25, 0.75])).tolist())
+
+head = Linear(2, 2, name="head")
+native = dict(head.state_dict())
+external = {
+    "lm_head.weight": native["head::weight"],
+    "lm_head.bias": native["head::bias"],
+}
+report = head.state_dict_compatibility_with_key_map(
+    external,
+    {"lm_head.weight": "head::weight", "lm_head.bias": "head::bias"},
+)
+print("checkpoint compatible:", report["compatible"])
+PY
+```
+
 ## What's included
 
 - `Tensor`, `ComplexTensor`, and `OpenTopos` for dependency-free
   geometry experiments.
+- Native neural layers via `spiraltorch.nn`—`Linear`, `Embedding`,
+  `Sequential`, losses, `ModuleTrainer`, `LoraLinear`, and `ZSpaceProjector`.
+- Checked checkpoint handoff helpers for exact or key-mapped `state_dict`
+  reports, subset loads, overlap resize/projection preflight, and HF-style
+  checkpoint presets.
 - `LanguageWaveEncoder` + `Hypergrad` so Python callers can stream Z-space
   text, accumulate gradients, and project back into the Poincaré ball.
 - `TensorBiome` to cultivate open-topos rewrites, weight shoots, stack the
@@ -23,18 +68,16 @@ NumPy, no PyTorch, and no shim layers.
 - Loss-monotone barycenter intermediates (`BarycenterIntermediate`) that plug
   into `Hypergrad.accumulate_barycenter_path` so tapes converge along the
   same Z-space corridor as the solver.
-- High-level orchestration via `SpiralSession` / `SpiralSessionBuilder` so
-  callers can select devices, spawn hypergrad tapes, plan kernels, and solve
-  barycentres with a few intuitive method calls. Structured results are
-  returned through the new `ZSpaceBarycenter` class.
-- Language desire geometry and automation builders—`SparseKernel`,
-  `SymbolGeometry`, `SemanticBridge`, `DesireLagrangian`, `DesireAutomation`,
-  and the ergonomic `DesirePipelineBuilder` so notebooks can assemble desire
-  pipelines, logbooks, telemetry sinks, and ConceptHint distributions entirely
-  from Python.
-- `SpiralLightning` harness for quick notebook experiments—prepare modules,
-  run epochs, and stream results without manually juggling trainers or
-  schedules.
+- Lightweight runtime orchestration via `SpiralSession` so callers can record
+  backend intent, inspect device preflight evidence, and reuse the same
+  `RankPlan` helpers as the Rust executors.
+- Language desire controls via `st.nn.DesirePipeline`, `DesireTrainerBridge`,
+  `DesireRoundtableBridge`, and downstream hook adapters so notebooks can
+  inspect phase/temperature/entropy offsets without making the symbolic kernel
+  internals part of the stable public surface.
+- Native trainer harnesses via `spiraltorch.nn.ModuleTrainer` and
+  `RoundtableConfig` for quick notebook experiments without leaving the Rust
+  training loop.
 - Event observability via `spiraltorch.plugin`—subscribe, listen queues, or
   record JSONL streams with `plugin.record(...)`.
 - Python plugin registry via `spiraltorch.plugin.register_python_plugin(...)`
@@ -63,14 +106,13 @@ NumPy, no PyTorch, and no shim layers.
 - Streaming dataset helpers via `spiraltorch.dataset`—build a
   shuffle/batch/prefetch pipeline entirely in Rust using the native
   `DataLoader`.
-- Non-commutative differential traces via `SpiralSession.trace(...)` which emit
-  `SpiralDifferentialTrace` builders and `DifferentialResonance` snapshots to
-  blend homotopy flows, functor derivatives, recursive barycenter energies, and
-  \(\infty\)-tower projections—optionally wiring the result straight into a
-  `Hypergrad` tape.
+- Trace and artifact utilities via `spiraltorch.zspace_trace`,
+  `spiraltorch.trainer_trace`, and Atlas adapters so JSONL telemetry can be
+  loaded, summarized, compared, and rendered from Python.
 - SoT-3Dφ spiral planners (`spiraltorch.sot`) that collapse to Z-space tensors,
-  grow full TensorBiomes via `SoT3DPlan.grow_biome(...)`, and stitch directly
-  into `SpiralSession.trace(...)` for geometry-aware exploration loops.
+  grow full TensorBiomes via `SoT3DPlan.grow_biome(...)`, and feed
+  geometry-aware experiments or trace artifacts without requiring a Python
+  session-side trace builder.
 - Z-space projector bindings (`spiraltorch.nn.ZSpaceProjector`) so spiral
   trajectories can be rendered onto the canvas or reused inside sequential
   transformer stacks.
@@ -108,9 +150,12 @@ The examples in `examples/byte_lm_*.py` provide a bounded byte-LM fine-tune
 diagnostic surface for local HF/PyTorch-style checkpoints without making Torch,
 safetensors, or Transformers hard dependencies of the binding. Start with
 `examples/byte_lm_profile_smoke.py --hf-state-dict <path> --key-preset auto` to
-run checkpoint preflight, LoRA/source/profile comparisons, promotion manifests,
-and dry-run continuation plans before scaling into heavier training runs. For a
-practical Transformers fine-tune readiness smoke, add
+run checkpoint preflight, native LoRA/source/profile comparisons, promotion
+manifests, and dry-run continuation plans before scaling into heavier training
+runs. `spiraltorch.nn.Linear`, `Embedding`, and `LoraLinear` expose checked
+exact and key-mapped load reports, while `ZSpaceProjector` can be inserted when
+you want a bounded residual projection instead of silently trusting an imported
+state dict. For a practical Transformers fine-tune readiness smoke, add
 `--ft-readiness-preset hf-wgpu-balanced`; this turns on checkpoint audit,
 Transformers trace, produced-manifest validation, same-process
 `transformers`/`torch`/`tokenizers` co-import evidence, the
@@ -218,13 +263,13 @@ spiral-model-zoo run mlp_regression -- --help
 ### Rank-K execution
 
 ```python
->>> import spiraltorch as st
->>> x = st.Tensor(2, 4, [0.1, 0.7, -0.2, 0.4, 0.9, 0.5, 0.6, 0.0])
->>> vals, idx = st.topk2d_tensor(x, 2)
->>> vals.tolist()
-[[0.7, 0.4], [0.9, 0.6]]
->>> [[int(i) for i in row] for row in idx.tolist()]
-[[1, 3], [0, 2]]
+import spiraltorch as st
+
+plan = st.plan_topk(rows=2, cols=4, k=2, backend="auto")
+print(plan.kind, plan.effective_backend)
+print("tile/workgroup:", plan.tile, plan.workgroup)
+print(plan.to_unison_script().splitlines()[0])
+print(plan.fft_spiralk_hint().splitlines()[0])
 ```
 
 ### Hello SpiralSession
@@ -239,9 +284,10 @@ finishes a roundtable epoch entirely from Python.
 ```python
 from spiraltorch import Tensor, Hypergrad, LanguageWaveEncoder
 
-z = Tensor(2, 4, [0.1, 0.2, 0.3, 0.4, 0.9, 0.8, 0.7, 0.6])
 encoder = LanguageWaveEncoder(-1.0, 0.5)
 wave = encoder.encode_z_space("SpiralTorch in Rust")
+rows, cols = wave.shape()
+z = Tensor(rows, cols, [0.0] * (rows * cols))
 
 tape = Hypergrad(-1.0, 0.05, *z.shape())
 tape.accumulate_pair(z, wave)
@@ -393,77 +439,76 @@ resolve friendly stream aliases on demand:
 ```python
 import spiraltorch as st
 from spiraltorch.ecosystem import (
-    tensor_to_torch,
-    torch_to_tensor,
-    tensor_to_jax,
-    jax_to_tensor,
     tensor_to_cupy,
-    cupy_to_tensor,
+    tensor_to_jax,
     tensor_to_tensorflow,
+    tensor_to_torch,
+    cupy_to_tensor,
+    jax_to_tensor,
     tensorflow_to_tensor,
+    torch_to_tensor,
 )
 
 spiral = st.Tensor(2, 2, [1.0, 2.0, 3.0, 4.0])
 
-torch_tensor = tensor_to_torch(spiral, dtype="float32")
-roundtrip = torch_to_tensor(torch_tensor)
+try:
+    import torch
 
-jax_array = tensor_to_jax(spiral)
-spiral_again = jax_to_tensor(jax_array)
+    torch_tensor = tensor_to_torch(spiral, dtype=torch.float32)
+    roundtrip = torch_to_tensor(torch_tensor)
+    print("torch:", roundtrip.shape())
+except Exception as exc:
+    print("torch bridge skipped:", type(exc).__name__)
 
-# stream can be an explicit cupy.cuda.Stream, or a lazy alias such as
-# "current" (resolve the active stream) or "null" (select the default stream).
-# Pointer-like objects such as ``ctypes.c_void_p`` will be wrapped in
-# ``cupy.cuda.ExternalStream`` automatically before dispatch.
-cupy_array = tensor_to_cupy(spiral, stream="current")
-spiral_from_cupy = cupy_to_tensor(cupy_array, stream="current")
+try:
+    jax_array = tensor_to_jax(spiral)
+    spiral_again = jax_to_tensor(jax_array)
+    print("jax:", spiral_again.shape())
+except Exception as exc:
+    print("jax bridge skipped:", type(exc).__name__)
 
-tf_tensor = tensor_to_tensorflow(spiral)
-spiral_from_tf = tensorflow_to_tensor(tf_tensor)
+try:
+    # stream can be an explicit cupy.cuda.Stream, or a lazy alias such as
+    # "current" (resolve the active stream) or "null" (select the default stream).
+    cupy_array = tensor_to_cupy(spiral, stream="current")
+    spiral_from_cupy = cupy_to_tensor(cupy_array, stream="current")
+    print("cupy:", spiral_from_cupy.shape())
+except Exception as exc:
+    print("cupy bridge skipped:", type(exc).__name__)
+
+try:
+    tf_tensor = tensor_to_tensorflow(spiral)
+    spiral_from_tf = tensorflow_to_tensor(tf_tensor)
+    print("tensorflow:", spiral_from_tf.shape())
+except Exception as exc:
+    print("tensorflow bridge skipped:", type(exc).__name__)
 ```
 
 ```python
 import spiraltorch as st
 from spiraltorch.nn import Linear, MeanSquaredError, Sequential
 
-session = st.SpiralSession(device="wgpu", curvature=-1.0)
-trainer = session.trainer()
+trainer = st.nn.ModuleTrainer(
+    backend="cpu",
+    curvature=-1.0,
+    hyper_learning_rate=1e-2,
+    fallback_learning_rate=1e-2,
+)
 schedule = trainer.roundtable(
-    rows=1,
-    cols=2,
-    psychoid=True,
-    psychoid_log=True,
-    psi=True,
-    collapse=True,
-    dist=st.DistConfig(node_id="demo", mode="periodic-meta", push_interval=10.0),
+    2,
+    1,
+    st.nn.RoundtableConfig(top_k=1, mid_k=1, bottom_k=1, here_tolerance=1e-5),
 )
-trainer.install_blackcat_moderator(threshold=0.6, participants=1)
-model = Sequential([Linear(2, 2, name="layer")])
+model = Sequential()
+model.add(Linear(2, 1, name="layer"))
+model.attach_hypergrad(curvature=-1.0, learning_rate=1e-2)
+
 loss = MeanSquaredError()
-session.prepare_module(model)
+x = st.Tensor.rand(2, 2, seed=3)
+y = st.Tensor.rand(2, 1, seed=4)
+stats = trainer.train_epoch(model, loss, [(x, y)], schedule)
 
-# Stream desire impulses back into the A/B/C roundtable.
-bridge = st.DesireRoundtableBridge(blend=0.4, drift_gain=0.5)
-trainer.enable_desire_roundtable_bridge(bridge)
-
-loader = (
-    st.dataset.from_vec([
-        (st.Tensor(1, 2, [0.0, 1.0]), st.Tensor(1, 2, [0.0, 1.0])),
-        (st.Tensor(1, 2, [1.0, 0.0]), st.Tensor(1, 2, [1.0, 0.0])),
-    ])
-    .shuffle(0xC0FFEE)
-    .batched(2)
-    .prefetch(2)
-)
-
-stats = session.train_epoch(trainer, model, loss, loader, schedule)
-print(f"roundtable avg loss {stats.average_loss:.6f} over {stats.batches} batches")
-print(st.get_psychoid_stats())
-print(st.get_desire_telemetry())  # phase/temperature/energies recorded by DesireTelemetrySink
-
-summary = trainer.desire_roundtable_summary()
-if summary:
-    print("desire barycentric:", summary["mean_above"], summary["mean_here"], summary["mean_beneath"])
+print(f"roundtable avg loss {stats.average_loss:.6f} over {stats.batches} batch")
 ```
 
 ### Desire pipeline orchestration
@@ -471,101 +516,59 @@ if summary:
 ```python
 import spiraltorch as st
 
-syn = st.SparseKernel.from_dense([[0.6, 0.4], [0.3, 0.7]])
-par = st.SparseKernel.from_dense([[0.55, 0.45], [0.2, 0.8]])
-geometry = st.SymbolGeometry(syn, par)
-repression = st.RepressionField([0.1, 0.05])
-concept_kernel = st.SparseKernel.from_dense([[0.8, 0.2], [0.2, 0.8]])
-bridge = st.SemanticBridge([[0.7, 0.3], [0.25, 0.75]], concept_kernel)
-controller = st.TemperatureController(1.0, 0.9, 0.4, 0.4, 1.6)
+pipeline = st.nn.DesirePipeline(vocab_size=2, concepts=2)
+step = pipeline.step([1.2, -0.4], previous_token=0, concept=[0.6, 0.4])
+print("phase", step["phase"], "entropy", step["entropy"])
 
-desire = st.DesireLagrangian(geometry, repression, bridge, controller)
-desire.set_alpha_schedule(st.DesireSchedule.warmup(0.0, 0.2, 400))
-
-automation = st.DesireAutomation(desire, st.SelfRewriteConfig())
-pipeline = (
-    st.DesirePipelineBuilder(automation)
-    .with_logbook("desire.ndjson", flush_every=16)
-    .with_telemetry()
-    .build()
+adapter = st.build_desire_adapter_from_downstream_hook(
+    {
+        "geometry_bias_coherence": {"score": 0.7},
+        "top_probability": 0.8,
+    }
 )
-
-step = pipeline.step(
-    [1.2, -0.4],
-    previous_token=0,
-    concept_hint=st.ConceptHint.distribution([0.6, 0.4]),
-)
-print("phase", step["solution"]["phase"], "entropy", step["solution"]["entropy"])
+pipeline.ingest_geometry_bias(adapter["geometry_bias_signal"], source="zspace")
+print("geometry bias:", pipeline.geometry_bias_metrics())
 ```
 
-### SpiralLightning harness
+### Native trainer harness
 
-Python callers can skip manual trainer plumbing by instantiating the new
-`SpiralLightning` helper. It prepares modules (honouring the session topos),
-keeps the roundtable schedule cached, and collects epoch reports for you.
+Python callers can keep the training loop small while still using the Rust
+roundtable trainer. For heavier HPO/serving flows, use this loop as the inner
+objective and wrap it with your Optuna/Ray/BentoML/TorchServe tool of choice.
 
 ```python
 import spiraltorch as st
-from spiraltorch import SpiralSession
-from spiraltorch.nn import Linear, MeanSquaredError
-
-session = SpiralSession(device="wgpu", curvature=-1.0)
-lightning = session.lightning(rows=1, cols=2, auto_prepare=True)
-model = Linear(2, 2, name="layer")
-loss = MeanSquaredError()
+from spiraltorch.nn import Linear, MeanSquaredError, ModuleTrainer, RoundtableConfig, Sequential
 
 dataset = [
-    (st.Tensor(1, 2, [0.0, 1.0]), st.Tensor(1, 2, [0.0, 1.0])),
-    (st.Tensor(1, 2, [1.0, 0.0]), st.Tensor(1, 2, [1.0, 0.0])),
+    (st.Tensor(1, 2, [0.0, 1.0]), st.Tensor(1, 1, [1.0])),
+    (st.Tensor(1, 2, [1.0, 0.0]), st.Tensor(1, 1, [0.0])),
 ]
 
-reports = lightning.fit(model, loss, [dataset])
-for epoch, stats in enumerate(reports, start=1):
-    print(f"epoch {epoch}: avg loss={stats.average_loss:.6f}")
-
-# Switch back to manual preparation mid-run if you need custom tape control
-lightning.set_auto_prepare(False)
-session.prepare_module(model)
-
-# Stage training plans inherit the previous configuration by default
-plan = [
-    {"label": "warmup", "epochs": [dataset]},
-    {
-        "label": "refine",
-        "config": {"top_k": 4, "auto_prepare": False},
-        "epochs": [dataset],
-    },
-# Run Optuna on a SpiralTorch training loop
-def objective(trial):
-    lr = trial.suggest_float("lr", 1e-4, 1e-1, log=True)
-    # ... wire lr into a SpiralSession run ...
-    return final_loss
-
-study = optuna_optimize(objective, n_trials=25, direction="minimize")
-
-# Dispatch Ray Tune sweeps without leaving the SpiralTorch API surface
-def train_spiral(lr: float):
-    # ... execute a SpiralSession epoch and report Ray-compatible metrics ...
-    return {"loss": 0.42}
-
-analysis = ray_tune_run(
-    trainable=lambda config: train_spiral(config["lr"]),
-    config={"lr": [1e-3, 5e-4, 1e-4]},
-    num_samples=5,
-)
-
-print("TorchServe bundle:", archive_path)
-print("Bento artifact:", bento_ref)
-print("Best Optuna trial:", study.best_trial.value)
-print("Best Ray Tune result:", analysis.get_best_config(metric="loss", mode="min"))
+for label, lr in [("warmup", 1e-2), ("refine", 5e-3)]:
+    trainer = ModuleTrainer(
+        backend="cpu",
+        curvature=-1.0,
+        hyper_learning_rate=lr,
+        fallback_learning_rate=lr,
+    )
+    schedule = trainer.roundtable(
+        1,
+        1,
+        RoundtableConfig(top_k=1, mid_k=1, bottom_k=1, here_tolerance=1e-5),
+    )
+    model = Sequential()
+    model.add(Linear(2, 1, name="layer"))
+    model.attach_hypergrad(curvature=-1.0, learning_rate=lr)
+    stats = trainer.train_epoch(model, MeanSquaredError(), dataset, schedule)
+    print(label, f"avg_loss={stats.average_loss:.6f}")
 ```
 
 ## SpiralTorchRL quickstart
 
-`spiraltorch.spiral_rl` packages the policy-gradient harness from the Rust side so
-Python notebooks can lean on SpiralTorchRL without reimplementing Z-space
-plumbing. Policies keep their weight updates inside hypergrad tapes and expose
-the discounted-return baseline used during training.
+`spiraltorch.spiral_rl` packages the Rust-side reinforcement-learning harness so
+Python notebooks can select actions, update native agents, and inspect compact
+state dictionaries without reimplementing the loop in Python.
 
 ### Legacy `rl` imports
 
@@ -577,63 +580,44 @@ module on demand. Wheels built without SpiralTorchRL skip the hook entirely so
 third-party modules remain unaffected.
 
 ```python
-from spiraltorch import Tensor
-from spiraltorch.spiral_rl import PolicyGradient
+from spiraltorch.spiral_rl import stAgent
 
-policy = PolicyGradient(state_dim=4, action_dim=2, learning_rate=0.02, discount=0.97)
-policy.enable_hypergrad(curvature=-1.0, learning_rate=0.05)
+agent = stAgent(state_dim=4, action_dim=2, discount=0.97, learning_rate=0.02)
 
-state = Tensor(1, 4, [0.2, 0.4, -0.1, 0.3])
-action, probs = policy.select_action(state)
-policy.record_transition(state, action, reward=1.0)
+state = 0
+next_state = 1
+action = agent.select_action(state)
+agent.update(state, int(action), reward=1.0, next_state=next_state)
 
-report = policy.finish_episode()
-print(f"reward={report.total_reward:.2f} baseline={report.mean_return:.2f} hypergrad={report.hypergrad_applied}")
-print("weights", policy.weights().tolist())
+print("action:", action)
+print("epsilon:", agent.state_dict()["epsilon"])
 ```
 
-Geometry-aware updates are available straight from Python. Provide an optional
-dictionary of overrides when calling `attach_geometry_feedback` and pass a
-`DifferentialResonance` snapshot to steer the learning rate with the same
-coalgebra used on the Rust side. The binding returns both the episode report and
-an optional geometry dictionary so notebooks can react to rank/pressure drift.
+The generic `spiraltorch.rl.Agent` wrapper exposes the same loop with an
+explicit config object and exploration schedule:
 
 ```python
-from spiraltorch import SpiralSession, Tensor
-from spiraltorch.spiral_rl import PolicyGradient
+from spiraltorch.rl import Agent, AgentConfig, EpsilonGreedy
 
-session = SpiralSession(device="cpu", curvature=-1.0)
-policy = PolicyGradient(state_dim=4, action_dim=2, learning_rate=0.02)
-policy.attach_geometry_feedback({"min_learning_rate_scale": 0.7, "slot_symmetry": "dihedral"})
-
-state = Tensor(1, 4, [0.2, 0.1, -0.3, 0.4])
-resonance = session.trace(state).resonate()
-policy.record_transition(state, 0, reward=0.5)
-
-report, signal = policy.finish_episode_with_geometry(resonance)
-print(report.steps, report.total_reward)
-if signal:
-    print("scale", signal["learning_rate_scale"], "rank", signal["smoothed_rank"])
-
-telemetry = policy.geometry_telemetry()
-if telemetry:
-    print("loop gain", telemetry["loop_gain"], "script", telemetry["loop_script"])
+config = AgentConfig(
+    "dqn",
+    state_dim=4,
+    action_dim=2,
+    gamma=0.97,
+    lr=0.02,
+    exploration=EpsilonGreedy(0.2, 0.05, 100),
+    seed=7,
+)
+agent = Agent(config)
+action = agent.select_action(0)
+agent.update(0, int(action), 1.0, 1)
+print(agent.algo, agent.state_dict()["epsilon"])
 ```
 
-Chrono telemetry is shared through the global hub, so recording resonance
-histories on the session side automatically feeds loop signals back into the
-policy geometry. Call `session.resonate_over_time(...)`/`session.timeline(...)`
-from Python to keep the hub warm; the Rust learner will tighten its clamps,
-adjust Λ₂₄ pressure, and publish loop gain/softening diagnostics the next time
-you finish an episode with geometry enabled.
-
-Each roundtable summary now contributes to a distributed `LoopbackEnvelope`
-queue. The Python side doesn’t need to manage it directly—whenever a summary
-or collapse pulse fires, the bindings push the latest SpiralK script hint,
-softlogic Z-bias, and PSI total into the hub. `SpiralPolicyGradient` drains the
-queue before processing resonance snapshots, blends the envelopes into a single
-chrono signal, and keeps the strongest script around so the controller can
-rewrite its own clamps on the next pass.
+The RL surface is intentionally compact today: keep state/action loops native,
+then export `state_dict()` for audit or handoff. Geometry-aware policy traces
+remain Rust-first until their Python facade is stable enough to document as a
+copy-paste path.
 
 ## SpiralTorchRec quickstart
 
@@ -653,167 +637,26 @@ ratings = [
     (1, 2, 4.5),
 ]
 
-report = lightning.fit_plan(model, loss, plan)
-print(report.best_stage_label(), report.best_epoch().average_loss)
+report = rec.train_epoch(ratings)
+print(report.rmse, report.samples)
+print("score:", rec.predict(0, 0))
+print("top-k:", rec.recommend_top_k(0, 3))
 ```
 
-The `DistConfig` connects the local roundtable to a meta layer that exchanges
-`MetaSummary` snapshots with peers. `install_blackcat_moderator` spins up a
-moderator runtime that scores summaries, publishes Blackcat minutes, and funnels
-evidence into the embedded meta conductor—all without exposing ψ readings to the
-outside world.
+### SpiralSession backend planning
+
+`SpiralSession` is intentionally small: it records the requested backend,
+captures device preflight evidence, and exposes planner helpers that match the
+Rust runtime. Use it as the first runtime object before deciding whether a run
+should stay on CPU, ask for WGPU, or escalate into a heavier training recipe.
 
 ```python
-from spiraltorch import SpiralSession, Tensor
+from spiraltorch import SpiralSession
 
-session = SpiralSession(device="wgpu", curvature=-1.0)
-seed = Tensor(1, 2, [0.4, 0.6])
-generator = Tensor(1, 2, [0.1, -0.2])
-direction = Tensor(1, 2, [0.05, 0.07])
-kernel = Tensor(2, 2, [1.0, 0.5, -0.25, 1.25])
+session = SpiralSession(backend="wgpu")
+print(session.requested_backend, "->", session.effective_backend)
+print("runtime:", session.device_preflight["runtime_status"])
 
-weights = [0.6, 0.4]
-densities = [Tensor(1, 2, [0.6, 0.4]), Tensor(1, 2, [0.5, 0.5])]
-
-trace = session.trace(seed)
-trace.deform(generator, direction)
-trace.via(kernel)
-trace.with_barycenter_from(weights, densities)
-trace.with_infinity([densities[0].clone()], [])
-resonance = trace.resonate()
-print(resonance.homotopy_flow().tolist())
-```
-
-Temporal telemetry is available directly from Python. Record frames with
-`session.resonate_over_time(resonance, dt)` and animate the geometry through the
-new helpers. Use `timeline_summary` for rolling drift/energy stats,
-`timeline_harmonics` to analyse spectral drift, `loop_signal` for a ready-made
-bundle (complete with SpiralK hints when `kdsl` is enabled), and `session.speak(...)`
-for a ready-to-plot amplitude trace while `timeline_story` narrates the same
-window:
-
-```python
-frame = session.resonate_over_time(resonance, dt=0.1)
-print(frame.timestamp, frame.total_energy, frame.curvature_drift)
-
-frames = session.timeline(timesteps=64)
-summary = session.timeline_summary(timesteps=64)
-harmonics = session.timeline_harmonics(timesteps=128, bins=20)
-loop_signal = session.loop_signal(timesteps=128)
-times, energy, drift = session.animate_resonance(timesteps=64)
-wave = session.speak(timesteps=64, temperature=0.6)
-story, highlights = session.timeline_story(timesteps=128, temperature=0.65)
-print(session.describe())
-print(st.describe_timeline(frames))
-if harmonics and harmonics.dominant_energy:
-    print("Energy harmonic", harmonics.dominant_energy.frequency)
-if loop_signal and loop_signal.spiralk_script:
-    print("SpiralK loop hint:\n", loop_signal.spiralk_script)
-
-encoder = LanguageWaveEncoder(session.curvature(), 0.55)
-wave = encoder.speak(frames)
-
-import spiraltorch as st
-from spiraltorch import TextResonator
-narrator = TextResonator(session.curvature(), 0.55)
-print(narrator.describe_resonance(resonance))
-print(narrator.describe_timeline(frames))
-print(narrator.describe_frame(frames[-1]))
-audio = narrator.speak(frames)
-```
-
-Atlas projections collect those temporal statistics, maintainer diagnostics,
-and loopback envelopes into one object. Grab the latest `AtlasFrame` via
-`session.atlas()`, inspect its metrics/notes, and narrate it with
-`session.atlas_story(...)` or `st.describe_atlas(...)`:
-
-```python
-atlas = session.atlas()
-if atlas:
-    print(atlas.timestamp, atlas.maintainer_status)
-    for metric in atlas.metrics():
-        print(metric.name, metric.value)
-    for district in atlas.districts():
-        print("district", district.name, district.mean, district.span)
-    story = session.atlas_story(temperature=0.6)
-    if story:
-        print(story[0])
-        print(story[1])
-    print(st.describe_atlas(atlas))
-
-route = session.atlas_route(limit=6)
-print("atlas history", route.length, [frame.timestamp for frame in route.frames])
-
-summary = session.atlas_route_summary(limit=6)
-print(
-    "atlas summary",
-    summary.frames,
-    summary.mean_loop_support,
-    summary.loop_std,
-    summary.collapse_trend,
-    summary.z_signal_trend,
-)
-for district in summary.districts():
-    print("summary", district.name, district.coverage, district.delta, district.std_dev)
-    for focus in district.focus:
-        print("  focus", focus.name, focus.delta, focus.momentum)
-if summary.maintainer_status:
-    print("maintainer", summary.maintainer_status, summary.maintainer_diagnostic)
-
-for perspective in session.atlas_perspectives(limit=6):
-    print("perspective", perspective.district, perspective.guidance)
-    for focus in perspective.focus:
-        print("  ↳", focus.name, focus.latest)
-
-surface = session.atlas_perspective(
-    "Surface", limit=6, focus_prefixes=["timeline", "session.surface"],
-)
-if surface:
-    print("surface view", surface.guidance)
-```
-
-The `SpiralSession` maintainer surfaces clamp and density suggestions directly
-from the temporal stream. Configure it via the builder or tweak thresholds at
-runtime:
-
-```python
-builder.maintainer(jitter_threshold=0.25, clamp_max=2.8)
-session = builder.build()
-
-print(session.maintainer_config())
-report = session.self_maintain()
-print(report.spiralk_script)
-if report.should_rewrite():
-    session.configure_maintainer(pressure_step=0.2)
-    print("Maintainer escalated:", report.diagnostic)
-if report.drift_peak:
-    print("Drift harmonic", report.drift_peak.frequency, report.drift_peak.magnitude)
-pulse = session.collapse_pulse()
-if pulse:
-    print("Collapse pulse", pulse.command, pulse.step)
-```
-
-```python
-from spiraltorch import SpiralSession, Tensor, TensorBiome
-from spiraltorch.nn import ZSpaceProjector, LanguageWaveEncoder
-from spiraltorch.sot import generate_plan
-
-session = SpiralSession(device="wgpu", curvature=-1.0)
-seed = Tensor(1, 8, [0.2] * 8)
-trace = session.trace(seed, sot={"steps": 64, "radial_growth": 0.08})
-plan = trace.sot_plan or generate_plan(64, radial_growth=0.08)
-
-topos = session.topos()
-encoder = LanguageWaveEncoder(session.curvature(), 0.5)
-projector = ZSpaceProjector(topos, encoder)
-
-spiral_tensor = plan.as_tensor()
-canvas = projector.project_spiral(plan)
-print(spiral_tensor.shape(), canvas.shape())
-
-biome = plan.grow_biome(topos)
-biome.absorb_weighted("canvas", canvas, weight=2.0)
-stacked = biome.stack()
-meaning = projector.reimport_biome(biome)
-print("stacked", stacked.shape(), "reimported", meaning.shape())
+plan = session.plan_topk(rows=8, cols=64, k=4)
+print(plan.kind, plan.effective_backend, plan.tile)
 ```

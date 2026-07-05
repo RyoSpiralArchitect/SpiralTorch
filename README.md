@@ -29,24 +29,27 @@ Reuse or redistribution **must retain the SpiralTorch name and authorship** as p
 
   python - <<'PY'
   import spiraltorch as st
+  from spiraltorch.nn import Linear, Sequential
 
-  # Mellin geometry: log-uniform samples → Mellin transform mesh (Hilbert-grounded).
-  grid = st.frac.MellinLogGrid.exp_decay(log_start=-3.0, log_step=0.05, len=256)
-  mesh = grid.evaluate_mesh(real_values=[0.8, 1.3], imag_values=[-0.5, 0.0, 0.4])
+  print("backend:", st.describe_device("cpu")["backend"])
 
-  # Maxwell coded-envelope helpers (visualisation-ready time series + expectation curves).
-  fp = st.MaxwellFingerprint(
-      gamma=1.0,
-      modulation_depth=1.0,
-      tissue_response=1.0,
-      shielding_db=0.0,
-      transmit_gain=1.0,
-      polarization_angle=0.0,
-      distance_m=1.0,
+  model = Sequential()
+  model.add(Linear(2, 2, name="head"))
+  y = model(st.Tensor(1, 2, [0.25, 0.75]))
+  print("forward:", y.tolist())
+
+  # Checkpoint handoff is explicit: external keys map into native module keys.
+  head = Linear(2, 2, name="head")
+  native_state = dict(head.state_dict())
+  external_state = {
+      "lm_head.weight": native_state["head::weight"],
+      "lm_head.bias": native_state["head::bias"],
+  }
+  report = head.state_dict_compatibility_with_key_map(
+      external_state,
+      {"lm_head.weight": "head::weight", "lm_head.bias": "head::bias"},
   )
-  z_curve = fp.expected_z_curve(blocks=64, sigma=1.0, kappa=1.0)
-
-  print("mesh:", len(mesh), "x", (len(mesh[0]) if mesh else 0), "| z[64]:", z_curve[-1])
+  print("checkpoint compatible:", report["compatible"])
   PY
   ```
 
@@ -56,6 +59,27 @@ Reuse or redistribution **must retain the SpiralTorch name and authorship** as p
 - 🌌 **[Z-Space Introduction](docs/zspace_intro.md)** - Understanding hyperbolic geometry in ML
 
 **Already familiar?** Jump to [Installation](#install-pip) or explore [Latest Highlights](#-latest-spiraltorch-highlights).
+
+---
+
+### Python Surface Map
+
+SpiralTorch deliberately keeps its strange color: Z-space, desire telemetry,
+roundtables, psychoid routes, and canvas traces are part of the vocabulary.
+For day-to-day Python use, though, the first handles are ordinary:
+
+- `spiraltorch.Tensor`, `spiraltorch.nn`, and `spiraltorch.optim` for native
+  tensors, modules, losses, and Amegagrad loops without NumPy/PyTorch as hard
+  dependencies.
+- `SpiralSession(backend="auto" | "cpu" | "wgpu")` for one object that records
+  the requested runtime route and device preflight evidence.
+- `spiraltorch.ecosystem` for PyTorch/JAX/CuPy/TensorFlow tensor handoff when
+  you do want to co-run another stack.
+- `bindings/st-py/examples/checkpoint_preflight.py` for HF/PyTorch-style state
+  dict audits before loading, resizing, projecting, or LoRA-wrapping weights.
+- `bindings/st-py/examples/byte_lm_profile_smoke.py` and
+  `byte_lm_transformers_trace.py` for tokenizerless FT diagnostics plus
+  same-process `torch` / `transformers` / `tokenizers` runtime evidence.
 
 ---
 
@@ -333,11 +357,17 @@ pip install -U spiraltorch
 Without cloning the repo, `pip install spiraltorch` gives you:
 
 - **Core tensors + optimisers:** `st.Tensor`, autodiff, `st.optim.Amegagrad`, DLPack interop.
+- **Native neural layers:** `st.nn.Linear`, `Embedding`, `Sequential`, losses,
+  `ModuleTrainer`, `LoraLinear`, and `ZSpaceProjector`.
+- **Checkpoint handoff:** checked `state_dict` compatibility reports,
+  key-mapped loads, overlap resize/projection preflight, and HF-style presets.
 - **Geometry:** `st.frac.MellinLogGrid` (Mellin mesh / verticals) + Hilbert helpers.
 - **Signal tools:** `st.MaxwellFingerprint` expectation curves (visualisation-ready).
 - **Z-space training utilities:** `st.ZSpaceTrainer`, `st.LanguageWaveEncoder`.
 - **Canvas + observability:** `st.canvas.CanvasProjector`, `st.telemetry.*`, HTML trace writers, `st.serve_zspace_trace`.
 - **SpiralK planning:** `st.plan_topk(...)`, `st.RankPlan`, `st.write_kdsl_trace_jsonl`, `st.write_kdsl_trace_html`.
+- **FT diagnostics:** tokenizerless byte-LM profile smokes, Transformers logit
+  trace capture, runtime import audits, and WGPU readiness gates.
 
 ---
 
@@ -430,6 +460,32 @@ Linux note: for manylinux2014 wheels you either need a manylinux container (e.g.
 > Copy-paste scripts live in `bindings/st-py/examples/` (e.g. `sot_biome_quickstart.py`, `spiralk_plan_rewrite_quickstart.py`, `zspace_stream_training_quickstart.py`).
 
 ### 🌟 Quick Tour: Core Features
+
+#### 0) Native module + checkpoint handoff
+
+```python
+import spiraltorch as st
+from spiraltorch.nn import Linear
+
+head = Linear(2, 2, name="head")
+native_state = dict(head.state_dict())
+external_state = {
+    "lm_head.weight": native_state["head::weight"],
+    "lm_head.bias": native_state["head::bias"],
+}
+key_map = {
+    "lm_head.weight": "head::weight",
+    "lm_head.bias": "head::bias",
+}
+
+report = head.state_dict_compatibility_with_key_map(external_state, key_map)
+assert report["compatible"]
+load_report = head.load_state_dict_subset_mapped_checked(external_state, key_map)
+assert load_report["matched"]
+print("matched checkpoint tensors:", report["matched"])
+
+print("wgpu plan surface:", st.describe_device("wgpu").get("backend"))
+```
 
 #### 1) Tensor creation and basic operations
 
