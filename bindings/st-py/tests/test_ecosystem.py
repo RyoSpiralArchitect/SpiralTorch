@@ -131,6 +131,123 @@ def test_jax_and_tensorflow_bridge_use_compat(stub_spiraltorch, monkeypatch):
     assert tf_calls["from"] == "tf-tensor"
 
 
+def test_tensor_from_external_imports_sequence_tensors(stub_spiraltorch, monkeypatch):
+    ecosystem = _load_ecosystem(stub_spiraltorch, monkeypatch)
+
+    matrix = ecosystem.tensor_from_external([[1, 2, 3], [4, 5, 6]], name="weight")
+    assert (matrix.rows, matrix.cols) == (2, 3)
+    assert matrix.tolist() == [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]
+
+    bias = ecosystem.tensor_from_external([0.25, -0.5], name="bias")
+    assert (bias.rows, bias.cols) == (1, 2)
+    assert bias.tolist() == [[0.25, -0.5]]
+
+
+def test_tensor_from_external_materializes_torch_like_values(
+    stub_spiraltorch, monkeypatch
+):
+    ecosystem = _load_ecosystem(stub_spiraltorch, monkeypatch)
+
+    class TorchLike:
+        shape = (2, 2)
+
+        def __init__(self):
+            self.calls: list[str] = []
+
+        def detach(self):
+            self.calls.append("detach")
+            return self
+
+        def cpu(self):
+            self.calls.append("cpu")
+            return self
+
+        def float(self):
+            self.calls.append("float")
+            return self
+
+        def reshape(self, size):
+            assert size == -1
+            self.calls.append("reshape")
+            return types.SimpleNamespace(tolist=lambda: [1, 2, 3, 4])
+
+    value = TorchLike()
+    tensor = ecosystem.tensor_from_external(value, name="hidden_projection")
+
+    assert value.calls == ["detach", "cpu", "float", "reshape"]
+    assert (tensor.rows, tensor.cols) == (2, 2)
+    assert tensor.tolist() == [[1.0, 2.0], [3.0, 4.0]]
+
+
+def test_slice_external_tensor_prefers_bounded_external_slice(
+    stub_spiraltorch, monkeypatch
+):
+    ecosystem = _load_ecosystem(stub_spiraltorch, monkeypatch)
+
+    class SliceableTensor:
+        shape = (3, 4)
+
+        def __init__(self):
+            self.keys: list[object] = []
+
+        def __getitem__(self, key):
+            self.keys.append(key)
+            row_slice, col_slice = key
+            rows = range(*row_slice.indices(self.shape[0]))
+            cols = range(*col_slice.indices(self.shape[1]))
+            return [[row * 10 + col for col in cols] for row in rows]
+
+        def tolist(self):  # pragma: no cover - should stay on bounded path
+            raise AssertionError("slice_external_tensor should slice before tolist()")
+
+    value = SliceableTensor()
+    sliced = ecosystem.slice_external_tensor(value, rows=2, cols=3, name="weight")
+
+    assert sliced == [[0, 1, 2], [10, 11, 12]]
+    assert value.keys == [(slice(None, 2, None), slice(None, 3, None))]
+
+
+def test_checkpoint_from_external_state_can_bound_and_filter(
+    stub_spiraltorch, monkeypatch
+):
+    ecosystem = _load_ecosystem(stub_spiraltorch, monkeypatch)
+
+    class ExcludedTensor:
+        shape = (1, 1)
+
+        def __getitem__(self, key):  # pragma: no cover - should be filtered first
+            raise AssertionError(f"excluded tensor should not be sliced: {key!r}")
+
+    checkpoint = ecosystem.checkpoint_from_external_state(
+        {
+            "embed.weight": [[1, 2, 3], [4, 5, 6]],
+            "unused.weight": ExcludedTensor(),
+        },
+        include=["embed.weight"],
+        tensor_bounds={
+            "embed.weight": (1, 2),
+            "unused.weight": (1, 1),
+        },
+    )
+
+    assert list(checkpoint) == ["embed.weight"]
+    tensor = checkpoint["embed.weight"]
+    assert (tensor.rows, tensor.cols) == (1, 2)
+    assert tensor.tolist() == [[1.0, 2.0]]
+
+
+def test_tensor_from_external_rejects_non_numeric_values(
+    stub_spiraltorch, monkeypatch
+):
+    ecosystem = _load_ecosystem(stub_spiraltorch, monkeypatch)
+
+    with pytest.raises(TypeError, match="boolean checkpoint value"):
+        ecosystem.tensor_from_external([[1.0, True]], name="weight")
+
+    with pytest.raises(TypeError, match="non-numeric checkpoint value"):
+        ecosystem.tensor_from_external(["1.0", 2.0], name="bias")
+
+
 def test_missing_compat_namespace_raises_helpful_error(stub_spiraltorch, monkeypatch):
     monkeypatch.delattr(stub_spiraltorch.compat, "torch", raising=False)
     ecosystem = _load_ecosystem(stub_spiraltorch, monkeypatch)

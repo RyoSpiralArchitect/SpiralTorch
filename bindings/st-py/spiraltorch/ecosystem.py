@@ -4,11 +4,17 @@ from __future__ import annotations
 
 import inspect
 import numbers
+from collections.abc import Mapping
 from typing import Any, Callable, Iterable
 
 from . import Tensor, compat
 
 __all__ = [
+    "bound_external_state_tensors",
+    "checkpoint_from_external_state",
+    "external_tensor_shape",
+    "slice_external_tensor",
+    "tensor_from_external",
     "tensor_to_torch",
     "torch_to_tensor",
     "tensor_to_jax",
@@ -116,6 +122,250 @@ def tensorflow_to_tensor(value: Any) -> Tensor:
     """Convert a ``tf.Tensor`` (or compatible object) into a SpiralTorch tensor."""
 
     return _compat_call("tensorflow", "from_tensorflow", value)
+
+
+def _looks_like_spiraltorch_tensor(value: Any) -> bool:
+    return (
+        hasattr(value, "rows")
+        and hasattr(value, "cols")
+        and callable(getattr(value, "data", None))
+    )
+
+
+def _materialize_external_tensor(value: Any) -> Any:
+    tensor = value
+    for method_name in ["detach", "cpu", "float"]:
+        method = getattr(tensor, method_name, None)
+        if callable(method):
+            tensor = method()
+    return tensor
+
+
+def _shape_from_sequence(value: Any, name: str) -> tuple[int, ...]:
+    if not isinstance(value, (list, tuple)):
+        raise TypeError(f"{name} has no shape metadata and is not a list/tuple")
+    if not value:
+        raise ValueError(f"{name} is empty")
+    if isinstance(value[0], (list, tuple)):
+        cols = len(value[0])
+        if cols == 0:
+            raise ValueError(f"{name} contains an empty row")
+        for row in value:
+            if not isinstance(row, (list, tuple)) or len(row) != cols:
+                raise ValueError(f"{name} must be a rectangular 2D sequence")
+        return (len(value), cols)
+    return (len(value),)
+
+
+def _external_shape_from_materialized(value: Any, name: str) -> tuple[int, ...]:
+    if _looks_like_spiraltorch_tensor(value):
+        return (int(value.rows), int(value.cols))
+    shape = getattr(value, "shape", None)
+    if shape is None:
+        size = getattr(value, "size", None)
+        shape = size() if callable(size) else None
+    if shape is None:
+        return _shape_from_sequence(value, name)
+    return tuple(int(dim) for dim in shape)
+
+
+def external_tensor_shape(value: Any, *, name: str = "tensor") -> tuple[int, ...]:
+    """Return shape metadata for a torch/numpy/list-like external tensor."""
+
+    materialized = _materialize_external_tensor(value)
+    return _external_shape_from_materialized(materialized, name)
+
+
+def _flatten_sequence(value: Any) -> list[Any]:
+    if isinstance(value, (list, tuple)) and value and isinstance(value[0], (list, tuple)):
+        return [item for row in value for item in row]
+    return list(value)
+
+
+def _flat_external_data(value: Any, name: str) -> list[Any]:
+    if isinstance(value, (list, tuple)):
+        return _flatten_sequence(value)
+    reshaped = None
+    reshape = getattr(value, "reshape", None)
+    if callable(reshape):
+        try:
+            reshaped = reshape(-1)
+        except TypeError:
+            reshaped = None
+    if reshaped is None:
+        flatten = getattr(value, "flatten", None)
+        if callable(flatten):
+            reshaped = flatten()
+    source = reshaped if reshaped is not None else value
+    tolist = getattr(source, "tolist", None)
+    if callable(tolist):
+        data = tolist()
+    else:
+        data = source
+    if isinstance(data, (list, tuple)):
+        return _flatten_sequence(data)
+    raise TypeError(f"{name} data could not be flattened into a Python sequence")
+
+
+def _slice_sequence_external_tensor(
+    value: Any,
+    name: str,
+    shape: tuple[int, ...],
+    rows: int,
+    cols: int,
+) -> list[Any]:
+    if len(shape) == 1:
+        limit = min(shape[0], cols)
+        return list(value[:limit])
+    row_limit = min(shape[0], rows)
+    col_limit = min(shape[1], cols)
+    sliced = []
+    for row in value[:row_limit]:
+        if not isinstance(row, (list, tuple)):
+            raise ValueError(f"{name} must be a rectangular 2D sequence")
+        sliced.append(list(row[:col_limit]))
+    return sliced
+
+
+def _slice_spiraltorch_tensor(
+    value: Any,
+    shape: tuple[int, ...],
+    rows: int,
+    cols: int,
+) -> Tensor:
+    if len(shape) == 1:
+        limit = min(shape[0], cols)
+        return Tensor(1, limit, value.data()[:limit])
+    row_limit = min(shape[0], rows)
+    col_limit = min(shape[1], cols)
+    data = []
+    source = value.data()
+    for row in range(row_limit):
+        offset = row * value.cols
+        data.extend(source[offset : offset + col_limit])
+    return Tensor(row_limit, col_limit, data)
+
+
+def slice_external_tensor(
+    value: Any,
+    *,
+    rows: int,
+    cols: int,
+    name: str = "tensor",
+) -> Any:
+    """Return a bounded slice/copy of a torch/numpy/list-like tensor.
+
+    This keeps checkpoint and Transformers preflight code from materializing a
+    full model-sized tensor when only the overlapping SpiralTorch block matters.
+    """
+
+    if rows <= 0 or cols <= 0:
+        raise ValueError(f"{name} bounds must be positive, got {(rows, cols)!r}")
+    materialized = _materialize_external_tensor(value)
+    shape = _external_shape_from_materialized(materialized, name)
+    if len(shape) not in {1, 2}:
+        raise ValueError(f"{name} must be 1D or 2D to slice, got shape={shape}")
+    if isinstance(materialized, (list, tuple)):
+        return _slice_sequence_external_tensor(materialized, name, shape, rows, cols)
+    if _looks_like_spiraltorch_tensor(materialized):
+        return _slice_spiraltorch_tensor(materialized, shape, rows, cols)
+
+    if len(shape) == 1:
+        limit = min(shape[0], cols)
+        try:
+            return materialized[:limit]
+        except TypeError:
+            pass
+    else:
+        row_limit = min(shape[0], rows)
+        col_limit = min(shape[1], cols)
+        try:
+            return materialized[:row_limit, :col_limit]
+        except TypeError:
+            pass
+
+    tolist = getattr(materialized, "tolist", None)
+    if callable(tolist):
+        return _slice_sequence_external_tensor(tolist(), name, shape, rows, cols)
+    raise TypeError(f"{name} could not be sliced before tensor materialization")
+
+
+def bound_external_state_tensors(
+    state: Mapping[str, Any],
+    tensor_bounds: Mapping[str, tuple[int, int]] | None,
+) -> dict[str, Any]:
+    """Slice selected external checkpoint tensors before conversion."""
+
+    if not tensor_bounds:
+        return dict(state)
+    bounded = {}
+    for name, value in state.items():
+        bound = tensor_bounds.get(name)
+        if bound is None:
+            bounded[name] = value
+            continue
+        rows, cols = bound
+        bounded[name] = slice_external_tensor(value, rows=rows, cols=cols, name=name)
+    return bounded
+
+
+def _external_numeric_value(value: Any, name: str, index: int) -> float:
+    if isinstance(value, bool):
+        raise TypeError(f"{name} contains boolean checkpoint value at index {index}")
+    if not isinstance(value, numbers.Real):
+        raise TypeError(f"{name} contains non-numeric checkpoint value at index {index}")
+    return float(value)
+
+
+def tensor_from_external(value: Any, *, name: str = "tensor") -> Tensor:
+    """Convert a torch/numpy/list-like 1D or 2D tensor into ``Tensor``.
+
+    2D arrays become ``(rows, cols)`` tensors. 1D arrays are imported as a
+    single row so common bias vectors and last-token hidden vectors are easy to
+    route into Z-Space probes.
+    """
+
+    if _looks_like_spiraltorch_tensor(value):
+        return value
+    materialized = _materialize_external_tensor(value)
+    shape = _external_shape_from_materialized(materialized, name)
+    if len(shape) == 1:
+        rows, cols = 1, shape[0]
+    elif len(shape) == 2:
+        rows, cols = shape
+    else:
+        raise ValueError(
+            f"{name} must be 1D or 2D for SpiralTorch conversion, got shape={shape}"
+        )
+    data = [
+        _external_numeric_value(item, name, index)
+        for index, item in enumerate(_flat_external_data(materialized, name))
+    ]
+    expected = rows * cols
+    if len(data) != expected:
+        raise ValueError(f"{name} shape={shape} expects {expected} values, got {len(data)}")
+    return Tensor(rows, cols, data)
+
+
+def checkpoint_from_external_state(
+    state: Mapping[str, Any],
+    *,
+    include: Iterable[str] | None = None,
+    tensor_bounds: Mapping[str, tuple[int, int]] | None = None,
+) -> dict[str, Tensor]:
+    """Convert selected external checkpoint values into SpiralTorch tensors."""
+
+    include_names = None if include is None else set(include)
+    selected_state = {
+        name: value
+        for name, value in state.items()
+        if include_names is None or name in include_names
+    }
+    bounded_state = bound_external_state_tensors(selected_state, tensor_bounds)
+    checkpoint = {}
+    for name, value in bounded_state.items():
+        checkpoint[name] = tensor_from_external(value, name=name)
+    return checkpoint
 
 
 def _require_module(name: str) -> Any:
