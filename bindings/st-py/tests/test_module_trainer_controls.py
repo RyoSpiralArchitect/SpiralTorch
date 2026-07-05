@@ -1078,6 +1078,128 @@ def test_summarize_trainer_trace_events_recovers_wgpu_runtime_fallbacks(tmp_path
     ] == pytest.approx(1.0)
 
 
+def test_summarize_transformers_trainer_runtime_bridge_links_external_and_wgpu(
+    tmp_path,
+) -> None:
+    _ensure_torch_stub()
+    st = importlib.import_module("spiraltorch")
+
+    transformers_trace = tmp_path / "transformers_trace.jsonl"
+    transformers_rows = [
+        {
+            "row_type": "transformers_trace_manifest",
+            "transformers_imported": True,
+            "runtime_import_presets": "torch-transformers",
+        },
+        {
+            "row_type": "transformers_prompt_trace",
+            "prompt_index": 0,
+            "prompt": "spiral",
+            "input_ids_tensor_available": True,
+            "input_ids_tensor_backend": "python_sequence",
+            "input_ids_tensor_shape": "1x3",
+            "logits_tensor_available": True,
+            "logits_tensor_backend": "torch",
+            "logits_tensor_device": "mps:0",
+            "logits_tensor_device_kind": "mps",
+            "logits_tensor_dtype": "torch.float16",
+            "logits_tensor_shape": "1x3x8",
+            "hidden_state_tensor_available": True,
+            "hidden_state_tensor_backend": "torch",
+            "hidden_state_tensor_device": "mps:0",
+            "hidden_state_tensor_device_kind": "mps",
+            "hidden_state_tensor_dtype": "torch.float16",
+            "hidden_state_tensor_shape": "1x3x4",
+        },
+    ]
+    transformers_trace.write_text(
+        "\n".join(json.dumps(row, ensure_ascii=False) for row in transformers_rows),
+        encoding="utf-8",
+    )
+
+    trainer_trace = tmp_path / "trainer_trace.jsonl"
+    trainer_records = [
+        {
+            "event": {
+                "kind": "Custom",
+                "data": {
+                    "event_type": "TensorOpMeta",
+                    "data": {
+                        "op_name": "matmul",
+                        "data": {
+                            "backend": "naive",
+                            "requested_backend": "wgpu",
+                            "fallback": {
+                                "from": "wgpu",
+                                "reason": "runtime_unavailable",
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        {
+            "event": {
+                "kind": "Custom",
+                "data": {
+                    "event_type": "TensorOpMeta",
+                    "data": {
+                        "op_name": "matmul_prepacked_bias",
+                        "data": {
+                            "backend": "wgpu",
+                            "requested_backend": "wgpu",
+                        },
+                    },
+                },
+            },
+        },
+        {
+            "event": {
+                "kind": "Custom",
+                "data": {
+                    "event_type": "TrainerStep",
+                    "data": {
+                        "step": 1,
+                        "metrics": {"step_time_ms": 0.5},
+                    },
+                },
+            },
+        },
+    ]
+    trainer_trace.write_text(
+        "\n".join(json.dumps(record, ensure_ascii=False) for record in trainer_records),
+        encoding="utf-8",
+    )
+
+    bridge = st.summarize_transformers_trainer_runtime_bridge(
+        transformers_trace,
+        trainer_trace,
+    )
+
+    assert bridge["kind"] == "spiraltorch.transformers_trainer_runtime_bridge"
+    assert bridge["status"] == "external_gpu_with_trainer_wgpu_fallback"
+    assert bridge["transformers"]["prompt_rows"] == 1
+    assert bridge["transformers"]["tensor_fields"] == 3
+    assert bridge["transformers"]["tensor_backends"] == {
+        "python_sequence": 1,
+        "torch": 2,
+    }
+    assert bridge["transformers"]["tensor_device_kinds"] == {"mps": 2}
+    assert bridge["transformers"]["tensor_devices"] == {"mps:0": 2}
+    assert bridge["transformers"]["tensor_dtypes"] == {"torch.float16": 2}
+    assert bridge["transformers"]["gpu_tensor_fields"] == 2
+    assert bridge["transformers"]["python_sequence_tensor_fields"] == 1
+    assert bridge["trainer"]["steps"] == 1
+    assert bridge["trainer"]["first_step"] == 1
+    assert bridge["trainer"]["last_step"] == 1
+    assert bridge["trainer"]["requested_wgpu_hits"] == pytest.approx(1.0)
+    assert bridge["trainer"]["requested_wgpu_runtime_fallbacks"] == pytest.approx(1.0)
+    assert bridge["trainer"]["requested_wgpu_hit_rate"] == pytest.approx(0.5)
+    assert bridge["trainer"]["requested_wgpu_runtime_fallback_rate"] == pytest.approx(
+        0.5
+    )
+
+
 def test_summarize_trainer_trace_events_recovers_lstm_estimated_work(tmp_path) -> None:
     _ensure_torch_stub()
     st = importlib.import_module("spiraltorch")

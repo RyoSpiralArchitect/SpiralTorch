@@ -8,8 +8,23 @@ from typing import Any, Iterable
 __all__ = [
     "load_trainer_trace_events",
     "summarize_trainer_trace_events",
+    "summarize_transformers_trainer_runtime_bridge",
     "write_trainer_trace_html",
 ]
+
+TRANSFORMERS_TRACE_TENSOR_PREFIXES = (
+    "input_ids",
+    "logits",
+    "hidden_state",
+)
+
+GPU_DEVICE_KINDS = {
+    "cuda",
+    "gpu",
+    "hip",
+    "mps",
+    "wgpu",
+}
 
 COHERENCE_REPAIR_METRIC_KEYS = (
     "coherence_repairs_total",
@@ -625,7 +640,7 @@ def _extract_payload(record: dict[str, Any], *, event_type: str) -> Any | None:
         data = event.get("data")
         if isinstance(data, dict) and data.get("event_type") == event_type:
             return data.get("data")
-    if len(record) == 1:
+    if len(record) == 1 and "event" not in record:
         return record
     return None
 
@@ -1295,6 +1310,172 @@ def load_trainer_trace_events(
             event["ts"] = record["ts"]
         events.append(event)
     return events
+
+
+def _load_jsonl_rows(path: str | Path) -> list[dict[str, Any]]:
+    return list(_iter_jsonl(Path(path)))
+
+
+def _count_labels(values: Iterable[Any]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for value in values:
+        if value is None or value == "":
+            continue
+        label = str(value)
+        counts[label] = counts.get(label, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def _transformers_prompt_rows(rows: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        row
+        for row in rows
+        if row.get("row_type") == "transformers_prompt_trace"
+    ]
+
+
+def _transformers_tensor_runtime_summary(
+    rows: Iterable[dict[str, Any]],
+) -> dict[str, Any]:
+    prompt_rows = _transformers_prompt_rows(rows)
+    field_rows: list[dict[str, Any]] = []
+    for row in prompt_rows:
+        prompt_index = row.get("prompt_index")
+        for prefix in TRANSFORMERS_TRACE_TENSOR_PREFIXES:
+            if not row.get(f"{prefix}_tensor_available"):
+                continue
+            field_rows.append(
+                {
+                    "prompt_index": prompt_index,
+                    "tensor": prefix,
+                    "backend": row.get(f"{prefix}_tensor_backend"),
+                    "device": row.get(f"{prefix}_tensor_device"),
+                    "device_kind": row.get(f"{prefix}_tensor_device_kind"),
+                    "dtype": row.get(f"{prefix}_tensor_dtype"),
+                    "shape": row.get(f"{prefix}_tensor_shape"),
+                    "shape_rank": row.get(f"{prefix}_tensor_shape_rank"),
+                }
+            )
+
+    device_kinds = _count_labels(item.get("device_kind") for item in field_rows)
+    gpu_fields = sum(
+        1
+        for item in field_rows
+        if str(item.get("device_kind") or "").lower() in GPU_DEVICE_KINDS
+    )
+    cpu_fields = sum(
+        1
+        for item in field_rows
+        if str(item.get("device_kind") or "").lower() == "cpu"
+    )
+    python_sequence_fields = sum(
+        1
+        for item in field_rows
+        if item.get("backend") == "python_sequence"
+    )
+    return {
+        "prompt_rows": len(prompt_rows),
+        "tensor_fields": len(field_rows),
+        "tensor_backends": _count_labels(item.get("backend") for item in field_rows),
+        "tensor_devices": _count_labels(item.get("device") for item in field_rows),
+        "tensor_device_kinds": device_kinds,
+        "tensor_dtypes": _count_labels(item.get("dtype") for item in field_rows),
+        "gpu_tensor_fields": gpu_fields,
+        "cpu_tensor_fields": cpu_fields,
+        "python_sequence_tensor_fields": python_sequence_fields,
+        "tensor_field_rows": field_rows,
+    }
+
+
+def _trainer_backend_bridge_summary(
+    trainer_summary: dict[str, Any],
+) -> dict[str, Any]:
+    metrics = trainer_summary.get("metrics")
+    if not isinstance(metrics, dict):
+        metrics = {}
+    requested_wgpu_hits = _metric_last(metrics, "tensor_backend_requested_wgpu_hits")
+    requested_wgpu_fallbacks = _metric_last(
+        metrics,
+        "tensor_backend_requested_wgpu_runtime_fallbacks",
+    )
+    requested_wgpu_hit_rate = _metric_last(
+        metrics,
+        "tensor_backend_requested_wgpu_hit_rate",
+    )
+    requested_wgpu_fallback_rate = _metric_last(
+        metrics,
+        "tensor_backend_requested_wgpu_runtime_fallback_rate",
+    )
+    component_hit_rate = _metric_last(
+        metrics,
+        "tensor_backend_requested_wgpu_component_hit_rate",
+    )
+    component_fallback_rate = _metric_last(
+        metrics,
+        "tensor_backend_requested_wgpu_component_fallback_rate",
+    )
+    return {
+        "steps": trainer_summary.get("count", 0),
+        "first_step": trainer_summary.get("first_step"),
+        "last_step": trainer_summary.get("last_step"),
+        "requested_wgpu_hits": requested_wgpu_hits,
+        "requested_wgpu_runtime_fallbacks": requested_wgpu_fallbacks,
+        "requested_wgpu_hit_rate": requested_wgpu_hit_rate,
+        "requested_wgpu_runtime_fallback_rate": requested_wgpu_fallback_rate,
+        "requested_wgpu_component_hit_rate": component_hit_rate,
+        "requested_wgpu_component_fallback_rate": component_fallback_rate,
+        "backend_policy": trainer_summary.get("backend_policy", {}),
+    }
+
+
+def _bridge_runtime_status(
+    transformers_summary: dict[str, Any],
+    trainer_backend: dict[str, Any],
+) -> str:
+    if transformers_summary["prompt_rows"] == 0 and not trainer_backend["steps"]:
+        return "empty"
+    if transformers_summary["prompt_rows"] == 0:
+        return "trainer_only"
+    if not trainer_backend["steps"]:
+        return "transformers_only"
+    fallback_rate = trainer_backend.get("requested_wgpu_runtime_fallback_rate")
+    hit_rate = trainer_backend.get("requested_wgpu_hit_rate")
+    has_external_gpu = bool(transformers_summary.get("gpu_tensor_fields"))
+    if has_external_gpu and fallback_rate and fallback_rate > 0.0:
+        return "external_gpu_with_trainer_wgpu_fallback"
+    if has_external_gpu and hit_rate and hit_rate > 0.0:
+        return "external_gpu_with_trainer_wgpu_hits"
+    if has_external_gpu:
+        return "external_gpu_without_trainer_wgpu_evidence"
+    if hit_rate and hit_rate > 0.0:
+        return "trainer_wgpu_without_external_gpu_tensors"
+    return "observed"
+
+
+def summarize_transformers_trainer_runtime_bridge(
+    transformers_trace_jsonl: str | Path,
+    trainer_trace_jsonl: str | Path,
+    *,
+    trainer_event_type: str = "TrainerStep",
+) -> dict[str, Any]:
+    """Summarize external Transformers tensor runtime against trainer backends."""
+
+    transformer_rows = _load_jsonl_rows(transformers_trace_jsonl)
+    transformers_summary = _transformers_tensor_runtime_summary(transformer_rows)
+    trainer_summary = summarize_trainer_trace_events(
+        trainer_trace_jsonl,
+        event_type=trainer_event_type,
+    )
+    trainer_backend = _trainer_backend_bridge_summary(trainer_summary)
+    return {
+        "kind": "spiraltorch.transformers_trainer_runtime_bridge",
+        "transformers_trace_jsonl": str(transformers_trace_jsonl),
+        "trainer_trace_jsonl": str(trainer_trace_jsonl),
+        "trainer_event_type": trainer_event_type,
+        "status": _bridge_runtime_status(transformers_summary, trainer_backend),
+        "transformers": transformers_summary,
+        "trainer": trainer_backend,
+    }
 
 
 def _tensor_meta_derived_metrics(path: str | Path) -> dict[str, dict[str, Any]]:
