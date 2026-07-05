@@ -119,6 +119,10 @@ class RunLlmCharFinetuneReloadSweepTests(unittest.TestCase):
             manifest["summary"]["runtime_preflight_status_counts"],
             {"dry_run": 4},
         )
+        self.assertEqual(
+            manifest["summary"]["runtime_preflight_detail_counts"],
+            {"none": 4},
+        )
         self.assertEqual(manifest["summary"]["runtime_trusted_cells"], 0)
         self.assertEqual(manifest["summary"]["runtime_untrusted_cells"], 4)
         self.assertEqual(len(manifest["summary"]["reload_lr_groups"]), 2)
@@ -159,7 +163,7 @@ class RunLlmCharFinetuneReloadSweepTests(unittest.TestCase):
         self.assertIn("## Reload LR Groups", markdown)
         self.assertIn("| 0.02 | 2 |", markdown)
         self.assertIn(
-            "| cell | status | training_status | adoption_status | run_status | runtime_status | trusted | seed | reload_seed | eval_seed |",
+            "| cell | status | training_status | adoption_status | run_status | runtime_status | runtime_detail | trusted | seed | reload_seed | eval_seed |",
             markdown,
         )
         self.assertIn("seed3_reloadlr0p02", markdown)
@@ -212,6 +216,12 @@ class RunLlmCharFinetuneReloadSweepTests(unittest.TestCase):
                         "child_runtime_preflight": {
                             "runtime_import_preflight_requested": True,
                             "runtime_import_preflight_passed": False,
+                            "runtime_import_preflight_failures": (
+                                "runtime_device_not_ready:wgpu"
+                            ),
+                            "runtime_device_report_statuses": (
+                                "wgpu=feature_disabled"
+                            ),
                         }
                     }
                 },
@@ -274,6 +284,14 @@ class RunLlmCharFinetuneReloadSweepTests(unittest.TestCase):
             summary["runtime_preflight_status_counts"],
             {"failed": 1, "not_requested": 1, "passed": 1, "unobserved": 2},
         )
+        self.assertEqual(
+            summary["runtime_preflight_detail_counts"],
+            {
+                "none": 2,
+                "runtime_device_not_ready:wgpu;wgpu=feature_disabled": 1,
+                "unobserved": 2,
+            },
+        )
         self.assertEqual(summary["runtime_trusted_cells"], 2)
         self.assertEqual(summary["runtime_untrusted_cells"], 3)
         self.assertEqual(summary["protected_noop_cells"], 1)
@@ -315,6 +333,13 @@ class RunLlmCharFinetuneReloadSweepTests(unittest.TestCase):
         self.assertEqual(
             groups[0]["runtime_preflight_status_counts"],
             {"failed": 1, "passed": 1},
+        )
+        self.assertEqual(
+            groups[0]["runtime_preflight_detail_counts"],
+            {
+                "none": 1,
+                "runtime_device_not_ready:wgpu;wgpu=feature_disabled": 1,
+            },
         )
         self.assertEqual(groups[0]["runtime_trusted_cells"], 1)
         self.assertAlmostEqual(

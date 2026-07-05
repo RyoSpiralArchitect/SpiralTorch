@@ -383,17 +383,43 @@ def outcome_adoption_status(cell: dict[str, Any]) -> str:
     return str(cell.get("status") or "unknown")
 
 
+def csv_parts(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple, set)):
+        parts: list[str] = []
+        for item in value:
+            parts.extend(csv_parts(item))
+        return parts
+    if isinstance(value, dict):
+        return []
+    parts = [part.strip() for part in str(value).split(",")]
+    return [part for part in parts if part and part != "none"]
+
+
+def runtime_preflight_payload(
+    cell: dict[str, Any],
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    pair_manifest = cell.get("pair_manifest")
+    if not isinstance(pair_manifest, dict):
+        return None, None
+    preflight = pair_manifest.get("preflight")
+    if not isinstance(preflight, dict):
+        return None, None
+    runtime = preflight.get("child_runtime_preflight")
+    if not isinstance(runtime, dict):
+        runtime = preflight.get("runtime_import_preflight")
+    return preflight, runtime if isinstance(runtime, dict) else None
+
+
 def runtime_preflight_status(cell: dict[str, Any]) -> str:
     pair_manifest = cell.get("pair_manifest")
     if not isinstance(pair_manifest, dict):
         status = str(cell.get("status") or "unknown")
         return status if status in {"dry_run", "failed"} else "unobserved"
-    preflight = pair_manifest.get("preflight")
+    preflight, runtime = runtime_preflight_payload(cell)
     if not isinstance(preflight, dict):
         return "missing_preflight"
-    runtime = preflight.get("child_runtime_preflight")
-    if not isinstance(runtime, dict):
-        runtime = preflight.get("runtime_import_preflight")
     requested = preflight.get("runtime_import_preflight_requested")
     if isinstance(runtime, dict):
         requested = runtime.get("runtime_import_preflight_requested", requested)
@@ -407,6 +433,26 @@ def runtime_preflight_status(cell: dict[str, Any]) -> str:
     if passed is False:
         return "failed"
     return "unknown"
+
+
+def runtime_preflight_detail(cell: dict[str, Any]) -> str:
+    status = runtime_preflight_status(cell)
+    preflight, runtime = runtime_preflight_payload(cell)
+    details: list[str] = []
+    if isinstance(runtime, dict):
+        details.extend(csv_parts(runtime.get("runtime_import_preflight_failures")))
+        details.extend(csv_parts(runtime.get("runtime_device_report_statuses")))
+        details.extend(csv_parts(runtime.get("runtime_imports_failed")))
+        details.extend(csv_parts(runtime.get("runtime_import_failed_install_hints")))
+    if isinstance(preflight, dict):
+        details.extend(csv_parts(preflight.get("reason")))
+        details.extend(csv_parts(preflight.get("issues")))
+    unique = list(dict.fromkeys(details))
+    if unique:
+        return ";".join(unique)
+    if status in {"passed", "not_requested", "dry_run"}:
+        return "none"
+    return status
 
 
 def runtime_preflight_trusted(cell: dict[str, Any]) -> bool:
@@ -471,6 +517,9 @@ def aggregate_cells(cells: list[dict[str, Any]]) -> dict[str, Any]:
     runtime_preflight_status_counts = Counter(
         runtime_preflight_status(cell) for cell in cells
     )
+    runtime_preflight_detail_counts = Counter(
+        runtime_preflight_detail(cell) for cell in cells
+    )
     trusted = trusted_cells(cells)
     best = best_cell_by_delta(
         cells,
@@ -498,6 +547,9 @@ def aggregate_cells(cells: list[dict[str, Any]]) -> dict[str, Any]:
         "run_status_counts": dict(sorted(run_status_counts.items())),
         "runtime_preflight_status_counts": dict(
             sorted(runtime_preflight_status_counts.items())
+        ),
+        "runtime_preflight_detail_counts": dict(
+            sorted(runtime_preflight_detail_counts.items())
         ),
         "runtime_trusted_cells": len(trusted),
         "runtime_untrusted_cells": len(cells) - len(trusted),
@@ -599,6 +651,7 @@ def render_markdown(manifest: dict[str, Any]) -> str:
         f"- training_status_counts: `{summary.get('training_status_counts', {})}`",
         f"- adoption_status_counts: `{summary.get('adoption_status_counts', {})}`",
         f"- runtime_preflight_status_counts: `{summary.get('runtime_preflight_status_counts', {})}`",
+        f"- runtime_preflight_detail_counts: `{summary.get('runtime_preflight_detail_counts', {})}`",
         f"- runtime_trusted_cells: `{summary.get('runtime_trusted_cells', 0)}`",
         f"- runtime_untrusted_cells: `{summary.get('runtime_untrusted_cells', 0)}`",
         f"- best_cell: `{summary.get('best_cell', '-')}`",
@@ -613,8 +666,8 @@ def render_markdown(manifest: dict[str, Any]) -> str:
             [
                 "## Reload LR Groups",
                 "",
-                "| reload_lr | cells | runtime_status | trusted_cells | status_counts | training_status_counts | adoption_status_counts | best_cell | trusted_best_cell | best_delta | trusted_best_delta | best_training_cell | trusted_best_training_cell | training_delta_mean | training_delta_min | training_delta_max | reload_delta_mean | rollback_count_mean |",
-                "| ---: | ---: | --- | ---: | --- | --- | --- | --- | --- | ---: | ---: | --- | --- | ---: | ---: | ---: | ---: | ---: |",
+                "| reload_lr | cells | runtime_status | runtime_detail | trusted_cells | status_counts | training_status_counts | adoption_status_counts | best_cell | trusted_best_cell | best_delta | trusted_best_delta | best_training_cell | trusted_best_training_cell | training_delta_mean | training_delta_min | training_delta_max | reload_delta_mean | rollback_count_mean |",
+                "| ---: | ---: | --- | --- | ---: | --- | --- | --- | --- | --- | ---: | ---: | --- | --- | ---: | ---: | ---: | ---: | ---: |",
             ]
         )
         for group in reload_lr_groups:
@@ -634,6 +687,7 @@ def render_markdown(manifest: dict[str, Any]) -> str:
                         md_cell(group.get("reload_lr_label")),
                         md_cell(group.get("cells")),
                         md_cell(group.get("runtime_preflight_status_counts")),
+                        md_cell(group.get("runtime_preflight_detail_counts")),
                         md_cell(group.get("runtime_trusted_cells")),
                         md_cell(group.get("status_counts")),
                         md_cell(group.get("training_status_counts")),
@@ -660,8 +714,8 @@ def render_markdown(manifest: dict[str, Any]) -> str:
         lines.append("")
     lines.extend(
         [
-            "| cell | status | training_status | adoption_status | run_status | runtime_status | trusted | seed | reload_seed | eval_seed | reload_lr | best_delta | training_delta | final_delta | reload_delta | rollback_count | manifest | outcome |",
-            "| --- | --- | --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |",
+            "| cell | status | training_status | adoption_status | run_status | runtime_status | runtime_detail | trusted | seed | reload_seed | eval_seed | reload_lr | best_delta | training_delta | final_delta | reload_delta | rollback_count | manifest | outcome |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |",
         ]
     )
     for cell in manifest.get("cells", []):
@@ -676,6 +730,7 @@ def render_markdown(manifest: dict[str, Any]) -> str:
                     md_cell(outcome_adoption_status(cell)),
                     md_cell(cell.get("status")),
                     md_cell(runtime_preflight_status(cell)),
+                    md_cell(runtime_preflight_detail(cell)),
                     md_cell(runtime_preflight_trusted(cell)),
                     md_cell(cell.get("seed")),
                     md_cell(cell.get("reload_seed")),
