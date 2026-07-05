@@ -77,6 +77,20 @@ WGPU_READINESS_PRESETS = {
         "max_run_epoch_wgpu_component_fallback_rate_regression": 0.0,
     },
 }
+FT_READINESS_PRESETS = {
+    "hf-wgpu-observed": {
+        "runtime_contract_presets": ["hf-runtime"],
+        "wgpu_readiness_presets": ["observed"],
+    },
+    "hf-wgpu-balanced": {
+        "runtime_contract_presets": ["hf-runtime"],
+        "wgpu_readiness_presets": ["balanced"],
+    },
+    "hf-wgpu-strict": {
+        "runtime_contract_presets": ["hf-runtime"],
+        "wgpu_readiness_presets": ["strict"],
+    },
+}
 
 
 def source_value(source, key, default=None):
@@ -383,6 +397,20 @@ def parse_args():
         help=(
             "Require checkpoint_preflight.py to satisfy this named runtime import "
             "preset during --transformers-audit. May be repeated."
+        ),
+    )
+    parser.add_argument(
+        "--ft-readiness-preset",
+        dest="ft_readiness_presets",
+        action="append",
+        choices=sorted(FT_READINESS_PRESETS),
+        default=[],
+        help=(
+            "Shortcut fine-tune readiness recipe for local HF checkpoints. "
+            "'hf-wgpu-balanced' expands to the hf-runtime contract plus the "
+            "balanced WGPU readiness preset. Lower-level runtime/WGPU preset "
+            "flags and explicit gate thresholds remain available and win. "
+            "May be repeated."
         ),
     )
     parser.add_argument(
@@ -1092,6 +1120,7 @@ def parse_args():
         parser.error("--continue-ft-epochs must be positive")
     if args.continue_ft_epochs_step is not None and args.continue_ft_epochs_step <= 0:
         parser.error("--continue-ft-epochs-step must be positive")
+    apply_ft_readiness_presets(args)
     apply_wgpu_readiness_presets(args)
     apply_runtime_contract_presets(args)
     if (
@@ -1362,6 +1391,29 @@ def parse_args():
         parser.error("checkpoint preflight compare gates require checkpoint preflight")
     if not args.source_label:
         parser.error("--source-label must be non-empty")
+    return args
+
+
+def apply_ft_readiness_presets(args):
+    presets = list(dict.fromkeys(args.ft_readiness_presets or []))
+    if not presets:
+        return args
+    runtime_contract_defaults = []
+    wgpu_readiness_defaults = []
+    for preset in presets:
+        preset_defaults = FT_READINESS_PRESETS[preset]
+        runtime_contract_defaults = append_unique(
+            runtime_contract_defaults,
+            preset_defaults.get("runtime_contract_presets", []),
+        )
+        wgpu_readiness_defaults = append_unique(
+            wgpu_readiness_defaults,
+            preset_defaults.get("wgpu_readiness_presets", []),
+        )
+    if not args.runtime_contract_presets:
+        args.runtime_contract_presets = runtime_contract_defaults
+    if not args.wgpu_readiness_presets:
+        args.wgpu_readiness_presets = wgpu_readiness_defaults
     return args
 
 
@@ -2416,6 +2468,9 @@ def profile_smoke_manifest_validation_row(path, row, promoted_rungs_jsonl, rung_
         "configs": list(row.get("configs") or []),
         "profiles": list(row.get("profiles") or []),
         "promotion_metric": row.get("promotion_metric"),
+        "ft_readiness_presets": manifest_validation_csv_label(
+            row.get("ft_readiness_presets")
+        ),
         "wgpu_readiness_presets": manifest_validation_csv_label(
             row.get("wgpu_readiness_presets")
         ),
@@ -3876,6 +3931,9 @@ def continuation_plan_row(
             "profiles": list(profiles),
             "promotion_metric": promotion_metric,
             "strict_aggregate_gates": strict_aggregate_gates,
+            "ft_readiness_presets": list(
+                source_row.get("ft_readiness_presets") or []
+            ),
             "wgpu_readiness_presets": list(
                 source_row.get("wgpu_readiness_presets") or []
             ),
@@ -4116,6 +4174,9 @@ def profile_smoke_manifest_row(
         "promoted_output_prefix": args.promoted_output_prefix,
         "promoted_ft_epochs_step": args.promoted_ft_epochs_step,
         "strict_aggregate_gates": args.strict_aggregate_gates,
+        "ft_readiness_presets": list(
+            getattr(args, "ft_readiness_presets", []) or []
+        ),
         "wgpu_readiness_presets": list(
             getattr(args, "wgpu_readiness_presets", []) or []
         ),
