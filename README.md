@@ -506,6 +506,7 @@ Linux note: for manylinux2014 wheels you either need a manylinux container (e.g.
 - Manual wheel artifact build: `.github/workflows/wheels.yml`
 - Official release build + attached assets: `.github/workflows/release_wheels.yml`
 - Publish existing signed GitHub Release wheels: `.github/workflows/publish_pypi_from_release.yml`
+- Release readiness summary: `scripts/release_status.py`
 - Safe manual PyPI publish helper: `scripts/publish_pypi_wheels.py`
 
 ```bash
@@ -513,6 +514,12 @@ Linux note: for manylinux2014 wheels you either need a manylinux container (e.g.
 VERSION=0.4.11
 TAG="v${VERSION}"
 DIST="/tmp/spiraltorch-${VERSION}-dist"
+
+# Snapshot release readiness without exposing any secret values.
+python scripts/release_status.py \
+  --version "$VERSION" \
+  --release-tag "$TAG" \
+  --expected-wheels 3
 
 # One-time token auth setup for the GitHub publish workflow. Prefer the `pypi`
 # environment secret so the credential scope matches the workflow environment.
