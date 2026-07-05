@@ -51,6 +51,31 @@ class RunLlmCharFinetuneReloadSweepTests(unittest.TestCase):
             ],
         )
 
+    def test_runtime_preflight_status_falls_back_to_pair_outcome_summary(self) -> None:
+        mod = _load_module()
+        cell = {
+            "name": "outcome-only",
+            "status": "ok",
+            "outcome": {
+                "runtime_preflight_trusted": False,
+                "runtime_preflight_statuses": {
+                    "base": "passed",
+                    "reload": "failed",
+                },
+                "runtime_preflight_details": {
+                    "base": "wgpu=kernel_wired",
+                    "reload": "runtime_device_not_ready:wgpu;wgpu=feature_disabled",
+                },
+            },
+        }
+
+        self.assertEqual(mod.runtime_preflight_status(cell), "failed")
+        self.assertFalse(mod.runtime_preflight_trusted(cell))
+        self.assertEqual(
+            mod.runtime_preflight_detail(cell),
+            "wgpu=kernel_wired;runtime_device_not_ready:wgpu;wgpu=feature_disabled",
+        )
+
     def test_dry_run_writes_grid_commands_and_summary(self) -> None:
         mod = _load_module()
         with tempfile.TemporaryDirectory() as tmp:
