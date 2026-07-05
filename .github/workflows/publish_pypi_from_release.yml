@@ -14,6 +14,14 @@ on:
         description: "Allow reruns when one or more files are already on PyPI"
         required: false
         default: "true"
+      publish_method:
+        description: "PyPI authentication method: token requires PYPI_API_TOKEN; trusted requires a PyPI trusted publisher"
+        required: false
+        type: choice
+        options:
+          - token
+          - trusted
+        default: "token"
 
 permissions:
   contents: read
@@ -29,9 +37,30 @@ jobs:
     env:
       RELEASE_TAG: ${{ inputs.release_tag }}
       EXPECTED_WHEELS: ${{ inputs.expected_wheels }}
+      PUBLISH_METHOD: ${{ inputs.publish_method }}
       PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
       SKIP_EXISTING: ${{ inputs.skip_existing }}
     steps:
+      - name: Validate PyPI publish method
+        run: |
+          set -euo pipefail
+          case "$PUBLISH_METHOD" in
+            token)
+              if [ -z "$PYPI_API_TOKEN" ]; then
+                echo "publish_method=token requires a PYPI_API_TOKEN repository or environment secret." >&2
+                exit 1
+              fi
+              ;;
+            trusted)
+              echo "publish_method=trusted selected."
+              echo "PyPI must define a trusted publisher for repo=$GITHUB_REPOSITORY, workflow=publish_pypi_from_release.yml, environment=pypi."
+              ;;
+            *)
+              echo "Unknown publish_method: $PUBLISH_METHOD" >&2
+              exit 1
+              ;;
+          esac
+
       - name: Download GitHub Release wheels
         env:
           GH_TOKEN: ${{ github.token }}
@@ -87,7 +116,7 @@ jobs:
           cp release-dist/*.whl pypi-dist/
 
       - name: Publish to PyPI (token)
-        if: env.PYPI_API_TOKEN != ''
+        if: inputs.publish_method == 'token'
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: pypi-dist
@@ -95,7 +124,7 @@ jobs:
           skip-existing: ${{ env.SKIP_EXISTING }}
 
       - name: Publish to PyPI (trusted publishing)
-        if: env.PYPI_API_TOKEN == ''
+        if: inputs.publish_method == 'trusted'
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: pypi-dist
