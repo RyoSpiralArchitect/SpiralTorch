@@ -83,9 +83,14 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def run(args: Sequence[str], *, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+def run(
+    args: Sequence[str],
+    *,
+    env: dict[str, str] | None = None,
+    cwd: Path | None = None,
+) -> subprocess.CompletedProcess[str]:
     log("+ " + " ".join(args))
-    return subprocess.run(args, check=True, env=env, text=True)
+    return subprocess.run(args, check=True, env=env, cwd=cwd, text=True)
 
 
 def discover_wheels(dist: Path) -> list[Path]:
@@ -204,7 +209,13 @@ def smoke_pypi_install(python: str, version: str) -> None:
     script = textwrap.dedent(
         f"""
         import spiraltorch as st
+        import os
+        from pathlib import Path
         from spiraltorch.nn import Linear
+
+        smoke_target = Path(os.environ["SPIRALTORCH_SMOKE_TARGET"]).resolve()
+        module_path = Path(st.__file__).resolve()
+        assert smoke_target in module_path.parents, module_path
 
         assert st.__version__ == {version!r}, st.__version__
         layer = Linear(2, 2, name="pypi_smoke")
@@ -233,7 +244,9 @@ def smoke_pypi_install(python: str, version: str) -> None:
         env = os.environ.copy()
         env["PYTHONNOUSERSITE"] = "1"
         env["PYTHONPATH"] = target
-        run([python, "-c", script], env=env)
+        env["SPIRALTORCH_SMOKE_TARGET"] = target
+        with tempfile.TemporaryDirectory(prefix="spiraltorch-pypi-smoke-cwd-") as run_cwd:
+            run([python, "-c", script], env=env, cwd=Path(run_cwd))
 
 
 def main() -> int:
