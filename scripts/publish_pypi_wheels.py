@@ -8,6 +8,7 @@ and can run as a dry-run while waiting for credentials.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -18,7 +19,7 @@ import textwrap
 import time
 from typing import Iterable, Sequence
 from urllib.error import HTTPError, URLError
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 PACKAGE = "spiraltorch"
 PYPI_JSON_URL = f"https://pypi.org/pypi/{PACKAGE}/json"
@@ -63,6 +64,26 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--repository-url",
         help="Optional twine repository URL. Omit for production PyPI.",
+    )
+    parser.add_argument(
+        "--github-release-tag",
+        help=(
+            "Optional GitHub Release tag whose wheels.sha256 must exactly match "
+            "the local wheel set before upload."
+        ),
+    )
+    parser.add_argument(
+        "--github-release-repo",
+        default=os.environ.get("GITHUB_REPOSITORY", "RyoSpiralArchitect/SpiralTorch"),
+        help=(
+            "Repository slug used with --github-release-tag. "
+            "Defaults to $GITHUB_REPOSITORY or RyoSpiralArchitect/SpiralTorch."
+        ),
+    )
+    parser.add_argument(
+        "--github-token-env",
+        default="GITHUB_TOKEN",
+        help="Optional environment variable for authenticated release asset download. Default: GITHUB_TOKEN.",
     )
     parser.add_argument(
         "--no-smoke",
@@ -119,6 +140,76 @@ def validate_versions(wheels: Iterable[Path], expected: str | None) -> str:
 
 def twine_check(python: str, wheels: Sequence[Path]) -> None:
     run([python, "-m", "twine", "check", *(str(path) for path in wheels)])
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def download_text(url: str, *, token: str | None = None) -> str:
+    headers = {"Accept": "application/octet-stream"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    request = Request(url, headers=headers)
+    try:
+        with urlopen(request, timeout=30) as response:
+            return response.read().decode("utf-8")
+    except (HTTPError, URLError, TimeoutError, UnicodeDecodeError) as exc:
+        raise PublishError(f"Unable to download release metadata from {url}") from exc
+
+
+def parse_sha256_lines(text: str) -> dict[str, str]:
+    entries: dict[str, str] = {}
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        parts = stripped.split()
+        if len(parts) != 2:
+            raise PublishError(f"Malformed wheels.sha256 line: {line!r}")
+        digest, name = parts
+        if len(digest) != 64 or any(ch not in "0123456789abcdefABCDEF" for ch in digest):
+            raise PublishError(f"Malformed sha256 digest for {name}: {digest}")
+        entries[name] = digest.lower()
+    return entries
+
+
+def verify_github_release_wheel_checksums(
+    wheels: Sequence[Path],
+    *,
+    repo: str,
+    tag: str,
+    token_env: str,
+) -> None:
+    url = f"https://github.com/{repo}/releases/download/{tag}/wheels.sha256"
+    token = os.environ.get(token_env) or None
+    expected = parse_sha256_lines(download_text(url, token=token))
+    local = {path.name: file_sha256(path) for path in wheels}
+
+    expected_wheels = {name: digest for name, digest in expected.items() if name.endswith(".whl")}
+    if not expected_wheels:
+        raise PublishError(f"Release {tag} did not expose any wheel entries in wheels.sha256")
+
+    missing = sorted(set(expected_wheels) - set(local))
+    extra = sorted(set(local) - set(expected_wheels))
+    mismatched = sorted(name for name in set(local) & set(expected_wheels) if local[name] != expected_wheels[name])
+
+    if missing or extra or mismatched:
+        details = {
+            "missing": missing,
+            "extra": extra,
+            "mismatched": mismatched,
+        }
+        raise PublishError(
+            f"Local wheels do not match GitHub Release {repo}@{tag} wheels.sha256: "
+            + json.dumps(details, sort_keys=True)
+        )
+
+    log(f"github_release_wheel_checksums=ok repo={repo} tag={tag} wheels={len(local)}")
 
 
 def read_clipboard() -> str:
@@ -260,6 +351,13 @@ def main() -> int:
         log(f"wheel={wheel}")
 
     twine_check(args.python, wheels)
+    if args.github_release_tag:
+        verify_github_release_wheel_checksums(
+            wheels,
+            repo=args.github_release_repo,
+            tag=args.github_release_tag,
+            token_env=args.github_token_env,
+        )
 
     token, token_metadata = read_token(args.token_source, args.token_env)
     redacted_token_metadata = dict(token_metadata)
