@@ -16,6 +16,7 @@ if (_ROOT / "spiraltorch").is_dir():
     sys.path.insert(0, str(_ROOT))
 
 import spiraltorch as st
+import spiraltorch.runtime_imports as _runtime_imports
 
 import _softlogic_cli
 
@@ -27,6 +28,7 @@ RUN_SCHEMA = "st.modelzoo.run.v1"
 TRAINING_CONTRACT_SCHEMA = "st.llm_char_finetune.training_contract.v1"
 SUMMARY_SCHEMA = "st.llm_char_finetune.summary.v1"
 PREFLIGHT_SCHEMA = "st.llm_char_finetune.preflight.v1"
+RUNTIME_IMPORT_PREFLIGHT_SCHEMA = "st.llm_char_finetune.runtime_import_preflight.v1"
 REQUIRED_NN_SYMBOLS = [
     "Sequential",
     "Embedding",
@@ -214,6 +216,56 @@ def _backend_contract(backend: str) -> dict[str, Any]:
     }
 
 
+def _runtime_import_preflight_requested(
+    *,
+    runtime_imports: object = None,
+    runtime_import_presets: object = None,
+    required_runtime_imports: object = None,
+    required_runtime_import_presets: object = None,
+    require_runtime_imports: bool = False,
+) -> bool:
+    return bool(
+        _runtime_imports.csv_values(runtime_imports)
+        or _runtime_imports.csv_values(runtime_import_presets)
+        or _runtime_imports.csv_values(required_runtime_imports)
+        or _runtime_imports.csv_values(required_runtime_import_presets)
+        or require_runtime_imports
+    )
+
+
+def _runtime_import_preflight_payload(
+    *,
+    runtime_imports: object = None,
+    runtime_import_presets: object = None,
+    required_runtime_imports: object = None,
+    required_runtime_import_presets: object = None,
+    require_runtime_imports: bool = False,
+) -> dict[str, Any]:
+    requested = _runtime_import_preflight_requested(
+        runtime_imports=runtime_imports,
+        runtime_import_presets=runtime_import_presets,
+        required_runtime_imports=required_runtime_imports,
+        required_runtime_import_presets=required_runtime_import_presets,
+        require_runtime_imports=require_runtime_imports,
+    )
+    report = dict(
+        _runtime_imports.runtime_import_preflight_report(
+            runtime_imports=runtime_imports,
+            runtime_import_presets=runtime_import_presets,
+            required_runtime_imports=required_runtime_imports,
+            required_runtime_import_presets=required_runtime_import_presets,
+            require_all=require_runtime_imports,
+        )
+    )
+    report.update(
+        {
+            "schema": RUNTIME_IMPORT_PREFLIGHT_SCHEMA,
+            "runtime_import_preflight_requested": requested,
+        }
+    )
+    return report
+
+
 def _required_nn_symbols(*, desire: bool) -> list[str]:
     symbols = list(REQUIRED_NN_SYMBOLS)
     if desire:
@@ -221,18 +273,36 @@ def _required_nn_symbols(*, desire: bool) -> list[str]:
     return symbols
 
 
-def _learning_preflight_payload(*, backend: str, desire: bool) -> dict[str, Any]:
+def _learning_preflight_payload(
+    *,
+    backend: str,
+    desire: bool,
+    runtime_imports: object = None,
+    runtime_import_presets: object = None,
+    required_runtime_imports: object = None,
+    required_runtime_import_presets: object = None,
+    require_runtime_imports: bool = False,
+) -> dict[str, Any]:
     flags, build_info_error = _native_feature_flags_with_error()
     backend_status = _backend_readiness(backend, flags)
     required_symbols = _required_nn_symbols(desire=desire)
     nn = getattr(st, "nn", None)
     missing_symbols = [symbol for symbol in required_symbols if not hasattr(nn, symbol)]
+    runtime_import_preflight = _runtime_import_preflight_payload(
+        runtime_imports=runtime_imports,
+        runtime_import_presets=runtime_import_presets,
+        required_runtime_imports=required_runtime_imports,
+        required_runtime_import_presets=required_runtime_import_presets,
+        require_runtime_imports=require_runtime_imports,
+    )
 
     issues: list[str] = []
     if missing_symbols:
         issues.append("missing_nn_symbols")
     if backend_status["ready"] is not True:
         issues.append(str(backend_status["status"]))
+    if runtime_import_preflight["runtime_import_preflight_passed"] is not True:
+        issues.append("runtime_import_preflight_failed")
 
     payload: dict[str, Any] = {
         "schema": PREFLIGHT_SCHEMA,
@@ -250,6 +320,7 @@ def _learning_preflight_payload(*, backend: str, desire: bool) -> dict[str, Any]
         "ready": not issues,
         "reason": "ready" if not issues else "+".join(issues),
         "spiraltorch_module": str(getattr(st, "__file__", "")),
+        "runtime_import_preflight": runtime_import_preflight,
     }
     if build_info_error:
         payload["build_info_error"] = build_info_error
@@ -318,6 +389,35 @@ def _build_training_contract(
     trainable = ["char_rnn", "linear_head", "zspace_softmax"]
     if run_meta.get("embed_dim") is not None:
         trainable.insert(0, "embedding")
+    runtime_import_preflight = run_meta.get("runtime_import_preflight")
+    runtime_import_summary: dict[str, Any] = {
+        "runtime_import_preflight_path": run_meta.get(
+            "runtime_import_preflight_path"
+        ),
+        "runtime_import_preflight_requested": run_meta.get(
+            "runtime_import_preflight_requested"
+        ),
+        "runtime_import_preflight_passed": run_meta.get(
+            "runtime_import_preflight_passed"
+        ),
+        "runtime_import_preflight_failures": run_meta.get(
+            "runtime_import_preflight_failures"
+        ),
+        "runtime_import_presets": run_meta.get("runtime_import_presets"),
+        "runtime_imports_requested": run_meta.get("runtime_imports_requested"),
+        "required_runtime_imports": run_meta.get("required_runtime_imports"),
+        "required_runtime_import_presets": run_meta.get(
+            "required_runtime_import_presets"
+        ),
+        "runtime_imports_failed": run_meta.get("runtime_imports_failed"),
+        "runtime_import_failed_install_hints": run_meta.get(
+            "runtime_import_failed_install_hints"
+        ),
+    }
+    if isinstance(runtime_import_preflight, dict):
+        for key, value in list(runtime_import_summary.items()):
+            if value is None:
+                runtime_import_summary[key] = runtime_import_preflight.get(key)
     return {
         "schema": TRAINING_CONTRACT_SCHEMA,
         "scope": "llm_char_finetune",
@@ -345,6 +445,10 @@ def _build_training_contract(
             "hypergrad_attached": True,
         },
         "backend": _backend_contract(str(run_meta.get("backend") or "cpu")),
+        "runtime": {
+            "python_executable": sys.executable,
+            **runtime_import_summary,
+        },
         "optimization": {
             "epochs": run_meta.get("epochs"),
             "batches_per_epoch": run_meta.get("batches_per_epoch"),
@@ -1154,6 +1258,9 @@ def main() -> int:
             "[--eval-seed N] [--early-stop-patience N] [--restore-best-at-end] [--rollback-on-validation-regression] "
             "[--backend cpu|wgpu|cuda|hip|auto] "
             "[--preflight-only] [--ignore-preflight] "
+            "[--runtime-import MODULE] [--runtime-import-preset hf-runtime|hf-finetune|hf-peft] "
+            "[--require-runtime-import MODULE] [--require-runtime-import-preset PRESET] [--require-runtime-imports] "
+            "[--runtime-preflight-json-out PATH] "
             "[--events PATH] [--events-types A,B,C] "
             "[--atlas] [--atlas-bound N] [--atlas-district NAME] "
             "[--desire] [--desire-concepts N] [--desire-prime N] [--desire-blend F] [--desire-drift-gain F] "
@@ -1212,6 +1319,12 @@ def main() -> int:
     desire_drift_gain = 0.35
     preflight_only = False
     ignore_preflight = False
+    runtime_imports: list[str] = []
+    runtime_import_presets: list[str] = []
+    required_runtime_imports: list[str] = []
+    required_runtime_import_presets: list[str] = []
+    require_runtime_imports = False
+    runtime_preflight_json_out: pathlib.Path | None = None
 
     softlogic_cli = _softlogic_cli.pop_softlogic_flags(args)
     it = iter(args)
@@ -1266,6 +1379,24 @@ def main() -> int:
             preflight_only = True
         elif flag == "--ignore-preflight":
             ignore_preflight = True
+        elif flag == "--runtime-import":
+            runtime_imports.append(str(next(it)).strip())
+        elif flag == "--runtime-import-preset":
+            preset = str(next(it)).strip()
+            if preset not in _runtime_imports.TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS:
+                raise ValueError(f"unknown --runtime-import-preset: {preset}")
+            runtime_import_presets.append(preset)
+        elif flag == "--require-runtime-import":
+            required_runtime_imports.append(str(next(it)).strip())
+        elif flag == "--require-runtime-import-preset":
+            preset = str(next(it)).strip()
+            if preset not in _runtime_imports.TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS:
+                raise ValueError(f"unknown --require-runtime-import-preset: {preset}")
+            required_runtime_import_presets.append(preset)
+        elif flag == "--require-runtime-imports":
+            require_runtime_imports = True
+        elif flag == "--runtime-preflight-json-out":
+            runtime_preflight_json_out = pathlib.Path(str(next(it)))
         elif flag == "--events":
             events_path = pathlib.Path(str(next(it)))
         elif flag == "--events-types":
@@ -1315,11 +1446,44 @@ def main() -> int:
         run_dir = _default_run_dir()
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "command.txt").write_text(" ".join(sys.argv), encoding="utf-8")
-    preflight = _learning_preflight_payload(backend=backend, desire=desire)
+    runtime_import_artifact_requested = (
+        runtime_preflight_json_out is not None
+        or _runtime_import_preflight_requested(
+            runtime_imports=runtime_imports,
+            runtime_import_presets=runtime_import_presets,
+            required_runtime_imports=required_runtime_imports,
+            required_runtime_import_presets=required_runtime_import_presets,
+            require_runtime_imports=require_runtime_imports,
+        )
+    )
+    runtime_preflight_path = runtime_preflight_json_out
+    if runtime_preflight_path is None and runtime_import_artifact_requested:
+        runtime_preflight_path = run_dir / "runtime_preflight.json"
+    preflight = _learning_preflight_payload(
+        backend=backend,
+        desire=desire,
+        runtime_imports=runtime_imports,
+        runtime_import_presets=runtime_import_presets,
+        required_runtime_imports=required_runtime_imports,
+        required_runtime_import_presets=required_runtime_import_presets,
+        require_runtime_imports=require_runtime_imports,
+    )
+    runtime_import_preflight = preflight["runtime_import_preflight"]
+    if runtime_preflight_path is not None:
+        runtime_import_preflight["runtime_import_preflight_path"] = str(
+            runtime_preflight_path
+        )
+        preflight["runtime_import_preflight_path"] = str(runtime_preflight_path)
+        _runtime_imports.write_runtime_import_preflight_report(
+            runtime_import_preflight,
+            runtime_preflight_path,
+        )
     _write_json(run_dir / "preflight.json", preflight)
     if preflight_only:
         _write_preflight_summary(run_dir, preflight, preflight_only=True)
         print(f"preflight: {run_dir / 'preflight.json'}")
+        if runtime_preflight_path is not None:
+            print(f"runtime_preflight: {runtime_preflight_path}")
         print(f"summary: {run_dir / 'summary.json'}")
         return 0 if preflight.get("ready") is True else 1
     if not ignore_preflight and preflight.get("ready") is not True:
@@ -1467,6 +1631,38 @@ def main() -> int:
         "weights_loaded_from": str(load_weights) if load_weights is not None else None,
         "weights_loaded_from_run": str(load_run) if load_run is not None else None,
         "source_checkpoint": source_checkpoint,
+        "preflight_path": str(run_dir / "preflight.json"),
+        "runtime_import_preflight_path": (
+            str(runtime_preflight_path) if runtime_preflight_path is not None else None
+        ),
+        "runtime_import_preflight": runtime_import_preflight,
+        "runtime_import_preflight_requested": runtime_import_preflight.get(
+            "runtime_import_preflight_requested"
+        ),
+        "runtime_import_preflight_passed": runtime_import_preflight.get(
+            "runtime_import_preflight_passed"
+        ),
+        "runtime_import_preflight_failures": runtime_import_preflight.get(
+            "runtime_import_preflight_failures"
+        ),
+        "runtime_import_presets": runtime_import_preflight.get(
+            "runtime_import_presets"
+        ),
+        "runtime_imports_requested": runtime_import_preflight.get(
+            "runtime_imports_requested"
+        ),
+        "required_runtime_imports": runtime_import_preflight.get(
+            "required_runtime_imports"
+        ),
+        "required_runtime_import_presets": runtime_import_preflight.get(
+            "required_runtime_import_presets"
+        ),
+        "runtime_imports_failed": runtime_import_preflight.get(
+            "runtime_imports_failed"
+        ),
+        "runtime_import_failed_install_hints": runtime_import_preflight.get(
+            "runtime_import_failed_install_hints"
+        ),
     }
 
     weights_meta = {

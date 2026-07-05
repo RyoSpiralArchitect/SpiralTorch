@@ -10,6 +10,7 @@ import tempfile
 import types
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -83,6 +84,49 @@ class LlmCharFinetuneContractTests(unittest.TestCase):
             payload["issues"], ["missing_nn_symbols", "backend_unavailable"]
         )
 
+    def test_learning_preflight_gates_required_runtime_import_preset(self) -> None:
+        mod = _load_module()
+        original_st = mod.st
+        mod.st = _fake_spiraltorch(symbols=mod.REQUIRED_NN_SYMBOLS, features={})
+
+        def fake_import(name: str):
+            if name in {"transformers", "torch", "tokenizers"}:
+                imported = types.ModuleType(name)
+                imported.__version__ = f"{name}-test"
+                return imported
+            raise ModuleNotFoundError(f"No module named {name!r}", name=name)
+
+        try:
+            with mock.patch.object(
+                mod._runtime_imports.importlib,
+                "import_module",
+                side_effect=fake_import,
+            ):
+                payload = mod._learning_preflight_payload(
+                    backend="cpu",
+                    desire=False,
+                    runtime_import_presets=["hf-peft"],
+                    require_runtime_imports=True,
+                )
+        finally:
+            mod.st = original_st
+
+        self.assertFalse(payload["ready"])
+        self.assertEqual(payload["reason"], "runtime_import_preflight_failed")
+        self.assertEqual(payload["issues"], ["runtime_import_preflight_failed"])
+        runtime_preflight = payload["runtime_import_preflight"]
+        self.assertTrue(runtime_preflight["runtime_import_preflight_requested"])
+        self.assertFalse(runtime_preflight["runtime_import_preflight_passed"])
+        self.assertEqual(runtime_preflight["runtime_import_presets"], "hf-peft")
+        self.assertEqual(
+            runtime_preflight["runtime_imports_failed"],
+            "accelerate,peft,safetensors",
+        )
+        self.assertEqual(
+            runtime_preflight["runtime_import_preflight_failures"],
+            "runtime_import_preset_unsatisfied:hf-peft",
+        )
+
     def test_preflight_only_writes_summary_without_training(self) -> None:
         mod = _load_module()
         original_st = mod.st
@@ -118,6 +162,58 @@ class LlmCharFinetuneContractTests(unittest.TestCase):
         self.assertEqual(summary["status"], "preflight_ready")
         self.assertTrue(summary["preflight_only"])
         self.assertFalse((run_dir / "metrics.jsonl").exists())
+
+    def test_preflight_only_writes_runtime_import_artifact(self) -> None:
+        mod = _load_module()
+        original_st = mod.st
+        original_argv = sys.argv
+        mod.st = _fake_spiraltorch(symbols=mod.REQUIRED_NN_SYMBOLS, features={})
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                data = root / "data.txt"
+                run_dir = root / "run"
+                runtime_preflight_path = root / "runtime" / "preflight.json"
+                data.write_text("spiral torch corpus", encoding="utf-8")
+                sys.argv = [
+                    str(SCRIPT),
+                    str(data),
+                    "--run-dir",
+                    str(run_dir),
+                    "--preflight-only",
+                    "--runtime-import",
+                    "math",
+                    "--require-runtime-imports",
+                    "--runtime-preflight-json-out",
+                    str(runtime_preflight_path),
+                ]
+                with contextlib.redirect_stdout(io.StringIO()):
+                    code = mod.main()
+                preflight = json.loads(
+                    (run_dir / "preflight.json").read_text(encoding="utf-8")
+                )
+                runtime_preflight = json.loads(
+                    runtime_preflight_path.read_text(encoding="utf-8")
+                )
+                summary = json.loads(
+                    (run_dir / "summary.json").read_text(encoding="utf-8")
+                )
+        finally:
+            mod.st = original_st
+            sys.argv = original_argv
+
+        self.assertEqual(code, 0)
+        self.assertTrue(runtime_preflight["runtime_import_preflight_passed"])
+        self.assertEqual(runtime_preflight["runtime_imports_requested"], "math")
+        self.assertEqual(runtime_preflight["required_runtime_imports"], "math")
+        self.assertEqual(
+            preflight["runtime_import_preflight_path"],
+            str(runtime_preflight_path),
+        )
+        self.assertEqual(
+            summary["preflight"]["runtime_import_preflight_path"],
+            str(runtime_preflight_path),
+        )
 
     def test_preflight_only_failure_returns_nonzero(self) -> None:
         mod = _load_module()
@@ -238,6 +334,18 @@ class LlmCharFinetuneContractTests(unittest.TestCase):
                 "weights_loaded_from": str(root / "base.json"),
                 "weights_loaded_from_run": str(root / "base-run"),
                 "source_checkpoint": source_checkpoint,
+                "runtime_import_preflight_path": str(
+                    root / "runtime_preflight.json"
+                ),
+                "runtime_import_preflight_requested": True,
+                "runtime_import_preflight_passed": True,
+                "runtime_import_preflight_failures": "none",
+                "runtime_import_presets": "hf-runtime",
+                "runtime_imports_requested": "transformers,torch,tokenizers",
+                "required_runtime_imports": "none",
+                "required_runtime_import_presets": "hf-runtime",
+                "runtime_imports_failed": "none",
+                "runtime_import_failed_install_hints": "none",
             }
 
             contract = mod._build_training_contract(
@@ -260,6 +368,17 @@ class LlmCharFinetuneContractTests(unittest.TestCase):
         )
         self.assertEqual(contract["backend"]["requested"], "cpu")
         self.assertEqual(contract["backend"]["status"], "available")
+        self.assertEqual(
+            contract["runtime"]["runtime_import_preflight_path"],
+            str(root / "runtime_preflight.json"),
+        )
+        self.assertTrue(contract["runtime"]["runtime_import_preflight_requested"])
+        self.assertTrue(contract["runtime"]["runtime_import_preflight_passed"])
+        self.assertEqual(contract["runtime"]["runtime_import_presets"], "hf-runtime")
+        self.assertEqual(
+            contract["runtime"]["runtime_imports_requested"],
+            "transformers,torch,tokenizers",
+        )
         self.assertEqual(contract["optimization"]["early_stop_patience"], 2)
         self.assertTrue(contract["optimization"]["restore_best_at_end"])
         self.assertTrue(contract["optimization"]["rollback_on_validation_regression"])
