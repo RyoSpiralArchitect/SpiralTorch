@@ -4042,6 +4042,23 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         direct_required_runtime_import_presets_missing="none",
         direct_required_runtime_import_presets_unsatisfied="none",
         direct_required_runtime_import_presets_passed=None,
+        checkpoint_runtime_import_probe_count=2,
+        checkpoint_runtime_imports_all_ok=True,
+        checkpoint_runtime_imports_failed="none",
+        checkpoint_runtime_import_presets="transformers",
+        checkpoint_runtime_import_presets_satisfied=None,
+        checkpoint_runtime_import_presets_failed=None,
+        checkpoint_runtime_import_preset_missing_modules=None,
+        checkpoint_required_runtime_imports="math",
+        checkpoint_required_runtime_imports_imported="math",
+        checkpoint_required_runtime_imports_missing="none",
+        checkpoint_required_runtime_imports_passed=True,
+        checkpoint_required_runtime_import_presets="transformers",
+        checkpoint_required_runtime_import_presets_observed="transformers",
+        checkpoint_required_runtime_import_presets_satisfied="transformers",
+        checkpoint_required_runtime_import_presets_missing="none",
+        checkpoint_required_runtime_import_presets_unsatisfied="none",
+        checkpoint_required_runtime_import_presets_passed=True,
     ):
         from spiraltorch.runtime_imports import (
             runtime_import_preset_missing_modules_label,
@@ -4101,6 +4118,60 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             runtime_import_preset_missing_modules = (
                 runtime_import_preset_missing_modules_label(
                     runtime_import_preset_status
+                )
+            )
+        checkpoint_requested_presets = [
+            preset
+            for preset in str(checkpoint_runtime_import_presets).split(",")
+            if preset and preset != "none"
+        ]
+        if checkpoint_runtime_import_presets_satisfied is None:
+            checkpoint_runtime_import_presets_satisfied = (
+                checkpoint_runtime_import_presets
+                if checkpoint_runtime_imports_all_ok
+                else "none"
+            )
+        if checkpoint_runtime_import_presets_failed is None:
+            checkpoint_runtime_import_presets_failed = (
+                "none"
+                if checkpoint_runtime_imports_all_ok
+                else checkpoint_runtime_import_presets
+            )
+        checkpoint_failed_set = {
+            preset
+            for preset in str(checkpoint_runtime_import_presets_failed).split(",")
+            if preset and preset != "none"
+        }
+        checkpoint_missing_modules = set()
+        for preset in checkpoint_requested_presets:
+            modules = preset_module_map.get(preset, [])
+            if preset in checkpoint_failed_set:
+                checkpoint_missing_modules.update(modules)
+        checkpoint_preset_probe_rows = []
+        checkpoint_seen_modules = set()
+        for preset in checkpoint_requested_presets:
+            modules = preset_module_map.get(preset, [])
+            for module_name in modules:
+                if module_name not in checkpoint_seen_modules:
+                    checkpoint_seen_modules.add(module_name)
+                    checkpoint_preset_probe_rows.append(
+                        {
+                            "module": module_name,
+                            "imported": module_name not in checkpoint_missing_modules,
+                        }
+                    )
+        checkpoint_runtime_import_preset_status = runtime_import_preset_status_rows(
+            checkpoint_requested_presets,
+            checkpoint_preset_probe_rows,
+            preset_modules=preset_module_map,
+        )
+        checkpoint_runtime_import_preset_modules = runtime_import_preset_modules_label(
+            checkpoint_runtime_import_preset_status
+        )
+        if checkpoint_runtime_import_preset_missing_modules is None:
+            checkpoint_runtime_import_preset_missing_modules = (
+                runtime_import_preset_missing_modules_label(
+                    checkpoint_runtime_import_preset_status
                 )
             )
         if declared_runtime_import_presets is None:
@@ -4279,6 +4350,153 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                         }
                     ],
                 )
+            elif field == "checkpoint_preflight_jsonl":
+                module.write_jsonl(
+                    path,
+                    [
+                        {
+                            "row_type": "report",
+                            "label": "profile-smoke",
+                            "compatible": True,
+                            "matched": 1,
+                            "missing": 0,
+                            "shape_mismatched": 0,
+                            "extra": 0,
+                            "source_hash": "source",
+                            "matched_subset_hash": "matched",
+                            "transformers_audit_requested": True,
+                            "transformers_audit_status": "ok",
+                            "transformers_audit_error": None,
+                            "transformers_model_path": str(out_dir),
+                            "transformers_available": True,
+                            "transformers_version": "9.9.9",
+                            "transformers_config_loaded": True,
+                            "transformers_tokenizer_loaded": True,
+                            "transformers_model_loaded": False,
+                            "runtime_import_presets": checkpoint_runtime_import_presets,
+                            "runtime_import_preset_modules": (
+                                checkpoint_runtime_import_preset_modules
+                            ),
+                            "runtime_import_presets_satisfied": (
+                                checkpoint_runtime_import_presets_satisfied
+                            ),
+                            "runtime_import_presets_failed": (
+                                checkpoint_runtime_import_presets_failed
+                            ),
+                            "runtime_import_preset_missing_modules": (
+                                checkpoint_runtime_import_preset_missing_modules
+                            ),
+                            "runtime_imports_requested": "transformers,math",
+                            "runtime_import_probe_count": (
+                                checkpoint_runtime_import_probe_count
+                            ),
+                            "runtime_imports_imported": (
+                                "transformers,math"
+                                if checkpoint_runtime_imports_all_ok
+                                else "none"
+                            ),
+                            "runtime_imports_failed": (
+                                checkpoint_runtime_imports_failed
+                            ),
+                            "runtime_imports_all_ok": (
+                                checkpoint_runtime_imports_all_ok
+                            ),
+                            "runtime_import_versions": (
+                                "transformers=9.9.9,math=none"
+                                if checkpoint_runtime_imports_all_ok
+                                else "transformers=none,math=none"
+                            ),
+                            "runtime_import_module_names": (
+                                "transformers=transformers,math=math"
+                                if checkpoint_runtime_imports_all_ok
+                                else "transformers=none,math=none"
+                            ),
+                            "runtime_imports_json": json.dumps(
+                                [
+                                    {
+                                        "module": "transformers",
+                                        "imported": (
+                                            checkpoint_runtime_imports_all_ok
+                                        ),
+                                        "version": (
+                                            "9.9.9"
+                                            if checkpoint_runtime_imports_all_ok
+                                            else None
+                                        ),
+                                        "module_name": (
+                                            "transformers"
+                                            if checkpoint_runtime_imports_all_ok
+                                            else None
+                                        ),
+                                        "module_file": (
+                                            "/env/transformers.py"
+                                            if checkpoint_runtime_imports_all_ok
+                                            else None
+                                        ),
+                                        "error": (
+                                            None
+                                            if checkpoint_runtime_imports_all_ok
+                                            else "ImportError: missing"
+                                        ),
+                                    },
+                                    {
+                                        "module": "math",
+                                        "imported": (
+                                            checkpoint_runtime_imports_all_ok
+                                        ),
+                                        "version": None,
+                                        "module_name": (
+                                            "math"
+                                            if checkpoint_runtime_imports_all_ok
+                                            else None
+                                        ),
+                                        "module_file": None,
+                                        "error": (
+                                            None
+                                            if checkpoint_runtime_imports_all_ok
+                                            else "ImportError: missing"
+                                        ),
+                                    },
+                                ],
+                                sort_keys=True,
+                            ),
+                            "runtime_import_preset_status_json": json.dumps(
+                                checkpoint_runtime_import_preset_status,
+                                sort_keys=True,
+                            ),
+                            "required_runtime_imports": (
+                                checkpoint_required_runtime_imports
+                            ),
+                            "required_runtime_imports_imported": (
+                                checkpoint_required_runtime_imports_imported
+                            ),
+                            "required_runtime_imports_missing": (
+                                checkpoint_required_runtime_imports_missing
+                            ),
+                            "required_runtime_imports_passed": (
+                                checkpoint_required_runtime_imports_passed
+                            ),
+                            "required_runtime_import_presets": (
+                                checkpoint_required_runtime_import_presets
+                            ),
+                            "required_runtime_import_presets_observed": (
+                                checkpoint_required_runtime_import_presets_observed
+                            ),
+                            "required_runtime_import_presets_satisfied": (
+                                checkpoint_required_runtime_import_presets_satisfied
+                            ),
+                            "required_runtime_import_presets_missing": (
+                                checkpoint_required_runtime_import_presets_missing
+                            ),
+                            "required_runtime_import_presets_unsatisfied": (
+                                checkpoint_required_runtime_import_presets_unsatisfied
+                            ),
+                            "required_runtime_import_presets_passed": (
+                                checkpoint_required_runtime_import_presets_passed
+                            ),
+                        }
+                    ],
+                )
             elif field == "transformers_trace_compare_jsonl":
                 module.write_jsonl(
                     path,
@@ -4344,6 +4562,8 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertIn("transformers_trace_compare_passed=True", text)
         self.assertIn("transformers_trace_coimport_status=ok", text)
         self.assertIn("transformers_trace_top_token_changed_rows=1", text)
+        self.assertIn("checkpoint_transformers_audit_status=ok", text)
+        self.assertIn("checkpoint_transformers_runtime_imports_all_ok=True", text)
         self.assertIn(
             "declared_transformers_trace_runtime_import_preset_modules="
             "torch-transformers=transformers|torch",
@@ -4450,6 +4670,64 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertIsNone(
             validation_row[
                 "transformers_trace_required_runtime_import_presets_passed"
+            ]
+        )
+        self.assertTrue(validation_row["checkpoint_transformers_audit_available"])
+        self.assertEqual(
+            validation_row["checkpoint_transformers_audit_status"],
+            "ok",
+        )
+        self.assertEqual(
+            validation_row["checkpoint_transformers_runtime_import_probe_count"],
+            2,
+        )
+        self.assertEqual(
+            validation_row["checkpoint_transformers_runtime_imports_requested"],
+            "transformers,math",
+        )
+        self.assertEqual(
+            validation_row["checkpoint_transformers_runtime_import_presets"],
+            "transformers",
+        )
+        self.assertEqual(
+            validation_row[
+                "checkpoint_transformers_runtime_import_preset_modules"
+            ],
+            "transformers=transformers",
+        )
+        self.assertEqual(
+            validation_row[
+                "checkpoint_transformers_runtime_import_presets_satisfied"
+            ],
+            "transformers",
+        )
+        self.assertEqual(
+            validation_row["checkpoint_transformers_runtime_imports_imported"],
+            "transformers,math",
+        )
+        self.assertTrue(
+            validation_row["checkpoint_transformers_runtime_imports_all_ok"]
+        )
+        self.assertEqual(
+            validation_row[
+                "checkpoint_transformers_direct_required_runtime_imports"
+            ],
+            "math",
+        )
+        self.assertTrue(
+            validation_row[
+                "checkpoint_transformers_direct_required_runtime_imports_passed"
+            ]
+        )
+        self.assertEqual(
+            validation_row[
+                "checkpoint_transformers_direct_required_runtime_import_presets"
+            ],
+            "transformers",
+        )
+        self.assertTrue(
+            validation_row[
+                "checkpoint_transformers_direct_required_runtime_import_presets_passed"
             ]
         )
         self.assertEqual(
@@ -4729,6 +5007,96 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             preset_failing_text,
         )
         self.assertIn("passed=False", preset_failing_text)
+
+    def test_byte_lm_profile_smoke_validation_gates_checkpoint_runtime_import_module(self):
+        module = load_example("byte_lm_profile_smoke")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out_dir = Path(tmpdir)
+            manifest_path, _validation_path = (
+                self.write_profile_smoke_manifest_with_transformers_trace_compare(
+                    module,
+                    out_dir,
+                )
+            )
+            validation_path = out_dir / "checkpoint-runtime-import-validation.jsonl"
+            old_argv = sys.argv
+            sys.argv = [
+                "byte_lm_profile_smoke.py",
+                "--validate-manifest-jsonl",
+                str(manifest_path),
+                "--manifest-validation-jsonl",
+                str(validation_path),
+                "--require-manifest-checkpoint-transformers-runtime-imports",
+                "--require-manifest-checkpoint-transformers-runtime-import",
+                "math",
+                "--require-manifest-checkpoint-transformers-runtime-import-preset",
+                "transformers",
+            ]
+            passing_output = io.StringIO()
+            try:
+                with contextlib.redirect_stdout(passing_output):
+                    module.main()
+            finally:
+                sys.argv = old_argv
+            passing_text = passing_output.getvalue()
+            passing_validation = module.load_jsonl(validation_path)[0]
+
+            sys.argv = [
+                "byte_lm_profile_smoke.py",
+                "--validate-manifest-jsonl",
+                str(manifest_path),
+                "--require-manifest-checkpoint-transformers-runtime-import",
+                "tokenizers",
+            ]
+            failing_output = io.StringIO()
+            try:
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "profile smoke manifest checkpoint Transformers validation gate failed",
+                ):
+                    with contextlib.redirect_stdout(failing_output):
+                        module.main()
+            finally:
+                sys.argv = old_argv
+            failing_text = failing_output.getvalue()
+
+        self.assertIn("gate=checkpoint_transformers", passing_text)
+        self.assertIn(
+            "checkpoint_transformers_runtime_imports_imported=transformers,math",
+            passing_text,
+        )
+        self.assertIn("passed=True", passing_text)
+        self.assertEqual(
+            passing_validation["checkpoint_transformers_required_runtime_imports"],
+            "math",
+        )
+        self.assertEqual(
+            passing_validation[
+                "checkpoint_transformers_required_runtime_imports_imported"
+            ],
+            "math,transformers",
+        )
+        self.assertTrue(
+            passing_validation[
+                "checkpoint_transformers_required_runtime_imports_passed"
+            ]
+        )
+        self.assertEqual(
+            passing_validation[
+                "checkpoint_transformers_required_runtime_import_presets"
+            ],
+            "transformers",
+        )
+        self.assertTrue(
+            passing_validation[
+                "checkpoint_transformers_required_runtime_import_presets_passed"
+            ]
+        )
+        self.assertIn(
+            "checkpoint_transformers_runtime_import_missing:tokenizers",
+            failing_text,
+        )
+        self.assertIn("passed=False", failing_text)
 
     def test_byte_lm_profile_smoke_produced_validation_gates_declared_runtime_import_preset(self):
         module = load_example("byte_lm_profile_smoke")
