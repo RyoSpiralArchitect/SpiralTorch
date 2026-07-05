@@ -17,6 +17,7 @@ EXAMPLES = ROOT / "examples"
 
 def install_spiraltorch_stub():
     spiraltorch = types.ModuleType("spiraltorch")
+    spiraltorch.__path__ = [str(ROOT / "spiraltorch")]
     spiraltorch.dataset = types.SimpleNamespace(BYTE_LM_VOCAB=256)
 
     class FakeTensor:
@@ -4992,6 +4993,30 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                 Path("/tmp/profile-smoke-real-hf/profile-smoke-manifest.jsonl"),
             ),
             Path("/tmp/profile-smoke-real-hf/profile-smoke-manifest-validation.jsonl"),
+        )
+
+    def test_transformers_trace_runtime_import_presets_are_shared(self):
+        profile_module = load_example("byte_lm_profile_smoke")
+        trace_module = load_example("byte_lm_transformers_trace")
+
+        self.assertEqual(
+            profile_module.TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS,
+            trace_module.RUNTIME_IMPORT_PRESETS,
+        )
+        self.assertEqual(
+            profile_module.transformers_trace_runtime_import_preset_modules(
+                ["hf-runtime"]
+            ),
+            ["hf-runtime=transformers|torch|tokenizers"],
+        )
+        self.assertEqual(
+            trace_module.runtime_import_presets_from_args(
+                argparse.Namespace(
+                    runtime_import_presets=[],
+                    required_runtime_import_presets=["hf-runtime"],
+                )
+            ),
+            ["hf-runtime"],
         )
 
     def test_byte_lm_profile_smoke_rejects_produced_manifest_validation_dry_run(self):

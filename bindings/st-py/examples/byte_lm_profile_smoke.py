@@ -8,30 +8,19 @@ from pathlib import Path
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+PACKAGE_ROOT = SCRIPT_DIR.parent
+if str(PACKAGE_ROOT) not in sys.path:
+    sys.path.insert(0, str(PACKAGE_ROOT))
+
+from spiraltorch.runtime_imports import (
+    TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS,
+    csv_values,
+    runtime_import_preset_modules as transformers_trace_runtime_import_preset_modules,
+)
+
 DEFAULT_OUT_DIR = Path("/tmp/spiraltorch-profile-smoke")
 BYTE_LM_VOCAB = 256
 BYTE_LM_HIDDEN = 24
-TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS = {
-    "transformers": ["transformers"],
-    "torch-transformers": ["transformers", "torch"],
-    "hf-runtime": ["transformers", "torch", "tokenizers"],
-}
-
-
-def csv_values(value):
-    if value is None:
-        return []
-    if isinstance(value, (list, tuple, set)):
-        return [str(item) for item in value if str(item)]
-    return [part for part in str(value).split(",") if part and part != "none"]
-
-
-def transformers_trace_runtime_import_preset_modules(presets):
-    rows = []
-    for preset in dict.fromkeys(csv_values(presets)):
-        modules = TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS.get(preset, [])
-        rows.append(f"{preset}={'|'.join(modules) or 'none'}")
-    return rows
 
 
 def parse_args():

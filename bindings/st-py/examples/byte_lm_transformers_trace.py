@@ -2,8 +2,15 @@ import argparse
 import importlib
 import json
 import math
+import sys
 from collections.abc import Mapping
 from pathlib import Path
+
+PACKAGE_ROOT = Path(__file__).resolve().parents[1]
+if str(PACKAGE_ROOT) not in sys.path:
+    sys.path.insert(0, str(PACKAGE_ROOT))
+
+from spiraltorch.runtime_imports import TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS
 
 import spiraltorch as st
 from spiraltorch.nn import ZSpaceProjector
@@ -13,11 +20,7 @@ DEFAULT_PROMPT = "SpiralTorch routes meaning through Z-space."
 ZSPACE_CURVATURE = -0.04
 ZSPACE_FREQUENCY = 0.65
 ZSPACE_STRENGTH = 1.0
-RUNTIME_IMPORT_PRESETS = {
-    "transformers": ["transformers"],
-    "torch-transformers": ["transformers", "torch"],
-    "hf-runtime": ["transformers", "torch", "tokenizers"],
-}
+RUNTIME_IMPORT_PRESETS = dict(TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS)
 
 
 def parse_args():
