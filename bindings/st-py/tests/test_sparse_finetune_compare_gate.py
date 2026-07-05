@@ -8174,6 +8174,17 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertEqual(bias.shape(), (1, 2))
         self.assertEqual(bias.data(), [0.1, -0.2])
 
+    def test_checkpoint_preflight_reuses_ecosystem_external_tensor_bridge(self):
+        helper = load_checkpoint_helper()
+        ecosystem = sys.modules["spiraltorch.ecosystem"]
+
+        self.assertIs(helper.tensor_from_external, ecosystem.tensor_from_external)
+        self.assertIs(helper.slice_external_tensor, ecosystem.slice_external_tensor)
+        self.assertIs(
+            helper.checkpoint_from_external_state,
+            ecosystem.checkpoint_from_external_state,
+        )
+
     def test_checkpoint_preflight_bounds_external_tensor_likes_before_flattening(self):
         helper = load_checkpoint_helper()
         state = helper.bound_external_state_tensors(
