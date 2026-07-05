@@ -32,7 +32,7 @@ use crate::spiralk::PyMaxwellPulse;
 #[cfg(feature = "nn")]
 use nalgebra::DVector;
 #[cfg(feature = "nn")]
-use pyo3::types::{PyIterator, PyList};
+use pyo3::types::{PyIterator, PyList, PyTuple};
 #[cfg(feature = "nn")]
 use st_core::backend::runtime_probe::resolve_backend;
 #[cfg(feature = "nn")]
@@ -167,6 +167,72 @@ impl Spatial3d {
 
     fn size(self) -> usize {
         self.channels * self.depth * self.height * self.width
+    }
+}
+
+#[cfg(feature = "nn")]
+fn parse_named_matrix_ctor(
+    args: &Bound<'_, PyTuple>,
+    kwargs: Option<&Bound<'_, PyDict>>,
+    class_name: &str,
+    default_name: &str,
+    first_dim_label: &str,
+    second_dim_label: &str,
+) -> PyResult<(String, usize, usize)> {
+    let mut name_kw = None;
+    if let Some(kwargs) = kwargs {
+        for (key, value) in kwargs.iter() {
+            let key: String = key.extract()?;
+            if key == "name" {
+                if name_kw.is_some() {
+                    return Err(PyTypeError::new_err(format!(
+                        "{class_name} got multiple values for keyword argument 'name'"
+                    )));
+                }
+                name_kw = Some(value.extract::<String>()?);
+            } else {
+                return Err(PyTypeError::new_err(format!(
+                    "{class_name} got unexpected keyword argument '{key}'"
+                )));
+            }
+        }
+    }
+
+    match args.len() {
+        2 => {
+            let first = args.get_item(0)?.extract::<usize>()?;
+            let second = args.get_item(1)?.extract::<usize>()?;
+            Ok((
+                name_kw.unwrap_or_else(|| default_name.to_string()),
+                first,
+                second,
+            ))
+        }
+        3 => {
+            if let Ok(name) = args.get_item(0)?.extract::<String>() {
+                if name_kw.is_some() {
+                    return Err(PyTypeError::new_err(format!(
+                        "{class_name} got multiple values for argument 'name'"
+                    )));
+                }
+                let first = args.get_item(1)?.extract::<usize>()?;
+                let second = args.get_item(2)?.extract::<usize>()?;
+                return Ok((name, first, second));
+            }
+            if name_kw.is_some() {
+                return Err(PyTypeError::new_err(format!(
+                    "{class_name} got multiple values for argument 'name'"
+                )));
+            }
+            let first = args.get_item(0)?.extract::<usize>()?;
+            let second = args.get_item(1)?.extract::<usize>()?;
+            let name = args.get_item(2)?.extract::<String>()?;
+            Ok((name, first, second))
+        }
+        count => Err(PyTypeError::new_err(format!(
+            "{class_name} expects either ({first_dim_label}, {second_dim_label}, *, name=...) \
+             or (name, {first_dim_label}, {second_dim_label}); got {count} positional arguments"
+        ))),
     }
 }
 
@@ -1311,7 +1377,10 @@ impl PyLinear {
 #[pymethods]
 impl PyLinear {
     #[new]
-    pub fn new(name: &str, input_dim: usize, output_dim: usize) -> PyResult<Self> {
+    #[pyo3(signature = (*args, **kwargs))]
+    pub fn new(args: &Bound<'_, PyTuple>, kwargs: Option<&Bound<'_, PyDict>>) -> PyResult<Self> {
+        let (name, input_dim, output_dim) =
+            parse_named_matrix_ctor(args, kwargs, "Linear", "linear", "input_dim", "output_dim")?;
         let inner = Linear::new(name, input_dim, output_dim).map_err(tensor_err_to_py)?;
         Ok(Self { inner: Some(inner) })
     }
@@ -1390,6 +1459,49 @@ impl PyLinear {
         self.inner_mut()?
             .load_state_dict(&map)
             .map_err(tensor_err_to_py)
+    }
+
+    pub fn load_state_dict_checked(
+        &mut self,
+        py: Python<'_>,
+        state: &Bound<'_, PyAny>,
+    ) -> PyResult<PyObject> {
+        let expected = self.inner()?.state_dict().map_err(tensor_err_to_py)?;
+        let incoming = extract_state_dict_required(py, state)?;
+        let report = exact_state_dict_report(py, &expected, &incoming)?;
+        if report.compatible {
+            self.inner_mut()?
+                .load_state_dict(&incoming)
+                .map_err(tensor_err_to_py)?;
+        }
+        report.into_load_py(py)
+    }
+
+    pub fn state_dict_compatibility_with_key_map(
+        &self,
+        py: Python<'_>,
+        checkpoint: &Bound<'_, PyAny>,
+        key_map: &Bound<'_, PyAny>,
+    ) -> PyResult<PyObject> {
+        let expected = self.inner()?.state_dict().map_err(tensor_err_to_py)?;
+        mapped_state_dict_report(py, &expected, checkpoint, key_map)
+    }
+
+    pub fn load_state_dict_subset_mapped_checked(
+        &mut self,
+        py: Python<'_>,
+        checkpoint: &Bound<'_, PyAny>,
+        key_map: &Bound<'_, PyAny>,
+    ) -> PyResult<PyObject> {
+        let expected = self.inner()?.state_dict().map_err(tensor_err_to_py)?;
+        let (report, adapted) =
+            mapped_state_dict_report_and_subset(py, &expected, checkpoint, key_map)?;
+        if report.compatible {
+            self.inner_mut()?
+                .load_state_dict(&adapted)
+                .map_err(tensor_err_to_py)?;
+        }
+        report.into_load_py(py)
     }
 
     #[pyo3(signature = (x))]
@@ -1756,7 +1868,16 @@ impl PyEmbedding {
 #[pymethods]
 impl PyEmbedding {
     #[new]
-    pub fn new(name: &str, vocab_size: usize, embed_dim: usize) -> PyResult<Self> {
+    #[pyo3(signature = (*args, **kwargs))]
+    pub fn new(args: &Bound<'_, PyTuple>, kwargs: Option<&Bound<'_, PyDict>>) -> PyResult<Self> {
+        let (name, vocab_size, embed_dim) = parse_named_matrix_ctor(
+            args,
+            kwargs,
+            "Embedding",
+            "embedding",
+            "vocab_size",
+            "embed_dim",
+        )?;
         let inner = RustEmbedding::new(name, vocab_size, embed_dim).map_err(tensor_err_to_py)?;
         Ok(Self { inner: Some(inner) })
     }
@@ -1835,6 +1956,49 @@ impl PyEmbedding {
         self.inner_mut()?
             .load_state_dict(&map)
             .map_err(tensor_err_to_py)
+    }
+
+    pub fn load_state_dict_checked(
+        &mut self,
+        py: Python<'_>,
+        state: &Bound<'_, PyAny>,
+    ) -> PyResult<PyObject> {
+        let expected = self.inner()?.state_dict().map_err(tensor_err_to_py)?;
+        let incoming = extract_state_dict_required(py, state)?;
+        let report = exact_state_dict_report(py, &expected, &incoming)?;
+        if report.compatible {
+            self.inner_mut()?
+                .load_state_dict(&incoming)
+                .map_err(tensor_err_to_py)?;
+        }
+        report.into_load_py(py)
+    }
+
+    pub fn state_dict_compatibility_with_key_map(
+        &self,
+        py: Python<'_>,
+        checkpoint: &Bound<'_, PyAny>,
+        key_map: &Bound<'_, PyAny>,
+    ) -> PyResult<PyObject> {
+        let expected = self.inner()?.state_dict().map_err(tensor_err_to_py)?;
+        mapped_state_dict_report(py, &expected, checkpoint, key_map)
+    }
+
+    pub fn load_state_dict_subset_mapped_checked(
+        &mut self,
+        py: Python<'_>,
+        checkpoint: &Bound<'_, PyAny>,
+        key_map: &Bound<'_, PyAny>,
+    ) -> PyResult<PyObject> {
+        let expected = self.inner()?.state_dict().map_err(tensor_err_to_py)?;
+        let (report, adapted) =
+            mapped_state_dict_report_and_subset(py, &expected, checkpoint, key_map)?;
+        if report.compatible {
+            self.inner_mut()?
+                .load_state_dict(&adapted)
+                .map_err(tensor_err_to_py)?;
+        }
+        report.into_load_py(py)
     }
 
     #[pyo3(signature = (x))]

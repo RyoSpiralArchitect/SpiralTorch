@@ -133,8 +133,21 @@ def _looks_like_spiraltorch_tensor(value: Any) -> bool:
     return (
         hasattr(value, "rows")
         and hasattr(value, "cols")
-        and callable(getattr(value, "data", None))
+        and (
+            callable(getattr(value, "data", None))
+            or callable(getattr(value, "tolist", None))
+        )
     )
+
+
+def _spiraltorch_tensor_data(value: Any) -> list[Any]:
+    data = getattr(value, "data", None)
+    if callable(data):
+        return list(data())
+    tolist = getattr(value, "tolist", None)
+    if callable(tolist):
+        return _flatten_nested_sequence(tolist())
+    raise TypeError("SpiralTorch tensor has no data() or tolist() export")
 
 
 def _materialize_external_tensor(value: Any) -> Any:
@@ -166,6 +179,8 @@ def _external_shape_from_materialized(value: Any, name: str) -> tuple[int, ...]:
     if _looks_like_spiraltorch_tensor(value):
         return (int(value.rows), int(value.cols))
     shape = getattr(value, "shape", None)
+    if callable(shape):
+        shape = shape()
     if shape is None:
         size = getattr(value, "size", None)
         shape = size() if callable(size) else None
@@ -326,11 +341,11 @@ def _slice_spiraltorch_tensor(
 ) -> Tensor:
     if len(shape) == 1:
         limit = min(shape[0], cols)
-        return Tensor(1, limit, value.data()[:limit])
+        return Tensor(1, limit, _spiraltorch_tensor_data(value)[:limit])
     row_limit = min(shape[0], rows)
     col_limit = min(shape[1], cols)
     data = []
-    source = value.data()
+    source = _spiraltorch_tensor_data(value)
     for row in range(row_limit):
         offset = row * value.cols
         data.extend(source[offset : offset + col_limit])

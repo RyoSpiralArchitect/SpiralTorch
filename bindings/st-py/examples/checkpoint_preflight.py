@@ -87,11 +87,24 @@ SOURCE_CHOICES = (
 
 
 def _tensor_rows(tensor):
-    data = tensor.data()
+    data = _tensor_data(tensor)
     return [
         data[row * tensor.cols : (row + 1) * tensor.cols]
         for row in range(tensor.rows)
     ]
+
+
+def _tensor_data(tensor):
+    data_fn = getattr(tensor, "data", None)
+    if callable(data_fn):
+        return list(data_fn())
+    tolist = getattr(tensor, "tolist", None)
+    if callable(tolist):
+        rows = tolist()
+        if rows and isinstance(rows[0], list):
+            return [item for row in rows for item in row]
+        return list(rows)
+    raise TypeError("tensor must expose data() or tolist()")
 
 
 def _tensor_shape(value, name):
@@ -1015,7 +1028,7 @@ def scale_checkpoint_tensor(tensor, gain):
     return st.Tensor(
         tensor.rows,
         tensor.cols,
-        [value * gain for value in tensor.data()],
+        [value * gain for value in _tensor_data(tensor)],
     )
 
 
@@ -1040,8 +1053,8 @@ def apply_checkpoint_source_gain(checkpoint, rules, args):
 def external_state():
     embed = Linear(VOCAB, HIDDEN, name="embed")
     head = Linear(HIDDEN, TARGET_CLASSES, name="head")
-    embed_state = embed.state_dict()
-    head_state = head.state_dict()
+    embed_state = dict(embed.state_dict())
+    head_state = dict(head.state_dict())
     raw_state = {
         "model.embed.weight": embed_state["embed::weight"],
         "model.embed.bias": embed_state["embed::bias"],
@@ -1665,11 +1678,11 @@ def hf_style_external_state():
 def hf_style_external_state_rows():
     embed = Linear(VOCAB, HIDDEN, name="embed")
     head = Linear(HIDDEN, TARGET_CLASSES, name="head")
-    embed_state = embed.state_dict()
-    head_state = head.state_dict()
+    embed_state = dict(embed.state_dict())
+    head_state = dict(head.state_dict())
     return {
         "transformer.wte.weight": _tensor_rows(embed_state["embed::weight"]),
-        "transformer.wte.bias": embed_state["embed::bias"].data(),
+        "transformer.wte.bias": _tensor_data(embed_state["embed::bias"]),
         "lm_head.weight": _tensor_rows(head_state["head::weight"].transpose()),
         "lm_head.bias": [0.1, -0.2, 0.3, -0.4],
         "transformer.h.0.ln_1.weight": [[1.0, 1.0]],
