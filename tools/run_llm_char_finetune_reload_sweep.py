@@ -368,7 +368,8 @@ def outcome_adoption_status(cell: dict[str, Any]) -> str:
 def runtime_preflight_status(cell: dict[str, Any]) -> str:
     pair_manifest = cell.get("pair_manifest")
     if not isinstance(pair_manifest, dict):
-        return str(cell.get("status") or "unknown")
+        status = str(cell.get("status") or "unknown")
+        return status if status in {"dry_run", "failed"} else "unobserved"
     preflight = pair_manifest.get("preflight")
     if not isinstance(preflight, dict):
         return "missing_preflight"
@@ -388,6 +389,14 @@ def runtime_preflight_status(cell: dict[str, Any]) -> str:
     if passed is False:
         return "failed"
     return "unknown"
+
+
+def runtime_preflight_trusted(cell: dict[str, Any]) -> bool:
+    return runtime_preflight_status(cell) in {"passed", "not_requested"}
+
+
+def trusted_cells(cells: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [cell for cell in cells if runtime_preflight_trusted(cell)]
 
 
 def outcome_delta(cell: dict[str, Any], key: str) -> float | None:
@@ -444,6 +453,7 @@ def aggregate_cells(cells: list[dict[str, Any]]) -> dict[str, Any]:
     runtime_preflight_status_counts = Counter(
         runtime_preflight_status(cell) for cell in cells
     )
+    trusted = trusted_cells(cells)
     best = best_cell_by_delta(
         cells,
         "reload_best_minus_base_best_nll",
@@ -451,6 +461,15 @@ def aggregate_cells(cells: list[dict[str, Any]]) -> dict[str, Any]:
     )
     best_training = best_cell_by_delta(
         cells,
+        "reload_training_final_minus_base_best_nll",
+    )
+    trusted_best = best_cell_by_delta(
+        trusted,
+        "reload_best_minus_base_best_nll",
+        secondary_key="reload_final_minus_base_final_nll",
+    )
+    trusted_best_training = best_cell_by_delta(
+        trusted,
         "reload_training_final_minus_base_best_nll",
     )
     return {
@@ -462,6 +481,8 @@ def aggregate_cells(cells: list[dict[str, Any]]) -> dict[str, Any]:
         "runtime_preflight_status_counts": dict(
             sorted(runtime_preflight_status_counts.items())
         ),
+        "runtime_trusted_cells": len(trusted),
+        "runtime_untrusted_cells": len(cells) - len(trusted),
         "best_cell": best.get("name") if best else None,
         "best_reload_best_minus_base_best_nll": (
             outcome_delta(best, "reload_best_minus_base_best_nll") if best else None
@@ -470,6 +491,23 @@ def aggregate_cells(cells: list[dict[str, Any]]) -> dict[str, Any]:
         "best_reload_training_final_minus_base_best_nll": (
             outcome_delta(best_training, "reload_training_final_minus_base_best_nll")
             if best_training
+            else None
+        ),
+        "trusted_best_cell": trusted_best.get("name") if trusted_best else None,
+        "trusted_best_reload_best_minus_base_best_nll": (
+            outcome_delta(trusted_best, "reload_best_minus_base_best_nll")
+            if trusted_best
+            else None
+        ),
+        "trusted_best_training_cell": (
+            trusted_best_training.get("name") if trusted_best_training else None
+        ),
+        "trusted_best_reload_training_final_minus_base_best_nll": (
+            outcome_delta(
+                trusted_best_training,
+                "reload_training_final_minus_base_best_nll",
+            )
+            if trusted_best_training
             else None
         ),
         "improved_cells": int(status_counts.get("improved", 0)),
@@ -543,8 +581,12 @@ def render_markdown(manifest: dict[str, Any]) -> str:
         f"- training_status_counts: `{summary.get('training_status_counts', {})}`",
         f"- adoption_status_counts: `{summary.get('adoption_status_counts', {})}`",
         f"- runtime_preflight_status_counts: `{summary.get('runtime_preflight_status_counts', {})}`",
+        f"- runtime_trusted_cells: `{summary.get('runtime_trusted_cells', 0)}`",
+        f"- runtime_untrusted_cells: `{summary.get('runtime_untrusted_cells', 0)}`",
         f"- best_cell: `{summary.get('best_cell', '-')}`",
         f"- best_training_cell: `{summary.get('best_training_cell', '-')}`",
+        f"- trusted_best_cell: `{summary.get('trusted_best_cell', '-')}`",
+        f"- trusted_best_training_cell: `{summary.get('trusted_best_training_cell', '-')}`",
         "",
     ]
     reload_lr_groups = summary.get("reload_lr_groups")
@@ -553,8 +595,8 @@ def render_markdown(manifest: dict[str, Any]) -> str:
             [
                 "## Reload LR Groups",
                 "",
-                "| reload_lr | cells | status_counts | training_status_counts | adoption_status_counts | best_cell | best_delta | best_training_cell | training_delta_mean | training_delta_min | training_delta_max | reload_delta_mean | rollback_count_mean |",
-                "| ---: | ---: | --- | --- | --- | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: |",
+                "| reload_lr | cells | runtime_status | trusted_cells | status_counts | training_status_counts | adoption_status_counts | best_cell | trusted_best_cell | best_delta | trusted_best_delta | best_training_cell | trusted_best_training_cell | training_delta_mean | training_delta_min | training_delta_max | reload_delta_mean | rollback_count_mean |",
+                "| ---: | ---: | --- | ---: | --- | --- | --- | --- | --- | ---: | ---: | --- | --- | ---: | ---: | ---: | ---: | ---: |",
             ]
         )
         for group in reload_lr_groups:
@@ -573,12 +615,21 @@ def render_markdown(manifest: dict[str, Any]) -> str:
                     [
                         md_cell(group.get("reload_lr_label")),
                         md_cell(group.get("cells")),
+                        md_cell(group.get("runtime_preflight_status_counts")),
+                        md_cell(group.get("runtime_trusted_cells")),
                         md_cell(group.get("status_counts")),
                         md_cell(group.get("training_status_counts")),
                         md_cell(group.get("adoption_status_counts")),
                         md_cell(group.get("best_cell")),
+                        md_cell(group.get("trusted_best_cell")),
                         fmt_float(group.get("best_reload_best_minus_base_best_nll")),
+                        fmt_float(
+                            group.get(
+                                "trusted_best_reload_best_minus_base_best_nll"
+                            )
+                        ),
                         md_cell(group.get("best_training_cell")),
+                        md_cell(group.get("trusted_best_training_cell")),
                         fmt_float(stats_value(training_stats, "mean")),
                         fmt_float(stats_value(training_stats, "min")),
                         fmt_float(stats_value(training_stats, "max")),
@@ -591,8 +642,8 @@ def render_markdown(manifest: dict[str, Any]) -> str:
         lines.append("")
     lines.extend(
         [
-            "| cell | status | training_status | adoption_status | run_status | seed | reload_seed | eval_seed | reload_lr | best_delta | training_delta | final_delta | reload_delta | rollback_count | manifest | outcome |",
-            "| --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |",
+            "| cell | status | training_status | adoption_status | run_status | runtime_status | trusted | seed | reload_seed | eval_seed | reload_lr | best_delta | training_delta | final_delta | reload_delta | rollback_count | manifest | outcome |",
+            "| --- | --- | --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |",
         ]
     )
     for cell in manifest.get("cells", []):
@@ -606,6 +657,8 @@ def render_markdown(manifest: dict[str, Any]) -> str:
                     md_cell(outcome_training_status(cell)),
                     md_cell(outcome_adoption_status(cell)),
                     md_cell(cell.get("status")),
+                    md_cell(runtime_preflight_status(cell)),
+                    md_cell(runtime_preflight_trusted(cell)),
                     md_cell(cell.get("seed")),
                     md_cell(cell.get("reload_seed")),
                     md_cell(cell.get("eval_seed")),

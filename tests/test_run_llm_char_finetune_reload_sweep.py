@@ -88,6 +88,8 @@ class RunLlmCharFinetuneReloadSweepTests(unittest.TestCase):
             manifest["summary"]["runtime_preflight_status_counts"],
             {"dry_run": 4},
         )
+        self.assertEqual(manifest["summary"]["runtime_trusted_cells"], 0)
+        self.assertEqual(manifest["summary"]["runtime_untrusted_cells"], 4)
         self.assertEqual(len(manifest["summary"]["reload_lr_groups"]), 2)
         self.assertEqual(
             [group["cells"] for group in manifest["summary"]["reload_lr_groups"]],
@@ -115,10 +117,11 @@ class RunLlmCharFinetuneReloadSweepTests(unittest.TestCase):
         self.assertIn("seed3_reloadlr0p02", first["name"])
         self.assertIn("# LLM Char Finetune Reload Sweep", markdown)
         self.assertIn("runtime_preflight_status_counts", markdown)
+        self.assertIn("trusted_best_cell", markdown)
         self.assertIn("## Reload LR Groups", markdown)
         self.assertIn("| 0.02 | 2 |", markdown)
         self.assertIn(
-            "| cell | status | training_status | adoption_status | run_status | seed | reload_seed | eval_seed |",
+            "| cell | status | training_status | adoption_status | run_status | runtime_status | trusted | seed | reload_seed | eval_seed |",
             markdown,
         )
         self.assertIn("seed3_reloadlr0p02", markdown)
@@ -144,6 +147,14 @@ class RunLlmCharFinetuneReloadSweepTests(unittest.TestCase):
                 "name": "improved",
                 "status": "ok",
                 "reload_lr": 0.005,
+                "pair_manifest": {
+                    "preflight": {
+                        "child_runtime_preflight": {
+                            "runtime_import_preflight_requested": True,
+                            "runtime_import_preflight_passed": True,
+                        }
+                    }
+                },
                 "outcome": {
                     "status": "improved",
                     "reload_training_status": "improved",
@@ -151,6 +162,28 @@ class RunLlmCharFinetuneReloadSweepTests(unittest.TestCase):
                     "reload_best_minus_base_best_nll": -0.2,
                     "reload_training_final_minus_base_best_nll": -0.3,
                     "reload_final_minus_base_final_nll": -0.1,
+                    "reload_validation_rollback_count": 0,
+                },
+            },
+            {
+                "name": "runtime_failed_best",
+                "status": "ok",
+                "reload_lr": 0.005,
+                "pair_manifest": {
+                    "preflight": {
+                        "child_runtime_preflight": {
+                            "runtime_import_preflight_requested": True,
+                            "runtime_import_preflight_passed": False,
+                        }
+                    }
+                },
+                "outcome": {
+                    "status": "improved",
+                    "reload_training_status": "improved",
+                    "reload_adoption_status": "accepted_improved",
+                    "reload_best_minus_base_best_nll": -0.5,
+                    "reload_training_final_minus_base_best_nll": -0.6,
+                    "reload_final_minus_base_final_nll": -0.4,
                     "reload_validation_rollback_count": 0,
                 },
             },
@@ -164,6 +197,14 @@ class RunLlmCharFinetuneReloadSweepTests(unittest.TestCase):
                 "name": "protected",
                 "status": "ok",
                 "reload_lr": 0.02,
+                "pair_manifest": {
+                    "preflight": {
+                        "child_runtime_preflight": {
+                            "runtime_import_preflight_requested": False,
+                            "runtime_import_preflight_passed": True,
+                        }
+                    }
+                },
                 "outcome": {
                     "status": "tied",
                     "reload_training_status": "regressed",
@@ -178,51 +219,69 @@ class RunLlmCharFinetuneReloadSweepTests(unittest.TestCase):
 
         summary = mod.sweep_summary(cells)
 
-        self.assertEqual(summary["cells"], 4)
-        self.assertEqual(summary["status_counts"]["improved"], 1)
+        self.assertEqual(summary["cells"], 5)
+        self.assertEqual(summary["status_counts"]["improved"], 2)
         self.assertEqual(summary["status_counts"]["regressed"], 1)
         self.assertEqual(summary["status_counts"]["tied"], 1)
         self.assertEqual(summary["status_counts"]["missing_outcome"], 1)
-        self.assertEqual(summary["training_status_counts"]["improved"], 1)
+        self.assertEqual(summary["training_status_counts"]["improved"], 2)
         self.assertEqual(summary["training_status_counts"]["regressed"], 2)
         self.assertEqual(summary["training_status_counts"]["missing_outcome"], 1)
-        self.assertEqual(summary["adoption_status_counts"]["accepted_improved"], 1)
+        self.assertEqual(summary["adoption_status_counts"]["accepted_improved"], 2)
         self.assertEqual(summary["adoption_status_counts"]["rejected_regressed"], 1)
         self.assertEqual(summary["adoption_status_counts"]["protected_noop"], 1)
         self.assertEqual(summary["adoption_status_counts"]["missing_outcome"], 1)
-        self.assertEqual(summary["run_status_counts"]["ok"], 3)
+        self.assertEqual(summary["run_status_counts"]["ok"], 4)
         self.assertEqual(
             summary["runtime_preflight_status_counts"],
-            {"missing_outcome": 1, "ok": 3},
+            {"failed": 1, "not_requested": 1, "passed": 1, "unobserved": 2},
         )
+        self.assertEqual(summary["runtime_trusted_cells"], 2)
+        self.assertEqual(summary["runtime_untrusted_cells"], 3)
         self.assertEqual(summary["protected_noop_cells"], 1)
-        self.assertEqual(summary["accepted_improved_cells"], 1)
-        self.assertEqual(summary["best_cell"], "improved")
-        self.assertEqual(summary["best_training_cell"], "improved")
+        self.assertEqual(summary["accepted_improved_cells"], 2)
+        self.assertEqual(summary["best_cell"], "runtime_failed_best")
+        self.assertEqual(summary["best_training_cell"], "runtime_failed_best")
+        self.assertEqual(summary["trusted_best_cell"], "improved")
+        self.assertEqual(summary["trusted_best_training_cell"], "improved")
         self.assertAlmostEqual(
             summary["best_reload_best_minus_base_best_nll"],
-            -0.2,
+            -0.5,
         )
         self.assertAlmostEqual(
             summary["best_reload_training_final_minus_base_best_nll"],
+            -0.6,
+        )
+        self.assertAlmostEqual(
+            summary["trusted_best_reload_best_minus_base_best_nll"],
+            -0.2,
+        )
+        self.assertAlmostEqual(
+            summary["trusted_best_reload_training_final_minus_base_best_nll"],
             -0.3,
         )
         self.assertAlmostEqual(
             summary["reload_training_final_minus_base_best_nll_stats"]["mean"],
-            -0.033333333333333326,
+            -0.175,
         )
         self.assertAlmostEqual(
             summary["reload_validation_rollback_count_stats"]["mean"],
-            1.3333333333333333,
+            1.0,
         )
         groups = summary["reload_lr_groups"]
         self.assertEqual([group["reload_lr_label"] for group in groups], ["0.005", "0.02"])
-        self.assertEqual(groups[0]["best_cell"], "improved")
-        self.assertEqual(groups[0]["training_status_counts"], {"improved": 1})
-        self.assertEqual(groups[0]["adoption_status_counts"], {"accepted_improved": 1})
+        self.assertEqual(groups[0]["best_cell"], "runtime_failed_best")
+        self.assertEqual(groups[0]["trusted_best_cell"], "improved")
+        self.assertEqual(groups[0]["training_status_counts"], {"improved": 2})
+        self.assertEqual(groups[0]["adoption_status_counts"], {"accepted_improved": 2})
+        self.assertEqual(
+            groups[0]["runtime_preflight_status_counts"],
+            {"failed": 1, "passed": 1},
+        )
+        self.assertEqual(groups[0]["runtime_trusted_cells"], 1)
         self.assertAlmostEqual(
             groups[0]["reload_training_final_minus_base_best_nll_stats"]["mean"],
-            -0.3,
+            -0.44999999999999996,
         )
         self.assertAlmostEqual(
             groups[0]["reload_validation_rollback_count_stats"]["mean"],
