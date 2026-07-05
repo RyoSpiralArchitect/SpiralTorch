@@ -443,6 +443,36 @@ def parse_args():
         default=None,
         help="Fail when current aggregate movement_ok_rate is below this 0..1 floor.",
     )
+    parser.add_argument(
+        "--min-aggregate-epoch-wgpu-hit-rate",
+        type=float,
+        default=None,
+        help=(
+            "Fail when current aggregate "
+            "epoch_tensor_backend_requested_wgpu_hit_rate_mean is absent or "
+            "below this 0..1 floor."
+        ),
+    )
+    parser.add_argument(
+        "--max-aggregate-epoch-wgpu-runtime-fallback-rate",
+        type=float,
+        default=None,
+        help=(
+            "Fail when current aggregate "
+            "epoch_tensor_backend_requested_wgpu_runtime_fallback_rate_mean is "
+            "absent or above this 0..1 ceiling."
+        ),
+    )
+    parser.add_argument(
+        "--max-aggregate-epoch-wgpu-component-fallback-rate",
+        type=float,
+        default=None,
+        help=(
+            "Fail when current aggregate "
+            "epoch_tensor_backend_requested_wgpu_component_fallback_rate_mean "
+            "is absent or above this 0..1 ceiling."
+        ),
+    )
     args = parser.parse_args()
     if args.checkpoint_projection_preset is not None:
         args.checkpoint_projection = "zspace"
@@ -550,6 +580,9 @@ def parse_args():
         "min_aggregate_retention_perplexity_margin",
         "min_aggregate_accepted_rate",
         "min_aggregate_movement_ok_rate",
+        "min_aggregate_epoch_wgpu_hit_rate",
+        "max_aggregate_epoch_wgpu_runtime_fallback_rate",
+        "max_aggregate_epoch_wgpu_component_fallback_rate",
     ]:
         value = getattr(args, name)
         if value is not None and value < 0.0:
@@ -2577,6 +2610,9 @@ def check_aggregate_coverage(
     required_cases=None,
     min_accepted_rate=None,
     min_movement_ok_rate=None,
+    min_epoch_wgpu_hit_rate=None,
+    max_epoch_wgpu_runtime_fallback_rate=None,
+    max_epoch_wgpu_component_fallback_rate=None,
 ):
     required_cases = list(required_cases or [])
     failures = []
@@ -2592,6 +2628,36 @@ def check_aggregate_coverage(
         accepted_all = required_aggregate_bool_value(row, "accepted_all")
         movement_ok_all = required_aggregate_bool_value(row, "movement_ok_all")
         missing_cases = [case for case in required_cases if case not in case_labels]
+        epoch_wgpu_hit_rate = (
+            numeric_value(row, "epoch_tensor_backend_requested_wgpu_hit_rate_mean")
+            if min_epoch_wgpu_hit_rate is not None
+            else optional_numeric_value(
+                row,
+                "epoch_tensor_backend_requested_wgpu_hit_rate_mean",
+            )
+        )
+        epoch_wgpu_runtime_fallback_rate = (
+            numeric_value(
+                row,
+                "epoch_tensor_backend_requested_wgpu_runtime_fallback_rate_mean",
+            )
+            if max_epoch_wgpu_runtime_fallback_rate is not None
+            else optional_numeric_value(
+                row,
+                "epoch_tensor_backend_requested_wgpu_runtime_fallback_rate_mean",
+            )
+        )
+        epoch_wgpu_component_fallback_rate = (
+            numeric_value(
+                row,
+                "epoch_tensor_backend_requested_wgpu_component_fallback_rate_mean",
+            )
+            if max_epoch_wgpu_component_fallback_rate is not None
+            else optional_numeric_value(
+                row,
+                "epoch_tensor_backend_requested_wgpu_component_fallback_rate_mean",
+            )
+        )
         print(
             f"aggregate_acceptance config={config} "
             f"accepted_cases={accepted_cases} "
@@ -2602,6 +2668,11 @@ def check_aggregate_coverage(
             f"movement_ok_cases={movement_ok_cases} "
             f"movement_ok_rate={movement_ok_rate:.9f} "
             f"movement_ok_all={movement_ok_all}"
+            f" epoch_wgpu_hit_rate_mean={epoch_wgpu_hit_rate:.9f} "
+            f"epoch_wgpu_runtime_fallback_rate_mean="
+            f"{epoch_wgpu_runtime_fallback_rate:.9f} "
+            f"epoch_wgpu_component_fallback_rate_mean="
+            f"{epoch_wgpu_component_fallback_rate:.9f}"
         )
         if min_cases is not None and cases < min_cases:
             failures.append(
@@ -2622,6 +2693,34 @@ def check_aggregate_coverage(
         if min_movement_ok_rate is not None and movement_ok_rate < min_movement_ok_rate:
             failures.append(
                 f"{config}: movement_ok_rate {movement_ok_rate:.9f} below floor {min_movement_ok_rate:.9f}"
+            )
+        if (
+            min_epoch_wgpu_hit_rate is not None
+            and epoch_wgpu_hit_rate < min_epoch_wgpu_hit_rate
+        ):
+            failures.append(
+                f"{config}: epoch WGPU hit_rate_mean {epoch_wgpu_hit_rate:.9f} "
+                f"below floor {min_epoch_wgpu_hit_rate:.9f}"
+            )
+        if (
+            max_epoch_wgpu_runtime_fallback_rate is not None
+            and epoch_wgpu_runtime_fallback_rate
+            > max_epoch_wgpu_runtime_fallback_rate
+        ):
+            failures.append(
+                f"{config}: epoch WGPU runtime_fallback_rate_mean "
+                f"{epoch_wgpu_runtime_fallback_rate:.9f} above ceiling "
+                f"{max_epoch_wgpu_runtime_fallback_rate:.9f}"
+            )
+        if (
+            max_epoch_wgpu_component_fallback_rate is not None
+            and epoch_wgpu_component_fallback_rate
+            > max_epoch_wgpu_component_fallback_rate
+        ):
+            failures.append(
+                f"{config}: epoch WGPU component_fallback_rate_mean "
+                f"{epoch_wgpu_component_fallback_rate:.9f} above ceiling "
+                f"{max_epoch_wgpu_component_fallback_rate:.9f}"
             )
     if failures:
         raise RuntimeError("LoRA sweep aggregate coverage gate failed: " + "; ".join(failures))
@@ -3080,6 +3179,9 @@ def main():
         or bool(args.require_aggregate_cases)
         or args.min_aggregate_accepted_rate is not None
         or args.min_aggregate_movement_ok_rate is not None
+        or args.min_aggregate_epoch_wgpu_hit_rate is not None
+        or args.max_aggregate_epoch_wgpu_runtime_fallback_rate is not None
+        or args.max_aggregate_epoch_wgpu_component_fallback_rate is not None
     )
     if aggregate_coverage_gate:
         checked = check_aggregate_coverage(
@@ -3089,6 +3191,13 @@ def main():
             required_cases=args.require_aggregate_cases,
             min_accepted_rate=args.min_aggregate_accepted_rate,
             min_movement_ok_rate=args.min_aggregate_movement_ok_rate,
+            min_epoch_wgpu_hit_rate=args.min_aggregate_epoch_wgpu_hit_rate,
+            max_epoch_wgpu_runtime_fallback_rate=(
+                args.max_aggregate_epoch_wgpu_runtime_fallback_rate
+            ),
+            max_epoch_wgpu_component_fallback_rate=(
+                args.max_aggregate_epoch_wgpu_component_fallback_rate
+            ),
         )
         print(f"aggregate_coverage_rows={checked}")
     if args.compare_aggregate_jsonl is not None:
