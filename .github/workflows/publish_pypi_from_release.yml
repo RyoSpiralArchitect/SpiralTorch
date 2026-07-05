@@ -141,7 +141,7 @@ jobs:
 
           assert st.__version__ == os.environ["EXPECTED_VERSION"]
           layer = st.nn.Linear(2, 2, name="pypi_workflow_smoke")
-          state = layer.state_dict()
+          state = dict(layer.state_dict())
           assert "pypi_workflow_smoke::weight" in state
           print("pypi workflow smoke ok", st.__version__)
           PY
