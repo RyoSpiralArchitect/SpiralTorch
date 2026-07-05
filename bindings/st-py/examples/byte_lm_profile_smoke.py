@@ -819,6 +819,49 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--require-manifest-transformers-trainer-runtime-bridge",
+        action="store_true",
+        help=(
+            "Fail --validate-manifest-jsonl when the manifest cannot bridge "
+            "Transformers tensor runtime metadata with trainer runtime events."
+        ),
+    )
+    parser.add_argument(
+        "--require-manifest-transformers-trainer-external-gpu",
+        action="store_true",
+        help=(
+            "Fail --validate-manifest-jsonl unless the Transformers/trainer "
+            "runtime bridge observed at least one external GPU tensor field."
+        ),
+    )
+    parser.add_argument(
+        "--min-manifest-transformers-trainer-wgpu-hit-rate",
+        type=float,
+        default=None,
+        help=(
+            "Fail --validate-manifest-jsonl when requested-WGPU trainer ops "
+            "hit WGPU less often than this rate."
+        ),
+    )
+    parser.add_argument(
+        "--max-manifest-transformers-trainer-wgpu-runtime-fallback-rate",
+        type=float,
+        default=None,
+        help=(
+            "Fail --validate-manifest-jsonl when requested-WGPU trainer ops "
+            "fall back at runtime more often than this rate."
+        ),
+    )
+    parser.add_argument(
+        "--max-manifest-transformers-trainer-wgpu-component-fallback-rate",
+        type=float,
+        default=None,
+        help=(
+            "Fail --validate-manifest-jsonl when requested-WGPU component "
+            "telemetry falls back more often than this rate."
+        ),
+    )
+    parser.add_argument(
         "--continue-manifest-output-jsonl",
         type=Path,
         default=None,
@@ -938,6 +981,13 @@ def parse_args():
             args.max_manifest_transformers_trace_top_token_changed_rows is not None,
             args.max_manifest_transformers_trace_top_probability_regression
             is not None,
+            args.require_manifest_transformers_trainer_runtime_bridge,
+            args.require_manifest_transformers_trainer_external_gpu,
+            args.min_manifest_transformers_trainer_wgpu_hit_rate is not None,
+            args.max_manifest_transformers_trainer_wgpu_runtime_fallback_rate
+            is not None,
+            args.max_manifest_transformers_trainer_wgpu_component_fallback_rate
+            is not None,
         ]
     )
     if (
@@ -965,6 +1015,23 @@ def parse_args():
             "--max-manifest-transformers-trace-top-probability-regression "
             "must be non-negative"
         )
+    for attr, flag in [
+        (
+            "min_manifest_transformers_trainer_wgpu_hit_rate",
+            "--min-manifest-transformers-trainer-wgpu-hit-rate",
+        ),
+        (
+            "max_manifest_transformers_trainer_wgpu_runtime_fallback_rate",
+            "--max-manifest-transformers-trainer-wgpu-runtime-fallback-rate",
+        ),
+        (
+            "max_manifest_transformers_trainer_wgpu_component_fallback_rate",
+            "--max-manifest-transformers-trainer-wgpu-component-fallback-rate",
+        ),
+    ]:
+        rate = getattr(args, attr)
+        if rate is not None and not (0.0 <= rate <= 1.0):
+            parser.error(f"{flag} must be between 0.0 and 1.0")
     if args.continue_plan_jsonl is not None and args.continue_manifest_jsonl is None:
         parser.error("--continue-plan-jsonl requires --continue-manifest-jsonl")
     if args.checkpoint_source_gain is not None and args.checkpoint_source_gain <= 0.0:
@@ -2528,6 +2595,114 @@ def manifest_trace_validation_gate_failures(validation_row, args):
     return failures
 
 
+def manifest_transformers_trainer_runtime_gate_failures(validation_row, args):
+    failures = []
+    if args is None:
+        return failures
+    bridge_required = getattr(
+        args,
+        "require_manifest_transformers_trainer_runtime_bridge",
+        False,
+    )
+    external_gpu_required = getattr(
+        args,
+        "require_manifest_transformers_trainer_external_gpu",
+        False,
+    )
+    min_wgpu_hit_rate = getattr(
+        args,
+        "min_manifest_transformers_trainer_wgpu_hit_rate",
+        None,
+    )
+    max_runtime_fallback_rate = getattr(
+        args,
+        "max_manifest_transformers_trainer_wgpu_runtime_fallback_rate",
+        None,
+    )
+    max_component_fallback_rate = getattr(
+        args,
+        "max_manifest_transformers_trainer_wgpu_component_fallback_rate",
+        None,
+    )
+    if not any(
+        [
+            bridge_required,
+            external_gpu_required,
+            min_wgpu_hit_rate is not None,
+            max_runtime_fallback_rate is not None,
+            max_component_fallback_rate is not None,
+        ]
+    ):
+        return failures
+
+    bridge_available = validation_row.get(
+        "transformers_trainer_runtime_bridge_available"
+    )
+    bridge_error = validation_row.get("transformers_trainer_runtime_bridge_error")
+    if bridge_available is not True:
+        failures.append(
+            "transformers_trainer_runtime_bridge_error"
+            if bridge_error
+            else "transformers_trainer_runtime_bridge_missing"
+        )
+        return failures
+
+    if external_gpu_required:
+        gpu_tensor_fields = manifest_validation_int(
+            validation_row,
+            "transformers_trainer_runtime_gpu_tensor_fields",
+        )
+        if gpu_tensor_fields is None:
+            failures.append(
+                "transformers_trainer_runtime_external_gpu_tensor_fields_unavailable"
+            )
+        elif gpu_tensor_fields <= 0:
+            failures.append("transformers_trainer_runtime_external_gpu_missing")
+
+    if min_wgpu_hit_rate is not None:
+        hit_rate = manifest_validation_float(
+            validation_row,
+            "transformers_trainer_runtime_requested_wgpu_hit_rate",
+        )
+        if hit_rate is None:
+            failures.append(
+                "transformers_trainer_runtime_requested_wgpu_hit_rate_unavailable"
+            )
+        elif hit_rate < min_wgpu_hit_rate:
+            failures.append(
+                "transformers_trainer_runtime_requested_wgpu_hit_rate_below_min"
+            )
+
+    if max_runtime_fallback_rate is not None:
+        fallback_rate = manifest_validation_float(
+            validation_row,
+            "transformers_trainer_runtime_requested_wgpu_runtime_fallback_rate",
+        )
+        if fallback_rate is None:
+            failures.append(
+                "transformers_trainer_runtime_requested_wgpu_runtime_fallback_rate_unavailable"
+            )
+        elif fallback_rate > max_runtime_fallback_rate:
+            failures.append(
+                "transformers_trainer_runtime_requested_wgpu_runtime_fallback_rate_above_max"
+            )
+
+    if max_component_fallback_rate is not None:
+        component_fallback_rate = manifest_validation_float(
+            validation_row,
+            "transformers_trainer_runtime_requested_wgpu_component_fallback_rate",
+        )
+        if component_fallback_rate is None:
+            failures.append(
+                "transformers_trainer_runtime_requested_wgpu_component_fallback_rate_unavailable"
+            )
+        elif component_fallback_rate > max_component_fallback_rate:
+            failures.append(
+                "transformers_trainer_runtime_requested_wgpu_component_fallback_rate_above_max"
+            )
+    return failures
+
+
 def manifest_checkpoint_validation_gate_failures(validation_row, args):
     failures = []
     if args is None:
@@ -2646,6 +2821,62 @@ def check_manifest_trace_validation_gates(validation_row, args):
     return True
 
 
+def check_manifest_transformers_trainer_runtime_gates(validation_row, args):
+    failures = manifest_transformers_trainer_runtime_gate_failures(
+        validation_row,
+        args,
+    )
+    if args is None:
+        return True
+    gate_requested = any(
+        [
+            getattr(
+                args,
+                "require_manifest_transformers_trainer_runtime_bridge",
+                False,
+            ),
+            getattr(
+                args,
+                "require_manifest_transformers_trainer_external_gpu",
+                False,
+            ),
+            getattr(
+                args,
+                "min_manifest_transformers_trainer_wgpu_hit_rate",
+                None,
+            )
+            is not None,
+            getattr(
+                args,
+                "max_manifest_transformers_trainer_wgpu_runtime_fallback_rate",
+                None,
+            )
+            is not None,
+            getattr(
+                args,
+                "max_manifest_transformers_trainer_wgpu_component_fallback_rate",
+                None,
+            )
+            is not None,
+            bool(failures),
+        ]
+    )
+    if not gate_requested:
+        return True
+    print(
+        "profile_smoke_manifest_gate "
+        f"gate=transformers_trainer_runtime "
+        f"failures={','.join(failures) if failures else 'none'} "
+        f"passed={not failures}"
+    )
+    if failures:
+        raise RuntimeError(
+            "profile smoke manifest Transformers/trainer runtime gate failed: "
+            + ", ".join(failures)
+        )
+    return True
+
+
 def check_manifest_checkpoint_validation_gates(validation_row, args):
     failures = manifest_checkpoint_validation_gate_failures(validation_row, args)
     if args is None:
@@ -2700,6 +2931,7 @@ def validate_profile_smoke_manifest_file(path, validation_jsonl=None, args=None)
     validation_row.update(runtime_import_gate_fields(validation_row, args))
     validation_row.update(checkpoint_runtime_import_gate_fields(validation_row, args))
     check_manifest_trace_validation_gates(validation_row, args)
+    check_manifest_transformers_trainer_runtime_gates(validation_row, args)
     check_manifest_checkpoint_validation_gates(validation_row, args)
     if validation_jsonl is not None:
         write_jsonl(validation_jsonl, [validation_row])
@@ -2795,6 +3027,8 @@ def validate_profile_smoke_manifest_file(path, validation_jsonl=None, args=None)
                 f"{validation_row['transformers_trainer_runtime_requested_wgpu_hit_rate']}",
                 "transformers_trainer_runtime_requested_wgpu_runtime_fallback_rate="
                 f"{validation_row['transformers_trainer_runtime_requested_wgpu_runtime_fallback_rate']}",
+                "transformers_trainer_runtime_requested_wgpu_component_fallback_rate="
+                f"{validation_row['transformers_trainer_runtime_requested_wgpu_component_fallback_rate']}",
             ]
         )
     if validation_row["checkpoint_transformers_audit_available"]:
