@@ -675,6 +675,17 @@ from .trainer_trace import (
     write_trainer_trace_html,
 )
 
+from .runtime_imports import (
+    TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS,
+    runtime_import_preflight_report,
+    runtime_import_preflight_summary_lines,
+    runtime_import_requirement_failures,
+    runtime_import_probe,
+    runtime_import_probe_rows,
+    runtime_import_preset_modules,
+    write_runtime_import_preflight_report,
+)
+
 from .gnn_trace import (
     load_gnn_band_replay_trace,
     flatten_gnn_band_replay_rows,
@@ -725,7 +736,7 @@ from .elliptic import (
     elliptic_warp_partial,
 )
 
-# 追加API（Rust側でエクスポート済みのやつだけ拾う）
+# 追加API（Rust側とPython補助面で公開できるものだけ拾う）
 _EXTRAS = [
     "golden_ratio","golden_angle","set_global_seed",
     "capture","share","compat",
@@ -737,6 +748,11 @@ _EXTRAS = [
     "load_zspace_trace_events","write_zspace_trace_html",
     "load_trainer_trace_events","summarize_trainer_trace_events",
     "summarize_transformers_trainer_runtime_bridge","write_trainer_trace_html",
+    "TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS",
+    "runtime_import_preflight_report","runtime_import_preflight_summary_lines",
+    "runtime_import_requirement_failures","runtime_import_probe",
+    "runtime_import_probe_rows","runtime_import_preset_modules",
+    "write_runtime_import_preflight_report",
     "load_gnn_band_replay_trace","flatten_gnn_band_replay_rows",
     "summarize_gnn_band_replays","compare_gnn_band_replay_runs","write_gnn_band_replay_html",
     "load_kdsl_trace_events","write_kdsl_trace_jsonl","write_kdsl_trace_html",
