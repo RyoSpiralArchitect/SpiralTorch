@@ -348,6 +348,36 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--promotion-ready-min-epoch-wgpu-hit-rate",
+        type=float,
+        default=None,
+        help=(
+            "Only mark promotion rows ready when "
+            "epoch_tensor_backend_requested_wgpu_hit_rate_mean clears this "
+            "0..1 floor. Non-ready rows remain in the promotion JSONL."
+        ),
+    )
+    parser.add_argument(
+        "--promotion-ready-max-epoch-wgpu-runtime-fallback-rate",
+        type=float,
+        default=None,
+        help=(
+            "Only mark promotion rows ready when "
+            "epoch_tensor_backend_requested_wgpu_runtime_fallback_rate_mean is "
+            "at or below this 0..1 ceiling."
+        ),
+    )
+    parser.add_argument(
+        "--promotion-ready-max-epoch-wgpu-component-fallback-rate",
+        type=float,
+        default=None,
+        help=(
+            "Only mark promotion rows ready when "
+            "epoch_tensor_backend_requested_wgpu_component_fallback_rate_mean "
+            "is at or below this 0..1 ceiling."
+        ),
+    )
+    parser.add_argument(
         "--promotion-ready-max-input-promotion-metric-regression",
         type=float,
         default=None,
@@ -520,6 +550,33 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--max-run-epoch-wgpu-hit-rate-regression",
+        type=float,
+        default=None,
+        help=(
+            "Fail when epoch_tensor_backend_requested_wgpu_hit_rate_mean drops "
+            "from the run-summary baseline by more than this amount."
+        ),
+    )
+    parser.add_argument(
+        "--max-run-epoch-wgpu-runtime-fallback-rate-regression",
+        type=float,
+        default=None,
+        help=(
+            "Fail when epoch_tensor_backend_requested_wgpu_runtime_fallback_rate_mean "
+            "rises from the run-summary baseline by more than this amount."
+        ),
+    )
+    parser.add_argument(
+        "--max-run-epoch-wgpu-component-fallback-rate-regression",
+        type=float,
+        default=None,
+        help=(
+            "Fail when epoch_tensor_backend_requested_wgpu_component_fallback_rate_mean "
+            "rises from the run-summary baseline by more than this amount."
+        ),
+    )
+    parser.add_argument(
         "--min-run-movement-ok-rate",
         type=float,
         default=None,
@@ -544,6 +601,35 @@ def parse_args():
         help=(
             "Fail when a promoted run's current input_promotion_metric value "
             "falls below input_promotion_value by more than this amount."
+        ),
+    )
+    parser.add_argument(
+        "--min-run-epoch-wgpu-hit-rate",
+        type=float,
+        default=None,
+        help=(
+            "Fail when current-run epoch_tensor_backend_requested_wgpu_hit_rate_mean "
+            "is below this 0..1 floor."
+        ),
+    )
+    parser.add_argument(
+        "--max-run-epoch-wgpu-runtime-fallback-rate",
+        type=float,
+        default=None,
+        help=(
+            "Fail when current-run "
+            "epoch_tensor_backend_requested_wgpu_runtime_fallback_rate_mean "
+            "exceeds this 0..1 ceiling."
+        ),
+    )
+    parser.add_argument(
+        "--max-run-epoch-wgpu-component-fallback-rate",
+        type=float,
+        default=None,
+        help=(
+            "Fail when current-run "
+            "epoch_tensor_backend_requested_wgpu_component_fallback_rate_mean "
+            "exceeds this 0..1 ceiling."
         ),
     )
     parser.add_argument(
@@ -700,6 +786,9 @@ def parse_args():
         "promotion_ready_min_movement_ok_rate",
         "promotion_ready_min_retention_accuracy_margin",
         "promotion_ready_min_retention_perplexity_margin",
+        "promotion_ready_min_epoch_wgpu_hit_rate",
+        "promotion_ready_max_epoch_wgpu_runtime_fallback_rate",
+        "promotion_ready_max_epoch_wgpu_component_fallback_rate",
         "promotion_ready_max_input_promotion_metric_regression",
         "promotion_ready_min_guard_acceptance_rate_mean",
         "promotion_ready_max_guard_retention_rejected_epochs_mean",
@@ -777,10 +866,16 @@ def parse_args():
         "max_run_guard_acceptance_rate_regression",
         "max_run_guard_retention_rejected_rate_regression",
         "max_run_guard_target_stale_rate_regression",
+        "max_run_epoch_wgpu_hit_rate_regression",
+        "max_run_epoch_wgpu_runtime_fallback_rate_regression",
+        "max_run_epoch_wgpu_component_fallback_rate_regression",
         "min_run_movement_ok_rate",
         "min_run_retention_accuracy_margin",
         "min_run_retention_perplexity_margin",
         "max_run_input_promotion_metric_regression",
+        "min_run_epoch_wgpu_hit_rate",
+        "max_run_epoch_wgpu_runtime_fallback_rate",
+        "max_run_epoch_wgpu_component_fallback_rate",
         "min_run_guard_acceptance_rate_mean",
         "max_run_guard_retention_rejected_epochs_mean",
         "max_run_guard_target_stale_epochs_mean",
@@ -818,6 +913,9 @@ def parse_args():
         or args.max_run_guard_acceptance_rate_regression is not None
         or args.max_run_guard_retention_rejected_rate_regression is not None
         or args.max_run_guard_target_stale_rate_regression is not None
+        or args.max_run_epoch_wgpu_hit_rate_regression is not None
+        or args.max_run_epoch_wgpu_runtime_fallback_rate_regression is not None
+        or args.max_run_epoch_wgpu_component_fallback_rate_regression is not None
         or args.require_run_source_match
         or args.require_run_config_match
         or args.require_run_case_scope_match
@@ -833,6 +931,9 @@ def parse_args():
         or args.min_run_retention_accuracy_margin is not None
         or args.min_run_retention_perplexity_margin is not None
         or args.max_run_input_promotion_metric_regression is not None
+        or args.min_run_epoch_wgpu_hit_rate is not None
+        or args.max_run_epoch_wgpu_runtime_fallback_rate is not None
+        or args.max_run_epoch_wgpu_component_fallback_rate is not None
         or args.require_run_guard_counts_available
         or args.min_run_guard_acceptance_rate_mean is not None
         or args.max_run_guard_retention_rejected_epochs_mean is not None
@@ -1358,6 +1459,15 @@ def promoted_profile_rows(profile_jsonl_rows, promotion_jsonl_rows, profile_name
                 "promotion_ready_min_retention_perplexity_margin": promotion.get(
                     "promotion_ready_min_retention_perplexity_margin"
                 ),
+                "promotion_ready_min_epoch_wgpu_hit_rate": promotion.get(
+                    "promotion_ready_min_epoch_wgpu_hit_rate"
+                ),
+                "promotion_ready_max_epoch_wgpu_runtime_fallback_rate": promotion.get(
+                    "promotion_ready_max_epoch_wgpu_runtime_fallback_rate"
+                ),
+                "promotion_ready_max_epoch_wgpu_component_fallback_rate": promotion.get(
+                    "promotion_ready_max_epoch_wgpu_component_fallback_rate"
+                ),
                 "promotion_ready_max_input_promotion_metric_regression": promotion.get(
                     "promotion_ready_max_input_promotion_metric_regression"
                 ),
@@ -1823,6 +1933,15 @@ def build_profile_command(
         "promotion_ready_min_retention_perplexity_margin": effective_row.get(
             "promotion_ready_min_retention_perplexity_margin"
         ),
+        "promotion_ready_min_epoch_wgpu_hit_rate": effective_row.get(
+            "promotion_ready_min_epoch_wgpu_hit_rate"
+        ),
+        "promotion_ready_max_epoch_wgpu_runtime_fallback_rate": effective_row.get(
+            "promotion_ready_max_epoch_wgpu_runtime_fallback_rate"
+        ),
+        "promotion_ready_max_epoch_wgpu_component_fallback_rate": effective_row.get(
+            "promotion_ready_max_epoch_wgpu_component_fallback_rate"
+        ),
         "promotion_ready_max_input_promotion_metric_regression": effective_row.get(
             "promotion_ready_max_input_promotion_metric_regression"
         ),
@@ -1927,6 +2046,9 @@ def print_command_rows(rows):
                 f"promotion_ready_top_k={row.get('promotion_ready_top_k')} "
                 f"promotion_ready_within={optional_numeric_label(row.get('promotion_ready_within'))} "
                 f"promotion_ready_floor_passed={row.get('promotion_ready_floor_passed')} "
+                f"promotion_ready_min_epoch_wgpu_hit_rate={optional_numeric_label(row.get('promotion_ready_min_epoch_wgpu_hit_rate'))} "
+                f"promotion_ready_max_epoch_wgpu_runtime_fallback_rate={optional_numeric_label(row.get('promotion_ready_max_epoch_wgpu_runtime_fallback_rate'))} "
+                f"promotion_ready_max_epoch_wgpu_component_fallback_rate={optional_numeric_label(row.get('promotion_ready_max_epoch_wgpu_component_fallback_rate'))} "
                 f"promotion_ready_require_guard_counts_available={row.get('promotion_ready_require_guard_counts_available')} "
                 f"promotion_ready_min_guard_acceptance_rate_mean={optional_numeric_label(row.get('promotion_ready_min_guard_acceptance_rate_mean'))} "
                 f"promotion_ready_max_guard_retention_rejected_epochs_mean={optional_numeric_label(row.get('promotion_ready_max_guard_retention_rejected_epochs_mean'))} "
@@ -1986,6 +2108,9 @@ def command_event_row(
         "promotion_ready_within",
         "promotion_ready_floor_passed",
         "promotion_ready_floor_failures",
+        "promotion_ready_min_epoch_wgpu_hit_rate",
+        "promotion_ready_max_epoch_wgpu_runtime_fallback_rate",
+        "promotion_ready_max_epoch_wgpu_component_fallback_rate",
         "promotion_ready_require_guard_counts_available",
         "promotion_ready_min_guard_acceptance_rate_mean",
         "promotion_ready_max_guard_retention_rejected_epochs_mean",
@@ -2077,6 +2202,18 @@ INPUT_PROMOTION_FIELDS = [
     (
         "promotion_ready_min_retention_perplexity_margin",
         "input_promotion_ready_min_retention_perplexity_margin",
+    ),
+    (
+        "promotion_ready_min_epoch_wgpu_hit_rate",
+        "input_promotion_ready_min_epoch_wgpu_hit_rate",
+    ),
+    (
+        "promotion_ready_max_epoch_wgpu_runtime_fallback_rate",
+        "input_promotion_ready_max_epoch_wgpu_runtime_fallback_rate",
+    ),
+    (
+        "promotion_ready_max_epoch_wgpu_component_fallback_rate",
+        "input_promotion_ready_max_epoch_wgpu_component_fallback_rate",
     ),
     (
         "promotion_ready_max_input_promotion_metric_regression",
@@ -2440,6 +2577,9 @@ PROMOTION_COPY_FIELDS = [
     "input_promotion_ready_min_movement_ok_rate",
     "input_promotion_ready_min_retention_accuracy_margin",
     "input_promotion_ready_min_retention_perplexity_margin",
+    "input_promotion_ready_min_epoch_wgpu_hit_rate",
+    "input_promotion_ready_max_epoch_wgpu_runtime_fallback_rate",
+    "input_promotion_ready_max_epoch_wgpu_component_fallback_rate",
     "input_promotion_ready_max_input_promotion_metric_regression",
     "input_promotion_ready_require_guard_counts_available",
     "input_promotion_ready_min_guard_acceptance_rate_mean",
@@ -2481,6 +2621,11 @@ PROMOTION_READY_FLOORS = [
         "retention_perplexity_margin_min",
     ),
     (
+        "epoch_tensor_backend_requested_wgpu_hit_rate_mean",
+        "promotion_ready_min_epoch_wgpu_hit_rate",
+        "epoch_wgpu_hit_rate_mean",
+    ),
+    (
         "guard_acceptance_rate_mean",
         "promotion_ready_min_guard_acceptance_rate_mean",
         "guard_acceptance_rate_mean",
@@ -2493,6 +2638,16 @@ PROMOTION_READY_CEILINGS = [
         "input_promotion_metric_regression",
         "promotion_ready_max_input_promotion_metric_regression",
         "input_promotion_metric_regression",
+    ),
+    (
+        "epoch_tensor_backend_requested_wgpu_runtime_fallback_rate_mean",
+        "promotion_ready_max_epoch_wgpu_runtime_fallback_rate",
+        "epoch_wgpu_runtime_fallback_rate_mean",
+    ),
+    (
+        "epoch_tensor_backend_requested_wgpu_component_fallback_rate_mean",
+        "promotion_ready_max_epoch_wgpu_component_fallback_rate",
+        "epoch_wgpu_component_fallback_rate_mean",
     ),
     (
         "guard_retention_rejected_epochs_mean",
@@ -2524,6 +2679,7 @@ def promotion_ready_floor_settings(
     min_movement_ok_rate=None,
     min_retention_accuracy_margin=None,
     min_retention_perplexity_margin=None,
+    min_epoch_wgpu_hit_rate=None,
     min_guard_acceptance_rate_mean=None,
 ):
     return {
@@ -2532,6 +2688,7 @@ def promotion_ready_floor_settings(
         "promotion_ready_min_movement_ok_rate": min_movement_ok_rate,
         "promotion_ready_min_retention_accuracy_margin": min_retention_accuracy_margin,
         "promotion_ready_min_retention_perplexity_margin": min_retention_perplexity_margin,
+        "promotion_ready_min_epoch_wgpu_hit_rate": min_epoch_wgpu_hit_rate,
         "promotion_ready_min_guard_acceptance_rate_mean": min_guard_acceptance_rate_mean,
     }
 
@@ -2539,6 +2696,8 @@ def promotion_ready_floor_settings(
 def promotion_ready_ceiling_settings(
     *,
     max_input_promotion_metric_regression=None,
+    max_epoch_wgpu_runtime_fallback_rate=None,
+    max_epoch_wgpu_component_fallback_rate=None,
     max_guard_retention_rejected_epochs_mean=None,
     max_guard_target_stale_epochs_mean=None,
     max_guard_retention_rejected_rate_mean=None,
@@ -2547,6 +2706,12 @@ def promotion_ready_ceiling_settings(
     return {
         "promotion_ready_max_input_promotion_metric_regression": (
             max_input_promotion_metric_regression
+        ),
+        "promotion_ready_max_epoch_wgpu_runtime_fallback_rate": (
+            max_epoch_wgpu_runtime_fallback_rate
+        ),
+        "promotion_ready_max_epoch_wgpu_component_fallback_rate": (
+            max_epoch_wgpu_component_fallback_rate
         ),
         "promotion_ready_max_guard_retention_rejected_epochs_mean": (
             max_guard_retention_rejected_epochs_mean
@@ -2597,8 +2762,11 @@ def profile_run_promotion_rows(
     ready_min_movement_ok_rate=None,
     ready_min_retention_accuracy_margin=None,
     ready_min_retention_perplexity_margin=None,
+    ready_min_epoch_wgpu_hit_rate=None,
     ready_min_guard_acceptance_rate_mean=None,
     ready_max_input_promotion_metric_regression=None,
+    ready_max_epoch_wgpu_runtime_fallback_rate=None,
+    ready_max_epoch_wgpu_component_fallback_rate=None,
     ready_require_guard_counts_available=False,
     ready_max_guard_retention_rejected_epochs_mean=None,
     ready_max_guard_target_stale_epochs_mean=None,
@@ -2617,11 +2785,18 @@ def profile_run_promotion_rows(
         min_movement_ok_rate=ready_min_movement_ok_rate,
         min_retention_accuracy_margin=ready_min_retention_accuracy_margin,
         min_retention_perplexity_margin=ready_min_retention_perplexity_margin,
+        min_epoch_wgpu_hit_rate=ready_min_epoch_wgpu_hit_rate,
         min_guard_acceptance_rate_mean=ready_min_guard_acceptance_rate_mean,
     )
     ceiling_settings = promotion_ready_ceiling_settings(
         max_input_promotion_metric_regression=(
             ready_max_input_promotion_metric_regression
+        ),
+        max_epoch_wgpu_runtime_fallback_rate=(
+            ready_max_epoch_wgpu_runtime_fallback_rate
+        ),
+        max_epoch_wgpu_component_fallback_rate=(
+            ready_max_epoch_wgpu_component_fallback_rate
         ),
         max_guard_retention_rejected_epochs_mean=(
             ready_max_guard_retention_rejected_epochs_mean
@@ -2846,6 +3021,9 @@ def check_profile_run_gates(
     min_retention_accuracy_margin=None,
     min_retention_perplexity_margin=None,
     max_input_promotion_metric_regression=None,
+    min_epoch_wgpu_hit_rate=None,
+    max_epoch_wgpu_runtime_fallback_rate=None,
+    max_epoch_wgpu_component_fallback_rate=None,
     require_guard_counts_available=False,
     min_guard_acceptance_rate_mean=None,
     max_guard_retention_rejected_epochs_mean=None,
@@ -2932,6 +3110,51 @@ def check_profile_run_gates(
                         f"{profile}: input_promotion_metric_regression "
                         f"{input_promotion_regression:.9f} above ceiling"
                     )
+        epoch_wgpu_hit_rate = None
+        epoch_wgpu_hit_rate_passed = True
+        if min_epoch_wgpu_hit_rate is not None:
+            epoch_wgpu_hit_rate = numeric_value(
+                row,
+                "epoch_tensor_backend_requested_wgpu_hit_rate_mean",
+            )
+            epoch_wgpu_hit_rate_passed = epoch_wgpu_hit_rate >= min_epoch_wgpu_hit_rate
+            if not epoch_wgpu_hit_rate_passed:
+                failures.append(
+                    f"{profile}: epoch_wgpu_hit_rate_mean "
+                    f"{epoch_wgpu_hit_rate:.9f} below floor"
+                )
+        epoch_wgpu_runtime_fallback_rate = None
+        epoch_wgpu_runtime_fallback_rate_passed = True
+        if max_epoch_wgpu_runtime_fallback_rate is not None:
+            epoch_wgpu_runtime_fallback_rate = numeric_value(
+                row,
+                "epoch_tensor_backend_requested_wgpu_runtime_fallback_rate_mean",
+            )
+            epoch_wgpu_runtime_fallback_rate_passed = (
+                epoch_wgpu_runtime_fallback_rate
+                <= max_epoch_wgpu_runtime_fallback_rate
+            )
+            if not epoch_wgpu_runtime_fallback_rate_passed:
+                failures.append(
+                    f"{profile}: epoch_wgpu_runtime_fallback_rate_mean "
+                    f"{epoch_wgpu_runtime_fallback_rate:.9f} above ceiling"
+                )
+        epoch_wgpu_component_fallback_rate = None
+        epoch_wgpu_component_fallback_rate_passed = True
+        if max_epoch_wgpu_component_fallback_rate is not None:
+            epoch_wgpu_component_fallback_rate = numeric_value(
+                row,
+                "epoch_tensor_backend_requested_wgpu_component_fallback_rate_mean",
+            )
+            epoch_wgpu_component_fallback_rate_passed = (
+                epoch_wgpu_component_fallback_rate
+                <= max_epoch_wgpu_component_fallback_rate
+            )
+            if not epoch_wgpu_component_fallback_rate_passed:
+                failures.append(
+                    f"{profile}: epoch_wgpu_component_fallback_rate_mean "
+                    f"{epoch_wgpu_component_fallback_rate:.9f} above ceiling"
+                )
         guard_counts_available = row.get("guard_epoch_counts_available_all")
         guard_counts_passed = True
         if require_guard_counts_available:
@@ -3011,6 +3234,9 @@ def check_profile_run_gates(
             and accuracy_passed
             and perplexity_passed
             and input_promotion_passed
+            and epoch_wgpu_hit_rate_passed
+            and epoch_wgpu_runtime_fallback_rate_passed
+            and epoch_wgpu_component_fallback_rate_passed
             and guard_counts_passed
             and guard_acceptance_rate_passed
             and guard_retention_rejected_passed
@@ -3036,6 +3262,12 @@ def check_profile_run_gates(
             f"input_promotion_current={optional_numeric_label(input_promotion_current)} "
             f"input_promotion_metric_regression={optional_numeric_label(input_promotion_regression)} "
             f"max_input_promotion_metric_regression={optional_numeric_label(max_input_promotion_metric_regression)} "
+            f"epoch_wgpu_hit_rate_mean={optional_numeric_label(epoch_wgpu_hit_rate)} "
+            f"min_epoch_wgpu_hit_rate={optional_numeric_label(min_epoch_wgpu_hit_rate)} "
+            f"epoch_wgpu_runtime_fallback_rate_mean={optional_numeric_label(epoch_wgpu_runtime_fallback_rate)} "
+            f"max_epoch_wgpu_runtime_fallback_rate={optional_numeric_label(max_epoch_wgpu_runtime_fallback_rate)} "
+            f"epoch_wgpu_component_fallback_rate_mean={optional_numeric_label(epoch_wgpu_component_fallback_rate)} "
+            f"max_epoch_wgpu_component_fallback_rate={optional_numeric_label(max_epoch_wgpu_component_fallback_rate)} "
             f"guard_epoch_counts_available_all={guard_counts_available} "
             f"require_guard_counts_available={require_guard_counts_available} "
             f"guard_acceptance_rate_mean={optional_numeric_label(guard_acceptance_rate)} "
@@ -3111,6 +3343,9 @@ INPUT_PROMOTION_COMPARE_FIELDS = [
     "input_promotion_ready_min_movement_ok_rate",
     "input_promotion_ready_min_retention_accuracy_margin",
     "input_promotion_ready_min_retention_perplexity_margin",
+    "input_promotion_ready_min_epoch_wgpu_hit_rate",
+    "input_promotion_ready_max_epoch_wgpu_runtime_fallback_rate",
+    "input_promotion_ready_max_epoch_wgpu_component_fallback_rate",
     "input_promotion_ready_max_input_promotion_metric_regression",
     "input_promotion_ready_require_guard_counts_available",
     "input_promotion_ready_min_guard_acceptance_rate_mean",
@@ -3154,9 +3389,15 @@ def compare_profile_run_summaries(
     max_guard_acceptance_rate_regression=None,
     max_guard_retention_rejected_rate_regression=None,
     max_guard_target_stale_rate_regression=None,
+    max_epoch_wgpu_hit_rate_regression=None,
+    max_epoch_wgpu_runtime_fallback_rate_regression=None,
+    max_epoch_wgpu_component_fallback_rate_regression=None,
     min_movement_ok_rate=None,
     min_retention_accuracy_margin=None,
     min_retention_perplexity_margin=None,
+    min_epoch_wgpu_hit_rate=None,
+    max_epoch_wgpu_runtime_fallback_rate=None,
+    max_epoch_wgpu_component_fallback_rate=None,
     require_source_match=False,
     require_config_match=False,
     require_case_scope_match=False,
@@ -3206,6 +3447,57 @@ def compare_profile_run_summaries(
                 before,
                 now,
                 "guard_target_stale_rate_mean",
+            )
+        epoch_wgpu_hit_rate_regression = None
+        if max_epoch_wgpu_hit_rate_regression is not None:
+            epoch_wgpu_hit_rate_regression = max_regression(
+                before,
+                now,
+                "epoch_tensor_backend_requested_wgpu_hit_rate_mean",
+            )
+        epoch_wgpu_runtime_fallback_rate_regression = None
+        if max_epoch_wgpu_runtime_fallback_rate_regression is not None:
+            epoch_wgpu_runtime_fallback_rate_regression = max_increase_regression(
+                before,
+                now,
+                "epoch_tensor_backend_requested_wgpu_runtime_fallback_rate_mean",
+            )
+        epoch_wgpu_component_fallback_rate_regression = None
+        if max_epoch_wgpu_component_fallback_rate_regression is not None:
+            epoch_wgpu_component_fallback_rate_regression = max_increase_regression(
+                before,
+                now,
+                "epoch_tensor_backend_requested_wgpu_component_fallback_rate_mean",
+            )
+        if min_epoch_wgpu_hit_rate is not None:
+            epoch_wgpu_hit_rate = numeric_value(
+                now,
+                "epoch_tensor_backend_requested_wgpu_hit_rate_mean",
+            )
+        else:
+            epoch_wgpu_hit_rate = optional_numeric_value(
+                now,
+                "epoch_tensor_backend_requested_wgpu_hit_rate_mean",
+            )
+        if max_epoch_wgpu_runtime_fallback_rate is not None:
+            epoch_wgpu_runtime_fallback_rate = numeric_value(
+                now,
+                "epoch_tensor_backend_requested_wgpu_runtime_fallback_rate_mean",
+            )
+        else:
+            epoch_wgpu_runtime_fallback_rate = optional_numeric_value(
+                now,
+                "epoch_tensor_backend_requested_wgpu_runtime_fallback_rate_mean",
+            )
+        if max_epoch_wgpu_component_fallback_rate is not None:
+            epoch_wgpu_component_fallback_rate = numeric_value(
+                now,
+                "epoch_tensor_backend_requested_wgpu_component_fallback_rate_mean",
+            )
+        else:
+            epoch_wgpu_component_fallback_rate = optional_numeric_value(
+                now,
+                "epoch_tensor_backend_requested_wgpu_component_fallback_rate_mean",
             )
         source_changed = now.get("selected_source") != before.get("selected_source")
         config_changed = now.get("config") != before.get("config")
@@ -3269,6 +3561,21 @@ def compare_profile_run_summaries(
                 or guard_target_stale_rate_regression
                 <= max_guard_target_stale_rate_regression
             )
+            and (
+                max_epoch_wgpu_hit_rate_regression is None
+                or epoch_wgpu_hit_rate_regression
+                <= max_epoch_wgpu_hit_rate_regression
+            )
+            and (
+                max_epoch_wgpu_runtime_fallback_rate_regression is None
+                or epoch_wgpu_runtime_fallback_rate_regression
+                <= max_epoch_wgpu_runtime_fallback_rate_regression
+            )
+            and (
+                max_epoch_wgpu_component_fallback_rate_regression is None
+                or epoch_wgpu_component_fallback_rate_regression
+                <= max_epoch_wgpu_component_fallback_rate_regression
+            )
             and (min_movement_ok_rate is None or movement_ok_rate >= min_movement_ok_rate)
             and (
                 min_retention_accuracy_margin is None
@@ -3277,6 +3584,20 @@ def compare_profile_run_summaries(
             and (
                 min_retention_perplexity_margin is None
                 or perplexity_margin >= min_retention_perplexity_margin
+            )
+            and (
+                min_epoch_wgpu_hit_rate is None
+                or epoch_wgpu_hit_rate >= min_epoch_wgpu_hit_rate
+            )
+            and (
+                max_epoch_wgpu_runtime_fallback_rate is None
+                or epoch_wgpu_runtime_fallback_rate
+                <= max_epoch_wgpu_runtime_fallback_rate
+            )
+            and (
+                max_epoch_wgpu_component_fallback_rate is None
+                or epoch_wgpu_component_fallback_rate
+                <= max_epoch_wgpu_component_fallback_rate
             )
             and (not require_source_match or not source_changed)
             and (not require_config_match or not config_changed)
@@ -3314,6 +3635,18 @@ def compare_profile_run_summaries(
             f"max_guard_retention_rejected_rate_regression={optional_numeric_label(max_guard_retention_rejected_rate_regression)} "
             f"guard_target_stale_rate_regression={optional_numeric_label(guard_target_stale_rate_regression)} "
             f"max_guard_target_stale_rate_regression={optional_numeric_label(max_guard_target_stale_rate_regression)} "
+            f"epoch_wgpu_hit_rate_regression={optional_numeric_label(epoch_wgpu_hit_rate_regression)} "
+            f"max_epoch_wgpu_hit_rate_regression={optional_numeric_label(max_epoch_wgpu_hit_rate_regression)} "
+            f"epoch_wgpu_runtime_fallback_rate_regression={optional_numeric_label(epoch_wgpu_runtime_fallback_rate_regression)} "
+            f"max_epoch_wgpu_runtime_fallback_rate_regression={optional_numeric_label(max_epoch_wgpu_runtime_fallback_rate_regression)} "
+            f"epoch_wgpu_component_fallback_rate_regression={optional_numeric_label(epoch_wgpu_component_fallback_rate_regression)} "
+            f"max_epoch_wgpu_component_fallback_rate_regression={optional_numeric_label(max_epoch_wgpu_component_fallback_rate_regression)} "
+            f"epoch_wgpu_hit_rate_mean={optional_numeric_label(epoch_wgpu_hit_rate)} "
+            f"min_epoch_wgpu_hit_rate={optional_numeric_label(min_epoch_wgpu_hit_rate)} "
+            f"epoch_wgpu_runtime_fallback_rate_mean={optional_numeric_label(epoch_wgpu_runtime_fallback_rate)} "
+            f"max_epoch_wgpu_runtime_fallback_rate={optional_numeric_label(max_epoch_wgpu_runtime_fallback_rate)} "
+            f"epoch_wgpu_component_fallback_rate_mean={optional_numeric_label(epoch_wgpu_component_fallback_rate)} "
+            f"max_epoch_wgpu_component_fallback_rate={optional_numeric_label(max_epoch_wgpu_component_fallback_rate)} "
             f"retention_accuracy_margin_min={accuracy_margin:.9f} "
             f"retention_perplexity_margin_min={perplexity_margin:.9f} "
             f"source_changed={source_changed} "
@@ -3404,6 +3737,32 @@ def compare_profile_run_summaries(
                 f"{profile}: guard_target_stale_rate_mean regressed by "
                 f"{guard_target_stale_rate_regression:.9f}"
             )
+        if (
+            max_epoch_wgpu_hit_rate_regression is not None
+            and epoch_wgpu_hit_rate_regression > max_epoch_wgpu_hit_rate_regression
+        ):
+            failures.append(
+                f"{profile}: epoch_wgpu_hit_rate_mean regressed by "
+                f"{epoch_wgpu_hit_rate_regression:.9f}"
+            )
+        if (
+            max_epoch_wgpu_runtime_fallback_rate_regression is not None
+            and epoch_wgpu_runtime_fallback_rate_regression
+            > max_epoch_wgpu_runtime_fallback_rate_regression
+        ):
+            failures.append(
+                f"{profile}: epoch_wgpu_runtime_fallback_rate_mean regressed by "
+                f"{epoch_wgpu_runtime_fallback_rate_regression:.9f}"
+            )
+        if (
+            max_epoch_wgpu_component_fallback_rate_regression is not None
+            and epoch_wgpu_component_fallback_rate_regression
+            > max_epoch_wgpu_component_fallback_rate_regression
+        ):
+            failures.append(
+                f"{profile}: epoch_wgpu_component_fallback_rate_mean regressed by "
+                f"{epoch_wgpu_component_fallback_rate_regression:.9f}"
+            )
         if min_movement_ok_rate is not None and movement_ok_rate < min_movement_ok_rate:
             failures.append(f"{profile}: movement_ok_rate {movement_ok_rate:.9f} below floor")
         if min_retention_accuracy_margin is not None and accuracy_margin < min_retention_accuracy_margin:
@@ -3416,6 +3775,31 @@ def compare_profile_run_summaries(
         ):
             failures.append(
                 f"{profile}: retention_perplexity_margin_min {perplexity_margin:.9f} below floor"
+            )
+        if (
+            min_epoch_wgpu_hit_rate is not None
+            and epoch_wgpu_hit_rate < min_epoch_wgpu_hit_rate
+        ):
+            failures.append(
+                f"{profile}: epoch_wgpu_hit_rate_mean "
+                f"{epoch_wgpu_hit_rate:.9f} below floor"
+            )
+        if (
+            max_epoch_wgpu_runtime_fallback_rate is not None
+            and epoch_wgpu_runtime_fallback_rate > max_epoch_wgpu_runtime_fallback_rate
+        ):
+            failures.append(
+                f"{profile}: epoch_wgpu_runtime_fallback_rate_mean "
+                f"{epoch_wgpu_runtime_fallback_rate:.9f} above ceiling"
+            )
+        if (
+            max_epoch_wgpu_component_fallback_rate is not None
+            and epoch_wgpu_component_fallback_rate
+            > max_epoch_wgpu_component_fallback_rate
+        ):
+            failures.append(
+                f"{profile}: epoch_wgpu_component_fallback_rate_mean "
+                f"{epoch_wgpu_component_fallback_rate:.9f} above ceiling"
             )
         if require_source_match and source_changed:
             failures.append(
@@ -3472,9 +3856,25 @@ def main():
             max_guard_target_stale_rate_regression=(
                 args.max_run_guard_target_stale_rate_regression
             ),
+            max_epoch_wgpu_hit_rate_regression=(
+                args.max_run_epoch_wgpu_hit_rate_regression
+            ),
+            max_epoch_wgpu_runtime_fallback_rate_regression=(
+                args.max_run_epoch_wgpu_runtime_fallback_rate_regression
+            ),
+            max_epoch_wgpu_component_fallback_rate_regression=(
+                args.max_run_epoch_wgpu_component_fallback_rate_regression
+            ),
             min_movement_ok_rate=args.min_run_movement_ok_rate,
             min_retention_accuracy_margin=args.min_run_retention_accuracy_margin,
             min_retention_perplexity_margin=args.min_run_retention_perplexity_margin,
+            min_epoch_wgpu_hit_rate=args.min_run_epoch_wgpu_hit_rate,
+            max_epoch_wgpu_runtime_fallback_rate=(
+                args.max_run_epoch_wgpu_runtime_fallback_rate
+            ),
+            max_epoch_wgpu_component_fallback_rate=(
+                args.max_run_epoch_wgpu_component_fallback_rate
+            ),
             require_source_match=args.require_run_source_match,
             require_config_match=args.require_run_config_match,
             require_case_scope_match=args.require_run_case_scope_match,
@@ -3526,11 +3926,20 @@ def main():
                 ready_min_retention_perplexity_margin=(
                     args.promotion_ready_min_retention_perplexity_margin
                 ),
+                ready_min_epoch_wgpu_hit_rate=(
+                    args.promotion_ready_min_epoch_wgpu_hit_rate
+                ),
                 ready_min_guard_acceptance_rate_mean=(
                     args.promotion_ready_min_guard_acceptance_rate_mean
                 ),
                 ready_max_input_promotion_metric_regression=(
                     args.promotion_ready_max_input_promotion_metric_regression
+                ),
+                ready_max_epoch_wgpu_runtime_fallback_rate=(
+                    args.promotion_ready_max_epoch_wgpu_runtime_fallback_rate
+                ),
+                ready_max_epoch_wgpu_component_fallback_rate=(
+                    args.promotion_ready_max_epoch_wgpu_component_fallback_rate
                 ),
                 ready_require_guard_counts_available=(
                     args.promotion_ready_require_guard_counts_available
@@ -3665,9 +4074,25 @@ def main():
             max_guard_target_stale_rate_regression=(
                 args.max_run_guard_target_stale_rate_regression
             ),
+            max_epoch_wgpu_hit_rate_regression=(
+                args.max_run_epoch_wgpu_hit_rate_regression
+            ),
+            max_epoch_wgpu_runtime_fallback_rate_regression=(
+                args.max_run_epoch_wgpu_runtime_fallback_rate_regression
+            ),
+            max_epoch_wgpu_component_fallback_rate_regression=(
+                args.max_run_epoch_wgpu_component_fallback_rate_regression
+            ),
             min_movement_ok_rate=args.min_run_movement_ok_rate,
             min_retention_accuracy_margin=args.min_run_retention_accuracy_margin,
             min_retention_perplexity_margin=args.min_run_retention_perplexity_margin,
+            min_epoch_wgpu_hit_rate=args.min_run_epoch_wgpu_hit_rate,
+            max_epoch_wgpu_runtime_fallback_rate=(
+                args.max_run_epoch_wgpu_runtime_fallback_rate
+            ),
+            max_epoch_wgpu_component_fallback_rate=(
+                args.max_run_epoch_wgpu_component_fallback_rate
+            ),
             require_source_match=args.require_run_source_match,
             require_config_match=args.require_run_config_match,
             require_case_scope_match=args.require_run_case_scope_match,
@@ -3709,6 +4134,9 @@ def main():
         or args.min_run_retention_accuracy_margin is not None
         or args.min_run_retention_perplexity_margin is not None
         or args.max_run_input_promotion_metric_regression is not None
+        or args.min_run_epoch_wgpu_hit_rate is not None
+        or args.max_run_epoch_wgpu_runtime_fallback_rate is not None
+        or args.max_run_epoch_wgpu_component_fallback_rate is not None
         or args.require_run_guard_counts_available
         or args.min_run_guard_acceptance_rate_mean is not None
         or args.max_run_guard_retention_rejected_epochs_mean is not None
@@ -3725,6 +4153,13 @@ def main():
             min_retention_perplexity_margin=args.min_run_retention_perplexity_margin,
             max_input_promotion_metric_regression=(
                 args.max_run_input_promotion_metric_regression
+            ),
+            min_epoch_wgpu_hit_rate=args.min_run_epoch_wgpu_hit_rate,
+            max_epoch_wgpu_runtime_fallback_rate=(
+                args.max_run_epoch_wgpu_runtime_fallback_rate
+            ),
+            max_epoch_wgpu_component_fallback_rate=(
+                args.max_run_epoch_wgpu_component_fallback_rate
             ),
             require_guard_counts_available=args.require_run_guard_counts_available,
             min_guard_acceptance_rate_mean=args.min_run_guard_acceptance_rate_mean,
@@ -3754,11 +4189,20 @@ def main():
             ready_min_retention_perplexity_margin=(
                 args.promotion_ready_min_retention_perplexity_margin
             ),
+            ready_min_epoch_wgpu_hit_rate=(
+                args.promotion_ready_min_epoch_wgpu_hit_rate
+            ),
             ready_min_guard_acceptance_rate_mean=(
                 args.promotion_ready_min_guard_acceptance_rate_mean
             ),
             ready_max_input_promotion_metric_regression=(
                 args.promotion_ready_max_input_promotion_metric_regression
+            ),
+            ready_max_epoch_wgpu_runtime_fallback_rate=(
+                args.promotion_ready_max_epoch_wgpu_runtime_fallback_rate
+            ),
+            ready_max_epoch_wgpu_component_fallback_rate=(
+                args.promotion_ready_max_epoch_wgpu_component_fallback_rate
             ),
             ready_require_guard_counts_available=(
                 args.promotion_ready_require_guard_counts_available
