@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from email.parser import Parser
 import json
 import os
 from pathlib import Path
@@ -11,11 +12,17 @@ import sys
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+import zipfile
 
 PACKAGE = "spiraltorch"
 DEFAULT_REPO = os.environ.get("GITHUB_REPOSITORY", "RyoSpiralArchitect/SpiralTorch")
 DEFAULT_SECRET_ENVIRONMENT = "pypi"
 DEFAULT_TOKEN_SECRET = "PYPI_API_TOKEN"
+REQUIRED_WHEEL_PAYLOADS = (
+    "spiraltorch/__init__.pyi",
+    "spiraltorch/py.typed",
+    "spiraltorch/spiralk.pyi",
+)
 
 
 class StatusError(RuntimeError):
@@ -43,6 +50,14 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=3,
         help="Expected number of release/PyPI wheel files. Default: 3.",
+    )
+    parser.add_argument(
+        "--dist",
+        type=Path,
+        help=(
+            "Optional local wheel directory to inspect for version metadata and "
+            "required type payloads before publishing."
+        ),
     )
     parser.add_argument(
         "--token-env",
@@ -139,6 +154,85 @@ def pypi_status(package: str, version: str, expected_wheels: int) -> dict[str, A
         "wheel_count": len(wheels),
         "wheel_names": wheels,
         "published": len(wheels) >= expected_wheels,
+    }
+
+
+def local_wheel_payload_status(
+    dist: Path | None,
+    *,
+    package: str,
+    version: str,
+    expected_wheels: int,
+) -> dict[str, Any]:
+    if dist is None:
+        return {
+            "checked": False,
+            "ready": None,
+            "wheel_count": 0,
+            "wheel_names": [],
+            "required_payloads": list(REQUIRED_WHEEL_PAYLOADS),
+            "missing_payloads": {},
+            "version_mismatches": {},
+            "metadata_errors": {},
+        }
+
+    if not dist.is_dir():
+        return {
+            "checked": True,
+            "ready": False,
+            "error": f"dist directory not found: {dist}",
+            "wheel_count": 0,
+            "wheel_names": [],
+            "required_payloads": list(REQUIRED_WHEEL_PAYLOADS),
+            "missing_payloads": {},
+            "version_mismatches": {},
+            "metadata_errors": {},
+        }
+
+    wheels = sorted(path for path in dist.rglob(f"{package}-*.whl") if path.is_file())
+    missing_payloads: dict[str, list[str]] = {}
+    version_mismatches: dict[str, str | None] = {}
+    metadata_errors: dict[str, str] = {}
+    for wheel in wheels:
+        try:
+            with zipfile.ZipFile(wheel) as archive:
+                names = set(archive.namelist())
+                metadata_names = [
+                    name for name in names
+                    if name.endswith(".dist-info/METADATA")
+                ]
+                if len(metadata_names) != 1:
+                    metadata_errors[wheel.name] = (
+                        f"expected one METADATA file, found {len(metadata_names)}"
+                    )
+                    continue
+                missing = sorted(set(REQUIRED_WHEEL_PAYLOADS) - names)
+                if missing:
+                    missing_payloads[wheel.name] = missing
+                metadata = Parser().parsestr(archive.read(metadata_names[0]).decode("utf-8"))
+        except (OSError, zipfile.BadZipFile, UnicodeDecodeError) as exc:
+            metadata_errors[wheel.name] = f"{exc.__class__.__name__}: {exc}"
+            continue
+
+        actual = metadata.get("Version")
+        if actual != version:
+            version_mismatches[wheel.name] = actual
+
+    ready = (
+        len(wheels) == expected_wheels
+        and not missing_payloads
+        and not version_mismatches
+        and not metadata_errors
+    )
+    return {
+        "checked": True,
+        "ready": ready,
+        "wheel_count": len(wheels),
+        "wheel_names": [wheel.name for wheel in wheels],
+        "required_payloads": list(REQUIRED_WHEEL_PAYLOADS),
+        "missing_payloads": missing_payloads,
+        "version_mismatches": version_mismatches,
+        "metadata_errors": metadata_errors,
     }
 
 
@@ -252,6 +346,12 @@ def build_status(args: argparse.Namespace) -> dict[str, Any]:
         raise StatusError("Unable to infer --version from bindings/st-py/pyproject.toml")
     tag = args.release_tag or f"v{version}"
     release = github_release_status(args.repo, tag, args.package, version, args.expected_wheels)
+    local_wheels = local_wheel_payload_status(
+        args.dist,
+        package=args.package,
+        version=version,
+        expected_wheels=args.expected_wheels,
+    )
     pypi = pypi_status(args.package, version, args.expected_wheels)
     tokens: dict[str, Any] = {
         "env": env_token_status(args.token_env),
@@ -263,6 +363,11 @@ def build_status(args: argparse.Namespace) -> dict[str, Any]:
 
     version_consistent = bool(versions["consistent"] and versions["pyproject"] == version)
     local_ready = bool(version_consistent)
+    local_wheel_payloads_ready = bool(
+        local_wheels.get("ready")
+        if local_wheels.get("checked")
+        else True
+    )
     release_ready = bool(release.get("ready"))
     pypi_published = bool(pypi.get("published"))
     token_ready = bool(tokens["env"].get("upload_ready")) or bool(tokens.get("clipboard", {}).get("upload_ready"))
@@ -271,6 +376,8 @@ def build_status(args: argparse.Namespace) -> dict[str, Any]:
         next_action = "verify published PyPI wheels against the GitHub Release manifest"
     elif not local_ready:
         next_action = "align local pyproject/Cargo versions before publishing"
+    elif not local_wheel_payloads_ready:
+        next_action = "fix local wheel metadata/type payloads before publishing"
     elif not release_ready:
         next_action = "fix or rebuild the GitHub Release wheel assets before publishing"
     elif github_secret_ready:
@@ -287,11 +394,13 @@ def build_status(args: argparse.Namespace) -> dict[str, Any]:
         "repo": args.repo,
         "expected_wheels": args.expected_wheels,
         "local_versions": versions,
+        "local_wheels": local_wheels,
         "github_release": release,
         "pypi": pypi,
         "tokens": tokens,
         "ready": {
             "local_versions": local_ready,
+            "local_wheel_payloads": local_wheel_payloads_ready,
             "github_release": release_ready,
             "pypi_published": pypi_published,
             "local_token": token_ready,
@@ -307,6 +416,7 @@ def yes_no(value: object) -> str:
 
 def print_text(status: dict[str, Any]) -> None:
     versions = status["local_versions"]
+    local_wheels = status["local_wheels"]
     release = status["github_release"]
     pypi = status["pypi"]
     tokens = status["tokens"]
@@ -317,6 +427,16 @@ def print_text(status: dict[str, Any]) -> None:
         f"pyproject={versions.get('pyproject')} cargo={versions.get('cargo')} "
         f"consistent={yes_no(ready['local_versions'])}"
     )
+    if local_wheels.get("checked"):
+        print(
+            "local_wheels "
+            f"ready={yes_no(ready['local_wheel_payloads'])} "
+            f"wheels={local_wheels.get('wheel_count', 0)}/{status['expected_wheels']} "
+            f"type_payloads={len(local_wheels.get('required_payloads', []))} "
+            f"missing_payload_wheels={len(local_wheels.get('missing_payloads', {}))} "
+            f"version_mismatch_wheels={len(local_wheels.get('version_mismatches', {}))} "
+            f"metadata_error_wheels={len(local_wheels.get('metadata_errors', {}))}"
+        )
     print(
         "github_release "
         f"exists={yes_no(release.get('exists'))} ready={yes_no(ready['github_release'])} "
