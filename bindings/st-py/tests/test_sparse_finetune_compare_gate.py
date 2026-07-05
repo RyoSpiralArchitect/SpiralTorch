@@ -1647,7 +1647,13 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             component_activation_fallbacks=0.0,
             component_merge_fallbacks=0.0,
             component_preactivation_hits=0.0,
+            wgpu_hits=0.0,
+            wgpu_runtime_fallbacks=0.0,
+            wgpu_component_hits=0.0,
+            wgpu_component_fallbacks=0.0,
         ):
+            wgpu_total = wgpu_hits + wgpu_runtime_fallbacks
+            wgpu_component_total = wgpu_component_hits + wgpu_component_fallbacks
             return {
                 "case": case,
                 "config": config,
@@ -1709,6 +1715,36 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                     "tensor_op_backend_requested_wgpu_component_hit_"
                     "non_liner_forward_preactivation_wgpu"
                 ): component_preactivation_hits,
+                "epoch_tensor_backend_requested_wgpu_hits": wgpu_hits,
+                "epoch_tensor_backend_requested_wgpu_runtime_fallbacks": (
+                    wgpu_runtime_fallbacks
+                ),
+                "epoch_tensor_backend_requested_wgpu_total": wgpu_total,
+                "epoch_tensor_backend_requested_wgpu_hit_rate": (
+                    wgpu_hits / wgpu_total if wgpu_total else None
+                ),
+                "epoch_tensor_backend_requested_wgpu_runtime_fallback_rate": (
+                    wgpu_runtime_fallbacks / wgpu_total if wgpu_total else None
+                ),
+                "epoch_tensor_backend_requested_wgpu_component_hits": (
+                    wgpu_component_hits
+                ),
+                "epoch_tensor_backend_requested_wgpu_component_fallbacks": (
+                    wgpu_component_fallbacks
+                ),
+                "epoch_tensor_backend_requested_wgpu_component_total": (
+                    wgpu_component_total
+                ),
+                "epoch_tensor_backend_requested_wgpu_component_hit_rate": (
+                    wgpu_component_hits / wgpu_component_total
+                    if wgpu_component_total
+                    else None
+                ),
+                "epoch_tensor_backend_requested_wgpu_component_fallback_rate": (
+                    wgpu_component_fallbacks / wgpu_component_total
+                    if wgpu_component_total
+                    else None
+                ),
             }
 
         rows = [
@@ -1724,6 +1760,10 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                 component_activation_fallbacks=2.0,
                 component_merge_fallbacks=1.0,
                 component_preactivation_hits=4.0,
+                wgpu_hits=8.0,
+                wgpu_runtime_fallbacks=2.0,
+                wgpu_component_hits=4.0,
+                wgpu_component_fallbacks=3.0,
             ),
             row(
                 "r12_a64_lr4::zspace_s0p5_cm0p5_f0p65",
@@ -1737,6 +1777,10 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                 component_activation_fallbacks=3.0,
                 component_merge_fallbacks=1.0,
                 component_preactivation_hits=2.0,
+                wgpu_hits=2.0,
+                wgpu_runtime_fallbacks=2.0,
+                wgpu_component_hits=2.0,
+                wgpu_component_fallbacks=4.0,
             ),
         ]
         aggregates = module.aggregate_config_rows(rows)
@@ -1786,6 +1830,32 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertEqual(
             aggregate["tensor_backend_requested_wgpu_component_hit_top"],
             "non_liner_forward_preactivation_wgpu:6",
+        )
+        self.assertAlmostEqual(
+            aggregate["epoch_tensor_backend_requested_wgpu_hits_total"],
+            10.0,
+        )
+        self.assertAlmostEqual(
+            aggregate[
+                "epoch_tensor_backend_requested_wgpu_runtime_fallbacks_total"
+            ],
+            4.0,
+        )
+        self.assertAlmostEqual(
+            aggregate["epoch_tensor_backend_requested_wgpu_hit_rate_mean"],
+            0.65,
+        )
+        self.assertAlmostEqual(
+            aggregate[
+                "epoch_tensor_backend_requested_wgpu_component_fallbacks_total"
+            ],
+            7.0,
+        )
+        self.assertAlmostEqual(
+            aggregate[
+                "epoch_tensor_backend_requested_wgpu_component_fallback_rate_mean"
+            ],
+            ((3.0 / 7.0) + (4.0 / 6.0)) / 2.0,
         )
         self.assertAlmostEqual(aggregate["guard_target_stale_rate_mean"], 1.0 / 6.0)
         self.assertAlmostEqual(aggregate["guard_target_stale_rate_max"], 2.0 / 6.0)
@@ -7106,6 +7176,16 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                             "tensor_op_backend_requested_wgpu_component_hit_"
                             "non_liner_forward_preactivation_wgpu"
                         ): 3.0,
+                        "epoch_tensor_backend_requested_wgpu_hits_total": 10.0,
+                        "epoch_tensor_backend_requested_wgpu_runtime_fallbacks_total": 4.0,
+                        "epoch_tensor_backend_requested_wgpu_total_sum": 14.0,
+                        "epoch_tensor_backend_requested_wgpu_hit_rate_mean": 0.65,
+                        "epoch_tensor_backend_requested_wgpu_runtime_fallback_rate_mean": 0.35,
+                        "epoch_tensor_backend_requested_wgpu_component_hits_total": 6.0,
+                        "epoch_tensor_backend_requested_wgpu_component_fallbacks_total": 7.0,
+                        "epoch_tensor_backend_requested_wgpu_component_total_sum": 13.0,
+                        "epoch_tensor_backend_requested_wgpu_component_hit_rate_mean": 0.45,
+                        "epoch_tensor_backend_requested_wgpu_component_fallback_rate_mean": 0.55,
                         "target_loss_delta_mean": 1.2,
                         "retention_loss_delta_mean": 0.4,
                     }
@@ -7181,12 +7261,29 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             row["tensor_backend_requested_wgpu_component_hit_top"],
             "non_liner_forward_preactivation_wgpu:3",
         )
+        self.assertAlmostEqual(
+            row["epoch_tensor_backend_requested_wgpu_hits_total"],
+            10.0,
+        )
+        self.assertAlmostEqual(
+            row["epoch_tensor_backend_requested_wgpu_hit_rate_mean"],
+            0.65,
+        )
+        self.assertAlmostEqual(
+            row["epoch_tensor_backend_requested_wgpu_component_fallback_rate_mean"],
+            0.55,
+        )
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
             module.print_run_summary_rows(rows)
         self.assertIn(
             "wgpu_component_fallback_top=non_liner_forward_activation_cpu:2,"
             "wave_scan_stack_forward_merge_cpu:1",
+            output.getvalue(),
+        )
+        self.assertIn("wgpu_epoch_hit_rate_mean=0.65", output.getvalue())
+        self.assertIn(
+            "wgpu_epoch_component_fallback_rate_mean=0.55",
             output.getvalue(),
         )
         self.assertEqual(row["input_promotion_run_key"], "strong_effect::r12_a64_lr4::gain_g4")
@@ -10870,6 +10967,66 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                 "non_liner_forward_activation_cpu"
             ],
             4.0,
+        )
+
+    def test_helper_backfills_epoch_tensor_backend_fields(self):
+        helper = load_compare_helper()
+        captured = types.SimpleNamespace(
+            train_summary=types.SimpleNamespace(
+                tensor_backend=types.SimpleNamespace(
+                    ops_total=12,
+                    fallbacks=2,
+                    backend_wgpu=8,
+                    requested_wgpu_hits=6,
+                    requested_wgpu_runtime_fallbacks=2,
+                    requested_wgpu_total=8,
+                    requested_wgpu_hit_rate=0.75,
+                    requested_wgpu_runtime_fallback_rate=0.25,
+                    requested_wgpu_component_hits=5,
+                    requested_wgpu_component_fallbacks=1,
+                    requested_wgpu_component_total=6,
+                    requested_wgpu_component_hit_rate=5.0 / 6.0,
+                    requested_wgpu_component_fallback_rate=1.0 / 6.0,
+                )
+            )
+        )
+        row = {}
+        helper.attach_epoch_tensor_backend_fields(row, captured)
+        self.assertEqual(row["epoch_tensor_ops_total"], 12)
+        self.assertEqual(row["epoch_tensor_backend_requested_wgpu_hits"], 6)
+        self.assertAlmostEqual(
+            row["epoch_tensor_backend_requested_wgpu_component_fallback_rate"],
+            1.0 / 6.0,
+        )
+
+        aggregate = helper.epoch_tensor_backend_aggregate_fields(
+            [
+                row,
+                {
+                    "epoch_tensor_backend_requested_wgpu_hits": 3,
+                    "epoch_tensor_backend_requested_wgpu_runtime_fallbacks": 1,
+                    "epoch_tensor_backend_requested_wgpu_total": 4,
+                    "epoch_tensor_backend_requested_wgpu_hit_rate": 0.75,
+                    "epoch_tensor_backend_requested_wgpu_component_hits": 2,
+                    "epoch_tensor_backend_requested_wgpu_component_fallbacks": 2,
+                    "epoch_tensor_backend_requested_wgpu_component_total": 4,
+                    "epoch_tensor_backend_requested_wgpu_component_fallback_rate": 0.5,
+                },
+            ]
+        )
+        self.assertEqual(
+            aggregate["epoch_tensor_backend_requested_wgpu_hits_total"],
+            9.0,
+        )
+        self.assertEqual(
+            aggregate["epoch_tensor_backend_requested_wgpu_total_sum"],
+            12.0,
+        )
+        self.assertAlmostEqual(
+            aggregate[
+                "epoch_tensor_backend_requested_wgpu_component_fallback_rate_mean"
+            ],
+            ((1.0 / 6.0) + 0.5) / 2.0,
         )
 
     def test_helper_rejects_boolean_summary_margin_inputs(self):

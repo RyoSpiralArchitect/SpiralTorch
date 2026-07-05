@@ -2223,6 +2223,16 @@ def print_run_summary_rows(rows):
                 "wgpu_component_hit_top="
                 f"{row.get('tensor_backend_requested_wgpu_component_hit_top')} "
             )
+        wgpu_epoch_label = ""
+        if row.get("epoch_tensor_backend_requested_wgpu_hit_rate_mean") is not None:
+            wgpu_epoch_label = (
+                "wgpu_epoch_hit_rate_mean="
+                f"{optional_numeric_label(row.get('epoch_tensor_backend_requested_wgpu_hit_rate_mean'))} "
+                "wgpu_epoch_runtime_fallback_rate_mean="
+                f"{optional_numeric_label(row.get('epoch_tensor_backend_requested_wgpu_runtime_fallback_rate_mean'))} "
+                "wgpu_epoch_component_fallback_rate_mean="
+                f"{optional_numeric_label(row.get('epoch_tensor_backend_requested_wgpu_component_fallback_rate_mean'))} "
+            )
         print(
             f"profile_run profile={row['source_profile']} "
             f"source={row['selected_source']} "
@@ -2239,6 +2249,7 @@ def print_run_summary_rows(rows):
             f"target_retention_gap_mean={float(row['target_retention_gap_mean']):.9f} "
             f"{guard_label}"
             f"{wgpu_component_label}"
+            f"{wgpu_epoch_label}"
             f"{input_promotion_label}"
             f"target_retention_ratio={ratio_label}"
         )
@@ -2301,6 +2312,16 @@ PROMOTION_COPY_FIELDS = [
     "guard_retention_rejected_rate_max",
     "guard_target_stale_rate_mean",
     "guard_target_stale_rate_max",
+    "epoch_tensor_backend_requested_wgpu_hits_total",
+    "epoch_tensor_backend_requested_wgpu_runtime_fallbacks_total",
+    "epoch_tensor_backend_requested_wgpu_total_sum",
+    "epoch_tensor_backend_requested_wgpu_hit_rate_mean",
+    "epoch_tensor_backend_requested_wgpu_runtime_fallback_rate_mean",
+    "epoch_tensor_backend_requested_wgpu_component_hits_total",
+    "epoch_tensor_backend_requested_wgpu_component_fallbacks_total",
+    "epoch_tensor_backend_requested_wgpu_component_total_sum",
+    "epoch_tensor_backend_requested_wgpu_component_hit_rate_mean",
+    "epoch_tensor_backend_requested_wgpu_component_fallback_rate_mean",
     "target_loss_delta_mean",
     "retention_loss_delta_mean",
     "target_retention_gap_mean",
