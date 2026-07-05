@@ -7563,6 +7563,54 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             ),
             2,
         )
+        wgpu_rows = [
+            dict(
+                rows[0],
+                epoch_tensor_backend_requested_wgpu_hit_rate_mean=0.95,
+                epoch_tensor_backend_requested_wgpu_runtime_fallback_rate_mean=0.05,
+                epoch_tensor_backend_requested_wgpu_component_fallback_rate_mean=0.10,
+            ),
+            dict(
+                rows[1],
+                epoch_tensor_backend_requested_wgpu_hit_rate_mean=0.60,
+                epoch_tensor_backend_requested_wgpu_runtime_fallback_rate_mean=0.25,
+                epoch_tensor_backend_requested_wgpu_component_fallback_rate_mean=0.30,
+            ),
+        ]
+        self.assertEqual(
+            module.check_profile_run_gates(
+                wgpu_rows,
+                min_epoch_wgpu_hit_rate=0.60,
+                max_epoch_wgpu_runtime_fallback_rate=0.25,
+                max_epoch_wgpu_component_fallback_rate=0.30,
+            ),
+            2,
+        )
+        with self.assertRaisesRegex(RuntimeError, "epoch_wgpu_hit_rate_mean"):
+            module.check_profile_run_gates(
+                [dict(wgpu_rows[1], epoch_tensor_backend_requested_wgpu_hit_rate_mean=0.5)],
+                min_epoch_wgpu_hit_rate=0.8,
+            )
+        with self.assertRaisesRegex(RuntimeError, "epoch_wgpu_runtime_fallback_rate_mean"):
+            module.check_profile_run_gates(
+                [
+                    dict(
+                        wgpu_rows[0],
+                        epoch_tensor_backend_requested_wgpu_runtime_fallback_rate_mean=0.2,
+                    )
+                ],
+                max_epoch_wgpu_runtime_fallback_rate=0.1,
+            )
+        with self.assertRaisesRegex(RuntimeError, "epoch_wgpu_component_fallback_rate_mean"):
+            module.check_profile_run_gates(
+                [
+                    dict(
+                        wgpu_rows[0],
+                        epoch_tensor_backend_requested_wgpu_component_fallback_rate_mean=0.25,
+                    )
+                ],
+                max_epoch_wgpu_component_fallback_rate=0.2,
+            )
         promotions = module.profile_run_promotion_rows(
             rows,
             promotion_metric="target_retention_ratio",
@@ -7671,6 +7719,40 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             regression_limited_promotions[1]["promotion_ready_floor_failures"],
             ["input_promotion_metric_regression>0.050000000"],
         )
+        wgpu_limited_promotions = module.profile_run_promotion_rows(
+            wgpu_rows,
+            promotion_metric="target_retention_ratio",
+            ready_top_k=2,
+            ready_min_epoch_wgpu_hit_rate=0.8,
+            ready_max_epoch_wgpu_runtime_fallback_rate=0.1,
+            ready_max_epoch_wgpu_component_fallback_rate=0.2,
+        )
+        self.assertFalse(wgpu_limited_promotions[0]["promotion_ready"])
+        self.assertEqual(
+            wgpu_limited_promotions[0]["promotion_ready_min_epoch_wgpu_hit_rate"],
+            0.8,
+        )
+        self.assertEqual(
+            wgpu_limited_promotions[0][
+                "promotion_ready_max_epoch_wgpu_runtime_fallback_rate"
+            ],
+            0.1,
+        )
+        self.assertEqual(
+            wgpu_limited_promotions[0][
+                "promotion_ready_max_epoch_wgpu_component_fallback_rate"
+            ],
+            0.2,
+        )
+        self.assertEqual(
+            wgpu_limited_promotions[0]["promotion_ready_floor_failures"],
+            [
+                "epoch_wgpu_hit_rate_mean<0.800000000",
+                "epoch_wgpu_runtime_fallback_rate_mean>0.100000000",
+                "epoch_wgpu_component_fallback_rate_mean>0.200000000",
+            ],
+        )
+        self.assertTrue(wgpu_limited_promotions[1]["promotion_ready"])
         guard_limited_rows = [
             dict(
                 rows[0],
@@ -8029,6 +8111,9 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                 "guard_acceptance_rate_mean": 1.0,
                 "guard_retention_rejected_rate_mean": 0.0,
                 "guard_target_stale_rate_mean": 0.0,
+                "epoch_tensor_backend_requested_wgpu_hit_rate_mean": 0.95,
+                "epoch_tensor_backend_requested_wgpu_runtime_fallback_rate_mean": 0.05,
+                "epoch_tensor_backend_requested_wgpu_component_fallback_rate_mean": 0.10,
                 "input_promotion_run_key": "strong_effect::r12_a64_lr4",
                 "input_promotion_rank": 1,
                 "input_promotion_metric": "target_retention_ratio",
@@ -8040,6 +8125,9 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                 "input_promotion_ready_floor_failures": [],
                 "input_promotion_ready_min_target_retention_ratio": 2.5,
                 "input_promotion_ready_min_accepted_rate": 1.0,
+                "input_promotion_ready_min_epoch_wgpu_hit_rate": 0.90,
+                "input_promotion_ready_max_epoch_wgpu_runtime_fallback_rate": 0.10,
+                "input_promotion_ready_max_epoch_wgpu_component_fallback_rate": 0.20,
                 "input_promotion_ready_require_guard_counts_available": True,
                 "input_promotion_ready_min_guard_acceptance_rate_mean": 0.75,
                 "input_promotion_ready_max_guard_retention_rejected_epochs_mean": 0.0,
@@ -8064,8 +8152,14 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                 max_guard_acceptance_rate_regression=0.0,
                 max_guard_retention_rejected_rate_regression=0.0,
                 max_guard_target_stale_rate_regression=0.0,
+                max_epoch_wgpu_hit_rate_regression=0.0,
+                max_epoch_wgpu_runtime_fallback_rate_regression=0.0,
+                max_epoch_wgpu_component_fallback_rate_regression=0.0,
                 min_retention_accuracy_margin=0.5,
                 min_retention_perplexity_margin=50.0,
+                min_epoch_wgpu_hit_rate=0.90,
+                max_epoch_wgpu_runtime_fallback_rate=0.10,
+                max_epoch_wgpu_component_fallback_rate=0.20,
                 require_source_match=True,
                 require_config_match=True,
                 require_case_scope_match=True,
@@ -8111,6 +8205,9 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         legacy_baseline[0].pop("input_promotion_ready_floor_failures")
         legacy_baseline[0].pop("input_promotion_ready_min_target_retention_ratio")
         legacy_baseline[0].pop("input_promotion_ready_min_accepted_rate")
+        legacy_baseline[0].pop("input_promotion_ready_min_epoch_wgpu_hit_rate")
+        legacy_baseline[0].pop("input_promotion_ready_max_epoch_wgpu_runtime_fallback_rate")
+        legacy_baseline[0].pop("input_promotion_ready_max_epoch_wgpu_component_fallback_rate")
         legacy_baseline[0].pop("input_promotion_ready_require_guard_counts_available")
         legacy_baseline[0].pop("input_promotion_ready_min_guard_acceptance_rate_mean")
         legacy_baseline[0].pop("input_promotion_ready_max_guard_retention_rejected_epochs_mean")
@@ -8126,6 +8223,9 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                 input_promotion_ready_floor_failures=None,
                 input_promotion_ready_min_target_retention_ratio=None,
                 input_promotion_ready_min_accepted_rate=None,
+                input_promotion_ready_min_epoch_wgpu_hit_rate=None,
+                input_promotion_ready_max_epoch_wgpu_runtime_fallback_rate=None,
+                input_promotion_ready_max_epoch_wgpu_component_fallback_rate=None,
                 input_promotion_ready_require_guard_counts_available=None,
                 input_promotion_ready_min_guard_acceptance_rate_mean=None,
                 input_promotion_ready_max_guard_retention_rejected_epochs_mean=None,
@@ -8191,6 +8291,37 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                 [dict(baseline[0], guard_target_stale_rate_mean=0.25)],
                 baseline,
                 max_guard_target_stale_rate_regression=0.0,
+            )
+        with self.assertRaisesRegex(RuntimeError, "epoch_wgpu_hit_rate_mean"):
+            module.compare_profile_run_summaries(
+                [dict(baseline[0], epoch_tensor_backend_requested_wgpu_hit_rate_mean=0.8)],
+                baseline,
+                max_epoch_wgpu_hit_rate_regression=0.1,
+                min_epoch_wgpu_hit_rate=0.9,
+            )
+        with self.assertRaisesRegex(RuntimeError, "epoch_wgpu_runtime_fallback_rate_mean"):
+            module.compare_profile_run_summaries(
+                [
+                    dict(
+                        baseline[0],
+                        epoch_tensor_backend_requested_wgpu_runtime_fallback_rate_mean=0.2,
+                    )
+                ],
+                baseline,
+                max_epoch_wgpu_runtime_fallback_rate_regression=0.1,
+                max_epoch_wgpu_runtime_fallback_rate=0.1,
+            )
+        with self.assertRaisesRegex(RuntimeError, "epoch_wgpu_component_fallback_rate_mean"):
+            module.compare_profile_run_summaries(
+                [
+                    dict(
+                        baseline[0],
+                        epoch_tensor_backend_requested_wgpu_component_fallback_rate_mean=0.3,
+                    )
+                ],
+                baseline,
+                max_epoch_wgpu_component_fallback_rate_regression=0.1,
+                max_epoch_wgpu_component_fallback_rate=0.2,
             )
         with self.assertRaisesRegex(RuntimeError, "case scope changed"):
             module.compare_profile_run_summaries(
@@ -8283,6 +8414,18 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                 baseline,
                 require_input_promotion_match=True,
             )
+        promotion_wgpu_policy_changed = [
+            dict(
+                baseline[0],
+                input_promotion_ready_min_epoch_wgpu_hit_rate=0.8,
+            )
+        ]
+        with self.assertRaisesRegex(RuntimeError, "input promotion changed"):
+            module.compare_profile_run_summaries(
+                promotion_wgpu_policy_changed,
+                baseline,
+                require_input_promotion_match=True,
+            )
 
     def test_mlp_lora_profile_runner_cli_compares_saved_run_summaries(self):
         module = load_example("byte_lm_mlp_lora_profile_runner")
@@ -8326,6 +8469,9 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             "target_retention_ratio": 3.0,
             "retention_accuracy_margin_min": 1.0,
             "retention_perplexity_margin_min": 100.0,
+            "epoch_tensor_backend_requested_wgpu_hit_rate_mean": 0.95,
+            "epoch_tensor_backend_requested_wgpu_runtime_fallback_rate_mean": 0.05,
+            "epoch_tensor_backend_requested_wgpu_component_fallback_rate_mean": 0.10,
             "input_promotion_run_key": "strong_effect::r12_a64_lr4",
             "input_promotion_rank": 1,
             "input_promotion_metric": "target_retention_ratio",
@@ -8340,6 +8486,9 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             "input_promotion_ready_floor_failures": [],
             "input_promotion_ready_min_target_retention_ratio": 2.5,
             "input_promotion_ready_min_accepted_rate": 1.0,
+            "input_promotion_ready_min_epoch_wgpu_hit_rate": 0.90,
+            "input_promotion_ready_max_epoch_wgpu_runtime_fallback_rate": 0.10,
+            "input_promotion_ready_max_epoch_wgpu_component_fallback_rate": 0.20,
             "input_promotion_ready_max_input_promotion_metric_regression": 0.0,
             "input_promotion_ready_require_guard_counts_available": True,
             "input_promotion_ready_min_guard_acceptance_rate_mean": 1.0,
@@ -8383,12 +8532,24 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                 "0.0",
                 "--max-run-guard-target-stale-rate-regression",
                 "0.0",
+                "--max-run-epoch-wgpu-hit-rate-regression",
+                "0.0",
+                "--max-run-epoch-wgpu-runtime-fallback-rate-regression",
+                "0.0",
+                "--max-run-epoch-wgpu-component-fallback-rate-regression",
+                "0.0",
                 "--min-run-movement-ok-rate",
                 "1.0",
                 "--min-run-retention-accuracy-margin",
                 "0.5",
                 "--min-run-retention-perplexity-margin",
                 "50.0",
+                "--min-run-epoch-wgpu-hit-rate",
+                "0.90",
+                "--max-run-epoch-wgpu-runtime-fallback-rate",
+                "0.10",
+                "--max-run-epoch-wgpu-component-fallback-rate",
+                "0.20",
                 "--max-run-input-promotion-metric-regression",
                 "0.0",
                 "--require-run-guard-counts-available",
@@ -8419,6 +8580,12 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                 "2.5",
                 "--promotion-ready-min-accepted-rate",
                 "1.0",
+                "--promotion-ready-min-epoch-wgpu-hit-rate",
+                "0.90",
+                "--promotion-ready-max-epoch-wgpu-runtime-fallback-rate",
+                "0.10",
+                "--promotion-ready-max-epoch-wgpu-component-fallback-rate",
+                "0.20",
                 "--promotion-ready-max-input-promotion-metric-regression",
                 "0.0",
                 "--promotion-ready-require-guard-counts-available",
@@ -8456,6 +8623,15 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             output.getvalue(),
         )
         self.assertIn("guard_target_stale_rate_regression=0.000000000", output.getvalue())
+        self.assertIn("epoch_wgpu_hit_rate_regression=0.000000000", output.getvalue())
+        self.assertIn(
+            "epoch_wgpu_runtime_fallback_rate_regression=0.000000000",
+            output.getvalue(),
+        )
+        self.assertIn(
+            "epoch_wgpu_component_fallback_rate_regression=0.000000000",
+            output.getvalue(),
+        )
         self.assertIn("profile_promotion_jsonl=", output.getvalue())
         self.assertIn("profile_promotion_gate rows=1 ready_count=1", output.getvalue())
         self.assertIn("ready_guard_policy_count=1", output.getvalue())
@@ -8468,6 +8644,15 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertEqual(promotions[0]["promotion_ready_floor_failures"], [])
         self.assertEqual(promotions[0]["promotion_ready_min_target_retention_ratio"], 2.5)
         self.assertEqual(promotions[0]["promotion_ready_min_accepted_rate"], 1.0)
+        self.assertEqual(promotions[0]["promotion_ready_min_epoch_wgpu_hit_rate"], 0.90)
+        self.assertEqual(
+            promotions[0]["promotion_ready_max_epoch_wgpu_runtime_fallback_rate"],
+            0.10,
+        )
+        self.assertEqual(
+            promotions[0]["promotion_ready_max_epoch_wgpu_component_fallback_rate"],
+            0.20,
+        )
         self.assertEqual(
             promotions[0]["promotion_ready_max_input_promotion_metric_regression"],
             0.0,
