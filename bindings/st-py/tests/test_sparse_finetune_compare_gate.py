@@ -3952,6 +3952,16 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         )
         self.assertEqual(
             [
+                plan["declared_transformers_trace_runtime_import_preset_modules"]
+                for plan in continue_plan_rows
+            ],
+            [
+                ["torch-transformers=transformers|torch"],
+                ["torch-transformers=transformers|torch"],
+            ],
+        )
+        self.assertEqual(
+            [
                 plan["require_transformers_trace_runtime_import"]
                 for plan in continue_plan_rows
             ],
@@ -3983,6 +3993,12 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         )
         self.assertEqual(continued_manifest_rows[0]["promoted_rungs"], 2)
         self.assertEqual(continued_manifest_rows[0]["promoted_ft_epochs"], [2, 3])
+        self.assertEqual(
+            continued_manifest_rows[0][
+                "declared_transformers_trace_runtime_import_preset_modules"
+            ],
+            ["torch-transformers=transformers|torch"],
+        )
         self.assertEqual(continued_validation_rows[0]["promoted_rungs"], 2)
         self.assertEqual(continued_validation_rows[0]["next_promoted_rung"], 3)
         self.assertEqual(
@@ -4317,6 +4333,11 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertIn("transformers_trace_compare_passed=True", text)
         self.assertIn("transformers_trace_coimport_status=ok", text)
         self.assertIn("transformers_trace_top_token_changed_rows=1", text)
+        self.assertIn(
+            "declared_transformers_trace_runtime_import_preset_modules="
+            "torch-transformers=transformers|torch",
+            text,
+        )
         self.assertTrue(validation_row["transformers_trace"])
         self.assertTrue(validation_row["transformers_trace_manifest_available"])
         self.assertTrue(validation_row["transformers_trace_spiraltorch_imported"])
@@ -4362,6 +4383,12 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertEqual(
             validation_row["declared_transformers_trace_runtime_import_presets"],
             "torch-transformers",
+        )
+        self.assertEqual(
+            validation_row[
+                "declared_transformers_trace_runtime_import_preset_modules"
+            ],
+            "torch-transformers=transformers|torch",
         )
         self.assertTrue(validation_row["transformers_trace_runtime_imports_all_ok"])
         self.assertEqual(
@@ -4953,6 +4980,10 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertEqual(
             args.require_manifest_transformers_trace_runtime_import_preset,
             ["torch-transformers"],
+        )
+        self.assertEqual(
+            module.transformers_trace_runtime_import_preset_modules(["hf-runtime"]),
+            ["hf-runtime=transformers|torch|tokenizers"],
         )
         self.assertIsNone(args.manifest_validation_jsonl)
         self.assertEqual(
