@@ -22,6 +22,7 @@ DEFAULT_CANONICAL_LICENSE = "LICENSE .txt"
 REQUIRED_LICENSE_TOKEN = "AGPL-3.0-or-later"
 CANONICAL_AGPL_PHRASE = "gnu affero general public license"
 CANONICAL_AGPL_VERSION = "version 3"
+THIRD_PARTY_PREFIXES = ("vendor",)
 
 
 @dataclass
@@ -42,6 +43,7 @@ class PackageRecord:
     name: str
     version: str | None
     license_expression: str
+    license_scope: str
 
 
 def parse_args() -> argparse.Namespace:
@@ -80,6 +82,13 @@ def references_agpl_license(text: str) -> bool:
     return REQUIRED_LICENSE_TOKEN.casefold() in normalized or (
         CANONICAL_AGPL_PHRASE in normalized and CANONICAL_AGPL_VERSION in normalized
     )
+
+
+def license_scope_for_manifest(root: Path, manifest_path: Path) -> str:
+    relative = manifest_path.relative_to(root)
+    if relative.parts and relative.parts[0] in THIRD_PARTY_PREFIXES:
+        return "third_party"
+    return "project"
 
 
 def git_ls_files(root: Path) -> Iterable[Path]:
@@ -151,10 +160,11 @@ def record_cargo_packages(root: Path, manifest_path: Path) -> PackageRecord | No
         return None
 
     pkg = package or workspace_package or {}
+    license_scope = license_scope_for_manifest(root, manifest_path)
     license_field = pkg.get("license")
     license_file = pkg.get("license-file")
     if license_field:
-        if REQUIRED_LICENSE_TOKEN not in license_field:
+        if license_scope == "project" and REQUIRED_LICENSE_TOKEN not in license_field:
             raise SystemExit(
                 f"{manifest_path}: license expression '{license_field}' does not contain {REQUIRED_LICENSE_TOKEN}."
             )
@@ -164,7 +174,7 @@ def record_cargo_packages(root: Path, manifest_path: Path) -> PackageRecord | No
         if not license_file_path.is_file():
             raise SystemExit(f"{manifest_path}: referenced license file '{license_file}' is missing.")
         embedded = license_file_path.read_text(encoding="utf-8", errors="ignore")
-        if not references_agpl_license(embedded):
+        if license_scope == "project" and not references_agpl_license(embedded):
             raise SystemExit(
                 f"{manifest_path}: referenced license file '{license_file}' does not mention "
                 f"{REQUIRED_LICENSE_TOKEN} or the GNU Affero GPL v3 license text."
@@ -178,6 +188,7 @@ def record_cargo_packages(root: Path, manifest_path: Path) -> PackageRecord | No
         name=pkg.get("name", ""),
         version=pkg.get("version"),
         license_expression=license_expression,
+        license_scope=license_scope,
     )
 
 
@@ -200,7 +211,8 @@ def record_pyproject(root: Path, manifest_path: Path) -> PackageRecord | None:
     if not license_expression:
         raise SystemExit(f"{manifest_path}: project license metadata is missing or malformed.")
 
-    if REQUIRED_LICENSE_TOKEN not in license_expression:
+    license_scope = license_scope_for_manifest(root, manifest_path)
+    if license_scope == "project" and REQUIRED_LICENSE_TOKEN not in license_expression:
         raise SystemExit(
             f"{manifest_path}: project license metadata '{license_expression}' does not contain {REQUIRED_LICENSE_TOKEN}."
         )
@@ -210,6 +222,7 @@ def record_pyproject(root: Path, manifest_path: Path) -> PackageRecord | None:
         name=str(project.get("name", "")),
         version=str(project.get("version")) if project.get("version") else None,
         license_expression=license_expression,
+        license_scope=license_scope,
     )
 
 
@@ -228,6 +241,7 @@ def gather_compliance_metadata(root: Path, tracked_files: Iterable[Path]) -> dic
                         "name": record.name,
                         "version": record.version or "",
                         "license": record.license_expression,
+                        "license_scope": record.license_scope,
                     }
                 )
         elif path.name == "pyproject.toml":
@@ -239,6 +253,7 @@ def gather_compliance_metadata(root: Path, tracked_files: Iterable[Path]) -> dic
                         "name": record.name,
                         "version": record.version or "",
                         "license": record.license_expression,
+                        "license_scope": record.license_scope,
                     }
                 )
 

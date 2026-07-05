@@ -598,7 +598,16 @@ def validate_clone(
     for section, entries in compliance.items():
         for entry in entries or []:
             license_expression = entry.get("license", "")
-            if REQUIRED_LICENSE_TOKEN not in license_expression:
+            license_scope = entry.get("license_scope", "project")
+            if not license_expression:
+                report.add_failure(
+                    f"{section} manifest {entry.get('manifest', '<unknown>')} missing license expression."
+                )
+            elif license_scope == "third_party":
+                report.add_check(
+                    f"{section} third-party manifest records license {license_expression}: {entry.get('manifest', '<unknown>')}"
+                )
+            elif REQUIRED_LICENSE_TOKEN not in license_expression:
                 report.add_failure(
                     f"{section} manifest {entry.get('manifest', '<unknown>')} missing AGPL expression: {license_expression}"
                 )
