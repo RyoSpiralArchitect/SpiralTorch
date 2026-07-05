@@ -521,6 +521,35 @@ python scripts/release_status.py \
   --release-tag "$TAG" \
   --expected-wheels 3
 
+# If local clipboard access is unavailable, install the PyPI token as a hidden
+# GitHub Actions environment secret. The token is read from a non-echoing prompt
+# and passed to `gh secret set` through stdin, not through shell history.
+python - <<'PY'
+import getpass
+import subprocess
+
+token = getpass.getpass("PyPI token for spiraltorch (hidden): ").strip()
+if not token.startswith("pypi-"):
+    raise SystemExit("Refusing to store a value that does not look like a PyPI API token")
+subprocess.run(
+    [
+        "gh",
+        "secret",
+        "set",
+        "PYPI_API_TOKEN",
+        "--repo",
+        "RyoSpiralArchitect/SpiralTorch",
+        "--env",
+        "pypi",
+        "--app",
+        "actions",
+    ],
+    input=token,
+    text=True,
+    check=True,
+)
+PY
+
 # Safe GitHub Actions preflight: validates the signed release wheels and PyPI
 # state, but never uploads. This is the default publish_method for the workflow.
 gh workflow run publish_pypi_from_release.yml \
