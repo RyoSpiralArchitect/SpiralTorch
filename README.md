@@ -400,24 +400,28 @@ Then pick the path that matches the job:
   checkpoint files before committing to heavier fine-tuning.
 - **Dependency contract before a run:** use the CLI or the top-level Python
   helper to record optional runtime evidence without making Hugging Face
-  packages hard dependencies of the wheel:
-
-  ```bash
-  spiral-runtime-preflight --preset hf-runtime --require --json-out ft-runtime.json
-  ```
-
-  ```python
-  import spiraltorch as st
-
-  report = st.runtime_import_preflight_report(
-      runtime_import_presets=["hf-runtime"],
-      required_runtime_import_presets=["hf-runtime"],
-  )
-  print(report["runtime_import_preflight_passed"])
-  ```
+  packages hard dependencies of the wheel.
 - **Source build or custom backend:** keep the wheel path for ordinary use, and
   switch to the maturin commands below only when you need local Rust changes,
   CPU-only artifacts, CUDA/HIP flags, or a release-equivalent wheel.
+
+For the dependency contract path, either run the CLI:
+
+```bash
+spiral-runtime-preflight --preset hf-runtime --require --json-out ft-runtime.json
+```
+
+or keep the evidence inside Python:
+
+```python
+import spiraltorch as st
+
+report = st.runtime_import_preflight_report(
+    runtime_import_presets=["hf-runtime"],
+    required_runtime_import_presets=["hf-runtime"],
+)
+print(report["runtime_import_preflight_passed"])
+```
 
 ---
 
