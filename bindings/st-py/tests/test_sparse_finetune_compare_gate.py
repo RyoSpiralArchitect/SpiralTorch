@@ -3,6 +3,7 @@ import contextlib
 import io
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -227,6 +228,63 @@ def new_compare_signature(seen_kwargs):
 
 
 class SparseFineTuneCompareGateTests(unittest.TestCase):
+    def test_python_facade_exposes_sparse_ft_compare_without_native(self):
+        env = dict(os.environ)
+        env["PYTHONNOUSERSITE"] = "1"
+        env["PYTHONPATH"] = str(ROOT)
+        code = """
+from spiraltorch.nn import compare_sparse_finetune_summaries
+
+baseline = {
+    "status": "ok",
+    "accepted": True,
+    "target_loss_delta": 1.0,
+    "retention_loss_delta": 0.1,
+    "target_min_loss_delta": 0.2,
+    "movement_tolerance": 1e-6,
+    "resume_hash": "a",
+}
+current = dict(
+    baseline,
+    accepted=False,
+    target_loss_delta=0.75,
+    retention_loss_delta=0.18,
+    resume_hash="b",
+)
+comparison = compare_sparse_finetune_summaries(
+    current,
+    baseline,
+    max_target_loss_regression=0.1,
+    max_retention_loss_regression=0.05,
+    require_accepted_match=True,
+    require_resume_match=True,
+)
+assert comparison["target_loss_regression"] == 0.25, comparison
+assert abs(comparison["retention_loss_regression"] - 0.08) < 1e-12, comparison
+assert comparison["accepted_changed"] is True, comparison
+assert comparison["resume_changed"] is True, comparison
+assert comparison["passed"] is False, comparison
+"""
+        subprocess.run(
+            [sys.executable, "-c", code],
+            env=env,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        help_result = subprocess.run(
+            [
+                sys.executable,
+                str(EXAMPLES / "byte_lm_profile_smoke.py"),
+                "--help",
+            ],
+            env=env,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        self.assertIn("--ft-readiness-preset", help_result.stdout)
+
     def test_helper_passes_accepted_gate_to_new_extension_signature(self):
         baseline = {"accepted": True}
         current = {"accepted": False}
