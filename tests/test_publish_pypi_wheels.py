@@ -10,6 +10,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest import mock
+import zipfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -29,6 +30,24 @@ class _Response(io.BytesIO):
 
 
 class PublishPyPIWheelsTests(unittest.TestCase):
+    def write_minimal_wheel(
+        self,
+        root: Path,
+        *,
+        version: str = "0.4.10",
+        include_type_payloads: bool = True,
+    ) -> Path:
+        wheel = root / f"spiraltorch-{version}-py3-none-any.whl"
+        with zipfile.ZipFile(wheel, "w") as archive:
+            archive.writestr(
+                f"spiraltorch-{version}.dist-info/METADATA",
+                f"Metadata-Version: 2.1\nName: spiraltorch\nVersion: {version}\n",
+            )
+            if include_type_payloads:
+                for payload in publish_pypi_wheels.REQUIRED_WHEEL_PAYLOADS:
+                    archive.writestr(payload, "")
+        return wheel
+
     def test_read_token_supports_hidden_prompt_source(self) -> None:
         with mock.patch.object(publish_pypi_wheels.getpass, "getpass", return_value=" pypi-test-token\n"):
             token, metadata = publish_pypi_wheels.read_token("prompt", "PYPI_API_TOKEN")
@@ -46,6 +65,27 @@ class PublishPyPIWheelsTests(unittest.TestCase):
 
         with self.assertRaisesRegex(publish_pypi_wheels.PublishError, "Duplicate"):
             publish_pypi_wheels.parse_sha256_lines(text)
+
+    def test_validate_wheel_metadata_requires_type_payloads(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            wheel = self.write_minimal_wheel(Path(tmp))
+
+            with mock.patch.object(publish_pypi_wheels, "log"):
+                publish_pypi_wheels.validate_wheel_metadata([wheel], "0.4.10")
+
+    def test_validate_wheel_metadata_reports_missing_type_payloads(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            wheel = self.write_minimal_wheel(Path(tmp), include_type_payloads=False)
+
+            with self.assertRaisesRegex(publish_pypi_wheels.PublishError, "py\\.typed"):
+                publish_pypi_wheels.validate_wheel_metadata([wheel], "0.4.10")
+
+    def test_validate_wheel_metadata_reports_version_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            wheel = self.write_minimal_wheel(Path(tmp), version="0.4.10")
+
+            with self.assertRaisesRegex(publish_pypi_wheels.PublishError, "expected version 0.4.11"):
+                publish_pypi_wheels.validate_wheel_metadata([wheel], "0.4.11")
 
     def test_pypi_release_wheel_digests_filters_non_wheels(self) -> None:
         payload = {

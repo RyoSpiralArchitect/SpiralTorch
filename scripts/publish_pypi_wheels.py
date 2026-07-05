@@ -8,6 +8,7 @@ and can run as a dry-run while waiting for credentials.
 from __future__ import annotations
 
 import argparse
+from email.parser import Parser
 import getpass
 import hashlib
 import json
@@ -21,9 +22,15 @@ import time
 from typing import Iterable, Sequence
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+import zipfile
 
 PACKAGE = "spiraltorch"
 PYPI_JSON_URL = f"https://pypi.org/pypi/{PACKAGE}/json"
+REQUIRED_WHEEL_PAYLOADS = (
+    "spiraltorch/__init__.pyi",
+    "spiraltorch/py.typed",
+    "spiraltorch/spiralk.pyi",
+)
 
 
 class PublishError(RuntimeError):
@@ -144,6 +151,39 @@ def validate_versions(wheels: Iterable[Path], expected: str | None) -> str:
 
 def twine_check(python: str, wheels: Sequence[Path]) -> None:
     run([python, "-m", "twine", "check", *(str(path) for path in wheels)])
+
+
+def validate_wheel_metadata(wheels: Sequence[Path], expected_version: str) -> None:
+    """Validate package metadata and type payloads before upload."""
+
+    for wheel in wheels:
+        with zipfile.ZipFile(wheel) as archive:
+            names = set(archive.namelist())
+            metadata_names = [
+                name for name in names
+                if name.endswith(".dist-info/METADATA")
+            ]
+            if len(metadata_names) != 1:
+                raise PublishError(
+                    f"{wheel.name}: expected one METADATA file, found {len(metadata_names)}"
+                )
+            missing_payloads = sorted(set(REQUIRED_WHEEL_PAYLOADS) - names)
+            if missing_payloads:
+                raise PublishError(
+                    f"{wheel.name}: missing required type payloads: "
+                    + ", ".join(missing_payloads)
+                )
+            metadata = Parser().parsestr(archive.read(metadata_names[0]).decode("utf-8"))
+
+        actual_version = metadata.get("Version")
+        if actual_version != expected_version:
+            raise PublishError(
+                f"{wheel.name}: expected version {expected_version}, found {actual_version}"
+            )
+        log(
+            f"wheel_metadata=ok wheel={wheel.name} version={actual_version} "
+            f"type_payloads={len(REQUIRED_WHEEL_PAYLOADS)}"
+        )
 
 
 def file_sha256(path: Path) -> str:
@@ -404,6 +444,7 @@ def main() -> int:
         log(f"wheel={wheel}")
 
     twine_check(args.python, wheels)
+    validate_wheel_metadata(wheels, version)
     if args.github_release_tag:
         verify_github_release_wheel_checksums(
             wheels,

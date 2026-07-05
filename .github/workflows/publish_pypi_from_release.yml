@@ -106,19 +106,30 @@ jobs:
           from pathlib import Path
 
           expected = os.environ["RELEASE_TAG"].lstrip("v")
+          required_payloads = {
+              "spiraltorch/__init__.pyi",
+              "spiraltorch/py.typed",
+              "spiraltorch/spiralk.pyi",
+          }
           for wheel in sorted(Path("release-dist").glob("*.whl")):
               with zipfile.ZipFile(wheel) as archive:
+                  names = set(archive.namelist())
                   metadata_names = [
-                      name for name in archive.namelist()
+                      name for name in names
                       if name.endswith(".dist-info/METADATA")
                   ]
                   if len(metadata_names) != 1:
                       raise SystemExit(f"{wheel.name}: expected one METADATA file, found {len(metadata_names)}")
+                  missing_payloads = sorted(required_payloads - names)
+                  if missing_payloads:
+                      raise SystemExit(
+                          f"{wheel.name}: missing required type payloads: {', '.join(missing_payloads)}"
+                      )
                   metadata = Parser().parsestr(archive.read(metadata_names[0]).decode("utf-8"))
               actual = metadata.get("Version")
               if actual != expected:
                   raise SystemExit(f"{wheel.name}: expected version {expected}, found {actual}")
-              print(f"{wheel.name}: version={actual}")
+              print(f"{wheel.name}: version={actual} type_payloads={len(required_payloads)}")
           PY
           mkdir -p pypi-dist
           cp release-dist/*.whl pypi-dist/
