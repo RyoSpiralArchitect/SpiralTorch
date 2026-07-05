@@ -6759,6 +6759,9 @@ _CORE_EXPORTS = [
 for _name in _CORE_EXPORTS:
     _expose_from_rs(_name)
 
+if "OpenTopos" not in globals() and "OpenCartesianTopos" in globals():
+    OpenTopos = globals()["OpenCartesianTopos"]
+
 _native_init_backend = globals().get("init_backend")
 _native_plan = globals().get("plan")
 _native_plan_topk = globals().get("plan_topk")
@@ -7314,6 +7317,8 @@ _EXPORTED: set[str] = set()
 _EXPORTED.update(n for n in _EXTRAS if n in globals())
 _EXPORTED.update(n for n in _CORE_EXPORTS if n in globals())
 _EXPORTED.update(n for n in _COMPAT_ALIAS if n in globals())
+if "OpenTopos" in globals():
+    _EXPORTED.add("OpenTopos")
 
 for _name in [
     "nn",

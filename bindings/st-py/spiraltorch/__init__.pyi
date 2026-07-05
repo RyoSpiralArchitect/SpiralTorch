@@ -664,6 +664,8 @@ class OpenCartesianTopos:
     def guard_zbox(self, zbox: ZBox) -> None: ...
     def guard_cover(self, cover: Sequence[ZBox]) -> None: ...
 
+OpenTopos = OpenCartesianTopos
+
 class ZBox:
     def __init__(
         self,
@@ -3305,7 +3307,14 @@ class _NnIdentity:
 
 
 class _NnLinear:
+    @overload
     def __init__(self, name: str, input_dim: int, output_dim: int) -> None: ...
+
+    @overload
+    def __init__(self, input_dim: int, output_dim: int, *, name: str = ...) -> None: ...
+
+    @overload
+    def __init__(self, input_dim: int, output_dim: int, name: str) -> None: ...
 
     def forward(self, input: Tensor) -> Tensor: ...
 
@@ -3330,6 +3339,23 @@ class _NnLinear:
     def state_dict(self) -> List[Tuple[str, Tensor]]: ...
 
     def load_state_dict(self, state: Sequence[Tuple[str, Tensor]]) -> None: ...
+
+    def load_state_dict_checked(
+        self,
+        state: Mapping[str, object] | Sequence[Tuple[str, object]],
+    ) -> Dict[str, Any]: ...
+
+    def state_dict_compatibility_with_key_map(
+        self,
+        state: Mapping[str, object] | Sequence[Tuple[str, object]],
+        key_map: object,
+    ) -> Dict[str, Any]: ...
+
+    def load_state_dict_subset_mapped_checked(
+        self,
+        state: Mapping[str, object] | Sequence[Tuple[str, object]],
+        key_map: object,
+    ) -> Dict[str, Any]: ...
 
 
 class _NnLoraLinear:
@@ -3436,7 +3462,14 @@ class _NnZSpaceProjector:
 
 
 class _NnEmbedding:
+    @overload
     def __init__(self, name: str, vocab_size: int, embed_dim: int) -> None: ...
+
+    @overload
+    def __init__(self, vocab_size: int, embed_dim: int, *, name: str = ...) -> None: ...
+
+    @overload
+    def __init__(self, vocab_size: int, embed_dim: int, name: str) -> None: ...
 
     def forward(self, input: Tensor) -> Tensor: ...
 
@@ -3461,6 +3494,23 @@ class _NnEmbedding:
     def state_dict(self) -> List[Tuple[str, Tensor]]: ...
 
     def load_state_dict(self, state: Sequence[Tuple[str, Tensor]]) -> None: ...
+
+    def load_state_dict_checked(
+        self,
+        state: Mapping[str, object] | Sequence[Tuple[str, object]],
+    ) -> Dict[str, Any]: ...
+
+    def state_dict_compatibility_with_key_map(
+        self,
+        state: Mapping[str, object] | Sequence[Tuple[str, object]],
+        key_map: object,
+    ) -> Dict[str, Any]: ...
+
+    def load_state_dict_subset_mapped_checked(
+        self,
+        state: Mapping[str, object] | Sequence[Tuple[str, object]],
+        key_map: object,
+    ) -> Dict[str, Any]: ...
 
 
 class _NnSpiralRnn:
