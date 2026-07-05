@@ -3430,6 +3430,153 @@ def _mirror_into_module(
     return module
 
 
+def _sparse_ft_mapping(summary: _Any) -> _Mapping[str, _Any]:
+    if isinstance(summary, _Mapping):
+        return summary
+    if hasattr(summary, "items"):
+        return dict(summary.items())
+    raise TypeError("sparse FT summary must be a mapping")
+
+
+def _sparse_ft_numeric(
+    summary: _Mapping[str, _Any],
+    key: str,
+    default: float = 0.0,
+) -> float:
+    value = summary.get(key, default)
+    if value is None:
+        return float(default)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"sparse FT summary {key} is not numeric")
+    return float(value)
+
+
+def _sparse_ft_bool(
+    summary: _Mapping[str, _Any],
+    key: str,
+    default: bool = False,
+) -> bool:
+    value = summary.get(key, default)
+    if isinstance(value, bool):
+        return value
+    return bool(value)
+
+
+def _sparse_ft_any_changed(
+    current: _Mapping[str, _Any],
+    baseline: _Mapping[str, _Any],
+    keys: _Iterable[str],
+) -> bool:
+    for key in keys:
+        current_has = key in current
+        baseline_has = key in baseline
+        if current_has != baseline_has:
+            return True
+        if current_has and current.get(key) != baseline.get(key):
+            return True
+    return False
+
+
+def compare_sparse_finetune_summaries(
+    current: _Mapping[str, _Any],
+    baseline: _Mapping[str, _Any],
+    *,
+    max_target_loss_regression: float | None = None,
+    max_retention_loss_regression: float | None = None,
+    require_status_match: bool = False,
+    require_accepted_match: bool = False,
+    require_guard_match: bool = False,
+    require_movement_tolerance_match: bool = False,
+    require_resume_match: bool = False,
+    **_extra: _Any,
+) -> dict[str, _Any]:
+    """Compare sparse FT summaries without requiring the compiled nn module."""
+
+    current_summary = _sparse_ft_mapping(current)
+    baseline_summary = _sparse_ft_mapping(baseline)
+    current_target = _sparse_ft_numeric(
+        current_summary,
+        "target_loss_delta",
+    )
+    baseline_target = _sparse_ft_numeric(
+        baseline_summary,
+        "target_loss_delta",
+    )
+    current_retention = _sparse_ft_numeric(
+        current_summary,
+        "retention_loss_delta",
+    )
+    baseline_retention = _sparse_ft_numeric(
+        baseline_summary,
+        "retention_loss_delta",
+    )
+    target_loss_regression = max(0.0, baseline_target - current_target)
+    retention_loss_regression = max(0.0, current_retention - baseline_retention)
+    current_status = current_summary.get("status")
+    baseline_status = baseline_summary.get("status")
+    status_changed = current_status != baseline_status
+    accepted_changed = _sparse_ft_bool(
+        current_summary,
+        "accepted",
+    ) != _sparse_ft_bool(baseline_summary, "accepted")
+    guard_changed = _sparse_ft_any_changed(
+        current_summary,
+        baseline_summary,
+        (
+            "target_min_loss_delta",
+            "target_min_loss_delta_policy",
+            "retention_max_loss_increase",
+            "retention_max_accuracy_drop",
+            "retention_max_perplexity_increase",
+        ),
+    )
+    movement_tolerance_changed = _sparse_ft_any_changed(
+        current_summary,
+        baseline_summary,
+        ("movement_tolerance",),
+    )
+    resume_changed = _sparse_ft_any_changed(
+        current_summary,
+        baseline_summary,
+        (
+            "resume_hash",
+            "resume_trainer_hash",
+            "resume_parameter_training_hash",
+        ),
+    )
+    passed = True
+    if max_target_loss_regression is not None:
+        passed = passed and target_loss_regression <= max_target_loss_regression
+    if max_retention_loss_regression is not None:
+        passed = passed and retention_loss_regression <= max_retention_loss_regression
+    if require_status_match:
+        passed = passed and not status_changed
+    if require_accepted_match:
+        passed = passed and not accepted_changed
+    if require_guard_match:
+        passed = passed and not guard_changed
+    if require_movement_tolerance_match:
+        passed = passed and not movement_tolerance_changed
+    if require_resume_match:
+        passed = passed and not resume_changed
+    return {
+        "passed": bool(passed),
+        "baseline_status": baseline_status,
+        "current_status": current_status,
+        "status_changed": status_changed,
+        "accepted_changed": accepted_changed,
+        "guard_changed": guard_changed,
+        "movement_tolerance_changed": movement_tolerance_changed,
+        "resume_changed": resume_changed,
+        "baseline_target_loss_delta": baseline_target,
+        "current_target_loss_delta": current_target,
+        "target_loss_regression": target_loss_regression,
+        "baseline_retention_loss_delta": baseline_retention,
+        "current_retention_loss_delta": current_retention,
+        "retention_loss_regression": retention_loss_regression,
+    }
+
+
 class _PluginRecorder:
     _subscribe = None
     _unsubscribe = None
@@ -4858,6 +5005,15 @@ def _install_nn_helpers() -> None:
 
     nn_module.eval_mode = eval_mode
     _register_module_export(nn_module, "eval_mode")
+
+    native_compare_sparse_ft = (
+        _resolve_rs_attr("nn.compare_sparse_finetune_summaries")
+        or _resolve_rs_attr("compare_sparse_finetune_summaries")
+    )
+    compare_sparse_ft = native_compare_sparse_ft or compare_sparse_finetune_summaries
+    globals()["compare_sparse_finetune_summaries"] = compare_sparse_ft
+    nn_module.compare_sparse_finetune_summaries = compare_sparse_ft
+    _register_module_export(nn_module, "compare_sparse_finetune_summaries")
 
     save_json = _resolve_rs_attr("nn.save_json")
     load_json = _resolve_rs_attr("nn.load_json")

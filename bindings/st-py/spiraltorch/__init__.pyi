@@ -4314,6 +4314,19 @@ class _NnModule(ModuleType):
         path: str,
     ) -> List[Tuple[str, Tensor]] | None: ...
     def eval_mode(module: object) -> ContextManager[None]: ...
+    def compare_sparse_finetune_summaries(
+        current: Mapping[str, Any],
+        baseline: Mapping[str, Any],
+        *,
+        max_target_loss_regression: float | None = ...,
+        max_retention_loss_regression: float | None = ...,
+        require_status_match: bool = ...,
+        require_accepted_match: bool = ...,
+        require_guard_match: bool = ...,
+        require_movement_tolerance_match: bool = ...,
+        require_resume_match: bool = ...,
+        **extra: Any,
+    ) -> Dict[str, Any]: ...
 
 
 nn: _NnModule
