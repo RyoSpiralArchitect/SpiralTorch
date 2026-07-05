@@ -40,6 +40,8 @@ from checkpoint_preflight import (
 )
 from sparse_finetune_compare import (
     add_summary_compare_args,
+    attach_epoch_tensor_backend_aggregate_fields,
+    attach_epoch_tensor_backend_fields,
     attach_requested_wgpu_component_backend_summary,
     attach_summary_guard_counts,
     attach_summary_guard_margins,
@@ -1717,6 +1719,7 @@ def summary_row(
     row = dict(report["summary"])
     attach_summary_guard_margins(row)
     attach_summary_guard_counts(row, report["captured"])
+    attach_epoch_tensor_backend_fields(row, report["summary"], report["captured"])
     attach_requested_wgpu_component_backend_summary(row)
     row.update(
         {
@@ -2402,6 +2405,7 @@ def aggregate_config_rows(rows):
             aggregate,
             source_rows=grouped,
         )
+        attach_epoch_tensor_backend_aggregate_fields(aggregate, grouped)
         aggregates.append(aggregate)
     return aggregates
 

@@ -600,6 +600,144 @@ def attach_requested_wgpu_component_backend_summary(
     return row
 
 
+EPOCH_TENSOR_BACKEND_KEYS = (
+    "ops_total",
+    "fallbacks",
+    "backend_wgpu",
+    "backend_cuda",
+    "backend_hip",
+    "backend_cpu",
+    "backend_cpu_simd",
+    "backend_f64_cpu",
+    "backend_faer",
+    "backend_naive",
+    "backend_other",
+    "kernel_backend_wgpu_dense",
+    "kernel_backend_simd",
+    "kernel_backend_other",
+    "requested_wgpu_hits",
+    "requested_wgpu_runtime_fallbacks",
+    "requested_wgpu_total",
+    "requested_wgpu_hit_rate",
+    "requested_wgpu_runtime_fallback_rate",
+    "requested_wgpu_component_hits",
+    "requested_wgpu_component_fallbacks",
+    "requested_wgpu_component_total",
+    "requested_wgpu_component_hit_rate",
+    "requested_wgpu_component_fallback_rate",
+    "embedding_tokens",
+    "embedding_unique_token_indices",
+    "embedding_repeated_token_indices",
+    "embedding_token_repairs",
+)
+
+EPOCH_TENSOR_BACKEND_RATE_KEYS = (
+    "epoch_tensor_backend_requested_wgpu_hit_rate",
+    "epoch_tensor_backend_requested_wgpu_runtime_fallback_rate",
+    "epoch_tensor_backend_requested_wgpu_component_hit_rate",
+    "epoch_tensor_backend_requested_wgpu_component_fallback_rate",
+)
+
+EPOCH_TENSOR_BACKEND_TOTAL_KEYS = (
+    "epoch_tensor_ops_total",
+    "epoch_tensor_backend_fallbacks",
+    "epoch_tensor_backend_requested_wgpu_hits",
+    "epoch_tensor_backend_requested_wgpu_runtime_fallbacks",
+    "epoch_tensor_backend_requested_wgpu_total",
+    "epoch_tensor_backend_requested_wgpu_component_hits",
+    "epoch_tensor_backend_requested_wgpu_component_fallbacks",
+    "epoch_tensor_backend_requested_wgpu_component_total",
+)
+
+
+def _source_get(source, key, default=None):
+    if source is None:
+        return default
+    if hasattr(source, "get"):
+        return source.get(key, default)
+    return getattr(source, key, default)
+
+
+def _source_mapping(source):
+    if source is None:
+        return None
+    if isinstance(source, dict):
+        return source
+    if hasattr(source, "items"):
+        return source
+    return None
+
+
+def _maybe_epoch_tensor_backend_source(source):
+    source = _source_get(source, "train_summary", source)
+    direct = _source_mapping(source)
+    if direct is not None and any(
+        f"epoch_tensor_{key}" in direct or f"epoch_tensor_backend_{key}" in direct
+        for key in EPOCH_TENSOR_BACKEND_KEYS
+    ):
+        return direct
+    tensor_backend = _source_get(source, "tensor_backend")
+    if tensor_backend is not None:
+        return tensor_backend
+    return source
+
+
+def epoch_tensor_backend_fields(source):
+    tensor_backend = _maybe_epoch_tensor_backend_source(source)
+    fields = {}
+    for key in EPOCH_TENSOR_BACKEND_KEYS:
+        row_key = f"epoch_tensor_{key}" if key == "ops_total" else f"epoch_tensor_backend_{key}"
+        value = _source_get(tensor_backend, row_key)
+        if value is None:
+            value = _source_get(tensor_backend, key)
+        if value is not None:
+            fields[row_key] = value
+    return fields
+
+
+def attach_epoch_tensor_backend_fields(row, *sources):
+    for source in sources:
+        fields = epoch_tensor_backend_fields(source)
+        if fields:
+            row.update(fields)
+            break
+    return row
+
+
+def _optional_numeric_values(rows, key):
+    values = []
+    for row in rows:
+        value = row.get(key)
+        if value is None:
+            continue
+        if not is_numeric_value(value):
+            raise ValueError(f"summary {key} is not numeric")
+        values.append(float(value))
+    return values
+
+
+def epoch_tensor_backend_aggregate_fields(rows):
+    fields = {}
+    for key in EPOCH_TENSOR_BACKEND_TOTAL_KEYS:
+        values = _optional_numeric_values(rows, key)
+        if values:
+            aggregate_key = f"{key}_sum" if key.endswith("_total") else f"{key}_total"
+            fields[aggregate_key] = sum(values)
+            fields[f"{key}_mean"] = sum(values) / len(values)
+    for key in EPOCH_TENSOR_BACKEND_RATE_KEYS:
+        values = _optional_numeric_values(rows, key)
+        if values:
+            fields[f"{key}_mean"] = sum(values) / len(values)
+            fields[f"{key}_min"] = min(values)
+            fields[f"{key}_max"] = max(values)
+    return fields
+
+
+def attach_epoch_tensor_backend_aggregate_fields(row, source_rows):
+    row.update(epoch_tensor_backend_aggregate_fields(source_rows))
+    return row
+
+
 CHECKPOINT_AUDIT_PREFIXES = ["base", "embed", "head"]
 CHECKPOINT_AUDIT_SUFFIXES = [
     "preflight_matched",
