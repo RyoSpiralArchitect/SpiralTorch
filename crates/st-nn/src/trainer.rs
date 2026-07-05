@@ -1635,6 +1635,36 @@ pub struct EpochTensorBackendStats {
 }
 
 impl EpochTensorBackendStats {
+    pub fn requested_wgpu_total(&self) -> usize {
+        self.requested_wgpu_hits
+            .saturating_add(self.requested_wgpu_runtime_fallbacks)
+    }
+
+    pub fn requested_wgpu_hit_rate(&self) -> Option<f64> {
+        let total = self.requested_wgpu_total();
+        (total > 0).then(|| self.requested_wgpu_hits as f64 / total as f64)
+    }
+
+    pub fn requested_wgpu_runtime_fallback_rate(&self) -> Option<f64> {
+        let total = self.requested_wgpu_total();
+        (total > 0).then(|| self.requested_wgpu_runtime_fallbacks as f64 / total as f64)
+    }
+
+    pub fn requested_wgpu_component_total(&self) -> usize {
+        self.requested_wgpu_component_hits
+            .saturating_add(self.requested_wgpu_component_fallbacks)
+    }
+
+    pub fn requested_wgpu_component_hit_rate(&self) -> Option<f64> {
+        let total = self.requested_wgpu_component_total();
+        (total > 0).then(|| self.requested_wgpu_component_hits as f64 / total as f64)
+    }
+
+    pub fn requested_wgpu_component_fallback_rate(&self) -> Option<f64> {
+        let total = self.requested_wgpu_component_total();
+        (total > 0).then(|| self.requested_wgpu_component_fallbacks as f64 / total as f64)
+    }
+
     fn accumulate_trace(&mut self, trace: &TensorBackendStepTrace) {
         self.ops_total = self.ops_total.saturating_add(trace.total);
         self.fallbacks = self.fallbacks.saturating_add(trace.fallbacks);
@@ -1713,17 +1743,16 @@ impl EpochTensorBackendStats {
             "epoch_tensor_backend_requested_wgpu_runtime_fallbacks".to_string(),
             self.requested_wgpu_runtime_fallbacks as f64,
         );
-        let requested_wgpu_total = self
-            .requested_wgpu_hits
-            .saturating_add(self.requested_wgpu_runtime_fallbacks);
-        if requested_wgpu_total > 0 {
+        if let Some(hit_rate) = self.requested_wgpu_hit_rate() {
             extra.insert(
                 "epoch_tensor_backend_requested_wgpu_hit_rate".to_string(),
-                self.requested_wgpu_hits as f64 / requested_wgpu_total as f64,
+                hit_rate,
             );
+        }
+        if let Some(fallback_rate) = self.requested_wgpu_runtime_fallback_rate() {
             extra.insert(
                 "epoch_tensor_backend_requested_wgpu_runtime_fallback_rate".to_string(),
-                self.requested_wgpu_runtime_fallbacks as f64 / requested_wgpu_total as f64,
+                fallback_rate,
             );
         }
         extra.insert(
@@ -1734,18 +1763,16 @@ impl EpochTensorBackendStats {
             "epoch_tensor_backend_requested_wgpu_component_fallbacks".to_string(),
             self.requested_wgpu_component_fallbacks as f64,
         );
-        let requested_wgpu_component_total = self
-            .requested_wgpu_component_hits
-            .saturating_add(self.requested_wgpu_component_fallbacks);
-        if requested_wgpu_component_total > 0 {
+        if let Some(hit_rate) = self.requested_wgpu_component_hit_rate() {
             extra.insert(
                 "epoch_tensor_backend_requested_wgpu_component_hit_rate".to_string(),
-                self.requested_wgpu_component_hits as f64 / requested_wgpu_component_total as f64,
+                hit_rate,
             );
+        }
+        if let Some(fallback_rate) = self.requested_wgpu_component_fallback_rate() {
             extra.insert(
                 "epoch_tensor_backend_requested_wgpu_component_fallback_rate".to_string(),
-                self.requested_wgpu_component_fallbacks as f64
-                    / requested_wgpu_component_total as f64,
+                fallback_rate,
             );
         }
         extra.insert(
@@ -10357,6 +10384,9 @@ mod tests {
         epoch.accumulate_trace(&trace);
         assert_eq!(epoch.requested_wgpu_component_hits, 6);
         assert_eq!(epoch.requested_wgpu_component_fallbacks, 4);
+        assert_eq!(epoch.requested_wgpu_component_total(), 10);
+        assert_eq!(epoch.requested_wgpu_component_hit_rate(), Some(0.6));
+        assert_eq!(epoch.requested_wgpu_component_fallback_rate(), Some(0.4));
         let mut epoch_extra = HashMap::new();
         epoch.write_extra(&mut epoch_extra);
         assert_eq!(
@@ -10564,6 +10594,9 @@ mod tests {
         epoch.accumulate_trace(&trace);
         assert_eq!(epoch.requested_wgpu_hits, 1);
         assert_eq!(epoch.requested_wgpu_runtime_fallbacks, 1);
+        assert_eq!(epoch.requested_wgpu_total(), 2);
+        assert_eq!(epoch.requested_wgpu_hit_rate(), Some(0.5));
+        assert_eq!(epoch.requested_wgpu_runtime_fallback_rate(), Some(0.5));
         let mut epoch_extra = HashMap::new();
         epoch.write_extra(&mut epoch_extra);
         assert_eq!(

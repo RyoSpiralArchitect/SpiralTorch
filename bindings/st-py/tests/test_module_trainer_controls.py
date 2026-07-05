@@ -167,6 +167,20 @@ def test_module_trainer_curvature_scheduler_metrics_roundtrip() -> None:
     y2 = st.Tensor.rand(2, 1, seed=34)
     stats = trainer.train_epoch(model, loss, [(x1, y1), (x2, y2)], schedule)
     assert stats.batches == 2
+    tensor_backend = stats.tensor_backend
+    assert tensor_backend["requested_wgpu_hits"] == 0
+    assert tensor_backend["requested_wgpu_runtime_fallbacks"] == 0
+    assert tensor_backend["requested_wgpu_total"] == 0
+    assert tensor_backend["requested_wgpu_hit_rate"] is None
+    assert tensor_backend["requested_wgpu_runtime_fallback_rate"] is None
+    assert tensor_backend["requested_wgpu_component_hits"] == 0
+    assert tensor_backend["requested_wgpu_component_fallbacks"] == 0
+    assert tensor_backend["requested_wgpu_component_total"] == 0
+    assert tensor_backend["requested_wgpu_component_hit_rate"] is None
+    assert tensor_backend["requested_wgpu_component_fallback_rate"] is None
+    assert "backend_f64_cpu" in tensor_backend
+    assert "embedding_unique_token_indices" in tensor_backend
+    assert "embedding_repeated_token_indices" in tensor_backend
 
     metrics = trainer.curvature_metrics()
     assert isinstance(metrics, dict)
