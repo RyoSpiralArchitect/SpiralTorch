@@ -4,6 +4,11 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Release tag to verify (leave empty to verify the latest release)"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -21,7 +26,8 @@ jobs:
       - name: Verify official release bundle
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.release_tag }}
           REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
@@ -29,4 +35,8 @@ jobs:
           if [ -n "${RELEASE_TAG:-}" ]; then
             TAG_ARG="--tag ${RELEASE_TAG}"
           fi
-          python scripts/security/verify_release.py ${TAG_ARG} --repo "${REPOSITORY}"
+          RECOVERY_REF_ARG=""
+          if [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
+            RECOVERY_REF_ARG="--allow-workflow-dispatch-ref refs/heads/main"
+          fi
+          python scripts/security/verify_release.py ${TAG_ARG} ${RECOVERY_REF_ARG} --repo "${REPOSITORY}"

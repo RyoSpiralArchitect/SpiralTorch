@@ -39,6 +39,15 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         help="Directory for downloaded artifacts. A temporary directory is used when omitted.",
     )
+    parser.add_argument(
+        "--allow-workflow-dispatch-ref",
+        action="append",
+        default=[],
+        help=(
+            "Also accept Sigstore GitHub identities signed by the Release Wheels workflow "
+            "via workflow_dispatch on this ref, e.g. refs/heads/main. Repeat to allow multiple refs."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -69,6 +78,21 @@ def download_asset(asset: Dict, destination: Path, token: str | None) -> Path:
     return destination
 
 
+def download_sigstore_companions(asset_name: str, asset_index: Dict[str, Dict], work_dir: Path, token: str | None) -> None:
+    bundle_name = asset_name + ".sigstore.json"
+    bundle_asset = asset_index.get(bundle_name)
+    if bundle_asset:
+        download_asset(bundle_asset, work_dir / bundle_name, token)
+        return
+
+    legacy_names = [asset_name + ".sig", asset_name + ".crt"]
+    missing = [name for name in legacy_names if name not in asset_index]
+    if missing:
+        raise SystemExit(f"Expected Sigstore companion asset missing for {asset_name}: {', '.join(missing)}")
+    for name in legacy_names:
+        download_asset(asset_index[name], work_dir / name, token)
+
+
 def file_digest(path: Path, algorithm: str) -> str:
     digest = hashlib.new(algorithm)
     with path.open("rb") as fh:
@@ -77,33 +101,74 @@ def file_digest(path: Path, algorithm: str) -> str:
     return digest.hexdigest()
 
 
-def run_sigstore_verify(file_path: Path, repo: str, tag: str) -> None:
+def normalize_ref(value: str) -> str:
+    if value.startswith("refs/"):
+        return value
+    return f"refs/heads/{value}"
+
+
+def sigstore_bundle_path(file_path: Path) -> Path:
+    return file_path.with_name(file_path.name + ".sigstore.json")
+
+
+def legacy_sigstore_paths(file_path: Path) -> tuple[Path, Path]:
     certificate = file_path.with_suffix(file_path.suffix + ".crt")
     signature = file_path.with_suffix(file_path.suffix + ".sig")
-    if not certificate.exists() or not signature.exists():
-        raise SystemExit(f"Missing Sigstore metadata for {file_path.name}")
+    return certificate, signature
 
-    cmd = [
+
+def sigstore_verify_command(file_path: Path, repo: str, ref: str, trigger: str) -> list[str]:
+    bundle = sigstore_bundle_path(file_path)
+    certificate, signature = legacy_sigstore_paths(file_path)
+    material_args: list[str]
+    if bundle.exists():
+        material_args = ["--bundle", str(bundle)]
+    elif certificate.exists() and signature.exists():
+        material_args = ["--certificate", str(certificate), "--signature", str(signature)]
+    else:
+        raise SystemExit(f"Missing Sigstore bundle or legacy metadata for {file_path.name}")
+
+    return [
         sys.executable,
         "-m",
         "sigstore",
         "verify",
         "github",
-        "--certificate",
-        str(certificate),
-        "--signature",
-        str(signature),
+        *material_args,
         "--repository",
         repo,
         "--ref",
-        f"refs/tags/{tag}",
+        ref,
         "--name",
         "Release Wheels",
         "--trigger",
-        "push",
+        trigger,
         str(file_path),
     ]
-    subprocess.run(cmd, check=True)
+
+
+def run_sigstore_verify(file_path: Path, repo: str, tag: str, allowed_workflow_dispatch_refs: list[str] | None = None) -> None:
+    bundle = sigstore_bundle_path(file_path)
+    certificate, signature = legacy_sigstore_paths(file_path)
+    if not bundle.exists() and not (certificate.exists() and signature.exists()):
+        raise SystemExit(f"Missing Sigstore bundle or legacy metadata for {file_path.name}")
+
+    identities = [(f"refs/tags/{tag}", "push")]
+    for ref in allowed_workflow_dispatch_refs or []:
+        identities.append((normalize_ref(ref), "workflow_dispatch"))
+
+    failures: list[str] = []
+    for ref, trigger in identities:
+        cmd = sigstore_verify_command(file_path, repo, ref, trigger)
+        completed = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if completed.returncode == 0:
+            print(f"Sigstore verified {file_path.name} with trigger={trigger} ref={ref}.")
+            return
+        detail = (completed.stderr or completed.stdout).strip()
+        failures.append(f"trigger={trigger} ref={ref}: {detail or f'exit {completed.returncode}'}")
+
+    summary = "\n - ".join(failures)
+    raise SystemExit(f"Sigstore verification failed for {file_path.name}:\n - {summary}")
 
 
 def validate_compliance_seal(seal_path: Path, manifest_path: Path, license_report: Dict | None, failures: list[str]) -> None:
@@ -190,14 +255,10 @@ def verify_release(args: argparse.Namespace) -> None:
         download_asset(manifest_asset, manifest_path, token)
 
         # Download accompanying Sigstore materials for the manifest itself.
-        for suffix in (".sig", ".crt"):
-            sig_asset = asset_index.get(manifest_asset["name"] + suffix)
-            if not sig_asset:
-                raise SystemExit(f"Expected manifest companion asset missing: {manifest_asset['name'] + suffix}")
-            download_asset(sig_asset, work_dir / sig_asset["name"], token)
+        download_sigstore_companions(manifest_asset["name"], asset_index, work_dir, token)
 
         # Verify the manifest signature before trusting its contents.
-        run_sigstore_verify(manifest_path, args.repo, tag_name)
+        run_sigstore_verify(manifest_path, args.repo, tag_name, args.allow_workflow_dispatch_ref)
 
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         manifest_files = manifest.get("files", [])
@@ -270,16 +331,11 @@ def verify_release(args: argparse.Namespace) -> None:
                 if actual_sha512 != expected_sha512:
                     failures.append(f"sha512 mismatch for {asset_name}")
 
-            sig_path = asset_path.with_suffix(asset_path.suffix + ".sig")
-            crt_path = asset_path.with_suffix(asset_path.suffix + ".crt")
-            sig_asset = asset_index.get(sig_path.name)
-            crt_asset = asset_index.get(crt_path.name)
-            if sig_asset and crt_asset:
-                download_asset(sig_asset, sig_path, token)
-                download_asset(crt_asset, crt_path, token)
-                run_sigstore_verify(asset_path, args.repo, tag_name)
-            else:
-                failures.append(f"Missing Sigstore signature or certificate for {asset_name}")
+            try:
+                download_sigstore_companions(asset_name, asset_index, work_dir, token)
+                run_sigstore_verify(asset_path, args.repo, tag_name, args.allow_workflow_dispatch_ref)
+            except SystemExit as exc:
+                failures.append(str(exc))
 
         if compliance_seal_path is None:
             failures.append(f"Release missing compliance seal asset: {COMPLIANCE_SEAL_NAME}")
