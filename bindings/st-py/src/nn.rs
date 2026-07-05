@@ -4243,13 +4243,53 @@ fn tensor_backend_stats_to_pydict(
     dict.set_item("backend_hip", stats.backend_hip)?;
     dict.set_item("backend_cpu", stats.backend_cpu)?;
     dict.set_item("backend_cpu_simd", stats.backend_cpu_simd)?;
+    dict.set_item("backend_f64_cpu", stats.backend_f64_cpu)?;
     dict.set_item("backend_faer", stats.backend_faer)?;
     dict.set_item("backend_naive", stats.backend_naive)?;
     dict.set_item("backend_other", stats.backend_other)?;
     dict.set_item("kernel_backend_wgpu_dense", stats.kernel_backend_wgpu_dense)?;
     dict.set_item("kernel_backend_simd", stats.kernel_backend_simd)?;
     dict.set_item("kernel_backend_other", stats.kernel_backend_other)?;
+    dict.set_item("requested_wgpu_hits", stats.requested_wgpu_hits)?;
+    dict.set_item(
+        "requested_wgpu_runtime_fallbacks",
+        stats.requested_wgpu_runtime_fallbacks,
+    )?;
+    dict.set_item("requested_wgpu_total", stats.requested_wgpu_total())?;
+    dict.set_item("requested_wgpu_hit_rate", stats.requested_wgpu_hit_rate())?;
+    dict.set_item(
+        "requested_wgpu_runtime_fallback_rate",
+        stats.requested_wgpu_runtime_fallback_rate(),
+    )?;
+    dict.set_item(
+        "requested_wgpu_component_hits",
+        stats.requested_wgpu_component_hits,
+    )?;
+    dict.set_item(
+        "requested_wgpu_component_fallbacks",
+        stats.requested_wgpu_component_fallbacks,
+    )?;
+    dict.set_item(
+        "requested_wgpu_component_total",
+        stats.requested_wgpu_component_total(),
+    )?;
+    dict.set_item(
+        "requested_wgpu_component_hit_rate",
+        stats.requested_wgpu_component_hit_rate(),
+    )?;
+    dict.set_item(
+        "requested_wgpu_component_fallback_rate",
+        stats.requested_wgpu_component_fallback_rate(),
+    )?;
     dict.set_item("embedding_tokens", stats.embedding_tokens)?;
+    dict.set_item(
+        "embedding_unique_token_indices",
+        stats.embedding_unique_token_indices,
+    )?;
+    dict.set_item(
+        "embedding_repeated_token_indices",
+        stats.embedding_repeated_token_indices,
+    )?;
     dict.set_item("embedding_token_repairs", stats.embedding_token_repairs)?;
     Ok(dict.into_py(py))
 }
