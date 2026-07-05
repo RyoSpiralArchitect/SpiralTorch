@@ -893,6 +893,7 @@ impl TensorBackendStepTrace {
         for field in [
             "input_gradient_backend",
             "input_gradient_reduction_backend",
+            "gradient_reduction_backend",
             "affine_gradient_backend",
             "normalization_backend",
             "input_projection_backend",
@@ -908,9 +909,13 @@ impl TensorBackendStepTrace {
             "parameter_gradient_reduction_backend",
             "bias_gradient_backend",
             "parameter_gradient_scale_backend",
+            "broadcast_backend",
             "accumulation_backend",
             "normalise_backend",
             "rewrite_backend",
+            "projection_backend",
+            "projection_gradient_backend",
+            "saturation_gradient_backend",
             "softmax_backend",
             "exp_backend",
             "sanitize_backend",
@@ -9970,6 +9975,109 @@ mod tests {
             Some(1.0)
         );
         assert_eq!(extra.get("tensor_backend_fallbacks").copied(), Some(0.0));
+    }
+
+    #[test]
+    fn strict_backend_trace_counts_zspace_layer_component_backends() {
+        let mut trace = TensorBackendStepTrace::default();
+        trace.record(&TensorOpMetaEvent {
+            op_name: "mul_row",
+            data: serde_json::json!({
+                "backend": "wgpu_dense",
+                "requested_backend": "wgpu",
+            }),
+        });
+        trace.record(&TensorOpMetaEvent {
+            op_name: "zspace_mixer_forward",
+            data: serde_json::json!({
+                "backend": "composite",
+                "requested_backend": "wgpu",
+                "broadcast_backend": "wgpu",
+            }),
+        });
+        trace.record(&TensorOpMetaEvent {
+            op_name: "zspace_mixer_backward",
+            data: serde_json::json!({
+                "backend": "composite",
+                "requested_backend": "wgpu",
+                "broadcast_backend": "wgpu",
+                "gradient_reduction_backend": "wgpu",
+            }),
+        });
+        trace.record(&TensorOpMetaEvent {
+            op_name: "zspace_projector_forward",
+            data: serde_json::json!({
+                "backend": "composite",
+                "requested_backend": "wgpu",
+                "rewrite_backend": "cpu",
+                "projection_backend": "wgpu",
+            }),
+        });
+        trace.record(&TensorOpMetaEvent {
+            op_name: "zspace_projector_backward",
+            data: serde_json::json!({
+                "backend": "cpu",
+                "requested_backend": "wgpu",
+                "projection_backend": "cpu",
+                "projection_gradient_backend": "cpu",
+                "saturation_gradient_backend": "cpu",
+            }),
+        });
+
+        trace
+            .validate_expected_backend(BackendKind::Wgpu)
+            .expect_err("CPU projector backward is still strict-GPU debt");
+        let mut extra = HashMap::new();
+        trace.write_extra(&mut extra);
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_zspace_mixer_forward_broadcast_wgpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_zspace_mixer_backward_broadcast_wgpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_zspace_mixer_backward_gradient_reduction_wgpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_zspace_projector_forward_rewrite_cpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_zspace_projector_forward_projection_wgpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_zspace_projector_backward_projection_cpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_zspace_projector_backward_projection_gradient_cpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_op_backend_zspace_projector_backward_saturation_gradient_cpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(extra.get("tensor_backend_fallbacks").copied(), Some(5.0));
     }
 
     #[test]

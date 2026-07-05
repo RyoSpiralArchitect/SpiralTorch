@@ -651,6 +651,139 @@ def test_summarize_trainer_trace_events_recovers_generic_tensor_backend_metrics(
     ] == pytest.approx(1.0)
 
 
+def test_summarize_trainer_trace_events_recovers_zspace_component_backends(
+    tmp_path,
+) -> None:
+    _ensure_torch_stub()
+    st = importlib.import_module("spiraltorch")
+
+    trace_path = tmp_path / "trainer_trace.jsonl"
+    records = [
+        {
+            "idx": 1,
+            "event": {
+                "kind": "Custom",
+                "data": {
+                    "event_type": "TensorOpMeta",
+                    "data": {
+                        "op_name": "zspace_mixer_forward",
+                        "data": {
+                            "backend": "composite",
+                            "requested_backend": "wgpu",
+                            "broadcast_backend": "wgpu",
+                        },
+                    },
+                },
+            },
+        },
+        {
+            "idx": 2,
+            "event": {
+                "kind": "Custom",
+                "data": {
+                    "event_type": "TensorOpMeta",
+                    "data": {
+                        "op_name": "zspace_mixer_backward",
+                        "data": {
+                            "backend": "composite",
+                            "requested_backend": "wgpu",
+                            "broadcast_backend": "wgpu",
+                            "gradient_reduction_backend": "wgpu",
+                        },
+                    },
+                },
+            },
+        },
+        {
+            "idx": 3,
+            "event": {
+                "kind": "Custom",
+                "data": {
+                    "event_type": "TensorOpMeta",
+                    "data": {
+                        "op_name": "zspace_projector_forward",
+                        "data": {
+                            "backend": "composite",
+                            "requested_backend": "wgpu",
+                            "rewrite_backend": "cpu",
+                            "projection_backend": "wgpu",
+                        },
+                    },
+                },
+            },
+        },
+        {
+            "idx": 4,
+            "event": {
+                "kind": "Custom",
+                "data": {
+                    "event_type": "TensorOpMeta",
+                    "data": {
+                        "op_name": "zspace_projector_backward",
+                        "data": {
+                            "backend": "cpu",
+                            "requested_backend": "wgpu",
+                            "projection_backend": "cpu",
+                            "projection_gradient_backend": "cpu",
+                            "saturation_gradient_backend": "cpu",
+                        },
+                    },
+                },
+            },
+        },
+        {
+            "idx": 5,
+            "event": {
+                "kind": "Custom",
+                "data": {
+                    "event_type": "TrainerStep",
+                    "data": {
+                        "step": 1,
+                        "metrics": {
+                            "step_time_ms": 0.5,
+                        },
+                    },
+                },
+            },
+        },
+    ]
+    trace_path.write_text(
+        "\n".join(json.dumps(record, ensure_ascii=False) for record in records),
+        encoding="utf-8",
+    )
+
+    summary = st.summarize_trainer_trace_events(trace_path)
+    metrics = summary["metrics"]
+    assert metrics["tensor_ops_total"]["last"] == pytest.approx(4.0)
+    assert metrics["tensor_backend_composite"]["last"] == pytest.approx(3.0)
+    assert metrics["tensor_backend_cpu"]["last"] == pytest.approx(1.0)
+    assert metrics["tensor_backend_fallbacks"]["last"] == pytest.approx(5.0)
+    assert metrics["tensor_op_backend_zspace_mixer_forward_broadcast_wgpu"][
+        "last"
+    ] == pytest.approx(1.0)
+    assert metrics["tensor_op_backend_zspace_mixer_backward_broadcast_wgpu"][
+        "last"
+    ] == pytest.approx(1.0)
+    assert metrics["tensor_op_backend_zspace_mixer_backward_gradient_reduction_wgpu"][
+        "last"
+    ] == pytest.approx(1.0)
+    assert metrics["tensor_op_backend_zspace_projector_forward_rewrite_cpu"][
+        "last"
+    ] == pytest.approx(1.0)
+    assert metrics["tensor_op_backend_zspace_projector_forward_projection_wgpu"][
+        "last"
+    ] == pytest.approx(1.0)
+    assert metrics["tensor_op_backend_zspace_projector_backward_projection_cpu"][
+        "last"
+    ] == pytest.approx(1.0)
+    assert metrics["tensor_op_backend_zspace_projector_backward_projection_gradient_cpu"][
+        "last"
+    ] == pytest.approx(1.0)
+    assert metrics["tensor_op_backend_zspace_projector_backward_saturation_gradient_cpu"][
+        "last"
+    ] == pytest.approx(1.0)
+
+
 def test_summarize_trainer_trace_events_recovers_wgpu_runtime_fallbacks(tmp_path) -> None:
     _ensure_torch_stub()
     st = importlib.import_module("spiraltorch")
