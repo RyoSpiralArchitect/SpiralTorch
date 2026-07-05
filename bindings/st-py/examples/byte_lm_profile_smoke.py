@@ -27,6 +27,7 @@ from spiraltorch.runtime_imports import (
     runtime_imports_from_source,
 )
 from spiraltorch.trainer_trace import summarize_transformers_trainer_runtime_bridge
+from sparse_finetune_compare import attach_requested_wgpu_component_backend_summary
 
 DEFAULT_OUT_DIR = Path("/tmp/spiraltorch-profile-smoke")
 BYTE_LM_VOCAB = 256
@@ -2070,6 +2071,52 @@ def checkpoint_transformers_validation_fields(row):
     return fields
 
 
+RUN_SUMMARY_WGPU_COMPONENT_KEYS = (
+    "tensor_backend_requested_wgpu_component_hit_distinct",
+    "tensor_backend_requested_wgpu_component_hit_top",
+    "tensor_backend_requested_wgpu_component_hit_top_json",
+    "tensor_backend_requested_wgpu_component_fallback_distinct",
+    "tensor_backend_requested_wgpu_component_fallback_top",
+    "tensor_backend_requested_wgpu_component_fallback_top_json",
+)
+
+
+def _default_run_summary_wgpu_component_fields(prefix):
+    fields = {
+        f"{prefix}_available": False,
+        f"{prefix}_rows": 0,
+        f"{prefix}_component_hotspots": False,
+        f"{prefix}_error": None,
+    }
+    for key in RUN_SUMMARY_WGPU_COMPONENT_KEYS:
+        fields[f"{prefix}_{key}"] = 0 if key.endswith("_distinct") else "none"
+    return fields
+
+
+def run_summary_wgpu_component_validation_fields(row, field, prefix):
+    fields = _default_run_summary_wgpu_component_fields(prefix)
+    path = row.get(field)
+    fields[f"{prefix}_jsonl"] = path
+    if not path:
+        return fields
+    try:
+        rows = load_jsonl(path)
+        summary = {}
+        attach_requested_wgpu_component_backend_summary(summary, source_rows=rows)
+    except Exception as exc:
+        fields[f"{prefix}_error"] = str(exc)
+        return fields
+    fields[f"{prefix}_available"] = True
+    fields[f"{prefix}_rows"] = len(rows)
+    for key in RUN_SUMMARY_WGPU_COMPONENT_KEYS:
+        fields[f"{prefix}_{key}"] = summary[key]
+    fields[f"{prefix}_component_hotspots"] = (
+        summary["tensor_backend_requested_wgpu_component_hit_distinct"] > 0
+        or summary["tensor_backend_requested_wgpu_component_fallback_distinct"] > 0
+    )
+    return fields
+
+
 def profile_smoke_manifest_validation_row(path, row, promoted_rungs_jsonl, rung_rows):
     promoted_rungs = manifest_int(row, "promoted_rungs", 0)
     promoted_epochs = manifest_promoted_ft_epochs(row)
@@ -2177,6 +2224,20 @@ def profile_smoke_manifest_validation_row(path, row, promoted_rungs_jsonl, rung_
     validation.update(checkpoint_transformers_validation_fields(row))
     validation.update(transformers_trace_validation_fields(row))
     validation.update(transformers_trainer_runtime_bridge_validation_fields(row))
+    validation.update(
+        run_summary_wgpu_component_validation_fields(
+            row,
+            "run_summary_jsonl",
+            "run_summary",
+        )
+    )
+    validation.update(
+        run_summary_wgpu_component_validation_fields(
+            row,
+            "promoted_final_run_summary_jsonl",
+            "promoted_final_run_summary",
+        )
+    )
     trace_declared_preset_modules = runtime_import_preset_module_rows(
         validation.get("transformers_trace_runtime_import_preset_modules"),
         declared_runtime_import_presets,
@@ -2948,6 +3009,14 @@ def validate_profile_smoke_manifest_file(path, validation_jsonl=None, args=None)
         f"next_ft_epochs={validation_row['next_ft_epochs']}",
         "promoted_final_promotion_jsonl="
         f"{validation_row['promoted_final_promotion_jsonl']}",
+        "run_summary_wgpu_component_fallback_top="
+        f"{validation_row['run_summary_tensor_backend_requested_wgpu_component_fallback_top']}",
+        "run_summary_wgpu_component_hit_top="
+        f"{validation_row['run_summary_tensor_backend_requested_wgpu_component_hit_top']}",
+        "promoted_final_run_summary_wgpu_component_fallback_top="
+        f"{validation_row['promoted_final_run_summary_tensor_backend_requested_wgpu_component_fallback_top']}",
+        "promoted_final_run_summary_wgpu_component_hit_top="
+        f"{validation_row['promoted_final_run_summary_tensor_backend_requested_wgpu_component_hit_top']}",
     ]
     if validation_row["transformers_trace"]:
         output_parts.extend(
