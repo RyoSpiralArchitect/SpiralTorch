@@ -4671,6 +4671,7 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                                         "data": {
                                             "backend": "naive",
                                             "requested_backend": "wgpu",
+                                            "preactivation_backend": "cpu",
                                             "fallback": {
                                                 "from": "wgpu",
                                                 "reason": "runtime_unavailable",
@@ -4690,6 +4691,7 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                                         "data": {
                                             "backend": "wgpu",
                                             "requested_backend": "wgpu",
+                                            "preactivation_backend": "wgpu",
                                         },
                                     },
                                 },
@@ -4944,6 +4946,10 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             "transformers_trainer_runtime_requested_wgpu_hit_rate=0.5",
             text,
         )
+        self.assertIn(
+            "transformers_trainer_runtime_requested_wgpu_component_fallback_rate=0.5",
+            text,
+        )
         self.assertIn("checkpoint_transformers_audit_status=ok", text)
         self.assertIn("checkpoint_transformers_runtime_imports_all_ok=True", text)
         self.assertIn(
@@ -5039,6 +5045,18 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertAlmostEqual(
             validation_row[
                 "transformers_trainer_runtime_requested_wgpu_runtime_fallback_rate"
+            ],
+            0.5,
+        )
+        self.assertAlmostEqual(
+            validation_row[
+                "transformers_trainer_runtime_requested_wgpu_component_hit_rate"
+            ],
+            0.5,
+        )
+        self.assertAlmostEqual(
+            validation_row[
+                "transformers_trainer_runtime_requested_wgpu_component_fallback_rate"
             ],
             0.5,
         )
@@ -5283,8 +5301,75 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             finally:
                 sys.argv = old_argv
             text = failing_output.getvalue()
-            self.assertIn("transformers_trace_top_token_changed_rows", text)
-            self.assertIn("passed=False", text)
+        self.assertIn("transformers_trace_top_token_changed_rows", text)
+        self.assertIn("passed=False", text)
+
+    def test_byte_lm_profile_smoke_validation_gates_transformers_trainer_runtime(self):
+        module = load_example("byte_lm_profile_smoke")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out_dir = Path(tmpdir)
+            manifest_path, validation_path = (
+                self.write_profile_smoke_manifest_with_transformers_trace_compare(
+                    module,
+                    out_dir,
+                )
+            )
+            old_argv = sys.argv
+            sys.argv = [
+                "byte_lm_profile_smoke.py",
+                "--validate-manifest-jsonl",
+                str(manifest_path),
+                "--manifest-validation-jsonl",
+                str(validation_path),
+                "--require-manifest-transformers-trainer-runtime-bridge",
+                "--require-manifest-transformers-trainer-external-gpu",
+                "--min-manifest-transformers-trainer-wgpu-hit-rate",
+                "0.5",
+                "--max-manifest-transformers-trainer-wgpu-runtime-fallback-rate",
+                "0.5",
+                "--max-manifest-transformers-trainer-wgpu-component-fallback-rate",
+                "0.5",
+            ]
+            passing_output = io.StringIO()
+            try:
+                with contextlib.redirect_stdout(passing_output):
+                    module.main()
+            finally:
+                sys.argv = old_argv
+            passing_text = passing_output.getvalue()
+            self.assertIn("gate=transformers_trainer_runtime", passing_text)
+            self.assertIn("passed=True", passing_text)
+
+            sys.argv = [
+                "byte_lm_profile_smoke.py",
+                "--validate-manifest-jsonl",
+                str(manifest_path),
+                "--require-manifest-transformers-trainer-runtime-bridge",
+                "--min-manifest-transformers-trainer-wgpu-hit-rate",
+                "0.75",
+                "--max-manifest-transformers-trainer-wgpu-runtime-fallback-rate",
+                "0.25",
+            ]
+            failing_output = io.StringIO()
+            try:
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "profile smoke manifest Transformers/trainer runtime gate failed",
+                ):
+                    with contextlib.redirect_stdout(failing_output):
+                        module.main()
+            finally:
+                sys.argv = old_argv
+            failing_text = failing_output.getvalue()
+            self.assertIn(
+                "transformers_trainer_runtime_requested_wgpu_hit_rate_below_min",
+                failing_text,
+            )
+            self.assertIn(
+                "transformers_trainer_runtime_requested_wgpu_runtime_fallback_rate_above_max",
+                failing_text,
+            )
+            self.assertIn("passed=False", failing_text)
 
     def test_byte_lm_profile_smoke_validation_gates_transformers_trace_coimport(self):
         module = load_example("byte_lm_profile_smoke")
