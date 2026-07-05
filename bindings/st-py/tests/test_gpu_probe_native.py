@@ -32,6 +32,15 @@ def test_describe_device_explicit_wgpu_backend() -> None:
 
     report = st.describe_device("wgpu", workgroup=300, cols=4096)
     assert report["backend"] == "wgpu"
+    assert report["requested_backend"] == "wgpu"
+    assert report["effective_backend"] == "wgpu"
+    assert report["runtime_ready"] == report["effective_backend_runtime_ready"]
+    assert report["runtime_status"] == report["effective_backend_runtime_status"]
+    assert report["runtime_status"] in {"kernel_wired", "feature_disabled"}
+    assert report["requested_backend_runtime_status"] == report["runtime_status"]
+    assert report["requested_backend_runtime_ready"] == report["runtime_ready"]
+    assert isinstance(report["runtime_recommendation"], str)
+    assert isinstance(report["effective_backend_runtime_recommendation"], str)
     assert "lane_width" in report
     assert "max_workgroup" in report
     assert "subgroup" in report
@@ -47,6 +56,13 @@ def test_describe_device_auto_backend_uses_effective_wgpu_label() -> None:
 
     report = st.describe_device("auto", workgroup=300, cols=4096)
     assert report["backend"] == "wgpu"
+    assert report["requested_backend"] == "wgpu"
+    assert report["effective_backend"] == "wgpu"
+    assert report["runtime_ready"] == report["effective_backend_runtime_ready"]
+    assert report["effective_backend_runtime_status"] in {
+        "kernel_wired",
+        "feature_disabled",
+    }
     assert "lane_width" in report
     assert "max_workgroup" in report
     assert "subgroup" in report

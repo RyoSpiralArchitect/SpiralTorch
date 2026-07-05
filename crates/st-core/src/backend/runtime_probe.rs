@@ -203,6 +203,12 @@ pub const fn backend_runtime_status(kind: BackendKind) -> &'static str {
     }
 }
 
+pub const fn backend_runtime_ready(kind: BackendKind) -> bool {
+    backend_feature_enabled(kind)
+        && backend_real_kernels_compiled(kind)
+        && !backend_placeholder(kind)
+}
+
 pub const fn backend_runtime_recommendation(kind: BackendKind) -> &'static str {
     match kind {
         BackendKind::Cpu => "cpu backend is available",
@@ -233,6 +239,37 @@ pub const fn backend_runtime_recommendation(kind: BackendKind) -> &'static str {
             }
         }
     }
+}
+
+fn insert_backend_runtime_meta(
+    payload: &mut serde_json::Map<String, serde_json::Value>,
+    prefix: &str,
+    backend: BackendKind,
+) {
+    payload.insert(
+        format!("{prefix}_backend_feature_enabled"),
+        backend_feature_enabled(backend).into(),
+    );
+    payload.insert(
+        format!("{prefix}_backend_real_kernels_compiled"),
+        backend_real_kernels_compiled(backend).into(),
+    );
+    payload.insert(
+        format!("{prefix}_backend_placeholder"),
+        backend_placeholder(backend).into(),
+    );
+    payload.insert(
+        format!("{prefix}_backend_runtime_status"),
+        backend_runtime_status(backend).into(),
+    );
+    payload.insert(
+        format!("{prefix}_backend_runtime_ready"),
+        backend_runtime_ready(backend).into(),
+    );
+    payload.insert(
+        format!("{prefix}_backend_runtime_recommendation"),
+        backend_runtime_recommendation(backend).into(),
+    );
 }
 
 pub fn resolve_backend(requested_backend: BackendKind) -> BackendResolution {
@@ -276,6 +313,8 @@ fn emit_backend_resolution_meta(resolution: BackendResolution) {
             "reported_backend".into(),
             resolution.reported_backend.as_str().into(),
         );
+        insert_backend_runtime_meta(&mut payload, "requested", resolution.reported_backend);
+        insert_backend_runtime_meta(&mut payload, "effective", resolution.effective_backend);
         payload.insert(
             "has_mps_probe".into(),
             resolution.mps_probe.is_some().into(),
@@ -359,6 +398,8 @@ fn emit_device_report_meta(report: DeviceReport) {
             "effective_backend".into(),
             report.effective_backend().as_str().into(),
         );
+        insert_backend_runtime_meta(&mut payload, "requested", report.reported_backend);
+        insert_backend_runtime_meta(&mut payload, "effective", report.effective_backend());
         payload.insert("subgroup".into(), report.caps.subgroup.into());
         payload.insert("lane_width".into(), report.caps.lane_width.into());
         payload.insert("max_workgroup".into(), report.caps.max_workgroup.into());
@@ -491,9 +532,11 @@ mod tests {
         assert!(backend_real_kernels_compiled(BackendKind::Cpu));
         assert!(!backend_placeholder(BackendKind::Cpu));
         assert_eq!(backend_runtime_status(BackendKind::Cpu), "cpu");
+        assert!(backend_runtime_ready(BackendKind::Cpu));
 
         assert!(!backend_real_kernels_compiled(BackendKind::Mps));
         assert!(backend_placeholder(BackendKind::Mps));
+        assert!(!backend_runtime_ready(BackendKind::Mps));
         assert_eq!(
             backend_feature_enabled(BackendKind::Mps),
             cfg!(feature = "mps")
@@ -513,6 +556,10 @@ mod tests {
         );
         assert_eq!(
             backend_real_kernels_compiled(BackendKind::Hip),
+            cfg!(all(feature = "hip", feature = "hip-real"))
+        );
+        assert_eq!(
+            backend_runtime_ready(BackendKind::Hip),
             cfg!(all(feature = "hip", feature = "hip-real"))
         );
         if cfg!(feature = "hip") && !cfg!(feature = "hip-real") {
@@ -558,6 +605,16 @@ mod tests {
             })
             .expect("backend resolution metadata event");
         assert_eq!(resolution_meta.1["requested_backend"], "mps");
+        assert_eq!(resolution_meta.1["requested_backend_runtime_ready"], false);
+        assert_eq!(resolution_meta.1["requested_backend_placeholder"], true);
+        assert_eq!(
+            resolution_meta.1["effective_backend_runtime_ready"],
+            backend_runtime_ready(resolution.effective_backend)
+        );
+        assert_eq!(
+            resolution_meta.1["effective_backend_runtime_status"],
+            backend_runtime_status(resolution.effective_backend)
+        );
         assert_eq!(resolution_meta.1["has_mps_probe"], true);
         assert_eq!(resolution_meta.1["mps_placeholder"], true);
 
@@ -571,6 +628,15 @@ mod tests {
             })
             .expect("backend device report metadata event");
         assert_eq!(report_meta.1["has_mps_probe"], true);
+        assert_eq!(report_meta.1["requested_backend_runtime_ready"], false);
+        assert_eq!(
+            report_meta.1["effective_backend_runtime_ready"],
+            backend_runtime_ready(report.effective_backend())
+        );
+        assert_eq!(
+            report_meta.1["effective_backend_runtime_status"],
+            backend_runtime_status(report.effective_backend())
+        );
         assert_eq!(report_meta.1["lane_width"], report.caps.lane_width);
         assert_eq!(
             report_meta.1["aligned_workgroup"],

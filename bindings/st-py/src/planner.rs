@@ -18,6 +18,8 @@ use st_core::backend::rankk_launch::with_launch_buffers_hip;
 #[cfg(any(feature = "cuda", feature = "hip"))]
 use st_core::backend::rankk_launch::LaunchBuffers;
 use st_core::backend::runtime_probe::{
+    backend_feature_enabled, backend_placeholder, backend_real_kernels_compiled,
+    backend_runtime_ready, backend_runtime_recommendation, backend_runtime_status,
     build_device_report, mps_probe as core_mps_probe, resolve_backend, BackendResolution,
     DeviceReport,
 };
@@ -399,9 +401,60 @@ fn caps_to_pydict(py: Python<'_>, caps: DeviceCaps) -> PyResult<Bound<'_, PyDict
     Ok(report)
 }
 
+fn set_backend_runtime_fields(
+    out: &Bound<'_, PyDict>,
+    prefix: &str,
+    backend: BackendKind,
+) -> PyResult<()> {
+    out.set_item(
+        format!("{prefix}_backend_feature_enabled"),
+        backend_feature_enabled(backend),
+    )?;
+    out.set_item(
+        format!("{prefix}_backend_real_kernels_compiled"),
+        backend_real_kernels_compiled(backend),
+    )?;
+    out.set_item(
+        format!("{prefix}_backend_placeholder"),
+        backend_placeholder(backend),
+    )?;
+    out.set_item(
+        format!("{prefix}_backend_runtime_status"),
+        backend_runtime_status(backend),
+    )?;
+    out.set_item(
+        format!("{prefix}_backend_runtime_ready"),
+        backend_runtime_ready(backend),
+    )?;
+    out.set_item(
+        format!("{prefix}_backend_runtime_recommendation"),
+        backend_runtime_recommendation(backend),
+    )?;
+    Ok(())
+}
+
 fn device_report_to_pydict(py: Python<'_>, report: DeviceReport) -> PyResult<Bound<'_, PyDict>> {
     let out = caps_to_pydict(py, report.caps)?;
     out.set_item("backend", backend_label(report.reported_backend))?;
+    out.set_item("requested_backend", backend_label(report.reported_backend))?;
+    out.set_item(
+        "effective_backend",
+        backend_label(report.effective_backend()),
+    )?;
+    set_backend_runtime_fields(&out, "requested", report.reported_backend)?;
+    set_backend_runtime_fields(&out, "effective", report.effective_backend())?;
+    out.set_item(
+        "runtime_status",
+        backend_runtime_status(report.effective_backend()),
+    )?;
+    out.set_item(
+        "runtime_ready",
+        backend_runtime_ready(report.effective_backend()),
+    )?;
+    out.set_item(
+        "runtime_recommendation",
+        backend_runtime_recommendation(report.effective_backend()),
+    )?;
 
     if let Some(mps_probe) = report.mps_probe {
         out.set_item("status", mps_probe.status().as_str())?;
