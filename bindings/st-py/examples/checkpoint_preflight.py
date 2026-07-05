@@ -315,7 +315,8 @@ def add_transformers_audit_args(parser):
         help=(
             "Named runtime import bundle to probe during --transformers-audit. "
             "'torch-transformers' probes Transformers plus torch; 'hf-runtime' "
-            "also probes tokenizers. May be repeated."
+            "also probes tokenizers; 'hf-finetune' and 'hf-peft' add common "
+            "FT dependencies. May be repeated."
         ),
     )
     parser.add_argument(
@@ -328,7 +329,8 @@ def add_transformers_audit_args(parser):
         help=(
             "Shortcut Transformers runtime contract preset: enables "
             "--transformers-audit, probes the preset modules, and requires them "
-            "to import in the same audit process. May be repeated."
+            "to import in the same audit process. Use 'hf-finetune' or "
+            "'hf-peft' for fuller FT runtime checks. May be repeated."
         ),
     )
     parser.add_argument(

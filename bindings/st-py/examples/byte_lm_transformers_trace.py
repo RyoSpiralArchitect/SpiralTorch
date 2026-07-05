@@ -122,7 +122,8 @@ def parse_args():
         help=(
             "Named runtime import bundle to probe while SpiralTorch and "
             "Transformers are loaded. 'torch-transformers' probes both "
-            "modules; 'hf-runtime' also probes tokenizers. May be repeated."
+            "modules; 'hf-runtime' also probes tokenizers; 'hf-finetune' and "
+            "'hf-peft' add common FT dependencies. May be repeated."
         ),
     )
     parser.add_argument(
@@ -162,7 +163,8 @@ def parse_args():
         help=(
             "Require a named runtime import preset to be satisfied in the same "
             "trace process. The preset modules are probed even if the preset "
-            "was not listed with --runtime-import-preset."
+            "was not listed with --runtime-import-preset. FT-oriented presets "
+            "include 'hf-finetune' and 'hf-peft'."
         ),
     )
     parser.add_argument(
@@ -879,6 +881,8 @@ TRACE_RUNTIME_METADATA_FIELDS = [
     "runtime_import_coimport_modules",
     "runtime_import_coimport_missing_modules",
     "runtime_import_versions",
+    "runtime_import_install_hints",
+    "runtime_import_failed_install_hints",
     "runtime_import_module_names",
     "transformers_version",
     "model_loaded",
