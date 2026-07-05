@@ -8,6 +8,12 @@ from types import ModuleType
 
 from .optim import Amegagrad, amegagrad
 
+export: ModuleType
+hpo: ModuleType
+inference: ModuleType
+optim: ModuleType
+spiralk: ModuleType
+
 def init_backend(backend: str) -> bool: ...
 
 def load_zspace_trace_events(path: str, *, event_type: str = ...) -> List[Dict[str, Any]]: ...
@@ -247,6 +253,24 @@ def zspace_trace_event_to_atlas_frame(
 
 def zspace_trace_to_atlas_route(
     trace: str | Iterable[Mapping[str, Any]],
+    *,
+    district: str = ...,
+    bound: int = ...,
+    event_type: str = ...,
+    timestamp_base: float | None = ...,
+    step_seconds: float = ...,
+) -> "telemetry.AtlasRoute": ...
+
+def trainer_step_event_to_atlas_frame(
+    event: Mapping[str, Any],
+    *,
+    district: str = ...,
+    timestamp_base: float | None = ...,
+    step_seconds: float = ...,
+) -> "telemetry.AtlasFrame" | None: ...
+
+def trainer_events_to_atlas_route(
+    trace: str | PathLike[str] | Iterable[Mapping[str, Any]],
     *,
     district: str = ...,
     bound: int = ...,
@@ -590,6 +614,18 @@ class Tensor:
     @staticmethod
     def cat_rows(tensors: Sequence[Tensor]) -> Tensor: ...
 
+class CpuSimdPackedRhs:
+    cols: int
+    inner: int
+
+    def tolist(self) -> List[float]: ...
+
+def cpu_simd_prepack_rhs(rhs: Tensor) -> CpuSimdPackedRhs: ...
+
+def capture(value: object) -> Tensor: ...
+
+def share(value: object, target: object) -> object: ...
+
 def lorentzian_metric_scaled(
     components: Sequence[Sequence[float]],
     scale: float,
@@ -611,6 +647,52 @@ def assemble_zrelativity_model(
     topology: str | None = ...,
     boundary_conditions: Sequence[str] | None = ...,
 ) -> ZRelativityModel: ...
+
+class EllipticTelemetry:
+    curvature_radius: float
+    sheet_count: int
+    sheet_index: int
+    sheet_position: float
+    normalized_radius: float
+    geodesic_radius: float
+    spin_alignment: float
+    resonance_heat: float
+    noise_density: float
+    topological_sector: int
+    normal_bias: Tuple[float, ...]
+    flow_vector: Tuple[float, ...]
+    rotor_field: Tuple[float, ...]
+    rotor_transport: Tuple[float, ...]
+    lie_quaternion: Tuple[float, ...]
+    lie_rotation: Tuple[float, ...]
+    lie_log: Tuple[float, ...]
+    homology_index: Tuple[int, ...]
+    event_tags: Tuple[str, ...]
+    curvature_tensor: Tuple[float, ...]
+
+    def as_dict(self) -> Dict[str, object]: ...
+
+class EllipticWarp:
+    curvature_radius: float
+    sheet_count: int
+    spin_harmonics: int
+
+    def __init__(
+        self,
+        curvature_radius: float,
+        sheet_count: int | None = ...,
+        spin_harmonics: int | None = ...,
+    ) -> None: ...
+    def configure(
+        self,
+        sheet_count: int | None = ...,
+        spin_harmonics: int | None = ...,
+    ) -> None: ...
+    def map_orientation(self, orientation: Sequence[float]) -> Tuple[float, ...]: ...
+    def map_orientation_differential(
+        self,
+        orientation: Sequence[float],
+    ) -> Tuple[float, ...]: ...
 
 class ResonanceProfile:
     def __init__(self, grid: MellinLogGrid, pole: complex, residue: complex) -> None: ...
@@ -1617,6 +1699,16 @@ class ZMetrics:
     drs: float
     telemetry: Optional[Mapping[str, float]]
 
+def z_metrics(
+    *,
+    speed: float | None = ...,
+    memory: float | None = ...,
+    stability: float | None = ...,
+    drs: float | None = ...,
+    gradient: object | None = ...,
+    **aliases: object,
+) -> ZMetrics: ...
+
 class ZSpaceDecoded:
     z_state: Tuple[float, ...]
     metrics: Mapping[str, float]
@@ -1709,6 +1801,53 @@ def prepare_trainer_step_payload(
     prefer_applied: bool = ...,
     canonical_mapping: bool = ...,
 ) -> object: ...
+
+def ensure_zmetrics(
+    payload: ZSpaceInference | ZMetrics | Mapping[str, Any],
+    *,
+    prefer_applied: bool = ...,
+) -> ZMetrics: ...
+
+class SafetyViolation:
+    category: str
+    message: str
+    offending_term: str
+    risk: str
+    score: float
+
+class SafetyVerdict:
+    allowed: bool
+    channel: str
+    dominant_risk: str
+    score: float
+    violations: List[SafetyViolation]
+
+class AuditEvent:
+    channel: str
+    content_preview: str
+    timestamp: float
+    verdict: SafetyVerdict
+
+class AuditLog:
+    def entries(self) -> List[AuditEvent]: ...
+    def clear(self) -> None: ...
+
+class InferenceResult:
+    accepted: bool
+    prompt_verdict: SafetyVerdict
+    refusal_message: str | None
+    response: str
+    response_verdict: SafetyVerdict
+
+class InferenceRuntime:
+    audit_log: AuditLog
+
+    def __init__(self, refusal_threshold: float | None = ...) -> None: ...
+    def generate(
+        self,
+        prompt: str,
+        metadata: Mapping[str, object] | None = ...,
+    ) -> InferenceResult: ...
 
 
 class ZSpaceTrainer:
@@ -2036,6 +2175,10 @@ def hypergrad_session(*shape_args: Any, **kwargs: Any) -> HypergradSession: ...
 
 def amegagrad_session(*shape_args: Any, **kwargs: Any) -> AmegagradSession: ...
 
+hg: Any
+rg: Any
+z: Any
+
 def describe_device(
     backend: str = ...,
     *,
@@ -2048,6 +2191,8 @@ def describe_device(
     tile_hint: Optional[int] = ...,
     compaction_hint: Optional[int] = ...,
 ) -> Dict[str, object]: ...
+
+def describe_wgpu_softmax_variants() -> None: ...
 
 def hip_probe() -> Dict[str, object]: ...
 def mps_probe() -> Dict[str, object]: ...
