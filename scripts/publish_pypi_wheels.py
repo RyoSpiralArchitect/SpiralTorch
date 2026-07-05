@@ -174,6 +174,8 @@ def parse_sha256_lines(text: str) -> dict[str, str]:
         digest, name = parts
         if len(digest) != 64 or any(ch not in "0123456789abcdefABCDEF" for ch in digest):
             raise PublishError(f"Malformed sha256 digest for {name}: {digest}")
+        if name in entries:
+            raise PublishError(f"Duplicate wheels.sha256 entry for {name}")
         entries[name] = digest.lower()
     return entries
 
@@ -266,6 +268,51 @@ def pypi_release_file_count(version: str) -> int:
         raise PublishError("PyPI JSON did not include a releases object")
     files = releases.get(version, [])
     return len(files) if isinstance(files, list) else 0
+
+
+def pypi_release_wheel_digests(version: str) -> dict[str, str]:
+    url = f"https://pypi.org/pypi/{PACKAGE}/{version}/json"
+    try:
+        with urlopen(url, timeout=20) as response:
+            payload = json.load(response)
+    except (HTTPError, URLError, TimeoutError, json.JSONDecodeError) as exc:
+        raise PublishError(f"Unable to read PyPI JSON from {url}") from exc
+
+    urls = payload.get("urls")
+    if not isinstance(urls, list):
+        raise PublishError(f"PyPI JSON for {PACKAGE}=={version} did not include a urls list")
+
+    wheels: dict[str, str] = {}
+    for file_info in urls:
+        if not isinstance(file_info, dict):
+            continue
+        filename = file_info.get("filename")
+        if not isinstance(filename, str) or not filename.endswith(".whl"):
+            continue
+        digest = (file_info.get("digests") or {}).get("sha256")
+        if not isinstance(digest, str):
+            raise PublishError(f"PyPI file {filename} did not expose a sha256 digest")
+        if filename in wheels:
+            raise PublishError(f"Duplicate PyPI wheel entry for {filename}")
+        wheels[filename] = digest.lower()
+    return wheels
+
+
+def verify_pypi_wheel_checksums(wheels: Sequence[Path], version: str) -> None:
+    local = {path.name: file_sha256(path) for path in wheels}
+    pypi = pypi_release_wheel_digests(version)
+
+    missing = sorted(set(local) - set(pypi))
+    extra = sorted(set(pypi) - set(local))
+    mismatched = sorted(name for name in set(local) & set(pypi) if local[name] != pypi[name])
+    if missing or extra or mismatched:
+        details = {"missing": missing, "extra": extra, "mismatched": mismatched}
+        raise PublishError(
+            f"PyPI wheels for {PACKAGE}=={version} do not match local upload set: "
+            + json.dumps(details, sort_keys=True)
+        )
+
+    log(f"pypi_wheel_checksums=ok version={version} wheels={len(local)}")
 
 
 def wait_for_pypi_files(version: str, expected_at_least: int, timeout: float) -> int:
@@ -378,6 +425,7 @@ def main() -> int:
     twine_upload(args, wheels, token)
     visible_files = wait_for_pypi_files(version, len(wheels), args.verify_timeout)
     log(f"pypi_visible_files_for_{version}={visible_files}")
+    verify_pypi_wheel_checksums(wheels, version)
     if not args.no_smoke:
         smoke_pypi_install(args.python, version)
     return 0
