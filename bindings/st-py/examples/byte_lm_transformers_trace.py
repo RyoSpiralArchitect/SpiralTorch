@@ -10,7 +10,12 @@ PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 if str(PACKAGE_ROOT) not in sys.path:
     sys.path.insert(0, str(PACKAGE_ROOT))
 
-from spiraltorch.runtime_imports import TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS
+from spiraltorch.runtime_imports import (
+    TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS,
+    runtime_import_preset_missing_modules_label,
+    runtime_import_preset_modules_label,
+    runtime_import_preset_status_rows,
+)
 
 import spiraltorch as st
 from spiraltorch.nn import ZSpaceProjector
@@ -739,48 +744,6 @@ def required_runtime_import_presets_from_args(args):
     )
 
 
-def runtime_import_preset_status_rows(presets, probes):
-    probes_by_module = {probe["module"]: probe for probe in probes}
-    rows = []
-    for preset in presets:
-        modules = list(RUNTIME_IMPORT_PRESETS.get(preset, []))
-        imported = [
-            module
-            for module in modules
-            if probes_by_module.get(module, {}).get("imported") is True
-        ]
-        missing = [module for module in modules if module not in imported]
-        rows.append(
-            {
-                "preset": preset,
-                "modules": modules,
-                "imported": imported,
-                "missing": missing,
-                "passed": not missing,
-            }
-        )
-    return rows
-
-
-def runtime_import_preset_modules_label(rows):
-    return csv_label(
-        [
-            f"{row['preset']}={'|'.join(row['modules']) or 'none'}"
-            for row in rows
-        ]
-    )
-
-
-def runtime_import_preset_missing_modules_label(rows):
-    return csv_label(
-        [
-            f"{row['preset']}={'|'.join(row['missing']) or 'none'}"
-            for row in rows
-            if row["missing"]
-        ]
-    )
-
-
 def runtime_import_required_gate_fields(args, probes, preset_status):
     required = required_runtime_imports_from_args(args)
     required_presets = required_runtime_import_presets_from_args(args)
@@ -838,7 +801,11 @@ def runtime_import_kv_label(probes, key):
 def runtime_import_fields(args):
     presets = runtime_import_presets_from_args(args)
     probes = runtime_import_probe_rows(runtime_import_names_from_args(args))
-    preset_status = runtime_import_preset_status_rows(presets, probes)
+    preset_status = runtime_import_preset_status_rows(
+        presets,
+        probes,
+        preset_modules=RUNTIME_IMPORT_PRESETS,
+    )
     imported = [probe["module"] for probe in probes if probe["imported"]]
     failed = [probe["module"] for probe in probes if not probe["imported"]]
     satisfied_presets = [row["preset"] for row in preset_status if row["passed"]]
