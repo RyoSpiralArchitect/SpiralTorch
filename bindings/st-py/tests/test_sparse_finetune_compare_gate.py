@@ -4201,6 +4201,13 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             "torch=2.0.0",
         )
         self.assertEqual(
+            validation_row["transformers_trace_required_runtime_imports"],
+            "none",
+        )
+        self.assertIsNone(
+            validation_row["transformers_trace_required_runtime_imports_passed"]
+        )
+        self.assertEqual(
             validation_row["transformers_trace_zspace_status_changed_rows"],
             1,
         )
@@ -4351,11 +4358,14 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                     out_dir,
                 )
             )
+            validation_path = out_dir / "runtime-import-validation.jsonl"
             old_argv = sys.argv
             sys.argv = [
                 "byte_lm_profile_smoke.py",
                 "--validate-manifest-jsonl",
                 str(manifest_path),
+                "--manifest-validation-jsonl",
+                str(validation_path),
                 "--require-manifest-transformers-trace",
                 "--require-manifest-transformers-trace-runtime-import",
                 "torch",
@@ -4367,6 +4377,7 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             finally:
                 sys.argv = old_argv
             passing_text = passing_output.getvalue()
+            passing_validation = module.load_jsonl(validation_path)[0]
 
             sys.argv = [
                 "byte_lm_profile_smoke.py",
@@ -4393,6 +4404,21 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             passing_text,
         )
         self.assertIn("passed=True", passing_text)
+        self.assertEqual(
+            passing_validation["transformers_trace_required_runtime_imports"],
+            "torch",
+        )
+        self.assertEqual(
+            passing_validation["transformers_trace_required_runtime_imports_imported"],
+            "torch",
+        )
+        self.assertEqual(
+            passing_validation["transformers_trace_required_runtime_imports_missing"],
+            "none",
+        )
+        self.assertTrue(
+            passing_validation["transformers_trace_required_runtime_imports_passed"]
+        )
         self.assertIn(
             "transformers_trace_runtime_import_missing:tokenizers",
             failing_text,
