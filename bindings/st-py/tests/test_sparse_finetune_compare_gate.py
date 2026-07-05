@@ -3975,6 +3975,9 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         coimport_status="ok",
         spiraltorch_imported=True,
         transformers_imported=True,
+        runtime_import_probe_count=1,
+        runtime_imports_all_ok=True,
+        runtime_imports_failed="none",
     ):
         trace_jsonl = out_dir / "transformers-trace.jsonl"
         baseline_trace_jsonl = out_dir / "transformers-trace-baseline.jsonl"
@@ -4006,6 +4009,8 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             transformers_trace_max_logit_l2_change=None,
             transformers_trace_max_hidden_state_l2_change=None,
             transformers_trace_require_zspace_status="ok",
+            transformers_trace_runtime_imports=["torch"],
+            require_transformers_trace_runtime_imports=True,
         )
         row = module.profile_smoke_manifest_row(
             args=smoke_args,
@@ -4053,6 +4058,48 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                             "transformers_module_name": "transformers",
                             "transformers_spiraltorch_coimport_status": (
                                 coimport_status
+                            ),
+                            "runtime_imports_requested": "torch",
+                            "runtime_import_probe_count": runtime_import_probe_count,
+                            "runtime_imports_imported": (
+                                "torch" if runtime_imports_all_ok else "none"
+                            ),
+                            "runtime_imports_failed": runtime_imports_failed,
+                            "runtime_imports_all_ok": runtime_imports_all_ok,
+                            "runtime_import_versions": (
+                                "torch=2.0.0"
+                                if runtime_imports_all_ok
+                                else "torch=none"
+                            ),
+                            "runtime_import_module_names": (
+                                "torch=torch"
+                                if runtime_imports_all_ok
+                                else "torch=none"
+                            ),
+                            "runtime_imports_json": json.dumps(
+                                [
+                                    {
+                                        "module": "torch",
+                                        "imported": runtime_imports_all_ok,
+                                        "version": (
+                                            "2.0.0" if runtime_imports_all_ok else None
+                                        ),
+                                        "module_name": (
+                                            "torch" if runtime_imports_all_ok else None
+                                        ),
+                                        "module_file": (
+                                            "/env/torch.py"
+                                            if runtime_imports_all_ok
+                                            else None
+                                        ),
+                                        "error": (
+                                            None
+                                            if runtime_imports_all_ok
+                                            else "ImportError: missing"
+                                        ),
+                                    }
+                                ],
+                                sort_keys=True,
                             ),
                         }
                     ],
@@ -4141,6 +4188,19 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         )
         self.assertEqual(validation_row["transformers_trace_top_token_changed_rows"], 1)
         self.assertEqual(
+            validation_row["transformers_trace_runtime_import_probe_count"],
+            1,
+        )
+        self.assertEqual(
+            validation_row["transformers_trace_runtime_imports_requested"],
+            "torch",
+        )
+        self.assertTrue(validation_row["transformers_trace_runtime_imports_all_ok"])
+        self.assertEqual(
+            validation_row["transformers_trace_runtime_import_versions"],
+            "torch=2.0.0",
+        )
+        self.assertEqual(
             validation_row["transformers_trace_zspace_status_changed_rows"],
             1,
         )
@@ -4171,6 +4231,7 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                 "--require-manifest-transformers-trace",
                 "--require-manifest-transformers-trace-compare-pass",
                 "--require-manifest-transformers-trace-coimport",
+                "--require-manifest-transformers-trace-runtime-imports",
                 "--require-manifest-transformers-trace-runtime-metadata-match",
                 "--max-manifest-transformers-trace-top-token-changed-rows",
                 "1",
@@ -4245,6 +4306,41 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertIn("transformers_trace_coimport_failed", text)
         self.assertIn("passed=False", text)
 
+    def test_byte_lm_profile_smoke_validation_gates_runtime_imports(self):
+        module = load_example("byte_lm_profile_smoke")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out_dir = Path(tmpdir)
+            manifest_path, _validation_path = (
+                self.write_profile_smoke_manifest_with_transformers_trace_compare(
+                    module,
+                    out_dir,
+                    runtime_imports_all_ok=False,
+                    runtime_imports_failed="torch",
+                )
+            )
+            old_argv = sys.argv
+            sys.argv = [
+                "byte_lm_profile_smoke.py",
+                "--validate-manifest-jsonl",
+                str(manifest_path),
+                "--require-manifest-transformers-trace",
+                "--require-manifest-transformers-trace-runtime-imports",
+            ]
+            output = io.StringIO()
+            try:
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "profile smoke manifest trace validation gate failed",
+                ):
+                    with contextlib.redirect_stdout(output):
+                        module.main()
+            finally:
+                sys.argv = old_argv
+            text = output.getvalue()
+
+        self.assertIn("transformers_trace_runtime_imports_failed", text)
+        self.assertIn("passed=False", text)
+
     def test_byte_lm_profile_smoke_accepts_produced_manifest_trace_gates(self):
         module = load_example("byte_lm_profile_smoke")
         old_argv = sys.argv
@@ -4255,9 +4351,13 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             "--hf-state-dict",
             "/models/llama",
             "--transformers-trace",
+            "--transformers-trace-runtime-import",
+            "torch",
+            "--require-transformers-trace-runtime-imports",
             "--validate-produced-manifest",
             "--require-manifest-transformers-trace",
             "--require-manifest-transformers-trace-coimport",
+            "--require-manifest-transformers-trace-runtime-imports",
         ]
         try:
             args = module.parse_args()
@@ -4265,8 +4365,11 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             sys.argv = old_argv
 
         self.assertTrue(args.validate_produced_manifest)
+        self.assertEqual(args.transformers_trace_runtime_imports, ["torch"])
+        self.assertTrue(args.require_transformers_trace_runtime_imports)
         self.assertTrue(args.require_manifest_transformers_trace)
         self.assertTrue(args.require_manifest_transformers_trace_coimport)
+        self.assertTrue(args.require_manifest_transformers_trace_runtime_imports)
         self.assertIsNone(args.manifest_validation_jsonl)
         self.assertEqual(
             module.produced_manifest_validation_jsonl(
@@ -4362,6 +4465,8 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         args.transformers_trace_top_k = 3
         args.transformers_trace_zspace_project = True
         args.transformers_trace_zspace_source = "top_logits"
+        args.transformers_trace_runtime_imports = ["torch", "tokenizers"]
+        args.require_transformers_trace_runtime_imports = True
         args.compare_transformers_trace_jsonl = Path("/tmp/baseline-trace.jsonl")
         args.require_transformers_trace_match = True
         args.require_transformers_trace_runtime_metadata_match = True
@@ -4396,6 +4501,11 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                 "--zspace-project",
                 "--zspace-source",
                 "top_logits",
+                "--runtime-import",
+                "torch",
+                "--runtime-import",
+                "tokenizers",
+                "--require-runtime-imports",
                 "--compare-jsonl",
                 Path("/tmp/baseline-trace.jsonl"),
                 "--compare-output-jsonl",
@@ -4447,6 +4557,9 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             "spiral",
             "--transformers-trace-top-k",
             "3",
+            "--transformers-trace-runtime-import",
+            "torch",
+            "--require-transformers-trace-runtime-imports",
             "--compare-transformers-trace-jsonl",
             "/tmp/profile-smoke-real-hf/transformers-trace-baseline.jsonl",
             "--require-transformers-trace-match",
@@ -4496,6 +4609,8 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertIn("--jsonl /tmp/profile-smoke-real-hf/transformers-trace.jsonl", text)
         self.assertIn("--top-k 3", text)
         self.assertIn("--prompt spiral", text)
+        self.assertIn("--runtime-import torch", text)
+        self.assertIn("--require-runtime-imports", text)
         self.assertIn(
             "--compare-jsonl /tmp/profile-smoke-real-hf/transformers-trace-baseline.jsonl",
             text,
@@ -6480,6 +6595,8 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                 zspace_curvature=-0.04,
                 zspace_frequency=0.65,
                 zspace_strength=1.0,
+                runtime_imports=["transformers", "math"],
+                require_runtime_imports=True,
                 require_hidden_states=False,
                 require_zspace_projection=False,
             )
@@ -6507,6 +6624,25 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             manifest["transformers_spiraltorch_coimport_status"],
             "ok",
         )
+        self.assertEqual(manifest["runtime_import_probe_count"], 2)
+        self.assertEqual(manifest["runtime_imports_requested"], "transformers,math")
+        self.assertEqual(manifest["runtime_imports_imported"], "transformers,math")
+        self.assertEqual(manifest["runtime_imports_failed"], "none")
+        self.assertTrue(manifest["runtime_imports_all_ok"])
+        self.assertEqual(
+            manifest["runtime_import_versions"],
+            "transformers=9.9.9,math=none",
+        )
+        self.assertEqual(
+            manifest["runtime_import_module_names"],
+            "transformers=transformers,math=math",
+        )
+        probe_rows = json.loads(manifest["runtime_imports_json"])
+        self.assertEqual(
+            [row["module"] for row in probe_rows],
+            ["transformers", "math"],
+        )
+        self.assertTrue(all(row["imported"] for row in probe_rows))
         self.assertEqual(manifest["transformers_model_type"], "llama")
         self.assertEqual(manifest["transformers_config_num_hidden_layers"], 2)
         self.assertEqual(manifest["transformers_config_num_attention_heads"], 4)
@@ -6545,6 +6681,9 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                 "2",
                 "--jsonl",
                 str(out),
+                "--runtime-import",
+                "transformers",
+                "--require-runtime-imports",
             ]
             output = io.StringIO()
             try:
@@ -6563,8 +6702,45 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             "transformers_prompt_trace",
         ])
         self.assertTrue(rows[0]["model_loaded"])
+        self.assertEqual(rows[0]["runtime_imports_requested"], "transformers")
+        self.assertTrue(rows[0]["runtime_imports_all_ok"])
         self.assertEqual(rows[1]["top_token_ids"], "3,1")
         self.assertIn("transformers_prompt_trace", output.getvalue())
+
+    def test_transformers_trace_runtime_import_gate_rejects_missing_module(self):
+        module = load_example("byte_lm_transformers_trace")
+        with tempfile.TemporaryDirectory() as tmp:
+            args = types.SimpleNamespace(
+                model_path=Path(tmp),
+                top_k=2,
+                allow_remote=False,
+                trust_remote_code=False,
+                revision=None,
+                metadata_only=True,
+                capture_hidden_states=True,
+                zspace_project=False,
+                zspace_source="hidden",
+                zspace_curvature=-0.04,
+                zspace_frequency=0.65,
+                zspace_strength=1.0,
+                runtime_imports=["spiraltorch_missing_runtime_fixture"],
+                require_runtime_imports=True,
+            )
+            with fake_transformers_module() as (fake, _calls):
+                config = fake.AutoConfig.from_pretrained(str(args.model_path))
+                tokenizer = fake.AutoTokenizer.from_pretrained(str(args.model_path))
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "runtime import probe failed",
+                ):
+                    module.manifest_row(
+                        args,
+                        ["spiral"],
+                        fake,
+                        config,
+                        tokenizer,
+                        model_loaded=False,
+                    )
 
     def test_transformers_trace_compares_prompt_rows_with_gates(self):
         module = load_example("byte_lm_transformers_trace")
@@ -6727,6 +6903,70 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             "runtime_metadata_changed",
         )
         self.assertTrue(rows[1]["passed"])
+
+    def test_transformers_trace_compare_gate_detects_runtime_import_drift(self):
+        module = load_example("byte_lm_transformers_trace")
+        args = argparse.Namespace(
+            require_trace_match=False,
+            require_runtime_metadata_match=True,
+            require_top_token_match=False,
+            max_top_logit_regression=None,
+            max_top_probability_regression=None,
+            max_logit_l2_change=None,
+            max_hidden_state_l2_change=None,
+        )
+        manifest = {
+            "row_type": "transformers_trace_manifest",
+            "model_path": "/models/llama",
+            "top_k": 2,
+            "runtime_imports_requested": "torch",
+            "runtime_import_probe_count": 1,
+            "runtime_imports_imported": "torch",
+            "runtime_imports_failed": "none",
+            "runtime_imports_all_ok": True,
+            "runtime_import_versions": "torch=2.0.0",
+            "runtime_import_module_names": "torch=torch",
+            "runtime_imports_json": json.dumps(
+                [
+                    {
+                        "module": "torch",
+                        "imported": True,
+                        "version": "2.0.0",
+                        "module_name": "torch",
+                        "module_file": "/env/torch.py",
+                        "error": None,
+                    }
+                ],
+                sort_keys=True,
+            ),
+        }
+        prompt = {
+            "row_type": "transformers_prompt_trace",
+            "prompt_index": 0,
+            "prompt": "spiral",
+            "top_token_ids": "3,1",
+        }
+        current = [
+            dict(
+                manifest,
+                runtime_imports_imported="none",
+                runtime_imports_failed="torch",
+                runtime_imports_all_ok=False,
+            ),
+            prompt,
+        ]
+        rows = module.compare_trace_rows(current, [manifest, prompt], args)
+
+        self.assertFalse(rows[0]["passed"])
+        self.assertEqual(rows[0]["runtime_metadata_changed_count"], 3)
+        self.assertEqual(
+            rows[0]["runtime_metadata_failures"],
+            "runtime_metadata_changed",
+        )
+        self.assertIn(
+            "runtime_imports_all_ok",
+            rows[0]["runtime_metadata_changed_fields"],
+        )
 
     def test_transformers_trace_compare_summary_reports_drift_metrics(self):
         module = load_example("byte_lm_transformers_trace")
