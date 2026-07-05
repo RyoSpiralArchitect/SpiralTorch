@@ -29,6 +29,17 @@ class _Response(io.BytesIO):
 
 
 class PublishPyPIWheelsTests(unittest.TestCase):
+    def test_read_token_supports_hidden_prompt_source(self) -> None:
+        with mock.patch.object(publish_pypi_wheels.getpass, "getpass", return_value=" pypi-test-token\n"):
+            token, metadata = publish_pypi_wheels.read_token("prompt", "PYPI_API_TOKEN")
+
+        self.assertEqual(token, "pypi-test-token")
+        self.assertEqual(metadata["source"], "prompt")
+        self.assertTrue(metadata["trimmed"])
+        self.assertTrue(metadata["starts_with_pypi"])
+        self.assertTrue(metadata["is_ascii"])
+        self.assertFalse(metadata["contains_whitespace"])
+
     def test_parse_sha256_lines_rejects_duplicate_entries(self) -> None:
         digest = "a" * 64
         text = f"{digest}  wheel.whl\n{digest}  wheel.whl\n"

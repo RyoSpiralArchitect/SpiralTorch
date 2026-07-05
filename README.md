@@ -556,28 +556,35 @@ gh release download "$TAG" \
   --pattern 'wheels.sha256'
 
 # Dry-run first: validates wheels, twine metadata, PyPI state, and token shape
-# without printing the token or uploading anything.
+# without printing the token or uploading anything. Use --token-source none
+# when you only want wheel/release validation without credential readiness.
 python scripts/publish_pypi_wheels.py \
   --dist "$DIST" \
   --expected-version "$VERSION" \
   --github-release-tag "$TAG" \
+  --token-source prompt \
   --dry-run
 
-# Real upload: reads a `pypi-...` token from the macOS clipboard, uploads with
+# Real upload: reads a `pypi-...` token from a hidden prompt, uploads with
 # twine, verifies PyPI wheel digests, then installs/import-smokes the release.
 python scripts/publish_pypi_wheels.py \
   --dist "$DIST" \
   --expected-version "$VERSION" \
   --github-release-tag "$TAG" \
+  --token-source prompt \
   --skip-existing
 
 # If a local multi-wheel upload stalls on a slow uplink, upload one wheel at a
 # time from a clean twine venv. Keep --skip-existing so interrupted retries are
-# safe after PyPI accepts an earlier file.
+# safe after PyPI accepts an earlier file. `read -s` keeps the token out of
+# stdout and shell history.
+read -rsp "PyPI token for spiraltorch (hidden): " TWINE_PASSWORD
+echo
 for wheel in "$DIST"/spiraltorch-"$VERSION"-*.whl; do
-  TWINE_USERNAME=__token__ TWINE_PASSWORD="$(pbpaste)" \
+  TWINE_USERNAME=__token__ TWINE_PASSWORD="$TWINE_PASSWORD" \
     python -m twine upload --non-interactive --skip-existing --disable-progress-bar "$wheel"
 done
+unset TWINE_PASSWORD
 
 # Signed GitHub Release recovery: run the fixed workflow from main, rebuild
 # wheels from the release tag, regenerate manifest/Sigstore bundles, and
@@ -626,8 +633,9 @@ environment=pypi
 If the trusted path fails with `invalid-publisher`, the PyPI-side publisher is
 missing or one of those fields does not match. Without that PyPI-side publisher,
 select `token` and provide `PYPI_API_TOKEN` as a GitHub secret, or use the local
-helper above with `--token-source env` when `pbpaste` is not visible from the
-current shell.
+helper above with `--token-source prompt` when `pbpaste` is not visible from the
+current shell. `--token-source env --token-env PYPI_API_TOKEN` is also available
+for non-interactive local automation.
 
 ---
 

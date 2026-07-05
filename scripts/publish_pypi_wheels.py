@@ -8,6 +8,7 @@ and can run as a dry-run while waiting for credentials.
 from __future__ import annotations
 
 import argparse
+import getpass
 import hashlib
 import json
 import os
@@ -42,9 +43,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--token-source",
-        choices=("clipboard", "env", "none"),
+        choices=("clipboard", "env", "prompt", "none"),
         default="clipboard",
-        help="Where to read the PyPI API token from before upload. Default: clipboard via pbpaste.",
+        help=(
+            "Where to read the PyPI API token from before upload. "
+            "Use prompt when pbpaste is not visible from this shell. Default: clipboard via pbpaste."
+        ),
     )
     parser.add_argument(
         "--token-env",
@@ -227,6 +231,8 @@ def read_token(source: str, env_name: str) -> tuple[str, dict[str, object]]:
         raw = read_clipboard()
     elif source == "env":
         raw = os.environ.get(env_name, "")
+    elif source == "prompt":
+        raw = getpass.getpass("PyPI token for spiraltorch (hidden): ")
 
     token = raw.strip()
     metadata = {
