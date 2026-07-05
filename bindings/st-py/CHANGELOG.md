@@ -1,5 +1,11 @@
 # SpiralTorch (Python) changelog
 
+## 0.4.10
+
+- Packaging: pin the canonical root license and wheel license payload to LF
+  line endings so Windows-built wheels embed the exact AGPL bytes checked by
+  the release license report.
+
 ## 0.4.9
 
 - Packaging: include the canonical AGPL license payload in wheels via
