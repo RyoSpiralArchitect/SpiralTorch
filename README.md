@@ -369,6 +369,38 @@ Without cloning the repo, `pip install spiraltorch` gives you:
 - **FT diagnostics:** tokenizerless byte-LM profile smokes, Transformers logit
   trace capture, runtime import audits, and WGPU readiness gates.
 
+### Python orientation after install
+
+If you only want to confirm the wheel and choose a runtime route, start with:
+
+```python
+import spiraltorch as st
+
+print("spiraltorch", st.__version__)
+print("cpu:", st.describe_device("cpu")["backend"])
+print("wgpu:", st.describe_device("wgpu").get("backend"))
+
+session = st.SpiralSession(backend="auto")
+print("session backend:", session.backend)
+print("effective backend:", getattr(session, "effective_backend", session.backend))
+```
+
+Then pick the path that matches the job:
+
+- **Native learning loop:** use `st.Tensor`, `st.nn`, `st.optim`, and
+  `st.SpiralSession` directly when you want SpiralTorch-owned tensors,
+  checkpoints, traces, and WGPU/CPU routing.
+- **Interop-first experiment:** use `spiraltorch.ecosystem` or DLPack when a
+  PyTorch/JAX/CuPy/TensorFlow object should cross into SpiralTorch without
+  rewriting the whole training stack at once.
+- **LLM / FT preflight:** run
+  `bindings/st-py/examples/checkpoint_preflight.py`,
+  `byte_lm_transformers_trace.py`, or `byte_lm_profile_smoke.py` against local
+  checkpoint files before committing to heavier fine-tuning.
+- **Source build or custom backend:** keep the wheel path for ordinary use, and
+  switch to the maturin commands below only when you need local Rust changes,
+  CPU-only artifacts, CUDA/HIP flags, or a release-equivalent wheel.
+
 ---
 
 ## Build from source (cargo)
@@ -457,15 +489,15 @@ Linux note: for manylinux2014 wheels you either need a manylinux container (e.g.
 # Dry-run first: validates wheels, twine metadata, PyPI state, and token shape
 # without printing the token or uploading anything.
 python scripts/publish_pypi_wheels.py \
-  --dist /tmp/spiraltorch-0.4.9-dist \
-  --expected-version 0.4.9 \
+  --dist /tmp/spiraltorch-0.4.10-dist \
+  --expected-version 0.4.10 \
   --dry-run
 
 # Real upload: reads a `pypi-...` token from the macOS clipboard, uploads the
 # wheels with twine, waits for PyPI JSON, then installs/import-smokes the release.
 python scripts/publish_pypi_wheels.py \
-  --dist /tmp/spiraltorch-0.4.9-dist \
-  --expected-version 0.4.9 \
+  --dist /tmp/spiraltorch-0.4.10-dist \
+  --expected-version 0.4.10 \
   --skip-existing
 
 # Signed GitHub Release recovery: run the fixed workflow from main, rebuild
@@ -473,11 +505,11 @@ python scripts/publish_pypi_wheels.py \
 # overwrite the assets on that tag's release.
 gh workflow run release_wheels.yml \
   --ref main \
-  -f release_tag=v0.4.9 \
-  -f checkout_ref=v0.4.9
+  -f release_tag=v0.4.10 \
+  -f checkout_ref=v0.4.10
 
 # Re-run integrity verification for that recovered release.
-gh workflow run verify-release.yml --ref main -f release_tag=v0.4.9
+gh workflow run verify-release.yml --ref main -f release_tag=v0.4.10
 ```
 
 ---
