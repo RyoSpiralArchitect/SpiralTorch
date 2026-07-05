@@ -1644,6 +1644,9 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             guard_accepted_epochs,
             guard_retention_rejected_epochs,
             guard_target_stale_epochs,
+            component_activation_fallbacks=0.0,
+            component_merge_fallbacks=0.0,
+            component_preactivation_hits=0.0,
         ):
             return {
                 "case": case,
@@ -1694,6 +1697,18 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                 "checkpoint_projection_strength": 0.5,
                 "checkpoint_projection_curvature": -0.5,
                 "checkpoint_projection_frequency": 0.65,
+                (
+                    "tensor_op_backend_requested_wgpu_component_fallback_"
+                    "non_liner_forward_activation_cpu"
+                ): component_activation_fallbacks,
+                (
+                    "tensor_op_backend_requested_wgpu_component_fallback_"
+                    "wave_scan_stack_forward_merge_cpu"
+                ): component_merge_fallbacks,
+                (
+                    "tensor_op_backend_requested_wgpu_component_hit_"
+                    "non_liner_forward_preactivation_wgpu"
+                ): component_preactivation_hits,
             }
 
         rows = [
@@ -1706,6 +1721,9 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                 6,
                 0,
                 0,
+                component_activation_fallbacks=2.0,
+                component_merge_fallbacks=1.0,
+                component_preactivation_hits=4.0,
             ),
             row(
                 "r12_a64_lr4::zspace_s0p5_cm0p5_f0p65",
@@ -1716,6 +1734,9 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                 4,
                 0,
                 2,
+                component_activation_fallbacks=3.0,
+                component_merge_fallbacks=1.0,
+                component_preactivation_hits=2.0,
             ),
         ]
         aggregates = module.aggregate_config_rows(rows)
@@ -1743,6 +1764,29 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertAlmostEqual(aggregate["guard_acceptance_rate_min"], 4.0 / 6.0)
         self.assertAlmostEqual(aggregate["guard_retention_rejected_rate_mean"], 0.0)
         self.assertAlmostEqual(aggregate["guard_retention_rejected_rate_max"], 0.0)
+        self.assertAlmostEqual(
+            aggregate[
+                "tensor_op_backend_requested_wgpu_component_fallback_"
+                "non_liner_forward_activation_cpu"
+            ],
+            5.0,
+        )
+        self.assertAlmostEqual(
+            aggregate[
+                "tensor_op_backend_requested_wgpu_component_fallback_"
+                "wave_scan_stack_forward_merge_cpu"
+            ],
+            2.0,
+        )
+        self.assertEqual(
+            aggregate["tensor_backend_requested_wgpu_component_fallback_top"],
+            "non_liner_forward_activation_cpu:5,"
+            "wave_scan_stack_forward_merge_cpu:2",
+        )
+        self.assertEqual(
+            aggregate["tensor_backend_requested_wgpu_component_hit_top"],
+            "non_liner_forward_preactivation_wgpu:6",
+        )
         self.assertAlmostEqual(aggregate["guard_target_stale_rate_mean"], 1.0 / 6.0)
         self.assertAlmostEqual(aggregate["guard_target_stale_rate_max"], 2.0 / 6.0)
         self.assertAlmostEqual(aggregate["target_loss_delta_mean"], 0.02)
@@ -6996,6 +7040,18 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                         "guard_retention_rejected_rate_max": 0.20,
                         "guard_target_stale_rate_mean": 0.30,
                         "guard_target_stale_rate_max": 0.40,
+                        (
+                            "tensor_op_backend_requested_wgpu_component_fallback_"
+                            "non_liner_forward_activation_cpu"
+                        ): 2.0,
+                        (
+                            "tensor_op_backend_requested_wgpu_component_fallback_"
+                            "wave_scan_stack_forward_merge_cpu"
+                        ): 1.0,
+                        (
+                            "tensor_op_backend_requested_wgpu_component_hit_"
+                            "non_liner_forward_preactivation_wgpu"
+                        ): 3.0,
                         "target_loss_delta_mean": 1.2,
                         "retention_loss_delta_mean": 0.4,
                     }
@@ -7062,6 +7118,23 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertAlmostEqual(row["guard_acceptance_rate_mean"], 0.75)
         self.assertAlmostEqual(row["guard_retention_rejected_rate_mean"], 0.10)
         self.assertAlmostEqual(row["guard_target_stale_rate_mean"], 0.30)
+        self.assertEqual(
+            row["tensor_backend_requested_wgpu_component_fallback_top"],
+            "non_liner_forward_activation_cpu:2,"
+            "wave_scan_stack_forward_merge_cpu:1",
+        )
+        self.assertEqual(
+            row["tensor_backend_requested_wgpu_component_hit_top"],
+            "non_liner_forward_preactivation_wgpu:3",
+        )
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            module.print_run_summary_rows(rows)
+        self.assertIn(
+            "wgpu_component_fallback_top=non_liner_forward_activation_cpu:2,"
+            "wave_scan_stack_forward_merge_cpu:1",
+            output.getvalue(),
+        )
         self.assertEqual(row["input_promotion_run_key"], "strong_effect::r12_a64_lr4::gain_g4")
         self.assertEqual(row["input_promotion_rank"], 1)
         self.assertEqual(row["input_promotion_metric"], "target_retention_ratio")
@@ -10700,6 +10773,50 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertAlmostEqual(explicit_rates["guard_acceptance_rate"], 0.75)
         self.assertAlmostEqual(explicit_rates["guard_retention_rejected_rate"], 0.125)
         self.assertAlmostEqual(explicit_rates["guard_target_stale_rate"], 0.125)
+
+    def test_helper_summarizes_requested_wgpu_component_backends(self):
+        helper = load_compare_helper()
+        row = {
+            (
+                "tensor_op_backend_requested_wgpu_component_fallback_"
+                "non_liner_forward_activation_cpu"
+            ): 2,
+            (
+                "tensor_op_backend_requested_wgpu_component_fallback_"
+                "wave_scan_stack_forward_merge_cpu"
+            ): 1,
+            (
+                "tensor_op_backend_requested_wgpu_component_hit_"
+                "non_liner_forward_preactivation_wgpu"
+            ): 3,
+        }
+        helper.attach_requested_wgpu_component_backend_summary(row)
+        self.assertEqual(
+            row["tensor_backend_requested_wgpu_component_fallback_top"],
+            "non_liner_forward_activation_cpu:2,"
+            "wave_scan_stack_forward_merge_cpu:1",
+        )
+        self.assertEqual(
+            row["tensor_backend_requested_wgpu_component_hit_top"],
+            "non_liner_forward_preactivation_wgpu:3",
+        )
+        self.assertEqual(
+            row["tensor_backend_requested_wgpu_component_fallback_distinct"],
+            2,
+        )
+        self.assertIn(
+            '"component":"non_liner_forward_activation_cpu"',
+            row["tensor_backend_requested_wgpu_component_fallback_top_json"],
+        )
+
+        totals = helper.requested_wgpu_component_backend_totals([row, row])
+        self.assertEqual(
+            totals[
+                "tensor_op_backend_requested_wgpu_component_fallback_"
+                "non_liner_forward_activation_cpu"
+            ],
+            4.0,
+        )
 
     def test_helper_rejects_boolean_summary_margin_inputs(self):
         helper = load_compare_helper()

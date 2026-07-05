@@ -496,6 +496,110 @@ def attach_summary_guard_counts(row, captured=None):
     return row
 
 
+REQUESTED_WGPU_COMPONENT_HIT_PREFIX = (
+    "tensor_op_backend_requested_wgpu_component_hit_"
+)
+REQUESTED_WGPU_COMPONENT_FALLBACK_PREFIX = (
+    "tensor_op_backend_requested_wgpu_component_fallback_"
+)
+
+
+def requested_wgpu_component_backend_totals(rows):
+    totals = {}
+    prefixes = (
+        REQUESTED_WGPU_COMPONENT_HIT_PREFIX,
+        REQUESTED_WGPU_COMPONENT_FALLBACK_PREFIX,
+    )
+    for row in rows:
+        for key, value in row.items():
+            if not any(str(key).startswith(prefix) for prefix in prefixes):
+                continue
+            if not is_numeric_value(value):
+                raise ValueError(f"summary {key} is not numeric")
+            totals[key] = totals.get(key, 0.0) + float(value)
+    return totals
+
+
+def _count_label(value):
+    if float(value).is_integer():
+        return str(int(value))
+    return f"{float(value):.6g}"
+
+
+def _requested_wgpu_component_items(row, prefix):
+    items = []
+    for key, value in row.items():
+        key = str(key)
+        if not key.startswith(prefix):
+            continue
+        if not is_numeric_value(value):
+            raise ValueError(f"summary {key} is not numeric")
+        numeric = float(value)
+        if numeric <= 0.0:
+            continue
+        component = key[len(prefix) :]
+        if component:
+            items.append((component, numeric))
+    return sorted(items, key=lambda item: (-item[1], item[0]))
+
+
+def _requested_wgpu_component_top_label(items, top_k):
+    selected = items[:top_k]
+    if not selected:
+        return "none"
+    return ",".join(f"{name}:{_count_label(value)}" for name, value in selected)
+
+
+def _requested_wgpu_component_top_json(items, top_k):
+    selected = [
+        {"component": name, "count": value}
+        for name, value in items[:top_k]
+    ]
+    return json.dumps(selected, ensure_ascii=False, separators=(",", ":"))
+
+
+def requested_wgpu_component_backend_summary(row, *, top_k=3):
+    top_k = max(1, int(top_k))
+    hit_items = _requested_wgpu_component_items(
+        row,
+        REQUESTED_WGPU_COMPONENT_HIT_PREFIX,
+    )
+    fallback_items = _requested_wgpu_component_items(
+        row,
+        REQUESTED_WGPU_COMPONENT_FALLBACK_PREFIX,
+    )
+    return {
+        "tensor_backend_requested_wgpu_component_hit_distinct": len(hit_items),
+        "tensor_backend_requested_wgpu_component_hit_top": (
+            _requested_wgpu_component_top_label(hit_items, top_k)
+        ),
+        "tensor_backend_requested_wgpu_component_hit_top_json": (
+            _requested_wgpu_component_top_json(hit_items, top_k)
+        ),
+        "tensor_backend_requested_wgpu_component_fallback_distinct": (
+            len(fallback_items)
+        ),
+        "tensor_backend_requested_wgpu_component_fallback_top": (
+            _requested_wgpu_component_top_label(fallback_items, top_k)
+        ),
+        "tensor_backend_requested_wgpu_component_fallback_top_json": (
+            _requested_wgpu_component_top_json(fallback_items, top_k)
+        ),
+    }
+
+
+def attach_requested_wgpu_component_backend_summary(
+    row,
+    source_rows=None,
+    *,
+    top_k=3,
+):
+    if source_rows is not None:
+        row.update(requested_wgpu_component_backend_totals(source_rows))
+    row.update(requested_wgpu_component_backend_summary(row, top_k=top_k))
+    return row
+
+
 CHECKPOINT_AUDIT_PREFIXES = ["base", "embed", "head"]
 CHECKPOINT_AUDIT_SUFFIXES = [
     "preflight_matched",
