@@ -30,6 +30,18 @@ def _temp_dir(prefix: str) -> str:
 
 
 class SpiralTorchSmokeTest(unittest.TestCase):
+    def test_runtime_import_preflight_top_level_exports(self) -> None:
+        report = st.runtime_import_preflight_report(
+            runtime_imports=["math"],
+            required_runtime_imports=["math"],
+        )
+        self.assertTrue(report["runtime_import_preflight_passed"])
+        self.assertEqual(report["runtime_imports_imported"], "math")
+        self.assertIn("runtime_import_preflight_report", st.__all__)
+
+        lines = st.runtime_import_preflight_summary_lines(report)
+        self.assertTrue(any("passed=True" in line for line in lines))
+
     def test_plugin_tensor_op(self) -> None:
         events: list[dict] = []
         sub_id = st.plugin.subscribe("TensorOp", lambda e: events.append(e))

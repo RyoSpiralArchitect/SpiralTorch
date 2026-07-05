@@ -2,8 +2,9 @@
 
 This package exposes a thin, dependency-light bridge to SpiralTorch's
 Rust-first training stack. The wheel ships the same Z-space tensors,
-hypergrad tapes, and unified rank planners that power the Rust API—no
-NumPy, no PyTorch, and no shim layers.
+hypergrad tapes, and unified rank planners that power the Rust API without
+making NumPy, PyTorch, Transformers, or Hugging Face tooling mandatory
+dependencies.
 
 ## Install
 
@@ -12,13 +13,16 @@ pip install -U spiraltorch
 ```
 
 The published wheel is WGPU-first with CPU fallback. In plain Python terms,
-start with three handles:
+start with four handles:
 
 - `spiraltorch.Tensor` for dependency-light native tensors.
 - `spiraltorch.nn` for modules, losses, trainers, LoRA adapters, and checked
   checkpoint handoff.
 - `spiraltorch.ecosystem` when a PyTorch/JAX/CuPy/TensorFlow tensor needs to
   cross the Z-space membrane.
+- `spiraltorch.runtime_import_preflight_report(...)` when a Transformers,
+  Torch, PEFT, or dataset dependency contract should be recorded before a
+  heavier fine-tune run.
 
 ```bash
 python - <<'PY'
@@ -42,6 +46,12 @@ report = head.state_dict_compatibility_with_key_map(
     {"lm_head.weight": "head::weight", "lm_head.bias": "head::bias"},
 )
 print("checkpoint compatible:", report["compatible"])
+
+runtime = st.runtime_import_preflight_report(
+    runtime_import_presets=["hf-runtime"],
+    required_runtime_import_presets=["hf-runtime"],
+)
+print("HF runtime ready:", runtime["runtime_import_preflight_passed"])
 PY
 ```
 
@@ -109,6 +119,11 @@ PY
 - Trace and artifact utilities via `spiraltorch.zspace_trace`,
   `spiraltorch.trainer_trace`, and Atlas adapters so JSONL telemetry can be
   loaded, summarized, compared, and rendered from Python.
+- Top-level runtime import preflight helpers so FT notebooks can probe
+  `torch` / `transformers` / `tokenizers` / `datasets` / `accelerate` /
+  `safetensors` evidence, write JSON reports, and gate optional dependency
+  contracts without pulling those packages into SpiralTorch's required
+  dependency set.
 - SoT-3Dφ spiral planners (`spiraltorch.sot`) that collapse to Z-space tensors,
   grow full TensorBiomes via `SoT3DPlan.grow_biome(...)`, and feed
   geometry-aware experiments or trace artifacts without requiring a Python
@@ -181,6 +196,24 @@ profile ladder, or use
 the matching checkpoint audit shortcut. Add
 `--require-runtime-metadata-match` when comparing traces to fail fast on
 config/tokenizer/model swaps before reading prompt-level drift.
+
+For notebook or CI preflight without a training script, either run the CLI:
+
+```bash
+spiral-runtime-preflight --preset hf-runtime --require --json-out ft-runtime.json
+```
+
+or call the same contract from Python:
+
+```python
+import spiraltorch as st
+
+report = st.runtime_import_preflight_report(
+    runtime_import_presets=["hf-runtime"],
+    required_runtime_import_presets=["hf-runtime"],
+)
+st.write_runtime_import_preflight_report(report, "ft-runtime.json")
+```
 
 ## Building wheels
 

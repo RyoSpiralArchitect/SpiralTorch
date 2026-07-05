@@ -398,6 +398,23 @@ Then pick the path that matches the job:
   `bindings/st-py/examples/checkpoint_preflight.py`,
   `byte_lm_transformers_trace.py`, or `byte_lm_profile_smoke.py` against local
   checkpoint files before committing to heavier fine-tuning.
+- **Dependency contract before a run:** use the CLI or the top-level Python
+  helper to record optional runtime evidence without making Hugging Face
+  packages hard dependencies of the wheel:
+
+  ```bash
+  spiral-runtime-preflight --preset hf-runtime --require --json-out ft-runtime.json
+  ```
+
+  ```python
+  import spiraltorch as st
+
+  report = st.runtime_import_preflight_report(
+      runtime_import_presets=["hf-runtime"],
+      required_runtime_import_presets=["hf-runtime"],
+  )
+  print(report["runtime_import_preflight_passed"])
+  ```
 - **Source build or custom backend:** keep the wheel path for ordinary use, and
   switch to the maturin commands below only when you need local Rust changes,
   CPU-only artifacts, CUDA/HIP flags, or a release-equivalent wheel.
@@ -489,7 +506,7 @@ Linux note: for manylinux2014 wheels you either need a manylinux container (e.g.
 
 ```bash
 # Replace these with the version/tag you are publishing.
-VERSION=0.4.10
+VERSION=0.4.11
 TAG="v${VERSION}"
 DIST="/tmp/spiraltorch-${VERSION}-dist"
 

@@ -1,5 +1,17 @@
 # SpiralTorch (Python) changelog
 
+## 0.4.11
+
+- Python API: expose runtime import preflight helpers directly from
+  `spiraltorch`, including `runtime_import_preflight_report(...)`,
+  `runtime_import_preflight_summary_lines(...)`, and
+  `write_runtime_import_preflight_report(...)`, so fine-tune and interop
+  notebooks can validate optional `torch` / `transformers` / `tokenizers`
+  dependencies without importing the lower-level helper module first.
+- Documentation: refresh the pip-facing README path around WGPU-first wheels,
+  `SpiralSession`, Transformers co-import evidence, tokenizerless byte-LM
+  diagnostics, and reload-pair/sweep runtime contracts.
+
 ## 0.4.10
 
 - Packaging: pin the canonical root license and wheel license payload to LF
