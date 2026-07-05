@@ -4341,6 +4341,64 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertIn("transformers_trace_runtime_imports_failed", text)
         self.assertIn("passed=False", text)
 
+    def test_byte_lm_profile_smoke_validation_gates_required_runtime_import_module(self):
+        module = load_example("byte_lm_profile_smoke")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out_dir = Path(tmpdir)
+            manifest_path, _validation_path = (
+                self.write_profile_smoke_manifest_with_transformers_trace_compare(
+                    module,
+                    out_dir,
+                )
+            )
+            old_argv = sys.argv
+            sys.argv = [
+                "byte_lm_profile_smoke.py",
+                "--validate-manifest-jsonl",
+                str(manifest_path),
+                "--require-manifest-transformers-trace",
+                "--require-manifest-transformers-trace-runtime-import",
+                "torch",
+            ]
+            passing_output = io.StringIO()
+            try:
+                with contextlib.redirect_stdout(passing_output):
+                    module.main()
+            finally:
+                sys.argv = old_argv
+            passing_text = passing_output.getvalue()
+
+            sys.argv = [
+                "byte_lm_profile_smoke.py",
+                "--validate-manifest-jsonl",
+                str(manifest_path),
+                "--require-manifest-transformers-trace",
+                "--require-manifest-transformers-trace-runtime-import",
+                "tokenizers",
+            ]
+            failing_output = io.StringIO()
+            try:
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "profile smoke manifest trace validation gate failed",
+                ):
+                    with contextlib.redirect_stdout(failing_output):
+                        module.main()
+            finally:
+                sys.argv = old_argv
+            failing_text = failing_output.getvalue()
+
+        self.assertIn(
+            "transformers_trace_runtime_imports_imported=torch",
+            passing_text,
+        )
+        self.assertIn("passed=True", passing_text)
+        self.assertIn(
+            "transformers_trace_runtime_import_missing:tokenizers",
+            failing_text,
+        )
+        self.assertIn("passed=False", failing_text)
+
     def test_byte_lm_profile_smoke_accepts_produced_manifest_trace_gates(self):
         module = load_example("byte_lm_profile_smoke")
         old_argv = sys.argv
@@ -4358,6 +4416,8 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             "--require-manifest-transformers-trace",
             "--require-manifest-transformers-trace-coimport",
             "--require-manifest-transformers-trace-runtime-imports",
+            "--require-manifest-transformers-trace-runtime-import",
+            "torch",
         ]
         try:
             args = module.parse_args()
@@ -4370,6 +4430,10 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertTrue(args.require_manifest_transformers_trace)
         self.assertTrue(args.require_manifest_transformers_trace_coimport)
         self.assertTrue(args.require_manifest_transformers_trace_runtime_imports)
+        self.assertEqual(
+            args.require_manifest_transformers_trace_runtime_import,
+            ["torch"],
+        )
         self.assertIsNone(args.manifest_validation_jsonl)
         self.assertEqual(
             module.produced_manifest_validation_jsonl(

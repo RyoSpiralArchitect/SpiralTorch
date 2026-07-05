@@ -499,6 +499,17 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--require-manifest-transformers-trace-runtime-import",
+        dest="require_manifest_transformers_trace_runtime_import",
+        action="append",
+        default=[],
+        help=(
+            "Fail --validate-manifest-jsonl unless this module appears in the "
+            "Transformers trace manifest's successful runtime import probes. "
+            "May be repeated."
+        ),
+    )
+    parser.add_argument(
         "--max-manifest-transformers-trace-top-token-changed-rows",
         type=int,
         default=None,
@@ -627,6 +638,7 @@ def parse_args():
             args.require_manifest_transformers_trace_runtime_metadata_match,
             args.require_manifest_transformers_trace_coimport,
             args.require_manifest_transformers_trace_runtime_imports,
+            bool(args.require_manifest_transformers_trace_runtime_import),
             args.max_manifest_transformers_trace_top_token_changed_rows is not None,
             args.max_manifest_transformers_trace_top_probability_regression
             is not None,
@@ -1285,6 +1297,15 @@ def manifest_validation_int(row, key):
         return None
 
 
+def manifest_validation_csv_set(row, key):
+    value = row.get(key)
+    if value is None or value == "none":
+        return set()
+    if isinstance(value, (list, tuple, set)):
+        return {str(item) for item in value if str(item)}
+    return {part for part in str(value).split(",") if part}
+
+
 def manifest_trace_validation_gate_failures(validation_row, args):
     failures = []
     if args is None:
@@ -1323,6 +1344,24 @@ def manifest_trace_validation_gate_failures(validation_row, args):
                 is not True
             ):
                 failures.append("transformers_trace_runtime_imports_failed")
+    required_runtime_imports = getattr(
+        args,
+        "require_manifest_transformers_trace_runtime_import",
+        [],
+    ) or []
+    if required_runtime_imports:
+        if not validation_row["transformers_trace_manifest_available"]:
+            failures.append("transformers_trace_manifest_missing")
+        else:
+            imported = manifest_validation_csv_set(
+                validation_row,
+                "transformers_trace_runtime_imports_imported",
+            )
+            for module_name in required_runtime_imports:
+                if module_name not in imported:
+                    failures.append(
+                        f"transformers_trace_runtime_import_missing:{module_name}"
+                    )
     if args.require_manifest_transformers_trace_runtime_metadata_match:
         if not validation_row["transformers_trace_compare_summary_available"]:
             failures.append("transformers_trace_compare_summary_missing")
@@ -1378,6 +1417,13 @@ def check_manifest_trace_validation_gates(validation_row, args):
             args.require_manifest_transformers_trace_runtime_metadata_match,
             args.require_manifest_transformers_trace_coimport,
             args.require_manifest_transformers_trace_runtime_imports,
+            bool(
+                getattr(
+                    args,
+                    "require_manifest_transformers_trace_runtime_import",
+                    [],
+                )
+            ),
             args.max_manifest_transformers_trace_top_token_changed_rows
             is not None,
             args.max_manifest_transformers_trace_top_probability_regression
@@ -1439,6 +1485,8 @@ def validate_profile_smoke_manifest_file(path, validation_jsonl=None, args=None)
                 f"{validation_row['transformers_trace_runtime_imports_all_ok']}",
                 "transformers_trace_runtime_imports_failed="
                 f"{validation_row['transformers_trace_runtime_imports_failed']}",
+                "transformers_trace_runtime_imports_imported="
+                f"{validation_row['transformers_trace_runtime_imports_imported']}",
                 "transformers_trace_top_token_changed_rows="
                 f"{validation_row['transformers_trace_top_token_changed_rows']}",
                 "transformers_trace_observed_max_top_probability_regression="
