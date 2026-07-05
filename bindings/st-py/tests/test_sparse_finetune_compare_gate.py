@@ -4163,6 +4163,10 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         runtime_import_probe_count=1,
         runtime_imports_all_ok=True,
         runtime_imports_failed="none",
+        runtime_import_coimport_status=None,
+        runtime_imports_coimported=None,
+        runtime_import_coimport_modules=None,
+        runtime_import_coimport_missing_modules=None,
         runtime_import_presets="torch-transformers",
         runtime_import_presets_satisfied=None,
         runtime_import_presets_failed=None,
@@ -4183,6 +4187,10 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         checkpoint_runtime_import_probe_count=2,
         checkpoint_runtime_imports_all_ok=True,
         checkpoint_runtime_imports_failed="none",
+        checkpoint_runtime_import_coimport_status=None,
+        checkpoint_runtime_imports_coimported=None,
+        checkpoint_runtime_import_coimport_modules=None,
+        checkpoint_runtime_import_coimport_missing_modules=None,
         checkpoint_runtime_import_presets="transformers",
         checkpoint_runtime_import_presets_satisfied=None,
         checkpoint_runtime_import_presets_failed=None,
@@ -4220,6 +4228,20 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         if runtime_import_presets_failed is None:
             runtime_import_presets_failed = (
                 "none" if runtime_imports_all_ok else runtime_import_presets
+            )
+        if runtime_import_coimport_status is None:
+            runtime_import_coimport_status = (
+                "ok" if runtime_imports_all_ok else "missing"
+            )
+        if runtime_imports_coimported is None:
+            runtime_imports_coimported = runtime_import_coimport_status == "ok"
+        if runtime_import_coimport_modules is None:
+            runtime_import_coimport_modules = (
+                "torch" if runtime_imports_all_ok else "none"
+            )
+        if runtime_import_coimport_missing_modules is None:
+            runtime_import_coimport_missing_modules = (
+                "none" if runtime_imports_all_ok else runtime_imports_failed
             )
         failed_set = {
             preset
@@ -4274,6 +4296,26 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                 "none"
                 if checkpoint_runtime_imports_all_ok
                 else checkpoint_runtime_import_presets
+            )
+        if checkpoint_runtime_import_coimport_status is None:
+            checkpoint_runtime_import_coimport_status = (
+                "ok" if checkpoint_runtime_imports_all_ok else "missing"
+            )
+        if checkpoint_runtime_imports_coimported is None:
+            checkpoint_runtime_imports_coimported = (
+                checkpoint_runtime_import_coimport_status == "ok"
+            )
+        if checkpoint_runtime_import_coimport_modules is None:
+            checkpoint_runtime_import_coimport_modules = (
+                "transformers,math"
+                if checkpoint_runtime_imports_all_ok
+                else "none"
+            )
+        if checkpoint_runtime_import_coimport_missing_modules is None:
+            checkpoint_runtime_import_coimport_missing_modules = (
+                "none"
+                if checkpoint_runtime_imports_all_ok
+                else checkpoint_runtime_imports_failed
             )
         checkpoint_failed_set = {
             preset
@@ -4418,6 +4460,18 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                             ),
                             "runtime_imports_failed": runtime_imports_failed,
                             "runtime_imports_all_ok": runtime_imports_all_ok,
+                            "runtime_import_coimport_status": (
+                                runtime_import_coimport_status
+                            ),
+                            "runtime_imports_coimported": (
+                                runtime_imports_coimported
+                            ),
+                            "runtime_import_coimport_modules": (
+                                runtime_import_coimport_modules
+                            ),
+                            "runtime_import_coimport_missing_modules": (
+                                runtime_import_coimport_missing_modules
+                            ),
                             "runtime_import_versions": (
                                 "torch=2.0.0"
                                 if runtime_imports_all_ok
@@ -4538,6 +4592,18 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                             ),
                             "runtime_imports_all_ok": (
                                 checkpoint_runtime_imports_all_ok
+                            ),
+                            "runtime_import_coimport_status": (
+                                checkpoint_runtime_import_coimport_status
+                            ),
+                            "runtime_imports_coimported": (
+                                checkpoint_runtime_imports_coimported
+                            ),
+                            "runtime_import_coimport_modules": (
+                                checkpoint_runtime_import_coimport_modules
+                            ),
+                            "runtime_import_coimport_missing_modules": (
+                                checkpoint_runtime_import_coimport_missing_modules
                             ),
                             "runtime_import_versions": (
                                 "transformers=9.9.9,math=none"
@@ -4699,9 +4765,15 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
 
         self.assertIn("transformers_trace_compare_passed=True", text)
         self.assertIn("transformers_trace_coimport_status=ok", text)
+        self.assertIn("transformers_trace_runtime_import_coimport_status=ok", text)
+        self.assertIn("transformers_trace_runtime_imports_coimported=True", text)
         self.assertIn("transformers_trace_top_token_changed_rows=1", text)
         self.assertIn("checkpoint_transformers_audit_status=ok", text)
         self.assertIn("checkpoint_transformers_runtime_imports_all_ok=True", text)
+        self.assertIn(
+            "checkpoint_transformers_runtime_import_coimport_status=ok",
+            text,
+        )
         self.assertIn(
             "declared_transformers_trace_runtime_import_preset_modules="
             "torch-transformers=transformers|torch",
@@ -4791,6 +4863,23 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         )
         self.assertTrue(validation_row["transformers_trace_runtime_imports_all_ok"])
         self.assertEqual(
+            validation_row["transformers_trace_runtime_import_coimport_status"],
+            "ok",
+        )
+        self.assertTrue(
+            validation_row["transformers_trace_runtime_imports_coimported"]
+        )
+        self.assertEqual(
+            validation_row["transformers_trace_runtime_import_coimport_modules"],
+            "torch",
+        )
+        self.assertEqual(
+            validation_row[
+                "transformers_trace_runtime_import_coimport_missing_modules"
+            ],
+            "none",
+        )
+        self.assertEqual(
             validation_row["transformers_trace_runtime_import_versions"],
             "torch=2.0.0",
         )
@@ -4845,6 +4934,27 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         )
         self.assertTrue(
             validation_row["checkpoint_transformers_runtime_imports_all_ok"]
+        )
+        self.assertEqual(
+            validation_row[
+                "checkpoint_transformers_runtime_import_coimport_status"
+            ],
+            "ok",
+        )
+        self.assertTrue(
+            validation_row["checkpoint_transformers_runtime_imports_coimported"]
+        )
+        self.assertEqual(
+            validation_row[
+                "checkpoint_transformers_runtime_import_coimport_modules"
+            ],
+            "transformers,math",
+        )
+        self.assertEqual(
+            validation_row[
+                "checkpoint_transformers_runtime_import_coimport_missing_modules"
+            ],
+            "none",
         )
         self.assertEqual(
             validation_row[

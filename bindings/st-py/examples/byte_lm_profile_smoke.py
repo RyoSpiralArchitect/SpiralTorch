@@ -1492,6 +1492,10 @@ def transformers_trace_validation_fields(row):
         "transformers_trace_runtime_imports_imported": None,
         "transformers_trace_runtime_imports_failed": None,
         "transformers_trace_runtime_imports_all_ok": None,
+        "transformers_trace_runtime_import_coimport_status": None,
+        "transformers_trace_runtime_imports_coimported": None,
+        "transformers_trace_runtime_import_coimport_modules": None,
+        "transformers_trace_runtime_import_coimport_missing_modules": None,
         "transformers_trace_runtime_import_versions": None,
         "transformers_trace_runtime_import_module_names": None,
         "transformers_trace_runtime_imports_json": None,
@@ -1589,6 +1593,18 @@ def transformers_trace_validation_fields(row):
                     ),
                     "transformers_trace_runtime_imports_all_ok": manifest.get(
                         "runtime_imports_all_ok"
+                    ),
+                    "transformers_trace_runtime_import_coimport_status": (
+                        manifest.get("runtime_import_coimport_status")
+                    ),
+                    "transformers_trace_runtime_imports_coimported": manifest.get(
+                        "runtime_imports_coimported"
+                    ),
+                    "transformers_trace_runtime_import_coimport_modules": (
+                        manifest.get("runtime_import_coimport_modules")
+                    ),
+                    "transformers_trace_runtime_import_coimport_missing_modules": (
+                        manifest.get("runtime_import_coimport_missing_modules")
                     ),
                     "transformers_trace_runtime_import_versions": manifest.get(
                         "runtime_import_versions"
@@ -1717,6 +1733,10 @@ def checkpoint_transformers_validation_fields(row):
         "checkpoint_transformers_runtime_imports_imported": None,
         "checkpoint_transformers_runtime_imports_failed": None,
         "checkpoint_transformers_runtime_imports_all_ok": None,
+        "checkpoint_transformers_runtime_import_coimport_status": None,
+        "checkpoint_transformers_runtime_imports_coimported": None,
+        "checkpoint_transformers_runtime_import_coimport_modules": None,
+        "checkpoint_transformers_runtime_import_coimport_missing_modules": None,
         "checkpoint_transformers_runtime_import_versions": None,
         "checkpoint_transformers_runtime_import_module_names": None,
         "checkpoint_transformers_runtime_imports_json": None,
@@ -1809,6 +1829,18 @@ def checkpoint_transformers_validation_fields(row):
                 ),
                 "checkpoint_transformers_runtime_imports_all_ok": audit_row.get(
                     "runtime_imports_all_ok"
+                ),
+                "checkpoint_transformers_runtime_import_coimport_status": (
+                    audit_row.get("runtime_import_coimport_status")
+                ),
+                "checkpoint_transformers_runtime_imports_coimported": audit_row.get(
+                    "runtime_imports_coimported"
+                ),
+                "checkpoint_transformers_runtime_import_coimport_modules": (
+                    audit_row.get("runtime_import_coimport_modules")
+                ),
+                "checkpoint_transformers_runtime_import_coimport_missing_modules": (
+                    audit_row.get("runtime_import_coimport_missing_modules")
                 ),
                 "checkpoint_transformers_runtime_import_versions": audit_row.get(
                     "runtime_import_versions"
@@ -2584,6 +2616,10 @@ def validate_profile_smoke_manifest_file(path, validation_jsonl=None, args=None)
                 f"{validation_row['transformers_trace_runtime_metadata_changed_count']}",
                 "transformers_trace_runtime_imports_all_ok="
                 f"{validation_row['transformers_trace_runtime_imports_all_ok']}",
+                "transformers_trace_runtime_import_coimport_status="
+                f"{validation_row['transformers_trace_runtime_import_coimport_status']}",
+                "transformers_trace_runtime_imports_coimported="
+                f"{validation_row['transformers_trace_runtime_imports_coimported']}",
                 "declared_transformers_trace_runtime_import_presets="
                 f"{validation_row['declared_transformers_trace_runtime_import_presets']}",
                 "declared_transformers_trace_runtime_import_preset_modules="
@@ -2649,6 +2685,10 @@ def validate_profile_smoke_manifest_file(path, validation_jsonl=None, args=None)
                 f"{validation_row['checkpoint_transformers_audit_status']}",
                 "checkpoint_transformers_runtime_imports_all_ok="
                 f"{validation_row['checkpoint_transformers_runtime_imports_all_ok']}",
+                "checkpoint_transformers_runtime_import_coimport_status="
+                f"{validation_row['checkpoint_transformers_runtime_import_coimport_status']}",
+                "checkpoint_transformers_runtime_imports_coimported="
+                f"{validation_row['checkpoint_transformers_runtime_imports_coimported']}",
                 "checkpoint_transformers_runtime_import_presets="
                 f"{validation_row['checkpoint_transformers_runtime_import_presets']}",
                 "checkpoint_transformers_runtime_import_presets_satisfied="
