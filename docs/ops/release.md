@@ -10,6 +10,7 @@ without uploading.
 - Official release build + attached assets: `.github/workflows/release_wheels.yml`
 - Publish existing signed GitHub Release wheels: `.github/workflows/publish_pypi_from_release.yml`
 - Release readiness summary: `scripts/release_status.py`
+- Safe PyPI token secret setup: `scripts/configure_pypi_token_secret.py`
 - Safe manual PyPI publish helper: `scripts/publish_pypi_wheels.py`
 - Published-wheel digest verifier: `scripts/security/verify_pypi_release.py`
 
@@ -58,41 +59,21 @@ gh workflow run publish_pypi_from_release.yml \
 ## Token Secret Setup
 
 Prefer the `pypi` environment secret so the credential scope matches the
-workflow environment. This prompt does not echo the token and does not write it
-into shell history.
+workflow environment. The helper does not echo the token and passes it to
+`gh secret set` through stdin, not through shell history.
 
 ```bash
-python - <<'PY'
-import getpass
-import subprocess
-
-token = getpass.getpass("PyPI token for spiraltorch (hidden): ").strip()
-if not token.startswith("pypi-"):
-    raise SystemExit("Refusing to store a value that does not look like a PyPI API token")
-subprocess.run(
-    [
-        "gh",
-        "secret",
-        "set",
-        "PYPI_API_TOKEN",
-        "--repo",
-        "RyoSpiralArchitect/SpiralTorch",
-        "--env",
-        "pypi",
-        "--app",
-        "actions",
-    ],
-    input=token,
-    text=True,
-    check=True,
-)
-PY
+python scripts/configure_pypi_token_secret.py --token-source prompt
 ```
 
 If the token secret is intentionally repo-wide instead of environment-scoped,
 omit `--env pypi`. If the workflow fails with
 `publish_method=token requires a PYPI_API_TOKEN`, the selected GitHub
 environment cannot see that secret yet.
+
+For non-interactive local automation, use `--token-source env --token-env
+PYPI_API_TOKEN` or pipe a hidden `read -s` value into `--token-source stdin`.
+Use `--dry-run` to validate token shape and secret target without storing it.
 
 ## Publish Signed Release Wheels
 
