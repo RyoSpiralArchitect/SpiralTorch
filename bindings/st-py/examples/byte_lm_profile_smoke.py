@@ -3058,7 +3058,59 @@ def continuation_plan_row(
     )
     row.update(trace_policy_fields(source_row))
     row.update(checkpoint_policy_fields(source_row))
+    row.update(runtime_contract_evidence_fields(source_row))
     return row
+
+
+TRACE_RUNTIME_CONTRACT_EVIDENCE_FIELDS = (
+    "transformers_trace_manifest_available",
+    "transformers_trace_manifest_error",
+    "transformers_trace_runtime_imports_requested",
+    "transformers_trace_runtime_import_probe_count",
+    "transformers_trace_runtime_imports_imported",
+    "transformers_trace_runtime_imports_failed",
+    "transformers_trace_runtime_imports_all_ok",
+    "transformers_trace_runtime_import_coimport_status",
+    "transformers_trace_runtime_imports_coimported",
+    "transformers_trace_runtime_import_coimport_modules",
+    "transformers_trace_runtime_import_coimport_missing_modules",
+    "transformers_trace_runtime_import_versions",
+    "transformers_trace_runtime_import_module_names",
+)
+
+
+CHECKPOINT_RUNTIME_CONTRACT_EVIDENCE_FIELDS = (
+    "checkpoint_transformers_audit_source_jsonl",
+    "checkpoint_transformers_audit_source_row_type",
+    "checkpoint_transformers_audit_available",
+    "checkpoint_transformers_audit_error",
+    "checkpoint_transformers_runtime_imports_requested",
+    "checkpoint_transformers_runtime_import_probe_count",
+    "checkpoint_transformers_runtime_imports_imported",
+    "checkpoint_transformers_runtime_imports_failed",
+    "checkpoint_transformers_runtime_imports_all_ok",
+    "checkpoint_transformers_runtime_import_coimport_status",
+    "checkpoint_transformers_runtime_imports_coimported",
+    "checkpoint_transformers_runtime_import_coimport_modules",
+    "checkpoint_transformers_runtime_import_coimport_missing_modules",
+    "checkpoint_transformers_runtime_import_versions",
+    "checkpoint_transformers_runtime_import_module_names",
+)
+
+
+def runtime_contract_evidence_fields(source):
+    trace_fields = transformers_trace_validation_fields(source)
+    checkpoint_fields = checkpoint_transformers_validation_fields(source)
+    return {
+        **{
+            key: trace_fields.get(key)
+            for key in TRACE_RUNTIME_CONTRACT_EVIDENCE_FIELDS
+        },
+        **{
+            key: checkpoint_fields.get(key)
+            for key in CHECKPOINT_RUNTIME_CONTRACT_EVIDENCE_FIELDS
+        },
+    }
 
 
 def checkpoint_policy_fields(source):

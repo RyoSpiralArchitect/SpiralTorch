@@ -3758,6 +3758,23 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                                 "runtime_import_preset_modules": (
                                     "torch-transformers=transformers|torch"
                                 ),
+                                "runtime_imports_requested": "transformers,torch",
+                                "runtime_import_probe_count": 2,
+                                "runtime_imports_imported": "transformers,torch",
+                                "runtime_imports_failed": "none",
+                                "runtime_imports_all_ok": True,
+                                "runtime_import_coimport_status": "ok",
+                                "runtime_imports_coimported": True,
+                                "runtime_import_coimport_modules": (
+                                    "transformers,torch"
+                                ),
+                                "runtime_import_coimport_missing_modules": "none",
+                                "runtime_import_versions": (
+                                    "transformers=9.9.9,torch=2.0.0"
+                                ),
+                                "runtime_import_module_names": (
+                                    "transformers=transformers,torch=torch"
+                                ),
                             }
                         ],
                     )
@@ -3796,6 +3813,12 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                                 "runtime_imports_imported": "transformers,math",
                                 "runtime_imports_failed": "none",
                                 "runtime_imports_all_ok": True,
+                                "runtime_import_coimport_status": "ok",
+                                "runtime_imports_coimported": True,
+                                "runtime_import_coimport_modules": (
+                                    "transformers,math"
+                                ),
+                                "runtime_import_coimport_missing_modules": "none",
                                 "runtime_import_versions": (
                                     "transformers=9.9.9,math=none"
                                 ),
@@ -4093,6 +4116,78 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                 str(out_dir / "transformers-trace-compare.jsonl"),
                 str(out_dir / "transformers-trace-compare.jsonl"),
             ],
+        )
+        self.assertEqual(
+            [
+                plan["transformers_trace_manifest_available"]
+                for plan in continue_plan_rows
+            ],
+            [True, True],
+        )
+        self.assertEqual(
+            [
+                plan["transformers_trace_runtime_imports_imported"]
+                for plan in continue_plan_rows
+            ],
+            ["transformers,torch", "transformers,torch"],
+        )
+        self.assertEqual(
+            [
+                plan["transformers_trace_runtime_import_coimport_status"]
+                for plan in continue_plan_rows
+            ],
+            ["ok", "ok"],
+        )
+        self.assertEqual(
+            [
+                plan["transformers_trace_runtime_import_coimport_modules"]
+                for plan in continue_plan_rows
+            ],
+            ["transformers,torch", "transformers,torch"],
+        )
+        self.assertEqual(
+            [
+                plan["transformers_trace_runtime_import_coimport_missing_modules"]
+                for plan in continue_plan_rows
+            ],
+            ["none", "none"],
+        )
+        self.assertEqual(
+            [
+                plan["checkpoint_transformers_audit_available"]
+                for plan in continue_plan_rows
+            ],
+            [True, True],
+        )
+        self.assertEqual(
+            [
+                plan["checkpoint_transformers_runtime_imports_imported"]
+                for plan in continue_plan_rows
+            ],
+            ["transformers,math", "transformers,math"],
+        )
+        self.assertEqual(
+            [
+                plan["checkpoint_transformers_runtime_import_coimport_status"]
+                for plan in continue_plan_rows
+            ],
+            ["ok", "ok"],
+        )
+        self.assertEqual(
+            [
+                plan["checkpoint_transformers_runtime_import_coimport_modules"]
+                for plan in continue_plan_rows
+            ],
+            ["transformers,math", "transformers,math"],
+        )
+        self.assertEqual(
+            [
+                plan[
+                    "checkpoint_transformers_runtime_import_coimport_missing_modules"
+                ]
+                for plan in continue_plan_rows
+            ],
+            ["none", "none"],
         )
         self.assertIn("profile_smoke_manifest_validate", continued_text)
         self.assertIn("profile_smoke_manifest_continue", continued_text)
