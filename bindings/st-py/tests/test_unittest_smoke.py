@@ -9,6 +9,7 @@ import uuid
 from pathlib import Path
 
 import spiraltorch as st  # noqa: E402
+import spiraltorch.runtime_imports as runtime_imports  # noqa: E402
 
 _TEST_TMP_ROOT = Path(__file__).resolve().parent
 
@@ -41,6 +42,34 @@ class SpiralTorchSmokeTest(unittest.TestCase):
 
         lines = st.runtime_import_preflight_summary_lines(report)
         self.assertTrue(any("passed=True" in line for line in lines))
+
+        expected_helpers = [
+            "RUNTIME_IMPORT_INSTALL_HINTS",
+            "runtime_import_install_hint",
+            "runtime_import_names_from_source",
+            "runtime_import_probe_fields",
+            "runtime_import_required_gate_fields",
+            "runtime_imports_from_source",
+            "required_runtime_imports_from_source",
+        ]
+        for helper in expected_helpers:
+            with self.subTest(helper=helper):
+                self.assertTrue(hasattr(st, helper))
+                self.assertIn(helper, st.__all__)
+                self.assertIs(getattr(st, helper), getattr(runtime_imports, helper))
+
+        source = {
+            "runtime_import_presets": ["hf-runtime"],
+            "required_runtime_imports": ["math"],
+        }
+        self.assertEqual(
+            st.runtime_import_names_from_source(source),
+            ["transformers", "torch", "tokenizers", "math"],
+        )
+        self.assertEqual(
+            st.runtime_import_install_hint("transformers"),
+            "pip install transformers",
+        )
 
     def test_plugin_tensor_op(self) -> None:
         events: list[dict] = []

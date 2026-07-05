@@ -15,6 +15,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 RUNTIME_IMPORTS_PATH = (
     REPO_ROOT / "bindings" / "st-py" / "spiraltorch" / "runtime_imports.py"
 )
+TOP_LEVEL_STUB_PATH = (
+    REPO_ROOT / "bindings" / "st-py" / "spiraltorch" / "__init__.pyi"
+)
 PYPROJECT_PATH = REPO_ROOT / "bindings" / "st-py" / "pyproject.toml"
 
 
@@ -37,6 +40,21 @@ class RuntimeImportsTest(unittest.TestCase):
             'spiral-runtime-preflight = "spiraltorch.runtime_imports:main"',
             pyproject,
         )
+
+    def test_top_level_stub_exposes_runtime_import_helpers(self) -> None:
+        stub = TOP_LEVEL_STUB_PATH.read_text(encoding="utf-8")
+
+        for helper in [
+            "RUNTIME_IMPORT_INSTALL_HINTS",
+            "runtime_import_install_hint",
+            "runtime_import_names_from_source",
+            "runtime_import_probe_fields",
+            "runtime_import_required_gate_fields",
+            "runtime_imports_from_source",
+            "required_runtime_imports_from_source",
+        ]:
+            with self.subTest(helper=helper):
+                self.assertIn(helper, stub)
 
     def test_ft_presets_extend_without_changing_hf_runtime(self) -> None:
         module = load_runtime_imports()

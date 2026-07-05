@@ -37,6 +37,162 @@ def summarize_transformers_trainer_runtime_bridge(
     trainer_event_type: str = ...,
 ) -> Dict[str, Any]: ...
 
+RUNTIME_IMPORT_INSTALL_HINTS: Dict[str, str]
+TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS: Dict[str, List[str]]
+
+def required_runtime_import_presets_from_args(args: object) -> List[str]: ...
+
+def required_runtime_import_presets_from_source(
+    source: object,
+    *,
+    required_runtime_import_presets_key: str = ...,
+) -> List[str]: ...
+
+def required_runtime_imports_from_args(args: object) -> List[str]: ...
+
+def required_runtime_imports_from_source(
+    source: object,
+    *,
+    required_runtime_imports_key: str = ...,
+) -> List[str]: ...
+
+def runtime_import_coimport_status(
+    probes: Iterable[Mapping[str, object]],
+) -> str: ...
+
+def runtime_import_install_hint(
+    name: object,
+    *,
+    install_hints: Mapping[str, str] | None = ...,
+) -> str | None: ...
+
+def runtime_import_install_hints_label(
+    names: object,
+    *,
+    install_hints: Mapping[str, str] | None = ...,
+) -> str: ...
+
+def runtime_import_kv_label(
+    probes: Iterable[Mapping[str, object]],
+    key: str,
+) -> str: ...
+
+def runtime_import_names_from_args(
+    args: object,
+    *,
+    preset_modules: Mapping[str, Iterable[str]] | None = ...,
+) -> List[str]: ...
+
+def runtime_import_names_from_source(
+    source: object,
+    *,
+    preset_modules: Mapping[str, Iterable[str]] | None = ...,
+    runtime_imports_key: str = ...,
+    runtime_import_presets_key: str = ...,
+    required_runtime_imports_key: str = ...,
+    required_runtime_import_presets_key: str = ...,
+) -> List[str]: ...
+
+def runtime_import_preflight_report(
+    *,
+    runtime_imports: object = ...,
+    runtime_import_presets: object = ...,
+    required_runtime_imports: object = ...,
+    required_runtime_import_presets: object = ...,
+    require_all: bool = ...,
+    preset_modules: Mapping[str, Iterable[str]] | None = ...,
+) -> Dict[str, Any]: ...
+
+def runtime_import_preflight_summary_lines(
+    report: Mapping[str, object],
+) -> List[str]: ...
+
+def runtime_import_preset_missing_modules_label(
+    rows: Iterable[Mapping[str, object]],
+) -> str: ...
+
+def runtime_import_preset_module_map(value: object) -> Dict[str, str]: ...
+
+def runtime_import_preset_module_rows(
+    value: object,
+    presets: object,
+) -> List[str]: ...
+
+def runtime_import_preset_modules(
+    presets: object,
+    *,
+    preset_modules: Mapping[str, Iterable[str]] | None = ...,
+) -> List[str]: ...
+
+def runtime_import_preset_modules_label(
+    rows: Iterable[Mapping[str, object]],
+) -> str: ...
+
+def runtime_import_preset_status_rows(
+    presets: object,
+    probes: Iterable[Mapping[str, object]],
+    *,
+    preset_modules: Mapping[str, Iterable[str]] | None = ...,
+) -> List[Dict[str, Any]]: ...
+
+def runtime_import_presets_from_args(args: object) -> List[str]: ...
+
+def runtime_import_presets_from_source(
+    source: object,
+    *,
+    runtime_import_presets_key: str = ...,
+    required_runtime_import_presets_key: str = ...,
+) -> List[str]: ...
+
+def runtime_import_probe(name: object) -> Dict[str, object]: ...
+
+def runtime_import_probe_fields(
+    source: object,
+    *,
+    preset_modules: Mapping[str, Iterable[str]] | None = ...,
+    field_prefix: str = ...,
+    runtime_imports_key: str = ...,
+    runtime_import_presets_key: str = ...,
+    required_runtime_imports_key: str = ...,
+    required_runtime_import_presets_key: str = ...,
+) -> Dict[str, object]: ...
+
+def runtime_import_probe_rows(names: object) -> List[Dict[str, object]]: ...
+
+def runtime_import_required_gate_fields(
+    required_imports: object,
+    required_presets: object,
+    *,
+    imported_modules: object | None = ...,
+    observed_presets: object | None = ...,
+    satisfied_presets: object | None = ...,
+    failed_presets: object | None = ...,
+    probes: Iterable[Mapping[str, object]] | None = ...,
+    preset_status: Iterable[Mapping[str, object]] | None = ...,
+    field_prefix: str = ...,
+    include_failed_presets: bool = ...,
+) -> Dict[str, object]: ...
+
+def runtime_import_requirement_failures(
+    row: Mapping[str, object],
+    *,
+    field_prefix: str = ...,
+    failure_prefix: str = ...,
+) -> List[str]: ...
+
+def runtime_imports_from_args(args: object) -> List[str]: ...
+
+def runtime_imports_from_source(
+    source: object,
+    *,
+    runtime_imports_key: str = ...,
+) -> List[str]: ...
+
+def write_runtime_import_preflight_report(
+    report: Mapping[str, object],
+    path: str | PathLike[str],
+) -> str: ...
+
 def write_trainer_trace_html(
     trace_jsonl: str,
     html_path: str | None = ...,

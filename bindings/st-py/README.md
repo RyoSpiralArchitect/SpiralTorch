@@ -119,11 +119,11 @@ PY
 - Trace and artifact utilities via `spiraltorch.zspace_trace`,
   `spiraltorch.trainer_trace`, and Atlas adapters so JSONL telemetry can be
   loaded, summarized, compared, and rendered from Python.
-- Top-level runtime import preflight helpers so FT notebooks can probe
-  `torch` / `transformers` / `tokenizers` / `datasets` / `accelerate` /
-  `safetensors` evidence, write JSON reports, and gate optional dependency
-  contracts without pulling those packages into SpiralTorch's required
-  dependency set.
+- Top-level runtime import helpers so FT notebooks can expand HF/PEFT presets,
+  emit install hints, probe `torch` / `transformers` / `tokenizers` /
+  `datasets` / `accelerate` / `safetensors` evidence, write JSON reports, and
+  gate optional dependency contracts without pulling those packages into
+  SpiralTorch's required dependency set.
 - SoT-3Dφ spiral planners (`spiraltorch.sot`) that collapse to Z-space tensors,
   grow full TensorBiomes via `SoT3DPlan.grow_biome(...)`, and feed
   geometry-aware experiments or trace artifacts without requiring a Python
