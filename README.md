@@ -451,6 +451,23 @@ Linux note: for manylinux2014 wheels you either need a manylinux container (e.g.
 
 - Manual wheel artifact build: `.github/workflows/wheels.yml`
 - Official release build + attached assets: `.github/workflows/release_wheels.yml`
+- Safe manual PyPI publish helper: `scripts/publish_pypi_wheels.py`
+
+```bash
+# Dry-run first: validates wheels, twine metadata, PyPI state, and token shape
+# without printing the token or uploading anything.
+python scripts/publish_pypi_wheels.py \
+  --dist /tmp/spiraltorch-0.4.8-dist \
+  --expected-version 0.4.8 \
+  --dry-run
+
+# Real upload: reads a `pypi-...` token from the macOS clipboard, uploads the
+# wheels with twine, waits for PyPI JSON, then installs/import-smokes the release.
+python scripts/publish_pypi_wheels.py \
+  --dist /tmp/spiraltorch-0.4.8-dist \
+  --expected-version 0.4.8 \
+  --skip-existing
+```
 
 ---
 
