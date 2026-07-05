@@ -116,6 +116,11 @@ For pre-FT inference evidence, `examples/byte_lm_transformers_trace.py` loads a
 local Transformers model, records prompt-level next-token top-k logits and
 hidden-state summaries, co-imports config/tokenizer/model runtime metadata, and
 can attach `--zspace-project` projection metrics. Add
+`--runtime-contract-preset hf-runtime` to require same-process
+`transformers`/`torch`/`tokenizers` co-import evidence without going through the
+profile ladder, or use
+`checkpoint_preflight.py --transformers-runtime-contract-preset hf-runtime` for
+the matching checkpoint audit shortcut. Add
 `--require-runtime-metadata-match` when comparing traces to fail fast on
 config/tokenizer/model swaps before reading prompt-level drift.
 

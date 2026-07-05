@@ -5838,6 +5838,7 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             runtime_import_preset_missing_modules_label,
             runtime_import_preset_modules_label,
             runtime_import_preset_status_rows,
+            runtime_import_coimport_status,
             runtime_import_names_from_source,
             runtime_import_names_from_args,
             runtime_import_presets_from_args,
@@ -6003,6 +6004,26 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertEqual(
             runtime_import_preset_missing_modules_label(status_rows),
             "hf-runtime=tokenizers",
+        )
+        self.assertEqual(runtime_import_coimport_status([]), "not_requested")
+        self.assertEqual(
+            runtime_import_coimport_status(
+                [
+                    {"module": "transformers", "imported": True},
+                    {"module": "torch", "imported": True},
+                ]
+            ),
+            "ok",
+        )
+        self.assertEqual(
+            runtime_import_coimport_status(
+                [
+                    {"module": "transformers", "imported": True},
+                    {"module": "torch", "imported": True},
+                    {"module": "tokenizers", "imported": False},
+                ]
+            ),
+            "missing",
         )
         self.assertEqual(
             runtime_import_preset_module_map(
@@ -8324,10 +8345,37 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertEqual(fields["runtime_imports_imported"], "transformers,math")
         self.assertEqual(fields["runtime_imports_failed"], "none")
         self.assertTrue(fields["runtime_imports_all_ok"])
+        self.assertEqual(fields["runtime_import_coimport_status"], "ok")
+        self.assertTrue(fields["runtime_imports_coimported"])
+        self.assertEqual(
+            fields["runtime_import_coimport_modules"],
+            "transformers,math",
+        )
+        self.assertEqual(fields["runtime_import_coimport_missing_modules"], "none")
         self.assertEqual(fields["required_runtime_imports"], "math")
         self.assertTrue(fields["required_runtime_imports_passed"])
         self.assertEqual(fields["required_runtime_import_presets"], "transformers")
         self.assertTrue(fields["required_runtime_import_presets_passed"])
+
+    def test_checkpoint_preflight_transformers_runtime_contract_preset_expands_audit(self):
+        helper = load_checkpoint_helper()
+        old_argv = sys.argv
+        sys.argv = [
+            "checkpoint_preflight.py",
+            "--hf-state-dict",
+            "/models/llama",
+            "--transformers-runtime-contract-preset",
+            "hf-runtime",
+        ]
+        try:
+            args = helper.parse_args()
+        finally:
+            sys.argv = old_argv
+
+        self.assertTrue(args.transformers_audit)
+        self.assertEqual(args.runtime_import_presets, ["hf-runtime"])
+        self.assertEqual(args.required_runtime_import_presets, ["hf-runtime"])
+        self.assertTrue(args.require_runtime_imports)
 
     def test_checkpoint_preflight_transformers_audit_gate_rejects_partial_runtime(self):
         helper = load_checkpoint_helper()
@@ -8469,6 +8517,13 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertEqual(manifest["runtime_imports_imported"], "transformers,math")
         self.assertEqual(manifest["runtime_imports_failed"], "none")
         self.assertTrue(manifest["runtime_imports_all_ok"])
+        self.assertEqual(manifest["runtime_import_coimport_status"], "ok")
+        self.assertTrue(manifest["runtime_imports_coimported"])
+        self.assertEqual(
+            manifest["runtime_import_coimport_modules"],
+            "transformers,math",
+        )
+        self.assertEqual(manifest["runtime_import_coimport_missing_modules"], "none")
         self.assertEqual(
             manifest["runtime_import_versions"],
             "transformers=9.9.9,math=none",
@@ -8534,9 +8589,8 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                 "2",
                 "--jsonl",
                 str(out),
-                "--runtime-import-preset",
+                "--runtime-contract-preset",
                 "transformers",
-                "--require-runtime-imports",
             ]
             output = io.StringIO()
             try:
@@ -8560,8 +8614,54 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertEqual(rows[0]["runtime_import_presets_failed"], "none")
         self.assertEqual(rows[0]["runtime_imports_requested"], "transformers")
         self.assertTrue(rows[0]["runtime_imports_all_ok"])
+        self.assertEqual(rows[0]["runtime_import_coimport_status"], "ok")
+        self.assertTrue(rows[0]["runtime_imports_coimported"])
+        self.assertEqual(
+            rows[0]["required_runtime_import_presets"],
+            "transformers",
+        )
+        self.assertTrue(rows[0]["required_runtime_import_presets_passed"])
         self.assertEqual(rows[1]["top_token_ids"], "3,1")
         self.assertIn("transformers_prompt_trace", output.getvalue())
+
+    def test_transformers_trace_runtime_contract_preset_expands_direct_gates(self):
+        module = load_example("byte_lm_transformers_trace")
+        old_argv = sys.argv
+        sys.argv = [
+            "byte_lm_transformers_trace.py",
+            "--model-path",
+            "/models/llama",
+            "--runtime-contract-preset",
+            "hf-runtime",
+        ]
+        try:
+            args = module.parse_args()
+        finally:
+            sys.argv = old_argv
+
+        self.assertEqual(args.runtime_import_presets, ["hf-runtime"])
+        self.assertEqual(args.required_runtime_import_presets, ["hf-runtime"])
+        self.assertTrue(args.require_runtime_imports)
+        self.assertFalse(args.require_runtime_metadata_match)
+
+        sys.argv = [
+            "byte_lm_transformers_trace.py",
+            "--model-path",
+            "/models/llama",
+            "--compare-jsonl",
+            "/tmp/baseline-transformers-trace.jsonl",
+            "--runtime-contract-preset",
+            "hf-runtime",
+        ]
+        try:
+            compare_args = module.parse_args()
+        finally:
+            sys.argv = old_argv
+
+        self.assertEqual(compare_args.runtime_import_presets, ["hf-runtime"])
+        self.assertEqual(compare_args.required_runtime_import_presets, ["hf-runtime"])
+        self.assertTrue(compare_args.require_runtime_imports)
+        self.assertTrue(compare_args.require_runtime_metadata_match)
 
     def test_transformers_trace_runtime_import_preset_status_tracks_missing_modules(self):
         module = load_example("byte_lm_transformers_trace")
@@ -8593,6 +8693,13 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             "fixture-runtime=spiraltorch_missing_runtime_fixture",
         )
         self.assertFalse(fields["runtime_imports_all_ok"])
+        self.assertEqual(fields["runtime_import_coimport_status"], "missing")
+        self.assertFalse(fields["runtime_imports_coimported"])
+        self.assertEqual(fields["runtime_import_coimport_modules"], "transformers")
+        self.assertEqual(
+            fields["runtime_import_coimport_missing_modules"],
+            "spiraltorch_missing_runtime_fixture",
+        )
         status_rows = json.loads(fields["runtime_import_preset_status_json"])
         self.assertEqual(status_rows[0]["preset"], "fixture-runtime")
         self.assertEqual(status_rows[0]["imported"], ["transformers"])
