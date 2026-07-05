@@ -3681,6 +3681,7 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                 transformers_trace_top_k=3,
                 transformers_trace_zspace_project=True,
                 transformers_trace_zspace_source="hidden",
+                transformers_trace_runtime_import_presets=["torch-transformers"],
                 require_transformers_trace_match=True,
                 require_transformers_trace_runtime_metadata_match=True,
                 require_transformers_trace_top_token_match=True,
@@ -3939,6 +3940,13 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         )
         self.assertEqual(
             [
+                plan["transformers_trace_runtime_import_presets"]
+                for plan in continue_plan_rows
+            ],
+            [["torch-transformers"], ["torch-transformers"]],
+        )
+        self.assertEqual(
+            [
                 plan["transformers_trace_compare_jsonl"]
                 for plan in continue_plan_rows
             ],
@@ -4009,6 +4017,7 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             transformers_trace_max_logit_l2_change=None,
             transformers_trace_max_hidden_state_l2_change=None,
             transformers_trace_require_zspace_status="ok",
+            transformers_trace_runtime_import_presets=["torch-transformers"],
             transformers_trace_runtime_imports=["torch"],
             require_transformers_trace_runtime_imports=True,
         )
@@ -4059,6 +4068,7 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                             "transformers_spiraltorch_coimport_status": (
                                 coimport_status
                             ),
+                            "runtime_import_presets": "torch-transformers",
                             "runtime_imports_requested": "torch",
                             "runtime_import_probe_count": runtime_import_probe_count,
                             "runtime_imports_imported": (
@@ -4194,6 +4204,10 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertEqual(
             validation_row["transformers_trace_runtime_imports_requested"],
             "torch",
+        )
+        self.assertEqual(
+            validation_row["transformers_trace_runtime_import_presets"],
+            "torch-transformers",
         )
         self.assertTrue(validation_row["transformers_trace_runtime_imports_all_ok"])
         self.assertEqual(
@@ -4435,6 +4449,8 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             "--hf-state-dict",
             "/models/llama",
             "--transformers-trace",
+            "--transformers-trace-runtime-import-preset",
+            "torch-transformers",
             "--transformers-trace-runtime-import",
             "torch",
             "--require-transformers-trace-runtime-imports",
@@ -4451,6 +4467,10 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             sys.argv = old_argv
 
         self.assertTrue(args.validate_produced_manifest)
+        self.assertEqual(
+            args.transformers_trace_runtime_import_presets,
+            ["torch-transformers"],
+        )
         self.assertEqual(args.transformers_trace_runtime_imports, ["torch"])
         self.assertTrue(args.require_transformers_trace_runtime_imports)
         self.assertTrue(args.require_manifest_transformers_trace)
@@ -4555,6 +4575,7 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         args.transformers_trace_top_k = 3
         args.transformers_trace_zspace_project = True
         args.transformers_trace_zspace_source = "top_logits"
+        args.transformers_trace_runtime_import_presets = ["torch-transformers"]
         args.transformers_trace_runtime_imports = ["torch", "tokenizers"]
         args.require_transformers_trace_runtime_imports = True
         args.compare_transformers_trace_jsonl = Path("/tmp/baseline-trace.jsonl")
@@ -4591,6 +4612,8 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                 "--zspace-project",
                 "--zspace-source",
                 "top_logits",
+                "--runtime-import-preset",
+                "torch-transformers",
                 "--runtime-import",
                 "torch",
                 "--runtime-import",
@@ -4647,6 +4670,8 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             "spiral",
             "--transformers-trace-top-k",
             "3",
+            "--transformers-trace-runtime-import-preset",
+            "torch-transformers",
             "--transformers-trace-runtime-import",
             "torch",
             "--require-transformers-trace-runtime-imports",
@@ -4699,6 +4724,7 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertIn("--jsonl /tmp/profile-smoke-real-hf/transformers-trace.jsonl", text)
         self.assertIn("--top-k 3", text)
         self.assertIn("--prompt spiral", text)
+        self.assertIn("--runtime-import-preset torch-transformers", text)
         self.assertIn("--runtime-import torch", text)
         self.assertIn("--require-runtime-imports", text)
         self.assertIn(
@@ -6685,7 +6711,8 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                 zspace_curvature=-0.04,
                 zspace_frequency=0.65,
                 zspace_strength=1.0,
-                runtime_imports=["transformers", "math"],
+                runtime_import_presets=["transformers"],
+                runtime_imports=["math"],
                 require_runtime_imports=True,
                 require_hidden_states=False,
                 require_zspace_projection=False,
@@ -6714,6 +6741,7 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             manifest["transformers_spiraltorch_coimport_status"],
             "ok",
         )
+        self.assertEqual(manifest["runtime_import_presets"], "transformers")
         self.assertEqual(manifest["runtime_import_probe_count"], 2)
         self.assertEqual(manifest["runtime_imports_requested"], "transformers,math")
         self.assertEqual(manifest["runtime_imports_imported"], "transformers,math")
@@ -6771,7 +6799,7 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                 "2",
                 "--jsonl",
                 str(out),
-                "--runtime-import",
+                "--runtime-import-preset",
                 "transformers",
                 "--require-runtime-imports",
             ]
@@ -6792,6 +6820,7 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             "transformers_prompt_trace",
         ])
         self.assertTrue(rows[0]["model_loaded"])
+        self.assertEqual(rows[0]["runtime_import_presets"], "transformers")
         self.assertEqual(rows[0]["runtime_imports_requested"], "transformers")
         self.assertTrue(rows[0]["runtime_imports_all_ok"])
         self.assertEqual(rows[1]["top_token_ids"], "3,1")

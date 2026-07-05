@@ -11,6 +11,11 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_OUT_DIR = Path("/tmp/spiraltorch-profile-smoke")
 BYTE_LM_VOCAB = 256
 BYTE_LM_HIDDEN = 24
+TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS = {
+    "transformers",
+    "torch-transformers",
+    "hf-runtime",
+}
 
 
 def parse_args():
@@ -230,6 +235,18 @@ def parse_args():
         help=(
             "Additional Python module imported by byte_lm_transformers_trace.py "
             "while SpiralTorch and Transformers are loaded. May be repeated."
+        ),
+    )
+    parser.add_argument(
+        "--transformers-trace-runtime-import-preset",
+        dest="transformers_trace_runtime_import_presets",
+        action="append",
+        choices=sorted(TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS),
+        default=[],
+        help=(
+            "Named byte_lm_transformers_trace.py runtime import bundle to "
+            "probe. 'torch-transformers' probes both modules; 'hf-runtime' "
+            "also probes tokenizers. May be repeated."
         ),
     )
     parser.add_argument(
@@ -684,6 +701,7 @@ def parse_args():
             args.transformers_trace_prompt_file is not None,
             args.transformers_trace_zspace_project,
             bool(args.transformers_trace_runtime_imports),
+            bool(args.transformers_trace_runtime_import_presets),
             args.require_transformers_trace_runtime_imports,
             args.require_transformers_trace_match,
             args.require_transformers_trace_runtime_metadata_match,
@@ -711,10 +729,12 @@ def parse_args():
     if (
         args.require_transformers_trace_runtime_imports
         and not args.transformers_trace_runtime_imports
+        and not args.transformers_trace_runtime_import_presets
     ):
         parser.error(
             "--require-transformers-trace-runtime-imports requires "
-            "--transformers-trace-runtime-import"
+            "--transformers-trace-runtime-import or "
+            "--transformers-trace-runtime-import-preset"
         )
     if any(trace_compare_gates) and args.compare_transformers_trace_jsonl is None:
         parser.error(
@@ -1100,6 +1120,7 @@ def transformers_trace_validation_fields(row):
         "transformers_trace_transformers_version": None,
         "transformers_trace_transformers_module_name": None,
         "transformers_trace_coimport_status": None,
+        "transformers_trace_runtime_import_presets": None,
         "transformers_trace_runtime_imports_requested": None,
         "transformers_trace_runtime_import_probe_count": None,
         "transformers_trace_runtime_imports_imported": None,
@@ -1161,6 +1182,9 @@ def transformers_trace_validation_fields(row):
                     ),
                     "transformers_trace_coimport_status": manifest.get(
                         "transformers_spiraltorch_coimport_status"
+                    ),
+                    "transformers_trace_runtime_import_presets": manifest.get(
+                        "runtime_import_presets"
                     ),
                     "transformers_trace_runtime_imports_requested": manifest.get(
                         "runtime_imports_requested"
@@ -1526,6 +1550,8 @@ def validate_profile_smoke_manifest_file(path, validation_jsonl=None, args=None)
                 f"{validation_row['transformers_trace_runtime_metadata_changed_count']}",
                 "transformers_trace_runtime_imports_all_ok="
                 f"{validation_row['transformers_trace_runtime_imports_all_ok']}",
+                "transformers_trace_runtime_import_presets="
+                f"{validation_row['transformers_trace_runtime_import_presets']}",
                 "transformers_trace_runtime_imports_failed="
                 f"{validation_row['transformers_trace_runtime_imports_failed']}",
                 "transformers_trace_runtime_imports_imported="
@@ -1657,6 +1683,8 @@ def transformers_trace_args(args, model_path, trace_jsonl, trace_compare_jsonl):
                 args.transformers_trace_zspace_source,
             ]
         )
+    for preset in getattr(args, "transformers_trace_runtime_import_presets", []) or []:
+        flags.extend(["--runtime-import-preset", preset])
     for module_name in getattr(args, "transformers_trace_runtime_imports", []) or []:
         flags.extend(["--runtime-import", module_name])
     if getattr(args, "require_transformers_trace_runtime_imports", False):
@@ -1880,6 +1908,9 @@ def trace_policy_fields(source):
         "transformers_trace_zspace_source": source.get(
             "transformers_trace_zspace_source"
         ),
+        "transformers_trace_runtime_import_presets": list(
+            source.get("transformers_trace_runtime_import_presets") or []
+        ),
         "transformers_trace_runtime_imports": list(
             source.get("transformers_trace_runtime_imports") or []
         ),
@@ -2045,6 +2076,10 @@ def profile_smoke_manifest_row(
                     args,
                     "transformers_trace_zspace_source",
                     None,
+                ),
+                "transformers_trace_runtime_import_presets": list(
+                    getattr(args, "transformers_trace_runtime_import_presets", [])
+                    or []
                 ),
                 "transformers_trace_runtime_imports": list(
                     getattr(args, "transformers_trace_runtime_imports", []) or []
