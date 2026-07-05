@@ -143,6 +143,7 @@ jobs:
             --release-tag "$RELEASE_TAG" \
             --repo "$GITHUB_REPOSITORY" \
             --expected-wheels "$EXPECTED_WHEELS" \
+            --dist release-dist \
             --no-clipboard
           python scripts/publish_pypi_wheels.py \
             --dist release-dist \

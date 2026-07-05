@@ -22,6 +22,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("Dry-run completed without uploading to PyPI.", workflow)
         self.assertIn("if: inputs.publish_method == 'dry-run'", workflow)
         self.assertIn("if: inputs.publish_method != 'dry-run'", workflow)
+        self.assertIn("--dist release-dist", workflow)
 
     def test_publish_from_release_validates_type_payloads(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "publish_pypi_from_release.yml").read_text(
