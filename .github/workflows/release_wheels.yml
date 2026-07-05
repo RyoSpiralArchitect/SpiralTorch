@@ -292,7 +292,7 @@ jobs:
         with:
           subject-path: 'dist/**/*.whl'
       - name: Sign release artifacts with Sigstore
-        uses: sigstore/gh-action-sigstore@v2.3.1
+        uses: sigstore/gh-action-sigstore-python@v3.4.0
         with:
           inputs: |
             dist/**/*.whl
