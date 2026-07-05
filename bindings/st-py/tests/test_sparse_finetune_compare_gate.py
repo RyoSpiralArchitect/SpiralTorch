@@ -5749,6 +5749,86 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         )
         self.assertFalse(dry_run_args.require_manifest_transformers_trace)
 
+        sys.argv = [
+            "byte_lm_profile_smoke.py",
+            "--validate-manifest-jsonl",
+            "/tmp/profile-smoke-real-hf/profile-smoke-manifest.jsonl",
+            "--runtime-contract-preset",
+            "hf-runtime",
+        ]
+        try:
+            validation_args = module.parse_args()
+        finally:
+            sys.argv = old_argv
+        self.assertFalse(validation_args.transformers_audit)
+        self.assertFalse(validation_args.transformers_trace)
+        self.assertFalse(validation_args.validate_produced_manifest)
+        self.assertTrue(
+            validation_args.require_manifest_checkpoint_transformers_runtime_imports
+        )
+        self.assertEqual(
+            validation_args.require_manifest_checkpoint_transformers_runtime_import_preset,
+            ["hf-runtime"],
+        )
+        self.assertTrue(validation_args.require_manifest_transformers_trace)
+        self.assertTrue(validation_args.require_manifest_transformers_trace_coimport)
+        self.assertTrue(
+            validation_args.require_manifest_transformers_trace_runtime_imports
+        )
+        self.assertEqual(
+            validation_args.require_manifest_transformers_trace_runtime_import_preset,
+            ["hf-runtime"],
+        )
+
+        sys.argv = [
+            "byte_lm_profile_smoke.py",
+            "--continue-manifest-jsonl",
+            "/tmp/profile-smoke-real-hf/profile-smoke-manifest.jsonl",
+            "--runtime-contract-preset",
+            "hf-runtime",
+        ]
+        try:
+            continue_args = module.parse_args()
+        finally:
+            sys.argv = old_argv
+        self.assertFalse(continue_args.transformers_audit)
+        self.assertFalse(continue_args.transformers_trace)
+        self.assertTrue(continue_args.validate_produced_manifest)
+        self.assertTrue(
+            continue_args.require_manifest_checkpoint_transformers_runtime_imports
+        )
+        self.assertEqual(
+            continue_args.require_manifest_checkpoint_transformers_runtime_import_preset,
+            ["hf-runtime"],
+        )
+        self.assertTrue(continue_args.require_manifest_transformers_trace)
+        self.assertTrue(continue_args.require_manifest_transformers_trace_coimport)
+        self.assertTrue(continue_args.require_manifest_transformers_trace_runtime_imports)
+        self.assertEqual(
+            continue_args.require_manifest_transformers_trace_runtime_import_preset,
+            ["hf-runtime"],
+        )
+
+        sys.argv = [
+            "byte_lm_profile_smoke.py",
+            "--continue-manifest-jsonl",
+            "/tmp/profile-smoke-real-hf/profile-smoke-manifest.jsonl",
+            "--runtime-contract-preset",
+            "hf-runtime",
+            "--dry-run",
+        ]
+        try:
+            continue_dry_run_args = module.parse_args()
+        finally:
+            sys.argv = old_argv
+        self.assertFalse(continue_dry_run_args.transformers_audit)
+        self.assertFalse(continue_dry_run_args.transformers_trace)
+        self.assertFalse(continue_dry_run_args.validate_produced_manifest)
+        self.assertFalse(
+            continue_dry_run_args.require_manifest_checkpoint_transformers_runtime_imports
+        )
+        self.assertFalse(continue_dry_run_args.require_manifest_transformers_trace)
+
     def test_transformers_trace_runtime_import_presets_are_shared(self):
         profile_module = load_example("byte_lm_profile_smoke")
         trace_module = load_example("byte_lm_transformers_trace")

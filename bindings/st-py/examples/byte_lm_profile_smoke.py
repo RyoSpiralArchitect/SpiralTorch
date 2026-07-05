@@ -1089,44 +1089,55 @@ def apply_runtime_contract_presets(args):
     presets = list(dict.fromkeys(args.runtime_contract_presets or []))
     if not presets:
         return args
-    args.transformers_audit = True
-    args.transformers_trace = True
-    args.checkpoint_transformers_runtime_import_presets = append_unique(
-        args.checkpoint_transformers_runtime_import_presets,
-        presets,
-    )
-    args.require_checkpoint_transformers_runtime_imports = True
-    args.require_checkpoint_transformers_runtime_import_preset = append_unique(
-        args.require_checkpoint_transformers_runtime_import_preset,
-        presets,
-    )
-    args.transformers_trace_runtime_import_presets = append_unique(
-        args.transformers_trace_runtime_import_presets,
-        presets,
-    )
-    args.require_transformers_trace_runtime_imports = True
-    args.require_transformers_trace_runtime_import_preset = append_unique(
-        args.require_transformers_trace_runtime_import_preset,
-        presets,
-    )
-    if not args.dry_run:
+    validation_only = args.validate_manifest_jsonl is not None
+    continuation = args.continue_manifest_jsonl is not None
+    execution_mode = not validation_only and not continuation
+
+    if execution_mode:
+        args.transformers_audit = True
+        args.transformers_trace = True
+        args.checkpoint_transformers_runtime_import_presets = append_unique(
+            args.checkpoint_transformers_runtime_import_presets,
+            presets,
+        )
+        args.require_checkpoint_transformers_runtime_imports = True
+        args.require_checkpoint_transformers_runtime_import_preset = append_unique(
+            args.require_checkpoint_transformers_runtime_import_preset,
+            presets,
+        )
+        args.transformers_trace_runtime_import_presets = append_unique(
+            args.transformers_trace_runtime_import_presets,
+            presets,
+        )
+        args.require_transformers_trace_runtime_imports = True
+        args.require_transformers_trace_runtime_import_preset = append_unique(
+            args.require_transformers_trace_runtime_import_preset,
+            presets,
+        )
+
+    if execution_mode and args.dry_run:
+        return args
+    if continuation and args.dry_run:
+        return args
+    if not validation_only:
         args.validate_produced_manifest = True
-        args.require_manifest_checkpoint_transformers_runtime_imports = True
-        args.require_manifest_checkpoint_transformers_runtime_import_preset = (
-            append_unique(
-                args.require_manifest_checkpoint_transformers_runtime_import_preset,
-                presets,
-            )
-        )
-        args.require_manifest_transformers_trace = True
-        args.require_manifest_transformers_trace_coimport = True
-        args.require_manifest_transformers_trace_runtime_imports = True
-        args.require_manifest_transformers_trace_runtime_import_preset = (
-            append_unique(
-                args.require_manifest_transformers_trace_runtime_import_preset,
-                presets,
-            )
-        )
+    apply_runtime_contract_manifest_gates(args, presets)
+    return args
+
+
+def apply_runtime_contract_manifest_gates(args, presets):
+    args.require_manifest_checkpoint_transformers_runtime_imports = True
+    args.require_manifest_checkpoint_transformers_runtime_import_preset = append_unique(
+        args.require_manifest_checkpoint_transformers_runtime_import_preset,
+        presets,
+    )
+    args.require_manifest_transformers_trace = True
+    args.require_manifest_transformers_trace_coimport = True
+    args.require_manifest_transformers_trace_runtime_imports = True
+    args.require_manifest_transformers_trace_runtime_import_preset = append_unique(
+        args.require_manifest_transformers_trace_runtime_import_preset,
+        presets,
+    )
     return args
 
 
