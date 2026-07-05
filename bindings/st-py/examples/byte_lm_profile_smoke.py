@@ -1379,6 +1379,28 @@ def apply_runtime_contract_manifest_gates(args, presets):
         args.require_manifest_transformers_trace_runtime_import_preset,
         presets,
     )
+    args.require_manifest_transformers_trainer_runtime_bridge = True
+    inherit_runtime_contract_manifest_wgpu_gates(args)
+    return args
+
+
+def inherit_runtime_contract_manifest_wgpu_gates(args):
+    for manifest_attr, run_attr in [
+        (
+            "min_manifest_transformers_trainer_wgpu_hit_rate",
+            "min_run_epoch_wgpu_hit_rate",
+        ),
+        (
+            "max_manifest_transformers_trainer_wgpu_runtime_fallback_rate",
+            "max_run_epoch_wgpu_runtime_fallback_rate",
+        ),
+        (
+            "max_manifest_transformers_trainer_wgpu_component_fallback_rate",
+            "max_run_epoch_wgpu_component_fallback_rate",
+        ),
+    ]:
+        if getattr(args, manifest_attr) is None:
+            setattr(args, manifest_attr, getattr(args, run_attr))
     return args
 
 

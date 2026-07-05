@@ -6496,6 +6496,14 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             args.require_manifest_transformers_trace_runtime_import_preset,
             ["hf-runtime"],
         )
+        self.assertTrue(args.require_manifest_transformers_trainer_runtime_bridge)
+        self.assertIsNone(args.min_manifest_transformers_trainer_wgpu_hit_rate)
+        self.assertIsNone(
+            args.max_manifest_transformers_trainer_wgpu_runtime_fallback_rate
+        )
+        self.assertIsNone(
+            args.max_manifest_transformers_trainer_wgpu_component_fallback_rate
+        )
         checkpoint_args = module.checkpoint_transformers_args(args)
         self.assertIn("--transformers-audit", checkpoint_args)
         self.assertIn("--transformers-runtime-import-preset", checkpoint_args)
@@ -6521,6 +6529,66 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             "/models/llama",
             "--runtime-contract-preset",
             "hf-runtime",
+            "--min-run-epoch-wgpu-hit-rate",
+            "0.75",
+            "--max-run-epoch-wgpu-runtime-fallback-rate",
+            "0.25",
+            "--max-run-epoch-wgpu-component-fallback-rate",
+            "0.3",
+        ]
+        try:
+            wgpu_contract_args = module.parse_args()
+        finally:
+            sys.argv = old_argv
+        self.assertTrue(
+            wgpu_contract_args.require_manifest_transformers_trainer_runtime_bridge
+        )
+        self.assertAlmostEqual(
+            wgpu_contract_args.min_manifest_transformers_trainer_wgpu_hit_rate,
+            0.75,
+        )
+        manifest_runtime_fallback_rate = getattr(
+            wgpu_contract_args,
+            "max_manifest_transformers_trainer_wgpu_runtime_fallback_rate",
+        )
+        manifest_component_fallback_rate = getattr(
+            wgpu_contract_args,
+            "max_manifest_transformers_trainer_wgpu_component_fallback_rate",
+        )
+        self.assertAlmostEqual(manifest_runtime_fallback_rate, 0.25)
+        self.assertAlmostEqual(manifest_component_fallback_rate, 0.3)
+
+        sys.argv = [
+            "byte_lm_profile_smoke.py",
+            "--out-dir",
+            "/tmp/profile-smoke-real-hf",
+            "--hf-state-dict",
+            "/models/llama",
+            "--runtime-contract-preset",
+            "hf-runtime",
+            "--min-run-epoch-wgpu-hit-rate",
+            "0.75",
+            "--min-manifest-transformers-trainer-wgpu-hit-rate",
+            "0.9",
+        ]
+        try:
+            explicit_wgpu_contract_args = module.parse_args()
+        finally:
+            sys.argv = old_argv
+        explicit_manifest_hit_rate = getattr(
+            explicit_wgpu_contract_args,
+            "min_manifest_transformers_trainer_wgpu_hit_rate",
+        )
+        self.assertAlmostEqual(explicit_manifest_hit_rate, 0.9)
+
+        sys.argv = [
+            "byte_lm_profile_smoke.py",
+            "--out-dir",
+            "/tmp/profile-smoke-real-hf",
+            "--hf-state-dict",
+            "/models/llama",
+            "--runtime-contract-preset",
+            "hf-runtime",
             "--dry-run",
         ]
         try:
@@ -6536,6 +6604,9 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             dry_run_args.require_manifest_checkpoint_transformers_runtime_imports
         )
         self.assertFalse(dry_run_args.require_manifest_transformers_trace)
+        self.assertFalse(
+            dry_run_args.require_manifest_transformers_trainer_runtime_bridge
+        )
 
         sys.argv = [
             "byte_lm_profile_smoke.py",
@@ -6567,6 +6638,9 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             validation_args.require_manifest_transformers_trace_runtime_import_preset,
             ["hf-runtime"],
         )
+        self.assertTrue(
+            validation_args.require_manifest_transformers_trainer_runtime_bridge
+        )
 
         sys.argv = [
             "byte_lm_profile_smoke.py",
@@ -6596,6 +6670,9 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             continue_args.require_manifest_transformers_trace_runtime_import_preset,
             ["hf-runtime"],
         )
+        self.assertTrue(
+            continue_args.require_manifest_transformers_trainer_runtime_bridge
+        )
 
         sys.argv = [
             "byte_lm_profile_smoke.py",
@@ -6616,6 +6693,9 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             continue_dry_run_args.require_manifest_checkpoint_transformers_runtime_imports
         )
         self.assertFalse(continue_dry_run_args.require_manifest_transformers_trace)
+        self.assertFalse(
+            continue_dry_run_args.require_manifest_transformers_trainer_runtime_bridge
+        )
 
     def test_transformers_trace_runtime_import_presets_are_shared(self):
         profile_module = load_example("byte_lm_profile_smoke")
