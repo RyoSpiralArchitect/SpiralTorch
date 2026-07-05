@@ -499,8 +499,9 @@ def parse_args():
         help=(
             "Shortcut runtime contract preset shared by checkpoint preflight, "
             "Transformers trace, and produced-manifest validation. "
-            "Use 'hf-runtime' to probe transformers, torch, and tokenizers. "
-            "May be repeated."
+            "Use 'hf-runtime' to probe transformers, torch, and tokenizers; "
+            "'hf-finetune' and 'hf-peft' add common FT dependencies. May be "
+            "repeated."
         ),
     )
     parser.add_argument(
@@ -619,7 +620,8 @@ def parse_args():
         help=(
             "Named byte_lm_transformers_trace.py runtime import bundle to "
             "probe. 'torch-transformers' probes both modules; 'hf-runtime' "
-            "also probes tokenizers. May be repeated."
+            "also probes tokenizers; 'hf-finetune' and 'hf-peft' add common "
+            "FT dependencies. May be repeated."
         ),
     )
     parser.add_argument(
@@ -2128,6 +2130,8 @@ def transformers_trace_validation_fields(row):
         "transformers_trace_runtime_import_coimport_modules": None,
         "transformers_trace_runtime_import_coimport_missing_modules": None,
         "transformers_trace_runtime_import_versions": None,
+        "transformers_trace_runtime_import_install_hints": None,
+        "transformers_trace_runtime_import_failed_install_hints": None,
         "transformers_trace_runtime_import_module_names": None,
         "transformers_trace_runtime_imports_json": None,
         "transformers_trace_runtime_import_preset_status_json": None,
@@ -2239,6 +2243,12 @@ def transformers_trace_validation_fields(row):
                     ),
                     "transformers_trace_runtime_import_versions": manifest.get(
                         "runtime_import_versions"
+                    ),
+                    "transformers_trace_runtime_import_install_hints": manifest.get(
+                        "runtime_import_install_hints"
+                    ),
+                    "transformers_trace_runtime_import_failed_install_hints": (
+                        manifest.get("runtime_import_failed_install_hints")
                     ),
                     "transformers_trace_runtime_import_module_names": manifest.get(
                         "runtime_import_module_names"
@@ -2480,6 +2490,8 @@ def checkpoint_transformers_validation_fields(row):
         "checkpoint_transformers_runtime_import_coimport_modules": None,
         "checkpoint_transformers_runtime_import_coimport_missing_modules": None,
         "checkpoint_transformers_runtime_import_versions": None,
+        "checkpoint_transformers_runtime_import_install_hints": None,
+        "checkpoint_transformers_runtime_import_failed_install_hints": None,
         "checkpoint_transformers_runtime_import_module_names": None,
         "checkpoint_transformers_runtime_imports_json": None,
         "checkpoint_transformers_runtime_import_preset_status_json": None,
@@ -2586,6 +2598,12 @@ def checkpoint_transformers_validation_fields(row):
                 ),
                 "checkpoint_transformers_runtime_import_versions": audit_row.get(
                     "runtime_import_versions"
+                ),
+                "checkpoint_transformers_runtime_import_install_hints": audit_row.get(
+                    "runtime_import_install_hints"
+                ),
+                "checkpoint_transformers_runtime_import_failed_install_hints": (
+                    audit_row.get("runtime_import_failed_install_hints")
                 ),
                 "checkpoint_transformers_runtime_import_module_names": audit_row.get(
                     "runtime_import_module_names"
@@ -4441,6 +4459,8 @@ TRACE_RUNTIME_CONTRACT_EVIDENCE_FIELDS = (
     "transformers_trace_runtime_import_coimport_modules",
     "transformers_trace_runtime_import_coimport_missing_modules",
     "transformers_trace_runtime_import_versions",
+    "transformers_trace_runtime_import_install_hints",
+    "transformers_trace_runtime_import_failed_install_hints",
     "transformers_trace_runtime_import_module_names",
 )
 
@@ -4460,6 +4480,8 @@ CHECKPOINT_RUNTIME_CONTRACT_EVIDENCE_FIELDS = (
     "checkpoint_transformers_runtime_import_coimport_modules",
     "checkpoint_transformers_runtime_import_coimport_missing_modules",
     "checkpoint_transformers_runtime_import_versions",
+    "checkpoint_transformers_runtime_import_install_hints",
+    "checkpoint_transformers_runtime_import_failed_install_hints",
     "checkpoint_transformers_runtime_import_module_names",
 )
 

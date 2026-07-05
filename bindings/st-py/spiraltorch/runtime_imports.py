@@ -5,6 +5,7 @@ import json
 from collections.abc import Iterable, Mapping
 
 __all__ = [
+    "RUNTIME_IMPORT_INSTALL_HINTS",
     "TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS",
     "csv_label",
     "csv_values",
@@ -23,6 +24,8 @@ __all__ = [
     "module_name",
     "module_version",
     "runtime_import_coimport_status",
+    "runtime_import_install_hint",
+    "runtime_import_install_hints_label",
     "runtime_import_kv_label",
     "runtime_import_names_from_source",
     "runtime_import_names_from_args",
@@ -39,8 +42,37 @@ __all__ = [
 
 TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS: dict[str, list[str]] = {
     "transformers": ["transformers"],
+    "torch": ["torch"],
+    "tokenizers": ["tokenizers"],
     "torch-transformers": ["transformers", "torch"],
     "hf-runtime": ["transformers", "torch", "tokenizers"],
+    "hf-datasets": ["transformers", "torch", "tokenizers", "datasets"],
+    "hf-finetune": [
+        "transformers",
+        "torch",
+        "tokenizers",
+        "datasets",
+        "accelerate",
+        "safetensors",
+    ],
+    "hf-peft": [
+        "transformers",
+        "torch",
+        "tokenizers",
+        "accelerate",
+        "peft",
+        "safetensors",
+    ],
+}
+
+RUNTIME_IMPORT_INSTALL_HINTS: dict[str, str] = {
+    "accelerate": "pip install accelerate",
+    "datasets": "pip install datasets",
+    "peft": "pip install peft",
+    "safetensors": "pip install safetensors",
+    "tokenizers": "pip install tokenizers",
+    "torch": "pip install torch",
+    "transformers": "pip install transformers",
 }
 
 
@@ -148,6 +180,32 @@ def runtime_import_kv_label(
             if isinstance(probe, Mapping) and probe.get("module")
         ]
     )
+
+
+def runtime_import_install_hint(
+    name: object,
+    *,
+    install_hints: Mapping[str, str] | None = None,
+) -> str | None:
+    module_name_value = str(name).strip()
+    if not module_name_value:
+        return None
+    hints = install_hints or RUNTIME_IMPORT_INSTALL_HINTS
+    hint = hints.get(module_name_value)
+    return str(hint) if hint else None
+
+
+def runtime_import_install_hints_label(
+    names: object,
+    *,
+    install_hints: Mapping[str, str] | None = None,
+) -> str:
+    rows = []
+    for name in unique_stripped_values(names):
+        hint = runtime_import_install_hint(name, install_hints=install_hints)
+        if hint:
+            rows.append(f"{name}={hint}")
+    return csv_label(rows)
 
 
 def runtime_import_preset_modules(
@@ -385,6 +443,12 @@ def runtime_import_probe_fields(
         f"{field_prefix}runtime_import_coimport_missing_modules": csv_label(failed),
         f"{field_prefix}runtime_import_versions": (
             runtime_import_kv_label(probes, "version")
+        ),
+        f"{field_prefix}runtime_import_install_hints": (
+            runtime_import_install_hints_label([probe["module"] for probe in probes])
+        ),
+        f"{field_prefix}runtime_import_failed_install_hints": (
+            runtime_import_install_hints_label(failed)
         ),
         f"{field_prefix}runtime_import_module_names": (
             runtime_import_kv_label(probes, "module_name")
