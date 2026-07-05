@@ -179,6 +179,64 @@ def test_tensor_from_external_materializes_torch_like_values(
     assert tensor.tolist() == [[1.0, 2.0], [3.0, 4.0]]
 
 
+def test_external_tensor_last_token_handles_transformers_shapes(
+    stub_spiraltorch, monkeypatch
+):
+    ecosystem = _load_ecosystem(stub_spiraltorch, monkeypatch)
+
+    nested = [[[0.1, 0.2, 0.3], [1.0, 2.0, 3.0]]]
+    assert ecosystem.external_tensor_shape(nested, name="logits") == (1, 2, 3)
+    assert ecosystem.external_tensor_to_list(nested, name="logits") == [
+        0.1,
+        0.2,
+        0.3,
+        1.0,
+        2.0,
+        3.0,
+    ]
+    assert ecosystem.external_tensor_to_list(
+        ecosystem.external_tensor_last_token(nested, name="logits"),
+        name="logits",
+    ) == [1.0, 2.0, 3.0]
+
+    class Vector:
+        def tolist(self):
+            return [4, 5, 6]
+
+    class TorchLikeLogits:
+        shape = (1, 2, 3)
+
+        def __init__(self):
+            self.calls: list[object] = []
+
+        def detach(self):
+            self.calls.append("detach")
+            return self
+
+        def cpu(self):
+            self.calls.append("cpu")
+            return self
+
+        def float(self):
+            self.calls.append("float")
+            return self
+
+        def __getitem__(self, key):
+            self.calls.append(("getitem", key))
+            return Vector()
+
+    value = TorchLikeLogits()
+    selected = ecosystem.external_tensor_last_token(value, name="logits")
+
+    assert selected.tolist() == [4, 5, 6]
+    assert value.calls == [
+        "detach",
+        "cpu",
+        "float",
+        ("getitem", (0, 1, slice(None, None, None))),
+    ]
+
+
 def test_slice_external_tensor_prefers_bounded_external_slice(
     stub_spiraltorch, monkeypatch
 ):

@@ -8840,6 +8840,20 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertEqual(rows[1]["top_token_ids"], "3,1")
         self.assertIn("transformers_prompt_trace", output.getvalue())
 
+    def test_transformers_trace_reuses_ecosystem_external_tensor_bridge(self):
+        module = load_example("byte_lm_transformers_trace")
+        ecosystem = sys.modules["spiraltorch.ecosystem"]
+
+        self.assertIs(module.external_tensor_shape, ecosystem.external_tensor_shape)
+        self.assertIs(
+            module.external_tensor_last_token,
+            ecosystem.external_tensor_last_token,
+        )
+        self.assertIs(
+            module.external_tensor_to_list,
+            ecosystem.external_tensor_to_list,
+        )
+
     def test_transformers_trace_runtime_contract_preset_expands_direct_gates(self):
         module = load_example("byte_lm_transformers_trace")
         old_argv = sys.argv
