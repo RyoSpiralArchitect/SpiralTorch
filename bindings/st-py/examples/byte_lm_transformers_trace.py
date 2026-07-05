@@ -12,9 +12,12 @@ if str(PACKAGE_ROOT) not in sys.path:
 
 from spiraltorch.runtime_imports import (
     TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS,
+    csv_label,
     runtime_import_preset_missing_modules_label,
     runtime_import_preset_modules_label,
     runtime_import_preset_status_rows,
+    runtime_import_required_gate_fields,
+    runtime_import_requirement_failures,
 )
 
 import spiraltorch as st
@@ -696,10 +699,6 @@ def runtime_import_probe_rows(names):
     return [runtime_import_probe(str(name)) for name in names if str(name).strip()]
 
 
-def csv_label(values):
-    return ",".join(str(value) for value in values) if values else "none"
-
-
 def runtime_import_names_from_args(args):
     names = []
     for preset in runtime_import_presets_from_args(args):
@@ -742,51 +741,6 @@ def required_runtime_import_presets_from_args(args):
             if str(preset).strip()
         )
     )
-
-
-def runtime_import_required_gate_fields(args, probes, preset_status):
-    required = required_runtime_imports_from_args(args)
-    required_presets = required_runtime_import_presets_from_args(args)
-    imported = [probe["module"] for probe in probes if probe["imported"]]
-    satisfied_presets = [row["preset"] for row in preset_status if row["passed"]]
-    observed_presets = [row["preset"] for row in preset_status]
-    missing = [module for module in required if module not in imported]
-    missing_presets = [
-        preset for preset in required_presets if preset not in observed_presets
-    ]
-    unsatisfied_presets = [
-        preset
-        for preset in required_presets
-        if preset in observed_presets and preset not in satisfied_presets
-    ]
-    return {
-        "required_runtime_imports": csv_label(required),
-        "required_runtime_imports_imported": (
-            csv_label(imported) if required else "none"
-        ),
-        "required_runtime_imports_missing": (
-            csv_label(missing) if required else "none"
-        ),
-        "required_runtime_imports_passed": None if not required else not missing,
-        "required_runtime_import_presets": csv_label(required_presets),
-        "required_runtime_import_presets_observed": (
-            csv_label(observed_presets) if required_presets else "none"
-        ),
-        "required_runtime_import_presets_satisfied": (
-            csv_label(satisfied_presets) if required_presets else "none"
-        ),
-        "required_runtime_import_presets_missing": (
-            csv_label(missing_presets) if required_presets else "none"
-        ),
-        "required_runtime_import_presets_unsatisfied": (
-            csv_label(unsatisfied_presets) if required_presets else "none"
-        ),
-        "required_runtime_import_presets_passed": (
-            None
-            if not required_presets
-            else not missing_presets and not unsatisfied_presets
-        ),
-    }
 
 
 def runtime_import_kv_label(probes, key):
@@ -838,29 +792,15 @@ def runtime_import_fields(args):
             sort_keys=True,
         ),
     }
-    fields.update(runtime_import_required_gate_fields(args, probes, preset_status))
+    fields.update(
+        runtime_import_required_gate_fields(
+            required_runtime_imports_from_args(args),
+            required_runtime_import_presets_from_args(args),
+            probes=probes,
+            preset_status=preset_status,
+        )
+    )
     return fields
-
-
-def csv_gate_values(value):
-    return [item for item in csv_values(value, str) if item != "none"]
-
-
-def runtime_import_requirement_failures(row):
-    failures = []
-    if row.get("required_runtime_imports_passed") is False:
-        for module in csv_gate_values(row.get("required_runtime_imports_missing")):
-            failures.append(f"runtime_import_missing:{module}")
-    if row.get("required_runtime_import_presets_passed") is False:
-        for preset in csv_gate_values(
-            row.get("required_runtime_import_presets_missing")
-        ):
-            failures.append(f"runtime_import_preset_missing:{preset}")
-        for preset in csv_gate_values(
-            row.get("required_runtime_import_presets_unsatisfied")
-        ):
-            failures.append(f"runtime_import_preset_unsatisfied:{preset}")
-    return failures
 
 
 def import_context_fields(transformers):

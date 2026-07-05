@@ -11,6 +11,8 @@ __all__ = [
     "runtime_import_preset_modules_label",
     "runtime_import_preset_missing_modules_label",
     "runtime_import_preset_status_rows",
+    "runtime_import_required_gate_fields",
+    "runtime_import_requirement_failures",
 ]
 
 TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS: dict[str, list[str]] = {
@@ -104,3 +106,131 @@ def runtime_import_preset_missing_modules_label(
             if row["missing"]
         ]
     )
+
+
+def runtime_import_required_gate_fields(
+    required_imports: object,
+    required_presets: object,
+    *,
+    imported_modules: object | None = None,
+    observed_presets: object | None = None,
+    satisfied_presets: object | None = None,
+    failed_presets: object | None = None,
+    probes: Iterable[Mapping[str, object]] | None = None,
+    preset_status: Iterable[Mapping[str, object]] | None = None,
+    field_prefix: str = "",
+    include_failed_presets: bool = False,
+) -> dict[str, object]:
+    required = unique_csv_values(required_imports)
+    required_preset_rows = unique_csv_values(required_presets)
+    if probes is not None:
+        imported = [
+            str(probe["module"])
+            for probe in probes
+            if isinstance(probe, Mapping)
+            and probe.get("module")
+            and probe.get("imported") is True
+        ]
+    else:
+        imported = unique_csv_values(imported_modules)
+
+    if preset_status is not None:
+        status_rows = [row for row in preset_status if isinstance(row, Mapping)]
+        observed = [
+            str(row["preset"])
+            for row in status_rows
+            if row.get("preset")
+        ]
+        satisfied = [
+            str(row["preset"])
+            for row in status_rows
+            if row.get("preset") and row.get("passed") is True
+        ]
+        failed = [
+            str(row["preset"])
+            for row in status_rows
+            if row.get("preset") and row.get("passed") is not True
+        ]
+    else:
+        observed = unique_csv_values(observed_presets)
+        satisfied = unique_csv_values(satisfied_presets)
+        failed = unique_csv_values(failed_presets)
+
+    missing = [module for module in required if module not in imported]
+    missing_presets = [
+        preset for preset in required_preset_rows if preset not in observed
+    ]
+    unsatisfied_presets = [
+        preset
+        for preset in required_preset_rows
+        if preset in observed and preset not in satisfied
+    ]
+    gate_requested = bool(required)
+    preset_gate_requested = bool(required_preset_rows)
+    fields: dict[str, object] = {
+        f"{field_prefix}required_runtime_imports": csv_label(required),
+        f"{field_prefix}required_runtime_imports_imported": (
+            csv_label(imported) if gate_requested else "none"
+        ),
+        f"{field_prefix}required_runtime_imports_missing": (
+            csv_label(missing) if gate_requested else "none"
+        ),
+        f"{field_prefix}required_runtime_imports_passed": (
+            None if not gate_requested else not missing
+        ),
+        f"{field_prefix}required_runtime_import_presets": (
+            csv_label(required_preset_rows)
+        ),
+        f"{field_prefix}required_runtime_import_presets_observed": (
+            csv_label(observed) if preset_gate_requested else "none"
+        ),
+        f"{field_prefix}required_runtime_import_presets_satisfied": (
+            csv_label(satisfied) if preset_gate_requested else "none"
+        ),
+        f"{field_prefix}required_runtime_import_presets_missing": (
+            csv_label(missing_presets) if preset_gate_requested else "none"
+        ),
+        f"{field_prefix}required_runtime_import_presets_unsatisfied": (
+            csv_label(unsatisfied_presets) if preset_gate_requested else "none"
+        ),
+        f"{field_prefix}required_runtime_import_presets_passed": (
+            None
+            if not preset_gate_requested
+            else not missing_presets and not unsatisfied_presets
+        ),
+    }
+    if include_failed_presets:
+        fields[f"{field_prefix}required_runtime_import_presets_failed"] = (
+            csv_label(failed) if preset_gate_requested else "none"
+        )
+    return fields
+
+
+def runtime_import_requirement_failures(
+    row: Mapping[str, object],
+    *,
+    field_prefix: str = "",
+    failure_prefix: str = "runtime_import",
+) -> list[str]:
+    failures = []
+    if row.get(f"{field_prefix}required_runtime_imports_passed") is False:
+        for module_name in sorted(
+            csv_values(row.get(f"{field_prefix}required_runtime_imports_missing"))
+        ):
+            failures.append(f"{failure_prefix}_missing:{module_name}")
+    if row.get(f"{field_prefix}required_runtime_import_presets_passed") is False:
+        for preset in sorted(
+            csv_values(
+                row.get(f"{field_prefix}required_runtime_import_presets_missing")
+            )
+        ):
+            failures.append(f"{failure_prefix}_preset_missing:{preset}")
+        for preset in sorted(
+            csv_values(
+                row.get(
+                    f"{field_prefix}required_runtime_import_presets_unsatisfied"
+                )
+            )
+        ):
+            failures.append(f"{failure_prefix}_preset_unsatisfied:{preset}")
+    return failures

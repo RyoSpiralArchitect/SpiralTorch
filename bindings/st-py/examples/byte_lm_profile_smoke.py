@@ -16,6 +16,8 @@ from spiraltorch.runtime_imports import (
     TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS,
     csv_values,
     runtime_import_preset_modules as transformers_trace_runtime_import_preset_modules,
+    runtime_import_required_gate_fields as shared_runtime_import_required_gate_fields,
+    runtime_import_requirement_failures,
 )
 
 DEFAULT_OUT_DIR = Path("/tmp/spiraltorch-profile-smoke")
@@ -1610,108 +1612,24 @@ def runtime_import_gate_fields(validation_row, args):
             "transformers_trace_runtime_import_presets_failed",
         )
     )
-    missing = [module_name for module_name in required if module_name not in imported]
-    missing_presets = [
-        preset for preset in required_presets if preset not in observed_presets
-    ]
-    unsatisfied_presets = [
-        preset
-        for preset in required_presets
-        if preset in observed_presets and preset not in satisfied_presets
-    ]
-    gate_requested = bool(required)
-    preset_gate_requested = bool(required_presets)
-    return {
-        "transformers_trace_required_runtime_imports": manifest_validation_csv_label(
-            required
-        ),
-        "transformers_trace_required_runtime_imports_imported": (
-            manifest_validation_csv_label(imported) if gate_requested else "none"
-        ),
-        "transformers_trace_required_runtime_imports_missing": (
-            manifest_validation_csv_label(missing) if gate_requested else "none"
-        ),
-        "transformers_trace_required_runtime_imports_passed": (
-            None if not gate_requested else not missing
-        ),
-        "transformers_trace_required_runtime_import_presets": (
-            manifest_validation_csv_label(required_presets)
-        ),
-        "transformers_trace_required_runtime_import_presets_observed": (
-            manifest_validation_csv_label(observed_presets)
-            if preset_gate_requested
-            else "none"
-        ),
-        "transformers_trace_required_runtime_import_presets_satisfied": (
-            manifest_validation_csv_label(satisfied_presets)
-            if preset_gate_requested
-            else "none"
-        ),
-        "transformers_trace_required_runtime_import_presets_failed": (
-            manifest_validation_csv_label(failed_presets)
-            if preset_gate_requested
-            else "none"
-        ),
-        "transformers_trace_required_runtime_import_presets_missing": (
-            manifest_validation_csv_label(missing_presets)
-            if preset_gate_requested
-            else "none"
-        ),
-        "transformers_trace_required_runtime_import_presets_unsatisfied": (
-            manifest_validation_csv_label(unsatisfied_presets)
-            if preset_gate_requested
-            else "none"
-        ),
-        "transformers_trace_required_runtime_import_presets_passed": (
-            None
-            if not preset_gate_requested
-            else not missing_presets and not unsatisfied_presets
-        ),
-    }
+    return shared_runtime_import_required_gate_fields(
+        required,
+        required_presets,
+        imported_modules=imported,
+        observed_presets=observed_presets,
+        satisfied_presets=satisfied_presets,
+        failed_presets=failed_presets,
+        field_prefix="transformers_trace_",
+        include_failed_presets=True,
+    )
 
 
 def direct_runtime_requirement_failures(validation_row):
-    failures = []
-    if (
-        validation_row.get("transformers_trace_direct_required_runtime_imports_passed")
-        is False
-    ):
-        for module_name in sorted(
-            manifest_validation_csv_set(
-                validation_row,
-                "transformers_trace_direct_required_runtime_imports_missing",
-            )
-        ):
-            failures.append(
-                f"transformers_trace_direct_runtime_import_missing:{module_name}"
-            )
-    if (
-        validation_row.get(
-            "transformers_trace_direct_required_runtime_import_presets_passed"
-        )
-        is False
-    ):
-        for preset in sorted(
-            manifest_validation_csv_set(
-                validation_row,
-                "transformers_trace_direct_required_runtime_import_presets_missing",
-            )
-        ):
-            failures.append(
-                "transformers_trace_direct_runtime_import_preset_missing:"
-                f"{preset}"
-            )
-        for preset in sorted(
-            manifest_validation_csv_set(
-                validation_row,
-                "transformers_trace_direct_required_runtime_import_presets_unsatisfied",
-            )
-        ):
-            failures.append(
-                "transformers_trace_direct_runtime_import_preset_unsatisfied:"
-                f"{preset}"
-            )
-    return failures
+    return runtime_import_requirement_failures(
+        validation_row,
+        field_prefix="transformers_trace_direct_",
+        failure_prefix="transformers_trace_direct_runtime_import",
+    )
 
 
 def runtime_preset_module_contract_failures(validation_row):
