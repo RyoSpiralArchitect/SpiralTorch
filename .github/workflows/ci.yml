@@ -194,6 +194,11 @@ jobs:
           inspect.signature(spiralk.required_blocks)
           print("stubs ok")
           PY
+      - name: Run packaged CLI smoke
+        env:
+          PYTHONNOUSERSITE: "1"
+        run: |
+          spiral-runtime-preflight --list-presets
       - name: Run README python blocks
         env:
           PYTHONNOUSERSITE: "1"
