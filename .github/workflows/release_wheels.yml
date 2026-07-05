@@ -6,6 +6,14 @@ on:
       - 'v*'
   workflow_dispatch:
     inputs:
+      release_tag:
+        description: "Release tag to attach assets to on manual runs (leave empty to skip GitHub Release attach)"
+        required: false
+        default: ""
+      checkout_ref:
+        description: "Source ref to build/sign on manual runs (for recovery, use the release tag)"
+        required: false
+        default: ""
       publish_pypi:
         description: "Publish wheels to PyPI (otherwise manual upload)"
         required: false
@@ -44,6 +52,8 @@ jobs:
             py: "3.12"
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.checkout_ref || github.ref }}
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.py }}
@@ -198,10 +208,14 @@ jobs:
   attach:
     name: Attach wheels to GitHub Release
     needs: wheels
+    if: github.event_name != 'workflow_dispatch' || inputs.release_tag != ''
     runs-on: ubuntu-22.04
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.checkout_ref || github.ref }}
           persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
@@ -223,8 +237,6 @@ jobs:
             --repo-root . \
             --output dist/spiraltorch-compliance-seal.json
       - name: Enforce embedded AGPL license payloads
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
         run: |
           python scripts/security/generate_license_report.py \
             --dist dist \
@@ -235,12 +247,10 @@ jobs:
         with:
           path: dist
           format: cyclonedx-json
-          output-file: dist/spiraltorch-${{ github.ref_name }}-sbom.cdx.json
-          artifact-name: spiraltorch-${{ github.ref_name }}-sbom
+          output-file: dist/spiraltorch-${{ env.RELEASE_TAG }}-sbom.cdx.json
+          artifact-name: spiraltorch-${{ env.RELEASE_TAG }}-sbom
           upload-release-assets: false
       - name: Generate authenticated release manifest
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
         run: |
           python - <<'PY'
           import hashlib
@@ -304,5 +314,7 @@ jobs:
       - name: Create/Update GitHub Release with assets
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          overwrite_files: true
           files: |
             dist/**/*
