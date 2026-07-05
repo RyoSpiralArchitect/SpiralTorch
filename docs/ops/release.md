@@ -70,7 +70,18 @@ token = getpass.getpass("PyPI token for spiraltorch (hidden): ").strip()
 if not token.startswith("pypi-"):
     raise SystemExit("Refusing to store a value that does not look like a PyPI API token")
 subprocess.run(
-    ["gh", "secret", "set", "PYPI_API_TOKEN", "--env", "pypi", "--body-file", "-"],
+    [
+        "gh",
+        "secret",
+        "set",
+        "PYPI_API_TOKEN",
+        "--repo",
+        "RyoSpiralArchitect/SpiralTorch",
+        "--env",
+        "pypi",
+        "--app",
+        "actions",
+    ],
     input=token,
     text=True,
     check=True,
