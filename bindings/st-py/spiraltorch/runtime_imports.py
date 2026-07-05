@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import importlib
+import json
 from collections.abc import Iterable, Mapping
 
 __all__ = [
@@ -17,8 +19,15 @@ __all__ = [
     "required_runtime_import_presets_from_args",
     "required_runtime_imports_from_source",
     "required_runtime_imports_from_args",
+    "module_file",
+    "module_name",
+    "module_version",
+    "runtime_import_kv_label",
     "runtime_import_names_from_source",
     "runtime_import_names_from_args",
+    "runtime_import_probe",
+    "runtime_import_probe_fields",
+    "runtime_import_probe_rows",
     "runtime_import_presets_from_source",
     "runtime_import_presets_from_args",
     "runtime_imports_from_args",
@@ -72,6 +81,61 @@ def _runtime_import_source_values(
 def csv_label(values: object) -> str:
     items = csv_values(values)
     return ",".join(items) if items else "none"
+
+
+def module_version(module: object) -> str | None:
+    version = getattr(module, "__version__", None)
+    return None if version is None else str(version)
+
+
+def module_name(module: object) -> str | None:
+    name = getattr(module, "__name__", None)
+    return None if name is None else str(name)
+
+
+def module_file(module: object) -> str | None:
+    file = getattr(module, "__file__", None)
+    return None if file is None else str(file)
+
+
+def runtime_import_probe(name: object) -> dict[str, object]:
+    module_name_value = str(name).strip()
+    try:
+        module = importlib.import_module(module_name_value)
+    except Exception as exc:  # pragma: no cover - import failures vary by environment.
+        return {
+            "module": module_name_value,
+            "imported": False,
+            "version": None,
+            "module_name": None,
+            "module_file": None,
+            "error": f"{exc.__class__.__name__}: {exc}",
+        }
+    return {
+        "module": module_name_value,
+        "imported": True,
+        "version": module_version(module),
+        "module_name": module_name(module),
+        "module_file": module_file(module),
+        "error": None,
+    }
+
+
+def runtime_import_probe_rows(names: object) -> list[dict[str, object]]:
+    return [runtime_import_probe(name) for name in unique_stripped_values(names)]
+
+
+def runtime_import_kv_label(
+    probes: Iterable[Mapping[str, object]],
+    key: str,
+) -> str:
+    return csv_label(
+        [
+            f"{probe['module']}={probe[key] if probe.get(key) is not None else 'none'}"
+            for probe in probes
+            if isinstance(probe, Mapping) and probe.get("module")
+        ]
+    )
 
 
 def runtime_import_preset_modules(
@@ -247,6 +311,96 @@ def runtime_import_names_from_args(
     preset_modules: Mapping[str, Iterable[str]] | None = None,
 ) -> list[str]:
     return runtime_import_names_from_source(args, preset_modules=preset_modules)
+
+
+def runtime_import_probe_fields(
+    source: object,
+    *,
+    preset_modules: Mapping[str, Iterable[str]] | None = None,
+    field_prefix: str = "",
+    runtime_imports_key: str = "runtime_imports",
+    runtime_import_presets_key: str = "runtime_import_presets",
+    required_runtime_imports_key: str = "required_runtime_imports",
+    required_runtime_import_presets_key: str = "required_runtime_import_presets",
+) -> dict[str, object]:
+    presets = runtime_import_presets_from_source(
+        source,
+        runtime_import_presets_key=runtime_import_presets_key,
+        required_runtime_import_presets_key=required_runtime_import_presets_key,
+    )
+    probes = runtime_import_probe_rows(
+        runtime_import_names_from_source(
+            source,
+            preset_modules=preset_modules,
+            runtime_imports_key=runtime_imports_key,
+            runtime_import_presets_key=runtime_import_presets_key,
+            required_runtime_imports_key=required_runtime_imports_key,
+            required_runtime_import_presets_key=required_runtime_import_presets_key,
+        )
+    )
+    preset_status = runtime_import_preset_status_rows(
+        presets,
+        probes,
+        preset_modules=preset_modules,
+    )
+    imported = [probe["module"] for probe in probes if probe["imported"]]
+    failed = [probe["module"] for probe in probes if not probe["imported"]]
+    satisfied_presets = [row["preset"] for row in preset_status if row["passed"]]
+    failed_presets = [row["preset"] for row in preset_status if not row["passed"]]
+    fields: dict[str, object] = {
+        f"{field_prefix}runtime_import_presets": csv_label(presets),
+        f"{field_prefix}runtime_import_preset_modules": (
+            runtime_import_preset_modules_label(preset_status)
+        ),
+        f"{field_prefix}runtime_import_presets_satisfied": (
+            csv_label(satisfied_presets)
+        ),
+        f"{field_prefix}runtime_import_presets_failed": csv_label(failed_presets),
+        f"{field_prefix}runtime_import_preset_missing_modules": (
+            runtime_import_preset_missing_modules_label(preset_status)
+        ),
+        f"{field_prefix}runtime_imports_requested": (
+            csv_label([probe["module"] for probe in probes])
+        ),
+        f"{field_prefix}runtime_import_probe_count": len(probes),
+        f"{field_prefix}runtime_imports_imported": csv_label(imported),
+        f"{field_prefix}runtime_imports_failed": csv_label(failed),
+        f"{field_prefix}runtime_imports_all_ok": not failed,
+        f"{field_prefix}runtime_import_versions": (
+            runtime_import_kv_label(probes, "version")
+        ),
+        f"{field_prefix}runtime_import_module_names": (
+            runtime_import_kv_label(probes, "module_name")
+        ),
+        f"{field_prefix}runtime_imports_json": json.dumps(
+            probes,
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
+        f"{field_prefix}runtime_import_preset_status_json": json.dumps(
+            preset_status,
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
+    }
+    fields.update(
+        runtime_import_required_gate_fields(
+            required_runtime_imports_from_source(
+                source,
+                required_runtime_imports_key=required_runtime_imports_key,
+            ),
+            required_runtime_import_presets_from_source(
+                source,
+                required_runtime_import_presets_key=(
+                    required_runtime_import_presets_key
+                ),
+            ),
+            probes=probes,
+            preset_status=preset_status,
+            field_prefix=field_prefix,
+        )
+    )
+    return fields
 
 
 def runtime_import_required_gate_fields(

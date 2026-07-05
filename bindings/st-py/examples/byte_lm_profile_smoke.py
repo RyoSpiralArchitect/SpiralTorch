@@ -39,6 +39,18 @@ REQUIRE_TRANSFORMERS_TRACE_RUNTIME_IMPORT_KEY = (
 REQUIRE_TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESET_KEY = (
     "require_transformers_trace_runtime_import_preset"
 )
+CHECKPOINT_TRANSFORMERS_RUNTIME_IMPORTS_KEY = (
+    "checkpoint_transformers_runtime_imports"
+)
+CHECKPOINT_TRANSFORMERS_RUNTIME_IMPORT_PRESETS_KEY = (
+    "checkpoint_transformers_runtime_import_presets"
+)
+REQUIRE_CHECKPOINT_TRANSFORMERS_RUNTIME_IMPORT_KEY = (
+    "require_checkpoint_transformers_runtime_import"
+)
+REQUIRE_CHECKPOINT_TRANSFORMERS_RUNTIME_IMPORT_PRESET_KEY = (
+    "require_checkpoint_transformers_runtime_import_preset"
+)
 
 
 def transformers_trace_runtime_imports(source):
@@ -84,6 +96,62 @@ def transformers_trace_runtime_import_names(source):
         required_runtime_import_presets_key=(
             REQUIRE_TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESET_KEY
         ),
+    )
+
+
+def checkpoint_transformers_runtime_imports(source):
+    return runtime_imports_from_source(
+        source,
+        runtime_imports_key=CHECKPOINT_TRANSFORMERS_RUNTIME_IMPORTS_KEY,
+    )
+
+
+def checkpoint_transformers_runtime_import_presets(source):
+    return runtime_import_presets_from_source(
+        source,
+        runtime_import_presets_key=CHECKPOINT_TRANSFORMERS_RUNTIME_IMPORT_PRESETS_KEY,
+        required_runtime_import_presets_key=(
+            REQUIRE_CHECKPOINT_TRANSFORMERS_RUNTIME_IMPORT_PRESET_KEY
+        ),
+    )
+
+
+def checkpoint_transformers_required_runtime_imports(source):
+    return required_runtime_imports_from_source(
+        source,
+        required_runtime_imports_key=(
+            REQUIRE_CHECKPOINT_TRANSFORMERS_RUNTIME_IMPORT_KEY
+        ),
+    )
+
+
+def checkpoint_transformers_required_runtime_import_presets(source):
+    return required_runtime_import_presets_from_source(
+        source,
+        required_runtime_import_presets_key=(
+            REQUIRE_CHECKPOINT_TRANSFORMERS_RUNTIME_IMPORT_PRESET_KEY
+        ),
+    )
+
+
+def checkpoint_transformers_runtime_import_names(source):
+    return runtime_import_names_from_source(
+        source,
+        preset_modules=TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS,
+        runtime_imports_key=CHECKPOINT_TRANSFORMERS_RUNTIME_IMPORTS_KEY,
+        runtime_import_presets_key=CHECKPOINT_TRANSFORMERS_RUNTIME_IMPORT_PRESETS_KEY,
+        required_runtime_imports_key=(
+            REQUIRE_CHECKPOINT_TRANSFORMERS_RUNTIME_IMPORT_KEY
+        ),
+        required_runtime_import_presets_key=(
+            REQUIRE_CHECKPOINT_TRANSFORMERS_RUNTIME_IMPORT_PRESET_KEY
+        ),
+    )
+
+
+def checkpoint_transformers_runtime_import_requested(source):
+    return bool(checkpoint_transformers_runtime_import_names(source)) or bool(
+        getattr(source, "require_checkpoint_transformers_runtime_imports", False)
     )
 
 
@@ -230,6 +298,56 @@ def parse_args():
         "--require-transformers-audit",
         action="store_true",
         help="Fail checkpoint preflight when the optional Transformers audit is not clean.",
+    )
+    parser.add_argument(
+        "--checkpoint-transformers-runtime-import",
+        dest="checkpoint_transformers_runtime_imports",
+        action="append",
+        default=[],
+        help=(
+            "Additional module imported by checkpoint_preflight.py during "
+            "--transformers-audit. May be repeated."
+        ),
+    )
+    parser.add_argument(
+        "--checkpoint-transformers-runtime-import-preset",
+        dest="checkpoint_transformers_runtime_import_presets",
+        action="append",
+        choices=sorted(TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS),
+        default=[],
+        help=(
+            "Named runtime import bundle probed by checkpoint_preflight.py during "
+            "--transformers-audit. May be repeated."
+        ),
+    )
+    parser.add_argument(
+        "--require-checkpoint-transformers-runtime-imports",
+        action="store_true",
+        help=(
+            "Fail checkpoint preflight when any checkpoint Transformers runtime "
+            "import probe fails."
+        ),
+    )
+    parser.add_argument(
+        "--require-checkpoint-transformers-runtime-import",
+        dest="require_checkpoint_transformers_runtime_import",
+        action="append",
+        default=[],
+        help=(
+            "Require checkpoint_preflight.py to import this module during "
+            "--transformers-audit. May be repeated."
+        ),
+    )
+    parser.add_argument(
+        "--require-checkpoint-transformers-runtime-import-preset",
+        dest="require_checkpoint_transformers_runtime_import_preset",
+        action="append",
+        choices=sorted(TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS),
+        default=[],
+        help=(
+            "Require checkpoint_preflight.py to satisfy this named runtime import "
+            "preset during --transformers-audit. May be repeated."
+        ),
     )
     parser.add_argument(
         "--transformers-trace",
@@ -794,6 +912,24 @@ def parse_args():
         parser.error("--checkpoint-source-gain must be positive")
     if args.require_transformers_audit and not args.transformers_audit:
         parser.error("--require-transformers-audit requires --transformers-audit")
+    if (
+        checkpoint_transformers_runtime_import_requested(args)
+        and not args.transformers_audit
+    ):
+        parser.error(
+            "checkpoint Transformers runtime import options require "
+            "--transformers-audit"
+        )
+    if (
+        args.require_checkpoint_transformers_runtime_imports
+        and not checkpoint_transformers_runtime_import_names(args)
+    ):
+        parser.error(
+            "--require-checkpoint-transformers-runtime-imports requires "
+            "--checkpoint-transformers-runtime-import, "
+            "--checkpoint-transformers-runtime-import-preset, or a direct "
+            "--require-checkpoint-transformers-runtime-import/import-preset gate"
+        )
     trace_requested_by_arg = any(
         [
             args.transformers_trace_jsonl is not None,
@@ -2027,6 +2163,16 @@ def checkpoint_transformers_args(args):
         flags.append("--transformers-load-model")
     if args.require_transformers_audit:
         flags.append("--require-transformers-audit")
+    for preset in checkpoint_transformers_runtime_import_presets(args):
+        flags.extend(["--transformers-runtime-import-preset", preset])
+    for module_name in checkpoint_transformers_runtime_imports(args):
+        flags.extend(["--transformers-runtime-import", module_name])
+    if getattr(args, "require_checkpoint_transformers_runtime_imports", False):
+        flags.append("--require-transformers-runtime-imports")
+    for module_name in checkpoint_transformers_required_runtime_imports(args):
+        flags.extend(["--require-transformers-runtime-import", module_name])
+    for preset in checkpoint_transformers_required_runtime_import_presets(args):
+        flags.extend(["--require-transformers-runtime-import-preset", preset])
     return flags
 
 
@@ -2434,6 +2580,21 @@ def profile_smoke_manifest_row(
         ),
         "require_transformers_audit": bool(
             getattr(args, "require_transformers_audit", False)
+        ),
+        "checkpoint_transformers_runtime_import_presets": (
+            checkpoint_transformers_runtime_import_presets(args)
+        ),
+        "checkpoint_transformers_runtime_imports": (
+            checkpoint_transformers_runtime_imports(args)
+        ),
+        "require_checkpoint_transformers_runtime_imports": bool(
+            getattr(args, "require_checkpoint_transformers_runtime_imports", False)
+        ),
+        "require_checkpoint_transformers_runtime_import": (
+            checkpoint_transformers_required_runtime_imports(args)
+        ),
+        "require_checkpoint_transformers_runtime_import_preset": (
+            checkpoint_transformers_required_runtime_import_presets(args)
         ),
         "sweep_jsonl": str(sweep_jsonl),
         "sweep_aggregate_jsonl": str(sweep_aggregate_jsonl),
