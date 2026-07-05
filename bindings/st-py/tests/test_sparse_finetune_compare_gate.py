@@ -7203,6 +7203,116 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                         model_loaded=False,
                     )
 
+    def test_transformers_trace_required_runtime_imports_probe_and_record(self):
+        module = load_example("byte_lm_transformers_trace")
+        with tempfile.TemporaryDirectory() as tmp:
+            args = types.SimpleNamespace(
+                model_path=Path(tmp),
+                top_k=2,
+                allow_remote=False,
+                trust_remote_code=False,
+                revision=None,
+                metadata_only=True,
+                capture_hidden_states=True,
+                zspace_project=False,
+                zspace_source="hidden",
+                zspace_curvature=-0.04,
+                zspace_frequency=0.65,
+                zspace_strength=1.0,
+                runtime_import_presets=[],
+                runtime_imports=[],
+                required_runtime_imports=["math"],
+                required_runtime_import_presets=["transformers"],
+                require_runtime_imports=False,
+            )
+            with fake_transformers_module() as (fake, _calls):
+                config = fake.AutoConfig.from_pretrained(str(args.model_path))
+                tokenizer = fake.AutoTokenizer.from_pretrained(str(args.model_path))
+                manifest = module.manifest_row(
+                    args,
+                    ["spiral"],
+                    fake,
+                    config,
+                    tokenizer,
+                    model_loaded=False,
+                )
+
+        self.assertEqual(manifest["runtime_import_presets"], "transformers")
+        self.assertEqual(manifest["runtime_imports_requested"], "transformers,math")
+        self.assertEqual(manifest["required_runtime_imports"], "math")
+        self.assertEqual(
+            manifest["required_runtime_imports_imported"],
+            "transformers,math",
+        )
+        self.assertEqual(manifest["required_runtime_imports_missing"], "none")
+        self.assertTrue(manifest["required_runtime_imports_passed"])
+        self.assertEqual(
+            manifest["required_runtime_import_presets"],
+            "transformers",
+        )
+        self.assertEqual(
+            manifest["required_runtime_import_presets_observed"],
+            "transformers",
+        )
+        self.assertEqual(
+            manifest["required_runtime_import_presets_satisfied"],
+            "transformers",
+        )
+        self.assertEqual(
+            manifest["required_runtime_import_presets_unsatisfied"],
+            "none",
+        )
+        self.assertTrue(manifest["required_runtime_import_presets_passed"])
+
+    def test_transformers_trace_required_runtime_import_preset_rejects_unsatisfied(self):
+        module = load_example("byte_lm_transformers_trace")
+        original = dict(module.RUNTIME_IMPORT_PRESETS)
+        try:
+            module.RUNTIME_IMPORT_PRESETS["fixture-runtime"] = [
+                "transformers",
+                "spiraltorch_missing_runtime_fixture",
+            ]
+            with tempfile.TemporaryDirectory() as tmp:
+                args = types.SimpleNamespace(
+                    model_path=Path(tmp),
+                    top_k=2,
+                    allow_remote=False,
+                    trust_remote_code=False,
+                    revision=None,
+                    metadata_only=True,
+                    capture_hidden_states=True,
+                    zspace_project=False,
+                    zspace_source="hidden",
+                    zspace_curvature=-0.04,
+                    zspace_frequency=0.65,
+                    zspace_strength=1.0,
+                    runtime_import_presets=[],
+                    runtime_imports=[],
+                    required_runtime_imports=[],
+                    required_runtime_import_presets=["fixture-runtime"],
+                    require_runtime_imports=False,
+                )
+                with fake_transformers_module() as (fake, _calls):
+                    config = fake.AutoConfig.from_pretrained(str(args.model_path))
+                    tokenizer = fake.AutoTokenizer.from_pretrained(
+                        str(args.model_path)
+                    )
+                    with self.assertRaisesRegex(
+                        RuntimeError,
+                        "runtime_import_preset_unsatisfied:fixture-runtime",
+                    ):
+                        module.manifest_row(
+                            args,
+                            ["spiral"],
+                            fake,
+                            config,
+                            tokenizer,
+                            model_loaded=False,
+                        )
+        finally:
+            module.RUNTIME_IMPORT_PRESETS.clear()
+            module.RUNTIME_IMPORT_PRESETS.update(original)
+
     def test_transformers_trace_compares_prompt_rows_with_gates(self):
         module = load_example("byte_lm_transformers_trace")
         args = argparse.Namespace(

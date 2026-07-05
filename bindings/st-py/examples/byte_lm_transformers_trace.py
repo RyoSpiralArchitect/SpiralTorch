@@ -113,6 +113,28 @@ def parse_args():
         help="Fail if any --runtime-import probe cannot be imported.",
     )
     parser.add_argument(
+        "--require-runtime-import",
+        dest="required_runtime_imports",
+        action="append",
+        default=[],
+        help=(
+            "Require a named Python module to import in the same trace process. "
+            "The module is probed even if it was not listed with --runtime-import."
+        ),
+    )
+    parser.add_argument(
+        "--require-runtime-import-preset",
+        dest="required_runtime_import_presets",
+        action="append",
+        choices=sorted(RUNTIME_IMPORT_PRESETS),
+        default=[],
+        help=(
+            "Require a named runtime import preset to be satisfied in the same "
+            "trace process. The preset modules are probed even if the preset "
+            "was not listed with --runtime-import-preset."
+        ),
+    )
+    parser.add_argument(
         "--metadata-only",
         action="store_true",
         help="Load config/tokenizer metadata but skip model inference.",
@@ -672,9 +694,10 @@ def csv_label(values):
 
 def runtime_import_names_from_args(args):
     names = []
-    for preset in getattr(args, "runtime_import_presets", []) or []:
+    for preset in runtime_import_presets_from_args(args):
         names.extend(RUNTIME_IMPORT_PRESETS[preset])
     names.extend(getattr(args, "runtime_imports", []) or [])
+    names.extend(getattr(args, "required_runtime_imports", []) or [])
     return list(
         dict.fromkeys(str(name).strip() for name in names if str(name).strip())
     )
@@ -684,7 +707,30 @@ def runtime_import_presets_from_args(args):
     return list(
         dict.fromkeys(
             str(preset).strip()
-            for preset in getattr(args, "runtime_import_presets", []) or []
+            for preset in [
+                *(getattr(args, "runtime_import_presets", []) or []),
+                *(getattr(args, "required_runtime_import_presets", []) or []),
+            ]
+            if str(preset).strip()
+        )
+    )
+
+
+def required_runtime_imports_from_args(args):
+    return list(
+        dict.fromkeys(
+            str(name).strip()
+            for name in getattr(args, "required_runtime_imports", []) or []
+            if str(name).strip()
+        )
+    )
+
+
+def required_runtime_import_presets_from_args(args):
+    return list(
+        dict.fromkeys(
+            str(preset).strip()
+            for preset in getattr(args, "required_runtime_import_presets", []) or []
             if str(preset).strip()
         )
     )
@@ -732,6 +778,51 @@ def runtime_import_preset_missing_modules_label(rows):
     )
 
 
+def runtime_import_required_gate_fields(args, probes, preset_status):
+    required = required_runtime_imports_from_args(args)
+    required_presets = required_runtime_import_presets_from_args(args)
+    imported = [probe["module"] for probe in probes if probe["imported"]]
+    satisfied_presets = [row["preset"] for row in preset_status if row["passed"]]
+    observed_presets = [row["preset"] for row in preset_status]
+    missing = [module for module in required if module not in imported]
+    missing_presets = [
+        preset for preset in required_presets if preset not in observed_presets
+    ]
+    unsatisfied_presets = [
+        preset
+        for preset in required_presets
+        if preset in observed_presets and preset not in satisfied_presets
+    ]
+    return {
+        "required_runtime_imports": csv_label(required),
+        "required_runtime_imports_imported": (
+            csv_label(imported) if required else "none"
+        ),
+        "required_runtime_imports_missing": (
+            csv_label(missing) if required else "none"
+        ),
+        "required_runtime_imports_passed": None if not required else not missing,
+        "required_runtime_import_presets": csv_label(required_presets),
+        "required_runtime_import_presets_observed": (
+            csv_label(observed_presets) if required_presets else "none"
+        ),
+        "required_runtime_import_presets_satisfied": (
+            csv_label(satisfied_presets) if required_presets else "none"
+        ),
+        "required_runtime_import_presets_missing": (
+            csv_label(missing_presets) if required_presets else "none"
+        ),
+        "required_runtime_import_presets_unsatisfied": (
+            csv_label(unsatisfied_presets) if required_presets else "none"
+        ),
+        "required_runtime_import_presets_passed": (
+            None
+            if not required_presets
+            else not missing_presets and not unsatisfied_presets
+        ),
+    }
+
+
 def runtime_import_kv_label(probes, key):
     return csv_label(
         [
@@ -749,7 +840,7 @@ def runtime_import_fields(args):
     failed = [probe["module"] for probe in probes if not probe["imported"]]
     satisfied_presets = [row["preset"] for row in preset_status if row["passed"]]
     failed_presets = [row["preset"] for row in preset_status if not row["passed"]]
-    return {
+    fields = {
         "runtime_import_presets": csv_label(presets),
         "runtime_import_preset_modules": runtime_import_preset_modules_label(
             preset_status
@@ -777,6 +868,29 @@ def runtime_import_fields(args):
             sort_keys=True,
         ),
     }
+    fields.update(runtime_import_required_gate_fields(args, probes, preset_status))
+    return fields
+
+
+def csv_gate_values(value):
+    return [item for item in csv_values(value, str) if item != "none"]
+
+
+def runtime_import_requirement_failures(row):
+    failures = []
+    if row.get("required_runtime_imports_passed") is False:
+        for module in csv_gate_values(row.get("required_runtime_imports_missing")):
+            failures.append(f"runtime_import_missing:{module}")
+    if row.get("required_runtime_import_presets_passed") is False:
+        for preset in csv_gate_values(
+            row.get("required_runtime_import_presets_missing")
+        ):
+            failures.append(f"runtime_import_preset_missing:{preset}")
+        for preset in csv_gate_values(
+            row.get("required_runtime_import_presets_unsatisfied")
+        ):
+            failures.append(f"runtime_import_preset_unsatisfied:{preset}")
+    return failures
 
 
 def import_context_fields(transformers):
@@ -829,6 +943,11 @@ def manifest_row(
     ]:
         raise RuntimeError(
             "runtime import probe failed: " + row["runtime_imports_failed"]
+        )
+    requirement_failures = runtime_import_requirement_failures(row)
+    if requirement_failures:
+        raise RuntimeError(
+            "runtime import requirement failed: " + ", ".join(requirement_failures)
         )
     return row
 
@@ -931,6 +1050,16 @@ TRACE_RUNTIME_METADATA_FIELDS = [
     "runtime_import_presets_satisfied",
     "runtime_import_presets_failed",
     "runtime_import_preset_missing_modules",
+    "required_runtime_imports",
+    "required_runtime_imports_imported",
+    "required_runtime_imports_missing",
+    "required_runtime_imports_passed",
+    "required_runtime_import_presets",
+    "required_runtime_import_presets_observed",
+    "required_runtime_import_presets_satisfied",
+    "required_runtime_import_presets_missing",
+    "required_runtime_import_presets_unsatisfied",
+    "required_runtime_import_presets_passed",
     "runtime_imports_requested",
     "runtime_import_probe_count",
     "runtime_imports_imported",
