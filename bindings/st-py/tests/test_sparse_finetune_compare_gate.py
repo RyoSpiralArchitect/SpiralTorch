@@ -5161,12 +5161,18 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             runtime_import_preset_missing_modules_label,
             runtime_import_preset_modules_label,
             runtime_import_preset_status_rows,
+            runtime_import_names_from_source,
             runtime_import_names_from_args,
             runtime_import_presets_from_args,
+            runtime_import_presets_from_source,
             runtime_import_required_gate_fields,
+            runtime_imports_from_args,
+            runtime_imports_from_source,
             runtime_import_requirement_failures,
             required_runtime_import_presets_from_args,
+            required_runtime_import_presets_from_source,
             required_runtime_imports_from_args,
+            required_runtime_imports_from_source,
         )
 
         self.assertEqual(
@@ -5209,6 +5215,101 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                 preset_modules=trace_module.RUNTIME_IMPORT_PRESETS,
             ),
             ["transformers", "torch", "tokenizers"],
+        )
+        self.assertEqual(runtime_imports_from_args(args), ["tokenizers"])
+        prefixed_args = argparse.Namespace(
+            transformers_trace_runtime_import_presets=[" torch-transformers "],
+            transformers_trace_runtime_imports=[" tokenizers "],
+            require_transformers_trace_runtime_import=["torch"],
+            require_transformers_trace_runtime_import_preset=[" hf-runtime "],
+        )
+        self.assertEqual(
+            runtime_import_presets_from_source(
+                prefixed_args,
+                runtime_import_presets_key="transformers_trace_runtime_import_presets",
+                required_runtime_import_presets_key=(
+                    "require_transformers_trace_runtime_import_preset"
+                ),
+            ),
+            ["torch-transformers", "hf-runtime"],
+        )
+        self.assertEqual(
+            runtime_imports_from_source(
+                prefixed_args,
+                runtime_imports_key="transformers_trace_runtime_imports",
+            ),
+            ["tokenizers"],
+        )
+        self.assertEqual(
+            required_runtime_imports_from_source(
+                prefixed_args,
+                required_runtime_imports_key=(
+                    "require_transformers_trace_runtime_import"
+                ),
+            ),
+            ["torch"],
+        )
+        self.assertEqual(
+            required_runtime_import_presets_from_source(
+                prefixed_args,
+                required_runtime_import_presets_key=(
+                    "require_transformers_trace_runtime_import_preset"
+                ),
+            ),
+            ["hf-runtime"],
+        )
+        self.assertEqual(
+            runtime_import_names_from_source(
+                prefixed_args,
+                preset_modules=trace_module.RUNTIME_IMPORT_PRESETS,
+                runtime_imports_key="transformers_trace_runtime_imports",
+                runtime_import_presets_key="transformers_trace_runtime_import_presets",
+                required_runtime_imports_key=(
+                    "require_transformers_trace_runtime_import"
+                ),
+                required_runtime_import_presets_key=(
+                    "require_transformers_trace_runtime_import_preset"
+                ),
+            ),
+            ["transformers", "torch", "tokenizers"],
+        )
+        self.assertEqual(
+            profile_module.transformers_trace_runtime_import_presets(prefixed_args),
+            ["torch-transformers", "hf-runtime"],
+        )
+        self.assertEqual(
+            profile_module.transformers_trace_runtime_import_names(prefixed_args),
+            ["transformers", "torch", "tokenizers"],
+        )
+        required_only_policy = profile_module.trace_policy_fields(
+            {
+                "transformers_trace": True,
+                "transformers_trace_runtime_import_presets": [],
+                "transformers_trace_runtime_imports": [],
+                "require_transformers_trace_runtime_imports": True,
+                "require_transformers_trace_runtime_import": [" torch "],
+                "require_transformers_trace_runtime_import_preset": ["hf-runtime"],
+            }
+        )
+        self.assertEqual(
+            required_only_policy["transformers_trace_runtime_import_presets"],
+            ["hf-runtime"],
+        )
+        self.assertEqual(
+            required_only_policy[
+                "declared_transformers_trace_runtime_import_preset_modules"
+            ],
+            ["hf-runtime=transformers|torch|tokenizers"],
+        )
+        self.assertEqual(
+            required_only_policy["require_transformers_trace_runtime_import"],
+            ["torch"],
+        )
+        self.assertEqual(
+            required_only_policy[
+                "require_transformers_trace_runtime_import_preset"
+            ],
+            ["hf-runtime"],
         )
         status_rows = runtime_import_preset_status_rows(
             ["hf-runtime"],
@@ -5454,6 +5555,37 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                 "ok",
             ],
         )
+        args.transformers_revision = None
+        args.allow_transformers_remote = False
+        args.transformers_trust_remote_code = False
+        args.transformers_trace_prompts = []
+        args.transformers_trace_prompt_file = None
+        args.transformers_trace_zspace_project = False
+        args.transformers_trace_runtime_import_presets = []
+        args.transformers_trace_runtime_imports = []
+        args.require_transformers_trace_runtime_import = []
+        args.require_transformers_trace_runtime_import_preset = ["hf-runtime"]
+        args.compare_transformers_trace_jsonl = None
+        args.require_transformers_trace_match = False
+        args.require_transformers_trace_runtime_metadata_match = False
+        args.require_transformers_trace_top_token_match = False
+        args.transformers_trace_max_top_logit_regression = None
+        args.transformers_trace_max_top_probability_regression = None
+        args.transformers_trace_max_logit_l2_change = None
+        args.transformers_trace_max_hidden_state_l2_change = None
+        args.transformers_trace_require_zspace_status = None
+        required_only_flags = module.transformers_trace_args(
+            args,
+            Path("/models/llama"),
+            Path("/tmp/current-trace.jsonl"),
+            None,
+        )
+        runtime_preset_index = required_only_flags.index("--runtime-import-preset")
+        require_preset_index = required_only_flags.index(
+            "--require-runtime-import-preset"
+        )
+        self.assertEqual(required_only_flags[runtime_preset_index + 1], "hf-runtime")
+        self.assertEqual(required_only_flags[require_preset_index + 1], "hf-runtime")
 
     def test_byte_lm_profile_smoke_dry_run_external_checkpoint_preflights(self):
         module = load_example("byte_lm_profile_smoke")

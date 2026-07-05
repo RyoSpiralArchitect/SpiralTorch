@@ -13,10 +13,16 @@ __all__ = [
     "runtime_import_preset_modules_label",
     "runtime_import_preset_missing_modules_label",
     "runtime_import_preset_status_rows",
+    "required_runtime_import_presets_from_source",
     "required_runtime_import_presets_from_args",
+    "required_runtime_imports_from_source",
     "required_runtime_imports_from_args",
+    "runtime_import_names_from_source",
     "runtime_import_names_from_args",
+    "runtime_import_presets_from_source",
     "runtime_import_presets_from_args",
+    "runtime_imports_from_args",
+    "runtime_imports_from_source",
     "runtime_import_required_gate_fields",
     "runtime_import_requirement_failures",
 ]
@@ -50,6 +56,17 @@ def unique_stripped_values(value: object) -> list[str]:
             if item.strip()
         )
     )
+
+
+def _runtime_import_source_values(
+    source: object,
+    key: str | None,
+) -> list[str]:
+    if key is None:
+        return []
+    if isinstance(source, Mapping):
+        return csv_values(source.get(key))
+    return csv_values(getattr(source, key, None))
 
 
 def csv_label(values: object) -> str:
@@ -142,25 +159,86 @@ def runtime_import_preset_missing_modules_label(
     )
 
 
-def runtime_import_presets_from_args(args: object) -> list[str]:
+def runtime_import_presets_from_source(
+    source: object,
+    *,
+    runtime_import_presets_key: str = "runtime_import_presets",
+    required_runtime_import_presets_key: str = "required_runtime_import_presets",
+) -> list[str]:
     return unique_stripped_values(
         [
-            *(getattr(args, "runtime_import_presets", []) or []),
-            *(getattr(args, "required_runtime_import_presets", []) or []),
+            *_runtime_import_source_values(source, runtime_import_presets_key),
+            *_runtime_import_source_values(source, required_runtime_import_presets_key),
         ]
     )
 
 
-def required_runtime_imports_from_args(args: object) -> list[str]:
+def runtime_import_presets_from_args(args: object) -> list[str]:
+    return runtime_import_presets_from_source(args)
+
+
+def runtime_imports_from_source(
+    source: object,
+    *,
+    runtime_imports_key: str = "runtime_imports",
+) -> list[str]:
     return unique_stripped_values(
-        getattr(args, "required_runtime_imports", []) or []
+        _runtime_import_source_values(source, runtime_imports_key)
+    )
+
+
+def runtime_imports_from_args(args: object) -> list[str]:
+    return runtime_imports_from_source(args)
+
+
+def required_runtime_imports_from_source(
+    source: object,
+    *,
+    required_runtime_imports_key: str = "required_runtime_imports",
+) -> list[str]:
+    return unique_stripped_values(
+        _runtime_import_source_values(source, required_runtime_imports_key)
+    )
+
+
+def required_runtime_imports_from_args(args: object) -> list[str]:
+    return required_runtime_imports_from_source(args)
+
+
+def required_runtime_import_presets_from_source(
+    source: object,
+    *,
+    required_runtime_import_presets_key: str = "required_runtime_import_presets",
+) -> list[str]:
+    return unique_stripped_values(
+        _runtime_import_source_values(source, required_runtime_import_presets_key)
     )
 
 
 def required_runtime_import_presets_from_args(args: object) -> list[str]:
-    return unique_stripped_values(
-        getattr(args, "required_runtime_import_presets", []) or []
-    )
+    return required_runtime_import_presets_from_source(args)
+
+
+def runtime_import_names_from_source(
+    source: object,
+    *,
+    preset_modules: Mapping[str, Iterable[str]] | None = None,
+    runtime_imports_key: str = "runtime_imports",
+    runtime_import_presets_key: str = "runtime_import_presets",
+    required_runtime_imports_key: str = "required_runtime_imports",
+    required_runtime_import_presets_key: str = "required_runtime_import_presets",
+) -> list[str]:
+    module_map = preset_modules or TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS
+    names = []
+    for preset in runtime_import_presets_from_source(
+        source,
+        runtime_import_presets_key=runtime_import_presets_key,
+        required_runtime_import_presets_key=required_runtime_import_presets_key,
+    ):
+        names.extend(str(module) for module in module_map.get(preset, []))
+    names.extend(_runtime_import_source_values(source, runtime_imports_key))
+    names.extend(_runtime_import_source_values(source, required_runtime_imports_key))
+    return unique_stripped_values(names)
 
 
 def runtime_import_names_from_args(
@@ -168,13 +246,7 @@ def runtime_import_names_from_args(
     *,
     preset_modules: Mapping[str, Iterable[str]] | None = None,
 ) -> list[str]:
-    module_map = preset_modules or TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS
-    names = []
-    for preset in runtime_import_presets_from_args(args):
-        names.extend(str(module) for module in module_map.get(preset, []))
-    names.extend(getattr(args, "runtime_imports", []) or [])
-    names.extend(getattr(args, "required_runtime_imports", []) or [])
-    return unique_stripped_values(names)
+    return runtime_import_names_from_source(args, preset_modules=preset_modules)
 
 
 def runtime_import_required_gate_fields(

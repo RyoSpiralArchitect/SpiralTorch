@@ -15,15 +15,76 @@ if str(PACKAGE_ROOT) not in sys.path:
 from spiraltorch.runtime_imports import (
     TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS,
     csv_values,
+    required_runtime_import_presets_from_source,
+    required_runtime_imports_from_source,
+    runtime_import_names_from_source,
     runtime_import_preset_module_rows,
     runtime_import_preset_modules as transformers_trace_runtime_import_preset_modules,
+    runtime_import_presets_from_source,
     runtime_import_required_gate_fields as shared_runtime_import_required_gate_fields,
     runtime_import_requirement_failures,
+    runtime_imports_from_source,
 )
 
 DEFAULT_OUT_DIR = Path("/tmp/spiraltorch-profile-smoke")
 BYTE_LM_VOCAB = 256
 BYTE_LM_HIDDEN = 24
+TRANSFORMERS_TRACE_RUNTIME_IMPORTS_KEY = "transformers_trace_runtime_imports"
+TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS_KEY = (
+    "transformers_trace_runtime_import_presets"
+)
+REQUIRE_TRANSFORMERS_TRACE_RUNTIME_IMPORT_KEY = (
+    "require_transformers_trace_runtime_import"
+)
+REQUIRE_TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESET_KEY = (
+    "require_transformers_trace_runtime_import_preset"
+)
+
+
+def transformers_trace_runtime_imports(source):
+    return runtime_imports_from_source(
+        source,
+        runtime_imports_key=TRANSFORMERS_TRACE_RUNTIME_IMPORTS_KEY,
+    )
+
+
+def transformers_trace_required_runtime_imports(source):
+    return required_runtime_imports_from_source(
+        source,
+        required_runtime_imports_key=REQUIRE_TRANSFORMERS_TRACE_RUNTIME_IMPORT_KEY,
+    )
+
+
+def transformers_trace_required_runtime_import_presets(source):
+    return required_runtime_import_presets_from_source(
+        source,
+        required_runtime_import_presets_key=(
+            REQUIRE_TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESET_KEY
+        ),
+    )
+
+
+def transformers_trace_runtime_import_presets(source):
+    return runtime_import_presets_from_source(
+        source,
+        runtime_import_presets_key=TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS_KEY,
+        required_runtime_import_presets_key=(
+            REQUIRE_TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESET_KEY
+        ),
+    )
+
+
+def transformers_trace_runtime_import_names(source):
+    return runtime_import_names_from_source(
+        source,
+        preset_modules=TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS,
+        runtime_imports_key=TRANSFORMERS_TRACE_RUNTIME_IMPORTS_KEY,
+        runtime_import_presets_key=TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS_KEY,
+        required_runtime_imports_key=REQUIRE_TRANSFORMERS_TRACE_RUNTIME_IMPORT_KEY,
+        required_runtime_import_presets_key=(
+            REQUIRE_TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESET_KEY
+        ),
+    )
 
 
 def parse_args():
@@ -771,16 +832,13 @@ def parse_args():
     ]
     if (
         args.require_transformers_trace_runtime_imports
-        and not args.transformers_trace_runtime_imports
-        and not args.transformers_trace_runtime_import_presets
-        and not args.require_transformers_trace_runtime_import
-        and not args.require_transformers_trace_runtime_import_preset
+        and not transformers_trace_runtime_import_names(args)
     ):
         parser.error(
             "--require-transformers-trace-runtime-imports requires "
             "--transformers-trace-runtime-import or "
             "--transformers-trace-runtime-import-preset or a direct "
-            "--require-transformers-trace-runtime-import gate"
+            "--require-transformers-trace-runtime-import/import-preset gate"
         )
     if any(trace_compare_gates) and args.compare_transformers_trace_jsonl is None:
         parser.error(
@@ -2019,19 +2077,15 @@ def transformers_trace_args(args, model_path, trace_jsonl, trace_compare_jsonl):
                 args.transformers_trace_zspace_source,
             ]
         )
-    for preset in getattr(args, "transformers_trace_runtime_import_presets", []) or []:
+    for preset in transformers_trace_runtime_import_presets(args):
         flags.extend(["--runtime-import-preset", preset])
-    for module_name in getattr(args, "transformers_trace_runtime_imports", []) or []:
+    for module_name in transformers_trace_runtime_imports(args):
         flags.extend(["--runtime-import", module_name])
     if getattr(args, "require_transformers_trace_runtime_imports", False):
         flags.append("--require-runtime-imports")
-    for module_name in (
-        getattr(args, "require_transformers_trace_runtime_import", []) or []
-    ):
+    for module_name in transformers_trace_required_runtime_imports(args):
         flags.extend(["--require-runtime-import", module_name])
-    for preset in (
-        getattr(args, "require_transformers_trace_runtime_import_preset", []) or []
-    ):
+    for preset in transformers_trace_required_runtime_import_presets(args):
         flags.extend(["--require-runtime-import-preset", preset])
     if args.compare_transformers_trace_jsonl is not None:
         flags.extend(["--compare-jsonl", args.compare_transformers_trace_jsonl])
@@ -2230,9 +2284,7 @@ def continuation_plan_row(
 
 
 def trace_policy_fields(source):
-    runtime_import_presets = csv_values(
-        source.get("transformers_trace_runtime_import_presets")
-    )
+    runtime_import_presets = transformers_trace_runtime_import_presets(source)
     declared_preset_modules = source.get(
         "declared_transformers_trace_runtime_import_preset_modules"
     )
@@ -2268,17 +2320,17 @@ def trace_policy_fields(source):
         "declared_transformers_trace_runtime_import_preset_modules": (
             declared_preset_modules
         ),
-        "transformers_trace_runtime_imports": list(
-            source.get("transformers_trace_runtime_imports") or []
+        "transformers_trace_runtime_imports": transformers_trace_runtime_imports(
+            source
         ),
         "require_transformers_trace_runtime_imports": bool(
             source.get("require_transformers_trace_runtime_imports", False)
         ),
-        "require_transformers_trace_runtime_import": list(
-            source.get("require_transformers_trace_runtime_import") or []
+        "require_transformers_trace_runtime_import": (
+            transformers_trace_required_runtime_imports(source)
         ),
-        "require_transformers_trace_runtime_import_preset": list(
-            source.get("require_transformers_trace_runtime_import_preset") or []
+        "require_transformers_trace_runtime_import_preset": (
+            transformers_trace_required_runtime_import_presets(source)
         ),
         "require_transformers_trace_match": bool(
             source.get("require_transformers_trace_match", False)
