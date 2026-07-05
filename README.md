@@ -514,6 +514,24 @@ VERSION=0.4.11
 TAG="v${VERSION}"
 DIST="/tmp/spiraltorch-${VERSION}-dist"
 
+# One-time token auth setup for the GitHub publish workflow. Prefer the `pypi`
+# environment secret so the credential scope matches the workflow environment.
+# This prompt does not echo the token and does not write it into shell history.
+python - <<'PY'
+import getpass
+import subprocess
+
+token = getpass.getpass("PyPI token for spiraltorch (hidden): ").strip()
+if not token.startswith("pypi-"):
+    raise SystemExit("Refusing to store a value that does not look like a PyPI API token")
+subprocess.run(
+    ["gh", "secret", "set", "PYPI_API_TOKEN", "--env", "pypi", "--body-file", "-"],
+    input=token,
+    text=True,
+    check=True,
+)
+PY
+
 # Preferred PyPI publish path: reuse the already-signed GitHub Release wheels.
 # publish_method=token requires a PYPI_API_TOKEN repo/environment secret.
 # publish_method=trusted requires a matching PyPI trusted publisher.
@@ -523,6 +541,19 @@ gh workflow run publish_pypi_from_release.yml \
   -f expected_wheels=3 \
   -f publish_method=token \
   -f skip_existing=true
+
+# If the token secret is intentionally repo-wide instead of environment-scoped,
+# omit `--env pypi` in the setup command above. If the workflow fails with
+# "publish_method=token requires a PYPI_API_TOKEN", the selected GitHub
+# environment cannot see that secret yet.
+
+# Local release-wheel download for dry-runs or emergency manual publish.
+mkdir -p "$DIST"
+gh release download "$TAG" \
+  --dir "$DIST" \
+  --clobber \
+  --pattern 'spiraltorch-*.whl' \
+  --pattern 'wheels.sha256'
 
 # Dry-run first: validates wheels, twine metadata, PyPI state, and token shape
 # without printing the token or uploading anything.
@@ -580,10 +611,23 @@ python scripts/security/verify_pypi_release.py \
 ```
 
 Trusted publishing is intentionally explicit. For PyPI OIDC, configure the
-PyPI publisher with repository `RyoSpiralArchitect/SpiralTorch`, environment
-`pypi`, and the workflow file you are using (`publish_pypi_from_release.yml` or
-`release_wheels.yml`). Without that PyPI-side publisher, select `token` and
-provide `PYPI_API_TOKEN` as a GitHub secret, or use the local helper above.
+PyPI publisher for project `spiraltorch` with owner `RyoSpiralArchitect`,
+repository `SpiralTorch`, environment `pypi`, and the workflow file you are
+using (`publish_pypi_from_release.yml` or `release_wheels.yml`). For the
+release-wheel reuse workflow, the expected OIDC shape is:
+
+```text
+sub=repo:RyoSpiralArchitect/SpiralTorch:environment:pypi
+repository=RyoSpiralArchitect/SpiralTorch
+workflow_ref=RyoSpiralArchitect/SpiralTorch/.github/workflows/publish_pypi_from_release.yml@refs/heads/main
+environment=pypi
+```
+
+If the trusted path fails with `invalid-publisher`, the PyPI-side publisher is
+missing or one of those fields does not match. Without that PyPI-side publisher,
+select `token` and provide `PYPI_API_TOKEN` as a GitHub secret, or use the local
+helper above with `--token-source env` when `pbpaste` is not visible from the
+current shell.
 
 ---
 
