@@ -13,6 +13,11 @@ DEFAULT_PROMPT = "SpiralTorch routes meaning through Z-space."
 ZSPACE_CURVATURE = -0.04
 ZSPACE_FREQUENCY = 0.65
 ZSPACE_STRENGTH = 1.0
+RUNTIME_IMPORT_PRESETS = {
+    "transformers": ["transformers"],
+    "torch-transformers": ["transformers", "torch"],
+    "hf-runtime": ["transformers", "torch", "tokenizers"],
+}
 
 
 def parse_args():
@@ -88,6 +93,18 @@ def parse_args():
             "Additional Python module to import while SpiralTorch and "
             "Transformers are loaded. May be repeated; results are recorded "
             "in the trace manifest."
+        ),
+    )
+    parser.add_argument(
+        "--runtime-import-preset",
+        dest="runtime_import_presets",
+        action="append",
+        choices=sorted(RUNTIME_IMPORT_PRESETS),
+        default=[],
+        help=(
+            "Named runtime import bundle to probe while SpiralTorch and "
+            "Transformers are loaded. 'torch-transformers' probes both "
+            "modules; 'hf-runtime' also probes tokenizers. May be repeated."
         ),
     )
     parser.add_argument(
@@ -203,8 +220,11 @@ def parse_args():
         parser.error("--require-hidden-states is incompatible with --metadata-only")
     if args.require_zspace_projection and not args.zspace_project:
         parser.error("--require-zspace-projection requires --zspace-project")
-    if args.require_runtime_imports and not args.runtime_imports:
-        parser.error("--require-runtime-imports requires --runtime-import")
+    if args.require_runtime_imports and not runtime_import_names_from_args(args):
+        parser.error(
+            "--require-runtime-imports requires --runtime-import "
+            "or --runtime-import-preset"
+        )
     if (
         args.compare_output_jsonl is not None
         and args.compare_jsonl is None
@@ -650,6 +670,16 @@ def csv_label(values):
     return ",".join(str(value) for value in values) if values else "none"
 
 
+def runtime_import_names_from_args(args):
+    names = []
+    for preset in getattr(args, "runtime_import_presets", []) or []:
+        names.extend(RUNTIME_IMPORT_PRESETS[preset])
+    names.extend(getattr(args, "runtime_imports", []) or [])
+    return list(
+        dict.fromkeys(str(name).strip() for name in names if str(name).strip())
+    )
+
+
 def runtime_import_kv_label(probes, key):
     return csv_label(
         [
@@ -660,10 +690,14 @@ def runtime_import_kv_label(probes, key):
 
 
 def runtime_import_fields(args):
-    probes = runtime_import_probe_rows(getattr(args, "runtime_imports", []) or [])
+    presets = [
+        str(preset) for preset in getattr(args, "runtime_import_presets", []) or []
+    ]
+    probes = runtime_import_probe_rows(runtime_import_names_from_args(args))
     imported = [probe["module"] for probe in probes if probe["imported"]]
     failed = [probe["module"] for probe in probes if not probe["imported"]]
     return {
+        "runtime_import_presets": csv_label(presets),
         "runtime_imports_requested": csv_label([probe["module"] for probe in probes]),
         "runtime_import_probe_count": len(probes),
         "runtime_imports_imported": csv_label(imported),
