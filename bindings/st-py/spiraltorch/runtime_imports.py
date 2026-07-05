@@ -43,6 +43,9 @@ __all__ = [
     "runtime_imports_from_source",
     "runtime_import_required_gate_fields",
     "runtime_import_requirement_failures",
+    "runtime_device_backends_from_source",
+    "runtime_device_report_fields",
+    "runtime_device_requirement_failures",
     "write_runtime_import_preflight_report",
 ]
 
@@ -618,25 +621,318 @@ def runtime_import_requirement_failures(
     return failures
 
 
+def runtime_device_backends_from_source(
+    source: object,
+    *,
+    runtime_device_backends_key: str = "runtime_device_backends",
+    required_runtime_device_backends_key: str = "required_runtime_device_backends",
+    required_runtime_device_ready_backends_key: str = (
+        "required_runtime_device_ready_backends"
+    ),
+) -> list[str]:
+    return unique_stripped_values(
+        [
+            *_runtime_import_source_values(source, runtime_device_backends_key),
+            *_runtime_import_source_values(source, required_runtime_device_backends_key),
+            *_runtime_import_source_values(
+                source,
+                required_runtime_device_ready_backends_key,
+            ),
+        ]
+    )
+
+
+def _default_describe_runtime_devices():
+    try:
+        import spiraltorch as st  # type: ignore
+    except Exception as exc:  # pragma: no cover - import failures vary by env.
+        error = f"import spiraltorch failed: {exc}"
+
+        def _missing(_backends, **_kwargs):
+            raise RuntimeError(error)
+
+        return _missing
+
+    describe = getattr(st, "describe_runtime_devices", None)
+    if callable(describe):
+        return describe
+
+    describe_device = getattr(st, "describe_device", None)
+    if not callable(describe_device):
+        def _missing(_backends, **_kwargs):
+            raise RuntimeError("spiraltorch.describe_device is unavailable")
+
+        return _missing
+
+    def _describe(backends, *, continue_on_error=True, **kwargs):
+        rows = []
+        ready = []
+        not_ready = []
+        errors = []
+        statuses = {}
+        for backend in unique_stripped_values(backends):
+            try:
+                row = dict(describe_device(backend, **dict(kwargs)))
+            except Exception as exc:
+                if not continue_on_error:
+                    raise
+                row = {
+                    "backend": backend,
+                    "requested_backend": backend,
+                    "runtime_ready": False,
+                    "runtime_status": "error",
+                    "error": str(exc),
+                }
+            ready_value = _runtime_device_row_ready(row)
+            status = _runtime_device_row_status(row)
+            if "error" in row:
+                errors.append(backend)
+            if ready_value:
+                ready.append(backend)
+            else:
+                not_ready.append(backend)
+            statuses[backend] = status
+            rows.append(row)
+        return {
+            "backends": unique_stripped_values(backends),
+            "reports": rows,
+            "ready_backends": ready,
+            "not_ready_backends": not_ready,
+            "error_backends": errors,
+            "status_by_backend": statuses,
+            "all_ready": bool(rows) and len(ready) == len(rows),
+            "has_errors": bool(errors),
+        }
+
+    return _describe
+
+
+def _runtime_device_row_backend(row: Mapping[str, object], default: object = None) -> str:
+    for key in ("requested_backend", "backend", "effective_backend"):
+        value = row.get(key)
+        if value is not None:
+            return str(value)
+    return str(default or "unknown")
+
+
+def _runtime_device_row_ready(row: Mapping[str, object]) -> bool:
+    for key in (
+        "runtime_ready",
+        "effective_backend_runtime_ready",
+        "requested_backend_runtime_ready",
+        "available",
+    ):
+        value = row.get(key)
+        if isinstance(value, bool):
+            return value
+    return False
+
+
+def _runtime_device_row_status(row: Mapping[str, object]) -> str:
+    for key in (
+        "runtime_status",
+        "effective_backend_runtime_status",
+        "requested_backend_runtime_status",
+        "status",
+    ):
+        value = row.get(key)
+        if value is not None:
+            return str(value)
+    return "unknown"
+
+
+def runtime_device_report_fields(
+    source: object,
+    *,
+    describe_runtime_devices=None,
+    field_prefix: str = "",
+    runtime_device_backends_key: str = "runtime_device_backends",
+    required_runtime_device_backends_key: str = "required_runtime_device_backends",
+    required_runtime_device_ready_backends_key: str = (
+        "required_runtime_device_ready_backends"
+    ),
+) -> dict[str, object]:
+    backends = runtime_device_backends_from_source(
+        source,
+        runtime_device_backends_key=runtime_device_backends_key,
+        required_runtime_device_backends_key=required_runtime_device_backends_key,
+        required_runtime_device_ready_backends_key=(
+            required_runtime_device_ready_backends_key
+        ),
+    )
+    required = unique_stripped_values(
+        _runtime_import_source_values(source, required_runtime_device_backends_key)
+    )
+    ready_required = unique_stripped_values(
+        _runtime_import_source_values(
+            source,
+            required_runtime_device_ready_backends_key,
+        )
+    )
+    if not backends:
+        return {
+            f"{field_prefix}runtime_device_report_requested": False,
+            f"{field_prefix}runtime_device_report_backends": "none",
+            f"{field_prefix}runtime_device_report_available_backends": "none",
+            f"{field_prefix}runtime_device_report_ready_backends": "none",
+            f"{field_prefix}runtime_device_report_not_ready_backends": "none",
+            f"{field_prefix}runtime_device_report_error_backends": "none",
+            f"{field_prefix}runtime_device_report_statuses": "none",
+            f"{field_prefix}runtime_device_reports_json": "[]",
+            f"{field_prefix}required_runtime_device_backends": csv_label(required),
+            f"{field_prefix}required_runtime_device_backends_missing": "none",
+            f"{field_prefix}required_runtime_device_backends_passed": (
+                None if not required else False
+            ),
+            f"{field_prefix}required_runtime_device_ready_backends": (
+                csv_label(ready_required)
+            ),
+            f"{field_prefix}required_runtime_device_ready_backends_missing": "none",
+            f"{field_prefix}required_runtime_device_ready_backends_passed": (
+                None if not ready_required else False
+            ),
+        }
+
+    describe = describe_runtime_devices or _default_describe_runtime_devices()
+    try:
+        summary = describe(backends, continue_on_error=True)
+    except Exception as exc:
+        reports = [
+            {
+                "backend": backend,
+                "requested_backend": backend,
+                "runtime_ready": False,
+                "runtime_status": "error",
+                "error": str(exc),
+            }
+            for backend in backends
+        ]
+    else:
+        if isinstance(summary, Mapping):
+            reports = [
+                row for row in summary.get("reports", [])
+                if isinstance(row, Mapping)
+            ]
+        else:
+            reports = []
+    available = [
+        _runtime_device_row_backend(row, default=backends[index])
+        for index, row in enumerate(reports)
+        if "error" not in row
+    ]
+    ready = [
+        _runtime_device_row_backend(row, default=backends[index])
+        for index, row in enumerate(reports)
+        if _runtime_device_row_ready(row)
+    ]
+    error_backends = [
+        _runtime_device_row_backend(row, default=backends[index])
+        for index, row in enumerate(reports)
+        if "error" in row
+    ]
+    not_ready = [
+        backend for backend in backends
+        if backend not in ready
+    ]
+    statuses = [
+        f"{backend}={_runtime_device_row_status(row)}"
+        for backend, row in zip(backends, reports)
+    ]
+    missing_required = [
+        backend for backend in required
+        if backend not in available
+    ]
+    missing_ready_required = [
+        backend for backend in ready_required
+        if backend not in ready
+    ]
+    return {
+        f"{field_prefix}runtime_device_report_requested": True,
+        f"{field_prefix}runtime_device_report_backends": csv_label(backends),
+        f"{field_prefix}runtime_device_report_available_backends": csv_label(available),
+        f"{field_prefix}runtime_device_report_ready_backends": csv_label(ready),
+        f"{field_prefix}runtime_device_report_not_ready_backends": csv_label(not_ready),
+        f"{field_prefix}runtime_device_report_error_backends": csv_label(error_backends),
+        f"{field_prefix}runtime_device_report_statuses": csv_label(statuses),
+        f"{field_prefix}runtime_device_reports_json": json.dumps(
+            reports,
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
+        f"{field_prefix}required_runtime_device_backends": csv_label(required),
+        f"{field_prefix}required_runtime_device_backends_missing": (
+            csv_label(missing_required) if required else "none"
+        ),
+        f"{field_prefix}required_runtime_device_backends_passed": (
+            None if not required else not missing_required
+        ),
+        f"{field_prefix}required_runtime_device_ready_backends": (
+            csv_label(ready_required)
+        ),
+        f"{field_prefix}required_runtime_device_ready_backends_missing": (
+            csv_label(missing_ready_required) if ready_required else "none"
+        ),
+        f"{field_prefix}required_runtime_device_ready_backends_passed": (
+            None if not ready_required else not missing_ready_required
+        ),
+    }
+
+
+def runtime_device_requirement_failures(
+    row: Mapping[str, object],
+    *,
+    field_prefix: str = "",
+    failure_prefix: str = "runtime_device",
+) -> list[str]:
+    failures = []
+    if row.get(f"{field_prefix}required_runtime_device_backends_passed") is False:
+        for backend in sorted(
+            csv_values(row.get(f"{field_prefix}required_runtime_device_backends_missing"))
+        ):
+            failures.append(f"{failure_prefix}_missing:{backend}")
+    if row.get(f"{field_prefix}required_runtime_device_ready_backends_passed") is False:
+        for backend in sorted(
+            csv_values(
+                row.get(
+                    f"{field_prefix}required_runtime_device_ready_backends_missing"
+                )
+            )
+        ):
+            failures.append(f"{failure_prefix}_not_ready:{backend}")
+    return failures
+
+
 def runtime_import_preflight_report(
     *,
     runtime_imports: object = None,
     runtime_import_presets: object = None,
     required_runtime_imports: object = None,
     required_runtime_import_presets: object = None,
+    runtime_device_backends: object = None,
+    required_runtime_device_backends: object = None,
+    required_runtime_device_ready_backends: object = None,
     require_all: bool = False,
     preset_modules: Mapping[str, Iterable[str]] | None = None,
+    describe_runtime_devices=None,
 ) -> dict[str, object]:
     requested_imports = unique_stripped_values(runtime_imports)
     requested_presets = unique_stripped_values(runtime_import_presets)
     required_imports = unique_stripped_values(required_runtime_imports)
     required_presets = unique_stripped_values(required_runtime_import_presets)
+    requested_devices = unique_stripped_values(runtime_device_backends)
+    required_devices = unique_stripped_values(required_runtime_device_backends)
+    required_ready_devices = unique_stripped_values(
+        required_runtime_device_ready_backends
+    )
     if require_all:
         required_imports = unique_stripped_values(
             [*requested_imports, *required_imports]
         )
         required_presets = unique_stripped_values(
             [*requested_presets, *required_presets]
+        )
+        required_devices = unique_stripped_values(
+            [*requested_devices, *required_devices]
         )
 
     report = runtime_import_probe_fields(
@@ -648,11 +944,26 @@ def runtime_import_preflight_report(
         },
         preset_modules=preset_modules,
     )
-    failures = runtime_import_requirement_failures(report)
+    report.update(
+        runtime_device_report_fields(
+            {
+                "runtime_device_backends": requested_devices,
+                "required_runtime_device_backends": required_devices,
+                "required_runtime_device_ready_backends": required_ready_devices,
+            },
+            describe_runtime_devices=describe_runtime_devices,
+        )
+    )
+    import_failures = runtime_import_requirement_failures(report)
+    device_failures = runtime_device_requirement_failures(report)
+    failures = [*import_failures, *device_failures]
     report.update(
         {
             "runtime_import_preflight_required": bool(
-                required_imports or required_presets
+                required_imports
+                or required_presets
+                or required_devices
+                or required_ready_devices
             ),
             "runtime_import_preflight_require_all": bool(require_all),
             "runtime_import_preflight_failures": csv_label(failures),
@@ -688,6 +999,16 @@ def runtime_import_preflight_summary_lines(
             f"{report.get('runtime_import_preset_missing_modules', 'none')}"
         ),
     ]
+    if report.get("runtime_device_report_requested"):
+        lines.append(
+            "runtime_device_reports "
+            f"backends={report.get('runtime_device_report_backends', 'none')} "
+            "available="
+            f"{report.get('runtime_device_report_available_backends', 'none')} "
+            f"ready={report.get('runtime_device_report_ready_backends', 'none')} "
+            f"errors={report.get('runtime_device_report_error_backends', 'none')} "
+            f"statuses={report.get('runtime_device_report_statuses', 'none')}"
+        )
     install_hints = str(report.get("runtime_import_failed_install_hints", "none"))
     if install_hints and install_hints != "none":
         lines.append(f"runtime_import_failed_install_hints {install_hints}")
@@ -764,6 +1085,38 @@ def _runtime_import_arg_parser() -> argparse.ArgumentParser:
         help="Preset that must be satisfied. May be repeated.",
     )
     parser.add_argument(
+        "--runtime-device-backend",
+        "--device-backend",
+        dest="runtime_device_backends",
+        action="append",
+        default=[],
+        help=(
+            "Backend to inspect with spiraltorch.describe_runtime_devices(). "
+            "May be repeated; does not fail unless paired with a require flag."
+        ),
+    )
+    parser.add_argument(
+        "--require-runtime-device-backend",
+        "--require-device-backend",
+        dest="required_runtime_device_backends",
+        action="append",
+        default=[],
+        help=(
+            "Fail unless a runtime device report is available for this backend. "
+            "May be repeated."
+        ),
+    )
+    parser.add_argument(
+        "--require-runtime-device-ready-backend",
+        "--require-device-ready-backend",
+        dest="required_runtime_device_ready_backends",
+        action="append",
+        default=[],
+        help=(
+            "Fail unless this backend is reported runtime-ready. May be repeated."
+        ),
+    )
+    parser.add_argument(
         "--list-presets",
         action="store_true",
         help="Print available preset expansions and exit.",
@@ -809,6 +1162,11 @@ def main(argv: list[str] | None = None) -> int:
         runtime_import_presets=args.runtime_import_presets,
         required_runtime_imports=args.required_runtime_imports,
         required_runtime_import_presets=args.required_runtime_import_presets,
+        runtime_device_backends=args.runtime_device_backends,
+        required_runtime_device_backends=args.required_runtime_device_backends,
+        required_runtime_device_ready_backends=(
+            args.required_runtime_device_ready_backends
+        ),
         require_all=args.require_all,
     )
     if args.json_out:

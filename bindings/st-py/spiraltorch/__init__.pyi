@@ -105,8 +105,12 @@ def runtime_import_preflight_report(
     runtime_import_presets: object = ...,
     required_runtime_imports: object = ...,
     required_runtime_import_presets: object = ...,
+    runtime_device_backends: object = ...,
+    required_runtime_device_backends: object = ...,
+    required_runtime_device_ready_backends: object = ...,
     require_all: bool = ...,
     preset_modules: Mapping[str, Iterable[str]] | None = ...,
+    describe_runtime_devices: Callable[..., Mapping[str, object]] | None = ...,
 ) -> Dict[str, Any]: ...
 
 def runtime_import_preflight_summary_lines(
@@ -180,6 +184,31 @@ def runtime_import_required_gate_fields(
 ) -> Dict[str, object]: ...
 
 def runtime_import_requirement_failures(
+    row: Mapping[str, object],
+    *,
+    field_prefix: str = ...,
+    failure_prefix: str = ...,
+) -> List[str]: ...
+
+def runtime_device_backends_from_source(
+    source: object,
+    *,
+    runtime_device_backends_key: str = ...,
+    required_runtime_device_backends_key: str = ...,
+    required_runtime_device_ready_backends_key: str = ...,
+) -> List[str]: ...
+
+def runtime_device_report_fields(
+    source: object,
+    *,
+    describe_runtime_devices: Callable[..., Mapping[str, object]] | None = ...,
+    field_prefix: str = ...,
+    runtime_device_backends_key: str = ...,
+    required_runtime_device_backends_key: str = ...,
+    required_runtime_device_ready_backends_key: str = ...,
+) -> Dict[str, object]: ...
+
+def runtime_device_requirement_failures(
     row: Mapping[str, object],
     *,
     field_prefix: str = ...,

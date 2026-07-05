@@ -50,8 +50,10 @@ print("checkpoint compatible:", report["compatible"])
 runtime = st.runtime_import_preflight_report(
     runtime_import_presets=["hf-runtime"],
     required_runtime_import_presets=["hf-runtime"],
+    runtime_device_backends=["wgpu"],
 )
 print("HF runtime ready:", runtime["runtime_import_preflight_passed"])
+print("WGPU status:", runtime["runtime_device_report_statuses"])
 PY
 ```
 
@@ -200,7 +202,11 @@ config/tokenizer/model swaps before reading prompt-level drift.
 For notebook or CI preflight without a training script, either run the CLI:
 
 ```bash
-spiral-runtime-preflight --preset hf-runtime --require --json-out ft-runtime.json
+spiral-runtime-preflight \
+  --preset hf-runtime \
+  --require \
+  --runtime-device-backend wgpu \
+  --json-out ft-runtime.json
 ```
 
 or call the same contract from Python:
@@ -211,6 +217,7 @@ import spiraltorch as st
 report = st.runtime_import_preflight_report(
     runtime_import_presets=["hf-runtime"],
     required_runtime_import_presets=["hf-runtime"],
+    runtime_device_backends=["wgpu"],
 )
 st.write_runtime_import_preflight_report(report, "ft-runtime.json")
 ```
@@ -259,7 +266,11 @@ After installing a wheel, optional Hugging Face/FT dependencies can be checked
 without launching a training job:
 
 ```bash
-spiral-runtime-preflight --preset hf-finetune --require --json-out ft-runtime.json
+spiral-runtime-preflight \
+  --preset hf-finetune \
+  --require \
+  --runtime-device-backend wgpu \
+  --json-out ft-runtime.json
 spiral-runtime-preflight --preset hf-peft --require --json
 ```
 
