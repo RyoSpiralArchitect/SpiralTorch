@@ -26,6 +26,7 @@ fn emit_wave_gate_forward_meta(
     saturation: f32,
     porosity: f32,
     fused_projection: bool,
+    fallback_message: Option<&str>,
 ) {
     emit_tensor_op(
         "wave_gate_forward",
@@ -34,7 +35,7 @@ fn emit_wave_gate_forward_meta(
     );
     emit_tensor_op_meta("wave_gate_forward", || {
         let values = rows.saturating_mul(cols);
-        serde_json::json!({
+        let mut data = serde_json::json!({
             "backend": backend,
             "requested_backend": requested_backend,
             "selected_backend": tensor_util_backend_label(selected_backend),
@@ -59,7 +60,11 @@ fn emit_wave_gate_forward_meta(
             "estimated_projection_ops": values.saturating_mul(3),
             "estimated_total_ops": values.saturating_mul(if fused_projection { 4 } else { 5 }),
             "empty": rows == 0 || cols == 0,
-        })
+        });
+        if let Some(message) = fallback_message {
+            data["fallback"] = serde_json::json!({"from": "wgpu", "message": message});
+        }
+        data
     });
 }
 
@@ -562,30 +567,57 @@ impl Module for WaveGate {
         let requested_backend = current_tensor_util_backend();
         let selected_backend = current_tensor_util_backend_for_values(rows.saturating_mul(cols));
         let requested_backend_label = tensor_util_backend_label(requested_backend);
-        if matches!(selected_backend, TensorUtilBackend::GpuWgpu) {
-            let projected = input.wave_gate_project_with_backend(
-                gate_data,
-                bias_data,
-                self.topos.curvature(),
-                self.topos.saturation(),
-                self.topos.porosity(),
-                selected_backend,
-            )?;
-            self.topos
-                .guard_tensor("wave_gate_forward_projected", &projected)?;
-            emit_wave_gate_forward_meta(
-                rows,
-                cols,
-                "tensor_util",
-                requested_backend_label,
-                selected_backend,
-                "wave_gate.forward_fused",
-                self.topos.curvature(),
-                self.topos.saturation(),
-                self.topos.porosity(),
-                true,
-            );
-            return Ok(projected);
+        #[cfg(feature = "wgpu")]
+        let mut wgpu_failure: Option<String> = None;
+        #[cfg(feature = "wgpu")]
+        {
+            if matches!(selected_backend, TensorUtilBackend::GpuWgpu) && rows > 0 && cols > 0 {
+                if wgpu_dense::is_available() {
+                    match wgpu_dense::wave_gate_project(
+                        input.data(),
+                        gate_data,
+                        bias_data,
+                        rows,
+                        cols,
+                        self.topos.curvature(),
+                        self.topos.saturation(),
+                        self.topos.porosity(),
+                    ) {
+                        Ok(buffer) => {
+                            let projected = Tensor::from_vec(rows, cols, buffer)?;
+                            self.topos
+                                .guard_tensor("wave_gate_forward_projected", &projected)?;
+                            emit_wave_gate_forward_meta(
+                                rows,
+                                cols,
+                                "wgpu_dense",
+                                requested_backend_label,
+                                selected_backend,
+                                "wave_gate.forward_wgpu",
+                                self.topos.curvature(),
+                                self.topos.saturation(),
+                                self.topos.porosity(),
+                                true,
+                                None,
+                            );
+                            return Ok(projected);
+                        }
+                        Err(message) if strict_gpu_path() => {
+                            return Err(wave_gate_wgpu_error("wave_gate_forward", message));
+                        }
+                        Err(message) => {
+                            wgpu_failure = Some(message);
+                        }
+                    }
+                } else if strict_gpu_path() {
+                    return Err(wave_gate_wgpu_error(
+                        "wave_gate_forward",
+                        "WGPU backend not available".to_string(),
+                    ));
+                } else {
+                    wgpu_failure = Some("WGPU backend not available".to_string());
+                }
+            }
         }
         let input_buf = input.data();
         let mut out = Tensor::zeros(rows, cols)?;
@@ -600,8 +632,22 @@ impl Module for WaveGate {
             }
         }
         monad.rewrite_tensor("wave_gate_forward_out", &mut out)?;
+        let projection_backend = {
+            #[cfg(feature = "wgpu")]
+            {
+                if wgpu_failure.is_some() {
+                    TensorUtilBackend::Cpu
+                } else {
+                    selected_backend
+                }
+            }
+            #[cfg(not(feature = "wgpu"))]
+            {
+                selected_backend
+            }
+        };
         let projected =
-            out.project_to_poincare_with_backend(self.topos.curvature(), selected_backend)?;
+            out.project_to_poincare_with_backend(self.topos.curvature(), projection_backend)?;
         self.topos
             .guard_tensor("wave_gate_forward_projected", &projected)?;
         emit_wave_gate_forward_meta(
@@ -615,6 +661,16 @@ impl Module for WaveGate {
             self.topos.saturation(),
             self.topos.porosity(),
             false,
+            {
+                #[cfg(feature = "wgpu")]
+                {
+                    wgpu_failure.as_deref()
+                }
+                #[cfg(not(feature = "wgpu"))]
+                {
+                    None
+                }
+            },
         );
         Ok(projected)
     }
@@ -1067,6 +1123,16 @@ mod tests {
     #[cfg(feature = "wgpu")]
     #[test]
     fn wave_gate_forced_wgpu_forward_matches_cpu_reference() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
         let rows = 33;
         let cols = 32;
         let cpu_gate = WaveGate::new("wg", cols, -1.0, 0.5).unwrap();
@@ -1088,8 +1154,29 @@ mod tests {
             let _guard = push_backend_policy(wgpu_policy());
             wgpu_gate.forward(&input).unwrap()
         };
+        st_tensor::set_tensor_op_meta_observer(previous);
 
         assert_tensor_close(&cpu, &wgpu, 2e-5);
+
+        let events = events.lock().unwrap();
+        let (_, forward) = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "wave_gate_forward"
+                    && data["requested_backend"] == "wgpu"
+                    && data["selected_backend"] == "wgpu"
+            })
+            .expect("wave gate forced wgpu forward metadata event");
+        if st_tensor::backend::wgpu_dense::is_available() {
+            assert_eq!(forward["backend"], "wgpu_dense");
+            assert_eq!(forward["kernel"], "wave_gate.forward_wgpu");
+            assert_eq!(forward["fused_projection"], true);
+            assert!(forward.get("fallback").is_none());
+        } else {
+            assert_eq!(forward["backend"], "cpu");
+            assert_eq!(forward["kernel"], "wave_gate.forward_scalar");
+            assert_eq!(forward["fallback"]["from"], "wgpu");
+        }
     }
 
     #[cfg(feature = "wgpu")]
