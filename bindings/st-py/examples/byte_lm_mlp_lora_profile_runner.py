@@ -6,6 +6,8 @@ import sys
 import time
 from pathlib import Path
 
+from sparse_finetune_compare import attach_requested_wgpu_component_backend_summary
+
 
 PROFILE_NAMES = [
     "strong_effect",
@@ -2096,6 +2098,7 @@ def profile_run_summary_rows(command_rows):
                 raise ValueError(f"{aggregate_path} expected row_type='config_aggregate'")
             gap, ratio = target_retention_selectivity(aggregate)
             summary = dict(aggregate)
+            attach_requested_wgpu_component_backend_summary(summary)
             summary.update(
                 {
                     "row_type": "checkpoint_source_profile_run",
@@ -2209,6 +2212,17 @@ def print_run_summary_rows(rows):
                 f"guard_retention_rejected_rate_mean={optional_numeric_label(row.get('guard_retention_rejected_rate_mean'))} "
                 f"guard_target_stale_rate_mean={optional_numeric_label(row.get('guard_target_stale_rate_mean'))} "
             )
+        wgpu_component_label = ""
+        if (
+            row.get("tensor_backend_requested_wgpu_component_fallback_top")
+            is not None
+        ):
+            wgpu_component_label = (
+                "wgpu_component_fallback_top="
+                f"{row.get('tensor_backend_requested_wgpu_component_fallback_top')} "
+                "wgpu_component_hit_top="
+                f"{row.get('tensor_backend_requested_wgpu_component_hit_top')} "
+            )
         print(
             f"profile_run profile={row['source_profile']} "
             f"source={row['selected_source']} "
@@ -2224,6 +2238,7 @@ def print_run_summary_rows(rows):
             f"retention_loss_delta_mean={float(row['retention_loss_delta_mean']):.9f} "
             f"target_retention_gap_mean={float(row['target_retention_gap_mean']):.9f} "
             f"{guard_label}"
+            f"{wgpu_component_label}"
             f"{input_promotion_label}"
             f"target_retention_ratio={ratio_label}"
         )

@@ -40,6 +40,7 @@ from checkpoint_preflight import (
 )
 from sparse_finetune_compare import (
     add_summary_compare_args,
+    attach_requested_wgpu_component_backend_summary,
     attach_summary_guard_counts,
     attach_summary_guard_margins,
     checkpoint_audit_differences,
@@ -1716,6 +1717,7 @@ def summary_row(
     row = dict(report["summary"])
     attach_summary_guard_margins(row)
     attach_summary_guard_counts(row, report["captured"])
+    attach_requested_wgpu_component_backend_summary(row)
     row.update(
         {
             "example": "byte_lm_mlp_lora_sweep",
@@ -2396,6 +2398,10 @@ def aggregate_config_rows(rows):
                 "checkpoint_source_gain",
             ),
         }
+        attach_requested_wgpu_component_backend_summary(
+            aggregate,
+            source_rows=grouped,
+        )
         aggregates.append(aggregate)
     return aggregates
 
