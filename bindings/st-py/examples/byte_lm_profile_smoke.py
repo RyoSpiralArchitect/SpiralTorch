@@ -1136,6 +1136,24 @@ def promoted_rungs_jsonl_path_for_manifest(row):
     return manifest_path(row, "out_dir", "top-level") / "promoted-rungs.jsonl"
 
 
+def runtime_import_preset_module_map(value):
+    modules = {}
+    for item in csv_values(value):
+        preset, sep, _module_list = item.partition("=")
+        if preset and sep:
+            modules[preset] = item
+    return modules
+
+
+def runtime_import_preset_module_rows(value, presets):
+    module_map = runtime_import_preset_module_map(value)
+    return [
+        module_map[preset]
+        for preset in csv_values(presets)
+        if preset in module_map
+    ]
+
+
 def load_profile_smoke_manifest_with_rungs(path):
     row = load_single_profile_smoke_manifest(path)
     promoted_rungs_jsonl = promoted_rungs_jsonl_path_for_manifest(row)
@@ -1388,6 +1406,26 @@ def profile_smoke_manifest_validation_row(path, row, promoted_rungs_jsonl, rung_
                 declared_runtime_import_presets
             )
         )
+    else:
+        declared_runtime_import_preset_modules = csv_values(
+            declared_runtime_import_preset_modules
+        )
+    expected_declared_runtime_import_preset_modules = (
+        transformers_trace_runtime_import_preset_modules(
+            declared_runtime_import_presets
+        )
+    )
+    declared_module_gate_requested = bool(
+        declared_runtime_import_presets
+        or declared_runtime_import_preset_modules
+        or expected_declared_runtime_import_preset_modules
+    )
+    declared_module_match = (
+        None
+        if not declared_module_gate_requested
+        else set(declared_runtime_import_preset_modules)
+        == set(expected_declared_runtime_import_preset_modules)
+    )
     validation = {
         "row_type": "profile_smoke_manifest_validation",
         "valid": True,
@@ -1406,6 +1444,14 @@ def profile_smoke_manifest_validation_row(path, row, promoted_rungs_jsonl, rung_
         "declared_transformers_trace_runtime_import_preset_modules": (
             manifest_validation_csv_label(declared_runtime_import_preset_modules)
         ),
+        "declared_transformers_trace_runtime_import_preset_modules_expected": (
+            manifest_validation_csv_label(
+                expected_declared_runtime_import_preset_modules
+            )
+        ),
+        "declared_transformers_trace_runtime_import_preset_modules_match": (
+            declared_module_match
+        ),
         "promoted_rungs": promoted_rungs,
         "promoted_ft_epochs": promoted_epochs,
         "promoted_rung_rows": len(rung_rows),
@@ -1419,6 +1465,27 @@ def profile_smoke_manifest_validation_row(path, row, promoted_rungs_jsonl, rung_
         * (1 + len(PROMOTED_RUNG_ARTIFACT_FIELDS)),
     }
     validation.update(transformers_trace_validation_fields(row))
+    trace_declared_preset_modules = runtime_import_preset_module_rows(
+        validation.get("transformers_trace_runtime_import_preset_modules"),
+        declared_runtime_import_presets,
+    )
+    trace_declared_modules_match = (
+        None
+        if not declared_runtime_import_presets
+        or not validation["transformers_trace_manifest_available"]
+        else set(trace_declared_preset_modules)
+        == set(expected_declared_runtime_import_preset_modules)
+    )
+    validation.update(
+        {
+            "transformers_trace_declared_runtime_import_preset_modules": (
+                manifest_validation_csv_label(trace_declared_preset_modules)
+            ),
+            "transformers_trace_declared_runtime_import_preset_modules_match": (
+                trace_declared_modules_match
+            ),
+        }
+    )
     return validation
 
 
@@ -1647,6 +1714,29 @@ def direct_runtime_requirement_failures(validation_row):
     return failures
 
 
+def runtime_preset_module_contract_failures(validation_row):
+    failures = []
+    if (
+        validation_row.get(
+            "declared_transformers_trace_runtime_import_preset_modules_match"
+        )
+        is False
+    ):
+        failures.append(
+            "declared_transformers_trace_runtime_import_preset_modules_mismatch"
+        )
+    if (
+        validation_row.get(
+            "transformers_trace_declared_runtime_import_preset_modules_match"
+        )
+        is False
+    ):
+        failures.append(
+            "transformers_trace_declared_runtime_import_preset_modules_mismatch"
+        )
+    return failures
+
+
 def manifest_trace_validation_gate_failures(validation_row, args):
     failures = []
     if args is None:
@@ -1726,6 +1816,7 @@ def manifest_trace_validation_gate_failures(validation_row, args):
                         f"{preset}"
                     )
     if getattr(args, "validate_produced_manifest", False):
+        failures.extend(runtime_preset_module_contract_failures(validation_row))
         failures.extend(direct_runtime_requirement_failures(validation_row))
     if args.require_manifest_transformers_trace_runtime_metadata_match:
         if not validation_row["transformers_trace_compare_summary_available"]:
@@ -1860,6 +1951,14 @@ def validate_profile_smoke_manifest_file(path, validation_jsonl=None, args=None)
                 f"{validation_row['declared_transformers_trace_runtime_import_presets']}",
                 "declared_transformers_trace_runtime_import_preset_modules="
                 f"{validation_row['declared_transformers_trace_runtime_import_preset_modules']}",
+                "declared_transformers_trace_runtime_import_preset_modules_expected="
+                f"{validation_row['declared_transformers_trace_runtime_import_preset_modules_expected']}",
+                "declared_transformers_trace_runtime_import_preset_modules_match="
+                f"{validation_row['declared_transformers_trace_runtime_import_preset_modules_match']}",
+                "transformers_trace_declared_runtime_import_preset_modules="
+                f"{validation_row['transformers_trace_declared_runtime_import_preset_modules']}",
+                "transformers_trace_declared_runtime_import_preset_modules_match="
+                f"{validation_row['transformers_trace_declared_runtime_import_preset_modules_match']}",
                 "transformers_trace_runtime_import_presets="
                 f"{validation_row['transformers_trace_runtime_import_presets']}",
                 "transformers_trace_runtime_import_presets_satisfied="
