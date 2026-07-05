@@ -469,6 +469,17 @@ class RunLlmCharFinetuneReloadPairTests(unittest.TestCase):
         self.assertTrue(outcome["ready"])
         self.assertTrue(outcome["evaluation_comparable"])
         self.assertEqual(outcome["issues"], [])
+        self.assertTrue(outcome["runtime_preflight_trusted"])
+        self.assertEqual(outcome["base_runtime_preflight_status"], "passed")
+        self.assertEqual(outcome["reload_runtime_preflight_status"], "passed")
+        self.assertEqual(
+            outcome["base_runtime_preflight_detail"],
+            "wgpu=kernel_wired",
+        )
+        self.assertEqual(
+            outcome["reload_runtime_preflight_detail"],
+            "wgpu=kernel_wired",
+        )
         self.assertEqual(outcome["status"], "improved")
         self.assertTrue(outcome["reload_improved_best"])
         self.assertFalse(outcome["reload_regressed_best"])
@@ -507,6 +518,77 @@ class RunLlmCharFinetuneReloadPairTests(unittest.TestCase):
         self.assertEqual(
             outcome["reload"]["runtime_device_report_ready_backends"],
             "wgpu",
+        )
+
+    def test_reload_pair_outcome_surfaces_runtime_device_failure_detail(self) -> None:
+        mod = _load_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            base = root / "base_scratch"
+            reload = root / "reload_finetune"
+            base.mkdir()
+            reload.mkdir()
+            for run_dir, runtime_payload in (
+                (
+                    base,
+                    {
+                        "runtime_import_preflight_requested": True,
+                        "runtime_import_preflight_passed": True,
+                        "runtime_import_preflight_failures": "none",
+                        "runtime_device_report_statuses": "wgpu=kernel_wired",
+                    },
+                ),
+                (
+                    reload,
+                    {
+                        "runtime_import_preflight_requested": True,
+                        "runtime_import_preflight_passed": False,
+                        "runtime_import_preflight_failures": (
+                            "runtime_device_not_ready:wgpu"
+                        ),
+                        "runtime_device_report_statuses": "wgpu=feature_disabled",
+                    },
+                ),
+            ):
+                (run_dir / "summary.json").write_text(
+                    json.dumps(
+                        {
+                            "initial_validation": {"mean_nll": 3.5},
+                            "final_validation": {"mean_nll": 3.4},
+                            "training_final_validation": {"mean_nll": 3.4},
+                            "best_validation_mean_nll": 3.4,
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                (run_dir / "run.json").write_text(
+                    json.dumps(
+                        {
+                            "seed": 1,
+                            "eval_seed": 7,
+                            "data_paths": ["shared.txt"],
+                            "training_contract": {"runtime": runtime_payload},
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+            outcome = mod.reload_pair_outcome(base, reload)
+
+        self.assertFalse(outcome["runtime_preflight_trusted"])
+        self.assertEqual(outcome["base_runtime_preflight_status"], "passed")
+        self.assertEqual(outcome["reload_runtime_preflight_status"], "failed")
+        self.assertEqual(
+            outcome["reload_runtime_preflight_detail"],
+            "runtime_device_not_ready:wgpu;wgpu=feature_disabled",
+        )
+        self.assertEqual(
+            outcome["runtime_preflight_statuses"],
+            {"base": "passed", "reload": "failed"},
+        )
+        self.assertEqual(
+            outcome["runtime_preflight_details"]["reload"],
+            "runtime_device_not_ready:wgpu;wgpu=feature_disabled",
         )
 
     def test_reload_pair_outcome_marks_rollback_tie_as_protected_noop(self) -> None:

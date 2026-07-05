@@ -547,6 +547,51 @@ def runtime_contract_from_run(
     return {}
 
 
+def csv_parts(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple, set)):
+        parts: list[str] = []
+        for item in value:
+            parts.extend(csv_parts(item))
+        return parts
+    if isinstance(value, dict):
+        return []
+    parts = [part.strip() for part in str(value).split(",")]
+    return [part for part in parts if part and part != "none"]
+
+
+def runtime_preflight_status(run: dict[str, Any]) -> str:
+    requested = run.get("runtime_import_preflight_requested")
+    if requested is not True:
+        return "not_requested"
+    passed = run.get("runtime_import_preflight_passed")
+    if passed is True:
+        return "passed"
+    if passed is False:
+        return "failed"
+    return "unknown"
+
+
+def runtime_preflight_detail(run: dict[str, Any]) -> str:
+    status = runtime_preflight_status(run)
+    details: list[str] = []
+    details.extend(csv_parts(run.get("runtime_import_preflight_failures")))
+    details.extend(csv_parts(run.get("runtime_device_report_statuses")))
+    details.extend(csv_parts(run.get("runtime_imports_failed")))
+    details.extend(csv_parts(run.get("runtime_import_failed_install_hints")))
+    unique = list(dict.fromkeys(details))
+    if unique:
+        return ";".join(unique)
+    if status in {"passed", "not_requested"}:
+        return "none"
+    return status
+
+
+def runtime_preflight_trusted(run: dict[str, Any]) -> bool:
+    return runtime_preflight_status(run) in {"passed", "not_requested"}
+
+
 def run_summary_contract(run_dir: Path) -> dict[str, Any]:
     summary_path = run_dir / "summary.json"
     run_json_path = run_dir / "run.json"
@@ -677,6 +722,13 @@ def reload_pair_outcome(base_run_dir: Path, reload_run_dir: Path) -> dict[str, A
         rollback_count=rollback_count,
         evaluation_comparable=evaluation_comparable,
     )
+    base_runtime_status = runtime_preflight_status(base)
+    reload_runtime_status = runtime_preflight_status(reload)
+    base_runtime_detail = runtime_preflight_detail(base)
+    reload_runtime_detail = runtime_preflight_detail(reload)
+    runtime_trusted = runtime_preflight_trusted(base) and runtime_preflight_trusted(
+        reload
+    )
 
     return {
         "schema": OUTCOME_SCHEMA,
@@ -687,6 +739,19 @@ def reload_pair_outcome(base_run_dir: Path, reload_run_dir: Path) -> dict[str, A
         "ready": not issues,
         "evaluation_comparable": evaluation_comparable,
         "comparison_issues": comparison_issues,
+        "runtime_preflight_trusted": runtime_trusted,
+        "base_runtime_preflight_status": base_runtime_status,
+        "reload_runtime_preflight_status": reload_runtime_status,
+        "base_runtime_preflight_detail": base_runtime_detail,
+        "reload_runtime_preflight_detail": reload_runtime_detail,
+        "runtime_preflight_statuses": {
+            "base": base_runtime_status,
+            "reload": reload_runtime_status,
+        },
+        "runtime_preflight_details": {
+            "base": base_runtime_detail,
+            "reload": reload_runtime_detail,
+        },
         "reload_improved_best": status == "improved",
         "reload_regressed_best": status == "regressed",
         "reload_training_status": training_status,
