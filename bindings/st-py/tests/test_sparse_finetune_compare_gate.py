@@ -7506,6 +7506,67 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         )
         self.assertIn("promoted_follow_up=skipped", text)
 
+    def test_byte_lm_profile_smoke_dry_run_recommended_wgpu_ft_contract(self):
+        module = load_example("byte_lm_profile_smoke")
+        old_argv = sys.argv
+        sys.argv = [
+            "byte_lm_profile_smoke.py",
+            "--out-dir",
+            "/tmp/profile-smoke-real-hf",
+            "--hf-state-dict",
+            "/models/llama",
+            "--key-preset",
+            "auto",
+            "--runtime-contract-preset",
+            "hf-runtime",
+            "--wgpu-readiness-preset",
+            "balanced",
+            "--skip-promoted-follow-up",
+            "--dry-run",
+        ]
+        output = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(output):
+                module.main()
+        finally:
+            sys.argv = old_argv
+
+        text = output.getvalue()
+        self.assertIn("checkpoint_preflight.py", text)
+        self.assertIn("byte_lm_transformers_trace.py", text)
+        self.assertIn("--transformers-audit", text)
+        self.assertIn("--transformers-runtime-import-preset hf-runtime", text)
+        self.assertIn("--require-transformers-runtime-imports", text)
+        self.assertIn(
+            "--require-transformers-runtime-import-preset hf-runtime",
+            text,
+        )
+        self.assertIn("--runtime-import-preset hf-runtime", text)
+        self.assertIn("--require-runtime-imports", text)
+        self.assertIn("--require-runtime-import-preset hf-runtime", text)
+        self.assertIn("--min-run-epoch-wgpu-hit-rate 0.5", text)
+        self.assertIn("--max-run-epoch-wgpu-runtime-fallback-rate 0.5", text)
+        self.assertIn("--max-run-epoch-wgpu-component-fallback-rate 0.5", text)
+        self.assertIn("--max-run-epoch-wgpu-hit-rate-regression 0", text)
+        self.assertIn(
+            "--max-run-epoch-wgpu-runtime-fallback-rate-regression 0",
+            text,
+        )
+        self.assertIn(
+            "--max-run-epoch-wgpu-component-fallback-rate-regression 0",
+            text,
+        )
+        self.assertIn("--promotion-ready-min-epoch-wgpu-hit-rate 0.5", text)
+        self.assertIn(
+            "--promotion-ready-max-epoch-wgpu-runtime-fallback-rate 0.5",
+            text,
+        )
+        self.assertIn(
+            "--promotion-ready-max-epoch-wgpu-component-fallback-rate 0.5",
+            text,
+        )
+        self.assertIn("promoted_follow_up=skipped", text)
+
     def test_mlp_lora_profile_runner_rejects_disabled_epoch_wgpu_aggregate_gates(self):
         module = load_example("byte_lm_mlp_lora_profile_runner")
         old_argv = sys.argv
