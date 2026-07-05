@@ -9241,6 +9241,10 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             "runtime_imports_imported": "torch",
             "runtime_imports_failed": "none",
             "runtime_imports_all_ok": True,
+            "runtime_import_coimport_status": "ok",
+            "runtime_imports_coimported": True,
+            "runtime_import_coimport_modules": "torch",
+            "runtime_import_coimport_missing_modules": "none",
             "runtime_import_versions": "torch=2.0.0",
             "runtime_import_module_names": "torch=torch",
             "runtime_imports_json": json.dumps(
@@ -9269,19 +9273,31 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                 runtime_imports_imported="none",
                 runtime_imports_failed="torch",
                 runtime_imports_all_ok=False,
+                runtime_import_coimport_status="missing",
+                runtime_imports_coimported=False,
+                runtime_import_coimport_modules="none",
+                runtime_import_coimport_missing_modules="torch",
             ),
             prompt,
         ]
         rows = module.compare_trace_rows(current, [manifest, prompt], args)
 
         self.assertFalse(rows[0]["passed"])
-        self.assertEqual(rows[0]["runtime_metadata_changed_count"], 3)
+        self.assertEqual(rows[0]["runtime_metadata_changed_count"], 7)
         self.assertEqual(
             rows[0]["runtime_metadata_failures"],
             "runtime_metadata_changed",
         )
         self.assertIn(
             "runtime_imports_all_ok",
+            rows[0]["runtime_metadata_changed_fields"],
+        )
+        self.assertIn(
+            "runtime_import_coimport_status",
+            rows[0]["runtime_metadata_changed_fields"],
+        )
+        self.assertIn(
+            "runtime_import_coimport_missing_modules",
             rows[0]["runtime_metadata_changed_fields"],
         )
 
