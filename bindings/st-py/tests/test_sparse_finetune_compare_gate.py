@@ -285,6 +285,63 @@ assert comparison["passed"] is False, comparison
         )
         self.assertIn("--ft-readiness-preset", help_result.stdout)
 
+    def test_python_facade_exposes_ft_import_surface_from_source(self):
+        env = dict(os.environ)
+        env["PYTHONNOUSERSITE"] = "1"
+        env["PYTHONPATH"] = str(ROOT)
+        code = """
+from spiraltorch.ecosystem import (
+    bound_external_state_tensors,
+    external_tensor_last_token,
+)
+from spiraltorch.nn import (
+    CategoricalCrossEntropy,
+    LoraLinear,
+    SoftmaxCrossEntropy,
+    ZSpaceProjector,
+    sparse_classification_delta,
+)
+
+assert callable(bound_external_state_tensors)
+assert callable(external_tensor_last_token)
+assert SoftmaxCrossEntropy is CategoricalCrossEntropy or callable(SoftmaxCrossEntropy)
+assert callable(LoraLinear)
+assert callable(ZSpaceProjector)
+delta = sparse_classification_delta(
+    {"average_loss": 1.5, "accuracy": 0.25},
+    {"average_loss": 1.0, "accuracy": 0.5},
+)
+assert delta["loss_delta"] == 0.5, delta
+assert delta["accuracy_delta"] == 0.25, delta
+"""
+        subprocess.run(
+            [sys.executable, "-c", code],
+            env=env,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        for example_name in [
+            "byte_lm_finetune.py",
+            "byte_lm_transformers_trace.py",
+            "checkpoint_preflight.py",
+            "byte_lm_mlp_lora_sweep.py",
+        ]:
+            with self.subTest(example=example_name):
+                help_result = subprocess.run(
+                    [
+                        sys.executable,
+                        str(EXAMPLES / example_name),
+                        "--help",
+                    ],
+                    env=env,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=20,
+                )
+                self.assertIn("usage:", help_result.stdout.lower())
+
     def test_helper_passes_accepted_gate_to_new_extension_signature(self):
         baseline = {"accepted": True}
         current = {"accepted": False}
