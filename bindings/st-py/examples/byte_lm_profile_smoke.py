@@ -4,6 +4,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 
 
@@ -51,6 +52,12 @@ REQUIRE_CHECKPOINT_TRANSFORMERS_RUNTIME_IMPORT_KEY = (
 REQUIRE_CHECKPOINT_TRANSFORMERS_RUNTIME_IMPORT_PRESET_KEY = (
     "require_checkpoint_transformers_runtime_import_preset"
 )
+
+
+def source_value(source, key, default=None):
+    if isinstance(source, Mapping):
+        return source.get(key, default)
+    return getattr(source, key, default)
 
 
 def transformers_trace_runtime_imports(source):
@@ -151,7 +158,7 @@ def checkpoint_transformers_runtime_import_names(source):
 
 def checkpoint_transformers_runtime_import_requested(source):
     return bool(checkpoint_transformers_runtime_import_names(source)) or bool(
-        getattr(source, "require_checkpoint_transformers_runtime_imports", False)
+        source_value(source, "require_checkpoint_transformers_runtime_imports", False)
     )
 
 
@@ -2936,7 +2943,52 @@ def continuation_plan_row(
         }
     )
     row.update(trace_policy_fields(source_row))
+    row.update(checkpoint_policy_fields(source_row))
     return row
+
+
+def checkpoint_policy_fields(source):
+    return {
+        "transformers_audit": bool(source_value(source, "transformers_audit", False)),
+        "transformers_model_path": optional_path(
+            source_value(source, "transformers_model_path")
+        ),
+        "transformers_revision": source_value(source, "transformers_revision"),
+        "allow_transformers_remote": bool(
+            source_value(source, "allow_transformers_remote", False)
+        ),
+        "transformers_trust_remote_code": bool(
+            source_value(source, "transformers_trust_remote_code", False)
+        ),
+        "skip_transformers_tokenizer": bool(
+            source_value(source, "skip_transformers_tokenizer", False)
+        ),
+        "transformers_load_model": bool(
+            source_value(source, "transformers_load_model", False)
+        ),
+        "require_transformers_audit": bool(
+            source_value(source, "require_transformers_audit", False)
+        ),
+        "checkpoint_transformers_runtime_import_presets": (
+            checkpoint_transformers_runtime_import_presets(source)
+        ),
+        "checkpoint_transformers_runtime_imports": (
+            checkpoint_transformers_runtime_imports(source)
+        ),
+        "require_checkpoint_transformers_runtime_imports": bool(
+            source_value(
+                source,
+                "require_checkpoint_transformers_runtime_imports",
+                False,
+            )
+        ),
+        "require_checkpoint_transformers_runtime_import": (
+            checkpoint_transformers_required_runtime_imports(source)
+        ),
+        "require_checkpoint_transformers_runtime_import_preset": (
+            checkpoint_transformers_required_runtime_import_presets(source)
+        ),
+    }
 
 
 def trace_policy_fields(source):
@@ -3071,41 +3123,6 @@ def profile_smoke_manifest_row(
             args.compare_checkpoint_preflight_jsonl
         ),
         "require_checkpoint_preflight_match": args.require_checkpoint_preflight_match,
-        "transformers_audit": bool(getattr(args, "transformers_audit", False)),
-        "transformers_model_path": optional_path(
-            getattr(args, "transformers_model_path", None)
-        ),
-        "transformers_revision": getattr(args, "transformers_revision", None),
-        "allow_transformers_remote": bool(
-            getattr(args, "allow_transformers_remote", False)
-        ),
-        "transformers_trust_remote_code": bool(
-            getattr(args, "transformers_trust_remote_code", False)
-        ),
-        "skip_transformers_tokenizer": bool(
-            getattr(args, "skip_transformers_tokenizer", False)
-        ),
-        "transformers_load_model": bool(
-            getattr(args, "transformers_load_model", False)
-        ),
-        "require_transformers_audit": bool(
-            getattr(args, "require_transformers_audit", False)
-        ),
-        "checkpoint_transformers_runtime_import_presets": (
-            checkpoint_transformers_runtime_import_presets(args)
-        ),
-        "checkpoint_transformers_runtime_imports": (
-            checkpoint_transformers_runtime_imports(args)
-        ),
-        "require_checkpoint_transformers_runtime_imports": bool(
-            getattr(args, "require_checkpoint_transformers_runtime_imports", False)
-        ),
-        "require_checkpoint_transformers_runtime_import": (
-            checkpoint_transformers_required_runtime_imports(args)
-        ),
-        "require_checkpoint_transformers_runtime_import_preset": (
-            checkpoint_transformers_required_runtime_import_presets(args)
-        ),
         "sweep_jsonl": str(sweep_jsonl),
         "sweep_aggregate_jsonl": str(sweep_aggregate_jsonl),
         "source_compare_jsonl": str(source_compare_jsonl),
@@ -3127,6 +3144,7 @@ def profile_smoke_manifest_row(
             final_artifacts["promotion_jsonl"] if final_artifacts else None
         ),
     }
+    row.update(checkpoint_policy_fields(args))
     row.update(
         trace_policy_fields(
             {

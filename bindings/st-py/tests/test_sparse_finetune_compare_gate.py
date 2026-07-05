@@ -3675,6 +3675,19 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                 skip_checkpoint_preflight=False,
                 compare_checkpoint_preflight_jsonl=None,
                 require_checkpoint_preflight_match=False,
+                transformers_audit=True,
+                transformers_model_path=out_dir,
+                transformers_revision=None,
+                allow_transformers_remote=False,
+                transformers_trust_remote_code=False,
+                skip_transformers_tokenizer=False,
+                transformers_load_model=False,
+                require_transformers_audit=True,
+                checkpoint_transformers_runtime_import_presets=["transformers"],
+                checkpoint_transformers_runtime_imports=["math"],
+                require_checkpoint_transformers_runtime_imports=True,
+                require_checkpoint_transformers_runtime_import=["math"],
+                require_checkpoint_transformers_runtime_import_preset=["transformers"],
                 transformers_trace=True,
                 compare_transformers_trace_jsonl=out_dir / "baseline-trace.jsonl",
                 transformers_trace_prompts=["spiral"],
@@ -3745,6 +3758,64 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                                 "runtime_import_preset_modules": (
                                     "torch-transformers=transformers|torch"
                                 ),
+                            }
+                        ],
+                    )
+                elif field == "checkpoint_preflight_jsonl":
+                    module.write_jsonl(
+                        path,
+                        [
+                            {
+                                "row_type": "report",
+                                "label": "profile-smoke",
+                                "compatible": True,
+                                "matched": 1,
+                                "missing": 0,
+                                "shape_mismatched": 0,
+                                "extra": 0,
+                                "source_hash": "source",
+                                "matched_subset_hash": "matched",
+                                "transformers_audit_requested": True,
+                                "transformers_audit_status": "ok",
+                                "transformers_audit_error": None,
+                                "transformers_model_path": str(out_dir),
+                                "transformers_available": True,
+                                "transformers_version": "9.9.9",
+                                "transformers_config_loaded": True,
+                                "transformers_tokenizer_loaded": True,
+                                "transformers_model_loaded": False,
+                                "runtime_import_presets": "transformers",
+                                "runtime_import_preset_modules": (
+                                    "transformers=transformers"
+                                ),
+                                "runtime_import_presets_satisfied": "transformers",
+                                "runtime_import_presets_failed": "none",
+                                "runtime_import_preset_missing_modules": "none",
+                                "runtime_imports_requested": "transformers,math",
+                                "runtime_import_probe_count": 2,
+                                "runtime_imports_imported": "transformers,math",
+                                "runtime_imports_failed": "none",
+                                "runtime_imports_all_ok": True,
+                                "runtime_import_versions": (
+                                    "transformers=9.9.9,math=none"
+                                ),
+                                "runtime_import_module_names": (
+                                    "transformers=transformers,math=math"
+                                ),
+                                "required_runtime_imports": "math",
+                                "required_runtime_imports_imported": "math",
+                                "required_runtime_imports_missing": "none",
+                                "required_runtime_imports_passed": True,
+                                "required_runtime_import_presets": "transformers",
+                                "required_runtime_import_presets_observed": (
+                                    "transformers"
+                                ),
+                                "required_runtime_import_presets_satisfied": (
+                                    "transformers"
+                                ),
+                                "required_runtime_import_presets_missing": "none",
+                                "required_runtime_import_presets_unsatisfied": "none",
+                                "required_runtime_import_presets_passed": True,
                             }
                         ],
                     )
@@ -3980,6 +4051,41 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         )
         self.assertEqual(
             [
+                plan["checkpoint_transformers_runtime_import_presets"]
+                for plan in continue_plan_rows
+            ],
+            [["transformers"], ["transformers"]],
+        )
+        self.assertEqual(
+            [
+                plan["checkpoint_transformers_runtime_imports"]
+                for plan in continue_plan_rows
+            ],
+            [["math"], ["math"]],
+        )
+        self.assertEqual(
+            [
+                plan["require_checkpoint_transformers_runtime_imports"]
+                for plan in continue_plan_rows
+            ],
+            [True, True],
+        )
+        self.assertEqual(
+            [
+                plan["require_checkpoint_transformers_runtime_import"]
+                for plan in continue_plan_rows
+            ],
+            [["math"], ["math"]],
+        )
+        self.assertEqual(
+            [
+                plan["require_checkpoint_transformers_runtime_import_preset"]
+                for plan in continue_plan_rows
+            ],
+            [["transformers"], ["transformers"]],
+        )
+        self.assertEqual(
+            [
                 plan["transformers_trace_compare_jsonl"]
                 for plan in continue_plan_rows
             ],
@@ -3991,6 +4097,11 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertIn("profile_smoke_manifest_validate", continued_text)
         self.assertIn("profile_smoke_manifest_continue", continued_text)
         self.assertIn("validated_produced_manifest=True", continued_text)
+        self.assertIn("gate=checkpoint_transformers", continued_text)
+        self.assertIn(
+            "checkpoint_transformers_runtime_imports_imported=transformers,math",
+            continued_text,
+        )
         self.assertIn(
             f"manifest_validation_jsonl={continued_validation_path}",
             continued_text,
@@ -4003,11 +4114,38 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             ],
             ["torch-transformers=transformers|torch"],
         )
+        self.assertEqual(
+            continued_manifest_rows[0][
+                "checkpoint_transformers_runtime_import_presets"
+            ],
+            ["transformers"],
+        )
+        self.assertEqual(
+            continued_manifest_rows[0]["checkpoint_transformers_runtime_imports"],
+            ["math"],
+        )
         self.assertEqual(continued_validation_rows[0]["promoted_rungs"], 2)
         self.assertEqual(continued_validation_rows[0]["next_promoted_rung"], 3)
         self.assertEqual(
             continued_validation_rows[0]["transformers_trace_coimport_status"],
             "ok",
+        )
+        self.assertEqual(
+            continued_validation_rows[0][
+                "declared_checkpoint_transformers_runtime_import_presets"
+            ],
+            "transformers",
+        )
+        self.assertEqual(
+            continued_validation_rows[0][
+                "checkpoint_transformers_runtime_imports_imported"
+            ],
+            "transformers,math",
+        )
+        self.assertTrue(
+            continued_validation_rows[0][
+                "checkpoint_transformers_required_runtime_import_presets_passed"
+            ]
         )
 
     def write_profile_smoke_manifest_with_transformers_trace_compare(
