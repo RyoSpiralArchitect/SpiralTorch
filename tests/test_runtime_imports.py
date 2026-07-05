@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import ast
 import contextlib
 import io
 import importlib.util
 import json
+import os
+import subprocess
+import sys
 import tempfile
 import types
 import unittest
@@ -18,6 +22,10 @@ RUNTIME_IMPORTS_PATH = (
 TOP_LEVEL_STUB_PATH = (
     REPO_ROOT / "bindings" / "st-py" / "spiraltorch" / "__init__.pyi"
 )
+SPIRALK_STUB_PATH = (
+    REPO_ROOT / "bindings" / "st-py" / "spiraltorch" / "spiralk.pyi"
+)
+PY_TYPED_PATH = REPO_ROOT / "bindings" / "st-py" / "spiraltorch" / "py.typed"
 PYPROJECT_PATH = REPO_ROOT / "bindings" / "st-py" / "pyproject.toml"
 
 
@@ -32,6 +40,55 @@ def load_runtime_imports():
     return module
 
 
+def top_level_stub_public_names() -> set[str]:
+    stub_mod = ast.parse(TOP_LEVEL_STUB_PATH.read_text(encoding="utf-8"))
+    names: set[str] = set()
+    for node in stub_mod.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(node.name)
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            names.add(node.target.id)
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    names.add(target.id)
+        elif isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                names.add(alias.asname or alias.name)
+    return names
+
+
+def source_runtime_public_names() -> list[str]:
+    script = """
+import json
+import spiraltorch as st
+print("SPIRALTORCH_PUBLIC_ALL=" + json.dumps(list(st.__all__)))
+"""
+    env = os.environ.copy()
+    env["PYTHONNOUSERSITE"] = "1"
+    env["PYTHONPATH"] = str(REPO_ROOT / "bindings" / "st-py")
+    completed = subprocess.run(
+        [sys.executable, "-P", "-c", script],
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+    if completed.returncode != 0:
+        raise AssertionError(
+            f"source spiraltorch import failed with code {completed.returncode}:\n"
+            + completed.stdout
+            + completed.stderr
+        )
+    for line in completed.stdout.splitlines():
+        if line.startswith("SPIRALTORCH_PUBLIC_ALL="):
+            return json.loads(line.partition("=")[2])
+    raise AssertionError(
+        "source spiraltorch import did not emit public surface marker:\n"
+        + completed.stdout
+        + completed.stderr
+    )
+
+
 class RuntimeImportsTest(unittest.TestCase):
     def test_pyproject_exposes_runtime_preflight_script(self) -> None:
         pyproject = PYPROJECT_PATH.read_text(encoding="utf-8")
@@ -40,6 +97,20 @@ class RuntimeImportsTest(unittest.TestCase):
             'spiral-runtime-preflight = "spiraltorch.runtime_imports:main"',
             pyproject,
         )
+
+    def test_pep561_marker_and_top_level_stubs_are_shipped(self) -> None:
+        self.assertTrue(PY_TYPED_PATH.is_file())
+        self.assertTrue(TOP_LEVEL_STUB_PATH.is_file())
+        self.assertTrue(SPIRALK_STUB_PATH.is_file())
+
+    def test_top_level_stub_covers_runtime_public_all(self) -> None:
+        stub_names = top_level_stub_public_names()
+        missing = sorted(
+            name
+            for name in source_runtime_public_names()
+            if not name.startswith("_") and name not in stub_names
+        )
+        self.assertEqual(missing, [])
 
     def test_top_level_stub_exposes_runtime_import_helpers(self) -> None:
         stub = TOP_LEVEL_STUB_PATH.read_text(encoding="utf-8")
