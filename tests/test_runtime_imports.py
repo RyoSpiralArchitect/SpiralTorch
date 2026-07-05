@@ -56,6 +56,39 @@ class RuntimeImportsTest(unittest.TestCase):
             with self.subTest(helper=helper):
                 self.assertIn(helper, stub)
 
+    def test_top_level_stub_exposes_shared_python_surface_helpers(self) -> None:
+        stub = TOP_LEVEL_STUB_PATH.read_text(encoding="utf-8")
+
+        for helper in [
+            "AuditEvent",
+            "AuditLog",
+            "CpuSimdPackedRhs",
+            "EllipticTelemetry",
+            "EllipticWarp",
+            "InferenceResult",
+            "InferenceRuntime",
+            "SafetyVerdict",
+            "SafetyViolation",
+            "capture",
+            "cpu_simd_prepack_rhs",
+            "describe_wgpu_softmax_variants",
+            "ensure_zmetrics",
+            "export",
+            "hg",
+            "hpo",
+            "inference",
+            "optim",
+            "rg",
+            "share",
+            "spiralk",
+            "trainer_events_to_atlas_route",
+            "trainer_step_event_to_atlas_frame",
+            "z",
+            "z_metrics",
+        ]:
+            with self.subTest(helper=helper):
+                self.assertIn(helper, stub)
+
     def test_ft_presets_extend_without_changing_hf_runtime(self) -> None:
         module = load_runtime_imports()
 
