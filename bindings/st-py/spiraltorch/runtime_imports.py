@@ -22,6 +22,7 @@ __all__ = [
     "module_file",
     "module_name",
     "module_version",
+    "runtime_import_coimport_status",
     "runtime_import_kv_label",
     "runtime_import_names_from_source",
     "runtime_import_names_from_args",
@@ -123,6 +124,17 @@ def runtime_import_probe(name: object) -> dict[str, object]:
 
 def runtime_import_probe_rows(names: object) -> list[dict[str, object]]:
     return [runtime_import_probe(name) for name in unique_stripped_values(names)]
+
+
+def runtime_import_coimport_status(
+    probes: Iterable[Mapping[str, object]],
+) -> str:
+    rows = [probe for probe in probes if isinstance(probe, Mapping)]
+    if not rows:
+        return "not_requested"
+    if any(probe.get("imported") is not True for probe in rows):
+        return "missing"
+    return "ok"
 
 
 def runtime_import_kv_label(
@@ -347,6 +359,7 @@ def runtime_import_probe_fields(
     failed = [probe["module"] for probe in probes if not probe["imported"]]
     satisfied_presets = [row["preset"] for row in preset_status if row["passed"]]
     failed_presets = [row["preset"] for row in preset_status if not row["passed"]]
+    coimport_status = runtime_import_coimport_status(probes)
     fields: dict[str, object] = {
         f"{field_prefix}runtime_import_presets": csv_label(presets),
         f"{field_prefix}runtime_import_preset_modules": (
@@ -366,6 +379,10 @@ def runtime_import_probe_fields(
         f"{field_prefix}runtime_imports_imported": csv_label(imported),
         f"{field_prefix}runtime_imports_failed": csv_label(failed),
         f"{field_prefix}runtime_imports_all_ok": not failed,
+        f"{field_prefix}runtime_import_coimport_status": coimport_status,
+        f"{field_prefix}runtime_imports_coimported": coimport_status == "ok",
+        f"{field_prefix}runtime_import_coimport_modules": csv_label(imported),
+        f"{field_prefix}runtime_import_coimport_missing_modules": csv_label(failed),
         f"{field_prefix}runtime_import_versions": (
             runtime_import_kv_label(probes, "version")
         ),

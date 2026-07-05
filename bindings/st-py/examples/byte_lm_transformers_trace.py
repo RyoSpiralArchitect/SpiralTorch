@@ -120,6 +120,19 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--runtime-contract-preset",
+        dest="runtime_contract_presets",
+        action="append",
+        choices=sorted(RUNTIME_IMPORT_PRESETS),
+        default=[],
+        help=(
+            "Shortcut runtime contract preset: probes the preset modules, "
+            "requires them to import in the same SpiralTorch/Transformers trace "
+            "process, and requires runtime metadata to match when comparing "
+            "against --compare-jsonl. May be repeated."
+        ),
+    )
+    parser.add_argument(
         "--require-runtime-imports",
         action="store_true",
         help="Fail if any --runtime-import probe cannot be imported.",
@@ -248,6 +261,7 @@ def parse_args():
         help="Fail when prompt trace zspace_projection_status does not match this value.",
     )
     args = parser.parse_args()
+    apply_runtime_contract_presets(args)
     if args.top_k <= 0:
         parser.error("--top-k must be positive")
     if args.metadata_only and args.require_hidden_states:
@@ -291,6 +305,25 @@ def parse_args():
         value = getattr(args, name)
         if value is not None and value < 0.0:
             parser.error(f"--{name.replace('_', '-')} must be non-negative")
+    return args
+
+
+def append_unique(values, additions):
+    return list(dict.fromkeys([*(values or []), *(additions or [])]))
+
+
+def apply_runtime_contract_presets(args):
+    presets = list(dict.fromkeys(getattr(args, "runtime_contract_presets", []) or []))
+    if not presets:
+        return args
+    args.runtime_import_presets = append_unique(args.runtime_import_presets, presets)
+    args.required_runtime_import_presets = append_unique(
+        args.required_runtime_import_presets,
+        presets,
+    )
+    args.require_runtime_imports = True
+    if getattr(args, "compare_jsonl", None) is not None:
+        args.require_runtime_metadata_match = True
     return args
 
 

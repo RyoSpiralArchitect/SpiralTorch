@@ -502,6 +502,19 @@ def add_transformers_audit_args(parser):
         ),
     )
     parser.add_argument(
+        "--transformers-runtime-contract-preset",
+        "--runtime-contract-preset",
+        dest="runtime_contract_presets",
+        action="append",
+        choices=sorted(TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS),
+        default=[],
+        help=(
+            "Shortcut Transformers runtime contract preset: enables "
+            "--transformers-audit, probes the preset modules, and requires them "
+            "to import in the same audit process. May be repeated."
+        ),
+    )
+    parser.add_argument(
         "--require-transformers-runtime-imports",
         dest="require_runtime_imports",
         action="store_true",
@@ -543,6 +556,24 @@ def transformers_runtime_import_requested(args):
             bool(getattr(args, "require_runtime_imports", False)),
         ]
     )
+
+
+def append_unique(values, additions):
+    return list(dict.fromkeys([*(values or []), *(additions or [])]))
+
+
+def apply_transformers_runtime_contract_presets(args):
+    presets = list(dict.fromkeys(getattr(args, "runtime_contract_presets", []) or []))
+    if not presets:
+        return args
+    args.transformers_audit = True
+    args.runtime_import_presets = append_unique(args.runtime_import_presets, presets)
+    args.required_runtime_import_presets = append_unique(
+        args.required_runtime_import_presets,
+        presets,
+    )
+    args.require_runtime_imports = True
+    return args
 
 
 def checkpoint_projection_preset_values(args):
@@ -683,6 +714,7 @@ def parse_args():
         help="Override head output classes for --hf-state-dict; defaults to inferred shape.",
     )
     args = parser.parse_args()
+    apply_transformers_runtime_contract_presets(args)
     if args.require_preflight_match and args.compare_jsonl is None:
         parser.error("--require-preflight-match requires --compare-jsonl")
     if args.shape_only and args.hf_state_dict is None:
