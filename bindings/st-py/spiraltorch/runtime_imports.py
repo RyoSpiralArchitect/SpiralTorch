@@ -8,6 +8,8 @@ __all__ = [
     "csv_values",
     "unique_csv_values",
     "runtime_import_preset_modules",
+    "runtime_import_preset_module_map",
+    "runtime_import_preset_module_rows",
     "runtime_import_preset_modules_label",
     "runtime_import_preset_missing_modules_label",
     "runtime_import_preset_status_rows",
@@ -52,6 +54,24 @@ def runtime_import_preset_modules(
         modules = [str(module) for module in module_map.get(preset, [])]
         rows.append(f"{preset}={'|'.join(modules) or 'none'}")
     return rows
+
+
+def runtime_import_preset_module_map(value: object) -> dict[str, str]:
+    modules = {}
+    for item in csv_values(value):
+        preset, sep, _module_list = item.partition("=")
+        if preset and sep:
+            modules[preset] = item
+    return modules
+
+
+def runtime_import_preset_module_rows(value: object, presets: object) -> list[str]:
+    module_map = runtime_import_preset_module_map(value)
+    return [
+        module_map[preset]
+        for preset in csv_values(presets)
+        if preset in module_map
+    ]
 
 
 def runtime_import_preset_status_rows(

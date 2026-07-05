@@ -15,6 +15,7 @@ if str(PACKAGE_ROOT) not in sys.path:
 from spiraltorch.runtime_imports import (
     TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS,
     csv_values,
+    runtime_import_preset_module_rows,
     runtime_import_preset_modules as transformers_trace_runtime_import_preset_modules,
     runtime_import_required_gate_fields as shared_runtime_import_required_gate_fields,
     runtime_import_requirement_failures,
@@ -1136,24 +1137,6 @@ def promoted_rungs_jsonl_path_for_manifest(row):
     if isinstance(value, str) and value:
         return Path(value)
     return manifest_path(row, "out_dir", "top-level") / "promoted-rungs.jsonl"
-
-
-def runtime_import_preset_module_map(value):
-    modules = {}
-    for item in csv_values(value):
-        preset, sep, _module_list = item.partition("=")
-        if preset and sep:
-            modules[preset] = item
-    return modules
-
-
-def runtime_import_preset_module_rows(value, presets):
-    module_map = runtime_import_preset_module_map(value)
-    return [
-        module_map[preset]
-        for preset in csv_values(presets)
-        if preset in module_map
-    ]
 
 
 def load_profile_smoke_manifest_with_rungs(path):
