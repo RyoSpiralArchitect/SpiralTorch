@@ -223,6 +223,21 @@ def parse_args():
         help="Trace vector source used when --transformers-trace-zspace-project is set.",
     )
     parser.add_argument(
+        "--transformers-trace-runtime-import",
+        dest="transformers_trace_runtime_imports",
+        action="append",
+        default=[],
+        help=(
+            "Additional Python module imported by byte_lm_transformers_trace.py "
+            "while SpiralTorch and Transformers are loaded. May be repeated."
+        ),
+    )
+    parser.add_argument(
+        "--require-transformers-trace-runtime-imports",
+        action="store_true",
+        help="Fail the Transformers trace when any runtime import probe fails.",
+    )
+    parser.add_argument(
         "--require-transformers-trace-match",
         action="store_true",
         help="Fail when current Transformers trace scope differs from the baseline.",
@@ -476,6 +491,14 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--require-manifest-transformers-trace-runtime-imports",
+        action="store_true",
+        help=(
+            "Fail --validate-manifest-jsonl when the current Transformers trace "
+            "manifest has missing or failed runtime import probes."
+        ),
+    )
+    parser.add_argument(
         "--max-manifest-transformers-trace-top-token-changed-rows",
         type=int,
         default=None,
@@ -603,6 +626,7 @@ def parse_args():
             args.require_manifest_transformers_trace_compare_pass,
             args.require_manifest_transformers_trace_runtime_metadata_match,
             args.require_manifest_transformers_trace_coimport,
+            args.require_manifest_transformers_trace_runtime_imports,
             args.max_manifest_transformers_trace_top_token_changed_rows is not None,
             args.max_manifest_transformers_trace_top_probability_regression
             is not None,
@@ -647,6 +671,8 @@ def parse_args():
             bool(args.transformers_trace_prompts),
             args.transformers_trace_prompt_file is not None,
             args.transformers_trace_zspace_project,
+            bool(args.transformers_trace_runtime_imports),
+            args.require_transformers_trace_runtime_imports,
             args.require_transformers_trace_match,
             args.require_transformers_trace_runtime_metadata_match,
             args.require_transformers_trace_top_token_match,
@@ -670,6 +696,14 @@ def parse_args():
         args.transformers_trace_max_logit_l2_change is not None,
         args.transformers_trace_max_hidden_state_l2_change is not None,
     ]
+    if (
+        args.require_transformers_trace_runtime_imports
+        and not args.transformers_trace_runtime_imports
+    ):
+        parser.error(
+            "--require-transformers-trace-runtime-imports requires "
+            "--transformers-trace-runtime-import"
+        )
     if any(trace_compare_gates) and args.compare_transformers_trace_jsonl is None:
         parser.error(
             "Transformers trace comparison gates require "
@@ -1054,6 +1088,14 @@ def transformers_trace_validation_fields(row):
         "transformers_trace_transformers_version": None,
         "transformers_trace_transformers_module_name": None,
         "transformers_trace_coimport_status": None,
+        "transformers_trace_runtime_imports_requested": None,
+        "transformers_trace_runtime_import_probe_count": None,
+        "transformers_trace_runtime_imports_imported": None,
+        "transformers_trace_runtime_imports_failed": None,
+        "transformers_trace_runtime_imports_all_ok": None,
+        "transformers_trace_runtime_import_versions": None,
+        "transformers_trace_runtime_import_module_names": None,
+        "transformers_trace_runtime_imports_json": None,
         "transformers_trace_compare_summary_available": False,
         "transformers_trace_compare_passed": None,
         "transformers_trace_compare_failures": None,
@@ -1107,6 +1149,30 @@ def transformers_trace_validation_fields(row):
                     ),
                     "transformers_trace_coimport_status": manifest.get(
                         "transformers_spiraltorch_coimport_status"
+                    ),
+                    "transformers_trace_runtime_imports_requested": manifest.get(
+                        "runtime_imports_requested"
+                    ),
+                    "transformers_trace_runtime_import_probe_count": manifest.get(
+                        "runtime_import_probe_count"
+                    ),
+                    "transformers_trace_runtime_imports_imported": manifest.get(
+                        "runtime_imports_imported"
+                    ),
+                    "transformers_trace_runtime_imports_failed": manifest.get(
+                        "runtime_imports_failed"
+                    ),
+                    "transformers_trace_runtime_imports_all_ok": manifest.get(
+                        "runtime_imports_all_ok"
+                    ),
+                    "transformers_trace_runtime_import_versions": manifest.get(
+                        "runtime_import_versions"
+                    ),
+                    "transformers_trace_runtime_import_module_names": manifest.get(
+                        "runtime_import_module_names"
+                    ),
+                    "transformers_trace_runtime_imports_json": manifest.get(
+                        "runtime_imports_json"
                     ),
                 }
             )
@@ -1242,6 +1308,21 @@ def manifest_trace_validation_gate_failures(validation_row, args):
             or validation_row["transformers_trace_coimport_status"] != "ok"
         ):
             failures.append("transformers_trace_coimport_failed")
+    if args.require_manifest_transformers_trace_runtime_imports:
+        if not validation_row["transformers_trace_manifest_available"]:
+            failures.append("transformers_trace_manifest_missing")
+        else:
+            probe_count = manifest_validation_int(
+                validation_row,
+                "transformers_trace_runtime_import_probe_count",
+            )
+            if probe_count is None or probe_count <= 0:
+                failures.append("transformers_trace_runtime_imports_missing")
+            elif (
+                validation_row["transformers_trace_runtime_imports_all_ok"]
+                is not True
+            ):
+                failures.append("transformers_trace_runtime_imports_failed")
     if args.require_manifest_transformers_trace_runtime_metadata_match:
         if not validation_row["transformers_trace_compare_summary_available"]:
             failures.append("transformers_trace_compare_summary_missing")
@@ -1296,6 +1377,7 @@ def check_manifest_trace_validation_gates(validation_row, args):
             args.require_manifest_transformers_trace_compare_pass,
             args.require_manifest_transformers_trace_runtime_metadata_match,
             args.require_manifest_transformers_trace_coimport,
+            args.require_manifest_transformers_trace_runtime_imports,
             args.max_manifest_transformers_trace_top_token_changed_rows
             is not None,
             args.max_manifest_transformers_trace_top_probability_regression
@@ -1353,6 +1435,10 @@ def validate_profile_smoke_manifest_file(path, validation_jsonl=None, args=None)
                 f"{validation_row['transformers_trace_compare_passed']}",
                 "transformers_trace_runtime_metadata_changed_count="
                 f"{validation_row['transformers_trace_runtime_metadata_changed_count']}",
+                "transformers_trace_runtime_imports_all_ok="
+                f"{validation_row['transformers_trace_runtime_imports_all_ok']}",
+                "transformers_trace_runtime_imports_failed="
+                f"{validation_row['transformers_trace_runtime_imports_failed']}",
                 "transformers_trace_top_token_changed_rows="
                 f"{validation_row['transformers_trace_top_token_changed_rows']}",
                 "transformers_trace_observed_max_top_probability_regression="
@@ -1474,6 +1560,10 @@ def transformers_trace_args(args, model_path, trace_jsonl, trace_compare_jsonl):
                 args.transformers_trace_zspace_source,
             ]
         )
+    for module_name in getattr(args, "transformers_trace_runtime_imports", []) or []:
+        flags.extend(["--runtime-import", module_name])
+    if getattr(args, "require_transformers_trace_runtime_imports", False):
+        flags.append("--require-runtime-imports")
     if args.compare_transformers_trace_jsonl is not None:
         flags.extend(["--compare-jsonl", args.compare_transformers_trace_jsonl])
     if trace_compare_jsonl is not None:
@@ -1693,6 +1783,12 @@ def trace_policy_fields(source):
         "transformers_trace_zspace_source": source.get(
             "transformers_trace_zspace_source"
         ),
+        "transformers_trace_runtime_imports": list(
+            source.get("transformers_trace_runtime_imports") or []
+        ),
+        "require_transformers_trace_runtime_imports": bool(
+            source.get("require_transformers_trace_runtime_imports", False)
+        ),
         "require_transformers_trace_match": bool(
             source.get("require_transformers_trace_match", False)
         ),
@@ -1852,6 +1948,12 @@ def profile_smoke_manifest_row(
                     args,
                     "transformers_trace_zspace_source",
                     None,
+                ),
+                "transformers_trace_runtime_imports": list(
+                    getattr(args, "transformers_trace_runtime_imports", []) or []
+                ),
+                "require_transformers_trace_runtime_imports": bool(
+                    getattr(args, "require_transformers_trace_runtime_imports", False)
                 ),
                 "require_transformers_trace_match": bool(
                     getattr(args, "require_transformers_trace_match", False)

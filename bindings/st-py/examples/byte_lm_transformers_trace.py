@@ -80,6 +80,22 @@ def parse_args():
         help="Forward trust_remote_code=True to Transformers loaders.",
     )
     parser.add_argument(
+        "--runtime-import",
+        dest="runtime_imports",
+        action="append",
+        default=[],
+        help=(
+            "Additional Python module to import while SpiralTorch and "
+            "Transformers are loaded. May be repeated; results are recorded "
+            "in the trace manifest."
+        ),
+    )
+    parser.add_argument(
+        "--require-runtime-imports",
+        action="store_true",
+        help="Fail if any --runtime-import probe cannot be imported.",
+    )
+    parser.add_argument(
         "--metadata-only",
         action="store_true",
         help="Load config/tokenizer metadata but skip model inference.",
@@ -187,6 +203,8 @@ def parse_args():
         parser.error("--require-hidden-states is incompatible with --metadata-only")
     if args.require_zspace_projection and not args.zspace_project:
         parser.error("--require-zspace-projection requires --zspace-project")
+    if args.require_runtime_imports and not args.runtime_imports:
+        parser.error("--require-runtime-imports requires --runtime-import")
     if (
         args.compare_output_jsonl is not None
         and args.compare_jsonl is None
@@ -602,6 +620,65 @@ def module_file(module):
     return None if file is None else str(file)
 
 
+def runtime_import_probe(name):
+    try:
+        module = importlib.import_module(name)
+    except Exception as exc:  # pragma: no cover - import failures vary by environment.
+        return {
+            "module": name,
+            "imported": False,
+            "version": None,
+            "module_name": None,
+            "module_file": None,
+            "error": f"{exc.__class__.__name__}: {exc}",
+        }
+    return {
+        "module": name,
+        "imported": True,
+        "version": module_version(module),
+        "module_name": module_name(module),
+        "module_file": module_file(module),
+        "error": None,
+    }
+
+
+def runtime_import_probe_rows(names):
+    return [runtime_import_probe(str(name)) for name in names if str(name).strip()]
+
+
+def csv_label(values):
+    return ",".join(str(value) for value in values) if values else "none"
+
+
+def runtime_import_kv_label(probes, key):
+    return csv_label(
+        [
+            f"{probe['module']}={probe[key] if probe[key] is not None else 'none'}"
+            for probe in probes
+        ]
+    )
+
+
+def runtime_import_fields(args):
+    probes = runtime_import_probe_rows(getattr(args, "runtime_imports", []) or [])
+    imported = [probe["module"] for probe in probes if probe["imported"]]
+    failed = [probe["module"] for probe in probes if not probe["imported"]]
+    return {
+        "runtime_imports_requested": csv_label([probe["module"] for probe in probes]),
+        "runtime_import_probe_count": len(probes),
+        "runtime_imports_imported": csv_label(imported),
+        "runtime_imports_failed": csv_label(failed),
+        "runtime_imports_all_ok": not failed,
+        "runtime_import_versions": runtime_import_kv_label(probes, "version"),
+        "runtime_import_module_names": runtime_import_kv_label(probes, "module_name"),
+        "runtime_imports_json": json.dumps(
+            probes,
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
+    }
+
+
 def import_context_fields(transformers):
     transformers_imported = transformers is not None
     return {
@@ -643,9 +720,16 @@ def manifest_row(
         "model_loaded": model_loaded,
     }
     row.update(import_context_fields(transformers))
+    row.update(runtime_import_fields(args))
     row.update(config_fields(config))
     row.update(tokenizer_fields(tokenizer))
     row.update(model_fields(model if model_loaded else None))
+    if getattr(args, "require_runtime_imports", False) and not row[
+        "runtime_imports_all_ok"
+    ]:
+        raise RuntimeError(
+            "runtime import probe failed: " + row["runtime_imports_failed"]
+        )
     return row
 
 
@@ -742,6 +826,13 @@ TRACE_RUNTIME_METADATA_FIELDS = [
     "transformers_imported",
     "transformers_module_name",
     "transformers_spiraltorch_coimport_status",
+    "runtime_imports_requested",
+    "runtime_import_probe_count",
+    "runtime_imports_imported",
+    "runtime_imports_failed",
+    "runtime_imports_all_ok",
+    "runtime_import_versions",
+    "runtime_import_module_names",
     "transformers_version",
     "model_loaded",
     "transformers_config_class",
