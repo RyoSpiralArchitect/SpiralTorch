@@ -123,6 +123,9 @@ class RuntimeImportsTest(unittest.TestCase):
             "runtime_import_required_gate_fields",
             "runtime_imports_from_source",
             "required_runtime_imports_from_source",
+            "runtime_device_backends_from_source",
+            "runtime_device_report_fields",
+            "runtime_device_requirement_failures",
         ]:
             with self.subTest(helper=helper):
                 self.assertIn(helper, stub)
@@ -269,6 +272,102 @@ class RuntimeImportsTest(unittest.TestCase):
             "\n".join(module.runtime_import_preflight_summary_lines(report)),
         )
 
+    def test_runtime_device_report_fields_gate_ready_backends(self) -> None:
+        module = load_runtime_imports()
+
+        def fake_describe(backends, *, continue_on_error=True):
+            self.assertTrue(continue_on_error)
+            rows = []
+            for backend in module.csv_values(backends):
+                if backend == "mps":
+                    rows.append(
+                        {
+                            "backend": "mps",
+                            "requested_backend": "mps",
+                            "runtime_ready": False,
+                            "runtime_status": "error",
+                            "error": "mps placeholder",
+                        }
+                    )
+                else:
+                    rows.append(
+                        {
+                            "backend": backend,
+                            "requested_backend": backend,
+                            "runtime_ready": backend == "wgpu",
+                            "runtime_status": (
+                                "kernel_wired" if backend == "wgpu" else "cpu"
+                            ),
+                        }
+                    )
+            return {"reports": rows}
+
+        fields = module.runtime_device_report_fields(
+            {
+                "runtime_device_backends": ["wgpu", "cpu"],
+                "required_runtime_device_backends": ["cpu"],
+                "required_runtime_device_ready_backends": ["wgpu", "mps"],
+            },
+            describe_runtime_devices=fake_describe,
+        )
+
+        self.assertTrue(fields["runtime_device_report_requested"])
+        self.assertEqual(fields["runtime_device_report_backends"], "wgpu,cpu,mps")
+        self.assertEqual(
+            fields["runtime_device_report_available_backends"],
+            "wgpu,cpu",
+        )
+        self.assertEqual(fields["runtime_device_report_ready_backends"], "wgpu")
+        self.assertEqual(fields["runtime_device_report_error_backends"], "mps")
+        self.assertEqual(
+            fields["runtime_device_report_statuses"],
+            "wgpu=kernel_wired,cpu=cpu,mps=error",
+        )
+        self.assertTrue(fields["required_runtime_device_backends_passed"])
+        self.assertFalse(fields["required_runtime_device_ready_backends_passed"])
+        self.assertEqual(
+            module.runtime_device_requirement_failures(fields),
+            ["runtime_device_not_ready:mps"],
+        )
+
+    def test_preflight_report_includes_runtime_device_failures(self) -> None:
+        module = load_runtime_imports()
+
+        def fake_describe(backends, *, continue_on_error=True):
+            return {
+                "reports": [
+                    {
+                        "backend": backend,
+                        "requested_backend": backend,
+                        "runtime_ready": False,
+                        "runtime_status": "feature_disabled",
+                    }
+                    for backend in module.csv_values(backends)
+                ]
+            }
+
+        report = module.runtime_import_preflight_report(
+            runtime_imports=["math"],
+            required_runtime_imports=["math"],
+            runtime_device_backends=["wgpu"],
+            required_runtime_device_ready_backends=["wgpu"],
+            describe_runtime_devices=fake_describe,
+        )
+
+        self.assertFalse(report["runtime_import_preflight_passed"])
+        self.assertEqual(
+            report["runtime_import_preflight_failures"],
+            "runtime_device_not_ready:wgpu",
+        )
+        self.assertEqual(
+            report["runtime_device_report_statuses"],
+            "wgpu=feature_disabled",
+        )
+        self.assertIn(
+            "runtime_device_reports backends=wgpu",
+            "\n".join(module.runtime_import_preflight_summary_lines(report)),
+        )
+
     def test_cli_json_returns_nonzero_for_required_missing_preset(self) -> None:
         module = load_runtime_imports()
 
@@ -339,6 +438,48 @@ class RuntimeImportsTest(unittest.TestCase):
         self.assertTrue(payload["runtime_import_preflight_passed"])
         self.assertEqual(payload["runtime_imports_requested"], "math")
         self.assertEqual(payload["required_runtime_imports"], "math")
+
+    def test_cli_runtime_device_ready_gate_uses_lazy_describer(self) -> None:
+        module = load_runtime_imports()
+
+        def fake_describe(backends, *, continue_on_error=True):
+            return {
+                "reports": [
+                    {
+                        "backend": backend,
+                        "requested_backend": backend,
+                        "runtime_ready": backend == "cpu",
+                        "runtime_status": (
+                            "cpu" if backend == "cpu" else "feature_disabled"
+                        ),
+                    }
+                    for backend in module.csv_values(backends)
+                ]
+            }
+
+        stdout = io.StringIO()
+        with mock.patch.object(
+            module,
+            "_default_describe_runtime_devices",
+            return_value=fake_describe,
+        ):
+            with contextlib.redirect_stdout(stdout):
+                exit_code = module.main(
+                    [
+                        "--runtime-device-backend",
+                        "wgpu",
+                        "--require-runtime-device-ready-backend",
+                        "wgpu",
+                    ]
+                )
+
+        self.assertEqual(exit_code, 1)
+        output = stdout.getvalue()
+        self.assertIn("runtime_device_reports backends=wgpu", output)
+        self.assertIn(
+            "runtime_import_preflight_failures runtime_device_not_ready:wgpu",
+            output,
+        )
 
 
 if __name__ == "__main__":

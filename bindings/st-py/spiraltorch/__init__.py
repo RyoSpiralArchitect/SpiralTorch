@@ -705,6 +705,9 @@ from .runtime_imports import (
     runtime_import_required_gate_fields,
     runtime_imports_from_args,
     runtime_imports_from_source,
+    runtime_device_backends_from_source,
+    runtime_device_report_fields,
+    runtime_device_requirement_failures,
     write_runtime_import_preflight_report,
 )
 
@@ -786,6 +789,8 @@ _EXTRAS = [
     "runtime_import_probe","runtime_import_probe_fields","runtime_import_probe_rows",
     "runtime_import_required_gate_fields","runtime_import_requirement_failures",
     "runtime_imports_from_args","runtime_imports_from_source",
+    "runtime_device_backends_from_source","runtime_device_report_fields",
+    "runtime_device_requirement_failures",
     "write_runtime_import_preflight_report",
     "load_gnn_band_replay_trace","flatten_gnn_band_replay_rows",
     "summarize_gnn_band_replays","compare_gnn_band_replay_runs","write_gnn_band_replay_html",
