@@ -26,6 +26,7 @@ from spiraltorch.runtime_imports import (
     runtime_import_requirement_failures,
     runtime_imports_from_source,
 )
+from spiraltorch.trainer_trace import summarize_transformers_trainer_runtime_bridge
 
 DEFAULT_OUT_DIR = Path("/tmp/spiraltorch-profile-smoke")
 BYTE_LM_VOCAB = 256
@@ -1708,6 +1709,117 @@ def transformers_trace_validation_fields(row):
     return fields
 
 
+def _manifest_validation_json_label(value):
+    if value is None:
+        return None
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+
+
+def transformers_trainer_runtime_bridge_validation_fields(row):
+    fields = {
+        "transformers_trainer_runtime_bridge_available": False,
+        "transformers_trainer_runtime_bridge_error": None,
+        "transformers_trainer_runtime_status": None,
+        "transformers_trainer_runtime_prompt_rows": None,
+        "transformers_trainer_runtime_tensor_fields": None,
+        "transformers_trainer_runtime_tensor_backends": None,
+        "transformers_trainer_runtime_tensor_devices": None,
+        "transformers_trainer_runtime_tensor_device_kinds": None,
+        "transformers_trainer_runtime_tensor_dtypes": None,
+        "transformers_trainer_runtime_gpu_tensor_fields": None,
+        "transformers_trainer_runtime_cpu_tensor_fields": None,
+        "transformers_trainer_runtime_python_sequence_tensor_fields": None,
+        "transformers_trainer_runtime_trainer_steps": None,
+        "transformers_trainer_runtime_trainer_first_step": None,
+        "transformers_trainer_runtime_trainer_last_step": None,
+        "transformers_trainer_runtime_requested_wgpu_hits": None,
+        "transformers_trainer_runtime_requested_wgpu_runtime_fallbacks": None,
+        "transformers_trainer_runtime_requested_wgpu_hit_rate": None,
+        "transformers_trainer_runtime_requested_wgpu_runtime_fallback_rate": None,
+        "transformers_trainer_runtime_requested_wgpu_component_hit_rate": None,
+        "transformers_trainer_runtime_requested_wgpu_component_fallback_rate": None,
+    }
+    trace_jsonl = row.get("transformers_trace_jsonl")
+    trainer_jsonl = row.get("run_events_jsonl")
+    if not trace_jsonl or not trainer_jsonl:
+        return fields
+
+    try:
+        bridge = summarize_transformers_trainer_runtime_bridge(
+            trace_jsonl,
+            trainer_jsonl,
+        )
+    except Exception as exc:  # noqa: BLE001 - validation should preserve evidence.
+        fields["transformers_trainer_runtime_bridge_error"] = (
+            f"{exc.__class__.__name__}: {exc}"
+        )
+        return fields
+
+    transformers = bridge.get("transformers", {})
+    trainer = bridge.get("trainer", {})
+    fields.update(
+        {
+            "transformers_trainer_runtime_bridge_available": True,
+            "transformers_trainer_runtime_status": bridge.get("status"),
+            "transformers_trainer_runtime_prompt_rows": transformers.get(
+                "prompt_rows"
+            ),
+            "transformers_trainer_runtime_tensor_fields": transformers.get(
+                "tensor_fields"
+            ),
+            "transformers_trainer_runtime_tensor_backends": (
+                _manifest_validation_json_label(transformers.get("tensor_backends"))
+            ),
+            "transformers_trainer_runtime_tensor_devices": (
+                _manifest_validation_json_label(transformers.get("tensor_devices"))
+            ),
+            "transformers_trainer_runtime_tensor_device_kinds": (
+                _manifest_validation_json_label(
+                    transformers.get("tensor_device_kinds")
+                )
+            ),
+            "transformers_trainer_runtime_tensor_dtypes": (
+                _manifest_validation_json_label(transformers.get("tensor_dtypes"))
+            ),
+            "transformers_trainer_runtime_gpu_tensor_fields": transformers.get(
+                "gpu_tensor_fields"
+            ),
+            "transformers_trainer_runtime_cpu_tensor_fields": transformers.get(
+                "cpu_tensor_fields"
+            ),
+            "transformers_trainer_runtime_python_sequence_tensor_fields": (
+                transformers.get("python_sequence_tensor_fields")
+            ),
+            "transformers_trainer_runtime_trainer_steps": trainer.get("steps"),
+            "transformers_trainer_runtime_trainer_first_step": trainer.get(
+                "first_step"
+            ),
+            "transformers_trainer_runtime_trainer_last_step": trainer.get(
+                "last_step"
+            ),
+            "transformers_trainer_runtime_requested_wgpu_hits": trainer.get(
+                "requested_wgpu_hits"
+            ),
+            "transformers_trainer_runtime_requested_wgpu_runtime_fallbacks": (
+                trainer.get("requested_wgpu_runtime_fallbacks")
+            ),
+            "transformers_trainer_runtime_requested_wgpu_hit_rate": trainer.get(
+                "requested_wgpu_hit_rate"
+            ),
+            "transformers_trainer_runtime_requested_wgpu_runtime_fallback_rate": (
+                trainer.get("requested_wgpu_runtime_fallback_rate")
+            ),
+            "transformers_trainer_runtime_requested_wgpu_component_hit_rate": (
+                trainer.get("requested_wgpu_component_hit_rate")
+            ),
+            "transformers_trainer_runtime_requested_wgpu_component_fallback_rate": (
+                trainer.get("requested_wgpu_component_fallback_rate")
+            ),
+        }
+    )
+    return fields
+
+
 def checkpoint_transformers_validation_fields(row):
     fields = {
         "checkpoint_transformers_audit_source_jsonl": None,
@@ -1997,6 +2109,7 @@ def profile_smoke_manifest_validation_row(path, row, promoted_rungs_jsonl, rung_
     }
     validation.update(checkpoint_transformers_validation_fields(row))
     validation.update(transformers_trace_validation_fields(row))
+    validation.update(transformers_trainer_runtime_bridge_validation_fields(row))
     trace_declared_preset_modules = runtime_import_preset_module_rows(
         validation.get("transformers_trace_runtime_import_preset_modules"),
         declared_runtime_import_presets,
@@ -2674,6 +2787,14 @@ def validate_profile_smoke_manifest_file(path, validation_jsonl=None, args=None)
                 f"{validation_row['transformers_trace_top_token_changed_rows']}",
                 "transformers_trace_observed_max_top_probability_regression="
                 f"{validation_row['transformers_trace_observed_max_top_probability_regression']}",
+                "transformers_trainer_runtime_status="
+                f"{validation_row['transformers_trainer_runtime_status']}",
+                "transformers_trainer_runtime_tensor_device_kinds="
+                f"{validation_row['transformers_trainer_runtime_tensor_device_kinds']}",
+                "transformers_trainer_runtime_requested_wgpu_hit_rate="
+                f"{validation_row['transformers_trainer_runtime_requested_wgpu_hit_rate']}",
+                "transformers_trainer_runtime_requested_wgpu_runtime_fallback_rate="
+                f"{validation_row['transformers_trainer_runtime_requested_wgpu_runtime_fallback_rate']}",
             ]
         )
     if validation_row["checkpoint_transformers_audit_available"]:

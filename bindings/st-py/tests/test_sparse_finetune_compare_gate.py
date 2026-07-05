@@ -4634,7 +4634,79 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                             "required_runtime_import_presets_passed": (
                                 direct_required_runtime_import_presets_passed
                             ),
-                        }
+                        },
+                        {
+                            "row_type": "transformers_prompt_trace",
+                            "prompt_index": 0,
+                            "prompt": "spiral",
+                            "input_ids_tensor_available": True,
+                            "input_ids_tensor_backend": "python_sequence",
+                            "input_ids_tensor_shape": "1x3",
+                            "logits_tensor_available": True,
+                            "logits_tensor_backend": "torch",
+                            "logits_tensor_device": "mps:0",
+                            "logits_tensor_device_kind": "mps",
+                            "logits_tensor_dtype": "torch.float16",
+                            "logits_tensor_shape": "1x3x8",
+                            "hidden_state_tensor_available": True,
+                            "hidden_state_tensor_backend": "torch",
+                            "hidden_state_tensor_device": "mps:0",
+                            "hidden_state_tensor_device_kind": "mps",
+                            "hidden_state_tensor_dtype": "torch.float16",
+                            "hidden_state_tensor_shape": "1x3x4",
+                        },
+                    ],
+                )
+            elif field == "run_events_jsonl":
+                module.write_jsonl(
+                    path,
+                    [
+                        {
+                            "event": {
+                                "kind": "Custom",
+                                "data": {
+                                    "event_type": "TensorOpMeta",
+                                    "data": {
+                                        "op_name": "matmul",
+                                        "data": {
+                                            "backend": "naive",
+                                            "requested_backend": "wgpu",
+                                            "fallback": {
+                                                "from": "wgpu",
+                                                "reason": "runtime_unavailable",
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                        {
+                            "event": {
+                                "kind": "Custom",
+                                "data": {
+                                    "event_type": "TensorOpMeta",
+                                    "data": {
+                                        "op_name": "matmul_prepacked_bias",
+                                        "data": {
+                                            "backend": "wgpu",
+                                            "requested_backend": "wgpu",
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                        {
+                            "event": {
+                                "kind": "Custom",
+                                "data": {
+                                    "event_type": "TrainerStep",
+                                    "data": {
+                                        "step": 1,
+                                        "metrics": {"step_time_ms": 0.5},
+                                    },
+                                },
+                            },
+                        },
                     ],
                 )
             elif field == "checkpoint_preflight_jsonl":
@@ -4863,6 +4935,15 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertIn("transformers_trace_runtime_import_coimport_status=ok", text)
         self.assertIn("transformers_trace_runtime_imports_coimported=True", text)
         self.assertIn("transformers_trace_top_token_changed_rows=1", text)
+        self.assertIn(
+            "transformers_trainer_runtime_status="
+            "external_gpu_with_trainer_wgpu_fallback",
+            text,
+        )
+        self.assertIn(
+            "transformers_trainer_runtime_requested_wgpu_hit_rate=0.5",
+            text,
+        )
         self.assertIn("checkpoint_transformers_audit_status=ok", text)
         self.assertIn("checkpoint_transformers_runtime_imports_all_ok=True", text)
         self.assertIn(
@@ -4900,6 +4981,67 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             0,
         )
         self.assertEqual(validation_row["transformers_trace_top_token_changed_rows"], 1)
+        self.assertTrue(
+            validation_row["transformers_trainer_runtime_bridge_available"]
+        )
+        self.assertEqual(
+            validation_row["transformers_trainer_runtime_status"],
+            "external_gpu_with_trainer_wgpu_fallback",
+        )
+        self.assertEqual(
+            validation_row["transformers_trainer_runtime_prompt_rows"],
+            1,
+        )
+        self.assertEqual(
+            validation_row["transformers_trainer_runtime_tensor_fields"],
+            3,
+        )
+        self.assertEqual(
+            validation_row["transformers_trainer_runtime_tensor_backends"],
+            '{"python_sequence":1,"torch":2}',
+        )
+        self.assertEqual(
+            validation_row["transformers_trainer_runtime_tensor_device_kinds"],
+            '{"mps":2}',
+        )
+        self.assertEqual(
+            validation_row["transformers_trainer_runtime_tensor_dtypes"],
+            '{"torch.float16":2}',
+        )
+        self.assertEqual(
+            validation_row["transformers_trainer_runtime_gpu_tensor_fields"],
+            2,
+        )
+        self.assertEqual(
+            validation_row[
+                "transformers_trainer_runtime_python_sequence_tensor_fields"
+            ],
+            1,
+        )
+        self.assertEqual(
+            validation_row["transformers_trainer_runtime_trainer_steps"],
+            1,
+        )
+        self.assertAlmostEqual(
+            validation_row["transformers_trainer_runtime_requested_wgpu_hits"],
+            1.0,
+        )
+        self.assertAlmostEqual(
+            validation_row[
+                "transformers_trainer_runtime_requested_wgpu_runtime_fallbacks"
+            ],
+            1.0,
+        )
+        self.assertAlmostEqual(
+            validation_row["transformers_trainer_runtime_requested_wgpu_hit_rate"],
+            0.5,
+        )
+        self.assertAlmostEqual(
+            validation_row[
+                "transformers_trainer_runtime_requested_wgpu_runtime_fallback_rate"
+            ],
+            0.5,
+        )
         self.assertEqual(
             validation_row["transformers_trace_runtime_import_probe_count"],
             1,
