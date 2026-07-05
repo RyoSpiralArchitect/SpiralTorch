@@ -5161,8 +5161,12 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             runtime_import_preset_missing_modules_label,
             runtime_import_preset_modules_label,
             runtime_import_preset_status_rows,
+            runtime_import_names_from_args,
+            runtime_import_presets_from_args,
             runtime_import_required_gate_fields,
             runtime_import_requirement_failures,
+            required_runtime_import_presets_from_args,
+            required_runtime_imports_from_args,
         )
 
         self.assertEqual(
@@ -5183,6 +5187,28 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                 )
             ),
             ["hf-runtime"],
+        )
+        args = argparse.Namespace(
+            runtime_import_presets=["torch-transformers"],
+            runtime_imports=[" tokenizers "],
+            required_runtime_imports=["torch"],
+            required_runtime_import_presets=["hf-runtime"],
+        )
+        self.assertEqual(
+            runtime_import_presets_from_args(args),
+            ["torch-transformers", "hf-runtime"],
+        )
+        self.assertEqual(required_runtime_imports_from_args(args), ["torch"])
+        self.assertEqual(
+            required_runtime_import_presets_from_args(args),
+            ["hf-runtime"],
+        )
+        self.assertEqual(
+            runtime_import_names_from_args(
+                args,
+                preset_modules=trace_module.RUNTIME_IMPORT_PRESETS,
+            ),
+            ["transformers", "torch", "tokenizers"],
         )
         status_rows = runtime_import_preset_status_rows(
             ["hf-runtime"],
