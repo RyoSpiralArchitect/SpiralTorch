@@ -14,6 +14,55 @@ use st_tensor::{
     LanguageWaveEncoder, TensorUtilBackend,
 };
 
+#[allow(clippy::too_many_arguments)]
+fn emit_wave_gate_forward_meta(
+    rows: usize,
+    cols: usize,
+    backend: &'static str,
+    requested_backend: &'static str,
+    selected_backend: TensorUtilBackend,
+    kernel: &'static str,
+    curvature: f32,
+    saturation: f32,
+    porosity: f32,
+    fused_projection: bool,
+) {
+    emit_tensor_op(
+        "wave_gate_forward",
+        &[rows, cols, 1, cols, 1, cols],
+        &[rows, cols],
+    );
+    emit_tensor_op_meta("wave_gate_forward", || {
+        let values = rows.saturating_mul(cols);
+        serde_json::json!({
+            "backend": backend,
+            "requested_backend": requested_backend,
+            "selected_backend": tensor_util_backend_label(selected_backend),
+            "kernel": kernel,
+            "kind": "broadcast_gate_forward",
+            "rows": rows,
+            "cols": cols,
+            "values": values,
+            "output_rows": rows,
+            "output_cols": cols,
+            "output_values": values,
+            "gate_cols": cols,
+            "bias_cols": cols,
+            "trainable_parameters": cols.saturating_mul(2),
+            "curvature": curvature,
+            "saturation": saturation,
+            "porosity": porosity,
+            "effective_gate_rewrite": true,
+            "projection": "poincare",
+            "fused_projection": fused_projection,
+            "estimated_broadcast_ops": values,
+            "estimated_projection_ops": values.saturating_mul(3),
+            "estimated_total_ops": values.saturating_mul(if fused_projection { 4 } else { 5 }),
+            "empty": rows == 0 || cols == 0,
+        })
+    });
+}
+
 fn emit_wave_gate_backward_meta(
     rows: usize,
     cols: usize,
@@ -39,6 +88,7 @@ fn emit_wave_gate_backward_meta(
         let mut data = serde_json::json!({
             "backend": backend,
             "requested_backend": requested_backend,
+            "selected_backend": tensor_util_backend_label(gradient_reduction_backend),
             "kernel": kernel,
             "kind": "broadcast_gate_backward",
             "rows": rows,
@@ -314,8 +364,9 @@ impl WaveGate {
                 right: self.gate.value().shape(),
             });
         }
+        let requested_backend = current_tensor_util_backend();
         let reduction_backend = current_tensor_util_backend_for_values(rows.saturating_mul(cols));
-        let requested_backend = tensor_util_backend_label(reduction_backend);
+        let requested_backend = tensor_util_backend_label(requested_backend);
         if rows == 0 {
             let grad_input = Tensor::zeros(rows, cols)?;
             emit_wave_gate_backward_meta(
@@ -508,18 +559,32 @@ impl Module for WaveGate {
         monad.rewrite_tensor("wave_gate_gate_rewrite", &mut gate)?;
         let gate_data = gate.data();
         let bias_data = self.bias.value().data();
-        let tensor_util_backend = current_tensor_util_backend();
-        if matches!(tensor_util_backend, TensorUtilBackend::GpuWgpu) {
+        let requested_backend = current_tensor_util_backend();
+        let selected_backend = current_tensor_util_backend_for_values(rows.saturating_mul(cols));
+        let requested_backend_label = tensor_util_backend_label(requested_backend);
+        if matches!(selected_backend, TensorUtilBackend::GpuWgpu) {
             let projected = input.wave_gate_project_with_backend(
                 gate_data,
                 bias_data,
                 self.topos.curvature(),
                 self.topos.saturation(),
                 self.topos.porosity(),
-                tensor_util_backend,
+                selected_backend,
             )?;
             self.topos
                 .guard_tensor("wave_gate_forward_projected", &projected)?;
+            emit_wave_gate_forward_meta(
+                rows,
+                cols,
+                "tensor_util",
+                requested_backend_label,
+                selected_backend,
+                "wave_gate.forward_fused",
+                self.topos.curvature(),
+                self.topos.saturation(),
+                self.topos.porosity(),
+                true,
+            );
             return Ok(projected);
         }
         let input_buf = input.data();
@@ -535,12 +600,22 @@ impl Module for WaveGate {
             }
         }
         monad.rewrite_tensor("wave_gate_forward_out", &mut out)?;
-        let projected = out.project_to_poincare_with_backend(
-            self.topos.curvature(),
-            current_tensor_util_backend(),
-        )?;
+        let projected =
+            out.project_to_poincare_with_backend(self.topos.curvature(), selected_backend)?;
         self.topos
             .guard_tensor("wave_gate_forward_projected", &projected)?;
+        emit_wave_gate_forward_meta(
+            rows,
+            cols,
+            "cpu",
+            requested_backend_label,
+            selected_backend,
+            "wave_gate.forward_scalar",
+            self.topos.curvature(),
+            self.topos.saturation(),
+            self.topos.porosity(),
+            false,
+        );
         Ok(projected)
     }
 
@@ -702,6 +777,100 @@ mod tests {
             .count();
         assert!(hadamard);
         assert!(reduction >= 2);
+    }
+
+    #[test]
+    fn wave_gate_forward_emits_backend_meta() {
+        let _lock = observer_lock();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let gate = WaveGate::new("wg", 4, -1.0, 0.5).unwrap();
+        let input =
+            Tensor::from_vec(2, 4, vec![0.1, -0.2, 0.3, -0.4, 0.5, -0.6, 0.7, -0.8]).unwrap();
+        let _ = gate.forward(&input).unwrap();
+        st_tensor::set_tensor_op_meta_observer(previous);
+
+        let events = events.lock().unwrap();
+        let forward = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "wave_gate_forward" && data["rows"] == 2 && data["cols"] == 4
+            })
+            .expect("wave gate forward metadata event");
+        assert_eq!(forward.1["backend"], "cpu");
+        assert_eq!(forward.1["requested_backend"], "auto");
+        assert_eq!(forward.1["selected_backend"], "auto");
+        assert_eq!(forward.1["kernel"], "wave_gate.forward_scalar");
+        assert_eq!(forward.1["kind"], "broadcast_gate_forward");
+        assert_eq!(forward.1["fused_projection"], false);
+        assert_eq!(forward.1["trainable_parameters"], 8);
+        assert_eq!(forward.1["effective_gate_rewrite"], true);
+        assert_eq!(forward.1["projection"], "poincare");
+
+        let projection = events
+            .iter()
+            .any(|(op_name, data)| *op_name == "project_to_poincare" && data["rows"] == 2);
+        assert!(projection);
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn wave_gate_forward_wgpu_policy_reports_threshold_cpu_route() {
+        let _lock = observer_lock();
+        let previous_threshold = std::env::var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES").ok();
+        std::env::set_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES", "1024");
+
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let gate = WaveGate::new("wg", 4, -1.0, 0.5).unwrap();
+        let input = Tensor::from_vec(1, 4, vec![0.1, -0.2, 0.3, -0.4]).unwrap();
+        {
+            let _guard = push_backend_policy(wgpu_policy());
+            let _ = gate.forward(&input).unwrap();
+        }
+
+        st_tensor::set_tensor_op_meta_observer(previous);
+        match previous_threshold {
+            Some(value) => std::env::set_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES", value),
+            None => std::env::remove_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES"),
+        }
+
+        let events = events.lock().unwrap();
+        let (_, route) = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "tensor_util_route"
+                    && data["requested_backend"] == "wgpu"
+                    && data["selected_backend"] == "cpu"
+            })
+            .expect("tensor util threshold route");
+        assert_eq!(route["status"], "cpu_threshold");
+
+        let (_, forward) = events
+            .iter()
+            .find(|(op_name, data)| {
+                *op_name == "wave_gate_forward" && data["rows"] == 1 && data["cols"] == 4
+            })
+            .expect("wave gate forward metadata event");
+        assert_eq!(forward["backend"], "cpu");
+        assert_eq!(forward["requested_backend"], "wgpu");
+        assert_eq!(forward["selected_backend"], "cpu");
+        assert_eq!(forward["kernel"], "wave_gate.forward_scalar");
+        assert_eq!(forward["fused_projection"], false);
     }
 
     #[test]
@@ -898,12 +1067,14 @@ mod tests {
     #[cfg(feature = "wgpu")]
     #[test]
     fn wave_gate_forced_wgpu_forward_matches_cpu_reference() {
-        let cpu_gate = WaveGate::new("wg", 7, -1.0, 0.5).unwrap();
-        let wgpu_gate = WaveGate::new("wg", 7, -1.0, 0.5).unwrap();
+        let rows = 33;
+        let cols = 32;
+        let cpu_gate = WaveGate::new("wg", cols, -1.0, 0.5).unwrap();
+        let wgpu_gate = WaveGate::new("wg", cols, -1.0, 0.5).unwrap();
         let input = Tensor::from_vec(
-            5,
-            7,
-            (0..35)
+            rows,
+            cols,
+            (0..rows * cols)
                 .map(|idx| ((idx as f32 * 0.123).sin() * 0.8) - ((idx % 5) as f32 * 0.04))
                 .collect(),
         )
