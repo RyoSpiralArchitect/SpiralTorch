@@ -925,33 +925,68 @@ def test_summarize_trainer_trace_events_recovers_runtime_component_backends(
     metrics = summary["metrics"]
     assert metrics["tensor_ops_total"]["last"] == pytest.approx(6.0)
     assert metrics["tensor_backend_fallbacks"]["last"] == pytest.approx(4.0)
+    assert metrics["tensor_backend_requested_wgpu_component_hits"][
+        "last"
+    ] == pytest.approx(6.0)
+    assert metrics["tensor_backend_requested_wgpu_component_fallbacks"][
+        "last"
+    ] == pytest.approx(4.0)
     assert metrics["tensor_op_backend_non_liner_forward_preactivation_wgpu"][
         "last"
     ] == pytest.approx(1.0)
+    assert metrics[
+        "tensor_op_backend_requested_wgpu_component_hit_non_liner_forward_preactivation_wgpu"
+    ]["last"] == pytest.approx(1.0)
     assert metrics["tensor_op_backend_non_liner_forward_activation_cpu"][
         "last"
     ] == pytest.approx(1.0)
+    assert metrics[
+        "tensor_op_backend_requested_wgpu_component_fallback_non_liner_forward_activation_cpu"
+    ]["last"] == pytest.approx(1.0)
     assert metrics["tensor_op_backend_non_liner_forward_geometry_cpu"][
         "last"
     ] == pytest.approx(1.0)
+    assert metrics[
+        "tensor_op_backend_requested_wgpu_component_fallback_non_liner_forward_geometry_cpu"
+    ]["last"] == pytest.approx(1.0)
     assert metrics["tensor_op_backend_dropout_forward_mask_wgpu"][
         "last"
     ] == pytest.approx(1.0)
+    assert metrics[
+        "tensor_op_backend_requested_wgpu_component_hit_dropout_forward_mask_wgpu"
+    ]["last"] == pytest.approx(1.0)
     assert metrics["tensor_op_backend_dropout_forward_rng_cpu"][
         "last"
     ] == pytest.approx(1.0)
+    assert (
+        "tensor_op_backend_requested_wgpu_component_fallback_dropout_forward_rng_cpu"
+        not in metrics
+    )
     assert metrics[
         "tensor_op_backend_dynamic_field_stochastic_schrodinger_forward_deterministic_wgpu"
     ]["last"] == pytest.approx(1.0)
     assert metrics[
-        "tensor_op_backend_dynamic_field_stochastic_schrodinger_forward_rng_cpu"
+        "tensor_op_backend_requested_wgpu_component_hit_dynamic_field_stochastic_schrodinger_forward_deterministic_wgpu"
     ]["last"] == pytest.approx(1.0)
     assert metrics[
+        "tensor_op_backend_dynamic_field_stochastic_schrodinger_forward_rng_cpu"
+    ]["last"] == pytest.approx(1.0)
+    assert (
+        "tensor_op_backend_requested_wgpu_component_fallback_dynamic_field_stochastic_schrodinger_forward_rng_cpu"
+        not in metrics
+    )
+    assert metrics[
         "tensor_op_backend_dynamic_field_stochastic_schrodinger_backward_gradient_scale_cpu"
+    ]["last"] == pytest.approx(1.0)
+    assert metrics[
+        "tensor_op_backend_requested_wgpu_component_fallback_dynamic_field_stochastic_schrodinger_backward_gradient_scale_cpu"
     ]["last"] == pytest.approx(1.0)
     assert metrics["tensor_op_backend_wave_scan_stack_forward_merge_cpu"][
         "last"
     ] == pytest.approx(1.0)
+    assert metrics[
+        "tensor_op_backend_requested_wgpu_component_fallback_wave_scan_stack_forward_merge_cpu"
+    ]["last"] == pytest.approx(1.0)
 
 
 def test_summarize_trainer_trace_events_recovers_wgpu_runtime_fallbacks(tmp_path) -> None:

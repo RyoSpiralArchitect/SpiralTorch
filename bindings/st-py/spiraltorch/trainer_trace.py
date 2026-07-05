@@ -70,6 +70,8 @@ TRACE_SPOTLIGHT_KEYS = (
     "tensor_backend_fallbacks",
     "tensor_backend_requested_wgpu_hits",
     "tensor_backend_requested_wgpu_runtime_fallbacks",
+    "tensor_backend_requested_wgpu_component_hits",
+    "tensor_backend_requested_wgpu_component_fallbacks",
     "tensor_op_backend_matmul_scaled_wgpu",
     "tensor_op_backend_matmul_scaled_faer",
     "tensor_op_backend_matmul_scaled_naive",
@@ -193,8 +195,12 @@ TRACE_SPOTLIGHT_KEYS = (
     "tensor_op_backend_wave_scan_stack_backward_composite",
     "tensor_op_backend_wave_scan_stack_forward_merge_wgpu",
     "tensor_op_backend_wave_scan_stack_forward_merge_cpu",
+    "tensor_op_backend_requested_wgpu_component_hit_wave_scan_stack_forward_merge_wgpu",
+    "tensor_op_backend_requested_wgpu_component_fallback_wave_scan_stack_forward_merge_cpu",
     "tensor_op_backend_wave_scan_stack_backward_merge_wgpu",
     "tensor_op_backend_wave_scan_stack_backward_merge_cpu",
+    "tensor_op_backend_requested_wgpu_component_hit_wave_scan_stack_backward_merge_wgpu",
+    "tensor_op_backend_requested_wgpu_component_fallback_wave_scan_stack_backward_merge_cpu",
     "tensor_op_backend_coherence_wave_forward_composite",
     "tensor_op_backend_coherence_wave_backward_composite",
     "tensor_op_backend_coherence_wave_forward_merge_wgpu",
@@ -250,9 +256,13 @@ TRACE_SPOTLIGHT_KEYS = (
     "tensor_op_backend_dropout_forward_mask_wgpu",
     "tensor_op_backend_dropout_forward_mask_cpu",
     "tensor_op_backend_dropout_forward_rng_cpu",
+    "tensor_op_backend_requested_wgpu_component_hit_dropout_forward_mask_wgpu",
+    "tensor_op_backend_requested_wgpu_component_fallback_dropout_forward_mask_cpu",
     "tensor_op_backend_dropout_backward_mask_wgpu",
     "tensor_op_backend_dropout_backward_mask_cpu",
     "tensor_op_backend_dropout_backward_rng_cpu",
+    "tensor_op_backend_requested_wgpu_component_hit_dropout_backward_mask_wgpu",
+    "tensor_op_backend_requested_wgpu_component_fallback_dropout_backward_mask_cpu",
     "tensor_op_backend_scale_wgpu",
     "tensor_op_backend_scale_cpu",
     "tensor_op_backend_add_wgpu",
@@ -319,8 +329,12 @@ TRACE_SPOTLIGHT_KEYS = (
     "tensor_op_backend_dynamic_field_stochastic_schrodinger_forward_deterministic_wgpu",
     "tensor_op_backend_dynamic_field_stochastic_schrodinger_forward_deterministic_cpu",
     "tensor_op_backend_dynamic_field_stochastic_schrodinger_forward_rng_cpu",
+    "tensor_op_backend_requested_wgpu_component_hit_dynamic_field_stochastic_schrodinger_forward_deterministic_wgpu",
+    "tensor_op_backend_requested_wgpu_component_fallback_dynamic_field_stochastic_schrodinger_forward_deterministic_cpu",
     "tensor_op_backend_dynamic_field_stochastic_schrodinger_backward_gradient_scale_wgpu",
     "tensor_op_backend_dynamic_field_stochastic_schrodinger_backward_gradient_scale_cpu",
+    "tensor_op_backend_requested_wgpu_component_hit_dynamic_field_stochastic_schrodinger_backward_gradient_scale_wgpu",
+    "tensor_op_backend_requested_wgpu_component_fallback_dynamic_field_stochastic_schrodinger_backward_gradient_scale_cpu",
     "tensor_op_backend_lstm_forward_cpu",
     "tensor_op_backend_lstm_backward_cpu",
     "tensor_op_backend_lstm_forward_composite",
@@ -426,10 +440,16 @@ TRACE_SPOTLIGHT_KEYS = (
     "tensor_op_backend_non_liner_backward_composite",
     "tensor_op_backend_non_liner_forward_preactivation_wgpu",
     "tensor_op_backend_non_liner_forward_preactivation_cpu",
+    "tensor_op_backend_requested_wgpu_component_hit_non_liner_forward_preactivation_wgpu",
+    "tensor_op_backend_requested_wgpu_component_fallback_non_liner_forward_preactivation_cpu",
     "tensor_op_backend_non_liner_forward_activation_cpu",
+    "tensor_op_backend_requested_wgpu_component_fallback_non_liner_forward_activation_cpu",
     "tensor_op_backend_non_liner_forward_geometry_cpu",
+    "tensor_op_backend_requested_wgpu_component_fallback_non_liner_forward_geometry_cpu",
     "tensor_op_backend_non_liner_forward_broadcast_wgpu",
     "tensor_op_backend_non_liner_forward_broadcast_cpu",
+    "tensor_op_backend_requested_wgpu_component_hit_non_liner_forward_broadcast_wgpu",
+    "tensor_op_backend_requested_wgpu_component_fallback_non_liner_forward_broadcast_cpu",
     "tensor_op_backend_non_liner_backward_preactivation_wgpu",
     "tensor_op_backend_non_liner_backward_preactivation_cpu",
     "tensor_op_backend_non_liner_backward_activation_cpu",
@@ -779,6 +799,19 @@ def _tensor_backend_metrics_from_tensor_meta(
             return
         component = field.removesuffix("_backend")
         inc(f"tensor_op_backend_{op_fragment}_{component}_{backend_fragment}")
+        if count_fallback and requested_backend == "wgpu":
+            if backend_fragment == "wgpu":
+                inc("tensor_backend_requested_wgpu_component_hits")
+                inc(
+                    "tensor_op_backend_requested_wgpu_component_hit_"
+                    f"{op_fragment}_{component}_{backend_fragment}"
+                )
+            elif not _is_metadata_only_backend(backend_fragment):
+                inc("tensor_backend_requested_wgpu_component_fallbacks")
+                inc(
+                    "tensor_op_backend_requested_wgpu_component_fallback_"
+                    f"{op_fragment}_{component}_{backend_fragment}"
+                )
         if (
             count_fallback
             and requested_backend is not None
