@@ -508,6 +508,149 @@ def test_summarize_trainer_trace_events_reads_plugin_writer_policy_events(tmp_pa
     assert policy["status_counts"]["wasm_tuner_choice_miss"] == pytest.approx(1.0)
 
 
+def test_summarize_trainer_trace_events_recovers_generic_tensor_backend_metrics(
+    tmp_path,
+) -> None:
+    _ensure_torch_stub()
+    st = importlib.import_module("spiraltorch")
+
+    trace_path = tmp_path / "trainer_trace.jsonl"
+    records = [
+        {
+            "idx": 1,
+            "event": {
+                "kind": "Custom",
+                "data": {
+                    "event_type": "TensorOpMeta",
+                    "data": {
+                        "op_name": "wave_gate_forward",
+                        "data": {
+                            "backend": "wgpu_dense",
+                            "requested_backend": "wgpu",
+                            "selected_backend": "wgpu",
+                        },
+                    },
+                },
+            },
+        },
+        {
+            "idx": 2,
+            "event": {
+                "kind": "Custom",
+                "data": {
+                    "event_type": "TensorOpMeta",
+                    "data": {
+                        "op_name": "zspace_softmax_forward",
+                        "data": {
+                            "backend": "cpu_adaptive",
+                            "requested_backend": "wgpu",
+                        },
+                    },
+                },
+            },
+        },
+        {
+            "idx": 3,
+            "event": {
+                "kind": "Custom",
+                "data": {
+                    "event_type": "TensorOpMeta",
+                    "data": {
+                        "op_name": "zspace_semantic_window",
+                        "data": {
+                            "backend": "hybrid",
+                            "requested_backend": "wgpu",
+                            "window_energy_backend": "wgpu",
+                            "distribution_scale_backend": "cpu",
+                        },
+                    },
+                },
+            },
+        },
+        {
+            "idx": 4,
+            "event": {
+                "kind": "Custom",
+                "data": {
+                    "event_type": "TensorOpMeta",
+                    "data": {
+                        "op_name": "wave_gate_backward",
+                        "data": {
+                            "backend": "cpu",
+                            "requested_backend": "wgpu",
+                            "fallback": {
+                                "from": "wgpu",
+                                "reason": "runtime_unavailable",
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        {
+            "idx": 5,
+            "event": {
+                "kind": "Custom",
+                "data": {
+                    "event_type": "TrainerStep",
+                    "data": {
+                        "step": 1,
+                        "metrics": {
+                            "step_time_ms": 0.5,
+                        },
+                    },
+                },
+            },
+        },
+    ]
+    trace_path.write_text(
+        "\n".join(json.dumps(record, ensure_ascii=False) for record in records),
+        encoding="utf-8",
+    )
+
+    summary = st.summarize_trainer_trace_events(trace_path)
+    metrics = summary["metrics"]
+    assert metrics["tensor_ops_total"]["last"] == pytest.approx(4.0)
+    assert metrics["tensor_backend_wgpu"]["last"] == pytest.approx(1.0)
+    assert metrics["tensor_kernel_backend_wgpu_dense"]["last"] == pytest.approx(1.0)
+    assert metrics["tensor_backend_cpu_adaptive"]["last"] == pytest.approx(1.0)
+    assert metrics["tensor_backend_hybrid"]["last"] == pytest.approx(1.0)
+    assert metrics["tensor_backend_cpu"]["last"] == pytest.approx(1.0)
+    assert metrics["tensor_backend_fallbacks"]["last"] == pytest.approx(3.0)
+    assert metrics["tensor_op_wave_gate_forward"]["last"] == pytest.approx(1.0)
+    assert metrics["tensor_op_backend_wave_gate_forward_wgpu"]["last"] == pytest.approx(
+        1.0
+    )
+    assert metrics["tensor_op_kernel_backend_wave_gate_forward_wgpu_dense"][
+        "last"
+    ] == pytest.approx(1.0)
+    assert metrics["tensor_op_backend_zspace_softmax_forward_cpu_adaptive"][
+        "last"
+    ] == pytest.approx(1.0)
+    assert metrics["tensor_op_backend_zspace_semantic_window_hybrid"][
+        "last"
+    ] == pytest.approx(1.0)
+    assert metrics["tensor_op_backend_zspace_semantic_window_window_energy_wgpu"][
+        "last"
+    ] == pytest.approx(1.0)
+    assert metrics["tensor_op_backend_zspace_semantic_window_distribution_scale_cpu"][
+        "last"
+    ] == pytest.approx(1.0)
+    assert metrics["tensor_op_backend_wave_gate_backward_cpu"]["last"] == pytest.approx(
+        1.0
+    )
+    assert metrics["tensor_backend_requested_wgpu_hits"]["last"] == pytest.approx(1.0)
+    assert metrics["tensor_op_backend_requested_wgpu_hit_wave_gate_forward_wgpu"][
+        "last"
+    ] == pytest.approx(1.0)
+    assert metrics["tensor_backend_requested_wgpu_runtime_fallbacks"][
+        "last"
+    ] == pytest.approx(1.0)
+    assert metrics["tensor_op_backend_wgpu_runtime_fallback_wave_gate_backward_cpu"][
+        "last"
+    ] == pytest.approx(1.0)
+
+
 def test_summarize_trainer_trace_events_recovers_wgpu_runtime_fallbacks(tmp_path) -> None:
     _ensure_torch_stub()
     st = importlib.import_module("spiraltorch")

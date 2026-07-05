@@ -73,6 +73,10 @@ TRACE_SPOTLIGHT_KEYS = (
     "tensor_op_backend_matmul_scaled_wgpu",
     "tensor_op_backend_matmul_scaled_faer",
     "tensor_op_backend_matmul_scaled_naive",
+    "tensor_op_backend_zspace_softmax_forward_auto",
+    "tensor_op_backend_zspace_softmax_forward_cpu",
+    "tensor_op_backend_zspace_softmax_forward_cpu_adaptive",
+    "tensor_op_backend_zspace_softmax_forward_wgpu",
     "tensor_op_backend_zspace_softmax_backward_cpu",
     "tensor_op_backend_zspace_coherence_scan_forward_wgpu",
     "tensor_op_backend_zspace_coherence_scan_forward_cpu",
@@ -373,6 +377,8 @@ TRACE_SPOTLIGHT_KEYS = (
     "tensor_op_backend_zspace_mixer_backward_cpu",
     "tensor_op_backend_zspace_mixer_forward_composite",
     "tensor_op_backend_zspace_mixer_backward_composite",
+    "tensor_op_backend_wave_gate_forward_cpu",
+    "tensor_op_backend_wave_gate_forward_wgpu",
     "tensor_op_backend_wave_gate_project_wgpu",
     "tensor_op_backend_wave_gate_project_cpu",
     "tensor_op_backend_wave_gate_backward_wgpu",
@@ -461,6 +467,57 @@ CPU_RUNTIME_BACKENDS = {
     "semantic_cpu",
     "topos_cpu",
 }
+
+METADATA_ONLY_BACKENDS = {
+    "composite",
+    "hybrid",
+    "view",
+    "semantic_bridge_window_distribution",
+}
+
+TENSOR_META_SUB_BACKEND_FIELDS = (
+    "input_gradient_backend",
+    "input_gradient_reduction_backend",
+    "affine_gradient_backend",
+    "normalization_backend",
+    "input_projection_backend",
+    "bias_backend",
+    "recurrent_backend",
+    "gate_activation_backend",
+    "bptt_backend",
+    "bptt_scan_backend",
+    "bptt_gate_derivative_backend",
+    "bptt_cell_recurrence_backend",
+    "bptt_state_carry_backend",
+    "raw_parameter_gradient_backend",
+    "parameter_gradient_reduction_backend",
+    "bias_gradient_backend",
+    "parameter_gradient_scale_backend",
+    "accumulation_backend",
+    "normalise_backend",
+    "rewrite_backend",
+    "softmax_backend",
+    "exp_backend",
+    "sanitize_backend",
+    "distribution_scale_backend",
+    "semantic_inference_backend",
+    "semantic_sparse_scan_backend",
+    "semantic_accumulation_backend",
+    "semantic_sanitize_backend",
+    "window_energy_backend",
+    "fusion_accumulation_backend",
+    "marginal_scan_backend",
+    "marginal_sum_backend",
+    "row_scan_backend",
+    "row_sum_backend",
+    "state_sum_backend",
+    "precision_backend",
+    "reduction_backend",
+    "covariance_centering_backend",
+    "covariance_accumulation_backend",
+    "low_rank_projection_backend",
+    "psd_projection_backend",
+)
 
 
 def _iter_jsonl(path: Path) -> Iterable[dict[str, Any]]:
@@ -611,6 +668,19 @@ def _metric_fragment(value: str) -> str:
     return fragment or "unknown"
 
 
+def _backend_metric_fragment(value: str) -> str:
+    fragment = _metric_fragment(value)
+    if fragment == "wgpu_dense":
+        return "wgpu"
+    if fragment == "simd":
+        return "cpu_simd"
+    return fragment
+
+
+def _is_metadata_only_backend(value: str) -> bool:
+    return value in METADATA_ONLY_BACKENDS
+
+
 def _finite_number(value: Any) -> float | None:
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         numeric = float(value)
@@ -625,6 +695,92 @@ def _insert_metric_value(
     value: float,
 ) -> None:
     metrics[key] = _metric_stats([value])
+
+
+def _tensor_backend_metrics_from_tensor_meta(
+    events: Iterable[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    counts: dict[str, float] = {}
+    fallback_count = 0.0
+
+    def inc(key: str, amount: float = 1.0) -> None:
+        counts[key] = counts.get(key, 0.0) + amount
+
+    def record_sub_backend(
+        op_fragment: str,
+        requested_backend: str | None,
+        field: str,
+        backend: str,
+        *,
+        count_fallback: bool = True,
+    ) -> None:
+        nonlocal fallback_count
+        backend_fragment = _backend_metric_fragment(backend)
+        if backend_fragment == "auto":
+            return
+        component = field.removesuffix("_backend")
+        inc(f"tensor_op_backend_{op_fragment}_{component}_{backend_fragment}")
+        if (
+            count_fallback
+            and requested_backend is not None
+            and requested_backend != "auto"
+            and requested_backend != backend_fragment
+            and not _is_metadata_only_backend(backend_fragment)
+        ):
+            fallback_count += 1.0
+
+    for event in events:
+        op_name = event.get("op_name")
+        data = event.get("data")
+        if not isinstance(op_name, str) or not isinstance(data, dict):
+            continue
+        backend = data.get("backend")
+        if not isinstance(backend, str) or not backend:
+            continue
+
+        op_fragment = _metric_fragment(op_name)
+        backend_fragment = _backend_metric_fragment(backend)
+        kernel_backend_fragment = _metric_fragment(backend)
+        inc("tensor_ops_total")
+        inc(f"tensor_backend_{backend_fragment}")
+        inc(f"tensor_kernel_backend_{kernel_backend_fragment}")
+        inc(f"tensor_op_{op_fragment}")
+        inc(f"tensor_op_backend_{op_fragment}_{backend_fragment}")
+        inc(f"tensor_op_kernel_backend_{op_fragment}_{kernel_backend_fragment}")
+
+        requested_backend_value = data.get("requested_backend")
+        requested_backend = (
+            _backend_metric_fragment(requested_backend_value)
+            if isinstance(requested_backend_value, str)
+            else None
+        )
+        if (
+            requested_backend is not None
+            and requested_backend != "auto"
+            and requested_backend != backend_fragment
+            and not _is_metadata_only_backend(backend_fragment)
+        ):
+            fallback_count += 1.0
+
+        for field in TENSOR_META_SUB_BACKEND_FIELDS:
+            sub_backend = data.get(field)
+            if not isinstance(sub_backend, str) or not sub_backend:
+                continue
+            record_sub_backend(
+                op_fragment,
+                requested_backend,
+                field,
+                sub_backend,
+                count_fallback=field != "bptt_scan_backend",
+            )
+
+    if counts:
+        counts["tensor_backend_fallbacks"] = fallback_count
+
+    metrics: dict[str, dict[str, Any]] = {}
+    for key, value in counts.items():
+        _insert_metric_value(metrics, key, value)
+    return metrics
 
 
 def _backend_policy_metrics_from_tensor_meta(
@@ -722,7 +878,7 @@ def _backend_request_metrics_from_tensor_meta(
             continue
         if requested != "wgpu":
             continue
-        backend_fragment = _metric_fragment(backend)
+        backend_fragment = _backend_metric_fragment(backend)
         op_fragment = _metric_fragment(op_name)
         if backend == "wgpu" or backend == "wgpu_dense":
             inc("tensor_backend_requested_wgpu_hits")
@@ -1022,6 +1178,7 @@ def load_trainer_trace_events(
 def _tensor_meta_derived_metrics(path: str | Path) -> dict[str, dict[str, Any]]:
     tensor_meta_events = load_trainer_trace_events(path, event_type="TensorOpMeta")
     metrics: dict[str, dict[str, Any]] = {}
+    metrics.update(_tensor_backend_metrics_from_tensor_meta(tensor_meta_events))
     metrics.update(_backend_policy_metrics_from_tensor_meta(tensor_meta_events))
     metrics.update(_backend_request_metrics_from_tensor_meta(tensor_meta_events))
     metrics.update(_lstm_backend_metrics_from_tensor_meta(tensor_meta_events))
