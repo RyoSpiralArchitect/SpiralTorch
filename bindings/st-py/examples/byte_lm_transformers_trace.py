@@ -680,6 +680,58 @@ def runtime_import_names_from_args(args):
     )
 
 
+def runtime_import_presets_from_args(args):
+    return list(
+        dict.fromkeys(
+            str(preset).strip()
+            for preset in getattr(args, "runtime_import_presets", []) or []
+            if str(preset).strip()
+        )
+    )
+
+
+def runtime_import_preset_status_rows(presets, probes):
+    probes_by_module = {probe["module"]: probe for probe in probes}
+    rows = []
+    for preset in presets:
+        modules = list(RUNTIME_IMPORT_PRESETS.get(preset, []))
+        imported = [
+            module
+            for module in modules
+            if probes_by_module.get(module, {}).get("imported") is True
+        ]
+        missing = [module for module in modules if module not in imported]
+        rows.append(
+            {
+                "preset": preset,
+                "modules": modules,
+                "imported": imported,
+                "missing": missing,
+                "passed": not missing,
+            }
+        )
+    return rows
+
+
+def runtime_import_preset_modules_label(rows):
+    return csv_label(
+        [
+            f"{row['preset']}={'|'.join(row['modules']) or 'none'}"
+            for row in rows
+        ]
+    )
+
+
+def runtime_import_preset_missing_modules_label(rows):
+    return csv_label(
+        [
+            f"{row['preset']}={'|'.join(row['missing']) or 'none'}"
+            for row in rows
+            if row["missing"]
+        ]
+    )
+
+
 def runtime_import_kv_label(probes, key):
     return csv_label(
         [
@@ -690,14 +742,23 @@ def runtime_import_kv_label(probes, key):
 
 
 def runtime_import_fields(args):
-    presets = [
-        str(preset) for preset in getattr(args, "runtime_import_presets", []) or []
-    ]
+    presets = runtime_import_presets_from_args(args)
     probes = runtime_import_probe_rows(runtime_import_names_from_args(args))
+    preset_status = runtime_import_preset_status_rows(presets, probes)
     imported = [probe["module"] for probe in probes if probe["imported"]]
     failed = [probe["module"] for probe in probes if not probe["imported"]]
+    satisfied_presets = [row["preset"] for row in preset_status if row["passed"]]
+    failed_presets = [row["preset"] for row in preset_status if not row["passed"]]
     return {
         "runtime_import_presets": csv_label(presets),
+        "runtime_import_preset_modules": runtime_import_preset_modules_label(
+            preset_status
+        ),
+        "runtime_import_presets_satisfied": csv_label(satisfied_presets),
+        "runtime_import_presets_failed": csv_label(failed_presets),
+        "runtime_import_preset_missing_modules": (
+            runtime_import_preset_missing_modules_label(preset_status)
+        ),
         "runtime_imports_requested": csv_label([probe["module"] for probe in probes]),
         "runtime_import_probe_count": len(probes),
         "runtime_imports_imported": csv_label(imported),
@@ -707,6 +768,11 @@ def runtime_import_fields(args):
         "runtime_import_module_names": runtime_import_kv_label(probes, "module_name"),
         "runtime_imports_json": json.dumps(
             probes,
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
+        "runtime_import_preset_status_json": json.dumps(
+            preset_status,
             ensure_ascii=False,
             sort_keys=True,
         ),
@@ -860,6 +926,11 @@ TRACE_RUNTIME_METADATA_FIELDS = [
     "transformers_imported",
     "transformers_module_name",
     "transformers_spiraltorch_coimport_status",
+    "runtime_import_presets",
+    "runtime_import_preset_modules",
+    "runtime_import_presets_satisfied",
+    "runtime_import_presets_failed",
+    "runtime_import_preset_missing_modules",
     "runtime_imports_requested",
     "runtime_import_probe_count",
     "runtime_imports_imported",
