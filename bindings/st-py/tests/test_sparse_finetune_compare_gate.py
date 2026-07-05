@@ -5465,6 +5465,11 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         args.skip_transformers_tokenizer = True
         args.transformers_load_model = True
         args.require_transformers_audit = True
+        args.checkpoint_transformers_runtime_import_presets = ["transformers"]
+        args.checkpoint_transformers_runtime_imports = ["math"]
+        args.require_checkpoint_transformers_runtime_imports = True
+        args.require_checkpoint_transformers_runtime_import = ["math"]
+        args.require_checkpoint_transformers_runtime_import_preset = ["transformers"]
         self.assertEqual(
             module.checkpoint_transformers_args(args),
             [
@@ -5478,6 +5483,15 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                 "--skip-transformers-tokenizer",
                 "--transformers-load-model",
                 "--require-transformers-audit",
+                "--transformers-runtime-import-preset",
+                "transformers",
+                "--transformers-runtime-import",
+                "math",
+                "--require-transformers-runtime-imports",
+                "--require-transformers-runtime-import",
+                "math",
+                "--require-transformers-runtime-import-preset",
+                "transformers",
             ],
         )
         args.transformers_trace = True
@@ -5613,6 +5627,15 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             "--transformers-trust-remote-code",
             "--skip-transformers-tokenizer",
             "--require-transformers-audit",
+            "--checkpoint-transformers-runtime-import-preset",
+            "transformers",
+            "--checkpoint-transformers-runtime-import",
+            "math",
+            "--require-checkpoint-transformers-runtime-imports",
+            "--require-checkpoint-transformers-runtime-import",
+            "math",
+            "--require-checkpoint-transformers-runtime-import-preset",
+            "transformers",
             "--transformers-trace",
             "--transformers-trace-prompt",
             "spiral",
@@ -5671,6 +5694,11 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertIn("--transformers-trust-remote-code", text)
         self.assertIn("--skip-transformers-tokenizer", text)
         self.assertIn("--require-transformers-audit", text)
+        self.assertIn("--transformers-runtime-import-preset transformers", text)
+        self.assertIn("--transformers-runtime-import math", text)
+        self.assertIn("--require-transformers-runtime-imports", text)
+        self.assertIn("--require-transformers-runtime-import math", text)
+        self.assertIn("--require-transformers-runtime-import-preset transformers", text)
         self.assertIn("byte_lm_transformers_trace.py", text)
         self.assertIn("--model-path /models/llama", text)
         self.assertIn("--jsonl /tmp/profile-smoke-real-hf/transformers-trace.jsonl", text)
@@ -7582,6 +7610,11 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                 transformers_revision="main",
                 skip_transformers_tokenizer=False,
                 transformers_load_model=True,
+                runtime_import_presets=["transformers"],
+                runtime_imports=["math"],
+                require_runtime_imports=True,
+                required_runtime_imports=["math"],
+                required_runtime_import_presets=["transformers"],
             )
             with fake_transformers_module() as (_fake, calls):
                 fields = helper.transformers_runtime_audit_fields(args, (320, 32, 320))
@@ -7604,6 +7637,20 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertEqual(calls["config"][0][1]["trust_remote_code"], True)
         self.assertEqual(calls["config"][0][1]["revision"], "main")
         self.assertEqual(calls["model"][0][1]["local_files_only"], True)
+        self.assertEqual(fields["runtime_import_presets"], "transformers")
+        self.assertEqual(
+            fields["runtime_import_preset_modules"],
+            "transformers=transformers",
+        )
+        self.assertEqual(fields["runtime_imports_requested"], "transformers,math")
+        self.assertEqual(fields["runtime_import_probe_count"], 2)
+        self.assertEqual(fields["runtime_imports_imported"], "transformers,math")
+        self.assertEqual(fields["runtime_imports_failed"], "none")
+        self.assertTrue(fields["runtime_imports_all_ok"])
+        self.assertEqual(fields["required_runtime_imports"], "math")
+        self.assertTrue(fields["required_runtime_imports_passed"])
+        self.assertEqual(fields["required_runtime_import_presets"], "transformers")
+        self.assertTrue(fields["required_runtime_import_presets_passed"])
 
     def test_checkpoint_preflight_transformers_audit_gate_rejects_partial_runtime(self):
         helper = load_checkpoint_helper()
@@ -7648,6 +7695,43 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertIn("tokenizer fixture missing", row["transformers_tokenizer_error"])
         with self.assertRaisesRegex(RuntimeError, "Transformers audit gate failed"):
             helper.check_transformers_audit_gate(row, args)
+
+    def test_checkpoint_preflight_transformers_runtime_import_gate_rejects_missing_module(self):
+        helper = load_checkpoint_helper()
+        with tempfile.TemporaryDirectory() as tmp:
+            args = types.SimpleNamespace(
+                transformers_audit=True,
+                transformers_model_path=Path(tmp),
+                hf_state_dict=None,
+                allow_transformers_remote=False,
+                transformers_trust_remote_code=False,
+                transformers_revision=None,
+                skip_transformers_tokenizer=True,
+                transformers_load_model=False,
+                runtime_import_presets=[],
+                runtime_imports=[],
+                require_runtime_imports=False,
+                required_runtime_imports=["spiraltorch_missing_runtime_fixture"],
+                required_runtime_import_presets=[],
+            )
+            with fake_transformers_module():
+                row = helper.transformers_runtime_audit_fields(args, (320, 32, 320))
+
+        self.assertEqual(row["transformers_audit_status"], "ok")
+        self.assertEqual(
+            row["runtime_imports_requested"],
+            "spiraltorch_missing_runtime_fixture",
+        )
+        self.assertEqual(
+            row["required_runtime_imports_missing"],
+            "spiraltorch_missing_runtime_fixture",
+        )
+        self.assertFalse(row["required_runtime_imports_passed"])
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Transformers runtime import gate failed",
+        ):
+            helper.check_transformers_runtime_import_gate(row, args)
 
     def test_transformers_trace_records_prompt_logits_and_hidden_state(self):
         module = load_example("byte_lm_transformers_trace")

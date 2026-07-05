@@ -12,16 +12,13 @@ if str(PACKAGE_ROOT) not in sys.path:
 
 from spiraltorch.runtime_imports import (
     TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS,
-    csv_label,
-    runtime_import_preset_missing_modules_label,
-    runtime_import_preset_modules_label,
-    runtime_import_preset_status_rows,
+    module_file,
+    module_name,
+    module_version,
     runtime_import_names_from_args,
+    runtime_import_probe_fields,
     runtime_import_presets_from_args,
-    runtime_import_required_gate_fields,
     runtime_import_requirement_failures,
-    required_runtime_import_presets_from_args,
-    required_runtime_imports_from_args,
 )
 
 import spiraltorch as st
@@ -665,110 +662,11 @@ def model_fields(model):
     }
 
 
-def module_version(module):
-    version = getattr(module, "__version__", None)
-    return None if version is None else str(version)
-
-
-def module_name(module):
-    name = getattr(module, "__name__", None)
-    return None if name is None else str(name)
-
-
-def module_file(module):
-    file = getattr(module, "__file__", None)
-    return None if file is None else str(file)
-
-
-def runtime_import_probe(name):
-    try:
-        module = importlib.import_module(name)
-    except Exception as exc:  # pragma: no cover - import failures vary by environment.
-        return {
-            "module": name,
-            "imported": False,
-            "version": None,
-            "module_name": None,
-            "module_file": None,
-            "error": f"{exc.__class__.__name__}: {exc}",
-        }
-    return {
-        "module": name,
-        "imported": True,
-        "version": module_version(module),
-        "module_name": module_name(module),
-        "module_file": module_file(module),
-        "error": None,
-    }
-
-
-def runtime_import_probe_rows(names):
-    return [runtime_import_probe(str(name)) for name in names if str(name).strip()]
-
-
-def runtime_import_kv_label(probes, key):
-    return csv_label(
-        [
-            f"{probe['module']}={probe[key] if probe[key] is not None else 'none'}"
-            for probe in probes
-        ]
-    )
-
-
 def runtime_import_fields(args):
-    presets = runtime_import_presets_from_args(args)
-    probes = runtime_import_probe_rows(
-        runtime_import_names_from_args(
-            args,
-            preset_modules=RUNTIME_IMPORT_PRESETS,
-        )
-    )
-    preset_status = runtime_import_preset_status_rows(
-        presets,
-        probes,
+    return runtime_import_probe_fields(
+        args,
         preset_modules=RUNTIME_IMPORT_PRESETS,
     )
-    imported = [probe["module"] for probe in probes if probe["imported"]]
-    failed = [probe["module"] for probe in probes if not probe["imported"]]
-    satisfied_presets = [row["preset"] for row in preset_status if row["passed"]]
-    failed_presets = [row["preset"] for row in preset_status if not row["passed"]]
-    fields = {
-        "runtime_import_presets": csv_label(presets),
-        "runtime_import_preset_modules": runtime_import_preset_modules_label(
-            preset_status
-        ),
-        "runtime_import_presets_satisfied": csv_label(satisfied_presets),
-        "runtime_import_presets_failed": csv_label(failed_presets),
-        "runtime_import_preset_missing_modules": (
-            runtime_import_preset_missing_modules_label(preset_status)
-        ),
-        "runtime_imports_requested": csv_label([probe["module"] for probe in probes]),
-        "runtime_import_probe_count": len(probes),
-        "runtime_imports_imported": csv_label(imported),
-        "runtime_imports_failed": csv_label(failed),
-        "runtime_imports_all_ok": not failed,
-        "runtime_import_versions": runtime_import_kv_label(probes, "version"),
-        "runtime_import_module_names": runtime_import_kv_label(probes, "module_name"),
-        "runtime_imports_json": json.dumps(
-            probes,
-            ensure_ascii=False,
-            sort_keys=True,
-        ),
-        "runtime_import_preset_status_json": json.dumps(
-            preset_status,
-            ensure_ascii=False,
-            sort_keys=True,
-        ),
-    }
-    fields.update(
-        runtime_import_required_gate_fields(
-            required_runtime_imports_from_args(args),
-            required_runtime_import_presets_from_args(args),
-            probes=probes,
-            preset_status=preset_status,
-        )
-    )
-    return fields
 
 
 def import_context_fields(transformers):

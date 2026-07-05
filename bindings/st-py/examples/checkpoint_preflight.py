@@ -7,6 +7,12 @@ from pathlib import Path
 
 import spiraltorch as st
 from spiraltorch.nn import Linear, LoraLinear, ZSpaceProjector
+from spiraltorch.runtime_imports import (
+    TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS,
+    runtime_import_names_from_args,
+    runtime_import_probe_fields,
+    runtime_import_requirement_failures,
+)
 
 
 VOCAB = 8
@@ -473,6 +479,70 @@ def add_transformers_audit_args(parser):
         action="store_true",
         help="Fail when the optional Transformers audit is requested but not clean.",
     )
+    parser.add_argument(
+        "--transformers-runtime-import",
+        dest="runtime_imports",
+        action="append",
+        default=[],
+        help=(
+            "Additional Python module imported during --transformers-audit while "
+            "SpiralTorch and Transformers audit code are loaded. May be repeated."
+        ),
+    )
+    parser.add_argument(
+        "--transformers-runtime-import-preset",
+        dest="runtime_import_presets",
+        action="append",
+        choices=sorted(TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS),
+        default=[],
+        help=(
+            "Named runtime import bundle to probe during --transformers-audit. "
+            "'torch-transformers' probes Transformers plus torch; 'hf-runtime' "
+            "also probes tokenizers. May be repeated."
+        ),
+    )
+    parser.add_argument(
+        "--require-transformers-runtime-imports",
+        dest="require_runtime_imports",
+        action="store_true",
+        help=(
+            "Fail checkpoint preflight when any Transformers audit runtime import "
+            "probe fails."
+        ),
+    )
+    parser.add_argument(
+        "--require-transformers-runtime-import",
+        dest="required_runtime_imports",
+        action="append",
+        default=[],
+        help=(
+            "Require this module to import during --transformers-audit. May be "
+            "repeated."
+        ),
+    )
+    parser.add_argument(
+        "--require-transformers-runtime-import-preset",
+        dest="required_runtime_import_presets",
+        action="append",
+        choices=sorted(TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS),
+        default=[],
+        help=(
+            "Require this named runtime import preset to be observed and satisfied "
+            "during --transformers-audit. May be repeated."
+        ),
+    )
+
+
+def transformers_runtime_import_requested(args):
+    return any(
+        [
+            bool(getattr(args, "runtime_imports", []) or []),
+            bool(getattr(args, "runtime_import_presets", []) or []),
+            bool(getattr(args, "required_runtime_imports", []) or []),
+            bool(getattr(args, "required_runtime_import_presets", []) or []),
+            bool(getattr(args, "require_runtime_imports", False)),
+        ]
+    )
 
 
 def checkpoint_projection_preset_values(args):
@@ -625,6 +695,17 @@ def parse_args():
         parser.error("--require-transformers-audit requires --transformers-audit")
     if args.transformers_audit and args.hf_state_dict is None and args.transformers_model_path is None:
         parser.error("--transformers-audit requires --hf-state-dict or --transformers-model-path")
+    if transformers_runtime_import_requested(args) and not args.transformers_audit:
+        parser.error("Transformers runtime import options require --transformers-audit")
+    if args.require_runtime_imports and not runtime_import_names_from_args(
+        args,
+        preset_modules=TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS,
+    ):
+        parser.error(
+            "--require-transformers-runtime-imports requires "
+            "--transformers-runtime-import, --transformers-runtime-import-preset, "
+            "or a direct --require-transformers-runtime-import/import-preset gate"
+        )
     for name in [
         "require_shape_materializable",
         "require_exact_shape_match",
@@ -806,12 +887,22 @@ def _base_transformers_audit_fields(args, path, module_shapes):
     }
 
 
+def transformers_runtime_import_fields(args):
+    if not transformers_runtime_import_requested(args):
+        return {}
+    return runtime_import_probe_fields(
+        args,
+        preset_modules=TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS,
+    )
+
+
 def transformers_runtime_audit_fields(args, module_shapes):
     if not transformers_audit_requested(args):
         return {}
 
     path = resolved_transformers_model_path(args)
     fields = _base_transformers_audit_fields(args, path, module_shapes)
+    fields.update(transformers_runtime_import_fields(args))
     if path is None:
         fields.update(
             {
@@ -958,6 +1049,46 @@ def print_transformers_audit(row):
         f"model_parameters={row['transformers_model_parameter_count']} "
         f"error={row['transformers_audit_error']!r}"
     )
+    print_transformers_runtime_imports(row)
+
+
+def print_transformers_runtime_imports(row):
+    if "runtime_imports_requested" not in row:
+        return
+    print(
+        "transformers_runtime_imports "
+        f"requested={row['runtime_imports_requested']} "
+        f"imported={row['runtime_imports_imported']} "
+        f"failed={row['runtime_imports_failed']} "
+        f"all_ok={row['runtime_imports_all_ok']} "
+        f"presets={row['runtime_import_presets']} "
+        f"presets_satisfied={row['runtime_import_presets_satisfied']} "
+        f"required_imports_passed={row['required_runtime_imports_passed']} "
+        f"required_presets_passed={row['required_runtime_import_presets_passed']}"
+    )
+
+
+def check_transformers_runtime_import_gate(row, args):
+    if not transformers_runtime_import_requested(args):
+        return True
+    failures = []
+    if (
+        getattr(args, "require_runtime_imports", False)
+        and row.get("runtime_imports_all_ok") is not True
+    ):
+        failures.append("runtime_imports_failed:" + str(row.get("runtime_imports_failed")))
+    failures.extend(runtime_import_requirement_failures(row))
+    passed = not failures
+    print(
+        "transformers_runtime_import_gate "
+        f"passed={passed} "
+        f"failures={','.join(failures) if failures else 'none'}"
+    )
+    if not passed:
+        raise RuntimeError(
+            "Transformers runtime import gate failed: " + ", ".join(failures)
+        )
+    return True
 
 
 def check_transformers_audit_gate(row, args):
@@ -2293,6 +2424,7 @@ def main():
             print(f"shape_audit_jsonl={args.jsonl} rows=1")
         if shape_audit_gate_requested(args):
             check_shape_audit_gates(row, args)
+        check_transformers_runtime_import_gate(row, args)
         check_transformers_audit_gate(row, args)
         return
 
@@ -2310,6 +2442,7 @@ def main():
     )
     context_fields.update(transformers_runtime_audit_fields(args, inferred_shapes))
     print_transformers_audit(context_fields)
+    check_transformers_runtime_import_gate(context_fields, args)
     check_transformers_audit_gate(context_fields, args)
 
     embed = Linear(vocab, hidden, name="embed")
