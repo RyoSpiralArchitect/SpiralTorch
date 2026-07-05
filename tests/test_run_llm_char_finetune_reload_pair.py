@@ -93,6 +93,9 @@ class RunLlmCharFinetuneReloadPairTests(unittest.TestCase):
                         "2",
                         "--restore-best-at-end",
                         "--rollback-on-validation-regression",
+                        "--runtime-import",
+                        "math",
+                        "--require-runtime-imports",
                         "--curves",
                         "--dry-run",
                     ]
@@ -115,6 +118,9 @@ class RunLlmCharFinetuneReloadPairTests(unittest.TestCase):
         self.assertEqual(manifest["settings"]["early_stop_patience"], 2)
         self.assertTrue(manifest["settings"]["restore_best_at_end"])
         self.assertTrue(manifest["settings"]["rollback_on_validation_regression"])
+        self.assertEqual(manifest["settings"]["runtime_imports"], ["math"])
+        self.assertTrue(manifest["settings"]["require_runtime_imports"])
+        self.assertTrue(manifest["settings"]["runtime_import_preflight_requested"])
         self.assertEqual(len(manifest["runs"]), 2)
         self.assertEqual(manifest["runs"][0]["name"], "base_scratch")
         self.assertEqual(manifest["runs"][1]["name"], "reload_finetune")
@@ -129,11 +135,27 @@ class RunLlmCharFinetuneReloadPairTests(unittest.TestCase):
         self.assertIn("--early-stop-patience", base_command)
         self.assertIn("--restore-best-at-end", base_command)
         self.assertIn("--rollback-on-validation-regression", base_command)
+        self.assertIn("--runtime-import", base_command)
+        self.assertIn("math", base_command)
+        self.assertIn("--require-runtime-imports", base_command)
+        self.assertIn("--runtime-preflight-json-out", base_command)
         self.assertIn("--load-run", reload_command)
         self.assertIn("--eval-seed", reload_command)
         self.assertIn("--early-stop-patience", reload_command)
         self.assertIn("--restore-best-at-end", reload_command)
         self.assertIn("--rollback-on-validation-regression", reload_command)
+        self.assertIn("--runtime-import", reload_command)
+        self.assertIn("math", reload_command)
+        self.assertIn("--require-runtime-imports", reload_command)
+        self.assertIn("--runtime-preflight-json-out", reload_command)
+        self.assertIn(
+            str(run_root / "base_scratch" / "runtime_preflight.json"),
+            base_command,
+        )
+        self.assertIn(
+            str(run_root / "reload_finetune" / "runtime_preflight.json"),
+            reload_command,
+        )
         self.assertEqual(
             base_command[base_command.index("--eval-seed") + 1],
             reload_command[reload_command.index("--eval-seed") + 1],
@@ -150,14 +172,20 @@ class RunLlmCharFinetuneReloadPairTests(unittest.TestCase):
     def test_preflight_only_writes_readiness_and_skips_runs(self) -> None:
         mod = _load_module()
         original = mod.run_finetune_preflight
-        mod.run_finetune_preflight = lambda data_paths, *, run_root, backend: {
-            "schema": mod.PREFLIGHT_SCHEMA,
-            "backend": backend,
-            "ready": True,
-            "reason": "ready",
-            "missing_nn_symbols": [],
-            "child_preflight_path": str(run_root / "_preflight" / "preflight.json"),
-        }
+
+        def fake_preflight(data_paths, *, run_root, backend, runtime_import_args):
+            return {
+                "schema": mod.PREFLIGHT_SCHEMA,
+                "backend": backend,
+                "ready": True,
+                "reason": "ready",
+                "missing_nn_symbols": [],
+                "child_preflight_path": str(
+                    run_root / "_preflight" / "preflight.json"
+                ),
+            }
+
+        mod.run_finetune_preflight = fake_preflight
         try:
             with tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
@@ -193,14 +221,20 @@ class RunLlmCharFinetuneReloadPairTests(unittest.TestCase):
     def test_preflight_only_failure_marks_manifest_failed(self) -> None:
         mod = _load_module()
         original = mod.run_finetune_preflight
-        mod.run_finetune_preflight = lambda data_paths, *, run_root, backend: {
-            "schema": mod.PREFLIGHT_SCHEMA,
-            "backend": backend,
-            "ready": False,
-            "reason": "missing_nn_symbols",
-            "missing_nn_symbols": ["Sequential"],
-            "child_preflight_path": str(run_root / "_preflight" / "preflight.json"),
-        }
+
+        def fake_preflight(data_paths, *, run_root, backend, runtime_import_args):
+            return {
+                "schema": mod.PREFLIGHT_SCHEMA,
+                "backend": backend,
+                "ready": False,
+                "reason": "missing_nn_symbols",
+                "missing_nn_symbols": ["Sequential"],
+                "child_preflight_path": str(
+                    run_root / "_preflight" / "preflight.json"
+                ),
+            }
+
+        mod.run_finetune_preflight = fake_preflight
         try:
             with tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
@@ -232,14 +266,20 @@ class RunLlmCharFinetuneReloadPairTests(unittest.TestCase):
     def test_preflight_failure_blocks_real_run_before_training(self) -> None:
         mod = _load_module()
         original = mod.run_finetune_preflight
-        mod.run_finetune_preflight = lambda data_paths, *, run_root, backend: {
-            "schema": mod.PREFLIGHT_SCHEMA,
-            "backend": backend,
-            "ready": False,
-            "reason": "missing_nn_symbols",
-            "missing_nn_symbols": ["Sequential"],
-            "child_preflight_path": str(run_root / "_preflight" / "preflight.json"),
-        }
+
+        def fake_preflight(data_paths, *, run_root, backend, runtime_import_args):
+            return {
+                "schema": mod.PREFLIGHT_SCHEMA,
+                "backend": backend,
+                "ready": False,
+                "reason": "missing_nn_symbols",
+                "missing_nn_symbols": ["Sequential"],
+                "child_preflight_path": str(
+                    run_root / "_preflight" / "preflight.json"
+                ),
+            }
+
+        mod.run_finetune_preflight = fake_preflight
         try:
             with tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
@@ -343,6 +383,32 @@ class RunLlmCharFinetuneReloadPairTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
+            for run_dir, runtime_path in (
+                (base, "base/runtime_preflight.json"),
+                (reload, "reload/runtime_preflight.json"),
+            ):
+                (run_dir / "run.json").write_text(
+                    json.dumps(
+                        {
+                            "seed": 1,
+                            "eval_seed": 7,
+                            "data_paths": ["shared.txt"],
+                            "training_contract": {
+                                "runtime": {
+                                    "runtime_import_preflight_path": runtime_path,
+                                    "runtime_import_preflight_requested": True,
+                                    "runtime_import_preflight_passed": True,
+                                    "runtime_import_preflight_failures": "none",
+                                    "runtime_import_presets": "hf-runtime",
+                                    "runtime_imports_requested": (
+                                        "transformers,torch,tokenizers"
+                                    ),
+                                }
+                            },
+                        }
+                    ),
+                    encoding="utf-8",
+                )
 
             outcome = mod.reload_pair_outcome(base, reload)
 
@@ -375,6 +441,10 @@ class RunLlmCharFinetuneReloadPairTests(unittest.TestCase):
         self.assertEqual(outcome["reload"]["validation_rollback_count"], 2)
         self.assertEqual(outcome["reload"]["early_stopped_epoch"], 3)
         self.assertTrue(outcome["reload"]["restored_best_at_end"])
+        self.assertTrue(outcome["base"]["runtime_import_preflight_requested"])
+        self.assertTrue(outcome["base"]["runtime_import_preflight_passed"])
+        self.assertEqual(outcome["base"]["runtime_import_presets"], "hf-runtime")
+        self.assertTrue(outcome["reload"]["runtime_import_preflight_passed"])
 
     def test_reload_pair_outcome_marks_rollback_tie_as_protected_noop(self) -> None:
         mod = _load_module()

@@ -23,6 +23,16 @@ from typing import Any
 SCHEMA = "st.llm_char_finetune.reload_sweep.v1"
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PAIR_SCRIPT = REPO_ROOT / "tools" / "run_llm_char_finetune_reload_pair.py"
+RUNTIME_IMPORT_PRESET_CHOICES = [
+    "transformers",
+    "torch",
+    "tokenizers",
+    "torch-transformers",
+    "hf-runtime",
+    "hf-datasets",
+    "hf-finetune",
+    "hf-peft",
+]
 
 
 def default_run_root() -> Path:
@@ -88,6 +98,52 @@ def float_slug(value: float) -> str:
 
 def shell_command(command: list[str]) -> str:
     return "PYTHONNOUSERSITE=1 " + shlex.join(command)
+
+
+def runtime_import_contract_requested(source: argparse.Namespace) -> bool:
+    return bool(
+        getattr(source, "runtime_imports", None)
+        or getattr(source, "runtime_import_presets", None)
+        or getattr(source, "required_runtime_imports", None)
+        or getattr(source, "required_runtime_import_presets", None)
+        or getattr(source, "require_runtime_imports", False)
+    )
+
+
+def runtime_import_contract_settings(source: argparse.Namespace) -> dict[str, Any]:
+    return {
+        "runtime_imports": list(getattr(source, "runtime_imports", []) or []),
+        "runtime_import_presets": list(
+            getattr(source, "runtime_import_presets", []) or []
+        ),
+        "required_runtime_imports": list(
+            getattr(source, "required_runtime_imports", []) or []
+        ),
+        "required_runtime_import_presets": list(
+            getattr(source, "required_runtime_import_presets", []) or []
+        ),
+        "require_runtime_imports": bool(
+            getattr(source, "require_runtime_imports", False)
+        ),
+        "runtime_import_preflight_requested": runtime_import_contract_requested(
+            source
+        ),
+    }
+
+
+def runtime_import_cli_flags(source: argparse.Namespace) -> list[str]:
+    flags: list[str] = []
+    for name in getattr(source, "runtime_imports", []) or []:
+        flags.extend(["--runtime-import", str(name)])
+    for preset in getattr(source, "runtime_import_presets", []) or []:
+        flags.extend(["--runtime-import-preset", str(preset)])
+    for name in getattr(source, "required_runtime_imports", []) or []:
+        flags.extend(["--require-runtime-import", str(name)])
+    for preset in getattr(source, "required_runtime_import_presets", []) or []:
+        flags.extend(["--require-runtime-import-preset", str(preset)])
+    if getattr(source, "require_runtime_imports", False):
+        flags.append("--require-runtime-imports")
+    return flags
 
 
 def md_cell(value: Any) -> str:
@@ -200,6 +256,7 @@ def pair_command(
         command.append("--restore-best-at-end")
     if args.rollback_on_validation_regression:
         command.append("--rollback-on-validation-regression")
+    command.extend(runtime_import_cli_flags(args))
     if args.curves:
         command.append("--curves")
     if args.ignore_preflight:
@@ -308,6 +365,31 @@ def outcome_adoption_status(cell: dict[str, Any]) -> str:
     return str(cell.get("status") or "unknown")
 
 
+def runtime_preflight_status(cell: dict[str, Any]) -> str:
+    pair_manifest = cell.get("pair_manifest")
+    if not isinstance(pair_manifest, dict):
+        return str(cell.get("status") or "unknown")
+    preflight = pair_manifest.get("preflight")
+    if not isinstance(preflight, dict):
+        return "missing_preflight"
+    runtime = preflight.get("child_runtime_preflight")
+    if not isinstance(runtime, dict):
+        runtime = preflight.get("runtime_import_preflight")
+    requested = preflight.get("runtime_import_preflight_requested")
+    if isinstance(runtime, dict):
+        requested = runtime.get("runtime_import_preflight_requested", requested)
+        passed = runtime.get("runtime_import_preflight_passed")
+    else:
+        passed = preflight.get("runtime_import_preflight_passed")
+    if requested is not True:
+        return "not_requested"
+    if passed is True:
+        return "passed"
+    if passed is False:
+        return "failed"
+    return "unknown"
+
+
 def outcome_delta(cell: dict[str, Any], key: str) -> float | None:
     outcome = cell.get("outcome")
     if not isinstance(outcome, dict):
@@ -359,6 +441,9 @@ def aggregate_cells(cells: list[dict[str, Any]]) -> dict[str, Any]:
     training_status_counts = Counter(outcome_training_status(cell) for cell in cells)
     adoption_status_counts = Counter(outcome_adoption_status(cell) for cell in cells)
     run_status_counts = Counter(str(cell.get("status") or "unknown") for cell in cells)
+    runtime_preflight_status_counts = Counter(
+        runtime_preflight_status(cell) for cell in cells
+    )
     best = best_cell_by_delta(
         cells,
         "reload_best_minus_base_best_nll",
@@ -374,6 +459,9 @@ def aggregate_cells(cells: list[dict[str, Any]]) -> dict[str, Any]:
         "training_status_counts": dict(sorted(training_status_counts.items())),
         "adoption_status_counts": dict(sorted(adoption_status_counts.items())),
         "run_status_counts": dict(sorted(run_status_counts.items())),
+        "runtime_preflight_status_counts": dict(
+            sorted(runtime_preflight_status_counts.items())
+        ),
         "best_cell": best.get("name") if best else None,
         "best_reload_best_minus_base_best_nll": (
             outcome_delta(best, "reload_best_minus_base_best_nll") if best else None
@@ -454,6 +542,7 @@ def render_markdown(manifest: dict[str, Any]) -> str:
         f"- status_counts: `{summary.get('status_counts', {})}`",
         f"- training_status_counts: `{summary.get('training_status_counts', {})}`",
         f"- adoption_status_counts: `{summary.get('adoption_status_counts', {})}`",
+        f"- runtime_preflight_status_counts: `{summary.get('runtime_preflight_status_counts', {})}`",
         f"- best_cell: `{summary.get('best_cell', '-')}`",
         f"- best_training_cell: `{summary.get('best_training_cell', '-')}`",
         "",
@@ -564,6 +653,41 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--early-stop-patience", type=int, default=0)
     parser.add_argument("--restore-best-at-end", action="store_true")
     parser.add_argument("--rollback-on-validation-regression", action="store_true")
+    parser.add_argument(
+        "--runtime-import",
+        dest="runtime_imports",
+        action="append",
+        default=[],
+        help="optional module forwarded to each reload-pair child LLM FT runtime preflight",
+    )
+    parser.add_argument(
+        "--runtime-import-preset",
+        dest="runtime_import_presets",
+        action="append",
+        choices=RUNTIME_IMPORT_PRESET_CHOICES,
+        default=[],
+        help="named runtime import bundle forwarded to each reload-pair cell",
+    )
+    parser.add_argument(
+        "--require-runtime-import",
+        dest="required_runtime_imports",
+        action="append",
+        default=[],
+        help="module that must import successfully in each reload-pair cell",
+    )
+    parser.add_argument(
+        "--require-runtime-import-preset",
+        dest="required_runtime_import_presets",
+        action="append",
+        choices=RUNTIME_IMPORT_PRESET_CHOICES,
+        default=[],
+        help="preset that must be satisfied in each reload-pair cell",
+    )
+    parser.add_argument(
+        "--require-runtime-imports",
+        action="store_true",
+        help="require every requested runtime import/preset in each reload-pair cell",
+    )
     parser.add_argument("--curves", action="store_true")
     parser.add_argument("--summary-limit", type=int, default=8)
     parser.add_argument("--ignore-preflight", action="store_true")
@@ -640,6 +764,7 @@ def main(argv: list[str] | None = None) -> int:
             "rollback_on_validation_regression": bool(
                 args.rollback_on_validation_regression
             ),
+            **runtime_import_contract_settings(args),
         },
         "cells": [],
         "summary": {},
