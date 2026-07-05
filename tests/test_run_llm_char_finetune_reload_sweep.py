@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import contextlib
 import importlib.util
 import io
@@ -24,6 +25,32 @@ def _load_module():
 
 
 class RunLlmCharFinetuneReloadSweepTests(unittest.TestCase):
+    def test_runtime_device_only_contract_forwards_to_pair_cells(self) -> None:
+        mod = _load_module()
+        args = argparse.Namespace(
+            runtime_imports=[],
+            runtime_import_presets=[],
+            required_runtime_imports=[],
+            required_runtime_import_presets=[],
+            runtime_device_backends=["wgpu"],
+            required_runtime_device_backends=[],
+            required_runtime_device_ready_backends=["wgpu"],
+            require_runtime_imports=False,
+        )
+
+        flags = mod.runtime_import_cli_flags(args)
+
+        self.assertTrue(mod.runtime_import_contract_requested(args))
+        self.assertEqual(
+            flags,
+            [
+                "--runtime-device-backend",
+                "wgpu",
+                "--require-runtime-device-ready-backend",
+                "wgpu",
+            ],
+        )
+
     def test_dry_run_writes_grid_commands_and_summary(self) -> None:
         mod = _load_module()
         with tempfile.TemporaryDirectory() as tmp:
@@ -67,6 +94,10 @@ class RunLlmCharFinetuneReloadSweepTests(unittest.TestCase):
                         "--runtime-import-preset",
                         "hf-finetune",
                         "--require-runtime-imports",
+                        "--runtime-device-backend",
+                        "wgpu",
+                        "--require-runtime-device-ready-backend",
+                        "wgpu",
                         "--dry-run",
                     ]
                 )
@@ -101,6 +132,11 @@ class RunLlmCharFinetuneReloadSweepTests(unittest.TestCase):
             manifest["settings"]["runtime_import_presets"],
             ["hf-finetune"],
         )
+        self.assertEqual(manifest["settings"]["runtime_device_backends"], ["wgpu"])
+        self.assertEqual(
+            manifest["settings"]["required_runtime_device_ready_backends"],
+            ["wgpu"],
+        )
         self.assertTrue(manifest["settings"]["require_runtime_imports"])
         self.assertTrue(manifest["settings"]["runtime_import_preflight_requested"])
         first = manifest["cells"][0]
@@ -114,6 +150,8 @@ class RunLlmCharFinetuneReloadSweepTests(unittest.TestCase):
         self.assertIn("--runtime-import-preset", first["command"])
         self.assertIn("hf-finetune", first["command"])
         self.assertIn("--require-runtime-imports", first["command"])
+        self.assertIn("--runtime-device-backend", first["command"])
+        self.assertIn("--require-runtime-device-ready-backend", first["command"])
         self.assertIn("seed3_reloadlr0p02", first["name"])
         self.assertIn("# LLM Char Finetune Reload Sweep", markdown)
         self.assertIn("runtime_preflight_status_counts", markdown)
