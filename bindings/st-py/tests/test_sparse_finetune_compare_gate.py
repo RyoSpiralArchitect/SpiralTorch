@@ -3713,6 +3713,28 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             runtime_validation["runtime_device_report_statuses"],
             "wgpu=kernel_wired",
         )
+        gate_args = argparse.Namespace(
+            require_manifest_runtime_device_report_backend=["wgpu"],
+            require_manifest_runtime_device_report_ready_backend=["wgpu"],
+        )
+        runtime_validation.update(
+            module.runtime_device_report_gate_fields(runtime_validation, gate_args)
+        )
+        self.assertTrue(
+            runtime_validation["runtime_device_report_required_backends_satisfied"]
+        )
+        self.assertTrue(
+            runtime_validation[
+                "runtime_device_report_required_ready_backends_satisfied"
+            ]
+        )
+        self.assertEqual(
+            module.manifest_runtime_device_report_gate_failures(
+                runtime_validation,
+                gate_args,
+            ),
+            [],
+        )
         self.assertEqual(smoke_manifest_row["min_aggregate_epoch_wgpu_hit_rate"], 0.8)
         self.assertEqual(
             smoke_manifest_row[
@@ -6516,6 +6538,11 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertEqual(args.runtime_contract_presets, ["hf-runtime"])
         self.assertEqual(args.wgpu_readiness_presets, ["balanced"])
         self.assertEqual(args.runtime_device_report_backends, ["wgpu"])
+        self.assertEqual(
+            args.require_manifest_runtime_device_report_backend,
+            ["wgpu"],
+        )
+        self.assertEqual(args.require_manifest_runtime_device_report_ready_backend, [])
         self.assertTrue(args.transformers_audit)
         self.assertTrue(args.transformers_trace)
         self.assertTrue(args.validate_produced_manifest)
@@ -6590,6 +6617,14 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertEqual(explicit_args.wgpu_readiness_presets, ["strict"])
         self.assertEqual(explicit_args.runtime_device_report_backends, ["mps"])
         self.assertEqual(
+            explicit_args.require_manifest_runtime_device_report_backend,
+            ["mps"],
+        )
+        self.assertEqual(
+            explicit_args.require_manifest_runtime_device_report_ready_backend,
+            [],
+        )
+        self.assertEqual(
             explicit_args.checkpoint_transformers_runtime_import_presets,
             ["torch-transformers"],
         )
@@ -6619,6 +6654,38 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             sys.argv = old_argv
 
         self.assertEqual(skip_report_args.runtime_device_report_backends, [])
+        self.assertEqual(
+            skip_report_args.require_manifest_runtime_device_report_backend,
+            [],
+        )
+        self.assertEqual(
+            skip_report_args.require_manifest_runtime_device_report_ready_backend,
+            [],
+        )
+
+        sys.argv = [
+            "byte_lm_profile_smoke.py",
+            "--out-dir",
+            "/tmp/profile-smoke-real-hf",
+            "--hf-state-dict",
+            "/models/llama",
+            "--ft-readiness-preset",
+            "hf-wgpu-strict",
+        ]
+        try:
+            strict_args = module.parse_args()
+        finally:
+            sys.argv = old_argv
+
+        self.assertEqual(strict_args.runtime_device_report_backends, ["wgpu"])
+        self.assertEqual(
+            strict_args.require_manifest_runtime_device_report_backend,
+            ["wgpu"],
+        )
+        self.assertEqual(
+            strict_args.require_manifest_runtime_device_report_ready_backend,
+            ["wgpu"],
+        )
 
     def test_byte_lm_profile_smoke_wgpu_readiness_preset_expands_gates(self):
         module = load_example("byte_lm_profile_smoke")
@@ -6760,6 +6827,67 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertEqual(
             explicit_args.min_manifest_transformers_trainer_wgpu_hit_rate,
             0.7,
+        )
+
+    def test_byte_lm_profile_smoke_runtime_device_report_manifest_gates(self):
+        module = load_example("byte_lm_profile_smoke")
+        validation_row = {
+            "runtime_device_report_available_backends": "wgpu",
+            "runtime_device_report_ready_backends": "none",
+        }
+        args = argparse.Namespace(
+            require_manifest_runtime_device_report_backend=["wgpu"],
+            require_manifest_runtime_device_report_ready_backend=["wgpu"],
+        )
+        gate_fields = module.runtime_device_report_gate_fields(
+            validation_row,
+            args,
+        )
+        self.assertTrue(gate_fields["runtime_device_report_required_backends_satisfied"])
+        self.assertFalse(
+            gate_fields["runtime_device_report_required_ready_backends_satisfied"]
+        )
+        self.assertEqual(
+            module.manifest_runtime_device_report_gate_failures(
+                validation_row,
+                args,
+            ),
+            ["runtime_device_report_not_ready:wgpu"],
+        )
+
+        missing_validation_row = {
+            "runtime_device_report_available_backends": "none",
+            "runtime_device_report_ready_backends": "none",
+        }
+        self.assertEqual(
+            module.manifest_runtime_device_report_gate_failures(
+                missing_validation_row,
+                args,
+            ),
+            ["runtime_device_report_missing:wgpu"],
+        )
+
+        old_argv = sys.argv
+        sys.argv = [
+            "byte_lm_profile_smoke.py",
+            "--validate-manifest-jsonl",
+            "/tmp/profile-smoke-real-hf/profile-smoke-manifest.jsonl",
+            "--require-manifest-runtime-device-report-ready-backend",
+            "wgpu",
+        ]
+        try:
+            parsed_args = module.parse_args()
+        finally:
+            sys.argv = old_argv
+
+        self.assertEqual(parsed_args.runtime_device_report_backends, ["wgpu"])
+        self.assertEqual(
+            parsed_args.require_manifest_runtime_device_report_backend,
+            [],
+        )
+        self.assertEqual(
+            parsed_args.require_manifest_runtime_device_report_ready_backend,
+            ["wgpu"],
         )
 
     def test_byte_lm_profile_smoke_runtime_contract_preset_expands_execution_gates(self):

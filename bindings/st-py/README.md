@@ -114,11 +114,14 @@ practical Transformers fine-tune readiness smoke, add
 `--ft-readiness-preset hf-wgpu-balanced`; this turns on checkpoint audit,
 Transformers trace, produced-manifest validation, same-process
 `transformers`/`torch`/`tokenizers` co-import evidence, the
-Transformers/trainer runtime bridge gate, and WGPU run-summary/promotion gates.
+Transformers/trainer runtime bridge gate, `describe_device("wgpu")` runtime
+readiness evidence, and WGPU run-summary/promotion gates.
 The recipe expands to `--runtime-contract-preset hf-runtime --wgpu-readiness-preset balanced`;
-use `hf-wgpu-observed` to only require WGPU metrics or `hf-wgpu-strict` for a
-high-readiness gate. Lower-level runtime/WGPU presets and explicit run,
-promotion, or manifest WGPU thresholds override the recipe defaults. Add
+use `hf-wgpu-observed` to only require WGPU metrics/report presence or
+`hf-wgpu-strict` for a high-readiness gate that also requires WGPU runtime-ready
+evidence. Lower-level runtime/WGPU presets, explicit
+`--runtime-device-report-backend`, and explicit run, promotion, or manifest
+WGPU thresholds override the recipe defaults. Add
 `--transformers-audit` when a local Transformers
 config/tokenizer should be co-imported into the same JSONL evidence without
 making Transformers mandatory.

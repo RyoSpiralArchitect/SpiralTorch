@@ -81,14 +81,18 @@ FT_READINESS_PRESETS = {
     "hf-wgpu-observed": {
         "runtime_contract_presets": ["hf-runtime"],
         "wgpu_readiness_presets": ["observed"],
+        "require_runtime_device_report": True,
     },
     "hf-wgpu-balanced": {
         "runtime_contract_presets": ["hf-runtime"],
         "wgpu_readiness_presets": ["balanced"],
+        "require_runtime_device_report": True,
     },
     "hf-wgpu-strict": {
         "runtime_contract_presets": ["hf-runtime"],
         "wgpu_readiness_presets": ["strict"],
+        "require_runtime_device_report": True,
+        "require_runtime_device_report_ready": True,
     },
 }
 WGPU_RUNTIME_DEVICE_REPORT_TRIGGER_ATTRS = (
@@ -120,9 +124,33 @@ def append_unique(values, additions):
     return list(dict.fromkeys([*(values or []), *(additions or [])]))
 
 
+def runtime_device_report_required_backends(source):
+    return list(
+        dict.fromkeys(
+            [
+                *(source_value(
+                    source,
+                    "require_manifest_runtime_device_report_backend",
+                    [],
+                )
+                or []),
+                *(source_value(
+                    source,
+                    "require_manifest_runtime_device_report_ready_backend",
+                    [],
+                )
+                or []),
+            ]
+        )
+    )
+
+
 def runtime_device_report_default_backends(source):
     if source_value(source, "skip_runtime_device_report", False):
         return []
+    required_backends = runtime_device_report_required_backends(source)
+    if required_backends:
+        return required_backends
     wgpu_requested = (
         bool(source_value(source, "ft_readiness_presets", []))
         or bool(source_value(source, "wgpu_readiness_presets", []))
@@ -934,6 +962,28 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--require-manifest-runtime-device-report-backend",
+        dest="require_manifest_runtime_device_report_backend",
+        action="append",
+        choices=["wgpu", "mps", "cpu", "cuda", "hip"],
+        default=[],
+        help=(
+            "Fail manifest validation unless a describe_device readiness report "
+            "for this backend is present and available. May be repeated."
+        ),
+    )
+    parser.add_argument(
+        "--require-manifest-runtime-device-report-ready-backend",
+        dest="require_manifest_runtime_device_report_ready_backend",
+        action="append",
+        choices=["wgpu", "mps", "cpu", "cuda", "hip"],
+        default=[],
+        help=(
+            "Fail manifest validation unless a describe_device readiness report "
+            "for this backend is present and runtime-ready. May be repeated."
+        ),
+    )
+    parser.add_argument(
         "--max-manifest-transformers-trace-top-token-changed-rows",
         type=int,
         default=None,
@@ -1190,6 +1240,12 @@ def parse_args():
     apply_wgpu_readiness_presets(args)
     apply_runtime_device_report_defaults(args)
     apply_runtime_contract_presets(args)
+    apply_runtime_device_report_gate_defaults(args)
+    if args.skip_runtime_device_report and runtime_device_report_required_backends(args):
+        parser.error(
+            "--skip-runtime-device-report cannot be combined with manifest "
+            "runtime device report gates"
+        )
     if (
         args.continue_manifest_jsonl is None
         and args.validate_manifest_jsonl is None
@@ -1231,6 +1287,8 @@ def parse_args():
             args.require_manifest_checkpoint_transformers_runtime_imports,
             bool(args.require_manifest_checkpoint_transformers_runtime_import),
             bool(args.require_manifest_checkpoint_transformers_runtime_import_preset),
+            bool(args.require_manifest_runtime_device_report_backend),
+            bool(args.require_manifest_runtime_device_report_ready_backend),
             args.max_manifest_transformers_trace_top_token_changed_rows is not None,
             args.max_manifest_transformers_trace_top_probability_regression
             is not None,
@@ -1537,6 +1595,41 @@ def apply_wgpu_readiness_presets(args):
 
 def apply_runtime_device_report_defaults(args):
     args.runtime_device_report_backends = normalize_runtime_device_report_backends(args)
+    return args
+
+
+def ft_readiness_preset_flag(source, key):
+    return any(
+        bool(FT_READINESS_PRESETS[preset].get(key))
+        for preset in source_value(source, "ft_readiness_presets", []) or []
+    )
+
+
+def runtime_device_report_gate_defaults_enabled(args):
+    validation_only = args.validate_manifest_jsonl is not None
+    continuation = args.continue_manifest_jsonl is not None
+    execution_mode = not validation_only and not continuation
+    if args.skip_runtime_device_report:
+        return False
+    if (execution_mode or continuation) and args.dry_run:
+        return False
+    return True
+
+
+def apply_runtime_device_report_gate_defaults(args):
+    if not runtime_device_report_gate_defaults_enabled(args):
+        return args
+    report_backends = normalize_runtime_device_report_backends(args)
+    if (
+        ft_readiness_preset_flag(args, "require_runtime_device_report")
+        and not args.require_manifest_runtime_device_report_backend
+    ):
+        args.require_manifest_runtime_device_report_backend = report_backends
+    if (
+        ft_readiness_preset_flag(args, "require_runtime_device_report_ready")
+        and not args.require_manifest_runtime_device_report_ready_backend
+    ):
+        args.require_manifest_runtime_device_report_ready_backend = report_backends
     return args
 
 
@@ -2647,6 +2740,16 @@ def profile_smoke_manifest_validation_row(path, row, promoted_rungs_jsonl, rung_
         "wgpu_readiness_presets": manifest_validation_csv_label(
             row.get("wgpu_readiness_presets")
         ),
+        "declared_require_manifest_runtime_device_report_backends": (
+            manifest_validation_csv_label(
+                row.get("require_manifest_runtime_device_report_backend") or []
+            )
+        ),
+        "declared_require_manifest_runtime_device_report_ready_backends": (
+            manifest_validation_csv_label(
+                row.get("require_manifest_runtime_device_report_ready_backend") or []
+            )
+        ),
         "declared_transformers_trace_runtime_import_presets": (
             manifest_validation_csv_label(declared_runtime_import_presets)
         ),
@@ -2827,6 +2930,65 @@ def runtime_device_report_validation_fields(row):
             recommendations
         ),
         "runtime_device_report_errors": manifest_validation_csv_label(errors),
+    }
+
+
+def manifest_required_runtime_device_report_backends(args):
+    if args is None:
+        return []
+    return list(
+        dict.fromkeys(
+            getattr(
+                args,
+                "require_manifest_runtime_device_report_backend",
+                [],
+            )
+            or []
+        )
+    )
+
+
+def manifest_required_runtime_device_report_ready_backends(args):
+    if args is None:
+        return []
+    return list(
+        dict.fromkeys(
+            getattr(
+                args,
+                "require_manifest_runtime_device_report_ready_backend",
+                [],
+            )
+            or []
+        )
+    )
+
+
+def runtime_device_report_gate_fields(validation_row, args):
+    required = manifest_required_runtime_device_report_backends(args)
+    ready_required = manifest_required_runtime_device_report_ready_backends(args)
+    available = manifest_validation_csv_set(
+        validation_row,
+        "runtime_device_report_available_backends",
+    )
+    ready = manifest_validation_csv_set(
+        validation_row,
+        "runtime_device_report_ready_backends",
+    )
+    return {
+        "runtime_device_report_required_backends": (
+            manifest_validation_csv_label(required)
+        ),
+        "runtime_device_report_required_ready_backends": (
+            manifest_validation_csv_label(ready_required)
+        ),
+        "runtime_device_report_required_backends_satisfied": (
+            None if not required else all(backend in available for backend in required)
+        ),
+        "runtime_device_report_required_ready_backends_satisfied": (
+            None
+            if not ready_required
+            else all(backend in ready for backend in ready_required)
+        ),
     }
 
 
@@ -3369,6 +3531,31 @@ def manifest_checkpoint_validation_gate_failures(validation_row, args):
     return failures
 
 
+def manifest_runtime_device_report_gate_failures(validation_row, args):
+    failures = []
+    if args is None:
+        return failures
+    required = manifest_required_runtime_device_report_backends(args)
+    ready_required = manifest_required_runtime_device_report_ready_backends(args)
+    available = manifest_validation_csv_set(
+        validation_row,
+        "runtime_device_report_available_backends",
+    )
+    ready = manifest_validation_csv_set(
+        validation_row,
+        "runtime_device_report_ready_backends",
+    )
+    for backend in required:
+        if backend not in available:
+            failures.append(f"runtime_device_report_missing:{backend}")
+    for backend in ready_required:
+        if backend not in available:
+            failures.append(f"runtime_device_report_missing:{backend}")
+        elif backend not in ready:
+            failures.append(f"runtime_device_report_not_ready:{backend}")
+    return list(dict.fromkeys(failures))
+
+
 def check_manifest_trace_validation_gates(validation_row, args):
     failures = manifest_trace_validation_gate_failures(validation_row, args)
     if args is None:
@@ -3515,6 +3702,33 @@ def check_manifest_checkpoint_validation_gates(validation_row, args):
     return True
 
 
+def check_manifest_runtime_device_report_gates(validation_row, args):
+    failures = manifest_runtime_device_report_gate_failures(validation_row, args)
+    if args is None:
+        return True
+    gate_requested = any(
+        [
+            bool(manifest_required_runtime_device_report_backends(args)),
+            bool(manifest_required_runtime_device_report_ready_backends(args)),
+            bool(failures),
+        ]
+    )
+    if not gate_requested:
+        return True
+    print(
+        "profile_smoke_manifest_gate "
+        f"gate=runtime_device_report "
+        f"failures={','.join(failures) if failures else 'none'} "
+        f"passed={not failures}"
+    )
+    if failures:
+        raise RuntimeError(
+            "profile smoke manifest runtime device report gate failed: "
+            + ", ".join(failures)
+        )
+    return True
+
+
 def validate_profile_smoke_manifest_file(path, validation_jsonl=None, args=None):
     row, promoted_rungs_jsonl, rung_rows = load_profile_smoke_manifest_with_rungs(path)
     validation_row = profile_smoke_manifest_validation_row(
@@ -3525,9 +3739,11 @@ def validate_profile_smoke_manifest_file(path, validation_jsonl=None, args=None)
     )
     validation_row.update(runtime_import_gate_fields(validation_row, args))
     validation_row.update(checkpoint_runtime_import_gate_fields(validation_row, args))
+    validation_row.update(runtime_device_report_gate_fields(validation_row, args))
     check_manifest_trace_validation_gates(validation_row, args)
     check_manifest_transformers_trainer_runtime_gates(validation_row, args)
     check_manifest_checkpoint_validation_gates(validation_row, args)
+    check_manifest_runtime_device_report_gates(validation_row, args)
     if validation_jsonl is not None:
         write_jsonl(validation_jsonl, [validation_row])
     output_parts = [
@@ -3551,6 +3767,14 @@ def validate_profile_smoke_manifest_file(path, validation_jsonl=None, args=None)
         f"{validation_row['promoted_final_run_summary_tensor_backend_requested_wgpu_component_fallback_top']}",
         "promoted_final_run_summary_wgpu_component_hit_top="
         f"{validation_row['promoted_final_run_summary_tensor_backend_requested_wgpu_component_hit_top']}",
+        "runtime_device_report_backends="
+        f"{validation_row['runtime_device_report_backends']}",
+        "runtime_device_report_ready_backends="
+        f"{validation_row['runtime_device_report_ready_backends']}",
+        "runtime_device_report_required_backends="
+        f"{validation_row['runtime_device_report_required_backends']}",
+        "runtime_device_report_required_ready_backends="
+        f"{validation_row['runtime_device_report_required_ready_backends']}",
     ]
     if validation_row["transformers_trace"]:
         output_parts.extend(
@@ -4175,6 +4399,15 @@ def continuation_plan_row(
             "runtime_device_reports": list(
                 source_row.get("runtime_device_reports") or []
             ),
+            "require_manifest_runtime_device_report_backend": list(
+                source_row.get("require_manifest_runtime_device_report_backend") or []
+            ),
+            "require_manifest_runtime_device_report_ready_backend": list(
+                source_row.get(
+                    "require_manifest_runtime_device_report_ready_backend"
+                )
+                or []
+            ),
             "min_aggregate_epoch_wgpu_hit_rate": source_row.get(
                 "min_aggregate_epoch_wgpu_hit_rate"
             ),
@@ -4425,6 +4658,17 @@ def profile_smoke_manifest_row(
         "runtime_device_reports": runtime_device_report_rows(
             args,
             describe_device=describe_device,
+        ),
+        "require_manifest_runtime_device_report_backend": list(
+            getattr(args, "require_manifest_runtime_device_report_backend", []) or []
+        ),
+        "require_manifest_runtime_device_report_ready_backend": list(
+            getattr(
+                args,
+                "require_manifest_runtime_device_report_ready_backend",
+                [],
+            )
+            or []
         ),
         "min_aggregate_epoch_wgpu_hit_rate": source_value(
             args,
