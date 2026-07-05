@@ -784,6 +784,176 @@ def test_summarize_trainer_trace_events_recovers_zspace_component_backends(
     ] == pytest.approx(1.0)
 
 
+def test_summarize_trainer_trace_events_recovers_runtime_component_backends(
+    tmp_path,
+) -> None:
+    _ensure_torch_stub()
+    st = importlib.import_module("spiraltorch")
+
+    trace_path = tmp_path / "trainer_trace.jsonl"
+    records = [
+        {
+            "idx": 1,
+            "event": {
+                "kind": "Custom",
+                "data": {
+                    "event_type": "TensorOpMeta",
+                    "data": {
+                        "op_name": "scale",
+                        "data": {
+                            "backend": "wgpu_dense",
+                            "requested_backend": "wgpu",
+                        },
+                    },
+                },
+            },
+        },
+        {
+            "idx": 2,
+            "event": {
+                "kind": "Custom",
+                "data": {
+                    "event_type": "TensorOpMeta",
+                    "data": {
+                        "op_name": "non_liner_forward",
+                        "data": {
+                            "backend": "composite",
+                            "requested_backend": "wgpu",
+                            "preactivation_backend": "wgpu",
+                            "activation_backend": "cpu",
+                            "geometry_backend": "cpu",
+                            "broadcast_backend": "wgpu",
+                        },
+                    },
+                },
+            },
+        },
+        {
+            "idx": 3,
+            "event": {
+                "kind": "Custom",
+                "data": {
+                    "event_type": "TensorOpMeta",
+                    "data": {
+                        "op_name": "dropout_forward",
+                        "data": {
+                            "backend": "composite",
+                            "requested_backend": "wgpu",
+                            "mask_backend": "wgpu",
+                            "rng_backend": "cpu",
+                        },
+                    },
+                },
+            },
+        },
+        {
+            "idx": 4,
+            "event": {
+                "kind": "Custom",
+                "data": {
+                    "event_type": "TensorOpMeta",
+                    "data": {
+                        "op_name": "dynamic_field_stochastic_schrodinger_forward",
+                        "data": {
+                            "backend": "hybrid",
+                            "requested_backend": "wgpu",
+                            "deterministic_backend": "wgpu",
+                            "rng_backend": "cpu",
+                        },
+                    },
+                },
+            },
+        },
+        {
+            "idx": 5,
+            "event": {
+                "kind": "Custom",
+                "data": {
+                    "event_type": "TensorOpMeta",
+                    "data": {
+                        "op_name": "dynamic_field_stochastic_schrodinger_backward",
+                        "data": {
+                            "backend": "hybrid",
+                            "requested_backend": "wgpu",
+                            "input_gradient_backend": "wgpu",
+                            "gradient_reduction_backend": "wgpu",
+                            "gradient_scale_backend": "cpu",
+                        },
+                    },
+                },
+            },
+        },
+        {
+            "idx": 6,
+            "event": {
+                "kind": "Custom",
+                "data": {
+                    "event_type": "TensorOpMeta",
+                    "data": {
+                        "op_name": "wave_scan_stack_forward",
+                        "data": {
+                            "backend": "composite",
+                            "requested_backend": "wgpu",
+                            "merge_backend": "cpu",
+                        },
+                    },
+                },
+            },
+        },
+        {
+            "idx": 7,
+            "event": {
+                "kind": "Custom",
+                "data": {
+                    "event_type": "TrainerStep",
+                    "data": {
+                        "step": 1,
+                        "metrics": {
+                            "step_time_ms": 0.5,
+                        },
+                    },
+                },
+            },
+        },
+    ]
+    trace_path.write_text(
+        "\n".join(json.dumps(record, ensure_ascii=False) for record in records),
+        encoding="utf-8",
+    )
+
+    summary = st.summarize_trainer_trace_events(trace_path)
+    metrics = summary["metrics"]
+    assert metrics["tensor_ops_total"]["last"] == pytest.approx(6.0)
+    assert metrics["tensor_backend_fallbacks"]["last"] == pytest.approx(4.0)
+    assert metrics["tensor_op_backend_non_liner_forward_preactivation_wgpu"][
+        "last"
+    ] == pytest.approx(1.0)
+    assert metrics["tensor_op_backend_non_liner_forward_activation_cpu"][
+        "last"
+    ] == pytest.approx(1.0)
+    assert metrics["tensor_op_backend_non_liner_forward_geometry_cpu"][
+        "last"
+    ] == pytest.approx(1.0)
+    assert metrics["tensor_op_backend_dropout_forward_mask_wgpu"][
+        "last"
+    ] == pytest.approx(1.0)
+    assert metrics["tensor_op_backend_dropout_forward_rng_cpu"][
+        "last"
+    ] == pytest.approx(1.0)
+    assert metrics[
+        "tensor_op_backend_dynamic_field_stochastic_schrodinger_forward_deterministic_wgpu"
+    ]["last"] == pytest.approx(1.0)
+    assert metrics[
+        "tensor_op_backend_dynamic_field_stochastic_schrodinger_forward_rng_cpu"
+    ]["last"] == pytest.approx(1.0)
+    assert metrics[
+        "tensor_op_backend_dynamic_field_stochastic_schrodinger_backward_gradient_scale_cpu"
+    ]["last"] == pytest.approx(1.0)
+    assert metrics["tensor_op_backend_wave_scan_stack_forward_merge_cpu"][
+        "last"
+    ] == pytest.approx(1.0)
+
+
 def test_summarize_trainer_trace_events_recovers_wgpu_runtime_fallbacks(tmp_path) -> None:
     _ensure_torch_stub()
     st = importlib.import_module("spiraltorch")
