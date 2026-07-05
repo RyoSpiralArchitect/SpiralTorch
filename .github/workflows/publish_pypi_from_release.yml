@@ -61,6 +61,10 @@ jobs:
               ;;
           esac
 
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
       - name: Download GitHub Release wheels
         env:
           GH_TOKEN: ${{ github.token }}
@@ -133,29 +137,12 @@ jobs:
       - name: Verify PyPI release and smoke install
         run: |
           set -euo pipefail
-          python - <<'PY'
-          import json
-          import os
-          import time
-          import urllib.request
-
-          version = os.environ["RELEASE_TAG"].lstrip("v")
-          expected = int(os.environ["EXPECTED_WHEELS"])
-          url = "https://pypi.org/pypi/spiraltorch/json"
-          deadline = time.time() + 240
-          count = 0
-          while time.time() < deadline:
-              with urllib.request.urlopen(url, timeout=30) as response:
-                  payload = json.load(response)
-              files = payload.get("releases", {}).get(version, [])
-              count = len(files)
-              print(f"pypi_files_for_{version}={count}", flush=True)
-              if count >= expected:
-                  break
-              time.sleep(10)
-          if count < expected:
-              raise SystemExit(f"PyPI exposed {count} file(s) for {version}; expected at least {expected}")
-          PY
+          python scripts/security/verify_pypi_release.py \
+            --version "${RELEASE_TAG#v}" \
+            --release-tag "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --expected-wheels "$EXPECTED_WHEELS" \
+            --timeout 240
 
           smoke_dir="$RUNNER_TEMP/spiraltorch-pypi-smoke"
           run_dir="$RUNNER_TEMP/spiraltorch-pypi-smoke-cwd"

@@ -545,6 +545,14 @@ gh workflow run release_wheels.yml \
 
 # Re-run integrity verification for that recovered release.
 gh workflow run verify-release.yml --ref main -f release_tag="$TAG"
+
+# Confirm the published PyPI wheels are byte-identical to the GitHub Release
+# wheel manifest. Add --require-latest when publishing the current release.
+python scripts/security/verify_pypi_release.py \
+  --version "$VERSION" \
+  --release-tag "$TAG" \
+  --expected-wheels 3 \
+  --require-latest
 ```
 
 Trusted publishing is intentionally explicit. For PyPI OIDC, configure the
