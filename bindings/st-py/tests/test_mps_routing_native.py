@@ -53,6 +53,18 @@ def test_describe_device_accepts_mps_backend() -> None:
 
     report = st.describe_device("mps", workgroup=300, cols=4096)
     assert report["backend"] == "mps"
+    assert report["requested_backend"] == "mps"
+    assert report["effective_backend"] in {"wgpu", "cpu"}
+    assert report["requested_backend_runtime_ready"] is False
+    assert report["requested_backend_placeholder"] is True
+    assert report["requested_backend_runtime_status"] in {
+        "feature_disabled",
+        "placeholder",
+    }
+    assert report["runtime_ready"] == report["effective_backend_runtime_ready"]
+    assert report["runtime_status"] == report["effective_backend_runtime_status"]
+    assert report["runtime_status"] in {"cpu", "kernel_wired", "feature_disabled"}
+    assert isinstance(report["runtime_recommendation"], str)
     assert report["status"] in {
         "build-feature-disabled",
         "unsupported-host",
@@ -104,6 +116,10 @@ def test_init_backend_and_session_expose_mps_preflight() -> None:
 
     report = session.device_preflight
     assert report["backend"] == "mps"
+    assert report["requested_backend"] == "mps"
+    assert report["effective_backend"] == session.effective_backend
+    assert report["runtime_ready"] == report["effective_backend_runtime_ready"]
+    assert report["requested_backend_runtime_ready"] is False
     assert report["planner_surrogate_backend"] == session.effective_backend
     assert report["planner_route"] == session.device
     assert report["backend_wired"] is False

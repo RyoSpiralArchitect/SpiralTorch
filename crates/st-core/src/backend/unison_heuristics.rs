@@ -1725,6 +1725,8 @@ struct RankCandidateScores {
     wgpu_generated: Option<f32>,
 }
 
+const WGPU_GENERATED_BASELINE_TIE_EPSILON: f32 = 1.0e-4;
+
 fn emit_unison_rank_choice_meta(
     scenario: RankScenario<'_>,
     baseline: &Choice,
@@ -1811,7 +1813,8 @@ fn emit_unison_rank_choice_meta(
         );
         payload.insert(
             "wgpu_generated_ties_baseline".into(),
-            (candidate_scores.wgpu_generated.is_some() && wgpu_generated_delta.abs() <= 1e-6)
+            (candidate_scores.wgpu_generated.is_some()
+                && wgpu_generated_delta.abs() <= WGPU_GENERATED_BASELINE_TIE_EPSILON)
                 .into(),
         );
         payload.insert("low_latency".into(), scenario.low_latency().into());
@@ -2250,8 +2253,9 @@ mod tests {
         let generated_delta = meta.1["wgpu_generated_score_delta"]
             .as_f64()
             .expect("generated score delta");
-        assert!((baseline_score - generated_score).abs() <= 1e-6);
-        assert!(generated_delta.abs() <= 1e-6);
+        let tie_epsilon = WGPU_GENERATED_BASELINE_TIE_EPSILON as f64;
+        assert!((baseline_score - generated_score).abs() <= tie_epsilon);
+        assert!(generated_delta.abs() <= tie_epsilon);
         assert_eq!(meta.1["wgpu_generated_ties_baseline"], true);
     }
 

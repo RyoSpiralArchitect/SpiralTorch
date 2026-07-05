@@ -111,13 +111,15 @@ safetensors, or Transformers hard dependencies of the binding. Start with
 run checkpoint preflight, LoRA/source/profile comparisons, promotion manifests,
 and dry-run continuation plans before scaling into heavier training runs. For a
 practical Transformers fine-tune readiness smoke, add
-`--runtime-contract-preset hf-runtime --wgpu-readiness-preset balanced`; this
-turns on checkpoint audit, Transformers trace, produced-manifest validation,
-same-process `transformers`/`torch`/`tokenizers` co-import evidence, the
+`--ft-readiness-preset hf-wgpu-balanced`; this turns on checkpoint audit,
+Transformers trace, produced-manifest validation, same-process
+`transformers`/`torch`/`tokenizers` co-import evidence, the
 Transformers/trainer runtime bridge gate, and WGPU run-summary/promotion gates.
-Use `--wgpu-readiness-preset observed` to only require WGPU metrics or `strict`
-for a high-readiness gate; explicit run, promotion, or manifest WGPU thresholds
-override the preset. Add `--transformers-audit` when a local Transformers
+The recipe expands to `--runtime-contract-preset hf-runtime --wgpu-readiness-preset balanced`;
+use `hf-wgpu-observed` to only require WGPU metrics or `hf-wgpu-strict` for a
+high-readiness gate. Lower-level runtime/WGPU presets and explicit run,
+promotion, or manifest WGPU thresholds override the recipe defaults. Add
+`--transformers-audit` when a local Transformers
 config/tokenizer should be co-imported into the same JSONL evidence without
 making Transformers mandatory.
 For pre-FT inference evidence, `examples/byte_lm_transformers_trace.py` loads a

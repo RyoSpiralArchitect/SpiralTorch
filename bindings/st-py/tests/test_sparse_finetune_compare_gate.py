@@ -3633,12 +3633,29 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             promotion_ready_min_epoch_wgpu_hit_rate=None,
             promotion_ready_max_epoch_wgpu_runtime_fallback_rate=0.15,
             promotion_ready_max_epoch_wgpu_component_fallback_rate=None,
+            ft_readiness_presets=["hf-wgpu-balanced"],
             wgpu_readiness_presets=["balanced"],
             skip_checkpoint_shape_audit=False,
             skip_checkpoint_preflight=False,
             compare_checkpoint_preflight_jsonl=out_dir / "checkpoint-preflight-baseline.jsonl",
             require_checkpoint_preflight_match=True,
         )
+
+        def describe_device(backend):
+            self.assertEqual(backend, "wgpu")
+            return {
+                "backend": "wgpu",
+                "requested_backend": "wgpu",
+                "effective_backend": "wgpu",
+                "runtime_status": "kernel_wired",
+                "runtime_ready": True,
+                "runtime_recommendation": "wgpu runtime ready",
+                "requested_backend_runtime_status": "kernel_wired",
+                "requested_backend_runtime_ready": True,
+                "effective_backend_runtime_status": "kernel_wired",
+                "effective_backend_runtime_ready": True,
+            }
+
         smoke_manifest_row = module.profile_smoke_manifest_row(
             args=smoke_args,
             out_dir=out_dir,
@@ -3661,13 +3678,41 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             promoted_rungs=2,
             promoted_rungs_jsonl=out_dir / "promoted-rungs.jsonl",
             promoted_artifacts=[first, second],
+            describe_device=describe_device,
         )
         self.assertEqual(smoke_manifest_row["row_type"], "profile_smoke_manifest")
         self.assertEqual(smoke_manifest_row["checkpoint_source"], "external")
         self.assertEqual(smoke_manifest_row["source_label"], "llama-3.2-3b")
         self.assertEqual(smoke_manifest_row["cases"], ["adapter_ja", "route_cats"])
         self.assertEqual(smoke_manifest_row["promoted_ft_epochs"], [2, 3])
+        self.assertEqual(
+            smoke_manifest_row["ft_readiness_presets"],
+            ["hf-wgpu-balanced"],
+        )
         self.assertEqual(smoke_manifest_row["wgpu_readiness_presets"], ["balanced"])
+        self.assertEqual(smoke_manifest_row["runtime_device_report_backends"], ["wgpu"])
+        self.assertEqual(len(smoke_manifest_row["runtime_device_reports"]), 1)
+        runtime_report = smoke_manifest_row["runtime_device_reports"][0]
+        self.assertTrue(runtime_report["available"])
+        self.assertTrue(runtime_report["runtime_ready"])
+        self.assertEqual(runtime_report["runtime_status"], "kernel_wired")
+        self.assertEqual(runtime_report["effective_backend"], "wgpu")
+        runtime_validation = module.runtime_device_report_validation_fields(
+            smoke_manifest_row
+        )
+        self.assertEqual(runtime_validation["runtime_device_report_backends"], "wgpu")
+        self.assertEqual(
+            runtime_validation["runtime_device_report_available_backends"],
+            "wgpu",
+        )
+        self.assertEqual(
+            runtime_validation["runtime_device_report_ready_backends"],
+            "wgpu",
+        )
+        self.assertEqual(
+            runtime_validation["runtime_device_report_statuses"],
+            "wgpu=kernel_wired",
+        )
         self.assertEqual(smoke_manifest_row["min_aggregate_epoch_wgpu_hit_rate"], 0.8)
         self.assertEqual(
             smoke_manifest_row[
@@ -6448,6 +6493,133 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             Path("/tmp/profile-smoke-real-hf/profile-smoke-manifest-validation.jsonl"),
         )
 
+    def test_byte_lm_profile_smoke_ft_readiness_preset_expands_contract_and_wgpu_defaults(
+        self,
+    ):
+        module = load_example("byte_lm_profile_smoke")
+        old_argv = sys.argv
+        sys.argv = [
+            "byte_lm_profile_smoke.py",
+            "--out-dir",
+            "/tmp/profile-smoke-real-hf",
+            "--hf-state-dict",
+            "/models/llama",
+            "--ft-readiness-preset",
+            "hf-wgpu-balanced",
+        ]
+        try:
+            args = module.parse_args()
+        finally:
+            sys.argv = old_argv
+
+        self.assertEqual(args.ft_readiness_presets, ["hf-wgpu-balanced"])
+        self.assertEqual(args.runtime_contract_presets, ["hf-runtime"])
+        self.assertEqual(args.wgpu_readiness_presets, ["balanced"])
+        self.assertEqual(args.runtime_device_report_backends, ["wgpu"])
+        self.assertTrue(args.transformers_audit)
+        self.assertTrue(args.transformers_trace)
+        self.assertTrue(args.validate_produced_manifest)
+        self.assertEqual(
+            args.checkpoint_transformers_runtime_import_presets,
+            ["hf-runtime"],
+        )
+        self.assertTrue(args.require_checkpoint_transformers_runtime_imports)
+        self.assertEqual(
+            args.require_checkpoint_transformers_runtime_import_preset,
+            ["hf-runtime"],
+        )
+        self.assertEqual(
+            args.transformers_trace_runtime_import_presets,
+            ["hf-runtime"],
+        )
+        self.assertTrue(args.require_transformers_trace_runtime_imports)
+        self.assertEqual(
+            args.require_transformers_trace_runtime_import_preset,
+            ["hf-runtime"],
+        )
+        self.assertEqual(args.min_run_epoch_wgpu_hit_rate, 0.5)
+        self.assertEqual(args.max_run_epoch_wgpu_runtime_fallback_rate, 0.5)
+        self.assertEqual(args.max_run_epoch_wgpu_component_fallback_rate, 0.5)
+        self.assertEqual(args.max_run_epoch_wgpu_hit_rate_regression, 0.0)
+        self.assertEqual(
+            args.max_run_epoch_wgpu_runtime_fallback_rate_regression,
+            0.0,
+        )
+        self.assertEqual(
+            args.max_run_epoch_wgpu_component_fallback_rate_regression,
+            0.0,
+        )
+        self.assertTrue(args.require_manifest_transformers_trainer_runtime_bridge)
+        self.assertEqual(args.min_manifest_transformers_trainer_wgpu_hit_rate, 0.5)
+        self.assertEqual(
+            args.max_manifest_transformers_trainer_wgpu_runtime_fallback_rate,
+            0.5,
+        )
+        self.assertEqual(
+            args.max_manifest_transformers_trainer_wgpu_component_fallback_rate,
+            0.5,
+        )
+
+        sys.argv = [
+            "byte_lm_profile_smoke.py",
+            "--out-dir",
+            "/tmp/profile-smoke-real-hf",
+            "--hf-state-dict",
+            "/models/llama",
+            "--ft-readiness-preset",
+            "hf-wgpu-balanced",
+            "--runtime-contract-preset",
+            "torch-transformers",
+            "--wgpu-readiness-preset",
+            "strict",
+            "--runtime-device-report-backend",
+            "mps",
+            "--min-run-epoch-wgpu-hit-rate",
+            "0.82",
+        ]
+        try:
+            explicit_args = module.parse_args()
+        finally:
+            sys.argv = old_argv
+
+        self.assertEqual(explicit_args.ft_readiness_presets, ["hf-wgpu-balanced"])
+        self.assertEqual(
+            explicit_args.runtime_contract_presets,
+            ["torch-transformers"],
+        )
+        self.assertEqual(explicit_args.wgpu_readiness_presets, ["strict"])
+        self.assertEqual(explicit_args.runtime_device_report_backends, ["mps"])
+        self.assertEqual(
+            explicit_args.checkpoint_transformers_runtime_import_presets,
+            ["torch-transformers"],
+        )
+        self.assertEqual(explicit_args.min_run_epoch_wgpu_hit_rate, 0.82)
+        self.assertEqual(
+            explicit_args.max_run_epoch_wgpu_runtime_fallback_rate,
+            0.1,
+        )
+        self.assertEqual(
+            explicit_args.max_run_epoch_wgpu_component_fallback_rate,
+            0.1,
+        )
+
+        sys.argv = [
+            "byte_lm_profile_smoke.py",
+            "--out-dir",
+            "/tmp/profile-smoke-real-hf",
+            "--hf-state-dict",
+            "/models/llama",
+            "--ft-readiness-preset",
+            "hf-wgpu-balanced",
+            "--skip-runtime-device-report",
+        ]
+        try:
+            skip_report_args = module.parse_args()
+        finally:
+            sys.argv = old_argv
+
+        self.assertEqual(skip_report_args.runtime_device_report_backends, [])
+
     def test_byte_lm_profile_smoke_wgpu_readiness_preset_expands_gates(self):
         module = load_example("byte_lm_profile_smoke")
         old_argv = sys.argv
@@ -7517,10 +7689,8 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             "/models/llama",
             "--key-preset",
             "auto",
-            "--runtime-contract-preset",
-            "hf-runtime",
-            "--wgpu-readiness-preset",
-            "balanced",
+            "--ft-readiness-preset",
+            "hf-wgpu-balanced",
             "--skip-promoted-follow-up",
             "--dry-run",
         ]
