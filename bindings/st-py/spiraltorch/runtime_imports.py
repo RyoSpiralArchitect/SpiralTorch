@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import argparse
 import importlib
 import json
+import sys
 from collections.abc import Iterable, Mapping
 
 __all__ = [
@@ -32,6 +34,8 @@ __all__ = [
     "runtime_import_probe",
     "runtime_import_probe_fields",
     "runtime_import_probe_rows",
+    "runtime_import_preflight_report",
+    "runtime_import_preflight_summary_lines",
     "runtime_import_presets_from_source",
     "runtime_import_presets_from_args",
     "runtime_imports_from_args",
@@ -610,3 +614,190 @@ def runtime_import_requirement_failures(
         ):
             failures.append(f"{failure_prefix}_preset_unsatisfied:{preset}")
     return failures
+
+
+def runtime_import_preflight_report(
+    *,
+    runtime_imports: object = None,
+    runtime_import_presets: object = None,
+    required_runtime_imports: object = None,
+    required_runtime_import_presets: object = None,
+    require_all: bool = False,
+    preset_modules: Mapping[str, Iterable[str]] | None = None,
+) -> dict[str, object]:
+    requested_imports = unique_stripped_values(runtime_imports)
+    requested_presets = unique_stripped_values(runtime_import_presets)
+    required_imports = unique_stripped_values(required_runtime_imports)
+    required_presets = unique_stripped_values(required_runtime_import_presets)
+    if require_all:
+        required_imports = unique_stripped_values(
+            [*requested_imports, *required_imports]
+        )
+        required_presets = unique_stripped_values(
+            [*requested_presets, *required_presets]
+        )
+
+    report = runtime_import_probe_fields(
+        {
+            "runtime_imports": requested_imports,
+            "runtime_import_presets": requested_presets,
+            "required_runtime_imports": required_imports,
+            "required_runtime_import_presets": required_presets,
+        },
+        preset_modules=preset_modules,
+    )
+    failures = runtime_import_requirement_failures(report)
+    report.update(
+        {
+            "runtime_import_preflight_required": bool(
+                required_imports or required_presets
+            ),
+            "runtime_import_preflight_require_all": bool(require_all),
+            "runtime_import_preflight_failures": csv_label(failures),
+            "runtime_import_preflight_passed": not failures,
+        }
+    )
+    return report
+
+
+def runtime_import_preflight_summary_lines(
+    report: Mapping[str, object],
+) -> list[str]:
+    lines = [
+        (
+            "runtime_import_preflight "
+            f"passed={report.get('runtime_import_preflight_passed')} "
+            f"required={report.get('runtime_import_preflight_required')} "
+            f"require_all={report.get('runtime_import_preflight_require_all')}"
+        ),
+        (
+            "runtime_imports "
+            f"requested={report.get('runtime_imports_requested', 'none')} "
+            f"imported={report.get('runtime_imports_imported', 'none')} "
+            f"failed={report.get('runtime_imports_failed', 'none')} "
+            f"all_ok={report.get('runtime_imports_all_ok')}"
+        ),
+        (
+            "runtime_import_presets "
+            f"requested={report.get('runtime_import_presets', 'none')} "
+            f"satisfied={report.get('runtime_import_presets_satisfied', 'none')} "
+            f"failed={report.get('runtime_import_presets_failed', 'none')} "
+            "missing_modules="
+            f"{report.get('runtime_import_preset_missing_modules', 'none')}"
+        ),
+    ]
+    install_hints = str(report.get("runtime_import_failed_install_hints", "none"))
+    if install_hints and install_hints != "none":
+        lines.append(f"runtime_import_failed_install_hints {install_hints}")
+    failures = str(report.get("runtime_import_preflight_failures", "none"))
+    if failures and failures != "none":
+        lines.append(f"runtime_import_preflight_failures {failures}")
+    return lines
+
+
+def _runtime_import_arg_parser() -> argparse.ArgumentParser:
+    preset_choices = sorted(TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS)
+    parser = argparse.ArgumentParser(
+        description=(
+            "Probe optional Python runtime imports for SpiralTorch interop and "
+            "fine-tuning handoffs."
+        ),
+    )
+    parser.add_argument(
+        "--runtime-import",
+        "--import",
+        dest="runtime_imports",
+        action="append",
+        default=[],
+        help="Python module to import. May be repeated.",
+    )
+    parser.add_argument(
+        "--runtime-import-preset",
+        "--preset",
+        dest="runtime_import_presets",
+        action="append",
+        choices=preset_choices,
+        default=[],
+        help=(
+            "Named import bundle to probe. Use hf-runtime for Transformers, "
+            "hf-finetune for datasets/accelerate/safetensors, or hf-peft for "
+            "PEFT adapter workflows."
+        ),
+    )
+    parser.add_argument(
+        "--require",
+        dest="require_all",
+        action="store_true",
+        help="Fail unless every requested import and preset is satisfied.",
+    )
+    parser.add_argument(
+        "--require-runtime-import",
+        "--require-import",
+        dest="required_runtime_imports",
+        action="append",
+        default=[],
+        help="Module that must import successfully. May be repeated.",
+    )
+    parser.add_argument(
+        "--require-runtime-import-preset",
+        "--require-preset",
+        dest="required_runtime_import_presets",
+        action="append",
+        choices=preset_choices,
+        default=[],
+        help="Preset that must be satisfied. May be repeated.",
+    )
+    parser.add_argument(
+        "--list-presets",
+        action="store_true",
+        help="Print available preset expansions and exit.",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Print machine-readable JSON instead of summary lines.",
+    )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Suppress human-readable output; exit code still reflects gates.",
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = _runtime_import_arg_parser()
+    args = parser.parse_args(argv)
+    if args.list_presets:
+        if args.json:
+            print(
+                json.dumps(
+                    TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )
+            )
+        elif not args.quiet:
+            for row in runtime_import_preset_modules(
+                sorted(TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS)
+            ):
+                print(row)
+        return 0
+
+    report = runtime_import_preflight_report(
+        runtime_imports=args.runtime_imports,
+        runtime_import_presets=args.runtime_import_presets,
+        required_runtime_imports=args.required_runtime_imports,
+        required_runtime_import_presets=args.required_runtime_import_presets,
+        require_all=args.require_all,
+    )
+    if args.json:
+        print(json.dumps(report, ensure_ascii=False, sort_keys=True))
+    elif not args.quiet:
+        for line in runtime_import_preflight_summary_lines(report):
+            print(line)
+    return 0 if report["runtime_import_preflight_passed"] else 1
+
+
+if __name__ == "__main__":  # pragma: no cover - exercised by CLI smoke.
+    raise SystemExit(main(sys.argv[1:]))
