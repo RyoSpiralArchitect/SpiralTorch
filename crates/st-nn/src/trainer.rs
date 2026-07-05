@@ -770,6 +770,10 @@ struct TensorBackendStepTrace {
     by_op: HashMap<String, usize>,
     by_op_backend: HashMap<String, usize>,
     by_op_kernel_backend: HashMap<String, usize>,
+    requested_wgpu_component_hits: usize,
+    requested_wgpu_component_fallbacks: usize,
+    requested_wgpu_component_hits_by_op_backend: HashMap<String, usize>,
+    requested_wgpu_component_fallbacks_by_op_backend: HashMap<String, usize>,
     embedding_tokens: usize,
     embedding_unique_token_indices: usize,
     embedding_repeated_token_indices: usize,
@@ -833,6 +837,24 @@ impl TensorBackendStepTrace {
             .by_op_backend
             .entry(format!("{op}_{field}_{sub_backend}"))
             .or_default() += 1;
+        if count_fallback && requested_backend == Some("wgpu") {
+            let key = format!("{op}_{field}_{sub_backend}");
+            if sub_backend == "wgpu" {
+                self.requested_wgpu_component_hits =
+                    self.requested_wgpu_component_hits.saturating_add(1);
+                *self
+                    .requested_wgpu_component_hits_by_op_backend
+                    .entry(key)
+                    .or_default() += 1;
+            } else if !is_metadata_only_backend(&sub_backend) {
+                self.requested_wgpu_component_fallbacks =
+                    self.requested_wgpu_component_fallbacks.saturating_add(1);
+                *self
+                    .requested_wgpu_component_fallbacks_by_op_backend
+                    .entry(key)
+                    .or_default() += 1;
+            }
+        }
         if count_fallback {
             if let Some(requested) = requested_backend {
                 if requested != "auto"
@@ -1204,6 +1226,31 @@ impl TensorBackendStepTrace {
                     count as f64,
                 );
             }
+            let requested_wgpu_component_total = self
+                .requested_wgpu_component_hits
+                .saturating_add(self.requested_wgpu_component_fallbacks);
+            if requested_wgpu_component_total > 0 {
+                extra.insert(
+                    "tensor_backend_requested_wgpu_component_hits".to_string(),
+                    self.requested_wgpu_component_hits as f64,
+                );
+                extra.insert(
+                    "tensor_backend_requested_wgpu_component_fallbacks".to_string(),
+                    self.requested_wgpu_component_fallbacks as f64,
+                );
+                for (op_backend, count) in self.requested_wgpu_component_hits_by_op_backend {
+                    extra.insert(
+                        format!("tensor_op_backend_requested_wgpu_component_hit_{op_backend}"),
+                        count as f64,
+                    );
+                }
+                for (op_backend, count) in self.requested_wgpu_component_fallbacks_by_op_backend {
+                    extra.insert(
+                        format!("tensor_op_backend_requested_wgpu_component_fallback_{op_backend}"),
+                        count as f64,
+                    );
+                }
+            }
         }
 
         if self.embedding_tokens > 0 {
@@ -1512,6 +1559,8 @@ pub struct EpochTensorBackendStats {
     pub kernel_backend_wgpu_dense: usize,
     pub kernel_backend_simd: usize,
     pub kernel_backend_other: usize,
+    pub requested_wgpu_component_hits: usize,
+    pub requested_wgpu_component_fallbacks: usize,
     pub embedding_tokens: usize,
     pub embedding_unique_token_indices: usize,
     pub embedding_repeated_token_indices: usize,
@@ -1522,6 +1571,12 @@ impl EpochTensorBackendStats {
     fn accumulate_trace(&mut self, trace: &TensorBackendStepTrace) {
         self.ops_total = self.ops_total.saturating_add(trace.total);
         self.fallbacks = self.fallbacks.saturating_add(trace.fallbacks);
+        self.requested_wgpu_component_hits = self
+            .requested_wgpu_component_hits
+            .saturating_add(trace.requested_wgpu_component_hits);
+        self.requested_wgpu_component_fallbacks = self
+            .requested_wgpu_component_fallbacks
+            .saturating_add(trace.requested_wgpu_component_fallbacks);
         self.meta_events = self.meta_events.saturating_add(trace.meta_events);
         self.meta_non_finite_sentinels = self.meta_non_finite_sentinels.saturating_add(
             trace
@@ -1576,6 +1631,14 @@ impl EpochTensorBackendStats {
         extra.insert(
             "epoch_tensor_backend_fallbacks".to_string(),
             self.fallbacks as f64,
+        );
+        extra.insert(
+            "epoch_tensor_backend_requested_wgpu_component_hits".to_string(),
+            self.requested_wgpu_component_hits as f64,
+        );
+        extra.insert(
+            "epoch_tensor_backend_requested_wgpu_component_fallbacks".to_string(),
+            self.requested_wgpu_component_fallbacks as f64,
         );
         extra.insert(
             "epoch_tensor_meta_events".to_string(),
@@ -10149,11 +10212,50 @@ mod tests {
         trace
             .validate_expected_backend(BackendKind::Wgpu)
             .expect("runtime component metadata has WGPU kernel evidence");
+        let mut epoch = EpochTensorBackendStats::default();
+        epoch.accumulate_trace(&trace);
+        assert_eq!(epoch.requested_wgpu_component_hits, 6);
+        assert_eq!(epoch.requested_wgpu_component_fallbacks, 4);
+        let mut epoch_extra = HashMap::new();
+        epoch.write_extra(&mut epoch_extra);
+        assert_eq!(
+            epoch_extra
+                .get("epoch_tensor_backend_requested_wgpu_component_hits")
+                .copied(),
+            Some(6.0)
+        );
+        assert_eq!(
+            epoch_extra
+                .get("epoch_tensor_backend_requested_wgpu_component_fallbacks")
+                .copied(),
+            Some(4.0)
+        );
+
         let mut extra = HashMap::new();
         trace.write_extra(&mut extra);
         assert_eq!(
             extra
+                .get("tensor_backend_requested_wgpu_component_hits")
+                .copied(),
+            Some(6.0)
+        );
+        assert_eq!(
+            extra
+                .get("tensor_backend_requested_wgpu_component_fallbacks")
+                .copied(),
+            Some(4.0)
+        );
+        assert_eq!(
+            extra
                 .get("tensor_op_backend_non_liner_forward_preactivation_wgpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get(
+                    "tensor_op_backend_requested_wgpu_component_hit_non_liner_forward_preactivation_wgpu"
+                )
                 .copied(),
             Some(1.0)
         );
@@ -10165,7 +10267,23 @@ mod tests {
         );
         assert_eq!(
             extra
+                .get(
+                    "tensor_op_backend_requested_wgpu_component_fallback_non_liner_forward_activation_cpu"
+                )
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
                 .get("tensor_op_backend_non_liner_forward_geometry_cpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get(
+                    "tensor_op_backend_requested_wgpu_component_fallback_non_liner_forward_geometry_cpu"
+                )
                 .copied(),
             Some(1.0)
         );
@@ -10177,13 +10295,30 @@ mod tests {
         );
         assert_eq!(
             extra
-                .get("tensor_op_backend_dropout_forward_rng_cpu")
+                .get("tensor_op_backend_requested_wgpu_component_hit_dropout_forward_mask_wgpu")
                 .copied(),
             Some(1.0)
         );
         assert_eq!(
             extra
+                .get("tensor_op_backend_dropout_forward_rng_cpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert!(extra
+            .get("tensor_op_backend_requested_wgpu_component_fallback_dropout_forward_rng_cpu")
+            .is_none());
+        assert_eq!(
+            extra
                 .get("tensor_op_backend_dynamic_field_stochastic_schrodinger_forward_deterministic_wgpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get(
+                    "tensor_op_backend_requested_wgpu_component_hit_dynamic_field_stochastic_schrodinger_forward_deterministic_wgpu"
+                )
                 .copied(),
             Some(1.0)
         );
@@ -10193,6 +10328,13 @@ mod tests {
                 .copied(),
             Some(1.0)
         );
+        assert!(
+            extra
+                .get(
+                    "tensor_op_backend_requested_wgpu_component_fallback_dynamic_field_stochastic_schrodinger_forward_rng_cpu"
+                )
+                .is_none()
+        );
         assert_eq!(
             extra
                 .get("tensor_op_backend_dynamic_field_stochastic_schrodinger_backward_gradient_scale_cpu")
@@ -10201,7 +10343,23 @@ mod tests {
         );
         assert_eq!(
             extra
+                .get(
+                    "tensor_op_backend_requested_wgpu_component_fallback_dynamic_field_stochastic_schrodinger_backward_gradient_scale_cpu"
+                )
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
                 .get("tensor_op_backend_wave_scan_stack_forward_merge_cpu")
+                .copied(),
+            Some(1.0)
+        );
+        assert_eq!(
+            extra
+                .get(
+                    "tensor_op_backend_requested_wgpu_component_fallback_wave_scan_stack_forward_merge_cpu"
+                )
                 .copied(),
             Some(1.0)
         );
