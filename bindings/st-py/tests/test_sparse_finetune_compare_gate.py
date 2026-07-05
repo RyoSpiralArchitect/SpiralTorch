@@ -4043,14 +4043,16 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         direct_required_runtime_import_presets_unsatisfied="none",
         direct_required_runtime_import_presets_passed=None,
     ):
+        from spiraltorch.runtime_imports import (
+            runtime_import_preset_missing_modules_label,
+            runtime_import_preset_modules_label,
+            runtime_import_preset_status_rows,
+        )
+
         trace_jsonl = out_dir / "transformers-trace.jsonl"
         baseline_trace_jsonl = out_dir / "transformers-trace-baseline.jsonl"
         trace_compare_jsonl = out_dir / "transformers-trace-compare.jsonl"
-        preset_module_map = {
-            "transformers": ["transformers"],
-            "torch-transformers": ["transformers", "torch"],
-            "hf-runtime": ["transformers", "torch", "tokenizers"],
-        }
+        preset_module_map = module.TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS
         requested_presets = [
             preset
             for preset in str(runtime_import_presets).split(",")
@@ -4064,49 +4066,43 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
             runtime_import_presets_failed = (
                 "none" if runtime_imports_all_ok else runtime_import_presets
             )
-        if runtime_import_preset_missing_modules is None:
-            runtime_import_preset_missing_modules = (
-                "none"
-                if runtime_imports_all_ok
-                else ",".join(
-                    f"{preset}=torch" for preset in requested_presets
-                )
-                or "none"
-            )
-        satisfied_set = {
-            preset
-            for preset in str(runtime_import_presets_satisfied).split(",")
-            if preset and preset != "none"
-        }
         failed_set = {
             preset
             for preset in str(runtime_import_presets_failed).split(",")
             if preset and preset != "none"
         }
-        runtime_import_preset_status_rows = []
+        missing_modules = set()
         for preset in requested_presets:
             modules = preset_module_map.get(preset, [])
-            missing = ["torch"] if preset in failed_set and "torch" in modules else []
-            runtime_import_preset_status_rows.append(
-                {
-                    "preset": preset,
-                    "modules": modules,
-                    "imported": [
-                        module_name
-                        for module_name in modules
-                        if module_name not in missing
-                    ],
-                    "missing": missing,
-                    "passed": preset in satisfied_set,
-                }
-            )
-        runtime_import_preset_modules = (
-            ",".join(
-                f"{preset}={'|'.join(preset_module_map.get(preset, [])) or 'none'}"
-                for preset in requested_presets
-            )
-            or "none"
+            if preset in failed_set and "torch" in modules:
+                missing_modules.add("torch")
+        preset_probe_rows = []
+        seen_modules = set()
+        for preset in requested_presets:
+            modules = preset_module_map.get(preset, [])
+            for module_name in modules:
+                if module_name not in seen_modules:
+                    seen_modules.add(module_name)
+                    preset_probe_rows.append(
+                        {
+                            "module": module_name,
+                            "imported": module_name not in missing_modules,
+                        }
+                    )
+        runtime_import_preset_status = runtime_import_preset_status_rows(
+            requested_presets,
+            preset_probe_rows,
+            preset_modules=preset_module_map,
         )
+        runtime_import_preset_modules = runtime_import_preset_modules_label(
+            runtime_import_preset_status
+        )
+        if runtime_import_preset_missing_modules is None:
+            runtime_import_preset_missing_modules = (
+                runtime_import_preset_missing_modules_label(
+                    runtime_import_preset_status
+                )
+            )
         if declared_runtime_import_presets is None:
             declared_runtime_import_presets = ["torch-transformers"]
         smoke_args = argparse.Namespace(
@@ -4249,7 +4245,7 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
                                 sort_keys=True,
                             ),
                             "runtime_import_preset_status_json": json.dumps(
-                                runtime_import_preset_status_rows,
+                                runtime_import_preset_status,
                                 sort_keys=True,
                             ),
                             "required_runtime_imports": direct_required_runtime_imports,
@@ -5160,6 +5156,8 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         profile_module = load_example("byte_lm_profile_smoke")
         trace_module = load_example("byte_lm_transformers_trace")
         from spiraltorch.runtime_imports import (
+            runtime_import_preset_module_map,
+            runtime_import_preset_module_rows,
             runtime_import_preset_missing_modules_label,
             runtime_import_preset_modules_label,
             runtime_import_preset_status_rows,
@@ -5201,6 +5199,24 @@ class SparseFineTuneCompareGateTests(unittest.TestCase):
         self.assertEqual(
             runtime_import_preset_missing_modules_label(status_rows),
             "hf-runtime=tokenizers",
+        )
+        self.assertEqual(
+            runtime_import_preset_module_map(
+                "torch-transformers=transformers|torch,"
+                "hf-runtime=transformers|torch|tokenizers"
+            ),
+            {
+                "torch-transformers": "torch-transformers=transformers|torch",
+                "hf-runtime": "hf-runtime=transformers|torch|tokenizers",
+            },
+        )
+        self.assertEqual(
+            runtime_import_preset_module_rows(
+                "torch-transformers=transformers|torch,"
+                "hf-runtime=transformers|torch|tokenizers",
+                ["hf-runtime"],
+            ),
+            ["hf-runtime=transformers|torch|tokenizers"],
         )
         self.assertFalse(status_rows[0]["passed"])
         gate_fields = runtime_import_required_gate_fields(
