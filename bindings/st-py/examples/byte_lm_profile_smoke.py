@@ -12,10 +12,26 @@ DEFAULT_OUT_DIR = Path("/tmp/spiraltorch-profile-smoke")
 BYTE_LM_VOCAB = 256
 BYTE_LM_HIDDEN = 24
 TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS = {
-    "transformers",
-    "torch-transformers",
-    "hf-runtime",
+    "transformers": ["transformers"],
+    "torch-transformers": ["transformers", "torch"],
+    "hf-runtime": ["transformers", "torch", "tokenizers"],
 }
+
+
+def csv_values(value):
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple, set)):
+        return [str(item) for item in value if str(item)]
+    return [part for part in str(value).split(",") if part and part != "none"]
+
+
+def transformers_trace_runtime_import_preset_modules(presets):
+    rows = []
+    for preset in dict.fromkeys(csv_values(presets)):
+        modules = TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS.get(preset, [])
+        rows.append(f"{preset}={'|'.join(modules) or 'none'}")
+    return rows
 
 
 def parse_args():
@@ -1371,6 +1387,18 @@ def transformers_trace_validation_fields(row):
 def profile_smoke_manifest_validation_row(path, row, promoted_rungs_jsonl, rung_rows):
     promoted_rungs = manifest_int(row, "promoted_rungs", 0)
     promoted_epochs = manifest_promoted_ft_epochs(row)
+    declared_runtime_import_presets = csv_values(
+        row.get("transformers_trace_runtime_import_presets")
+    )
+    declared_runtime_import_preset_modules = row.get(
+        "declared_transformers_trace_runtime_import_preset_modules"
+    )
+    if declared_runtime_import_preset_modules is None:
+        declared_runtime_import_preset_modules = (
+            transformers_trace_runtime_import_preset_modules(
+                declared_runtime_import_presets
+            )
+        )
     validation = {
         "row_type": "profile_smoke_manifest_validation",
         "valid": True,
@@ -1384,9 +1412,10 @@ def profile_smoke_manifest_validation_row(path, row, promoted_rungs_jsonl, rung_
         "profiles": list(row.get("profiles") or []),
         "promotion_metric": row.get("promotion_metric"),
         "declared_transformers_trace_runtime_import_presets": (
-            manifest_validation_csv_label(
-                row.get("transformers_trace_runtime_import_presets") or []
-            )
+            manifest_validation_csv_label(declared_runtime_import_presets)
+        ),
+        "declared_transformers_trace_runtime_import_preset_modules": (
+            manifest_validation_csv_label(declared_runtime_import_preset_modules)
         ),
         "promoted_rungs": promoted_rungs,
         "promoted_ft_epochs": promoted_epochs,
@@ -1840,6 +1869,8 @@ def validate_profile_smoke_manifest_file(path, validation_jsonl=None, args=None)
                 f"{validation_row['transformers_trace_runtime_imports_all_ok']}",
                 "declared_transformers_trace_runtime_import_presets="
                 f"{validation_row['declared_transformers_trace_runtime_import_presets']}",
+                "declared_transformers_trace_runtime_import_preset_modules="
+                f"{validation_row['declared_transformers_trace_runtime_import_preset_modules']}",
                 "transformers_trace_runtime_import_presets="
                 f"{validation_row['transformers_trace_runtime_import_presets']}",
                 "transformers_trace_runtime_import_presets_satisfied="
@@ -2210,6 +2241,18 @@ def continuation_plan_row(
 
 
 def trace_policy_fields(source):
+    runtime_import_presets = csv_values(
+        source.get("transformers_trace_runtime_import_presets")
+    )
+    declared_preset_modules = source.get(
+        "declared_transformers_trace_runtime_import_preset_modules"
+    )
+    if declared_preset_modules is None:
+        declared_preset_modules = transformers_trace_runtime_import_preset_modules(
+            runtime_import_presets
+        )
+    else:
+        declared_preset_modules = csv_values(declared_preset_modules)
     return {
         "transformers_trace": bool(source.get("transformers_trace", False)),
         "transformers_trace_jsonl": source.get("transformers_trace_jsonl"),
@@ -2232,8 +2275,9 @@ def trace_policy_fields(source):
         "transformers_trace_zspace_source": source.get(
             "transformers_trace_zspace_source"
         ),
-        "transformers_trace_runtime_import_presets": list(
-            source.get("transformers_trace_runtime_import_presets") or []
+        "transformers_trace_runtime_import_presets": runtime_import_presets,
+        "declared_transformers_trace_runtime_import_preset_modules": (
+            declared_preset_modules
         ),
         "transformers_trace_runtime_imports": list(
             source.get("transformers_trace_runtime_imports") or []
