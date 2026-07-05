@@ -7022,6 +7022,110 @@ if callable(_native_describe_device):
         return report
 
 
+_RUNTIME_DEVICE_REPORT_BACKENDS: tuple[str, ...] = ("wgpu", "cpu", "mps")
+
+
+def _normalize_runtime_device_backends(backends: _Any) -> list[str]:
+    if backends is None:
+        return list(_RUNTIME_DEVICE_REPORT_BACKENDS)
+    if isinstance(backends, str):
+        raw_values = [backends]
+    else:
+        try:
+            raw_values = [str(value) for value in backends]
+        except TypeError as exc:
+            raise TypeError("backends must be a string or iterable of strings") from exc
+    normalized = [value.strip().lower() for value in raw_values if value.strip()]
+    if not normalized:
+        raise ValueError("backends must contain at least one backend label")
+    return list(dict.fromkeys(normalized))
+
+
+def _runtime_report_ready(report: _Mapping[str, _Any]) -> bool:
+    for key in (
+        "runtime_ready",
+        "effective_backend_runtime_ready",
+        "requested_backend_runtime_ready",
+        "available",
+    ):
+        value = report.get(key)
+        if isinstance(value, bool):
+            return value
+    return False
+
+
+def _runtime_report_status(report: _Mapping[str, _Any]) -> str:
+    for key in (
+        "runtime_status",
+        "effective_backend_runtime_status",
+        "requested_backend_runtime_status",
+        "status",
+    ):
+        value = report.get(key)
+        if value is not None:
+            return str(value)
+    return "unknown"
+
+
+def describe_runtime_devices(
+    backends: _Any = _RUNTIME_DEVICE_REPORT_BACKENDS,
+    *,
+    continue_on_error: bool = True,
+    **kwargs: _Any,
+) -> _Dict[str, _Any]:
+    """Collect ``describe_device`` readiness reports for several backends."""
+
+    describe = globals().get("describe_device")
+    if not callable(describe):
+        raise RuntimeError("spiraltorch.describe_device is unavailable in this build")
+
+    backend_labels = _normalize_runtime_device_backends(backends)
+    reports: list[_Dict[str, _Any]] = []
+    ready_backends: list[str] = []
+    not_ready_backends: list[str] = []
+    error_backends: list[str] = []
+    status_by_backend: _Dict[str, str] = {}
+
+    for backend in backend_labels:
+        try:
+            report = dict(describe(backend, **dict(kwargs)))
+        except Exception as exc:
+            if not continue_on_error:
+                raise
+            report = {
+                "backend": backend,
+                "requested_backend": backend,
+                "runtime_ready": False,
+                "runtime_status": "error",
+                "error": str(exc),
+            }
+        else:
+            report.setdefault("requested_backend", backend)
+            report.setdefault("backend", str(report.get("effective_backend", backend)))
+
+        ready = _runtime_report_ready(report)
+        status = _runtime_report_status(report)
+        if "error" in report:
+            error_backends.append(backend)
+        if ready:
+            ready_backends.append(backend)
+        else:
+            not_ready_backends.append(backend)
+        status_by_backend[backend] = status
+        reports.append(report)
+
+    return {
+        "backends": backend_labels,
+        "reports": reports,
+        "ready_backends": ready_backends,
+        "not_ready_backends": not_ready_backends,
+        "error_backends": error_backends,
+        "status_by_backend": status_by_backend,
+        "all_ready": bool(reports) and len(ready_backends) == len(reports),
+        "has_errors": bool(error_backends),
+    }
+
+
 def _resolve_runtime_entry(backend: str) -> tuple[str, str, _Dict[str, _Any]]:
     raw = str(backend).strip().lower()
     if raw == "mps":
@@ -7308,6 +7412,7 @@ def write_wgpu_first_runtime_matrix(
 
 _EXTRAS.extend(
     [
+        "describe_runtime_devices",
         "trace_wgpu_first_runtime",
         "trace_wgpu_first_runtime_matrix",
         "write_wgpu_first_runtime_matrix",
@@ -7318,7 +7423,13 @@ _EXTRAS.extend(
 try:
     _planner_module = globals().get("planner")
     if isinstance(_planner_module, _types.ModuleType):
-        for _planner_name in ("plan", "plan_topk", "describe_device", "mps_probe"):
+        for _planner_name in (
+            "plan",
+            "plan_topk",
+            "describe_device",
+            "describe_runtime_devices",
+            "mps_probe",
+        ):
             _planner_value = globals().get(_planner_name)
             if _planner_value is None:
                 continue

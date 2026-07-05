@@ -69,6 +69,52 @@ def test_describe_device_auto_backend_uses_effective_wgpu_label() -> None:
     assert "shared_mem_per_workgroup" in report
 
 
+def test_describe_runtime_devices_collects_backend_readiness(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    st = require_native()
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    def _patched_describe_device(backend: str = "wgpu", **kwargs: object):
+        calls.append((backend, dict(kwargs)))
+        if backend == "mps":
+            raise RuntimeError("mps placeholder")
+        return {
+            "backend": backend,
+            "requested_backend": backend,
+            "effective_backend": backend,
+            "runtime_ready": backend == "wgpu",
+            "runtime_status": "kernel_wired" if backend == "wgpu" else "cpu",
+        }
+
+    monkeypatch.setattr(st, "describe_device", _patched_describe_device, raising=False)
+
+    summary = st.describe_runtime_devices(["wgpu", "cpu", "mps"], workgroup=128)
+
+    assert "describe_runtime_devices" in st.__all__
+    assert st.planner.describe_runtime_devices is st.describe_runtime_devices
+    assert summary["backends"] == ["wgpu", "cpu", "mps"]
+    assert summary["ready_backends"] == ["wgpu"]
+    assert summary["not_ready_backends"] == ["cpu", "mps"]
+    assert summary["error_backends"] == ["mps"]
+    assert summary["status_by_backend"] == {
+        "wgpu": "kernel_wired",
+        "cpu": "cpu",
+        "mps": "error",
+    }
+    assert summary["all_ready"] is False
+    assert summary["has_errors"] is True
+    assert summary["reports"][2]["error"] == "mps placeholder"
+    assert calls == [
+        ("wgpu", {"workgroup": 128}),
+        ("cpu", {"workgroup": 128}),
+        ("mps", {"workgroup": 128}),
+    ]
+
+    with pytest.raises(RuntimeError, match="mps placeholder"):
+        st.describe_runtime_devices(["mps"], continue_on_error=False)
+
+
 def test_plan_explicit_wgpu_backend() -> None:
     st = require_native()
 

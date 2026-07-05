@@ -2192,6 +2192,20 @@ def describe_device(
     compaction_hint: Optional[int] = ...,
 ) -> Dict[str, object]: ...
 
+def describe_runtime_devices(
+    backends: str | Iterable[str] = ...,
+    *,
+    continue_on_error: bool = ...,
+    lane_width: Optional[int] = ...,
+    subgroup: Optional[bool] = ...,
+    max_workgroup: Optional[int] = ...,
+    shared_mem_per_workgroup: Optional[int] = ...,
+    workgroup: Optional[int] = ...,
+    cols: Optional[int] = ...,
+    tile_hint: Optional[int] = ...,
+    compaction_hint: Optional[int] = ...,
+) -> Dict[str, object]: ...
+
 def describe_wgpu_softmax_variants() -> None: ...
 
 def hip_probe() -> Dict[str, object]: ...
@@ -6661,6 +6675,7 @@ __all__ = [
     "Tensor",
     "ModuleTrainer",
     "SpiralSession",
+    "describe_runtime_devices",
     "trace_wgpu_first_runtime",
     "trace_wgpu_first_runtime_matrix",
     "write_wgpu_first_runtime_matrix",
