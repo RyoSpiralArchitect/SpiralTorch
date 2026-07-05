@@ -1,0 +1,147 @@
+name: Publish PyPI From Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "GitHub Release tag whose signed wheels should be published"
+        required: true
+      expected_wheels:
+        description: "Number of wheel files expected in the release payload"
+        required: false
+        default: "3"
+      skip_existing:
+        description: "Allow reruns when one or more files are already on PyPI"
+        required: false
+        default: "true"
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    name: Publish release wheels to PyPI
+    runs-on: ubuntu-22.04
+    environment:
+      name: pypi
+      url: https://pypi.org/p/spiraltorch
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      EXPECTED_WHEELS: ${{ inputs.expected_wheels }}
+      PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+      SKIP_EXISTING: ${{ inputs.skip_existing }}
+    steps:
+      - name: Download GitHub Release wheels
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-dist
+          gh release download "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --dir release-dist \
+            --pattern '*.whl' \
+            --pattern 'wheels.sha256'
+          find release-dist -maxdepth 1 -type f -print | sort
+
+      - name: Verify release checksums
+        run: |
+          set -euo pipefail
+          cd release-dist
+          test -f wheels.sha256
+          wheel_count="$(find . -maxdepth 1 -type f -name '*.whl' | wc -l | tr -d ' ')"
+          if [ "$wheel_count" != "$EXPECTED_WHEELS" ]; then
+            echo "Expected $EXPECTED_WHEELS wheel(s), found $wheel_count" >&2
+            exit 1
+          fi
+          sha256sum --check wheels.sha256
+
+      - name: Validate wheel metadata
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip twine
+          python -m twine check release-dist/*.whl
+          python - <<'PY'
+          import os
+          import zipfile
+          from email.parser import Parser
+          from pathlib import Path
+
+          expected = os.environ["RELEASE_TAG"].lstrip("v")
+          for wheel in sorted(Path("release-dist").glob("*.whl")):
+              with zipfile.ZipFile(wheel) as archive:
+                  metadata_names = [
+                      name for name in archive.namelist()
+                      if name.endswith(".dist-info/METADATA")
+                  ]
+                  if len(metadata_names) != 1:
+                      raise SystemExit(f"{wheel.name}: expected one METADATA file, found {len(metadata_names)}")
+                  metadata = Parser().parsestr(archive.read(metadata_names[0]).decode("utf-8"))
+              actual = metadata.get("Version")
+              if actual != expected:
+                  raise SystemExit(f"{wheel.name}: expected version {expected}, found {actual}")
+              print(f"{wheel.name}: version={actual}")
+          PY
+          mkdir -p pypi-dist
+          cp release-dist/*.whl pypi-dist/
+
+      - name: Publish to PyPI (token)
+        if: env.PYPI_API_TOKEN != ''
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: pypi-dist
+          password: ${{ env.PYPI_API_TOKEN }}
+          skip-existing: ${{ env.SKIP_EXISTING }}
+
+      - name: Publish to PyPI (trusted publishing)
+        if: env.PYPI_API_TOKEN == ''
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: pypi-dist
+          skip-existing: ${{ env.SKIP_EXISTING }}
+
+      - name: Verify PyPI release and smoke install
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          import time
+          import urllib.request
+
+          version = os.environ["RELEASE_TAG"].lstrip("v")
+          expected = int(os.environ["EXPECTED_WHEELS"])
+          url = "https://pypi.org/pypi/spiraltorch/json"
+          deadline = time.time() + 240
+          count = 0
+          while time.time() < deadline:
+              with urllib.request.urlopen(url, timeout=30) as response:
+                  payload = json.load(response)
+              files = payload.get("releases", {}).get(version, [])
+              count = len(files)
+              print(f"pypi_files_for_{version}={count}", flush=True)
+              if count >= expected:
+                  break
+              time.sleep(10)
+          if count < expected:
+              raise SystemExit(f"PyPI exposed {count} file(s) for {version}; expected at least {expected}")
+          PY
+
+          smoke_dir="$RUNNER_TEMP/spiraltorch-pypi-smoke"
+          run_dir="$RUNNER_TEMP/spiraltorch-pypi-smoke-cwd"
+          rm -rf "$smoke_dir" "$run_dir"
+          mkdir -p "$smoke_dir" "$run_dir"
+          python -m pip install --upgrade pip
+          python -m pip install --no-cache-dir --only-binary=:all: --target "$smoke_dir" "spiraltorch==${RELEASE_TAG#v}"
+          cd "$run_dir"
+          EXPECTED_VERSION="${RELEASE_TAG#v}" PYTHONPATH="$smoke_dir" python -P - <<'PY'
+          import os
+          import spiraltorch as st
+
+          assert st.__version__ == os.environ["EXPECTED_VERSION"]
+          layer = st.nn.Linear(2, 2, name="pypi_workflow_smoke")
+          state = layer.state_dict()
+          assert "pypi_workflow_smoke::weight" in state
+          print("pypi workflow smoke ok", st.__version__)
+          PY
