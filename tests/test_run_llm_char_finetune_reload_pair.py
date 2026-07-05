@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import contextlib
 import importlib.util
 import io
@@ -39,6 +40,37 @@ class RunLlmCharFinetuneReloadPairTests(unittest.TestCase):
         self.assertTrue(mod.backend_readiness("cuda", {"cuda": True})["backend_ready"])
         self.assertEqual(
             mod.backend_readiness("quantum", {})["backend_status"], "unknown_backend"
+        )
+
+    def test_runtime_device_only_contract_requests_preflight_artifact(self) -> None:
+        mod = _load_module()
+        args = argparse.Namespace(
+            runtime_imports=[],
+            runtime_import_presets=[],
+            required_runtime_imports=[],
+            required_runtime_import_presets=[],
+            runtime_device_backends=["wgpu"],
+            required_runtime_device_backends=[],
+            required_runtime_device_ready_backends=["wgpu"],
+            require_runtime_imports=False,
+        )
+
+        flags = mod.runtime_import_cli_flags(
+            args,
+            runtime_preflight_json_out=Path("runtime_preflight.json"),
+        )
+
+        self.assertTrue(mod.runtime_import_contract_requested(args))
+        self.assertEqual(
+            flags,
+            [
+                "--runtime-device-backend",
+                "wgpu",
+                "--require-runtime-device-ready-backend",
+                "wgpu",
+                "--runtime-preflight-json-out",
+                "runtime_preflight.json",
+            ],
         )
 
     def test_dry_run_writes_base_reload_and_compare_contract(self) -> None:
@@ -96,6 +128,10 @@ class RunLlmCharFinetuneReloadPairTests(unittest.TestCase):
                         "--runtime-import",
                         "math",
                         "--require-runtime-imports",
+                        "--runtime-device-backend",
+                        "wgpu",
+                        "--require-runtime-device-ready-backend",
+                        "wgpu",
                         "--curves",
                         "--dry-run",
                     ]
@@ -120,6 +156,11 @@ class RunLlmCharFinetuneReloadPairTests(unittest.TestCase):
         self.assertTrue(manifest["settings"]["rollback_on_validation_regression"])
         self.assertEqual(manifest["settings"]["runtime_imports"], ["math"])
         self.assertTrue(manifest["settings"]["require_runtime_imports"])
+        self.assertEqual(manifest["settings"]["runtime_device_backends"], ["wgpu"])
+        self.assertEqual(
+            manifest["settings"]["required_runtime_device_ready_backends"],
+            ["wgpu"],
+        )
         self.assertTrue(manifest["settings"]["runtime_import_preflight_requested"])
         self.assertEqual(len(manifest["runs"]), 2)
         self.assertEqual(manifest["runs"][0]["name"], "base_scratch")
@@ -138,6 +179,8 @@ class RunLlmCharFinetuneReloadPairTests(unittest.TestCase):
         self.assertIn("--runtime-import", base_command)
         self.assertIn("math", base_command)
         self.assertIn("--require-runtime-imports", base_command)
+        self.assertIn("--runtime-device-backend", base_command)
+        self.assertIn("--require-runtime-device-ready-backend", base_command)
         self.assertIn("--runtime-preflight-json-out", base_command)
         self.assertIn("--load-run", reload_command)
         self.assertIn("--eval-seed", reload_command)
@@ -147,6 +190,8 @@ class RunLlmCharFinetuneReloadPairTests(unittest.TestCase):
         self.assertIn("--runtime-import", reload_command)
         self.assertIn("math", reload_command)
         self.assertIn("--require-runtime-imports", reload_command)
+        self.assertIn("--runtime-device-backend", reload_command)
+        self.assertIn("--require-runtime-device-ready-backend", reload_command)
         self.assertIn("--runtime-preflight-json-out", reload_command)
         self.assertIn(
             str(run_root / "base_scratch" / "runtime_preflight.json"),
@@ -403,6 +448,14 @@ class RunLlmCharFinetuneReloadPairTests(unittest.TestCase):
                                     "runtime_imports_requested": (
                                         "transformers,torch,tokenizers"
                                     ),
+                                    "runtime_device_report_requested": True,
+                                    "runtime_device_report_backends": "wgpu",
+                                    "runtime_device_report_ready_backends": "wgpu",
+                                    "runtime_device_report_statuses": (
+                                        "wgpu=kernel_wired"
+                                    ),
+                                    "required_runtime_device_ready_backends": "wgpu",
+                                    "required_runtime_device_ready_backends_passed": True,
                                 }
                             },
                         }
@@ -444,7 +497,17 @@ class RunLlmCharFinetuneReloadPairTests(unittest.TestCase):
         self.assertTrue(outcome["base"]["runtime_import_preflight_requested"])
         self.assertTrue(outcome["base"]["runtime_import_preflight_passed"])
         self.assertEqual(outcome["base"]["runtime_import_presets"], "hf-runtime")
+        self.assertTrue(outcome["base"]["runtime_device_report_requested"])
+        self.assertEqual(outcome["base"]["runtime_device_report_backends"], "wgpu")
+        self.assertEqual(
+            outcome["base"]["required_runtime_device_ready_backends"],
+            "wgpu",
+        )
         self.assertTrue(outcome["reload"]["runtime_import_preflight_passed"])
+        self.assertEqual(
+            outcome["reload"]["runtime_device_report_ready_backends"],
+            "wgpu",
+        )
 
     def test_reload_pair_outcome_marks_rollback_tie_as_protected_noop(self) -> None:
         mod = _load_module()

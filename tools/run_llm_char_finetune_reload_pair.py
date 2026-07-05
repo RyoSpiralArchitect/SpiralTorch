@@ -60,6 +60,22 @@ RUNTIME_IMPORT_PRESET_CHOICES = [
     "hf-finetune",
     "hf-peft",
 ]
+RUNTIME_DEVICE_PREFLIGHT_KEYS = (
+    "runtime_device_report_requested",
+    "runtime_device_report_backends",
+    "runtime_device_report_available_backends",
+    "runtime_device_report_ready_backends",
+    "runtime_device_report_not_ready_backends",
+    "runtime_device_report_error_backends",
+    "runtime_device_report_statuses",
+    "runtime_device_reports_json",
+    "required_runtime_device_backends",
+    "required_runtime_device_backends_missing",
+    "required_runtime_device_backends_passed",
+    "required_runtime_device_ready_backends",
+    "required_runtime_device_ready_backends_missing",
+    "required_runtime_device_ready_backends_passed",
+)
 
 
 def default_run_root() -> Path:
@@ -157,6 +173,9 @@ def runtime_import_contract_requested(source: argparse.Namespace) -> bool:
         or getattr(source, "runtime_import_presets", None)
         or getattr(source, "required_runtime_imports", None)
         or getattr(source, "required_runtime_import_presets", None)
+        or getattr(source, "runtime_device_backends", None)
+        or getattr(source, "required_runtime_device_backends", None)
+        or getattr(source, "required_runtime_device_ready_backends", None)
         or getattr(source, "require_runtime_imports", False)
     )
 
@@ -172,6 +191,15 @@ def runtime_import_contract_settings(source: argparse.Namespace) -> dict[str, An
         ),
         "required_runtime_import_presets": list(
             getattr(source, "required_runtime_import_presets", []) or []
+        ),
+        "runtime_device_backends": list(
+            getattr(source, "runtime_device_backends", []) or []
+        ),
+        "required_runtime_device_backends": list(
+            getattr(source, "required_runtime_device_backends", []) or []
+        ),
+        "required_runtime_device_ready_backends": list(
+            getattr(source, "required_runtime_device_ready_backends", []) or []
         ),
         "require_runtime_imports": bool(
             getattr(source, "require_runtime_imports", False)
@@ -198,6 +226,12 @@ def runtime_import_cli_flags(
         flags.extend(["--require-runtime-import-preset", str(preset)])
     if getattr(source, "require_runtime_imports", False):
         flags.append("--require-runtime-imports")
+    for backend in getattr(source, "runtime_device_backends", []) or []:
+        flags.extend(["--runtime-device-backend", str(backend)])
+    for backend in getattr(source, "required_runtime_device_backends", []) or []:
+        flags.extend(["--require-runtime-device-backend", str(backend)])
+    for backend in getattr(source, "required_runtime_device_ready_backends", []) or []:
+        flags.extend(["--require-runtime-device-ready-backend", str(backend)])
     if runtime_preflight_json_out is not None and runtime_import_contract_requested(
         source
     ):
@@ -338,6 +372,7 @@ def run_finetune_preflight(
             "required_runtime_import_presets",
             "runtime_imports_failed",
             "runtime_import_failed_install_hints",
+            *RUNTIME_DEVICE_PREFLIGHT_KEYS,
         ):
             if key in runtime_preflight:
                 payload[key] = runtime_preflight[key]
@@ -557,6 +592,10 @@ def run_summary_contract(run_dir: Path) -> dict[str, Any]:
         "runtime_import_failed_install_hints": runtime_contract.get(
             "runtime_import_failed_install_hints"
         ),
+        **{
+            key: runtime_contract.get(key)
+            for key in RUNTIME_DEVICE_PREFLIGHT_KEYS
+        },
         "initial_nll": initial_nll,
         "final_nll": final_nll,
         "training_final_nll": training_final_nll,
@@ -746,6 +785,30 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--require-runtime-imports",
         action="store_true",
         help="require every requested runtime import/preset in child LLM FT preflights/runs",
+    )
+    parser.add_argument(
+        "--runtime-device-backend",
+        "--device-backend",
+        dest="runtime_device_backends",
+        action="append",
+        default=[],
+        help="runtime backend to inspect during child LLM FT preflights/runs",
+    )
+    parser.add_argument(
+        "--require-runtime-device-backend",
+        "--require-device-backend",
+        dest="required_runtime_device_backends",
+        action="append",
+        default=[],
+        help="require this runtime backend report in child LLM FT preflights/runs",
+    )
+    parser.add_argument(
+        "--require-runtime-device-ready-backend",
+        "--require-device-ready-backend",
+        dest="required_runtime_device_ready_backends",
+        action="append",
+        default=[],
+        help="require this runtime backend to be ready in child LLM FT preflights/runs",
     )
     parser.add_argument("--curves", action="store_true")
     parser.add_argument("--summary-limit", type=int, default=8)
