@@ -1048,32 +1048,43 @@ def _safe_trace_label(label: str, *, fallback: str) -> str:
     return safe or fallback
 
 
-def _route_score(row: Mapping[str, Any]) -> float:
+def _bounded_unit(value: Any) -> float:
+    return max(0.0, min(1.0, _finite_float(value) or 0.0))
+
+
+def _quality_score(row: Mapping[str, Any]) -> float:
     confidence = _finite_float(row.get("confidence_mean")) or 0.0
     stability = _finite_float(row.get("stability_mean")) or 0.0
     frac = _finite_float(row.get("frac_mean")) or 0.0
+    return max(
+        0.0,
+        min(1.0, 0.5 * confidence + 0.3 * stability + 0.2 * frac),
+    )
+
+
+def _latency_cost(row: Mapping[str, Any]) -> float:
     latency = max(0.0, _finite_float(row.get("latency_ms_mean")) or 0.0)
+    return min(1.0, math.log1p(latency) / math.log1p(10_000.0))
+
+
+def _token_cost(row: Mapping[str, Any]) -> float:
     tokens = max(0.0, _finite_float(row.get("total_tokens")) or 0.0)
-    runtime_ready = max(
-        0.0,
-        min(1.0, _finite_float(row.get("runtime_ready_rate")) or 0.0),
-    )
-    empty_text_rate = max(
-        0.0,
-        min(1.0, _finite_float(row.get("empty_text_rate")) or 0.0),
-    )
-    refusal_rate = max(
-        0.0,
-        min(1.0, _finite_float(row.get("refusal_rate")) or 0.0),
-    )
-    incomplete_rate = max(
-        0.0,
-        min(1.0, _finite_float(row.get("incomplete_rate")) or 0.0),
-    )
-    quality = 0.5 * confidence + 0.3 * stability + 0.2 * frac
-    latency_penalty = 0.05 * min(1.0, math.log1p(latency) / math.log1p(10_000.0))
-    token_penalty = 0.05 * min(1.0, math.log1p(tokens) / math.log1p(4096.0))
-    health_penalty = 0.35 * empty_text_rate + 0.25 * refusal_rate + 0.08 * incomplete_rate
+    return min(1.0, math.log1p(tokens) / math.log1p(4096.0))
+
+
+def _health_penalty(row: Mapping[str, Any]) -> float:
+    empty_text_rate = _bounded_unit(row.get("empty_text_rate"))
+    refusal_rate = _bounded_unit(row.get("refusal_rate"))
+    incomplete_rate = _bounded_unit(row.get("incomplete_rate"))
+    return 0.35 * empty_text_rate + 0.25 * refusal_rate + 0.08 * incomplete_rate
+
+
+def _route_score(row: Mapping[str, Any]) -> float:
+    quality = _quality_score(row)
+    runtime_ready = _bounded_unit(row.get("runtime_ready_rate"))
+    latency_penalty = 0.05 * _latency_cost(row)
+    token_penalty = 0.05 * _token_cost(row)
+    health_penalty = _health_penalty(row)
     return max(
         0.0,
         min(
@@ -1083,6 +1094,22 @@ def _route_score(row: Mapping[str, Any]) -> float:
             - latency_penalty
             - token_penalty
             - health_penalty,
+        ),
+    )
+
+
+def _efficiency_score(row: Mapping[str, Any]) -> float:
+    quality = _quality_score(row)
+    runtime_ready = _bounded_unit(row.get("runtime_ready_rate"))
+    cost_reward = 0.5 * (1.0 - _latency_cost(row)) + 0.5 * (1.0 - _token_cost(row))
+    return max(
+        0.0,
+        min(
+            1.0,
+            0.60 * quality
+            + 0.35 * cost_reward
+            + 0.05 * runtime_ready
+            - _health_penalty(row),
         ),
     )
 
@@ -1114,6 +1141,11 @@ def _comparison_row(label: str, path: Path, summary: Mapping[str, Any]) -> dict[
         "drs_mean": _summary_metric(summary, "drs"),
         "last_text_preview": summary.get("last_text_preview"),
     }
+    row["quality_score"] = _quality_score(row)
+    row["latency_cost"] = _latency_cost(row)
+    row["token_cost"] = _token_cost(row)
+    row["health_penalty"] = _health_penalty(row)
+    row["efficiency_score"] = _efficiency_score(row)
     row["route_score"] = _route_score(row)
     return row
 
@@ -1138,11 +1170,50 @@ def _winner(
     return max(candidates, key=lambda item: item[0])[1]
 
 
+def _near_best_routes(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    tolerance: float,
+) -> list[dict[str, Any]]:
+    candidates: list[tuple[float, Mapping[str, Any]]] = []
+    for row in rows:
+        if int(row.get("count") or 0) <= 0:
+            continue
+        score = _finite_float(row.get("route_score"))
+        if score is not None:
+            candidates.append((score, row))
+    if not candidates:
+        return []
+    best_score = max(score for score, _row in candidates)
+    bounded_tolerance = max(0.0, float(tolerance))
+    near: list[dict[str, Any]] = []
+    for score, row in sorted(candidates, key=lambda item: item[0], reverse=True):
+        delta = best_score - score
+        if delta > bounded_tolerance:
+            continue
+        near.append(
+            {
+                "label": row.get("label"),
+                "route_score": score,
+                "route_score_delta": delta,
+                "quality_score": _finite_float(row.get("quality_score")) or 0.0,
+                "efficiency_score": _finite_float(row.get("efficiency_score")) or 0.0,
+                "latency_ms_mean": _finite_float(row.get("latency_ms_mean")) or 0.0,
+                "total_tokens": _finite_float(row.get("total_tokens")) or 0.0,
+                "completion_rate": _finite_float(row.get("completion_rate")) or 0.0,
+                "empty_text_rate": _finite_float(row.get("empty_text_rate")) or 0.0,
+                "refusal_rate": _finite_float(row.get("refusal_rate")) or 0.0,
+            }
+        )
+    return near
+
+
 def compare_api_llm_trace_runs(
     traces: Mapping[str, str | Path] | Sequence[str | Path] | str | Path,
     *,
     labels: Sequence[str] | None = None,
     event_type: str = "ApiLLMTrace",
+    near_best_tolerance: float = 0.02,
 ) -> dict[str, Any]:
     """Compare multiple API LLM Z-space trace runs.
 
@@ -1162,6 +1233,8 @@ def compare_api_llm_trace_runs(
     )
     winners = {
         "best_score": _winner(rows, "route_score"),
+        "highest_quality": _winner(rows, "quality_score"),
+        "highest_efficiency": _winner(rows, "efficiency_score"),
         "highest_confidence": _winner(rows, "confidence_mean"),
         "highest_stability": _winner(rows, "stability_mean"),
         "highest_completion_rate": _winner(rows, "completion_rate"),
@@ -1172,11 +1245,20 @@ def compare_api_llm_trace_runs(
         "highest_runtime_ready": _winner(rows, "runtime_ready_rate"),
     }
     best = winners.get("best_score")
+    near_best_tolerance_value = max(0.0, _finite_float(near_best_tolerance) or 0.0)
+    near_best = _near_best_routes(rows, tolerance=near_best_tolerance_value)
     recommendations: list[str] = []
     if best:
         recommendations.append(f"prefer {best} for the highest aggregate API LLM route score")
+    if len(near_best) > 1:
+        labels_text = ", ".join(str(row["label"]) for row in near_best[:4])
+        recommendations.append(
+            f"compare near-best routes within {near_best_tolerance_value:.3f}: {labels_text}"
+        )
     if winners.get("lowest_latency") and winners["lowest_latency"] != best:
         recommendations.append(f"inspect {winners['lowest_latency']} for latency-sensitive routing")
+    if winners.get("highest_efficiency") and winners["highest_efficiency"] != best:
+        recommendations.append(f"inspect {winners['highest_efficiency']} for cost-sensitive routing")
     if winners.get("lowest_refusal") and winners["lowest_refusal"] != best:
         recommendations.append(f"inspect {winners['lowest_refusal']} for fewer refusals")
     return {
@@ -1184,6 +1266,8 @@ def compare_api_llm_trace_runs(
         "event_type": event_type,
         "count": len(rows),
         "runs": rows,
+        "near_best_tolerance": near_best_tolerance_value,
+        "near_best": near_best,
         "winners": winners,
         "recommendations": recommendations,
     }

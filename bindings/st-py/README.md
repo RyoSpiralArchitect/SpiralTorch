@@ -112,6 +112,9 @@ PY
   `completion_rate` or `empty_text_rate`, then
   `compare_api_llm_trace_runs(...)` to pick candidates by route score, latency,
   token use, confidence, runtime readiness, refusal rate, and empty-text rate.
+  Comparison rows also expose `quality_score`, `efficiency_score`, normalized
+  `latency_cost` / `token_cost`, and `health_penalty`; use `near_best` to inspect
+  routes that are close enough that the tradeoff matters more than the rank.
 - Language desire controls via `st.nn.DesirePipeline`, `DesireTrainerBridge`,
   `DesireRoundtableBridge`, and downstream hook adapters so notebooks can
   inspect phase/temperature/entropy offsets without making the symbolic kernel
