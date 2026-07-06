@@ -30,7 +30,10 @@ class _FakeScaleStack:
 
 def test_scale_stack_probe_exported_from_top_level() -> None:
     assert "scale_stack_probe" in st.__all__
+    assert "scale_stack_probe_to_zspace_partial" in st.__all__
+    assert "scalar_scale_stack_partial" in st.__all__
     assert "scalar_scale_stack_probe" in st.__all__
+    assert "semantic_scale_stack_partial" in st.__all__
     assert "semantic_scale_stack_probe" in st.__all__
 
 
@@ -58,3 +61,32 @@ def test_scale_stack_probe_matches_wasm_payload_shape() -> None:
         {"level": 0.25, "scale": 1.0},
         {"level": 0.5, "scale": 2.0},
     ]
+
+
+def test_scale_stack_probe_converts_to_zspace_partial() -> None:
+    probe = st.scale_stack_probe(
+        _FakeScaleStack(),
+        ambient_dim=2.0,
+        dimension_window=2,
+        levels=(0.25, 0.5),
+    )
+
+    partial = st.scale_stack_probe_to_zspace_partial(
+        probe,
+        gradient_dim=6,
+        telemetry_prefix="scale",
+    )
+    metrics = partial.resolved()
+    telemetry = partial.telemetry_payload()
+
+    assert isinstance(partial, st.ZSpacePartialBundle)
+    assert partial.origin == "scale_stack:scalar"
+    assert 0.0 <= metrics["speed"] <= 1.0
+    assert 0.0 <= metrics["memory"] <= 1.0
+    assert 0.0 <= metrics["stability"] <= 1.0
+    assert 0.0 <= metrics["drs"] <= 1.0
+    assert len(metrics["gradient"]) == 6
+    assert telemetry is not None
+    assert telemetry["scale.mode_scalar"] == pytest.approx(1.0)
+    assert telemetry["scale.sample_count"] == pytest.approx(2.0)
+    assert telemetry["scale.coherence_break_mean"] == pytest.approx(1.5)

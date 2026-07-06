@@ -665,6 +665,15 @@ def scale_stack_probe(
     levels: Sequence[float] = ...,
 ) -> Dict[str, Any]: ...
 
+def scale_stack_probe_to_zspace_partial(
+    probe: Mapping[str, Any],
+    *,
+    bundle_weight: float = ...,
+    origin: str | None = ...,
+    telemetry_prefix: str = ...,
+    gradient_dim: int = ...,
+) -> ZSpacePartialBundle: ...
+
 def scalar_scale_stack_probe(
     field: Iterable[float],
     shape: Sequence[int],
@@ -676,6 +685,21 @@ def scalar_scale_stack_probe(
     levels: Sequence[float] = ...,
 ) -> Dict[str, Any]: ...
 
+def scalar_scale_stack_partial(
+    field: Iterable[float],
+    shape: Sequence[int],
+    scales: Sequence[float],
+    threshold: float,
+    *,
+    ambient_dim: float | None = ...,
+    dimension_window: int = ...,
+    levels: Sequence[float] = ...,
+    bundle_weight: float = ...,
+    origin: str | None = ...,
+    telemetry_prefix: str = ...,
+    gradient_dim: int = ...,
+) -> ZSpacePartialBundle: ...
+
 def semantic_scale_stack_probe(
     embeddings: Sequence[Sequence[float]],
     scales: Sequence[float],
@@ -686,6 +710,21 @@ def semantic_scale_stack_probe(
     dimension_window: int = ...,
     levels: Sequence[float] = ...,
 ) -> Dict[str, Any]: ...
+
+def semantic_scale_stack_partial(
+    embeddings: Sequence[Sequence[float]],
+    scales: Sequence[float],
+    threshold: float,
+    *,
+    metric: str = ...,
+    ambient_dim: float = ...,
+    dimension_window: int = ...,
+    levels: Sequence[float] = ...,
+    bundle_weight: float = ...,
+    origin: str | None = ...,
+    telemetry_prefix: str = ...,
+    gradient_dim: int = ...,
+) -> ZSpacePartialBundle: ...
 
 class Tensor:
     def __init__(self, *args: object, **kwargs: object) -> None: ...
@@ -7370,7 +7409,10 @@ __all__ = [
     "wasm_report_to_zspace_partial",
     "write_wasm_report_context_artifact",
     "scale_stack_probe",
+    "scale_stack_probe_to_zspace_partial",
+    "scalar_scale_stack_partial",
     "scalar_scale_stack_probe",
+    "semantic_scale_stack_partial",
     "semantic_scale_stack_probe",
     "ZSpaceTrainer",
     "ZSpaceCoherenceSequencer",
