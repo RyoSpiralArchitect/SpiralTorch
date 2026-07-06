@@ -223,6 +223,20 @@ def _finish_reason_from_response(response: Any) -> str | None:
     return None
 
 
+def _response_metadata(response: Any) -> dict[str, Any]:
+    metadata = _maybe_mapping(response) or {}
+    payload = {
+        key: value
+        for key, value in metadata.items()
+        if key in {"id", "created", "object", "system_fingerprint", "stop_details"}
+    }
+    stop_details = _value(response, "stop_details")
+    stop_details_mapping = _maybe_mapping(stop_details)
+    if stop_details_mapping:
+        payload["stop_details"] = dict(stop_details_mapping)
+    return payload
+
+
 def _logprob_to_probability(logprob: Any) -> float | None:
     numeric = _as_float(logprob)
     if numeric is None:
@@ -618,7 +632,10 @@ def api_llm_partial_from_response(
     if model or _response_model(response):
         numeric_telemetry["model_present"] = 1.0
     if finish_reason:
-        numeric_telemetry["finish_reason_stop"] = 1.0 if finish_reason.lower() == "stop" else 0.0
+        finish = finish_reason.lower()
+        numeric_telemetry["finish_reason_stop"] = 1.0 if finish == "stop" else 0.0
+        numeric_telemetry["finish_reason_refusal"] = 1.0 if finish == "refusal" else 0.0
+    numeric_telemetry["empty_text"] = 1.0 if not text.strip() else 0.0
 
     return ZSpacePartialBundle(
         metrics,
@@ -691,7 +708,6 @@ def api_llm_trace_from_response(
         telemetry_prefix=telemetry_prefix,
         gradient_dim=gradient_dim,
     )
-    metadata = _maybe_mapping(response) or {}
     return ApiLLMTrace(
         provider=provider,
         model=model or _response_model(response),
@@ -704,11 +720,7 @@ def api_llm_trace_from_response(
         telemetry=bundle.telemetry_payload() or {},
         inference=inference,
         device_preflight=device_preflight,
-        response_metadata={
-            key: value
-            for key, value in metadata.items()
-            if key in {"id", "created", "object", "system_fingerprint"}
-        },
+        response_metadata=_response_metadata(response),
     )
 
 
@@ -859,6 +871,24 @@ def _trace_step(event: Mapping[str, Any]) -> int | None:
     return None
 
 
+def _finish_reason_label(event: Mapping[str, Any]) -> str:
+    value = event.get("finish_reason")
+    return str(value).lower() if value else ""
+
+
+def _trace_has_text(event: Mapping[str, Any]) -> bool:
+    return bool(str(event.get("text") or "").strip())
+
+
+def _trace_stop_details_category(event: Mapping[str, Any]) -> str | None:
+    metadata = _mapping_at(event, "response_metadata")
+    stop_details = metadata.get("stop_details")
+    if not isinstance(stop_details, Mapping):
+        return None
+    category = stop_details.get("category")
+    return str(category) if category not in {None, ""} else None
+
+
 def summarize_api_llm_trace_events(
     path: str | Path,
     *,
@@ -874,6 +904,19 @@ def summarize_api_llm_trace_events(
     ready_observed = [value for value in runtime_ready_values if value is not None]
     ready_count = sum(1 for value in ready_observed if value)
     text_lengths = [len(str(event.get("text") or "")) for event in events]
+    empty_text_count = sum(1 for event in events if not _trace_has_text(event))
+    refusal_count = sum(1 for event in events if _finish_reason_label(event) == "refusal")
+    incomplete_count = sum(
+        1
+        for event in events
+        if _finish_reason_label(event) in {"incomplete", "length", "max_tokens"}
+    )
+    completed_count = sum(
+        1
+        for event in events
+        if _finish_reason_label(event)
+        in {"stop", "completed", "complete", "success", "end_turn", "stop_sequence"}
+    )
 
     metric_keys = sorted(
         {
@@ -911,6 +954,17 @@ def summarize_api_llm_trace_events(
         "providers": _count_labels(event.get("provider") for event in events),
         "models": _count_labels(event.get("model") for event in events),
         "finish_reasons": _count_labels(event.get("finish_reason") for event in events),
+        "stop_detail_categories": _count_labels(
+            _trace_stop_details_category(event) for event in events
+        ),
+        "empty_text_count": empty_text_count,
+        "empty_text_rate": empty_text_count / len(events) if events else 0.0,
+        "refusal_count": refusal_count,
+        "refusal_rate": refusal_count / len(events) if events else 0.0,
+        "incomplete_count": incomplete_count,
+        "incomplete_rate": incomplete_count / len(events) if events else 0.0,
+        "completed_count": completed_count,
+        "completion_rate": completed_count / len(events) if events else 0.0,
         "runtime_statuses": _count_labels(_trace_runtime_status(event) for event in events),
         "runtime_ready_count": ready_count,
         "runtime_ready_rate": ready_count / len(ready_observed) if ready_observed else 0.0,
@@ -1004,12 +1058,32 @@ def _route_score(row: Mapping[str, Any]) -> float:
         0.0,
         min(1.0, _finite_float(row.get("runtime_ready_rate")) or 0.0),
     )
+    empty_text_rate = max(
+        0.0,
+        min(1.0, _finite_float(row.get("empty_text_rate")) or 0.0),
+    )
+    refusal_rate = max(
+        0.0,
+        min(1.0, _finite_float(row.get("refusal_rate")) or 0.0),
+    )
+    incomplete_rate = max(
+        0.0,
+        min(1.0, _finite_float(row.get("incomplete_rate")) or 0.0),
+    )
     quality = 0.5 * confidence + 0.3 * stability + 0.2 * frac
     latency_penalty = 0.05 * min(1.0, math.log1p(latency) / math.log1p(10_000.0))
     token_penalty = 0.05 * min(1.0, math.log1p(tokens) / math.log1p(4096.0))
+    health_penalty = 0.35 * empty_text_rate + 0.25 * refusal_rate + 0.08 * incomplete_rate
     return max(
         0.0,
-        min(1.0, quality + 0.05 * runtime_ready - latency_penalty - token_penalty),
+        min(
+            1.0,
+            quality
+            + 0.05 * runtime_ready
+            - latency_penalty
+            - token_penalty
+            - health_penalty,
+        ),
     )
 
 
@@ -1022,6 +1096,11 @@ def _comparison_row(label: str, path: Path, summary: Mapping[str, Any]) -> dict[
         "model": _dominant_label(summary.get("models")),
         "runtime_status": _dominant_label(summary.get("runtime_statuses")),
         "runtime_ready_rate": _finite_float(summary.get("runtime_ready_rate")) or 0.0,
+        "completion_rate": _finite_float(summary.get("completion_rate")) or 0.0,
+        "incomplete_rate": _finite_float(summary.get("incomplete_rate")) or 0.0,
+        "empty_text_rate": _finite_float(summary.get("empty_text_rate")) or 0.0,
+        "refusal_rate": _finite_float(summary.get("refusal_rate")) or 0.0,
+        "stop_detail_category": _dominant_label(summary.get("stop_detail_categories")),
         "total_tokens": _finite_float(summary.get("total_tokens")) or 0.0,
         "latency_ms_mean": _summary_stat(summary, "latency_ms"),
         "confidence_mean": _summary_stat(summary, "confidence"),
@@ -1056,7 +1135,7 @@ def _winner(
             candidates.append((score, str(label)))
     if not candidates:
         return None
-    return max(candidates, key=lambda item: (item[0], item[1]))[1]
+    return max(candidates, key=lambda item: item[0])[1]
 
 
 def compare_api_llm_trace_runs(
@@ -1085,6 +1164,9 @@ def compare_api_llm_trace_runs(
         "best_score": _winner(rows, "route_score"),
         "highest_confidence": _winner(rows, "confidence_mean"),
         "highest_stability": _winner(rows, "stability_mean"),
+        "highest_completion_rate": _winner(rows, "completion_rate"),
+        "lowest_empty_text": _winner(rows, "empty_text_rate", higher_is_better=False),
+        "lowest_refusal": _winner(rows, "refusal_rate", higher_is_better=False),
         "lowest_latency": _winner(rows, "latency_ms_mean", higher_is_better=False),
         "lowest_total_tokens": _winner(rows, "total_tokens", higher_is_better=False),
         "highest_runtime_ready": _winner(rows, "runtime_ready_rate"),
@@ -1095,6 +1177,8 @@ def compare_api_llm_trace_runs(
         recommendations.append(f"prefer {best} for the highest aggregate API LLM route score")
     if winners.get("lowest_latency") and winners["lowest_latency"] != best:
         recommendations.append(f"inspect {winners['lowest_latency']} for latency-sensitive routing")
+    if winners.get("lowest_refusal") and winners["lowest_refusal"] != best:
+        recommendations.append(f"inspect {winners['lowest_refusal']} for fewer refusals")
     return {
         "kind": "spiraltorch.api_llm_trace_comparison",
         "event_type": event_type,
@@ -1376,6 +1460,21 @@ class ApiLLMZSpaceRuntime:
         ready_values = [_trace_runtime_ready(trace) for trace in trace_dicts]
         ready_observed = [value for value in ready_values if value is not None]
         ready_count = sum(1 for value in ready_observed if value)
+        empty_text_count = sum(1 for trace in trace_dicts if not _trace_has_text(trace))
+        refusal_count = sum(
+            1 for trace in trace_dicts if _finish_reason_label(trace) == "refusal"
+        )
+        incomplete_count = sum(
+            1
+            for trace in trace_dicts
+            if _finish_reason_label(trace) in {"incomplete", "length", "max_tokens"}
+        )
+        completed_count = sum(
+            1
+            for trace in trace_dicts
+            if _finish_reason_label(trace)
+            in {"stop", "completed", "complete", "success", "end_turn", "stop_sequence"}
+        )
         metric_keys = sorted(
             {
                 key
@@ -1388,6 +1487,20 @@ class ApiLLMZSpaceRuntime:
             "count": len(trace_dicts),
             "providers": _count_labels(trace.get("provider") for trace in trace_dicts),
             "models": _count_labels(trace.get("model") for trace in trace_dicts),
+            "finish_reasons": _count_labels(
+                trace.get("finish_reason") for trace in trace_dicts
+            ),
+            "stop_detail_categories": _count_labels(
+                _trace_stop_details_category(trace) for trace in trace_dicts
+            ),
+            "empty_text_count": empty_text_count,
+            "empty_text_rate": empty_text_count / len(trace_dicts) if trace_dicts else 0.0,
+            "refusal_count": refusal_count,
+            "refusal_rate": refusal_count / len(trace_dicts) if trace_dicts else 0.0,
+            "incomplete_count": incomplete_count,
+            "incomplete_rate": incomplete_count / len(trace_dicts) if trace_dicts else 0.0,
+            "completed_count": completed_count,
+            "completion_rate": completed_count / len(trace_dicts) if trace_dicts else 0.0,
             "runtime_statuses": _count_labels(
                 _trace_runtime_status(trace) for trace in trace_dicts
             ),

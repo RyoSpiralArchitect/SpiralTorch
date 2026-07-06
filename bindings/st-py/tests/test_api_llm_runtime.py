@@ -417,6 +417,9 @@ def test_api_llm_runtime_writes_loads_and_summarizes_jsonl(tmp_path) -> None:
     assert runtime_summary["count"] == 2
     assert runtime_summary["models"] == {"api-model-test": 2}
     assert runtime_summary["usage"]["total_tokens"]["mean"] == 9.0
+    assert runtime_summary["empty_text_rate"] == 0.0
+    assert runtime_summary["refusal_rate"] == 0.0
+    assert runtime_summary["completion_rate"] == 1.0
     assert runtime.as_dict()["summary"]["count"] == 2
 
     path = tmp_path / "api-llm-trace.jsonl"
@@ -434,9 +437,80 @@ def test_api_llm_runtime_writes_loads_and_summarizes_jsonl(tmp_path) -> None:
     assert summary["last_text_preview"] == "Second Z-space runtime trace."
     assert summary["models"] == {"api-model-test": 2}
     assert summary["total_tokens"] == 18.0
+    assert summary["empty_text_count"] == 0
+    assert summary["empty_text_rate"] == 0.0
+    assert summary["refusal_count"] == 0
+    assert summary["completion_rate"] == 1.0
     assert summary["latency_ms"]["max"] == 200.0
     assert summary["confidence"]["min"] > 0.0
     assert "stability" in summary["metrics"]
+
+
+def test_api_llm_trace_health_penalizes_empty_refusals(tmp_path) -> None:
+    healthy = st.ApiLLMZSpaceRuntime(
+        [0.12, -0.04, 0.33, -0.11],
+        provider="example",
+        model="healthy-model",
+        create_session=False,
+    )
+    healthy.record_response(
+        {
+            "model": "healthy-model",
+            "output_text": "A visible answer entered Z-space.",
+            "status": "completed",
+            "usage": {"input_tokens": 4, "output_tokens": 6, "total_tokens": 10},
+        },
+        prompt="visible route",
+        latency_ms=100.0,
+    )
+    healthy_path = tmp_path / "healthy.jsonl"
+    healthy.write_jsonl(healthy_path)
+
+    refusal = st.ApiLLMZSpaceRuntime(
+        [0.12, -0.04, 0.33, -0.11],
+        provider="example",
+        model="refusal-model",
+        create_session=False,
+    )
+    refusal.record_response(
+        {
+            "id": "refusal-test",
+            "model": "refusal-model",
+            "content": [{"type": "thinking", "thinking": "hidden route"}],
+            "stop_reason": "refusal",
+            "stop_details": {"category": "policy"},
+            "usage": {"input_tokens": 4, "output_tokens": 8, "total_tokens": 12},
+        },
+        prompt="refusal route",
+        latency_ms=100.0,
+    )
+    refusal_path = tmp_path / "refusal.jsonl"
+    refusal.write_jsonl(refusal_path)
+
+    summary = st.summarize_api_llm_trace_events(refusal_path)
+    assert summary["empty_text_count"] == 1
+    assert summary["empty_text_rate"] == 1.0
+    assert summary["refusal_count"] == 1
+    assert summary["refusal_rate"] == 1.0
+    assert summary["completion_rate"] == 0.0
+    assert summary["stop_detail_categories"] == {"policy": 1}
+
+    event = st.load_api_llm_trace_events(refusal_path)[0]
+    assert event["response_metadata"]["stop_details"] == {"category": "policy"}
+    assert event["telemetry"]["api_llm.empty_text"] == 1.0
+    assert event["telemetry"]["api_llm.finish_reason_refusal"] == 1.0
+
+    comparison = st.compare_api_llm_trace_runs(
+        {"healthy": healthy_path, "refusal": refusal_path}
+    )
+    rows = {row["label"]: row for row in comparison["runs"]}
+    assert rows["refusal"]["empty_text_rate"] == 1.0
+    assert rows["refusal"]["refusal_rate"] == 1.0
+    assert rows["refusal"]["completion_rate"] == 0.0
+    assert rows["refusal"]["stop_detail_category"] == "policy"
+    assert rows["healthy"]["route_score"] > rows["refusal"]["route_score"]
+    assert comparison["winners"]["lowest_empty_text"] == "healthy"
+    assert comparison["winners"]["lowest_refusal"] == "healthy"
 
 
 def test_api_llm_runtime_runs_prompt_suite_and_writes_jsonl(tmp_path) -> None:
