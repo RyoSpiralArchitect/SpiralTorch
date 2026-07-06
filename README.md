@@ -528,6 +528,20 @@ python scripts/release_status.py \
 # prints the token, and passes it to `gh secret set` through stdin.
 python scripts/configure_pypi_token_secret.py --token-source prompt
 
+# If the active shell/agent cannot accept an interactive hidden prompt, paste
+# the token into this stdin handoff instead. The token stays out of stdout,
+# shell history, and process arguments.
+(
+  old_stty=$(stty -g)
+  trap 'stty "$old_stty"; unset PYPI_TOKEN' EXIT
+  printf 'PyPI token for spiraltorch (hidden): '
+  stty -echo
+  IFS= read -r PYPI_TOKEN
+  stty "$old_stty"
+  printf '\n'
+  printf '%s' "$PYPI_TOKEN" | python scripts/configure_pypi_token_secret.py --token-source stdin
+)
+
 # Safe GitHub Actions preflight: validates the signed release wheels and PyPI
 # state, but never uploads. This is the default publish_method for the workflow.
 python scripts/run_pypi_publish_from_release.py \

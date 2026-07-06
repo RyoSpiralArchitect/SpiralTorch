@@ -28,6 +28,8 @@ class ReleaseRunbookTests(unittest.TestCase):
                 self.assertNotIn("--body-file", text)
                 self.assertIn("scripts/configure_pypi_token_secret.py", text)
                 self.assertIn("--token-source prompt", text)
+                self.assertIn("--token-source stdin", text)
+                self.assertIn("stty -echo", text)
                 self.assertIn("PYPI_API_TOKEN", text)
                 self.assertIn("stdin", text)
 

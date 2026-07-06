@@ -177,6 +177,8 @@ class ReleaseStatusTests(unittest.TestCase):
             status["commands"]["token_secret_setup"],
             "python scripts/configure_pypi_token_secret.py --token-source prompt",
         )
+        self.assertIn("--token-source stdin", status["commands"]["token_secret_setup_stdin"])
+        self.assertIn("stty -echo", status["commands"]["token_secret_setup_stdin"])
         self.assertIn("publish_method=token", status["commands"]["publish_token_workflow"])
         self.assertEqual(
             status["trusted_publisher"]["sub"],

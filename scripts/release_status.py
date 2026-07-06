@@ -357,6 +357,30 @@ def token_secret_setup_command(*, secret_name: str, environment: str) -> str:
     return shell_join(command)
 
 
+def token_secret_setup_stdin_command(*, secret_name: str, environment: str) -> str:
+    command = [
+        "python",
+        "scripts/configure_pypi_token_secret.py",
+        "--token-source",
+        "stdin",
+    ]
+    if secret_name != DEFAULT_TOKEN_SECRET:
+        command.extend(["--secret-name", secret_name])
+    if environment != DEFAULT_SECRET_ENVIRONMENT:
+        command.extend(["--environment", environment])
+    return (
+        "( old_stty=$(stty -g); "
+        "trap 'stty \"$old_stty\"; unset PYPI_TOKEN' EXIT; "
+        "printf 'PyPI token for spiraltorch (hidden): '; "
+        "stty -echo; "
+        "IFS= read -r PYPI_TOKEN; "
+        "stty \"$old_stty\"; "
+        "printf '\\n'; "
+        "printf '%s' \"$PYPI_TOKEN\" | "
+        f"{shell_join(command)} )"
+    )
+
+
 def publish_from_release_command(*, tag: str, expected_wheels: int, publish_method: str) -> str:
     return shell_join(
         [
@@ -430,6 +454,10 @@ def build_status(args: argparse.Namespace) -> dict[str, Any]:
         secret_name=args.token_env,
         environment=args.github_secret_environment,
     )
+    token_secret_stdin_command = token_secret_setup_stdin_command(
+        secret_name=args.token_env,
+        environment=args.github_secret_environment,
+    )
     token_publish_command = publish_from_release_command(
         tag=tag,
         expected_wheels=args.expected_wheels,
@@ -453,7 +481,7 @@ def build_status(args: argparse.Namespace) -> dict[str, Any]:
     elif token_ready:
         next_action = "run scripts/publish_pypi_wheels.py with the ready local token source"
     else:
-        next_action = f"{token_secret_command} OR configure PyPI Trusted Publishing"
+        next_action = f"{token_secret_command} OR token_secret_setup_stdin OR configure PyPI Trusted Publishing"
 
     return {
         "package": args.package,
@@ -468,6 +496,7 @@ def build_status(args: argparse.Namespace) -> dict[str, Any]:
         "tokens": tokens,
         "commands": {
             "token_secret_setup": token_secret_command,
+            "token_secret_setup_stdin": token_secret_stdin_command,
             "publish_token_workflow": token_publish_command,
             "publish_trusted_workflow": trusted_publish_command,
         },
@@ -540,10 +569,13 @@ def print_text(status: dict[str, Any]) -> None:
     commands = status.get("commands", {})
     if isinstance(commands, dict):
         token_secret_setup = commands.get("token_secret_setup")
+        token_secret_setup_stdin = commands.get("token_secret_setup_stdin")
         publish_token_workflow = commands.get("publish_token_workflow")
         publish_trusted_workflow = commands.get("publish_trusted_workflow")
         if token_secret_setup:
             print(f"token_secret_setup: {token_secret_setup}")
+        if token_secret_setup_stdin:
+            print(f"token_secret_setup_stdin: {token_secret_setup_stdin}")
         if publish_token_workflow:
             print(f"publish_token_workflow: {publish_token_workflow}")
         if publish_trusted_workflow:
