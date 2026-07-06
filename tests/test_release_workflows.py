@@ -26,6 +26,8 @@ class ReleaseWorkflowTests(unittest.TestCase):
             encoding="utf-8"
         )
 
+        self.assertIn("actions/setup-python@v5", workflow)
+        self.assertIn('python-version: "3.12"', workflow)
         self.assertIn("- dry-run", workflow)
         self.assertIn('default: "dry-run"', workflow)
         self.assertIn("publish_method=dry-run selected", workflow)
