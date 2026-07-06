@@ -133,7 +133,10 @@ PY
   `examples/api_llm_wasm_context_runtime.py` for a keyless end-to-end bridge, or
   pass `--wasm-report report.json` to `examples/api_llm_live_provider_matrix.py`
   and `examples/api_llm_live_provider_matrix_sweep.py` when live OpenAI/Claude
-  route comparisons should carry the same browser-side learning signal.
+  route comparisons should carry the same browser-side learning signal. Use
+  `--wasm-report-glob`, `--wasm-report-dir`, `--wasm-report-recursive`, and
+  `--wasm-max-reports` to collect repeated browser runs, compare them by loss,
+  and feed only the strongest reports into the provider matrix.
 - Language desire controls via `st.nn.DesirePipeline`, `DesireTrainerBridge`,
   `DesireRoundtableBridge`, and downstream hook adapters so notebooks can
   inspect phase/temperature/entropy offsets without making the symbolic kernel

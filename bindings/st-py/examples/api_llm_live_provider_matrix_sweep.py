@@ -221,6 +221,35 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--wasm-gradient-dim", type=int, default=8)
     parser.add_argument("--wasm-bundle-weight", type=float, default=1.0)
     parser.add_argument("--wasm-telemetry-prefix", default="wasm")
+    parser.add_argument(
+        "--wasm-report-glob",
+        action="append",
+        default=[],
+        help=(
+            "Glob pattern for browser-exported WASM report JSON files. "
+            "Repeat to collect reports from several run directories."
+        ),
+    )
+    parser.add_argument(
+        "--wasm-report-dir",
+        action="append",
+        default=[],
+        help="Directory containing WASM report JSON files.",
+    )
+    parser.add_argument(
+        "--wasm-report-recursive",
+        action="store_true",
+        help="Search --wasm-report-dir directories recursively.",
+    )
+    parser.add_argument(
+        "--wasm-max-reports",
+        type=int,
+        default=0,
+        help=(
+            "Use only the best N discovered WASM reports by loss. "
+            "Use 0 to pass all discovered reports."
+        ),
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument(
         "--resume-existing",
@@ -247,6 +276,10 @@ def main() -> None:
         gradient_dim=args.wasm_gradient_dim,
         bundle_weight=args.wasm_bundle_weight,
         telemetry_prefix=args.wasm_telemetry_prefix,
+        wasm_report_globs=args.wasm_report_glob,
+        wasm_report_dirs=args.wasm_report_dir,
+        max_reports=args.wasm_max_reports,
+        recursive=args.wasm_report_recursive,
     )
     configs = [
         {
