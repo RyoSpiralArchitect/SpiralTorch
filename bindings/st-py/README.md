@@ -123,7 +123,9 @@ PY
   `compare_api_llm_matrix_reports(...)` to compare repeated live provider
   `report.json` sweeps and inspect profile-winner stability across runs; the
   `api_llm_live_provider_matrix_sweep.py` example can run several token-budget
-  pairs and produce that comparison in one command.
+  pairs and produce that comparison in one command. Pass `--resume-existing`
+  when expanding a sweep so completed budget pairs are reused instead of
+  re-calling provider APIs.
 - Language desire controls via `st.nn.DesirePipeline`, `DesireTrainerBridge`,
   `DesireRoundtableBridge`, and downstream hook adapters so notebooks can
   inspect phase/temperature/entropy offsets without making the symbolic kernel
