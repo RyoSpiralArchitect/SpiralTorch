@@ -361,7 +361,7 @@ def test_api_llm_geometry_context_partials_feed_context_prompt() -> None:
         "Use geometry context.",
         context,
         max_partials=2,
-        max_telemetry=12,
+        max_telemetry=20,
     )
 
     assert len(context) == 2
@@ -372,6 +372,27 @@ def test_api_llm_geometry_context_partials_feed_context_prompt() -> None:
     assert "geometry.log_z_series.1.projection_stability=0.9" in prompt
     assert "geometry.consensus.probe_count=1" in prompt
     assert "User prompt: Use geometry context." in prompt
+
+
+def test_api_llm_geometry_context_partials_can_send_consensus_only() -> None:
+    context = st.api_llm_geometry_context_partials(
+        {"logz": _geometry_log_z_probe()},
+        gradient_dim=5,
+        consensus_only=True,
+    )
+
+    prompt = st.format_api_llm_context_prompt(
+        "Use compact geometry context.",
+        context,
+        max_partials=1,
+        max_telemetry=20,
+    )
+
+    assert len(context) == 1
+    assert context[0].origin == "geometry:consensus"
+    assert "origin=geometry:consensus" in prompt
+    assert "origin=geometry:logz" not in prompt
+    assert "geometry.consensus.probe_count=1" in prompt
 
 
 def test_runtime_context_prompt_injection_keeps_trace_prompt_original() -> None:

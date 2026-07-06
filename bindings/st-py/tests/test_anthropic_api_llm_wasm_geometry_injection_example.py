@@ -37,15 +37,16 @@ def test_geometry_injection_example_runs_keyless_comparison() -> None:
 
     assert result["kind"] == "spiraltorch.anthropic_wasm_geometry_injection"
     assert result["probe_source"] == "builtin-wasm-shaped"
+    assert result["context_mode"] == "consensus-only"
     assert result["conditions"] == ["baseline", "calm", "turbulent"]
     assert result["results"]["baseline"]["context_origins"] == []
-    assert result["results"]["calm"]["context_origins"][-1] == "geometry:consensus"
-    assert result["results"]["turbulent"]["context_origins"][-1] == "geometry:consensus"
+    assert result["results"]["calm"]["context_origins"] == ["geometry:consensus"]
+    assert result["results"]["turbulent"]["context_origins"] == ["geometry:consensus"]
     assert result["results"]["calm"]["telemetry"][
         "geometry.consensus.probe_count"
     ] == pytest.approx(3.0)
     assert result["results"]["turbulent"]["telemetry"][
-        "geometry.log_z_series.3.projection_stability"
+        "geometry.consensus.log_z_series_projection_stability_mean"
     ] < 0.001
     assert "Geometry context routed decoding" in result["results"]["calm"]["text"]
 
@@ -60,6 +61,7 @@ def test_geometry_injection_example_cli_writes_json(tmp_path, capsys) -> None:
             "Route one condition.",
             "--condition",
             "calm",
+            "--full-context",
             "--json-out",
             str(out),
             "--indent",
@@ -71,6 +73,7 @@ def test_geometry_injection_example_cli_writes_json(tmp_path, capsys) -> None:
     written = json.loads(out.read_text(encoding="utf-8"))
     assert exit_code == 0
     assert printed == written
+    assert printed["context_mode"] == "full"
     assert printed["conditions"] == ["calm"]
     assert printed["results"]["calm"]["context_origins"] == [
         "geometry:scale",

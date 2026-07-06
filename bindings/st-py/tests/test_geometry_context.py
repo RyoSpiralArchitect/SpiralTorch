@@ -149,6 +149,9 @@ def test_geometry_probe_consensus_partial_blends_probe_families() -> None:
     assert telemetry["geometry.consensus.probe_count"] == pytest.approx(3.0)
     assert telemetry["geometry.consensus.family_count"] == pytest.approx(3.0)
     assert telemetry["geometry.consensus.family_scale_stack_count"] == pytest.approx(1.0)
+    assert telemetry[
+        "geometry.consensus.log_z_series_projection_stability_mean"
+    ] == pytest.approx(0.9)
 
 
 def test_build_geometry_probe_context_can_append_consensus_prompt_context() -> None:
@@ -171,6 +174,40 @@ def test_build_geometry_probe_context_can_append_consensus_prompt_context() -> N
     assert "origin=geometry:consensus" in prompt
     assert "geometry.consensus.probe_count=3" in prompt
     assert "geometry.consensus.family_log_z_series_count=1" in prompt
+
+
+def test_build_geometry_probe_context_can_return_consensus_only() -> None:
+    partials, metadata = st.build_geometry_probe_context(
+        {
+            "scale": _scale_probe(),
+            "field": _fractal_probe(),
+            "logz": _log_z_probe(),
+        },
+        gradient_dim=4,
+        consensus_only=True,
+    )
+
+    prompt = st.format_api_llm_context_prompt(
+        "Read only the fused browser geometry.",
+        partials,
+        max_partials=1,
+        max_telemetry=20,
+    )
+
+    assert len(partials) == 1
+    assert partials[0].origin == "geometry:consensus"
+    assert metadata["source_origins"] == [
+        "geometry:scale",
+        "geometry:field",
+        "geometry:logz",
+    ]
+    assert metadata["context_origins"] == ["geometry:consensus"]
+    assert metadata["consensus"]["only"] is True
+    assert metadata["consensus"]["source_origin_count"] == 3
+    assert "origin=geometry:consensus" in prompt
+    assert "origin=geometry:scale" not in prompt
+    assert "geometry.consensus.probe_count=3" in prompt
+    assert "geometry.consensus.log_z_series_projection_stability_mean=0.9" in prompt
 
 
 def test_geometry_probe_context_artifact_round_trips(tmp_path) -> None:

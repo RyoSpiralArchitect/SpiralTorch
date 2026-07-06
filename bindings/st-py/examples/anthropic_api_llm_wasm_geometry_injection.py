@@ -190,6 +190,7 @@ def _context_for(
     *,
     gradient_dim: int,
     consensus_weight: float,
+    consensus_only: bool,
 ) -> list[st.ZSpacePartialBundle]:
     if condition == "baseline":
         return []
@@ -200,6 +201,7 @@ def _context_for(
         probes,
         gradient_dim=gradient_dim,
         include_consensus=True,
+        consensus_only=consensus_only,
         consensus_weight=consensus_weight,
     )
 
@@ -221,6 +223,10 @@ def _telemetry_focus(trace: Mapping[str, Any]) -> dict[str, float]:
         "geometry.consensus.family_count",
         "geometry.consensus.metric_count",
         "geometry.consensus.strategy_code",
+        "geometry.consensus.scale_stack_interface_density_mean",
+        "geometry.consensus.fractal_field_energy_mean",
+        "geometry.consensus.fractal_field_coherence_score_mean",
+        "geometry.consensus.log_z_series_projection_stability_mean",
     )
     return {key: float(payload[key]) for key in keys if key in payload}
 
@@ -247,7 +253,9 @@ def _compact_trace(
             key: applied.get(key) if isinstance(applied, Mapping) else None
             for key in ("speed", "memory", "stability", "drs", "frac")
         },
-        "confidence": inference.get("confidence") if isinstance(inference, Mapping) else None,
+        "confidence": (
+            inference.get("confidence") if isinstance(inference, Mapping) else None
+        ),
         "telemetry": _telemetry_focus(row),
         "text_quality": summary.get("text_quality"),
     }
@@ -266,6 +274,7 @@ def run_geometry_injection(
     max_tokens: int = 180,
     gradient_dim: int = 6,
     consensus_weight: float = 1.35,
+    full_context: bool = False,
 ) -> dict[str, Any]:
     """Run baseline/calm/turbulent Z-space geometry injection comparisons."""
 
@@ -289,6 +298,7 @@ def run_geometry_injection(
             resolved_probe_sets,
             gradient_dim=gradient_dim,
             consensus_weight=consensus_weight,
+            consensus_only=not full_context,
         )
         runtime = st.ApiLLMZSpaceRuntime(
             list(z_state),
@@ -308,7 +318,7 @@ def run_geometry_injection(
                 context_partials=context,
                 context_prompt=bool(context),
                 context_prompt_options={
-                    "max_partials": 5,
+                    "max_partials": 5 if full_context else 1,
                     "max_metrics": 8,
                     "max_telemetry": 18,
                 },
@@ -323,7 +333,7 @@ def run_geometry_injection(
                 context_partials=context,
                 context_prompt=bool(context),
                 context_prompt_options={
-                    "max_partials": 5,
+                    "max_partials": 5 if full_context else 1,
                     "max_metrics": 8,
                     "max_telemetry": 18,
                 },
@@ -335,6 +345,7 @@ def run_geometry_injection(
         "model": model,
         "prompt": prompt,
         "probe_source": probe_source,
+        "context_mode": "full" if full_context else "consensus-only",
         "wasm_pkg": None if wasm_pkg is None else str(wasm_pkg),
         "conditions": list(conditions),
         "results": rows,
@@ -350,6 +361,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-tokens", type=int, default=180)
     parser.add_argument("--gradient-dim", type=int, default=6)
     parser.add_argument("--consensus-weight", type=float, default=1.35)
+    parser.add_argument(
+        "--full-context",
+        action="store_true",
+        help="Send per-probe partials plus consensus instead of only geometry:consensus.",
+    )
     parser.add_argument("--condition", action="append", default=[])
     parser.add_argument("--json-out", default=None)
     parser.add_argument("--indent", type=int, default=2)
@@ -367,6 +383,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         max_tokens=args.max_tokens,
         gradient_dim=args.gradient_dim,
         consensus_weight=args.consensus_weight,
+        full_context=args.full_context,
     )
     text = json.dumps(result, indent=args.indent, sort_keys=True) + "\n"
     if args.json_out:

@@ -258,6 +258,27 @@ def _consensus_telemetry(
     }
     for family, count in sorted(family_counts.items()):
         telemetry[f"{consensus_prefix}.family_{family}_count"] = float(count)
+    probes = metadata.get("probes")
+    if isinstance(probes, Sequence) and not isinstance(probes, (str, bytes, bytearray)):
+        summary_values: dict[str, list[float]] = {}
+        for probe in probes:
+            if not isinstance(probe, Mapping):
+                continue
+            family = str(probe.get("family") or "")
+            for key in (
+                "interface_density",
+                "energy",
+                "total_variation",
+                "coherence_score",
+                "projection_energy",
+                "projection_stability",
+            ):
+                value = _finite_float(probe.get(key))
+                if value is not None:
+                    summary_values.setdefault(f"{family}_{key}", []).append(value)
+        for key, values in sorted(summary_values.items()):
+            if values:
+                telemetry[f"{consensus_prefix}.{key}_mean"] = sum(values) / len(values)
     return telemetry
 
 
@@ -335,6 +356,7 @@ def build_geometry_probe_context(
     telemetry_prefix: str = "geometry",
     gradient_dim: int = 8,
     include_consensus: bool = False,
+    consensus_only: bool = False,
     consensus_weight: float | None = None,
     consensus_strategy: str = "mean",
     consensus_origin: str = "geometry:consensus",
@@ -384,8 +406,9 @@ def build_geometry_probe_context(
         "kinds": kind_counts,
         "probes": summaries,
         "context_origins": [partial.origin for partial in partials],
+        "source_origins": [partial.origin for partial in partials],
     }
-    if include_consensus and partials:
+    if (include_consensus or consensus_only) and partials:
         consensus = _consensus_partial_from_context(
             partials,
             metadata,
@@ -394,15 +417,21 @@ def build_geometry_probe_context(
             strategy=consensus_strategy,
             origin=consensus_origin,
         )
-        partials.append(consensus)
         metadata["consensus"] = {
             "origin": consensus.origin,
             "strategy": _normalise_consensus_strategy(consensus_strategy),
             "weight": consensus.weight,
             "metric_count": len(consensus.resolved()),
+            "source_origin_count": len(metadata["source_origins"]),
         }
+        if consensus_only:
+            partials = [consensus]
+            metadata["consensus"]["only"] = True
+        else:
+            partials.append(consensus)
+            metadata["consensus"]["only"] = False
         metadata["context_origins"] = [partial.origin for partial in partials]
-    elif include_consensus:
+    elif include_consensus or consensus_only:
         metadata["consensus"] = None
     return partials, metadata
 
@@ -415,6 +444,7 @@ def build_geometry_probe_context_artifact(
     telemetry_prefix: str = "geometry",
     gradient_dim: int = 8,
     include_consensus: bool = False,
+    consensus_only: bool = False,
     consensus_weight: float | None = None,
     consensus_strategy: str = "mean",
     consensus_origin: str = "geometry:consensus",
@@ -428,6 +458,7 @@ def build_geometry_probe_context_artifact(
         telemetry_prefix=telemetry_prefix,
         gradient_dim=gradient_dim,
         include_consensus=include_consensus,
+        consensus_only=consensus_only,
         consensus_weight=consensus_weight,
         consensus_strategy=consensus_strategy,
         consensus_origin=consensus_origin,
@@ -449,6 +480,7 @@ def write_geometry_probe_context_artifact(
     telemetry_prefix: str = "geometry",
     gradient_dim: int = 8,
     include_consensus: bool = False,
+    consensus_only: bool = False,
     consensus_weight: float | None = None,
     consensus_strategy: str = "mean",
     consensus_origin: str = "geometry:consensus",
@@ -462,6 +494,7 @@ def write_geometry_probe_context_artifact(
         telemetry_prefix=telemetry_prefix,
         gradient_dim=gradient_dim,
         include_consensus=include_consensus,
+        consensus_only=consensus_only,
         consensus_weight=consensus_weight,
         consensus_strategy=consensus_strategy,
         consensus_origin=consensus_origin,
