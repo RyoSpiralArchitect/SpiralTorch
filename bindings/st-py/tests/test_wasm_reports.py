@@ -123,6 +123,8 @@ def _canvas_report(last_loss: float = 0.05) -> dict[str, object]:
 
 
 def test_wasm_report_helpers_exported_from_top_level() -> None:
+    assert "audit_wasm_report" in st.__all__
+    assert "audit_wasm_report_context" in st.__all__
     assert "build_wasm_report_context" in st.__all__
     assert "build_wasm_report_context_artifact" in st.__all__
     assert "collect_wasm_report_paths" in st.__all__
@@ -168,6 +170,37 @@ def test_summarize_canvas_wasm_report_and_convert_to_partial() -> None:
     assert telemetry["wasm.webgpu_device_ready"] == pytest.approx(1.0)
 
 
+def test_audit_wasm_report_scores_ready_canvas_context() -> None:
+    audit = st.audit_wasm_report(_canvas_report(last_loss=0.05))
+
+    assert audit["kind"] == "spiraltorch.wasm_report_audit"
+    assert audit["family"] == "canvas"
+    assert audit["status"] == "ready"
+    assert audit["runtime"]["status"] == "webgpu_ready"
+    assert audit["learning"]["source"] == "loss_stats"
+    assert audit["learning"]["relative_improvement"] == pytest.approx(0.75)
+    assert audit["readiness_score"] > 0.9
+    assert audit["risk_flags"] == []
+    assert "promote this report" in " ".join(audit["recommendations"])
+
+
+def test_audit_wasm_report_flags_runtime_and_learning_risks() -> None:
+    report = _canvas_report(last_loss=0.3)
+    runtime = report["runtime"]
+    assert isinstance(runtime, dict)
+    runtime["webgpuAvailable"] = False
+    runtime["webgpuDeviceReady"] = False
+    runtime["webgpuTrainerReady"] = False
+
+    audit = st.audit_wasm_report(report)
+
+    assert audit["status"] == "needs_attention"
+    assert audit["runtime"]["status"] == "wasm_only"
+    assert audit["learning"]["improved"] is False
+    assert "webgpu_unavailable" in audit["risk_flags"]
+    assert "loss_not_improved" in audit["risk_flags"]
+
+
 def test_compare_wasm_reports_selects_best_loss() -> None:
     comparison = st.compare_wasm_reports(
         {
@@ -180,6 +213,32 @@ def test_compare_wasm_reports_selects_best_loss() -> None:
     assert comparison["families"] == {"mellin": 2}
     assert comparison["best_loss"]["label"] == "better"
     assert comparison["best_loss"]["loss"] == pytest.approx(0.05)
+    assert comparison["best_readiness"]["label"] == "better"
+    assert comparison["best_readiness"]["audit_status"] == "ready"
+
+
+def test_audit_wasm_report_context_ranks_ready_reports() -> None:
+    risk = _canvas_report(last_loss=0.3)
+    runtime = risk["runtime"]
+    assert isinstance(runtime, dict)
+    runtime["webgpuAvailable"] = False
+    runtime["webgpuDeviceReady"] = False
+    runtime["webgpuTrainerReady"] = False
+
+    audit = st.audit_wasm_report_context(
+        {
+            "risk": risk,
+            "ready": _canvas_report(last_loss=0.02),
+            "mellin": _mellin_report(final_loss=0.08),
+        }
+    )
+
+    assert audit["kind"] == "spiraltorch.wasm_report_context_audit"
+    assert audit["count"] == 3
+    assert audit["best"]["label"] == "ready"
+    assert audit["statuses"]["ready"] >= 2
+    assert audit["risk_counts"]["webgpu_unavailable"] == 1
+    assert any("families separately" in item for item in audit["recommendations"])
 
 
 def test_collect_and_build_wasm_report_context_selects_best_runs(tmp_path) -> None:
@@ -218,6 +277,10 @@ def test_collect_and_build_wasm_report_context_selects_best_runs(tmp_path) -> No
     assert selected == {str(best), str(middle)}
     assert metadata["comparison"]["best_loss"]["label"] == "best"
     assert metadata["comparison"]["best_loss"]["loss"] == pytest.approx(0.01)
+    assert metadata["comparison"]["best_readiness"]["label"] == "best"
+    assert metadata["audit"]["best"]["label"] == "best"
+    assert metadata["audit"]["statuses"]["ready"] == 2
+    assert metadata["audit"]["statuses"]["usable"] == 1
     assert len(context) == 2
     assert all(len(partial.resolved()["gradient"]) == 5 for partial in context)
 
