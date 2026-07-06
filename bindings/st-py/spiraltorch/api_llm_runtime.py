@@ -25,6 +25,7 @@ from .zspace_inference import (
     topos_control_partial,
     topos_control_signal,
     topos_inference_plan,
+    topos_runtime_profile,
 )
 
 __all__ = [
@@ -80,6 +81,9 @@ _REPORT_ROUTE_METRICS = (
     "topos_inference_plan_temperature_mean",
     "topos_inference_plan_top_p_mean",
     "topos_inference_context_weight_mean",
+    "topos_runtime_control_energy_mean",
+    "topos_runtime_closure_risk_mean",
+    "topos_runtime_exploration_budget_mean",
 )
 _TEXT_QUALITY_STOPWORDS = frozenset(
     {
@@ -162,6 +166,7 @@ def _finite_float(value: Any) -> float | None:
 def topos_runtime_request(
     topos: Any | None = None,
     *,
+    gain: float = 1.0,
     base_temperature: float = 1.0,
     base_top_p: float = 1.0,
     min_temperature: float = 0.0,
@@ -180,6 +185,7 @@ def topos_runtime_request(
     signal = topos_control_signal(topos, **signal_options)
     plan = topos_inference_plan(
         signal,
+        gain=gain,
         base_temperature=base_temperature,
         base_top_p=base_top_p,
         min_temperature=min_temperature,
@@ -205,6 +211,7 @@ def topos_runtime_adapter(
     topos: Any | None = None,
     *,
     bundle_weight: float = 1.0,
+    training_gain: float = 1.0,
     origin: str | None = "topos:runtime",
     telemetry_prefix: str = "topos",
     gradient_dim: int = 6,
@@ -214,6 +221,7 @@ def topos_runtime_adapter(
     """Build a serializable topological adapter for API-model inference."""
 
     signal = topos_control_signal(topos, **signal_options)
+    request_options_map = dict(request_options or {})
     partial = topos_control_partial(
         signal,
         bundle_weight=bundle_weight,
@@ -221,16 +229,60 @@ def topos_runtime_adapter(
         telemetry_prefix=telemetry_prefix,
         gradient_dim=gradient_dim,
     )
-    request = topos_runtime_request(signal, **dict(request_options or {}))
+    request = topos_runtime_request(signal, **request_options_map)
+    plan_keys = {
+        "gain",
+        "base_temperature",
+        "base_top_p",
+        "min_temperature",
+        "max_temperature",
+        "min_top_p",
+        "max_top_p",
+        "base_frequency_penalty",
+        "base_presence_penalty",
+    }
+    profile_options = {
+        key: value for key, value in request_options_map.items() if key in plan_keys
+    }
+    inference_plan = topos_inference_plan(signal, **profile_options)
+
+    def _profile_option_float(key: str, default: float) -> float:
+        numeric = _finite_float(profile_options.get(key))
+        return default if numeric is None else numeric
+
+    profile = topos_runtime_profile(
+        signal,
+        training_gain=training_gain,
+        inference_gain=_profile_option_float("gain", 1.0),
+        base_temperature=_profile_option_float("base_temperature", 1.0),
+        base_top_p=_profile_option_float("base_top_p", 1.0),
+        min_temperature=_profile_option_float("min_temperature", 0.0),
+        max_temperature=_profile_option_float("max_temperature", 2.0),
+        min_top_p=_profile_option_float("min_top_p", 0.05),
+        max_top_p=_profile_option_float("max_top_p", 1.0),
+        base_frequency_penalty=_profile_option_float("base_frequency_penalty", 0.0),
+        base_presence_penalty=_profile_option_float("base_presence_penalty", 0.0),
+    )
+    telemetry = dict(partial.telemetry_payload() or {})
+    for key, value in inference_plan.items():
+        numeric = _finite_float(value)
+        if numeric is not None:
+            telemetry[f"{telemetry_prefix}.inference_plan.{key}"] = numeric
+    for key, value in profile.items():
+        numeric = _finite_float(value)
+        if numeric is not None:
+            telemetry[f"{telemetry_prefix}.runtime_profile.{key}"] = numeric
     return {
         "kind": "spiraltorch.topos_runtime_adapter",
         "signal": signal,
+        "inference_plan": inference_plan,
+        "runtime_profile": profile,
         "request": request,
         "context_partial": {
             "origin": partial.origin,
             "weight": float(partial.weight),
             "metrics": partial.resolved(),
-            "telemetry": dict(partial.telemetry_payload() or {}),
+            "telemetry": telemetry,
         },
     }
 
@@ -1547,6 +1599,30 @@ def _summarize_topos_context_telemetry(
         "inference_presence_penalty_bias": _stats(
             row.get("topos.inference_hints.presence_penalty_bias") for row in rows
         ),
+        "runtime_profile_control_energy": _stats(
+            row.get("topos.runtime_profile.control_energy") for row in rows
+        ),
+        "runtime_profile_closure_risk": _stats(
+            row.get("topos.runtime_profile.closure_risk") for row in rows
+        ),
+        "runtime_profile_exploration_budget": _stats(
+            row.get("topos.runtime_profile.exploration_budget") for row in rows
+        ),
+        "runtime_profile_training_rate_scale": _stats(
+            row.get("topos.runtime_profile.training_rate_scale") for row in rows
+        ),
+        "runtime_profile_training_gradient_bias_scale": _stats(
+            row.get("topos.runtime_profile.training_gradient_bias_scale") for row in rows
+        ),
+        "runtime_profile_inference_temperature": _stats(
+            row.get("topos.runtime_profile.inference_temperature") for row in rows
+        ),
+        "runtime_profile_inference_context_weight": _stats(
+            row.get("topos.runtime_profile.inference_context_weight") for row in rows
+        ),
+        "runtime_profile_learning_inference_balance": _stats(
+            row.get("topos.runtime_profile.learning_inference_balance") for row in rows
+        ),
     }
 
 
@@ -2053,6 +2129,38 @@ def _comparison_row(label: str, path: Path, summary: Mapping[str, Any]) -> dict[
             summary,
             "inference_context_weight",
         ),
+        "topos_runtime_control_energy_mean": _topos_context_stat(
+            summary,
+            "runtime_profile_control_energy",
+        ),
+        "topos_runtime_closure_risk_mean": _topos_context_stat(
+            summary,
+            "runtime_profile_closure_risk",
+        ),
+        "topos_runtime_exploration_budget_mean": _topos_context_stat(
+            summary,
+            "runtime_profile_exploration_budget",
+        ),
+        "topos_runtime_training_rate_scale_mean": _topos_context_stat(
+            summary,
+            "runtime_profile_training_rate_scale",
+        ),
+        "topos_runtime_training_gradient_bias_scale_mean": _topos_context_stat(
+            summary,
+            "runtime_profile_training_gradient_bias_scale",
+        ),
+        "topos_runtime_inference_temperature_mean": _topos_context_stat(
+            summary,
+            "runtime_profile_inference_temperature",
+        ),
+        "topos_runtime_inference_context_weight_mean": _topos_context_stat(
+            summary,
+            "runtime_profile_inference_context_weight",
+        ),
+        "topos_runtime_learning_inference_balance_mean": _topos_context_stat(
+            summary,
+            "runtime_profile_learning_inference_balance",
+        ),
         "last_text_preview": summary.get("last_text_preview"),
     }
     row["quality_score"] = _quality_score(row)
@@ -2267,6 +2375,19 @@ def _comparison_topos_context(
             "topos_inference_plan_temperature_mean",
             higher_is_better=False,
         ),
+        "highest_runtime_control_energy": _winner(
+            rows,
+            "topos_runtime_control_energy_mean",
+        ),
+        "lowest_runtime_closure_risk": _winner(
+            rows,
+            "topos_runtime_closure_risk_mean",
+            higher_is_better=False,
+        ),
+        "highest_runtime_exploration_budget": _winner(
+            rows,
+            "topos_runtime_exploration_budget_mean",
+        ),
         "lowest_optimizer_rate_scale": _winner(
             rows,
             "topos_optimizer_rate_scale_mean",
@@ -2301,6 +2422,15 @@ def _comparison_topos_context(
         ),
         "optimizer_raw_rate_scale": _numeric_stats_with_range(
             row.get("topos_optimizer_raw_rate_scale_mean") for row in observed
+        ),
+        "runtime_control_energy": _numeric_stats_with_range(
+            row.get("topos_runtime_control_energy_mean") for row in observed
+        ),
+        "runtime_closure_risk": _numeric_stats_with_range(
+            row.get("topos_runtime_closure_risk_mean") for row in observed
+        ),
+        "runtime_exploration_budget": _numeric_stats_with_range(
+            row.get("topos_runtime_exploration_budget_mean") for row in observed
         ),
     }
 
@@ -2914,6 +3044,15 @@ def compare_api_llm_trace_runs(
         "highest_topos_inference_context_weight": _winner(
             rows,
             "topos_inference_context_weight_mean",
+        ),
+        "highest_topos_runtime_control_energy": _winner(
+            rows,
+            "topos_runtime_control_energy_mean",
+        ),
+        "lowest_topos_runtime_closure_risk": _winner(
+            rows,
+            "topos_runtime_closure_risk_mean",
+            higher_is_better=False,
         ),
     }
     best = winners.get("best_score")

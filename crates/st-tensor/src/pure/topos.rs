@@ -294,6 +294,22 @@ pub struct ToposInferencePlan {
     sampling_focus: f32,
 }
 
+/// Joint learning/inference profile projected from one open-topos signal.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ToposRuntimeProfile {
+    training_gain: f32,
+    inference_gain: f32,
+    closure_risk: f32,
+    exploration_budget: f32,
+    control_energy: f32,
+    training_rate_scale: f32,
+    training_gradient_bias_scale: f32,
+    inference_temperature: f32,
+    inference_top_p: f32,
+    inference_context_weight: f32,
+    learning_inference_balance: f32,
+}
+
 impl ToposInferenceHints {
     pub fn temperature_scale(&self) -> f32 {
         self.temperature_scale
@@ -406,6 +422,100 @@ impl ToposInferencePlan {
             self.presence_penalty,
             self.context_weight,
             self.sampling_focus,
+        ]
+    }
+}
+
+impl ToposRuntimeProfile {
+    fn from_parts(
+        signal: &ToposControlSignal,
+        training_plan: ToposTrainingPlan,
+        inference_plan: ToposInferencePlan,
+    ) -> Self {
+        let closure_risk = (0.5 * signal.closure_pressure()
+            + 0.3 * signal.guard_strength()
+            + 0.2 * signal.step_damping())
+        .clamp(0.0, 1.0);
+        let exploration_budget =
+            (0.6 * signal.openness() + 0.4 * signal.exploration_hint()).clamp(0.0, 1.0);
+        let gradient_pressure =
+            (training_plan.effective_gradient_bias_scale() / 0.35).clamp(0.0, 1.0);
+        let rate_pressure = (1.0 - training_plan.rate_scale()).max(0.0).clamp(0.0, 1.0);
+        let context_pressure = inference_plan.context_weight().clamp(0.0, 1.25) / 1.25;
+        let control_energy = (0.35 * closure_risk
+            + 0.25 * gradient_pressure
+            + 0.2 * rate_pressure
+            + 0.2 * context_pressure)
+            .clamp(0.0, 1.0);
+        let learning_inference_balance =
+            (training_plan.rate_scale() / inference_plan.temperature().max(1e-6)).clamp(0.0, 2.0);
+        Self {
+            training_gain: training_plan.gain(),
+            inference_gain: inference_plan.gain(),
+            closure_risk,
+            exploration_budget,
+            control_energy,
+            training_rate_scale: training_plan.rate_scale(),
+            training_gradient_bias_scale: training_plan.effective_gradient_bias_scale(),
+            inference_temperature: inference_plan.temperature(),
+            inference_top_p: inference_plan.top_p(),
+            inference_context_weight: inference_plan.context_weight(),
+            learning_inference_balance,
+        }
+    }
+
+    pub fn training_gain(&self) -> f32 {
+        self.training_gain
+    }
+
+    pub fn inference_gain(&self) -> f32 {
+        self.inference_gain
+    }
+
+    pub fn closure_risk(&self) -> f32 {
+        self.closure_risk
+    }
+
+    pub fn exploration_budget(&self) -> f32 {
+        self.exploration_budget
+    }
+
+    pub fn control_energy(&self) -> f32 {
+        self.control_energy
+    }
+
+    pub fn training_rate_scale(&self) -> f32 {
+        self.training_rate_scale
+    }
+
+    pub fn training_gradient_bias_scale(&self) -> f32 {
+        self.training_gradient_bias_scale
+    }
+
+    pub fn inference_temperature(&self) -> f32 {
+        self.inference_temperature
+    }
+
+    pub fn inference_top_p(&self) -> f32 {
+        self.inference_top_p
+    }
+
+    pub fn inference_context_weight(&self) -> f32 {
+        self.inference_context_weight
+    }
+
+    pub fn learning_inference_balance(&self) -> f32 {
+        self.learning_inference_balance
+    }
+
+    pub fn vector(&self) -> [f32; 6] {
+        [
+            self.control_energy,
+            self.closure_risk,
+            self.exploration_budget,
+            self.training_rate_scale,
+            self.inference_temperature,
+            self.inference_context_weight,
         ]
     }
 }
@@ -618,6 +728,27 @@ impl ToposControlSignal {
             base_frequency_penalty,
             base_presence_penalty,
         )
+    }
+
+    /// Joint learning/inference controls derived from this signal.
+    pub fn runtime_profile(
+        &self,
+        training_gain: f32,
+        inference_gain: f32,
+        base_temperature: f32,
+        base_top_p: f32,
+        base_frequency_penalty: f32,
+        base_presence_penalty: f32,
+    ) -> ToposRuntimeProfile {
+        let training_plan = self.training_plan(training_gain);
+        let inference_plan = self.inference_plan(
+            inference_gain,
+            base_temperature,
+            base_top_p,
+            base_frequency_penalty,
+            base_presence_penalty,
+        );
+        ToposRuntimeProfile::from_parts(self, training_plan, inference_plan)
     }
 
     /// Compact runtime hint vector for optimizers and inference adapters.
@@ -1301,6 +1432,29 @@ impl OpenCartesianTopos {
         visited_volume: usize,
     ) -> ToposControlSignal {
         ToposControlSignal::from_observation(self, observed_depth, visited_volume)
+    }
+
+    /// Emits a joint learning/inference profile for runtime telemetry.
+    pub fn runtime_profile_for(
+        &self,
+        observed_depth: usize,
+        visited_volume: usize,
+        training_gain: f32,
+        inference_gain: f32,
+        base_temperature: f32,
+        base_top_p: f32,
+        base_frequency_penalty: f32,
+        base_presence_penalty: f32,
+    ) -> ToposRuntimeProfile {
+        self.control_signal_for(observed_depth, visited_volume)
+            .runtime_profile(
+                training_gain,
+                inference_gain,
+                base_temperature,
+                base_top_p,
+                base_frequency_penalty,
+                base_presence_penalty,
+            )
     }
 
     /// Ensures the provided tensor stays finite and within the permitted volume.
@@ -3162,6 +3316,14 @@ mod tests {
         assert!((inference_plan.presence_penalty() - 0.18094969).abs() < 1e-6);
         assert!((inference_plan.context_weight() - 0.96125).abs() < 1e-6);
         assert_eq!(inference_plan.vector().len(), 6);
+        let profile = signal.runtime_profile(0.5, 0.5, 0.8, 0.9, 0.1, 0.2);
+        assert!((profile.closure_risk() - 0.4451).abs() < 1e-6);
+        assert!((profile.exploration_budget() - 0.4555).abs() < 1e-6);
+        assert!((profile.training_rate_scale() - 0.8884606).abs() < 1e-6);
+        assert!((profile.inference_temperature() - 0.741325).abs() < 1e-6);
+        assert!((profile.control_energy() - 0.35998437).abs() < 1e-6);
+        assert!((profile.learning_inference_balance() - 1.1984764).abs() < 1e-6);
+        assert_eq!(profile.vector().len(), 6);
     }
 
     #[test]

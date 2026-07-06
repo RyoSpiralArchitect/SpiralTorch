@@ -13,7 +13,7 @@ use st_tensor::{
     AmegaHypergrad, AmegaRealgrad, Complex32 as StComplex32, ComplexTensor, DesireGradientControl,
     DesireGradientInterpretation, GradientSummary, HypergradTelemetry, LanguageWaveEncoder,
     OpenCartesianTopos, Tensor, TensorBiome, ToposControlSignal, ToposInferenceHints,
-    ToposInferencePlan, ToposTrainingHints, ToposTrainingPlan, ZBox, ZBoxSite,
+    ToposInferencePlan, ToposRuntimeProfile, ToposTrainingHints, ToposTrainingPlan, ZBox, ZBoxSite,
 };
 
 fn py_complex_to_st(values: Vec<PyComplex32>) -> Vec<StComplex32> {
@@ -73,6 +73,10 @@ fn topos_control_signal_to_pydict(
     dict.set_item(
         "inference_plan",
         topos_inference_plan_to_pydict(py, signal.inference_plan(1.0, 1.0, 1.0, 0.0, 0.0))?,
+    )?;
+    dict.set_item(
+        "runtime_profile",
+        topos_runtime_profile_to_pydict(py, signal.runtime_profile(1.0, 1.0, 1.0, 1.0, 0.0, 0.0))?,
     )?;
     Ok(dict.into_py(py))
 }
@@ -139,6 +143,35 @@ fn topos_inference_plan_to_pydict(py: Python<'_>, plan: ToposInferencePlan) -> P
     dict.set_item("top_p_scale", plan.top_p_scale())?;
     dict.set_item("sampling_focus", plan.sampling_focus())?;
     dict.set_item("vector", plan.vector().to_vec())?;
+    Ok(dict.into_py(py))
+}
+
+fn topos_runtime_profile_to_pydict(
+    py: Python<'_>,
+    profile: ToposRuntimeProfile,
+) -> PyResult<PyObject> {
+    let dict = PyDict::new(py);
+    dict.set_item("training_gain", profile.training_gain())?;
+    dict.set_item("inference_gain", profile.inference_gain())?;
+    dict.set_item("closure_risk", profile.closure_risk())?;
+    dict.set_item("exploration_budget", profile.exploration_budget())?;
+    dict.set_item("control_energy", profile.control_energy())?;
+    dict.set_item("training_rate_scale", profile.training_rate_scale())?;
+    dict.set_item(
+        "training_gradient_bias_scale",
+        profile.training_gradient_bias_scale(),
+    )?;
+    dict.set_item("inference_temperature", profile.inference_temperature())?;
+    dict.set_item("inference_top_p", profile.inference_top_p())?;
+    dict.set_item(
+        "inference_context_weight",
+        profile.inference_context_weight(),
+    )?;
+    dict.set_item(
+        "learning_inference_balance",
+        profile.learning_inference_balance(),
+    )?;
+    dict.set_item("vector", profile.vector().to_vec())?;
     Ok(dict.into_py(py))
 }
 
@@ -351,6 +384,34 @@ impl PyOpenCartesianTopos {
                     base_frequency_penalty,
                     base_presence_penalty,
                 ),
+        )
+    }
+
+    #[pyo3(signature = (observed_depth=0, visited_volume=0, training_gain=1.0, inference_gain=1.0, base_temperature=1.0, base_top_p=1.0, base_frequency_penalty=0.0, base_presence_penalty=0.0))]
+    pub fn runtime_profile(
+        &self,
+        py: Python<'_>,
+        observed_depth: usize,
+        visited_volume: usize,
+        training_gain: f32,
+        inference_gain: f32,
+        base_temperature: f32,
+        base_top_p: f32,
+        base_frequency_penalty: f32,
+        base_presence_penalty: f32,
+    ) -> PyResult<PyObject> {
+        topos_runtime_profile_to_pydict(
+            py,
+            self.inner.runtime_profile_for(
+                observed_depth,
+                visited_volume,
+                training_gain,
+                inference_gain,
+                base_temperature,
+                base_top_p,
+                base_frequency_penalty,
+                base_presence_penalty,
+            ),
         )
     }
 
