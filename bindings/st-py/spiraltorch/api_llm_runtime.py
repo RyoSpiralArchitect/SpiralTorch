@@ -59,6 +59,10 @@ _REPORT_ROUTE_METRICS = (
     "total_tokens",
     "empty_text_rate",
     "refusal_rate",
+    "wasm_context_observed_rate",
+    "wasm_loss_mean",
+    "wasm_stability_hint_mean",
+    "wasm_webgpu_device_ready_rate",
 )
 _TEXT_QUALITY_STOPWORDS = frozenset(
     {
@@ -1104,6 +1108,55 @@ def _trace_stop_details_category(event: Mapping[str, Any]) -> str | None:
     return str(category) if category not in {None, ""} else None
 
 
+def _wasm_ready_summary(
+    rows: Sequence[Mapping[str, Any]],
+    key: str,
+) -> dict[str, float]:
+    values = [_finite_float(row.get(key)) for row in rows]
+    observed = [value for value in values if value is not None]
+    ready_count = sum(1 for value in observed if value > 0.0)
+    return {
+        "observed_count": float(len(observed)),
+        "ready_count": float(ready_count),
+        "ready_rate": ready_count / len(observed) if observed else 0.0,
+    }
+
+
+def _summarize_wasm_context_telemetry(
+    events: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Summarize browser-side WASM telemetry fused into API LLM traces."""
+
+    rows = [
+        _mapping_at(event, "telemetry")
+        for event in events
+        if any(str(key).startswith("wasm.") for key in _mapping_at(event, "telemetry"))
+    ]
+    families: dict[str, int] = {}
+    for row in rows:
+        for key, value in row.items():
+            key_text = str(key)
+            if not key_text.startswith("wasm.family_"):
+                continue
+            if (_finite_float(value) or 0.0) <= 0.0:
+                continue
+            family = key_text.removeprefix("wasm.family_")
+            families[family] = families.get(family, 0) + 1
+    return {
+        "observed_count": len(rows),
+        "observed_rate": len(rows) / len(events) if events else 0.0,
+        "families": dict(sorted(families.items())),
+        "loss": _stats(row.get("wasm.loss") for row in rows),
+        "stability_hint": _stats(row.get("wasm.stability_hint") for row in rows),
+        "work_units": _stats(row.get("wasm.work_units") for row in rows),
+        "webgpu_available": _wasm_ready_summary(rows, "wasm.webgpu_available"),
+        "webgpu_device_ready": _wasm_ready_summary(
+            rows,
+            "wasm.webgpu_device_ready",
+        ),
+    }
+
+
 def summarize_api_llm_trace_events(
     path: str | Path,
     *,
@@ -1207,6 +1260,7 @@ def summarize_api_llm_trace_events(
         },
         "confidence": _stats(confidence_values),
         "metrics": metrics,
+        "wasm_context": _summarize_wasm_context_telemetry(events),
     }
 
 
@@ -1241,6 +1295,38 @@ def _summary_metric(
         return 0.0
     numeric = _finite_float(source.get(stat))
     return 0.0 if numeric is None else numeric
+
+
+def _wasm_context_stat(
+    summary: Mapping[str, Any],
+    section: str,
+    *,
+    stat: str = "mean",
+) -> float | None:
+    wasm_context = summary.get("wasm_context")
+    if not isinstance(wasm_context, Mapping):
+        return None
+    source = wasm_context.get(section)
+    if not isinstance(source, Mapping):
+        return None
+    if (_finite_float(source.get("count")) or 0.0) <= 0.0:
+        return None
+    return _finite_float(source.get(stat))
+
+
+def _wasm_context_ready_rate(
+    summary: Mapping[str, Any],
+    section: str,
+) -> float | None:
+    wasm_context = summary.get("wasm_context")
+    if not isinstance(wasm_context, Mapping):
+        return None
+    source = wasm_context.get(section)
+    if not isinstance(source, Mapping):
+        return None
+    if (_finite_float(source.get("observed_count")) or 0.0) <= 0.0:
+        return None
+    return _finite_float(source.get("ready_rate"))
 
 
 def _dominant_label(counts: Any) -> str | None:
@@ -1391,6 +1477,8 @@ def _selection_profile_score(row: Mapping[str, Any], profile: str) -> float:
 
 
 def _comparison_row(label: str, path: Path, summary: Mapping[str, Any]) -> dict[str, Any]:
+    wasm_context = summary.get("wasm_context")
+    wasm_context_map = wasm_context if isinstance(wasm_context, Mapping) else {}
     row: dict[str, Any] = {
         "label": label,
         "path": str(path),
@@ -1440,6 +1528,26 @@ def _comparison_row(label: str, path: Path, summary: Mapping[str, Any]) -> dict[
         "memory_mean": _summary_metric(summary, "memory"),
         "frac_mean": _summary_metric(summary, "frac"),
         "drs_mean": _summary_metric(summary, "drs"),
+        "wasm_context_observed_count": int(
+            _finite_float(wasm_context_map.get("observed_count")) or 0
+        ),
+        "wasm_context_observed_rate": _finite_float(
+            wasm_context_map.get("observed_rate")
+        )
+        or 0.0,
+        "wasm_family": _dominant_label(wasm_context_map.get("families")),
+        "wasm_loss_mean": _wasm_context_stat(summary, "loss"),
+        "wasm_loss_last": _wasm_context_stat(summary, "loss", stat="last"),
+        "wasm_stability_hint_mean": _wasm_context_stat(summary, "stability_hint"),
+        "wasm_work_units_mean": _wasm_context_stat(summary, "work_units"),
+        "wasm_webgpu_available_rate": _wasm_context_ready_rate(
+            summary,
+            "webgpu_available",
+        ),
+        "wasm_webgpu_device_ready_rate": _wasm_context_ready_rate(
+            summary,
+            "webgpu_device_ready",
+        ),
         "last_text_preview": summary.get("last_text_preview"),
     }
     row["quality_score"] = _quality_score(row)
@@ -1513,6 +1621,11 @@ def _near_best_routes(
                 "completion_rate": _finite_float(row.get("completion_rate")) or 0.0,
                 "empty_text_rate": _finite_float(row.get("empty_text_rate")) or 0.0,
                 "refusal_rate": _finite_float(row.get("refusal_rate")) or 0.0,
+                "wasm_family": row.get("wasm_family"),
+                "wasm_loss_mean": _finite_float(row.get("wasm_loss_mean")),
+                "wasm_webgpu_device_ready_rate": _finite_float(
+                    row.get("wasm_webgpu_device_ready_rate")
+                ),
             }
         )
     return near
@@ -1554,8 +1667,38 @@ def _selection_profiles(rows: Sequence[Mapping[str, Any]]) -> dict[str, dict[str
             "latency_ms_mean": _finite_float(row.get("latency_ms_mean")) or 0.0,
             "total_tokens": _finite_float(row.get("total_tokens")) or 0.0,
             "completion_rate": _finite_float(row.get("completion_rate")) or 0.0,
+            "wasm_loss_mean": _finite_float(row.get("wasm_loss_mean")),
+            "wasm_webgpu_device_ready_rate": _finite_float(
+                row.get("wasm_webgpu_device_ready_rate")
+            ),
         }
     return profiles
+
+
+def _comparison_wasm_context(
+    rows: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    observed = [
+        row
+        for row in rows
+        if int(row.get("count") or 0) > 0
+        and int(row.get("wasm_context_observed_count") or 0) > 0
+    ]
+    families: dict[str, int] = {}
+    for row in observed:
+        family = row.get("wasm_family")
+        if family in {None, ""}:
+            continue
+        family_text = str(family)
+        families[family_text] = families.get(family_text, 0) + 1
+    return {
+        "observed_runs": len(observed),
+        "observed_run_rate": len(observed) / len(rows) if rows else 0.0,
+        "families": dict(sorted(families.items())),
+        "lowest_loss": _winner(rows, "wasm_loss_mean", higher_is_better=False),
+        "highest_stability_hint": _winner(rows, "wasm_stability_hint_mean"),
+        "highest_webgpu_device_ready": _winner(rows, "wasm_webgpu_device_ready_rate"),
+    }
 
 
 def _read_json_mapping(path: Path) -> dict[str, Any]:
@@ -1849,11 +1992,22 @@ def compare_api_llm_trace_runs(
         "lowest_latency": _winner(rows, "latency_ms_mean", higher_is_better=False),
         "lowest_total_tokens": _winner(rows, "total_tokens", higher_is_better=False),
         "highest_runtime_ready": _winner(rows, "runtime_ready_rate"),
+        "lowest_wasm_loss": _winner(
+            rows,
+            "wasm_loss_mean",
+            higher_is_better=False,
+        ),
+        "highest_wasm_stability_hint": _winner(rows, "wasm_stability_hint_mean"),
+        "highest_wasm_webgpu_device_ready": _winner(
+            rows,
+            "wasm_webgpu_device_ready_rate",
+        ),
     }
     best = winners.get("best_score")
     near_best_tolerance_value = max(0.0, _finite_float(near_best_tolerance) or 0.0)
     near_best = _near_best_routes(rows, tolerance=near_best_tolerance_value)
     selection_profiles = _selection_profiles(rows)
+    wasm_context = _comparison_wasm_context(rows)
     recommendations: list[str] = []
     if best:
         recommendations.append(f"prefer {best} for the highest aggregate API LLM route score")
@@ -1875,6 +2029,15 @@ def compare_api_llm_trace_runs(
     grounded_label = selection_profiles.get("grounded", {}).get("label")
     if grounded_label and grounded_label != best:
         recommendations.append(f"use {grounded_label} for grounded prompt-following routes")
+    lowest_wasm_loss = winners.get("lowest_wasm_loss")
+    if lowest_wasm_loss and lowest_wasm_loss != best:
+        recommendations.append(
+            f"inspect {lowest_wasm_loss} for the lowest browser-side WASM context loss"
+        )
+    elif lowest_wasm_loss:
+        recommendations.append(
+            f"{lowest_wasm_loss} also carries the lowest browser-side WASM context loss"
+        )
     return {
         "kind": "spiraltorch.api_llm_trace_comparison",
         "event_type": event_type,
@@ -1883,6 +2046,7 @@ def compare_api_llm_trace_runs(
         "near_best_tolerance": near_best_tolerance_value,
         "near_best": near_best,
         "selection_profiles": selection_profiles,
+        "wasm_context": wasm_context,
         "winners": winners,
         "recommendations": recommendations,
     }

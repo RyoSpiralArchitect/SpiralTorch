@@ -154,27 +154,32 @@ def _chat_response() -> dict[str, object]:
     }
 
 
-def _canvas_wasm_report() -> dict[str, object]:
+def _canvas_wasm_report(
+    *,
+    last_loss: float = 0.05,
+    stability: float = 0.9,
+    webgpu_device_ready: bool = True,
+) -> dict[str, object]:
     return {
         "schema": "spiraltorch.wasm.canvas_hypertrain_report.v1",
         "kind": "canvas-hypertrain-training",
         "runtime": {
             "wasm": True,
             "webgpuAvailable": True,
-            "webgpuDeviceReady": True,
+            "webgpuDeviceReady": webgpu_device_ready,
         },
         "currentFrame": {
             "width": 4,
             "height": 4,
             "relationStats": {"count": 16, "finiteCount": 16, "rms": 0.2},
-            "desire": {"balance": 0.5, "stability": 0.9, "saturation": 0.1},
+            "desire": {"balance": 0.5, "stability": stability, "saturation": 0.1},
             "gradients": {"hypergradRms": 0.12, "realgradRms": 0.08},
             "learningControl": {"operatorMix": 0.4, "operatorGain": 0.7},
         },
         "metrics": {
             "step": 2,
             "historyLength": 2,
-            "last": {"loss": 0.05},
+            "last": {"loss": last_loss},
             "lossStats": {"count": 2, "finiteCount": 2, "mean": 0.08, "rms": 0.09},
         },
     }
@@ -937,6 +942,89 @@ def test_compare_api_llm_trace_runs_exposes_route_tradeoffs(tmp_path) -> None:
     assert rows["compact"]["text_quality_score"] > 0.0
     assert 0.0 <= rows["expanded"]["quality_score"] <= 1.0
     assert 0.0 <= rows["expanded"]["efficiency_score"] <= 1.0
+
+
+def test_compare_api_llm_trace_runs_surfaces_wasm_context_tradeoffs(tmp_path) -> None:
+    low_loss_context = st.api_llm_wasm_context_partials(
+        _canvas_wasm_report(last_loss=0.02, stability=0.94),
+        gradient_dim=6,
+    )
+    low_loss = st.ApiLLMZSpaceRuntime(
+        [0.12, -0.04, 0.33, -0.11],
+        provider="example",
+        model="low-loss-model",
+        create_session=False,
+    )
+    low_loss.run_prompts(
+        ["Use browser context."],
+        lambda _prompt: {
+            "model": "low-loss-model",
+            "output_text": "Low loss browser context entered Z-space.",
+            "status": "completed",
+            "usage": {"prompt_tokens": 8, "completion_tokens": 7, "total_tokens": 15},
+        },
+        context_partials=low_loss_context,
+    )
+    low_path = tmp_path / "low-loss.jsonl"
+    low_loss.write_jsonl(low_path)
+
+    high_loss_context = st.api_llm_wasm_context_partials(
+        _canvas_wasm_report(
+            last_loss=0.18,
+            stability=0.62,
+            webgpu_device_ready=False,
+        ),
+        gradient_dim=6,
+    )
+    high_loss = st.ApiLLMZSpaceRuntime(
+        [0.12, -0.04, 0.33, -0.11],
+        provider="example",
+        model="high-loss-model",
+        create_session=False,
+    )
+    high_loss.run_prompts(
+        ["Use browser context."],
+        lambda _prompt: {
+            "model": "high-loss-model",
+            "output_text": "High loss browser context entered Z-space.",
+            "status": "completed",
+            "usage": {"prompt_tokens": 8, "completion_tokens": 7, "total_tokens": 15},
+        },
+        context_partials=high_loss_context,
+    )
+    high_path = tmp_path / "high-loss.jsonl"
+    high_loss.write_jsonl(high_path)
+
+    summary = st.summarize_api_llm_trace_events(low_path)
+    assert summary["wasm_context"]["observed_count"] == 1
+    assert summary["wasm_context"]["families"] == {"canvas": 1}
+    assert summary["wasm_context"]["loss"]["mean"] == pytest.approx(0.02)
+    assert summary["wasm_context"]["stability_hint"]["mean"] == pytest.approx(0.94)
+    assert summary["wasm_context"]["webgpu_device_ready"]["ready_rate"] == pytest.approx(
+        1.0
+    )
+
+    comparison = st.compare_api_llm_trace_runs(
+        {"low-loss": low_path, "high-loss": high_path},
+        near_best_tolerance=1.0,
+    )
+    rows = {row["label"]: row for row in comparison["runs"]}
+
+    assert comparison["wasm_context"]["observed_runs"] == 2
+    assert comparison["wasm_context"]["observed_run_rate"] == pytest.approx(1.0)
+    assert comparison["wasm_context"]["families"] == {"canvas": 2}
+    assert comparison["winners"]["lowest_wasm_loss"] == "low-loss"
+    assert comparison["winners"]["highest_wasm_stability_hint"] == "low-loss"
+    assert comparison["winners"]["highest_wasm_webgpu_device_ready"] == "low-loss"
+    assert rows["low-loss"]["wasm_family"] == "canvas"
+    assert rows["low-loss"]["wasm_loss_mean"] == pytest.approx(0.02)
+    assert rows["low-loss"]["wasm_webgpu_device_ready_rate"] == pytest.approx(1.0)
+    assert rows["high-loss"]["wasm_loss_mean"] == pytest.approx(0.18)
+    assert rows["high-loss"]["wasm_webgpu_device_ready_rate"] == pytest.approx(0.0)
+    assert any(
+        "lowest browser-side WASM context loss" in recommendation
+        for recommendation in comparison["recommendations"]
+    )
 
 
 def test_compare_api_llm_trace_runs_flags_prompt_text_quality(tmp_path) -> None:

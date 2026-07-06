@@ -111,7 +111,8 @@ PY
   `max_tokens` for thinking plus visible output before interpreting
   `completion_rate` or `empty_text_rate`, then
   `compare_api_llm_trace_runs(...)` to pick candidates by route score, latency,
-  token use, confidence, runtime readiness, refusal rate, and empty-text rate.
+  token use, confidence, runtime readiness, refusal rate, empty-text rate, and
+  attached WASM context signals such as browser-side loss and WebGPU readiness.
   Comparison rows also expose `quality_score`, `efficiency_score`, normalized
   `latency_cost` / `token_cost`, and `health_penalty`; use `near_best` to inspect
   routes that are close enough that the tradeoff matters more than the rank.
