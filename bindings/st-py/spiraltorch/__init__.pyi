@@ -1117,10 +1117,26 @@ class OpenCartesianTopos:
         observed_depth: int = ...,
         visited_volume: int = ...,
     ) -> Dict[str, object]: ...
+    def training_plan(
+        self,
+        observed_depth: int = ...,
+        visited_volume: int = ...,
+        gain: float = ...,
+    ) -> Dict[str, object]: ...
     def inference_hints(
         self,
         observed_depth: int = ...,
         visited_volume: int = ...,
+    ) -> Dict[str, object]: ...
+    def inference_plan(
+        self,
+        observed_depth: int = ...,
+        visited_volume: int = ...,
+        gain: float = ...,
+        base_temperature: float = ...,
+        base_top_p: float = ...,
+        base_frequency_penalty: float = ...,
+        base_presence_penalty: float = ...,
     ) -> Dict[str, object]: ...
     def site(self) -> ZBoxSite: ...
     def guard_zbox(self, zbox: ZBox) -> None: ...
@@ -2896,8 +2912,30 @@ def topos_training_hints(
     **signal_options: Any,
 ) -> Dict[str, object]: ...
 
+def topos_training_plan(
+    topos: Any | None = ...,
+    *,
+    gain: float = ...,
+    **signal_options: Any,
+) -> Dict[str, object]: ...
+
 def topos_inference_hints(
     topos: Any | None = ...,
+    **signal_options: Any,
+) -> Dict[str, object]: ...
+
+def topos_inference_plan(
+    topos: Any | None = ...,
+    *,
+    gain: float = ...,
+    base_temperature: float = ...,
+    base_top_p: float = ...,
+    min_temperature: float = ...,
+    max_temperature: float = ...,
+    min_top_p: float = ...,
+    max_top_p: float = ...,
+    base_frequency_penalty: float = ...,
+    base_presence_penalty: float = ...,
     **signal_options: Any,
 ) -> Dict[str, object]: ...
 

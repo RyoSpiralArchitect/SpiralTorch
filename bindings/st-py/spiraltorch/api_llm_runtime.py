@@ -24,6 +24,7 @@ from .zspace_inference import (
     ZSpacePartialBundle,
     topos_control_partial,
     topos_control_signal,
+    topos_inference_plan,
 )
 
 __all__ = [
@@ -153,13 +154,6 @@ def _finite_float(value: Any) -> float | None:
     return numeric if math.isfinite(numeric) else None
 
 
-def _clamp_float(value: Any, lower: float, upper: float, *, default: float) -> float:
-    numeric = _finite_float(value)
-    if numeric is None:
-        numeric = float(default)
-    return max(float(lower), min(float(upper), float(numeric)))
-
-
 def topos_runtime_request(
     topos: Any | None = None,
     *,
@@ -179,62 +173,26 @@ def topos_runtime_request(
     """Map topological runtime hints into hosted-LLM request overrides."""
 
     signal = topos_control_signal(topos, **signal_options)
-    request: dict[str, float] = {}
-    inference_hints = signal.get("inference_hints")
-    if not isinstance(inference_hints, Mapping):
-        inference_hints = {}
-    temperature_scale = float(
-        inference_hints.get("temperature_scale", signal.get("temperature_scale", 1.0))
+    plan = topos_inference_plan(
+        signal,
+        base_temperature=base_temperature,
+        base_top_p=base_top_p,
+        min_temperature=min_temperature,
+        max_temperature=max_temperature,
+        min_top_p=min_top_p,
+        max_top_p=max_top_p,
+        base_frequency_penalty=base_frequency_penalty,
+        base_presence_penalty=base_presence_penalty,
     )
-    sampling_focus = float(signal.get("sampling_focus", 0.0))
-    exploration_hint = float(signal.get("exploration_hint", 0.0))
-    step_damping = float(signal.get("step_damping", 0.0))
+    request: dict[str, float] = {}
 
     if include_temperature:
-        request["temperature"] = _clamp_float(
-            float(base_temperature) * temperature_scale,
-            min_temperature,
-            max_temperature,
-            default=base_temperature,
-        )
+        request["temperature"] = float(plan["temperature"])
     if include_top_p:
-        top_p_scale = float(
-            inference_hints.get(
-                "top_p_scale",
-                1.0 - 0.2 * sampling_focus + 0.1 * exploration_hint,
-            )
-        )
-        request["top_p"] = _clamp_float(
-            float(base_top_p) * top_p_scale,
-            min_top_p,
-            max_top_p,
-            default=base_top_p,
-        )
+        request["top_p"] = float(plan["top_p"])
     if include_penalties:
-        request["frequency_penalty"] = _clamp_float(
-            float(base_frequency_penalty)
-            + float(
-                inference_hints.get(
-                    "frequency_penalty_bias",
-                    0.35 * sampling_focus + 0.2 * step_damping,
-                )
-            ),
-            -2.0,
-            2.0,
-            default=base_frequency_penalty,
-        )
-        request["presence_penalty"] = _clamp_float(
-            float(base_presence_penalty)
-            + float(
-                inference_hints.get(
-                    "presence_penalty_bias",
-                    0.4 * exploration_hint - 0.2 * sampling_focus,
-                )
-            ),
-            -2.0,
-            2.0,
-            default=base_presence_penalty,
-        )
+        request["frequency_penalty"] = float(plan["frequency_penalty"])
+        request["presence_penalty"] = float(plan["presence_penalty"])
     return request
 
 

@@ -29,7 +29,9 @@ __all__ = [
     "prepare_trainer_step_payload",
     "topos_control_signal",
     "topos_training_hints",
+    "topos_training_plan",
     "topos_inference_hints",
+    "topos_inference_plan",
     "topos_control_partial",
     "decode_zspace_embedding",
     "infer_from_partial",
@@ -217,6 +219,16 @@ def _clamp_float(value: Any, lower: float, upper: float, *, default: float) -> f
     return max(lower, min(upper, numeric))
 
 
+def _non_negative_float(value: Any, *, default: float = 0.0) -> float:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        numeric = default
+    if not math.isfinite(numeric):
+        numeric = default if math.isfinite(default) else 0.0
+    return max(0.0, numeric)
+
+
 def _normalise_topos_training_hints(
     payload: Any,
     *,
@@ -368,6 +380,196 @@ def _normalise_topos_inference_hints(
     return hints
 
 
+def _normalise_topos_training_plan(
+    payload: Any,
+    *,
+    hints: Mapping[str, Any],
+    gain: float = 1.0,
+) -> dict[str, Any]:
+    source = payload if isinstance(payload, MappingABC) else {}
+    used_gain = _non_negative_float(source.get("gain", gain), default=gain)
+    learning_rate_scale = _clamp_float(
+        source.get("learning_rate_scale", hints.get("learning_rate_scale", 1.0)),
+        0.1,
+        1.25,
+        default=1.0,
+    )
+    regularization_scale = _clamp_float(
+        source.get("regularization_scale", hints.get("regularization_scale", 1.0)),
+        0.5,
+        2.0,
+        default=1.0,
+    )
+    step_damping = _unit_interval(
+        source.get("step_damping", hints.get("step_damping", 0.0))
+    )
+    gradient_bias_scale = _clamp_float(
+        source.get("gradient_bias_scale", hints.get("gradient_bias_scale", 0.0)),
+        0.0,
+        0.35,
+        default=0.0,
+    )
+    clip_scale = _clamp_float(
+        source.get("clip_scale", hints.get("clip_scale", 1.0)),
+        0.25,
+        1.0,
+        default=1.0,
+    )
+    momentum_damping = _clamp_float(
+        source.get("momentum_damping", hints.get("momentum_damping", 0.0)),
+        0.0,
+        0.85,
+        default=0.0,
+    )
+    raw_rate_scale = _clamp_float(
+        source.get("raw_rate_scale", learning_rate_scale * clip_scale),
+        0.01,
+        2.0,
+        default=learning_rate_scale * clip_scale,
+    )
+    rate_scale = _clamp_float(
+        source.get("rate_scale", 1.0 + used_gain * (raw_rate_scale - 1.0)),
+        0.01,
+        2.0,
+        default=1.0,
+    )
+    effective_gradient_bias_scale = _clamp_float(
+        source.get("effective_gradient_bias_scale", gradient_bias_scale * used_gain),
+        0.0,
+        0.35,
+        default=0.0,
+    )
+    effective_momentum_damping = _clamp_float(
+        source.get("effective_momentum_damping", momentum_damping * used_gain),
+        0.0,
+        0.85,
+        default=0.0,
+    )
+    plan = {
+        "gain": used_gain,
+        "learning_rate_scale": learning_rate_scale,
+        "regularization_scale": regularization_scale,
+        "step_damping": step_damping,
+        "gradient_bias_scale": gradient_bias_scale,
+        "clip_scale": clip_scale,
+        "momentum_damping": momentum_damping,
+        "raw_rate_scale": raw_rate_scale,
+        "rate_scale": rate_scale,
+        "effective_gradient_bias_scale": effective_gradient_bias_scale,
+        "effective_momentum_damping": effective_momentum_damping,
+    }
+    vector = _coerce_gradient(source.get("vector"))
+    if vector is None:
+        vector = [
+            plan["rate_scale"],
+            plan["regularization_scale"],
+            plan["step_damping"],
+            plan["effective_gradient_bias_scale"],
+            plan["clip_scale"],
+            plan["effective_momentum_damping"],
+        ]
+    plan["vector"] = vector[:6]
+    return plan
+
+
+def _normalise_topos_inference_plan(
+    payload: Any,
+    *,
+    hints: Mapping[str, Any],
+    gain: float = 1.0,
+    base_temperature: float = 1.0,
+    base_top_p: float = 1.0,
+    min_temperature: float = 0.0,
+    max_temperature: float = 2.0,
+    min_top_p: float = 0.05,
+    max_top_p: float = 1.0,
+    base_frequency_penalty: float = 0.0,
+    base_presence_penalty: float = 0.0,
+) -> dict[str, Any]:
+    source = payload if isinstance(payload, MappingABC) else {}
+    used_gain = _non_negative_float(source.get("gain", gain), default=gain)
+    temperature_scale = _clamp_float(
+        source.get(
+            "temperature_scale",
+            1.0 + used_gain * (float(hints.get("temperature_scale", 1.0)) - 1.0),
+        ),
+        0.5,
+        1.5,
+        default=1.0,
+    )
+    top_p_scale = _clamp_float(
+        source.get("top_p_scale", 1.0 + used_gain * (float(hints.get("top_p_scale", 1.0)) - 1.0)),
+        0.05,
+        1.25,
+        default=1.0,
+    )
+    sampling_focus = _unit_interval(
+        source.get("sampling_focus", hints.get("sampling_focus", 0.0))
+    )
+    context_weight = _clamp_float(
+        source.get(
+            "context_weight",
+            1.0 + used_gain * (float(hints.get("context_weight", 1.0)) - 1.0),
+        ),
+        0.25,
+        1.25,
+        default=1.0,
+    )
+    frequency_penalty = _clamp_float(
+        source.get(
+            "frequency_penalty",
+            float(base_frequency_penalty)
+            + used_gain * float(hints.get("frequency_penalty_bias", 0.0)),
+        ),
+        -2.0,
+        2.0,
+        default=base_frequency_penalty,
+    )
+    presence_penalty = _clamp_float(
+        source.get(
+            "presence_penalty",
+            float(base_presence_penalty)
+            + used_gain * float(hints.get("presence_penalty_bias", 0.0)),
+        ),
+        -2.0,
+        2.0,
+        default=base_presence_penalty,
+    )
+    plan = {
+        "gain": used_gain,
+        "temperature": _clamp_float(
+            source.get("temperature", float(base_temperature) * temperature_scale),
+            min_temperature,
+            max_temperature,
+            default=base_temperature,
+        ),
+        "top_p": _clamp_float(
+            source.get("top_p", float(base_top_p) * top_p_scale),
+            min_top_p,
+            max_top_p,
+            default=base_top_p,
+        ),
+        "frequency_penalty": frequency_penalty,
+        "presence_penalty": presence_penalty,
+        "context_weight": context_weight,
+        "temperature_scale": temperature_scale,
+        "top_p_scale": top_p_scale,
+        "sampling_focus": sampling_focus,
+    }
+    vector = _coerce_gradient(source.get("vector"))
+    if vector is None:
+        vector = [
+            plan["temperature"],
+            plan["top_p"],
+            plan["frequency_penalty"],
+            plan["presence_penalty"],
+            plan["context_weight"],
+            plan["sampling_focus"],
+        ]
+    plan["vector"] = vector[:6]
+    return plan
+
+
 def _normalise_topos_control_signal(payload: Mapping[str, Any]) -> dict[str, Any]:
     curvature = float(payload.get("curvature", -1.0))
     tolerance = float(payload.get("tolerance", 1e-3))
@@ -494,6 +696,14 @@ def _normalise_topos_control_signal(payload: Mapping[str, Any]) -> dict[str, Any
         guard_strength=guard_strength,
         closure_pressure=closure_pressure,
     )
+    training_plan = _normalise_topos_training_plan(
+        payload.get("training_plan"),
+        hints=training_hints,
+    )
+    inference_plan = _normalise_topos_inference_plan(
+        payload.get("inference_plan"),
+        hints=inference_hints,
+    )
     return {
         "curvature": curvature,
         "tolerance": tolerance,
@@ -519,7 +729,9 @@ def _normalise_topos_control_signal(payload: Mapping[str, Any]) -> dict[str, Any
         "runtime_hints": runtime_hints,
         "gradient": gradient_values,
         "training_hints": training_hints,
+        "training_plan": training_plan,
         "inference_hints": inference_hints,
+        "inference_plan": inference_plan,
     }
 
 
@@ -652,6 +864,22 @@ def topos_training_hints(
     return dict(signal["training_hints"])
 
 
+def topos_training_plan(
+    topos: Any | None = None,
+    *,
+    gain: float = 1.0,
+    **signal_options: Any,
+) -> dict[str, Any]:
+    """Return gain-applied optimizer controls derived from an open-topos signal."""
+
+    signal = topos_control_signal(topos, **signal_options)
+    return _normalise_topos_training_plan(
+        None,
+        hints=signal["training_hints"],
+        gain=gain,
+    )
+
+
 def topos_inference_hints(
     topos: Any | None = None,
     **signal_options: Any,
@@ -660,6 +888,38 @@ def topos_inference_hints(
 
     signal = topos_control_signal(topos, **signal_options)
     return dict(signal["inference_hints"])
+
+
+def topos_inference_plan(
+    topos: Any | None = None,
+    *,
+    gain: float = 1.0,
+    base_temperature: float = 1.0,
+    base_top_p: float = 1.0,
+    min_temperature: float = 0.0,
+    max_temperature: float = 2.0,
+    min_top_p: float = 0.05,
+    max_top_p: float = 1.0,
+    base_frequency_penalty: float = 0.0,
+    base_presence_penalty: float = 0.0,
+    **signal_options: Any,
+) -> dict[str, Any]:
+    """Return concrete hosted-inference controls derived from an open-topos signal."""
+
+    signal = topos_control_signal(topos, **signal_options)
+    return _normalise_topos_inference_plan(
+        None,
+        hints=signal["inference_hints"],
+        gain=gain,
+        base_temperature=base_temperature,
+        base_top_p=base_top_p,
+        min_temperature=min_temperature,
+        max_temperature=max_temperature,
+        min_top_p=min_top_p,
+        max_top_p=max_top_p,
+        base_frequency_penalty=base_frequency_penalty,
+        base_presence_penalty=base_presence_penalty,
+    )
 
 
 def topos_control_partial(
@@ -700,7 +960,10 @@ def topos_control_partial(
         "frac": _unit_interval(signal["sampling_focus"]),
         "gradient": gradient[:dim],
     }
-    telemetry = _flatten_telemetry(signal, prefix=f"{telemetry_prefix}.")
+    telemetry_signal = dict(signal)
+    telemetry_signal.pop("training_plan", None)
+    telemetry_signal.pop("inference_plan", None)
+    telemetry = _flatten_telemetry(telemetry_signal, prefix=f"{telemetry_prefix}.")
     return ZSpacePartialBundle(
         metrics,
         weight=max(0.0, float(bundle_weight)),

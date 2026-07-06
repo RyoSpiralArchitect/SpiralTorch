@@ -76,6 +76,18 @@ fn porous_mix(value: f32, saturation: f32, porosity: f32) -> f32 {
     value.signum() * softened
 }
 
+fn finite_or(value: f32, default: f32) -> f32 {
+    if value.is_finite() {
+        value
+    } else {
+        default
+    }
+}
+
+fn finite_non_negative(value: f32) -> f32 {
+    finite_or(value, 0.0).max(0.0)
+}
+
 fn tensor_util_backend_label(backend: TensorUtilBackend) -> &'static str {
     match backend {
         TensorUtilBackend::Auto => "auto",
@@ -125,6 +137,22 @@ pub struct ToposTrainingHints {
     momentum_damping: f32,
 }
 
+/// Gain-applied optimizer controls ready to be consumed by training loops.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ToposTrainingPlan {
+    gain: f32,
+    learning_rate_scale: f32,
+    regularization_scale: f32,
+    step_damping: f32,
+    gradient_bias_scale: f32,
+    clip_scale: f32,
+    momentum_damping: f32,
+    raw_rate_scale: f32,
+    rate_scale: f32,
+    effective_gradient_bias_scale: f32,
+    effective_momentum_damping: f32,
+}
+
 impl ToposTrainingHints {
     pub fn learning_rate_scale(&self) -> f32 {
         self.learning_rate_scale
@@ -160,6 +188,85 @@ impl ToposTrainingHints {
             self.momentum_damping,
         ]
     }
+
+    /// Applies a runtime gain and returns concrete optimizer controls.
+    pub fn plan(&self, gain: f32) -> ToposTrainingPlan {
+        let gain = finite_non_negative(gain);
+        let raw_rate_scale = (self.learning_rate_scale * self.clip_scale).clamp(0.01, 2.0);
+        let rate_scale = (1.0 + gain * (raw_rate_scale - 1.0)).clamp(0.01, 2.0);
+        let effective_gradient_bias_scale = (self.gradient_bias_scale * gain).clamp(0.0, 0.35);
+        let effective_momentum_damping = (self.momentum_damping * gain).clamp(0.0, 0.85);
+        ToposTrainingPlan {
+            gain,
+            learning_rate_scale: self.learning_rate_scale,
+            regularization_scale: self.regularization_scale,
+            step_damping: self.step_damping,
+            gradient_bias_scale: self.gradient_bias_scale,
+            clip_scale: self.clip_scale,
+            momentum_damping: self.momentum_damping,
+            raw_rate_scale,
+            rate_scale,
+            effective_gradient_bias_scale,
+            effective_momentum_damping,
+        }
+    }
+}
+
+impl ToposTrainingPlan {
+    pub fn gain(&self) -> f32 {
+        self.gain
+    }
+
+    pub fn learning_rate_scale(&self) -> f32 {
+        self.learning_rate_scale
+    }
+
+    pub fn regularization_scale(&self) -> f32 {
+        self.regularization_scale
+    }
+
+    pub fn step_damping(&self) -> f32 {
+        self.step_damping
+    }
+
+    pub fn gradient_bias_scale(&self) -> f32 {
+        self.gradient_bias_scale
+    }
+
+    pub fn clip_scale(&self) -> f32 {
+        self.clip_scale
+    }
+
+    pub fn momentum_damping(&self) -> f32 {
+        self.momentum_damping
+    }
+
+    pub fn raw_rate_scale(&self) -> f32 {
+        self.raw_rate_scale
+    }
+
+    pub fn rate_scale(&self) -> f32 {
+        self.rate_scale
+    }
+
+    pub fn effective_gradient_bias_scale(&self) -> f32 {
+        self.effective_gradient_bias_scale
+    }
+
+    pub fn effective_momentum_damping(&self) -> f32 {
+        self.effective_momentum_damping
+    }
+
+    pub fn vector(&self) -> [f32; 6] {
+        [
+            self.rate_scale,
+            self.regularization_scale,
+            self.step_damping,
+            self.effective_gradient_bias_scale,
+            self.clip_scale,
+            self.effective_momentum_damping,
+        ]
+    }
 }
 
 /// Named hosted-inference controls projected from an open-topos pressure signal.
@@ -171,6 +278,20 @@ pub struct ToposInferenceHints {
     frequency_penalty_bias: f32,
     presence_penalty_bias: f32,
     context_weight: f32,
+}
+
+/// Hosted-inference request controls after applying base sampling parameters.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ToposInferencePlan {
+    gain: f32,
+    temperature: f32,
+    top_p: f32,
+    frequency_penalty: f32,
+    presence_penalty: f32,
+    context_weight: f32,
+    temperature_scale: f32,
+    top_p_scale: f32,
+    sampling_focus: f32,
 }
 
 impl ToposInferenceHints {
@@ -206,6 +327,85 @@ impl ToposInferenceHints {
             self.frequency_penalty_bias,
             self.presence_penalty_bias,
             self.context_weight,
+        ]
+    }
+
+    /// Applies base sampling parameters and returns concrete hosted-LLM controls.
+    pub fn plan(
+        &self,
+        gain: f32,
+        base_temperature: f32,
+        base_top_p: f32,
+        base_frequency_penalty: f32,
+        base_presence_penalty: f32,
+    ) -> ToposInferencePlan {
+        let gain = finite_non_negative(gain);
+        let temperature_scale = (1.0 + gain * (self.temperature_scale - 1.0)).clamp(0.5, 1.5);
+        let top_p_scale = (1.0 + gain * (self.top_p_scale - 1.0)).clamp(0.05, 1.25);
+        let context_weight = (1.0 + gain * (self.context_weight - 1.0)).clamp(0.25, 1.25);
+        ToposInferencePlan {
+            gain,
+            temperature: (finite_or(base_temperature, 1.0) * temperature_scale).clamp(0.0, 2.0),
+            top_p: (finite_or(base_top_p, 1.0) * top_p_scale).clamp(0.05, 1.0),
+            frequency_penalty: (finite_or(base_frequency_penalty, 0.0)
+                + gain * self.frequency_penalty_bias)
+                .clamp(-2.0, 2.0),
+            presence_penalty: (finite_or(base_presence_penalty, 0.0)
+                + gain * self.presence_penalty_bias)
+                .clamp(-2.0, 2.0),
+            context_weight,
+            temperature_scale,
+            top_p_scale,
+            sampling_focus: self.sampling_focus,
+        }
+    }
+}
+
+impl ToposInferencePlan {
+    pub fn gain(&self) -> f32 {
+        self.gain
+    }
+
+    pub fn temperature(&self) -> f32 {
+        self.temperature
+    }
+
+    pub fn top_p(&self) -> f32 {
+        self.top_p
+    }
+
+    pub fn frequency_penalty(&self) -> f32 {
+        self.frequency_penalty
+    }
+
+    pub fn presence_penalty(&self) -> f32 {
+        self.presence_penalty
+    }
+
+    pub fn context_weight(&self) -> f32 {
+        self.context_weight
+    }
+
+    pub fn temperature_scale(&self) -> f32 {
+        self.temperature_scale
+    }
+
+    pub fn top_p_scale(&self) -> f32 {
+        self.top_p_scale
+    }
+
+    pub fn sampling_focus(&self) -> f32 {
+        self.sampling_focus
+    }
+
+    pub fn vector(&self) -> [f32; 6] {
+        [
+            self.temperature,
+            self.top_p,
+            self.frequency_penalty,
+            self.presence_penalty,
+            self.context_weight,
+            self.sampling_focus,
         ]
     }
 }
@@ -377,6 +577,11 @@ impl ToposControlSignal {
         }
     }
 
+    /// Gain-applied optimizer controls derived from this signal.
+    pub fn training_plan(&self, gain: f32) -> ToposTrainingPlan {
+        self.training_hints().plan(gain)
+    }
+
     /// Named hosted-inference controls derived from this signal.
     pub fn inference_hints(&self) -> ToposInferenceHints {
         let top_p_scale =
@@ -395,6 +600,24 @@ impl ToposControlSignal {
             presence_penalty_bias,
             context_weight,
         }
+    }
+
+    /// Concrete hosted-inference request controls derived from this signal.
+    pub fn inference_plan(
+        &self,
+        gain: f32,
+        base_temperature: f32,
+        base_top_p: f32,
+        base_frequency_penalty: f32,
+        base_presence_penalty: f32,
+    ) -> ToposInferencePlan {
+        self.inference_hints().plan(
+            gain,
+            base_temperature,
+            base_top_p,
+            base_frequency_penalty,
+            base_presence_penalty,
+        )
     }
 
     /// Compact runtime hint vector for optimizers and inference adapters.
@@ -2920,12 +3143,25 @@ mod tests {
         assert!((training.clip_scale() - 0.871).abs() < 1e-6);
         assert!((training.momentum_damping() - 0.2535).abs() < 1e-6);
         assert_eq!(training.vector().len(), 6);
+        let training_plan = signal.training_plan(0.5);
+        assert!((training_plan.raw_rate_scale() - 0.7769211).abs() < 1e-6);
+        assert!((training_plan.rate_scale() - 0.8884606).abs() < 1e-6);
+        assert!((training_plan.effective_gradient_bias_scale() - 0.03932805).abs() < 1e-6);
+        assert!((training_plan.effective_momentum_damping() - 0.12675).abs() < 1e-6);
+        assert_eq!(training_plan.vector().len(), 6);
         let inference = signal.inference_hints();
         assert!((inference.top_p_scale() - 0.8902744).abs() < 1e-6);
         assert!((inference.frequency_penalty_bias() - 0.2854011).abs() < 1e-6);
         assert!((inference.presence_penalty_bias() + 0.03810062).abs() < 1e-6);
         assert!((inference.context_weight() - 0.9225).abs() < 1e-6);
         assert_eq!(inference.vector().len(), 6);
+        let inference_plan = signal.inference_plan(0.5, 0.8, 0.9, 0.1, 0.2);
+        assert!((inference_plan.temperature() - 0.741325).abs() < 1e-6);
+        assert!((inference_plan.top_p() - 0.8506235).abs() < 1e-6);
+        assert!((inference_plan.frequency_penalty() - 0.24270055).abs() < 1e-6);
+        assert!((inference_plan.presence_penalty() - 0.18094969).abs() < 1e-6);
+        assert!((inference_plan.context_weight() - 0.96125).abs() < 1e-6);
+        assert_eq!(inference_plan.vector().len(), 6);
     }
 
     #[test]

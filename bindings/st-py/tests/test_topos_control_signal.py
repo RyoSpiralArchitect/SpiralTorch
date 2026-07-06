@@ -36,10 +36,16 @@ def test_topos_control_signal_from_mapping_normalises_pressure() -> None:
     assert signal["training_hints"]["gradient_bias_scale"] == pytest.approx(0.0786561)
     assert signal["training_hints"]["clip_scale"] == pytest.approx(0.871)
     assert signal["training_hints"]["momentum_damping"] == pytest.approx(0.2535)
+    assert signal["training_plan"]["rate_scale"] == pytest.approx(0.7769211125)
+    assert signal["training_plan"]["effective_gradient_bias_scale"] == pytest.approx(
+        0.0786561
+    )
     assert signal["inference_hints"]["top_p_scale"] == pytest.approx(0.890274375)
     assert signal["inference_hints"]["frequency_penalty_bias"] == pytest.approx(0.28540109375)
     assert signal["inference_hints"]["presence_penalty_bias"] == pytest.approx(-0.038100625)
     assert signal["inference_hints"]["context_weight"] == pytest.approx(0.9225)
+    assert signal["inference_plan"]["temperature"] == pytest.approx(0.8533125)
+    assert signal["inference_plan"]["top_p"] == pytest.approx(0.890274375)
 
 
 def test_named_topos_hints_are_exported_for_learning_and_inference() -> None:
@@ -53,14 +59,37 @@ def test_named_topos_hints_are_exported_for_learning_and_inference() -> None:
     }
 
     training = st.topos_training_hints(payload, observed_depth=4, visited_volume=25)
+    training_plan = st.topos_training_plan(
+        payload,
+        gain=0.5,
+        observed_depth=4,
+        visited_volume=25,
+    )
     inference = st.topos_inference_hints(payload, observed_depth=4, visited_volume=25)
+    inference_plan = st.topos_inference_plan(
+        payload,
+        gain=0.5,
+        observed_depth=4,
+        visited_volume=25,
+        base_temperature=0.8,
+        base_top_p=0.9,
+        base_frequency_penalty=0.1,
+        base_presence_penalty=0.2,
+    )
 
     assert training["learning_rate_scale"] == pytest.approx(0.8919875)
     assert training["gradient_bias_scale"] == pytest.approx(0.0786561)
     assert len(training["vector"]) == 6
+    assert training_plan["raw_rate_scale"] == pytest.approx(0.7769211125)
+    assert training_plan["rate_scale"] == pytest.approx(0.88846055625)
+    assert training_plan["effective_gradient_bias_scale"] == pytest.approx(0.03932805)
     assert inference["temperature_scale"] == pytest.approx(0.8533125)
     assert inference["top_p_scale"] == pytest.approx(0.890274375)
     assert len(inference["vector"]) == 6
+    assert inference_plan["temperature"] == pytest.approx(0.741325)
+    assert inference_plan["top_p"] == pytest.approx(0.85062346875)
+    assert inference_plan["frequency_penalty"] == pytest.approx(0.242700546875)
+    assert inference_plan["presence_penalty"] == pytest.approx(0.1809496875)
 
 
 def test_topos_control_partial_feeds_zspace_inference() -> None:
@@ -97,7 +126,9 @@ def test_topos_control_partial_feeds_zspace_inference() -> None:
 def test_topos_control_partial_is_exported_from_top_level() -> None:
     assert "topos_control_signal" in st.__all__
     assert "topos_training_hints" in st.__all__
+    assert "topos_training_plan" in st.__all__
     assert "topos_inference_hints" in st.__all__
+    assert "topos_inference_plan" in st.__all__
     assert "topos_control_partial" in st.__all__
 
 
