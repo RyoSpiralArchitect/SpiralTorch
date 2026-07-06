@@ -50,6 +50,12 @@ fn topos_control_signal_to_pydict(
     dict.set_item("guard_strength", signal.guard_strength())?;
     dict.set_item("stability_hint", signal.stability_hint())?;
     dict.set_item("exploration_hint", signal.exploration_hint())?;
+    dict.set_item("learning_rate_scale", signal.learning_rate_scale())?;
+    dict.set_item("temperature_scale", signal.temperature_scale())?;
+    dict.set_item("regularization_scale", signal.regularization_scale())?;
+    dict.set_item("step_damping", signal.step_damping())?;
+    dict.set_item("sampling_focus", signal.sampling_focus())?;
+    dict.set_item("runtime_hints", signal.runtime_hints().to_vec())?;
     dict.set_item("gradient", signal.gradient().to_vec())?;
     Ok(dict.into_py(py))
 }

@@ -3125,7 +3125,19 @@ class ZSpaceTrainer:
         depth = self._last_topos_control.get("depth_pressure", 0.0)
         volume = self._last_topos_control.get("volume_pressure", 0.0)
         guard = self._last_topos_control.get("guard_strength", closure)
-        return max(0.0, min(1.0, max(closure, depth, volume, guard)))
+        damping = self._last_topos_control.get("step_damping", closure * guard)
+        focus = self._last_topos_control.get("sampling_focus", guard)
+        return max(0.0, min(1.0, max(closure, depth, volume, guard, damping, focus)))
+
+    def _topos_learning_rate_scale(self) -> float:
+        gain = self._topos_control_gain
+        if gain <= 0.0 or not self._last_topos_control:
+            return 1.0
+        raw = float(self._last_topos_control.get("learning_rate_scale", 1.0))
+        if not _math.isfinite(raw):
+            raw = 1.0
+        hinted = max(0.1, min(1.25, raw))
+        return max(0.1, min(1.25, 1.0 + gain * (hinted - 1.0)))
 
     def _topos_gradient_bias(self) -> _List[float]:
         gain = self._topos_control_gain
@@ -3137,11 +3149,19 @@ class ZSpaceTrainer:
         guard = self._last_topos_control.get("guard_strength", closure)
         openness = self._last_topos_control.get("openness", 1.0 - closure)
         exploration = self._last_topos_control.get("exploration_hint", 0.0)
+        lr_scale = self._last_topos_control.get("learning_rate_scale", 1.0)
+        regularization = self._last_topos_control.get("regularization_scale", 1.0)
+        damping = self._last_topos_control.get("step_damping", closure * guard)
+        focus = self._last_topos_control.get("sampling_focus", guard)
         basis = (
             closure - 0.5,
             volume - 0.5,
             depth - 0.5,
             guard - 0.5,
+            damping - 0.5,
+            focus - 0.5,
+            1.0 - lr_scale,
+            regularization - 1.0,
             0.5 - openness,
             0.5 - exploration,
         )
@@ -3253,9 +3273,11 @@ class ZSpaceTrainer:
         loss = penalty + lam_frac * frac_reg
         grad_metric = self._normalise_gradient(gradient)
         frac_grad = self._frac_grad()
+        topos_lr_scale = self._topos_learning_rate_scale()
         topos_bias = self._topos_gradient_bias()
         total_grad = [
-            grad_metric[idx] + lam_frac * frac_grad[idx] + topos_bias[idx]
+            (grad_metric[idx] + lam_frac * frac_grad[idx]) * topos_lr_scale
+            + topos_bias[idx]
             for idx in range(len(self._z))
         ]
         self._adam_update(total_grad)

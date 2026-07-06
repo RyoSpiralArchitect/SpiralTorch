@@ -205,6 +205,16 @@ def _unit_interval(value: Any, *, default: float = 0.0) -> float:
     return max(0.0, min(1.0, numeric))
 
 
+def _clamp_float(value: Any, lower: float, upper: float, *, default: float) -> float:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        numeric = default
+    if not math.isfinite(numeric):
+        numeric = default
+    return max(lower, min(upper, numeric))
+
+
 def _normalise_topos_control_signal(payload: Mapping[str, Any]) -> dict[str, Any]:
     curvature = float(payload.get("curvature", -1.0))
     tolerance = float(payload.get("tolerance", 1e-3))
@@ -248,6 +258,61 @@ def _normalise_topos_control_signal(payload: Mapping[str, Any]) -> dict[str, Any
             porosity * openness + (1.0 - guard_strength) * 0.25,
         )
     )
+    default_step_damping = max(0.0, min(1.0, closure_pressure * guard_strength))
+    step_damping = _unit_interval(
+        payload.get("step_damping", default_step_damping),
+        default=default_step_damping,
+    )
+    default_learning_rate_scale = max(
+        0.1,
+        min(1.25, 1.0 - 0.65 * step_damping + 0.25 * exploration_hint),
+    )
+    learning_rate_scale = _clamp_float(
+        payload.get("learning_rate_scale", default_learning_rate_scale),
+        0.1,
+        1.25,
+        default=default_learning_rate_scale,
+    )
+    default_temperature_scale = max(
+        0.5,
+        min(
+            1.5,
+            0.75 + 0.75 * exploration_hint + 0.25 * openness - 0.35 * guard_strength,
+        ),
+    )
+    temperature_scale = _clamp_float(
+        payload.get("temperature_scale", default_temperature_scale),
+        0.5,
+        1.5,
+        default=default_temperature_scale,
+    )
+    default_regularization_scale = max(
+        0.5,
+        min(2.0, 0.5 + guard_strength + 0.5 * closure_pressure - 0.25 * exploration_hint),
+    )
+    regularization_scale = _clamp_float(
+        payload.get("regularization_scale", default_regularization_scale),
+        0.5,
+        2.0,
+        default=default_regularization_scale,
+    )
+    default_sampling_focus = max(
+        0.0,
+        min(1.0, guard_strength * (1.0 - 0.5 * exploration_hint) + 0.25 * closure_pressure),
+    )
+    sampling_focus = _unit_interval(
+        payload.get("sampling_focus", default_sampling_focus),
+        default=default_sampling_focus,
+    )
+    runtime_hints = _coerce_gradient(payload.get("runtime_hints"))
+    if runtime_hints is None:
+        runtime_hints = [
+            learning_rate_scale,
+            temperature_scale,
+            regularization_scale,
+            step_damping,
+            sampling_focus,
+        ]
     gradient = payload.get("gradient")
     gradient_values = _coerce_gradient(gradient) if gradient is not None else None
     if gradient_values is None:
@@ -276,6 +341,12 @@ def _normalise_topos_control_signal(payload: Mapping[str, Any]) -> dict[str, Any
         "guard_strength": guard_strength,
         "stability_hint": stability_hint,
         "exploration_hint": exploration_hint,
+        "learning_rate_scale": learning_rate_scale,
+        "temperature_scale": temperature_scale,
+        "regularization_scale": regularization_scale,
+        "step_damping": step_damping,
+        "sampling_focus": sampling_focus,
+        "runtime_hints": runtime_hints,
         "gradient": gradient_values,
     }
 
@@ -417,15 +488,24 @@ def topos_control_partial(
         gradient.extend(0.0 for _ in range(dim - len(gradient)))
     metrics = {
         "speed": _unit_interval(
-            signal["openness"] * (0.7 + 0.3 * signal["porosity"])
+            signal["openness"]
+            * (0.7 + 0.3 * signal["porosity"])
+            * signal["learning_rate_scale"]
         ),
         "memory": _unit_interval(signal["volume_pressure"]),
-        "stability": _unit_interval(signal["stability_hint"]),
+        "stability": _unit_interval(
+            signal["stability_hint"] / max(1.0, signal["regularization_scale"])
+        ),
         "drs": max(
             -1.0,
-            min(1.0, float(signal["openness"]) - float(signal["closure_pressure"])),
+            min(
+                1.0,
+                float(signal["openness"])
+                - float(signal["closure_pressure"])
+                - 0.25 * float(signal["step_damping"]),
+            ),
         ),
-        "frac": _unit_interval(signal["guard_strength"]),
+        "frac": _unit_interval(signal["sampling_focus"]),
         "gradient": gradient[:dim],
     }
     telemetry = _flatten_telemetry(signal, prefix=f"{telemetry_prefix}.")

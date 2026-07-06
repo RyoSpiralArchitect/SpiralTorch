@@ -107,6 +107,11 @@ pub struct ToposControlSignal {
     guard_strength: f32,
     stability_hint: f32,
     exploration_hint: f32,
+    learning_rate_scale: f32,
+    temperature_scale: f32,
+    regularization_scale: f32,
+    step_damping: f32,
+    sampling_focus: f32,
 }
 
 impl ToposControlSignal {
@@ -136,6 +141,18 @@ impl ToposControlSignal {
         let stability_hint = (openness * (1.0 - 0.4 * topos.porosity())).clamp(0.0, 1.0);
         let exploration_hint =
             (topos.porosity() * openness + (1.0 - guard_strength) * 0.25).clamp(0.0, 1.0);
+        let step_damping = (closure_pressure * guard_strength).clamp(0.0, 1.0);
+        let learning_rate_scale =
+            (1.0 - 0.65 * step_damping + 0.25 * exploration_hint).clamp(0.1, 1.25);
+        let temperature_scale = (0.75 + 0.75 * exploration_hint + 0.25 * openness
+            - 0.35 * guard_strength)
+            .clamp(0.5, 1.5);
+        let regularization_scale = (0.5 + guard_strength + 0.5 * closure_pressure
+            - 0.25 * exploration_hint)
+            .clamp(0.5, 2.0);
+        let sampling_focus = (guard_strength * (1.0 - 0.5 * exploration_hint)
+            + 0.25 * closure_pressure)
+            .clamp(0.0, 1.0);
         Self {
             curvature: topos.curvature(),
             tolerance: topos.tolerance(),
@@ -153,6 +170,11 @@ impl ToposControlSignal {
             guard_strength,
             stability_hint,
             exploration_hint,
+            learning_rate_scale,
+            temperature_scale,
+            regularization_scale,
+            step_damping,
+            sampling_focus,
         }
     }
 
@@ -218,6 +240,37 @@ impl ToposControlSignal {
 
     pub fn exploration_hint(&self) -> f32 {
         self.exploration_hint
+    }
+
+    pub fn learning_rate_scale(&self) -> f32 {
+        self.learning_rate_scale
+    }
+
+    pub fn temperature_scale(&self) -> f32 {
+        self.temperature_scale
+    }
+
+    pub fn regularization_scale(&self) -> f32 {
+        self.regularization_scale
+    }
+
+    pub fn step_damping(&self) -> f32 {
+        self.step_damping
+    }
+
+    pub fn sampling_focus(&self) -> f32 {
+        self.sampling_focus
+    }
+
+    /// Compact runtime hint vector for optimizers and inference adapters.
+    pub fn runtime_hints(&self) -> [f32; 5] {
+        [
+            self.learning_rate_scale,
+            self.temperature_scale,
+            self.regularization_scale,
+            self.step_damping,
+            self.sampling_focus,
+        ]
     }
 
     /// Compact gradient-like vector for Z-space inference partials.
@@ -2718,6 +2771,14 @@ mod tests {
         assert!((signal.openness() - 0.6).abs() < 1e-6);
         assert!(signal.guard_strength() > 0.0);
         assert!(signal.stability_hint() > 0.0);
+        assert!(signal.learning_rate_scale() > 0.1);
+        assert!(signal.learning_rate_scale() <= 1.25);
+        assert!(signal.temperature_scale() >= 0.5);
+        assert!(signal.temperature_scale() <= 1.5);
+        assert!(signal.regularization_scale() >= 0.5);
+        assert!(signal.step_damping() > 0.0);
+        assert!(signal.sampling_focus() > 0.0);
+        assert_eq!(signal.runtime_hints().len(), 5);
         assert_eq!(signal.gradient().len(), 6);
     }
 

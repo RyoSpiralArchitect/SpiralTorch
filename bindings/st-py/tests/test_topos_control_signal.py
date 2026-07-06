@@ -26,6 +26,12 @@ def test_topos_control_signal_from_mapping_normalises_pressure() -> None:
     assert signal["volume_pressure"] == pytest.approx(0.25)
     assert signal["closure_pressure"] == pytest.approx(0.4)
     assert signal["openness"] == pytest.approx(0.6)
+    assert signal["step_damping"] == pytest.approx(0.258)
+    assert signal["learning_rate_scale"] == pytest.approx(0.8919875)
+    assert signal["temperature_scale"] == pytest.approx(0.8533125)
+    assert signal["regularization_scale"] == pytest.approx(1.2853125)
+    assert signal["sampling_focus"] == pytest.approx(0.668003125)
+    assert len(signal["runtime_hints"]) == 5
     assert len(signal["gradient"]) == 6
 
 
@@ -53,6 +59,9 @@ def test_topos_control_partial_feeds_zspace_inference() -> None:
     assert len(resolved["gradient"]) == 4
     assert telemetry is not None
     assert telemetry["topos.closure_pressure"] == pytest.approx(0.5)
+    assert telemetry["topos.learning_rate_scale"] < 1.0
+    assert telemetry["topos.temperature_scale"] > 0.5
+    assert telemetry["topos.regularization_scale"] > 1.0
 
 
 def test_topos_control_partial_is_exported_from_top_level() -> None:
@@ -132,6 +141,10 @@ def test_topos_control_gain_can_drive_trainer_without_metric_gradient() -> None:
                 "guard_strength": 0.8,
                 "openness": 0.25,
                 "exploration_hint": 0.1,
+                "learning_rate_scale": 0.55,
+                "regularization_scale": 1.4,
+                "step_damping": 0.6,
+                "sampling_focus": 0.7,
             }
         },
     )
@@ -145,6 +158,7 @@ def test_topos_control_gain_can_drive_trainer_without_metric_gradient() -> None:
     assert active.state != passive.state
     assert active_loss > passive_loss
     assert active.last_topos_control["guard_strength"] == pytest.approx(0.8)
+    assert active.last_topos_control["learning_rate_scale"] == pytest.approx(0.55)
 
 
 def test_z_metrics_partial_preserves_topos_telemetry() -> None:
@@ -191,6 +205,9 @@ def test_open_topos_control_signal_can_override_porosity() -> None:
     assert signal["depth_pressure"] == pytest.approx(0.5)
     assert signal["volume_pressure"] == pytest.approx(0.1)
     assert signal["closure_pressure"] == pytest.approx(0.5)
+    assert "learning_rate_scale" in signal
+    assert "temperature_scale" in signal
+    assert "runtime_hints" in signal
 
 
 def test_tensor_biome_control_signal_reflects_absorbed_volume() -> None:
@@ -206,3 +223,4 @@ def test_tensor_biome_control_signal_reflects_absorbed_volume() -> None:
     assert signal["visited_volume"] == 4
     assert signal["volume_pressure"] == pytest.approx(0.5)
     assert signal["openness"] == pytest.approx(0.5)
+    assert len(signal["runtime_hints"]) == 5
