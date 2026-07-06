@@ -2066,6 +2066,17 @@ class ApiLLMZSpaceRuntime:
         model: str | None = ...,
         **kwargs: Any,
     ) -> ApiLLMTrace: ...
+    def run_prompts(
+        self,
+        prompts: Iterable[str],
+        invoke: Callable[..., Any],
+        *args: Any,
+        provider: str | None = ...,
+        model: str | None = ...,
+        jsonl_out: str | PathLike[str] | None = ...,
+        clear: bool = ...,
+        **kwargs: Any,
+    ) -> Dict[str, Any]: ...
     def call_openai_responses(
         self,
         prompt: str,
@@ -2079,6 +2090,19 @@ class ApiLLMZSpaceRuntime:
         **request: Any,
     ) -> ApiLLMTrace: ...
     def call_openai_chat(
+        self,
+        prompt: str,
+        *,
+        client: Any | None = ...,
+        client_factory: Callable[..., Any] | None = ...,
+        client_kwargs: Mapping[str, Any] | None = ...,
+        model: str | None = ...,
+        system: str | None = ...,
+        messages: Sequence[Mapping[str, Any]] | None = ...,
+        provider: str | None = ...,
+        **request: Any,
+    ) -> ApiLLMTrace: ...
+    def call_anthropic_messages(
         self,
         prompt: str,
         *,
@@ -2168,6 +2192,38 @@ def compare_api_llm_trace_runs(
     *,
     labels: Sequence[str] | None = ...,
     event_type: str = ...,
+) -> Dict[str, Any]: ...
+
+
+def make_anthropic_messages_invoke(
+    *,
+    client: Any | None = ...,
+    client_factory: Callable[..., Any] | None = ...,
+    client_kwargs: Mapping[str, Any] | None = ...,
+    model: str | None = ...,
+    system: str | None = ...,
+    messages: Sequence[Mapping[str, Any]] | None = ...,
+    **request_defaults: Any,
+) -> Callable[..., Any]: ...
+
+
+def run_api_llm_prompt_suite(
+    prompts: Iterable[str],
+    invoke: Callable[..., Any],
+    *args: Any,
+    z_state: Sequence[float],
+    backend: str | None = ...,
+    provider: str | None = ...,
+    model: str | None = ...,
+    session: Any | None = ...,
+    session_factory: Callable[..., Any] | None = ...,
+    create_session: bool = ...,
+    alpha: float = ...,
+    smoothing: float = ...,
+    strategy: str = ...,
+    jsonl_out: str | PathLike[str] | None = ...,
+    clear: bool = ...,
+    **kwargs: Any,
 ) -> Dict[str, Any]: ...
 
 
@@ -7094,8 +7150,10 @@ __all__ = [
     "api_llm_usage_from_response",
     "compare_api_llm_trace_runs",
     "load_api_llm_trace_events",
+    "make_anthropic_messages_invoke",
     "make_openai_chat_invoke",
     "make_openai_responses_invoke",
+    "run_api_llm_prompt_suite",
     "summarize_api_llm_trace_events",
     "write_api_llm_trace_jsonl",
     "ZSpaceTrainer",

@@ -113,6 +113,22 @@ comparison = st.compare_api_llm_trace_runs({"current": "api_llm_trace.jsonl"})
 print(comparison["winners"]["best_score"])
 ```
 
+For a small multi-prompt run, keep one runtime route and persist the whole
+suite as JSONL:
+
+```python
+suite = st.run_api_llm_prompt_suite(
+    ["route as bipolar geometry", "name one trace signal"],
+    api,
+    z_state=[0.12, -0.04, 0.33, -0.11],
+    provider="demo",
+    model="api-model-demo",
+    create_session=False,
+    jsonl_out="api_llm_suite.jsonl",
+)
+print(suite["summary"]["count"])
+```
+
 If the optional `openai` package is installed, the same runtime can call the
 Responses API directly.  The SDK reads `OPENAI_API_KEY` from the environment;
 SpiralTorch only records the model output, usage, latency, and Z-space trace.
@@ -132,6 +148,22 @@ trace = runtime.call_openai_responses(
 )
 print(trace.text)
 print(trace.as_dict()["metrics"])
+```
+
+The Anthropic Messages adapter follows the same contract when the optional
+`anthropic` package and `ANTHROPIC_API_KEY` are available:
+
+```python
+runtime = st.ApiLLMZSpaceRuntime(
+    [0.12, -0.04, 0.33, -0.11],
+    provider="anthropic",
+    model="claude-haiku-4-5",
+)
+trace = runtime.call_anthropic_messages(
+    "Describe SpiralTorch inference as bipolar geometry.",
+    max_tokens=96,
+)
+print(trace.text)
 ```
 
 ### Rust: Pure Tensor Operations

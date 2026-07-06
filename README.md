@@ -80,7 +80,8 @@ For day-to-day Python use, though, the first handles are ordinary:
 - `ApiLLMZSpaceRuntime` for hosted/API-model LLM inference: pass an
   OpenAI-compatible response mapping or any callable API client, and SpiralTorch
   turns text/usage/latency into a Z-space partial trace, JSONL artifact, and
-  summary without making hosted SDKs hard dependencies.
+  summary without making hosted SDKs hard dependencies. Lazy OpenAI and
+  Anthropic adapters are available when those optional SDKs are installed.
 - `bindings/st-py/examples/byte_lm_profile_smoke.py` and
   `byte_lm_transformers_trace.py` for tokenizerless FT diagnostics plus
   same-process `torch` / `transformers` / `tokenizers` runtime evidence.
@@ -121,7 +122,8 @@ SpiralTorch’s “learning stack” is a set of minimal, runnable training base
 - **LLM (Python, tokenizerless FT profile ladder):** `PYTHONNOUSERSITE=1 python3 -S -s bindings/st-py/examples/byte_lm_profile_smoke.py --hf-state-dict <local-hf-state-dict-or-dir> --key-preset auto --ft-readiness-preset hf-wgpu-balanced` audits local HF/PyTorch-style checkpoints, enables the checkpoint + Transformers trace + produced-manifest runtime contract, records same-process `transformers`/`torch`/`tokenizers` co-import evidence, captures `describe_device("wgpu")` runtime readiness evidence, checks the Transformers/trainer runtime bridge, and gates bounded byte-LM LoRA/source/profile comparisons with WGPU run-summary and promotion readiness thresholds before heavier FT. The FT preset expands to `--runtime-contract-preset hf-runtime --wgpu-readiness-preset balanced`; use `hf-wgpu-observed` to only require WGPU metrics/report presence or `hf-wgpu-strict` for a high-readiness bar that also requires WGPU runtime-ready evidence. Lower-level `--runtime-contract-preset`, `--wgpu-readiness-preset`, explicit `--runtime-device-report-backend`, `--min-run-epoch-wgpu-*`, `--max-run-epoch-wgpu-*`, promotion-ready, or manifest trainer/device WGPU flags override the recipe defaults. Direct trace/import flags such as `--transformers-trace-runtime-import-preset torch-transformers`, `--require-transformers-trace-runtime-import torch`, and `--require-manifest-transformers-trace-runtime-import-preset torch-transformers` remain available for narrower runtime audits; use `hf-finetune` to also require `datasets`/`accelerate`/`safetensors`, or `hf-peft` to include `peft`.
 - **LLM (Python, Transformers logit trace):** `PYTHONNOUSERSITE=1 python3 -S -s bindings/st-py/examples/byte_lm_transformers_trace.py --model-path <local-transformers-model> --prompt "spiral route" --jsonl trace.jsonl` records runtime config/tokenizer/model metadata plus next-token top-k logits/probabilities and hidden-state summaries before FT; add `--zspace-project` to attach a bounded Z-space projection probe, `--runtime-contract-preset hf-runtime` to require same-process `transformers`/`torch`/`tokenizers` co-import evidence directly, `--runtime-import-preset torch-transformers|hf-runtime|hf-finetune|hf-peft` or repeated `--runtime-import <module>` to audit narrower same-process imports, persist preset module expansion plus satisfied/failed/coimport status contracts and install hints for known missing HF modules, gate direct traces with `--require-runtime-import torch` or `--require-runtime-import-preset torch-transformers`, and `--require-runtime-metadata-match` during `--compare-jsonl` checks to catch model/tokenizer/runtime swaps.
 - **LLM runtime preflight (installed wheel):** `spiral-runtime-preflight --preset hf-finetune --require --runtime-device-backend wgpu --json-out ft-runtime.json` checks the local `transformers`/`torch`/`tokenizers` plus `datasets`/`accelerate`/`safetensors` stack and records `describe_runtime_devices(["wgpu"])` readiness before a heavier FT run; add `--require-runtime-device-ready-backend wgpu` for strict accelerator gating, `--json` for stdout-based CI output, use `--preset hf-peft` for PEFT adapter workflows, or call `python -m spiraltorch.runtime_imports ...` when console scripts are unavailable.
-- **LLM (API model + Z-space runtime):** `PYTHONNOUSERSITE=1 python3 -S -s bindings/st-py/examples/api_llm_zspace_runtime.py` shows how an OpenAI-compatible response or arbitrary hosted-model callable becomes a Z-space partial trace with device preflight evidence, usage/latency telemetry, and posterior confidence. With `OPENAI_API_KEY` plus `pip install openai`, run `PYTHONPATH=bindings/st-py python3 bindings/st-py/examples/openai_api_llm_zspace_runtime.py --prompt "Describe SpiralTorch entering Z-space runtime."` to hit the OpenAI Responses API through the same bridge.
+- **LLM (API model + Z-space runtime):** `PYTHONNOUSERSITE=1 python3 -S -s bindings/st-py/examples/api_llm_zspace_runtime.py` shows how an OpenAI-compatible response or arbitrary hosted-model callable becomes a Z-space partial trace with device preflight evidence, usage/latency telemetry, and posterior confidence. With `OPENAI_API_KEY` plus `pip install openai`, run `PYTHONPATH=bindings/st-py python3 bindings/st-py/examples/openai_api_llm_zspace_runtime.py --prompt "Describe SpiralTorch entering Z-space runtime."` to hit the OpenAI Responses API through the same bridge. With `ANTHROPIC_API_KEY` plus `pip install anthropic`, run `PYTHONPATH=bindings/st-py python3 bindings/st-py/examples/anthropic_api_llm_zspace_runtime.py --prompt "Describe SpiralTorch inference as bipolar geometry."` to route Anthropic Messages into the same trace path.
+- **LLM (API model prompt suite):** `PYTHONNOUSERSITE=1 PYTHONPATH=bindings/st-py python3 -S -s bindings/st-py/examples/api_llm_prompt_suite.py` runs several hosted-model-shaped prompts through one Z-space runtime, writes a compact JSONL artifact, and compares the suite without network access.
 - **LLM (API model trace comparison):** `PYTHONNOUSERSITE=1 PYTHONPATH=bindings/st-py python3 -S -s bindings/st-py/examples/api_llm_trace_compare.py` compares multiple API LLM trace JSONL artifacts by route score, confidence, latency, token use, runtime readiness, and Z-space metrics.
 - **LLM (coherence scan, raw text, no tokenizer):** `cargo run -p st-nn --example modelzoo_llm_char_coherence_scan -- <text.txt> [--context-scale 0.05 --mix-rms 0.1 --head-rms 0.1 --head-residual-scale 1.0 --head-prior unigram|bigram|learned-bigram --bigram-topk-guard 0.05 --bigram-topk-guard-k 5] [--val-fraction 0.1 --eval-samples 256]`
 - **LLM (Python, coherence scan, raw text, no tokenizer):** `PYTHONNOUSERSITE=1 python3 -S -s models/python/llm_char_coherence_scan.py <text_or_dir> [<text_or_dir> ...] [--context-scale 0.05]`
@@ -375,13 +377,18 @@ Without cloning the repo, `pip install spiraltorch` gives you:
 - **SpiralK planning:** `st.plan_topk(...)`, `st.RankPlan`, `st.write_kdsl_trace_jsonl`, `st.write_kdsl_trace_html`.
 - **API-model LLM bridge:** `st.ApiLLMZSpaceRuntime` converts hosted LLM
   responses/callables into Z-space runtime traces without requiring an API SDK
-  at install time; when the optional `openai` package is available,
-  `st.make_openai_responses_invoke(...)` or `runtime.call_openai_responses(...)`
-  can use `OPENAI_API_KEY` directly. Persist runs with
+  at install time; when optional provider packages are available,
+  `st.make_openai_responses_invoke(...)`, `runtime.call_openai_responses(...)`,
+  `st.make_anthropic_messages_invoke(...)`, or
+  `runtime.call_anthropic_messages(...)` can use provider keys from the
+  environment directly. Persist runs with
   `runtime.write_jsonl("api_llm_trace.jsonl")`, reload with
   `st.load_api_llm_trace_events(...)`, and compare runs with
   `st.summarize_api_llm_trace_events(...)` or
   `st.compare_api_llm_trace_runs({"baseline": "a.jsonl", "candidate": "b.jsonl"})`.
+  Use `runtime.run_prompts(...)` or `st.run_api_llm_prompt_suite(...)` for a
+  multi-prompt bipolar/Z-space suite backed by OpenAI, Anthropic, or any
+  compatible callable.
 - **FT diagnostics:** tokenizerless byte-LM profile smokes, Transformers logit
   trace capture, runtime import audits, and WGPU readiness gates.
 

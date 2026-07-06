@@ -32,14 +32,17 @@ __all__ = [
     "api_llm_usage_from_response",
     "compare_api_llm_trace_runs",
     "load_api_llm_trace_events",
+    "make_anthropic_messages_invoke",
     "make_openai_chat_invoke",
     "make_openai_responses_invoke",
+    "run_api_llm_prompt_suite",
     "summarize_api_llm_trace_events",
     "write_api_llm_trace_jsonl",
 ]
 
 
 _OPENAI_INSTALL_HINT = "pip install openai"
+_ANTHROPIC_INSTALL_HINT = "pip install anthropic"
 _API_LLM_TRACE_SCHEMA = "spiraltorch.api_llm_trace.v1"
 
 
@@ -101,6 +104,13 @@ def _content_text(content: Any) -> str:
         return ""
     if isinstance(content, Sequence) and not isinstance(content, (str, bytes, bytearray)):
         return "".join(_content_text(part) for part in content)
+    for key in ("text", "output_text", "content"):
+        candidate = getattr(content, key, None)
+        if candidate is None or candidate is content:
+            continue
+        text = _content_text(candidate)
+        if text:
+            return text
     return str(content)
 
 
@@ -304,7 +314,7 @@ def _runtime_metrics(
     )
 
     finish = (finish_reason or "").lower()
-    if finish in {"stop", "completed", "complete", "success"}:
+    if finish in {"stop", "completed", "complete", "success", "end_turn", "stop_sequence"}:
         stop_stability = 0.95
     elif finish in {"length", "max_tokens", "incomplete"}:
         stop_stability = 0.45
@@ -386,6 +396,26 @@ def _create_openai_client(
     return client_factory(**dict(client_kwargs or {}))
 
 
+def _create_anthropic_client(
+    *,
+    client: Any | None,
+    client_factory: Callable[..., Any] | None,
+    client_kwargs: Mapping[str, Any] | None,
+) -> Any:
+    if client is not None:
+        return client
+    if client_factory is None:
+        try:
+            from anthropic import Anthropic  # type: ignore[import-not-found]
+        except Exception as exc:  # pragma: no cover - depends on optional SDK.
+            raise RuntimeError(
+                "Anthropic SDK is required for the Anthropic adapter; "
+                f"install it with `{_ANTHROPIC_INSTALL_HINT}` or pass a client."
+            ) from exc
+        client_factory = Anthropic
+    return client_factory(**dict(client_kwargs or {}))
+
+
 def _resolve_create(root: Any, path: Sequence[str]) -> Callable[..., Any]:
     target = root
     for name in path:
@@ -442,6 +472,54 @@ def make_openai_responses_invoke(
         request = _merge_request(request_defaults, request_overrides, model=model)
         request.setdefault(input_key, prompt)
         create = _resolve_create(cached_client, ("responses",))
+        return create(**request)
+
+    return _invoke
+
+
+def _anthropic_messages(
+    prompt: str,
+    *,
+    messages: Sequence[Mapping[str, Any]] | None,
+) -> list[Mapping[str, Any]]:
+    result: list[Mapping[str, Any]] = []
+    if messages:
+        result.extend(dict(message) for message in messages)
+    result.append({"role": "user", "content": prompt})
+    return result
+
+
+def make_anthropic_messages_invoke(
+    *,
+    client: Any | None = None,
+    client_factory: Callable[..., Any] | None = None,
+    client_kwargs: Mapping[str, Any] | None = None,
+    model: str | None = None,
+    system: str | None = None,
+    messages: Sequence[Mapping[str, Any]] | None = None,
+    **request_defaults: Any,
+) -> Callable[..., Any]:
+    """Return a callable that sends prompts through Anthropic Messages."""
+
+    cached_client = client
+
+    def _invoke(prompt: str, **request_overrides: Any) -> Any:
+        nonlocal cached_client
+        if cached_client is None:
+            cached_client = _create_anthropic_client(
+                client=None,
+                client_factory=client_factory,
+                client_kwargs=client_kwargs,
+            )
+        request = _merge_request(request_defaults, request_overrides, model=model)
+        if system is not None:
+            request.setdefault("system", system)
+        override_messages = request.pop("messages", None)
+        request["messages"] = _anthropic_messages(
+            prompt,
+            messages=override_messages if override_messages is not None else messages,
+        )
+        create = _resolve_create(cached_client, ("messages",))
         return create(**request)
 
     return _invoke
@@ -1137,6 +1215,50 @@ class ApiLLMZSpaceRuntime:
             latency_ms=latency_ms,
         )
 
+    def run_prompts(
+        self,
+        prompts: Iterable[str],
+        invoke: Callable[..., Any],
+        *args: Any,
+        provider: str | None = None,
+        model: str | None = None,
+        jsonl_out: str | Path | None = None,
+        clear: bool = True,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Run a prompt suite through one runtime and return trace artifacts."""
+
+        traces: list[ApiLLMTrace] = []
+        for prompt in prompts:
+            start = time.perf_counter()
+            response = invoke(prompt, *args, **kwargs)
+            latency_ms = (time.perf_counter() - start) * 1000.0
+            traces.append(
+                self.record_response(
+                    response,
+                    prompt=prompt,
+                    provider=provider,
+                    model=model,
+                    latency_ms=latency_ms,
+                    clear=clear,
+                )
+            )
+
+        result: dict[str, Any] = {
+            "kind": "spiraltorch.api_llm_prompt_suite",
+            "count": len(traces),
+            "runtime_trace_count": len(self.traces),
+            "provider": provider or self.provider,
+            "model": model or self.model,
+            "requested_backend": self.requested_backend,
+            "device_preflight": self.device_preflight,
+            "summary": self.summary(),
+            "traces": [trace.as_dict() for trace in traces],
+        }
+        if jsonl_out is not None:
+            result["jsonl"] = self.write_jsonl(jsonl_out)
+        return result
+
     def call_openai_responses(
         self,
         prompt: str,
@@ -1184,6 +1306,38 @@ class ApiLLMZSpaceRuntime:
 
         model_value = model or self.model
         invoke = make_openai_chat_invoke(
+            client=client,
+            client_factory=client_factory,
+            client_kwargs=client_kwargs,
+            model=model_value,
+            system=system,
+            messages=messages,
+            **request,
+        )
+        return self.call(
+            invoke,
+            prompt,
+            provider=provider,
+            model=model_value,
+        )
+
+    def call_anthropic_messages(
+        self,
+        prompt: str,
+        *,
+        client: Any | None = None,
+        client_factory: Callable[..., Any] | None = None,
+        client_kwargs: Mapping[str, Any] | None = None,
+        model: str | None = None,
+        system: str | None = None,
+        messages: Sequence[Mapping[str, Any]] | None = None,
+        provider: str | None = "anthropic",
+        **request: Any,
+    ) -> ApiLLMTrace:
+        """Call Anthropic Messages and record the resulting Z-space trace."""
+
+        model_value = model or self.model
+        invoke = make_anthropic_messages_invoke(
             client=client,
             client_factory=client_factory,
             client_kwargs=client_kwargs,
@@ -1264,3 +1418,47 @@ class ApiLLMZSpaceRuntime:
             "summary": self.summary(),
             "traces": [trace.as_dict() for trace in self.traces],
         }
+
+
+def run_api_llm_prompt_suite(
+    prompts: Iterable[str],
+    invoke: Callable[..., Any],
+    *args: Any,
+    z_state: Sequence[float],
+    backend: str | None = "auto",
+    provider: str | None = None,
+    model: str | None = None,
+    session: Any | None = None,
+    session_factory: Callable[..., Any] | None = None,
+    create_session: bool = True,
+    alpha: float = 0.35,
+    smoothing: float = 0.35,
+    strategy: str = "mean",
+    jsonl_out: str | Path | None = None,
+    clear: bool = True,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Run multiple hosted/API-model prompts through a fresh Z-space runtime."""
+
+    runtime = ApiLLMZSpaceRuntime(
+        z_state,
+        backend=backend,
+        provider=provider,
+        model=model,
+        session=session,
+        session_factory=session_factory,
+        create_session=create_session,
+        alpha=alpha,
+        smoothing=smoothing,
+        strategy=strategy,
+    )
+    return runtime.run_prompts(
+        prompts,
+        invoke,
+        *args,
+        provider=provider,
+        model=model,
+        jsonl_out=jsonl_out,
+        clear=clear,
+        **kwargs,
+    )
