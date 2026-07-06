@@ -106,7 +106,7 @@ PY
   smoke, or `run_api_llm_prompt_suite_matrix(...)` to replay the same prompts
   across OpenAI, Anthropic, gateway, or local callables, then
   `compare_api_llm_trace_runs(...)` to pick candidates by route score, latency,
-  token use, confidence, and runtime readiness.
+  token use, confidence, runtime readiness, refusal rate, and empty-text rate.
 - Language desire controls via `st.nn.DesirePipeline`, `DesireTrainerBridge`,
   `DesireRoundtableBridge`, and downstream hook adapters so notebooks can
   inspect phase/temperature/entropy offsets without making the symbolic kernel

@@ -390,7 +390,9 @@ Without cloning the repo, `pip install spiraltorch` gives you:
   multi-prompt bipolar/Z-space suite backed by OpenAI, Anthropic, or any
   compatible callable. Use `st.run_api_llm_prompt_suite_matrix(...)` when the
   same prompts should be replayed across several provider routes and compared
-  from their persisted JSONL traces.
+  from their persisted JSONL traces. Trace comparison also surfaces
+  `empty_text_rate`, `refusal_rate`, `completion_rate`, and stop-detail
+  categories so provider safety behavior does not hide behind raw confidence.
 - **FT diagnostics:** tokenizerless byte-LM profile smokes, Transformers logit
   trace capture, runtime import audits, and WGPU readiness gates.
 

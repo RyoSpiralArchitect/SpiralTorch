@@ -142,6 +142,7 @@ matrix = st.run_api_llm_prompt_suite_matrix(
     jsonl_dir="api_llm_matrix",
 )
 print(matrix["comparison"]["winners"]["best_score"])
+print(matrix["comparison"]["runs"][0]["refusal_rate"])
 ```
 
 If the optional `openai` package is installed, the same runtime can call the
