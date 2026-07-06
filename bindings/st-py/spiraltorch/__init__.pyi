@@ -264,6 +264,14 @@ def summarize_wasm_report(
     report: str | PathLike[str] | Mapping[str, Any],
 ) -> Dict[str, Any]: ...
 
+def collect_wasm_report_paths(
+    reports: Sequence[str | PathLike[str]] | str | PathLike[str] | None = ...,
+    *,
+    globs: Sequence[str] | None = ...,
+    dirs: Sequence[str | PathLike[str]] | None = ...,
+    recursive: bool = ...,
+) -> List[str]: ...
+
 def compare_wasm_reports(
     reports: (
         Mapping[str, str | PathLike[str] | Mapping[str, Any]]
@@ -283,6 +291,18 @@ def wasm_report_to_zspace_partial(
     telemetry_prefix: str = ...,
     gradient_dim: int = ...,
 ) -> ZSpacePartialBundle: ...
+
+def build_wasm_report_context(
+    reports: Any = ...,
+    *,
+    report_globs: Sequence[str] | None = ...,
+    report_dirs: Sequence[str | PathLike[str]] | None = ...,
+    max_reports: int | None = ...,
+    recursive: bool = ...,
+    bundle_weight: float = ...,
+    telemetry_prefix: str = ...,
+    gradient_dim: int = ...,
+) -> Tuple[List[ZSpacePartialBundle], Dict[str, Any]]: ...
 
 def load_kdsl_trace_events(path: str) -> List[Dict[str, Any]]: ...
 
@@ -7237,7 +7257,9 @@ __all__ = [
     "run_api_llm_prompt_suite_matrix",
     "summarize_api_llm_trace_events",
     "write_api_llm_trace_jsonl",
+    "build_wasm_report_context",
     "compare_wasm_reports",
+    "collect_wasm_report_paths",
     "load_wasm_report",
     "summarize_wasm_report",
     "wasm_report_to_zspace_partial",

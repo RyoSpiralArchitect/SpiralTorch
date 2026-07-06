@@ -776,7 +776,9 @@ from .zspace_artifacts import (
 )
 
 from .wasm_reports import (
+    build_wasm_report_context,
     compare_wasm_reports,
+    collect_wasm_report_paths,
     load_wasm_report,
     summarize_wasm_report,
     wasm_report_to_zspace_partial,
@@ -837,7 +839,9 @@ _EXTRAS = [
     "build_zspace_downstream_hook",
     "build_desire_adapter_from_downstream_hook","desire_step_from_downstream_hook",
     "run_desire_geometry_bias_validation",
-    "compare_wasm_reports","load_wasm_report","summarize_wasm_report",
+    "build_wasm_report_context",
+    "compare_wasm_reports","collect_wasm_report_paths",
+    "load_wasm_report","summarize_wasm_report",
     "wasm_report_to_zspace_partial",
     "ApiLLMTrace","ApiLLMZSpaceRuntime",
     "api_llm_partial_from_response","api_llm_text_from_response",

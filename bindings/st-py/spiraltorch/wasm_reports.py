@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+import glob
 import json
 import math
 import os
@@ -10,7 +11,9 @@ from typing import Any
 from .zspace_inference import ZSpacePartialBundle
 
 __all__ = [
+    "build_wasm_report_context",
     "compare_wasm_reports",
+    "collect_wasm_report_paths",
     "load_wasm_report",
     "summarize_wasm_report",
     "wasm_report_to_zspace_partial",
@@ -52,10 +55,78 @@ def _mapping(value: Any) -> Mapping[str, Any]:
     return value if isinstance(value, Mapping) else {}
 
 
+def _is_report_mapping(value: Any) -> bool:
+    return isinstance(value, Mapping) and ("schema" in value or "kind" in value)
+
+
 def _sequence(value: Any) -> Sequence[Any]:
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
         return value
     return ()
+
+
+def _dedupe_paths(paths: Sequence[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for path in paths:
+        key = str(Path(path).expanduser())
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(key)
+    return result
+
+
+def _report_label(index: int, report: Any) -> str:
+    if isinstance(report, (str, os.PathLike)):
+        return str(Path(report).stem)
+    artifact_path = report.get("artifact_path") if isinstance(report, Mapping) else None
+    if isinstance(artifact_path, (str, os.PathLike)):
+        return str(Path(artifact_path).stem)
+    family_hint = str(report.get("kind", "")) if isinstance(report, Mapping) else ""
+    if family_hint:
+        return family_hint
+    return f"run_{index}"
+
+
+def _iter_report_items(
+    reports: Any,
+    *,
+    labels: Sequence[str] | None = None,
+) -> list[tuple[str, str | os.PathLike[str] | Mapping[str, Any]]]:
+    if reports is None:
+        return []
+    if isinstance(reports, (str, os.PathLike)):
+        return [(_report_label(0, reports), reports)]
+    if _is_report_mapping(reports):
+        return [(_report_label(0, reports), reports)]
+    if isinstance(reports, Mapping):
+        return [(str(label), report) for label, report in reports.items()]
+    values = list(reports)
+    if labels is not None and len(labels) != len(values):
+        raise ValueError("labels length must match reports length")
+    return [
+        (
+            str(labels[index]) if labels is not None else _report_label(index, value),
+            value,
+        )
+        for index, value in enumerate(values)
+    ]
+
+
+def _dedupe_report_items(
+    items: Sequence[tuple[str, str | os.PathLike[str] | Mapping[str, Any]]],
+) -> list[tuple[str, str | os.PathLike[str] | Mapping[str, Any]]]:
+    seen_paths: set[str] = set()
+    result: list[tuple[str, str | os.PathLike[str] | Mapping[str, Any]]] = []
+    for label, report in items:
+        if isinstance(report, (str, os.PathLike)):
+            key = str(Path(report).expanduser())
+            if key in seen_paths:
+                continue
+            seen_paths.add(key)
+        result.append((label, report))
+    return result
 
 
 def _path(source: Mapping[str, Any], *keys: str) -> Any:
@@ -276,22 +347,7 @@ def compare_wasm_reports(
 ) -> dict[str, Any]:
     """Compare several WASM reports by final/last loss and stability."""
 
-    items: list[tuple[str, str | os.PathLike[str] | Mapping[str, Any]]] = []
-    if isinstance(reports, Mapping):
-        items = [(str(label), report) for label, report in reports.items()]
-    elif isinstance(reports, (str, os.PathLike)):
-        items = [(str(Path(reports).stem), reports)]
-    else:
-        values = list(reports)
-        if labels is not None and len(labels) != len(values):
-            raise ValueError("labels length must match reports length")
-        items = [
-            (
-                str(labels[index]) if labels is not None else f"run_{index}",
-                value,
-            )
-            for index, value in enumerate(values)
-        ]
+    items = _iter_report_items(reports, labels=labels)
 
     rows: list[dict[str, Any]] = []
     family_counts: dict[str, int] = {}
@@ -329,6 +385,173 @@ def compare_wasm_reports(
         "best_stability": None if best_stability is None else dict(best_stability),
         "reports": rows,
     }
+
+
+def collect_wasm_report_paths(
+    reports: (
+        Sequence[str | os.PathLike[str]]
+        | str
+        | os.PathLike[str]
+        | None
+    ) = None,
+    *,
+    globs: Sequence[str] | None = None,
+    dirs: Sequence[str | os.PathLike[str]] | None = None,
+    recursive: bool = False,
+) -> list[str]:
+    """Collect browser-exported WASM report JSON paths from paths, globs, or dirs."""
+
+    paths: list[str] = []
+    if reports is None:
+        pass
+    elif isinstance(reports, (str, os.PathLike)):
+        paths.append(str(reports))
+    else:
+        paths.extend(str(path) for path in reports if str(path))
+
+    for pattern in globs or ():
+        paths.extend(sorted(glob.glob(str(pattern), recursive=True)))
+
+    for raw_dir in dirs or ():
+        report_dir = Path(raw_dir)
+        iterator = report_dir.rglob("*.json") if recursive else report_dir.glob("*.json")
+        paths.extend(str(path) for path in sorted(iterator))
+
+    return _dedupe_paths(paths)
+
+
+def _select_wasm_report_indices(
+    summaries: Sequence[Mapping[str, Any]],
+    max_reports: int | None,
+) -> list[int]:
+    if max_reports is None or max_reports <= 0 or max_reports >= len(summaries):
+        return list(range(len(summaries)))
+
+    def _rank_key(index: int) -> tuple[bool, float, int]:
+        loss = _summary_loss(summaries[index])
+        return (loss is None, loss if loss is not None else 0.0, index)
+
+    ranked = sorted(range(len(summaries)), key=_rank_key)
+    return sorted(ranked[:max_reports])
+
+
+def _compact_report_summary(
+    label: str,
+    summary: Mapping[str, Any],
+) -> dict[str, Any]:
+    runtime = _mapping(summary.get("runtime"))
+    return {
+        "label": label,
+        "schema": summary.get("schema"),
+        "kind": summary.get("kind"),
+        "family": summary.get("family"),
+        "artifact_path": summary.get("artifact_path"),
+        "loss": _summary_loss(summary),
+        "stability": _summary_stability(summary),
+        "webgpu_available": runtime.get("webgpu_available"),
+        "webgpu_device_ready": runtime.get("webgpu_device_ready"),
+    }
+
+
+def _compact_wasm_comparison(comparison: Mapping[str, Any]) -> dict[str, Any]:
+    def _row(row: Any) -> dict[str, Any] | None:
+        if not isinstance(row, Mapping):
+            return None
+        return {
+            "label": row.get("label"),
+            "family": row.get("family"),
+            "loss": row.get("loss"),
+            "stability": row.get("stability"),
+        }
+
+    return {
+        "kind": comparison.get("kind"),
+        "count": comparison.get("count"),
+        "families": comparison.get("families"),
+        "best_loss": _row(comparison.get("best_loss")),
+        "best_stability": _row(comparison.get("best_stability")),
+    }
+
+
+def build_wasm_report_context(
+    reports: (
+        Mapping[str, str | os.PathLike[str] | Mapping[str, Any]]
+        | Sequence[str | os.PathLike[str] | Mapping[str, Any]]
+        | str
+        | os.PathLike[str]
+        | Mapping[str, Any]
+        | None
+    ) = None,
+    *,
+    report_globs: Sequence[str] | None = None,
+    report_dirs: Sequence[str | os.PathLike[str]] | None = None,
+    max_reports: int | None = None,
+    recursive: bool = False,
+    bundle_weight: float = 1.0,
+    telemetry_prefix: str = "wasm",
+    gradient_dim: int = 8,
+) -> tuple[list[ZSpacePartialBundle], dict[str, Any]]:
+    """Discover, compare, select, and convert WASM reports into Z-space context."""
+
+    explicit_items = _iter_report_items(reports)
+    discovered_paths = collect_wasm_report_paths(
+        None,
+        globs=report_globs,
+        dirs=report_dirs,
+        recursive=recursive,
+    )
+    discovered_items = [
+        (_report_label(index, path), path)
+        for index, path in enumerate(discovered_paths, start=len(explicit_items))
+    ]
+    candidate_items = _dedupe_report_items([*explicit_items, *discovered_items])
+    metadata: dict[str, Any] = {
+        "candidate_count": len(candidate_items),
+        "report_count": 0,
+        "gradient_dim": int(gradient_dim),
+        "bundle_weight": float(bundle_weight),
+        "telemetry_prefix": telemetry_prefix,
+        "selection": {
+            "max_reports": max_reports,
+            "recursive": bool(recursive),
+        },
+        "candidate_reports": [],
+        "reports": [],
+        "context_origins": [],
+        "comparison": None,
+    }
+    if not candidate_items:
+        return [], metadata
+
+    labels = [label for label, _ in candidate_items]
+    report_values = [report for _, report in candidate_items]
+    summaries = [summarize_wasm_report(report) for report in report_values]
+    selected_indices = _select_wasm_report_indices(summaries, max_reports)
+    selected_items = [candidate_items[index] for index in selected_indices]
+    selected_summaries = [summaries[index] for index in selected_indices]
+    comparison = compare_wasm_reports(report_values, labels=labels)
+    context_partials = [
+        wasm_report_to_zspace_partial(
+            report,
+            bundle_weight=bundle_weight,
+            telemetry_prefix=telemetry_prefix,
+            gradient_dim=gradient_dim,
+        )
+        for _, report in selected_items
+    ]
+
+    metadata["report_count"] = len(selected_items)
+    metadata["candidate_reports"] = [
+        _compact_report_summary(label, summary)
+        for label, summary in zip(labels, summaries)
+    ]
+    metadata["reports"] = [
+        _compact_report_summary(label, summary)
+        for (label, _), summary in zip(selected_items, selected_summaries)
+    ]
+    metadata["context_origins"] = [partial.origin for partial in context_partials]
+    metadata["comparison"] = _compact_wasm_comparison(comparison)
+    return context_partials, metadata
 
 
 def _work_units(summary: Mapping[str, Any]) -> float:
