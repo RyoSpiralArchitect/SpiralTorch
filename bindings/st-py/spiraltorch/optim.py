@@ -111,7 +111,6 @@ class Amegagrad:
         self.hyper_learning_rate = float(hyper_learning_rate)
         self.real_learning_rate = float(real_learning_rate)
         self.gain = float(gain)
-        explicit_topos = topos is not None
 
         self.hyper = st.hypergrad(
             *shape_args,
@@ -143,7 +142,7 @@ class Amegagrad:
             topos_visited_volume,
             default=default_visited_volume,
         )
-        default_topos_gain = 1.0 if explicit_topos else 0.0
+        default_topos_gain = 0.0
         self.topos_control_gain = _finite_float(
             default_topos_gain if topos_control_gain is None else topos_control_gain,
             default=default_topos_gain,

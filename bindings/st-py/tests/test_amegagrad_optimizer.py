@@ -113,11 +113,13 @@ def test_amegagrad_applies_topos_training_hints_to_tune() -> None:
 def test_amegagrad_keeps_default_tune_non_topos_by_default() -> None:
     _require_native()
 
+    guard = st.hypergrad_topos(max_depth=8, max_volume=16)
     opt = st.optim.Amegagrad(
         (1, 2),
         curvature=-0.9,
         hyper_learning_rate=0.04,
         real_learning_rate=0.02,
+        topos=guard,
     )
 
     opt.tune(control=_UnitRateControl())
@@ -125,3 +127,4 @@ def test_amegagrad_keeps_default_tune_non_topos_by_default() -> None:
     assert opt.hyper.learning_rate() == pytest.approx(0.04)
     assert opt.real.learning_rate() == pytest.approx(0.02)
     assert opt.topos_diagnostics()["effect"] is None
+    assert opt.topos_training_hints()["clip_scale"] <= 1.0
