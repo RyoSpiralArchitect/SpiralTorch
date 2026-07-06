@@ -453,6 +453,9 @@ def test_summarize_trainer_trace_events_surfaces_topos_context(tmp_path) -> None
                         "topos.temperature_scale": 0.8533125,
                         "topos.training_hints.gradient_bias_scale": 0.0786561,
                         "topos.training_hints.clip_scale": 0.871,
+                        "topos.optimizer_effect.rate_scale": 0.776965,
+                        "topos.optimizer_effect.hyper_learning_rate": 0.0310786,
+                        "topos.optimizer_effect.real_learning_rate": 0.0155393,
                         "topos.inference_hints.top_p_scale": 0.890274375,
                         "topos.inference_hints.context_weight": 0.9225,
                     }
@@ -471,6 +474,11 @@ def test_summarize_trainer_trace_events_surfaces_topos_context(tmp_path) -> None
                         "training_hints": {
                             "gradient_bias_scale": 0.12,
                             "clip_scale": 0.6,
+                        },
+                        "optimizer_effect": {
+                            "rate_scale": 0.42,
+                            "hyper_learning_rate": 0.0168,
+                            "real_learning_rate": 0.0084,
                         },
                         "inference_hints": {
                             "top_p_scale": 0.72,
@@ -496,6 +504,9 @@ def test_summarize_trainer_trace_events_surfaces_topos_context(tmp_path) -> None
     assert context["learning_rate_scale"]["samples"] == 1
     assert context["training_gradient_bias_scale"]["max"] == pytest.approx(0.12)
     assert context["training_clip_scale"]["min"] == pytest.approx(0.6)
+    assert context["optimizer_rate_scale"]["min"] == pytest.approx(0.42)
+    assert context["optimizer_hyper_learning_rate"]["mean"] == pytest.approx(0.0239393)
+    assert context["optimizer_real_learning_rate"]["last"] == pytest.approx(0.0084)
     assert context["inference_top_p_scale"]["mean"] == pytest.approx(0.8051371875)
     assert context["inference_context_weight"]["last"] == pytest.approx(1.1)
 

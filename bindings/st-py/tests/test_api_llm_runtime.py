@@ -549,6 +549,74 @@ def test_api_llm_trace_summary_surfaces_topos_runtime_hints(tmp_path) -> None:
     assert any("open-topos runtime hints" in item for item in comparison["recommendations"])
 
 
+def test_api_llm_trace_summary_surfaces_topos_optimizer_effect(tmp_path) -> None:
+    path = tmp_path / "topos-optimizer-effect.jsonl"
+    st.write_api_llm_trace_jsonl(
+        [
+            {
+                "provider": "fake",
+                "model": "topos-optimizer-model",
+                "prompt": "summarize optimizer pressure",
+                "text": "Optimizer pressure was routed through Z-space.",
+                "finish_reason": "stop",
+                "latency_ms": 12.0,
+                "usage": {
+                    "prompt_tokens": 5,
+                    "completion_tokens": 8,
+                    "total_tokens": 13,
+                },
+                "metrics": {"speed": 0.4, "memory": 0.2, "stability": 0.9},
+                "telemetry": {
+                    "topos.closure_pressure": 0.5,
+                    "topos.optimizer_effect.rate_scale": 0.72,
+                    "topos.optimizer_effect.hyper_learning_rate": 0.0288,
+                    "topos.optimizer_effect.real_learning_rate": 0.0144,
+                },
+            },
+            {
+                "provider": "fake",
+                "model": "topos-optimizer-model",
+                "prompt": "summarize optimizer pressure again",
+                "text": "Optimizer pressure stayed bounded.",
+                "finish_reason": "stop",
+                "latency_ms": 10.0,
+                "usage": {
+                    "prompt_tokens": 5,
+                    "completion_tokens": 6,
+                    "total_tokens": 11,
+                },
+                "metrics": {"speed": 0.45, "memory": 0.25, "stability": 0.88},
+                "telemetry": {
+                    "topos.closure_pressure": 0.25,
+                    "topos.optimizer_effect.rate_scale": 0.84,
+                    "topos.optimizer_effect.hyper_learning_rate": 0.0336,
+                    "topos.optimizer_effect.real_learning_rate": 0.0168,
+                },
+            },
+        ],
+        path,
+    )
+
+    summary = st.summarize_api_llm_trace_events(path)
+
+    assert summary["topos_context"]["observed_count"] == 2
+    assert summary["topos_context"]["optimizer_rate_scale"]["mean"] == pytest.approx(0.78)
+    assert summary["topos_context"]["optimizer_hyper_learning_rate"]["last"] == pytest.approx(
+        0.0336
+    )
+    assert summary["topos_context"]["optimizer_real_learning_rate"]["min"] == pytest.approx(
+        0.0144
+    )
+
+    comparison = st.compare_api_llm_trace_runs({"opt": path}, near_best_tolerance=1.0)
+    row = comparison["runs"][0]
+
+    assert row["topos_optimizer_rate_scale_mean"] == pytest.approx(0.78)
+    assert comparison["winners"]["lowest_topos_optimizer_rate_scale"] == "opt"
+    assert comparison["topos_context"]["lowest_optimizer_rate_scale"] == "opt"
+    assert comparison["topos_context"]["optimizer_rate_scale"]["mean"] == pytest.approx(0.78)
+
+
 def test_provider_wrapper_runtime_adapter_allows_explicit_request_override() -> None:
     client = _FakeChatClient()
     runtime = st.ApiLLMZSpaceRuntime(
