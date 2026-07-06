@@ -1749,9 +1749,38 @@ class ZSpaceDecoded:
     def as_dict(self) -> Dict[str, object]: ...
 
 
+class ZSpaceTelemetryFrame:
+    payload: Mapping[str, float]
+    mean: float
+    variance: float
+    amplitude: float
+    energy: float
+    balance: float
+    focus: float
+
+    def as_dict(self) -> Dict[str, object]: ...
+
+
+class ZSpacePartialBundle:
+    metrics: Mapping[str, Any]
+    weight: float
+    origin: Optional[str]
+    telemetry: Optional[Mapping[str, Any]]
+
+    def __init__(
+        self,
+        metrics: Mapping[str, Any],
+        weight: float = ...,
+        origin: str | None = ...,
+        telemetry: Mapping[str, Any] | None = ...,
+    ) -> None: ...
+    def resolved(self) -> Dict[str, Any]: ...
+    def telemetry_payload(self) -> Mapping[str, Any] | None: ...
+
+
 class ZSpaceInference:
     metrics: Mapping[str, float]
-    gradient: Tuple[float, ...]
+    gradient: Sequence[float]
     barycentric: Tuple[float, float, float]
     residual: float
     confidence: float
@@ -1786,6 +1815,114 @@ class ZSpacePosterior:
         partial: Mapping[str, object] | None,
         *,
         smoothing: float = ...,
+        telemetry: Mapping[str, Any] | ZSpaceTelemetryFrame | None = ...,
+    ) -> ZSpaceInference: ...
+
+
+class ZSpaceInferenceRuntime:
+    def __init__(
+        self,
+        z_state: Sequence[float],
+        *,
+        alpha: float = ...,
+        smoothing: float = ...,
+        accumulate: bool = ...,
+        telemetry: Mapping[str, Any] | None = ...,
+    ) -> None: ...
+
+    @property
+    def posterior(self) -> ZSpacePosterior: ...
+    @property
+    def smoothing(self) -> float: ...
+    @property
+    def accumulate(self) -> bool: ...
+    @property
+    def telemetry(self) -> Mapping[str, float]: ...
+    @property
+    def cached_observations(self) -> Mapping[str, Any]: ...
+
+    def clear(self) -> None: ...
+    def set_telemetry(
+        self,
+        telemetry: Mapping[str, Any] | ZSpaceTelemetryFrame | None,
+    ) -> None: ...
+    def update(
+        self,
+        partial: Mapping[str, Any] | None = ...,
+        *,
+        telemetry: Mapping[str, Any] | ZSpaceTelemetryFrame | None = ...,
+    ) -> ZSpaceInference: ...
+    def infer(
+        self,
+        partial: Mapping[str, Any] | None = ...,
+        *,
+        telemetry: Mapping[str, Any] | ZSpaceTelemetryFrame | None = ...,
+    ) -> ZSpaceInference: ...
+
+
+class ZSpaceInferencePipeline:
+    def __init__(
+        self,
+        z_state: Sequence[float],
+        *,
+        alpha: float = ...,
+        smoothing: float = ...,
+        strategy: str = ...,
+        telemetry: Mapping[str, Any] | None = ...,
+    ) -> None: ...
+
+    @property
+    def strategy(self) -> str: ...
+    @property
+    def posterior(self) -> ZSpacePosterior: ...
+    @property
+    def smoothing(self) -> float: ...
+
+    def add_partial(
+        self,
+        partial: Mapping[str, Any] | ZSpacePartialBundle,
+        *,
+        weight: float | None = ...,
+        origin: str | None = ...,
+        telemetry: Mapping[str, Any] | None = ...,
+    ) -> ZSpacePartialBundle: ...
+    def add_elliptic_telemetry(
+        self,
+        telemetry: Any,
+        *,
+        bundle_weight: float = ...,
+        origin: str | None = ...,
+        telemetry_prefix: str = ...,
+        aggregate: str = ...,
+        gradient_source: str = ...,
+        extra_telemetry: Mapping[str, Any] | None = ...,
+    ) -> ZSpacePartialBundle: ...
+    def add_canvas_snapshot(self, snapshot: Any, **kwargs: Any) -> ZSpacePartialBundle: ...
+    def add_coherence_diagnostics(
+        self,
+        diagnostics: Any,
+        **kwargs: Any,
+    ) -> ZSpacePartialBundle: ...
+    def add_dlpack_weights(self, weights: Any, **kwargs: Any) -> ZSpacePartialBundle: ...
+    def add_compat_weights(
+        self,
+        weights: Any,
+        *,
+        adapter: str | None = ...,
+        **kwargs: Any,
+    ) -> ZSpacePartialBundle: ...
+    def clear(self) -> None: ...
+    def set_telemetry(
+        self,
+        telemetry: Mapping[str, Any] | ZSpaceTelemetryFrame | None,
+    ) -> None: ...
+    def infer(
+        self,
+        *,
+        strategy: str | None = ...,
+        weights: Sequence[float] | None = ...,
+        clear: bool = ...,
+        telemetry: Mapping[str, Any] | ZSpaceTelemetryFrame | None = ...,
     ) -> ZSpaceInference: ...
 
 
@@ -1802,7 +1939,35 @@ def infer_from_partial(
     *,
     alpha: float = ...,
     smoothing: float = ...,
+    telemetry: Mapping[str, Any] | ZSpaceTelemetryFrame | None = ...,
 ) -> ZSpaceInference: ...
+
+
+def blend_zspace_partials(
+    partials: Sequence[Mapping[str, Any] | ZSpacePartialBundle | None],
+    *,
+    weights: Sequence[float] | None = ...,
+    strategy: str = ...,
+) -> Dict[str, Any]: ...
+
+
+def infer_with_partials(
+    z_state: Sequence[float] | ZSpacePosterior | object,
+    *partials: Mapping[str, Any] | ZSpacePartialBundle | None,
+    alpha: float = ...,
+    smoothing: float = ...,
+    strategy: str = ...,
+    weights: Sequence[float] | None = ...,
+    telemetry: Mapping[str, Any] | ZSpaceTelemetryFrame | None = ...,
+) -> ZSpaceInference: ...
+
+
+def compile_inference(
+    fn: Callable[..., Mapping[str, Any] | None] | None = ...,
+    *,
+    alpha: float = ...,
+    smoothing: float = ...,
+) -> Callable[..., ZSpaceInference]: ...
 
 
 def inference_to_mapping(
@@ -1836,6 +2001,107 @@ def ensure_zmetrics(
     *,
     prefer_applied: bool = ...,
 ) -> ZMetrics: ...
+
+
+class ApiLLMTrace:
+    provider: Optional[str]
+    model: Optional[str]
+    prompt: Optional[str]
+    text: str
+    finish_reason: Optional[str]
+    latency_ms: Optional[float]
+    usage: Mapping[str, float]
+    metrics: Mapping[str, Any]
+    telemetry: Mapping[str, Any]
+    inference: Any | None
+    device_preflight: Mapping[str, Any] | None
+    response_metadata: Mapping[str, Any] | None
+
+    def as_dict(self) -> Dict[str, Any]: ...
+
+
+class ApiLLMZSpaceRuntime:
+    provider: Optional[str]
+    model: Optional[str]
+    requested_backend: Optional[str]
+    pipeline: ZSpaceInferencePipeline
+    session_error: Optional[str]
+    session: Any | None
+    device_preflight: Optional[Dict[str, Any]]
+    traces: List[ApiLLMTrace]
+
+    def __init__(
+        self,
+        z_state: Sequence[float],
+        *,
+        backend: str | None = ...,
+        provider: str | None = ...,
+        model: str | None = ...,
+        session: Any | None = ...,
+        session_factory: Callable[..., Any] | None = ...,
+        create_session: bool = ...,
+        alpha: float = ...,
+        smoothing: float = ...,
+        strategy: str = ...,
+    ) -> None: ...
+    def record_response(
+        self,
+        response: Any,
+        *,
+        prompt: str | None = ...,
+        provider: str | None = ...,
+        model: str | None = ...,
+        latency_ms: float | None = ...,
+        bundle_weight: float = ...,
+        telemetry_prefix: str = ...,
+        gradient_dim: int = ...,
+        clear: bool = ...,
+    ) -> ApiLLMTrace: ...
+    def call(
+        self,
+        invoke: Callable[..., Any],
+        prompt: str,
+        *args: Any,
+        provider: str | None = ...,
+        model: str | None = ...,
+        **kwargs: Any,
+    ) -> ApiLLMTrace: ...
+    def as_dict(self) -> Dict[str, Any]: ...
+
+
+def api_llm_text_from_response(response: Any) -> str: ...
+
+
+def api_llm_usage_from_response(response: Any) -> Dict[str, float]: ...
+
+
+def api_llm_partial_from_response(
+    response: Any,
+    *,
+    prompt: str | None = ...,
+    provider: str | None = ...,
+    model: str | None = ...,
+    latency_ms: float | None = ...,
+    bundle_weight: float = ...,
+    origin: str | None = ...,
+    telemetry_prefix: str = ...,
+    gradient_dim: int = ...,
+) -> ZSpacePartialBundle: ...
+
+
+def api_llm_trace_from_response(
+    response: Any,
+    *,
+    prompt: str | None = ...,
+    provider: str | None = ...,
+    model: str | None = ...,
+    latency_ms: float | None = ...,
+    bundle_weight: float = ...,
+    telemetry_prefix: str = ...,
+    inference: Any | None = ...,
+    device_preflight: Mapping[str, Any] | None = ...,
+    gradient_dim: int = ...,
+) -> ApiLLMTrace: ...
 
 class SafetyViolation:
     category: str
@@ -6714,6 +6980,28 @@ __all__ = [
     "BarycenterIntermediate",
     "z_space_barycenter",
     "ZMetrics",
+    "ZSpaceDecoded",
+    "ZSpaceInference",
+    "ZSpacePosterior",
+    "ZSpacePartialBundle",
+    "ZSpaceTelemetryFrame",
+    "ZSpaceInferenceRuntime",
+    "ZSpaceInferencePipeline",
+    "decode_zspace_embedding",
+    "infer_from_partial",
+    "infer_with_partials",
+    "compile_inference",
+    "blend_zspace_partials",
+    "inference_to_mapping",
+    "inference_to_zmetrics",
+    "prepare_trainer_step_payload",
+    "ensure_zmetrics",
+    "ApiLLMTrace",
+    "ApiLLMZSpaceRuntime",
+    "api_llm_partial_from_response",
+    "api_llm_text_from_response",
+    "api_llm_trace_from_response",
+    "api_llm_usage_from_response",
     "ZSpaceTrainer",
     "ZSpaceCoherenceSequencer",
     "step_many",

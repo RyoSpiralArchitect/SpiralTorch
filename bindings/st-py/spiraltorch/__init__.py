@@ -301,6 +301,10 @@ def _maybe_load_rs_from_target() -> _types.ModuleType | None:
     without copying the compiled dylib/so into `bindings/st-py/spiraltorch/`.
     """
 
+    existing = sys.modules.get("spiraltorch.spiraltorch")
+    if isinstance(existing, _types.ModuleType):
+        return existing
+
     root = _workspace_root_for_dev()
     if root is None:
         return None
@@ -640,6 +644,7 @@ from .zspace_inference import (
     ZSpacePosterior,
     ZSpacePartialBundle,
     ZSpaceTelemetryFrame,
+    ZSpaceInferenceRuntime,
     ZSpaceInferencePipeline,
     inference_to_mapping,
     inference_to_zmetrics,
@@ -650,6 +655,7 @@ from .zspace_inference import (
     coherence_partial_from_diagnostics,
     decode_zspace_embedding,
     blend_zspace_partials,
+    compile_inference,
     infer_canvas_snapshot,
     infer_canvas_transformer,
     infer_coherence_diagnostics,
@@ -661,6 +667,15 @@ from .zspace_inference import (
     weights_partial_from_compat,
     infer_weights_from_dlpack,
     infer_weights_from_compat,
+)
+
+from .api_llm_runtime import (
+    ApiLLMTrace,
+    ApiLLMZSpaceRuntime,
+    api_llm_partial_from_response,
+    api_llm_text_from_response,
+    api_llm_trace_from_response,
+    api_llm_usage_from_response,
 )
 
 from .zspace_trace import (
@@ -804,6 +819,9 @@ _EXTRAS = [
     "build_zspace_downstream_hook",
     "build_desire_adapter_from_downstream_hook","desire_step_from_downstream_hook",
     "run_desire_geometry_bias_validation",
+    "ApiLLMTrace","ApiLLMZSpaceRuntime",
+    "api_llm_partial_from_response","api_llm_text_from_response",
+    "api_llm_trace_from_response","api_llm_usage_from_response",
     "trainer_events_to_atlas_route","trainer_step_event_to_atlas_frame",
     "serve_zspace_trace","ZSpaceTraceLiveServer",
 ]
@@ -5394,6 +5412,12 @@ def _install_nn_helpers() -> None:
 
 for _name, _doc in _PREDECLARED_SUBMODULES:
     _module = _ensure_submodule(_name, _doc)
+    if _name in {"rl", "spiral_rl"} and _is_valid_rl_module(_module):
+        _fq = f"{__name__}.{_name}"
+        sys.modules[_fq] = _module
+        setattr(sys.modules[__name__], _name, _module)
+        globals()[_name] = _module
+        continue
     if not isinstance(_module, _ForwardingModule):
         _fq = f"{__name__}.{_name}"
         _forward = _ForwardingModule(_fq, getattr(_module, "__doc__", _doc), _name)
@@ -6756,11 +6780,18 @@ _EXTRAS.extend(
         "ZSpaceDecoded",
         "ZSpaceInference",
         "ZSpacePosterior",
+        "ZSpacePartialBundle",
+        "ZSpaceTelemetryFrame",
         "ZSpaceInferenceRuntime",
+        "ZSpaceInferencePipeline",
         "decode_zspace_embedding",
         "infer_from_partial",
+        "infer_with_partials",
         "compile_inference",
+        "blend_zspace_partials",
+        "inference_to_mapping",
         "inference_to_zmetrics",
+        "prepare_trainer_step_payload",
         "ensure_zmetrics",
         "vision_online_step",
         "stream_vision_training",
