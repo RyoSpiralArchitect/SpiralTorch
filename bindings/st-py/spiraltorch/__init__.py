@@ -710,6 +710,11 @@ from .trainer_trace import (
     write_trainer_trace_html,
 )
 
+from .amegagrad_trace import (
+    compare_amegagrad_topos_training_traces,
+    trace_amegagrad_topos_training_sweep,
+)
+
 from .runtime_imports import (
     RUNTIME_IMPORT_INSTALL_HINTS,
     TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS,
@@ -856,6 +861,8 @@ _EXTRAS = [
     "load_zspace_trace_events","write_zspace_trace_html",
     "load_trainer_trace_events","summarize_trainer_trace_events",
     "summarize_transformers_trainer_runtime_bridge","write_trainer_trace_html",
+    "compare_amegagrad_topos_training_traces",
+    "trace_amegagrad_topos_training_sweep",
     "RUNTIME_IMPORT_INSTALL_HINTS","TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS",
     "required_runtime_import_presets_from_args",
     "required_runtime_import_presets_from_source",
