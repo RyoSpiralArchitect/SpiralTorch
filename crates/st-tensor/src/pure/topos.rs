@@ -1434,29 +1434,6 @@ impl OpenCartesianTopos {
         ToposControlSignal::from_observation(self, observed_depth, visited_volume)
     }
 
-    /// Emits a joint learning/inference profile for runtime telemetry.
-    pub fn runtime_profile_for(
-        &self,
-        observed_depth: usize,
-        visited_volume: usize,
-        training_gain: f32,
-        inference_gain: f32,
-        base_temperature: f32,
-        base_top_p: f32,
-        base_frequency_penalty: f32,
-        base_presence_penalty: f32,
-    ) -> ToposRuntimeProfile {
-        self.control_signal_for(observed_depth, visited_volume)
-            .runtime_profile(
-                training_gain,
-                inference_gain,
-                base_temperature,
-                base_top_p,
-                base_frequency_penalty,
-                base_presence_penalty,
-            )
-    }
-
     /// Ensures the provided tensor stays finite and within the permitted volume.
     pub fn guard_tensor(&self, label: &'static str, tensor: &Tensor) -> PureResult<()> {
         let (rows, cols) = tensor.shape();

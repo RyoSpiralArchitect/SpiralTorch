@@ -402,16 +402,16 @@ impl PyOpenCartesianTopos {
     ) -> PyResult<PyObject> {
         topos_runtime_profile_to_pydict(
             py,
-            self.inner.runtime_profile_for(
-                observed_depth,
-                visited_volume,
-                training_gain,
-                inference_gain,
-                base_temperature,
-                base_top_p,
-                base_frequency_penalty,
-                base_presence_penalty,
-            ),
+            self.inner
+                .control_signal_for(observed_depth, visited_volume)
+                .runtime_profile(
+                    training_gain,
+                    inference_gain,
+                    base_temperature,
+                    base_top_p,
+                    base_frequency_penalty,
+                    base_presence_penalty,
+                ),
         )
     }
 
