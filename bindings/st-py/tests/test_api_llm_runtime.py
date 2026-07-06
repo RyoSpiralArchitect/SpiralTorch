@@ -106,6 +106,20 @@ class _FakeAnthropicClient:
         self.messages = _FakeAnthropicMessages()
 
 
+class _SdkTextBlock:
+    type = "text"
+
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+
+class _SdkThinkingBlock:
+    type = "thinking"
+
+    def __init__(self, thinking: str) -> None:
+        self.thinking = thinking
+
+
 def _chat_response() -> dict[str, object]:
     return {
         "id": "chatcmpl-test",
@@ -167,14 +181,19 @@ def test_api_llm_text_from_anthropic_messages_shape() -> None:
     response = {
         "model": "claude-test",
         "content": [
+            {"type": "thinking", "thinking": "private route scratchpad"},
             {"type": "text", "text": "Bipolar geometry route "},
+            _SdkThinkingBlock("sdk private route scratchpad"),
+            _SdkTextBlock("entered SDK Z-space, "),
             {"type": "text", "text": "entered Z-space."},
         ],
         "stop_reason": "end_turn",
         "usage": {"input_tokens": 6, "output_tokens": 4},
     }
 
-    assert st.api_llm_text_from_response(response) == "Bipolar geometry route entered Z-space."
+    assert st.api_llm_text_from_response(response) == (
+        "Bipolar geometry route entered SDK Z-space, entered Z-space."
+    )
     usage = st.api_llm_usage_from_response(response)
     assert usage["prompt_tokens"] == 6
     assert usage["completion_tokens"] == 4
