@@ -72,6 +72,7 @@ _REPORT_ROUTE_METRICS = (
     "topos_context_observed_rate",
     "topos_closure_pressure_mean",
     "topos_training_gradient_bias_scale_mean",
+    "topos_optimizer_rate_scale_mean",
     "topos_inference_context_weight_mean",
 )
 _TEXT_QUALITY_STOPWORDS = frozenset(
@@ -1529,6 +1530,15 @@ def _summarize_topos_context_telemetry(
         "training_momentum_damping": _stats(
             row.get("topos.training_hints.momentum_damping") for row in rows
         ),
+        "optimizer_rate_scale": _stats(
+            row.get("topos.optimizer_effect.rate_scale") for row in rows
+        ),
+        "optimizer_hyper_learning_rate": _stats(
+            row.get("topos.optimizer_effect.hyper_learning_rate") for row in rows
+        ),
+        "optimizer_real_learning_rate": _stats(
+            row.get("topos.optimizer_effect.real_learning_rate") for row in rows
+        ),
         "inference_top_p_scale": _stats(
             row.get("topos.inference_hints.top_p_scale") for row in rows
         ),
@@ -1983,6 +1993,18 @@ def _comparison_row(label: str, path: Path, summary: Mapping[str, Any]) -> dict[
             summary,
             "training_clip_scale",
         ),
+        "topos_optimizer_rate_scale_mean": _topos_context_stat(
+            summary,
+            "optimizer_rate_scale",
+        ),
+        "topos_optimizer_hyper_learning_rate_mean": _topos_context_stat(
+            summary,
+            "optimizer_hyper_learning_rate",
+        ),
+        "topos_optimizer_real_learning_rate_mean": _topos_context_stat(
+            summary,
+            "optimizer_real_learning_rate",
+        ),
         "topos_inference_top_p_scale_mean": _topos_context_stat(
             summary,
             "inference_top_p_scale",
@@ -2077,6 +2099,9 @@ def _near_best_routes(
                 ),
                 "topos_inference_context_weight_mean": _finite_float(
                     row.get("topos_inference_context_weight_mean")
+                ),
+                "topos_optimizer_rate_scale_mean": _finite_float(
+                    row.get("topos_optimizer_rate_scale_mean")
                 ),
             }
         )
@@ -2184,6 +2209,11 @@ def _comparison_topos_context(
             rows,
             "topos_inference_context_weight_mean",
         ),
+        "lowest_optimizer_rate_scale": _winner(
+            rows,
+            "topos_optimizer_rate_scale_mean",
+            higher_is_better=False,
+        ),
         "temperature_scale": _numeric_stats_with_range(
             row.get("topos_temperature_scale_mean") for row in observed
         ),
@@ -2192,6 +2222,9 @@ def _comparison_topos_context(
         ),
         "training_gradient_bias_scale": _numeric_stats_with_range(
             row.get("topos_training_gradient_bias_scale_mean") for row in observed
+        ),
+        "optimizer_rate_scale": _numeric_stats_with_range(
+            row.get("topos_optimizer_rate_scale_mean") for row in observed
         ),
     }
 
@@ -2796,6 +2829,11 @@ def compare_api_llm_trace_runs(
         "highest_topos_training_gradient_bias": _winner(
             rows,
             "topos_training_gradient_bias_scale_mean",
+        ),
+        "lowest_topos_optimizer_rate_scale": _winner(
+            rows,
+            "topos_optimizer_rate_scale_mean",
+            higher_is_better=False,
         ),
         "highest_topos_inference_context_weight": _winner(
             rows,

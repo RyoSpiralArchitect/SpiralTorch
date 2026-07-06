@@ -47,6 +47,9 @@ TOPOS_CONTEXT_METRIC_KEYS = (
     ("training_gradient_bias_scale", "topos.training_hints.gradient_bias_scale"),
     ("training_clip_scale", "topos.training_hints.clip_scale"),
     ("training_momentum_damping", "topos.training_hints.momentum_damping"),
+    ("optimizer_rate_scale", "topos.optimizer_effect.rate_scale"),
+    ("optimizer_hyper_learning_rate", "topos.optimizer_effect.hyper_learning_rate"),
+    ("optimizer_real_learning_rate", "topos.optimizer_effect.real_learning_rate"),
     ("inference_top_p_scale", "topos.inference_hints.top_p_scale"),
     ("inference_context_weight", "topos.inference_hints.context_weight"),
     (
