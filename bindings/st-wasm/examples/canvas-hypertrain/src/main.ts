@@ -28,6 +28,9 @@ const resetMetricsButton = document.querySelector<HTMLButtonElement>("#reset-met
 const captureTargetButton = document.querySelector<HTMLButtonElement>("#capture-target")!;
 const clearTargetButton = document.querySelector<HTMLButtonElement>("#clear-target")!;
 const fftRunButton = document.querySelector<HTMLButtonElement>("#fft-run")!;
+const reportEl = document.querySelector<HTMLPreElement>("#training-report")!;
+const copyReportButton = document.querySelector<HTMLButtonElement>("#copy-report")!;
+const downloadReportButton = document.querySelector<HTMLButtonElement>("#download-report")!;
 
 const trailRendererSelect = document.querySelector<HTMLSelectElement>("#trail-renderer")!;
 const fftRowInput = document.querySelector<HTMLInputElement>("#fft-row")!;
@@ -75,6 +78,18 @@ const METRICS_CAPACITY = 512;
 const metricsHistory: TrainingMetric[] = [];
 let trainStep = 0;
 let metricsDirty = false;
+let lastReportJson = "";
+
+type NumericStats = {
+  count: number;
+  finiteCount: number;
+  min: number;
+  max: number;
+  mean: number;
+  rms: number;
+  l1: number;
+  linf: number;
+};
 
 function setStatus(message: string, isError = false) {
   statusEl.textContent = message;
@@ -111,6 +126,216 @@ function parseIntStrict(id: string, fallback: number, min: number): number {
 
 function clampFinite(value: number): number {
   return Number.isFinite(value) ? value : 0;
+}
+
+function snapshotNumber(id: string, fallback: number): number | null {
+  try {
+    return parseNumber(id, fallback);
+  } catch {
+    return null;
+  }
+}
+
+function snapshotInt(id: string, fallback: number, min: number): number | null {
+  try {
+    return parseIntStrict(id, fallback, min);
+  } catch {
+    return null;
+  }
+}
+
+function summarize(values: Float32Array): NumericStats {
+  let finiteCount = 0;
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+  let sum = 0;
+  let sumSq = 0;
+  let l1 = 0;
+  let linf = 0;
+
+  for (const value of values) {
+    if (!Number.isFinite(value)) continue;
+    finiteCount += 1;
+    if (value < min) min = value;
+    if (value > max) max = value;
+    sum += value;
+    sumSq += value * value;
+    const abs = Math.abs(value);
+    l1 += abs;
+    if (abs > linf) linf = abs;
+  }
+
+  if (finiteCount === 0) {
+    return {
+      count: values.length,
+      finiteCount,
+      min: 0,
+      max: 0,
+      mean: 0,
+      rms: 0,
+      l1: 0,
+      linf: 0,
+    };
+  }
+
+  return {
+    count: values.length,
+    finiteCount,
+    min,
+    max,
+    mean: sum / finiteCount,
+    rms: Math.sqrt(sumSq / finiteCount),
+    l1,
+    linf,
+  };
+}
+
+function sampleValues(values: Float32Array, limit = 16): number[] {
+  const out: number[] = [];
+  const n = Math.min(values.length, limit);
+  for (let i = 0; i < n; i++) {
+    out.push(Number(values[i].toPrecision(7)));
+  }
+  return out;
+}
+
+function statsFromMetric(selector: (metric: TrainingMetric) => number): NumericStats {
+  const values = new Float32Array(metricsHistory.length);
+  for (let i = 0; i < metricsHistory.length; i++) {
+    values[i] = selector(metricsHistory[i]);
+  }
+  return summarize(values);
+}
+
+function runtimeReport() {
+  return {
+    wasm: true,
+    webgpuAvailable: "gpu" in navigator,
+    webgpuInitAttempted: gpuInitAttempted,
+    webgpuInitFailed: gpuInitFailed,
+    webgpuDeviceReady: Boolean(gpuDevice),
+    webgpuTrailReady: Boolean(gpuTrail),
+    webgpuTrainerReady: Boolean(gpuTrainer),
+    webgpuFftReady: Boolean(gpuFft),
+    userAgent: navigator.userAgent,
+  };
+}
+
+function currentConfig() {
+  return {
+    width: snapshotInt("width", 512, 64),
+    height: snapshotInt("height", 320, 64),
+    capacity: snapshotInt("capacity", 1, 1),
+    coherence: snapshotNumber("coherence", 1.0),
+    tension: snapshotNumber("tension", 1.0),
+    depth: snapshotInt("depth", 0, 0),
+    palette: paletteSelect.value || "blue-magenta",
+    mode: getMode(),
+    objective: getObjective(),
+    stepsPerFrame: snapshotInt("steps", 2, 1),
+    baseLr: snapshotNumber("lr", 0.02),
+    curvature: snapshotNumber("curvature", -1.0),
+    useDesireScaling: useDesireToggle.checked,
+    runContinuously: runToggle.checked,
+    trailRenderer: parseTrailRenderer(trailRendererSelect.value),
+    trailStride: snapshotInt("trail-stride", 4, 1),
+    fftRow: snapshotInt("fft-row", 0, 0),
+    fftAuto: fftAutoToggle.checked,
+  };
+}
+
+function setReport(report: unknown) {
+  lastReportJson = JSON.stringify(report, null, 2);
+  reportEl.textContent = lastReportJson;
+}
+
+function downloadText(filename: string, text: string) {
+  const blob = new Blob([text], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+function safeFileStamp(): string {
+  return new Date().toISOString().replace(/[:.]/g, "-");
+}
+
+function buildCanvasReport() {
+  if (!canvas) {
+    throw new Error("Canvas is not ready yet.");
+  }
+
+  const curvature = parseNumber("curvature", -1.0);
+  const packet = canvas.framePacket(curvature);
+  const lastMetric = metricsHistory.length > 0 ? metricsHistory[metricsHistory.length - 1] : null;
+
+  return {
+    schema: "spiraltorch.wasm.canvas_hypertrain_report.v1",
+    kind: "canvas-hypertrain-training",
+    createdAt: new Date().toISOString(),
+    runtime: runtimeReport(),
+    config: currentConfig(),
+    target: targetRelation
+      ? {
+          dims: targetDims,
+          stats: summarize(targetRelation),
+          head: sampleValues(targetRelation, 16),
+        }
+      : null,
+    currentFrame: {
+      width: packet.width,
+      height: packet.height,
+      relationStats: summarize(packet.relation),
+      relationHead: sampleValues(packet.relation, 16),
+      fieldStats: summarize(packet.field),
+      trailStats: summarize(packet.trail),
+      desire: {
+        balance: packet.balance,
+        stability: packet.stability,
+        saturation: packet.saturation,
+        eventsMask: packet.eventsMask,
+      },
+      gradients: {
+        hypergradRms: packet.hypergradRms,
+        realgradRms: packet.realgradRms,
+        hypergradCount: packet.hypergradCount,
+        realgradCount: packet.realgradCount,
+      },
+      learningControl: {
+        hyperLearningRateScale: packet.hyperLearningRateScale,
+        realLearningRateScale: packet.realLearningRateScale,
+        operatorMix: packet.operatorMix,
+        operatorGain: packet.operatorGain,
+      },
+    },
+    metrics: {
+      step: trainStep,
+      capacity: METRICS_CAPACITY,
+      historyLength: metricsHistory.length,
+      truncated: metricsHistory.length >= METRICS_CAPACITY,
+      last: lastMetric,
+      lossStats: statsFromMetric((metric) => metric.loss),
+      hyperRmsStats: statsFromMetric((metric) => metric.hyperRms),
+      realRmsStats: statsFromMetric((metric) => metric.realRms),
+      lrStats: statsFromMetric((metric) => metric.lr),
+      tail: metricsHistory.slice(-64),
+    },
+  };
+}
+
+async function copyLatestReport() {
+  setReport(buildCanvasReport());
+  await navigator.clipboard.writeText(lastReportJson);
+}
+
+function downloadLatestReport() {
+  setReport(buildCanvasReport());
+  downloadText(`spiraltorch-canvas-hypertrain-wasm-${safeFileStamp()}.json`, lastReportJson);
 }
 
 function updateTargetLabel() {
@@ -747,6 +972,21 @@ fftRunButton.addEventListener("click", async () => {
     const curvature = parseNumber("curvature", -1.0);
     const packet = canvas.framePacket(curvature);
     await computeFftFromPacket(packet);
+  } catch (err) {
+    setStatus((err as Error).message, true);
+  }
+});
+
+copyReportButton.addEventListener("click", () => {
+  void copyLatestReport()
+    .then(() => setStatus("Copied report JSON."))
+    .catch((err) => setStatus((err as Error).message, true));
+});
+
+downloadReportButton.addEventListener("click", () => {
+  try {
+    downloadLatestReport();
+    setStatus("Downloaded report JSON.");
   } catch (err) {
     setStatus((err as Error).message, true);
   }

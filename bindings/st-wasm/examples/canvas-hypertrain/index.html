@@ -164,6 +164,19 @@
               <button id="fft-run" type="button">Compute FFT</button>
             </div>
           </fieldset>
+
+          <fieldset>
+            <legend>Run artifact</legend>
+            <p class="hint">
+              Export the current frame packet, training history, Desire controls, and WebGPU status
+              as JSON for downstream Python, API-LLM runtime, or FT experiment replay.
+            </p>
+            <div class="actions">
+              <button id="copy-report" type="button">Copy report JSON</button>
+              <button id="download-report" type="button">Download report</button>
+            </div>
+            <pre id="training-report" class="report-preview">No report yet.</pre>
+          </fieldset>
         </form>
 
         <p id="status" class="status">Loading WebAssembly…</p>

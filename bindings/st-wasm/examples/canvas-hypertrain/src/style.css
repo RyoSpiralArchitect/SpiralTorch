@@ -181,6 +181,19 @@ canvas#metrics {
   margin-top: 1rem;
 }
 
+.report-preview {
+  margin: 0.85rem 0 0;
+  padding: 1rem;
+  border-radius: 14px;
+  background: rgba(8, 10, 18, 0.55);
+  border: 1px solid rgba(108, 122, 190, 0.25);
+  max-height: 13rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-size: 0.85rem;
+  color: rgba(235, 239, 255, 0.92);
+}
+
 @media (max-width: 900px) {
   .canvases {
     grid-template-columns: 1fr;

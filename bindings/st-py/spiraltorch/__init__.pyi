@@ -258,6 +258,32 @@ def write_gnn_band_replay_html(
     title: str = ...,
 ) -> str: ...
 
+def load_wasm_report(path: str | PathLike[str]) -> Dict[str, Any]: ...
+
+def summarize_wasm_report(
+    report: str | PathLike[str] | Mapping[str, Any],
+) -> Dict[str, Any]: ...
+
+def compare_wasm_reports(
+    reports: (
+        Mapping[str, str | PathLike[str] | Mapping[str, Any]]
+        | Sequence[str | PathLike[str] | Mapping[str, Any]]
+        | str
+        | PathLike[str]
+    ),
+    *,
+    labels: Sequence[str] | None = ...,
+) -> Dict[str, Any]: ...
+
+def wasm_report_to_zspace_partial(
+    report: str | PathLike[str] | Mapping[str, Any],
+    *,
+    bundle_weight: float = ...,
+    origin: str | None = ...,
+    telemetry_prefix: str = ...,
+    gradient_dim: int = ...,
+) -> ZSpacePartialBundle: ...
+
 def load_kdsl_trace_events(path: str) -> List[Dict[str, Any]]: ...
 
 def write_kdsl_trace_jsonl(
@@ -7193,6 +7219,10 @@ __all__ = [
     "run_api_llm_prompt_suite_matrix",
     "summarize_api_llm_trace_events",
     "write_api_llm_trace_jsonl",
+    "compare_wasm_reports",
+    "load_wasm_report",
+    "summarize_wasm_report",
+    "wasm_report_to_zspace_partial",
     "ZSpaceTrainer",
     "ZSpaceCoherenceSequencer",
     "step_many",

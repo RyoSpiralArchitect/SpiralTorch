@@ -42,3 +42,16 @@ npm run dev
 1. Click “Capture target” to store the current relation as the supervised target.
 2. Click “Seed relation” (optional) to create a new starting point.
 3. Set “loss = target mse” and click “Step” (or enable “run continuously”).
+
+## Run artifact export
+
+Use “Copy report JSON” or “Download report” to capture the live browser experiment as
+`spiraltorch.wasm.canvas_hypertrain_report.v1`. The report includes:
+
+- Current `FractalCanvas.framePacket()` summaries for relation, vector field, trail, gradients,
+  Desire controls, and WebGPU readiness.
+- The bounded training metrics tail (loss, hyper/real RMS, LR scale, balance/stability/saturation).
+- Optional target-relation stats when supervised target-MSE mode is active.
+
+This makes the WASM demo usable as an auditable frontend probe for downstream Python notebooks,
+API-LLM runtime comparison, and future fine-tuning replay flows.

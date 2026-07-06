@@ -774,6 +774,13 @@ from .zspace_artifacts import (
     run_desire_geometry_bias_validation,
 )
 
+from .wasm_reports import (
+    compare_wasm_reports,
+    load_wasm_report,
+    summarize_wasm_report,
+    wasm_report_to_zspace_partial,
+)
+
 from .zspace_live import (
     serve_zspace_trace,
     ZSpaceTraceLiveServer,
@@ -829,6 +836,8 @@ _EXTRAS = [
     "build_zspace_downstream_hook",
     "build_desire_adapter_from_downstream_hook","desire_step_from_downstream_hook",
     "run_desire_geometry_bias_validation",
+    "compare_wasm_reports","load_wasm_report","summarize_wasm_report",
+    "wasm_report_to_zspace_partial",
     "ApiLLMTrace","ApiLLMZSpaceRuntime",
     "api_llm_partial_from_response","api_llm_text_from_response",
     "api_llm_trace_from_response","api_llm_usage_from_response",

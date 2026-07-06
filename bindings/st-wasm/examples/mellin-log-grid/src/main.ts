@@ -17,11 +17,31 @@ const heatmapCanvas = document.createElement("canvas");
 const heatmapCtx = heatmapCanvas.getContext("2d");
 const initButton = document.querySelector<HTMLButtonElement>("#init")!;
 const trainButton = document.querySelector<HTMLButtonElement>("#train")!;
+const reportEl = document.querySelector<HTMLPreElement>("#learning-report")!;
+const copyReportButton = document.querySelector<HTMLButtonElement>("#copy-report")!;
+const downloadReportButton = document.querySelector<HTMLButtonElement>("#download-report")!;
 
 let ready = false;
 let targetGrid: WasmMellinLogGrid | null = null;
 let learnGrid: WasmMellinLogGrid | null = null;
 let gridKey = "";
+let lastReportJson = "";
+
+type NumericStats = {
+  count: number;
+  finiteCount: number;
+  min: number;
+  max: number;
+  mean: number;
+  rms: number;
+  l1: number;
+  linf: number;
+};
+
+type MellinTrainTraceRow = {
+  step: number;
+  loss: number;
+};
 
 function setStatus(message: string, isError = false) {
   statusEl.textContent = message;
@@ -53,6 +73,161 @@ function parseIntStrict(id: string, fallback: number, min: number): number {
     throw new Error(`${id} must be an integer >= ${min}`);
   }
   return parsed;
+}
+
+function snapshotNumber(id: string, fallback: number): number | null {
+  try {
+    return parseNumber(id, fallback);
+  } catch {
+    return null;
+  }
+}
+
+function snapshotInt(id: string, fallback: number, min: number): number | null {
+  try {
+    return parseIntStrict(id, fallback, min);
+  } catch {
+    return null;
+  }
+}
+
+function summarize(values: Float32Array): NumericStats {
+  let finiteCount = 0;
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+  let sum = 0;
+  let sumSq = 0;
+  let l1 = 0;
+  let linf = 0;
+
+  for (const value of values) {
+    if (!Number.isFinite(value)) continue;
+    finiteCount += 1;
+    if (value < min) min = value;
+    if (value > max) max = value;
+    sum += value;
+    sumSq += value * value;
+    const abs = Math.abs(value);
+    l1 += abs;
+    if (abs > linf) linf = abs;
+  }
+
+  if (finiteCount === 0) {
+    return {
+      count: values.length,
+      finiteCount,
+      min: 0,
+      max: 0,
+      mean: 0,
+      rms: 0,
+      l1: 0,
+      linf: 0,
+    };
+  }
+
+  return {
+    count: values.length,
+    finiteCount,
+    min,
+    max,
+    mean: sum / finiteCount,
+    rms: Math.sqrt(sumSq / finiteCount),
+    l1,
+    linf,
+  };
+}
+
+function sampleValues(values: Float32Array, limit = 16): number[] {
+  const out: number[] = [];
+  const n = Math.min(values.length, limit);
+  for (let i = 0; i < n; i++) {
+    out.push(Number(values[i].toPrecision(7)));
+  }
+  return out;
+}
+
+function sampleComplexValues(values: Float32Array, limit = 8): Array<{ re: number; im: number }> {
+  const out: Array<{ re: number; im: number }> = [];
+  const n = Math.min(Math.floor(values.length / 2), limit);
+  for (let i = 0; i < n; i++) {
+    out.push({
+      re: Number(values[i * 2].toPrecision(7)),
+      im: Number(values[i * 2 + 1].toPrecision(7)),
+    });
+  }
+  return out;
+}
+
+function differenceMagnitude(a: Float32Array, b: Float32Array): Float32Array {
+  const n = Math.min(a.length, b.length);
+  const out = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    out[i] = Math.abs(a[i] - b[i]);
+  }
+  return out;
+}
+
+function runtimeReport() {
+  return {
+    wasm: true,
+    webgpuAvailable: "gpu" in navigator,
+    userAgent: navigator.userAgent,
+  };
+}
+
+function currentConfig() {
+  const mode = getValue("mode") || "vertical";
+  return {
+    logStart: snapshotNumber("log-start", -5.0),
+    logStep: snapshotNumber("log-step", 0.01),
+    len: snapshotInt("len", 2048, 2),
+    mode,
+    sReal: snapshotNumber("s-real", 2.5),
+    imagMin: snapshotNumber("imag-min", -30),
+    imagMax: snapshotNumber("imag-max", 30),
+    imagCount: snapshotInt("imag-count", 256, 2),
+    realMin: snapshotNumber("real-min", 0.8),
+    realMax: snapshotNumber("real-max", 3.2),
+    realCount: snapshotInt("real-count", 256, 2),
+    initNoise: snapshotNumber("init-noise", 0.02),
+    trainSteps: snapshotInt("train-steps", 40, 1),
+    trainLr: snapshotNumber("train-lr", 0.08),
+  };
+}
+
+function setReport(report: unknown) {
+  lastReportJson = JSON.stringify(report, null, 2);
+  reportEl.textContent = lastReportJson;
+}
+
+function downloadText(filename: string, text: string) {
+  const blob = new Blob([text], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+function safeFileStamp(): string {
+  return new Date().toISOString().replace(/[:.]/g, "-");
+}
+
+async function copyLatestReport() {
+  if (!lastReportJson) {
+    throw new Error("No report yet. Run evaluation or training first.");
+  }
+  await navigator.clipboard.writeText(lastReportJson);
+}
+
+function downloadLatestReport() {
+  if (!lastReportJson) {
+    throw new Error("No report yet. Run evaluation or training first.");
+  }
+  downloadText(`spiraltorch-mellin-wasm-${safeFileStamp()}.json`, lastReportJson);
 }
 
 function linspace(min: number, max: number, count: number): Float32Array {
@@ -264,6 +439,28 @@ function interleavedToMagnitudes(values: Float32Array): Float32Array {
   return out;
 }
 
+function gridSnapshot(grid: WasmMellinLogGrid) {
+  const support = grid.support();
+  return {
+    len: grid.len(),
+    logStart: grid.logStart,
+    logStep: grid.logStep,
+    support: [support[0], support[1]],
+    hilbertNorm: grid.hilbertNorm(),
+    sampleStats: summarize(grid.samples()),
+  };
+}
+
+function planSnapshot(plan: WasmMellinEvalPlan) {
+  const shape = plan.shape();
+  return {
+    len: plan.len(),
+    shape: Array.from(shape),
+    logStart: plan.logStart,
+    logStep: plan.logStep,
+  };
+}
+
 async function runOnce(ev?: Event) {
   ev?.preventDefault();
   if (!ready) return;
@@ -344,6 +541,28 @@ async function runOnce(ev?: Event) {
         );
       }
       previewEl.textContent = rows.join("\n");
+      setReport({
+        schema: "spiraltorch.wasm.mellin_eval_report.v1",
+        kind: "mellin-log-grid-evaluation",
+        createdAt: new Date().toISOString(),
+        runtime: runtimeReport(),
+        config: currentConfig(),
+        grid: gridSnapshot(grid),
+        plan: planSnapshot(plan),
+        timingsMs: {
+          samples: reuse ? 0 : t1 - t0,
+          grid: reuse ? 0 : t2 - t1,
+          evaluate: t4 - t3,
+        },
+        inferenceProbe: {
+          mode: "mesh",
+          realHead: sampleValues(realValues, 8),
+          imagHead: sampleValues(imagValues, 8),
+          magnitudeStats: summarize(mags),
+          magnitudeHead: sampleValues(mags, 16),
+          previewValues: sampleComplexValues(previewValues, 6),
+        },
+      });
       setStatus(`OK (mesh ${realCount}×${imagCount})`);
     } else {
       const imagValues = linspace(imagMin, imagMax, imagCount);
@@ -371,6 +590,28 @@ async function runOnce(ev?: Event) {
         );
       }
       previewEl.textContent = rows.join("\n");
+      setReport({
+        schema: "spiraltorch.wasm.mellin_eval_report.v1",
+        kind: "mellin-log-grid-evaluation",
+        createdAt: new Date().toISOString(),
+        runtime: runtimeReport(),
+        config: currentConfig(),
+        grid: gridSnapshot(grid),
+        plan: planSnapshot(plan),
+        timingsMs: {
+          samples: reuse ? 0 : t1 - t0,
+          grid: reuse ? 0 : t2 - t1,
+          evaluate: t4 - t3,
+        },
+        inferenceProbe: {
+          mode: "vertical",
+          sReal: real,
+          imagHead: sampleValues(imagValues, 8),
+          valueHead: sampleComplexValues(values, 8),
+          magnitudeStats: summarize(mags),
+          magnitudeHead: sampleValues(mags, 16),
+        },
+      });
       setStatus(`OK (n=${imagCount})`);
     }
   } catch (err) {
@@ -440,8 +681,14 @@ trainButton.addEventListener("click", () => {
     setStatus("Training…");
     const t0 = performance.now();
     let lastLoss = Number.NaN;
+    const trace: MellinTrainTraceRow[] = [];
+    const traceStride = Math.max(1, Math.floor(steps / 128));
     for (let i = 0; i < steps; i++) {
       lastLoss = learned.trainStepMatchGridPlan(plan, target, lr);
+      const step = i + 1;
+      if (step === 1 || step === steps || step % traceStride === 0) {
+        trace.push({ step, loss: lastLoss });
+      }
     }
     const t1 = performance.now();
 
@@ -449,13 +696,63 @@ trainButton.addEventListener("click", () => {
 
     const targetMags = target.evaluatePlanMagnitude(plan);
     const learnedMags = learned.evaluatePlanMagnitude(plan);
+    const absDiff = differenceMagnitude(targetMags, learnedMags);
     drawMagnitudeCompare(targetMags, learnedMags, lastLoss);
 
     timingsEl.textContent = `train ${(t1 - t0).toFixed(1)}ms · steps=${steps} · lr=${lr.toExponential(2)}`;
+    setReport({
+      schema: "spiraltorch.wasm.mellin_learning_report.v1",
+      kind: "mellin-log-grid-training",
+      createdAt: new Date().toISOString(),
+      runtime: runtimeReport(),
+      config: currentConfig(),
+      target: {
+        grid: gridSnapshot(target),
+        magnitudeStats: summarize(targetMags),
+      },
+      learned: {
+        grid: gridSnapshot(learned),
+        magnitudeStats: summarize(learnedMags),
+      },
+      plan: planSnapshot(plan),
+      training: {
+        steps,
+        lr,
+        durationMs: t1 - t0,
+        finalLoss: lastLoss,
+        traceStride,
+        trace,
+        traceTruncated: trace.length < steps,
+      },
+      inferenceProbe: {
+        mode: "vertical",
+        sReal: real,
+        imagHead: sampleValues(imagValues, 8),
+        targetMagnitudeHead: sampleValues(targetMags, 16),
+        learnedMagnitudeHead: sampleValues(learnedMags, 16),
+        absDiffStats: summarize(absDiff),
+        absDiffHead: sampleValues(absDiff, 16),
+      },
+    });
     setStatus("OK (trained)");
   } catch (err) {
     setStatus((err as Error).message, true);
     console.error(err);
+  }
+});
+
+copyReportButton.addEventListener("click", () => {
+  void copyLatestReport()
+    .then(() => setStatus("Copied report JSON."))
+    .catch((err) => setStatus((err as Error).message, true));
+});
+
+downloadReportButton.addEventListener("click", () => {
+  try {
+    downloadLatestReport();
+    setStatus("Downloaded report JSON.");
+  } catch (err) {
+    setStatus((err as Error).message, true);
   }
 });
 
