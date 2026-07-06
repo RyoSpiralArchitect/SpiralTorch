@@ -107,7 +107,9 @@ PY
   across OpenAI, Anthropic, gateway, or local callables. Pass
   `request_kwargs={"route": {...}}` when each provider needs different request
   controls, such as OpenAI output-token caps versus Claude adaptive-thinking
-  `output_config.effort`, then
+  `output_config.effort`. For Claude 5/Opus 4.8 adaptive-thinking routes, size
+  `max_tokens` for thinking plus visible output before interpreting
+  `completion_rate` or `empty_text_rate`, then
   `compare_api_llm_trace_runs(...)` to pick candidates by route score, latency,
   token use, confidence, runtime readiness, refusal rate, and empty-text rate.
 - Language desire controls via `st.nn.DesirePipeline`, `DesireTrainerBridge`,
