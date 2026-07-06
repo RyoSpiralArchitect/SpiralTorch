@@ -405,6 +405,91 @@ def test_topos_runtime_adapter_is_serializable_context_payload() -> None:
     )
 
 
+def test_topos_runtime_adapter_can_be_used_directly_as_prompt_context() -> None:
+    adapter = st.topos_runtime_adapter(
+        {"porosity": 0.25, "max_depth": 10, "max_volume": 100},
+        observed_depth=4,
+        visited_volume=25,
+    )
+
+    prompt = st.format_api_llm_context_prompt(
+        "Route through the topos adapter.",
+        adapter,
+        max_telemetry=32,
+    )
+
+    assert "origin=topos:runtime" in prompt
+    assert "topos.learning_rate_scale=0.891988" in prompt
+    assert "User prompt: Route through the topos adapter." in prompt
+
+
+def test_api_llm_prompt_suite_applies_topos_runtime_adapter_directly() -> None:
+    calls: list[tuple[str, dict[str, object]]] = []
+    adapter = st.topos_runtime_adapter(
+        {"porosity": 0.25, "max_depth": 10, "max_volume": 100},
+        observed_depth=4,
+        visited_volume=25,
+        request_options={"base_temperature": 0.8},
+    )
+
+    def fake_api(prompt: str, **request_kwargs: object) -> dict[str, object]:
+        calls.append((prompt, dict(request_kwargs)))
+        return {
+            "model": "topos-runtime-model",
+            "output_text": "Direct adapter route entered Z-space.",
+            "usage": {"prompt_tokens": 6, "completion_tokens": 7, "total_tokens": 13},
+        }
+
+    result = st.run_api_llm_prompt_suite(
+        ["route with direct adapter"],
+        fake_api,
+        z_state=[0.2, -0.1, 0.4, 0.05],
+        provider="topos-provider",
+        model="topos-runtime-model",
+        create_session=False,
+        runtime_adapter=adapter,
+        context_prompt=True,
+        context_prompt_options={"max_telemetry": 32},
+    )
+
+    assert len(calls) == 1
+    assert calls[0][1]["temperature"] == pytest.approx(adapter["request"]["temperature"])
+    assert calls[0][1]["top_p"] == pytest.approx(adapter["request"]["top_p"])
+    assert "origin=topos:runtime" in calls[0][0]
+    telemetry = result["traces"][0]["inference"]["telemetry"]["payload"]
+    assert telemetry["topos.temperature_scale"] == pytest.approx(0.8533125)
+
+
+def test_provider_wrapper_runtime_adapter_allows_explicit_request_override() -> None:
+    client = _FakeChatClient()
+    runtime = st.ApiLLMZSpaceRuntime(
+        [0.05, 0.15, -0.2, 0.31],
+        create_session=False,
+    )
+    adapter = st.topos_runtime_adapter(
+        {"porosity": 0.25, "max_depth": 10, "max_volume": 100},
+        observed_depth=4,
+        visited_volume=25,
+        request_options={"base_temperature": 0.8},
+    )
+
+    trace = runtime.call_openai_chat(
+        "route through chat adapter",
+        client=client,
+        model="chat-model-test",
+        runtime_adapter=adapter,
+        context_prompt=True,
+        context_prompt_options={"max_telemetry": 32},
+        temperature=0.2,
+    )
+
+    request = client.chat.completions.calls[0]
+    assert request["temperature"] == pytest.approx(0.2)
+    assert request["top_p"] == pytest.approx(adapter["request"]["top_p"])
+    assert "origin=topos:runtime" in request["messages"][-1]["content"]
+    assert trace.inference is not None
+
+
 def test_api_llm_prompt_suite_accepts_topos_runtime_request_and_context() -> None:
     calls: list[tuple[str, dict[str, object]]] = []
     topos_payload = {"porosity": 0.25, "max_depth": 10, "max_volume": 100}

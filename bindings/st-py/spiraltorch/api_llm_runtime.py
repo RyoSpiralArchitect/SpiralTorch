@@ -974,13 +974,33 @@ def _trace_payload(trace: ApiLLMTrace | Mapping[str, Any]) -> dict[str, Any]:
     return dict(trace)
 
 
+def _context_bundle_from_mapping(mapping: Mapping[str, Any]) -> ZSpacePartialBundle:
+    if mapping.get("kind") == "spiraltorch.topos_runtime_adapter":
+        context = mapping.get("context_partial")
+        if isinstance(context, Mapping):
+            return _context_bundle_from_mapping(context)
+    metrics = mapping.get("metrics")
+    if isinstance(metrics, Mapping):
+        return ZSpacePartialBundle(
+            metrics,
+            weight=float(mapping.get("weight", 1.0) or 1.0),
+            origin=None if mapping.get("origin") is None else str(mapping.get("origin")),
+            telemetry=(
+                dict(mapping.get("telemetry"))
+                if isinstance(mapping.get("telemetry"), Mapping)
+                else None
+            ),
+        )
+    return ZSpacePartialBundle(mapping)
+
+
 def _normalise_context_partials(context_partials: Any) -> list[ZSpacePartialBundle]:
     if context_partials is None:
         return []
     if isinstance(context_partials, ZSpacePartialBundle):
         return [context_partials]
     if isinstance(context_partials, Mapping):
-        return [ZSpacePartialBundle(context_partials)]
+        return [_context_bundle_from_mapping(context_partials)]
     if isinstance(context_partials, (str, bytes, bytearray)):
         raise TypeError(
             "context_partials must be partial mappings or ZSpacePartialBundle values"
@@ -999,12 +1019,49 @@ def _normalise_context_partials(context_partials: Any) -> list[ZSpacePartialBund
         if isinstance(partial, ZSpacePartialBundle):
             bundles.append(partial)
         elif isinstance(partial, Mapping):
-            bundles.append(ZSpacePartialBundle(partial))
+            bundles.append(_context_bundle_from_mapping(partial))
         else:
             raise TypeError(
                 "context_partials must contain partial mappings or ZSpacePartialBundle values"
             )
     return bundles
+
+
+def _iter_runtime_adapters(runtime_adapter: Any) -> list[Mapping[str, Any]]:
+    if runtime_adapter is None:
+        return []
+    if isinstance(runtime_adapter, Mapping):
+        return [runtime_adapter]
+    if isinstance(runtime_adapter, (str, bytes, bytearray)):
+        raise TypeError("runtime_adapter must be a mapping or sequence of mappings")
+    try:
+        iterator = iter(runtime_adapter)
+    except TypeError as exc:
+        raise TypeError("runtime_adapter must be a mapping or sequence of mappings") from exc
+    adapters: list[Mapping[str, Any]] = []
+    for adapter in iterator:
+        if adapter is None:
+            continue
+        if not isinstance(adapter, Mapping):
+            raise TypeError("runtime_adapter sequences must contain mappings")
+        adapters.append(adapter)
+    return adapters
+
+
+def _runtime_adapter_context_partials(runtime_adapter: Any) -> list[ZSpacePartialBundle]:
+    return [
+        _context_bundle_from_mapping(adapter)
+        for adapter in _iter_runtime_adapters(runtime_adapter)
+    ]
+
+
+def _runtime_adapter_request(runtime_adapter: Any) -> dict[str, Any]:
+    request: dict[str, Any] = {}
+    for adapter in _iter_runtime_adapters(runtime_adapter):
+        payload = adapter.get("request")
+        if isinstance(payload, Mapping):
+            request.update(dict(payload))
+    return request
 
 
 def _format_prompt_scalar(value: Any, *, precision: int = 6) -> str | None:
@@ -2716,6 +2773,7 @@ class ApiLLMZSpaceRuntime:
         provider: str | None = None,
         model: str | None = None,
         context_partials: Any = None,
+        runtime_adapter: Any = None,
         context_prompt: bool = False,
         context_prompt_options: Mapping[str, Any] | None = None,
         **kwargs: Any,
@@ -2723,6 +2781,9 @@ class ApiLLMZSpaceRuntime:
         """Call an API-model function and immediately record the Z-space trace."""
 
         context_bundles = _normalise_context_partials(context_partials)
+        context_bundles.extend(_runtime_adapter_context_partials(runtime_adapter))
+        request_kwargs = _runtime_adapter_request(runtime_adapter)
+        request_kwargs.update(kwargs)
         request_prompt = (
             format_api_llm_context_prompt(
                 prompt,
@@ -2733,7 +2794,7 @@ class ApiLLMZSpaceRuntime:
             else prompt
         )
         start = time.perf_counter()
-        response = invoke(request_prompt, *args, **kwargs)
+        response = invoke(request_prompt, *args, **request_kwargs)
         latency_ms = (time.perf_counter() - start) * 1000.0
         return self.record_response(
             response,
@@ -2753,6 +2814,7 @@ class ApiLLMZSpaceRuntime:
         model: str | None = None,
         jsonl_out: str | Path | None = None,
         context_partials: Any = None,
+        runtime_adapter: Any = None,
         context_prompt: bool = False,
         context_prompt_options: Mapping[str, Any] | None = None,
         clear: bool = True,
@@ -2762,6 +2824,9 @@ class ApiLLMZSpaceRuntime:
 
         traces: list[ApiLLMTrace] = []
         context_bundles = _normalise_context_partials(context_partials)
+        context_bundles.extend(_runtime_adapter_context_partials(runtime_adapter))
+        request_kwargs = _runtime_adapter_request(runtime_adapter)
+        request_kwargs.update(kwargs)
         for prompt in prompts:
             request_prompt = (
                 format_api_llm_context_prompt(
@@ -2773,7 +2838,7 @@ class ApiLLMZSpaceRuntime:
                 else prompt
             )
             start = time.perf_counter()
-            response = invoke(request_prompt, *args, **kwargs)
+            response = invoke(request_prompt, *args, **request_kwargs)
             latency_ms = (time.perf_counter() - start) * 1000.0
             traces.append(
                 self.record_response(
@@ -2813,6 +2878,7 @@ class ApiLLMZSpaceRuntime:
         input_key: str = "input",
         provider: str | None = "openai",
         context_partials: Any = None,
+        runtime_adapter: Any = None,
         context_prompt: bool = False,
         context_prompt_options: Mapping[str, Any] | None = None,
         **request: Any,
@@ -2820,22 +2886,26 @@ class ApiLLMZSpaceRuntime:
         """Call OpenAI's Responses API and record the resulting Z-space trace."""
 
         model_value = model or self.model
+        request_overrides = _runtime_adapter_request(runtime_adapter)
+        request_overrides.update(request)
+        context_bundles = _normalise_context_partials(context_partials)
+        context_bundles.extend(_runtime_adapter_context_partials(runtime_adapter))
         invoke = make_openai_responses_invoke(
             client=client,
             client_factory=client_factory,
             client_kwargs=client_kwargs,
             model=model_value,
             input_key=input_key,
-            **request,
         )
         return self.call(
             invoke,
             prompt,
             provider=provider,
             model=model_value,
-            context_partials=context_partials,
+            context_partials=context_bundles,
             context_prompt=context_prompt,
             context_prompt_options=context_prompt_options,
+            **request_overrides,
         )
 
     def call_openai_chat(
@@ -2850,6 +2920,7 @@ class ApiLLMZSpaceRuntime:
         messages: Sequence[Mapping[str, Any]] | None = None,
         provider: str | None = "openai",
         context_partials: Any = None,
+        runtime_adapter: Any = None,
         context_prompt: bool = False,
         context_prompt_options: Mapping[str, Any] | None = None,
         **request: Any,
@@ -2857,6 +2928,10 @@ class ApiLLMZSpaceRuntime:
         """Call OpenAI chat completions and record the resulting Z-space trace."""
 
         model_value = model or self.model
+        request_overrides = _runtime_adapter_request(runtime_adapter)
+        request_overrides.update(request)
+        context_bundles = _normalise_context_partials(context_partials)
+        context_bundles.extend(_runtime_adapter_context_partials(runtime_adapter))
         invoke = make_openai_chat_invoke(
             client=client,
             client_factory=client_factory,
@@ -2864,16 +2939,16 @@ class ApiLLMZSpaceRuntime:
             model=model_value,
             system=system,
             messages=messages,
-            **request,
         )
         return self.call(
             invoke,
             prompt,
             provider=provider,
             model=model_value,
-            context_partials=context_partials,
+            context_partials=context_bundles,
             context_prompt=context_prompt,
             context_prompt_options=context_prompt_options,
+            **request_overrides,
         )
 
     def call_anthropic_messages(
@@ -2888,6 +2963,7 @@ class ApiLLMZSpaceRuntime:
         messages: Sequence[Mapping[str, Any]] | None = None,
         provider: str | None = "anthropic",
         context_partials: Any = None,
+        runtime_adapter: Any = None,
         context_prompt: bool = False,
         context_prompt_options: Mapping[str, Any] | None = None,
         **request: Any,
@@ -2895,6 +2971,10 @@ class ApiLLMZSpaceRuntime:
         """Call Anthropic Messages and record the resulting Z-space trace."""
 
         model_value = model or self.model
+        request_overrides = _runtime_adapter_request(runtime_adapter)
+        request_overrides.update(request)
+        context_bundles = _normalise_context_partials(context_partials)
+        context_bundles.extend(_runtime_adapter_context_partials(runtime_adapter))
         invoke = make_anthropic_messages_invoke(
             client=client,
             client_factory=client_factory,
@@ -2902,16 +2982,16 @@ class ApiLLMZSpaceRuntime:
             model=model_value,
             system=system,
             messages=messages,
-            **request,
         )
         return self.call(
             invoke,
             prompt,
             provider=provider,
             model=model_value,
-            context_partials=context_partials,
+            context_partials=context_bundles,
             context_prompt=context_prompt,
             context_prompt_options=context_prompt_options,
+            **request_overrides,
         )
 
     def summary(self) -> dict[str, Any]:
@@ -3044,6 +3124,7 @@ def run_api_llm_prompt_suite(
     strategy: str = "mean",
     jsonl_out: str | Path | None = None,
     context_partials: Any = None,
+    runtime_adapter: Any = None,
     context_prompt: bool = False,
     context_prompt_options: Mapping[str, Any] | None = None,
     clear: bool = True,
@@ -3071,6 +3152,7 @@ def run_api_llm_prompt_suite(
         model=model,
         jsonl_out=jsonl_out,
         context_partials=context_partials,
+        runtime_adapter=runtime_adapter,
         context_prompt=context_prompt,
         context_prompt_options=context_prompt_options,
         clear=clear,
@@ -3094,6 +3176,7 @@ def run_api_llm_prompt_suite_matrix(
     strategy: str = "mean",
     jsonl_dir: str | Path | None = None,
     context_partials: Any = None,
+    runtime_adapter: Any = None,
     context_prompt: bool = False,
     context_prompt_options: Mapping[str, Any] | None = None,
     request_kwargs: Mapping[str, Mapping[str, Any]] | None = None,
@@ -3143,6 +3226,7 @@ def run_api_llm_prompt_suite_matrix(
             strategy=strategy,
             jsonl_out=jsonl_out,
             context_partials=context_partials,
+            runtime_adapter=runtime_adapter,
             context_prompt=context_prompt,
             context_prompt_options=context_prompt_options,
             clear=clear,
