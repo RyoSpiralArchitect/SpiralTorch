@@ -1680,6 +1680,43 @@ class ZSpaceInferencePipeline:
         bundle = weights_partial_from_compat(weights, adapter=adapter, **kwargs)
         return self.add_partial(bundle)
 
+    def add_geometry_probes(
+        self,
+        probes: Any,
+        *,
+        max_probes: int | None = None,
+        bundle_weight: float = 1.0,
+        telemetry_prefix: str = "geometry",
+        gradient_dim: int = 8,
+        include_consensus: bool = False,
+        consensus_only: bool = False,
+        consensus_weight: float | None = None,
+        consensus_strategy: str = "mean",
+        consensus_origin: str = "geometry:consensus",
+        return_metadata: bool = False,
+    ) -> list[ZSpacePartialBundle] | tuple[list[ZSpacePartialBundle], dict[str, Any]]:
+        """Register WASM geometry probes as queued partial observations."""
+
+        from .geometry_context import build_geometry_probe_context
+
+        partials, metadata = build_geometry_probe_context(
+            probes,
+            max_probes=max_probes,
+            bundle_weight=bundle_weight,
+            telemetry_prefix=telemetry_prefix,
+            gradient_dim=gradient_dim,
+            include_consensus=include_consensus,
+            consensus_only=consensus_only,
+            consensus_weight=consensus_weight,
+            consensus_strategy=consensus_strategy,
+            consensus_origin=consensus_origin,
+        )
+        for bundle in partials:
+            self.add_partial(bundle)
+        if return_metadata:
+            return partials, metadata
+        return partials
+
     def clear(self) -> None:
         """Discard any buffered partial observations."""
 

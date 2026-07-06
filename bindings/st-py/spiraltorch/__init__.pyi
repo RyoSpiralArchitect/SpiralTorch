@@ -657,6 +657,75 @@ def semantic_scale_stack(
     metric: str = ...,
 ) -> ScaleStack: ...
 
+def scale_stack_probe(
+    stack: Any,
+    *,
+    ambient_dim: float,
+    dimension_window: int = ...,
+    levels: Sequence[float] = ...,
+) -> Dict[str, Any]: ...
+
+def scale_stack_probe_to_zspace_partial(
+    probe: Mapping[str, Any],
+    *,
+    bundle_weight: float = ...,
+    origin: str | None = ...,
+    telemetry_prefix: str = ...,
+    gradient_dim: int = ...,
+) -> ZSpacePartialBundle: ...
+
+def scalar_scale_stack_probe(
+    field: Iterable[float],
+    shape: Sequence[int],
+    scales: Sequence[float],
+    threshold: float,
+    *,
+    ambient_dim: float | None = ...,
+    dimension_window: int = ...,
+    levels: Sequence[float] = ...,
+) -> Dict[str, Any]: ...
+
+def scalar_scale_stack_partial(
+    field: Iterable[float],
+    shape: Sequence[int],
+    scales: Sequence[float],
+    threshold: float,
+    *,
+    ambient_dim: float | None = ...,
+    dimension_window: int = ...,
+    levels: Sequence[float] = ...,
+    bundle_weight: float = ...,
+    origin: str | None = ...,
+    telemetry_prefix: str = ...,
+    gradient_dim: int = ...,
+) -> ZSpacePartialBundle: ...
+
+def semantic_scale_stack_probe(
+    embeddings: Sequence[Sequence[float]],
+    scales: Sequence[float],
+    threshold: float,
+    *,
+    metric: str = ...,
+    ambient_dim: float = ...,
+    dimension_window: int = ...,
+    levels: Sequence[float] = ...,
+) -> Dict[str, Any]: ...
+
+def semantic_scale_stack_partial(
+    embeddings: Sequence[Sequence[float]],
+    scales: Sequence[float],
+    threshold: float,
+    *,
+    metric: str = ...,
+    ambient_dim: float = ...,
+    dimension_window: int = ...,
+    levels: Sequence[float] = ...,
+    bundle_weight: float = ...,
+    origin: str | None = ...,
+    telemetry_prefix: str = ...,
+    gradient_dim: int = ...,
+) -> ZSpacePartialBundle: ...
+
 class Tensor:
     def __init__(self, *args: object, **kwargs: object) -> None: ...
     @staticmethod
@@ -2001,6 +2070,21 @@ class ZSpaceInferencePipeline:
         adapter: str | None = ...,
         **kwargs: Any,
     ) -> ZSpacePartialBundle: ...
+    def add_geometry_probes(
+        self,
+        probes: Any,
+        *,
+        max_probes: int | None = ...,
+        bundle_weight: float = ...,
+        telemetry_prefix: str = ...,
+        gradient_dim: int = ...,
+        include_consensus: bool = ...,
+        consensus_only: bool = ...,
+        consensus_weight: float | None = ...,
+        consensus_strategy: str = ...,
+        consensus_origin: str = ...,
+        return_metadata: bool = ...,
+    ) -> List[ZSpacePartialBundle] | Tuple[List[ZSpacePartialBundle], Dict[str, Any]]: ...
     def clear(self) -> None: ...
     def set_telemetry(
         self,
@@ -2257,6 +2341,20 @@ def api_llm_wasm_context_partials(
     origin: str | None = ...,
     telemetry_prefix: str = ...,
     gradient_dim: int = ...,
+) -> List[ZSpacePartialBundle]: ...
+
+def api_llm_geometry_context_partials(
+    probes: Any,
+    *,
+    max_probes: int | None = ...,
+    bundle_weight: float = ...,
+    telemetry_prefix: str = ...,
+    gradient_dim: int = ...,
+    include_consensus: bool = ...,
+    consensus_only: bool = ...,
+    consensus_weight: float | None = ...,
+    consensus_strategy: str = ...,
+    consensus_origin: str = ...,
 ) -> List[ZSpacePartialBundle]: ...
 
 
@@ -6045,6 +6143,40 @@ class FractalFieldGenerator:
     def spawn_grid(self, log_start: float, log_step: float, len: int) -> MellinLogGrid: ...
     def weave_with_grid(self, base: MellinLogGrid) -> MellinLogGrid: ...
 
+def fractal_field_probe(
+    generator: Any,
+    log_start: float,
+    log_step: float,
+    length: int,
+    *,
+    preview_len: int = ...,
+) -> Dict[str, Any]: ...
+
+def fractal_field_probe_to_zspace_partial(
+    probe: Mapping[str, Any],
+    *,
+    bundle_weight: float = ...,
+    origin: str | None = ...,
+    telemetry_prefix: str = ...,
+    gradient_dim: int = ...,
+) -> ZSpacePartialBundle: ...
+
+def fractal_field_partial(
+    octaves: int,
+    log_start: float,
+    log_step: float,
+    length: int,
+    *,
+    lacunarity: float = ...,
+    gain: float = ...,
+    iterations: int = ...,
+    preview_len: int = ...,
+    bundle_weight: float = ...,
+    origin: str | None = ...,
+    telemetry_prefix: str = ...,
+    gradient_dim: int = ...,
+) -> ZSpacePartialBundle: ...
+
 
 class LogZSeries:
     def __init__(
@@ -6082,6 +6214,119 @@ class LogZSeries:
     def evaluate_many_z(self, z_values: Sequence[complex]) -> List[complex]: ...
     def ensure_compatible(self, other: LogZSeries) -> None: ...
 
+def log_z_series_probe(
+    series: Any,
+    z_values: Sequence[complex],
+    *,
+    preview_len: int = ...,
+) -> Dict[str, Any]: ...
+
+def log_z_series_probe_to_zspace_partial(
+    probe: Mapping[str, Any],
+    *,
+    bundle_weight: float = ...,
+    origin: str | None = ...,
+    telemetry_prefix: str = ...,
+    gradient_dim: int = ...,
+) -> ZSpacePartialBundle: ...
+
+def log_z_series_partial(
+    samples: Sequence[float],
+    log_start: float,
+    log_step: float,
+    z_values: Sequence[complex],
+    *,
+    window: str = ...,
+    normalisation: str = ...,
+    preview_len: int = ...,
+    bundle_weight: float = ...,
+    origin: str | None = ...,
+    telemetry_prefix: str = ...,
+    gradient_dim: int = ...,
+) -> ZSpacePartialBundle: ...
+
+def geometry_probe_summary(
+    probe: Mapping[str, Any],
+    *,
+    label: str | None = ...,
+) -> Dict[str, Any]: ...
+
+def geometry_probe_to_zspace_partial(
+    probe: Mapping[str, Any],
+    *,
+    bundle_weight: float = ...,
+    origin: str | None = ...,
+    telemetry_prefix: str = ...,
+    gradient_dim: int = ...,
+) -> ZSpacePartialBundle: ...
+
+def geometry_probes_to_zspace_partials(
+    probes: Any,
+    *,
+    bundle_weight: float = ...,
+    telemetry_prefix: str = ...,
+    gradient_dim: int = ...,
+) -> List[ZSpacePartialBundle]: ...
+
+def geometry_probe_consensus_partial(
+    probes: Any,
+    *,
+    max_probes: int | None = ...,
+    bundle_weight: float = ...,
+    consensus_weight: float | None = ...,
+    telemetry_prefix: str = ...,
+    gradient_dim: int = ...,
+    strategy: str = ...,
+    origin: str = ...,
+) -> Tuple[ZSpacePartialBundle, Dict[str, Any]]: ...
+
+def build_geometry_probe_context(
+    probes: Any,
+    *,
+    max_probes: int | None = ...,
+    bundle_weight: float = ...,
+    telemetry_prefix: str = ...,
+    gradient_dim: int = ...,
+    include_consensus: bool = ...,
+    consensus_only: bool = ...,
+    consensus_weight: float | None = ...,
+    consensus_strategy: str = ...,
+    consensus_origin: str = ...,
+) -> Tuple[List[ZSpacePartialBundle], Dict[str, Any]]: ...
+
+def build_geometry_probe_context_artifact(
+    probes: Any,
+    *,
+    max_probes: int | None = ...,
+    bundle_weight: float = ...,
+    telemetry_prefix: str = ...,
+    gradient_dim: int = ...,
+    include_consensus: bool = ...,
+    consensus_only: bool = ...,
+    consensus_weight: float | None = ...,
+    consensus_strategy: str = ...,
+    consensus_origin: str = ...,
+) -> Dict[str, Any]: ...
+
+def write_geometry_probe_context_artifact(
+    path: str | PathLike[str],
+    probes: Any,
+    *,
+    max_probes: int | None = ...,
+    bundle_weight: float = ...,
+    telemetry_prefix: str = ...,
+    gradient_dim: int = ...,
+    include_consensus: bool = ...,
+    consensus_only: bool = ...,
+    consensus_weight: float | None = ...,
+    consensus_strategy: str = ...,
+    consensus_origin: str = ...,
+) -> str: ...
+
+def load_geometry_probe_context_artifact(
+    path: str | PathLike[str],
+) -> Tuple[List[ZSpacePartialBundle], Dict[str, Any]]: ...
+
 
 class _FracModule(ModuleType):
     MellinLogGrid: type[MellinLogGrid]
@@ -6109,8 +6354,159 @@ class _FracModule(ModuleType):
         pad_constant: Optional[float] = ...,
     ) -> List[float]: ...
 
+    def fractal_field_probe(
+        generator: Any,
+        log_start: float,
+        log_step: float,
+        length: int,
+        *,
+        preview_len: int = ...,
+    ) -> Dict[str, Any]: ...
+
+    def fractal_field_probe_to_zspace_partial(
+        probe: Mapping[str, Any],
+        *,
+        bundle_weight: float = ...,
+        origin: str | None = ...,
+        telemetry_prefix: str = ...,
+        gradient_dim: int = ...,
+    ) -> ZSpacePartialBundle: ...
+
+    def fractal_field_partial(
+        octaves: int,
+        log_start: float,
+        log_step: float,
+        length: int,
+        *,
+        lacunarity: float = ...,
+        gain: float = ...,
+        iterations: int = ...,
+        preview_len: int = ...,
+        bundle_weight: float = ...,
+        origin: str | None = ...,
+        telemetry_prefix: str = ...,
+        gradient_dim: int = ...,
+    ) -> ZSpacePartialBundle: ...
+
+    def log_z_series_probe(
+        series: Any,
+        z_values: Sequence[complex],
+        *,
+        preview_len: int = ...,
+    ) -> Dict[str, Any]: ...
+
+    def log_z_series_probe_to_zspace_partial(
+        probe: Mapping[str, Any],
+        *,
+        bundle_weight: float = ...,
+        origin: str | None = ...,
+        telemetry_prefix: str = ...,
+        gradient_dim: int = ...,
+    ) -> ZSpacePartialBundle: ...
+
+    def log_z_series_partial(
+        samples: Sequence[float],
+        log_start: float,
+        log_step: float,
+        z_values: Sequence[complex],
+        *,
+        window: str = ...,
+        normalisation: str = ...,
+        preview_len: int = ...,
+        bundle_weight: float = ...,
+        origin: str | None = ...,
+        telemetry_prefix: str = ...,
+        gradient_dim: int = ...,
+    ) -> ZSpacePartialBundle: ...
+
 
 frac: _FracModule
+
+class _GeometryModule(ModuleType):
+    def geometry_probe_summary(
+        probe: Mapping[str, Any],
+        *,
+        label: str | None = ...,
+    ) -> Dict[str, Any]: ...
+
+    def geometry_probe_to_zspace_partial(
+        probe: Mapping[str, Any],
+        *,
+        bundle_weight: float = ...,
+        origin: str | None = ...,
+        telemetry_prefix: str = ...,
+        gradient_dim: int = ...,
+    ) -> ZSpacePartialBundle: ...
+
+    def geometry_probes_to_zspace_partials(
+        probes: Any,
+        *,
+        bundle_weight: float = ...,
+        telemetry_prefix: str = ...,
+        gradient_dim: int = ...,
+    ) -> List[ZSpacePartialBundle]: ...
+
+    def geometry_probe_consensus_partial(
+        probes: Any,
+        *,
+        max_probes: int | None = ...,
+        bundle_weight: float = ...,
+        consensus_weight: float | None = ...,
+        telemetry_prefix: str = ...,
+        gradient_dim: int = ...,
+        strategy: str = ...,
+        origin: str = ...,
+    ) -> Tuple[ZSpacePartialBundle, Dict[str, Any]]: ...
+
+    def build_geometry_probe_context(
+        probes: Any,
+        *,
+        max_probes: int | None = ...,
+        bundle_weight: float = ...,
+        telemetry_prefix: str = ...,
+        gradient_dim: int = ...,
+        include_consensus: bool = ...,
+        consensus_only: bool = ...,
+        consensus_weight: float | None = ...,
+        consensus_strategy: str = ...,
+        consensus_origin: str = ...,
+    ) -> Tuple[List[ZSpacePartialBundle], Dict[str, Any]]: ...
+
+    def build_geometry_probe_context_artifact(
+        probes: Any,
+        *,
+        max_probes: int | None = ...,
+        bundle_weight: float = ...,
+        telemetry_prefix: str = ...,
+        gradient_dim: int = ...,
+        include_consensus: bool = ...,
+        consensus_only: bool = ...,
+        consensus_weight: float | None = ...,
+        consensus_strategy: str = ...,
+        consensus_origin: str = ...,
+    ) -> Dict[str, Any]: ...
+
+    def write_geometry_probe_context_artifact(
+        path: str | PathLike[str],
+        probes: Any,
+        *,
+        max_probes: int | None = ...,
+        bundle_weight: float = ...,
+        telemetry_prefix: str = ...,
+        gradient_dim: int = ...,
+        include_consensus: bool = ...,
+        consensus_only: bool = ...,
+        consensus_weight: float | None = ...,
+        consensus_strategy: str = ...,
+        consensus_origin: str = ...,
+    ) -> str: ...
+
+    def load_geometry_probe_context_artifact(
+        path: str | PathLike[str],
+    ) -> Tuple[List[ZSpacePartialBundle], Dict[str, Any]]: ...
+
+
+geometry: _GeometryModule
 
 class _DatasetModule(ModuleType):
     BYTE_LM_VOCAB: int
@@ -7312,6 +7708,7 @@ __all__ = [
     "ensure_zmetrics",
     "ApiLLMTrace",
     "ApiLLMZSpaceRuntime",
+    "api_llm_geometry_context_partials",
     "api_llm_partial_from_response",
     "api_llm_text_from_response",
     "api_llm_trace_from_response",
@@ -7339,6 +7736,26 @@ __all__ = [
     "summarize_wasm_report",
     "wasm_report_to_zspace_partial",
     "write_wasm_report_context_artifact",
+    "fractal_field_partial",
+    "fractal_field_probe",
+    "fractal_field_probe_to_zspace_partial",
+    "log_z_series_partial",
+    "log_z_series_probe",
+    "log_z_series_probe_to_zspace_partial",
+    "build_geometry_probe_context",
+    "build_geometry_probe_context_artifact",
+    "geometry_probe_consensus_partial",
+    "geometry_probe_summary",
+    "geometry_probe_to_zspace_partial",
+    "geometry_probes_to_zspace_partials",
+    "load_geometry_probe_context_artifact",
+    "write_geometry_probe_context_artifact",
+    "scale_stack_probe",
+    "scale_stack_probe_to_zspace_partial",
+    "scalar_scale_stack_partial",
+    "scalar_scale_stack_probe",
+    "semantic_scale_stack_partial",
+    "semantic_scale_stack_probe",
     "ZSpaceTrainer",
     "ZSpaceCoherenceSequencer",
     "step_many",
@@ -7356,6 +7773,7 @@ __all__ = [
     "to_dlpack",
     "nn",
     "frac",
+    "geometry",
     "dataset",
     "linalg",
     "psi",

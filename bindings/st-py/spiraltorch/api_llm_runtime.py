@@ -27,6 +27,7 @@ from .zspace_inference import (
 __all__ = [
     "ApiLLMTrace",
     "ApiLLMZSpaceRuntime",
+    "api_llm_geometry_context_partials",
     "api_llm_partial_from_response",
     "api_llm_text_from_response",
     "api_llm_trace_from_response",
@@ -168,6 +169,8 @@ def _content_text(content: Any) -> str:
         if text:
             return text
     if getattr(content, "type", None):
+        return ""
+    if type(content).__name__.lower().endswith("config"):
         return ""
     return str(content)
 
@@ -798,8 +801,16 @@ class ApiLLMTrace:
             "metrics": dict(self.metrics),
             "telemetry": telemetry,
             "inference": inference_payload,
-            "device_preflight": None if self.device_preflight is None else dict(self.device_preflight),
-            "response_metadata": None if self.response_metadata is None else dict(self.response_metadata),
+            "device_preflight": (
+                None
+                if self.device_preflight is None
+                else dict(self.device_preflight)
+            ),
+            "response_metadata": (
+                None
+                if self.response_metadata is None
+                else dict(self.response_metadata)
+            ),
         }
 
 
@@ -1051,6 +1062,38 @@ def api_llm_wasm_context_partials(
                 gradient_dim=gradient_dim,
             )
         )
+    return partials
+
+
+def api_llm_geometry_context_partials(
+    probes: Any,
+    *,
+    max_probes: int | None = None,
+    bundle_weight: float = 1.0,
+    telemetry_prefix: str = "geometry",
+    gradient_dim: int = 8,
+    include_consensus: bool = False,
+    consensus_only: bool = False,
+    consensus_weight: float | None = None,
+    consensus_strategy: str = "mean",
+    consensus_origin: str = "geometry:consensus",
+) -> list[ZSpacePartialBundle]:
+    """Convert WASM geometry probes into API-LLM runtime context partials."""
+
+    from .geometry_context import build_geometry_probe_context
+
+    partials, _metadata = build_geometry_probe_context(
+        probes,
+        max_probes=max_probes,
+        bundle_weight=bundle_weight,
+        telemetry_prefix=telemetry_prefix,
+        gradient_dim=gradient_dim,
+        include_consensus=include_consensus,
+        consensus_only=consensus_only,
+        consensus_weight=consensus_weight,
+        consensus_strategy=consensus_strategy,
+        consensus_origin=consensus_origin,
+    )
     return partials
 
 
@@ -2420,9 +2463,13 @@ def compare_api_llm_trace_runs(
             f"compare near-best routes within {near_best_tolerance_value:.3f}: {labels_text}"
         )
     if winners.get("lowest_latency") and winners["lowest_latency"] != best:
-        recommendations.append(f"inspect {winners['lowest_latency']} for latency-sensitive routing")
+        recommendations.append(
+            f"inspect {winners['lowest_latency']} for latency-sensitive routing"
+        )
     if winners.get("highest_efficiency") and winners["highest_efficiency"] != best:
-        recommendations.append(f"inspect {winners['highest_efficiency']} for cost-sensitive routing")
+        recommendations.append(
+            f"inspect {winners['highest_efficiency']} for cost-sensitive routing"
+        )
     if winners.get("highest_text_quality") and winners["highest_text_quality"] != best:
         recommendations.append(
             f"inspect {winners['highest_text_quality']} for stronger prompt-text coverage"

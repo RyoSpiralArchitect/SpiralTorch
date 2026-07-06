@@ -1,0 +1,146 @@
+{
+  "comparison": {
+    "recommendations": [
+      "prefer calm for the highest aggregate API LLM route score",
+      "compare near-best routes within 0.020: calm, turbulent"
+    ],
+    "run_trace_count": 4,
+    "winners": {
+      "best_score": "calm",
+      "highest_completion_rate": "calm",
+      "highest_confidence": "calm",
+      "highest_efficiency": "calm",
+      "highest_quality": "turbulent",
+      "highest_runtime_ready": "calm",
+      "highest_stability": "calm",
+      "highest_text_quality": "calm",
+      "highest_wasm_stability_hint": null,
+      "highest_wasm_webgpu_device_ready": null,
+      "lowest_empty_text": "calm",
+      "lowest_latency": "calm",
+      "lowest_refusal": "calm",
+      "lowest_total_tokens": "calm",
+      "lowest_wasm_loss": null
+    }
+  },
+  "conditions": [
+    "calm",
+    "turbulent"
+  ],
+  "context_mode": "consensus-only",
+  "kind": "spiraltorch.anthropic_wasm_geometry_injection.sample",
+  "model": "claude-fable-5",
+  "probe_source": "node-st-wasm",
+  "repeat": 2,
+  "runs": {
+    "calm": [
+      {
+        "finish_reason": "end_turn",
+        "telemetry": {
+          "geometry.consensus.family_count": 3.0,
+          "geometry.consensus.fractal_field_coherence_score_mean": 0.9597420739465278,
+          "geometry.consensus.fractal_field_energy_mean": 0.03182310097330653,
+          "geometry.consensus.log_z_series_projection_stability_mean": 0.9698286690743427,
+          "geometry.consensus.metric_count": 5.0,
+          "geometry.consensus.probe_count": 3.0,
+          "geometry.consensus.scale_stack_interface_density_mean": 0.3333333333333333,
+          "geometry.consensus.strategy_code": 1.0
+        },
+        "text": "With high stability and coherent consensus geometry, decoding should stay near baseline with mildly confident, low-temperature sampling rather than aggressive exploration.",
+        "trace_metrics": {
+          "drs": -0.6830934895856278,
+          "frac": 0.8996855720587967,
+          "memory": 0.303596543866975,
+          "speed": 0.15437544237572864,
+          "stability": 0.845
+        },
+        "usage": {
+          "completion_tokens": 53.0,
+          "prompt_tokens": 589.0,
+          "total_tokens": 642.0
+        }
+      },
+      {
+        "finish_reason": "end_turn",
+        "telemetry": {
+          "geometry.consensus.family_count": 3.0,
+          "geometry.consensus.fractal_field_coherence_score_mean": 0.9597420739465278,
+          "geometry.consensus.fractal_field_energy_mean": 0.03182310097330653,
+          "geometry.consensus.log_z_series_projection_stability_mean": 0.9698286690743427,
+          "geometry.consensus.metric_count": 5.0,
+          "geometry.consensus.probe_count": 3.0,
+          "geometry.consensus.scale_stack_interface_density_mean": 0.3333333333333333,
+          "geometry.consensus.strategy_code": 1.0
+        },
+        "text": "With high stability and coherence in the consensus geometry, decoding can safely bias toward the dominant gradient direction while keeping conservative step sizes for the modest drs.",
+        "trace_metrics": {
+          "drs": -0.6785148142783696,
+          "frac": 0.8725934289821311,
+          "memory": 0.30492577961619144,
+          "speed": 0.14488865672361806,
+          "stability": 0.845
+        },
+        "usage": {
+          "completion_tokens": 56.0,
+          "prompt_tokens": 589.0,
+          "total_tokens": 645.0
+        }
+      }
+    ],
+    "turbulent": [
+      {
+        "finish_reason": "end_turn",
+        "telemetry": {
+          "geometry.consensus.family_count": 3.0,
+          "geometry.consensus.fractal_field_coherence_score_mean": 0.9898957875454091,
+          "geometry.consensus.fractal_field_energy_mean": 0.0005217122605226074,
+          "geometry.consensus.log_z_series_projection_stability_mean": 8.962226452746691e-06,
+          "geometry.consensus.metric_count": 5.0,
+          "geometry.consensus.probe_count": 3.0,
+          "geometry.consensus.scale_stack_interface_density_mean": 1.0,
+          "geometry.consensus.strategy_code": 1.0
+        },
+        "text": "Favor the coherent consensus geometry: decode with moderate confidence, slightly tightening sampling where stability dips and leaning on the strongest gradient directions.",
+        "trace_metrics": {
+          "drs": -0.5893018157558447,
+          "frac": 0.8784700050178693,
+          "memory": 0.3312558897034074,
+          "speed": 0.3218050059227876,
+          "stability": 0.845
+        },
+        "usage": {
+          "completion_tokens": 114.0,
+          "prompt_tokens": 591.0,
+          "total_tokens": 705.0
+        }
+      },
+      {
+        "finish_reason": "end_turn",
+        "telemetry": {
+          "geometry.consensus.family_count": 3.0,
+          "geometry.consensus.fractal_field_coherence_score_mean": 0.9898957875454091,
+          "geometry.consensus.fractal_field_energy_mean": 0.0005217122605226074,
+          "geometry.consensus.log_z_series_projection_stability_mean": 8.962226452746691e-06,
+          "geometry.consensus.metric_count": 5.0,
+          "geometry.consensus.probe_count": 3.0,
+          "geometry.consensus.scale_stack_interface_density_mean": 1.0,
+          "geometry.consensus.strategy_code": 1.0
+        },
+        "text": "High consensus coherence but weak stability suggests conservative decoding: lower temperature, favor stable gradient dimensions, and dampen the volatile low-stability components.",
+        "trace_metrics": {
+          "drs": -0.6032722580537236,
+          "frac": 0.8963525783631934,
+          "memory": 0.3273378941474652,
+          "speed": 0.26008606793664807,
+          "stability": 0.845
+        },
+        "usage": {
+          "completion_tokens": 105.0,
+          "prompt_tokens": 591.0,
+          "total_tokens": 696.0
+        }
+      }
+    ]
+  },
+  "sample_note": "Sanitized live Anthropic + node-st-wasm repeat output; trace paths and local wasm paths omitted."
+}

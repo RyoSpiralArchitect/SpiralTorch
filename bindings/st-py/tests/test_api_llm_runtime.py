@@ -10,6 +10,7 @@ st = pytest.importorskip("spiraltorch")
 
 def test_api_llm_runtime_exports_from_top_level() -> None:
     assert "ApiLLMZSpaceRuntime" in st.__all__
+    assert "api_llm_geometry_context_partials" in st.__all__
     assert "api_llm_partial_from_response" in st.__all__
     assert "api_llm_wasm_context_partials" in st.__all__
     assert "compare_api_llm_matrix_reports" in st.__all__
@@ -155,6 +156,30 @@ def _chat_response() -> dict[str, object]:
     }
 
 
+def _geometry_log_z_probe() -> dict[str, object]:
+    return {
+        "kind": "spiraltorch.wasm_log_z_series_probe",
+        "source_crate": "st-frac::cosmology",
+        "mode": "log_z_series",
+        "log_lattice": {"log_start": 0.0, "log_step": 0.25, "len": 4},
+        "options": {"window": "hann", "normalisation": "l1"},
+        "sample_count": 4,
+        "sample_stats": {"count": 4, "mean": 2.5, "min": 1.0, "max": 4.0, "energy": 7.5},
+        "weight_stats": {"count": 4, "mean": 0.25, "min": 0.0, "max": 0.5, "energy": 0.125},
+        "z_count": 2,
+        "projection": {
+            "count": 2,
+            "mean_abs": 1.1,
+            "max_abs": 1.4,
+            "energy": 1.25,
+            "phase_drift": 0.1,
+            "stability_score": 0.9,
+            "preview_count": 1,
+            "preview": [{"index": 0, "re": 1.0, "im": 0.0, "abs": 1.0}],
+        },
+    }
+
+
 def _canvas_wasm_report(
     *,
     last_loss: float = 0.05,
@@ -210,6 +235,21 @@ def test_api_llm_text_from_responses_shape() -> None:
     assert usage["prompt_tokens"] == 4
     assert usage["completion_tokens"] == 2
     assert usage["total_tokens"] == 6
+
+
+def test_api_llm_text_from_responses_skips_text_config_object() -> None:
+    class ResponseTextConfig:
+        def __str__(self) -> str:
+            return "ResponseTextConfig(format=ResponseFormatText(type='text'))"
+
+    response = {
+        "model": "api-response-test",
+        "text": ResponseTextConfig(),
+        "output": [{"type": "reasoning", "content": []}],
+        "usage": {"input_tokens": 4, "output_tokens": 64},
+    }
+
+    assert st.api_llm_text_from_response(response) == ""
 
 
 def test_api_llm_text_from_anthropic_messages_shape() -> None:
@@ -323,6 +363,51 @@ def test_format_api_llm_context_prompt_includes_bounded_wasm_telemetry() -> None
     assert "wasm.loss=0.0415" in prompt
     assert "wasm.stability_hint=0.86" in prompt
     assert "User prompt: Diagnose the run." in prompt
+
+
+def test_api_llm_geometry_context_partials_feed_context_prompt() -> None:
+    context = st.api_llm_geometry_context_partials(
+        {"logz": _geometry_log_z_probe()},
+        gradient_dim=5,
+        include_consensus=True,
+    )
+
+    prompt = st.format_api_llm_context_prompt(
+        "Use geometry context.",
+        context,
+        max_partials=2,
+        max_telemetry=20,
+    )
+
+    assert len(context) == 2
+    assert context[0].origin == "geometry:logz"
+    assert context[1].origin == "geometry:consensus"
+    assert "origin=geometry:logz" in prompt
+    assert "origin=geometry:consensus" in prompt
+    assert "geometry.log_z_series.1.projection_stability=0.9" in prompt
+    assert "geometry.consensus.probe_count=1" in prompt
+    assert "User prompt: Use geometry context." in prompt
+
+
+def test_api_llm_geometry_context_partials_can_send_consensus_only() -> None:
+    context = st.api_llm_geometry_context_partials(
+        {"logz": _geometry_log_z_probe()},
+        gradient_dim=5,
+        consensus_only=True,
+    )
+
+    prompt = st.format_api_llm_context_prompt(
+        "Use compact geometry context.",
+        context,
+        max_partials=1,
+        max_telemetry=20,
+    )
+
+    assert len(context) == 1
+    assert context[0].origin == "geometry:consensus"
+    assert "origin=geometry:consensus" in prompt
+    assert "origin=geometry:logz" not in prompt
+    assert "geometry.consensus.probe_count=1" in prompt
 
 
 def test_runtime_context_prompt_injection_keeps_trace_prompt_original() -> None:

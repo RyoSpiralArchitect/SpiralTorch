@@ -113,6 +113,108 @@ layout, and exposes options for supplying custom palette presets or toggling con
 and off. Since it only depends on `SpiralCanvasView`, it can be further wrapped inside
 framework components as needed.
 
+## Browser-side report audit
+
+The wasm package can audit exported Mellin and Canvas learning reports before they leave
+the browser. Use `auditWasmReportObject` for one report or `compareWasmReportsObject` for
+a batch; JSON-string variants are also exported for clipboard/storage flows:
+
+```ts
+import { auditWasmReportObject, compareWasmReportsObject } from "spiraltorch-wasm";
+
+const audit = auditWasmReportObject(canvasReport);
+if (audit.status === "ready") {
+    console.log("promote as Z-space context", audit.readiness_score);
+}
+
+const comparison = compareWasmReportsObject({
+    baseline: oldReport,
+    candidate: canvasReport,
+});
+console.log("best browser context", comparison.best_readiness?.label);
+```
+
+Audits include runtime readiness, learning progress, risk flags, and recommendations, so
+browser dashboards can decide whether a report is ready for Python/API-LLM handoff without
+waiting for a server-side preflight.
+
+## Fractal-field probes
+
+`st-frac::fractal_field` is also available from the wasm surface, so browser-side demos
+can generate deterministic branching fields for Mellin lattices and emit a compact probe
+that Python Z-space runtimes can ingest later:
+
+```ts
+import { WasmFractalFieldGenerator, fractalFieldProbeObject } from "spiraltorch-wasm";
+
+const generator = new WasmFractalFieldGenerator(4, 2.0, 0.55, 24);
+const field = generator.branchingField(-2.0, 0.125, 64); // packed [re, im, ...]
+
+const probe = fractalFieldProbeObject(4, 2.0, 0.55, 24, -2.0, 0.125, 64, 8);
+console.log(probe.energy, probe.total_variation, probe.samples[0]);
+```
+
+The probe records generator hyper-parameters, log-lattice support, field energy, phase
+drift, total variation, and a bounded preview of complex samples. Keeping this payload
+source-crate tagged (`st-frac::fractal_field`) lets browser experiments, Python reports,
+and future Rust backends share the same geometric context contract.
+
+## Log-Z cosmology probes
+
+`st-frac::cosmology::LogZSeries` can be projected in-browser too. This gives demos and
+dashboards a compact way to summarise real-valued log-lattice series before handing the
+same payload to Python-side Z-space partials:
+
+```ts
+import { WasmLogZSeries, logZSeriesProbeObject } from "spiraltorch-wasm";
+
+const samples = new Float32Array([1.0, 1.2, 1.6, 2.1, 2.8]);
+const zValues = new Float32Array([
+    0.5, 0.0,
+    0.2, 0.3,
+]); // interleaved complex [re, im, ...]
+
+const series = new WasmLogZSeries(0.0, 0.25, samples, "hann", "l1");
+console.log(series.evaluateManyZ(zValues));
+
+const probe = logZSeriesProbeObject(0.0, 0.25, samples, "hann", "l1", zValues, 4);
+console.log(probe.sample_stats.energy, probe.projection.stability_score);
+```
+
+The probe records sample statistics, windowed weight statistics, projection energy,
+phase drift, and a bounded projection preview. It complements Mellin grids by exposing
+the real-series cosmology path as a first-class browser context signal.
+
+## Scale-stack geometry probes
+
+`st-frac::scale_stack` is now exposed directly in the wasm package. Browser demos can run
+microlocal ⇄ macrolocal interface probes over scalar fields or token/semantic embeddings,
+then hand the same JSON shape to Python-side Z-space pipelines:
+
+```ts
+import { WasmScaleStack, scalarScaleStackProbeObject } from "spiraltorch-wasm";
+
+const field = new Float32Array([
+    0, 0, 1, 1,
+    0, 0, 1, 1,
+    0, 0, 1, 1,
+    0, 0, 1, 1,
+]);
+const shape = new Uint32Array([4, 4]);
+const scales = new Float32Array([1, 2, 3]);
+const levels = new Float32Array([0.25, 0.5, 0.75]);
+
+const stack = WasmScaleStack.scalar(field, shape, scales, 0.01);
+console.log(stack.samples()); // packed [scale, gate_mean, ...]
+
+const probe = scalarScaleStackProbeObject(field, shape, scales, 0.01, 2, 3, levels);
+console.log(probe.boundary_dimension, probe.coherence_profile);
+```
+
+The probe payload is intentionally source-crate tagged (`st-frac::scale_stack`) so browser
+telemetry, Python reports, and future Rust backends can agree on where each geometric
+signal came from.
+
 ### Frame capture and recording
 
 `SpiralCanvasView` now exposes helpers for exporting the currently rendered frame:

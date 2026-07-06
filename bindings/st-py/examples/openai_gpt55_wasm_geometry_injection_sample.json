@@ -1,0 +1,108 @@
+{
+  "comparison": {
+    "recommendations": [
+      "prefer baseline for the highest aggregate API LLM route score",
+      "compare near-best routes within 0.020: baseline, calm",
+      "inspect calm for latency-sensitive routing"
+    ],
+    "winners": {
+      "best_score": "baseline",
+      "highest_completion_rate": "baseline",
+      "highest_confidence": "baseline",
+      "highest_efficiency": "baseline",
+      "highest_quality": "baseline",
+      "highest_runtime_ready": "baseline",
+      "highest_stability": "baseline",
+      "highest_text_quality": "baseline",
+      "highest_wasm_stability_hint": null,
+      "highest_wasm_webgpu_device_ready": null,
+      "lowest_empty_text": "baseline",
+      "lowest_latency": "calm",
+      "lowest_refusal": "baseline",
+      "lowest_total_tokens": "baseline",
+      "lowest_wasm_loss": null
+    }
+  },
+  "conditions": [
+    "baseline",
+    "calm",
+    "turbulent"
+  ],
+  "context_mode": "consensus-only",
+  "kind": "spiraltorch.openai_gpt55_wasm_geometry_injection.sample",
+  "model": "gpt-5.5",
+  "probe_source": "node-st-wasm",
+  "provider": "openai",
+  "results": {
+    "baseline": {
+      "finish_reason": "completed",
+      "telemetry": {},
+      "text": "Use neutral baseline decoding.",
+      "trace_metrics": {
+        "drs": -0.6529866041176373,
+        "frac": 0.9466940487543869,
+        "memory": 0.040017680316844974,
+        "speed": 0.06303749095708526,
+        "stability": 0.845
+      },
+      "usage": {
+        "completion_tokens": 9.0,
+        "prompt_tokens": 73.0,
+        "total_tokens": 82.0
+      }
+    },
+    "calm": {
+      "finish_reason": "completed",
+      "telemetry": {
+        "geometry.consensus.family_count": 3.0,
+        "geometry.consensus.fractal_field_coherence_score_mean": 0.9597420739465278,
+        "geometry.consensus.fractal_field_energy_mean": 0.03182310097330653,
+        "geometry.consensus.log_z_series_projection_stability_mean": 0.9698286690743427,
+        "geometry.consensus.metric_count": 5.0,
+        "geometry.consensus.probe_count": 3.0,
+        "geometry.consensus.scale_stack_interface_density_mean": 0.3333333333333333,
+        "geometry.consensus.strategy_code": 1.0
+      },
+      "text": "Use a geometry-aware decoding bias favoring stable, coherent consensus signals while keeping adjustments modest due to low-to-moderate drift.",
+      "trace_metrics": {
+        "drs": -0.6890548056873629,
+        "frac": 0.8899475770827708,
+        "memory": 0.18816071400443024,
+        "speed": 0.23991273958833426,
+        "stability": 0.845
+      },
+      "usage": {
+        "completion_tokens": 30.0,
+        "prompt_tokens": 360.0,
+        "total_tokens": 390.0
+      }
+    },
+    "turbulent": {
+      "finish_reason": "completed",
+      "telemetry": {
+        "geometry.consensus.family_count": 3.0,
+        "geometry.consensus.fractal_field_coherence_score_mean": 0.9898957875454091,
+        "geometry.consensus.fractal_field_energy_mean": 0.0005217122605226074,
+        "geometry.consensus.log_z_series_projection_stability_mean": 8.962226452746691e-06,
+        "geometry.consensus.metric_count": 5.0,
+        "geometry.consensus.probe_count": 3.0,
+        "geometry.consensus.scale_stack_interface_density_mean": 1.0,
+        "geometry.consensus.strategy_code": 1.0
+      },
+      "text": "Prioritize consensus-driven decoding with adaptive gradients, balancing speed and stability while using memory moderately and tracking geometric coherence.",
+      "trace_metrics": {
+        "drs": -0.6993255921104736,
+        "frac": 0.893371263897924,
+        "memory": 0.1872185533436538,
+        "speed": 0.1696913416085292,
+        "stability": 0.845
+      },
+      "usage": {
+        "completion_tokens": 26.0,
+        "prompt_tokens": 362.0,
+        "total_tokens": 388.0
+      }
+    }
+  },
+  "sample_note": "Sanitized live OpenAI GPT-5.5 + node-st-wasm geometry output; trace paths and local wasm paths omitted."
+}

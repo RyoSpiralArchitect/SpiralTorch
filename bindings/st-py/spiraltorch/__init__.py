@@ -234,6 +234,7 @@ _PREDECLARED_SUBMODULES: list[tuple[str, str]] = [
     ("qr", "Quantum reality overlays"),
     ("theory", "Theory models (Z-relativity, metrics, ...)"),
     ("julia", "Julia bridge helpers"),
+    ("geometry", "Geometry probe context helpers"),
     ("scale_stack", "Scale persistence helpers"),
     ("rl", "Reinforcement learning primitives"),
     ("robotics", "Robotics & Z-space dynamics"),
@@ -672,6 +673,7 @@ from .zspace_inference import (
 from .api_llm_runtime import (
     ApiLLMTrace,
     ApiLLMZSpaceRuntime,
+    api_llm_geometry_context_partials,
     api_llm_partial_from_response,
     api_llm_text_from_response,
     api_llm_trace_from_response,
@@ -790,6 +792,38 @@ from .wasm_reports import (
     write_wasm_report_context_artifact,
 )
 
+from .scale_stack_probe import (
+    scale_stack_probe,
+    scale_stack_probe_to_zspace_partial,
+    scalar_scale_stack_partial,
+    scalar_scale_stack_probe,
+    semantic_scale_stack_partial,
+    semantic_scale_stack_probe,
+)
+
+from .fractal_field_probe import (
+    fractal_field_partial,
+    fractal_field_probe,
+    fractal_field_probe_to_zspace_partial,
+)
+
+from .log_z_series_probe import (
+    log_z_series_partial,
+    log_z_series_probe,
+    log_z_series_probe_to_zspace_partial,
+)
+
+from .geometry_context import (
+    build_geometry_probe_context,
+    build_geometry_probe_context_artifact,
+    geometry_probe_consensus_partial,
+    geometry_probe_summary,
+    geometry_probe_to_zspace_partial,
+    geometry_probes_to_zspace_partials,
+    load_geometry_probe_context_artifact,
+    write_geometry_probe_context_artifact,
+)
+
 from .zspace_live import (
     serve_zspace_trace,
     ZSpaceTraceLiveServer,
@@ -853,7 +887,22 @@ _EXTRAS = [
     "load_wasm_report_context_artifact",
     "load_wasm_report","summarize_wasm_report",
     "wasm_report_to_zspace_partial","write_wasm_report_context_artifact",
+    "fractal_field_partial","fractal_field_probe",
+    "fractal_field_probe_to_zspace_partial",
+    "log_z_series_partial","log_z_series_probe",
+    "log_z_series_probe_to_zspace_partial",
+    "build_geometry_probe_context","build_geometry_probe_context_artifact",
+    "geometry_probe_consensus_partial",
+    "geometry_probe_summary","geometry_probe_to_zspace_partial",
+    "geometry_probes_to_zspace_partials",
+    "load_geometry_probe_context_artifact",
+    "write_geometry_probe_context_artifact",
+    "geometry",
+    "scale_stack_probe","scale_stack_probe_to_zspace_partial",
+    "scalar_scale_stack_partial","scalar_scale_stack_probe",
+    "semantic_scale_stack_partial","semantic_scale_stack_probe",
     "ApiLLMTrace","ApiLLMZSpaceRuntime",
+    "api_llm_geometry_context_partials",
     "api_llm_partial_from_response","api_llm_text_from_response",
     "api_llm_trace_from_response","api_llm_usage_from_response",
     "api_llm_wasm_context_partials",
@@ -5551,7 +5600,39 @@ _mirror_into_module(
     {
         "gl_coeffs_adaptive": ("frac.gl_coeffs_adaptive",),
         "fracdiff_gl_1d": ("frac.fracdiff_gl_1d",),
+        "fractal_field_partial": (),
+        "fractal_field_probe": (),
+        "fractal_field_probe_to_zspace_partial": (),
+        "log_z_series_partial": (),
+        "log_z_series_probe": (),
+        "log_z_series_probe_to_zspace_partial": (),
     },
+)
+_mirror_into_module(
+    "geometry",
+    [
+        "build_geometry_probe_context",
+        "build_geometry_probe_context_artifact",
+        "geometry_probe_consensus_partial",
+        "geometry_probe_summary",
+        "geometry_probe_to_zspace_partial",
+        "geometry_probes_to_zspace_partials",
+        "load_geometry_probe_context_artifact",
+        "write_geometry_probe_context_artifact",
+    ],
+    reexport=False,
+)
+_mirror_into_module(
+    "scale_stack",
+    [
+        "scale_stack_probe",
+        "scale_stack_probe_to_zspace_partial",
+        "scalar_scale_stack_partial",
+        "scalar_scale_stack_probe",
+        "semantic_scale_stack_partial",
+        "semantic_scale_stack_probe",
+    ],
+    reexport=False,
 )
 _mirror_into_module(
     "spiral_rl",
@@ -7585,6 +7666,7 @@ for _name in [
     "psi",
     "qr",
     "julia",
+    "scale_stack",
     "robotics",
 ]:
     if _name in globals() or _resolve_rs_attr(_name) is not None:
