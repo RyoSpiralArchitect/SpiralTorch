@@ -2081,6 +2081,7 @@ class ApiLLMZSpaceRuntime:
         bundle_weight: float = ...,
         telemetry_prefix: str = ...,
         gradient_dim: int = ...,
+        context_partials: Any = ...,
         clear: bool = ...,
     ) -> ApiLLMTrace: ...
     def call(
@@ -2090,6 +2091,7 @@ class ApiLLMZSpaceRuntime:
         *args: Any,
         provider: str | None = ...,
         model: str | None = ...,
+        context_partials: Any = ...,
         **kwargs: Any,
     ) -> ApiLLMTrace: ...
     def run_prompts(
@@ -2100,6 +2102,7 @@ class ApiLLMZSpaceRuntime:
         provider: str | None = ...,
         model: str | None = ...,
         jsonl_out: str | PathLike[str] | None = ...,
+        context_partials: Any = ...,
         clear: bool = ...,
         **kwargs: Any,
     ) -> Dict[str, Any]: ...
@@ -2113,6 +2116,7 @@ class ApiLLMZSpaceRuntime:
         model: str | None = ...,
         input_key: str = ...,
         provider: str | None = ...,
+        context_partials: Any = ...,
         **request: Any,
     ) -> ApiLLMTrace: ...
     def call_openai_chat(
@@ -2126,6 +2130,7 @@ class ApiLLMZSpaceRuntime:
         system: str | None = ...,
         messages: Sequence[Mapping[str, Any]] | None = ...,
         provider: str | None = ...,
+        context_partials: Any = ...,
         **request: Any,
     ) -> ApiLLMTrace: ...
     def call_anthropic_messages(
@@ -2139,6 +2144,7 @@ class ApiLLMZSpaceRuntime:
         system: str | None = ...,
         messages: Sequence[Mapping[str, Any]] | None = ...,
         provider: str | None = ...,
+        context_partials: Any = ...,
         **request: Any,
     ) -> ApiLLMTrace: ...
     def summary(self) -> Dict[str, Any]: ...
@@ -2169,6 +2175,15 @@ def api_llm_partial_from_response(
     telemetry_prefix: str = ...,
     gradient_dim: int = ...,
 ) -> ZSpacePartialBundle: ...
+
+def api_llm_wasm_context_partials(
+    reports: Any,
+    *,
+    bundle_weight: float = ...,
+    origin: str | None = ...,
+    telemetry_prefix: str = ...,
+    gradient_dim: int = ...,
+) -> List[ZSpacePartialBundle]: ...
 
 
 def api_llm_trace_from_response(
@@ -2261,6 +2276,7 @@ def run_api_llm_prompt_suite(
     smoothing: float = ...,
     strategy: str = ...,
     jsonl_out: str | PathLike[str] | None = ...,
+    context_partials: Any = ...,
     clear: bool = ...,
     **kwargs: Any,
 ) -> Dict[str, Any]: ...
@@ -2281,6 +2297,7 @@ def run_api_llm_prompt_suite_matrix(
     smoothing: float = ...,
     strategy: str = ...,
     jsonl_dir: str | PathLike[str] | None = ...,
+    context_partials: Any = ...,
     request_kwargs: Mapping[str, Mapping[str, Any]] | None = ...,
     near_best_tolerance: float = ...,
     clear: bool = ...,
@@ -7209,6 +7226,7 @@ __all__ = [
     "api_llm_text_from_response",
     "api_llm_trace_from_response",
     "api_llm_usage_from_response",
+    "api_llm_wasm_context_partials",
     "compare_api_llm_matrix_reports",
     "compare_api_llm_trace_runs",
     "load_api_llm_trace_events",

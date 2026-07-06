@@ -13,6 +13,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 import json
 import math
+import os
 from pathlib import Path
 import sys
 import time
@@ -30,6 +31,7 @@ __all__ = [
     "api_llm_text_from_response",
     "api_llm_trace_from_response",
     "api_llm_usage_from_response",
+    "api_llm_wasm_context_partials",
     "compare_api_llm_matrix_reports",
     "compare_api_llm_trace_runs",
     "load_api_llm_trace_events",
@@ -839,6 +841,85 @@ def _trace_payload(trace: ApiLLMTrace | Mapping[str, Any]) -> dict[str, Any]:
     if isinstance(trace, ApiLLMTrace):
         return trace.as_dict()
     return dict(trace)
+
+
+def _normalise_context_partials(context_partials: Any) -> list[ZSpacePartialBundle]:
+    if context_partials is None:
+        return []
+    if isinstance(context_partials, ZSpacePartialBundle):
+        return [context_partials]
+    if isinstance(context_partials, Mapping):
+        return [ZSpacePartialBundle(context_partials)]
+    if isinstance(context_partials, (str, bytes, bytearray)):
+        raise TypeError(
+            "context_partials must be partial mappings or ZSpacePartialBundle values"
+        )
+
+    bundles: list[ZSpacePartialBundle] = []
+    try:
+        iterator = iter(context_partials)
+    except TypeError as exc:
+        raise TypeError(
+            "context_partials must be partial mappings or ZSpacePartialBundle values"
+        ) from exc
+    for partial in iterator:
+        if partial is None:
+            continue
+        if isinstance(partial, ZSpacePartialBundle):
+            bundles.append(partial)
+        elif isinstance(partial, Mapping):
+            bundles.append(ZSpacePartialBundle(partial))
+        else:
+            raise TypeError(
+                "context_partials must contain partial mappings or ZSpacePartialBundle values"
+            )
+    return bundles
+
+
+def _iter_wasm_report_inputs(reports: Any) -> list[tuple[str | None, Any]]:
+    if reports is None:
+        return []
+    if isinstance(reports, (str, os.PathLike)):
+        return [(None, reports)]
+    if isinstance(reports, Mapping):
+        if "schema" in reports or "kind" in reports:
+            return [(None, reports)]
+        return [(str(label), report) for label, report in reports.items()]
+    if isinstance(reports, (bytes, bytearray)):
+        raise TypeError("wasm reports must be paths, mappings, or sequences")
+    try:
+        return [(None, report) for report in reports]
+    except TypeError as exc:
+        raise TypeError("wasm reports must be paths, mappings, or sequences") from exc
+
+
+def api_llm_wasm_context_partials(
+    reports: Any,
+    *,
+    bundle_weight: float = 1.0,
+    origin: str | None = None,
+    telemetry_prefix: str = "wasm",
+    gradient_dim: int = 8,
+) -> list[ZSpacePartialBundle]:
+    """Convert one or more WASM reports into API-LLM runtime context partials."""
+
+    from .wasm_reports import wasm_report_to_zspace_partial
+
+    partials: list[ZSpacePartialBundle] = []
+    for label, report in _iter_wasm_report_inputs(reports):
+        partial_origin = origin
+        if partial_origin is None and label:
+            partial_origin = f"wasm:{label}"
+        partials.append(
+            wasm_report_to_zspace_partial(
+                report,
+                bundle_weight=bundle_weight,
+                origin=partial_origin,
+                telemetry_prefix=telemetry_prefix,
+                gradient_dim=gradient_dim,
+            )
+        )
+    return partials
 
 
 def write_api_llm_trace_jsonl(
@@ -1853,6 +1934,7 @@ class ApiLLMZSpaceRuntime:
         bundle_weight: float = 1.0,
         telemetry_prefix: str = "api_llm",
         gradient_dim: int = 4,
+        context_partials: Any = None,
         clear: bool = True,
     ) -> ApiLLMTrace:
         """Record an API response, fuse it into Z-space, and return a trace."""
@@ -1869,6 +1951,8 @@ class ApiLLMZSpaceRuntime:
             telemetry_prefix=telemetry_prefix,
             gradient_dim=gradient_dim,
         )
+        for context in _normalise_context_partials(context_partials):
+            self.pipeline.add_partial(context)
         self.pipeline.add_partial(bundle)
         inference = self.pipeline.infer(clear=clear)
         trace = api_llm_trace_from_response(
@@ -1893,6 +1977,7 @@ class ApiLLMZSpaceRuntime:
         *args: Any,
         provider: str | None = None,
         model: str | None = None,
+        context_partials: Any = None,
         **kwargs: Any,
     ) -> ApiLLMTrace:
         """Call an API-model function and immediately record the Z-space trace."""
@@ -1906,6 +1991,7 @@ class ApiLLMZSpaceRuntime:
             provider=provider,
             model=model,
             latency_ms=latency_ms,
+            context_partials=context_partials,
         )
 
     def run_prompts(
@@ -1916,12 +2002,14 @@ class ApiLLMZSpaceRuntime:
         provider: str | None = None,
         model: str | None = None,
         jsonl_out: str | Path | None = None,
+        context_partials: Any = None,
         clear: bool = True,
         **kwargs: Any,
     ) -> dict[str, Any]:
         """Run a prompt suite through one runtime and return trace artifacts."""
 
         traces: list[ApiLLMTrace] = []
+        context_bundles = _normalise_context_partials(context_partials)
         for prompt in prompts:
             start = time.perf_counter()
             response = invoke(prompt, *args, **kwargs)
@@ -1933,6 +2021,7 @@ class ApiLLMZSpaceRuntime:
                     provider=provider,
                     model=model,
                     latency_ms=latency_ms,
+                    context_partials=context_bundles,
                     clear=clear,
                 )
             )
@@ -1962,6 +2051,7 @@ class ApiLLMZSpaceRuntime:
         model: str | None = None,
         input_key: str = "input",
         provider: str | None = "openai",
+        context_partials: Any = None,
         **request: Any,
     ) -> ApiLLMTrace:
         """Call OpenAI's Responses API and record the resulting Z-space trace."""
@@ -1980,6 +2070,7 @@ class ApiLLMZSpaceRuntime:
             prompt,
             provider=provider,
             model=model_value,
+            context_partials=context_partials,
         )
 
     def call_openai_chat(
@@ -1993,6 +2084,7 @@ class ApiLLMZSpaceRuntime:
         system: str | None = None,
         messages: Sequence[Mapping[str, Any]] | None = None,
         provider: str | None = "openai",
+        context_partials: Any = None,
         **request: Any,
     ) -> ApiLLMTrace:
         """Call OpenAI chat completions and record the resulting Z-space trace."""
@@ -2012,6 +2104,7 @@ class ApiLLMZSpaceRuntime:
             prompt,
             provider=provider,
             model=model_value,
+            context_partials=context_partials,
         )
 
     def call_anthropic_messages(
@@ -2025,6 +2118,7 @@ class ApiLLMZSpaceRuntime:
         system: str | None = None,
         messages: Sequence[Mapping[str, Any]] | None = None,
         provider: str | None = "anthropic",
+        context_partials: Any = None,
         **request: Any,
     ) -> ApiLLMTrace:
         """Call Anthropic Messages and record the resulting Z-space trace."""
@@ -2044,6 +2138,7 @@ class ApiLLMZSpaceRuntime:
             prompt,
             provider=provider,
             model=model_value,
+            context_partials=context_partials,
         )
 
     def summary(self) -> dict[str, Any]:
@@ -2175,6 +2270,7 @@ def run_api_llm_prompt_suite(
     smoothing: float = 0.35,
     strategy: str = "mean",
     jsonl_out: str | Path | None = None,
+    context_partials: Any = None,
     clear: bool = True,
     **kwargs: Any,
 ) -> dict[str, Any]:
@@ -2199,6 +2295,7 @@ def run_api_llm_prompt_suite(
         provider=provider,
         model=model,
         jsonl_out=jsonl_out,
+        context_partials=context_partials,
         clear=clear,
         **kwargs,
     )
@@ -2219,6 +2316,7 @@ def run_api_llm_prompt_suite_matrix(
     smoothing: float = 0.35,
     strategy: str = "mean",
     jsonl_dir: str | Path | None = None,
+    context_partials: Any = None,
     request_kwargs: Mapping[str, Mapping[str, Any]] | None = None,
     near_best_tolerance: float = 0.02,
     clear: bool = True,
@@ -2265,6 +2363,7 @@ def run_api_llm_prompt_suite_matrix(
             smoothing=smoothing,
             strategy=strategy,
             jsonl_out=jsonl_out,
+            context_partials=context_partials,
             clear=clear,
             **route_kwargs,
         )
