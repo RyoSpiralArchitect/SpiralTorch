@@ -2504,6 +2504,7 @@ def format_api_llm_context_prompt(
 def topos_runtime_request(
     topos: Any | None = ...,
     *,
+    gain: float = ...,
     base_temperature: float = ...,
     base_top_p: float = ...,
     min_temperature: float = ...,
@@ -2522,6 +2523,7 @@ def topos_runtime_adapter(
     topos: Any | None = ...,
     *,
     bundle_weight: float = ...,
+    training_gain: float = ...,
     origin: str | None = ...,
     telemetry_prefix: str = ...,
     gradient_dim: int = ...,
@@ -2928,6 +2930,22 @@ def topos_inference_plan(
     topos: Any | None = ...,
     *,
     gain: float = ...,
+    base_temperature: float = ...,
+    base_top_p: float = ...,
+    min_temperature: float = ...,
+    max_temperature: float = ...,
+    min_top_p: float = ...,
+    max_top_p: float = ...,
+    base_frequency_penalty: float = ...,
+    base_presence_penalty: float = ...,
+    **signal_options: Any,
+) -> Dict[str, object]: ...
+
+def topos_runtime_profile(
+    topos: Any | None = ...,
+    *,
+    training_gain: float = ...,
+    inference_gain: float = ...,
     base_temperature: float = ...,
     base_top_p: float = ...,
     min_temperature: float = ...,

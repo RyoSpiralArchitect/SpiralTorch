@@ -32,6 +32,7 @@ __all__ = [
     "topos_training_plan",
     "topos_inference_hints",
     "topos_inference_plan",
+    "topos_runtime_profile",
     "topos_control_partial",
     "decode_zspace_embedding",
     "infer_from_partial",
@@ -570,6 +571,129 @@ def _normalise_topos_inference_plan(
     return plan
 
 
+def _normalise_topos_runtime_profile(
+    payload: Any,
+    *,
+    signal: Mapping[str, Any],
+    training_plan: Mapping[str, Any],
+    inference_plan: Mapping[str, Any],
+    training_gain: float = 1.0,
+    inference_gain: float = 1.0,
+) -> dict[str, Any]:
+    source = payload if isinstance(payload, MappingABC) else {}
+    closure_pressure = _unit_interval(signal.get("closure_pressure", 0.0))
+    guard_strength = _unit_interval(signal.get("guard_strength", 0.0))
+    step_damping = _unit_interval(signal.get("step_damping", 0.0))
+    openness = _unit_interval(signal.get("openness", 0.0))
+    exploration_hint = _unit_interval(signal.get("exploration_hint", 0.0))
+    default_closure_risk = max(
+        0.0,
+        min(1.0, 0.5 * closure_pressure + 0.3 * guard_strength + 0.2 * step_damping),
+    )
+    default_exploration_budget = max(
+        0.0,
+        min(1.0, 0.6 * openness + 0.4 * exploration_hint),
+    )
+    training_rate_scale = _clamp_float(
+        source.get("training_rate_scale", training_plan.get("rate_scale", 1.0)),
+        0.01,
+        2.0,
+        default=1.0,
+    )
+    training_gradient_bias_scale = _clamp_float(
+        source.get(
+            "training_gradient_bias_scale",
+            training_plan.get("effective_gradient_bias_scale", 0.0),
+        ),
+        0.0,
+        0.35,
+        default=0.0,
+    )
+    inference_temperature = _clamp_float(
+        source.get("inference_temperature", inference_plan.get("temperature", 1.0)),
+        0.0,
+        2.0,
+        default=1.0,
+    )
+    inference_top_p = _clamp_float(
+        source.get("inference_top_p", inference_plan.get("top_p", 1.0)),
+        0.05,
+        1.0,
+        default=1.0,
+    )
+    inference_context_weight = _clamp_float(
+        source.get(
+            "inference_context_weight",
+            inference_plan.get("context_weight", 1.0),
+        ),
+        0.25,
+        1.25,
+        default=1.0,
+    )
+    gradient_pressure = max(0.0, min(1.0, training_gradient_bias_scale / 0.35))
+    rate_pressure = max(0.0, min(1.0, 1.0 - training_rate_scale))
+    context_pressure = max(0.0, min(1.0, inference_context_weight / 1.25))
+    default_control_energy = max(
+        0.0,
+        min(
+            1.0,
+            0.35 * default_closure_risk
+            + 0.25 * gradient_pressure
+            + 0.2 * rate_pressure
+            + 0.2 * context_pressure,
+        ),
+    )
+    default_balance = max(
+        0.0,
+        min(2.0, training_rate_scale / max(1e-6, inference_temperature)),
+    )
+    profile = {
+        "training_gain": _non_negative_float(
+            source.get("training_gain", training_plan.get("gain", training_gain)),
+            default=training_gain,
+        ),
+        "inference_gain": _non_negative_float(
+            source.get("inference_gain", inference_plan.get("gain", inference_gain)),
+            default=inference_gain,
+        ),
+        "closure_risk": _unit_interval(
+            source.get("closure_risk", default_closure_risk),
+            default=default_closure_risk,
+        ),
+        "exploration_budget": _unit_interval(
+            source.get("exploration_budget", default_exploration_budget),
+            default=default_exploration_budget,
+        ),
+        "control_energy": _unit_interval(
+            source.get("control_energy", default_control_energy),
+            default=default_control_energy,
+        ),
+        "training_rate_scale": training_rate_scale,
+        "training_gradient_bias_scale": training_gradient_bias_scale,
+        "inference_temperature": inference_temperature,
+        "inference_top_p": inference_top_p,
+        "inference_context_weight": inference_context_weight,
+        "learning_inference_balance": _clamp_float(
+            source.get("learning_inference_balance", default_balance),
+            0.0,
+            2.0,
+            default=default_balance,
+        ),
+    }
+    vector = _coerce_gradient(source.get("vector"))
+    if vector is None:
+        vector = [
+            profile["control_energy"],
+            profile["closure_risk"],
+            profile["exploration_budget"],
+            profile["training_rate_scale"],
+            profile["inference_temperature"],
+            profile["inference_context_weight"],
+        ]
+    profile["vector"] = vector[:6]
+    return profile
+
+
 def _normalise_topos_control_signal(payload: Mapping[str, Any]) -> dict[str, Any]:
     curvature = float(payload.get("curvature", -1.0))
     tolerance = float(payload.get("tolerance", 1e-3))
@@ -704,6 +828,18 @@ def _normalise_topos_control_signal(payload: Mapping[str, Any]) -> dict[str, Any
         payload.get("inference_plan"),
         hints=inference_hints,
     )
+    runtime_profile = _normalise_topos_runtime_profile(
+        payload.get("runtime_profile"),
+        signal={
+            "closure_pressure": closure_pressure,
+            "guard_strength": guard_strength,
+            "step_damping": step_damping,
+            "openness": openness,
+            "exploration_hint": exploration_hint,
+        },
+        training_plan=training_plan,
+        inference_plan=inference_plan,
+    )
     return {
         "curvature": curvature,
         "tolerance": tolerance,
@@ -732,6 +868,7 @@ def _normalise_topos_control_signal(payload: Mapping[str, Any]) -> dict[str, Any
         "training_plan": training_plan,
         "inference_hints": inference_hints,
         "inference_plan": inference_plan,
+        "runtime_profile": runtime_profile,
     }
 
 
@@ -922,6 +1059,52 @@ def topos_inference_plan(
     )
 
 
+def topos_runtime_profile(
+    topos: Any | None = None,
+    *,
+    training_gain: float = 1.0,
+    inference_gain: float = 1.0,
+    base_temperature: float = 1.0,
+    base_top_p: float = 1.0,
+    min_temperature: float = 0.0,
+    max_temperature: float = 2.0,
+    min_top_p: float = 0.05,
+    max_top_p: float = 1.0,
+    base_frequency_penalty: float = 0.0,
+    base_presence_penalty: float = 0.0,
+    **signal_options: Any,
+) -> dict[str, Any]:
+    """Return a joint learning/inference profile derived from an open-topos signal."""
+
+    signal = topos_control_signal(topos, **signal_options)
+    training_plan = _normalise_topos_training_plan(
+        None,
+        hints=signal["training_hints"],
+        gain=training_gain,
+    )
+    inference_plan = _normalise_topos_inference_plan(
+        None,
+        hints=signal["inference_hints"],
+        gain=inference_gain,
+        base_temperature=base_temperature,
+        base_top_p=base_top_p,
+        min_temperature=min_temperature,
+        max_temperature=max_temperature,
+        min_top_p=min_top_p,
+        max_top_p=max_top_p,
+        base_frequency_penalty=base_frequency_penalty,
+        base_presence_penalty=base_presence_penalty,
+    )
+    return _normalise_topos_runtime_profile(
+        None,
+        signal=signal,
+        training_plan=training_plan,
+        inference_plan=inference_plan,
+        training_gain=training_gain,
+        inference_gain=inference_gain,
+    )
+
+
 def topos_control_partial(
     topos: Any | None = None,
     *,
@@ -963,6 +1146,7 @@ def topos_control_partial(
     telemetry_signal = dict(signal)
     telemetry_signal.pop("training_plan", None)
     telemetry_signal.pop("inference_plan", None)
+    telemetry_signal.pop("runtime_profile", None)
     telemetry = _flatten_telemetry(telemetry_signal, prefix=f"{telemetry_prefix}.")
     return ZSpacePartialBundle(
         metrics,

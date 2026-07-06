@@ -46,6 +46,12 @@ def test_topos_control_signal_from_mapping_normalises_pressure() -> None:
     assert signal["inference_hints"]["context_weight"] == pytest.approx(0.9225)
     assert signal["inference_plan"]["temperature"] == pytest.approx(0.8533125)
     assert signal["inference_plan"]["top_p"] == pytest.approx(0.890274375)
+    assert signal["runtime_profile"]["closure_risk"] == pytest.approx(0.4451)
+    assert signal["runtime_profile"]["exploration_budget"] == pytest.approx(0.4555)
+    assert signal["runtime_profile"]["control_energy"] == pytest.approx(0.4041837060714286)
+    assert signal["runtime_profile"]["learning_inference_balance"] == pytest.approx(
+        0.9104766571449497
+    )
 
 
 def test_named_topos_hints_are_exported_for_learning_and_inference() -> None:
@@ -76,6 +82,17 @@ def test_named_topos_hints_are_exported_for_learning_and_inference() -> None:
         base_frequency_penalty=0.1,
         base_presence_penalty=0.2,
     )
+    runtime_profile = st.topos_runtime_profile(
+        payload,
+        training_gain=0.5,
+        inference_gain=0.5,
+        observed_depth=4,
+        visited_volume=25,
+        base_temperature=0.8,
+        base_top_p=0.9,
+        base_frequency_penalty=0.1,
+        base_presence_penalty=0.2,
+    )
 
     assert training["learning_rate_scale"] == pytest.approx(0.8919875)
     assert training["gradient_bias_scale"] == pytest.approx(0.0786561)
@@ -90,6 +107,11 @@ def test_named_topos_hints_are_exported_for_learning_and_inference() -> None:
     assert inference_plan["top_p"] == pytest.approx(0.85062346875)
     assert inference_plan["frequency_penalty"] == pytest.approx(0.242700546875)
     assert inference_plan["presence_penalty"] == pytest.approx(0.1809496875)
+    assert runtime_profile["training_rate_scale"] == pytest.approx(0.88846055625)
+    assert runtime_profile["inference_temperature"] == pytest.approx(0.741325)
+    assert runtime_profile["inference_context_weight"] == pytest.approx(0.96125)
+    assert runtime_profile["control_energy"] == pytest.approx(0.3599843530357143)
+    assert len(runtime_profile["vector"]) == 6
 
 
 def test_topos_control_partial_feeds_zspace_inference() -> None:
@@ -129,6 +151,7 @@ def test_topos_control_partial_is_exported_from_top_level() -> None:
     assert "topos_training_plan" in st.__all__
     assert "topos_inference_hints" in st.__all__
     assert "topos_inference_plan" in st.__all__
+    assert "topos_runtime_profile" in st.__all__
     assert "topos_control_partial" in st.__all__
 
 
