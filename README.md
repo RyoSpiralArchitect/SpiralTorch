@@ -162,6 +162,9 @@ SpiralTorch’s WASM bindings are now **fully runnable** in the browser: geometr
   `bash scripts/wasm_demo.sh mellin-log-grid dev`
 - **Canvas hypertrain (WASM):** `FractalCanvas` learning loop + WebGPU trail + FFT probe + **target-MSE supervised mode**  
   `bash scripts/wasm_demo.sh canvas-hypertrain dev`
+- **WASM → API LLM context:** pass exported browser reports into the hosted-model
+  route matrix with `--wasm-report report.json`, or run the keyless bridge with
+  `PYTHONPATH=bindings/st-py python3 bindings/st-py/examples/api_llm_wasm_context_runtime.py --wasm-report report.json`
 
 ### Why SpiralTorch  
 

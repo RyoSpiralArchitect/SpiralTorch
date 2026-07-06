@@ -130,7 +130,10 @@ PY
   converted into reusable context via `api_llm_wasm_context_partials(...)`, and
   passed as `context_partials=` to `ApiLLMZSpaceRuntime` or
   `run_api_llm_prompt_suite(...)`; see
-  `examples/api_llm_wasm_context_runtime.py` for a keyless end-to-end bridge.
+  `examples/api_llm_wasm_context_runtime.py` for a keyless end-to-end bridge, or
+  pass `--wasm-report report.json` to `examples/api_llm_live_provider_matrix.py`
+  and `examples/api_llm_live_provider_matrix_sweep.py` when live OpenAI/Claude
+  route comparisons should carry the same browser-side learning signal.
 - Language desire controls via `st.nn.DesirePipeline`, `DesireTrainerBridge`,
   `DesireRoundtableBridge`, and downstream hook adapters so notebooks can
   inspect phase/temperature/entropy offsets without making the symbolic kernel
