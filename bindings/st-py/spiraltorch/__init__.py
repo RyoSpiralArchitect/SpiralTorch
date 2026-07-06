@@ -234,6 +234,7 @@ _PREDECLARED_SUBMODULES: list[tuple[str, str]] = [
     ("qr", "Quantum reality overlays"),
     ("theory", "Theory models (Z-relativity, metrics, ...)"),
     ("julia", "Julia bridge helpers"),
+    ("geometry", "Geometry probe context helpers"),
     ("scale_stack", "Scale persistence helpers"),
     ("rl", "Reinforcement learning primitives"),
     ("robotics", "Robotics & Z-space dynamics"),
@@ -811,6 +812,16 @@ from .log_z_series_probe import (
     log_z_series_probe_to_zspace_partial,
 )
 
+from .geometry_context import (
+    build_geometry_probe_context,
+    build_geometry_probe_context_artifact,
+    geometry_probe_summary,
+    geometry_probe_to_zspace_partial,
+    geometry_probes_to_zspace_partials,
+    load_geometry_probe_context_artifact,
+    write_geometry_probe_context_artifact,
+)
+
 from .zspace_live import (
     serve_zspace_trace,
     ZSpaceTraceLiveServer,
@@ -878,6 +889,12 @@ _EXTRAS = [
     "fractal_field_probe_to_zspace_partial",
     "log_z_series_partial","log_z_series_probe",
     "log_z_series_probe_to_zspace_partial",
+    "build_geometry_probe_context","build_geometry_probe_context_artifact",
+    "geometry_probe_summary","geometry_probe_to_zspace_partial",
+    "geometry_probes_to_zspace_partials",
+    "load_geometry_probe_context_artifact",
+    "write_geometry_probe_context_artifact",
+    "geometry",
     "scale_stack_probe","scale_stack_probe_to_zspace_partial",
     "scalar_scale_stack_partial","scalar_scale_stack_probe",
     "semantic_scale_stack_partial","semantic_scale_stack_probe",
@@ -5586,6 +5603,19 @@ _mirror_into_module(
         "log_z_series_probe": (),
         "log_z_series_probe_to_zspace_partial": (),
     },
+)
+_mirror_into_module(
+    "geometry",
+    [
+        "build_geometry_probe_context",
+        "build_geometry_probe_context_artifact",
+        "geometry_probe_summary",
+        "geometry_probe_to_zspace_partial",
+        "geometry_probes_to_zspace_partials",
+        "load_geometry_probe_context_artifact",
+        "write_geometry_probe_context_artifact",
+    ],
+    reexport=False,
 )
 _mirror_into_module(
     "scale_stack",

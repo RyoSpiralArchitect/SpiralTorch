@@ -6216,6 +6216,61 @@ def log_z_series_partial(
     gradient_dim: int = ...,
 ) -> ZSpacePartialBundle: ...
 
+def geometry_probe_summary(
+    probe: Mapping[str, Any],
+    *,
+    label: str | None = ...,
+) -> Dict[str, Any]: ...
+
+def geometry_probe_to_zspace_partial(
+    probe: Mapping[str, Any],
+    *,
+    bundle_weight: float = ...,
+    origin: str | None = ...,
+    telemetry_prefix: str = ...,
+    gradient_dim: int = ...,
+) -> ZSpacePartialBundle: ...
+
+def geometry_probes_to_zspace_partials(
+    probes: Any,
+    *,
+    bundle_weight: float = ...,
+    telemetry_prefix: str = ...,
+    gradient_dim: int = ...,
+) -> List[ZSpacePartialBundle]: ...
+
+def build_geometry_probe_context(
+    probes: Any,
+    *,
+    max_probes: int | None = ...,
+    bundle_weight: float = ...,
+    telemetry_prefix: str = ...,
+    gradient_dim: int = ...,
+) -> Tuple[List[ZSpacePartialBundle], Dict[str, Any]]: ...
+
+def build_geometry_probe_context_artifact(
+    probes: Any,
+    *,
+    max_probes: int | None = ...,
+    bundle_weight: float = ...,
+    telemetry_prefix: str = ...,
+    gradient_dim: int = ...,
+) -> Dict[str, Any]: ...
+
+def write_geometry_probe_context_artifact(
+    path: str | PathLike[str],
+    probes: Any,
+    *,
+    max_probes: int | None = ...,
+    bundle_weight: float = ...,
+    telemetry_prefix: str = ...,
+    gradient_dim: int = ...,
+) -> str: ...
+
+def load_geometry_probe_context_artifact(
+    path: str | PathLike[str],
+) -> Tuple[List[ZSpacePartialBundle], Dict[str, Any]]: ...
+
 
 class _FracModule(ModuleType):
     MellinLogGrid: type[MellinLogGrid]
@@ -6310,6 +6365,65 @@ class _FracModule(ModuleType):
 
 
 frac: _FracModule
+
+class _GeometryModule(ModuleType):
+    def geometry_probe_summary(
+        probe: Mapping[str, Any],
+        *,
+        label: str | None = ...,
+    ) -> Dict[str, Any]: ...
+
+    def geometry_probe_to_zspace_partial(
+        probe: Mapping[str, Any],
+        *,
+        bundle_weight: float = ...,
+        origin: str | None = ...,
+        telemetry_prefix: str = ...,
+        gradient_dim: int = ...,
+    ) -> ZSpacePartialBundle: ...
+
+    def geometry_probes_to_zspace_partials(
+        probes: Any,
+        *,
+        bundle_weight: float = ...,
+        telemetry_prefix: str = ...,
+        gradient_dim: int = ...,
+    ) -> List[ZSpacePartialBundle]: ...
+
+    def build_geometry_probe_context(
+        probes: Any,
+        *,
+        max_probes: int | None = ...,
+        bundle_weight: float = ...,
+        telemetry_prefix: str = ...,
+        gradient_dim: int = ...,
+    ) -> Tuple[List[ZSpacePartialBundle], Dict[str, Any]]: ...
+
+    def build_geometry_probe_context_artifact(
+        probes: Any,
+        *,
+        max_probes: int | None = ...,
+        bundle_weight: float = ...,
+        telemetry_prefix: str = ...,
+        gradient_dim: int = ...,
+    ) -> Dict[str, Any]: ...
+
+    def write_geometry_probe_context_artifact(
+        path: str | PathLike[str],
+        probes: Any,
+        *,
+        max_probes: int | None = ...,
+        bundle_weight: float = ...,
+        telemetry_prefix: str = ...,
+        gradient_dim: int = ...,
+    ) -> str: ...
+
+    def load_geometry_probe_context_artifact(
+        path: str | PathLike[str],
+    ) -> Tuple[List[ZSpacePartialBundle], Dict[str, Any]]: ...
+
+
+geometry: _GeometryModule
 
 class _DatasetModule(ModuleType):
     BYTE_LM_VOCAB: int
@@ -7544,6 +7658,13 @@ __all__ = [
     "log_z_series_partial",
     "log_z_series_probe",
     "log_z_series_probe_to_zspace_partial",
+    "build_geometry_probe_context",
+    "build_geometry_probe_context_artifact",
+    "geometry_probe_summary",
+    "geometry_probe_to_zspace_partial",
+    "geometry_probes_to_zspace_partials",
+    "load_geometry_probe_context_artifact",
+    "write_geometry_probe_context_artifact",
     "scale_stack_probe",
     "scale_stack_probe_to_zspace_partial",
     "scalar_scale_stack_partial",
@@ -7567,6 +7688,7 @@ __all__ = [
     "to_dlpack",
     "nn",
     "frac",
+    "geometry",
     "dataset",
     "linalg",
     "psi",
