@@ -102,6 +102,8 @@ def _content_text(content: Any) -> str:
             text = _content_text(content.get(key))
             if text:
                 return text
+        if content.get("type"):
+            return ""
         return ""
     if isinstance(content, Sequence) and not isinstance(content, (str, bytes, bytearray)):
         return "".join(_content_text(part) for part in content)
@@ -112,6 +114,8 @@ def _content_text(content: Any) -> str:
         text = _content_text(candidate)
         if text:
             return text
+    if getattr(content, "type", None):
+        return ""
     return str(content)
 
 
