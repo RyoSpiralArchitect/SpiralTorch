@@ -23,9 +23,11 @@ start with four handles:
 - `spiraltorch.ApiLLMZSpaceRuntime` when hosted/API-model LLM responses should
   become Z-space partial traces without requiring the OpenAI SDK or any other
   hosted-model package at install time; if `openai` is installed, use
-  `runtime.call_openai_responses(...)` or `spiraltorch.make_openai_chat_invoke(...)`
-  with `OPENAI_API_KEY` from the environment. Runtime traces can be persisted
-  with `runtime.write_jsonl(...)` and summarized with
+  `runtime.call_openai_responses(...)` or `spiraltorch.make_openai_chat_invoke(...)`;
+  if `anthropic` is installed, use `runtime.call_anthropic_messages(...)` or
+  `spiraltorch.make_anthropic_messages_invoke(...)`. Provider keys are read
+  from the environment by their SDKs. Runtime traces can be persisted with
+  `runtime.write_jsonl(...)`, batched with `runtime.run_prompts(...)`, and summarized with
   `spiraltorch.summarize_api_llm_trace_events(...)`, or compared with
   `spiraltorch.compare_api_llm_trace_runs(...)`.
 - `spiraltorch.runtime_import_preflight_report(...)` when a Transformers,
@@ -95,10 +97,12 @@ PY
   OpenAI-compatible response mapping, SDK response object, or arbitrary API
   callable can be converted into Z-space metrics, usage/latency telemetry, and
   posterior confidence without making hosted SDKs mandatory dependencies. The
-  optional OpenAI adapters are lazy: they import `openai` only when called, then
-  feed Responses API or chat-completion results into the same trace path. API
-  LLM trace JSONL helpers mirror the trainer/transformers trace workflow so
-  hosted-model runs can be compared without re-running the API call; use
+  optional OpenAI and Anthropic adapters are lazy: they import provider SDKs only
+  when called, then feed Responses, chat-completion, or Messages API results into
+  the same trace path. API LLM trace JSONL helpers mirror the trainer/transformers
+  trace workflow so hosted-model runs can be compared without re-running the API
+  call; use `run_api_llm_prompt_suite(...)` for a multi-prompt bipolar/Z-space
+  smoke, then
   `compare_api_llm_trace_runs(...)` to pick candidates by route score, latency,
   token use, confidence, and runtime readiness.
 - Language desire controls via `st.nn.DesirePipeline`, `DesireTrainerBridge`,

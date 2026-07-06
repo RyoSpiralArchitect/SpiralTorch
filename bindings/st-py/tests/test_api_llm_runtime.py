@@ -12,8 +12,10 @@ def test_api_llm_runtime_exports_from_top_level() -> None:
     assert "api_llm_partial_from_response" in st.__all__
     assert "compare_api_llm_trace_runs" in st.__all__
     assert "load_api_llm_trace_events" in st.__all__
+    assert "make_anthropic_messages_invoke" in st.__all__
     assert "make_openai_chat_invoke" in st.__all__
     assert "make_openai_responses_invoke" in st.__all__
+    assert "run_api_llm_prompt_suite" in st.__all__
     assert "summarize_api_llm_trace_events" in st.__all__
     assert "write_api_llm_trace_jsonl" in st.__all__
 
@@ -76,6 +78,33 @@ class _FakeChatClient:
         self.chat = _FakeChat()
 
 
+class _FakeAnthropicMessages:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def create(self, **request: object) -> dict[str, object]:
+        self.calls.append(dict(request))
+        return {
+            "id": "msg-test",
+            "type": "message",
+            "role": "assistant",
+            "model": request.get("model", "claude-test"),
+            "content": [
+                {
+                    "type": "text",
+                    "text": "Anthropic message entered bipolar Z-space geometry.",
+                }
+            ],
+            "stop_reason": "end_turn",
+            "usage": {"input_tokens": 8, "output_tokens": 7},
+        }
+
+
+class _FakeAnthropicClient:
+    def __init__(self) -> None:
+        self.messages = _FakeAnthropicMessages()
+
+
 def _chat_response() -> dict[str, object]:
     return {
         "id": "chatcmpl-test",
@@ -131,6 +160,24 @@ def test_api_llm_text_from_responses_shape() -> None:
     assert usage["prompt_tokens"] == 4
     assert usage["completion_tokens"] == 2
     assert usage["total_tokens"] == 6
+
+
+def test_api_llm_text_from_anthropic_messages_shape() -> None:
+    response = {
+        "model": "claude-test",
+        "content": [
+            {"type": "text", "text": "Bipolar geometry route "},
+            {"type": "text", "text": "entered Z-space."},
+        ],
+        "stop_reason": "end_turn",
+        "usage": {"input_tokens": 6, "output_tokens": 4},
+    }
+
+    assert st.api_llm_text_from_response(response) == "Bipolar geometry route entered Z-space."
+    usage = st.api_llm_usage_from_response(response)
+    assert usage["prompt_tokens"] == 6
+    assert usage["completion_tokens"] == 4
+    assert usage["total_tokens"] == 10
 
 
 def test_api_llm_partial_derives_zspace_bundle() -> None:
@@ -274,6 +321,54 @@ def test_runtime_call_openai_chat_records_trace() -> None:
     ]
 
 
+def test_make_anthropic_messages_invoke_builds_messages() -> None:
+    client = _FakeAnthropicClient()
+    invoke = st.make_anthropic_messages_invoke(
+        client=client,
+        model="claude-test",
+        system="Reason in bipolar geometry coordinates.",
+        max_tokens=16,
+    )
+    response = invoke("trace this Anthropic message", temperature=0.1)
+
+    assert st.api_llm_text_from_response(response) == (
+        "Anthropic message entered bipolar Z-space geometry."
+    )
+    request = client.messages.calls[0]
+    assert request["model"] == "claude-test"
+    assert request["system"] == "Reason in bipolar geometry coordinates."
+    assert request["max_tokens"] == 16
+    assert request["temperature"] == 0.1
+    assert request["messages"] == [
+        {"role": "user", "content": "trace this Anthropic message"}
+    ]
+
+
+def test_runtime_call_anthropic_messages_records_trace() -> None:
+    client = _FakeAnthropicClient()
+    runtime = st.ApiLLMZSpaceRuntime(
+        [0.05, 0.15, -0.2, 0.31],
+        model="claude-test",
+        create_session=False,
+    )
+
+    trace = runtime.call_anthropic_messages(
+        "route Anthropic through bipolar geometry",
+        client=client,
+        max_tokens=20,
+    )
+
+    assert trace.provider == "anthropic"
+    assert trace.model == "claude-test"
+    assert trace.text == "Anthropic message entered bipolar Z-space geometry."
+    assert trace.finish_reason == "end_turn"
+    assert trace.usage["total_tokens"] == 15
+    assert trace.inference is not None
+    assert client.messages.calls[0]["messages"] == [
+        {"role": "user", "content": "route Anthropic through bipolar geometry"}
+    ]
+
+
 def test_api_llm_runtime_writes_loads_and_summarizes_jsonl(tmp_path) -> None:
     runtime = st.ApiLLMZSpaceRuntime(
         [0.12, -0.04, 0.33, -0.11],
@@ -322,6 +417,83 @@ def test_api_llm_runtime_writes_loads_and_summarizes_jsonl(tmp_path) -> None:
     assert summary["latency_ms"]["max"] == 200.0
     assert summary["confidence"]["min"] > 0.0
     assert "stability" in summary["metrics"]
+
+
+def test_api_llm_runtime_runs_prompt_suite_and_writes_jsonl(tmp_path) -> None:
+    runtime = st.ApiLLMZSpaceRuntime(
+        [0.12, -0.04, 0.33, -0.11],
+        provider="suite-provider",
+        model="suite-model",
+        create_session=False,
+    )
+    calls: list[str] = []
+
+    def fake_api(prompt: str, *, suffix: str) -> dict[str, object]:
+        calls.append(prompt)
+        return {
+            "model": "suite-model",
+            "output_text": f"{prompt} {suffix}",
+            "status": "completed",
+            "usage": {"input_tokens": 4, "output_tokens": 3, "total_tokens": 7},
+        }
+
+    path = tmp_path / "suite.jsonl"
+    result = runtime.run_prompts(
+        ["first route", "second route"],
+        fake_api,
+        suffix="entered Z-space.",
+        jsonl_out=path,
+    )
+
+    assert calls == ["first route", "second route"]
+    assert result["kind"] == "spiraltorch.api_llm_prompt_suite"
+    assert result["count"] == 2
+    assert result["runtime_trace_count"] == 2
+    assert result["provider"] == "suite-provider"
+    assert result["model"] == "suite-model"
+    assert result["jsonl"] == str(path)
+    assert result["summary"]["count"] == 2
+    assert len(result["traces"]) == 2
+    assert result["traces"][0]["prompt"] == "first route"
+
+    events = st.load_api_llm_trace_events(path)
+    assert [event["prompt"] for event in events] == ["first route", "second route"]
+    summary = st.summarize_api_llm_trace_events(path)
+    assert summary["count"] == 2
+    assert summary["models"] == {"suite-model": 2}
+    assert summary["total_tokens"] == 14.0
+
+
+def test_run_api_llm_prompt_suite_creates_runtime(tmp_path) -> None:
+    calls: list[tuple[str, float]] = []
+
+    def fake_api(prompt: str, *, temperature: float) -> dict[str, object]:
+        calls.append((prompt, temperature))
+        return {
+            "model": "top-level-suite",
+            "output_text": "Top-level prompt suite entered Z-space.",
+            "usage": {"prompt_tokens": 5, "completion_tokens": 6, "total_tokens": 11},
+        }
+
+    path = tmp_path / "top-level-suite.jsonl"
+    result = st.run_api_llm_prompt_suite(
+        ["route the API model"],
+        fake_api,
+        z_state=[0.2, -0.1, 0.4, 0.05],
+        provider="suite-provider",
+        model="top-level-suite",
+        create_session=False,
+        jsonl_out=path,
+        temperature=0.2,
+    )
+
+    assert calls == [("route the API model", 0.2)]
+    assert result["count"] == 1
+    assert result["runtime_trace_count"] == 1
+    assert result["requested_backend"] == "auto"
+    assert result["device_preflight"] is None
+    assert result["summary"]["models"] == {"top-level-suite": 1}
+    assert result["jsonl"] == str(path)
 
 
 def test_compare_api_llm_trace_runs_ranks_compact_artifacts(tmp_path) -> None:
