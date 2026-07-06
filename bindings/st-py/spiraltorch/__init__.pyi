@@ -2141,6 +2141,8 @@ class ApiLLMZSpaceRuntime:
         provider: str | None = ...,
         model: str | None = ...,
         context_partials: Any = ...,
+        context_prompt: bool = ...,
+        context_prompt_options: Mapping[str, Any] | None = ...,
         **kwargs: Any,
     ) -> ApiLLMTrace: ...
     def run_prompts(
@@ -2152,6 +2154,8 @@ class ApiLLMZSpaceRuntime:
         model: str | None = ...,
         jsonl_out: str | PathLike[str] | None = ...,
         context_partials: Any = ...,
+        context_prompt: bool = ...,
+        context_prompt_options: Mapping[str, Any] | None = ...,
         clear: bool = ...,
         **kwargs: Any,
     ) -> Dict[str, Any]: ...
@@ -2166,6 +2170,8 @@ class ApiLLMZSpaceRuntime:
         input_key: str = ...,
         provider: str | None = ...,
         context_partials: Any = ...,
+        context_prompt: bool = ...,
+        context_prompt_options: Mapping[str, Any] | None = ...,
         **request: Any,
     ) -> ApiLLMTrace: ...
     def call_openai_chat(
@@ -2180,6 +2186,8 @@ class ApiLLMZSpaceRuntime:
         messages: Sequence[Mapping[str, Any]] | None = ...,
         provider: str | None = ...,
         context_partials: Any = ...,
+        context_prompt: bool = ...,
+        context_prompt_options: Mapping[str, Any] | None = ...,
         **request: Any,
     ) -> ApiLLMTrace: ...
     def call_anthropic_messages(
@@ -2194,6 +2202,8 @@ class ApiLLMZSpaceRuntime:
         messages: Sequence[Mapping[str, Any]] | None = ...,
         provider: str | None = ...,
         context_partials: Any = ...,
+        context_prompt: bool = ...,
+        context_prompt_options: Mapping[str, Any] | None = ...,
         **request: Any,
     ) -> ApiLLMTrace: ...
     def summary(self) -> Dict[str, Any]: ...
@@ -2298,6 +2308,18 @@ def compare_api_llm_matrix_reports(
 ) -> Dict[str, Any]: ...
 
 
+def format_api_llm_context_prompt(
+    prompt: str,
+    context_partials: Any,
+    *,
+    header: str = ...,
+    max_partials: int = ...,
+    max_metrics: int = ...,
+    max_telemetry: int = ...,
+    precision: int = ...,
+) -> str: ...
+
+
 def make_anthropic_messages_invoke(
     *,
     client: Any | None = ...,
@@ -2326,6 +2348,8 @@ def run_api_llm_prompt_suite(
     strategy: str = ...,
     jsonl_out: str | PathLike[str] | None = ...,
     context_partials: Any = ...,
+    context_prompt: bool = ...,
+    context_prompt_options: Mapping[str, Any] | None = ...,
     clear: bool = ...,
     **kwargs: Any,
 ) -> Dict[str, Any]: ...
@@ -2347,6 +2371,8 @@ def run_api_llm_prompt_suite_matrix(
     strategy: str = ...,
     jsonl_dir: str | PathLike[str] | None = ...,
     context_partials: Any = ...,
+    context_prompt: bool = ...,
+    context_prompt_options: Mapping[str, Any] | None = ...,
     request_kwargs: Mapping[str, Mapping[str, Any]] | None = ...,
     near_best_tolerance: float = ...,
     clear: bool = ...,
@@ -7278,6 +7304,7 @@ __all__ = [
     "api_llm_wasm_context_partials",
     "compare_api_llm_matrix_reports",
     "compare_api_llm_trace_runs",
+    "format_api_llm_context_prompt",
     "load_api_llm_trace_events",
     "make_anthropic_messages_invoke",
     "make_openai_chat_invoke",

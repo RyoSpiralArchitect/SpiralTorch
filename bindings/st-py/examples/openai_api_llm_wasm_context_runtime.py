@@ -173,6 +173,8 @@ def run_openai_wasm_context(
     bundle_weight: float = 1.0,
     telemetry_prefix: str = "wasm",
     write_wasm_context_artifact: str | Path | None = None,
+    include_context_prompt: bool = False,
+    context_prompt_max_telemetry: int = 16,
 ) -> dict[str, Any]:
     """Run OpenAI-compatible inference with selected browser WASM context."""
 
@@ -207,6 +209,10 @@ def run_openai_wasm_context(
         model=selected_model,
         create_session=False,
         context_partials=context_partials,
+        context_prompt=include_context_prompt,
+        context_prompt_options={
+            "max_telemetry": context_prompt_max_telemetry,
+        },
         jsonl_out=trace_jsonl,
         **request_kwargs,
     )
@@ -230,6 +236,7 @@ def run_openai_wasm_context(
             "comparison": context_metadata.get("comparison"),
             "artifact_schema": context_metadata.get("artifact_schema"),
         },
+        "context_prompt_injected": bool(include_context_prompt),
         "wasm_context_seen": {
             "family_canvas": telemetry.get(f"{telemetry_prefix}.family_canvas"),
             "family_mellin": telemetry.get(f"{telemetry_prefix}.family_mellin"),
@@ -304,6 +311,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional path to persist the selected report handoff before inference.",
     )
     parser.add_argument(
+        "--include-context-prompt",
+        action="store_true",
+        help="Prepend bounded Z-space/WASM telemetry to the API model prompt.",
+    )
+    parser.add_argument("--context-prompt-max-telemetry", type=int, default=16)
+    parser.add_argument(
         "--trace-jsonl",
         default=None,
         help="Optional path for API LLM trace JSONL output.",
@@ -340,6 +353,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         bundle_weight=args.bundle_weight,
         telemetry_prefix=args.telemetry_prefix,
         write_wasm_context_artifact=args.write_wasm_context_artifact,
+        include_context_prompt=args.include_context_prompt,
+        context_prompt_max_telemetry=args.context_prompt_max_telemetry,
     )
     text = json.dumps(result, indent=args.indent, sort_keys=True) + "\n"
     if args.json_out:
