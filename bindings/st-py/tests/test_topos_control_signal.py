@@ -33,6 +33,34 @@ def test_topos_control_signal_from_mapping_normalises_pressure() -> None:
     assert signal["sampling_focus"] == pytest.approx(0.668003125)
     assert len(signal["runtime_hints"]) == 5
     assert len(signal["gradient"]) == 6
+    assert signal["training_hints"]["gradient_bias_scale"] == pytest.approx(0.0786561)
+    assert signal["training_hints"]["clip_scale"] == pytest.approx(0.871)
+    assert signal["training_hints"]["momentum_damping"] == pytest.approx(0.2535)
+    assert signal["inference_hints"]["top_p_scale"] == pytest.approx(0.890274375)
+    assert signal["inference_hints"]["frequency_penalty_bias"] == pytest.approx(0.28540109375)
+    assert signal["inference_hints"]["presence_penalty_bias"] == pytest.approx(-0.038100625)
+    assert signal["inference_hints"]["context_weight"] == pytest.approx(0.9225)
+
+
+def test_named_topos_hints_are_exported_for_learning_and_inference() -> None:
+    payload = {
+        "curvature": -0.9,
+        "tolerance": 1e-4,
+        "saturation": 2.0,
+        "porosity": 0.25,
+        "max_depth": 10,
+        "max_volume": 100,
+    }
+
+    training = st.topos_training_hints(payload, observed_depth=4, visited_volume=25)
+    inference = st.topos_inference_hints(payload, observed_depth=4, visited_volume=25)
+
+    assert training["learning_rate_scale"] == pytest.approx(0.8919875)
+    assert training["gradient_bias_scale"] == pytest.approx(0.0786561)
+    assert len(training["vector"]) == 6
+    assert inference["temperature_scale"] == pytest.approx(0.8533125)
+    assert inference["top_p_scale"] == pytest.approx(0.890274375)
+    assert len(inference["vector"]) == 6
 
 
 def test_topos_control_partial_feeds_zspace_inference() -> None:
@@ -62,10 +90,14 @@ def test_topos_control_partial_feeds_zspace_inference() -> None:
     assert telemetry["topos.learning_rate_scale"] < 1.0
     assert telemetry["topos.temperature_scale"] > 0.5
     assert telemetry["topos.regularization_scale"] > 1.0
+    assert telemetry["topos.training_hints.gradient_bias_scale"] > 0.0
+    assert telemetry["topos.inference_hints.context_weight"] > 0.0
 
 
 def test_topos_control_partial_is_exported_from_top_level() -> None:
     assert "topos_control_signal" in st.__all__
+    assert "topos_training_hints" in st.__all__
+    assert "topos_inference_hints" in st.__all__
     assert "topos_control_partial" in st.__all__
 
 
@@ -159,6 +191,23 @@ def test_topos_control_gain_can_drive_trainer_without_metric_gradient() -> None:
     assert active_loss > passive_loss
     assert active.last_topos_control["guard_strength"] == pytest.approx(0.8)
     assert active.last_topos_control["learning_rate_scale"] == pytest.approx(0.55)
+
+
+def test_topos_training_hints_reach_trainer_telemetry() -> None:
+    signal = st.topos_control_signal(
+        {"porosity": 0.25, "max_depth": 10, "max_volume": 100},
+        observed_depth=4,
+        visited_volume=25,
+    )
+    metrics = st.z_metrics(speed=0.0, memory=0.0, stability=0.0, telemetry={"topos": signal})
+    trainer = st.ZSpaceTrainer(z_dim=4, lam_frac=0.0, topos_control_gain=0.5)
+
+    trainer.step(metrics)
+
+    assert trainer.last_topos_control["training_hints.gradient_bias_scale"] == pytest.approx(
+        0.0786561
+    )
+    assert trainer.last_topos_control["training_hints.clip_scale"] == pytest.approx(0.871)
 
 
 def test_z_metrics_partial_preserves_topos_telemetry() -> None:

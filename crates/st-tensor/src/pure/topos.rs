@@ -114,6 +114,102 @@ pub struct ToposControlSignal {
     sampling_focus: f32,
 }
 
+/// Named optimizer controls projected from an open-topos pressure signal.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ToposTrainingHints {
+    learning_rate_scale: f32,
+    regularization_scale: f32,
+    step_damping: f32,
+    gradient_bias_scale: f32,
+    clip_scale: f32,
+    momentum_damping: f32,
+}
+
+impl ToposTrainingHints {
+    pub fn learning_rate_scale(&self) -> f32 {
+        self.learning_rate_scale
+    }
+
+    pub fn regularization_scale(&self) -> f32 {
+        self.regularization_scale
+    }
+
+    pub fn step_damping(&self) -> f32 {
+        self.step_damping
+    }
+
+    pub fn gradient_bias_scale(&self) -> f32 {
+        self.gradient_bias_scale
+    }
+
+    pub fn clip_scale(&self) -> f32 {
+        self.clip_scale
+    }
+
+    pub fn momentum_damping(&self) -> f32 {
+        self.momentum_damping
+    }
+
+    pub fn vector(&self) -> [f32; 6] {
+        [
+            self.learning_rate_scale,
+            self.regularization_scale,
+            self.step_damping,
+            self.gradient_bias_scale,
+            self.clip_scale,
+            self.momentum_damping,
+        ]
+    }
+}
+
+/// Named hosted-inference controls projected from an open-topos pressure signal.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ToposInferenceHints {
+    temperature_scale: f32,
+    top_p_scale: f32,
+    sampling_focus: f32,
+    frequency_penalty_bias: f32,
+    presence_penalty_bias: f32,
+    context_weight: f32,
+}
+
+impl ToposInferenceHints {
+    pub fn temperature_scale(&self) -> f32 {
+        self.temperature_scale
+    }
+
+    pub fn top_p_scale(&self) -> f32 {
+        self.top_p_scale
+    }
+
+    pub fn sampling_focus(&self) -> f32 {
+        self.sampling_focus
+    }
+
+    pub fn frequency_penalty_bias(&self) -> f32 {
+        self.frequency_penalty_bias
+    }
+
+    pub fn presence_penalty_bias(&self) -> f32 {
+        self.presence_penalty_bias
+    }
+
+    pub fn context_weight(&self) -> f32 {
+        self.context_weight
+    }
+
+    pub fn vector(&self) -> [f32; 6] {
+        [
+            self.temperature_scale,
+            self.top_p_scale,
+            self.sampling_focus,
+            self.frequency_penalty_bias,
+            self.presence_penalty_bias,
+            self.context_weight,
+        ]
+    }
+}
+
 impl ToposControlSignal {
     /// Builds a signal from a topos and optional traversal observations.
     pub fn from_observation(
@@ -260,6 +356,45 @@ impl ToposControlSignal {
 
     pub fn sampling_focus(&self) -> f32 {
         self.sampling_focus
+    }
+
+    /// Named optimizer controls derived from this signal.
+    pub fn training_hints(&self) -> ToposTrainingHints {
+        let gradient_bias_scale = (0.04 * self.closure_pressure
+            + 0.16 * self.step_damping
+            + 0.08 * self.sampling_focus * self.closure_pressure)
+            .clamp(0.0, 0.35);
+        let clip_scale = (1.0 - 0.5 * self.step_damping).clamp(0.25, 1.0);
+        let momentum_damping =
+            (0.75 * self.step_damping + 0.15 * self.closure_pressure).clamp(0.0, 0.85);
+        ToposTrainingHints {
+            learning_rate_scale: self.learning_rate_scale,
+            regularization_scale: self.regularization_scale,
+            step_damping: self.step_damping,
+            gradient_bias_scale,
+            clip_scale,
+            momentum_damping,
+        }
+    }
+
+    /// Named hosted-inference controls derived from this signal.
+    pub fn inference_hints(&self) -> ToposInferenceHints {
+        let top_p_scale =
+            (1.0 - 0.2 * self.sampling_focus + 0.1 * self.exploration_hint).clamp(0.05, 1.25);
+        let frequency_penalty_bias =
+            (0.35 * self.sampling_focus + 0.2 * self.step_damping).clamp(-2.0, 2.0);
+        let presence_penalty_bias =
+            (0.4 * self.exploration_hint - 0.2 * self.sampling_focus).clamp(-2.0, 2.0);
+        let context_weight =
+            (0.5 + 0.5 * self.guard_strength + 0.25 * self.closure_pressure).clamp(0.25, 1.25);
+        ToposInferenceHints {
+            temperature_scale: self.temperature_scale,
+            top_p_scale,
+            sampling_focus: self.sampling_focus,
+            frequency_penalty_bias,
+            presence_penalty_bias,
+            context_weight,
+        }
     }
 
     /// Compact runtime hint vector for optimizers and inference adapters.
@@ -2780,6 +2915,17 @@ mod tests {
         assert!(signal.sampling_focus() > 0.0);
         assert_eq!(signal.runtime_hints().len(), 5);
         assert_eq!(signal.gradient().len(), 6);
+        let training = signal.training_hints();
+        assert!((training.gradient_bias_scale() - 0.0786561).abs() < 1e-6);
+        assert!((training.clip_scale() - 0.871).abs() < 1e-6);
+        assert!((training.momentum_damping() - 0.2535).abs() < 1e-6);
+        assert_eq!(training.vector().len(), 6);
+        let inference = signal.inference_hints();
+        assert!((inference.top_p_scale() - 0.8902744).abs() < 1e-6);
+        assert!((inference.frequency_penalty_bias() - 0.2854011).abs() < 1e-6);
+        assert!((inference.presence_penalty_bias() + 0.03810062).abs() < 1e-6);
+        assert!((inference.context_weight() - 0.9225).abs() < 1e-6);
+        assert_eq!(inference.vector().len(), 6);
     }
 
     #[test]

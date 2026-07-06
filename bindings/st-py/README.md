@@ -737,6 +737,28 @@ then export `state_dict()` for audit or handoff. Geometry-aware policy traces
 remain Rust-first until their Python facade is stable enough to document as a
 copy-paste path.
 
+## Open-topos learning and inference hints
+
+`topos_control_signal()` turns an open-cartesian guard into one compact pressure
+signal, while `topos_training_hints()` and `topos_inference_hints()` split the
+same signal into named controls for local learning loops and hosted-model
+runtime requests.
+
+```python
+import spiraltorch as st
+
+topos = st.hypergrad_topos(max_depth=10, max_volume=100)
+signal = st.topos_control_signal(topos, observed_depth=4, visited_volume=25)
+training = st.topos_training_hints(signal)
+adapter = st.topos_runtime_adapter(signal, request_options={"base_temperature": 0.8})
+
+trainer = st.ZSpaceTrainer(z_dim=4, topos_control_gain=0.5)
+trainer.step(st.z.metrics(speed=0.0, memory=0.0, stability=0.0, telemetry={"topos": signal}))
+
+print("gradient bias:", training["gradient_bias_scale"])
+print("runtime temperature:", adapter["request"]["temperature"])
+```
+
 ## SpiralTorchRec quickstart
 
 `spiraltorch.rec` brings the SpiralTorchRec factorisation stack to notebooks and

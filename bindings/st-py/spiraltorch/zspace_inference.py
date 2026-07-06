@@ -28,6 +28,8 @@ __all__ = [
     "inference_to_zmetrics",
     "prepare_trainer_step_payload",
     "topos_control_signal",
+    "topos_training_hints",
+    "topos_inference_hints",
     "topos_control_partial",
     "decode_zspace_embedding",
     "infer_from_partial",
@@ -215,6 +217,157 @@ def _clamp_float(value: Any, lower: float, upper: float, *, default: float) -> f
     return max(lower, min(upper, numeric))
 
 
+def _normalise_topos_training_hints(
+    payload: Any,
+    *,
+    learning_rate_scale: float,
+    regularization_scale: float,
+    step_damping: float,
+    closure_pressure: float,
+    sampling_focus: float,
+) -> dict[str, Any]:
+    source = payload if isinstance(payload, MappingABC) else {}
+    default_gradient_bias_scale = max(
+        0.0,
+        min(
+            0.35,
+            0.04 * closure_pressure
+            + 0.16 * step_damping
+            + 0.08 * sampling_focus * closure_pressure,
+        ),
+    )
+    default_clip_scale = max(0.25, min(1.0, 1.0 - 0.5 * step_damping))
+    default_momentum_damping = max(
+        0.0,
+        min(0.85, 0.75 * step_damping + 0.15 * closure_pressure),
+    )
+    hints = {
+        "learning_rate_scale": _clamp_float(
+            source.get("learning_rate_scale", learning_rate_scale),
+            0.1,
+            1.25,
+            default=learning_rate_scale,
+        ),
+        "regularization_scale": _clamp_float(
+            source.get("regularization_scale", regularization_scale),
+            0.5,
+            2.0,
+            default=regularization_scale,
+        ),
+        "step_damping": _unit_interval(
+            source.get("step_damping", step_damping),
+            default=step_damping,
+        ),
+        "gradient_bias_scale": _clamp_float(
+            source.get("gradient_bias_scale", default_gradient_bias_scale),
+            0.0,
+            0.35,
+            default=default_gradient_bias_scale,
+        ),
+        "clip_scale": _clamp_float(
+            source.get("clip_scale", default_clip_scale),
+            0.25,
+            1.0,
+            default=default_clip_scale,
+        ),
+        "momentum_damping": _clamp_float(
+            source.get("momentum_damping", default_momentum_damping),
+            0.0,
+            0.85,
+            default=default_momentum_damping,
+        ),
+    }
+    vector = _coerce_gradient(source.get("vector"))
+    if vector is None:
+        vector = [
+            hints["learning_rate_scale"],
+            hints["regularization_scale"],
+            hints["step_damping"],
+            hints["gradient_bias_scale"],
+            hints["clip_scale"],
+            hints["momentum_damping"],
+        ]
+    hints["vector"] = vector[:6]
+    return hints
+
+
+def _normalise_topos_inference_hints(
+    payload: Any,
+    *,
+    temperature_scale: float,
+    sampling_focus: float,
+    exploration_hint: float,
+    step_damping: float,
+    guard_strength: float,
+    closure_pressure: float,
+) -> dict[str, Any]:
+    source = payload if isinstance(payload, MappingABC) else {}
+    default_top_p_scale = max(
+        0.05,
+        min(1.25, 1.0 - 0.2 * sampling_focus + 0.1 * exploration_hint),
+    )
+    default_frequency_penalty_bias = max(
+        -2.0,
+        min(2.0, 0.35 * sampling_focus + 0.2 * step_damping),
+    )
+    default_presence_penalty_bias = max(
+        -2.0,
+        min(2.0, 0.4 * exploration_hint - 0.2 * sampling_focus),
+    )
+    default_context_weight = max(
+        0.25,
+        min(1.25, 0.5 + 0.5 * guard_strength + 0.25 * closure_pressure),
+    )
+    hints = {
+        "temperature_scale": _clamp_float(
+            source.get("temperature_scale", temperature_scale),
+            0.5,
+            1.5,
+            default=temperature_scale,
+        ),
+        "top_p_scale": _clamp_float(
+            source.get("top_p_scale", default_top_p_scale),
+            0.05,
+            1.25,
+            default=default_top_p_scale,
+        ),
+        "sampling_focus": _unit_interval(
+            source.get("sampling_focus", sampling_focus),
+            default=sampling_focus,
+        ),
+        "frequency_penalty_bias": _clamp_float(
+            source.get("frequency_penalty_bias", default_frequency_penalty_bias),
+            -2.0,
+            2.0,
+            default=default_frequency_penalty_bias,
+        ),
+        "presence_penalty_bias": _clamp_float(
+            source.get("presence_penalty_bias", default_presence_penalty_bias),
+            -2.0,
+            2.0,
+            default=default_presence_penalty_bias,
+        ),
+        "context_weight": _clamp_float(
+            source.get("context_weight", default_context_weight),
+            0.25,
+            1.25,
+            default=default_context_weight,
+        ),
+    }
+    vector = _coerce_gradient(source.get("vector"))
+    if vector is None:
+        vector = [
+            hints["temperature_scale"],
+            hints["top_p_scale"],
+            hints["sampling_focus"],
+            hints["frequency_penalty_bias"],
+            hints["presence_penalty_bias"],
+            hints["context_weight"],
+        ]
+    hints["vector"] = vector[:6]
+    return hints
+
+
 def _normalise_topos_control_signal(payload: Mapping[str, Any]) -> dict[str, Any]:
     curvature = float(payload.get("curvature", -1.0))
     tolerance = float(payload.get("tolerance", 1e-3))
@@ -324,6 +477,23 @@ def _normalise_topos_control_signal(payload: Mapping[str, Any]) -> dict[str, Any
             depth_pressure,
             volume_pressure,
         ]
+    training_hints = _normalise_topos_training_hints(
+        payload.get("training_hints"),
+        learning_rate_scale=learning_rate_scale,
+        regularization_scale=regularization_scale,
+        step_damping=step_damping,
+        closure_pressure=closure_pressure,
+        sampling_focus=sampling_focus,
+    )
+    inference_hints = _normalise_topos_inference_hints(
+        payload.get("inference_hints"),
+        temperature_scale=temperature_scale,
+        sampling_focus=sampling_focus,
+        exploration_hint=exploration_hint,
+        step_damping=step_damping,
+        guard_strength=guard_strength,
+        closure_pressure=closure_pressure,
+    )
     return {
         "curvature": curvature,
         "tolerance": tolerance,
@@ -348,6 +518,8 @@ def _normalise_topos_control_signal(payload: Mapping[str, Any]) -> dict[str, Any
         "sampling_focus": sampling_focus,
         "runtime_hints": runtime_hints,
         "gradient": gradient_values,
+        "training_hints": training_hints,
+        "inference_hints": inference_hints,
     }
 
 
@@ -468,6 +640,26 @@ def topos_control_signal(
         visited_volume=int(visited_volume),
         porosity=porosity,
     )
+
+
+def topos_training_hints(
+    topos: Any | None = None,
+    **signal_options: Any,
+) -> dict[str, Any]:
+    """Return named optimizer hints derived from an open-topos signal."""
+
+    signal = topos_control_signal(topos, **signal_options)
+    return dict(signal["training_hints"])
+
+
+def topos_inference_hints(
+    topos: Any | None = None,
+    **signal_options: Any,
+) -> dict[str, Any]:
+    """Return named hosted-inference hints derived from an open-topos signal."""
+
+    signal = topos_control_signal(topos, **signal_options)
+    return dict(signal["inference_hints"])
 
 
 def topos_control_partial(

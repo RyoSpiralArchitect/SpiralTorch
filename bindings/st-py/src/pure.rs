@@ -12,7 +12,8 @@ use st_tensor::measure::{
 use st_tensor::{
     AmegaHypergrad, AmegaRealgrad, Complex32 as StComplex32, ComplexTensor, DesireGradientControl,
     DesireGradientInterpretation, GradientSummary, HypergradTelemetry, LanguageWaveEncoder,
-    OpenCartesianTopos, Tensor, TensorBiome, ToposControlSignal, ZBox, ZBoxSite,
+    OpenCartesianTopos, Tensor, TensorBiome, ToposControlSignal, ToposInferenceHints,
+    ToposTrainingHints, ZBox, ZBoxSite,
 };
 
 fn py_complex_to_st(values: Vec<PyComplex32>) -> Vec<StComplex32> {
@@ -57,6 +58,41 @@ fn topos_control_signal_to_pydict(
     dict.set_item("sampling_focus", signal.sampling_focus())?;
     dict.set_item("runtime_hints", signal.runtime_hints().to_vec())?;
     dict.set_item("gradient", signal.gradient().to_vec())?;
+    dict.set_item(
+        "training_hints",
+        topos_training_hints_to_pydict(py, signal.training_hints())?,
+    )?;
+    dict.set_item(
+        "inference_hints",
+        topos_inference_hints_to_pydict(py, signal.inference_hints())?,
+    )?;
+    Ok(dict.into_py(py))
+}
+
+fn topos_training_hints_to_pydict(py: Python<'_>, hints: ToposTrainingHints) -> PyResult<PyObject> {
+    let dict = PyDict::new(py);
+    dict.set_item("learning_rate_scale", hints.learning_rate_scale())?;
+    dict.set_item("regularization_scale", hints.regularization_scale())?;
+    dict.set_item("step_damping", hints.step_damping())?;
+    dict.set_item("gradient_bias_scale", hints.gradient_bias_scale())?;
+    dict.set_item("clip_scale", hints.clip_scale())?;
+    dict.set_item("momentum_damping", hints.momentum_damping())?;
+    dict.set_item("vector", hints.vector().to_vec())?;
+    Ok(dict.into_py(py))
+}
+
+fn topos_inference_hints_to_pydict(
+    py: Python<'_>,
+    hints: ToposInferenceHints,
+) -> PyResult<PyObject> {
+    let dict = PyDict::new(py);
+    dict.set_item("temperature_scale", hints.temperature_scale())?;
+    dict.set_item("top_p_scale", hints.top_p_scale())?;
+    dict.set_item("sampling_focus", hints.sampling_focus())?;
+    dict.set_item("frequency_penalty_bias", hints.frequency_penalty_bias())?;
+    dict.set_item("presence_penalty_bias", hints.presence_penalty_bias())?;
+    dict.set_item("context_weight", hints.context_weight())?;
+    dict.set_item("vector", hints.vector().to_vec())?;
     Ok(dict.into_py(py))
 }
 
@@ -197,6 +233,36 @@ impl PyOpenCartesianTopos {
             py,
             self.inner
                 .control_signal_for(observed_depth, visited_volume),
+        )
+    }
+
+    #[pyo3(signature = (observed_depth=0, visited_volume=0))]
+    pub fn training_hints(
+        &self,
+        py: Python<'_>,
+        observed_depth: usize,
+        visited_volume: usize,
+    ) -> PyResult<PyObject> {
+        topos_training_hints_to_pydict(
+            py,
+            self.inner
+                .control_signal_for(observed_depth, visited_volume)
+                .training_hints(),
+        )
+    }
+
+    #[pyo3(signature = (observed_depth=0, visited_volume=0))]
+    pub fn inference_hints(
+        &self,
+        py: Python<'_>,
+        observed_depth: usize,
+        visited_volume: usize,
+    ) -> PyResult<PyObject> {
+        topos_inference_hints_to_pydict(
+            py,
+            self.inner
+                .control_signal_for(observed_depth, visited_volume)
+                .inference_hints(),
         )
     }
 

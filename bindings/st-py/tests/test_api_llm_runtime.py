@@ -388,6 +388,33 @@ def test_topos_runtime_request_scales_hosted_llm_controls() -> None:
     assert request["presence_penalty"] < request["frequency_penalty"]
 
 
+def test_topos_runtime_request_prefers_named_inference_hints() -> None:
+    request = st.topos_runtime_request(
+        {
+            "curvature": -0.9,
+            "max_depth": 10,
+            "max_volume": 100,
+            "temperature_scale": 1.3,
+            "inference_hints": {
+                "temperature_scale": 0.5,
+                "top_p_scale": 0.7,
+                "frequency_penalty_bias": 0.3,
+                "presence_penalty_bias": -0.1,
+            },
+        },
+        observed_depth=4,
+        visited_volume=25,
+        base_temperature=0.8,
+        base_top_p=0.9,
+        include_penalties=True,
+    )
+
+    assert request["temperature"] == pytest.approx(0.4)
+    assert request["top_p"] == pytest.approx(0.63)
+    assert request["frequency_penalty"] == pytest.approx(0.3)
+    assert request["presence_penalty"] == pytest.approx(-0.1)
+
+
 def test_topos_runtime_adapter_is_serializable_context_payload() -> None:
     adapter = st.topos_runtime_adapter(
         {"porosity": 0.25, "max_depth": 10, "max_volume": 100},
@@ -399,10 +426,14 @@ def test_topos_runtime_adapter_is_serializable_context_payload() -> None:
     assert adapter["kind"] == "spiraltorch.topos_runtime_adapter"
     assert adapter["request"]["temperature"] == pytest.approx(0.68265)
     assert adapter["signal"]["sampling_focus"] == pytest.approx(0.668003125)
+    assert adapter["signal"]["inference_hints"]["top_p_scale"] == pytest.approx(0.890274375)
     assert adapter["context_partial"]["origin"] == "topos:runtime"
     assert adapter["context_partial"]["telemetry"]["topos.temperature_scale"] == pytest.approx(
         0.8533125
     )
+    assert adapter["context_partial"]["telemetry"][
+        "topos.inference_hints.context_weight"
+    ] == pytest.approx(0.9225)
 
 
 def test_topos_runtime_adapter_can_be_used_directly_as_prompt_context() -> None:

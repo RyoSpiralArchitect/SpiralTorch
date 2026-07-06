@@ -1092,6 +1092,16 @@ class OpenCartesianTopos:
         observed_depth: int = ...,
         visited_volume: int = ...,
     ) -> Dict[str, object]: ...
+    def training_hints(
+        self,
+        observed_depth: int = ...,
+        visited_volume: int = ...,
+    ) -> Dict[str, object]: ...
+    def inference_hints(
+        self,
+        observed_depth: int = ...,
+        visited_volume: int = ...,
+    ) -> Dict[str, object]: ...
     def site(self) -> ZBoxSite: ...
     def guard_zbox(self, zbox: ZBox) -> None: ...
     def guard_cover(self, cover: Sequence[ZBox]) -> None: ...
@@ -2859,6 +2869,16 @@ def topos_control_signal(
     porosity: float | None = ...,
     observed_depth: int = ...,
     visited_volume: int = ...,
+) -> Dict[str, object]: ...
+
+def topos_training_hints(
+    topos: Any | None = ...,
+    **signal_options: Any,
+) -> Dict[str, object]: ...
+
+def topos_inference_hints(
+    topos: Any | None = ...,
+    **signal_options: Any,
 ) -> Dict[str, object]: ...
 
 def topos_control_partial(
