@@ -146,6 +146,9 @@ matrix = st.run_api_llm_prompt_suite_matrix(
     jsonl_dir="api_llm_matrix",
 )
 print(matrix["comparison"]["winners"]["best_score"])
+print(matrix["comparison"]["winners"]["highest_efficiency"])
+print(matrix["comparison"]["near_best"])
+print(matrix["comparison"]["runs"][0]["quality_score"])
 print(matrix["comparison"]["runs"][0]["refusal_rate"])
 ```
 

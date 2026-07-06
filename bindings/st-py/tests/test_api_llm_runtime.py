@@ -702,3 +702,66 @@ def test_compare_api_llm_trace_runs_ranks_compact_artifacts(tmp_path) -> None:
     assert comparison["recommendations"] == [
         "prefer fast for the highest aggregate API LLM route score"
     ]
+
+
+def test_compare_api_llm_trace_runs_exposes_route_tradeoffs(tmp_path) -> None:
+    compact = st.ApiLLMZSpaceRuntime(
+        [0.12, -0.04, 0.33, -0.11],
+        provider="example",
+        model="compact-model",
+        create_session=False,
+    )
+    compact.record_response(
+        {
+            "model": "compact-model",
+            "output_text": "Compact route entered Z-space.",
+            "status": "completed",
+            "usage": {"prompt_tokens": 8, "completion_tokens": 8, "total_tokens": 16},
+        },
+        prompt="compact route",
+        latency_ms=100.0,
+    )
+    compact_path = tmp_path / "compact.jsonl"
+    compact.write_jsonl(compact_path)
+
+    expanded = st.ApiLLMZSpaceRuntime(
+        [0.12, -0.04, 0.33, -0.11],
+        provider="example",
+        model="expanded-model",
+        create_session=False,
+    )
+    expanded.record_response(
+        {
+            "model": "expanded-model",
+            "output_text": (
+                "Expanded route entered Z-space with additional context for a "
+                "near-best tradeoff comparison."
+            ),
+            "status": "completed",
+            "usage": {"prompt_tokens": 8, "completion_tokens": 18, "total_tokens": 26},
+        },
+        prompt="expanded route",
+        latency_ms=180.0,
+    )
+    expanded_path = tmp_path / "expanded.jsonl"
+    expanded.write_jsonl(expanded_path)
+
+    comparison = st.compare_api_llm_trace_runs(
+        {"compact": compact_path, "expanded": expanded_path},
+        near_best_tolerance=0.25,
+    )
+    rows = {row["label"]: row for row in comparison["runs"]}
+
+    assert comparison["near_best_tolerance"] == 0.25
+    assert {row["label"] for row in comparison["near_best"]} == {
+        "compact",
+        "expanded",
+    }
+    assert "compare near-best routes within 0.250" in comparison["recommendations"][1]
+    assert comparison["winners"]["highest_efficiency"] == "compact"
+    assert comparison["winners"]["highest_quality"] in {"compact", "expanded"}
+    assert rows["compact"]["latency_cost"] < rows["expanded"]["latency_cost"]
+    assert rows["compact"]["token_cost"] < rows["expanded"]["token_cost"]
+    assert rows["compact"]["health_penalty"] == 0.0
+    assert 0.0 <= rows["expanded"]["quality_score"] <= 1.0
+    assert 0.0 <= rows["expanded"]["efficiency_score"] <= 1.0
