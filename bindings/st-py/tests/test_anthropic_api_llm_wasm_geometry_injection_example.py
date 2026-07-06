@@ -73,6 +73,35 @@ def test_geometry_injection_example_writes_trace_artifacts(tmp_path) -> None:
     assert Path(result["trace_paths"]["calm"]).exists()
 
 
+def test_geometry_injection_example_repeats_trace_artifacts(tmp_path) -> None:
+    module = _load_example_module()
+    trace_dir = tmp_path / "repeated-traces"
+
+    result = module.run_geometry_injection(
+        prompt="Route repeated trace artifacts.",
+        conditions=("baseline", "calm"),
+        live_anthropic=False,
+        repeat=2,
+        trace_dir=trace_dir,
+    )
+
+    assert result["repeat"] == 2
+    assert len(result["runs"]["baseline"]) == 2
+    assert len(result["runs"]["calm"]) == 2
+    assert result["trace_comparison"]["count"] == 2
+    assert result["trace_summaries"]["baseline"]["count"] == 2
+    assert result["trace_summaries"]["calm"]["count"] == 2
+    assert result["run_trace_comparison"]["count"] == 4
+    calm_events = st.load_api_llm_trace_events(result["trace_paths"]["calm"])
+    assert len(calm_events) == 2
+    assert set(result["run_trace_paths"]) == {
+        "baseline.1",
+        "baseline.2",
+        "calm.1",
+        "calm.2",
+    }
+
+
 def test_geometry_injection_example_cli_writes_json(tmp_path, capsys) -> None:
     module = _load_example_module()
     out = tmp_path / "geometry-injection.json"
@@ -86,6 +115,8 @@ def test_geometry_injection_example_cli_writes_json(tmp_path, capsys) -> None:
             "--full-context",
             "--trace-dir",
             str(tmp_path / "traces"),
+            "--repeat",
+            "2",
             "--json-out",
             str(out),
             "--indent",
@@ -99,7 +130,10 @@ def test_geometry_injection_example_cli_writes_json(tmp_path, capsys) -> None:
     assert printed == written
     assert printed["context_mode"] == "full"
     assert printed["conditions"] == ["calm"]
+    assert printed["repeat"] == 2
     assert printed["trace_comparison"]["count"] == 1
+    assert printed["trace_summaries"]["calm"]["count"] == 2
+    assert printed["run_trace_comparison"]["count"] == 2
     assert printed["results"]["calm"]["context_origins"] == [
         "geometry:scale",
         "geometry:field",

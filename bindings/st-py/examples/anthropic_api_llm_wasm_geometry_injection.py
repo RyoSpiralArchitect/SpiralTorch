@@ -11,6 +11,7 @@ nodejs`` and pass the generated JS glue:
         bindings/st-py/examples/anthropic_api_llm_wasm_geometry_injection.py \
         --wasm-pkg /tmp/spiraltorch-wasm-node-pkg/spiraltorch_wasm.js \
         --live-anthropic --model claude-fable-5 \
+        --repeat 3 \
         --trace-dir /tmp/spiraltorch-geometry-traces
 
 The API key is read only by the Anthropic SDK and is never printed.
@@ -36,8 +37,9 @@ DEFAULT_PROMPT = (
     "baseline decoding."
 )
 DEFAULT_SYSTEM = (
-    "Answer in one compact sentence. Treat SpiralTorch Z-space context as "
-    "runtime telemetry; do not quote or enumerate the telemetry block."
+    "Return the final answer only, in one compact sentence under 24 words. "
+    "Treat SpiralTorch Z-space context as runtime telemetry; do not quote or "
+    "enumerate the telemetry block."
 )
 DEFAULT_Z_STATE = [0.18, -0.07, 0.31, -0.14, 0.22, -0.05]
 DEFAULT_CONDITIONS = ("baseline", "calm", "turbulent")
@@ -272,6 +274,10 @@ def _safe_trace_label(label: str) -> str:
     return cleaned.strip("-_.") or "condition"
 
 
+def _run_trace_label(condition: str, run_index: int) -> str:
+    return f"{_safe_trace_label(condition)}.{run_index + 1}"
+
+
 def run_geometry_injection(
     *,
     prompt: str = DEFAULT_PROMPT,
@@ -284,6 +290,7 @@ def run_geometry_injection(
     invoke: Callable[..., Any] | None = None,
     system: str | None = DEFAULT_SYSTEM,
     max_tokens: int = 180,
+    repeat: int = 1,
     gradient_dim: int = 6,
     consensus_weight: float = 1.35,
     full_context: bool = False,
@@ -291,6 +298,8 @@ def run_geometry_injection(
 ) -> dict[str, Any]:
     """Run baseline/calm/turbulent Z-space geometry injection comparisons."""
 
+    if repeat < 1:
+        raise ValueError("repeat must be at least 1")
     if probe_sets is None:
         probe_source = "node-st-wasm" if wasm_pkg else "builtin-wasm-shaped"
         resolved_probe_sets = (
@@ -305,8 +314,11 @@ def run_geometry_injection(
         raise RuntimeError("Set ANTHROPIC_API_KEY or omit --live-anthropic")
 
     rows: dict[str, Any] = {}
+    run_rows: dict[str, list[dict[str, Any]]] = {}
     trace_paths: dict[str, str] = {}
     trace_summaries: dict[str, Any] = {}
+    run_trace_paths: dict[str, str] = {}
+    run_trace_summaries: dict[str, Any] = {}
     trace_root = Path(trace_dir) if trace_dir is not None else None
     if trace_root is not None:
         trace_root.mkdir(parents=True, exist_ok=True)
@@ -319,45 +331,64 @@ def run_geometry_injection(
             consensus_weight=consensus_weight,
             consensus_only=not full_context,
         )
-        runtime = st.ApiLLMZSpaceRuntime(
-            list(z_state),
-            provider="anthropic" if live_anthropic else "local-demo",
-            model=model,
-            create_session=False,
-            smoothing=0.32,
-        )
-        if live_anthropic:
-            trace = runtime.call_anthropic_messages(
-                prompt,
+        condition_rows: list[dict[str, Any]] = []
+        condition_traces: list[st.ApiLLMTrace] = []
+        for run_index in range(repeat):
+            runtime = st.ApiLLMZSpaceRuntime(
+                list(z_state),
+                provider="anthropic" if live_anthropic else "local-demo",
                 model=model,
-                system=system,
-                context_partials=context,
-                context_prompt=bool(context),
-                context_prompt_options={
-                    "max_partials": 5 if full_context else 1,
-                    "max_metrics": 8,
-                    "max_telemetry": 18,
-                },
-                max_tokens=max_tokens,
+                create_session=False,
+                smoothing=0.32,
             )
-        else:
-            trace = runtime.call(
-                invoke or fake_api_model,
-                prompt,
-                provider="local-demo",
-                model=model,
-                context_partials=context,
-                context_prompt=bool(context),
-                context_prompt_options={
-                    "max_partials": 5 if full_context else 1,
-                    "max_metrics": 8,
-                    "max_telemetry": 18,
-                },
-            )
-        rows[condition] = _compact_trace(trace, context, runtime)
+            if live_anthropic:
+                trace = runtime.call_anthropic_messages(
+                    prompt,
+                    model=model,
+                    system=system,
+                    context_partials=context,
+                    context_prompt=bool(context),
+                    context_prompt_options={
+                        "max_partials": 5 if full_context else 1,
+                        "max_metrics": 8,
+                        "max_telemetry": 18,
+                    },
+                    max_tokens=max_tokens,
+                )
+            else:
+                trace = runtime.call(
+                    invoke or fake_api_model,
+                    prompt,
+                    provider="local-demo",
+                    model=model,
+                    context_partials=context,
+                    context_prompt=bool(context),
+                    context_prompt_options={
+                        "max_partials": 5 if full_context else 1,
+                        "max_metrics": 8,
+                        "max_telemetry": 18,
+                    },
+                )
+            condition_rows.append(_compact_trace(trace, context, runtime))
+            condition_traces.append(trace)
+            if trace_root is not None and repeat > 1:
+                run_label = _run_trace_label(str(condition), run_index)
+                run_trace_path = trace_root / f"{run_label}.jsonl"
+                run_trace_paths[run_label] = st.write_api_llm_trace_jsonl(
+                    [trace],
+                    run_trace_path,
+                )
+                run_trace_summaries[run_label] = st.summarize_api_llm_trace_events(
+                    run_trace_path
+                )
+        rows[condition] = condition_rows[-1]
+        run_rows[condition] = condition_rows
         if trace_root is not None:
             trace_path = trace_root / f"{_safe_trace_label(str(condition))}.jsonl"
-            trace_paths[str(condition)] = runtime.write_jsonl(trace_path)
+            trace_paths[str(condition)] = st.write_api_llm_trace_jsonl(
+                condition_traces,
+                trace_path,
+            )
             trace_summaries[str(condition)] = st.summarize_api_llm_trace_events(
                 trace_path
             )
@@ -370,12 +401,21 @@ def run_geometry_injection(
         "context_mode": "full" if full_context else "consensus-only",
         "wasm_pkg": None if wasm_pkg is None else str(wasm_pkg),
         "conditions": list(conditions),
+        "repeat": repeat,
         "results": rows,
     }
+    if repeat > 1:
+        result["runs"] = run_rows
     if trace_paths:
         result["trace_paths"] = trace_paths
         result["trace_summaries"] = trace_summaries
         result["trace_comparison"] = st.compare_api_llm_trace_runs(trace_paths)
+    if run_trace_paths:
+        result["run_trace_paths"] = run_trace_paths
+        result["run_trace_summaries"] = run_trace_summaries
+        result["run_trace_comparison"] = st.compare_api_llm_trace_runs(
+            run_trace_paths
+        )
     return result
 
 
@@ -387,6 +427,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--live-anthropic", action="store_true")
     parser.add_argument("--system", default=DEFAULT_SYSTEM)
     parser.add_argument("--max-tokens", type=int, default=180)
+    parser.add_argument("--repeat", type=int, default=1)
     parser.add_argument("--gradient-dim", type=int, default=6)
     parser.add_argument("--consensus-weight", type=float, default=1.35)
     parser.add_argument(
@@ -415,6 +456,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         live_anthropic=args.live_anthropic,
         system=args.system,
         max_tokens=args.max_tokens,
+        repeat=args.repeat,
         gradient_dim=args.gradient_dim,
         consensus_weight=args.consensus_weight,
         full_context=args.full_context,
