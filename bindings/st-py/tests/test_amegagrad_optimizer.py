@@ -128,3 +128,56 @@ def test_amegagrad_keeps_default_tune_non_topos_by_default() -> None:
     assert opt.real.learning_rate() == pytest.approx(0.02)
     assert opt.topos_diagnostics()["effect"] is None
     assert opt.topos_training_hints()["clip_scale"] <= 1.0
+
+
+def test_amegagrad_session_writes_topos_training_trace(tmp_path) -> None:
+    _require_native()
+
+    guard = st.hypergrad_topos(
+        curvature=-0.9,
+        tolerance=1e-4,
+        saturation=2.0,
+        max_depth=8,
+        max_volume=16,
+    )
+    session = st.amegagrad_session(
+        (1, 4),
+        curvature=-0.9,
+        hyper_learning_rate=0.04,
+        real_learning_rate=0.02,
+        topos=guard,
+        topos_control_gain=1.0,
+        topos_observed_depth=4,
+        topos_visited_volume=8,
+        telemetry=False,
+        z_lam_frac=0.0,
+    )
+    wave = st.Tensor((1, 4), data=[0.4, -0.6, 0.2, 0.1])
+
+    session.step_wave(wave)
+    metrics = session.last_step_metrics
+    trace_path = tmp_path / "amegagrad-topos-trace.jsonl"
+    session.write_trainer_trace_event(trace_path, mode="w")
+
+    assert metrics["topos.closure_pressure"] == pytest.approx(0.5)
+    assert metrics["topos.optimizer_effect.rate_scale"] < 1.0
+    assert metrics["hypergrad.learning_rate"] == pytest.approx(
+        metrics["topos.optimizer_effect.hyper_learning_rate"]
+    )
+    assert metrics["realgrad.learning_rate"] == pytest.approx(
+        metrics["topos.optimizer_effect.real_learning_rate"]
+    )
+
+    events = st.load_trainer_trace_events(trace_path)
+    summary = st.summarize_trainer_trace_events(trace_path)
+
+    assert events[0]["step"] == 1
+    assert events[0]["metrics"]["extra"]["topos.optimizer_effect.rate_scale"] == pytest.approx(
+        metrics["topos.optimizer_effect.rate_scale"]
+    )
+    assert summary["count"] == 1
+    assert summary["metrics"]["realgrad.l2"]["samples"] == 1
+    assert summary["topos_context"]["observed_count"] == 1
+    assert summary["topos_context"]["optimizer_rate_scale"]["last"] == pytest.approx(
+        metrics["topos.optimizer_effect.rate_scale"]
+    )
