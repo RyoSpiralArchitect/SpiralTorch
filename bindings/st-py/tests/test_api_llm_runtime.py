@@ -10,8 +10,11 @@ st = pytest.importorskip("spiraltorch")
 def test_api_llm_runtime_exports_from_top_level() -> None:
     assert "ApiLLMZSpaceRuntime" in st.__all__
     assert "api_llm_partial_from_response" in st.__all__
+    assert "load_api_llm_trace_events" in st.__all__
     assert "make_openai_chat_invoke" in st.__all__
     assert "make_openai_responses_invoke" in st.__all__
+    assert "summarize_api_llm_trace_events" in st.__all__
+    assert "write_api_llm_trace_jsonl" in st.__all__
 
 
 class _FakeResponses:
@@ -268,3 +271,53 @@ def test_runtime_call_openai_chat_records_trace() -> None:
         {"role": "assistant", "content": "Prior trace acknowledged."},
         {"role": "user", "content": "route the chat model"},
     ]
+
+
+def test_api_llm_runtime_writes_loads_and_summarizes_jsonl(tmp_path) -> None:
+    runtime = st.ApiLLMZSpaceRuntime(
+        [0.12, -0.04, 0.33, -0.11],
+        provider="example",
+        model="api-model-test",
+        create_session=False,
+    )
+
+    runtime.record_response(
+        _chat_response(),
+        prompt="first trace",
+        latency_ms=100.0,
+    )
+    runtime.record_response(
+        {
+            "model": "api-model-test",
+            "output_text": "Second Z-space runtime trace.",
+            "status": "completed",
+            "usage": {"input_tokens": 3, "output_tokens": 4, "total_tokens": 7},
+        },
+        prompt="second trace",
+        latency_ms=200.0,
+    )
+
+    runtime_summary = runtime.summary()
+    assert runtime_summary["count"] == 2
+    assert runtime_summary["models"] == {"api-model-test": 2}
+    assert runtime_summary["usage"]["total_tokens"]["mean"] == 9.0
+    assert runtime.as_dict()["summary"]["count"] == 2
+
+    path = tmp_path / "api-llm-trace.jsonl"
+    assert runtime.write_jsonl(path) == str(path)
+
+    events = st.load_api_llm_trace_events(path)
+    assert len(events) == 2
+    assert events[0]["step"] == 0
+    assert events[1]["text"] == "Second Z-space runtime trace."
+
+    summary = st.summarize_api_llm_trace_events(path)
+    assert summary["count"] == 2
+    assert summary["first_step"] == 0
+    assert summary["last_step"] == 1
+    assert summary["last_text_preview"] == "Second Z-space runtime trace."
+    assert summary["models"] == {"api-model-test": 2}
+    assert summary["total_tokens"] == 18.0
+    assert summary["latency_ms"]["max"] == 200.0
+    assert summary["confidence"]["min"] > 0.0
+    assert "stability" in summary["metrics"]

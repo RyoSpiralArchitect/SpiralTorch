@@ -24,7 +24,9 @@ start with four handles:
   become Z-space partial traces without requiring the OpenAI SDK or any other
   hosted-model package at install time; if `openai` is installed, use
   `runtime.call_openai_responses(...)` or `spiraltorch.make_openai_chat_invoke(...)`
-  with `OPENAI_API_KEY` from the environment.
+  with `OPENAI_API_KEY` from the environment. Runtime traces can be persisted
+  with `runtime.write_jsonl(...)` and summarized with
+  `spiraltorch.summarize_api_llm_trace_events(...)`.
 - `spiraltorch.runtime_import_preflight_report(...)` when a Transformers,
   Torch, PEFT, or dataset dependency contract should be recorded before a
   heavier fine-tune run.
@@ -93,7 +95,9 @@ PY
   callable can be converted into Z-space metrics, usage/latency telemetry, and
   posterior confidence without making hosted SDKs mandatory dependencies. The
   optional OpenAI adapters are lazy: they import `openai` only when called, then
-  feed Responses API or chat-completion results into the same trace path.
+  feed Responses API or chat-completion results into the same trace path. API
+  LLM trace JSONL helpers mirror the trainer/transformers trace workflow so
+  hosted-model runs can be compared without re-running the API call.
 - Language desire controls via `st.nn.DesirePipeline`, `DesireTrainerBridge`,
   `DesireRoundtableBridge`, and downstream hook adapters so notebooks can
   inspect phase/temperature/entropy offsets without making the symbolic kernel

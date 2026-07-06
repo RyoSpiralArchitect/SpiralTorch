@@ -28,6 +28,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model", default=os.environ.get("OPENAI_MODEL", "gpt-4.1-mini"))
     parser.add_argument("--backend", default="auto")
     parser.add_argument("--max-output-tokens", type=int, default=48)
+    parser.add_argument("--jsonl-out", default=None)
     return parser.parse_args()
 
 
@@ -54,6 +55,24 @@ def main() -> None:
     print("metrics:", json.dumps(payload["metrics"], indent=2, sort_keys=True))
     print("confidence:", payload["inference"]["confidence"])
     print("device:", payload["device_preflight"])
+    if args.jsonl_out:
+        path = runtime.write_jsonl(args.jsonl_out)
+        summary = st.summarize_api_llm_trace_events(path)
+        print("jsonl:", path)
+        print(
+            "summary:",
+            json.dumps(
+                {
+                    "count": summary["count"],
+                    "models": summary["models"],
+                    "total_tokens": summary["total_tokens"],
+                    "runtime_statuses": summary["runtime_statuses"],
+                    "last_text_preview": summary["last_text_preview"],
+                },
+                indent=2,
+                sort_keys=True,
+            ),
+        )
 
 
 if __name__ == "__main__":

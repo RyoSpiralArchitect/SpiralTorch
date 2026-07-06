@@ -104,6 +104,10 @@ def api(prompt: str):
 
 trace = runtime.call(api, "route this through Z-space")
 print(trace.as_dict()["inference"]["confidence"])
+
+runtime.write_jsonl("api_llm_trace.jsonl")
+summary = st.summarize_api_llm_trace_events("api_llm_trace.jsonl")
+print(summary["usage"]["total_tokens"])
 ```
 
 If the optional `openai` package is installed, the same runtime can call the

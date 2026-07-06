@@ -79,8 +79,8 @@ For day-to-day Python use, though, the first handles are ordinary:
   dict audits before loading, resizing, projecting, or LoRA-wrapping weights.
 - `ApiLLMZSpaceRuntime` for hosted/API-model LLM inference: pass an
   OpenAI-compatible response mapping or any callable API client, and SpiralTorch
-  turns text/usage/latency into a Z-space partial trace without making hosted
-  SDKs hard dependencies.
+  turns text/usage/latency into a Z-space partial trace, JSONL artifact, and
+  summary without making hosted SDKs hard dependencies.
 - `bindings/st-py/examples/byte_lm_profile_smoke.py` and
   `byte_lm_transformers_trace.py` for tokenizerless FT diagnostics plus
   same-process `torch` / `transformers` / `tokenizers` runtime evidence.
@@ -376,7 +376,10 @@ Without cloning the repo, `pip install spiraltorch` gives you:
   responses/callables into Z-space runtime traces without requiring an API SDK
   at install time; when the optional `openai` package is available,
   `st.make_openai_responses_invoke(...)` or `runtime.call_openai_responses(...)`
-  can use `OPENAI_API_KEY` directly.
+  can use `OPENAI_API_KEY` directly. Persist runs with
+  `runtime.write_jsonl("api_llm_trace.jsonl")`, reload with
+  `st.load_api_llm_trace_events(...)`, and compare runs with
+  `st.summarize_api_llm_trace_events(...)`.
 - **FT diagnostics:** tokenizerless byte-LM profile smokes, Transformers logit
   trace capture, runtime import audits, and WGPU readiness gates.
 
