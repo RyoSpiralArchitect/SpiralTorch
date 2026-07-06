@@ -47,9 +47,32 @@ TOPOS_CONTEXT_METRIC_KEYS = (
     ("training_gradient_bias_scale", "topos.training_hints.gradient_bias_scale"),
     ("training_clip_scale", "topos.training_hints.clip_scale"),
     ("training_momentum_damping", "topos.training_hints.momentum_damping"),
+    ("training_plan_rate_scale", "topos.training_plan.rate_scale"),
+    (
+        "training_plan_effective_gradient_bias_scale",
+        "topos.training_plan.effective_gradient_bias_scale",
+    ),
+    (
+        "training_plan_effective_momentum_damping",
+        "topos.training_plan.effective_momentum_damping",
+    ),
     ("optimizer_rate_scale", "topos.optimizer_effect.rate_scale"),
+    ("optimizer_raw_rate_scale", "topos.optimizer_effect.raw_rate_scale"),
+    (
+        "optimizer_effective_gradient_bias_scale",
+        "topos.optimizer_effect.effective_gradient_bias_scale",
+    ),
+    (
+        "optimizer_effective_momentum_damping",
+        "topos.optimizer_effect.effective_momentum_damping",
+    ),
     ("optimizer_hyper_learning_rate", "topos.optimizer_effect.hyper_learning_rate"),
     ("optimizer_real_learning_rate", "topos.optimizer_effect.real_learning_rate"),
+    ("inference_plan_temperature", "topos.inference_plan.temperature"),
+    ("inference_plan_top_p", "topos.inference_plan.top_p"),
+    ("inference_plan_frequency_penalty", "topos.inference_plan.frequency_penalty"),
+    ("inference_plan_presence_penalty", "topos.inference_plan.presence_penalty"),
+    ("inference_plan_context_weight", "topos.inference_plan.context_weight"),
     ("inference_top_p_scale", "topos.inference_hints.top_p_scale"),
     ("inference_context_weight", "topos.inference_hints.context_weight"),
     (

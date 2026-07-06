@@ -132,6 +132,18 @@ def compare_amegagrad_topos_training_traces(
                     summary,
                     "optimizer_rate_scale",
                 ),
+                "topos_optimizer_raw_rate_scale_mean": _topos_stat(
+                    summary,
+                    "optimizer_raw_rate_scale",
+                ),
+                "topos_optimizer_effective_gradient_bias_scale_mean": _topos_stat(
+                    summary,
+                    "optimizer_effective_gradient_bias_scale",
+                ),
+                "topos_optimizer_effective_momentum_damping_mean": _topos_stat(
+                    summary,
+                    "optimizer_effective_momentum_damping",
+                ),
                 "topos_optimizer_hyper_learning_rate_mean": _topos_stat(
                     summary,
                     "optimizer_hyper_learning_rate",
@@ -167,6 +179,15 @@ def compare_amegagrad_topos_training_traces(
                 rows,
                 "topos_optimizer_rate_scale_mean",
                 higher_is_better=False,
+            ),
+            "lowest_optimizer_raw_rate_scale": _winner(
+                rows,
+                "topos_optimizer_raw_rate_scale_mean",
+                higher_is_better=False,
+            ),
+            "highest_effective_gradient_bias": _winner(
+                rows,
+                "topos_optimizer_effective_gradient_bias_scale_mean",
             ),
         },
     }
