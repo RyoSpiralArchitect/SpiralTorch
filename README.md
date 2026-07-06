@@ -780,6 +780,22 @@ wheel’s metric aliases, `st.z.partial(...)` captures telemetry/weights in a
 `ZSpacePartialBundle`, and `st.z.bundle(...)` (alias `st.z.blend`) merges those
 partials before handing them to `ZSpaceTrainer`.
 
+Open-topos pressure can now be projected into named learning and inference
+hints. The same signal can damp a local Z-space trainer and tune hosted-model
+sampling controls:
+
+```python
+topos = st.hypergrad_topos(max_depth=10, max_volume=100)
+signal = st.topos_control_signal(topos, observed_depth=4, visited_volume=25)
+training = st.topos_training_hints(signal)
+runtime = st.topos_runtime_adapter(signal, request_options={"base_temperature": 0.8})
+
+trainer = st.ZSpaceTrainer(z_dim=4, topos_control_gain=0.5)
+trainer.step(st.z.metrics(speed=0.0, memory=0.0, stability=0.0, telemetry={"topos": signal}))
+
+print(training["gradient_bias_scale"], runtime["request"]["temperature"])
+```
+
 ### 6) Zero-copy tensor exchange via DLPack
 
 ```python

@@ -651,6 +651,8 @@ from .zspace_inference import (
     inference_to_zmetrics,
     prepare_trainer_step_payload,
     topos_control_signal,
+    topos_training_hints,
+    topos_inference_hints,
     topos_control_partial,
     canvas_partial_from_snapshot,
     canvas_coherence_partial,
@@ -849,6 +851,7 @@ _EXTRAS = [
     "generate_plan_batch_ex","plan","plan_topk",
     "describe_device","hip_probe","mps_probe","probe_gpu_path","z_space_barycenter",
     "hypergrad","realgrad","hypergrad_topos","topos_control_signal",
+    "topos_training_hints","topos_inference_hints",
     "topos_control_partial","encode_zspace","z_metrics",
     "load_zspace_trace_events","write_zspace_trace_html",
     "load_trainer_trace_events","summarize_trainer_trace_events",
@@ -3137,11 +3140,31 @@ class ZSpaceTrainer:
         gain = self._topos_control_gain
         if gain <= 0.0 or not self._last_topos_control:
             return 1.0
-        raw = float(self._last_topos_control.get("learning_rate_scale", 1.0))
+        raw = float(
+            self._last_topos_control.get(
+                "training_hints.learning_rate_scale",
+                self._last_topos_control.get("learning_rate_scale", 1.0),
+            )
+        )
         if not _math.isfinite(raw):
             raw = 1.0
         hinted = max(0.1, min(1.25, raw))
         return max(0.1, min(1.25, 1.0 + gain * (hinted - 1.0)))
+
+    def _topos_gradient_clip_scale(self) -> float:
+        gain = self._topos_control_gain
+        if gain <= 0.0 or not self._last_topos_control:
+            return 1.0
+        raw = float(
+            self._last_topos_control.get(
+                "training_hints.clip_scale",
+                self._last_topos_control.get("clip_scale", 1.0),
+            )
+        )
+        if not _math.isfinite(raw):
+            raw = 1.0
+        hinted = max(0.25, min(1.0, raw))
+        return max(0.25, min(1.0, 1.0 + gain * (hinted - 1.0)))
 
     def _topos_gradient_bias(self) -> _List[float]:
         gain = self._topos_control_gain
@@ -3154,8 +3177,14 @@ class ZSpaceTrainer:
         openness = self._last_topos_control.get("openness", 1.0 - closure)
         exploration = self._last_topos_control.get("exploration_hint", 0.0)
         lr_scale = self._last_topos_control.get("learning_rate_scale", 1.0)
-        regularization = self._last_topos_control.get("regularization_scale", 1.0)
-        damping = self._last_topos_control.get("step_damping", closure * guard)
+        regularization = self._last_topos_control.get(
+            "training_hints.regularization_scale",
+            self._last_topos_control.get("regularization_scale", 1.0),
+        )
+        damping = self._last_topos_control.get(
+            "training_hints.step_damping",
+            self._last_topos_control.get("step_damping", closure * guard),
+        )
         focus = self._last_topos_control.get("sampling_focus", guard)
         basis = (
             closure - 0.5,
@@ -3169,7 +3198,17 @@ class ZSpaceTrainer:
             0.5 - openness,
             0.5 - exploration,
         )
-        scale = 0.05 * gain
+        bias_hint = self._last_topos_control.get(
+            "training_hints.gradient_bias_scale",
+            self._last_topos_control.get("gradient_bias_scale", 0.05),
+        )
+        try:
+            bias_hint_value = float(bias_hint)
+        except (TypeError, ValueError):
+            bias_hint_value = 0.05
+        if not _math.isfinite(bias_hint_value):
+            bias_hint_value = 0.05
+        scale = max(0.0, min(0.35, bias_hint_value)) * gain
         return [scale * basis[idx % len(basis)] for idx in range(len(self._z))]
 
     def step_batch(
@@ -3284,6 +3323,9 @@ class ZSpaceTrainer:
             + topos_bias[idx]
             for idx in range(len(self._z))
         ]
+        topos_clip = self._topos_gradient_clip_scale()
+        if topos_clip < 1.0:
+            total_grad = [max(-topos_clip, min(topos_clip, grad)) for grad in total_grad]
         self._adam_update(total_grad)
         return loss
 

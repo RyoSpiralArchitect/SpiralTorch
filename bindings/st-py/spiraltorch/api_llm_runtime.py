@@ -175,7 +175,12 @@ def topos_runtime_request(
 
     signal = topos_control_signal(topos, **signal_options)
     request: dict[str, float] = {}
-    temperature_scale = float(signal.get("temperature_scale", 1.0))
+    inference_hints = signal.get("inference_hints")
+    if not isinstance(inference_hints, Mapping):
+        inference_hints = {}
+    temperature_scale = float(
+        inference_hints.get("temperature_scale", signal.get("temperature_scale", 1.0))
+    )
     sampling_focus = float(signal.get("sampling_focus", 0.0))
     exploration_hint = float(signal.get("exploration_hint", 0.0))
     step_damping = float(signal.get("step_damping", 0.0))
@@ -188,7 +193,12 @@ def topos_runtime_request(
             default=base_temperature,
         )
     if include_top_p:
-        top_p_scale = 1.0 - 0.2 * sampling_focus + 0.1 * exploration_hint
+        top_p_scale = float(
+            inference_hints.get(
+                "top_p_scale",
+                1.0 - 0.2 * sampling_focus + 0.1 * exploration_hint,
+            )
+        )
         request["top_p"] = _clamp_float(
             float(base_top_p) * top_p_scale,
             min_top_p,
@@ -197,13 +207,25 @@ def topos_runtime_request(
         )
     if include_penalties:
         request["frequency_penalty"] = _clamp_float(
-            float(base_frequency_penalty) + 0.35 * sampling_focus + 0.2 * step_damping,
+            float(base_frequency_penalty)
+            + float(
+                inference_hints.get(
+                    "frequency_penalty_bias",
+                    0.35 * sampling_focus + 0.2 * step_damping,
+                )
+            ),
             -2.0,
             2.0,
             default=base_frequency_penalty,
         )
         request["presence_penalty"] = _clamp_float(
-            float(base_presence_penalty) + 0.4 * exploration_hint - 0.2 * sampling_focus,
+            float(base_presence_penalty)
+            + float(
+                inference_hints.get(
+                    "presence_penalty_bias",
+                    0.4 * exploration_hint - 0.2 * sampling_focus,
+                )
+            ),
             -2.0,
             2.0,
             default=base_presence_penalty,
