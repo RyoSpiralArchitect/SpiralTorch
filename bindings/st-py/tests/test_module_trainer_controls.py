@@ -467,6 +467,14 @@ def test_summarize_trainer_trace_events_surfaces_topos_context(tmp_path) -> None
                         "topos.inference_plan.context_weight": 0.9225,
                         "topos.inference_hints.top_p_scale": 0.890274375,
                         "topos.inference_hints.context_weight": 0.9225,
+                        "topos.runtime_profile.control_energy": 0.4041837060714286,
+                        "topos.runtime_profile.closure_risk": 0.4451,
+                        "topos.runtime_profile.exploration_budget": 0.4555,
+                        "topos.runtime_profile.training_rate_scale": 0.7769211125,
+                        "topos.runtime_profile.training_gradient_bias_scale": 0.0786561,
+                        "topos.runtime_profile.inference_temperature": 0.8533125,
+                        "topos.runtime_profile.inference_context_weight": 0.9225,
+                        "topos.runtime_profile.learning_inference_balance": 0.9104766571,
                     }
                 },
             },
@@ -506,6 +514,16 @@ def test_summarize_trainer_trace_events_surfaces_topos_context(tmp_path) -> None
                             "top_p_scale": 0.72,
                             "context_weight": 1.1,
                         },
+                        "runtime_profile": {
+                            "control_energy": 0.35,
+                            "closure_risk": 0.7,
+                            "exploration_budget": 0.2,
+                            "training_rate_scale": 0.55,
+                            "training_gradient_bias_scale": 0.06,
+                            "inference_temperature": 0.7,
+                            "inference_context_weight": 1.05,
+                            "learning_inference_balance": 0.7857142857,
+                        },
                     }
                 },
             },
@@ -542,6 +560,15 @@ def test_summarize_trainer_trace_events_surfaces_topos_context(tmp_path) -> None
     assert context["inference_plan_context_weight"]["last"] == pytest.approx(1.05)
     assert context["inference_top_p_scale"]["mean"] == pytest.approx(0.8051371875)
     assert context["inference_context_weight"]["last"] == pytest.approx(1.1)
+    assert context["runtime_profile_control_energy"]["mean"] == pytest.approx(
+        0.3770918530357143
+    )
+    assert context["runtime_profile_closure_risk"]["max"] == pytest.approx(0.7)
+    assert context["runtime_profile_exploration_budget"]["last"] == pytest.approx(0.2)
+    assert context["runtime_profile_training_rate_scale"]["min"] == pytest.approx(0.55)
+    assert context["runtime_profile_learning_inference_balance"]["last"] == pytest.approx(
+        0.7857142857
+    )
 
 
 def test_summarize_trainer_trace_events_reads_plugin_writer_policy_events(tmp_path) -> None:

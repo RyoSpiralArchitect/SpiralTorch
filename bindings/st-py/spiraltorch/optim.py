@@ -152,6 +152,7 @@ class Amegagrad:
         self.last_control: Any | None = None
         self.last_topos_signal: dict[str, Any] | None = None
         self.last_topos_hints: dict[str, Any] | None = None
+        self.last_topos_profile: dict[str, Any] | None = None
         self.last_topos_effect: dict[str, float] | None = None
 
     def shape(self) -> tuple[int, int]:
@@ -307,6 +308,7 @@ class Amegagrad:
                 observed_depth=observed_depth,
                 visited_volume=visited_volume,
             )
+            profile_source: Mapping[str, Any] = signal
             hints = signal.get("training_hints")
             if not isinstance(hints, Mapping):
                 hints = {}
@@ -314,6 +316,7 @@ class Amegagrad:
         else:
             hints = dict(hints)
             self.last_topos_hints = dict(hints)
+            profile_source = self.last_topos_signal or {"training_hints": hints}
             plan = st.topos_training_plan(
                 {"training_hints": hints},
                 gain=self.topos_control_gain,
@@ -351,6 +354,10 @@ class Amegagrad:
             "hyper_learning_rate": hyper_scaled,
             "real_learning_rate": real_scaled,
         }
+        self.last_topos_profile = st.topos_runtime_profile(
+            profile_source,
+            training_gain=self.topos_control_gain,
+        )
         return hyper_scaled, real_scaled
 
     def topos_telemetry_payload(
@@ -364,7 +371,22 @@ class Amegagrad:
         if signal is None:
             signal = self.topos_control_signal()
         telemetry: dict[str, float] = {}
-        _flatten_numeric_mapping(signal, prefix="topos", out=telemetry)
+        signal_payload = dict(signal)
+        signal_payload.pop("runtime_profile", None)
+        _flatten_numeric_mapping(signal_payload, prefix="topos", out=telemetry)
+        profile = self.last_topos_profile
+        if profile is None:
+            import spiraltorch as st
+
+            profile = st.topos_runtime_profile(
+                signal,
+                training_gain=self.topos_control_gain,
+            )
+        _flatten_numeric_mapping(
+            profile,
+            prefix="topos.runtime_profile",
+            out=telemetry,
+        )
         if self.last_topos_effect is not None:
             _flatten_numeric_mapping(
                 self.last_topos_effect,
@@ -379,6 +401,9 @@ class Amegagrad:
         return {
             "signal": dict(self.last_topos_signal) if self.last_topos_signal else None,
             "training_hints": dict(self.last_topos_hints) if self.last_topos_hints else None,
+            "runtime_profile": dict(self.last_topos_profile)
+            if self.last_topos_profile
+            else None,
             "effect": dict(self.last_topos_effect) if self.last_topos_effect else None,
         }
 
@@ -408,6 +433,7 @@ class Amegagrad:
                 visited_volume=visited_volume,
             )
         else:
+            self.last_topos_profile = None
             self.last_topos_effect = None
         _set_tape_learning_rate(self.hyper, hyper_target)
         _set_tape_learning_rate(self.real, real_target)

@@ -152,6 +152,30 @@ def compare_amegagrad_topos_training_traces(
                     summary,
                     "optimizer_real_learning_rate",
                 ),
+                "topos_runtime_control_energy_mean": _topos_stat(
+                    summary,
+                    "runtime_profile_control_energy",
+                ),
+                "topos_runtime_closure_risk_mean": _topos_stat(
+                    summary,
+                    "runtime_profile_closure_risk",
+                ),
+                "topos_runtime_exploration_budget_mean": _topos_stat(
+                    summary,
+                    "runtime_profile_exploration_budget",
+                ),
+                "topos_runtime_training_rate_scale_mean": _topos_stat(
+                    summary,
+                    "runtime_profile_training_rate_scale",
+                ),
+                "topos_runtime_training_gradient_bias_scale_mean": _topos_stat(
+                    summary,
+                    "runtime_profile_training_gradient_bias_scale",
+                ),
+                "topos_runtime_learning_inference_balance_mean": _topos_stat(
+                    summary,
+                    "runtime_profile_learning_inference_balance",
+                ),
             }
         )
     rows.sort(
@@ -188,6 +212,20 @@ def compare_amegagrad_topos_training_traces(
             "highest_effective_gradient_bias": _winner(
                 rows,
                 "topos_optimizer_effective_gradient_bias_scale_mean",
+            ),
+            "highest_runtime_control_energy": _winner(
+                rows,
+                "topos_runtime_control_energy_mean",
+            ),
+            "lowest_runtime_closure_risk": _winner(
+                rows,
+                "topos_runtime_closure_risk_mean",
+                higher_is_better=False,
+            ),
+            "lowest_runtime_training_rate_scale": _winner(
+                rows,
+                "topos_runtime_training_rate_scale_mean",
+                higher_is_better=False,
             ),
         },
     }
