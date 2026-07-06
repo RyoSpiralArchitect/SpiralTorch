@@ -69,6 +69,10 @@ _REPORT_ROUTE_METRICS = (
     "wasm_loss_mean",
     "wasm_stability_hint_mean",
     "wasm_webgpu_device_ready_rate",
+    "topos_context_observed_rate",
+    "topos_closure_pressure_mean",
+    "topos_training_gradient_bias_scale_mean",
+    "topos_inference_context_weight_mean",
 )
 _TEXT_QUALITY_STOPWORDS = frozenset(
     {
@@ -1494,6 +1498,52 @@ def _summarize_wasm_context_telemetry(
     }
 
 
+def _summarize_topos_context_telemetry(
+    events: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Summarize open-topos hints fused into API LLM traces."""
+
+    rows = [
+        _mapping_at(event, "telemetry")
+        for event in events
+        if any(str(key).startswith("topos.") for key in _mapping_at(event, "telemetry"))
+    ]
+    return {
+        "observed_count": len(rows),
+        "observed_rate": len(rows) / len(events) if events else 0.0,
+        "closure_pressure": _stats(row.get("topos.closure_pressure") for row in rows),
+        "openness": _stats(row.get("topos.openness") for row in rows),
+        "guard_strength": _stats(row.get("topos.guard_strength") for row in rows),
+        "learning_rate_scale": _stats(
+            row.get("topos.learning_rate_scale") for row in rows
+        ),
+        "temperature_scale": _stats(
+            row.get("topos.temperature_scale") for row in rows
+        ),
+        "training_gradient_bias_scale": _stats(
+            row.get("topos.training_hints.gradient_bias_scale") for row in rows
+        ),
+        "training_clip_scale": _stats(
+            row.get("topos.training_hints.clip_scale") for row in rows
+        ),
+        "training_momentum_damping": _stats(
+            row.get("topos.training_hints.momentum_damping") for row in rows
+        ),
+        "inference_top_p_scale": _stats(
+            row.get("topos.inference_hints.top_p_scale") for row in rows
+        ),
+        "inference_context_weight": _stats(
+            row.get("topos.inference_hints.context_weight") for row in rows
+        ),
+        "inference_frequency_penalty_bias": _stats(
+            row.get("topos.inference_hints.frequency_penalty_bias") for row in rows
+        ),
+        "inference_presence_penalty_bias": _stats(
+            row.get("topos.inference_hints.presence_penalty_bias") for row in rows
+        ),
+    }
+
+
 def summarize_api_llm_trace_events(
     path: str | Path,
     *,
@@ -1598,6 +1648,7 @@ def summarize_api_llm_trace_events(
         "confidence": _stats(confidence_values),
         "metrics": metrics,
         "wasm_context": _summarize_wasm_context_telemetry(events),
+        "topos_context": _summarize_topos_context_telemetry(events),
     }
 
 
@@ -1664,6 +1715,23 @@ def _wasm_context_ready_rate(
     if (_finite_float(source.get("observed_count")) or 0.0) <= 0.0:
         return None
     return _finite_float(source.get("ready_rate"))
+
+
+def _topos_context_stat(
+    summary: Mapping[str, Any],
+    section: str,
+    *,
+    stat: str = "mean",
+) -> float | None:
+    topos_context = summary.get("topos_context")
+    if not isinstance(topos_context, Mapping):
+        return None
+    source = topos_context.get(section)
+    if not isinstance(source, Mapping):
+        return None
+    if (_finite_float(source.get("count")) or 0.0) <= 0.0:
+        return None
+    return _finite_float(source.get(stat))
 
 
 def _dominant_label(counts: Any) -> str | None:
@@ -1816,6 +1884,8 @@ def _selection_profile_score(row: Mapping[str, Any], profile: str) -> float:
 def _comparison_row(label: str, path: Path, summary: Mapping[str, Any]) -> dict[str, Any]:
     wasm_context = summary.get("wasm_context")
     wasm_context_map = wasm_context if isinstance(wasm_context, Mapping) else {}
+    topos_context = summary.get("topos_context")
+    topos_context_map = topos_context if isinstance(topos_context, Mapping) else {}
     row: dict[str, Any] = {
         "label": label,
         "path": str(path),
@@ -1884,6 +1954,42 @@ def _comparison_row(label: str, path: Path, summary: Mapping[str, Any]) -> dict[
         "wasm_webgpu_device_ready_rate": _wasm_context_ready_rate(
             summary,
             "webgpu_device_ready",
+        ),
+        "topos_context_observed_count": int(
+            _finite_float(topos_context_map.get("observed_count")) or 0
+        ),
+        "topos_context_observed_rate": _finite_float(
+            topos_context_map.get("observed_rate")
+        )
+        or 0.0,
+        "topos_closure_pressure_mean": _topos_context_stat(
+            summary,
+            "closure_pressure",
+        ),
+        "topos_openness_mean": _topos_context_stat(summary, "openness"),
+        "topos_learning_rate_scale_mean": _topos_context_stat(
+            summary,
+            "learning_rate_scale",
+        ),
+        "topos_temperature_scale_mean": _topos_context_stat(
+            summary,
+            "temperature_scale",
+        ),
+        "topos_training_gradient_bias_scale_mean": _topos_context_stat(
+            summary,
+            "training_gradient_bias_scale",
+        ),
+        "topos_training_clip_scale_mean": _topos_context_stat(
+            summary,
+            "training_clip_scale",
+        ),
+        "topos_inference_top_p_scale_mean": _topos_context_stat(
+            summary,
+            "inference_top_p_scale",
+        ),
+        "topos_inference_context_weight_mean": _topos_context_stat(
+            summary,
+            "inference_context_weight",
         ),
         "last_text_preview": summary.get("last_text_preview"),
     }
@@ -1963,6 +2069,15 @@ def _near_best_routes(
                 "wasm_webgpu_device_ready_rate": _finite_float(
                     row.get("wasm_webgpu_device_ready_rate")
                 ),
+                "topos_context_observed_rate": _finite_float(
+                    row.get("topos_context_observed_rate")
+                ),
+                "topos_closure_pressure_mean": _finite_float(
+                    row.get("topos_closure_pressure_mean")
+                ),
+                "topos_inference_context_weight_mean": _finite_float(
+                    row.get("topos_inference_context_weight_mean")
+                ),
             }
         )
     return near
@@ -2035,6 +2150,49 @@ def _comparison_wasm_context(
         "lowest_loss": _winner(rows, "wasm_loss_mean", higher_is_better=False),
         "highest_stability_hint": _winner(rows, "wasm_stability_hint_mean"),
         "highest_webgpu_device_ready": _winner(rows, "wasm_webgpu_device_ready_rate"),
+    }
+
+
+def _comparison_topos_context(
+    rows: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    observed = [
+        row
+        for row in rows
+        if int(row.get("count") or 0) > 0
+        and int(row.get("topos_context_observed_count") or 0) > 0
+    ]
+    return {
+        "observed_runs": len(observed),
+        "observed_run_rate": len(observed) / len(rows) if rows else 0.0,
+        "lowest_closure_pressure": _winner(
+            rows,
+            "topos_closure_pressure_mean",
+            higher_is_better=False,
+        ),
+        "highest_openness": _winner(rows, "topos_openness_mean"),
+        "highest_training_gradient_bias": _winner(
+            rows,
+            "topos_training_gradient_bias_scale_mean",
+        ),
+        "lowest_training_clip_scale": _winner(
+            rows,
+            "topos_training_clip_scale_mean",
+            higher_is_better=False,
+        ),
+        "highest_inference_context_weight": _winner(
+            rows,
+            "topos_inference_context_weight_mean",
+        ),
+        "temperature_scale": _numeric_stats_with_range(
+            row.get("topos_temperature_scale_mean") for row in observed
+        ),
+        "inference_top_p_scale": _numeric_stats_with_range(
+            row.get("topos_inference_top_p_scale_mean") for row in observed
+        ),
+        "training_gradient_bias_scale": _numeric_stats_with_range(
+            row.get("topos_training_gradient_bias_scale_mean") for row in observed
+        ),
     }
 
 
@@ -2628,12 +2786,28 @@ def compare_api_llm_trace_runs(
             rows,
             "wasm_webgpu_device_ready_rate",
         ),
+        "highest_topos_context_observed": _winner(rows, "topos_context_observed_rate"),
+        "lowest_topos_closure_pressure": _winner(
+            rows,
+            "topos_closure_pressure_mean",
+            higher_is_better=False,
+        ),
+        "highest_topos_openness": _winner(rows, "topos_openness_mean"),
+        "highest_topos_training_gradient_bias": _winner(
+            rows,
+            "topos_training_gradient_bias_scale_mean",
+        ),
+        "highest_topos_inference_context_weight": _winner(
+            rows,
+            "topos_inference_context_weight_mean",
+        ),
     }
     best = winners.get("best_score")
     near_best_tolerance_value = max(0.0, _finite_float(near_best_tolerance) or 0.0)
     near_best = _near_best_routes(rows, tolerance=near_best_tolerance_value)
     selection_profiles = _selection_profiles(rows)
     wasm_context = _comparison_wasm_context(rows)
+    topos_context = _comparison_topos_context(rows)
     recommendations: list[str] = []
     if best:
         recommendations.append(f"prefer {best} for the highest aggregate API LLM route score")
@@ -2668,6 +2842,20 @@ def compare_api_llm_trace_runs(
         recommendations.append(
             f"{lowest_wasm_loss} also carries the lowest browser-side WASM context loss"
         )
+    if topos_context["observed_runs"]:
+        recommendations.append(
+            f"{topos_context['observed_runs']} trace runs carry open-topos runtime hints"
+        )
+    lowest_topos_closure = winners.get("lowest_topos_closure_pressure")
+    if lowest_topos_closure and lowest_topos_closure != best:
+        recommendations.append(
+            f"inspect {lowest_topos_closure} for the lowest open-topos closure pressure"
+        )
+    highest_topos_weight = winners.get("highest_topos_inference_context_weight")
+    if highest_topos_weight and highest_topos_weight != best:
+        recommendations.append(
+            f"inspect {highest_topos_weight} for the strongest open-topos context weight"
+        )
     return {
         "kind": "spiraltorch.api_llm_trace_comparison",
         "event_type": event_type,
@@ -2677,6 +2865,7 @@ def compare_api_llm_trace_runs(
         "near_best": near_best,
         "selection_profiles": selection_profiles,
         "wasm_context": wasm_context,
+        "topos_context": topos_context,
         "winners": winners,
         "recommendations": recommendations,
     }

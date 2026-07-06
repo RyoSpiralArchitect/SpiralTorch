@@ -491,6 +491,64 @@ def test_api_llm_prompt_suite_applies_topos_runtime_adapter_directly() -> None:
     assert telemetry["topos.temperature_scale"] == pytest.approx(0.8533125)
 
 
+def test_api_llm_trace_summary_surfaces_topos_runtime_hints(tmp_path) -> None:
+    adapter = st.topos_runtime_adapter(
+        {"porosity": 0.25, "max_depth": 10, "max_volume": 100},
+        observed_depth=4,
+        visited_volume=25,
+        request_options={"base_temperature": 0.8},
+    )
+    runtime = st.ApiLLMZSpaceRuntime(
+        [0.2, -0.1, 0.4, 0.05],
+        provider="topos-provider",
+        model="topos-summary-model",
+        create_session=False,
+    )
+
+    def fake_api(_prompt: str, **_request_kwargs: object) -> dict[str, object]:
+        return {
+            "model": "topos-summary-model",
+            "output_text": "Topos runtime summary entered Z-space.",
+            "status": "completed",
+            "usage": {"prompt_tokens": 6, "completion_tokens": 7, "total_tokens": 13},
+        }
+
+    runtime.run_prompts(
+        ["summarize direct topos runtime adapter"],
+        fake_api,
+        runtime_adapter=adapter,
+    )
+    path = tmp_path / "topos-runtime.jsonl"
+    runtime.write_jsonl(path)
+
+    summary = st.summarize_api_llm_trace_events(path)
+
+    assert summary["topos_context"]["observed_count"] == 1
+    assert summary["topos_context"]["observed_rate"] == pytest.approx(1.0)
+    assert summary["topos_context"]["closure_pressure"]["mean"] == pytest.approx(0.4)
+    assert summary["topos_context"]["training_gradient_bias_scale"]["mean"] == pytest.approx(
+        0.0786561
+    )
+    assert summary["topos_context"]["training_clip_scale"]["mean"] == pytest.approx(0.871)
+    assert summary["topos_context"]["inference_top_p_scale"]["mean"] == pytest.approx(
+        0.890274375
+    )
+    assert summary["topos_context"]["inference_context_weight"]["mean"] == pytest.approx(
+        0.9225
+    )
+
+    comparison = st.compare_api_llm_trace_runs({"topos": path}, near_best_tolerance=1.0)
+    row = comparison["runs"][0]
+
+    assert comparison["topos_context"]["observed_runs"] == 1
+    assert comparison["topos_context"]["observed_run_rate"] == pytest.approx(1.0)
+    assert comparison["winners"]["highest_topos_inference_context_weight"] == "topos"
+    assert comparison["winners"]["lowest_topos_closure_pressure"] == "topos"
+    assert row["topos_context_observed_rate"] == pytest.approx(1.0)
+    assert row["topos_inference_context_weight_mean"] == pytest.approx(0.9225)
+    assert any("open-topos runtime hints" in item for item in comparison["recommendations"])
+
+
 def test_provider_wrapper_runtime_adapter_allows_explicit_request_override() -> None:
     client = _FakeChatClient()
     runtime = st.ApiLLMZSpaceRuntime(
