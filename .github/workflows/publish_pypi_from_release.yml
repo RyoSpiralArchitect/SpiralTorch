@@ -183,6 +183,7 @@ jobs:
             --release-tag "$RELEASE_TAG" \
             --repo "$GITHUB_REPOSITORY" \
             --expected-wheels "$EXPECTED_WHEELS" \
+            --require-latest \
             --timeout 240
 
           smoke_dir="$RUNNER_TEMP/spiraltorch-pypi-smoke"
@@ -190,7 +191,12 @@ jobs:
           rm -rf "$smoke_dir" "$run_dir"
           mkdir -p "$smoke_dir" "$run_dir"
           python -m pip install --upgrade pip
-          python -m pip install --no-cache-dir --only-binary=:all: --target "$smoke_dir" "spiraltorch==${RELEASE_TAG#v}"
+          python -m pip install \
+            --no-cache-dir \
+            --index-url https://pypi.org/simple \
+            --only-binary=:all: \
+            --target "$smoke_dir" \
+            "spiraltorch==${RELEASE_TAG#v}"
           cd "$run_dir"
           EXPECTED_VERSION="${RELEASE_TAG#v}" PYTHONPATH="$smoke_dir" python -P - <<'PY'
           import os

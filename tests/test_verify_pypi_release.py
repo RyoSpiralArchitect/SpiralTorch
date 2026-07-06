@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+import sys
 import unittest
 from unittest import mock
 
@@ -76,6 +77,32 @@ class VerifyPyPIReleaseTests(unittest.TestCase):
 
         self.assertEqual(result, {"linux.whl": "1" * 64, "mac.whl": "2" * 64})
         sleep.assert_called_once_with(0.01)
+
+    def test_main_requires_latest_when_requested(self) -> None:
+        wheels = {"spiraltorch-0.4.11.whl": "1" * 64}
+        argv = [
+            "verify_pypi_release.py",
+            "--version",
+            "0.4.11",
+            "--expected-wheels",
+            "1",
+            "--require-latest",
+        ]
+
+        with mock.patch.object(sys, "argv", argv):
+            with mock.patch.object(
+                verify_pypi_release,
+                "github_release_wheel_digests",
+                return_value=wheels,
+            ):
+                with mock.patch.object(verify_pypi_release, "wait_for_pypi_wheels", return_value=wheels):
+                    with mock.patch.object(
+                        verify_pypi_release,
+                        "pypi_latest_version",
+                        return_value="0.4.10",
+                    ):
+                        with self.assertRaisesRegex(verify_pypi_release.VerifyError, "latest version"):
+                            verify_pypi_release.main()
 
 
 if __name__ == "__main__":

@@ -264,6 +264,7 @@ jobs:
             --release-tag "$RELEASE_TAG" \
             --repo "$GITHUB_REPOSITORY" \
             --expected-wheels 3 \
+            --require-latest \
             --timeout 240
 
   attach:
