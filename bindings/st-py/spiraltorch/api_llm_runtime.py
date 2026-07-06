@@ -45,6 +45,39 @@ __all__ = [
 _OPENAI_INSTALL_HINT = "pip install openai"
 _ANTHROPIC_INSTALL_HINT = "pip install anthropic"
 _API_LLM_TRACE_SCHEMA = "spiraltorch.api_llm_trace.v1"
+_TEXT_QUALITY_STOPWORDS = frozenset(
+    {
+        "a",
+        "an",
+        "and",
+        "are",
+        "as",
+        "at",
+        "be",
+        "but",
+        "by",
+        "for",
+        "from",
+        "give",
+        "how",
+        "if",
+        "in",
+        "into",
+        "is",
+        "it",
+        "name",
+        "of",
+        "on",
+        "one",
+        "or",
+        "should",
+        "that",
+        "the",
+        "this",
+        "to",
+        "with",
+    }
+)
 
 
 def _value(source: Any, key: str, default: Any = None) -> Any:
@@ -303,6 +336,71 @@ def _text_stats(text: str) -> dict[str, float]:
         "unique_chars": float(len(counts)),
         "entropy": entropy,
         "entropy_norm": entropy / max_entropy if max_entropy > 0.0 else 0.0,
+    }
+
+
+def _word_tokens(value: Any) -> list[str]:
+    text = str(value or "").lower()
+    tokens: list[str] = []
+    current: list[str] = []
+    for char in text:
+        if char.isalnum():
+            current.append(char)
+        elif current:
+            tokens.append("".join(current))
+            current.clear()
+    if current:
+        tokens.append("".join(current))
+    return tokens
+
+
+def _significant_tokens(value: Any) -> list[str]:
+    return [
+        token
+        for token in _word_tokens(value)
+        if token not in _TEXT_QUALITY_STOPWORDS
+        and (len(token) > 2 or token in {"ai", "api", "llm", "z"})
+    ]
+
+
+def _trace_text_quality(event: Mapping[str, Any]) -> dict[str, float | None]:
+    prompt_tokens = set(_significant_tokens(event.get("prompt")))
+    text_tokens = _significant_tokens(event.get("text"))
+    text_token_set = set(text_tokens)
+    raw_text_token_count = len(_word_tokens(event.get("text")))
+    text_token_count = len(text_tokens)
+    if text_token_count == 0:
+        response_signal_rate = 0.0
+        repetition_rate = 1.0
+    else:
+        response_signal_rate = text_token_count / max(1, raw_text_token_count)
+        repetition_rate = 1.0 - (len(text_token_set) / text_token_count)
+
+    prompt_coverage: float | None
+    prompt_echo_rate: float | None
+    if prompt_tokens:
+        overlap = len(prompt_tokens & text_token_set)
+        prompt_coverage = overlap / len(prompt_tokens)
+        prompt_echo_rate = overlap / max(1, text_token_count)
+    else:
+        prompt_coverage = None
+        prompt_echo_rate = None
+
+    repetition_reward = 1.0 - max(0.0, min(1.0, repetition_rate))
+    if prompt_coverage is None:
+        text_quality_score = 0.65 * response_signal_rate + 0.35 * repetition_reward
+    else:
+        text_quality_score = (
+            0.60 * prompt_coverage
+            + 0.25 * response_signal_rate
+            + 0.15 * repetition_reward
+        )
+    return {
+        "prompt_coverage": prompt_coverage,
+        "prompt_echo_rate": prompt_echo_rate,
+        "response_signal_rate": response_signal_rate,
+        "repetition_rate": repetition_rate,
+        "text_quality_score": max(0.0, min(1.0, text_quality_score)),
     }
 
 
@@ -899,6 +997,7 @@ def summarize_api_llm_trace_events(
     events = load_api_llm_trace_events(path, event_type=event_type)
     usage_rows = [_mapping_at(event, "usage") for event in events]
     metric_rows = [_mapping_at(event, "metrics") for event in events]
+    text_quality_rows = [_trace_text_quality(event) for event in events]
     confidence_values = [_trace_confidence(event) for event in events]
     runtime_ready_values = [_trace_runtime_ready(event) for event in events]
     ready_observed = [value for value in runtime_ready_values if value is not None]
@@ -972,6 +1071,23 @@ def summarize_api_llm_trace_events(
         "total_tokens": total_tokens,
         "latency_ms": latency,
         "text_chars": _stats(text_lengths),
+        "text_quality": {
+            "prompt_coverage": _stats(
+                row.get("prompt_coverage") for row in text_quality_rows
+            ),
+            "prompt_echo_rate": _stats(
+                row.get("prompt_echo_rate") for row in text_quality_rows
+            ),
+            "response_signal_rate": _stats(
+                row.get("response_signal_rate") for row in text_quality_rows
+            ),
+            "repetition_rate": _stats(
+                row.get("repetition_rate") for row in text_quality_rows
+            ),
+            "text_quality_score": _stats(
+                row.get("text_quality_score") for row in text_quality_rows
+            ),
+        },
         "confidence": _stats(confidence_values),
         "metrics": metrics,
     }
@@ -1132,6 +1248,31 @@ def _comparison_row(label: str, path: Path, summary: Mapping[str, Any]) -> dict[
         "latency_ms_mean": _summary_stat(summary, "latency_ms"),
         "confidence_mean": _summary_stat(summary, "confidence"),
         "text_chars_mean": _summary_stat(summary, "text_chars"),
+        "prompt_coverage_mean": _summary_stat(
+            summary,
+            "text_quality",
+            key="prompt_coverage",
+        ),
+        "prompt_echo_rate_mean": _summary_stat(
+            summary,
+            "text_quality",
+            key="prompt_echo_rate",
+        ),
+        "response_signal_rate_mean": _summary_stat(
+            summary,
+            "text_quality",
+            key="response_signal_rate",
+        ),
+        "repetition_rate_mean": _summary_stat(
+            summary,
+            "text_quality",
+            key="repetition_rate",
+        ),
+        "text_quality_score": _summary_stat(
+            summary,
+            "text_quality",
+            key="text_quality_score",
+        ),
         "prompt_tokens_mean": _summary_stat(summary, "usage", key="prompt_tokens"),
         "completion_tokens_mean": _summary_stat(summary, "usage", key="completion_tokens"),
         "stability_mean": _summary_metric(summary, "stability"),
@@ -1197,6 +1338,11 @@ def _near_best_routes(
                 "route_score": score,
                 "route_score_delta": delta,
                 "quality_score": _finite_float(row.get("quality_score")) or 0.0,
+                "text_quality_score": _finite_float(row.get("text_quality_score")) or 0.0,
+                "prompt_coverage_mean": _finite_float(
+                    row.get("prompt_coverage_mean")
+                )
+                or 0.0,
                 "efficiency_score": _finite_float(row.get("efficiency_score")) or 0.0,
                 "latency_ms_mean": _finite_float(row.get("latency_ms_mean")) or 0.0,
                 "total_tokens": _finite_float(row.get("total_tokens")) or 0.0,
@@ -1234,6 +1380,7 @@ def compare_api_llm_trace_runs(
     winners = {
         "best_score": _winner(rows, "route_score"),
         "highest_quality": _winner(rows, "quality_score"),
+        "highest_text_quality": _winner(rows, "text_quality_score"),
         "highest_efficiency": _winner(rows, "efficiency_score"),
         "highest_confidence": _winner(rows, "confidence_mean"),
         "highest_stability": _winner(rows, "stability_mean"),
@@ -1259,6 +1406,10 @@ def compare_api_llm_trace_runs(
         recommendations.append(f"inspect {winners['lowest_latency']} for latency-sensitive routing")
     if winners.get("highest_efficiency") and winners["highest_efficiency"] != best:
         recommendations.append(f"inspect {winners['highest_efficiency']} for cost-sensitive routing")
+    if winners.get("highest_text_quality") and winners["highest_text_quality"] != best:
+        recommendations.append(
+            f"inspect {winners['highest_text_quality']} for stronger prompt-text coverage"
+        )
     if winners.get("lowest_refusal") and winners["lowest_refusal"] != best:
         recommendations.append(f"inspect {winners['lowest_refusal']} for fewer refusals")
     return {
@@ -1541,6 +1692,7 @@ class ApiLLMZSpaceRuntime:
         trace_dicts = [trace.as_dict() for trace in self.traces]
         usage_rows = [_mapping_at(trace, "usage") for trace in trace_dicts]
         metric_rows = [_mapping_at(trace, "metrics") for trace in trace_dicts]
+        text_quality_rows = [_trace_text_quality(trace) for trace in trace_dicts]
         ready_values = [_trace_runtime_ready(trace) for trace in trace_dicts]
         ready_observed = [value for value in ready_values if value is not None]
         ready_count = sum(1 for value in ready_observed if value)
@@ -1598,6 +1750,23 @@ class ApiLLMZSpaceRuntime:
                 "total_tokens": _stats(row.get("total_tokens") for row in usage_rows),
             },
             "latency_ms": _stats(trace.get("latency_ms") for trace in trace_dicts),
+            "text_quality": {
+                "prompt_coverage": _stats(
+                    row.get("prompt_coverage") for row in text_quality_rows
+                ),
+                "prompt_echo_rate": _stats(
+                    row.get("prompt_echo_rate") for row in text_quality_rows
+                ),
+                "response_signal_rate": _stats(
+                    row.get("response_signal_rate") for row in text_quality_rows
+                ),
+                "repetition_rate": _stats(
+                    row.get("repetition_rate") for row in text_quality_rows
+                ),
+                "text_quality_score": _stats(
+                    row.get("text_quality_score") for row in text_quality_rows
+                ),
+            },
             "confidence": _stats(_trace_confidence(trace) for trace in trace_dicts),
             "metrics": {
                 key: _stats(row.get(key) for row in metric_rows)

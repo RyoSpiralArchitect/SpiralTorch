@@ -115,6 +115,9 @@ PY
   Comparison rows also expose `quality_score`, `efficiency_score`, normalized
   `latency_cost` / `token_cost`, and `health_penalty`; use `near_best` to inspect
   routes that are close enough that the tradeoff matters more than the rank.
+  Trace summaries also include deterministic text-quality guards:
+  `prompt_coverage`, `prompt_echo_rate`, `response_signal_rate`,
+  `repetition_rate`, and `text_quality_score`.
 - Language desire controls via `st.nn.DesirePipeline`, `DesireTrainerBridge`,
   `DesireRoundtableBridge`, and downstream hook adapters so notebooks can
   inspect phase/temperature/entropy offsets without making the symbolic kernel

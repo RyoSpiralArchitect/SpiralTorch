@@ -420,6 +420,7 @@ def test_api_llm_runtime_writes_loads_and_summarizes_jsonl(tmp_path) -> None:
     assert runtime_summary["empty_text_rate"] == 0.0
     assert runtime_summary["refusal_rate"] == 0.0
     assert runtime_summary["completion_rate"] == 1.0
+    assert runtime_summary["text_quality"]["text_quality_score"]["mean"] > 0.0
     assert runtime.as_dict()["summary"]["count"] == 2
 
     path = tmp_path / "api-llm-trace.jsonl"
@@ -444,6 +445,9 @@ def test_api_llm_runtime_writes_loads_and_summarizes_jsonl(tmp_path) -> None:
     assert summary["latency_ms"]["max"] == 200.0
     assert summary["confidence"]["min"] > 0.0
     assert "stability" in summary["metrics"]
+    assert summary["text_quality"]["text_quality_score"]["mean"] > 0.0
+    assert summary["text_quality"]["response_signal_rate"]["mean"] > 0.0
+    assert summary["text_quality"]["repetition_rate"]["max"] < 1.0
 
 
 def test_api_llm_trace_health_penalizes_empty_refusals(tmp_path) -> None:
@@ -760,8 +764,62 @@ def test_compare_api_llm_trace_runs_exposes_route_tradeoffs(tmp_path) -> None:
     assert "compare near-best routes within 0.250" in comparison["recommendations"][1]
     assert comparison["winners"]["highest_efficiency"] == "compact"
     assert comparison["winners"]["highest_quality"] in {"compact", "expanded"}
+    assert comparison["winners"]["highest_text_quality"] in {"compact", "expanded"}
     assert rows["compact"]["latency_cost"] < rows["expanded"]["latency_cost"]
     assert rows["compact"]["token_cost"] < rows["expanded"]["token_cost"]
     assert rows["compact"]["health_penalty"] == 0.0
+    assert rows["compact"]["prompt_coverage_mean"] > 0.0
+    assert rows["compact"]["text_quality_score"] > 0.0
     assert 0.0 <= rows["expanded"]["quality_score"] <= 1.0
     assert 0.0 <= rows["expanded"]["efficiency_score"] <= 1.0
+
+
+def test_compare_api_llm_trace_runs_flags_prompt_text_quality(tmp_path) -> None:
+    aligned = st.ApiLLMZSpaceRuntime(
+        [0.12, -0.04, 0.33, -0.11],
+        provider="example",
+        model="aligned-model",
+        create_session=False,
+    )
+    aligned.record_response(
+        {
+            "model": "aligned-model",
+            "output_text": "Z-space routing audits latency, tokens, and prompt coverage.",
+            "status": "completed",
+            "usage": {"prompt_tokens": 8, "completion_tokens": 9, "total_tokens": 17},
+        },
+        prompt="Audit Z-space routing latency tokens and prompt coverage",
+        latency_ms=150.0,
+    )
+    aligned_path = tmp_path / "aligned.jsonl"
+    aligned.write_jsonl(aligned_path)
+
+    off_topic = st.ApiLLMZSpaceRuntime(
+        [0.12, -0.04, 0.33, -0.11],
+        provider="example",
+        model="off-topic-model",
+        create_session=False,
+    )
+    off_topic.record_response(
+        {
+            "model": "off-topic-model",
+            "output_text": "Bananas repeat bananas repeat bananas repeat.",
+            "status": "completed",
+            "usage": {"prompt_tokens": 8, "completion_tokens": 6, "total_tokens": 14},
+        },
+        prompt="Audit Z-space routing latency tokens and prompt coverage",
+        latency_ms=120.0,
+    )
+    off_topic_path = tmp_path / "off-topic.jsonl"
+    off_topic.write_jsonl(off_topic_path)
+
+    comparison = st.compare_api_llm_trace_runs(
+        {"aligned": aligned_path, "off-topic": off_topic_path},
+        near_best_tolerance=1.0,
+    )
+    rows = {row["label"]: row for row in comparison["runs"]}
+
+    assert comparison["winners"]["highest_text_quality"] == "aligned"
+    assert rows["aligned"]["prompt_coverage_mean"] > rows["off-topic"]["prompt_coverage_mean"]
+    assert rows["aligned"]["text_quality_score"] > rows["off-topic"]["text_quality_score"]
+    assert rows["off-topic"]["repetition_rate_mean"] > rows["aligned"]["repetition_rate_mean"]

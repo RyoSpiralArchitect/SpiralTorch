@@ -147,8 +147,10 @@ matrix = st.run_api_llm_prompt_suite_matrix(
 )
 print(matrix["comparison"]["winners"]["best_score"])
 print(matrix["comparison"]["winners"]["highest_efficiency"])
+print(matrix["comparison"]["winners"]["highest_text_quality"])
 print(matrix["comparison"]["near_best"])
 print(matrix["comparison"]["runs"][0]["quality_score"])
+print(matrix["comparison"]["runs"][0]["text_quality_score"])
 print(matrix["comparison"]["runs"][0]["refusal_rate"])
 ```
 
