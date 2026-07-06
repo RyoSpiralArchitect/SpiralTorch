@@ -780,6 +780,8 @@ class ApiLLMTrace:
         if self.inference is not None:
             as_dict = getattr(self.inference, "as_dict", None)
             inference_payload = as_dict() if callable(as_dict) else self.inference
+        telemetry = dict(self.telemetry)
+        telemetry.update(_inference_telemetry_payload(inference_payload))
         return {
             "provider": self.provider,
             "model": self.model,
@@ -789,11 +791,23 @@ class ApiLLMTrace:
             "latency_ms": self.latency_ms,
             "usage": dict(self.usage),
             "metrics": dict(self.metrics),
-            "telemetry": dict(self.telemetry),
+            "telemetry": telemetry,
             "inference": inference_payload,
             "device_preflight": None if self.device_preflight is None else dict(self.device_preflight),
             "response_metadata": None if self.response_metadata is None else dict(self.response_metadata),
         }
+
+
+def _inference_telemetry_payload(inference: Any) -> dict[str, Any]:
+    if not isinstance(inference, Mapping):
+        return {}
+    telemetry = inference.get("telemetry")
+    if not isinstance(telemetry, Mapping):
+        return {}
+    payload = telemetry.get("payload")
+    if isinstance(payload, Mapping):
+        return dict(payload)
+    return dict(telemetry)
 
 
 def api_llm_trace_from_response(
@@ -966,12 +980,21 @@ def _normalise_trace_record(
     record_type = record.get("event_type") or record.get("type") or record.get("kind")
     if isinstance(payload, Mapping) and (record_type in {event_type, None}):
         event = dict(payload)
+        telemetry = dict(_mapping_at(event, "telemetry"))
+        telemetry.update(_inference_telemetry_payload(event.get("inference")))
+        if telemetry:
+            event["telemetry"] = telemetry
         for key in ("step", "ts", "schema"):
             if key in record and key not in event:
                 event[key] = record[key]
         return event
     if {"text", "metrics", "usage"}.issubset(record.keys()):
-        return dict(record)
+        event = dict(record)
+        telemetry = dict(_mapping_at(event, "telemetry"))
+        telemetry.update(_inference_telemetry_payload(event.get("inference")))
+        if telemetry:
+            event["telemetry"] = telemetry
+        return event
     return None
 
 
