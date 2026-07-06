@@ -56,6 +56,18 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("spiraltorch/spiralk.pyi", workflow)
         self.assertIn("missing required type payloads", workflow)
 
+    def test_pypi_publish_verification_requires_latest_release(self) -> None:
+        publish_from_release = (
+            ROOT / ".github" / "workflows" / "publish_pypi_from_release.yml"
+        ).read_text(encoding="utf-8")
+        release_wheels = (ROOT / ".github" / "workflows" / "release_wheels.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("--require-latest", publish_from_release)
+        self.assertIn("--require-latest", release_wheels)
+        self.assertIn("--index-url https://pypi.org/simple", publish_from_release)
+
 
 if __name__ == "__main__":
     unittest.main()
