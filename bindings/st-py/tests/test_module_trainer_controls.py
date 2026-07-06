@@ -435,6 +435,71 @@ def test_summarize_trainer_trace_events_collects_numeric_metrics(tmp_path) -> No
     assert policy["status_counts"]["wasm_tuner_choice_hit"] == pytest.approx(1.0)
 
 
+def test_summarize_trainer_trace_events_surfaces_topos_context(tmp_path) -> None:
+    _ensure_torch_stub()
+    st = importlib.import_module("spiraltorch")
+
+    trace_path = tmp_path / "trainer_topos_trace.jsonl"
+    records = [
+        {
+            "type": "TrainerStep",
+            "payload": {
+                "step": 1,
+                "metrics": {
+                    "extra": {
+                        "topos.closure_pressure": 0.4,
+                        "topos.openness": 0.6,
+                        "topos.learning_rate_scale": 0.8919875,
+                        "topos.temperature_scale": 0.8533125,
+                        "topos.training_hints.gradient_bias_scale": 0.0786561,
+                        "topos.training_hints.clip_scale": 0.871,
+                        "topos.inference_hints.top_p_scale": 0.890274375,
+                        "topos.inference_hints.context_weight": 0.9225,
+                    }
+                },
+            },
+        },
+        {
+            "type": "TrainerStep",
+            "payload": {
+                "step": 2,
+                "metrics": {"step_time_ms": 1.0},
+                "telemetry": {
+                    "topos": {
+                        "closure_pressure": 0.8,
+                        "openness": 0.2,
+                        "training_hints": {
+                            "gradient_bias_scale": 0.12,
+                            "clip_scale": 0.6,
+                        },
+                        "inference_hints": {
+                            "top_p_scale": 0.72,
+                            "context_weight": 1.1,
+                        },
+                    }
+                },
+            },
+        },
+    ]
+    trace_path.write_text(
+        "\n".join(json.dumps(record, ensure_ascii=False) for record in records),
+        encoding="utf-8",
+    )
+
+    summary = st.summarize_trainer_trace_events(trace_path)
+    context = summary["topos_context"]
+
+    assert context["observed_count"] == 2
+    assert context["observed_rate"] == pytest.approx(1.0)
+    assert context["closure_pressure"]["mean"] == pytest.approx(0.6)
+    assert context["openness"]["last"] == pytest.approx(0.2)
+    assert context["learning_rate_scale"]["samples"] == 1
+    assert context["training_gradient_bias_scale"]["max"] == pytest.approx(0.12)
+    assert context["training_clip_scale"]["min"] == pytest.approx(0.6)
+    assert context["inference_top_p_scale"]["mean"] == pytest.approx(0.8051371875)
+    assert context["inference_context_weight"]["last"] == pytest.approx(1.1)
+
+
 def test_summarize_trainer_trace_events_reads_plugin_writer_policy_events(tmp_path) -> None:
     _ensure_torch_stub()
     st = importlib.import_module("spiraltorch")
