@@ -2242,6 +2242,8 @@ def run_api_llm_prompt_suite_matrix(
     smoothing: float = ...,
     strategy: str = ...,
     jsonl_dir: str | PathLike[str] | None = ...,
+    request_kwargs: Mapping[str, Mapping[str, Any]] | None = ...,
+    near_best_tolerance: float = ...,
     clear: bool = ...,
     **kwargs: Any,
 ) -> Dict[str, Any]: ...

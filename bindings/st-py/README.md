@@ -117,7 +117,9 @@ PY
   routes that are close enough that the tradeoff matters more than the rank.
   Trace summaries also include deterministic text-quality guards:
   `prompt_coverage`, `prompt_echo_rate`, `response_signal_rate`,
-  `repetition_rate`, and `text_quality_score`.
+  `repetition_rate`, and `text_quality_score`. For route selection, comparison
+  payloads include `selection_profiles` for `balanced`, `quality`, `grounded`,
+  `efficiency`, and `latency` routing.
 - Language desire controls via `st.nn.DesirePipeline`, `DesireTrainerBridge`,
   `DesireRoundtableBridge`, and downstream hook adapters so notebooks can
   inspect phase/temperature/entropy offsets without making the symbolic kernel

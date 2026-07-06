@@ -148,6 +148,7 @@ matrix = st.run_api_llm_prompt_suite_matrix(
 print(matrix["comparison"]["winners"]["best_score"])
 print(matrix["comparison"]["winners"]["highest_efficiency"])
 print(matrix["comparison"]["winners"]["highest_text_quality"])
+print(matrix["comparison"]["selection_profiles"]["grounded"]["label"])
 print(matrix["comparison"]["near_best"])
 print(matrix["comparison"]["runs"][0]["quality_score"])
 print(matrix["comparison"]["runs"][0]["text_quality_score"])
@@ -160,12 +161,15 @@ run:
 ```bash
 PYTHONPATH=bindings/st-py python3 \
   bindings/st-py/examples/api_llm_live_provider_matrix.py \
-  --prompt-limit 12 --repeat 3 --out-dir /tmp/spiraltorch-live-matrix
+  --prompt-limit 12 --repeat 3 --near-best-tolerance 0.02 \
+  --out-dir /tmp/spiraltorch-live-matrix
 ```
 
 Claude 5/Opus 4.8 adaptive-thinking routes share `max_tokens` between thinking
 and visible output, so raise `--anthropic-max-tokens` if completion rates fall
-or empty-text rows appear on high-effort routes.
+or empty-text rows appear on high-effort routes. The written `report.json`
+includes route settings plus `selection_profiles` for balanced, quality,
+grounded, efficiency, and latency-sensitive routing.
 
 If the optional `openai` package is installed, the same runtime can call the
 Responses API directly.  The SDK reads `OPENAI_API_KEY` from the environment;
