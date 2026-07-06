@@ -171,3 +171,9 @@ canvas#plot {
   font-size: 0.85rem;
   color: rgba(235, 239, 255, 0.92);
 }
+
+.report-preview {
+  margin-top: 0.85rem;
+  max-height: 13rem;
+  white-space: pre-wrap;
+}

@@ -115,6 +115,19 @@
             </div>
           </fieldset>
 
+          <fieldset>
+            <legend>Run artifact</legend>
+            <p class="hint">
+              Export the latest browser-side evaluation or training run as JSON so Python,
+              notebooks, or API-LLM routing experiments can replay the same Z-space probe.
+            </p>
+            <div class="actions">
+              <button id="copy-report" type="button">Copy report JSON</button>
+              <button id="download-report" type="button">Download report</button>
+            </div>
+            <pre id="learning-report" class="preview report-preview">No report yet.</pre>
+          </fieldset>
+
           <div class="actions">
             <button id="run" type="submit">Build + Evaluate</button>
           </div>

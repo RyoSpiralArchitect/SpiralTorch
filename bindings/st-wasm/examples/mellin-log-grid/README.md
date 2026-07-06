@@ -52,3 +52,14 @@ Notes:
 1. Pick `mode=vertical` (training currently uses the vertical line settings).
 2. Click “Init learnable grid” to seed a noisy copy of the reference samples.
 3. Click “Train” to run gradient steps (`trainStepMatchGridPlan`) and overlay target vs learned.
+
+## Run artifact export
+
+The demo now emits structured JSON reports from the browser:
+
+- `spiraltorch.wasm.mellin_eval_report.v1` captures a Mellin evaluation/inference probe.
+- `spiraltorch.wasm.mellin_learning_report.v1` captures the match-reference training trace,
+  final loss, target/learned magnitude summaries, and the sampled probe values.
+
+Use “Copy report JSON” or “Download report” after evaluation/training to pass the browser run into
+Python notebooks, API-LLM routing experiments, or future FT/runtime replay tooling.
