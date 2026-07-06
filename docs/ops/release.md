@@ -11,6 +11,7 @@ without uploading.
 - Publish existing signed GitHub Release wheels: `.github/workflows/publish_pypi_from_release.yml`
 - Release readiness summary: `scripts/release_status.py`
 - Safe PyPI token secret setup: `scripts/configure_pypi_token_secret.py`
+- Safe publish workflow runner: `scripts/run_pypi_publish_from_release.py`
 - Safe manual PyPI publish helper: `scripts/publish_pypi_wheels.py`
 - Published-wheel digest verifier: `scripts/security/verify_pypi_release.py`
 
@@ -58,6 +59,19 @@ This is safe to run repeatedly. The workflow default is `publish_method=dry-run`
 and the PyPI upload and post-upload smoke steps are skipped in that mode.
 
 ```bash
+python scripts/run_pypi_publish_from_release.py \
+  --version "$VERSION" \
+  --publish-method dry-run \
+  --watch
+```
+
+The runner preflights local/release/PyPI state first, then dispatches and
+optionally watches the workflow. If you only want to inspect the exact workflow
+command without dispatching it, add `--print-only`.
+
+The equivalent raw workflow command is:
+
+```bash
 gh workflow run publish_pypi_from_release.yml \
   --ref main \
   -f release_tag="$TAG" \
@@ -88,6 +102,18 @@ Use `--dry-run` to validate token shape and secret target without storing it.
 ## Publish Signed Release Wheels
 
 The preferred PyPI path reuses the already-signed GitHub Release wheels.
+
+```bash
+python scripts/run_pypi_publish_from_release.py \
+  --version "$VERSION" \
+  --publish-method token \
+  --watch
+```
+
+The runner refuses `--publish-method token` until the `pypi` environment can see
+`PYPI_API_TOKEN`, so a missing secret fails before dispatching an upload run.
+
+The equivalent raw workflow command is:
 
 ```bash
 gh workflow run publish_pypi_from_release.yml \

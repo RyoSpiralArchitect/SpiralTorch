@@ -508,6 +508,7 @@ Linux note: for manylinux2014 wheels you either need a manylinux container (e.g.
 - Publish existing signed GitHub Release wheels: `.github/workflows/publish_pypi_from_release.yml`
 - Release readiness summary: `scripts/release_status.py`
 - Safe PyPI token secret setup: `scripts/configure_pypi_token_secret.py`
+- Safe publish workflow runner: `scripts/run_pypi_publish_from_release.py`
 - Safe manual PyPI publish helper: `scripts/publish_pypi_wheels.py`
 - Full release runbook: [`docs/ops/release.md`](docs/ops/release.md)
 
@@ -529,21 +530,17 @@ python scripts/configure_pypi_token_secret.py --token-source prompt
 
 # Safe GitHub Actions preflight: validates the signed release wheels and PyPI
 # state, but never uploads. This is the default publish_method for the workflow.
-gh workflow run publish_pypi_from_release.yml \
-  --ref main \
-  -f release_tag="$TAG" \
-  -f expected_wheels=3 \
-  -f publish_method=dry-run \
-  -f skip_existing=true
+python scripts/run_pypi_publish_from_release.py \
+  --version "$VERSION" \
+  --publish-method dry-run \
+  --watch
 
 # Real publish is intentionally explicit: provide PYPI_API_TOKEN as the `pypi`
 # environment secret, or configure a matching PyPI Trusted Publisher first.
-gh workflow run publish_pypi_from_release.yml \
-  --ref main \
-  -f release_tag="$TAG" \
-  -f expected_wheels=3 \
-  -f publish_method=token \
-  -f skip_existing=true
+python scripts/run_pypi_publish_from_release.py \
+  --version "$VERSION" \
+  --publish-method token \
+  --watch
 ```
 
 ---
