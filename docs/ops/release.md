@@ -95,8 +95,25 @@ omit `--env pypi`. If the workflow fails with
 `publish_method=token requires a PYPI_API_TOKEN`, the selected GitHub
 environment cannot see that secret yet.
 
+If the active shell/agent cannot accept an interactive hidden prompt, use a
+stdin handoff instead. This keeps the token out of stdout, shell history, and
+process arguments while still feeding `gh secret set` through stdin.
+
+```bash
+(
+  old_stty=$(stty -g)
+  trap 'stty "$old_stty"; unset PYPI_TOKEN' EXIT
+  printf 'PyPI token for spiraltorch (hidden): '
+  stty -echo
+  IFS= read -r PYPI_TOKEN
+  stty "$old_stty"
+  printf '\n'
+  printf '%s' "$PYPI_TOKEN" | python scripts/configure_pypi_token_secret.py --token-source stdin
+)
+```
+
 For non-interactive local automation, use `--token-source env --token-env
-PYPI_API_TOKEN` or pipe a hidden `read -s` value into `--token-source stdin`.
+PYPI_API_TOKEN` or pipe another secret manager into `--token-source stdin`.
 Use `--dry-run` to validate token shape and secret target without storing it.
 
 ## Publish Signed Release Wheels
