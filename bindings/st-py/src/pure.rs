@@ -189,7 +189,8 @@ impl PyOpenCartesianTopos {
     ) -> PyResult<PyObject> {
         topos_control_signal_to_pydict(
             py,
-            self.inner.control_signal_for(observed_depth, visited_volume),
+            self.inner
+                .control_signal_for(observed_depth, visited_volume),
         )
     }
 
