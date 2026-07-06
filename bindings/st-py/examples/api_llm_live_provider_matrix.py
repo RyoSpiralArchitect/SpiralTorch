@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
+import glob
 import json
 import os
 from pathlib import Path
@@ -110,41 +111,142 @@ def _compact_wasm_summary(summary: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _dedupe_paths(paths: Sequence[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for path in paths:
+        key = str(Path(path).expanduser())
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(key)
+    return result
+
+
+def _discover_wasm_report_paths(
+    wasm_reports: Sequence[str | os.PathLike[str]] | str | os.PathLike[str] | None,
+    *,
+    wasm_report_globs: Sequence[str] | None = None,
+    wasm_report_dirs: Sequence[str | os.PathLike[str]] | None = None,
+    recursive: bool = False,
+) -> list[str]:
+    paths: list[str] = []
+    if wasm_reports is None:
+        pass
+    elif isinstance(wasm_reports, (str, os.PathLike)):
+        paths.append(str(wasm_reports))
+    else:
+        paths.extend(str(path) for path in wasm_reports if str(path))
+
+    for pattern in wasm_report_globs or ():
+        paths.extend(sorted(glob.glob(str(pattern), recursive=True)))
+
+    for raw_dir in wasm_report_dirs or ():
+        report_dir = Path(raw_dir)
+        iterator = report_dir.rglob("*.json") if recursive else report_dir.glob("*.json")
+        paths.extend(str(path) for path in sorted(iterator))
+
+    return _dedupe_paths(paths)
+
+
+def _select_wasm_report_indices(
+    summaries: Sequence[Mapping[str, Any]],
+    max_reports: int | None,
+) -> list[int]:
+    if max_reports is None or max_reports <= 0 or max_reports >= len(summaries):
+        return list(range(len(summaries)))
+
+    def _rank_key(index: int) -> tuple[bool, float, int]:
+        loss = _summary_loss(summaries[index])
+        return (loss is None, loss if loss is not None else 0.0, index)
+
+    ranked = sorted(
+        range(len(summaries)),
+        key=_rank_key,
+    )
+    return sorted(ranked[:max_reports])
+
+
+def _compact_wasm_comparison(comparison: Mapping[str, Any]) -> dict[str, Any]:
+    def _row(row: Any) -> dict[str, Any] | None:
+        if not isinstance(row, Mapping):
+            return None
+        return {
+            "label": row.get("label"),
+            "family": row.get("family"),
+            "loss": row.get("loss"),
+            "stability": row.get("stability"),
+        }
+
+    return {
+        "kind": comparison.get("kind"),
+        "count": comparison.get("count"),
+        "families": comparison.get("families"),
+        "best_loss": _row(comparison.get("best_loss")),
+        "best_stability": _row(comparison.get("best_stability")),
+    }
+
+
 def build_wasm_context(
     wasm_reports: Sequence[str | os.PathLike[str]] | str | os.PathLike[str] | None,
     *,
     gradient_dim: int,
     bundle_weight: float,
     telemetry_prefix: str,
+    wasm_report_globs: Sequence[str] | None = None,
+    wasm_report_dirs: Sequence[str | os.PathLike[str]] | None = None,
+    max_reports: int | None = None,
+    recursive: bool = False,
 ) -> tuple[list[Any], dict[str, Any]]:
     """Load WASM reports and convert them into reusable API LLM context."""
 
-    if wasm_reports is None:
-        paths: list[str] = []
-    elif isinstance(wasm_reports, (str, os.PathLike)):
-        paths = [str(wasm_reports)]
-    else:
-        paths = [str(path) for path in wasm_reports if str(path)]
+    candidate_paths = _discover_wasm_report_paths(
+        wasm_reports,
+        wasm_report_globs=wasm_report_globs,
+        wasm_report_dirs=wasm_report_dirs,
+        recursive=recursive,
+    )
     metadata: dict[str, Any] = {
-        "report_count": len(paths),
+        "candidate_count": len(candidate_paths),
+        "report_count": 0,
         "gradient_dim": int(gradient_dim),
         "bundle_weight": float(bundle_weight),
         "telemetry_prefix": telemetry_prefix,
+        "selection": {
+            "max_reports": max_reports,
+            "recursive": bool(recursive),
+        },
+        "candidate_reports": [],
         "reports": [],
         "context_origins": [],
+        "comparison": None,
     }
-    if not paths:
+    if not candidate_paths:
         return [], metadata
 
-    summaries = [st.summarize_wasm_report(path) for path in paths]
+    summaries = [st.summarize_wasm_report(path) for path in candidate_paths]
+    selected_indices = _select_wasm_report_indices(summaries, max_reports)
+    selected_paths = [candidate_paths[index] for index in selected_indices]
+    selected_summaries = [summaries[index] for index in selected_indices]
+    comparison = st.compare_wasm_reports(
+        candidate_paths,
+        labels=[Path(path).stem for path in candidate_paths],
+    )
     context_partials = st.api_llm_wasm_context_partials(
-        paths,
+        selected_paths,
         gradient_dim=gradient_dim,
         bundle_weight=bundle_weight,
         telemetry_prefix=telemetry_prefix,
     )
-    metadata["reports"] = [_compact_wasm_summary(summary) for summary in summaries]
+    metadata["report_count"] = len(selected_paths)
+    metadata["candidate_reports"] = [
+        _compact_wasm_summary(summary) for summary in summaries
+    ]
+    metadata["reports"] = [
+        _compact_wasm_summary(summary) for summary in selected_summaries
+    ]
     metadata["context_origins"] = [partial.origin for partial in context_partials]
+    metadata["comparison"] = _compact_wasm_comparison(comparison)
     return context_partials, metadata
 
 
@@ -288,6 +390,35 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--wasm-gradient-dim", type=int, default=8)
     parser.add_argument("--wasm-bundle-weight", type=float, default=1.0)
     parser.add_argument("--wasm-telemetry-prefix", default="wasm")
+    parser.add_argument(
+        "--wasm-report-glob",
+        action="append",
+        default=[],
+        help=(
+            "Glob pattern for browser-exported WASM report JSON files. "
+            "Repeat to collect reports from several run directories."
+        ),
+    )
+    parser.add_argument(
+        "--wasm-report-dir",
+        action="append",
+        default=[],
+        help="Directory containing WASM report JSON files.",
+    )
+    parser.add_argument(
+        "--wasm-report-recursive",
+        action="store_true",
+        help="Search --wasm-report-dir directories recursively.",
+    )
+    parser.add_argument(
+        "--wasm-max-reports",
+        type=int,
+        default=0,
+        help=(
+            "Use only the best N discovered WASM reports by loss. "
+            "Use 0 to pass all discovered reports."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -313,6 +444,10 @@ def main() -> None:
         gradient_dim=args.wasm_gradient_dim,
         bundle_weight=args.wasm_bundle_weight,
         telemetry_prefix=args.wasm_telemetry_prefix,
+        wasm_report_globs=args.wasm_report_glob,
+        wasm_report_dirs=args.wasm_report_dir,
+        max_reports=args.wasm_max_reports,
+        recursive=args.wasm_report_recursive,
     )
     matrix = st.run_api_llm_prompt_suite_matrix(
         prompts,

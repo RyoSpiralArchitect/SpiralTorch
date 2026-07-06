@@ -22,7 +22,7 @@ def _load_examples(monkeypatch):
     return live_matrix, sweep
 
 
-def _canvas_report() -> dict[str, object]:
+def _canvas_report(loss: float = 0.05) -> dict[str, object]:
     return {
         "schema": "spiraltorch.wasm.canvas_hypertrain_report.v1",
         "kind": "canvas-hypertrain-training",
@@ -44,7 +44,7 @@ def _canvas_report() -> dict[str, object]:
         "metrics": {
             "step": 2,
             "historyLength": 2,
-            "last": {"loss": 0.05},
+            "last": {"loss": loss},
             "lossStats": {"count": 2, "finiteCount": 2, "mean": 0.08, "rms": 0.09},
         },
     }
@@ -53,6 +53,13 @@ def _canvas_report() -> dict[str, object]:
 def _write_canvas_report(tmp_path: Path) -> Path:
     report = tmp_path / "canvas-report.json"
     report.write_text(json.dumps(_canvas_report()), encoding="utf-8")
+    return report
+
+
+def _write_named_canvas_report(directory: Path, name: str, loss: float) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    report = directory / name
+    report.write_text(json.dumps(_canvas_report(loss=loss)), encoding="utf-8")
     return report
 
 
@@ -80,6 +87,40 @@ def test_live_matrix_builds_wasm_context_from_report(tmp_path, monkeypatch) -> N
     assert telemetry is not None
     assert telemetry["browser.family_canvas"] == pytest.approx(1.0)
     assert telemetry["browser.webgpu_device_ready"] == pytest.approx(1.0)
+
+
+def test_live_matrix_discovers_and_selects_best_wasm_reports(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    live_matrix, _ = _load_examples(monkeypatch)
+    runs = tmp_path / "runs"
+    slow = _write_named_canvas_report(runs, "slow.json", 0.2)
+    best = _write_named_canvas_report(runs, "best.json", 0.01)
+    nested = _write_named_canvas_report(runs / "nested", "middle.json", 0.05)
+
+    context, metadata = live_matrix.build_wasm_context(
+        [str(slow), str(slow)],
+        gradient_dim=5,
+        bundle_weight=1.0,
+        telemetry_prefix="wasm",
+        wasm_report_globs=[str(runs / "best.json")],
+        wasm_report_dirs=[str(runs)],
+        max_reports=2,
+        recursive=True,
+    )
+
+    selected_paths = [row["artifact_path"] for row in metadata["reports"]]
+    candidate_paths = [row["artifact_path"] for row in metadata["candidate_reports"]]
+    assert metadata["candidate_count"] == 3
+    assert metadata["report_count"] == 2
+    assert set(candidate_paths) == {str(slow), str(best), str(nested)}
+    assert set(selected_paths) == {str(best), str(nested)}
+    assert metadata["comparison"]["count"] == 3
+    assert metadata["comparison"]["best_loss"]["label"] == "best"
+    assert metadata["comparison"]["best_loss"]["loss"] == pytest.approx(0.01)
+    assert len(context) == 2
+    assert all(len(partial.resolved()["gradient"]) == 5 for partial in context)
 
 
 def test_sweep_dry_run_records_wasm_context(tmp_path, monkeypatch, capsys) -> None:

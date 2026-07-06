@@ -165,6 +165,8 @@ SpiralTorch’s WASM bindings are now **fully runnable** in the browser: geometr
 - **WASM → API LLM context:** pass exported browser reports into the hosted-model
   route matrix with `--wasm-report report.json`, or run the keyless bridge with
   `PYTHONPATH=bindings/st-py python3 bindings/st-py/examples/api_llm_wasm_context_runtime.py --wasm-report report.json`
+  Use `--wasm-report-dir runs --wasm-report-recursive --wasm-max-reports 3` to
+  select the best browser-side learning runs before they become LLM context.
 
 ### Why SpiralTorch  
 
