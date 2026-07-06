@@ -43,6 +43,26 @@ def summarize_transformers_trainer_runtime_bridge(
     trainer_event_type: str = ...,
 ) -> Dict[str, Any]: ...
 
+def compare_amegagrad_topos_training_traces(
+    traces: Mapping[str, str | PathLike[str]] | Sequence[str | PathLike[str]],
+    *,
+    event_type: str = ...,
+) -> Dict[str, Any]: ...
+
+def trace_amegagrad_topos_training_sweep(
+    trace_dir: str | PathLike[str],
+    *,
+    profiles: Mapping[str, Mapping[str, Any]] | None = ...,
+    steps: int = ...,
+    shape: Tuple[int, int] = ...,
+    curvature: float = ...,
+    hyper_learning_rate: float = ...,
+    real_learning_rate: float = ...,
+    topos: Mapping[str, Any] | None = ...,
+    waves: Sequence[Sequence[float]] | None = ...,
+    event_type: str = ...,
+) -> Dict[str, Any]: ...
+
 RUNTIME_IMPORT_INSTALL_HINTS: Dict[str, str]
 TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS: Dict[str, List[str]]
 

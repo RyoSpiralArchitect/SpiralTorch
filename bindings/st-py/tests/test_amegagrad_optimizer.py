@@ -26,6 +26,8 @@ def test_amegagrad_available_in_optim_module() -> None:
     assert hasattr(st, "optim")
     assert hasattr(st.optim, "Amegagrad")
     assert hasattr(st.optim, "amegagrad")
+    assert "compare_amegagrad_topos_training_traces" in st.__all__
+    assert "trace_amegagrad_topos_training_sweep" in st.__all__
 
 
 def test_amegagrad_step_updates_weights() -> None:
@@ -181,3 +183,32 @@ def test_amegagrad_session_writes_topos_training_trace(tmp_path) -> None:
     assert summary["topos_context"]["optimizer_rate_scale"]["last"] == pytest.approx(
         metrics["topos.optimizer_effect.rate_scale"]
     )
+
+
+def test_amegagrad_topos_training_sweep_compares_runs(tmp_path) -> None:
+    _require_native()
+
+    result = st.trace_amegagrad_topos_training_sweep(tmp_path / "sweep", steps=2)
+    comparison = result["comparison"]
+
+    assert result["kind"] == "spiraltorch.amegagrad_topos_training_trace_sweep"
+    assert set(result["trace_paths"]) == {"guard_only", "topos_tuned"}
+    assert comparison["kind"] == "spiraltorch.amegagrad_topos_training_trace_comparison"
+    assert comparison["count"] == 2
+    assert comparison["winners"]["lowest_optimizer_rate_scale"] == "topos_tuned"
+
+    tuned_summary = result["summaries"]["topos_tuned"]
+    tuned_context = tuned_summary["topos_context"]
+    assert tuned_summary["count"] == 2
+    assert tuned_context["observed_count"] == 2
+    assert tuned_context["optimizer_rate_scale"]["last"] < 1.0
+
+    guard_row = next(row for row in comparison["runs"] if row["label"] == "guard_only")
+    tuned_row = next(row for row in comparison["runs"] if row["label"] == "topos_tuned")
+    assert guard_row["topos_optimizer_rate_scale_mean"] is None
+    assert tuned_row["topos_optimizer_rate_scale_mean"] == pytest.approx(
+        tuned_context["optimizer_rate_scale"]["mean"]
+    )
+
+    reloaded = st.compare_amegagrad_topos_training_traces(result["trace_paths"])
+    assert reloaded["winners"]["lowest_optimizer_rate_scale"] == "topos_tuned"
