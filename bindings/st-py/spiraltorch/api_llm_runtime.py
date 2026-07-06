@@ -1606,14 +1606,21 @@ def run_api_llm_prompt_suite_matrix(
     smoothing: float = 0.35,
     strategy: str = "mean",
     jsonl_dir: str | Path | None = None,
+    request_kwargs: Mapping[str, Mapping[str, Any]] | None = None,
     clear: bool = True,
     **kwargs: Any,
 ) -> dict[str, Any]:
-    """Run the same prompt suite through multiple API-model callables."""
+    """Run the same prompt suite through multiple API-model callables.
+
+    ``kwargs`` are shared across all routes.  Use ``request_kwargs`` when each
+    route needs a provider-specific request shape, such as Anthropic effort
+    controls versus OpenAI response token limits.
+    """
 
     prompt_list = list(prompts)
     provider_map = dict(providers or {})
     model_map = dict(models or {})
+    request_kwargs_map = dict(request_kwargs or {})
     out_dir = Path(jsonl_dir) if jsonl_dir is not None else None
     if out_dir is not None:
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -1627,6 +1634,8 @@ def run_api_llm_prompt_suite_matrix(
             safe_label = _safe_trace_label(label_value, fallback=f"run-{index}")
             filename = f"{index:02d}-{safe_label}.jsonl"
             jsonl_out = out_dir / filename
+        route_kwargs = dict(kwargs)
+        route_kwargs.update(dict(request_kwargs_map.get(label_value, {})))
         suite = run_api_llm_prompt_suite(
             prompt_list,
             invoke,
@@ -1643,7 +1652,7 @@ def run_api_llm_prompt_suite_matrix(
             strategy=strategy,
             jsonl_out=jsonl_out,
             clear=clear,
-            **kwargs,
+            **route_kwargs,
         )
         suites[label_value] = suite
         path = suite.get("jsonl")

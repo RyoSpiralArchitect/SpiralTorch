@@ -591,10 +591,10 @@ def test_run_api_llm_prompt_suite_creates_runtime(tmp_path) -> None:
 
 
 def test_run_api_llm_prompt_suite_matrix_compares_providers(tmp_path) -> None:
-    calls: list[tuple[str, str]] = []
+    calls: list[tuple[str, str, str]] = []
 
     def fast_api(prompt: str, *, suffix: str) -> dict[str, object]:
-        calls.append(("fast api", prompt))
+        calls.append(("fast api", prompt, suffix))
         return {
             "model": "fast-model",
             "output_text": f"Fast bipolar route {suffix}",
@@ -603,7 +603,7 @@ def test_run_api_llm_prompt_suite_matrix_compares_providers(tmp_path) -> None:
         }
 
     def deep_api(prompt: str, *, suffix: str) -> dict[str, object]:
-        calls.append(("deep/api", prompt))
+        calls.append(("deep/api", prompt, suffix))
         return {
             "model": "deep-model",
             "content": [
@@ -624,14 +624,18 @@ def test_run_api_llm_prompt_suite_matrix_compares_providers(tmp_path) -> None:
         models={"fast api": "fast-model", "deep/api": "deep-model"},
         create_session=False,
         jsonl_dir=tmp_path,
-        suffix="entered Z-space.",
+        request_kwargs={
+            "fast api": {"suffix": "entered fast Z-space."},
+            "deep/api": {"suffix": "entered deep Z-space."},
+        },
+        suffix="entered shared Z-space.",
     )
 
     assert calls == [
-        ("fast api", "first bipolar prompt"),
-        ("fast api", "second bipolar prompt"),
-        ("deep/api", "first bipolar prompt"),
-        ("deep/api", "second bipolar prompt"),
+        ("fast api", "first bipolar prompt", "entered fast Z-space."),
+        ("fast api", "second bipolar prompt", "entered fast Z-space."),
+        ("deep/api", "first bipolar prompt", "entered deep Z-space."),
+        ("deep/api", "second bipolar prompt", "entered deep Z-space."),
     ]
     assert result["kind"] == "spiraltorch.api_llm_prompt_suite_matrix"
     assert result["count"] == 2

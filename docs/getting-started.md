@@ -138,11 +138,24 @@ matrix = st.run_api_llm_prompt_suite_matrix(
     {"demo-a": api, "demo-b": api},
     z_state=[0.12, -0.04, 0.33, -0.11],
     providers={"demo-a": "openai", "demo-b": "anthropic"},
+    request_kwargs={
+        "demo-a": {"max_output_tokens": 64},
+        "demo-b": {"max_tokens": 96, "extra_body": {"output_config": {"effort": "low"}}},
+    },
     create_session=False,
     jsonl_dir="api_llm_matrix",
 )
 print(matrix["comparison"]["winners"]["best_score"])
 print(matrix["comparison"]["runs"][0]["refusal_rate"])
+```
+
+For a live provider sweep, set `OPENAI_API_KEY` and/or `ANTHROPIC_API_KEY`, then
+run:
+
+```bash
+PYTHONPATH=bindings/st-py python3 \
+  bindings/st-py/examples/api_llm_live_provider_matrix.py \
+  --prompt-limit 12 --repeat 3 --out-dir /tmp/spiraltorch-live-matrix
 ```
 
 If the optional `openai` package is installed, the same runtime can call the
