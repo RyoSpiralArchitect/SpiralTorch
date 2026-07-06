@@ -131,6 +131,8 @@ PY
   passed as `context_partials=` to `ApiLLMZSpaceRuntime` or
   `run_api_llm_prompt_suite(...)`; see
   `examples/api_llm_wasm_context_runtime.py` for a keyless end-to-end bridge, or
+  `examples/openai_api_llm_wasm_context_runtime.py` for a live OpenAI Responses
+  smoke that persists the selected WASM context handoff and writes trace JSONL, or
   pass `--wasm-report report.json` to `examples/api_llm_live_provider_matrix.py`
   and `examples/api_llm_live_provider_matrix_sweep.py` when live OpenAI/Claude
   route comparisons should carry the same browser-side learning signal. Use
