@@ -785,6 +785,8 @@ hints. The same signal can damp a local Z-space trainer and tune hosted-model
 sampling controls:
 
 ```python
+import spiraltorch as st
+
 topos = st.hypergrad_topos(max_depth=10, max_volume=100)
 signal = st.topos_control_signal(topos, observed_depth=4, visited_volume=25)
 training = st.topos_training_hints(signal)
