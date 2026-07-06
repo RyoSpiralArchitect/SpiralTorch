@@ -30,7 +30,8 @@ pub use self::measure::{
 pub use self::topos::{
     GraphGuardProfile, GraphGuardReport, LawvereTierneyGuard, ModalityProfile, MultiModalAtlas,
     MultiModalBiome, MultiModalToposGuard, OpenCartesianTopos, RewardBoundary,
-    RewardBoundarySignal, RewriteMonad, TensorBiome, ToposAtlas, ZBox, ZBoxSite,
+    RewardBoundarySignal, RewriteMonad, TensorBiome, ToposAtlas, ToposControlSignal, ZBox,
+    ZBoxSite,
 };
 
 #[cfg(feature = "hip")]

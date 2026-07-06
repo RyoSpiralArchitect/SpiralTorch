@@ -844,7 +844,8 @@ _EXTRAS = [
     "pack_tribonacci_chunks","pack_tetranacci_chunks",
     "generate_plan_batch_ex","plan","plan_topk",
     "describe_device","hip_probe","mps_probe","probe_gpu_path","z_space_barycenter",
-    "hypergrad","realgrad","hypergrad_topos","encode_zspace","z_metrics",
+    "hypergrad","realgrad","hypergrad_topos","topos_control_signal",
+    "topos_control_partial","encode_zspace","z_metrics",
     "load_zspace_trace_events","write_zspace_trace_html",
     "load_trainer_trace_events","summarize_trainer_trace_events",
     "summarize_transformers_trainer_runtime_bridge","write_trainer_trace_html",
@@ -1532,6 +1533,202 @@ def hypergrad_topos(
 ) -> _Any:
     topos_cls = _require_rs_class("OpenCartesianTopos")
     return topos_cls(curvature, tolerance, saturation, int(max_depth), int(max_volume))
+
+
+def _unit_interval(value: _Any, *, default: float = 0.0) -> float:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        numeric = default
+    if not _math.isfinite(numeric):
+        numeric = default
+    return max(0.0, min(1.0, numeric))
+
+
+def _normalise_topos_control_signal(payload: _Mapping[str, _Any]) -> dict[str, _Any]:
+    curvature = float(payload.get("curvature", -1.0))
+    tolerance = float(payload.get("tolerance", 1e-3))
+    saturation = float(payload.get("saturation", 1.0))
+    porosity = _unit_interval(payload.get("porosity", 0.2), default=0.2)
+    max_depth = max(1, int(payload.get("max_depth", 64)))
+    max_volume = max(1, int(payload.get("max_volume", 512)))
+    observed_depth = max(0, int(payload.get("observed_depth", 0)))
+    visited_volume = max(0, int(payload.get("visited_volume", 0)))
+    remaining_volume = max(0, int(payload.get(
+        "remaining_volume",
+        max_volume - min(max_volume, visited_volume),
+    )))
+    depth_pressure = _unit_interval(
+        payload.get("depth_pressure", observed_depth / max_depth)
+    )
+    volume_pressure = _unit_interval(
+        payload.get("volume_pressure", visited_volume / max_volume)
+    )
+    closure_pressure = _unit_interval(
+        payload.get("closure_pressure", max(depth_pressure, volume_pressure))
+    )
+    openness = _unit_interval(payload.get("openness", 1.0 - closure_pressure))
+    guard_strength = _unit_interval(
+        payload.get(
+            "guard_strength",
+            (1.0 - porosity) * 0.7 + closure_pressure * 0.3,
+        )
+    )
+    stability_hint = _unit_interval(
+        payload.get("stability_hint", openness * (1.0 - 0.4 * porosity))
+    )
+    exploration_hint = _unit_interval(
+        payload.get(
+            "exploration_hint",
+            porosity * openness + (1.0 - guard_strength) * 0.25,
+        )
+    )
+    gradient = payload.get("gradient")
+    gradient_values = _coerce_gradient_values(gradient) if gradient is not None else None
+    if gradient_values is None:
+        gradient_values = [
+            openness,
+            guard_strength,
+            stability_hint,
+            exploration_hint,
+            depth_pressure,
+            volume_pressure,
+        ]
+    return {
+        "curvature": curvature,
+        "tolerance": tolerance,
+        "saturation": saturation,
+        "porosity": porosity,
+        "max_depth": max_depth,
+        "max_volume": max_volume,
+        "observed_depth": observed_depth,
+        "visited_volume": visited_volume,
+        "remaining_volume": remaining_volume,
+        "depth_pressure": depth_pressure,
+        "volume_pressure": volume_pressure,
+        "closure_pressure": closure_pressure,
+        "openness": openness,
+        "guard_strength": guard_strength,
+        "stability_hint": stability_hint,
+        "exploration_hint": exploration_hint,
+        "gradient": gradient_values,
+    }
+
+
+def _topos_signal_from_getters(
+    source: _Any,
+    *,
+    observed_depth: int,
+    visited_volume: int,
+    porosity: float | None = None,
+) -> dict[str, _Any]:
+    def _call(name: str, default: _Any) -> _Any:
+        attr = getattr(source, name, None)
+        return attr() if callable(attr) else default
+
+    payload = {
+        "curvature": _call("curvature", -1.0),
+        "tolerance": _call("tolerance", 1e-3),
+        "saturation": _call("saturation", 1.0),
+        "porosity": porosity if porosity is not None else _call("porosity", 0.2),
+        "max_depth": _call("max_depth", 64),
+        "max_volume": _call("max_volume", 512),
+        "observed_depth": observed_depth,
+        "visited_volume": visited_volume,
+    }
+    return _normalise_topos_control_signal(payload)
+
+
+def topos_control_signal(
+    topos: _Any | None = None,
+    *,
+    curvature: float = -1.0,
+    tolerance: float = 1e-3,
+    saturation: float = 1.0,
+    max_depth: int = 64,
+    max_volume: int = 512,
+    porosity: float | None = None,
+    observed_depth: int = 0,
+    visited_volume: int = 0,
+) -> dict[str, _Any]:
+    """Return a normalized open-topos pressure signal for training or inference."""
+
+    if isinstance(topos, _Mapping):
+        payload = dict(topos)
+        payload.setdefault("observed_depth", observed_depth)
+        payload.setdefault("visited_volume", visited_volume)
+        return _normalise_topos_control_signal(payload)
+
+    guard = topos
+    if guard is None:
+        guard = hypergrad_topos(
+            curvature=curvature,
+            tolerance=tolerance,
+            saturation=saturation,
+            max_depth=max_depth,
+            max_volume=max_volume,
+        )
+    if porosity is not None:
+        with_porosity = getattr(guard, "with_porosity", None)
+        if callable(with_porosity):
+            guard = with_porosity(float(porosity))
+
+    control_signal = getattr(guard, "control_signal", None)
+    if callable(control_signal):
+        try:
+            payload = control_signal(int(observed_depth), int(visited_volume))
+        except TypeError:
+            payload = control_signal()
+        if isinstance(payload, _Mapping):
+            normalised = _normalise_topos_control_signal(payload)
+            if porosity is not None and "porosity" not in payload:
+                normalised["porosity"] = _unit_interval(porosity, default=0.2)
+            return normalised
+
+    return _topos_signal_from_getters(
+        guard,
+        observed_depth=int(observed_depth),
+        visited_volume=int(visited_volume),
+        porosity=porosity,
+    )
+
+
+def topos_control_partial(
+    topos: _Any | None = None,
+    *,
+    bundle_weight: float = 1.0,
+    origin: str | None = "topos:control",
+    telemetry_prefix: str = "topos",
+    gradient_dim: int = 6,
+    **signal_options: _Any,
+) -> ZSpacePartialBundle:
+    """Convert an open-topos pressure signal into a Z-space inference partial."""
+
+    signal = topos_control_signal(topos, **signal_options)
+    gradient = list(signal["gradient"])
+    dim = max(1, int(gradient_dim))
+    if len(gradient) < dim:
+        gradient.extend(0.0 for _ in range(dim - len(gradient)))
+    metrics = {
+        "speed": _unit_interval(
+            signal["openness"] * (0.7 + 0.3 * signal["porosity"])
+        ),
+        "memory": _unit_interval(signal["volume_pressure"]),
+        "stability": _unit_interval(signal["stability_hint"]),
+        "drs": max(
+            -1.0,
+            min(1.0, float(signal["openness"]) - float(signal["closure_pressure"])),
+        ),
+        "frac": _unit_interval(signal["guard_strength"]),
+        "gradient": gradient[:dim],
+    }
+    telemetry = _flatten_telemetry(signal, prefix=telemetry_prefix)
+    return ZSpacePartialBundle(
+        metrics,
+        weight=max(0.0, float(bundle_weight)),
+        origin=origin,
+        telemetry=telemetry,
+    )
 
 
 def encode_zspace(
