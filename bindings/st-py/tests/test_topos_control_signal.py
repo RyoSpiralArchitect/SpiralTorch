@@ -55,6 +55,52 @@ def test_topos_control_partial_feeds_zspace_inference() -> None:
     assert telemetry["topos.closure_pressure"] == pytest.approx(0.5)
 
 
+def test_topos_control_partial_is_exported_from_top_level() -> None:
+    assert "topos_control_signal" in st.__all__
+    assert "topos_control_partial" in st.__all__
+
+
+def test_pipeline_add_topos_control_blends_into_inference() -> None:
+    pipeline = st.ZSpaceInferencePipeline([0.18, -0.07, 0.31, -0.14])
+
+    bundle = pipeline.add_topos_control(
+        {
+            "curvature": -1.0,
+            "tolerance": 1e-5,
+            "saturation": 1.0,
+            "porosity": 0.3,
+            "max_depth": 10,
+            "max_volume": 20,
+        },
+        observed_depth=2,
+        visited_volume=10,
+    )
+    inference = pipeline.infer()
+
+    assert bundle.origin == "topos:control"
+    assert inference.telemetry is not None
+    assert inference.telemetry.payload["topos.volume_pressure"] == pytest.approx(0.5)
+    assert inference.metrics["memory"] == pytest.approx(bundle.resolved()["memory"])
+
+
+def test_topos_control_context_formats_for_api_llm_prompt() -> None:
+    partial = st.topos_control_partial(
+        {"max_depth": 10, "max_volume": 20},
+        observed_depth=1,
+        visited_volume=10,
+    )
+
+    prompt = st.format_api_llm_context_prompt(
+        "Route with topos control.",
+        [partial],
+        max_telemetry=32,
+    )
+
+    assert "origin=topos:control" in prompt
+    assert "topos.closure_pressure" in prompt
+    assert "User prompt: Route with topos control." in prompt
+
+
 def test_open_topos_control_signal_can_override_porosity() -> None:
     guard = st.hypergrad_topos(max_depth=10, max_volume=100)
     signal = st.topos_control_signal(

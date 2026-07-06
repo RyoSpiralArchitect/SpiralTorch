@@ -2077,6 +2077,16 @@ class ZSpaceInferencePipeline:
         adapter: str | None = ...,
         **kwargs: Any,
     ) -> ZSpacePartialBundle: ...
+    def add_topos_control(
+        self,
+        topos: Any | None = ...,
+        *,
+        bundle_weight: float = ...,
+        origin: str | None = ...,
+        telemetry_prefix: str = ...,
+        gradient_dim: int = ...,
+        **signal_options: Any,
+    ) -> ZSpacePartialBundle: ...
     def add_geometry_probes(
         self,
         probes: Any,
