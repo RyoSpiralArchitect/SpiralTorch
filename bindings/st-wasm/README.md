@@ -113,6 +113,61 @@ layout, and exposes options for supplying custom palette presets or toggling con
 and off. Since it only depends on `SpiralCanvasView`, it can be further wrapped inside
 framework components as needed.
 
+## Browser-side report audit
+
+The wasm package can audit exported Mellin and Canvas learning reports before they leave
+the browser. Use `auditWasmReportObject` for one report or `compareWasmReportsObject` for
+a batch; JSON-string variants are also exported for clipboard/storage flows:
+
+```ts
+import { auditWasmReportObject, compareWasmReportsObject } from "spiraltorch-wasm";
+
+const audit = auditWasmReportObject(canvasReport);
+if (audit.status === "ready") {
+    console.log("promote as Z-space context", audit.readiness_score);
+}
+
+const comparison = compareWasmReportsObject({
+    baseline: oldReport,
+    candidate: canvasReport,
+});
+console.log("best browser context", comparison.best_readiness?.label);
+```
+
+Audits include runtime readiness, learning progress, risk flags, and recommendations, so
+browser dashboards can decide whether a report is ready for Python/API-LLM handoff without
+waiting for a server-side preflight.
+
+## Scale-stack geometry probes
+
+`st-frac::scale_stack` is now exposed directly in the wasm package. Browser demos can run
+microlocal ⇄ macrolocal interface probes over scalar fields or token/semantic embeddings,
+then hand the same JSON shape to Python-side Z-space pipelines:
+
+```ts
+import { WasmScaleStack, scalarScaleStackProbeObject } from "spiraltorch-wasm";
+
+const field = new Float32Array([
+    0, 0, 1, 1,
+    0, 0, 1, 1,
+    0, 0, 1, 1,
+    0, 0, 1, 1,
+]);
+const shape = new Uint32Array([4, 4]);
+const scales = new Float32Array([1, 2, 3]);
+const levels = new Float32Array([0.25, 0.5, 0.75]);
+
+const stack = WasmScaleStack.scalar(field, shape, scales, 0.01);
+console.log(stack.samples()); // packed [scale, gate_mean, ...]
+
+const probe = scalarScaleStackProbeObject(field, shape, scales, 0.01, 2, 3, levels);
+console.log(probe.boundary_dimension, probe.coherence_profile);
+```
+
+The probe payload is intentionally source-crate tagged (`st-frac::scale_stack`) so browser
+telemetry, Python reports, and future Rust backends can agree on where each geometric
+signal came from.
+
 ### Frame capture and recording
 
 `SpiralCanvasView` now exposes helpers for exporting the currently rendered frame:

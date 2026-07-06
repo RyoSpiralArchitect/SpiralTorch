@@ -1,6 +1,8 @@
 #![cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 
 mod cobol;
+mod reports;
+mod scale_stack;
 
 #[cfg(target_arch = "wasm32")]
 mod canvas;
@@ -24,5 +26,7 @@ pub use cobol_bridge::*;
 pub use fft::*;
 #[cfg(target_arch = "wasm32")]
 pub use mellin::*;
+pub use reports::*;
+pub use scale_stack::*;
 #[cfg(target_arch = "wasm32")]
 pub use tuner::*;

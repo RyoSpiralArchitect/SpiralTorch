@@ -790,6 +790,12 @@ from .wasm_reports import (
     write_wasm_report_context_artifact,
 )
 
+from .scale_stack_probe import (
+    scale_stack_probe,
+    scalar_scale_stack_probe,
+    semantic_scale_stack_probe,
+)
+
 from .zspace_live import (
     serve_zspace_trace,
     ZSpaceTraceLiveServer,
@@ -853,6 +859,7 @@ _EXTRAS = [
     "load_wasm_report_context_artifact",
     "load_wasm_report","summarize_wasm_report",
     "wasm_report_to_zspace_partial","write_wasm_report_context_artifact",
+    "scale_stack_probe","scalar_scale_stack_probe","semantic_scale_stack_probe",
     "ApiLLMTrace","ApiLLMZSpaceRuntime",
     "api_llm_partial_from_response","api_llm_text_from_response",
     "api_llm_trace_from_response","api_llm_usage_from_response",
@@ -5554,6 +5561,15 @@ _mirror_into_module(
     },
 )
 _mirror_into_module(
+    "scale_stack",
+    [
+        "scale_stack_probe",
+        "scalar_scale_stack_probe",
+        "semantic_scale_stack_probe",
+    ],
+    reexport=False,
+)
+_mirror_into_module(
     "spiral_rl",
     {
         "stAgent": ("PyDqnAgent", "DqnAgent", "StAgent"),
@@ -7585,6 +7601,7 @@ for _name in [
     "psi",
     "qr",
     "julia",
+    "scale_stack",
     "robotics",
 ]:
     if _name in globals() or _resolve_rs_attr(_name) is not None:

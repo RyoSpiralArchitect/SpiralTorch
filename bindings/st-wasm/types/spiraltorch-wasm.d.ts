@@ -22,6 +22,102 @@ declare module "spiraltorch-wasm" {
     /** Canonical palette names reported by {@link FractalCanvas.palette}. */
     export type CanvasPaletteCanonicalName = "blue-magenta" | "turbo" | "grayscale";
 
+    export type WasmReportAuditStatus = "ready" | "usable" | "needs_attention";
+
+    export type WasmReportRuntimeAudit = {
+        status: "webgpu_ready" | "webgpu_available" | "wasm_only" | "missing_runtime";
+        score: number;
+        wasm: boolean;
+        webgpu_available: boolean;
+        webgpu_device_ready: boolean;
+        webgpu_component_ready_count: number;
+        webgpu_init_failed: boolean;
+    };
+
+    export type WasmReportLearningAudit = {
+        source: "trace" | "loss_stats" | "missing";
+        loss: number | null;
+        first_loss: number | null;
+        last_loss: number | null;
+        absolute_improvement: number | null;
+        relative_improvement: number | null;
+        improved: boolean | null;
+        progress_score: number;
+    };
+
+    export type WasmReportAudit = {
+        kind: "spiraltorch.wasm_report_audit";
+        schema: string;
+        report_kind: string;
+        family: "mellin" | "canvas" | "unknown";
+        artifact_path: string | null;
+        status: WasmReportAuditStatus;
+        readiness_score: number;
+        runtime: WasmReportRuntimeAudit;
+        learning: WasmReportLearningAudit;
+        loss_score: number;
+        stability_score: number;
+        risk_flags: string[];
+        recommendations: string[];
+    };
+
+    export type WasmReportComparisonRow = {
+        label: string;
+        schema: string;
+        kind: string;
+        family: "mellin" | "canvas" | "unknown";
+        loss: number | null;
+        stability: number | null;
+        readiness_score: number | null;
+        audit_status: WasmReportAuditStatus;
+        risk_flags: string[];
+        audit: WasmReportAudit;
+    };
+
+    export type WasmReportComparison = {
+        kind: "spiraltorch.wasm_report_comparison";
+        count: number;
+        families: Record<string, number>;
+        best_loss: WasmReportComparisonRow | null;
+        best_stability: WasmReportComparisonRow | null;
+        best_readiness: WasmReportComparisonRow | null;
+        reports: WasmReportComparisonRow[];
+    };
+
+    export type ScaleStackProbeMode = "scalar" | "semantic::euclidean" | "semantic::cosine";
+
+    export type ScaleStackProbeSample = {
+        scale: number;
+        gate_mean: number;
+    };
+
+    export type ScaleStackPersistenceBin = {
+        scale_low: number;
+        scale_high: number;
+        mass: number;
+    };
+
+    export type ScaleStackCoherenceBreak = {
+        level: number;
+        scale: number | null;
+    };
+
+    export type ScaleStackProbe = {
+        kind: "spiraltorch.wasm_scale_stack_probe";
+        source_crate: "st-frac::scale_stack";
+        mode: ScaleStackProbeMode;
+        threshold: number;
+        sample_count: number;
+        samples: ScaleStackProbeSample[];
+        persistence: ScaleStackPersistenceBin[];
+        interface_density: number | null;
+        moment_0: number;
+        moment_1: number;
+        moment_2: number;
+        boundary_dimension: number | null;
+        coherence_profile: ScaleStackCoherenceBreak[];
+    };
+
     /** Labels emitted by {@link CanvasDesireControl.eventLabels}. */
     export type DesireControlEventLabel =
         | "lr_increase"
@@ -160,6 +256,55 @@ declare module "spiraltorch-wasm" {
     }
 
     export function available_palettes(): CanvasPaletteCanonicalName[];
+
+    export function auditWasmReportJson(reportJson: string): string;
+    export function auditWasmReportObject(report: unknown): WasmReportAudit;
+    export function compareWasmReportsJson(reportsJson: string): string;
+    export function compareWasmReportsObject(reports: unknown): WasmReportComparison;
+
+    export function scalarScaleStackProbeJson(
+        field: Float32Array,
+        shape: Uint32Array,
+        scales: Float32Array,
+        threshold: number,
+        ambientDim: number,
+        dimensionWindow: number,
+        levels: Float32Array,
+    ): string;
+
+    export function scalarScaleStackProbeObject(
+        field: Float32Array,
+        shape: Uint32Array,
+        scales: Float32Array,
+        threshold: number,
+        ambientDim: number,
+        dimensionWindow: number,
+        levels: Float32Array,
+    ): ScaleStackProbe;
+
+    export function semanticScaleStackProbeJson(
+        embeddings: Float32Array,
+        rows: number,
+        dims: number,
+        scales: Float32Array,
+        threshold: number,
+        metric: "euclidean" | "cosine",
+        ambientDim: number,
+        dimensionWindow: number,
+        levels: Float32Array,
+    ): string;
+
+    export function semanticScaleStackProbeObject(
+        embeddings: Float32Array,
+        rows: number,
+        dims: number,
+        scales: Float32Array,
+        threshold: number,
+        metric: "euclidean" | "cosine",
+        ambientDim: number,
+        dimensionWindow: number,
+        levels: Float32Array,
+    ): ScaleStackProbe;
 
     export type WasmFftPlanObject = {
         radix: number;
@@ -336,6 +481,36 @@ declare module "spiraltorch-wasm" {
         len: number,
         rate: number,
     ): Float32Array;
+
+    export class WasmScaleStack {
+        private constructor();
+        static scalar(
+            field: Float32Array,
+            shape: Uint32Array,
+            scales: Float32Array,
+            threshold: number,
+        ): WasmScaleStack;
+        static semantic(
+            embeddings: Float32Array,
+            rows: number,
+            dims: number,
+            scales: Float32Array,
+            threshold: number,
+            metric: "euclidean" | "cosine",
+        ): WasmScaleStack;
+        readonly threshold: number;
+        readonly mode: ScaleStackProbeMode;
+        readonly sampleCount: number;
+        samples(): Float32Array;
+        persistence(): Float32Array;
+        interfaceDensity(): number | undefined;
+        moment(order: number): number;
+        boundaryDimension(ambientDim: number, window: number): number | undefined;
+        coherenceBreakScale(level: number): number | undefined;
+        coherenceProfile(levels: Float32Array): Float32Array;
+        toObject(ambientDim: number, dimensionWindow: number, levels: Float32Array): ScaleStackProbe;
+        toJson(ambientDim: number, dimensionWindow: number, levels: Float32Array): string;
+    }
 
     export interface WasmTunerRecord {
         rows_min?: number | null;
