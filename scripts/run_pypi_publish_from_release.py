@@ -200,20 +200,57 @@ def latest_run_id(repo: str, *, workflow: str, branch: str) -> tuple[int, str]:
     return run_id, str(runs[0].get("url", ""))
 
 
-def watch_run(repo: str, run_id: int, *, interval: int) -> None:
-    run(
+def run_status(repo: str, run_id: int) -> dict[str, str]:
+    proc = run(
         [
             "gh",
             "run",
-            "watch",
+            "view",
             str(run_id),
             "--repo",
             repo,
-            "--interval",
-            str(interval),
-            "--exit-status",
-        ]
+            "--json",
+            "status,conclusion,url",
+        ],
+        capture=True,
     )
+    payload = json.loads(proc.stdout)
+    return {
+        "status": str(payload.get("status", "")),
+        "conclusion": str(payload.get("conclusion", "")),
+        "url": str(payload.get("url", "")),
+    }
+
+
+def watch_run(repo: str, run_id: int, *, interval: int) -> None:
+    try:
+        run(
+            [
+                "gh",
+                "run",
+                "watch",
+                str(run_id),
+                "--repo",
+                repo,
+                "--interval",
+                str(interval),
+                "--exit-status",
+            ]
+        )
+    except subprocess.CalledProcessError as exc:
+        print(f"watch_failed=transient_or_failed exit_code={exc.returncode}; checking run conclusion", flush=True)
+        status = run_status(repo, run_id)
+        print(
+            "workflow_run_status "
+            f"status={status['status']} conclusion={status['conclusion']} url={status['url']}",
+            flush=True,
+        )
+        if status["status"] == "completed" and status["conclusion"] == "success":
+            return
+        raise PublishRunError(
+            "Workflow watch failed before a successful completion could be confirmed: "
+            f"status={status['status']} conclusion={status['conclusion']} url={status['url']}"
+        ) from exc
 
 
 def main() -> int:
