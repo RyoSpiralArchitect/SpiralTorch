@@ -11,7 +11,7 @@ jobs:
     name: bindings/st-py version consistency
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: pyproject.toml ↔ Cargo.toml version match
         run: bash scripts/check_version_consistency.sh
 
@@ -38,7 +38,7 @@ jobs:
             run_lints: false
             run_upper_stack: false
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.toolchain }}
@@ -81,7 +81,7 @@ jobs:
     name: build & test core (windows)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
@@ -94,7 +94,7 @@ jobs:
     name: st-tensor (wgpu / macOS)
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
@@ -106,7 +106,7 @@ jobs:
     name: spiraltorch-wasm (wasm32 build)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
@@ -118,7 +118,7 @@ jobs:
     name: python docs smoke (README + hello_session)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"

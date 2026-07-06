@@ -60,7 +60,7 @@ jobs:
             universal2: false
             py: "3.12"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.checkout_ref || github.ref }}
       - uses: actions/setup-python@v5
@@ -251,7 +251,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - name: Verify PyPI wheels against GitHub Release
@@ -274,7 +274,7 @@ jobs:
     env:
       RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ github.ref }}
           persist-credentials: false
