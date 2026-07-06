@@ -10,7 +10,8 @@ nodejs`` and pass the generated JS glue:
     ANTHROPIC_API_KEY=... python \
         bindings/st-py/examples/anthropic_api_llm_wasm_geometry_injection.py \
         --wasm-pkg /tmp/spiraltorch-wasm-node-pkg/spiraltorch_wasm.js \
-        --live-anthropic --model claude-fable-5
+        --live-anthropic --model claude-fable-5 \
+        --trace-dir /tmp/spiraltorch-geometry-traces
 
 The API key is read only by the Anthropic SDK and is never printed.
 """
@@ -31,7 +32,12 @@ import spiraltorch as st
 DEFAULT_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-fable-5")
 DEFAULT_PROMPT = (
     "Return exactly one sentence under 30 words: how should this Z-space "
-    "geometry change decoding?"
+    "geometry change decoding? If no telemetry is supplied, say to use neutral "
+    "baseline decoding."
+)
+DEFAULT_SYSTEM = (
+    "Answer in one compact sentence. Treat SpiralTorch Z-space context as "
+    "runtime telemetry; do not quote or enumerate the telemetry block."
 )
 DEFAULT_Z_STATE = [0.18, -0.07, 0.31, -0.14, 0.22, -0.05]
 DEFAULT_CONDITIONS = ("baseline", "calm", "turbulent")
@@ -261,6 +267,11 @@ def _compact_trace(
     }
 
 
+def _safe_trace_label(label: str) -> str:
+    cleaned = "".join(ch if ch.isalnum() or ch in "-_." else "-" for ch in label)
+    return cleaned.strip("-_.") or "condition"
+
+
 def run_geometry_injection(
     *,
     prompt: str = DEFAULT_PROMPT,
@@ -271,10 +282,12 @@ def run_geometry_injection(
     wasm_pkg: str | os.PathLike[str] | None = None,
     live_anthropic: bool = False,
     invoke: Callable[..., Any] | None = None,
+    system: str | None = DEFAULT_SYSTEM,
     max_tokens: int = 180,
     gradient_dim: int = 6,
     consensus_weight: float = 1.35,
     full_context: bool = False,
+    trace_dir: str | os.PathLike[str] | None = None,
 ) -> dict[str, Any]:
     """Run baseline/calm/turbulent Z-space geometry injection comparisons."""
 
@@ -292,6 +305,12 @@ def run_geometry_injection(
         raise RuntimeError("Set ANTHROPIC_API_KEY or omit --live-anthropic")
 
     rows: dict[str, Any] = {}
+    trace_paths: dict[str, str] = {}
+    trace_summaries: dict[str, Any] = {}
+    trace_root = Path(trace_dir) if trace_dir is not None else None
+    if trace_root is not None:
+        trace_root.mkdir(parents=True, exist_ok=True)
+
     for condition in conditions:
         context = _context_for(
             condition,
@@ -311,10 +330,7 @@ def run_geometry_injection(
             trace = runtime.call_anthropic_messages(
                 prompt,
                 model=model,
-                system=(
-                    "Answer directly and treat SpiralTorch Z-space context as "
-                    "runtime telemetry."
-                ),
+                system=system,
                 context_partials=context,
                 context_prompt=bool(context),
                 context_prompt_options={
@@ -339,8 +355,14 @@ def run_geometry_injection(
                 },
             )
         rows[condition] = _compact_trace(trace, context, runtime)
+        if trace_root is not None:
+            trace_path = trace_root / f"{_safe_trace_label(str(condition))}.jsonl"
+            trace_paths[str(condition)] = runtime.write_jsonl(trace_path)
+            trace_summaries[str(condition)] = st.summarize_api_llm_trace_events(
+                trace_path
+            )
 
-    return {
+    result: dict[str, Any] = {
         "kind": "spiraltorch.anthropic_wasm_geometry_injection",
         "model": model,
         "prompt": prompt,
@@ -350,6 +372,11 @@ def run_geometry_injection(
         "conditions": list(conditions),
         "results": rows,
     }
+    if trace_paths:
+        result["trace_paths"] = trace_paths
+        result["trace_summaries"] = trace_summaries
+        result["trace_comparison"] = st.compare_api_llm_trace_runs(trace_paths)
+    return result
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -358,6 +385,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--wasm-pkg", default=None)
     parser.add_argument("--live-anthropic", action="store_true")
+    parser.add_argument("--system", default=DEFAULT_SYSTEM)
     parser.add_argument("--max-tokens", type=int, default=180)
     parser.add_argument("--gradient-dim", type=int, default=6)
     parser.add_argument("--consensus-weight", type=float, default=1.35)
@@ -367,6 +395,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Send per-probe partials plus consensus instead of only geometry:consensus.",
     )
     parser.add_argument("--condition", action="append", default=[])
+    parser.add_argument(
+        "--trace-dir",
+        default=None,
+        help="Optional directory for per-condition API LLM trace JSONL files.",
+    )
     parser.add_argument("--json-out", default=None)
     parser.add_argument("--indent", type=int, default=2)
     return parser
@@ -380,10 +413,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         conditions=args.condition or DEFAULT_CONDITIONS,
         wasm_pkg=args.wasm_pkg,
         live_anthropic=args.live_anthropic,
+        system=args.system,
         max_tokens=args.max_tokens,
         gradient_dim=args.gradient_dim,
         consensus_weight=args.consensus_weight,
         full_context=args.full_context,
+        trace_dir=args.trace_dir,
     )
     text = json.dumps(result, indent=args.indent, sort_keys=True) + "\n"
     if args.json_out:

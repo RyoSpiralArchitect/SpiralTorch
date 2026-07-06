@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip("spiraltorch")
+st = pytest.importorskip("spiraltorch")
 
 
 def _load_example_module():
@@ -51,6 +51,28 @@ def test_geometry_injection_example_runs_keyless_comparison() -> None:
     assert "Geometry context routed decoding" in result["results"]["calm"]["text"]
 
 
+def test_geometry_injection_example_writes_trace_artifacts(tmp_path) -> None:
+    module = _load_example_module()
+    trace_dir = tmp_path / "traces"
+
+    result = module.run_geometry_injection(
+        prompt="Route trace artifacts.",
+        conditions=("baseline", "calm"),
+        live_anthropic=False,
+        trace_dir=trace_dir,
+    )
+
+    assert result["trace_paths"].keys() == {"baseline", "calm"}
+    assert result["trace_comparison"]["count"] == 2
+    assert result["trace_summaries"]["calm"]["count"] == 1
+    calm_events = st.load_api_llm_trace_events(result["trace_paths"]["calm"])
+    assert calm_events[0]["telemetry"][
+        "geometry.consensus.probe_count"
+    ] == pytest.approx(3.0)
+    assert Path(result["trace_paths"]["baseline"]).exists()
+    assert Path(result["trace_paths"]["calm"]).exists()
+
+
 def test_geometry_injection_example_cli_writes_json(tmp_path, capsys) -> None:
     module = _load_example_module()
     out = tmp_path / "geometry-injection.json"
@@ -62,6 +84,8 @@ def test_geometry_injection_example_cli_writes_json(tmp_path, capsys) -> None:
             "--condition",
             "calm",
             "--full-context",
+            "--trace-dir",
+            str(tmp_path / "traces"),
             "--json-out",
             str(out),
             "--indent",
@@ -75,6 +99,7 @@ def test_geometry_injection_example_cli_writes_json(tmp_path, capsys) -> None:
     assert printed == written
     assert printed["context_mode"] == "full"
     assert printed["conditions"] == ["calm"]
+    assert printed["trace_comparison"]["count"] == 1
     assert printed["results"]["calm"]["context_origins"] == [
         "geometry:scale",
         "geometry:field",
