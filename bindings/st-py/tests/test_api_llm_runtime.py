@@ -237,6 +237,21 @@ def test_api_llm_text_from_responses_shape() -> None:
     assert usage["total_tokens"] == 6
 
 
+def test_api_llm_text_from_responses_skips_text_config_object() -> None:
+    class ResponseTextConfig:
+        def __str__(self) -> str:
+            return "ResponseTextConfig(format=ResponseFormatText(type='text'))"
+
+    response = {
+        "model": "api-response-test",
+        "text": ResponseTextConfig(),
+        "output": [{"type": "reasoning", "content": []}],
+        "usage": {"input_tokens": 4, "output_tokens": 64},
+    }
+
+    assert st.api_llm_text_from_response(response) == ""
+
+
 def test_api_llm_text_from_anthropic_messages_shape() -> None:
     response = {
         "model": "claude-test",

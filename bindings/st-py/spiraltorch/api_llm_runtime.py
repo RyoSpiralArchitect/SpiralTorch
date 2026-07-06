@@ -170,6 +170,8 @@ def _content_text(content: Any) -> str:
             return text
     if getattr(content, "type", None):
         return ""
+    if type(content).__name__.lower().endswith("config"):
+        return ""
     return str(content)
 
 
@@ -799,8 +801,16 @@ class ApiLLMTrace:
             "metrics": dict(self.metrics),
             "telemetry": telemetry,
             "inference": inference_payload,
-            "device_preflight": None if self.device_preflight is None else dict(self.device_preflight),
-            "response_metadata": None if self.response_metadata is None else dict(self.response_metadata),
+            "device_preflight": (
+                None
+                if self.device_preflight is None
+                else dict(self.device_preflight)
+            ),
+            "response_metadata": (
+                None
+                if self.response_metadata is None
+                else dict(self.response_metadata)
+            ),
         }
 
 
@@ -2453,9 +2463,13 @@ def compare_api_llm_trace_runs(
             f"compare near-best routes within {near_best_tolerance_value:.3f}: {labels_text}"
         )
     if winners.get("lowest_latency") and winners["lowest_latency"] != best:
-        recommendations.append(f"inspect {winners['lowest_latency']} for latency-sensitive routing")
+        recommendations.append(
+            f"inspect {winners['lowest_latency']} for latency-sensitive routing"
+        )
     if winners.get("highest_efficiency") and winners["highest_efficiency"] != best:
-        recommendations.append(f"inspect {winners['highest_efficiency']} for cost-sensitive routing")
+        recommendations.append(
+            f"inspect {winners['highest_efficiency']} for cost-sensitive routing"
+        )
     if winners.get("highest_text_quality") and winners["highest_text_quality"] != best:
         recommendations.append(
             f"inspect {winners['highest_text_quality']} for stronger prompt-text coverage"

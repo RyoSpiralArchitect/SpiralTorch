@@ -164,3 +164,28 @@ def test_geometry_injection_repeat_sample_output_is_sanitized() -> None:
     assert sample["runs"]["turbulent"][0]["telemetry"][
         "geometry.consensus.log_z_series_projection_stability_mean"
     ] < 0.001
+
+
+def test_openai_gpt55_geometry_sample_output_is_sanitized() -> None:
+    sample_path = (
+        Path(__file__).resolve().parents[1]
+        / "examples"
+        / "openai_gpt55_wasm_geometry_injection_sample.json"
+    )
+
+    sample_text = sample_path.read_text(encoding="utf-8")
+    sample = json.loads(sample_text)
+
+    assert sample["kind"] == "spiraltorch.openai_gpt55_wasm_geometry_injection.sample"
+    assert sample["provider"] == "openai"
+    assert sample["model"] == "gpt-5.5"
+    assert sample["comparison"]["winners"]["best_score"] in sample["conditions"]
+    assert "OPENAI_API_KEY" not in sample_text
+    assert "ANTHROPIC_API_KEY" not in sample_text
+    assert "sk-" not in sample_text
+    assert "/tmp/" not in sample_text
+    assert sample["results"]["baseline"]["text"] == "Use neutral baseline decoding."
+    assert sample["results"]["calm"]["finish_reason"] == "completed"
+    assert sample["results"]["turbulent"]["telemetry"][
+        "geometry.consensus.log_z_series_projection_stability_mean"
+    ] < 0.001
