@@ -722,7 +722,15 @@ def test_run_api_llm_prompt_suite_matrix_compares_providers(tmp_path) -> None:
 
 
 def test_compare_api_llm_matrix_reports_tracks_stable_profile_winners(tmp_path) -> None:
-    def write_report(name: str, compact_score: float, expanded_score: float) -> str:
+    def write_report(
+        name: str,
+        compact_score: float,
+        expanded_score: float,
+        *,
+        wasm_loss: float,
+        wasm_stability: float,
+        webgpu_ready: bool,
+    ) -> str:
         report = {
             "kind": "spiraltorch.api_llm_live_provider_matrix",
             "created_at": f"2026-07-06T00:00:0{len(name)}Z",
@@ -792,13 +800,55 @@ def test_compare_api_llm_matrix_reports_tracks_stable_profile_winners(tmp_path) 
                     },
                 ],
             },
+            "wasm_context": {
+                "report_count": 1,
+                "context_origins": ["wasm:canvas"],
+                "reports": [
+                    {
+                        "label": f"{name}-canvas",
+                        "family": "canvas",
+                        "loss": wasm_loss,
+                        "stability": wasm_stability,
+                        "webgpu_device_ready": webgpu_ready,
+                    }
+                ],
+                "comparison": {
+                    "families": {"canvas": 1},
+                    "best_loss": {
+                        "label": f"{name}-canvas",
+                        "family": "canvas",
+                        "loss": wasm_loss,
+                        "stability": wasm_stability,
+                    },
+                    "best_stability": {
+                        "label": f"{name}-canvas",
+                        "family": "canvas",
+                        "loss": wasm_loss,
+                        "stability": wasm_stability,
+                    },
+                },
+            },
         }
         path = tmp_path / f"{name}.json"
         path.write_text(json.dumps(report), encoding="utf-8")
         return str(path)
 
-    first = write_report("first", 0.83, 0.82)
-    second = write_report("second", 0.84, 0.81)
+    first = write_report(
+        "first",
+        0.83,
+        0.82,
+        wasm_loss=0.05,
+        wasm_stability=0.86,
+        webgpu_ready=True,
+    )
+    second = write_report(
+        "second",
+        0.84,
+        0.81,
+        wasm_loss=0.02,
+        wasm_stability=0.91,
+        webgpu_ready=False,
+    )
 
     comparison = st.compare_api_llm_matrix_reports(
         {"first": first, "second": second}
@@ -810,6 +860,17 @@ def test_compare_api_llm_matrix_reports_tracks_stable_profile_winners(tmp_path) 
     assert comparison["profile_winners"]["balanced"][0]["label"] == "openai-compact"
     assert comparison["profile_winners"]["balanced"][0]["win_rate"] == 1.0
     assert comparison["profile_winners"]["quality"][0]["label"] == "openai-expanded"
+    assert comparison["wasm_context"]["observed_reports"] == 2
+    assert comparison["wasm_context"]["total_wasm_report_count"] == 2
+    assert comparison["wasm_context"]["families"] == {"canvas": 2}
+    assert comparison["wasm_context"]["context_origins"] == {"wasm:canvas": 2}
+    assert comparison["wasm_context"]["lowest_best_loss"] == "second"
+    assert comparison["wasm_context"]["highest_best_stability"] == "second"
+    assert comparison["wasm_context"]["highest_webgpu_device_ready"] == "first"
+    report_rows = {row["label"]: row for row in comparison["reports"]}
+    assert report_rows["second"]["wasm_best_loss"] == pytest.approx(0.02)
+    assert report_rows["first"]["wasm_webgpu_device_ready_rate"] == pytest.approx(1.0)
+    assert report_rows["second"]["wasm_webgpu_device_ready_rate"] == pytest.approx(0.0)
     assert routes["openai-compact"]["best_score_wins"] == 2
     assert routes["openai-compact"]["profile_wins"]["latency"] == 2
     assert routes["openai-expanded"]["profile_wins"]["grounded"] == 2
@@ -817,6 +878,9 @@ def test_compare_api_llm_matrix_reports_tracks_stable_profile_winners(tmp_path) 
         "route_score_mean"
     ]
     assert "balanced profile is stable on openai-compact" in " ".join(
+        comparison["recommendations"]
+    )
+    assert "lowest selected WASM report loss" in " ".join(
         comparison["recommendations"]
     )
 
