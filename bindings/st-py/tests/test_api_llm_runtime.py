@@ -14,6 +14,7 @@ def test_api_llm_runtime_exports_from_top_level() -> None:
     assert "api_llm_wasm_context_partials" in st.__all__
     assert "compare_api_llm_matrix_reports" in st.__all__
     assert "compare_api_llm_trace_runs" in st.__all__
+    assert "format_api_llm_context_prompt" in st.__all__
     assert "load_api_llm_trace_events" in st.__all__
     assert "make_anthropic_messages_invoke" in st.__all__
     assert "make_openai_chat_invoke" in st.__all__
@@ -302,6 +303,56 @@ def test_api_llm_runtime_blends_wasm_context_partials_for_each_prompt() -> None:
         assert telemetry["wasm.family_canvas"] == pytest.approx(1.0)
         assert telemetry["wasm.webgpu_device_ready"] == pytest.approx(1.0)
         assert inference["confidence"] > 0.0
+
+
+def test_format_api_llm_context_prompt_includes_bounded_wasm_telemetry() -> None:
+    context = st.api_llm_wasm_context_partials(
+        _canvas_wasm_report(last_loss=0.0415, stability=0.86),
+        gradient_dim=6,
+    )
+
+    prompt = st.format_api_llm_context_prompt(
+        "Diagnose the run.",
+        context,
+        max_metrics=4,
+        max_telemetry=8,
+    )
+
+    assert prompt.startswith("SpiralTorch Z-space context:")
+    assert "origin=wasm:canvas" in prompt
+    assert "wasm.loss=0.0415" in prompt
+    assert "wasm.stability_hint=0.86" in prompt
+    assert "User prompt: Diagnose the run." in prompt
+
+
+def test_runtime_context_prompt_injection_keeps_trace_prompt_original() -> None:
+    context = st.api_llm_wasm_context_partials(_canvas_wasm_report(), gradient_dim=6)
+    runtime = st.ApiLLMZSpaceRuntime(
+        [0.12, -0.04, 0.33, -0.11],
+        provider="example",
+        create_session=False,
+    )
+    calls: list[str] = []
+
+    def fake_api(prompt: str) -> dict[str, object]:
+        calls.append(prompt)
+        return _chat_response()
+
+    trace = runtime.call(
+        fake_api,
+        "Use the browser report.",
+        context_partials=iter(context),
+        context_prompt=True,
+        context_prompt_options={"max_telemetry": 8},
+    )
+    payload = trace.as_dict()
+
+    assert len(calls) == 1
+    assert calls[0] != "Use the browser report."
+    assert "SpiralTorch Z-space context:" in calls[0]
+    assert "wasm.loss=0.05" in calls[0]
+    assert payload["prompt"] == "Use the browser report."
+    assert payload["inference"]["telemetry"]["payload"]["wasm.loss"] == pytest.approx(0.05)
 
 
 def test_make_openai_responses_invoke_uses_client_factory_lazily() -> None:

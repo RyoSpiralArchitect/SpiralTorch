@@ -34,6 +34,7 @@ __all__ = [
     "api_llm_wasm_context_partials",
     "compare_api_llm_matrix_reports",
     "compare_api_llm_trace_runs",
+    "format_api_llm_context_prompt",
     "load_api_llm_trace_events",
     "make_anthropic_messages_invoke",
     "make_openai_chat_invoke",
@@ -892,6 +893,119 @@ def _normalise_context_partials(context_partials: Any) -> list[ZSpacePartialBund
                 "context_partials must contain partial mappings or ZSpacePartialBundle values"
             )
     return bundles
+
+
+def _format_prompt_scalar(value: Any, *, precision: int = 6) -> str | None:
+    number = _finite_float(value)
+    if number is not None:
+        return f"{number:.{max(1, int(precision))}g}"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, str) and value:
+        return value[:80]
+    return None
+
+
+def _format_prompt_sequence(
+    values: Any,
+    *,
+    max_items: int,
+    precision: int,
+) -> str | None:
+    if isinstance(values, (str, bytes, bytearray)):
+        return None
+    try:
+        iterator = iter(values)
+    except TypeError:
+        return None
+    rendered: list[str] = []
+    for value in iterator:
+        scalar = _format_prompt_scalar(value, precision=precision)
+        if scalar is None:
+            continue
+        rendered.append(scalar)
+        if len(rendered) >= max(0, int(max_items)):
+            break
+    if not rendered:
+        return None
+    return "[" + ", ".join(rendered) + "]"
+
+
+def _format_prompt_mapping(
+    values: Mapping[str, Any],
+    *,
+    max_items: int,
+    precision: int,
+) -> str:
+    parts: list[str] = []
+    for key in sorted(values):
+        value = values[key]
+        if isinstance(value, Sequence) and not isinstance(
+            value, (str, bytes, bytearray)
+        ):
+            rendered = _format_prompt_sequence(
+                value,
+                max_items=6,
+                precision=precision,
+            )
+        else:
+            rendered = _format_prompt_scalar(value, precision=precision)
+        if rendered is None:
+            continue
+        parts.append(f"{key}={rendered}")
+        if len(parts) >= max(0, int(max_items)):
+            break
+    return ", ".join(parts)
+
+
+def format_api_llm_context_prompt(
+    prompt: str,
+    context_partials: Any,
+    *,
+    header: str = "SpiralTorch Z-space context",
+    max_partials: int = 4,
+    max_metrics: int = 8,
+    max_telemetry: int = 16,
+    precision: int = 6,
+) -> str:
+    """Prepend bounded Z-space context details to an API-model prompt.
+
+    The formatter is intentionally plain text and opt-in: it lets callers hand
+    context partial telemetry to a hosted model while the runtime still records
+    the original user prompt in traces.
+    """
+
+    bundles = _normalise_context_partials(context_partials)
+    if not bundles:
+        return prompt
+
+    lines = [f"{header}:"]
+    for index, bundle in enumerate(bundles[: max(0, int(max_partials))], start=1):
+        origin = bundle.origin or "partial"
+        lines.append(f"- partial {index}: origin={origin} weight={bundle.weight:.6g}")
+        metrics = bundle.resolved()
+        metric_line = _format_prompt_mapping(
+            metrics,
+            max_items=max_metrics,
+            precision=precision,
+        )
+        if metric_line:
+            lines.append(f"  metrics: {metric_line}")
+        telemetry = bundle.telemetry_payload()
+        if telemetry:
+            telemetry_line = _format_prompt_mapping(
+                dict(telemetry),
+                max_items=max_telemetry,
+                precision=precision,
+            )
+            if telemetry_line:
+                lines.append(f"  telemetry: {telemetry_line}")
+    if len(bundles) > max(0, int(max_partials)):
+        lines.append(f"- omitted_partials={len(bundles) - max(0, int(max_partials))}")
+    lines.append("Use only the context above when referring to SpiralTorch telemetry.")
+    lines.append("")
+    lines.append(f"User prompt: {prompt}")
+    return "\n".join(lines)
 
 
 def _iter_wasm_report_inputs(reports: Any) -> list[tuple[str | None, Any]]:
@@ -2454,12 +2568,24 @@ class ApiLLMZSpaceRuntime:
         provider: str | None = None,
         model: str | None = None,
         context_partials: Any = None,
+        context_prompt: bool = False,
+        context_prompt_options: Mapping[str, Any] | None = None,
         **kwargs: Any,
     ) -> ApiLLMTrace:
         """Call an API-model function and immediately record the Z-space trace."""
 
+        context_bundles = _normalise_context_partials(context_partials)
+        request_prompt = (
+            format_api_llm_context_prompt(
+                prompt,
+                context_bundles,
+                **dict(context_prompt_options or {}),
+            )
+            if context_prompt
+            else prompt
+        )
         start = time.perf_counter()
-        response = invoke(prompt, *args, **kwargs)
+        response = invoke(request_prompt, *args, **kwargs)
         latency_ms = (time.perf_counter() - start) * 1000.0
         return self.record_response(
             response,
@@ -2467,7 +2593,7 @@ class ApiLLMZSpaceRuntime:
             provider=provider,
             model=model,
             latency_ms=latency_ms,
-            context_partials=context_partials,
+            context_partials=context_bundles,
         )
 
     def run_prompts(
@@ -2479,6 +2605,8 @@ class ApiLLMZSpaceRuntime:
         model: str | None = None,
         jsonl_out: str | Path | None = None,
         context_partials: Any = None,
+        context_prompt: bool = False,
+        context_prompt_options: Mapping[str, Any] | None = None,
         clear: bool = True,
         **kwargs: Any,
     ) -> dict[str, Any]:
@@ -2487,8 +2615,17 @@ class ApiLLMZSpaceRuntime:
         traces: list[ApiLLMTrace] = []
         context_bundles = _normalise_context_partials(context_partials)
         for prompt in prompts:
+            request_prompt = (
+                format_api_llm_context_prompt(
+                    prompt,
+                    context_bundles,
+                    **dict(context_prompt_options or {}),
+                )
+                if context_prompt
+                else prompt
+            )
             start = time.perf_counter()
-            response = invoke(prompt, *args, **kwargs)
+            response = invoke(request_prompt, *args, **kwargs)
             latency_ms = (time.perf_counter() - start) * 1000.0
             traces.append(
                 self.record_response(
@@ -2528,6 +2665,8 @@ class ApiLLMZSpaceRuntime:
         input_key: str = "input",
         provider: str | None = "openai",
         context_partials: Any = None,
+        context_prompt: bool = False,
+        context_prompt_options: Mapping[str, Any] | None = None,
         **request: Any,
     ) -> ApiLLMTrace:
         """Call OpenAI's Responses API and record the resulting Z-space trace."""
@@ -2547,6 +2686,8 @@ class ApiLLMZSpaceRuntime:
             provider=provider,
             model=model_value,
             context_partials=context_partials,
+            context_prompt=context_prompt,
+            context_prompt_options=context_prompt_options,
         )
 
     def call_openai_chat(
@@ -2561,6 +2702,8 @@ class ApiLLMZSpaceRuntime:
         messages: Sequence[Mapping[str, Any]] | None = None,
         provider: str | None = "openai",
         context_partials: Any = None,
+        context_prompt: bool = False,
+        context_prompt_options: Mapping[str, Any] | None = None,
         **request: Any,
     ) -> ApiLLMTrace:
         """Call OpenAI chat completions and record the resulting Z-space trace."""
@@ -2581,6 +2724,8 @@ class ApiLLMZSpaceRuntime:
             provider=provider,
             model=model_value,
             context_partials=context_partials,
+            context_prompt=context_prompt,
+            context_prompt_options=context_prompt_options,
         )
 
     def call_anthropic_messages(
@@ -2595,6 +2740,8 @@ class ApiLLMZSpaceRuntime:
         messages: Sequence[Mapping[str, Any]] | None = None,
         provider: str | None = "anthropic",
         context_partials: Any = None,
+        context_prompt: bool = False,
+        context_prompt_options: Mapping[str, Any] | None = None,
         **request: Any,
     ) -> ApiLLMTrace:
         """Call Anthropic Messages and record the resulting Z-space trace."""
@@ -2615,6 +2762,8 @@ class ApiLLMZSpaceRuntime:
             provider=provider,
             model=model_value,
             context_partials=context_partials,
+            context_prompt=context_prompt,
+            context_prompt_options=context_prompt_options,
         )
 
     def summary(self) -> dict[str, Any]:
@@ -2747,6 +2896,8 @@ def run_api_llm_prompt_suite(
     strategy: str = "mean",
     jsonl_out: str | Path | None = None,
     context_partials: Any = None,
+    context_prompt: bool = False,
+    context_prompt_options: Mapping[str, Any] | None = None,
     clear: bool = True,
     **kwargs: Any,
 ) -> dict[str, Any]:
@@ -2772,6 +2923,8 @@ def run_api_llm_prompt_suite(
         model=model,
         jsonl_out=jsonl_out,
         context_partials=context_partials,
+        context_prompt=context_prompt,
+        context_prompt_options=context_prompt_options,
         clear=clear,
         **kwargs,
     )
@@ -2793,6 +2946,8 @@ def run_api_llm_prompt_suite_matrix(
     strategy: str = "mean",
     jsonl_dir: str | Path | None = None,
     context_partials: Any = None,
+    context_prompt: bool = False,
+    context_prompt_options: Mapping[str, Any] | None = None,
     request_kwargs: Mapping[str, Mapping[str, Any]] | None = None,
     near_best_tolerance: float = 0.02,
     clear: bool = True,
@@ -2840,6 +2995,8 @@ def run_api_llm_prompt_suite_matrix(
             strategy=strategy,
             jsonl_out=jsonl_out,
             context_partials=context_partials,
+            context_prompt=context_prompt,
+            context_prompt_options=context_prompt_options,
             clear=clear,
             **route_kwargs,
         )

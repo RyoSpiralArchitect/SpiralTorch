@@ -153,6 +153,38 @@ def test_openai_wasm_context_example_loads_persisted_artifact(tmp_path) -> None:
     assert result["wasm_context_seen"]["loss"] == pytest.approx(0.03)
 
 
+def test_openai_wasm_context_example_can_inject_context_prompt(tmp_path) -> None:
+    module = _load_example_module()
+    report = tmp_path / "canvas-report.json"
+    report.write_text(json.dumps(_canvas_report(last_loss=0.0415)), encoding="utf-8")
+    calls: list[str] = []
+
+    def fake_openai(prompt: str, **_kwargs: object) -> dict[str, object]:
+        calls.append(prompt)
+        return {
+            "model": "gpt-test",
+            "output_text": "Telemetry-aware answer.",
+            "status": "completed",
+            "usage": {"input_tokens": 8, "output_tokens": 3, "total_tokens": 11},
+        }
+
+    result = module.run_openai_wasm_context(
+        prompts=["Use the selected browser report."],
+        model="gpt-test",
+        backend="cpu",
+        invoke=fake_openai,
+        wasm_reports=[report],
+        include_context_prompt=True,
+        context_prompt_max_telemetry=8,
+    )
+
+    assert result["context_prompt_injected"] is True
+    assert len(calls) == 1
+    assert "SpiralTorch Z-space context:" in calls[0]
+    assert "wasm.loss=0.0415" in calls[0]
+    assert "User prompt: Use the selected browser report." in calls[0]
+
+
 def test_openai_wasm_context_example_requires_context_input() -> None:
     module = _load_example_module()
 
