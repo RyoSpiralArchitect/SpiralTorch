@@ -673,6 +673,7 @@ from .zspace_inference import (
 from .api_llm_runtime import (
     ApiLLMTrace,
     ApiLLMZSpaceRuntime,
+    api_llm_geometry_context_partials,
     api_llm_partial_from_response,
     api_llm_text_from_response,
     api_llm_trace_from_response,
@@ -899,6 +900,7 @@ _EXTRAS = [
     "scalar_scale_stack_partial","scalar_scale_stack_probe",
     "semantic_scale_stack_partial","semantic_scale_stack_probe",
     "ApiLLMTrace","ApiLLMZSpaceRuntime",
+    "api_llm_geometry_context_partials",
     "api_llm_partial_from_response","api_llm_text_from_response",
     "api_llm_trace_from_response","api_llm_usage_from_response",
     "api_llm_wasm_context_partials",

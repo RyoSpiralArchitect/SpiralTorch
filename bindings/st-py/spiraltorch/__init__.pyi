@@ -2070,6 +2070,16 @@ class ZSpaceInferencePipeline:
         adapter: str | None = ...,
         **kwargs: Any,
     ) -> ZSpacePartialBundle: ...
+    def add_geometry_probes(
+        self,
+        probes: Any,
+        *,
+        max_probes: int | None = ...,
+        bundle_weight: float = ...,
+        telemetry_prefix: str = ...,
+        gradient_dim: int = ...,
+        return_metadata: bool = ...,
+    ) -> List[ZSpacePartialBundle] | Tuple[List[ZSpacePartialBundle], Dict[str, Any]]: ...
     def clear(self) -> None: ...
     def set_telemetry(
         self,
@@ -2324,6 +2334,15 @@ def api_llm_wasm_context_partials(
     *,
     bundle_weight: float = ...,
     origin: str | None = ...,
+    telemetry_prefix: str = ...,
+    gradient_dim: int = ...,
+) -> List[ZSpacePartialBundle]: ...
+
+def api_llm_geometry_context_partials(
+    probes: Any,
+    *,
+    max_probes: int | None = ...,
+    bundle_weight: float = ...,
     telemetry_prefix: str = ...,
     gradient_dim: int = ...,
 ) -> List[ZSpacePartialBundle]: ...
@@ -7625,6 +7644,7 @@ __all__ = [
     "ensure_zmetrics",
     "ApiLLMTrace",
     "ApiLLMZSpaceRuntime",
+    "api_llm_geometry_context_partials",
     "api_llm_partial_from_response",
     "api_llm_text_from_response",
     "api_llm_trace_from_response",

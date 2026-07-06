@@ -27,6 +27,7 @@ from .zspace_inference import (
 __all__ = [
     "ApiLLMTrace",
     "ApiLLMZSpaceRuntime",
+    "api_llm_geometry_context_partials",
     "api_llm_partial_from_response",
     "api_llm_text_from_response",
     "api_llm_trace_from_response",
@@ -1051,6 +1052,28 @@ def api_llm_wasm_context_partials(
                 gradient_dim=gradient_dim,
             )
         )
+    return partials
+
+
+def api_llm_geometry_context_partials(
+    probes: Any,
+    *,
+    max_probes: int | None = None,
+    bundle_weight: float = 1.0,
+    telemetry_prefix: str = "geometry",
+    gradient_dim: int = 8,
+) -> list[ZSpacePartialBundle]:
+    """Convert WASM geometry probes into API-LLM runtime context partials."""
+
+    from .geometry_context import build_geometry_probe_context
+
+    partials, _metadata = build_geometry_probe_context(
+        probes,
+        max_probes=max_probes,
+        bundle_weight=bundle_weight,
+        telemetry_prefix=telemetry_prefix,
+        gradient_dim=gradient_dim,
+    )
     return partials
 
 

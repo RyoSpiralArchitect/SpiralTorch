@@ -160,6 +160,39 @@ def test_pipeline_blends_and_clears_partials():
     assert pipeline.posterior is not None
 
 
+def test_pipeline_can_queue_geometry_probe_context():
+    probe = {
+        "kind": "spiraltorch.wasm_fractal_field_probe",
+        "source_crate": "st-frac::fractal_field",
+        "mode": "branching_field",
+        "generator": {"octaves": 3, "lacunarity": 2.0, "gain": 0.5, "iterations": 16},
+        "log_lattice": {"log_start": -2.0, "log_step": 0.25, "len": 4},
+        "sample_count": 4,
+        "preview_count": 1,
+        "energy": 0.4,
+        "mean_abs": 0.3,
+        "max_abs": 0.7,
+        "phase_drift": 0.2,
+        "total_variation": 0.15,
+        "coherence_score": 0.86,
+        "samples": [{"index": 0, "re": 0.1, "im": 0.0, "abs": 0.1}],
+    }
+    pipeline = ZSpaceInferencePipeline([0.22, -0.11, 0.31, -0.07])
+
+    partials, metadata = pipeline.add_geometry_probes(
+        {"field": probe},
+        gradient_dim=4,
+        return_metadata=True,
+    )
+    inference = pipeline.infer()
+
+    assert len(partials) == 1
+    assert metadata["context_origins"] == ["geometry:field"]
+    assert "speed" in inference.metrics
+    assert inference.telemetry is not None
+    assert inference.telemetry.payload["geometry.fractal_field.1.energy"] == pytest.approx(0.4)
+
+
 def test_compile_inference_wraps_callable():
     calls: list[dict[str, float]] = []
 
