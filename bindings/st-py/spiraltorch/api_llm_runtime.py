@@ -74,6 +74,11 @@ _REPORT_ROUTE_METRICS = (
     "topos_closure_pressure_mean",
     "topos_training_gradient_bias_scale_mean",
     "topos_optimizer_rate_scale_mean",
+    "topos_optimizer_raw_rate_scale_mean",
+    "topos_optimizer_effective_gradient_bias_scale_mean",
+    "topos_optimizer_effective_momentum_damping_mean",
+    "topos_inference_plan_temperature_mean",
+    "topos_inference_plan_top_p_mean",
     "topos_inference_context_weight_mean",
 )
 _TEXT_QUALITY_STOPWORDS = frozenset(
@@ -1488,14 +1493,47 @@ def _summarize_topos_context_telemetry(
         "training_momentum_damping": _stats(
             row.get("topos.training_hints.momentum_damping") for row in rows
         ),
+        "training_plan_rate_scale": _stats(
+            row.get("topos.training_plan.rate_scale") for row in rows
+        ),
+        "training_plan_effective_gradient_bias_scale": _stats(
+            row.get("topos.training_plan.effective_gradient_bias_scale") for row in rows
+        ),
+        "training_plan_effective_momentum_damping": _stats(
+            row.get("topos.training_plan.effective_momentum_damping") for row in rows
+        ),
         "optimizer_rate_scale": _stats(
             row.get("topos.optimizer_effect.rate_scale") for row in rows
+        ),
+        "optimizer_raw_rate_scale": _stats(
+            row.get("topos.optimizer_effect.raw_rate_scale") for row in rows
+        ),
+        "optimizer_effective_gradient_bias_scale": _stats(
+            row.get("topos.optimizer_effect.effective_gradient_bias_scale") for row in rows
+        ),
+        "optimizer_effective_momentum_damping": _stats(
+            row.get("topos.optimizer_effect.effective_momentum_damping") for row in rows
         ),
         "optimizer_hyper_learning_rate": _stats(
             row.get("topos.optimizer_effect.hyper_learning_rate") for row in rows
         ),
         "optimizer_real_learning_rate": _stats(
             row.get("topos.optimizer_effect.real_learning_rate") for row in rows
+        ),
+        "inference_plan_temperature": _stats(
+            row.get("topos.inference_plan.temperature") for row in rows
+        ),
+        "inference_plan_top_p": _stats(
+            row.get("topos.inference_plan.top_p") for row in rows
+        ),
+        "inference_plan_frequency_penalty": _stats(
+            row.get("topos.inference_plan.frequency_penalty") for row in rows
+        ),
+        "inference_plan_presence_penalty": _stats(
+            row.get("topos.inference_plan.presence_penalty") for row in rows
+        ),
+        "inference_plan_context_weight": _stats(
+            row.get("topos.inference_plan.context_weight") for row in rows
         ),
         "inference_top_p_scale": _stats(
             row.get("topos.inference_hints.top_p_scale") for row in rows
@@ -1951,9 +1989,33 @@ def _comparison_row(label: str, path: Path, summary: Mapping[str, Any]) -> dict[
             summary,
             "training_clip_scale",
         ),
+        "topos_training_plan_rate_scale_mean": _topos_context_stat(
+            summary,
+            "training_plan_rate_scale",
+        ),
+        "topos_training_plan_effective_gradient_bias_scale_mean": _topos_context_stat(
+            summary,
+            "training_plan_effective_gradient_bias_scale",
+        ),
+        "topos_training_plan_effective_momentum_damping_mean": _topos_context_stat(
+            summary,
+            "training_plan_effective_momentum_damping",
+        ),
         "topos_optimizer_rate_scale_mean": _topos_context_stat(
             summary,
             "optimizer_rate_scale",
+        ),
+        "topos_optimizer_raw_rate_scale_mean": _topos_context_stat(
+            summary,
+            "optimizer_raw_rate_scale",
+        ),
+        "topos_optimizer_effective_gradient_bias_scale_mean": _topos_context_stat(
+            summary,
+            "optimizer_effective_gradient_bias_scale",
+        ),
+        "topos_optimizer_effective_momentum_damping_mean": _topos_context_stat(
+            summary,
+            "optimizer_effective_momentum_damping",
         ),
         "topos_optimizer_hyper_learning_rate_mean": _topos_context_stat(
             summary,
@@ -1962,6 +2024,26 @@ def _comparison_row(label: str, path: Path, summary: Mapping[str, Any]) -> dict[
         "topos_optimizer_real_learning_rate_mean": _topos_context_stat(
             summary,
             "optimizer_real_learning_rate",
+        ),
+        "topos_inference_plan_temperature_mean": _topos_context_stat(
+            summary,
+            "inference_plan_temperature",
+        ),
+        "topos_inference_plan_top_p_mean": _topos_context_stat(
+            summary,
+            "inference_plan_top_p",
+        ),
+        "topos_inference_plan_frequency_penalty_mean": _topos_context_stat(
+            summary,
+            "inference_plan_frequency_penalty",
+        ),
+        "topos_inference_plan_presence_penalty_mean": _topos_context_stat(
+            summary,
+            "inference_plan_presence_penalty",
+        ),
+        "topos_inference_plan_context_weight_mean": _topos_context_stat(
+            summary,
+            "inference_plan_context_weight",
         ),
         "topos_inference_top_p_scale_mean": _topos_context_stat(
             summary,
@@ -2158,22 +2240,51 @@ def _comparison_topos_context(
             rows,
             "topos_training_gradient_bias_scale_mean",
         ),
+        "highest_effective_training_gradient_bias": _winner(
+            rows,
+            "topos_optimizer_effective_gradient_bias_scale_mean",
+        ),
         "lowest_training_clip_scale": _winner(
             rows,
             "topos_training_clip_scale_mean",
+            higher_is_better=False,
+        ),
+        "lowest_training_plan_rate_scale": _winner(
+            rows,
+            "topos_training_plan_rate_scale_mean",
             higher_is_better=False,
         ),
         "highest_inference_context_weight": _winner(
             rows,
             "topos_inference_context_weight_mean",
         ),
+        "highest_inference_plan_context_weight": _winner(
+            rows,
+            "topos_inference_plan_context_weight_mean",
+        ),
+        "lowest_inference_plan_temperature": _winner(
+            rows,
+            "topos_inference_plan_temperature_mean",
+            higher_is_better=False,
+        ),
         "lowest_optimizer_rate_scale": _winner(
             rows,
             "topos_optimizer_rate_scale_mean",
             higher_is_better=False,
         ),
+        "lowest_optimizer_raw_rate_scale": _winner(
+            rows,
+            "topos_optimizer_raw_rate_scale_mean",
+            higher_is_better=False,
+        ),
         "temperature_scale": _numeric_stats_with_range(
             row.get("topos_temperature_scale_mean") for row in observed
+        ),
+        "inference_plan_temperature": _numeric_stats_with_range(
+            row.get("topos_inference_plan_temperature_mean") for row in observed
+        ),
+        "inference_plan_top_p": _numeric_stats_with_range(
+            row.get("topos_inference_plan_top_p_mean") for row in observed
         ),
         "inference_top_p_scale": _numeric_stats_with_range(
             row.get("topos_inference_top_p_scale_mean") for row in observed
@@ -2181,8 +2292,15 @@ def _comparison_topos_context(
         "training_gradient_bias_scale": _numeric_stats_with_range(
             row.get("topos_training_gradient_bias_scale_mean") for row in observed
         ),
+        "effective_training_gradient_bias_scale": _numeric_stats_with_range(
+            row.get("topos_optimizer_effective_gradient_bias_scale_mean")
+            for row in observed
+        ),
         "optimizer_rate_scale": _numeric_stats_with_range(
             row.get("topos_optimizer_rate_scale_mean") for row in observed
+        ),
+        "optimizer_raw_rate_scale": _numeric_stats_with_range(
+            row.get("topos_optimizer_raw_rate_scale_mean") for row in observed
         ),
     }
 

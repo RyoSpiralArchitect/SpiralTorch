@@ -105,11 +105,21 @@ def test_amegagrad_applies_topos_training_hints_to_tune() -> None:
     diagnostics = opt.topos_diagnostics()
     assert diagnostics["training_hints"]["clip_scale"] == pytest.approx(hints["clip_scale"])
     assert diagnostics["effect"]["rate_scale"] == pytest.approx(expected_scale)
+    assert diagnostics["effect"]["raw_rate_scale"] == pytest.approx(
+        hints["learning_rate_scale"] * hints["clip_scale"]
+    )
+    assert diagnostics["effect"]["effective_gradient_bias_scale"] > 0.0
 
     telemetry = opt.topos_telemetry_payload()
     assert telemetry["topos.closure_pressure"] == pytest.approx(0.5)
     assert telemetry["topos.training_hints.clip_scale"] == pytest.approx(hints["clip_scale"])
     assert telemetry["topos.optimizer_effect.rate_scale"] == pytest.approx(expected_scale)
+    assert telemetry["topos.optimizer_effect.raw_rate_scale"] == pytest.approx(
+        diagnostics["effect"]["raw_rate_scale"]
+    )
+    assert telemetry["topos.optimizer_effect.effective_gradient_bias_scale"] == pytest.approx(
+        diagnostics["effect"]["effective_gradient_bias_scale"]
+    )
 
 
 def test_amegagrad_keeps_default_tune_non_topos_by_default() -> None:
@@ -206,6 +216,8 @@ def test_amegagrad_topos_training_sweep_compares_runs(tmp_path) -> None:
     assert tuned_summary["metrics"]["realgrad.l2"]["nonzero"] == 2
     assert tuned_context["observed_count"] == 2
     assert tuned_context["optimizer_rate_scale"]["last"] < 1.0
+    assert tuned_context["optimizer_raw_rate_scale"]["last"] < 1.0
+    assert tuned_context["optimizer_effective_gradient_bias_scale"]["mean"] > 0.0
 
     guard_row = next(row for row in comparison["runs"] if row["label"] == "guard_only")
     tuned_row = next(row for row in comparison["runs"] if row["label"] == "topos_tuned")
@@ -215,6 +227,14 @@ def test_amegagrad_topos_training_sweep_compares_runs(tmp_path) -> None:
     assert tuned_row["topos_optimizer_rate_scale_mean"] == pytest.approx(
         tuned_context["optimizer_rate_scale"]["mean"]
     )
+    assert tuned_row["topos_optimizer_raw_rate_scale_mean"] == pytest.approx(
+        tuned_context["optimizer_raw_rate_scale"]["mean"]
+    )
+    assert tuned_row["topos_optimizer_effective_gradient_bias_scale_mean"] == pytest.approx(
+        tuned_context["optimizer_effective_gradient_bias_scale"]["mean"]
+    )
 
     reloaded = st.compare_amegagrad_topos_training_traces(result["trace_paths"])
     assert reloaded["winners"]["lowest_optimizer_rate_scale"] == "topos_tuned"
+    assert reloaded["winners"]["lowest_optimizer_raw_rate_scale"] == "topos_tuned"
+    assert reloaded["winners"]["highest_effective_gradient_bias"] == "topos_tuned"
