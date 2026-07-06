@@ -17,7 +17,10 @@ Replace ``canvas_wasm_report()`` with ``st.load_wasm_report("report.json")`` and
 
 from __future__ import annotations
 
+import argparse
 import json
+from pathlib import Path
+from typing import Any, Sequence
 
 import spiraltorch as st
 
@@ -110,45 +113,165 @@ def fake_api(prompt: str) -> dict[str, object]:
     }
 
 
-def main() -> None:
-    report = canvas_wasm_report()
-    report_summary = st.summarize_wasm_report(report)
-    context_partials = st.api_llm_wasm_context_partials(report, gradient_dim=6)
+DEFAULT_PROMPTS = (
+    "Use the browser-side training signal as context.",
+    "Explain one safe next step for runtime fine-tuning.",
+)
+DEFAULT_Z_STATE = (0.12, -0.04, 0.33, -0.11)
+
+
+def _parse_z_state(raw: str | None) -> list[float]:
+    if raw is None or not raw.strip():
+        return list(DEFAULT_Z_STATE)
+    values = [part.strip() for part in raw.split(",")]
+    parsed = [float(part) for part in values if part]
+    if not parsed:
+        raise ValueError("--z-state must contain at least one number")
+    return parsed
+
+
+def _load_reports(paths: Sequence[str] | None) -> list[dict[str, Any]]:
+    if not paths:
+        return [canvas_wasm_report()]
+    return [st.load_wasm_report(path) for path in paths]
+
+
+def _compact_report_summary(summary: dict[str, Any]) -> dict[str, Any]:
+    learning = summary.get("learning")
+    runtime = summary.get("runtime")
+    loss = None
+    if isinstance(learning, dict):
+        loss = learning.get("final_loss")
+        if loss is None:
+            loss = learning.get("last_loss")
+    return {
+        "schema": summary.get("schema"),
+        "kind": summary.get("kind"),
+        "family": summary.get("family"),
+        "artifact_path": summary.get("artifact_path"),
+        "loss": loss,
+        "webgpu_available": runtime.get("webgpu_available")
+        if isinstance(runtime, dict)
+        else None,
+        "webgpu_device_ready": runtime.get("webgpu_device_ready")
+        if isinstance(runtime, dict)
+        else None,
+    }
+
+
+def run_demo(
+    *,
+    wasm_reports: Sequence[str] | None = None,
+    prompts: Sequence[str] = DEFAULT_PROMPTS,
+    z_state: Sequence[float] = DEFAULT_Z_STATE,
+    gradient_dim: int = 6,
+    provider: str = "local-demo",
+    model: str = "local-wasm-context-demo",
+    trace_jsonl: str | Path | None = None,
+) -> dict[str, Any]:
+    reports = _load_reports(wasm_reports)
+    report_summaries = [st.summarize_wasm_report(report) for report in reports]
+    context_partials = st.api_llm_wasm_context_partials(
+        reports,
+        gradient_dim=gradient_dim,
+    )
 
     suite = st.run_api_llm_prompt_suite(
-        [
-            "Use the browser-side training signal as context.",
-            "Explain one safe next step for runtime fine-tuning.",
-        ],
+        list(prompts),
         fake_api,
-        z_state=[0.12, -0.04, 0.33, -0.11],
-        provider="local-demo",
-        model="local-wasm-context-demo",
+        z_state=list(z_state),
+        provider=provider,
+        model=model,
         create_session=False,
         context_partials=context_partials,
+        jsonl_out=trace_jsonl,
     )
 
     first_inference = suite["traces"][0]["inference"]
     telemetry = first_inference["telemetry"]["payload"] if first_inference else {}
-    print(
-        json.dumps(
-            {
-                "wasm_family": report_summary["family"],
-                "wasm_last_loss": report_summary["learning"]["last_loss"],
-                "context_origin": context_partials[0].origin,
-                "trace_count": suite["count"],
-                "first_confidence": first_inference["confidence"],
-                "wasm_context_seen": {
-                    "family_canvas": telemetry.get("wasm.family_canvas"),
-                    "webgpu_device_ready": telemetry.get("wasm.webgpu_device_ready"),
-                    "loss": telemetry.get("wasm.loss"),
-                },
-            },
-            indent=2,
-            sort_keys=True,
+    return {
+        "kind": "spiraltorch.api_llm_wasm_context_runtime_demo",
+        "report_count": len(reports),
+        "reports": [_compact_report_summary(summary) for summary in report_summaries],
+        "context_origins": [partial.origin for partial in context_partials],
+        "trace_count": suite["count"],
+        "trace_jsonl": suite.get("jsonl"),
+        "summary": suite["summary"],
+        "first_confidence": first_inference["confidence"] if first_inference else None,
+        "wasm_context_seen": {
+            "family_canvas": telemetry.get("wasm.family_canvas"),
+            "family_mellin": telemetry.get("wasm.family_mellin"),
+            "webgpu_device_ready": telemetry.get("wasm.webgpu_device_ready"),
+            "loss": telemetry.get("wasm.loss"),
+        },
+    }
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Blend browser-exported SpiralTorch WASM report JSON into a keyless "
+            "API LLM Z-space prompt suite."
         )
     )
+    parser.add_argument(
+        "--wasm-report",
+        action="append",
+        default=[],
+        help=(
+            "Path to a WASM report JSON exported by mellin-log-grid or "
+            "canvas-hypertrain. Repeat to blend multiple reports. If omitted, "
+            "a compact built-in Canvas report is used."
+        ),
+    )
+    parser.add_argument(
+        "--prompt",
+        action="append",
+        default=[],
+        help="Prompt to run through the local fake API. Repeat for a suite.",
+    )
+    parser.add_argument(
+        "--z-state",
+        default=None,
+        help="Comma-separated Z-state vector. Defaults to a small four-value seed.",
+    )
+    parser.add_argument("--gradient-dim", type=int, default=6)
+    parser.add_argument("--provider", default="local-demo")
+    parser.add_argument("--model", default="local-wasm-context-demo")
+    parser.add_argument(
+        "--trace-jsonl",
+        default=None,
+        help="Optional path for API LLM trace JSONL output.",
+    )
+    parser.add_argument(
+        "--json-out",
+        default=None,
+        help="Optional path for the compact demo summary JSON.",
+    )
+    parser.add_argument("--indent", type=int, default=2)
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    prompts = args.prompt or list(DEFAULT_PROMPTS)
+    result = run_demo(
+        wasm_reports=args.wasm_report,
+        prompts=prompts,
+        z_state=_parse_z_state(args.z_state),
+        gradient_dim=args.gradient_dim,
+        provider=args.provider,
+        model=args.model,
+        trace_jsonl=args.trace_jsonl,
+    )
+    text = json.dumps(result, indent=args.indent, sort_keys=True) + "\n"
+    if args.json_out:
+        out = Path(args.json_out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(text, encoding="utf-8")
+    print(text, end="")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
