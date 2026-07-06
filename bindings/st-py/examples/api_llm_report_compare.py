@@ -24,6 +24,8 @@ def _demo_report(
     *,
     compact_score: float,
     expanded_score: float,
+    wasm_loss: float,
+    wasm_stability: float,
 ) -> None:
     report: dict[str, Any] = {
         "kind": "spiraltorch.api_llm_live_provider_matrix",
@@ -31,6 +33,34 @@ def _demo_report(
         "route_count": 2,
         "skipped": {},
         "client_errors": [],
+        "wasm_context": {
+            "report_count": 1,
+            "context_origins": ["wasm:canvas"],
+            "reports": [
+                {
+                    "label": path.stem,
+                    "family": "canvas",
+                    "loss": wasm_loss,
+                    "stability": wasm_stability,
+                    "webgpu_device_ready": True,
+                }
+            ],
+            "comparison": {
+                "families": {"canvas": 1},
+                "best_loss": {
+                    "label": path.stem,
+                    "family": "canvas",
+                    "loss": wasm_loss,
+                    "stability": wasm_stability,
+                },
+                "best_stability": {
+                    "label": path.stem,
+                    "family": "canvas",
+                    "loss": wasm_loss,
+                    "stability": wasm_stability,
+                },
+            },
+        },
         "comparison": {
             "winners": {
                 "best_score": "openai-compact",
@@ -108,8 +138,20 @@ def main() -> None:
         root = Path(tmp)
         first = root / "first-report.json"
         second = root / "second-report.json"
-        _demo_report(first, compact_score=0.83, expanded_score=0.82)
-        _demo_report(second, compact_score=0.84, expanded_score=0.81)
+        _demo_report(
+            first,
+            compact_score=0.83,
+            expanded_score=0.82,
+            wasm_loss=0.05,
+            wasm_stability=0.86,
+        )
+        _demo_report(
+            second,
+            compact_score=0.84,
+            expanded_score=0.81,
+            wasm_loss=0.03,
+            wasm_stability=0.90,
+        )
         comparison = st.compare_api_llm_matrix_reports(
             {"first": first, "second": second}
         )

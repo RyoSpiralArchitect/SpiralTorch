@@ -122,7 +122,8 @@ PY
   payloads include `selection_profiles` for `balanced`, `quality`, `grounded`,
   `efficiency`, and `latency` routing. Use
   `compare_api_llm_matrix_reports(...)` to compare repeated live provider
-  `report.json` sweeps and inspect profile-winner stability across runs; the
+  `report.json` sweeps and inspect profile-winner stability plus carried WASM
+  context loss/WebGPU readiness across runs; the
   `api_llm_live_provider_matrix_sweep.py` example can run several token-budget
   pairs and produce that comparison in one command. Pass `--resume-existing`
   when expanding a sweep so completed budget pairs are reused instead of

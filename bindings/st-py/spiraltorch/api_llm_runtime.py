@@ -1745,6 +1745,103 @@ def _report_profile_winners(
     return winners, scores
 
 
+def _counts_from_sequence(values: Any) -> dict[str, int]:
+    if not isinstance(values, Sequence) or isinstance(values, (str, bytes, bytearray)):
+        return {}
+    counts: dict[str, int] = {}
+    for value in values:
+        if value is None:
+            continue
+        label = str(value)
+        if not label:
+            continue
+        counts[label] = counts.get(label, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def _list_from_sequence(values: Any) -> list[Any]:
+    if not isinstance(values, Sequence) or isinstance(values, (str, bytes, bytearray)):
+        return []
+    return list(values)
+
+
+def _wasm_context_report_rows(wasm_context: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    reports = wasm_context.get("reports")
+    if not isinstance(reports, Sequence) or isinstance(reports, (str, bytes, bytearray)):
+        return []
+    return [row for row in reports if isinstance(row, Mapping)]
+
+
+def _wasm_context_report_count(wasm_context: Mapping[str, Any]) -> int:
+    count = _finite_float(wasm_context.get("report_count"))
+    if count is not None:
+        return int(count)
+    return len(_wasm_context_report_rows(wasm_context))
+
+
+def _wasm_context_families(wasm_context: Mapping[str, Any]) -> dict[str, int]:
+    comparison = wasm_context.get("comparison")
+    comparison_map = comparison if isinstance(comparison, Mapping) else {}
+    families = comparison_map.get("families")
+    if isinstance(families, Mapping):
+        result: dict[str, int] = {}
+        for label, count in families.items():
+            numeric = _finite_float(count)
+            if numeric is not None and numeric > 0.0:
+                result[str(label)] = int(numeric)
+        if result:
+            return dict(sorted(result.items()))
+
+    result: dict[str, int] = {}
+    for row in _wasm_context_report_rows(wasm_context):
+        family = row.get("family")
+        if family in {None, ""}:
+            continue
+        family_text = str(family)
+        result[family_text] = result.get(family_text, 0) + 1
+    return dict(sorted(result.items()))
+
+
+def _wasm_context_best_value(
+    wasm_context: Mapping[str, Any],
+    key: str,
+    *,
+    comparison_key: str,
+    higher_is_better: bool,
+) -> float | None:
+    comparison = wasm_context.get("comparison")
+    comparison_map = comparison if isinstance(comparison, Mapping) else {}
+    row = comparison_map.get(comparison_key)
+    if isinstance(row, Mapping):
+        value = _finite_float(row.get(key))
+        if value is not None:
+            return value
+
+    values = [
+        value
+        for value in (
+            _finite_float(row.get(key))
+            for row in _wasm_context_report_rows(wasm_context)
+        )
+        if value is not None
+    ]
+    if not values:
+        return None
+    return max(values) if higher_is_better else min(values)
+
+
+def _wasm_context_ready_rate_from_reports(wasm_context: Mapping[str, Any]) -> float | None:
+    values = [
+        row.get("webgpu_device_ready")
+        for row in _wasm_context_report_rows(wasm_context)
+        if row.get("webgpu_device_ready") is not None
+    ]
+    if not values:
+        return None
+    ready = sum(1 for value in values if bool(value))
+    return ready / len(values)
+
+
 def _matrix_report_row(label: str, path: Path, report: Mapping[str, Any]) -> dict[str, Any]:
     comparison = report.get("comparison")
     comparison_map = comparison if isinstance(comparison, Mapping) else {}
@@ -1762,6 +1859,8 @@ def _matrix_report_row(label: str, path: Path, report: Mapping[str, Any]) -> dic
         else int(_finite_float(report.get("client_error_count")) or 0)
     )
     near_best = comparison_map.get("near_best")
+    wasm_context = report.get("wasm_context")
+    wasm_context_map = wasm_context if isinstance(wasm_context, Mapping) else {}
     return {
         "label": label,
         "path": str(path),
@@ -1782,6 +1881,106 @@ def _matrix_report_row(label: str, path: Path, report: Mapping[str, Any]) -> dic
         "skipped": skipped_map,
         "skipped_count": len(skipped_map),
         "client_error_count": client_error_count,
+        "wasm_report_count": _wasm_context_report_count(wasm_context_map),
+        "wasm_context_origins": _list_from_sequence(
+            wasm_context_map.get("context_origins")
+        ),
+        "wasm_context_origin_counts": _counts_from_sequence(
+            wasm_context_map.get("context_origins")
+        ),
+        "wasm_families": _wasm_context_families(wasm_context_map),
+        "wasm_best_loss": _wasm_context_best_value(
+            wasm_context_map,
+            "loss",
+            comparison_key="best_loss",
+            higher_is_better=False,
+        ),
+        "wasm_best_stability": _wasm_context_best_value(
+            wasm_context_map,
+            "stability",
+            comparison_key="best_stability",
+            higher_is_better=True,
+        ),
+        "wasm_webgpu_device_ready_rate": _wasm_context_ready_rate_from_reports(
+            wasm_context_map
+        ),
+    }
+
+
+def _matrix_report_winner(
+    rows: Sequence[Mapping[str, Any]],
+    key: str,
+    *,
+    higher_is_better: bool = True,
+) -> str | None:
+    candidates: list[tuple[float, str]] = []
+    for row in rows:
+        if int(row.get("wasm_report_count") or 0) <= 0:
+            continue
+        value = _finite_float(row.get(key))
+        label = row.get("label")
+        if value is None or label in {None, ""}:
+            continue
+        score = value if higher_is_better else -value
+        candidates.append((score, str(label)))
+    if not candidates:
+        return None
+    return max(candidates, key=lambda item: item[0])[1]
+
+
+def _matrix_reports_wasm_context(
+    report_rows: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    observed = [
+        row
+        for row in report_rows
+        if int(row.get("wasm_report_count") or 0) > 0
+    ]
+    family_counts: dict[str, int] = {}
+    origin_counts: dict[str, int] = {}
+    for row in observed:
+        families = row.get("wasm_families")
+        if isinstance(families, Mapping):
+            for family, count in families.items():
+                numeric = int(_finite_float(count) or 0)
+                if numeric > 0:
+                    family_text = str(family)
+                    family_counts[family_text] = (
+                        family_counts.get(family_text, 0) + numeric
+                    )
+        origins = row.get("wasm_context_origin_counts")
+        if isinstance(origins, Mapping):
+            for origin, count in origins.items():
+                numeric = int(_finite_float(count) or 0)
+                if numeric > 0:
+                    origin_text = str(origin)
+                    origin_counts[origin_text] = (
+                        origin_counts.get(origin_text, 0) + numeric
+                    )
+
+    return {
+        "observed_reports": len(observed),
+        "observed_report_rate": (
+            len(observed) / len(report_rows) if report_rows else 0.0
+        ),
+        "total_wasm_report_count": sum(
+            int(row.get("wasm_report_count") or 0) for row in observed
+        ),
+        "families": dict(sorted(family_counts.items())),
+        "context_origins": dict(sorted(origin_counts.items())),
+        "lowest_best_loss": _matrix_report_winner(
+            report_rows,
+            "wasm_best_loss",
+            higher_is_better=False,
+        ),
+        "highest_best_stability": _matrix_report_winner(
+            report_rows,
+            "wasm_best_stability",
+        ),
+        "highest_webgpu_device_ready": _matrix_report_winner(
+            report_rows,
+            "wasm_webgpu_device_ready_rate",
+        ),
     }
 
 
@@ -1921,11 +2120,22 @@ def compare_api_llm_matrix_reports(
 
     profile_winners = _profile_winner_summary(report_rows)
     route_summaries = _route_report_summary(report_rows, reports_by_label)
+    wasm_context = _matrix_reports_wasm_context(report_rows)
     recommendations: list[str] = []
     if route_summaries:
         best_route = route_summaries[0]
         recommendations.append(
             f"prefer {best_route['label']} when stability across matrix reports matters"
+        )
+    if wasm_context["observed_reports"]:
+        recommendations.append(
+            f"{wasm_context['observed_reports']} matrix reports carry WASM context "
+            f"({wasm_context['total_wasm_report_count']} selected browser reports)"
+        )
+    lowest_wasm_loss = wasm_context.get("lowest_best_loss")
+    if lowest_wasm_loss:
+        recommendations.append(
+            f"inspect {lowest_wasm_loss} for the lowest selected WASM report loss"
         )
     for profile, winners in profile_winners.items():
         if not winners:
@@ -1952,6 +2162,7 @@ def compare_api_llm_matrix_reports(
         "reports": report_rows,
         "profile_winners": profile_winners,
         "routes": route_summaries,
+        "wasm_context": wasm_context,
         "recommendations": recommendations,
     }
 
