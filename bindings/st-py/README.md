@@ -121,7 +121,9 @@ PY
   payloads include `selection_profiles` for `balanced`, `quality`, `grounded`,
   `efficiency`, and `latency` routing. Use
   `compare_api_llm_matrix_reports(...)` to compare repeated live provider
-  `report.json` sweeps and inspect profile-winner stability across runs.
+  `report.json` sweeps and inspect profile-winner stability across runs; the
+  `api_llm_live_provider_matrix_sweep.py` example can run several token-budget
+  pairs and produce that comparison in one command.
 - Language desire controls via `st.nn.DesirePipeline`, `DesireTrainerBridge`,
   `DesireRoundtableBridge`, and downstream hook adapters so notebooks can
   inspect phase/temperature/entropy offsets without making the symbolic kernel
