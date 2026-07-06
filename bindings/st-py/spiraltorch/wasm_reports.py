@@ -12,12 +12,17 @@ from .zspace_inference import ZSpacePartialBundle
 
 __all__ = [
     "build_wasm_report_context",
+    "build_wasm_report_context_artifact",
     "compare_wasm_reports",
     "collect_wasm_report_paths",
+    "load_wasm_report_context_artifact",
     "load_wasm_report",
     "summarize_wasm_report",
     "wasm_report_to_zspace_partial",
+    "write_wasm_report_context_artifact",
 ]
+
+_CONTEXT_ARTIFACT_SCHEMA = "spiraltorch.wasm_report_context.v1"
 
 
 def load_wasm_report(path: str | os.PathLike[str]) -> dict[str, Any]:
@@ -552,6 +557,137 @@ def build_wasm_report_context(
     metadata["context_origins"] = [partial.origin for partial in context_partials]
     metadata["comparison"] = _compact_wasm_comparison(comparison)
     return context_partials, metadata
+
+
+def _partial_payload(partial: ZSpacePartialBundle) -> dict[str, Any]:
+    telemetry = partial.telemetry_payload()
+    return {
+        "metrics": partial.resolved(),
+        "weight": partial.weight,
+        "origin": partial.origin,
+        "telemetry": None if telemetry is None else dict(telemetry),
+    }
+
+
+def _partial_from_payload(payload: Any) -> ZSpacePartialBundle:
+    if not isinstance(payload, Mapping):
+        raise ValueError("WASM context partial rows must be JSON objects")
+    metrics = payload.get("metrics")
+    if not isinstance(metrics, Mapping):
+        raise ValueError("WASM context partial rows must contain metrics")
+    telemetry = payload.get("telemetry")
+    if telemetry is not None and not isinstance(telemetry, Mapping):
+        raise ValueError("WASM context partial telemetry must be an object")
+    return ZSpacePartialBundle(
+        dict(metrics),
+        weight=float(payload.get("weight", 1.0)),
+        origin=None if payload.get("origin") is None else str(payload.get("origin")),
+        telemetry=None if telemetry is None else dict(telemetry),
+    )
+
+
+def build_wasm_report_context_artifact(
+    reports: (
+        Mapping[str, str | os.PathLike[str] | Mapping[str, Any]]
+        | Sequence[str | os.PathLike[str] | Mapping[str, Any]]
+        | str
+        | os.PathLike[str]
+        | Mapping[str, Any]
+        | None
+    ) = None,
+    *,
+    report_globs: Sequence[str] | None = None,
+    report_dirs: Sequence[str | os.PathLike[str]] | None = None,
+    max_reports: int | None = None,
+    recursive: bool = False,
+    bundle_weight: float = 1.0,
+    telemetry_prefix: str = "wasm",
+    gradient_dim: int = 8,
+) -> dict[str, Any]:
+    """Return a portable JSON-ready artifact for selected WASM context partials."""
+
+    context_partials, metadata = build_wasm_report_context(
+        reports,
+        report_globs=report_globs,
+        report_dirs=report_dirs,
+        max_reports=max_reports,
+        recursive=recursive,
+        bundle_weight=bundle_weight,
+        telemetry_prefix=telemetry_prefix,
+        gradient_dim=gradient_dim,
+    )
+    return {
+        "schema": _CONTEXT_ARTIFACT_SCHEMA,
+        "kind": "spiraltorch.wasm_report_context",
+        "metadata": metadata,
+        "context_partials": [_partial_payload(partial) for partial in context_partials],
+    }
+
+
+def write_wasm_report_context_artifact(
+    path: str | os.PathLike[str],
+    reports: (
+        Mapping[str, str | os.PathLike[str] | Mapping[str, Any]]
+        | Sequence[str | os.PathLike[str] | Mapping[str, Any]]
+        | str
+        | os.PathLike[str]
+        | Mapping[str, Any]
+        | None
+    ) = None,
+    *,
+    report_globs: Sequence[str] | None = None,
+    report_dirs: Sequence[str | os.PathLike[str]] | None = None,
+    max_reports: int | None = None,
+    recursive: bool = False,
+    bundle_weight: float = 1.0,
+    telemetry_prefix: str = "wasm",
+    gradient_dim: int = 8,
+) -> str:
+    """Write a selected WASM context handoff artifact and return its path."""
+
+    artifact = build_wasm_report_context_artifact(
+        reports,
+        report_globs=report_globs,
+        report_dirs=report_dirs,
+        max_reports=max_reports,
+        recursive=recursive,
+        bundle_weight=bundle_weight,
+        telemetry_prefix=telemetry_prefix,
+        gradient_dim=gradient_dim,
+    )
+    out_path = Path(path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(
+        json.dumps(artifact, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    return str(out_path)
+
+
+def load_wasm_report_context_artifact(
+    path: str | os.PathLike[str],
+) -> tuple[list[ZSpacePartialBundle], dict[str, Any]]:
+    """Load a WASM context handoff artifact into partials plus metadata."""
+
+    artifact_path = Path(path)
+    payload = json.loads(artifact_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, Mapping):
+        raise ValueError("WASM context artifact must be a JSON object")
+    partial_rows = payload.get("context_partials")
+    if not isinstance(partial_rows, Sequence) or isinstance(
+        partial_rows, (str, bytes, bytearray)
+    ):
+        raise ValueError("WASM context artifact must contain context_partials")
+    metadata = payload.get("metadata")
+    if metadata is None:
+        metadata_payload: dict[str, Any] = {}
+    elif isinstance(metadata, Mapping):
+        metadata_payload = dict(metadata)
+    else:
+        raise ValueError("WASM context artifact metadata must be an object")
+    metadata_payload.setdefault("artifact_path", str(artifact_path))
+    metadata_payload.setdefault("artifact_schema", payload.get("schema"))
+    return [_partial_from_payload(row) for row in partial_rows], metadata_payload
 
 
 def _work_units(summary: Mapping[str, Any]) -> float:

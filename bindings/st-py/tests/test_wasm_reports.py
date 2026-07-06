@@ -124,11 +124,14 @@ def _canvas_report(last_loss: float = 0.05) -> dict[str, object]:
 
 def test_wasm_report_helpers_exported_from_top_level() -> None:
     assert "build_wasm_report_context" in st.__all__
+    assert "build_wasm_report_context_artifact" in st.__all__
     assert "collect_wasm_report_paths" in st.__all__
+    assert "load_wasm_report_context_artifact" in st.__all__
     assert "load_wasm_report" in st.__all__
     assert "summarize_wasm_report" in st.__all__
     assert "compare_wasm_reports" in st.__all__
     assert "wasm_report_to_zspace_partial" in st.__all__
+    assert "write_wasm_report_context_artifact" in st.__all__
 
 
 def test_load_and_summarize_mellin_wasm_report(tmp_path) -> None:
@@ -217,3 +220,52 @@ def test_collect_and_build_wasm_report_context_selects_best_runs(tmp_path) -> No
     assert metadata["comparison"]["best_loss"]["loss"] == pytest.approx(0.01)
     assert len(context) == 2
     assert all(len(partial.resolved()["gradient"]) == 5 for partial in context)
+
+
+def test_wasm_report_context_artifact_roundtrips_into_api_llm_suite(tmp_path) -> None:
+    slow = tmp_path / "slow.json"
+    best = tmp_path / "best.json"
+    artifact = tmp_path / "handoff" / "wasm-context.json"
+    slow.write_text(json.dumps(_canvas_report(last_loss=0.2)), encoding="utf-8")
+    best.write_text(json.dumps(_canvas_report(last_loss=0.01)), encoding="utf-8")
+
+    written = st.write_wasm_report_context_artifact(
+        artifact,
+        [slow, best],
+        max_reports=1,
+        gradient_dim=6,
+    )
+    payload = json.loads(artifact.read_text(encoding="utf-8"))
+    context, metadata = st.load_wasm_report_context_artifact(written)
+
+    assert written == str(artifact)
+    assert payload["schema"] == "spiraltorch.wasm_report_context.v1"
+    assert payload["metadata"]["report_count"] == 1
+    assert payload["metadata"]["reports"][0]["artifact_path"] == str(best)
+    assert metadata["artifact_path"] == str(artifact)
+    assert metadata["artifact_schema"] == "spiraltorch.wasm_report_context.v1"
+    assert len(context) == 1
+
+    def fake_api(prompt: str) -> dict[str, object]:
+        text = f"Hosted route reuses selected browser context for {prompt}"
+        return {
+            "model": "local-wasm-context-artifact",
+            "output_text": text,
+            "status": "completed",
+            "usage": {
+                "input_tokens": max(1, len(prompt.split())),
+                "output_tokens": max(1, len(text.split())),
+            },
+        }
+
+    suite = st.run_api_llm_prompt_suite(
+        ["Use selected WASM context."],
+        fake_api,
+        z_state=[0.12, -0.04, 0.33, -0.11],
+        create_session=False,
+        context_partials=context,
+    )
+    telemetry = suite["traces"][0]["inference"]["telemetry"]["payload"]
+    assert telemetry["wasm.family_canvas"] == pytest.approx(1.0)
+    assert telemetry["wasm.loss"] == pytest.approx(0.01)
+    assert telemetry["wasm.webgpu_device_ready"] == pytest.approx(1.0)

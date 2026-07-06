@@ -304,6 +304,35 @@ def build_wasm_report_context(
     gradient_dim: int = ...,
 ) -> Tuple[List[ZSpacePartialBundle], Dict[str, Any]]: ...
 
+def build_wasm_report_context_artifact(
+    reports: Any = ...,
+    *,
+    report_globs: Sequence[str] | None = ...,
+    report_dirs: Sequence[str | PathLike[str]] | None = ...,
+    max_reports: int | None = ...,
+    recursive: bool = ...,
+    bundle_weight: float = ...,
+    telemetry_prefix: str = ...,
+    gradient_dim: int = ...,
+) -> Dict[str, Any]: ...
+
+def write_wasm_report_context_artifact(
+    path: str | PathLike[str],
+    reports: Any = ...,
+    *,
+    report_globs: Sequence[str] | None = ...,
+    report_dirs: Sequence[str | PathLike[str]] | None = ...,
+    max_reports: int | None = ...,
+    recursive: bool = ...,
+    bundle_weight: float = ...,
+    telemetry_prefix: str = ...,
+    gradient_dim: int = ...,
+) -> str: ...
+
+def load_wasm_report_context_artifact(
+    path: str | PathLike[str],
+) -> Tuple[List[ZSpacePartialBundle], Dict[str, Any]]: ...
+
 def load_kdsl_trace_events(path: str) -> List[Dict[str, Any]]: ...
 
 def write_kdsl_trace_jsonl(
@@ -7258,11 +7287,14 @@ __all__ = [
     "summarize_api_llm_trace_events",
     "write_api_llm_trace_jsonl",
     "build_wasm_report_context",
+    "build_wasm_report_context_artifact",
     "compare_wasm_reports",
     "collect_wasm_report_paths",
+    "load_wasm_report_context_artifact",
     "load_wasm_report",
     "summarize_wasm_report",
     "wasm_report_to_zspace_partial",
+    "write_wasm_report_context_artifact",
     "ZSpaceTrainer",
     "ZSpaceCoherenceSequencer",
     "step_many",
