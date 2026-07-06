@@ -37,6 +37,28 @@ COHERENCE_REPAIR_METRIC_KEYS = (
     "coherence_pre_discard_repaired_negative",
 )
 
+TOPOS_CONTEXT_METRIC_KEYS = (
+    ("closure_pressure", "topos.closure_pressure"),
+    ("openness", "topos.openness"),
+    ("guard_strength", "topos.guard_strength"),
+    ("learning_rate_scale", "topos.learning_rate_scale"),
+    ("temperature_scale", "topos.temperature_scale"),
+    ("regularization_scale", "topos.regularization_scale"),
+    ("training_gradient_bias_scale", "topos.training_hints.gradient_bias_scale"),
+    ("training_clip_scale", "topos.training_hints.clip_scale"),
+    ("training_momentum_damping", "topos.training_hints.momentum_damping"),
+    ("inference_top_p_scale", "topos.inference_hints.top_p_scale"),
+    ("inference_context_weight", "topos.inference_hints.context_weight"),
+    (
+        "inference_frequency_penalty_bias",
+        "topos.inference_hints.frequency_penalty_bias",
+    ),
+    (
+        "inference_presence_penalty_bias",
+        "topos.inference_hints.presence_penalty_bias",
+    ),
+)
+
 TRACE_SPOTLIGHT_KEYS = (
     "loss_weighted",
     "loss_weighted_base",
@@ -695,6 +717,89 @@ def _metric_stats(values: list[float]) -> dict[str, Any]:
         "samples": len(values),
         "nonzero": sum(1 for value in values if value != 0.0),
     }
+
+
+def _empty_metric_stats() -> dict[str, Any]:
+    return {
+        "first": None,
+        "last": None,
+        "min": None,
+        "max": None,
+        "mean": 0.0,
+        "sum": 0.0,
+        "samples": 0,
+        "nonzero": 0,
+    }
+
+
+def _metric_stats_or_empty(values: list[float]) -> dict[str, Any]:
+    return _metric_stats(values) if values else _empty_metric_stats()
+
+
+def _flatten_numeric_mapping(value: Any, *, prefix: str = "") -> dict[str, float]:
+    if not isinstance(value, dict):
+        return {}
+    flattened: dict[str, float] = {}
+    for key, raw_value in value.items():
+        label = f"{prefix}.{key}" if prefix else str(key)
+        if isinstance(raw_value, dict):
+            flattened.update(_flatten_numeric_mapping(raw_value, prefix=label))
+            continue
+        if isinstance(raw_value, (int, float)) and not isinstance(raw_value, bool):
+            numeric = float(raw_value)
+            if math.isfinite(numeric):
+                flattened[label] = numeric
+    return flattened
+
+
+def _event_numeric_mapping(event: dict[str, Any]) -> dict[str, float]:
+    values: dict[str, float] = {}
+    metrics = event.get("metrics")
+    if isinstance(metrics, dict):
+        extra = metrics.get("extra")
+        if isinstance(extra, dict):
+            values.update(_flatten_numeric_mapping(extra))
+        for key, value in metrics.items():
+            if key == "extra":
+                continue
+            if isinstance(value, dict):
+                prefix = "" if key == "telemetry" else str(key)
+                values.update(_flatten_numeric_mapping(value, prefix=prefix))
+                continue
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                numeric = float(value)
+                if math.isfinite(numeric):
+                    values[str(key)] = numeric
+    for key, value in event.items():
+        if key == "metrics":
+            continue
+        if isinstance(value, dict):
+            prefix = "" if key == "telemetry" else str(key)
+            values.update(_flatten_numeric_mapping(value, prefix=prefix))
+            continue
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            numeric = float(value)
+            if math.isfinite(numeric):
+                values[str(key)] = numeric
+    return values
+
+
+def _topos_context_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
+    rows = [
+        mapping
+        for event in events
+        for mapping in [_event_numeric_mapping(event)]
+        if any(key.startswith("topos.") for key in mapping)
+    ]
+    summary: dict[str, Any] = {
+        "observed_count": len(rows),
+        "observed_rate": len(rows) / len(events) if events else 0.0,
+    }
+    for label, source_key in TOPOS_CONTEXT_METRIC_KEYS:
+        summary[label] = _metric_stats_or_empty(
+            [row[source_key] for row in rows if source_key in row]
+        )
+    return summary
 
 
 def _coherence_repair_summary(metrics: dict[str, dict[str, Any]]) -> dict[str, Any]:
@@ -1499,6 +1604,7 @@ def summarize_trainer_trace_events(
 
     events = load_trainer_trace_events(path, event_type=event_type)
     tensor_meta_metrics = _tensor_meta_derived_metrics(path)
+    topos_context = _topos_context_summary(events)
     if not events:
         return {
             "event_type": event_type,
@@ -1506,6 +1612,7 @@ def summarize_trainer_trace_events(
             "first_step": None,
             "last_step": None,
             "metrics": tensor_meta_metrics,
+            "topos_context": topos_context,
             "coherence_repairs": {},
             "backend_policy": _backend_policy_summary(tensor_meta_metrics),
         }
@@ -1551,6 +1658,7 @@ def summarize_trainer_trace_events(
         "first_step": first_step,
         "last_step": last_step,
         "metrics": metrics,
+        "topos_context": topos_context,
         "coherence_repairs": _coherence_repair_summary(metrics),
         "backend_policy": _backend_policy_summary(metrics),
     }
