@@ -28,7 +28,12 @@ __all__ = [
     "api_llm_text_from_response",
     "api_llm_trace_from_response",
     "api_llm_usage_from_response",
+    "make_openai_chat_invoke",
+    "make_openai_responses_invoke",
 ]
+
+
+_OPENAI_INSTALL_HINT = "pip install openai"
 
 
 def _value(source: Any, key: str, default: Any = None) -> Any:
@@ -347,6 +352,137 @@ def _response_model(response: Any) -> str | None:
     return str(value) if value else None
 
 
+def _create_openai_client(
+    *,
+    client: Any | None,
+    client_factory: Callable[..., Any] | None,
+    client_kwargs: Mapping[str, Any] | None,
+) -> Any:
+    if client is not None:
+        return client
+    if client_factory is None:
+        try:
+            from openai import OpenAI  # type: ignore[import-not-found]
+        except Exception as exc:  # pragma: no cover - depends on optional SDK.
+            raise RuntimeError(
+                "OpenAI SDK is required for the OpenAI adapter; "
+                f"install it with `{_OPENAI_INSTALL_HINT}` or pass a client."
+            ) from exc
+        client_factory = OpenAI
+    return client_factory(**dict(client_kwargs or {}))
+
+
+def _resolve_create(root: Any, path: Sequence[str]) -> Callable[..., Any]:
+    target = root
+    for name in path:
+        target = _value(target, name)
+        if target is None:
+            dotted = ".".join(path)
+            raise AttributeError(f"client does not expose {dotted}.create")
+    create = _value(target, "create")
+    if not callable(create):
+        dotted = ".".join(path)
+        raise AttributeError(f"client does not expose callable {dotted}.create")
+    return create
+
+
+def _merge_request(
+    defaults: Mapping[str, Any],
+    overrides: Mapping[str, Any],
+    *,
+    model: str | None,
+) -> dict[str, Any]:
+    request = dict(defaults)
+    request.update(overrides)
+    if model is not None:
+        request.setdefault("model", model)
+    return request
+
+
+def make_openai_responses_invoke(
+    *,
+    client: Any | None = None,
+    client_factory: Callable[..., Any] | None = None,
+    client_kwargs: Mapping[str, Any] | None = None,
+    model: str | None = None,
+    input_key: str = "input",
+    **request_defaults: Any,
+) -> Callable[..., Any]:
+    """Return a callable that sends prompts through OpenAI's Responses API.
+
+    The returned callable is compatible with :meth:`ApiLLMZSpaceRuntime.call`.
+    It imports ``openai`` lazily, so SpiralTorch remains usable without the SDK
+    until this adapter is invoked.
+    """
+
+    cached_client = client
+
+    def _invoke(prompt: str, **request_overrides: Any) -> Any:
+        nonlocal cached_client
+        if cached_client is None:
+            cached_client = _create_openai_client(
+                client=None,
+                client_factory=client_factory,
+                client_kwargs=client_kwargs,
+            )
+        request = _merge_request(request_defaults, request_overrides, model=model)
+        request.setdefault(input_key, prompt)
+        create = _resolve_create(cached_client, ("responses",))
+        return create(**request)
+
+    return _invoke
+
+
+def _chat_messages(
+    prompt: str,
+    *,
+    system: str | None,
+    messages: Sequence[Mapping[str, Any]] | None,
+) -> list[Mapping[str, Any]]:
+    result: list[Mapping[str, Any]] = []
+    if system:
+        result.append({"role": "system", "content": system})
+    if messages:
+        result.extend(dict(message) for message in messages)
+    result.append({"role": "user", "content": prompt})
+    return result
+
+
+def make_openai_chat_invoke(
+    *,
+    client: Any | None = None,
+    client_factory: Callable[..., Any] | None = None,
+    client_kwargs: Mapping[str, Any] | None = None,
+    model: str | None = None,
+    system: str | None = None,
+    messages: Sequence[Mapping[str, Any]] | None = None,
+    **request_defaults: Any,
+) -> Callable[..., Any]:
+    """Return a callable that sends prompts through OpenAI chat completions."""
+
+    cached_client = client
+
+    def _invoke(prompt: str, **request_overrides: Any) -> Any:
+        nonlocal cached_client
+        if cached_client is None:
+            cached_client = _create_openai_client(
+                client=None,
+                client_factory=client_factory,
+                client_kwargs=client_kwargs,
+            )
+        request = _merge_request(request_defaults, request_overrides, model=model)
+        override_messages = request.pop("messages", None)
+        request["messages"] = _chat_messages(
+            prompt,
+            system=system,
+            messages=override_messages if override_messages is not None else messages,
+        )
+        create = _resolve_create(cached_client, ("chat", "completions"))
+        return create(**request)
+
+    return _invoke
+
+
 def api_llm_partial_from_response(
     response: Any,
     *,
@@ -601,6 +737,68 @@ class ApiLLMZSpaceRuntime:
             provider=provider,
             model=model,
             latency_ms=latency_ms,
+        )
+
+    def call_openai_responses(
+        self,
+        prompt: str,
+        *,
+        client: Any | None = None,
+        client_factory: Callable[..., Any] | None = None,
+        client_kwargs: Mapping[str, Any] | None = None,
+        model: str | None = None,
+        input_key: str = "input",
+        provider: str | None = "openai",
+        **request: Any,
+    ) -> ApiLLMTrace:
+        """Call OpenAI's Responses API and record the resulting Z-space trace."""
+
+        model_value = model or self.model
+        invoke = make_openai_responses_invoke(
+            client=client,
+            client_factory=client_factory,
+            client_kwargs=client_kwargs,
+            model=model_value,
+            input_key=input_key,
+            **request,
+        )
+        return self.call(
+            invoke,
+            prompt,
+            provider=provider,
+            model=model_value,
+        )
+
+    def call_openai_chat(
+        self,
+        prompt: str,
+        *,
+        client: Any | None = None,
+        client_factory: Callable[..., Any] | None = None,
+        client_kwargs: Mapping[str, Any] | None = None,
+        model: str | None = None,
+        system: str | None = None,
+        messages: Sequence[Mapping[str, Any]] | None = None,
+        provider: str | None = "openai",
+        **request: Any,
+    ) -> ApiLLMTrace:
+        """Call OpenAI chat completions and record the resulting Z-space trace."""
+
+        model_value = model or self.model
+        invoke = make_openai_chat_invoke(
+            client=client,
+            client_factory=client_factory,
+            client_kwargs=client_kwargs,
+            model=model_value,
+            system=system,
+            messages=messages,
+            **request,
+        )
+        return self.call(
+            invoke,
+            prompt,
+            provider=provider,
+            model=model_value,
         )
 
     def as_dict(self) -> dict[str, Any]:

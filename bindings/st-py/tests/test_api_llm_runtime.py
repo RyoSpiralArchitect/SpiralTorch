@@ -10,6 +10,66 @@ st = pytest.importorskip("spiraltorch")
 def test_api_llm_runtime_exports_from_top_level() -> None:
     assert "ApiLLMZSpaceRuntime" in st.__all__
     assert "api_llm_partial_from_response" in st.__all__
+    assert "make_openai_chat_invoke" in st.__all__
+    assert "make_openai_responses_invoke" in st.__all__
+
+
+class _FakeResponses:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def create(self, **request: object) -> dict[str, object]:
+        self.calls.append(dict(request))
+        return {
+            "id": "resp-test",
+            "object": "response",
+            "model": request.get("model", "response-model-test"),
+            "output_text": "Adapter response entered Z-space.",
+            "status": "completed",
+            "usage": {"input_tokens": 7, "output_tokens": 5, "total_tokens": 12},
+        }
+
+
+class _FakeResponsesClient:
+    def __init__(self) -> None:
+        self.responses = _FakeResponses()
+
+
+class _FakeCompletions:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def create(self, **request: object) -> dict[str, object]:
+        self.calls.append(dict(request))
+        return {
+            "id": "chat-test",
+            "object": "chat.completion",
+            "model": request.get("model", "chat-model-test"),
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "Chat adapter entered Z-space.",
+                    },
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {
+                "prompt_tokens": 9,
+                "completion_tokens": 5,
+                "total_tokens": 14,
+            },
+        }
+
+
+class _FakeChat:
+    def __init__(self) -> None:
+        self.completions = _FakeCompletions()
+
+
+class _FakeChatClient:
+    def __init__(self) -> None:
+        self.chat = _FakeChat()
 
 
 def _chat_response() -> dict[str, object]:
@@ -111,3 +171,100 @@ def test_api_llm_runtime_calls_callable_and_records_inference() -> None:
     assert payload["inference"]["confidence"] > 0.0
     assert payload["metrics"]["stability"] > 0.7
     assert runtime.as_dict()["traces"][0]["text"] == trace.text
+
+
+def test_make_openai_responses_invoke_uses_client_factory_lazily() -> None:
+    created: list[dict[str, object]] = []
+    client = _FakeResponsesClient()
+
+    def factory(**kwargs: object) -> _FakeResponsesClient:
+        created.append(dict(kwargs))
+        return client
+
+    invoke = st.make_openai_responses_invoke(
+        client_factory=factory,
+        client_kwargs={"api_key": "test-key"},
+        model="response-model-test",
+        max_output_tokens=12,
+    )
+    response = invoke("trace this response", temperature=0.1)
+
+    assert created == [{"api_key": "test-key"}]
+    assert st.api_llm_text_from_response(response) == "Adapter response entered Z-space."
+    assert client.responses.calls == [
+        {
+            "max_output_tokens": 12,
+            "temperature": 0.1,
+            "model": "response-model-test",
+            "input": "trace this response",
+        }
+    ]
+
+
+def test_runtime_call_openai_responses_records_trace() -> None:
+    client = _FakeResponsesClient()
+    runtime = st.ApiLLMZSpaceRuntime(
+        [0.2, -0.1, 0.4, 0.05],
+        model="response-model-test",
+        create_session=False,
+    )
+
+    trace = runtime.call_openai_responses(
+        "route the hosted model",
+        client=client,
+        max_output_tokens=8,
+    )
+
+    assert trace.provider == "openai"
+    assert trace.model == "response-model-test"
+    assert trace.text == "Adapter response entered Z-space."
+    assert trace.inference is not None
+    assert client.responses.calls[0]["input"] == "route the hosted model"
+    assert client.responses.calls[0]["model"] == "response-model-test"
+
+
+def test_make_openai_chat_invoke_builds_messages() -> None:
+    client = _FakeChatClient()
+    invoke = st.make_openai_chat_invoke(
+        client=client,
+        model="chat-model-test",
+        system="Answer in compact Z-space language.",
+        max_tokens=10,
+    )
+    response = invoke("trace this chat", temperature=0.2)
+
+    assert st.api_llm_text_from_response(response) == "Chat adapter entered Z-space."
+    request = client.chat.completions.calls[0]
+    assert request["model"] == "chat-model-test"
+    assert request["max_tokens"] == 10
+    assert request["temperature"] == 0.2
+    assert request["messages"] == [
+        {"role": "system", "content": "Answer in compact Z-space language."},
+        {"role": "user", "content": "trace this chat"},
+    ]
+
+
+def test_runtime_call_openai_chat_records_trace() -> None:
+    client = _FakeChatClient()
+    runtime = st.ApiLLMZSpaceRuntime(
+        [0.05, 0.15, -0.2, 0.31],
+        create_session=False,
+    )
+
+    trace = runtime.call_openai_chat(
+        "route the chat model",
+        client=client,
+        model="chat-model-test",
+        messages=[{"role": "assistant", "content": "Prior trace acknowledged."}],
+        max_tokens=6,
+    )
+
+    assert trace.provider == "openai"
+    assert trace.model == "chat-model-test"
+    assert trace.text == "Chat adapter entered Z-space."
+    assert trace.inference is not None
+    messages = client.chat.completions.calls[0]["messages"]
+    assert messages[-2:] == [
+        {"role": "assistant", "content": "Prior trace acknowledged."},
+        {"role": "user", "content": "route the chat model"},
+    ]

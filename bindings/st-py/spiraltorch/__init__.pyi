@@ -2066,6 +2066,31 @@ class ApiLLMZSpaceRuntime:
         model: str | None = ...,
         **kwargs: Any,
     ) -> ApiLLMTrace: ...
+    def call_openai_responses(
+        self,
+        prompt: str,
+        *,
+        client: Any | None = ...,
+        client_factory: Callable[..., Any] | None = ...,
+        client_kwargs: Mapping[str, Any] | None = ...,
+        model: str | None = ...,
+        input_key: str = ...,
+        provider: str | None = ...,
+        **request: Any,
+    ) -> ApiLLMTrace: ...
+    def call_openai_chat(
+        self,
+        prompt: str,
+        *,
+        client: Any | None = ...,
+        client_factory: Callable[..., Any] | None = ...,
+        client_kwargs: Mapping[str, Any] | None = ...,
+        model: str | None = ...,
+        system: str | None = ...,
+        messages: Sequence[Mapping[str, Any]] | None = ...,
+        provider: str | None = ...,
+        **request: Any,
+    ) -> ApiLLMTrace: ...
     def as_dict(self) -> Dict[str, Any]: ...
 
 
@@ -2102,6 +2127,29 @@ def api_llm_trace_from_response(
     device_preflight: Mapping[str, Any] | None = ...,
     gradient_dim: int = ...,
 ) -> ApiLLMTrace: ...
+
+
+def make_openai_responses_invoke(
+    *,
+    client: Any | None = ...,
+    client_factory: Callable[..., Any] | None = ...,
+    client_kwargs: Mapping[str, Any] | None = ...,
+    model: str | None = ...,
+    input_key: str = ...,
+    **request_defaults: Any,
+) -> Callable[..., Any]: ...
+
+
+def make_openai_chat_invoke(
+    *,
+    client: Any | None = ...,
+    client_factory: Callable[..., Any] | None = ...,
+    client_kwargs: Mapping[str, Any] | None = ...,
+    model: str | None = ...,
+    system: str | None = ...,
+    messages: Sequence[Mapping[str, Any]] | None = ...,
+    **request_defaults: Any,
+) -> Callable[..., Any]: ...
 
 class SafetyViolation:
     category: str
@@ -7002,6 +7050,8 @@ __all__ = [
     "api_llm_text_from_response",
     "api_llm_trace_from_response",
     "api_llm_usage_from_response",
+    "make_openai_chat_invoke",
+    "make_openai_responses_invoke",
     "ZSpaceTrainer",
     "ZSpaceCoherenceSequencer",
     "step_many",
