@@ -16,6 +16,7 @@ def test_api_llm_runtime_exports_from_top_level() -> None:
     assert "make_openai_chat_invoke" in st.__all__
     assert "make_openai_responses_invoke" in st.__all__
     assert "run_api_llm_prompt_suite" in st.__all__
+    assert "run_api_llm_prompt_suite_matrix" in st.__all__
     assert "summarize_api_llm_trace_events" in st.__all__
     assert "write_api_llm_trace_jsonl" in st.__all__
 
@@ -494,6 +495,67 @@ def test_run_api_llm_prompt_suite_creates_runtime(tmp_path) -> None:
     assert result["device_preflight"] is None
     assert result["summary"]["models"] == {"top-level-suite": 1}
     assert result["jsonl"] == str(path)
+
+
+def test_run_api_llm_prompt_suite_matrix_compares_providers(tmp_path) -> None:
+    calls: list[tuple[str, str]] = []
+
+    def fast_api(prompt: str, *, suffix: str) -> dict[str, object]:
+        calls.append(("fast api", prompt))
+        return {
+            "model": "fast-model",
+            "output_text": f"Fast bipolar route {suffix}",
+            "status": "completed",
+            "usage": {"prompt_tokens": 4, "completion_tokens": 5, "total_tokens": 9},
+        }
+
+    def deep_api(prompt: str, *, suffix: str) -> dict[str, object]:
+        calls.append(("deep/api", prompt))
+        return {
+            "model": "deep-model",
+            "content": [
+                {
+                    "type": "text",
+                    "text": f"Deep bipolar route with more generated tokens {suffix}",
+                }
+            ],
+            "stop_reason": "end_turn",
+            "usage": {"input_tokens": 12, "output_tokens": 24},
+        }
+
+    result = st.run_api_llm_prompt_suite_matrix(
+        ["first bipolar prompt", "second bipolar prompt"],
+        {"fast api": fast_api, "deep/api": deep_api},
+        z_state=[0.2, -0.1, 0.4, 0.05],
+        providers={"fast api": "openai", "deep/api": "anthropic"},
+        models={"fast api": "fast-model", "deep/api": "deep-model"},
+        create_session=False,
+        jsonl_dir=tmp_path,
+        suffix="entered Z-space.",
+    )
+
+    assert calls == [
+        ("fast api", "first bipolar prompt"),
+        ("fast api", "second bipolar prompt"),
+        ("deep/api", "first bipolar prompt"),
+        ("deep/api", "second bipolar prompt"),
+    ]
+    assert result["kind"] == "spiraltorch.api_llm_prompt_suite_matrix"
+    assert result["count"] == 2
+    assert result["prompt_count"] == 2
+    assert result["labels"] == ["fast api", "deep/api"]
+    assert set(result["suites"]) == {"fast api", "deep/api"}
+    assert result["suites"]["fast api"]["summary"]["models"] == {"fast-model": 2}
+    assert result["suites"]["deep/api"]["summary"]["models"] == {"deep-model": 2}
+    assert set(result["trace_paths"]) == {"fast api", "deep/api"}
+    assert result["trace_paths"]["fast api"].endswith("00-fast-api.jsonl")
+    assert result["trace_paths"]["deep/api"].endswith("01-deep-api.jsonl")
+
+    comparison = result["comparison"]
+    assert comparison["kind"] == "spiraltorch.api_llm_trace_comparison"
+    assert comparison["count"] == 2
+    assert {row["label"] for row in comparison["runs"]} == {"fast api", "deep/api"}
+    assert comparison["winners"]["lowest_total_tokens"] == "fast api"
 
 
 def test_compare_api_llm_trace_runs_ranks_compact_artifacts(tmp_path) -> None:

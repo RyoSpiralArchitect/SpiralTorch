@@ -129,6 +129,21 @@ suite = st.run_api_llm_prompt_suite(
 print(suite["summary"]["count"])
 ```
 
+To compare several provider routes on the same prompts, pass a label-to-callable
+mapping and a JSONL output directory:
+
+```python
+matrix = st.run_api_llm_prompt_suite_matrix(
+    ["route as bipolar geometry", "name one trace signal"],
+    {"demo-a": api, "demo-b": api},
+    z_state=[0.12, -0.04, 0.33, -0.11],
+    providers={"demo-a": "openai", "demo-b": "anthropic"},
+    create_session=False,
+    jsonl_dir="api_llm_matrix",
+)
+print(matrix["comparison"]["winners"]["best_score"])
+```
+
 If the optional `openai` package is installed, the same runtime can call the
 Responses API directly.  The SDK reads `OPENAI_API_KEY` from the environment;
 SpiralTorch only records the model output, usage, latency, and Z-space trace.
