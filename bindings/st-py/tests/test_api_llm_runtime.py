@@ -632,6 +632,7 @@ def test_run_api_llm_prompt_suite_matrix_compares_providers(tmp_path) -> None:
             "fast api": {"suffix": "entered fast Z-space."},
             "deep/api": {"suffix": "entered deep Z-space."},
         },
+        near_best_tolerance=0.05,
         suffix="entered shared Z-space.",
     )
 
@@ -655,6 +656,7 @@ def test_run_api_llm_prompt_suite_matrix_compares_providers(tmp_path) -> None:
     comparison = result["comparison"]
     assert comparison["kind"] == "spiraltorch.api_llm_trace_comparison"
     assert comparison["count"] == 2
+    assert comparison["near_best_tolerance"] == 0.05
     assert {row["label"] for row in comparison["runs"]} == {"fast api", "deep/api"}
     assert comparison["winners"]["lowest_total_tokens"] == "fast api"
 
@@ -765,9 +767,17 @@ def test_compare_api_llm_trace_runs_exposes_route_tradeoffs(tmp_path) -> None:
     assert comparison["winners"]["highest_efficiency"] == "compact"
     assert comparison["winners"]["highest_quality"] in {"compact", "expanded"}
     assert comparison["winners"]["highest_text_quality"] in {"compact", "expanded"}
+    assert comparison["selection_profiles"]["balanced"]["label"] in {
+        "compact",
+        "expanded",
+    }
+    assert comparison["selection_profiles"]["efficiency"]["label"] == "compact"
+    assert comparison["selection_profiles"]["latency"]["label"] == "compact"
+    assert 0.0 <= comparison["selection_profiles"]["quality"]["score"] <= 1.0
     assert rows["compact"]["latency_cost"] < rows["expanded"]["latency_cost"]
     assert rows["compact"]["token_cost"] < rows["expanded"]["token_cost"]
     assert rows["compact"]["health_penalty"] == 0.0
+    assert "grounded" in rows["expanded"]["selection_scores"]
     assert rows["compact"]["prompt_coverage_mean"] > 0.0
     assert rows["compact"]["text_quality_score"] > 0.0
     assert 0.0 <= rows["expanded"]["quality_score"] <= 1.0
@@ -820,6 +830,7 @@ def test_compare_api_llm_trace_runs_flags_prompt_text_quality(tmp_path) -> None:
     rows = {row["label"]: row for row in comparison["runs"]}
 
     assert comparison["winners"]["highest_text_quality"] == "aligned"
+    assert comparison["selection_profiles"]["grounded"]["label"] == "aligned"
     assert rows["aligned"]["prompt_coverage_mean"] > rows["off-topic"]["prompt_coverage_mean"]
     assert rows["aligned"]["text_quality_score"] > rows["off-topic"]["text_quality_score"]
     assert rows["off-topic"]["repetition_rate_mean"] > rows["aligned"]["repetition_rate_mean"]

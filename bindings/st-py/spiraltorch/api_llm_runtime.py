@@ -1230,6 +1230,49 @@ def _efficiency_score(row: Mapping[str, Any]) -> float:
     )
 
 
+def _selection_profile_score(row: Mapping[str, Any], profile: str) -> float:
+    quality = _quality_score(row)
+    text_quality = _bounded_unit(row.get("text_quality_score"))
+    completion = _bounded_unit(row.get("completion_rate"))
+    runtime_ready = _bounded_unit(row.get("runtime_ready_rate"))
+    latency_reward = 1.0 - _latency_cost(row)
+    token_reward = 1.0 - _token_cost(row)
+    health_penalty = _health_penalty(row)
+    if profile == "quality":
+        score = (
+            0.65 * quality
+            + 0.20 * text_quality
+            + 0.10 * completion
+            + 0.05 * runtime_ready
+        )
+    elif profile == "grounded":
+        score = (
+            0.55 * text_quality
+            + 0.25 * quality
+            + 0.15 * completion
+            + 0.05 * runtime_ready
+        )
+    elif profile == "efficiency":
+        score = (
+            0.40 * quality
+            + 0.20 * text_quality
+            + 0.20 * latency_reward
+            + 0.15 * token_reward
+            + 0.05 * runtime_ready
+        )
+    elif profile == "latency":
+        score = (
+            0.35 * latency_reward
+            + 0.25 * quality
+            + 0.20 * text_quality
+            + 0.15 * completion
+            + 0.05 * runtime_ready
+        )
+    else:
+        score = _route_score(row)
+    return max(0.0, min(1.0, score - health_penalty))
+
+
 def _comparison_row(label: str, path: Path, summary: Mapping[str, Any]) -> dict[str, Any]:
     row: dict[str, Any] = {
         "label": label,
@@ -1288,6 +1331,13 @@ def _comparison_row(label: str, path: Path, summary: Mapping[str, Any]) -> dict[
     row["health_penalty"] = _health_penalty(row)
     row["efficiency_score"] = _efficiency_score(row)
     row["route_score"] = _route_score(row)
+    row["selection_scores"] = {
+        "balanced": _selection_profile_score(row, "balanced"),
+        "quality": _selection_profile_score(row, "quality"),
+        "grounded": _selection_profile_score(row, "grounded"),
+        "efficiency": _selection_profile_score(row, "efficiency"),
+        "latency": _selection_profile_score(row, "latency"),
+    }
     return row
 
 
@@ -1354,6 +1404,46 @@ def _near_best_routes(
     return near
 
 
+def _selection_profiles(rows: Sequence[Mapping[str, Any]]) -> dict[str, dict[str, Any]]:
+    profiles: dict[str, dict[str, Any]] = {}
+    for profile in ("balanced", "quality", "grounded", "efficiency", "latency"):
+        candidates: list[tuple[float, Mapping[str, Any]]] = []
+        for row in rows:
+            if int(row.get("count") or 0) <= 0:
+                continue
+            selection_scores = row.get("selection_scores")
+            score = (
+                _finite_float(selection_scores.get(profile))
+                if isinstance(selection_scores, Mapping)
+                else None
+            )
+            if score is not None:
+                candidates.append((score, row))
+        if not candidates:
+            profiles[profile] = {"label": None, "score": 0.0}
+            continue
+        score, row = max(
+            candidates,
+            key=lambda item: (
+                item[0],
+                _finite_float(item[1].get("route_score")) or 0.0,
+                str(item[1].get("label")),
+            ),
+        )
+        profiles[profile] = {
+            "label": row.get("label"),
+            "score": score,
+            "route_score": _finite_float(row.get("route_score")) or 0.0,
+            "quality_score": _finite_float(row.get("quality_score")) or 0.0,
+            "text_quality_score": _finite_float(row.get("text_quality_score")) or 0.0,
+            "efficiency_score": _finite_float(row.get("efficiency_score")) or 0.0,
+            "latency_ms_mean": _finite_float(row.get("latency_ms_mean")) or 0.0,
+            "total_tokens": _finite_float(row.get("total_tokens")) or 0.0,
+            "completion_rate": _finite_float(row.get("completion_rate")) or 0.0,
+        }
+    return profiles
+
+
 def compare_api_llm_trace_runs(
     traces: Mapping[str, str | Path] | Sequence[str | Path] | str | Path,
     *,
@@ -1394,6 +1484,7 @@ def compare_api_llm_trace_runs(
     best = winners.get("best_score")
     near_best_tolerance_value = max(0.0, _finite_float(near_best_tolerance) or 0.0)
     near_best = _near_best_routes(rows, tolerance=near_best_tolerance_value)
+    selection_profiles = _selection_profiles(rows)
     recommendations: list[str] = []
     if best:
         recommendations.append(f"prefer {best} for the highest aggregate API LLM route score")
@@ -1412,6 +1503,9 @@ def compare_api_llm_trace_runs(
         )
     if winners.get("lowest_refusal") and winners["lowest_refusal"] != best:
         recommendations.append(f"inspect {winners['lowest_refusal']} for fewer refusals")
+    grounded_label = selection_profiles.get("grounded", {}).get("label")
+    if grounded_label and grounded_label != best:
+        recommendations.append(f"use {grounded_label} for grounded prompt-following routes")
     return {
         "kind": "spiraltorch.api_llm_trace_comparison",
         "event_type": event_type,
@@ -1419,6 +1513,7 @@ def compare_api_llm_trace_runs(
         "runs": rows,
         "near_best_tolerance": near_best_tolerance_value,
         "near_best": near_best,
+        "selection_profiles": selection_profiles,
         "winners": winners,
         "recommendations": recommendations,
     }
@@ -1860,6 +1955,7 @@ def run_api_llm_prompt_suite_matrix(
     strategy: str = "mean",
     jsonl_dir: str | Path | None = None,
     request_kwargs: Mapping[str, Mapping[str, Any]] | None = None,
+    near_best_tolerance: float = 0.02,
     clear: bool = True,
     **kwargs: Any,
 ) -> dict[str, Any]:
@@ -1912,7 +2008,11 @@ def run_api_llm_prompt_suite_matrix(
         if isinstance(path, str):
             trace_paths[label_value] = path
 
-    comparison = compare_api_llm_trace_runs(trace_paths) if trace_paths else None
+    comparison = (
+        compare_api_llm_trace_runs(trace_paths, near_best_tolerance=near_best_tolerance)
+        if trace_paths
+        else None
+    )
     return {
         "kind": "spiraltorch.api_llm_prompt_suite_matrix",
         "count": len(suites),

@@ -201,6 +201,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--anthropic-efforts", default="low,high")
     parser.add_argument("--anthropic-max-tokens", type=int, default=768)
+    parser.add_argument("--near-best-tolerance", type=float, default=0.02)
     return parser.parse_args()
 
 
@@ -231,12 +232,24 @@ def main() -> None:
         create_session=args.create_session,
         jsonl_dir=out_dir / "traces",
         request_kwargs=request_kwargs,
+        near_best_tolerance=args.near_best_tolerance,
     )
+    route_settings = {
+        label: {
+            "provider": providers.get(label),
+            "model": models.get(label),
+            "request_kwargs": request_kwargs.get(label, {}),
+        }
+        for label in invokes
+    }
     report = {
         "kind": "spiraltorch.api_llm_live_provider_matrix",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "prompt_count": len(prompts),
         "route_count": len(invokes),
+        "z_state": args.z_state,
+        "near_best_tolerance": args.near_best_tolerance,
+        "route_settings": route_settings,
         "skipped": skipped,
         "client_errors": errors,
         "trace_paths": matrix["trace_paths"],
@@ -254,6 +267,10 @@ def main() -> None:
                 "skipped": skipped,
                 "client_error_count": len(errors),
                 "winners": (matrix["comparison"] or {}).get("winners"),
+                "selection_profiles": (matrix["comparison"] or {}).get(
+                    "selection_profiles"
+                ),
+                "near_best": (matrix["comparison"] or {}).get("near_best"),
             },
             indent=2,
             sort_keys=True,
