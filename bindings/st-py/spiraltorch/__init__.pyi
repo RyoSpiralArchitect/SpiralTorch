@@ -2450,6 +2450,34 @@ def format_api_llm_context_prompt(
     precision: int = ...,
 ) -> str: ...
 
+def topos_runtime_request(
+    topos: Any | None = ...,
+    *,
+    base_temperature: float = ...,
+    base_top_p: float = ...,
+    min_temperature: float = ...,
+    max_temperature: float = ...,
+    min_top_p: float = ...,
+    max_top_p: float = ...,
+    include_temperature: bool = ...,
+    include_top_p: bool = ...,
+    include_penalties: bool = ...,
+    base_frequency_penalty: float = ...,
+    base_presence_penalty: float = ...,
+    **signal_options: Any,
+) -> Dict[str, float]: ...
+
+def topos_runtime_adapter(
+    topos: Any | None = ...,
+    *,
+    bundle_weight: float = ...,
+    origin: str | None = ...,
+    telemetry_prefix: str = ...,
+    gradient_dim: int = ...,
+    request_options: Mapping[str, Any] | None = ...,
+    **signal_options: Any,
+) -> Dict[str, Any]: ...
+
 
 def make_anthropic_messages_invoke(
     *,
@@ -7783,6 +7811,8 @@ __all__ = [
     "run_api_llm_prompt_suite",
     "run_api_llm_prompt_suite_matrix",
     "summarize_api_llm_trace_events",
+    "topos_runtime_adapter",
+    "topos_runtime_request",
     "write_api_llm_trace_jsonl",
     "audit_wasm_report",
     "audit_wasm_report_context",

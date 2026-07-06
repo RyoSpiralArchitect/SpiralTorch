@@ -691,6 +691,8 @@ from .api_llm_runtime import (
     run_api_llm_prompt_suite,
     run_api_llm_prompt_suite_matrix,
     summarize_api_llm_trace_events,
+    topos_runtime_adapter,
+    topos_runtime_request,
     write_api_llm_trace_jsonl,
 )
 
@@ -915,7 +917,9 @@ _EXTRAS = [
     "make_anthropic_messages_invoke",
     "make_openai_chat_invoke","make_openai_responses_invoke",
     "run_api_llm_prompt_suite","run_api_llm_prompt_suite_matrix",
-    "summarize_api_llm_trace_events","write_api_llm_trace_jsonl",
+    "summarize_api_llm_trace_events",
+    "topos_runtime_adapter","topos_runtime_request",
+    "write_api_llm_trace_jsonl",
     "trainer_events_to_atlas_route","trainer_step_event_to_atlas_frame",
     "serve_zspace_trace","ZSpaceTraceLiveServer",
 ]

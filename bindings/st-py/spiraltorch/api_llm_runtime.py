@@ -22,6 +22,8 @@ from typing import Any
 from .zspace_inference import (
     ZSpaceInferencePipeline,
     ZSpacePartialBundle,
+    topos_control_partial,
+    topos_control_signal,
 )
 
 __all__ = [
@@ -43,6 +45,8 @@ __all__ = [
     "run_api_llm_prompt_suite",
     "run_api_llm_prompt_suite_matrix",
     "summarize_api_llm_trace_events",
+    "topos_runtime_adapter",
+    "topos_runtime_request",
     "write_api_llm_trace_jsonl",
 ]
 
@@ -142,6 +146,103 @@ def _finite_float(value: Any) -> float | None:
     if numeric is None:
         return None
     return numeric if math.isfinite(numeric) else None
+
+
+def _clamp_float(value: Any, lower: float, upper: float, *, default: float) -> float:
+    numeric = _finite_float(value)
+    if numeric is None:
+        numeric = float(default)
+    return max(float(lower), min(float(upper), float(numeric)))
+
+
+def topos_runtime_request(
+    topos: Any | None = None,
+    *,
+    base_temperature: float = 1.0,
+    base_top_p: float = 1.0,
+    min_temperature: float = 0.0,
+    max_temperature: float = 2.0,
+    min_top_p: float = 0.05,
+    max_top_p: float = 1.0,
+    include_temperature: bool = True,
+    include_top_p: bool = True,
+    include_penalties: bool = False,
+    base_frequency_penalty: float = 0.0,
+    base_presence_penalty: float = 0.0,
+    **signal_options: Any,
+) -> dict[str, float]:
+    """Map topological runtime hints into hosted-LLM request overrides."""
+
+    signal = topos_control_signal(topos, **signal_options)
+    request: dict[str, float] = {}
+    temperature_scale = float(signal.get("temperature_scale", 1.0))
+    sampling_focus = float(signal.get("sampling_focus", 0.0))
+    exploration_hint = float(signal.get("exploration_hint", 0.0))
+    step_damping = float(signal.get("step_damping", 0.0))
+
+    if include_temperature:
+        request["temperature"] = _clamp_float(
+            float(base_temperature) * temperature_scale,
+            min_temperature,
+            max_temperature,
+            default=base_temperature,
+        )
+    if include_top_p:
+        top_p_scale = 1.0 - 0.2 * sampling_focus + 0.1 * exploration_hint
+        request["top_p"] = _clamp_float(
+            float(base_top_p) * top_p_scale,
+            min_top_p,
+            max_top_p,
+            default=base_top_p,
+        )
+    if include_penalties:
+        request["frequency_penalty"] = _clamp_float(
+            float(base_frequency_penalty) + 0.35 * sampling_focus + 0.2 * step_damping,
+            -2.0,
+            2.0,
+            default=base_frequency_penalty,
+        )
+        request["presence_penalty"] = _clamp_float(
+            float(base_presence_penalty) + 0.4 * exploration_hint - 0.2 * sampling_focus,
+            -2.0,
+            2.0,
+            default=base_presence_penalty,
+        )
+    return request
+
+
+def topos_runtime_adapter(
+    topos: Any | None = None,
+    *,
+    bundle_weight: float = 1.0,
+    origin: str | None = "topos:runtime",
+    telemetry_prefix: str = "topos",
+    gradient_dim: int = 6,
+    request_options: Mapping[str, Any] | None = None,
+    **signal_options: Any,
+) -> dict[str, Any]:
+    """Build a serializable topological adapter for API-model inference."""
+
+    signal = topos_control_signal(topos, **signal_options)
+    partial = topos_control_partial(
+        signal,
+        bundle_weight=bundle_weight,
+        origin=origin,
+        telemetry_prefix=telemetry_prefix,
+        gradient_dim=gradient_dim,
+    )
+    request = topos_runtime_request(signal, **dict(request_options or {}))
+    return {
+        "kind": "spiraltorch.topos_runtime_adapter",
+        "signal": signal,
+        "request": request,
+        "context_partial": {
+            "origin": partial.origin,
+            "weight": float(partial.weight),
+            "metrics": partial.resolved(),
+            "telemetry": dict(partial.telemetry_payload() or {}),
+        },
+    }
 
 
 def _content_text(content: Any) -> str:
