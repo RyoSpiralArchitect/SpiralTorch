@@ -123,6 +123,8 @@ def _canvas_report(last_loss: float = 0.05) -> dict[str, object]:
 
 
 def test_wasm_report_helpers_exported_from_top_level() -> None:
+    assert "build_wasm_report_context" in st.__all__
+    assert "collect_wasm_report_paths" in st.__all__
     assert "load_wasm_report" in st.__all__
     assert "summarize_wasm_report" in st.__all__
     assert "compare_wasm_reports" in st.__all__
@@ -175,3 +177,43 @@ def test_compare_wasm_reports_selects_best_loss() -> None:
     assert comparison["families"] == {"mellin": 2}
     assert comparison["best_loss"]["label"] == "better"
     assert comparison["best_loss"]["loss"] == pytest.approx(0.05)
+
+
+def test_collect_and_build_wasm_report_context_selects_best_runs(tmp_path) -> None:
+    runs = tmp_path / "runs"
+    nested = runs / "nested"
+    runs.mkdir()
+    nested.mkdir()
+    slow = runs / "slow.json"
+    best = runs / "best.json"
+    middle = nested / "middle.json"
+    slow.write_text(json.dumps(_canvas_report(last_loss=0.2)), encoding="utf-8")
+    best.write_text(json.dumps(_canvas_report(last_loss=0.01)), encoding="utf-8")
+    middle.write_text(json.dumps(_canvas_report(last_loss=0.05)), encoding="utf-8")
+
+    paths = st.collect_wasm_report_paths(
+        [slow, slow],
+        globs=[str(best)],
+        dirs=[runs],
+        recursive=True,
+    )
+
+    assert set(paths) == {str(slow), str(best), str(middle)}
+
+    context, metadata = st.build_wasm_report_context(
+        [slow, slow],
+        report_globs=[str(best)],
+        report_dirs=[runs],
+        recursive=True,
+        max_reports=2,
+        gradient_dim=5,
+    )
+
+    selected = {row["artifact_path"] for row in metadata["reports"]}
+    assert metadata["candidate_count"] == 3
+    assert metadata["report_count"] == 2
+    assert selected == {str(best), str(middle)}
+    assert metadata["comparison"]["best_loss"]["label"] == "best"
+    assert metadata["comparison"]["best_loss"]["loss"] == pytest.approx(0.01)
+    assert len(context) == 2
+    assert all(len(partial.resolved()["gradient"]) == 5 for partial in context)
