@@ -114,6 +114,34 @@ def test_named_topos_hints_are_exported_for_learning_and_inference() -> None:
     assert len(runtime_profile["vector"]) == 6
 
 
+def test_topos_runtime_route_names_profile_for_learning_and_inference() -> None:
+    route = st.topos_runtime_route(
+        {
+            "curvature": -0.9,
+            "porosity": 0.25,
+            "max_depth": 10,
+            "max_volume": 100,
+        },
+        observed_depth=4,
+        visited_volume=25,
+        base_temperature=0.8,
+    )
+
+    assert route["kind"] == "spiraltorch.topos_runtime_route"
+    assert route["mode"] == "contextual"
+    assert route["mode_id"] == 3
+    assert route["score"] == pytest.approx(0.6956782798030483)
+    assert route["score_key"] == "context"
+    assert route["inference_action"] == "raise_context_weight"
+    assert route["scores"]["context"] == pytest.approx(route["score"])
+    assert route["scores"]["training"] > route["scores"]["guard"]
+    assert route["runtime_profile"]["inference_context_weight"] == pytest.approx(0.9225)
+
+    profile_route = st.topos_runtime_route(route["runtime_profile"])
+    assert profile_route["mode"] == route["mode"]
+    assert profile_route["score"] == pytest.approx(route["score"])
+
+
 def test_topos_control_partial_feeds_zspace_inference() -> None:
     partial = st.topos_control_partial(
         {
@@ -152,6 +180,7 @@ def test_topos_control_partial_is_exported_from_top_level() -> None:
     assert "topos_inference_hints" in st.__all__
     assert "topos_inference_plan" in st.__all__
     assert "topos_runtime_profile" in st.__all__
+    assert "topos_runtime_route" in st.__all__
     assert "topos_control_partial" in st.__all__
 
 
