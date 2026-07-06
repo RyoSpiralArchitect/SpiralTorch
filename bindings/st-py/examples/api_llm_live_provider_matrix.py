@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, Sequence
 
 import spiraltorch as st
 
@@ -72,6 +72,80 @@ def _prompts(*, prompt_limit: int, repeat: int) -> list[str]:
         for prompt in selected:
             result.append(f"{prompt}\nRepeat index: {run_index + 1}.")
     return result
+
+
+def _summary_loss(summary: Mapping[str, Any]) -> float | None:
+    def _as_float(value: Any) -> float | None:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    learning = summary.get("learning")
+    if not isinstance(learning, Mapping):
+        return None
+    for key in ("final_loss", "last_loss"):
+        value = _as_float(learning.get(key))
+        if value is not None:
+            return value
+    loss_stats = learning.get("loss")
+    if isinstance(loss_stats, Mapping):
+        value = _as_float(loss_stats.get("mean"))
+        if value is not None:
+            return value
+    return None
+
+
+def _compact_wasm_summary(summary: Mapping[str, Any]) -> dict[str, Any]:
+    runtime = summary.get("runtime")
+    runtime_map = runtime if isinstance(runtime, Mapping) else {}
+    return {
+        "schema": summary.get("schema"),
+        "kind": summary.get("kind"),
+        "family": summary.get("family"),
+        "artifact_path": summary.get("artifact_path"),
+        "loss": _summary_loss(summary),
+        "webgpu_available": runtime_map.get("webgpu_available"),
+        "webgpu_device_ready": runtime_map.get("webgpu_device_ready"),
+    }
+
+
+def build_wasm_context(
+    wasm_reports: Sequence[str | os.PathLike[str]] | str | os.PathLike[str] | None,
+    *,
+    gradient_dim: int,
+    bundle_weight: float,
+    telemetry_prefix: str,
+) -> tuple[list[Any], dict[str, Any]]:
+    """Load WASM reports and convert them into reusable API LLM context."""
+
+    if wasm_reports is None:
+        paths: list[str] = []
+    elif isinstance(wasm_reports, (str, os.PathLike)):
+        paths = [str(wasm_reports)]
+    else:
+        paths = [str(path) for path in wasm_reports if str(path)]
+    metadata: dict[str, Any] = {
+        "report_count": len(paths),
+        "gradient_dim": int(gradient_dim),
+        "bundle_weight": float(bundle_weight),
+        "telemetry_prefix": telemetry_prefix,
+        "reports": [],
+        "context_origins": [],
+    }
+    if not paths:
+        return [], metadata
+
+    summaries = [st.summarize_wasm_report(path) for path in paths]
+    context_partials = st.api_llm_wasm_context_partials(
+        paths,
+        gradient_dim=gradient_dim,
+        bundle_weight=bundle_weight,
+        telemetry_prefix=telemetry_prefix,
+    )
+    metadata["reports"] = [_compact_wasm_summary(summary) for summary in summaries]
+    metadata["context_origins"] = [partial.origin for partial in context_partials]
+    return context_partials, metadata
 
 
 def _client_error_response(
@@ -202,6 +276,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--anthropic-efforts", default="low,high")
     parser.add_argument("--anthropic-max-tokens", type=int, default=768)
     parser.add_argument("--near-best-tolerance", type=float, default=0.02)
+    parser.add_argument(
+        "--wasm-report",
+        action="append",
+        default=[],
+        help=(
+            "Path to a browser-exported WASM report JSON. Repeat to blend "
+            "multiple browser learning signals into every provider route."
+        ),
+    )
+    parser.add_argument("--wasm-gradient-dim", type=int, default=8)
+    parser.add_argument("--wasm-bundle-weight", type=float, default=1.0)
+    parser.add_argument("--wasm-telemetry-prefix", default="wasm")
     return parser.parse_args()
 
 
@@ -222,6 +308,12 @@ def main() -> None:
         raise SystemExit("No live routes are available; set OPENAI_API_KEY or ANTHROPIC_API_KEY.")
 
     prompts = _prompts(prompt_limit=args.prompt_limit, repeat=args.repeat)
+    context_partials, wasm_context = build_wasm_context(
+        args.wasm_report,
+        gradient_dim=args.wasm_gradient_dim,
+        bundle_weight=args.wasm_bundle_weight,
+        telemetry_prefix=args.wasm_telemetry_prefix,
+    )
     matrix = st.run_api_llm_prompt_suite_matrix(
         prompts,
         invokes,
@@ -233,6 +325,7 @@ def main() -> None:
         jsonl_dir=out_dir / "traces",
         request_kwargs=request_kwargs,
         near_best_tolerance=args.near_best_tolerance,
+        context_partials=context_partials,
     )
     route_settings = {
         label: {
@@ -250,6 +343,7 @@ def main() -> None:
         "z_state": args.z_state,
         "near_best_tolerance": args.near_best_tolerance,
         "route_settings": route_settings,
+        "wasm_context": wasm_context,
         "skipped": skipped,
         "client_errors": errors,
         "trace_paths": matrix["trace_paths"],
@@ -266,6 +360,8 @@ def main() -> None:
                 "routes": matrix["labels"],
                 "skipped": skipped,
                 "client_error_count": len(errors),
+                "wasm_report_count": wasm_context["report_count"],
+                "wasm_context_origins": wasm_context["context_origins"],
                 "winners": (matrix["comparison"] or {}).get("winners"),
                 "selection_profiles": (matrix["comparison"] or {}).get(
                     "selection_profiles"

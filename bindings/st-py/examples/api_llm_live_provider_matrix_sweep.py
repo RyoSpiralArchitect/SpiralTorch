@@ -90,6 +90,7 @@ def _existing_report_summary(label: str, report_path: Path) -> dict[str, Any]:
         "report": str(report_path),
         "reused": True,
         "skipped": report.get("skipped", {}),
+        "wasm_context": report.get("wasm_context", {}),
         "client_error_count": client_error_count,
         "winners": comparison_map.get("winners"),
         "selection_profiles": comparison_map.get("selection_profiles"),
@@ -110,6 +111,8 @@ def _run_config(
     anthropic_efforts: list[str],
     anthropic_max_tokens: int,
     near_best_tolerance: float,
+    context_partials: list[Any],
+    wasm_context: dict[str, Any],
     resume_existing: bool,
     force: bool,
 ) -> dict[str, Any]:
@@ -142,6 +145,7 @@ def _run_config(
         jsonl_dir=run_dir / "traces",
         request_kwargs=request_kwargs,
         near_best_tolerance=near_best_tolerance,
+        context_partials=context_partials,
     )
     report = {
         "kind": "spiraltorch.api_llm_live_provider_matrix",
@@ -156,6 +160,7 @@ def _run_config(
             "anthropic_max_tokens": anthropic_max_tokens,
         },
         "route_settings": _route_settings(providers, models, request_kwargs),
+        "wasm_context": wasm_context,
         "skipped": skipped,
         "client_errors": errors,
         "trace_paths": matrix["trace_paths"],
@@ -167,6 +172,7 @@ def _run_config(
         "report": str(report_path),
         "reused": False,
         "skipped": skipped,
+        "wasm_context": wasm_context,
         "client_error_count": len(errors),
         "winners": (matrix["comparison"] or {}).get("winners"),
         "selection_profiles": (matrix["comparison"] or {}).get("selection_profiles"),
@@ -203,6 +209,18 @@ def parse_args() -> argparse.Namespace:
         default=_budget_pairs("192:768,256:1024"),
     )
     parser.add_argument("--near-best-tolerance", type=float, default=0.02)
+    parser.add_argument(
+        "--wasm-report",
+        action="append",
+        default=[],
+        help=(
+            "Path to a browser-exported WASM report JSON. Repeat to blend "
+            "multiple browser learning signals into every provider route."
+        ),
+    )
+    parser.add_argument("--wasm-gradient-dim", type=int, default=8)
+    parser.add_argument("--wasm-bundle-weight", type=float, default=1.0)
+    parser.add_argument("--wasm-telemetry-prefix", default="wasm")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument(
         "--resume-existing",
@@ -224,6 +242,12 @@ def main() -> None:
     prompts = live_matrix._prompts(prompt_limit=args.prompt_limit, repeat=args.repeat)
     anthropic_models = live_matrix._csv(args.anthropic_models)
     anthropic_efforts = live_matrix._csv(args.anthropic_efforts)
+    context_partials, wasm_context = live_matrix.build_wasm_context(
+        args.wasm_report,
+        gradient_dim=args.wasm_gradient_dim,
+        bundle_weight=args.wasm_bundle_weight,
+        telemetry_prefix=args.wasm_telemetry_prefix,
+    )
     configs = [
         {
             "label": _run_label(index, openai_tokens, anthropic_tokens),
@@ -241,6 +265,7 @@ def main() -> None:
             "anthropic_efforts": anthropic_efforts,
             "resume_existing": args.resume_existing,
             "force": args.force,
+            "wasm_context": wasm_context,
             "configs": configs,
         }
         plan_path = out_dir / "sweep-plan.json"
@@ -264,6 +289,8 @@ def main() -> None:
             anthropic_efforts=anthropic_efforts,
             anthropic_max_tokens=config["anthropic_max_tokens"],
             near_best_tolerance=args.near_best_tolerance,
+            context_partials=context_partials,
+            wasm_context=wasm_context,
             resume_existing=args.resume_existing,
             force=args.force,
         )
@@ -279,6 +306,7 @@ def main() -> None:
         "reused_count": sum(1 for row in run_summaries if row.get("reused")),
         "resume_existing": args.resume_existing,
         "force": args.force,
+        "wasm_context": wasm_context,
         "configs": configs,
         "reports": report_paths,
         "runs": run_summaries,
@@ -296,6 +324,7 @@ def main() -> None:
                 "prompt_count": len(prompts),
                 "run_count": len(run_summaries),
                 "reused_count": sweep_report["reused_count"],
+                "wasm_report_count": wasm_context["report_count"],
                 "profile_winners": comparison.get("profile_winners"),
                 "top_route": (comparison.get("routes") or [{}])[0].get("label"),
                 "recommendations": comparison.get("recommendations"),
