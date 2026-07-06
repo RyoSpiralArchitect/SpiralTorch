@@ -676,8 +676,11 @@ from .api_llm_runtime import (
     api_llm_text_from_response,
     api_llm_trace_from_response,
     api_llm_usage_from_response,
+    load_api_llm_trace_events,
     make_openai_chat_invoke,
     make_openai_responses_invoke,
+    summarize_api_llm_trace_events,
+    write_api_llm_trace_jsonl,
 )
 
 from .zspace_trace import (
@@ -824,7 +827,9 @@ _EXTRAS = [
     "ApiLLMTrace","ApiLLMZSpaceRuntime",
     "api_llm_partial_from_response","api_llm_text_from_response",
     "api_llm_trace_from_response","api_llm_usage_from_response",
+    "load_api_llm_trace_events",
     "make_openai_chat_invoke","make_openai_responses_invoke",
+    "summarize_api_llm_trace_events","write_api_llm_trace_jsonl",
     "trainer_events_to_atlas_route","trainer_step_event_to_atlas_frame",
     "serve_zspace_trace","ZSpaceTraceLiveServer",
 ]

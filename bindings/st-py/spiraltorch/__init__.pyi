@@ -2091,6 +2091,13 @@ class ApiLLMZSpaceRuntime:
         provider: str | None = ...,
         **request: Any,
     ) -> ApiLLMTrace: ...
+    def summary(self) -> Dict[str, Any]: ...
+    def write_jsonl(
+        self,
+        path: str | PathLike[str],
+        *,
+        event_type: str = ...,
+    ) -> str: ...
     def as_dict(self) -> Dict[str, Any]: ...
 
 
@@ -2127,6 +2134,28 @@ def api_llm_trace_from_response(
     device_preflight: Mapping[str, Any] | None = ...,
     gradient_dim: int = ...,
 ) -> ApiLLMTrace: ...
+
+
+def write_api_llm_trace_jsonl(
+    traces: Iterable[ApiLLMTrace | Mapping[str, Any]],
+    path: str | PathLike[str],
+    *,
+    event_type: str = ...,
+) -> str: ...
+
+
+def load_api_llm_trace_events(
+    path: str | PathLike[str],
+    *,
+    event_type: str = ...,
+) -> List[Dict[str, Any]]: ...
+
+
+def summarize_api_llm_trace_events(
+    path: str | PathLike[str],
+    *,
+    event_type: str = ...,
+) -> Dict[str, Any]: ...
 
 
 def make_openai_responses_invoke(
@@ -7050,8 +7079,11 @@ __all__ = [
     "api_llm_text_from_response",
     "api_llm_trace_from_response",
     "api_llm_usage_from_response",
+    "load_api_llm_trace_events",
     "make_openai_chat_invoke",
     "make_openai_responses_invoke",
+    "summarize_api_llm_trace_events",
+    "write_api_llm_trace_jsonl",
     "ZSpaceTrainer",
     "ZSpaceCoherenceSequencer",
     "step_many",

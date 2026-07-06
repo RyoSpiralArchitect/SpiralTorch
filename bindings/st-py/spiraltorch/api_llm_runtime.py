@@ -9,9 +9,11 @@ probability-like fields.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
+import json
 import math
+from pathlib import Path
 import sys
 import time
 from typing import Any
@@ -28,12 +30,16 @@ __all__ = [
     "api_llm_text_from_response",
     "api_llm_trace_from_response",
     "api_llm_usage_from_response",
+    "load_api_llm_trace_events",
     "make_openai_chat_invoke",
     "make_openai_responses_invoke",
+    "summarize_api_llm_trace_events",
+    "write_api_llm_trace_jsonl",
 ]
 
 
 _OPENAI_INSTALL_HINT = "pip install openai"
+_API_LLM_TRACE_SCHEMA = "spiraltorch.api_llm_trace.v1"
 
 
 def _value(source: Any, key: str, default: Any = None) -> Any:
@@ -70,6 +76,13 @@ def _as_float(value: Any) -> float | None:
     if math.isnan(numeric) or math.isinf(numeric):
         return None
     return numeric
+
+
+def _finite_float(value: Any) -> float | None:
+    numeric = _as_float(value)
+    if numeric is None:
+        return None
+    return numeric if math.isfinite(numeric) else None
 
 
 def _content_text(content: Any) -> str:
@@ -615,6 +628,217 @@ def api_llm_trace_from_response(
     )
 
 
+def _trace_payload(trace: ApiLLMTrace | Mapping[str, Any]) -> dict[str, Any]:
+    if isinstance(trace, ApiLLMTrace):
+        return trace.as_dict()
+    return dict(trace)
+
+
+def write_api_llm_trace_jsonl(
+    traces: Iterable[ApiLLMTrace | Mapping[str, Any]],
+    path: str | Path,
+    *,
+    event_type: str = "ApiLLMTrace",
+) -> str:
+    """Write API LLM Z-space traces as JSONL events."""
+
+    out_path = Path(path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with out_path.open("w", encoding="utf-8") as handle:
+        for step, trace in enumerate(traces):
+            payload = _trace_payload(trace)
+            record = {
+                "event_type": event_type,
+                "schema": _API_LLM_TRACE_SCHEMA,
+                "step": step,
+                "ts": time.time(),
+                "payload": payload,
+            }
+            handle.write(json.dumps(record, ensure_ascii=True) + "\n")
+    return str(out_path)
+
+
+def _iter_jsonl(path: Path) -> Iterable[dict[str, Any]]:
+    with path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            row = json.loads(line)
+            if isinstance(row, dict):
+                yield row
+
+
+def _normalise_trace_record(
+    record: Mapping[str, Any],
+    *,
+    event_type: str,
+) -> dict[str, Any] | None:
+    payload = record.get("payload")
+    record_type = record.get("event_type") or record.get("type") or record.get("kind")
+    if isinstance(payload, Mapping) and (record_type in {event_type, None}):
+        event = dict(payload)
+        for key in ("step", "ts", "schema"):
+            if key in record and key not in event:
+                event[key] = record[key]
+        return event
+    if {"text", "metrics", "usage"}.issubset(record.keys()):
+        return dict(record)
+    return None
+
+
+def load_api_llm_trace_events(
+    path: str | Path,
+    *,
+    event_type: str = "ApiLLMTrace",
+) -> list[dict[str, Any]]:
+    """Load API LLM Z-space trace JSONL rows written by SpiralTorch."""
+
+    events: list[dict[str, Any]] = []
+    for record in _iter_jsonl(Path(path)):
+        event = _normalise_trace_record(record, event_type=event_type)
+        if event is not None:
+            events.append(event)
+    return events
+
+
+def _count_labels(values: Iterable[Any]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for value in values:
+        if value is None or value == "":
+            continue
+        label = str(value)
+        counts[label] = counts.get(label, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def _stats(values: Iterable[Any]) -> dict[str, float]:
+    numeric = [value for value in (_finite_float(item) for item in values) if value is not None]
+    if not numeric:
+        return {"count": 0.0, "min": 0.0, "max": 0.0, "mean": 0.0, "last": 0.0}
+    return {
+        "count": float(len(numeric)),
+        "min": min(numeric),
+        "max": max(numeric),
+        "mean": sum(numeric) / len(numeric),
+        "last": numeric[-1],
+    }
+
+
+def _mapping_at(source: Mapping[str, Any], key: str) -> Mapping[str, Any]:
+    value = source.get(key)
+    return value if isinstance(value, Mapping) else {}
+
+
+def _trace_confidence(event: Mapping[str, Any]) -> float | None:
+    inference = _mapping_at(event, "inference")
+    return _finite_float(inference.get("confidence"))
+
+
+def _trace_runtime_status(event: Mapping[str, Any]) -> str | None:
+    preflight = _mapping_at(event, "device_preflight")
+    for key in (
+        "runtime_status",
+        "effective_backend_runtime_status",
+        "requested_backend_runtime_status",
+    ):
+        value = preflight.get(key)
+        if value:
+            return str(value)
+    return None
+
+
+def _trace_runtime_ready(event: Mapping[str, Any]) -> bool | None:
+    preflight = _mapping_at(event, "device_preflight")
+    value = preflight.get("runtime_ready")
+    if isinstance(value, bool):
+        return value
+    value = preflight.get("effective_backend_runtime_ready")
+    return value if isinstance(value, bool) else None
+
+
+def _preview(value: Any, *, limit: int = 160) -> str | None:
+    if value is None:
+        return None
+    text = str(value)
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 1)] + "…"
+
+
+def _trace_step(event: Mapping[str, Any]) -> int | None:
+    step = event.get("step")
+    if isinstance(step, bool):
+        return None
+    if isinstance(step, (int, float)):
+        return int(step)
+    return None
+
+
+def summarize_api_llm_trace_events(
+    path: str | Path,
+    *,
+    event_type: str = "ApiLLMTrace",
+) -> dict[str, Any]:
+    """Summarize API LLM Z-space trace JSONL rows for experiment comparison."""
+
+    events = load_api_llm_trace_events(path, event_type=event_type)
+    usage_rows = [_mapping_at(event, "usage") for event in events]
+    metric_rows = [_mapping_at(event, "metrics") for event in events]
+    confidence_values = [_trace_confidence(event) for event in events]
+    runtime_ready_values = [_trace_runtime_ready(event) for event in events]
+    ready_observed = [value for value in runtime_ready_values if value is not None]
+    ready_count = sum(1 for value in ready_observed if value)
+    text_lengths = [len(str(event.get("text") or "")) for event in events]
+
+    metric_keys = sorted(
+        {
+            key
+            for row in metric_rows
+            for key, value in row.items()
+            if key != "gradient" and _finite_float(value) is not None
+        }
+    )
+    metrics = {
+        key: _stats(row.get(key) for row in metric_rows)
+        for key in metric_keys
+    }
+    usage = {
+        "prompt_tokens": _stats(row.get("prompt_tokens") for row in usage_rows),
+        "completion_tokens": _stats(row.get("completion_tokens") for row in usage_rows),
+        "total_tokens": _stats(row.get("total_tokens") for row in usage_rows),
+    }
+    total_tokens = sum(
+        value
+        for value in (_finite_float(row.get("total_tokens")) for row in usage_rows)
+        if value is not None
+    )
+    latency = _stats(event.get("latency_ms") for event in events)
+    first = events[0] if events else {}
+    last = events[-1] if events else {}
+    return {
+        "event_type": event_type,
+        "schema": _API_LLM_TRACE_SCHEMA,
+        "count": len(events),
+        "first_step": _trace_step(first),
+        "last_step": _trace_step(last),
+        "first_text_preview": _preview(first.get("text")),
+        "last_text_preview": _preview(last.get("text")),
+        "providers": _count_labels(event.get("provider") for event in events),
+        "models": _count_labels(event.get("model") for event in events),
+        "finish_reasons": _count_labels(event.get("finish_reason") for event in events),
+        "runtime_statuses": _count_labels(_trace_runtime_status(event) for event in events),
+        "runtime_ready_count": ready_count,
+        "runtime_ready_rate": ready_count / len(ready_observed) if ready_observed else 0.0,
+        "usage": usage,
+        "total_tokens": total_tokens,
+        "latency_ms": latency,
+        "text_chars": _stats(text_lengths),
+        "confidence": _stats(confidence_values),
+        "metrics": metrics,
+    }
+
+
 def _session_from_spiraltorch(
     backend: str | None,
     session_factory: Callable[..., Any] | None,
@@ -801,6 +1025,61 @@ class ApiLLMZSpaceRuntime:
             model=model_value,
         )
 
+    def summary(self) -> dict[str, Any]:
+        """Summarize traces already recorded by this runtime instance."""
+
+        trace_dicts = [trace.as_dict() for trace in self.traces]
+        usage_rows = [_mapping_at(trace, "usage") for trace in trace_dicts]
+        metric_rows = [_mapping_at(trace, "metrics") for trace in trace_dicts]
+        ready_values = [_trace_runtime_ready(trace) for trace in trace_dicts]
+        ready_observed = [value for value in ready_values if value is not None]
+        ready_count = sum(1 for value in ready_observed if value)
+        metric_keys = sorted(
+            {
+                key
+                for row in metric_rows
+                for key, value in row.items()
+                if key != "gradient" and _finite_float(value) is not None
+            }
+        )
+        return {
+            "count": len(trace_dicts),
+            "providers": _count_labels(trace.get("provider") for trace in trace_dicts),
+            "models": _count_labels(trace.get("model") for trace in trace_dicts),
+            "runtime_statuses": _count_labels(
+                _trace_runtime_status(trace) for trace in trace_dicts
+            ),
+            "runtime_ready_count": ready_count,
+            "runtime_ready_rate": ready_count / len(ready_observed) if ready_observed else 0.0,
+            "usage": {
+                "prompt_tokens": _stats(row.get("prompt_tokens") for row in usage_rows),
+                "completion_tokens": _stats(
+                    row.get("completion_tokens") for row in usage_rows
+                ),
+                "total_tokens": _stats(row.get("total_tokens") for row in usage_rows),
+            },
+            "latency_ms": _stats(trace.get("latency_ms") for trace in trace_dicts),
+            "confidence": _stats(_trace_confidence(trace) for trace in trace_dicts),
+            "metrics": {
+                key: _stats(row.get(key) for row in metric_rows)
+                for key in metric_keys
+            },
+        }
+
+    def write_jsonl(
+        self,
+        path: str | Path,
+        *,
+        event_type: str = "ApiLLMTrace",
+    ) -> str:
+        """Persist recorded traces as JSONL events."""
+
+        return write_api_llm_trace_jsonl(
+            self.traces,
+            path,
+            event_type=event_type,
+        )
+
     def as_dict(self) -> dict[str, Any]:
         return {
             "provider": self.provider,
@@ -808,5 +1087,6 @@ class ApiLLMZSpaceRuntime:
             "requested_backend": self.requested_backend,
             "session_error": self.session_error,
             "device_preflight": self.device_preflight,
+            "summary": self.summary(),
             "traces": [trace.as_dict() for trace in self.traces],
         }

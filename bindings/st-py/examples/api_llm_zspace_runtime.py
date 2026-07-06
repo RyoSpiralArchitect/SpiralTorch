@@ -61,6 +61,7 @@ def main() -> None:
     print("text:", trace.text)
     print("metrics:", json.dumps(payload["metrics"], indent=2, sort_keys=True))
     print("confidence:", payload["inference"]["confidence"])
+    print("summary:", json.dumps(runtime.summary(), indent=2, sort_keys=True))
     print("device:", payload["device_preflight"])
 
 
