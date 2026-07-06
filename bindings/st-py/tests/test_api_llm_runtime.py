@@ -11,6 +11,7 @@ st = pytest.importorskip("spiraltorch")
 def test_api_llm_runtime_exports_from_top_level() -> None:
     assert "ApiLLMZSpaceRuntime" in st.__all__
     assert "api_llm_partial_from_response" in st.__all__
+    assert "api_llm_wasm_context_partials" in st.__all__
     assert "compare_api_llm_matrix_reports" in st.__all__
     assert "compare_api_llm_trace_runs" in st.__all__
     assert "load_api_llm_trace_events" in st.__all__
@@ -153,6 +154,32 @@ def _chat_response() -> dict[str, object]:
     }
 
 
+def _canvas_wasm_report() -> dict[str, object]:
+    return {
+        "schema": "spiraltorch.wasm.canvas_hypertrain_report.v1",
+        "kind": "canvas-hypertrain-training",
+        "runtime": {
+            "wasm": True,
+            "webgpuAvailable": True,
+            "webgpuDeviceReady": True,
+        },
+        "currentFrame": {
+            "width": 4,
+            "height": 4,
+            "relationStats": {"count": 16, "finiteCount": 16, "rms": 0.2},
+            "desire": {"balance": 0.5, "stability": 0.9, "saturation": 0.1},
+            "gradients": {"hypergradRms": 0.12, "realgradRms": 0.08},
+            "learningControl": {"operatorMix": 0.4, "operatorGain": 0.7},
+        },
+        "metrics": {
+            "step": 2,
+            "historyLength": 2,
+            "last": {"loss": 0.05},
+            "lossStats": {"count": 2, "finiteCount": 2, "mean": 0.08, "rms": 0.09},
+        },
+    }
+
+
 def test_api_llm_text_from_chat_completion_shape() -> None:
     assert st.api_llm_text_from_response(_chat_response()) == "Z-space runtime is awake."
 
@@ -244,6 +271,32 @@ def test_api_llm_runtime_calls_callable_and_records_inference() -> None:
     assert payload["inference"]["confidence"] > 0.0
     assert payload["metrics"]["stability"] > 0.7
     assert runtime.as_dict()["traces"][0]["text"] == trace.text
+
+
+def test_api_llm_runtime_blends_wasm_context_partials_for_each_prompt() -> None:
+    context = st.api_llm_wasm_context_partials(_canvas_wasm_report(), gradient_dim=6)
+    runtime = st.ApiLLMZSpaceRuntime(
+        [0.12, -0.04, 0.33, -0.11],
+        provider="example",
+        create_session=False,
+    )
+
+    result = runtime.run_prompts(
+        ["first", "second"],
+        lambda _prompt: _chat_response(),
+        context_partials=context,
+    )
+
+    assert len(context) == 1
+    assert context[0].origin == "wasm:canvas"
+    assert result["count"] == 2
+    for trace in result["traces"]:
+        inference = trace["inference"]
+        assert inference is not None
+        telemetry = inference["telemetry"]["payload"]
+        assert telemetry["wasm.family_canvas"] == pytest.approx(1.0)
+        assert telemetry["wasm.webgpu_device_ready"] == pytest.approx(1.0)
+        assert inference["confidence"] > 0.0
 
 
 def test_make_openai_responses_invoke_uses_client_factory_lazily() -> None:
