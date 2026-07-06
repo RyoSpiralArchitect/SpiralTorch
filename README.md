@@ -170,7 +170,9 @@ SpiralTorch’s WASM bindings are now **fully runnable** in the browser: geometr
   `PYTHONPATH=bindings/st-py python3 bindings/st-py/examples/openai_api_llm_wasm_context_runtime.py --wasm-report report.json --trace-jsonl /tmp/spiraltorch-openai-wasm-trace.jsonl`
   Use `--wasm-report-dir runs --wasm-report-recursive --wasm-max-reports 3` to
   select the best browser-side learning runs before they become LLM context;
-  Python can persist that handoff with `st.write_wasm_report_context_artifact(...)`.
+  Python can audit promotion readiness with `st.audit_wasm_report(...)` /
+  `st.audit_wasm_report_context(...)`, then persist the selected handoff with
+  `st.write_wasm_report_context_artifact(...)`.
 
 ### Why SpiralTorch  
 

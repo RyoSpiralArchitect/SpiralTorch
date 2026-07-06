@@ -142,8 +142,11 @@ PY
   `collect_wasm_report_paths(...)` or `build_wasm_report_context(...)` directly,
   or pass `--wasm-report-glob`, `--wasm-report-dir`, `--wasm-report-recursive`,
   and `--wasm-max-reports` to collect repeated browser runs, compare them by
-  loss, and feed only the strongest reports into the provider matrix. Persist
-  the selected handoff for later FT/notebook/API runs with
+  loss plus audited readiness, and feed only the strongest reports into the
+  provider matrix. Use `audit_wasm_report(...)` or
+  `audit_wasm_report_context(...)` before promotion; context artifacts also
+  carry the readiness status, learning-progress score, risk flags, and audit
+  recommendations. Persist the selected handoff for later FT/notebook/API runs with
   `write_wasm_report_context_artifact(...)`, then reload its partials with
   `load_wasm_report_context_artifact(...)`.
 - Language desire controls via `st.nn.DesirePipeline`, `DesireTrainerBridge`,

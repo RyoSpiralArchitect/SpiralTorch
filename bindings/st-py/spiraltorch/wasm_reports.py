@@ -11,6 +11,8 @@ from typing import Any
 from .zspace_inference import ZSpacePartialBundle
 
 __all__ = [
+    "audit_wasm_report",
+    "audit_wasm_report_context",
     "build_wasm_report_context",
     "build_wasm_report_context_artifact",
     "compare_wasm_reports",
@@ -178,6 +180,8 @@ def _loss_trace_stats(trace: Any) -> dict[str, Any] | None:
         "max": max(values),
         "mean": sum(values) / len(values),
         "delta": last - first,
+        "absolute_improvement": first - last,
+        "relative_improvement": (first - last) / abs(first) if first != 0.0 else 0.0,
         "improved": last <= first,
     }
 
@@ -264,6 +268,7 @@ def _canvas_summary(report: Mapping[str, Any]) -> dict[str, Any]:
             "history_length": _number_at(metrics, "historyLength"),
             "truncated": bool(metrics.get("truncated")),
             "last_loss": _number_at(_mapping(metrics.get("last")), "loss"),
+            "trace": _loss_trace_stats(metrics.get("tail")),
             "loss": _stats_summary(metrics.get("lossStats")),
             "hyper_rms": _stats_summary(metrics.get("hyperRmsStats")),
             "real_rms": _stats_summary(metrics.get("realRmsStats")),
@@ -340,6 +345,196 @@ def _summary_stability(summary: Mapping[str, Any]) -> float | None:
     return 1.0 / (1.0 + max(0.0, loss))
 
 
+def _runtime_readiness(summary: Mapping[str, Any]) -> dict[str, Any]:
+    runtime = _mapping(summary.get("runtime"))
+    family = str(summary.get("family", "unknown"))
+    component_ready = [
+        bool(runtime.get("webgpu_device_ready")),
+        bool(runtime.get("webgpu_trainer_ready")),
+        bool(runtime.get("webgpu_fft_ready")),
+        bool(runtime.get("webgpu_trail_ready")),
+    ]
+    observed_components = sum(1 for ready in component_ready if ready)
+    webgpu_available = bool(runtime.get("webgpu_available"))
+    wasm_ready = bool(runtime.get("wasm"))
+
+    score = 0.0
+    if wasm_ready:
+        score += 0.35
+    if webgpu_available:
+        score += 0.20
+    if observed_components:
+        score += 0.35
+    elif family == "mellin" and webgpu_available:
+        # The Mellin demo currently reports WebGPU availability but may not open
+        # a device for the CPU/WASM training path.
+        score += 0.15
+    if not runtime.get("webgpu_init_failed"):
+        score += 0.10
+
+    if observed_components:
+        status = "webgpu_ready"
+    elif webgpu_available:
+        status = "webgpu_available"
+    elif wasm_ready:
+        status = "wasm_only"
+    else:
+        status = "missing_runtime"
+
+    return {
+        "status": status,
+        "score": _clamp01(score),
+        "wasm": wasm_ready,
+        "webgpu_available": webgpu_available,
+        "webgpu_device_ready": bool(runtime.get("webgpu_device_ready")),
+        "webgpu_component_ready_count": observed_components,
+        "webgpu_init_failed": bool(runtime.get("webgpu_init_failed")),
+    }
+
+
+def _learning_progress(summary: Mapping[str, Any]) -> dict[str, Any]:
+    learning = _mapping(summary.get("learning"))
+    trace = _mapping(learning.get("trace"))
+    loss_stats = _mapping(learning.get("loss"))
+    loss = _summary_loss(summary)
+
+    source = "missing"
+    first_loss: float | None = None
+    last_loss = loss
+    absolute_improvement: float | None = None
+    relative_improvement: float | None = None
+    improved: bool | None = None
+
+    if trace:
+        source = "trace"
+        first_loss = _as_float(trace.get("first"))
+        trace_last = _as_float(trace.get("last"))
+        if trace_last is not None:
+            last_loss = trace_last
+        absolute_improvement = _as_float(trace.get("absolute_improvement"))
+        relative_improvement = _as_float(trace.get("relative_improvement"))
+        improved_value = trace.get("improved")
+        improved = bool(improved_value) if isinstance(improved_value, bool) else None
+    elif loss_stats:
+        # Browser reports sometimes keep aggregate loss stats but not the full
+        # tail. Approximate progress from the observed max down to the selected
+        # final/last loss.
+        source = "loss_stats"
+        first_loss = _as_float(loss_stats.get("max"))
+        last_loss = loss
+        if first_loss is not None and last_loss is not None:
+            absolute_improvement = first_loss - last_loss
+            relative_improvement = (
+                absolute_improvement / abs(first_loss) if first_loss != 0.0 else 0.0
+            )
+            improved = absolute_improvement >= 0.0
+
+    progress_score = 0.5
+    if relative_improvement is not None:
+        progress_score = _clamp01(relative_improvement)
+    elif improved is not None:
+        progress_score = 1.0 if improved else 0.0
+
+    return {
+        "source": source,
+        "loss": loss,
+        "first_loss": first_loss,
+        "last_loss": last_loss,
+        "absolute_improvement": absolute_improvement,
+        "relative_improvement": relative_improvement,
+        "improved": improved,
+        "progress_score": progress_score,
+    }
+
+
+def _audit_from_summary(summary: Mapping[str, Any]) -> dict[str, Any]:
+    runtime = _runtime_readiness(summary)
+    progress = _learning_progress(summary)
+    loss = _summary_loss(summary)
+    stability = _summary_stability(summary)
+    learning = _mapping(summary.get("learning"))
+
+    loss_score = 0.5 if loss is None else 1.0 / (1.0 + max(0.0, loss))
+    stability_score = _clamp01(stability if stability is not None else 0.5)
+    readiness_score = _clamp01(
+        0.35 * float(runtime["score"])
+        + 0.25 * stability_score
+        + 0.25 * loss_score
+        + 0.15 * float(progress["progress_score"])
+    )
+
+    risk_flags: list[str] = []
+    if not runtime["wasm"]:
+        risk_flags.append("wasm_runtime_missing")
+    if not runtime["webgpu_available"]:
+        risk_flags.append("webgpu_unavailable")
+    if runtime["webgpu_init_failed"]:
+        risk_flags.append("webgpu_init_failed")
+    if (
+        runtime["webgpu_available"]
+        and runtime["webgpu_component_ready_count"] == 0
+        and summary.get("family") == "canvas"
+    ):
+        risk_flags.append("canvas_webgpu_components_not_ready")
+    if loss is None:
+        risk_flags.append("loss_not_observed")
+    if progress["improved"] is False:
+        risk_flags.append("loss_not_improved")
+    if bool(learning.get("truncated")):
+        risk_flags.append("metrics_history_truncated")
+
+    if readiness_score >= 0.78 and "loss_not_improved" not in risk_flags:
+        status = "ready"
+    elif readiness_score >= 0.58:
+        status = "usable"
+    else:
+        status = "needs_attention"
+
+    recommendations: list[str] = []
+    if not runtime["wasm"]:
+        recommendations.append("rerun the browser demo after the WASM package loads")
+    if runtime["webgpu_init_failed"]:
+        recommendations.append("inspect the browser WebGPU initialization failure")
+    elif not runtime["webgpu_available"]:
+        recommendations.append("capture the report in a browser with WebGPU available")
+    if progress["improved"] is False:
+        recommendations.append("increase training steps or reduce the learning rate")
+    if bool(learning.get("truncated")):
+        recommendations.append("download a fresh report before the metrics tail truncates")
+    if status == "ready":
+        recommendations.append("promote this report as a Z-space runtime context candidate")
+    elif status == "usable":
+        recommendations.append("compare against nearby runs before promotion")
+
+    return {
+        "status": status,
+        "readiness_score": readiness_score,
+        "runtime": runtime,
+        "learning": progress,
+        "loss_score": loss_score,
+        "stability_score": stability_score,
+        "risk_flags": risk_flags,
+        "recommendations": recommendations,
+    }
+
+
+def audit_wasm_report(
+    report: str | os.PathLike[str] | Mapping[str, Any],
+) -> dict[str, Any]:
+    """Return readiness, learning-progress, and risk diagnostics for a WASM report."""
+
+    summary = summarize_wasm_report(report)
+    audit = _audit_from_summary(summary)
+    return {
+        "kind": "spiraltorch.wasm_report_audit",
+        "schema": summary.get("schema"),
+        "report_kind": summary.get("kind"),
+        "family": summary.get("family"),
+        "artifact_path": summary.get("artifact_path"),
+        **audit,
+    }
+
+
 def compare_wasm_reports(
     reports: (
         Mapping[str, str | os.PathLike[str] | Mapping[str, Any]]
@@ -358,6 +553,7 @@ def compare_wasm_reports(
     family_counts: dict[str, int] = {}
     for label, report in items:
         summary = summarize_wasm_report(report)
+        audit = _audit_from_summary(summary)
         family = str(summary.get("family", "unknown"))
         family_counts[family] = family_counts.get(family, 0) + 1
         rows.append(
@@ -368,6 +564,10 @@ def compare_wasm_reports(
                 "family": family,
                 "loss": _summary_loss(summary),
                 "stability": _summary_stability(summary),
+                "readiness_score": audit["readiness_score"],
+                "audit_status": audit["status"],
+                "risk_flags": audit["risk_flags"],
+                "audit": audit,
                 "summary": summary,
             }
         )
@@ -382,12 +582,22 @@ def compare_wasm_reports(
         key=lambda row: float(row["stability"]),
         default=None,
     )
+    best_readiness = max(
+        rows,
+        key=lambda row: (
+            float(row.get("readiness_score") or 0.0),
+            -(float(row["loss"]) if row.get("loss") is not None else 1.0e9),
+            str(row.get("label")),
+        ),
+        default=None,
+    )
     return {
         "kind": "spiraltorch.wasm_report_comparison",
         "count": len(rows),
         "families": family_counts,
         "best_loss": None if best_loss is None else dict(best_loss),
         "best_stability": None if best_stability is None else dict(best_stability),
+        "best_readiness": None if best_readiness is None else dict(best_readiness),
         "reports": rows,
     }
 
@@ -445,6 +655,8 @@ def _compact_report_summary(
     summary: Mapping[str, Any],
 ) -> dict[str, Any]:
     runtime = _mapping(summary.get("runtime"))
+    audit = _audit_from_summary(summary)
+    learning = _mapping(audit.get("learning"))
     return {
         "label": label,
         "schema": summary.get("schema"),
@@ -453,6 +665,11 @@ def _compact_report_summary(
         "artifact_path": summary.get("artifact_path"),
         "loss": _summary_loss(summary),
         "stability": _summary_stability(summary),
+        "readiness_score": audit.get("readiness_score"),
+        "audit_status": audit.get("status"),
+        "learning_progress_score": learning.get("progress_score"),
+        "learning_relative_improvement": learning.get("relative_improvement"),
+        "risk_flags": list(_sequence(audit.get("risk_flags"))),
         "webgpu_available": runtime.get("webgpu_available"),
         "webgpu_device_ready": runtime.get("webgpu_device_ready"),
     }
@@ -467,6 +684,9 @@ def _compact_wasm_comparison(comparison: Mapping[str, Any]) -> dict[str, Any]:
             "family": row.get("family"),
             "loss": row.get("loss"),
             "stability": row.get("stability"),
+            "readiness_score": row.get("readiness_score"),
+            "audit_status": row.get("audit_status"),
+            "risk_flags": row.get("risk_flags"),
         }
 
     return {
@@ -475,6 +695,89 @@ def _compact_wasm_comparison(comparison: Mapping[str, Any]) -> dict[str, Any]:
         "families": comparison.get("families"),
         "best_loss": _row(comparison.get("best_loss")),
         "best_stability": _row(comparison.get("best_stability")),
+        "best_readiness": _row(comparison.get("best_readiness")),
+    }
+
+
+def audit_wasm_report_context(
+    reports: (
+        Mapping[str, str | os.PathLike[str] | Mapping[str, Any]]
+        | Sequence[str | os.PathLike[str] | Mapping[str, Any]]
+        | str
+        | os.PathLike[str]
+    ),
+    *,
+    labels: Sequence[str] | None = None,
+) -> dict[str, Any]:
+    """Audit a set of WASM reports for promotion into runtime context."""
+
+    items = _iter_report_items(reports, labels=labels)
+    rows: list[dict[str, Any]] = []
+    status_counts: dict[str, int] = {}
+    family_counts: dict[str, int] = {}
+    risk_counts: dict[str, int] = {}
+    for label, report in items:
+        audit = audit_wasm_report(report)
+        status = str(audit.get("status", "unknown"))
+        family = str(audit.get("family", "unknown"))
+        status_counts[status] = status_counts.get(status, 0) + 1
+        family_counts[family] = family_counts.get(family, 0) + 1
+        for flag in _sequence(audit.get("risk_flags")):
+            flag_label = str(flag)
+            risk_counts[flag_label] = risk_counts.get(flag_label, 0) + 1
+        rows.append(
+            {
+                "label": label,
+                "family": family,
+                "status": status,
+                "readiness_score": audit.get("readiness_score"),
+                "loss": _mapping(audit.get("learning")).get("loss"),
+                "learning_progress_score": _mapping(audit.get("learning")).get(
+                    "progress_score"
+                ),
+                "risk_flags": audit.get("risk_flags"),
+                "audit": audit,
+            }
+        )
+
+    ranked = sorted(
+        rows,
+        key=lambda row: (
+            float(row.get("readiness_score") or 0.0),
+            -(float(row["loss"]) if row.get("loss") is not None else 1.0e9),
+            str(row.get("label")),
+        ),
+        reverse=True,
+    )
+    best = ranked[0] if ranked else None
+    recommendations: list[str] = []
+    if best is not None:
+        recommendations.append(
+            f"prefer {best['label']} for the strongest audited WASM context"
+        )
+    if risk_counts:
+        top_risks = ", ".join(
+            key
+            for key, _ in sorted(
+                risk_counts.items(),
+                key=lambda item: (-item[1], item[0]),
+            )[:3]
+        )
+        recommendations.append(f"review common WASM report risks: {top_risks}")
+    if len(family_counts) > 1:
+        recommendations.append(
+            "compare Mellin and Canvas report families separately before mixing"
+        )
+
+    return {
+        "kind": "spiraltorch.wasm_report_context_audit",
+        "count": len(rows),
+        "families": family_counts,
+        "statuses": status_counts,
+        "risk_counts": risk_counts,
+        "best": best,
+        "ranked": ranked,
+        "recommendations": recommendations,
     }
 
 
@@ -524,6 +827,7 @@ def build_wasm_report_context(
         "reports": [],
         "context_origins": [],
         "comparison": None,
+        "audit": None,
     }
     if not candidate_items:
         return [], metadata
@@ -535,6 +839,7 @@ def build_wasm_report_context(
     selected_items = [candidate_items[index] for index in selected_indices]
     selected_summaries = [summaries[index] for index in selected_indices]
     comparison = compare_wasm_reports(report_values, labels=labels)
+    context_audit = audit_wasm_report_context(report_values, labels=labels)
     context_partials = [
         wasm_report_to_zspace_partial(
             report,
@@ -556,6 +861,23 @@ def build_wasm_report_context(
     ]
     metadata["context_origins"] = [partial.origin for partial in context_partials]
     metadata["comparison"] = _compact_wasm_comparison(comparison)
+    metadata["audit"] = {
+        "kind": context_audit.get("kind"),
+        "count": context_audit.get("count"),
+        "families": context_audit.get("families"),
+        "statuses": context_audit.get("statuses"),
+        "risk_counts": context_audit.get("risk_counts"),
+        "best": None
+        if not isinstance(context_audit.get("best"), Mapping)
+        else {
+            "label": _mapping(context_audit["best"]).get("label"),
+            "family": _mapping(context_audit["best"]).get("family"),
+            "status": _mapping(context_audit["best"]).get("status"),
+            "readiness_score": _mapping(context_audit["best"]).get("readiness_score"),
+            "loss": _mapping(context_audit["best"]).get("loss"),
+        },
+        "recommendations": context_audit.get("recommendations"),
+    }
     return context_partials, metadata
 
 

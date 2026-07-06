@@ -264,6 +264,10 @@ def summarize_wasm_report(
     report: str | PathLike[str] | Mapping[str, Any],
 ) -> Dict[str, Any]: ...
 
+def audit_wasm_report(
+    report: str | PathLike[str] | Mapping[str, Any],
+) -> Dict[str, Any]: ...
+
 def collect_wasm_report_paths(
     reports: Sequence[str | PathLike[str]] | str | PathLike[str] | None = ...,
     *,
@@ -273,6 +277,17 @@ def collect_wasm_report_paths(
 ) -> List[str]: ...
 
 def compare_wasm_reports(
+    reports: (
+        Mapping[str, str | PathLike[str] | Mapping[str, Any]]
+        | Sequence[str | PathLike[str] | Mapping[str, Any]]
+        | str
+        | PathLike[str]
+    ),
+    *,
+    labels: Sequence[str] | None = ...,
+) -> Dict[str, Any]: ...
+
+def audit_wasm_report_context(
     reports: (
         Mapping[str, str | PathLike[str] | Mapping[str, Any]]
         | Sequence[str | PathLike[str] | Mapping[str, Any]]
@@ -7313,6 +7328,8 @@ __all__ = [
     "run_api_llm_prompt_suite_matrix",
     "summarize_api_llm_trace_events",
     "write_api_llm_trace_jsonl",
+    "audit_wasm_report",
+    "audit_wasm_report_context",
     "build_wasm_report_context",
     "build_wasm_report_context_artifact",
     "compare_wasm_reports",
