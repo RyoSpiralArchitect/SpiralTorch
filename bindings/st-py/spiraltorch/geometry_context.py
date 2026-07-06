@@ -9,11 +9,12 @@ from typing import Any
 from .fractal_field_probe import fractal_field_probe_to_zspace_partial
 from .log_z_series_probe import log_z_series_probe_to_zspace_partial
 from .scale_stack_probe import scale_stack_probe_to_zspace_partial
-from .zspace_inference import ZSpacePartialBundle
+from .zspace_inference import ZSpacePartialBundle, blend_zspace_partials
 
 __all__ = [
     "build_geometry_probe_context",
     "build_geometry_probe_context_artifact",
+    "geometry_probe_consensus_partial",
     "geometry_probe_summary",
     "geometry_probe_to_zspace_partial",
     "geometry_probes_to_zspace_partials",
@@ -22,6 +23,7 @@ __all__ = [
 ]
 
 _GEOMETRY_CONTEXT_SCHEMA = "spiraltorch.geometry_probe_context.v1"
+_CONSENSUS_STRATEGIES = {"mean": 1.0, "last": 2.0, "max": 3.0, "min": 4.0}
 
 _ROUTES = {
     "spiraltorch.wasm_scale_stack_probe": (
@@ -104,6 +106,16 @@ def _label_for(index: int, label: str | None, family: str) -> str:
 def _telemetry_prefix(base: str, family: str, index: int) -> str:
     base = base or "geometry"
     return f"{base}.{family}.{index}"
+
+
+def _normalise_consensus_strategy(strategy: str) -> str:
+    value = str(strategy or "mean").strip().lower()
+    if value not in _CONSENSUS_STRATEGIES:
+        known = ", ".join(sorted(_CONSENSUS_STRATEGIES))
+        raise ValueError(
+            f"unsupported geometry consensus strategy '{strategy}', expected one of: {known}"
+        )
+    return value
 
 
 def _partial_payload(partial: ZSpacePartialBundle) -> dict[str, Any]:
@@ -223,6 +235,98 @@ def geometry_probes_to_zspace_partials(
     return partials
 
 
+def _consensus_telemetry(
+    metadata: Mapping[str, Any],
+    *,
+    telemetry_prefix: str,
+    strategy: str,
+    metric_count: int,
+) -> dict[str, float]:
+    prefix = telemetry_prefix or "geometry"
+    consensus_prefix = f"{prefix}.consensus"
+    families = metadata.get("families")
+    family_counts = dict(families) if isinstance(families, Mapping) else {}
+    telemetry: dict[str, float] = {
+        f"{consensus_prefix}.probe_count": float(metadata.get("probe_count", 0)),
+        f"{consensus_prefix}.candidate_count": float(
+            metadata.get("candidate_count", 0)
+        ),
+        f"{consensus_prefix}.family_count": float(len(family_counts)),
+        f"{consensus_prefix}.metric_count": float(metric_count),
+        f"{consensus_prefix}.gradient_dim": float(metadata.get("gradient_dim", 0)),
+        f"{consensus_prefix}.strategy_code": _CONSENSUS_STRATEGIES[strategy],
+    }
+    for family, count in sorted(family_counts.items()):
+        telemetry[f"{consensus_prefix}.family_{family}_count"] = float(count)
+    return telemetry
+
+
+def _consensus_partial_from_context(
+    partials: Sequence[ZSpacePartialBundle],
+    metadata: Mapping[str, Any],
+    *,
+    bundle_weight: float,
+    telemetry_prefix: str,
+    strategy: str,
+    origin: str,
+) -> ZSpacePartialBundle:
+    strategy = _normalise_consensus_strategy(strategy)
+    metrics = blend_zspace_partials(partials, strategy=strategy)
+    telemetry = _consensus_telemetry(
+        metadata,
+        telemetry_prefix=telemetry_prefix,
+        strategy=strategy,
+        metric_count=len(metrics),
+    )
+    return ZSpacePartialBundle(
+        metrics,
+        weight=max(0.0, float(bundle_weight)),
+        origin=origin or "geometry:consensus",
+        telemetry=telemetry,
+    )
+
+
+def geometry_probe_consensus_partial(
+    probes: Any,
+    *,
+    max_probes: int | None = None,
+    bundle_weight: float = 1.0,
+    consensus_weight: float | None = None,
+    telemetry_prefix: str = "geometry",
+    gradient_dim: int = 8,
+    strategy: str = "mean",
+    origin: str = "geometry:consensus",
+) -> tuple[ZSpacePartialBundle, dict[str, Any]]:
+    """Fuse supported WASM geometry probes into one runtime-ready partial."""
+
+    partials, metadata = build_geometry_probe_context(
+        probes,
+        max_probes=max_probes,
+        bundle_weight=bundle_weight,
+        telemetry_prefix=telemetry_prefix,
+        gradient_dim=gradient_dim,
+        include_consensus=False,
+    )
+    if not partials:
+        raise ValueError("at least one geometry probe is required for consensus")
+    consensus = _consensus_partial_from_context(
+        partials,
+        metadata,
+        bundle_weight=bundle_weight if consensus_weight is None else consensus_weight,
+        telemetry_prefix=telemetry_prefix,
+        strategy=strategy,
+        origin=origin,
+    )
+    consensus_metadata = dict(metadata)
+    consensus_metadata["consensus"] = {
+        "origin": consensus.origin,
+        "strategy": _normalise_consensus_strategy(strategy),
+        "weight": consensus.weight,
+        "metric_count": len(consensus.resolved()),
+    }
+    return consensus, consensus_metadata
+
+
 def build_geometry_probe_context(
     probes: Any,
     *,
@@ -230,6 +334,10 @@ def build_geometry_probe_context(
     bundle_weight: float = 1.0,
     telemetry_prefix: str = "geometry",
     gradient_dim: int = 8,
+    include_consensus: bool = False,
+    consensus_weight: float | None = None,
+    consensus_strategy: str = "mean",
+    consensus_origin: str = "geometry:consensus",
 ) -> tuple[list[ZSpacePartialBundle], dict[str, Any]]:
     """Build Z-space context partials plus metadata from WASM geometry probes."""
 
@@ -277,6 +385,25 @@ def build_geometry_probe_context(
         "probes": summaries,
         "context_origins": [partial.origin for partial in partials],
     }
+    if include_consensus and partials:
+        consensus = _consensus_partial_from_context(
+            partials,
+            metadata,
+            bundle_weight=bundle_weight if consensus_weight is None else consensus_weight,
+            telemetry_prefix=telemetry_prefix,
+            strategy=consensus_strategy,
+            origin=consensus_origin,
+        )
+        partials.append(consensus)
+        metadata["consensus"] = {
+            "origin": consensus.origin,
+            "strategy": _normalise_consensus_strategy(consensus_strategy),
+            "weight": consensus.weight,
+            "metric_count": len(consensus.resolved()),
+        }
+        metadata["context_origins"] = [partial.origin for partial in partials]
+    elif include_consensus:
+        metadata["consensus"] = None
     return partials, metadata
 
 
@@ -287,6 +414,10 @@ def build_geometry_probe_context_artifact(
     bundle_weight: float = 1.0,
     telemetry_prefix: str = "geometry",
     gradient_dim: int = 8,
+    include_consensus: bool = False,
+    consensus_weight: float | None = None,
+    consensus_strategy: str = "mean",
+    consensus_origin: str = "geometry:consensus",
 ) -> dict[str, Any]:
     """Return a portable JSON-ready artifact for geometry-probe context partials."""
 
@@ -296,6 +427,10 @@ def build_geometry_probe_context_artifact(
         bundle_weight=bundle_weight,
         telemetry_prefix=telemetry_prefix,
         gradient_dim=gradient_dim,
+        include_consensus=include_consensus,
+        consensus_weight=consensus_weight,
+        consensus_strategy=consensus_strategy,
+        consensus_origin=consensus_origin,
     )
     return {
         "schema": _GEOMETRY_CONTEXT_SCHEMA,
@@ -313,6 +448,10 @@ def write_geometry_probe_context_artifact(
     bundle_weight: float = 1.0,
     telemetry_prefix: str = "geometry",
     gradient_dim: int = 8,
+    include_consensus: bool = False,
+    consensus_weight: float | None = None,
+    consensus_strategy: str = "mean",
+    consensus_origin: str = "geometry:consensus",
 ) -> str:
     """Write a geometry-probe context handoff artifact and return its path."""
 
@@ -322,6 +461,10 @@ def write_geometry_probe_context_artifact(
         bundle_weight=bundle_weight,
         telemetry_prefix=telemetry_prefix,
         gradient_dim=gradient_dim,
+        include_consensus=include_consensus,
+        consensus_weight=consensus_weight,
+        consensus_strategy=consensus_strategy,
+        consensus_origin=consensus_origin,
     )
     out_path = Path(path)
     out_path.parent.mkdir(parents=True, exist_ok=True)

@@ -182,15 +182,17 @@ def test_pipeline_can_queue_geometry_probe_context():
     partials, metadata = pipeline.add_geometry_probes(
         {"field": probe},
         gradient_dim=4,
+        include_consensus=True,
         return_metadata=True,
     )
     inference = pipeline.infer()
 
-    assert len(partials) == 1
-    assert metadata["context_origins"] == ["geometry:field"]
+    assert len(partials) == 2
+    assert metadata["context_origins"] == ["geometry:field", "geometry:consensus"]
     assert "speed" in inference.metrics
     assert inference.telemetry is not None
     assert inference.telemetry.payload["geometry.fractal_field.1.energy"] == pytest.approx(0.4)
+    assert inference.telemetry.payload["geometry.consensus.probe_count"] == pytest.approx(1.0)
 
 
 def test_compile_inference_wraps_callable():

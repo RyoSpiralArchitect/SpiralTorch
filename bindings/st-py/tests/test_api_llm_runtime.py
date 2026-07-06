@@ -354,19 +354,23 @@ def test_api_llm_geometry_context_partials_feed_context_prompt() -> None:
     context = st.api_llm_geometry_context_partials(
         {"logz": _geometry_log_z_probe()},
         gradient_dim=5,
+        include_consensus=True,
     )
 
     prompt = st.format_api_llm_context_prompt(
         "Use geometry context.",
         context,
-        max_partials=1,
+        max_partials=2,
         max_telemetry=12,
     )
 
-    assert len(context) == 1
+    assert len(context) == 2
     assert context[0].origin == "geometry:logz"
+    assert context[1].origin == "geometry:consensus"
     assert "origin=geometry:logz" in prompt
+    assert "origin=geometry:consensus" in prompt
     assert "geometry.log_z_series.1.projection_stability=0.9" in prompt
+    assert "geometry.consensus.probe_count=1" in prompt
     assert "User prompt: Use geometry context." in prompt
 
 

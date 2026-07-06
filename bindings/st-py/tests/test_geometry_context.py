@@ -71,9 +71,11 @@ def _log_z_probe() -> dict[str, object]:
 
 def test_geometry_context_exports_top_level_and_module() -> None:
     assert "geometry_probe_to_zspace_partial" in st.__all__
+    assert "geometry_probe_consensus_partial" in st.__all__
     assert "build_geometry_probe_context" in st.__all__
     assert "geometry" in st.__all__
     assert st.geometry.geometry_probe_to_zspace_partial is st.geometry_probe_to_zspace_partial
+    assert st.geometry.geometry_probe_consensus_partial is st.geometry_probe_consensus_partial
     assert st.geometry.build_geometry_probe_context is st.build_geometry_probe_context
 
 
@@ -128,6 +130,49 @@ def test_build_geometry_probe_context_feeds_api_llm_prompt() -> None:
     assert "geometry.log_z_series.3.projection_stability=0.9" in prompt
 
 
+def test_geometry_probe_consensus_partial_blends_probe_families() -> None:
+    consensus, metadata = st.geometry_probe_consensus_partial(
+        [_scale_probe(), _fractal_probe(), _log_z_probe()],
+        gradient_dim=4,
+        consensus_weight=1.7,
+    )
+    metrics = consensus.resolved()
+    telemetry = consensus.telemetry_payload()
+
+    assert consensus.origin == "geometry:consensus"
+    assert consensus.weight == pytest.approx(1.7)
+    assert metadata["consensus"]["strategy"] == "mean"
+    assert metadata["consensus"]["metric_count"] == len(metrics)
+    assert {"speed", "memory", "stability", "drs", "gradient"} <= set(metrics)
+    assert len(metrics["gradient"]) == 4
+    assert telemetry is not None
+    assert telemetry["geometry.consensus.probe_count"] == pytest.approx(3.0)
+    assert telemetry["geometry.consensus.family_count"] == pytest.approx(3.0)
+    assert telemetry["geometry.consensus.family_scale_stack_count"] == pytest.approx(1.0)
+
+
+def test_build_geometry_probe_context_can_append_consensus_prompt_context() -> None:
+    partials, metadata = st.build_geometry_probe_context(
+        [_scale_probe(), _fractal_probe(), _log_z_probe()],
+        gradient_dim=4,
+        include_consensus=True,
+    )
+
+    prompt = st.format_api_llm_context_prompt(
+        "Read the fused browser geometry.",
+        partials,
+        max_partials=4,
+        max_telemetry=20,
+    )
+
+    assert len(partials) == 4
+    assert metadata["consensus"]["origin"] == "geometry:consensus"
+    assert metadata["context_origins"][-1] == "geometry:consensus"
+    assert "origin=geometry:consensus" in prompt
+    assert "geometry.consensus.probe_count=3" in prompt
+    assert "geometry.consensus.family_log_z_series_count=1" in prompt
+
+
 def test_geometry_probe_context_artifact_round_trips(tmp_path) -> None:
     path = tmp_path / "geometry-context.json"
 
@@ -148,3 +193,8 @@ def test_geometry_probe_context_artifact_round_trips(tmp_path) -> None:
 def test_geometry_probe_router_rejects_unknown_kind() -> None:
     with pytest.raises(ValueError, match="unsupported geometry probe kind"):
         st.geometry_probe_to_zspace_partial({"kind": "spiraltorch.unknown"})
+
+
+def test_geometry_probe_consensus_rejects_unknown_strategy() -> None:
+    with pytest.raises(ValueError, match="unsupported geometry consensus strategy"):
+        st.geometry_probe_consensus_partial(_scale_probe(), strategy="median")

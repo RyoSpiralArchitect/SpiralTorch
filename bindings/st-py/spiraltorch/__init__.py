@@ -816,6 +816,7 @@ from .log_z_series_probe import (
 from .geometry_context import (
     build_geometry_probe_context,
     build_geometry_probe_context_artifact,
+    geometry_probe_consensus_partial,
     geometry_probe_summary,
     geometry_probe_to_zspace_partial,
     geometry_probes_to_zspace_partials,
@@ -891,6 +892,7 @@ _EXTRAS = [
     "log_z_series_partial","log_z_series_probe",
     "log_z_series_probe_to_zspace_partial",
     "build_geometry_probe_context","build_geometry_probe_context_artifact",
+    "geometry_probe_consensus_partial",
     "geometry_probe_summary","geometry_probe_to_zspace_partial",
     "geometry_probes_to_zspace_partials",
     "load_geometry_probe_context_artifact",
@@ -5611,6 +5613,7 @@ _mirror_into_module(
     [
         "build_geometry_probe_context",
         "build_geometry_probe_context_artifact",
+        "geometry_probe_consensus_partial",
         "geometry_probe_summary",
         "geometry_probe_to_zspace_partial",
         "geometry_probes_to_zspace_partials",

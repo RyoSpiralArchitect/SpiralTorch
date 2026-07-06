@@ -2078,6 +2078,10 @@ class ZSpaceInferencePipeline:
         bundle_weight: float = ...,
         telemetry_prefix: str = ...,
         gradient_dim: int = ...,
+        include_consensus: bool = ...,
+        consensus_weight: float | None = ...,
+        consensus_strategy: str = ...,
+        consensus_origin: str = ...,
         return_metadata: bool = ...,
     ) -> List[ZSpacePartialBundle] | Tuple[List[ZSpacePartialBundle], Dict[str, Any]]: ...
     def clear(self) -> None: ...
@@ -2345,6 +2349,10 @@ def api_llm_geometry_context_partials(
     bundle_weight: float = ...,
     telemetry_prefix: str = ...,
     gradient_dim: int = ...,
+    include_consensus: bool = ...,
+    consensus_weight: float | None = ...,
+    consensus_strategy: str = ...,
+    consensus_origin: str = ...,
 ) -> List[ZSpacePartialBundle]: ...
 
 
@@ -6258,6 +6266,18 @@ def geometry_probes_to_zspace_partials(
     gradient_dim: int = ...,
 ) -> List[ZSpacePartialBundle]: ...
 
+def geometry_probe_consensus_partial(
+    probes: Any,
+    *,
+    max_probes: int | None = ...,
+    bundle_weight: float = ...,
+    consensus_weight: float | None = ...,
+    telemetry_prefix: str = ...,
+    gradient_dim: int = ...,
+    strategy: str = ...,
+    origin: str = ...,
+) -> Tuple[ZSpacePartialBundle, Dict[str, Any]]: ...
+
 def build_geometry_probe_context(
     probes: Any,
     *,
@@ -6265,6 +6285,10 @@ def build_geometry_probe_context(
     bundle_weight: float = ...,
     telemetry_prefix: str = ...,
     gradient_dim: int = ...,
+    include_consensus: bool = ...,
+    consensus_weight: float | None = ...,
+    consensus_strategy: str = ...,
+    consensus_origin: str = ...,
 ) -> Tuple[List[ZSpacePartialBundle], Dict[str, Any]]: ...
 
 def build_geometry_probe_context_artifact(
@@ -6274,6 +6298,10 @@ def build_geometry_probe_context_artifact(
     bundle_weight: float = ...,
     telemetry_prefix: str = ...,
     gradient_dim: int = ...,
+    include_consensus: bool = ...,
+    consensus_weight: float | None = ...,
+    consensus_strategy: str = ...,
+    consensus_origin: str = ...,
 ) -> Dict[str, Any]: ...
 
 def write_geometry_probe_context_artifact(
@@ -6284,6 +6312,10 @@ def write_geometry_probe_context_artifact(
     bundle_weight: float = ...,
     telemetry_prefix: str = ...,
     gradient_dim: int = ...,
+    include_consensus: bool = ...,
+    consensus_weight: float | None = ...,
+    consensus_strategy: str = ...,
+    consensus_origin: str = ...,
 ) -> str: ...
 
 def load_geometry_probe_context_artifact(
@@ -6409,6 +6441,18 @@ class _GeometryModule(ModuleType):
         gradient_dim: int = ...,
     ) -> List[ZSpacePartialBundle]: ...
 
+    def geometry_probe_consensus_partial(
+        probes: Any,
+        *,
+        max_probes: int | None = ...,
+        bundle_weight: float = ...,
+        consensus_weight: float | None = ...,
+        telemetry_prefix: str = ...,
+        gradient_dim: int = ...,
+        strategy: str = ...,
+        origin: str = ...,
+    ) -> Tuple[ZSpacePartialBundle, Dict[str, Any]]: ...
+
     def build_geometry_probe_context(
         probes: Any,
         *,
@@ -6416,6 +6460,10 @@ class _GeometryModule(ModuleType):
         bundle_weight: float = ...,
         telemetry_prefix: str = ...,
         gradient_dim: int = ...,
+        include_consensus: bool = ...,
+        consensus_weight: float | None = ...,
+        consensus_strategy: str = ...,
+        consensus_origin: str = ...,
     ) -> Tuple[List[ZSpacePartialBundle], Dict[str, Any]]: ...
 
     def build_geometry_probe_context_artifact(
@@ -6425,6 +6473,10 @@ class _GeometryModule(ModuleType):
         bundle_weight: float = ...,
         telemetry_prefix: str = ...,
         gradient_dim: int = ...,
+        include_consensus: bool = ...,
+        consensus_weight: float | None = ...,
+        consensus_strategy: str = ...,
+        consensus_origin: str = ...,
     ) -> Dict[str, Any]: ...
 
     def write_geometry_probe_context_artifact(
@@ -6435,6 +6487,10 @@ class _GeometryModule(ModuleType):
         bundle_weight: float = ...,
         telemetry_prefix: str = ...,
         gradient_dim: int = ...,
+        include_consensus: bool = ...,
+        consensus_weight: float | None = ...,
+        consensus_strategy: str = ...,
+        consensus_origin: str = ...,
     ) -> str: ...
 
     def load_geometry_probe_context_artifact(
@@ -7680,6 +7736,7 @@ __all__ = [
     "log_z_series_probe_to_zspace_partial",
     "build_geometry_probe_context",
     "build_geometry_probe_context_artifact",
+    "geometry_probe_consensus_partial",
     "geometry_probe_summary",
     "geometry_probe_to_zspace_partial",
     "geometry_probes_to_zspace_partials",

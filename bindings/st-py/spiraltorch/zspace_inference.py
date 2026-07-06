@@ -1688,6 +1688,10 @@ class ZSpaceInferencePipeline:
         bundle_weight: float = 1.0,
         telemetry_prefix: str = "geometry",
         gradient_dim: int = 8,
+        include_consensus: bool = False,
+        consensus_weight: float | None = None,
+        consensus_strategy: str = "mean",
+        consensus_origin: str = "geometry:consensus",
         return_metadata: bool = False,
     ) -> list[ZSpacePartialBundle] | tuple[list[ZSpacePartialBundle], dict[str, Any]]:
         """Register WASM geometry probes as queued partial observations."""
@@ -1700,6 +1704,10 @@ class ZSpaceInferencePipeline:
             bundle_weight=bundle_weight,
             telemetry_prefix=telemetry_prefix,
             gradient_dim=gradient_dim,
+            include_consensus=include_consensus,
+            consensus_weight=consensus_weight,
+            consensus_strategy=consensus_strategy,
+            consensus_origin=consensus_origin,
         )
         for bundle in partials:
             self.add_partial(bundle)

@@ -1062,6 +1062,10 @@ def api_llm_geometry_context_partials(
     bundle_weight: float = 1.0,
     telemetry_prefix: str = "geometry",
     gradient_dim: int = 8,
+    include_consensus: bool = False,
+    consensus_weight: float | None = None,
+    consensus_strategy: str = "mean",
+    consensus_origin: str = "geometry:consensus",
 ) -> list[ZSpacePartialBundle]:
     """Convert WASM geometry probes into API-LLM runtime context partials."""
 
@@ -1073,6 +1077,10 @@ def api_llm_geometry_context_partials(
         bundle_weight=bundle_weight,
         telemetry_prefix=telemetry_prefix,
         gradient_dim=gradient_dim,
+        include_consensus=include_consensus,
+        consensus_weight=consensus_weight,
+        consensus_strategy=consensus_strategy,
+        consensus_origin=consensus_origin,
     )
     return partials
 
