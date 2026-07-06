@@ -1,6 +1,7 @@
 #![cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 
 mod cobol;
+mod fractal_field;
 mod reports;
 mod scale_stack;
 
@@ -24,6 +25,7 @@ pub use cobol::*;
 pub use cobol_bridge::*;
 #[cfg(target_arch = "wasm32")]
 pub use fft::*;
+pub use fractal_field::*;
 #[cfg(target_arch = "wasm32")]
 pub use mellin::*;
 pub use reports::*;

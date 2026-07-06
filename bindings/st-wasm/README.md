@@ -138,6 +138,27 @@ Audits include runtime readiness, learning progress, risk flags, and recommendat
 browser dashboards can decide whether a report is ready for Python/API-LLM handoff without
 waiting for a server-side preflight.
 
+## Fractal-field probes
+
+`st-frac::fractal_field` is also available from the wasm surface, so browser-side demos
+can generate deterministic branching fields for Mellin lattices and emit a compact probe
+that Python Z-space runtimes can ingest later:
+
+```ts
+import { WasmFractalFieldGenerator, fractalFieldProbeObject } from "spiraltorch-wasm";
+
+const generator = new WasmFractalFieldGenerator(4, 2.0, 0.55, 24);
+const field = generator.branchingField(-2.0, 0.125, 64); // packed [re, im, ...]
+
+const probe = fractalFieldProbeObject(4, 2.0, 0.55, 24, -2.0, 0.125, 64, 8);
+console.log(probe.energy, probe.total_variation, probe.samples[0]);
+```
+
+The probe records generator hyper-parameters, log-lattice support, field energy, phase
+drift, total variation, and a bounded preview of complex samples. Keeping this payload
+source-crate tagged (`st-frac::fractal_field`) lets browser experiments, Python reports,
+and future Rust backends share the same geometric context contract.
+
 ## Scale-stack geometry probes
 
 `st-frac::scale_stack` is now exposed directly in the wasm package. Browser demos can run

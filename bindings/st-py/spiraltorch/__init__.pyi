@@ -6114,6 +6114,40 @@ class FractalFieldGenerator:
     def spawn_grid(self, log_start: float, log_step: float, len: int) -> MellinLogGrid: ...
     def weave_with_grid(self, base: MellinLogGrid) -> MellinLogGrid: ...
 
+def fractal_field_probe(
+    generator: Any,
+    log_start: float,
+    log_step: float,
+    length: int,
+    *,
+    preview_len: int = ...,
+) -> Dict[str, Any]: ...
+
+def fractal_field_probe_to_zspace_partial(
+    probe: Mapping[str, Any],
+    *,
+    bundle_weight: float = ...,
+    origin: str | None = ...,
+    telemetry_prefix: str = ...,
+    gradient_dim: int = ...,
+) -> ZSpacePartialBundle: ...
+
+def fractal_field_partial(
+    octaves: int,
+    log_start: float,
+    log_step: float,
+    length: int,
+    *,
+    lacunarity: float = ...,
+    gain: float = ...,
+    iterations: int = ...,
+    preview_len: int = ...,
+    bundle_weight: float = ...,
+    origin: str | None = ...,
+    telemetry_prefix: str = ...,
+    gradient_dim: int = ...,
+) -> ZSpacePartialBundle: ...
+
 
 class LogZSeries:
     def __init__(
@@ -6177,6 +6211,40 @@ class _FracModule(ModuleType):
         pad: str = ...,
         pad_constant: Optional[float] = ...,
     ) -> List[float]: ...
+
+    def fractal_field_probe(
+        generator: Any,
+        log_start: float,
+        log_step: float,
+        length: int,
+        *,
+        preview_len: int = ...,
+    ) -> Dict[str, Any]: ...
+
+    def fractal_field_probe_to_zspace_partial(
+        probe: Mapping[str, Any],
+        *,
+        bundle_weight: float = ...,
+        origin: str | None = ...,
+        telemetry_prefix: str = ...,
+        gradient_dim: int = ...,
+    ) -> ZSpacePartialBundle: ...
+
+    def fractal_field_partial(
+        octaves: int,
+        log_start: float,
+        log_step: float,
+        length: int,
+        *,
+        lacunarity: float = ...,
+        gain: float = ...,
+        iterations: int = ...,
+        preview_len: int = ...,
+        bundle_weight: float = ...,
+        origin: str | None = ...,
+        telemetry_prefix: str = ...,
+        gradient_dim: int = ...,
+    ) -> ZSpacePartialBundle: ...
 
 
 frac: _FracModule
@@ -7408,6 +7476,9 @@ __all__ = [
     "summarize_wasm_report",
     "wasm_report_to_zspace_partial",
     "write_wasm_report_context_artifact",
+    "fractal_field_partial",
+    "fractal_field_probe",
+    "fractal_field_probe_to_zspace_partial",
     "scale_stack_probe",
     "scale_stack_probe_to_zspace_partial",
     "scalar_scale_stack_partial",

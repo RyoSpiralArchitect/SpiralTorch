@@ -799,6 +799,12 @@ from .scale_stack_probe import (
     semantic_scale_stack_probe,
 )
 
+from .fractal_field_probe import (
+    fractal_field_partial,
+    fractal_field_probe,
+    fractal_field_probe_to_zspace_partial,
+)
+
 from .zspace_live import (
     serve_zspace_trace,
     ZSpaceTraceLiveServer,
@@ -862,6 +868,8 @@ _EXTRAS = [
     "load_wasm_report_context_artifact",
     "load_wasm_report","summarize_wasm_report",
     "wasm_report_to_zspace_partial","write_wasm_report_context_artifact",
+    "fractal_field_partial","fractal_field_probe",
+    "fractal_field_probe_to_zspace_partial",
     "scale_stack_probe","scale_stack_probe_to_zspace_partial",
     "scalar_scale_stack_partial","scalar_scale_stack_probe",
     "semantic_scale_stack_partial","semantic_scale_stack_probe",
@@ -5563,6 +5571,9 @@ _mirror_into_module(
     {
         "gl_coeffs_adaptive": ("frac.gl_coeffs_adaptive",),
         "fracdiff_gl_1d": ("frac.fracdiff_gl_1d",),
+        "fractal_field_partial": (),
+        "fractal_field_probe": (),
+        "fractal_field_probe_to_zspace_partial": (),
     },
 )
 _mirror_into_module(

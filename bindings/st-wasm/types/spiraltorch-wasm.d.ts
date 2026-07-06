@@ -118,6 +118,48 @@ declare module "spiraltorch-wasm" {
         coherence_profile: ScaleStackCoherenceBreak[];
     };
 
+    export type FractalFieldGeneratorConfig = {
+        octaves: number;
+        lacunarity: number;
+        gain: number;
+        iterations: number;
+    };
+
+    export type FractalFieldLogLattice = {
+        log_start: number;
+        log_step: number;
+        len: number;
+        support: [number, number];
+    };
+
+    export type FractalFieldProbeSample = {
+        index: number;
+        log: number;
+        re: number;
+        im: number;
+        abs: number;
+        phase: number;
+    };
+
+    export type FractalFieldProbe = {
+        kind: "spiraltorch.wasm_fractal_field_probe";
+        source_crate: "st-frac::fractal_field";
+        mode: "branching_field";
+        generator: FractalFieldGeneratorConfig;
+        log_lattice: FractalFieldLogLattice;
+        sample_count: number;
+        preview_count: number;
+        energy: number;
+        mean_abs: number;
+        max_abs: number;
+        mean_real: number;
+        mean_imag: number;
+        phase_drift: number;
+        total_variation: number;
+        coherence_score: number;
+        samples: FractalFieldProbeSample[];
+    };
+
     /** Labels emitted by {@link CanvasDesireControl.eventLabels}. */
     export type DesireControlEventLabel =
         | "lr_increase"
@@ -481,6 +523,44 @@ declare module "spiraltorch-wasm" {
         len: number,
         rate: number,
     ): Float32Array;
+
+    export class WasmFractalFieldGenerator {
+        constructor(octaves: number, lacunarity: number, gain: number, iterations: number);
+        readonly octaves: number;
+        readonly lacunarity: number;
+        readonly gain: number;
+        readonly iterations: number;
+        branchingField(logStart: number, logStep: number, len: number): Float32Array;
+        probeObject(
+            logStart: number,
+            logStep: number,
+            len: number,
+            previewLen: number,
+        ): FractalFieldProbe;
+        probeJson(logStart: number, logStep: number, len: number, previewLen: number): string;
+    }
+
+    export function fractalFieldProbeObject(
+        octaves: number,
+        lacunarity: number,
+        gain: number,
+        iterations: number,
+        logStart: number,
+        logStep: number,
+        len: number,
+        previewLen: number,
+    ): FractalFieldProbe;
+
+    export function fractalFieldProbeJson(
+        octaves: number,
+        lacunarity: number,
+        gain: number,
+        iterations: number,
+        logStart: number,
+        logStep: number,
+        len: number,
+        previewLen: number,
+    ): string;
 
     export class WasmScaleStack {
         private constructor();
