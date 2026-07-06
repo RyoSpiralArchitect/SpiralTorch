@@ -104,7 +104,10 @@ PY
   trace workflow so hosted-model runs can be compared without re-running the API
   call; use `run_api_llm_prompt_suite(...)` for a multi-prompt bipolar/Z-space
   smoke, or `run_api_llm_prompt_suite_matrix(...)` to replay the same prompts
-  across OpenAI, Anthropic, gateway, or local callables, then
+  across OpenAI, Anthropic, gateway, or local callables. Pass
+  `request_kwargs={"route": {...}}` when each provider needs different request
+  controls, such as OpenAI output-token caps versus Claude adaptive-thinking
+  `output_config.effort`, then
   `compare_api_llm_trace_runs(...)` to pick candidates by route score, latency,
   token use, confidence, runtime readiness, refusal rate, and empty-text rate.
 - Language desire controls via `st.nn.DesirePipeline`, `DesireTrainerBridge`,
