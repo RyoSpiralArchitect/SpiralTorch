@@ -10,6 +10,7 @@ st = pytest.importorskip("spiraltorch")
 def test_api_llm_runtime_exports_from_top_level() -> None:
     assert "ApiLLMZSpaceRuntime" in st.__all__
     assert "api_llm_partial_from_response" in st.__all__
+    assert "compare_api_llm_trace_runs" in st.__all__
     assert "load_api_llm_trace_events" in st.__all__
     assert "make_openai_chat_invoke" in st.__all__
     assert "make_openai_responses_invoke" in st.__all__
@@ -321,3 +322,52 @@ def test_api_llm_runtime_writes_loads_and_summarizes_jsonl(tmp_path) -> None:
     assert summary["latency_ms"]["max"] == 200.0
     assert summary["confidence"]["min"] > 0.0
     assert "stability" in summary["metrics"]
+
+
+def test_compare_api_llm_trace_runs_ranks_compact_artifacts(tmp_path) -> None:
+    fast = st.ApiLLMZSpaceRuntime(
+        [0.12, -0.04, 0.33, -0.11],
+        provider="example",
+        model="fast-model",
+        create_session=False,
+    )
+    fast.record_response(
+        _chat_response(),
+        prompt="fast route",
+        model="fast-model",
+        latency_ms=50.0,
+    )
+    fast_path = tmp_path / "fast.jsonl"
+    fast.write_jsonl(fast_path)
+
+    slow = st.ApiLLMZSpaceRuntime(
+        [0.12, -0.04, 0.33, -0.11],
+        provider="example",
+        model="slow-model",
+        create_session=False,
+    )
+    slow.record_response(
+        {
+            "model": "slow-model",
+            "output_text": "A slower API model response with more generated text.",
+            "status": "completed",
+            "usage": {"input_tokens": 64, "output_tokens": 96, "total_tokens": 160},
+        },
+        prompt="slow route",
+        latency_ms=2500.0,
+    )
+    slow_path = tmp_path / "slow.jsonl"
+    slow.write_jsonl(slow_path)
+
+    comparison = st.compare_api_llm_trace_runs({"fast": fast_path, "slow": slow_path})
+
+    assert comparison["kind"] == "spiraltorch.api_llm_trace_comparison"
+    assert comparison["count"] == 2
+    assert comparison["runs"][0]["label"] == "fast"
+    assert comparison["winners"]["best_score"] == "fast"
+    assert comparison["winners"]["lowest_latency"] == "fast"
+    assert comparison["winners"]["lowest_total_tokens"] == "fast"
+    assert comparison["runs"][0]["route_score"] > comparison["runs"][1]["route_score"]
+    assert comparison["recommendations"] == [
+        "prefer fast for the highest aggregate API LLM route score"
+    ]

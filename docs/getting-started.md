@@ -108,6 +108,9 @@ print(trace.as_dict()["inference"]["confidence"])
 runtime.write_jsonl("api_llm_trace.jsonl")
 summary = st.summarize_api_llm_trace_events("api_llm_trace.jsonl")
 print(summary["usage"]["total_tokens"])
+
+comparison = st.compare_api_llm_trace_runs({"current": "api_llm_trace.jsonl"})
+print(comparison["winners"]["best_score"])
 ```
 
 If the optional `openai` package is installed, the same runtime can call the
