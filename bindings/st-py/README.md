@@ -125,7 +125,12 @@ PY
   `api_llm_live_provider_matrix_sweep.py` example can run several token-budget
   pairs and produce that comparison in one command. Pass `--resume-existing`
   when expanding a sweep so completed budget pairs are reused instead of
-  re-calling provider APIs.
+  re-calling provider APIs. Browser-side WASM learning reports can also be
+  loaded with `load_wasm_report(...)`, summarized with `summarize_wasm_report(...)`,
+  converted into reusable context via `api_llm_wasm_context_partials(...)`, and
+  passed as `context_partials=` to `ApiLLMZSpaceRuntime` or
+  `run_api_llm_prompt_suite(...)`; see
+  `examples/api_llm_wasm_context_runtime.py` for a keyless end-to-end bridge.
 - Language desire controls via `st.nn.DesirePipeline`, `DesireTrainerBridge`,
   `DesireRoundtableBridge`, and downstream hook adapters so notebooks can
   inspect phase/temperature/entropy offsets without making the symbolic kernel
