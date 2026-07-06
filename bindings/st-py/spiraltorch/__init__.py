@@ -6638,6 +6638,7 @@ class AmegagradSession(SpiralSession):
         self.opt.accumulate_wave(wave)
         z_loss = self._zspace_step()
         control_obj = self.opt.desire_control(gain=gain) if control is None else control
+        step_metrics = self._realgrad_metrics(include_mean_abs=True)
         self.opt.step(
             self.weights,
             tune=tune,
@@ -6650,7 +6651,7 @@ class AmegagradSession(SpiralSession):
         )
 
         self._finish_step_metrics(
-            self._realgrad_metrics(include_mean_abs=True),
+            step_metrics,
             z_loss=z_loss,
             note=note,
         )
@@ -6674,6 +6675,7 @@ class AmegagradSession(SpiralSession):
         self.opt.accumulate_pair(prediction, target)
         z_loss = self._zspace_step()
         control_obj = self.opt.desire_control(gain=gain) if control is None else control
+        step_metrics = self._realgrad_metrics()
         self.opt.step(
             self.weights,
             tune=tune,
@@ -6686,7 +6688,7 @@ class AmegagradSession(SpiralSession):
         )
 
         self._finish_step_metrics(
-            self._realgrad_metrics(),
+            step_metrics,
             z_loss=z_loss,
             note=note,
         )
@@ -6710,6 +6712,7 @@ class AmegagradSession(SpiralSession):
         self.opt.absorb_text(encoder, str(text))
         z_loss = self._zspace_step()
         control_obj = self.opt.desire_control(gain=gain) if control is None else control
+        step_metrics = self._realgrad_metrics()
         self.opt.step(
             self.weights,
             tune=tune,
@@ -6722,7 +6725,7 @@ class AmegagradSession(SpiralSession):
         )
 
         self._finish_step_metrics(
-            self._realgrad_metrics(),
+            step_metrics,
             z_loss=z_loss,
             note=note,
         )

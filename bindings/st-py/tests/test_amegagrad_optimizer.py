@@ -161,6 +161,8 @@ def test_amegagrad_session_writes_topos_training_trace(tmp_path) -> None:
     trace_path = tmp_path / "amegagrad-topos-trace.jsonl"
     session.write_trainer_trace_event(trace_path, mode="w")
 
+    assert metrics["realgrad.l2"] > 0.0
+    assert metrics["realgrad.mean_abs"] > 0.0
     assert metrics["topos.closure_pressure"] == pytest.approx(0.5)
     assert metrics["topos.optimizer_effect.rate_scale"] < 1.0
     assert metrics["hypergrad.learning_rate"] == pytest.approx(
@@ -179,6 +181,7 @@ def test_amegagrad_session_writes_topos_training_trace(tmp_path) -> None:
     )
     assert summary["count"] == 1
     assert summary["metrics"]["realgrad.l2"]["samples"] == 1
+    assert summary["metrics"]["realgrad.l2"]["nonzero"] == 1
     assert summary["topos_context"]["observed_count"] == 1
     assert summary["topos_context"]["optimizer_rate_scale"]["last"] == pytest.approx(
         metrics["topos.optimizer_effect.rate_scale"]
@@ -200,11 +203,14 @@ def test_amegagrad_topos_training_sweep_compares_runs(tmp_path) -> None:
     tuned_summary = result["summaries"]["topos_tuned"]
     tuned_context = tuned_summary["topos_context"]
     assert tuned_summary["count"] == 2
+    assert tuned_summary["metrics"]["realgrad.l2"]["nonzero"] == 2
     assert tuned_context["observed_count"] == 2
     assert tuned_context["optimizer_rate_scale"]["last"] < 1.0
 
     guard_row = next(row for row in comparison["runs"] if row["label"] == "guard_only")
     tuned_row = next(row for row in comparison["runs"] if row["label"] == "topos_tuned")
+    assert guard_row["realgrad_l2_mean"] > 0.0
+    assert tuned_row["realgrad_l2_mean"] > 0.0
     assert guard_row["topos_optimizer_rate_scale_mean"] is None
     assert tuned_row["topos_optimizer_rate_scale_mean"] == pytest.approx(
         tuned_context["optimizer_rate_scale"]["mean"]
