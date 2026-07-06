@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ReleaseWorkflowTests(unittest.TestCase):
-    def test_checkout_actions_use_node24_generation(self) -> None:
+    def test_official_actions_use_node24_generation(self) -> None:
         workflow_dir = ROOT / ".github" / "workflows"
         workflow_text = "\n".join(
             path.read_text(encoding="utf-8")
@@ -19,7 +19,15 @@ class ReleaseWorkflowTests(unittest.TestCase):
         )
 
         self.assertNotIn("actions/checkout@v4", workflow_text)
+        self.assertNotIn("actions/upload-artifact@v4", workflow_text)
+        self.assertNotIn("actions/download-artifact@v4", workflow_text)
+        self.assertNotIn("actions/cache@v4", workflow_text)
+        self.assertNotIn("actions/setup-go@v5", workflow_text)
         self.assertIn("actions/checkout@v5", workflow_text)
+        self.assertIn("actions/upload-artifact@v7", workflow_text)
+        self.assertIn("actions/download-artifact@v7", workflow_text)
+        self.assertIn("actions/cache@v5", workflow_text)
+        self.assertIn("actions/setup-go@v6", workflow_text)
 
     def test_publish_from_release_has_safe_dry_run_mode(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "publish_pypi_from_release.yml").read_text(
