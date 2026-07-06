@@ -84,6 +84,155 @@ fn tensor_util_backend_label(backend: TensorUtilBackend) -> &'static str {
     }
 }
 
+/// Runtime pressure and openness signal emitted by an open-cartesian topos.
+///
+/// The signal is intentionally scalar and copyable so training loops, Python
+/// facades, WASM demos, and hosted-LLM inference contexts can all observe the
+/// same guard state without owning the guarded tensors.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ToposControlSignal {
+    curvature: f32,
+    tolerance: f32,
+    saturation: f32,
+    porosity: f32,
+    max_depth: usize,
+    max_volume: usize,
+    observed_depth: usize,
+    visited_volume: usize,
+    remaining_volume: usize,
+    depth_pressure: f32,
+    volume_pressure: f32,
+    closure_pressure: f32,
+    openness: f32,
+    guard_strength: f32,
+    stability_hint: f32,
+    exploration_hint: f32,
+}
+
+impl ToposControlSignal {
+    /// Builds a signal from a topos and optional traversal observations.
+    pub fn from_observation(
+        topos: &OpenCartesianTopos,
+        observed_depth: usize,
+        visited_volume: usize,
+    ) -> Self {
+        let max_depth = topos.max_depth();
+        let max_volume = topos.max_volume();
+        let depth_pressure = if max_depth == 0 {
+            1.0
+        } else {
+            (observed_depth as f32 / max_depth as f32).clamp(0.0, 1.0)
+        };
+        let volume_pressure = if max_volume == 0 {
+            1.0
+        } else {
+            (visited_volume as f32 / max_volume as f32).clamp(0.0, 1.0)
+        };
+        let closure_pressure = depth_pressure.max(volume_pressure);
+        let openness = (1.0 - closure_pressure).clamp(0.0, 1.0);
+        let guard_strength = ((1.0 - topos.porosity()).clamp(0.0, 1.0) * 0.7
+            + closure_pressure * 0.3)
+            .clamp(0.0, 1.0);
+        let stability_hint = (openness * (1.0 - 0.4 * topos.porosity())).clamp(0.0, 1.0);
+        let exploration_hint =
+            (topos.porosity() * openness + (1.0 - guard_strength) * 0.25).clamp(0.0, 1.0);
+        Self {
+            curvature: topos.curvature(),
+            tolerance: topos.tolerance(),
+            saturation: topos.saturation(),
+            porosity: topos.porosity(),
+            max_depth,
+            max_volume,
+            observed_depth,
+            visited_volume,
+            remaining_volume: max_volume.saturating_sub(visited_volume),
+            depth_pressure,
+            volume_pressure,
+            closure_pressure,
+            openness,
+            guard_strength,
+            stability_hint,
+            exploration_hint,
+        }
+    }
+
+    pub fn curvature(&self) -> f32 {
+        self.curvature
+    }
+
+    pub fn tolerance(&self) -> f32 {
+        self.tolerance
+    }
+
+    pub fn saturation(&self) -> f32 {
+        self.saturation
+    }
+
+    pub fn porosity(&self) -> f32 {
+        self.porosity
+    }
+
+    pub fn max_depth(&self) -> usize {
+        self.max_depth
+    }
+
+    pub fn max_volume(&self) -> usize {
+        self.max_volume
+    }
+
+    pub fn observed_depth(&self) -> usize {
+        self.observed_depth
+    }
+
+    pub fn visited_volume(&self) -> usize {
+        self.visited_volume
+    }
+
+    pub fn remaining_volume(&self) -> usize {
+        self.remaining_volume
+    }
+
+    pub fn depth_pressure(&self) -> f32 {
+        self.depth_pressure
+    }
+
+    pub fn volume_pressure(&self) -> f32 {
+        self.volume_pressure
+    }
+
+    pub fn closure_pressure(&self) -> f32 {
+        self.closure_pressure
+    }
+
+    pub fn openness(&self) -> f32 {
+        self.openness
+    }
+
+    pub fn guard_strength(&self) -> f32 {
+        self.guard_strength
+    }
+
+    pub fn stability_hint(&self) -> f32 {
+        self.stability_hint
+    }
+
+    pub fn exploration_hint(&self) -> f32 {
+        self.exploration_hint
+    }
+
+    /// Compact gradient-like vector for Z-space inference partials.
+    pub fn gradient(&self) -> [f32; 6] {
+        [
+            self.openness,
+            self.guard_strength,
+            self.stability_hint,
+            self.exploration_hint,
+            self.depth_pressure,
+            self.volume_pressure,
+        ]
+    }
+}
+
 /// Numerically guards the Lawvere–Tierney topology that keeps probabilistic data j-closed.
 #[derive(Clone, Copy, Debug)]
 pub struct LawvereTierneyGuard {
@@ -727,6 +876,20 @@ impl OpenCartesianTopos {
         }
         self.porosity = porosity;
         Ok(self)
+    }
+
+    /// Emits a zero-observation control signal for inference or training telemetry.
+    pub fn control_signal(&self) -> ToposControlSignal {
+        self.control_signal_for(0, 0)
+    }
+
+    /// Emits a control signal with explicit traversal and volume observations.
+    pub fn control_signal_for(
+        &self,
+        observed_depth: usize,
+        visited_volume: usize,
+    ) -> ToposControlSignal {
+        ToposControlSignal::from_observation(self, observed_depth, visited_volume)
     }
 
     /// Ensures the provided tensor stays finite and within the permitted volume.
@@ -1582,6 +1745,11 @@ impl<'a> MultiModalAtlas<'a> {
     ) -> PureResult<()> {
         self.atlas.guard_fractal_patch(label, patch)
     }
+
+    /// Emits the current multi-modal traversal pressure as a Z-space control signal.
+    pub fn control_signal(&self) -> ToposControlSignal {
+        self.atlas.control_signal()
+    }
 }
 
 /// Tensor biome that preserves modality envelopes while absorbing shoots.
@@ -1644,6 +1812,11 @@ impl MultiModalBiome {
     /// Creates a multi-modal atlas sharing the biome's profiles.
     pub fn atlas(&self) -> MultiModalAtlas<'_> {
         MultiModalAtlas::from_parts(self.guard_ref(), self.biome.atlas())
+    }
+
+    /// Emits a control signal derived from the tensors currently absorbed by the biome.
+    pub fn control_signal(&self) -> ToposControlSignal {
+        self.biome.control_signal()
     }
 
     /// Absorbs a text tensor into the biome.
@@ -1897,6 +2070,12 @@ impl<'a> ToposAtlas<'a> {
     pub fn remaining_volume(&self) -> usize {
         self.topos.max_volume().saturating_sub(self.visited_volume)
     }
+
+    /// Emits the atlas traversal pressure as a Z-space control signal.
+    pub fn control_signal(&self) -> ToposControlSignal {
+        self.topos
+            .control_signal_for(self.depth, self.visited_volume)
+    }
 }
 
 /// Minimal monadic helper that rewrites values through the enclosing topos.
@@ -2091,6 +2270,18 @@ impl TensorBiome {
     /// Total accumulated weight across all shoots.
     pub fn total_weight(&self) -> f32 {
         self.total_weight
+    }
+
+    /// Estimated number of tensor values currently retained by the biome.
+    pub fn stored_volume(&self) -> usize {
+        self.shape
+            .map(|(rows, cols)| self.len().saturating_mul(rows).saturating_mul(cols))
+            .unwrap_or(0)
+    }
+
+    /// Emits a control signal derived from the currently retained shoots.
+    pub fn control_signal(&self) -> ToposControlSignal {
+        self.topos.control_signal_for(0, self.stored_volume())
     }
 
     /// Common tensor shape shared by all shoots once the biome is non-empty.
@@ -2511,6 +2702,42 @@ mod tests {
         let porous_value = porous.saturate(sample);
         assert!(porous_value.abs() < rigid_value.abs());
         assert!(porous_value.abs() > rigid.saturation() * 0.8);
+    }
+
+    #[test]
+    fn topos_control_signal_tracks_pressure_and_openness() {
+        let topos = unwrap_ok(OpenCartesianTopos::new(-1.0, 1e-5, 10.0, 10, 100));
+        let topos = unwrap_ok(topos.with_porosity(0.25));
+        let signal = topos.control_signal_for(4, 25);
+        assert_eq!(signal.observed_depth(), 4);
+        assert_eq!(signal.visited_volume(), 25);
+        assert_eq!(signal.remaining_volume(), 75);
+        assert!((signal.depth_pressure() - 0.4).abs() < 1e-6);
+        assert!((signal.volume_pressure() - 0.25).abs() < 1e-6);
+        assert!((signal.closure_pressure() - 0.4).abs() < 1e-6);
+        assert!((signal.openness() - 0.6).abs() < 1e-6);
+        assert!(signal.guard_strength() > 0.0);
+        assert!(signal.stability_hint() > 0.0);
+        assert_eq!(signal.gradient().len(), 6);
+    }
+
+    #[test]
+    fn biome_control_signal_reflects_retained_volume() {
+        let topos = unwrap_ok(OpenCartesianTopos::new(-1.0, 1e-5, 10.0, 64, 8));
+        let mut biome = TensorBiome::new(topos);
+        unwrap_ok(biome.absorb(
+            "signal_a",
+            unwrap_ok(Tensor::from_vec(1, 2, vec![0.1, 0.2])),
+        ));
+        unwrap_ok(biome.absorb(
+            "signal_b",
+            unwrap_ok(Tensor::from_vec(1, 2, vec![0.3, 0.4])),
+        ));
+        let signal = biome.control_signal();
+        assert_eq!(biome.stored_volume(), 4);
+        assert_eq!(signal.visited_volume(), 4);
+        assert!((signal.volume_pressure() - 0.5).abs() < 1e-6);
+        assert!((signal.openness() - 0.5).abs() < 1e-6);
     }
 
     #[test]

@@ -12,7 +12,7 @@ use st_tensor::measure::{
 use st_tensor::{
     AmegaHypergrad, AmegaRealgrad, Complex32 as StComplex32, ComplexTensor, DesireGradientControl,
     DesireGradientInterpretation, GradientSummary, HypergradTelemetry, LanguageWaveEncoder,
-    OpenCartesianTopos, Tensor, TensorBiome, ZBox, ZBoxSite,
+    OpenCartesianTopos, Tensor, TensorBiome, ToposControlSignal, ZBox, ZBoxSite,
 };
 
 fn py_complex_to_st(values: Vec<PyComplex32>) -> Vec<StComplex32> {
@@ -27,6 +27,31 @@ fn st_complex_to_py(values: &[StComplex32]) -> Vec<PyComplex32> {
         .iter()
         .map(|value| PyComplex32::new(value.re, value.im))
         .collect()
+}
+
+fn topos_control_signal_to_pydict(
+    py: Python<'_>,
+    signal: ToposControlSignal,
+) -> PyResult<PyObject> {
+    let dict = PyDict::new(py);
+    dict.set_item("curvature", signal.curvature())?;
+    dict.set_item("tolerance", signal.tolerance())?;
+    dict.set_item("saturation", signal.saturation())?;
+    dict.set_item("porosity", signal.porosity())?;
+    dict.set_item("max_depth", signal.max_depth())?;
+    dict.set_item("max_volume", signal.max_volume())?;
+    dict.set_item("observed_depth", signal.observed_depth())?;
+    dict.set_item("visited_volume", signal.visited_volume())?;
+    dict.set_item("remaining_volume", signal.remaining_volume())?;
+    dict.set_item("depth_pressure", signal.depth_pressure())?;
+    dict.set_item("volume_pressure", signal.volume_pressure())?;
+    dict.set_item("closure_pressure", signal.closure_pressure())?;
+    dict.set_item("openness", signal.openness())?;
+    dict.set_item("guard_strength", signal.guard_strength())?;
+    dict.set_item("stability_hint", signal.stability_hint())?;
+    dict.set_item("exploration_hint", signal.exploration_hint())?;
+    dict.set_item("gradient", signal.gradient().to_vec())?;
+    Ok(dict.into_py(py))
 }
 
 #[pyclass(module = "spiraltorch", name = "ComplexTensor")]
@@ -130,6 +155,15 @@ impl PyOpenCartesianTopos {
         self.inner.porosity()
     }
 
+    pub fn with_porosity(&self, porosity: f32) -> PyResult<Self> {
+        let inner = self
+            .inner
+            .clone()
+            .with_porosity(porosity)
+            .map_err(tensor_err_to_py)?;
+        Ok(Self::from_topos(inner))
+    }
+
     pub fn max_depth(&self) -> usize {
         self.inner.max_depth()
     }
@@ -144,6 +178,20 @@ impl PyOpenCartesianTopos {
 
     pub fn saturate(&self, value: f32) -> f32 {
         self.inner.saturate(value)
+    }
+
+    #[pyo3(signature = (observed_depth=0, visited_volume=0))]
+    pub fn control_signal(
+        &self,
+        py: Python<'_>,
+        observed_depth: usize,
+        visited_volume: usize,
+    ) -> PyResult<PyObject> {
+        topos_control_signal_to_pydict(
+            py,
+            self.inner
+                .control_signal_for(observed_depth, visited_volume),
+        )
     }
 
     pub fn site(&self) -> PyResult<PyZBoxSite> {
@@ -1225,6 +1273,10 @@ impl PyTensorBiome {
 
     pub fn total_weight(&self) -> f32 {
         self.inner.total_weight()
+    }
+
+    pub fn control_signal(&self, py: Python<'_>) -> PyResult<PyObject> {
+        topos_control_signal_to_pydict(py, self.inner.control_signal())
     }
 
     pub fn weights(&self) -> Vec<f32> {
