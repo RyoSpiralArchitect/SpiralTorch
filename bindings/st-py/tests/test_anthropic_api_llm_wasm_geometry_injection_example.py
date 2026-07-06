@@ -140,3 +140,27 @@ def test_geometry_injection_example_cli_writes_json(tmp_path, capsys) -> None:
         "geometry:logz",
         "geometry:consensus",
     ]
+
+
+def test_geometry_injection_repeat_sample_output_is_sanitized() -> None:
+    sample_path = (
+        Path(__file__).resolve().parents[1]
+        / "examples"
+        / "anthropic_wasm_geometry_injection_repeat_sample.json"
+    )
+
+    sample_text = sample_path.read_text(encoding="utf-8")
+    sample = json.loads(sample_text)
+
+    assert sample["kind"] == "spiraltorch.anthropic_wasm_geometry_injection.sample"
+    assert sample["probe_source"] == "node-st-wasm"
+    assert sample["repeat"] == 2
+    assert sample["comparison"]["run_trace_count"] == 4
+    assert sample["comparison"]["winners"]["best_score"] in sample["conditions"]
+    assert "ANTHROPIC_API_KEY" not in sample_text
+    assert "sk-" not in sample_text
+    assert "/tmp/" not in sample_text
+    assert sample["runs"]["calm"][0]["finish_reason"] == "end_turn"
+    assert sample["runs"]["turbulent"][0]["telemetry"][
+        "geometry.consensus.log_z_series_projection_stability_mean"
+    ] < 0.001
