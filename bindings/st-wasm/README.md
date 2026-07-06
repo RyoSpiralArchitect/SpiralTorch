@@ -159,6 +159,32 @@ drift, total variation, and a bounded preview of complex samples. Keeping this p
 source-crate tagged (`st-frac::fractal_field`) lets browser experiments, Python reports,
 and future Rust backends share the same geometric context contract.
 
+## Log-Z cosmology probes
+
+`st-frac::cosmology::LogZSeries` can be projected in-browser too. This gives demos and
+dashboards a compact way to summarise real-valued log-lattice series before handing the
+same payload to Python-side Z-space partials:
+
+```ts
+import { WasmLogZSeries, logZSeriesProbeObject } from "spiraltorch-wasm";
+
+const samples = new Float32Array([1.0, 1.2, 1.6, 2.1, 2.8]);
+const zValues = new Float32Array([
+    0.5, 0.0,
+    0.2, 0.3,
+]); // interleaved complex [re, im, ...]
+
+const series = new WasmLogZSeries(0.0, 0.25, samples, "hann", "l1");
+console.log(series.evaluateManyZ(zValues));
+
+const probe = logZSeriesProbeObject(0.0, 0.25, samples, "hann", "l1", zValues, 4);
+console.log(probe.sample_stats.energy, probe.projection.stability_score);
+```
+
+The probe records sample statistics, windowed weight statistics, projection energy,
+phase drift, and a bounded projection preview. It complements Mellin grids by exposing
+the real-series cosmology path as a first-class browser context signal.
+
 ## Scale-stack geometry probes
 
 `st-frac::scale_stack` is now exposed directly in the wasm package. Browser demos can run

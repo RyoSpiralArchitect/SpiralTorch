@@ -160,6 +160,59 @@ declare module "spiraltorch-wasm" {
         samples: FractalFieldProbeSample[];
     };
 
+    export type LogZSeriesWindow = "rectangular" | "hann";
+    export type LogZSeriesNormalisation = "none" | "l1" | "l2";
+
+    export type LogZSeriesLattice = {
+        log_start: number;
+        log_step: number;
+        len: number;
+        support: [number, number];
+    };
+
+    export type LogZSeriesScalarStats = {
+        count: number;
+        mean: number;
+        min: number;
+        max: number;
+        energy: number;
+    };
+
+    export type LogZSeriesProjectionPreview = {
+        index: number;
+        re: number;
+        im: number;
+        abs: number;
+        phase: number;
+    };
+
+    export type LogZSeriesProjectionStats = {
+        count: number;
+        mean_abs: number;
+        max_abs: number;
+        energy: number;
+        phase_drift: number;
+        stability_score: number;
+        preview_count: number;
+        preview: LogZSeriesProjectionPreview[];
+    };
+
+    export type LogZSeriesProbe = {
+        kind: "spiraltorch.wasm_log_z_series_probe";
+        source_crate: "st-frac::cosmology";
+        mode: "log_z_series";
+        log_lattice: LogZSeriesLattice;
+        options: {
+            window: LogZSeriesWindow;
+            normalisation: LogZSeriesNormalisation;
+        };
+        sample_count: number;
+        sample_stats: LogZSeriesScalarStats;
+        weight_stats: LogZSeriesScalarStats;
+        z_count: number;
+        projection: LogZSeriesProjectionStats;
+    };
+
     /** Labels emitted by {@link CanvasDesireControl.eventLabels}. */
     export type DesireControlEventLabel =
         | "lr_increase"
@@ -559,6 +612,48 @@ declare module "spiraltorch-wasm" {
         logStart: number,
         logStep: number,
         len: number,
+        previewLen: number,
+    ): string;
+
+    export class WasmLogZSeries {
+        constructor(
+            logStart: number,
+            logStep: number,
+            samples: Float32Array,
+            window: LogZSeriesWindow,
+            normalisation: LogZSeriesNormalisation,
+        );
+        len(): number;
+        isEmpty(): boolean;
+        readonly logStart: number;
+        readonly logStep: number;
+        readonly window: LogZSeriesWindow;
+        readonly normalisation: LogZSeriesNormalisation;
+        samples(): Float32Array;
+        weights(): Float32Array;
+        evaluateZ(z: Float32Array): Float32Array;
+        evaluateManyZ(zValues: Float32Array): Float32Array;
+        probeObject(zValues: Float32Array, previewLen: number): LogZSeriesProbe;
+        probeJson(zValues: Float32Array, previewLen: number): string;
+    }
+
+    export function logZSeriesProbeObject(
+        logStart: number,
+        logStep: number,
+        samples: Float32Array,
+        window: LogZSeriesWindow,
+        normalisation: LogZSeriesNormalisation,
+        zValues: Float32Array,
+        previewLen: number,
+    ): LogZSeriesProbe;
+
+    export function logZSeriesProbeJson(
+        logStart: number,
+        logStep: number,
+        samples: Float32Array,
+        window: LogZSeriesWindow,
+        normalisation: LogZSeriesNormalisation,
+        zValues: Float32Array,
         previewLen: number,
     ): string;
 

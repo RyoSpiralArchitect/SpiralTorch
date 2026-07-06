@@ -6185,6 +6185,37 @@ class LogZSeries:
     def evaluate_many_z(self, z_values: Sequence[complex]) -> List[complex]: ...
     def ensure_compatible(self, other: LogZSeries) -> None: ...
 
+def log_z_series_probe(
+    series: Any,
+    z_values: Sequence[complex],
+    *,
+    preview_len: int = ...,
+) -> Dict[str, Any]: ...
+
+def log_z_series_probe_to_zspace_partial(
+    probe: Mapping[str, Any],
+    *,
+    bundle_weight: float = ...,
+    origin: str | None = ...,
+    telemetry_prefix: str = ...,
+    gradient_dim: int = ...,
+) -> ZSpacePartialBundle: ...
+
+def log_z_series_partial(
+    samples: Sequence[float],
+    log_start: float,
+    log_step: float,
+    z_values: Sequence[complex],
+    *,
+    window: str = ...,
+    normalisation: str = ...,
+    preview_len: int = ...,
+    bundle_weight: float = ...,
+    origin: str | None = ...,
+    telemetry_prefix: str = ...,
+    gradient_dim: int = ...,
+) -> ZSpacePartialBundle: ...
+
 
 class _FracModule(ModuleType):
     MellinLogGrid: type[MellinLogGrid]
@@ -6239,6 +6270,37 @@ class _FracModule(ModuleType):
         lacunarity: float = ...,
         gain: float = ...,
         iterations: int = ...,
+        preview_len: int = ...,
+        bundle_weight: float = ...,
+        origin: str | None = ...,
+        telemetry_prefix: str = ...,
+        gradient_dim: int = ...,
+    ) -> ZSpacePartialBundle: ...
+
+    def log_z_series_probe(
+        series: Any,
+        z_values: Sequence[complex],
+        *,
+        preview_len: int = ...,
+    ) -> Dict[str, Any]: ...
+
+    def log_z_series_probe_to_zspace_partial(
+        probe: Mapping[str, Any],
+        *,
+        bundle_weight: float = ...,
+        origin: str | None = ...,
+        telemetry_prefix: str = ...,
+        gradient_dim: int = ...,
+    ) -> ZSpacePartialBundle: ...
+
+    def log_z_series_partial(
+        samples: Sequence[float],
+        log_start: float,
+        log_step: float,
+        z_values: Sequence[complex],
+        *,
+        window: str = ...,
+        normalisation: str = ...,
         preview_len: int = ...,
         bundle_weight: float = ...,
         origin: str | None = ...,
@@ -7479,6 +7541,9 @@ __all__ = [
     "fractal_field_partial",
     "fractal_field_probe",
     "fractal_field_probe_to_zspace_partial",
+    "log_z_series_partial",
+    "log_z_series_probe",
+    "log_z_series_probe_to_zspace_partial",
     "scale_stack_probe",
     "scale_stack_probe_to_zspace_partial",
     "scalar_scale_stack_partial",
