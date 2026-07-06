@@ -171,6 +171,20 @@ or empty-text rows appear on high-effort routes. The written `report.json`
 includes route settings plus `selection_profiles` for balanced, quality,
 grounded, efficiency, and latency-sensitive routing.
 
+After several live sweeps, compare the resulting reports to check whether the
+same profile winners stay stable:
+
+```python
+reports = st.compare_api_llm_matrix_reports(
+    {
+        "budget-a": "/tmp/spiraltorch-live-a/report.json",
+        "budget-b": "/tmp/spiraltorch-live-b/report.json",
+    }
+)
+print(reports["profile_winners"]["balanced"][0])
+print(reports["routes"][0]["route_score_mean"])
+```
+
 If the optional `openai` package is installed, the same runtime can call the
 Responses API directly.  The SDK reads `OPENAI_API_KEY` from the environment;
 SpiralTorch only records the model output, usage, latency, and Z-space trace.

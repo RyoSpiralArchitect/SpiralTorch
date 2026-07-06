@@ -30,6 +30,7 @@ __all__ = [
     "api_llm_text_from_response",
     "api_llm_trace_from_response",
     "api_llm_usage_from_response",
+    "compare_api_llm_matrix_reports",
     "compare_api_llm_trace_runs",
     "load_api_llm_trace_events",
     "make_anthropic_messages_invoke",
@@ -45,6 +46,18 @@ __all__ = [
 _OPENAI_INSTALL_HINT = "pip install openai"
 _ANTHROPIC_INSTALL_HINT = "pip install anthropic"
 _API_LLM_TRACE_SCHEMA = "spiraltorch.api_llm_trace.v1"
+_SELECTION_PROFILES = ("balanced", "quality", "grounded", "efficiency", "latency")
+_REPORT_ROUTE_METRICS = (
+    "route_score",
+    "quality_score",
+    "text_quality_score",
+    "efficiency_score",
+    "completion_rate",
+    "latency_ms_mean",
+    "total_tokens",
+    "empty_text_rate",
+    "refusal_rate",
+)
 _TEXT_QUALITY_STOPWORDS = frozenset(
     {
         "a",
@@ -1332,11 +1345,8 @@ def _comparison_row(label: str, path: Path, summary: Mapping[str, Any]) -> dict[
     row["efficiency_score"] = _efficiency_score(row)
     row["route_score"] = _route_score(row)
     row["selection_scores"] = {
-        "balanced": _selection_profile_score(row, "balanced"),
-        "quality": _selection_profile_score(row, "quality"),
-        "grounded": _selection_profile_score(row, "grounded"),
-        "efficiency": _selection_profile_score(row, "efficiency"),
-        "latency": _selection_profile_score(row, "latency"),
+        profile: _selection_profile_score(row, profile)
+        for profile in _SELECTION_PROFILES
     }
     return row
 
@@ -1406,7 +1416,7 @@ def _near_best_routes(
 
 def _selection_profiles(rows: Sequence[Mapping[str, Any]]) -> dict[str, dict[str, Any]]:
     profiles: dict[str, dict[str, Any]] = {}
-    for profile in ("balanced", "quality", "grounded", "efficiency", "latency"):
+    for profile in _SELECTION_PROFILES:
         candidates: list[tuple[float, Mapping[str, Any]]] = []
         for row in rows:
             if int(row.get("count") or 0) <= 0:
@@ -1442,6 +1452,261 @@ def _selection_profiles(rows: Sequence[Mapping[str, Any]]) -> dict[str, dict[str
             "completion_rate": _finite_float(row.get("completion_rate")) or 0.0,
         }
     return profiles
+
+
+def _read_json_mapping(path: Path) -> dict[str, Any]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"{path} does not contain a JSON object")
+    return payload
+
+
+def _report_entries(
+    reports: Mapping[str, str | Path] | Sequence[str | Path] | str | Path,
+    *,
+    labels: Sequence[str] | None,
+) -> list[tuple[str, Path]]:
+    if isinstance(reports, Mapping):
+        return [(str(label), Path(path)) for label, path in reports.items()]
+    if isinstance(reports, (str, Path)):
+        path = Path(reports)
+        return [(path.parent.name or path.stem or "report_0", path)]
+    paths = list(reports)
+    explicit = list(labels or [])
+    entries: list[tuple[str, Path]] = []
+    for index, raw_path in enumerate(paths):
+        path = Path(raw_path)
+        label = explicit[index] if index < len(explicit) else path.parent.name or path.stem
+        entries.append((str(label or f"report_{index}"), path))
+    return entries
+
+
+def _report_profile_winners(
+    selection_profiles: Mapping[str, Any],
+) -> tuple[dict[str, str | None], dict[str, float]]:
+    winners: dict[str, str | None] = {}
+    scores: dict[str, float] = {}
+    for profile in _SELECTION_PROFILES:
+        payload = selection_profiles.get(profile)
+        if isinstance(payload, Mapping):
+            label = payload.get("label")
+            winners[profile] = str(label) if label not in {None, ""} else None
+            scores[profile] = _finite_float(payload.get("score")) or 0.0
+        else:
+            winners[profile] = None
+            scores[profile] = 0.0
+    return winners, scores
+
+
+def _matrix_report_row(label: str, path: Path, report: Mapping[str, Any]) -> dict[str, Any]:
+    comparison = report.get("comparison")
+    comparison_map = comparison if isinstance(comparison, Mapping) else {}
+    winners = comparison_map.get("winners")
+    winners_map = winners if isinstance(winners, Mapping) else {}
+    selection_profiles = comparison_map.get("selection_profiles")
+    selection_map = selection_profiles if isinstance(selection_profiles, Mapping) else {}
+    profile_winners, profile_scores = _report_profile_winners(selection_map)
+    skipped = report.get("skipped")
+    skipped_map = dict(skipped) if isinstance(skipped, Mapping) else {}
+    client_errors = report.get("client_errors")
+    client_error_count = (
+        len(client_errors)
+        if isinstance(client_errors, Sequence) and not isinstance(client_errors, (str, bytes))
+        else int(_finite_float(report.get("client_error_count")) or 0)
+    )
+    near_best = comparison_map.get("near_best")
+    return {
+        "label": label,
+        "path": str(path),
+        "kind": report.get("kind"),
+        "created_at": report.get("created_at"),
+        "prompt_count": int(_finite_float(report.get("prompt_count")) or 0),
+        "route_count": int(_finite_float(report.get("route_count")) or 0),
+        "near_best_tolerance": _finite_float(report.get("near_best_tolerance")) or 0.0,
+        "best_score": winners_map.get("best_score"),
+        "highest_quality": winners_map.get("highest_quality"),
+        "highest_text_quality": winners_map.get("highest_text_quality"),
+        "highest_efficiency": winners_map.get("highest_efficiency"),
+        "lowest_latency": winners_map.get("lowest_latency"),
+        "lowest_total_tokens": winners_map.get("lowest_total_tokens"),
+        "profile_winners": profile_winners,
+        "profile_scores": profile_scores,
+        "near_best_count": len(near_best) if isinstance(near_best, Sequence) else 0,
+        "skipped": skipped_map,
+        "skipped_count": len(skipped_map),
+        "client_error_count": client_error_count,
+    }
+
+
+def _report_run_rows(report: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    comparison = report.get("comparison")
+    if not isinstance(comparison, Mapping):
+        return []
+    runs = comparison.get("runs")
+    if not isinstance(runs, Sequence) or isinstance(runs, (str, bytes)):
+        return []
+    return [row for row in runs if isinstance(row, Mapping)]
+
+
+def _profile_winner_summary(
+    report_rows: Sequence[Mapping[str, Any]],
+) -> dict[str, list[dict[str, Any]]]:
+    total_reports = max(1, len(report_rows))
+    result: dict[str, list[dict[str, Any]]] = {}
+    for profile in _SELECTION_PROFILES:
+        counts: dict[str, int] = {}
+        scores: dict[str, list[float]] = {}
+        observed_reports = 0
+        for row in report_rows:
+            winners = row.get("profile_winners")
+            profile_scores = row.get("profile_scores")
+            label = winners.get(profile) if isinstance(winners, Mapping) else None
+            if label in {None, ""}:
+                continue
+            observed_reports += 1
+            label_value = str(label)
+            counts[label_value] = counts.get(label_value, 0) + 1
+            if isinstance(profile_scores, Mapping):
+                score = _finite_float(profile_scores.get(profile))
+                if score is not None:
+                    scores.setdefault(label_value, []).append(score)
+        result[profile] = [
+            {
+                "label": label,
+                "wins": wins,
+                "observed_reports": observed_reports,
+                "report_coverage": observed_reports / total_reports,
+                "win_rate": wins / max(1, observed_reports),
+                "score_mean": _stats(scores.get(label, []))["mean"],
+            }
+            for label, wins in sorted(
+                counts.items(),
+                key=lambda item: (item[1], item[0]),
+                reverse=True,
+            )
+        ]
+    return result
+
+
+def _route_report_summary(
+    report_rows: Sequence[Mapping[str, Any]],
+    reports_by_label: Mapping[str, Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    route_values: dict[str, dict[str, list[float]]] = {}
+    best_wins: dict[str, int] = {}
+    profile_wins: dict[str, dict[str, int]] = {}
+    appearances: dict[str, int] = {}
+    for report_row in report_rows:
+        report_label = str(report_row.get("label"))
+        report = reports_by_label.get(report_label, {})
+        best = report_row.get("best_score")
+        if best not in {None, ""}:
+            best_label = str(best)
+            best_wins[best_label] = best_wins.get(best_label, 0) + 1
+        winners = report_row.get("profile_winners")
+        if isinstance(winners, Mapping):
+            for profile, route_label in winners.items():
+                if route_label in {None, ""}:
+                    continue
+                route_value = str(route_label)
+                profile_wins.setdefault(route_value, {})
+                profile_wins[route_value][str(profile)] = (
+                    profile_wins[route_value].get(str(profile), 0) + 1
+                )
+        for run_row in _report_run_rows(report):
+            route_label = run_row.get("label")
+            if route_label in {None, ""}:
+                continue
+            route_value = str(route_label)
+            appearances[route_value] = appearances.get(route_value, 0) + 1
+            metrics = route_values.setdefault(route_value, {})
+            for metric in _REPORT_ROUTE_METRICS:
+                value = _finite_float(run_row.get(metric))
+                if value is not None:
+                    metrics.setdefault(metric, []).append(value)
+
+    summaries: list[dict[str, Any]] = []
+    for route_label, metrics in route_values.items():
+        profile_win_counts = {
+            profile: profile_wins.get(route_label, {}).get(profile, 0)
+            for profile in _SELECTION_PROFILES
+        }
+        row: dict[str, Any] = {
+            "label": route_label,
+            "appearances": appearances.get(route_label, 0),
+            "best_score_wins": best_wins.get(route_label, 0),
+            "profile_wins": profile_win_counts,
+            "profile_win_total": sum(profile_win_counts.values()),
+        }
+        for metric in _REPORT_ROUTE_METRICS:
+            stats = _stats(metrics.get(metric, []))
+            prefix = metric[:-5] if metric.endswith("_mean") else metric
+            row[f"{prefix}_mean"] = stats["mean"]
+            row[f"{prefix}_min"] = stats["min"]
+            row[f"{prefix}_max"] = stats["max"]
+        summaries.append(row)
+    summaries.sort(
+        key=lambda row: (
+            int(row.get("best_score_wins") or 0),
+            int(row.get("profile_win_total") or 0),
+            _finite_float(row.get("route_score_mean")) or 0.0,
+            str(row.get("label")),
+        ),
+        reverse=True,
+    )
+    return summaries
+
+
+def compare_api_llm_matrix_reports(
+    reports: Mapping[str, str | Path] | Sequence[str | Path] | str | Path,
+    *,
+    labels: Sequence[str] | None = None,
+) -> dict[str, Any]:
+    """Compare multiple live API LLM provider-matrix report JSON files."""
+
+    entries = _report_entries(reports, labels=labels)
+    report_rows: list[dict[str, Any]] = []
+    reports_by_label: dict[str, dict[str, Any]] = {}
+    for label, path in entries:
+        report = _read_json_mapping(path)
+        reports_by_label[label] = report
+        report_rows.append(_matrix_report_row(label, path, report))
+
+    profile_winners = _profile_winner_summary(report_rows)
+    route_summaries = _route_report_summary(report_rows, reports_by_label)
+    recommendations: list[str] = []
+    if route_summaries:
+        best_route = route_summaries[0]
+        recommendations.append(
+            f"prefer {best_route['label']} when stability across matrix reports matters"
+        )
+    for profile, winners in profile_winners.items():
+        if not winners:
+            continue
+        leader = winners[0]
+        if leader["win_rate"] >= 1.0 and leader.get("report_coverage") == 1.0:
+            recommendations.append(
+                f"{profile} profile is stable on {leader['label']} across all reports"
+            )
+        elif leader["win_rate"] >= 1.0:
+            recommendations.append(
+                f"{profile} profile is stable on {leader['label']} across "
+                f"observed reports ({leader['observed_reports']}/{len(report_rows)} reports)"
+            )
+        elif leader["win_rate"] >= 0.5:
+            recommendations.append(
+                f"{profile} profile leans toward {leader['label']} "
+                f"({leader['wins']}/{leader['observed_reports']} observed reports)"
+            )
+
+    return {
+        "kind": "spiraltorch.api_llm_matrix_report_comparison",
+        "count": len(report_rows),
+        "reports": report_rows,
+        "profile_winners": profile_winners,
+        "routes": route_summaries,
+        "recommendations": recommendations,
+    }
 
 
 def compare_api_llm_trace_runs(
