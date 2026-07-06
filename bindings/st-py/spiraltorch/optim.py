@@ -300,21 +300,54 @@ class Amegagrad:
         observed_depth: int | None = None,
         visited_volume: int | None = None,
     ) -> tuple[float, float]:
+        import spiraltorch as st
+
         if hints is None:
-            hints = self.topos_training_hints(
+            signal = self.topos_control_signal(
                 observed_depth=observed_depth,
                 visited_volume=visited_volume,
             )
+            hints = signal.get("training_hints")
+            if not isinstance(hints, Mapping):
+                hints = {}
+            plan = st.topos_training_plan(signal, gain=self.topos_control_gain)
         else:
             hints = dict(hints)
             self.last_topos_hints = dict(hints)
-        learning_rate_scale, clip_scale, rate_scale = self._topos_rate_scale(hints)
+            plan = st.topos_training_plan(
+                {"training_hints": hints},
+                gain=self.topos_control_gain,
+            )
+        learning_rate_scale = _finite_float(
+            plan.get("learning_rate_scale"),
+            default=_finite_float(hints.get("learning_rate_scale"), default=1.0),
+        )
+        clip_scale = _finite_float(
+            plan.get("clip_scale"),
+            default=_finite_float(hints.get("clip_scale"), default=1.0),
+        )
+        rate_scale = _finite_float(
+            plan.get("rate_scale"),
+            default=self._topos_rate_scale(hints)[2],
+        )
         hyper_scaled = hyper_target * rate_scale
         real_scaled = real_target * rate_scale
         self.last_topos_effect = {
             "learning_rate_scale": learning_rate_scale,
             "clip_scale": clip_scale,
+            "raw_rate_scale": _finite_float(
+                plan.get("raw_rate_scale"),
+                default=learning_rate_scale * clip_scale,
+            ),
             "rate_scale": rate_scale,
+            "effective_gradient_bias_scale": _finite_float(
+                plan.get("effective_gradient_bias_scale"),
+                default=0.0,
+            ),
+            "effective_momentum_damping": _finite_float(
+                plan.get("effective_momentum_damping"),
+                default=0.0,
+            ),
             "hyper_learning_rate": hyper_scaled,
             "real_learning_rate": real_scaled,
         }

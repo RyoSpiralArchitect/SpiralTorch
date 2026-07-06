@@ -31,7 +31,7 @@ pub use self::topos::{
     GraphGuardProfile, GraphGuardReport, LawvereTierneyGuard, ModalityProfile, MultiModalAtlas,
     MultiModalBiome, MultiModalToposGuard, OpenCartesianTopos, RewardBoundary,
     RewardBoundarySignal, RewriteMonad, TensorBiome, ToposAtlas, ToposControlSignal,
-    ToposInferenceHints, ToposTrainingHints, ZBox, ZBoxSite,
+    ToposInferenceHints, ToposInferencePlan, ToposTrainingHints, ToposTrainingPlan, ZBox, ZBoxSite,
 };
 
 #[cfg(feature = "hip")]
