@@ -110,6 +110,43 @@ class RunPyPIPublishFromReleaseTests(unittest.TestCase):
         self.assertEqual(run_id, 123)
         self.assertEqual(url, "https://example.test/run")
 
+    def test_watch_run_accepts_successful_run_after_transient_watch_failure(self) -> None:
+        watch_failure = run_pypi_publish_from_release.subprocess.CalledProcessError(
+            returncode=1,
+            cmd=["gh", "run", "watch"],
+        )
+        status_success = run_pypi_publish_from_release.subprocess.CompletedProcess(
+            args=["gh", "run", "view"],
+            returncode=0,
+            stdout='{"status": "completed", "conclusion": "success", "url": "https://example.test/run"}',
+            stderr="",
+        )
+        with mock.patch.object(
+            run_pypi_publish_from_release,
+            "run",
+            side_effect=[watch_failure, status_success],
+        ):
+            run_pypi_publish_from_release.watch_run("RyoSpiralArchitect/SpiralTorch", 123, interval=10)
+
+    def test_watch_run_reports_failed_conclusion_after_watch_failure(self) -> None:
+        watch_failure = run_pypi_publish_from_release.subprocess.CalledProcessError(
+            returncode=1,
+            cmd=["gh", "run", "watch"],
+        )
+        status_failure = run_pypi_publish_from_release.subprocess.CompletedProcess(
+            args=["gh", "run", "view"],
+            returncode=0,
+            stdout='{"status": "completed", "conclusion": "failure", "url": "https://example.test/run"}',
+            stderr="",
+        )
+        with mock.patch.object(
+            run_pypi_publish_from_release,
+            "run",
+            side_effect=[watch_failure, status_failure],
+        ):
+            with self.assertRaisesRegex(run_pypi_publish_from_release.PublishRunError, "conclusion=failure"):
+                run_pypi_publish_from_release.watch_run("RyoSpiralArchitect/SpiralTorch", 123, interval=10)
+
 
 if __name__ == "__main__":
     unittest.main()
