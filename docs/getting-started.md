@@ -106,6 +106,27 @@ trace = runtime.call(api, "route this through Z-space")
 print(trace.as_dict()["inference"]["confidence"])
 ```
 
+If the optional `openai` package is installed, the same runtime can call the
+Responses API directly.  The SDK reads `OPENAI_API_KEY` from the environment;
+SpiralTorch only records the model output, usage, latency, and Z-space trace.
+
+```python
+import spiraltorch as st
+
+runtime = st.ApiLLMZSpaceRuntime(
+    [0.12, -0.04, 0.33, -0.11],
+    backend="auto",
+    provider="openai",
+    model="gpt-4.1-mini",
+)
+trace = runtime.call_openai_responses(
+    "Describe SpiralTorch entering Z-space runtime.",
+    max_output_tokens=48,
+)
+print(trace.text)
+print(trace.as_dict()["metrics"])
+```
+
 ### Rust: Pure Tensor Operations
 
 ```rust

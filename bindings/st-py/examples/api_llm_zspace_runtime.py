@@ -5,6 +5,8 @@
 This example uses a local fake API callable so it runs without network access or
 an API key.  Replace ``fake_api`` with a hosted-model SDK call, or pass an
 already materialised response mapping into ``runtime.record_response(...)``.
+For a real OpenAI Responses API smoke, see
+``openai_api_llm_zspace_runtime.py``.
 """
 
 from __future__ import annotations

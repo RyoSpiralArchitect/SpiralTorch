@@ -22,7 +22,9 @@ start with four handles:
   cross the Z-space membrane.
 - `spiraltorch.ApiLLMZSpaceRuntime` when hosted/API-model LLM responses should
   become Z-space partial traces without requiring the OpenAI SDK or any other
-  hosted-model package at install time.
+  hosted-model package at install time; if `openai` is installed, use
+  `runtime.call_openai_responses(...)` or `spiraltorch.make_openai_chat_invoke(...)`
+  with `OPENAI_API_KEY` from the environment.
 - `spiraltorch.runtime_import_preflight_report(...)` when a Transformers,
   Torch, PEFT, or dataset dependency contract should be recorded before a
   heavier fine-tune run.
@@ -89,7 +91,9 @@ PY
 - Hosted/API-model LLM runtime bridge via `ApiLLMZSpaceRuntime` so an
   OpenAI-compatible response mapping, SDK response object, or arbitrary API
   callable can be converted into Z-space metrics, usage/latency telemetry, and
-  posterior confidence without making hosted SDKs mandatory dependencies.
+  posterior confidence without making hosted SDKs mandatory dependencies. The
+  optional OpenAI adapters are lazy: they import `openai` only when called, then
+  feed Responses API or chat-completion results into the same trace path.
 - Language desire controls via `st.nn.DesirePipeline`, `DesireTrainerBridge`,
   `DesireRoundtableBridge`, and downstream hook adapters so notebooks can
   inspect phase/temperature/entropy offsets without making the symbolic kernel
