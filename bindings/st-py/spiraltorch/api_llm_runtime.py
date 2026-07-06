@@ -36,6 +36,7 @@ __all__ = [
     "make_openai_chat_invoke",
     "make_openai_responses_invoke",
     "run_api_llm_prompt_suite",
+    "run_api_llm_prompt_suite_matrix",
     "summarize_api_llm_trace_events",
     "write_api_llm_trace_jsonl",
 ]
@@ -980,6 +981,15 @@ def _trace_entries(
     return entries
 
 
+def _safe_trace_label(label: str, *, fallback: str) -> str:
+    safe = "".join(
+        char if char.isalnum() or char in {"-", "_", "."} else "-"
+        for char in label
+    )
+    safe = safe.strip(".-_")
+    return safe or fallback
+
+
 def _route_score(row: Mapping[str, Any]) -> float:
     confidence = _finite_float(row.get("confidence_mean")) or 0.0
     stability = _finite_float(row.get("stability_mean")) or 0.0
@@ -1462,3 +1472,75 @@ def run_api_llm_prompt_suite(
         clear=clear,
         **kwargs,
     )
+
+
+def run_api_llm_prompt_suite_matrix(
+    prompts: Iterable[str],
+    invokes: Mapping[str, Callable[..., Any]],
+    *args: Any,
+    z_state: Sequence[float],
+    backend: str | None = "auto",
+    providers: Mapping[str, str | None] | None = None,
+    models: Mapping[str, str | None] | None = None,
+    session: Any | None = None,
+    session_factory: Callable[..., Any] | None = None,
+    create_session: bool = True,
+    alpha: float = 0.35,
+    smoothing: float = 0.35,
+    strategy: str = "mean",
+    jsonl_dir: str | Path | None = None,
+    clear: bool = True,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Run the same prompt suite through multiple API-model callables."""
+
+    prompt_list = list(prompts)
+    provider_map = dict(providers or {})
+    model_map = dict(models or {})
+    out_dir = Path(jsonl_dir) if jsonl_dir is not None else None
+    if out_dir is not None:
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+    suites: dict[str, dict[str, Any]] = {}
+    trace_paths: dict[str, str] = {}
+    for index, (label, invoke) in enumerate(invokes.items()):
+        label_value = str(label)
+        jsonl_out: Path | None = None
+        if out_dir is not None:
+            safe_label = _safe_trace_label(label_value, fallback=f"run-{index}")
+            filename = f"{index:02d}-{safe_label}.jsonl"
+            jsonl_out = out_dir / filename
+        suite = run_api_llm_prompt_suite(
+            prompt_list,
+            invoke,
+            *args,
+            z_state=z_state,
+            backend=backend,
+            provider=provider_map.get(label_value, label_value),
+            model=model_map.get(label_value),
+            session=session,
+            session_factory=session_factory,
+            create_session=create_session,
+            alpha=alpha,
+            smoothing=smoothing,
+            strategy=strategy,
+            jsonl_out=jsonl_out,
+            clear=clear,
+            **kwargs,
+        )
+        suites[label_value] = suite
+        path = suite.get("jsonl")
+        if isinstance(path, str):
+            trace_paths[label_value] = path
+
+    comparison = compare_api_llm_trace_runs(trace_paths) if trace_paths else None
+    return {
+        "kind": "spiraltorch.api_llm_prompt_suite_matrix",
+        "count": len(suites),
+        "prompt_count": len(prompt_list),
+        "labels": list(suites.keys()),
+        "jsonl_dir": str(out_dir) if out_dir is not None else None,
+        "trace_paths": trace_paths,
+        "suites": suites,
+        "comparison": comparison,
+    }

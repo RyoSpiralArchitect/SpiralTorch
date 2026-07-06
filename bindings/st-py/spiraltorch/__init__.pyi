@@ -2227,6 +2227,26 @@ def run_api_llm_prompt_suite(
 ) -> Dict[str, Any]: ...
 
 
+def run_api_llm_prompt_suite_matrix(
+    prompts: Iterable[str],
+    invokes: Mapping[str, Callable[..., Any]],
+    *args: Any,
+    z_state: Sequence[float],
+    backend: str | None = ...,
+    providers: Mapping[str, str | None] | None = ...,
+    models: Mapping[str, str | None] | None = ...,
+    session: Any | None = ...,
+    session_factory: Callable[..., Any] | None = ...,
+    create_session: bool = ...,
+    alpha: float = ...,
+    smoothing: float = ...,
+    strategy: str = ...,
+    jsonl_dir: str | PathLike[str] | None = ...,
+    clear: bool = ...,
+    **kwargs: Any,
+) -> Dict[str, Any]: ...
+
+
 def make_openai_responses_invoke(
     *,
     client: Any | None = ...,
@@ -7154,6 +7174,7 @@ __all__ = [
     "make_openai_chat_invoke",
     "make_openai_responses_invoke",
     "run_api_llm_prompt_suite",
+    "run_api_llm_prompt_suite_matrix",
     "summarize_api_llm_trace_events",
     "write_api_llm_trace_jsonl",
     "ZSpaceTrainer",

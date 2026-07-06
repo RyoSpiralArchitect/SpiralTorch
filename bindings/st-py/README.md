@@ -27,7 +27,8 @@ start with four handles:
   if `anthropic` is installed, use `runtime.call_anthropic_messages(...)` or
   `spiraltorch.make_anthropic_messages_invoke(...)`. Provider keys are read
   from the environment by their SDKs. Runtime traces can be persisted with
-  `runtime.write_jsonl(...)`, batched with `runtime.run_prompts(...)`, and summarized with
+  `runtime.write_jsonl(...)`, batched with `runtime.run_prompts(...)`, replayed
+  across providers with `spiraltorch.run_api_llm_prompt_suite_matrix(...)`, and summarized with
   `spiraltorch.summarize_api_llm_trace_events(...)`, or compared with
   `spiraltorch.compare_api_llm_trace_runs(...)`.
 - `spiraltorch.runtime_import_preflight_report(...)` when a Transformers,
@@ -102,7 +103,8 @@ PY
   the same trace path. API LLM trace JSONL helpers mirror the trainer/transformers
   trace workflow so hosted-model runs can be compared without re-running the API
   call; use `run_api_llm_prompt_suite(...)` for a multi-prompt bipolar/Z-space
-  smoke, then
+  smoke, or `run_api_llm_prompt_suite_matrix(...)` to replay the same prompts
+  across OpenAI, Anthropic, gateway, or local callables, then
   `compare_api_llm_trace_runs(...)` to pick candidates by route score, latency,
   token use, confidence, and runtime readiness.
 - Language desire controls via `st.nn.DesirePipeline`, `DesireTrainerBridge`,
