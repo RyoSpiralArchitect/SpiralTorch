@@ -657,6 +657,36 @@ def semantic_scale_stack(
     metric: str = ...,
 ) -> ScaleStack: ...
 
+def scale_stack_probe(
+    stack: Any,
+    *,
+    ambient_dim: float,
+    dimension_window: int = ...,
+    levels: Sequence[float] = ...,
+) -> Dict[str, Any]: ...
+
+def scalar_scale_stack_probe(
+    field: Iterable[float],
+    shape: Sequence[int],
+    scales: Sequence[float],
+    threshold: float,
+    *,
+    ambient_dim: float | None = ...,
+    dimension_window: int = ...,
+    levels: Sequence[float] = ...,
+) -> Dict[str, Any]: ...
+
+def semantic_scale_stack_probe(
+    embeddings: Sequence[Sequence[float]],
+    scales: Sequence[float],
+    threshold: float,
+    *,
+    metric: str = ...,
+    ambient_dim: float = ...,
+    dimension_window: int = ...,
+    levels: Sequence[float] = ...,
+) -> Dict[str, Any]: ...
+
 class Tensor:
     def __init__(self, *args: object, **kwargs: object) -> None: ...
     @staticmethod
@@ -7339,6 +7369,9 @@ __all__ = [
     "summarize_wasm_report",
     "wasm_report_to_zspace_partial",
     "write_wasm_report_context_artifact",
+    "scale_stack_probe",
+    "scalar_scale_stack_probe",
+    "semantic_scale_stack_probe",
     "ZSpaceTrainer",
     "ZSpaceCoherenceSequencer",
     "step_many",
