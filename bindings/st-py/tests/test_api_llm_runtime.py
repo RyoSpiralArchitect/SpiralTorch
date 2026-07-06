@@ -23,6 +23,8 @@ def test_api_llm_runtime_exports_from_top_level() -> None:
     assert "run_api_llm_prompt_suite" in st.__all__
     assert "run_api_llm_prompt_suite_matrix" in st.__all__
     assert "summarize_api_llm_trace_events" in st.__all__
+    assert "topos_runtime_adapter" in st.__all__
+    assert "topos_runtime_request" in st.__all__
     assert "write_api_llm_trace_jsonl" in st.__all__
 
 
@@ -363,6 +365,88 @@ def test_format_api_llm_context_prompt_includes_bounded_wasm_telemetry() -> None
     assert "wasm.loss=0.0415" in prompt
     assert "wasm.stability_hint=0.86" in prompt
     assert "User prompt: Diagnose the run." in prompt
+
+
+def test_topos_runtime_request_scales_hosted_llm_controls() -> None:
+    request = st.topos_runtime_request(
+        {
+            "curvature": -0.9,
+            "porosity": 0.25,
+            "max_depth": 10,
+            "max_volume": 100,
+        },
+        observed_depth=4,
+        visited_volume=25,
+        base_temperature=0.8,
+        base_top_p=0.9,
+        include_penalties=True,
+    )
+
+    assert request["temperature"] == pytest.approx(0.68265)
+    assert request["top_p"] == pytest.approx(0.8012469375)
+    assert request["frequency_penalty"] > 0.0
+    assert request["presence_penalty"] < request["frequency_penalty"]
+
+
+def test_topos_runtime_adapter_is_serializable_context_payload() -> None:
+    adapter = st.topos_runtime_adapter(
+        {"porosity": 0.25, "max_depth": 10, "max_volume": 100},
+        observed_depth=4,
+        visited_volume=25,
+        request_options={"base_temperature": 0.8, "include_penalties": True},
+    )
+
+    assert adapter["kind"] == "spiraltorch.topos_runtime_adapter"
+    assert adapter["request"]["temperature"] == pytest.approx(0.68265)
+    assert adapter["signal"]["sampling_focus"] == pytest.approx(0.668003125)
+    assert adapter["context_partial"]["origin"] == "topos:runtime"
+    assert adapter["context_partial"]["telemetry"]["topos.temperature_scale"] == pytest.approx(
+        0.8533125
+    )
+
+
+def test_api_llm_prompt_suite_accepts_topos_runtime_request_and_context() -> None:
+    calls: list[tuple[str, dict[str, object]]] = []
+    topos_payload = {"porosity": 0.25, "max_depth": 10, "max_volume": 100}
+    request = st.topos_runtime_request(
+        topos_payload,
+        observed_depth=4,
+        visited_volume=25,
+        base_temperature=0.8,
+    )
+    context = st.topos_control_partial(
+        topos_payload,
+        observed_depth=4,
+        visited_volume=25,
+    )
+
+    def fake_api(prompt: str, **request_kwargs: object) -> dict[str, object]:
+        calls.append((prompt, dict(request_kwargs)))
+        return {
+            "model": "topos-runtime-model",
+            "output_text": "Topos-guided API route entered Z-space.",
+            "usage": {"prompt_tokens": 6, "completion_tokens": 7, "total_tokens": 13},
+        }
+
+    result = st.run_api_llm_prompt_suite(
+        ["route with topos runtime hints"],
+        fake_api,
+        z_state=[0.2, -0.1, 0.4, 0.05],
+        provider="topos-provider",
+        model="topos-runtime-model",
+        create_session=False,
+        context_partials=context,
+        context_prompt=True,
+        context_prompt_options={"max_telemetry": 32},
+        **request,
+    )
+
+    assert len(calls) == 1
+    assert calls[0][1]["temperature"] == pytest.approx(request["temperature"])
+    assert calls[0][1]["top_p"] == pytest.approx(request["top_p"])
+    assert "topos.temperature_scale" in calls[0][0]
+    telemetry = result["traces"][0]["inference"]["telemetry"]["payload"]
+    assert telemetry["topos.learning_rate_scale"] == pytest.approx(0.8919875)
 
 
 def test_api_llm_geometry_context_partials_feed_context_prompt() -> None:
