@@ -158,6 +158,10 @@ PYTHONPATH=bindings/st-py python3 \
   --prompt-limit 12 --repeat 3 --out-dir /tmp/spiraltorch-live-matrix
 ```
 
+Claude 5/Opus 4.8 adaptive-thinking routes share `max_tokens` between thinking
+and visible output, so raise `--anthropic-max-tokens` if completion rates fall
+or empty-text rows appear on high-effort routes.
+
 If the optional `openai` package is installed, the same runtime can call the
 Responses API directly.  The SDK reads `OPENAI_API_KEY` from the environment;
 SpiralTorch only records the model output, usage, latency, and Z-space trace.

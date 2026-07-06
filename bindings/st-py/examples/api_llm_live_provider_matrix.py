@@ -31,7 +31,8 @@ import spiraltorch as st
 SYSTEM_PROMPT = (
     "You are evaluating SpiralTorch as a Z-space runtime beside hosted LLM "
     "inference. Answer concretely, keep the geometry vocabulary explicit, and "
-    "avoid inventing measurements that are not in the prompt."
+    "avoid inventing measurements that are not in the prompt. Keep visible "
+    "answers under 100 words; if code is requested, use at most 8 lines."
 )
 
 PROMPTS = [
@@ -193,13 +194,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--create-session", action="store_true")
     parser.add_argument("--z-state", type=_z_state, default=[0.12, -0.04, 0.33, -0.11])
     parser.add_argument("--openai-model", default=os.environ.get("OPENAI_MODEL", "gpt-4.1-mini"))
-    parser.add_argument("--openai-max-output-tokens", type=int, default=128)
+    parser.add_argument("--openai-max-output-tokens", type=int, default=256)
     parser.add_argument(
         "--anthropic-models",
         default=os.environ.get("ANTHROPIC_MODELS", "claude-opus-4-8,claude-fable-5"),
     )
     parser.add_argument("--anthropic-efforts", default="low,high")
-    parser.add_argument("--anthropic-max-tokens", type=int, default=192)
+    parser.add_argument("--anthropic-max-tokens", type=int, default=768)
     return parser.parse_args()
 
 
