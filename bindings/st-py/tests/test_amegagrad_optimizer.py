@@ -5,6 +5,14 @@ import pytest
 import spiraltorch as st
 
 
+class _UnitRateControl:
+    def hyper_rate_scale(self) -> float:
+        return 1.0
+
+    def real_rate_scale(self) -> float:
+        return 1.0
+
+
 def _require_native() -> None:
     try:
         st.hypergrad((1, 1))
@@ -60,3 +68,63 @@ def test_amegagrad_absorb_text_handles_variable_length() -> None:
     opt.step(weights, tune=False)
     after = weights.tolist()
     assert after != before
+
+
+def test_amegagrad_applies_topos_training_hints_to_tune() -> None:
+    _require_native()
+
+    guard = st.hypergrad_topos(
+        curvature=-0.9,
+        tolerance=1e-4,
+        saturation=2.0,
+        max_depth=8,
+        max_volume=16,
+    )
+    opt = st.optim.Amegagrad(
+        (1, 4),
+        curvature=-0.9,
+        hyper_learning_rate=0.04,
+        real_learning_rate=0.02,
+        topos=guard,
+        topos_control_gain=1.0,
+        topos_observed_depth=4,
+        topos_visited_volume=8,
+    )
+
+    hints = opt.topos_training_hints()
+    expected_scale = hints["learning_rate_scale"] * hints["clip_scale"]
+
+    control = _UnitRateControl()
+    returned = opt.tune(control=control, use_topos=True)
+
+    assert returned is control
+    assert opt.hyper.learning_rate() == pytest.approx(0.04 * expected_scale)
+    assert opt.real.learning_rate() == pytest.approx(0.02 * expected_scale)
+    diagnostics = opt.topos_diagnostics()
+    assert diagnostics["training_hints"]["clip_scale"] == pytest.approx(hints["clip_scale"])
+    assert diagnostics["effect"]["rate_scale"] == pytest.approx(expected_scale)
+
+    telemetry = opt.topos_telemetry_payload()
+    assert telemetry["topos.closure_pressure"] == pytest.approx(0.5)
+    assert telemetry["topos.training_hints.clip_scale"] == pytest.approx(hints["clip_scale"])
+    assert telemetry["topos.optimizer_effect.rate_scale"] == pytest.approx(expected_scale)
+
+
+def test_amegagrad_keeps_default_tune_non_topos_by_default() -> None:
+    _require_native()
+
+    guard = st.hypergrad_topos(max_depth=8, max_volume=16)
+    opt = st.optim.Amegagrad(
+        (1, 2),
+        curvature=-0.9,
+        hyper_learning_rate=0.04,
+        real_learning_rate=0.02,
+        topos=guard,
+    )
+
+    opt.tune(control=_UnitRateControl())
+
+    assert opt.hyper.learning_rate() == pytest.approx(0.04)
+    assert opt.real.learning_rate() == pytest.approx(0.02)
+    assert opt.topos_diagnostics()["effect"] is None
+    assert opt.topos_training_hints()["clip_scale"] <= 1.0
