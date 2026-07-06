@@ -6392,6 +6392,9 @@ class AmegagradSession(SpiralSession):
         cols: _Any | None = None,
         topos: _Any | None = None,
         gain: float = 1.0,
+        topos_control_gain: float | None = None,
+        topos_observed_depth: int | None = None,
+        topos_visited_volume: int | None = None,
         weights: _Any | None = None,
         z_dim: int = 4,
         z_lr: float = 0.05,
@@ -6411,6 +6414,9 @@ class AmegagradSession(SpiralSession):
             cols=cols,
             topos=topos,
             gain=float(gain),
+            topos_control_gain=topos_control_gain,
+            topos_observed_depth=topos_observed_depth,
+            topos_visited_volume=topos_visited_volume,
         )
         self.hyper = self.opt.hyper
         self.real = self.opt.real
@@ -6434,14 +6440,141 @@ class AmegagradSession(SpiralSession):
         route_type = _safe_getattr(globals().get("telemetry"), "AtlasRoute")
         self.route = route_type() if telemetry and callable(route_type) else None
         self.telemetry_bound = int(telemetry_bound)
+        self._step_index = 0
+        self._last_step_metrics: dict[str, float] = {}
 
     def shape(self) -> tuple[int, int]:
         return self.opt.shape()
+
+    @property
+    def last_step_metrics(self) -> _Mapping[str, float]:
+        """Numeric metrics emitted by the most recent AmegagradSession step."""
+
+        return dict(self._last_step_metrics)
 
     def zero_grad(self) -> None:
         self.opt.zero_grad()
 
     reset = zero_grad
+
+    def _realgrad_metrics(self, *, include_mean_abs: bool = False) -> dict[str, float]:
+        metrics: dict[str, float] = {}
+        summary = self.real.summary()
+        getters = [("realgrad.l2", "l2")]
+        if include_mean_abs:
+            getters.extend(
+                [
+                    ("realgrad.mean_abs", "mean_abs"),
+                    ("realgrad.count", "count"),
+                ]
+            )
+        for name, getter in getters:
+            fn = getattr(summary, getter, None)
+            if callable(fn):
+                try:
+                    metrics[name] = float(fn())
+                except Exception:
+                    pass
+        return metrics
+
+    def _optimizer_learning_rate_metrics(self) -> dict[str, float]:
+        metrics: dict[str, float] = {}
+        for prefix, tape in (("hypergrad", self.hyper), ("realgrad", self.real)):
+            lr_fn = getattr(tape, "learning_rate", None)
+            if callable(lr_fn):
+                try:
+                    metrics[f"{prefix}.learning_rate"] = float(lr_fn())
+                except Exception:
+                    pass
+        return metrics
+
+    def _topos_metrics(self) -> dict[str, float]:
+        telemetry_fn = getattr(self.opt, "topos_telemetry_payload", None)
+        if not callable(telemetry_fn):
+            return {}
+        try:
+            telemetry = telemetry_fn()
+        except Exception:
+            return {}
+        metrics: dict[str, float] = {}
+        if isinstance(telemetry, _Mapping):
+            for key, value in telemetry.items():
+                try:
+                    numeric = float(value)
+                except (TypeError, ValueError):
+                    continue
+                if _math.isfinite(numeric):
+                    metrics[str(key)] = numeric
+        return metrics
+
+    def _finish_step_metrics(
+        self,
+        metrics: dict[str, float],
+        *,
+        z_loss: float | None,
+        note: str | None,
+    ) -> dict[str, float]:
+        if z_loss is not None:
+            metrics["zspace.loss"] = float(z_loss)
+        metrics.update(self._optimizer_learning_rate_metrics())
+        metrics.update(self._topos_metrics())
+        self._step_index += 1
+        self._last_step_metrics = dict(metrics)
+        self._push_telemetry(metrics, note=note)
+        return dict(metrics)
+
+    def trainer_trace_payload(
+        self,
+        *,
+        step: int | None = None,
+        metrics: _Mapping[str, float] | None = None,
+    ) -> dict[str, _Any]:
+        """Return a `TrainerStep` payload compatible with trainer trace summaries."""
+
+        used_metrics = dict(self._last_step_metrics if metrics is None else metrics)
+        used_step = self._step_index if step is None else int(step)
+        return {
+            "step": used_step,
+            "metrics": {"extra": used_metrics},
+        }
+
+    def trainer_trace_event(
+        self,
+        *,
+        step: int | None = None,
+        event_type: str = "TrainerStep",
+        metrics: _Mapping[str, float] | None = None,
+    ) -> dict[str, _Any]:
+        """Return a JSONL-ready trainer trace event for the latest step."""
+
+        return {
+            "type": str(event_type),
+            "ts": float(_time.time()),
+            "payload": self.trainer_trace_payload(step=step, metrics=metrics),
+        }
+
+    def write_trainer_trace_event(
+        self,
+        path: str | _os.PathLike[str],
+        *,
+        step: int | None = None,
+        event_type: str = "TrainerStep",
+        mode: str = "a",
+        metrics: _Mapping[str, float] | None = None,
+    ) -> str:
+        """Append the latest step as a trainer trace JSONL event."""
+
+        out_path = _pathlib.Path(path)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        record = self.trainer_trace_event(
+            step=step,
+            event_type=event_type,
+            metrics=metrics,
+        )
+        open_mode = "w" if mode == "w" else "a"
+        with out_path.open(open_mode, encoding="utf-8") as handle:
+            handle.write(_json.dumps(record, ensure_ascii=False) + "\n")
+        return str(out_path)
 
     def _push_telemetry(self, metrics: _Mapping[str, float], note: str | None = None) -> None:
         if self.route is None:
@@ -6488,30 +6621,32 @@ class AmegagradSession(SpiralSession):
         tune: bool = True,
         gain: float | None = None,
         control: _Any | None = None,
+        use_topos: bool | None = None,
+        topos_hints: _Mapping[str, _Any] | None = None,
+        observed_depth: int | None = None,
+        visited_volume: int | None = None,
         note: str | None = None,
     ) -> _Any:
         self.opt.zero_grad()
         self.opt.accumulate_wave(wave)
         z_loss = self._zspace_step()
         control_obj = self.opt.desire_control(gain=gain) if control is None else control
-        self.opt.step(self.weights, tune=tune, gain=gain, control=control_obj)
+        self.opt.step(
+            self.weights,
+            tune=tune,
+            gain=gain,
+            control=control_obj,
+            use_topos=use_topos,
+            topos_hints=topos_hints,
+            observed_depth=observed_depth,
+            visited_volume=visited_volume,
+        )
 
-        metrics: dict[str, float] = {}
-        summary = self.real.summary()
-        for name, getter in (
-            ("realgrad.l2", "l2"),
-            ("realgrad.mean_abs", "mean_abs"),
-            ("realgrad.count", "count"),
-        ):
-            fn = getattr(summary, getter, None)
-            if callable(fn):
-                try:
-                    metrics[name] = float(fn())
-                except Exception:
-                    pass
-        if z_loss is not None:
-            metrics["zspace.loss"] = float(z_loss)
-        self._push_telemetry(metrics, note=note)
+        self._finish_step_metrics(
+            self._realgrad_metrics(include_mean_abs=True),
+            z_loss=z_loss,
+            note=note,
+        )
         return self.weights
 
     def step_pair(
@@ -6522,25 +6657,32 @@ class AmegagradSession(SpiralSession):
         tune: bool = True,
         gain: float | None = None,
         control: _Any | None = None,
+        use_topos: bool | None = None,
+        topos_hints: _Mapping[str, _Any] | None = None,
+        observed_depth: int | None = None,
+        visited_volume: int | None = None,
         note: str | None = None,
     ) -> _Any:
         self.opt.zero_grad()
         self.opt.accumulate_pair(prediction, target)
         z_loss = self._zspace_step()
         control_obj = self.opt.desire_control(gain=gain) if control is None else control
-        self.opt.step(self.weights, tune=tune, gain=gain, control=control_obj)
+        self.opt.step(
+            self.weights,
+            tune=tune,
+            gain=gain,
+            control=control_obj,
+            use_topos=use_topos,
+            topos_hints=topos_hints,
+            observed_depth=observed_depth,
+            visited_volume=visited_volume,
+        )
 
-        metrics: dict[str, float] = {}
-        summary = self.real.summary()
-        fn = getattr(summary, "l2", None)
-        if callable(fn):
-            try:
-                metrics["realgrad.l2"] = float(fn())
-            except Exception:
-                pass
-        if z_loss is not None:
-            metrics["zspace.loss"] = float(z_loss)
-        self._push_telemetry(metrics, note=note)
+        self._finish_step_metrics(
+            self._realgrad_metrics(),
+            z_loss=z_loss,
+            note=note,
+        )
         return self.weights
 
     def step_text(
@@ -6551,25 +6693,32 @@ class AmegagradSession(SpiralSession):
         tune: bool = True,
         gain: float | None = None,
         control: _Any | None = None,
+        use_topos: bool | None = None,
+        topos_hints: _Mapping[str, _Any] | None = None,
+        observed_depth: int | None = None,
+        visited_volume: int | None = None,
         note: str | None = None,
     ) -> _Any:
         self.opt.zero_grad()
         self.opt.absorb_text(encoder, str(text))
         z_loss = self._zspace_step()
         control_obj = self.opt.desire_control(gain=gain) if control is None else control
-        self.opt.step(self.weights, tune=tune, gain=gain, control=control_obj)
+        self.opt.step(
+            self.weights,
+            tune=tune,
+            gain=gain,
+            control=control_obj,
+            use_topos=use_topos,
+            topos_hints=topos_hints,
+            observed_depth=observed_depth,
+            visited_volume=visited_volume,
+        )
 
-        metrics: dict[str, float] = {}
-        summary = self.real.summary()
-        fn = getattr(summary, "l2", None)
-        if callable(fn):
-            try:
-                metrics["realgrad.l2"] = float(fn())
-            except Exception:
-                pass
-        if z_loss is not None:
-            metrics["zspace.loss"] = float(z_loss)
-        self._push_telemetry(metrics, note=note)
+        self._finish_step_metrics(
+            self._realgrad_metrics(),
+            z_loss=z_loss,
+            note=note,
+        )
         return self.weights
 
 
