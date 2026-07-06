@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 
 import pytest
@@ -10,6 +11,7 @@ st = pytest.importorskip("spiraltorch")
 def test_api_llm_runtime_exports_from_top_level() -> None:
     assert "ApiLLMZSpaceRuntime" in st.__all__
     assert "api_llm_partial_from_response" in st.__all__
+    assert "compare_api_llm_matrix_reports" in st.__all__
     assert "compare_api_llm_trace_runs" in st.__all__
     assert "load_api_llm_trace_events" in st.__all__
     assert "make_anthropic_messages_invoke" in st.__all__
@@ -659,6 +661,106 @@ def test_run_api_llm_prompt_suite_matrix_compares_providers(tmp_path) -> None:
     assert comparison["near_best_tolerance"] == 0.05
     assert {row["label"] for row in comparison["runs"]} == {"fast api", "deep/api"}
     assert comparison["winners"]["lowest_total_tokens"] == "fast api"
+
+
+def test_compare_api_llm_matrix_reports_tracks_stable_profile_winners(tmp_path) -> None:
+    def write_report(name: str, compact_score: float, expanded_score: float) -> str:
+        report = {
+            "kind": "spiraltorch.api_llm_live_provider_matrix",
+            "created_at": f"2026-07-06T00:00:0{len(name)}Z",
+            "prompt_count": 24,
+            "route_count": 2,
+            "near_best_tolerance": 0.02,
+            "skipped": {},
+            "client_errors": [],
+            "comparison": {
+                "winners": {
+                    "best_score": "openai-compact",
+                    "highest_quality": "openai-expanded",
+                    "highest_text_quality": "openai-expanded",
+                    "highest_efficiency": "openai-compact",
+                    "lowest_latency": "openai-compact",
+                    "lowest_total_tokens": "openai-compact",
+                },
+                "selection_profiles": {
+                    "balanced": {
+                        "label": "openai-compact",
+                        "score": compact_score,
+                    },
+                    "quality": {
+                        "label": "openai-expanded",
+                        "score": expanded_score,
+                    },
+                    "grounded": {
+                        "label": "openai-expanded",
+                        "score": expanded_score - 0.02,
+                    },
+                    "efficiency": {
+                        "label": "openai-compact",
+                        "score": compact_score - 0.05,
+                    },
+                    "latency": {
+                        "label": "openai-compact",
+                        "score": compact_score - 0.03,
+                    },
+                },
+                "near_best": [{"label": "openai-compact"}, {"label": "openai-expanded"}],
+                "runs": [
+                    {
+                        "label": "openai-compact",
+                        "count": 24,
+                        "route_score": compact_score,
+                        "quality_score": 0.91,
+                        "text_quality_score": 0.68,
+                        "efficiency_score": 0.58,
+                        "completion_rate": 1.0,
+                        "latency_ms_mean": 2400.0,
+                        "total_tokens": 4800.0,
+                        "empty_text_rate": 0.0,
+                        "refusal_rate": 0.0,
+                    },
+                    {
+                        "label": "openai-expanded",
+                        "count": 24,
+                        "route_score": expanded_score,
+                        "quality_score": 0.90,
+                        "text_quality_score": 0.74,
+                        "efficiency_score": 0.55,
+                        "completion_rate": 1.0,
+                        "latency_ms_mean": 3200.0,
+                        "total_tokens": 5200.0,
+                        "empty_text_rate": 0.0,
+                        "refusal_rate": 0.0,
+                    },
+                ],
+            },
+        }
+        path = tmp_path / f"{name}.json"
+        path.write_text(json.dumps(report), encoding="utf-8")
+        return str(path)
+
+    first = write_report("first", 0.83, 0.82)
+    second = write_report("second", 0.84, 0.81)
+
+    comparison = st.compare_api_llm_matrix_reports(
+        {"first": first, "second": second}
+    )
+    routes = {row["label"]: row for row in comparison["routes"]}
+
+    assert comparison["kind"] == "spiraltorch.api_llm_matrix_report_comparison"
+    assert comparison["count"] == 2
+    assert comparison["profile_winners"]["balanced"][0]["label"] == "openai-compact"
+    assert comparison["profile_winners"]["balanced"][0]["win_rate"] == 1.0
+    assert comparison["profile_winners"]["quality"][0]["label"] == "openai-expanded"
+    assert routes["openai-compact"]["best_score_wins"] == 2
+    assert routes["openai-compact"]["profile_wins"]["latency"] == 2
+    assert routes["openai-expanded"]["profile_wins"]["grounded"] == 2
+    assert routes["openai-compact"]["route_score_mean"] > routes["openai-expanded"][
+        "route_score_mean"
+    ]
+    assert "balanced profile is stable on openai-compact" in " ".join(
+        comparison["recommendations"]
+    )
 
 
 def test_compare_api_llm_trace_runs_ranks_compact_artifacts(tmp_path) -> None:

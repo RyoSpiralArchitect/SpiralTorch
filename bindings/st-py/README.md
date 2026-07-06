@@ -119,7 +119,9 @@ PY
   `prompt_coverage`, `prompt_echo_rate`, `response_signal_rate`,
   `repetition_rate`, and `text_quality_score`. For route selection, comparison
   payloads include `selection_profiles` for `balanced`, `quality`, `grounded`,
-  `efficiency`, and `latency` routing.
+  `efficiency`, and `latency` routing. Use
+  `compare_api_llm_matrix_reports(...)` to compare repeated live provider
+  `report.json` sweeps and inspect profile-winner stability across runs.
 - Language desire controls via `st.nn.DesirePipeline`, `DesireTrainerBridge`,
   `DesireRoundtableBridge`, and downstream hook adapters so notebooks can
   inspect phase/temperature/entropy offsets without making the symbolic kernel

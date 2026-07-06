@@ -2192,6 +2192,19 @@ def compare_api_llm_trace_runs(
     *,
     labels: Sequence[str] | None = ...,
     event_type: str = ...,
+    near_best_tolerance: float = ...,
+) -> Dict[str, Any]: ...
+
+
+def compare_api_llm_matrix_reports(
+    reports: (
+        Mapping[str, str | PathLike[str]]
+        | Sequence[str | PathLike[str]]
+        | str
+        | PathLike[str]
+    ),
+    *,
+    labels: Sequence[str] | None = ...,
 ) -> Dict[str, Any]: ...
 
 
@@ -7170,6 +7183,7 @@ __all__ = [
     "api_llm_text_from_response",
     "api_llm_trace_from_response",
     "api_llm_usage_from_response",
+    "compare_api_llm_matrix_reports",
     "compare_api_llm_trace_runs",
     "load_api_llm_trace_events",
     "make_anthropic_messages_invoke",
