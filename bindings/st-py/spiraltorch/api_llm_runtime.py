@@ -1928,6 +1928,69 @@ def _matrix_report_winner(
     return max(candidates, key=lambda item: item[0])[1]
 
 
+def _sorted_mapping_signature(value: Any) -> tuple[tuple[str, int], ...]:
+    if not isinstance(value, Mapping):
+        return ()
+    items: list[tuple[str, int]] = []
+    for key, raw_count in value.items():
+        numeric = int(_finite_float(raw_count) or 0)
+        if numeric > 0:
+            items.append((str(key), numeric))
+    return tuple(sorted(items))
+
+
+def _numeric_stats_with_range(values: Iterable[Any]) -> dict[str, float]:
+    stats = _stats(values)
+    stats["range"] = stats["max"] - stats["min"] if stats["count"] > 0.0 else 0.0
+    return stats
+
+
+def _wasm_context_consistency(
+    observed: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    family_signatures = {
+        _sorted_mapping_signature(row.get("wasm_families")) for row in observed
+    }
+    origin_signatures = {
+        _sorted_mapping_signature(row.get("wasm_context_origin_counts"))
+        for row in observed
+    }
+    report_counts = {int(row.get("wasm_report_count") or 0) for row in observed}
+    best_loss = _numeric_stats_with_range(
+        row.get("wasm_best_loss") for row in observed
+    )
+    best_stability = _numeric_stats_with_range(
+        row.get("wasm_best_stability") for row in observed
+    )
+    webgpu_device_ready = _numeric_stats_with_range(
+        row.get("wasm_webgpu_device_ready_rate") for row in observed
+    )
+    consistent_families = len(family_signatures) <= 1
+    consistent_origins = len(origin_signatures) <= 1
+    consistent_report_count = len(report_counts) <= 1
+    has_loss_variation = best_loss["range"] > 0.0
+    if not observed:
+        status = "missing"
+    elif not (consistent_families and consistent_origins and consistent_report_count):
+        status = "mixed_context"
+    elif has_loss_variation:
+        status = "varied_selected_reports"
+    else:
+        status = "consistent"
+    return {
+        "status": status,
+        "consistent_families": consistent_families,
+        "consistent_context_origins": consistent_origins,
+        "consistent_report_count": consistent_report_count,
+        "family_signature_count": len(family_signatures),
+        "context_origin_signature_count": len(origin_signatures),
+        "report_count_values": sorted(report_counts),
+        "best_loss": best_loss,
+        "best_stability": best_stability,
+        "webgpu_device_ready_rate": webgpu_device_ready,
+    }
+
+
 def _matrix_reports_wasm_context(
     report_rows: Sequence[Mapping[str, Any]],
 ) -> dict[str, Any]:
@@ -1968,6 +2031,7 @@ def _matrix_reports_wasm_context(
         ),
         "families": dict(sorted(family_counts.items())),
         "context_origins": dict(sorted(origin_counts.items())),
+        "consistency": _wasm_context_consistency(observed),
         "lowest_best_loss": _matrix_report_winner(
             report_rows,
             "wasm_best_loss",
@@ -2132,6 +2196,20 @@ def compare_api_llm_matrix_reports(
             f"{wasm_context['observed_reports']} matrix reports carry WASM context "
             f"({wasm_context['total_wasm_report_count']} selected browser reports)"
         )
+        consistency = wasm_context.get("consistency")
+        consistency_map = consistency if isinstance(consistency, Mapping) else {}
+        status = consistency_map.get("status")
+        if status == "mixed_context":
+            recommendations.append(
+                "audit mixed WASM context before treating matrix-report winners as comparable"
+            )
+        elif status == "varied_selected_reports":
+            best_loss = consistency_map.get("best_loss")
+            best_loss_map = best_loss if isinstance(best_loss, Mapping) else {}
+            recommendations.append(
+                "review selected WASM report variation "
+                f"(best-loss range {(_finite_float(best_loss_map.get('range')) or 0.0):.6g})"
+            )
     lowest_wasm_loss = wasm_context.get("lowest_best_loss")
     if lowest_wasm_loss:
         recommendations.append(

@@ -867,6 +867,12 @@ def test_compare_api_llm_matrix_reports_tracks_stable_profile_winners(tmp_path) 
     assert comparison["wasm_context"]["lowest_best_loss"] == "second"
     assert comparison["wasm_context"]["highest_best_stability"] == "second"
     assert comparison["wasm_context"]["highest_webgpu_device_ready"] == "first"
+    consistency = comparison["wasm_context"]["consistency"]
+    assert consistency["status"] == "varied_selected_reports"
+    assert consistency["consistent_families"] is True
+    assert consistency["consistent_context_origins"] is True
+    assert consistency["consistent_report_count"] is True
+    assert consistency["best_loss"]["range"] == pytest.approx(0.03)
     report_rows = {row["label"]: row for row in comparison["reports"]}
     assert report_rows["second"]["wasm_best_loss"] == pytest.approx(0.02)
     assert report_rows["first"]["wasm_webgpu_device_ready_rate"] == pytest.approx(1.0)
@@ -883,6 +889,72 @@ def test_compare_api_llm_matrix_reports_tracks_stable_profile_winners(tmp_path) 
     assert "lowest selected WASM report loss" in " ".join(
         comparison["recommendations"]
     )
+    assert "selected WASM report variation" in " ".join(
+        comparison["recommendations"]
+    )
+
+
+def test_compare_api_llm_matrix_reports_flags_mixed_wasm_context(tmp_path) -> None:
+    def write_report(name: str, *, family: str, origin: str) -> str:
+        report = {
+            "kind": "spiraltorch.api_llm_live_provider_matrix",
+            "prompt_count": 1,
+            "route_count": 0,
+            "wasm_context": {
+                "report_count": 1,
+                "context_origins": [origin],
+                "reports": [
+                    {
+                        "label": f"{name}-{family}",
+                        "family": family,
+                        "loss": 0.05,
+                        "stability": 0.8,
+                        "webgpu_device_ready": True,
+                    }
+                ],
+                "comparison": {
+                    "families": {family: 1},
+                    "best_loss": {
+                        "label": f"{name}-{family}",
+                        "family": family,
+                        "loss": 0.05,
+                        "stability": 0.8,
+                    },
+                    "best_stability": {
+                        "label": f"{name}-{family}",
+                        "family": family,
+                        "loss": 0.05,
+                        "stability": 0.8,
+                    },
+                },
+            },
+        }
+        path = tmp_path / f"{name}.json"
+        path.write_text(json.dumps(report), encoding="utf-8")
+        return str(path)
+
+    comparison = st.compare_api_llm_matrix_reports(
+        {
+            "canvas-report": write_report(
+                "canvas-report",
+                family="canvas",
+                origin="wasm:canvas",
+            ),
+            "mellin-report": write_report(
+                "mellin-report",
+                family="mellin",
+                origin="wasm:mellin",
+            ),
+        }
+    )
+    consistency = comparison["wasm_context"]["consistency"]
+
+    assert comparison["wasm_context"]["observed_reports"] == 2
+    assert comparison["wasm_context"]["families"] == {"canvas": 1, "mellin": 1}
+    assert consistency["status"] == "mixed_context"
+    assert consistency["consistent_families"] is False
+    assert consistency["consistent_context_origins"] is False
+    assert "audit mixed WASM context" in " ".join(comparison["recommendations"])
 
 
 def test_compare_api_llm_trace_runs_ranks_compact_artifacts(tmp_path) -> None:
