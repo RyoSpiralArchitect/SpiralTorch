@@ -177,7 +177,7 @@ To compare several token-budget settings in one run, use the sweep wrapper:
 PYTHONPATH=bindings/st-py python3 \
   bindings/st-py/examples/api_llm_live_provider_matrix_sweep.py \
   --prompt-limit 12 --repeat 3 --budget-pairs 192:768,256:1024 \
-  --out-dir /tmp/spiraltorch-live-matrix-sweep
+  --resume-existing --out-dir /tmp/spiraltorch-live-matrix-sweep
 ```
 
 After several live sweeps, compare the resulting reports to check whether the
