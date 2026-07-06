@@ -83,6 +83,32 @@ TOPOS_CONTEXT_METRIC_KEYS = (
         "inference_presence_penalty_bias",
         "topos.inference_hints.presence_penalty_bias",
     ),
+    ("runtime_profile_control_energy", "topos.runtime_profile.control_energy"),
+    ("runtime_profile_closure_risk", "topos.runtime_profile.closure_risk"),
+    (
+        "runtime_profile_exploration_budget",
+        "topos.runtime_profile.exploration_budget",
+    ),
+    (
+        "runtime_profile_training_rate_scale",
+        "topos.runtime_profile.training_rate_scale",
+    ),
+    (
+        "runtime_profile_training_gradient_bias_scale",
+        "topos.runtime_profile.training_gradient_bias_scale",
+    ),
+    (
+        "runtime_profile_inference_temperature",
+        "topos.runtime_profile.inference_temperature",
+    ),
+    (
+        "runtime_profile_inference_context_weight",
+        "topos.runtime_profile.inference_context_weight",
+    ),
+    (
+        "runtime_profile_learning_inference_balance",
+        "topos.runtime_profile.learning_inference_balance",
+    ),
 )
 
 TRACE_SPOTLIGHT_KEYS = (

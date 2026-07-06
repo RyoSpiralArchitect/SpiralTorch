@@ -104,6 +104,10 @@ def test_amegagrad_applies_topos_training_hints_to_tune() -> None:
     assert opt.real.learning_rate() == pytest.approx(0.02 * expected_scale)
     diagnostics = opt.topos_diagnostics()
     assert diagnostics["training_hints"]["clip_scale"] == pytest.approx(hints["clip_scale"])
+    assert diagnostics["runtime_profile"]["training_rate_scale"] == pytest.approx(
+        expected_scale
+    )
+    assert diagnostics["runtime_profile"]["control_energy"] > 0.0
     assert diagnostics["effect"]["rate_scale"] == pytest.approx(expected_scale)
     assert diagnostics["effect"]["raw_rate_scale"] == pytest.approx(
         hints["learning_rate_scale"] * hints["clip_scale"]
@@ -119,6 +123,12 @@ def test_amegagrad_applies_topos_training_hints_to_tune() -> None:
     )
     assert telemetry["topos.optimizer_effect.effective_gradient_bias_scale"] == pytest.approx(
         diagnostics["effect"]["effective_gradient_bias_scale"]
+    )
+    assert telemetry["topos.runtime_profile.training_rate_scale"] == pytest.approx(
+        expected_scale
+    )
+    assert telemetry["topos.runtime_profile.control_energy"] == pytest.approx(
+        diagnostics["runtime_profile"]["control_energy"]
     )
 
 
@@ -175,6 +185,10 @@ def test_amegagrad_session_writes_topos_training_trace(tmp_path) -> None:
     assert metrics["realgrad.mean_abs"] > 0.0
     assert metrics["topos.closure_pressure"] == pytest.approx(0.5)
     assert metrics["topos.optimizer_effect.rate_scale"] < 1.0
+    assert metrics["topos.runtime_profile.training_rate_scale"] == pytest.approx(
+        metrics["topos.optimizer_effect.rate_scale"]
+    )
+    assert metrics["topos.runtime_profile.control_energy"] > 0.0
     assert metrics["hypergrad.learning_rate"] == pytest.approx(
         metrics["topos.optimizer_effect.hyper_learning_rate"]
     )
@@ -196,6 +210,9 @@ def test_amegagrad_session_writes_topos_training_trace(tmp_path) -> None:
     assert summary["topos_context"]["optimizer_rate_scale"]["last"] == pytest.approx(
         metrics["topos.optimizer_effect.rate_scale"]
     )
+    assert summary["topos_context"]["runtime_profile_training_rate_scale"][
+        "last"
+    ] == pytest.approx(metrics["topos.optimizer_effect.rate_scale"])
 
 
 def test_amegagrad_topos_training_sweep_compares_runs(tmp_path) -> None:
@@ -218,14 +235,20 @@ def test_amegagrad_topos_training_sweep_compares_runs(tmp_path) -> None:
     assert tuned_context["optimizer_rate_scale"]["last"] < 1.0
     assert tuned_context["optimizer_raw_rate_scale"]["last"] < 1.0
     assert tuned_context["optimizer_effective_gradient_bias_scale"]["mean"] > 0.0
+    assert tuned_context["runtime_profile_training_rate_scale"]["last"] < 1.0
+    assert tuned_context["runtime_profile_control_energy"]["mean"] > 0.0
 
     guard_row = next(row for row in comparison["runs"] if row["label"] == "guard_only")
     tuned_row = next(row for row in comparison["runs"] if row["label"] == "topos_tuned")
     assert guard_row["realgrad_l2_mean"] > 0.0
     assert tuned_row["realgrad_l2_mean"] > 0.0
     assert guard_row["topos_optimizer_rate_scale_mean"] is None
+    assert guard_row["topos_runtime_training_rate_scale_mean"] == pytest.approx(1.0)
     assert tuned_row["topos_optimizer_rate_scale_mean"] == pytest.approx(
         tuned_context["optimizer_rate_scale"]["mean"]
+    )
+    assert tuned_row["topos_runtime_training_rate_scale_mean"] == pytest.approx(
+        tuned_context["runtime_profile_training_rate_scale"]["mean"]
     )
     assert tuned_row["topos_optimizer_raw_rate_scale_mean"] == pytest.approx(
         tuned_context["optimizer_raw_rate_scale"]["mean"]
@@ -238,3 +261,4 @@ def test_amegagrad_topos_training_sweep_compares_runs(tmp_path) -> None:
     assert reloaded["winners"]["lowest_optimizer_rate_scale"] == "topos_tuned"
     assert reloaded["winners"]["lowest_optimizer_raw_rate_scale"] == "topos_tuned"
     assert reloaded["winners"]["highest_effective_gradient_bias"] == "topos_tuned"
+    assert reloaded["winners"]["lowest_runtime_training_rate_scale"] == "topos_tuned"
