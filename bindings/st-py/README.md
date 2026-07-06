@@ -26,7 +26,8 @@ start with four handles:
   `runtime.call_openai_responses(...)` or `spiraltorch.make_openai_chat_invoke(...)`
   with `OPENAI_API_KEY` from the environment. Runtime traces can be persisted
   with `runtime.write_jsonl(...)` and summarized with
-  `spiraltorch.summarize_api_llm_trace_events(...)`.
+  `spiraltorch.summarize_api_llm_trace_events(...)`, or compared with
+  `spiraltorch.compare_api_llm_trace_runs(...)`.
 - `spiraltorch.runtime_import_preflight_report(...)` when a Transformers,
   Torch, PEFT, or dataset dependency contract should be recorded before a
   heavier fine-tune run.
@@ -97,7 +98,9 @@ PY
   optional OpenAI adapters are lazy: they import `openai` only when called, then
   feed Responses API or chat-completion results into the same trace path. API
   LLM trace JSONL helpers mirror the trainer/transformers trace workflow so
-  hosted-model runs can be compared without re-running the API call.
+  hosted-model runs can be compared without re-running the API call; use
+  `compare_api_llm_trace_runs(...)` to pick candidates by route score, latency,
+  token use, confidence, and runtime readiness.
 - Language desire controls via `st.nn.DesirePipeline`, `DesireTrainerBridge`,
   `DesireRoundtableBridge`, and downstream hook adapters so notebooks can
   inspect phase/temperature/entropy offsets without making the symbolic kernel

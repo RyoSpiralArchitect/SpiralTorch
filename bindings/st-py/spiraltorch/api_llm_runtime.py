@@ -30,6 +30,7 @@ __all__ = [
     "api_llm_text_from_response",
     "api_llm_trace_from_response",
     "api_llm_usage_from_response",
+    "compare_api_llm_trace_runs",
     "load_api_llm_trace_events",
     "make_openai_chat_invoke",
     "make_openai_responses_invoke",
@@ -836,6 +837,179 @@ def summarize_api_llm_trace_events(
         "text_chars": _stats(text_lengths),
         "confidence": _stats(confidence_values),
         "metrics": metrics,
+    }
+
+
+def _summary_stat(
+    summary: Mapping[str, Any],
+    section: str,
+    *,
+    key: str | None = None,
+    stat: str = "mean",
+) -> float:
+    source = summary.get(section)
+    if key is not None and isinstance(source, Mapping):
+        source = source.get(key)
+    if isinstance(source, Mapping):
+        numeric = _finite_float(source.get(stat))
+        return 0.0 if numeric is None else numeric
+    numeric = _finite_float(source)
+    return 0.0 if numeric is None else numeric
+
+
+def _summary_metric(
+    summary: Mapping[str, Any],
+    metric: str,
+    *,
+    stat: str = "mean",
+) -> float:
+    metrics = summary.get("metrics")
+    if not isinstance(metrics, Mapping):
+        return 0.0
+    source = metrics.get(metric)
+    if not isinstance(source, Mapping):
+        return 0.0
+    numeric = _finite_float(source.get(stat))
+    return 0.0 if numeric is None else numeric
+
+
+def _dominant_label(counts: Any) -> str | None:
+    if not isinstance(counts, Mapping) or not counts:
+        return None
+    return max(
+        ((str(label), int(count)) for label, count in counts.items()),
+        key=lambda item: (item[1], item[0]),
+    )[0]
+
+
+def _trace_entries(
+    traces: Mapping[str, str | Path] | Sequence[str | Path] | str | Path,
+    *,
+    labels: Sequence[str] | None,
+) -> list[tuple[str, Path]]:
+    if isinstance(traces, Mapping):
+        return [(str(label), Path(path)) for label, path in traces.items()]
+    if isinstance(traces, (str, Path)):
+        path = Path(traces)
+        return [(path.stem or "run_0", path)]
+    paths = list(traces)
+    explicit = list(labels or [])
+    entries: list[tuple[str, Path]] = []
+    for index, raw_path in enumerate(paths):
+        path = Path(raw_path)
+        label = explicit[index] if index < len(explicit) else path.stem
+        entries.append((label or f"run_{index}", path))
+    return entries
+
+
+def _route_score(row: Mapping[str, Any]) -> float:
+    confidence = _finite_float(row.get("confidence_mean")) or 0.0
+    stability = _finite_float(row.get("stability_mean")) or 0.0
+    frac = _finite_float(row.get("frac_mean")) or 0.0
+    latency = max(0.0, _finite_float(row.get("latency_ms_mean")) or 0.0)
+    tokens = max(0.0, _finite_float(row.get("total_tokens")) or 0.0)
+    runtime_ready = max(
+        0.0,
+        min(1.0, _finite_float(row.get("runtime_ready_rate")) or 0.0),
+    )
+    quality = 0.5 * confidence + 0.3 * stability + 0.2 * frac
+    latency_penalty = 0.05 * min(1.0, math.log1p(latency) / math.log1p(10_000.0))
+    token_penalty = 0.05 * min(1.0, math.log1p(tokens) / math.log1p(4096.0))
+    return max(
+        0.0,
+        min(1.0, quality + 0.05 * runtime_ready - latency_penalty - token_penalty),
+    )
+
+
+def _comparison_row(label: str, path: Path, summary: Mapping[str, Any]) -> dict[str, Any]:
+    row: dict[str, Any] = {
+        "label": label,
+        "path": str(path),
+        "count": int(summary.get("count") or 0),
+        "provider": _dominant_label(summary.get("providers")),
+        "model": _dominant_label(summary.get("models")),
+        "runtime_status": _dominant_label(summary.get("runtime_statuses")),
+        "runtime_ready_rate": _finite_float(summary.get("runtime_ready_rate")) or 0.0,
+        "total_tokens": _finite_float(summary.get("total_tokens")) or 0.0,
+        "latency_ms_mean": _summary_stat(summary, "latency_ms"),
+        "confidence_mean": _summary_stat(summary, "confidence"),
+        "text_chars_mean": _summary_stat(summary, "text_chars"),
+        "prompt_tokens_mean": _summary_stat(summary, "usage", key="prompt_tokens"),
+        "completion_tokens_mean": _summary_stat(summary, "usage", key="completion_tokens"),
+        "stability_mean": _summary_metric(summary, "stability"),
+        "speed_mean": _summary_metric(summary, "speed"),
+        "memory_mean": _summary_metric(summary, "memory"),
+        "frac_mean": _summary_metric(summary, "frac"),
+        "drs_mean": _summary_metric(summary, "drs"),
+        "last_text_preview": summary.get("last_text_preview"),
+    }
+    row["route_score"] = _route_score(row)
+    return row
+
+
+def _winner(
+    rows: Sequence[Mapping[str, Any]],
+    key: str,
+    *,
+    higher_is_better: bool = True,
+) -> str | None:
+    candidates: list[tuple[float, str]] = []
+    for row in rows:
+        if int(row.get("count") or 0) <= 0:
+            continue
+        value = _finite_float(row.get(key))
+        label = row.get("label")
+        if value is not None and label is not None:
+            score = value if higher_is_better else -value
+            candidates.append((score, str(label)))
+    if not candidates:
+        return None
+    return max(candidates, key=lambda item: (item[0], item[1]))[1]
+
+
+def compare_api_llm_trace_runs(
+    traces: Mapping[str, str | Path] | Sequence[str | Path] | str | Path,
+    *,
+    labels: Sequence[str] | None = None,
+    event_type: str = "ApiLLMTrace",
+) -> dict[str, Any]:
+    """Compare multiple API LLM Z-space trace runs.
+
+    The comparison is intentionally lightweight: it consumes JSONL traces already
+    written by :func:`write_api_llm_trace_jsonl` or ``runtime.write_jsonl(...)``
+    and returns compact per-run rows plus common winners for notebooks and CI.
+    """
+
+    entries = _trace_entries(traces, labels=labels)
+    rows: list[dict[str, Any]] = []
+    for label, path in entries:
+        summary = summarize_api_llm_trace_events(path, event_type=event_type)
+        rows.append(_comparison_row(label, path, summary))
+    rows.sort(
+        key=lambda row: (row["route_score"], row["confidence_mean"], row["label"]),
+        reverse=True,
+    )
+    winners = {
+        "best_score": _winner(rows, "route_score"),
+        "highest_confidence": _winner(rows, "confidence_mean"),
+        "highest_stability": _winner(rows, "stability_mean"),
+        "lowest_latency": _winner(rows, "latency_ms_mean", higher_is_better=False),
+        "lowest_total_tokens": _winner(rows, "total_tokens", higher_is_better=False),
+        "highest_runtime_ready": _winner(rows, "runtime_ready_rate"),
+    }
+    best = winners.get("best_score")
+    recommendations: list[str] = []
+    if best:
+        recommendations.append(f"prefer {best} for the highest aggregate API LLM route score")
+    if winners.get("lowest_latency") and winners["lowest_latency"] != best:
+        recommendations.append(f"inspect {winners['lowest_latency']} for latency-sensitive routing")
+    return {
+        "kind": "spiraltorch.api_llm_trace_comparison",
+        "event_type": event_type,
+        "count": len(rows),
+        "runs": rows,
+        "winners": winners,
+        "recommendations": recommendations,
     }
 
 

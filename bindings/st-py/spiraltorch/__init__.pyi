@@ -2158,6 +2158,19 @@ def summarize_api_llm_trace_events(
 ) -> Dict[str, Any]: ...
 
 
+def compare_api_llm_trace_runs(
+    traces: (
+        Mapping[str, str | PathLike[str]]
+        | Sequence[str | PathLike[str]]
+        | str
+        | PathLike[str]
+    ),
+    *,
+    labels: Sequence[str] | None = ...,
+    event_type: str = ...,
+) -> Dict[str, Any]: ...
+
+
 def make_openai_responses_invoke(
     *,
     client: Any | None = ...,
@@ -7079,6 +7092,7 @@ __all__ = [
     "api_llm_text_from_response",
     "api_llm_trace_from_response",
     "api_llm_usage_from_response",
+    "compare_api_llm_trace_runs",
     "load_api_llm_trace_events",
     "make_openai_chat_invoke",
     "make_openai_responses_invoke",
