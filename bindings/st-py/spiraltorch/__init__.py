@@ -1657,6 +1657,7 @@ def z_metrics(
     stability: float | None = None,
     drs: float | None = None,
     gradient: _Any | None = None,
+    telemetry: _Any | None = None,
     **aliases: _Any,
 ) -> ZMetrics:
     values: dict[str, _Any] = {
@@ -1688,6 +1689,7 @@ def z_metrics(
         stability=float(values.get("stability", 0.0) or 0.0),
         gradient=grad_list,
         drs=float(values.get("drs", 0.0) or 0.0),
+        telemetry=_normalise_telemetry_arg(telemetry) or None,
     )
 
 
@@ -1911,6 +1913,7 @@ class _ZSpaceNotation:
                 telemetry_payload = dict(source.telemetry_payload() or {}) or None
             elif isinstance(source, ZMetrics):
                 base_metrics = _metrics_to_mapping(source)
+                telemetry_payload = dict(source.telemetry or {}) or None
             elif isinstance(source, _Mapping):
                 base_metrics = _canonicalise_partial_mapping(source)
             elif source is None:
@@ -1964,7 +1967,12 @@ class _ZSpaceNotation:
                 normalised.append(partial)
                 continue
             if isinstance(partial, ZMetrics):
-                normalised.append(ZSpacePartialBundle(_metrics_to_mapping(partial)))
+                normalised.append(
+                    ZSpacePartialBundle(
+                        _metrics_to_mapping(partial),
+                        telemetry=dict(partial.telemetry or {}) or None,
+                    )
+                )
                 continue
             if isinstance(partial, _Mapping):
                 normalised.append(_canonicalise_partial_mapping(partial))
@@ -2379,6 +2387,7 @@ class ZMetrics:
     stability: float
     gradient: _Optional[_Sequence[float]] = None
     drs: float = 0.0
+    telemetry: _Optional[_Mapping[str, float]] = None
 
     @classmethod
     def from_mapping(
@@ -2386,6 +2395,7 @@ class ZMetrics:
         mapping: _Mapping[str, _Any],
         *,
         gradient: _Optional[_Sequence[float]] = None,
+        telemetry: _Any | None = None,
     ) -> "ZMetrics":
         scalars, gradient_override = _extract_zmetrics_components(mapping)
         grad_source = gradient_override
@@ -2396,12 +2406,19 @@ class ZMetrics:
         gradient_payload = None
         if grad_source:
             gradient_payload = tuple(float(value) for value in grad_source)
+        telemetry_payload: dict[str, float] = {}
+        embedded_telemetry = mapping.get("telemetry")
+        if embedded_telemetry is not None:
+            telemetry_payload.update(_normalise_telemetry_arg(embedded_telemetry))
+        if telemetry is not None:
+            telemetry_payload.update(_normalise_telemetry_arg(telemetry))
         return cls(
             speed=float(scalars.get("speed", 0.0)),
             memory=float(scalars.get("memory", 0.0)),
             stability=float(scalars.get("stability", 0.0)),
             gradient=gradient_payload,
             drs=float(scalars.get("drs", 0.0)),
+            telemetry=telemetry_payload or None,
         )
 
     @classmethod
@@ -2414,14 +2431,35 @@ class ZMetrics:
         if isinstance(payload, cls):
             return payload
         if isinstance(payload, ZSpaceInference):
-            return inference_to_zmetrics(payload, prefer_applied=prefer_applied)
+            return inference_to_zmetrics(
+                payload,
+                prefer_applied=prefer_applied,
+                include_telemetry=True,
+            )
+        if all(hasattr(payload, name) for name in ("speed", "memory", "stability")):
+            telemetry_payload = getattr(payload, "telemetry", None)
+            return cls(
+                speed=float(getattr(payload, "speed")),
+                memory=float(getattr(payload, "memory")),
+                stability=float(getattr(payload, "stability")),
+                gradient=_coerce_gradient_sequence(getattr(payload, "gradient", None)),
+                drs=float(getattr(payload, "drs", 0.0)),
+                telemetry=(
+                    _normalise_telemetry_arg(telemetry_payload)
+                    if telemetry_payload
+                    else None
+                ),
+            )
         if isinstance(payload, _Mapping):
             return cls.from_mapping(payload)
         raise TypeError("payload must be mapping, ZMetrics or ZSpaceInference")
 
 
 def inference_to_zmetrics(
-    inference: "ZSpaceInference", *, prefer_applied: bool = True
+    inference: "ZSpaceInference",
+    *,
+    prefer_applied: bool = True,
+    include_telemetry: bool = True,
 ) -> ZMetrics:
     """Convert a :class:`ZSpaceInference` result into :class:`ZMetrics`.
 
@@ -2456,6 +2494,9 @@ def inference_to_zmetrics(
 
     gradient_payload: _Optional[_Sequence[float]]
     gradient_payload = tuple(gradient_seq) if gradient_seq else None
+    telemetry_payload: dict[str, float] | None = None
+    if include_telemetry and inference.telemetry is not None:
+        telemetry_payload = dict(inference.telemetry.payload)
 
     return ZMetrics(
         speed=float(scalars.get("speed", 0.0)),
@@ -2463,6 +2504,7 @@ def inference_to_zmetrics(
         stability=float(scalars.get("stability", 0.0)),
         gradient=gradient_payload,
         drs=float(scalars.get("drs", 0.0)),
+        telemetry=telemetry_payload,
     )
 
 
@@ -2943,6 +2985,7 @@ class ZSpaceTrainer:
         beta1: float = 0.9,
         beta2: float = 0.999,
         eps: float = 1e-8,
+        topos_control_gain: float = 0.0,
     ) -> None:
         if z_dim <= 0:
             raise ValueError("z_dim must be positive")
@@ -2953,10 +2996,13 @@ class ZSpaceTrainer:
         self._beta1 = float(beta1)
         self._beta2 = float(beta2)
         self._eps = float(eps)
+        self._topos_control_gain = max(0.0, float(topos_control_gain))
         self._m: _List[float] = [0.0] * z_dim
         self._v: _List[float] = [0.0] * z_dim
         self._t = 0
         self._last_inference: ZSpaceInference | None = None
+        self._last_telemetry: dict[str, float] = {}
+        self._last_topos_control: dict[str, float] = {}
 
     @property
     def state(self) -> _List[float]:
@@ -2966,11 +3012,22 @@ class ZSpaceTrainer:
     def last_inference(self) -> ZSpaceInference | None:
         return self._last_inference
 
+    @property
+    def last_telemetry(self) -> _Mapping[str, float]:
+        return dict(self._last_telemetry)
+
+    @property
+    def last_topos_control(self) -> _Mapping[str, float]:
+        return dict(self._last_topos_control)
+
     def reset(self) -> None:
         for arr in (self._z, self._m, self._v):
             for idx in range(len(arr)):
                 arr[idx] = 0.0
         self._t = 0
+        self._last_inference = None
+        self._last_telemetry = {}
+        self._last_topos_control = {}
 
     def state_dict(self) -> _Dict[str, _Any]:
         return {
@@ -2985,7 +3042,9 @@ class ZSpaceTrainer:
                 "beta1": self._beta1,
                 "beta2": self._beta2,
                 "eps": self._eps,
+                "topos_control_gain": self._topos_control_gain,
             },
+            "last_telemetry": dict(self._last_telemetry),
         }
 
     def load_state_dict(self, state: _Mapping[str, _Any], *, strict: bool = True) -> None:
@@ -3023,6 +3082,14 @@ class ZSpaceTrainer:
             self._beta1 = float(hyper.get("beta1", self._beta1))
             self._beta2 = float(hyper.get("beta2", self._beta2))
             self._eps = float(hyper.get("eps", self._eps))
+            self._topos_control_gain = max(
+                0.0,
+                float(hyper.get("topos_control_gain", self._topos_control_gain)),
+            )
+        telemetry = state.get("last_telemetry")
+        if isinstance(telemetry, _Mapping):
+            self._last_telemetry = _normalise_telemetry_arg(telemetry)
+            self._last_topos_control = self._extract_topos_control(self._last_telemetry)
 
     def _assign_vector(self, target: _MutableSequence[float], values: _Any, strict: bool) -> None:
         data = [float(v) for v in values]
@@ -3038,9 +3105,52 @@ class ZSpaceTrainer:
         for idx, value in enumerate(data):
             target[idx] = value
 
+    def _extract_topos_control(self, telemetry: _Mapping[str, float]) -> dict[str, float]:
+        prefix = "topos."
+        return {
+            key[len(prefix):]: float(value)
+            for key, value in telemetry.items()
+            if key.startswith(prefix)
+        }
+
+    def _cache_step_telemetry(self, metrics: ZMetrics) -> None:
+        telemetry = _normalise_telemetry_arg(metrics.telemetry) if metrics.telemetry else {}
+        self._last_telemetry = telemetry
+        self._last_topos_control = self._extract_topos_control(telemetry)
+
+    def _topos_pressure(self) -> float:
+        if not self._last_topos_control:
+            return 0.0
+        closure = self._last_topos_control.get("closure_pressure", 0.0)
+        depth = self._last_topos_control.get("depth_pressure", 0.0)
+        volume = self._last_topos_control.get("volume_pressure", 0.0)
+        guard = self._last_topos_control.get("guard_strength", closure)
+        return max(0.0, min(1.0, max(closure, depth, volume, guard)))
+
+    def _topos_gradient_bias(self) -> _List[float]:
+        gain = self._topos_control_gain
+        if gain <= 0.0 or not self._last_topos_control:
+            return [0.0] * len(self._z)
+        closure = self._last_topos_control.get("closure_pressure", 0.0)
+        volume = self._last_topos_control.get("volume_pressure", closure)
+        depth = self._last_topos_control.get("depth_pressure", closure)
+        guard = self._last_topos_control.get("guard_strength", closure)
+        openness = self._last_topos_control.get("openness", 1.0 - closure)
+        exploration = self._last_topos_control.get("exploration_hint", 0.0)
+        basis = (
+            closure - 0.5,
+            volume - 0.5,
+            depth - 0.5,
+            guard - 0.5,
+            0.5 - openness,
+            0.5 - exploration,
+        )
+        scale = 0.05 * gain
+        return [scale * basis[idx % len(basis)] for idx in range(len(self._z))]
+
     def step_batch(
         self,
-        metrics: _Iterable[_Mapping[str, float] | ZMetrics],
+        metrics: _Iterable[_Mapping[str, float] | ZMetrics | ZSpaceInference],
     ) -> _List[float]:
         losses: _List[float] = []
         for sample in metrics:
@@ -3116,9 +3226,12 @@ class ZSpaceTrainer:
         *,
         prefer_applied: bool = True,
     ) -> float:
+        if isinstance(metrics, ZSpaceInference):
+            self._last_inference = metrics
         normalized = ZMetrics.from_payload(
             metrics, prefer_applied=prefer_applied
         )
+        self._cache_step_telemetry(normalized)
 
         speed = float(normalized.speed)
         memory = float(normalized.memory)
@@ -3126,6 +3239,7 @@ class ZSpaceTrainer:
         gradient = normalized.gradient
         drs_signal = float(normalized.drs)
         lam_speed, lam_mem, lam_stab, lam_frac, lam_drs = self._lam
+        topos_pressure = self._topos_pressure()
         penalty = (
             lam_speed * self._normalise(speed)
             + lam_mem * self._normalise(memory)
@@ -3133,11 +3247,17 @@ class ZSpaceTrainer:
         )
         if lam_drs:
             penalty += lam_drs * self._normalise(drs_signal)
+        if self._topos_control_gain:
+            penalty += self._topos_control_gain * self._normalise(topos_pressure)
         frac_reg = self._frac_reg(self._z)
         loss = penalty + lam_frac * frac_reg
         grad_metric = self._normalise_gradient(gradient)
         frac_grad = self._frac_grad()
-        total_grad = [grad_metric[idx] + lam_frac * frac_grad[idx] for idx in range(len(self._z))]
+        topos_bias = self._topos_gradient_bias()
+        total_grad = [
+            grad_metric[idx] + lam_frac * frac_grad[idx] + topos_bias[idx]
+            for idx in range(len(self._z))
+        ]
         self._adam_update(total_grad)
         return loss
 
