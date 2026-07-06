@@ -137,7 +137,10 @@ PY
   `collect_wasm_report_paths(...)` or `build_wasm_report_context(...)` directly,
   or pass `--wasm-report-glob`, `--wasm-report-dir`, `--wasm-report-recursive`,
   and `--wasm-max-reports` to collect repeated browser runs, compare them by
-  loss, and feed only the strongest reports into the provider matrix.
+  loss, and feed only the strongest reports into the provider matrix. Persist
+  the selected handoff for later FT/notebook/API runs with
+  `write_wasm_report_context_artifact(...)`, then reload its partials with
+  `load_wasm_report_context_artifact(...)`.
 - Language desire controls via `st.nn.DesirePipeline`, `DesireTrainerBridge`,
   `DesireRoundtableBridge`, and downstream hook adapters so notebooks can
   inspect phase/temperature/entropy offsets without making the symbolic kernel
