@@ -513,12 +513,16 @@ def _fractional_energy(values: Sequence[float], alpha: float) -> float:
 
 
 def _normalise_gradient(values: Sequence[float], length: int) -> list[float]:
+    if isinstance(values, MappingABC):
+        values = list(values.values())
     grad = [float(v) for v in values]
     if len(grad) < length:
         grad.extend(0.0 for _ in range(length - len(grad)))
     elif len(grad) > length:
         grad = grad[:length]
-    scale = max(1.0, max(abs(v) for v in grad) if grad else 1.0)
+    scale = max(abs(v) for v in grad) if grad else 0.0
+    if scale <= 1.0:
+        return grad
     return [math.tanh(v / scale) for v in grad]
 
 
@@ -1313,7 +1317,7 @@ class ZSpaceInference:
     """Inference result after fusing partial observations with the decoded state."""
 
     metrics: Mapping[str, float]
-    gradient: tuple[float, ...]
+    gradient: Sequence[float]
     barycentric: tuple[float, float, float]
     residual: float
     confidence: float
@@ -1413,7 +1417,7 @@ class ZSpacePosterior:
             telemetry_frame = None
         return ZSpaceInference(
             metrics=MappingProxyType(dict(metrics)),
-            gradient=tuple(gradient),
+            gradient=list(gradient),
             barycentric=barycentric,
             residual=residual,
             confidence=confidence,
@@ -2452,5 +2456,3 @@ def infer_canvas_with_coherence(
         coherence_kwargs=coherence_kwargs,
     )
     return infer_from_partial(z_state, partial, alpha=alpha, smoothing=smoothing)
-
-

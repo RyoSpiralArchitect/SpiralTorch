@@ -82,6 +82,30 @@ labeled = st.tensor(
 print(f"Axis names: {labeled.axis_names()}")
 ```
 
+### Python: Hosted/API LLM into Z-space
+
+When a hosted model is doing the language inference, SpiralTorch can still own
+the runtime trace.  Pass an OpenAI-compatible response mapping, or wrap any API
+client callable, and `ApiLLMZSpaceRuntime` converts text, token usage, latency,
+and probability-like fields into a `ZSpacePartialBundle` plus posterior
+confidence.
+
+```python
+import spiraltorch as st
+
+runtime = st.ApiLLMZSpaceRuntime([0.12, -0.04, 0.33, -0.11], create_session=False)
+
+def api(prompt: str):
+    return {
+        "model": "api-model-demo",
+        "choices": [{"message": {"content": "Z-space heard you."}, "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": 4, "completion_tokens": 5, "total_tokens": 9},
+    }
+
+trace = runtime.call(api, "route this through Z-space")
+print(trace.as_dict()["inference"]["confidence"])
+```
+
 ### Rust: Pure Tensor Operations
 
 ```rust

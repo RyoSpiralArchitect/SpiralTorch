@@ -20,6 +20,9 @@ start with four handles:
   checkpoint handoff.
 - `spiraltorch.ecosystem` when a PyTorch/JAX/CuPy/TensorFlow tensor needs to
   cross the Z-space membrane.
+- `spiraltorch.ApiLLMZSpaceRuntime` when hosted/API-model LLM responses should
+  become Z-space partial traces without requiring the OpenAI SDK or any other
+  hosted-model package at install time.
 - `spiraltorch.runtime_import_preflight_report(...)` when a Transformers,
   Torch, PEFT, or dataset dependency contract should be recorded before a
   heavier fine-tune run.
@@ -83,6 +86,10 @@ PY
 - Lightweight runtime orchestration via `SpiralSession` so callers can record
   backend intent, inspect device preflight evidence, and reuse the same
   `RankPlan` helpers as the Rust executors.
+- Hosted/API-model LLM runtime bridge via `ApiLLMZSpaceRuntime` so an
+  OpenAI-compatible response mapping, SDK response object, or arbitrary API
+  callable can be converted into Z-space metrics, usage/latency telemetry, and
+  posterior confidence without making hosted SDKs mandatory dependencies.
 - Language desire controls via `st.nn.DesirePipeline`, `DesireTrainerBridge`,
   `DesireRoundtableBridge`, and downstream hook adapters so notebooks can
   inspect phase/temperature/entropy offsets without making the symbolic kernel

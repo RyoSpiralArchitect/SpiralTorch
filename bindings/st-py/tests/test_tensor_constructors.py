@@ -128,6 +128,7 @@ def _install_stub_environment(monkeypatch: pytest.MonkeyPatch) -> None:
         "ZSpacePosterior",
         "ZSpacePartialBundle",
         "ZSpaceTelemetryFrame",
+        "ZSpaceInferenceRuntime",
         "ZSpaceInferencePipeline",
     ]
     for name in _ZSPACE_CLASSES:
@@ -143,6 +144,7 @@ def _install_stub_environment(monkeypatch: pytest.MonkeyPatch) -> None:
         "coherence_partial_from_diagnostics",
         "decode_zspace_embedding",
         "blend_zspace_partials",
+        "compile_inference",
         "infer_canvas_snapshot",
         "infer_canvas_transformer",
         "infer_coherence_diagnostics",

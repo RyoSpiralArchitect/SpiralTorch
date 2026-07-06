@@ -54,6 +54,8 @@ def _isolated_spiraltorch(*, provide_rl: bool, existing_rl: types.ModuleType | N
             sys.modules["spiraltorch.rl"] = rl_module
 
         stub_core = types.ModuleType("spiraltorch.spiraltorch")
+        stub_core.Tensor = type("Tensor", (), {})
+        stub_core.PyTensor = stub_core.Tensor
         if rl_module is not None:
             stub_core.rl = rl_module
             stub_core.spiral_rl = rl_module
@@ -67,6 +69,7 @@ def _isolated_spiraltorch(*, provide_rl: bool, existing_rl: types.ModuleType | N
             "ZSpacePosterior",
             "ZSpacePartialBundle",
             "ZSpaceTelemetryFrame",
+            "ZSpaceInferenceRuntime",
             "ZSpaceInferencePipeline",
             "inference_to_mapping",
             "inference_to_zmetrics",
@@ -77,6 +80,7 @@ def _isolated_spiraltorch(*, provide_rl: bool, existing_rl: types.ModuleType | N
             "coherence_partial_from_diagnostics",
             "decode_zspace_embedding",
             "blend_zspace_partials",
+            "compile_inference",
             "infer_canvas_snapshot",
             "infer_canvas_transformer",
             "infer_coherence_diagnostics",
