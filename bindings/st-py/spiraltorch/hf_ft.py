@@ -51,6 +51,7 @@ __all__ = [
 
 
 HF_GPT2_FT_DEFAULT_DEVICE_BACKENDS = ["wgpu", "cpu"]
+HF_GPT2_FT_DISTORTION_EVAL_PENALTY_WEIGHT = 0.1
 HF_GPT2_FT_REQUIRED_PYTHON_PACKAGES = [
     "transformers",
     "torch",
@@ -1834,6 +1835,60 @@ def _metric_number(
     return _safe_number(row.get(key))
 
 
+def _bounded_pressure(value: object, *, scale: float = 1.0) -> float | None:
+    number = _safe_number(value)
+    if number is None:
+        return None
+    if scale <= 0.0 or not math.isfinite(scale):
+        scale = 1.0
+    return max(0.0, min(1.0, float(number) / scale))
+
+
+def _compatibility_pressure(value: object) -> float | None:
+    number = _safe_number(value)
+    if number is None:
+        return None
+    return max(0.0, min(1.0, 1.0 - float(number)))
+
+
+def _distortion_pressure_index(
+    *,
+    risk_score: object = None,
+    api_compatibility_score: object = None,
+    api_request_dropped_key_count: object = None,
+    api_request_retry_dropped_key_count: object = None,
+    logits_repression_strength: object = None,
+    logits_ngram_repression_strength: object = None,
+) -> float | None:
+    terms = [
+        _bounded_pressure(risk_score),
+        _compatibility_pressure(api_compatibility_score),
+        _bounded_pressure(api_request_dropped_key_count, scale=4.0),
+        _bounded_pressure(api_request_retry_dropped_key_count, scale=2.0),
+        _bounded_pressure(logits_repression_strength, scale=4.0),
+        _bounded_pressure(logits_ngram_repression_strength, scale=4.0),
+    ]
+    values = [value for value in terms if value is not None]
+    if not values:
+        return None
+    return sum(values) / len(values)
+
+
+def _distortion_adjusted_eval_loss(
+    eval_loss: object,
+    distortion_pressure_index: object,
+) -> float | None:
+    loss = _safe_number(eval_loss)
+    if loss is None:
+        return None
+    pressure = _safe_number(distortion_pressure_index)
+    if pressure is None:
+        return float(loss)
+    return float(loss) + (
+        HF_GPT2_FT_DISTORTION_EVAL_PENALTY_WEIGHT * float(pressure)
+    )
+
+
 def _generation_control(
     row: Mapping[str, object],
 ) -> dict[str, object]:
@@ -2046,6 +2101,54 @@ def summarize_hf_gpt2_finetune_run_card(
         if not before_continuation_hash or not after_continuation_hash
         else before_continuation_hash != after_continuation_hash
     )
+    distortion_pressure_index = _distortion_pressure_index(
+        risk_score=_first_safe_number(
+            trainer_trace.get("trace_last_inference_distortion_risk_score"),
+            inference_handoff.get("recommended_risk_score"),
+        ),
+        api_compatibility_score=_first_safe_number(
+            trainer_trace.get(
+                "trace_last_inference_distortion_api_compatibility_score"
+            ),
+            inference_handoff.get("recommended_api_compatibility_score"),
+        ),
+        api_request_dropped_key_count=_first_safe_number(
+            trainer_trace.get(
+                "trace_last_inference_distortion_api_request_dropped_key_count"
+            ),
+            inference_handoff.get("api_request_dropped_key_count"),
+        ),
+        api_request_retry_dropped_key_count=_first_safe_number(
+            trainer_trace.get(
+                "trace_last_inference_distortion_api_request_retry_dropped_key_count"
+            ),
+            inference_handoff.get("api_request_retry_dropped_key_count"),
+        ),
+        logits_repression_strength=_first_safe_number(
+            trainer_trace.get(
+                "trace_last_inference_distortion_logits_repression_strength"
+            ),
+            generation_inference_processor.get("repression_strength"),
+            _mapping_item(
+                inference_handoff,
+                "recommended_processor_kwargs",
+            ).get("repression_strength"),
+        ),
+        logits_ngram_repression_strength=_first_safe_number(
+            trainer_trace.get(
+                "trace_last_inference_distortion_logits_ngram_repression_strength"
+            ),
+            generation_inference_processor.get("ngram_repression_strength"),
+            _mapping_item(
+                inference_handoff,
+                "recommended_processor_kwargs",
+            ).get("ngram_repression_strength"),
+        ),
+    )
+    distortion_adjusted_eval_loss = _distortion_adjusted_eval_loss(
+        effective_eval_after_loss,
+        distortion_pressure_index,
+    )
 
     return {
         "row_type": "hf_gpt2_finetune_run_card_summary",
@@ -2080,6 +2183,11 @@ def summarize_hf_gpt2_finetune_run_card(
         "effective_eval_after_loss_source": effective_eval_after_source,
         "eval_loss_delta": eval_loss_delta,
         "eval_perplexity_delta": eval_perplexity_delta,
+        "distortion_pressure_index": distortion_pressure_index,
+        "distortion_adjusted_eval_loss": distortion_adjusted_eval_loss,
+        "distortion_adjusted_eval_penalty_weight": (
+            HF_GPT2_FT_DISTORTION_EVAL_PENALTY_WEIGHT
+        ),
         "eval_loss_improved": (
             None if eval_loss_delta is None else bool(eval_loss_delta < 0.0)
         ),
@@ -2486,6 +2594,12 @@ def _ranked_sweep_rows(
                     "effective_eval_after_loss_source"
                 ),
                 "eval_loss_delta": _safe_number(row.get("eval_loss_delta")),
+                "distortion_pressure_index": _safe_number(
+                    row.get("distortion_pressure_index")
+                ),
+                "distortion_adjusted_eval_loss": _safe_number(
+                    row.get("distortion_adjusted_eval_loss")
+                ),
                 "eval_loss_improved": row.get("eval_loss_improved"),
                 "generation_continuation_changed": row.get(
                     "generation_continuation_changed"
@@ -2758,6 +2872,7 @@ def summarize_hf_gpt2_finetune_sweep_report(
     best_delta = _safe_number(comparison.get("best_eval_loss_delta"))
     best_delta_label = comparison.get("best_eval_loss_delta_run_label")
     best_after_label = comparison.get("best_eval_after_run_label")
+    scale_up_candidate = _best_summary(summaries, "distortion_adjusted_eval_loss")
     selected_reason = "best_eval_after_loss"
     selected_label = best_after_label
     if best_delta is not None and best_delta < 0.0 and best_delta_label:
@@ -2852,6 +2967,29 @@ def summarize_hf_gpt2_finetune_sweep_report(
         "best_eval_loss_delta": best_delta,
         "selected_run_label": selected_label,
         "selected_reason": selected_reason if selected_label else None,
+        "scale_up_candidate_label": (
+            None if scale_up_candidate is None else scale_up_candidate.get("run_label")
+        ),
+        "scale_up_candidate_reason": (
+            None
+            if scale_up_candidate is None
+            else "lowest_distortion_adjusted_eval_loss"
+        ),
+        "scale_up_candidate_distortion_adjusted_eval_loss": (
+            None
+            if scale_up_candidate is None
+            else _safe_number(scale_up_candidate.get("distortion_adjusted_eval_loss"))
+        ),
+        "scale_up_candidate_distortion_pressure_index": (
+            None
+            if scale_up_candidate is None
+            else _safe_number(scale_up_candidate.get("distortion_pressure_index"))
+        ),
+        "scale_up_candidate_effective_eval_after_loss": (
+            None
+            if scale_up_candidate is None
+            else _safe_number(scale_up_candidate.get("effective_eval_after_loss"))
+        ),
         "selected_run_name": selected_run.get("name"),
         "selected_run_status": selected_run.get("status"),
         "selected_run_reused": selected_run.get("reused"),
@@ -2982,6 +3120,18 @@ def summarize_hf_gpt2_finetune_sweep_report_lines(
             f"best_delta={summary.get('best_eval_loss_delta')}"
         ),
     ]
+    if summary.get("scale_up_candidate_label") is not None:
+        lines.append(
+            "hf_gpt2_ft_sweep_scale_up "
+            f"candidate={summary.get('scale_up_candidate_label')} "
+            f"reason={summary.get('scale_up_candidate_reason')} "
+            "adjusted_eval="
+            f"{summary.get('scale_up_candidate_distortion_adjusted_eval_loss')} "
+            "pressure="
+            f"{summary.get('scale_up_candidate_distortion_pressure_index')} "
+            "eval_after="
+            f"{summary.get('scale_up_candidate_effective_eval_after_loss')}"
+        )
     if summary.get("inference_distortion_recommended_probe") is not None:
         lines.append(
             "hf_gpt2_ft_sweep_inference_handoff "
@@ -3082,6 +3232,8 @@ def summarize_hf_gpt2_finetune_sweep_report_lines(
             f"eval_after={row.get('effective_eval_after_loss')} "
             f"source={row.get('effective_eval_after_loss_source')} "
             f"delta={row.get('eval_loss_delta')} "
+            f"adjusted={row.get('distortion_adjusted_eval_loss')} "
+            f"pressure={row.get('distortion_pressure_index')} "
             f"trainer_sps={row.get('trainer_steps_per_second')} "
             f"trace_sps_mean={row.get('trace_log_steps_per_second_mean')} "
             f"eval_series={row.get('trace_eval_loss_series')} "
@@ -3115,6 +3267,7 @@ def compare_hf_gpt2_finetune_run_cards(
     ]
     best_after = _best_summary(summaries, "effective_eval_after_loss")
     best_delta = _best_summary(summaries, "eval_loss_delta")
+    best_adjusted = _best_summary(summaries, "distortion_adjusted_eval_loss")
     run_label_values = [str(summary.get("run_label")) for summary in summaries]
     return {
         "row_type": "hf_gpt2_finetune_run_card_comparison",
@@ -3155,6 +3308,19 @@ def compare_hf_gpt2_finetune_run_cards(
         ),
         "best_eval_loss_delta": (
             None if best_delta is None else best_delta.get("eval_loss_delta")
+        ),
+        "best_distortion_adjusted_run_label": (
+            None if best_adjusted is None else best_adjusted.get("run_label")
+        ),
+        "best_distortion_adjusted_eval_loss": (
+            None
+            if best_adjusted is None
+            else best_adjusted.get("distortion_adjusted_eval_loss")
+        ),
+        "best_distortion_adjusted_pressure_index": (
+            None
+            if best_adjusted is None
+            else best_adjusted.get("distortion_pressure_index")
         ),
         "summaries": summaries,
     }

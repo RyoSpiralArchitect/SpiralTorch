@@ -582,7 +582,10 @@ show whether telemetry was explicitly requested or auto-enabled from the
 handoff, which makes dry-run plans honest before the model is loaded. Trace
 summaries carry the handoff's risk/API retry-drop counts plus logits repression
 strengths beside loss/eval telemetry, so post-run comparisons can distinguish
-"it trained well" from "it trained well under an aggressive decode field." Add
+"it trained well" from "it trained well under an aggressive decode field."
+`distortion_adjusted_eval_loss` and the sweep `scale_up_candidate_*` fields let
+the next longer run prefer near-best eval loss with lower distortion pressure
+instead of blindly following raw eval loss alone. Add
 `--generation-from-inference-distortion` with a
 generation prompt to reuse the handoff's `recommended_processor_kwargs` as the
 Z-Space/repression logits processor for before/after generated samples; omit it

@@ -904,6 +904,11 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             summary["trainer_telemetry_auto_reason"],
             "inference_distortion_handoff",
         )
+        self.assertAlmostEqual(summary["distortion_pressure_index"], 0.3366666667)
+        self.assertAlmostEqual(
+            summary["distortion_adjusted_eval_loss"],
+            1.5336666667,
+        )
         self.assertEqual(
             summary["trace_last_inference_distortion_risk_score"],
             0.21,
@@ -978,6 +983,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(comparison["run_count"], 2)
         self.assertEqual(comparison["best_eval_after_run_label"], "strong")
         self.assertEqual(comparison["best_eval_loss_delta_run_label"], "strong")
+        self.assertEqual(comparison["best_distortion_adjusted_run_label"], "strong")
         self.assertEqual(comparison["eval_loss_improved_count"], 2)
         self.assertEqual(comparison["generation_changed_count"], 1)
         self.assertEqual(comparison["generation_from_inference_distortion_count"], 2)
@@ -989,6 +995,15 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(sweep_summary["status"], "complete")
         self.assertEqual(sweep_summary["selected_run_label"], "strong")
         self.assertEqual(sweep_summary["selected_reason"], "best_eval_loss_delta")
+        self.assertEqual(sweep_summary["scale_up_candidate_label"], "strong")
+        self.assertEqual(
+            sweep_summary["scale_up_candidate_reason"],
+            "lowest_distortion_adjusted_eval_loss",
+        )
+        self.assertAlmostEqual(
+            sweep_summary["scale_up_candidate_distortion_pressure_index"],
+            0.3366666667,
+        )
         self.assertEqual(sweep_summary["selected_run_status"], "completed")
         self.assertEqual(sweep_summary["selected_run_card"], str(strong_path))
         self.assertIn(
@@ -1124,6 +1139,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         top_line = next(line for line in sweep_lines if "hf_gpt2_ft_sweep_top" in line)
         self.assertIn("trainer_sps=None", top_line)
         self.assertIn("trace_sps_mean=0.5", top_line)
+        self.assertIn("adjusted=1.533666", top_line)
+        self.assertIn("pressure=0.336666", top_line)
         self.assertIn("telemetry=True", top_line)
         self.assertIn("telemetry_auto=inference_distortion_handoff", top_line)
         self.assertIn("infer_trace_risk=0.21", top_line)
@@ -1136,6 +1153,9 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("gen_entropy=3.4", top_line)
         self.assertIn("zcontrol_changed=2", top_line)
         self.assertIn("zcontrol_backend=spiraltorch_zspace_softmax", top_line)
+        self.assertTrue(
+            any("hf_gpt2_ft_sweep_scale_up" in line for line in sweep_lines)
+        )
 
         trace_card = dict(base_card)
         trace_card["eval_after_train"] = hf_ft.hf_gpt2_finetune_eval_report(
@@ -1170,6 +1190,113 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(
             trace_comparison["best_eval_after_loss_source"],
             "trainer_trace_last_eval_loss",
+        )
+
+    def test_distortion_adjusted_scale_up_prefers_safer_nearby_run(self) -> None:
+        def run_card(eval_loss: float, *, trace: dict[str, float]) -> dict[str, object]:
+            return {
+                "row_type": "hf_gpt2_finetune_run_card",
+                "model_name": "gpt2",
+                "dataset_name": "local-files",
+                "dataset_fit_report": {
+                    "verdict": "train_eval_ready",
+                    "train_ready": True,
+                    "eval_ready": True,
+                },
+                "eval_after_train": hf_ft.hf_gpt2_finetune_eval_report(
+                    stage="after_train",
+                    metrics={"eval_loss": eval_loss},
+                ),
+                "trainer_trace_summary": {
+                    "trace_event_count": 2,
+                    **trace,
+                },
+            }
+
+        risky = run_card(
+            1.5,
+            trace={
+                "trace_last_inference_distortion_risk_score": 1.0,
+                "trace_last_inference_distortion_api_compatibility_score": 0.0,
+                "trace_last_inference_distortion_api_request_dropped_key_count": 4,
+                "trace_last_inference_distortion_api_request_retry_dropped_key_count": 2,
+                "trace_last_inference_distortion_logits_repression_strength": 4.0,
+                "trace_last_inference_distortion_logits_ngram_repression_strength": 4.0,
+            },
+        )
+        safe = run_card(
+            1.54,
+            trace={
+                "trace_last_inference_distortion_risk_score": 0.0,
+                "trace_last_inference_distortion_api_compatibility_score": 1.0,
+                "trace_last_inference_distortion_api_request_dropped_key_count": 0,
+                "trace_last_inference_distortion_api_request_retry_dropped_key_count": 0,
+                "trace_last_inference_distortion_logits_repression_strength": 0.0,
+                "trace_last_inference_distortion_logits_ngram_repression_strength": 0.0,
+            },
+        )
+
+        comparison = hf_ft.compare_hf_gpt2_finetune_run_cards(
+            [risky, safe],
+            run_labels=["risky", "safe"],
+        )
+        sweep_summary = hf_ft.summarize_hf_gpt2_finetune_sweep_report(
+            {
+                "row_type": "hf_gpt2_finetune_sweep_report",
+                "dry_run": False,
+                "run_count": 2,
+                "completed_run_count": 2,
+                "failed_run_count": 0,
+                "comparison": comparison,
+                "runs": [
+                    {"name": "risky", "status": "completed", "returncode": 0},
+                    {"name": "safe", "status": "completed", "returncode": 0},
+                ],
+            },
+            top_n=2,
+        )
+        lines = hf_ft.summarize_hf_gpt2_finetune_sweep_report_lines(
+            {
+                "row_type": "hf_gpt2_finetune_sweep_report",
+                "dry_run": False,
+                "run_count": 2,
+                "completed_run_count": 2,
+                "failed_run_count": 0,
+                "comparison": comparison,
+                "runs": [
+                    {"name": "risky", "status": "completed", "returncode": 0},
+                    {"name": "safe", "status": "completed", "returncode": 0},
+                ],
+            },
+            top_n=2,
+        )
+
+        self.assertEqual(comparison["best_eval_after_run_label"], "risky")
+        self.assertEqual(comparison["best_distortion_adjusted_run_label"], "safe")
+        self.assertAlmostEqual(
+            comparison["summaries"][0]["distortion_pressure_index"],
+            1.0,
+        )
+        self.assertAlmostEqual(
+            comparison["summaries"][0]["distortion_adjusted_eval_loss"],
+            1.6,
+        )
+        self.assertAlmostEqual(
+            comparison["summaries"][1]["distortion_pressure_index"],
+            0.0,
+        )
+        self.assertAlmostEqual(
+            comparison["summaries"][1]["distortion_adjusted_eval_loss"],
+            1.54,
+        )
+        self.assertEqual(sweep_summary["selected_run_label"], "risky")
+        self.assertEqual(sweep_summary["scale_up_candidate_label"], "safe")
+        self.assertEqual(
+            sweep_summary["scale_up_candidate_reason"],
+            "lowest_distortion_adjusted_eval_loss",
+        )
+        self.assertTrue(
+            any("hf_gpt2_ft_sweep_scale_up candidate=safe" in line for line in lines)
         )
 
     def test_sweep_example_builds_grid_and_writes_dry_run_report(self) -> None:
