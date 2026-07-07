@@ -13,6 +13,9 @@ from spiraltorch.hf_generation import (
     load_zspace_generation_control_sweep,
     summarize_zspace_generation_control_sweep,
     summarize_zspace_generation_control_sweep_lines,
+    zspace_generation_control_bridge_cli_args,
+    zspace_generation_control_processor_kwargs,
+    zspace_generation_control_sweep_cli_args,
 )
 
 try:
@@ -122,9 +125,16 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         self.assertIn("ZSpaceRepressionLogitsProcessor", st.__all__)
         self.assertIn("build_zspace_repression_logits_processor", st.__all__)
         self.assertIn("build_zspace_softmax_logits_processor", st.__all__)
+        self.assertIn("zspace_generation_control_bridge_cli_args", st.__all__)
+        self.assertIn("zspace_generation_control_processor_kwargs", st.__all__)
+        self.assertIn("zspace_generation_control_sweep_cli_args", st.__all__)
         self.assertIn("load_zspace_generation_control_sweep", st.__all__)
         self.assertIn("summarize_zspace_generation_control_sweep", st.__all__)
         self.assertIs(st.ZSpaceRepressionLogitsProcessor, ZSpaceRepressionLogitsProcessor)
+        self.assertIs(
+            st.zspace_generation_control_bridge_cli_args,
+            zspace_generation_control_bridge_cli_args,
+        )
         self.assertIs(
             st.summarize_zspace_generation_control_sweep,
             summarize_zspace_generation_control_sweep,
@@ -159,8 +169,18 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
             "status": "ok",
             "config": {
                 "top_k": 64,
+                "curvature": -0.04,
+                "temperature": 1.0,
                 "entropy_target": 3.0,
+                "entropy_tolerance": 1.0e-4,
+                "entropy_gain": 0.5,
+                "min_temperature": 0.7,
+                "max_temperature": 2.4,
+                "repression_window": 16,
                 "repression_strength": 1.25,
+                "last_token_repression": 0.0,
+                "mask_non_top_k": True,
+                "use_native_zspace": True,
             },
             "generation": hf_ft.hf_gpt2_finetune_generation_report(
                 stage="controlled",
@@ -213,8 +233,29 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
         )
         self.assertEqual(summary["recommended_config"]["repression_strength"], 1.25)
         self.assertEqual(summary["recommended_config"]["entropy_target"], 3.0)
-        self.assertIn("--repression-strength-values", summary["recommended_cli_args"])
-        self.assertIn("1.25", summary["recommended_cli_args"])
+        self.assertEqual(summary["recommended_processor_kwargs"]["top_k"], 64)
+        self.assertEqual(
+            summary["recommended_processor_kwargs"]["min_temperature"],
+            0.7,
+        )
+        self.assertIn("--repression-strength-values", summary["recommended_sweep_cli_args"])
+        self.assertIn("1.25", summary["recommended_sweep_cli_args"])
+        self.assertEqual(summary["recommended_cli_args"], summary["recommended_sweep_cli_args"])
+        self.assertIn("--generation-zspace-softmax", summary["recommended_bridge_cli_args"])
+        self.assertIn("--generation-repression-strength", summary["recommended_bridge_cli_args"])
+        self.assertIn("1.25", summary["recommended_bridge_cli_args"])
+        self.assertEqual(
+            zspace_generation_control_processor_kwargs(summary["recommended_config"]),
+            summary["recommended_processor_kwargs"],
+        )
+        self.assertEqual(
+            zspace_generation_control_sweep_cli_args(summary["recommended_config"]),
+            summary["recommended_sweep_cli_args"],
+        )
+        self.assertEqual(
+            zspace_generation_control_bridge_cli_args(summary["recommended_config"]),
+            summary["recommended_bridge_cli_args"],
+        )
         self.assertEqual(summary["best_loop_score_delta_from_baseline"], -3.0)
         self.assertEqual(summary["best_loop_score_reduction_ratio"], 1.0)
         self.assertEqual(summary["top_runs"][0]["loop_score"], 0.0)

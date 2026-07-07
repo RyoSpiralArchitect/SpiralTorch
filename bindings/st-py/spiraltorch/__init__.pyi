@@ -341,6 +341,20 @@ def build_zspace_softmax_logits_processor(
     **kwargs: object,
 ) -> ZSpaceRepressionLogitsProcessor: ...
 
+def zspace_generation_control_processor_kwargs(
+    config: Mapping[str, object] | None,
+) -> Dict[str, object]: ...
+
+def zspace_generation_control_sweep_cli_args(
+    config: Mapping[str, object] | None,
+) -> List[str]: ...
+
+def zspace_generation_control_bridge_cli_args(
+    config: Mapping[str, object] | None,
+    *,
+    include_enable_flag: bool = ...,
+) -> List[str]: ...
+
 def load_zspace_generation_control_sweep(
     path: str | PathLike[str],
 ) -> Dict[str, object]: ...
@@ -8247,6 +8261,9 @@ __all__ = [
     "ZSpaceRepressionLogitsProcessor",
     "build_zspace_repression_logits_processor",
     "build_zspace_softmax_logits_processor",
+    "zspace_generation_control_bridge_cli_args",
+    "zspace_generation_control_processor_kwargs",
+    "zspace_generation_control_sweep_cli_args",
     "load_zspace_generation_control_sweep",
     "summarize_zspace_generation_control_run",
     "summarize_zspace_generation_control_sweep",

@@ -13,6 +13,9 @@ __all__ = [
     "ZSpaceRepressionLogitsProcessor",
     "build_zspace_repression_logits_processor",
     "build_zspace_softmax_logits_processor",
+    "zspace_generation_control_bridge_cli_args",
+    "zspace_generation_control_processor_kwargs",
+    "zspace_generation_control_sweep_cli_args",
     "load_zspace_generation_control_sweep",
     "summarize_zspace_generation_control_run",
     "summarize_zspace_generation_control_sweep",
@@ -597,13 +600,26 @@ def summarize_zspace_generation_control_run(
         "config_curvature": _safe_number(config.get("curvature")),
         "config_temperature": _safe_number(config.get("temperature")),
         "config_entropy_target": _safe_number(config.get("entropy_target")),
+        "config_entropy_tolerance": _safe_number(
+            config.get("entropy_tolerance")
+        ),
         "config_entropy_gain": _safe_number(config.get("entropy_gain")),
+        "config_min_temperature": _safe_number(config.get("min_temperature")),
+        "config_max_temperature": _safe_number(config.get("max_temperature")),
         "config_repression_window": _safe_number(config.get("repression_window")),
         "config_repression_strength": _safe_number(
             config.get("repression_strength")
         ),
         "config_last_token_repression": _safe_number(
             config.get("last_token_repression")
+        ),
+        "config_mask_non_top_k": (
+            bool(config["mask_non_top_k"]) if "mask_non_top_k" in config else None
+        ),
+        "config_use_native_zspace": (
+            bool(config["use_native_zspace"])
+            if "use_native_zspace" in config
+            else None
         ),
     }
 
@@ -656,10 +672,15 @@ def _recommended_config(row: Mapping[str, object] | None) -> dict[str, object] |
         "curvature": row.get("config_curvature"),
         "temperature": row.get("config_temperature"),
         "entropy_target": row.get("config_entropy_target"),
+        "entropy_tolerance": row.get("config_entropy_tolerance"),
         "entropy_gain": row.get("config_entropy_gain"),
+        "min_temperature": row.get("config_min_temperature"),
+        "max_temperature": row.get("config_max_temperature"),
         "repression_window": row.get("config_repression_window"),
         "repression_strength": row.get("config_repression_strength"),
         "last_token_repression": row.get("config_last_token_repression"),
+        "mask_non_top_k": row.get("config_mask_non_top_k"),
+        "use_native_zspace": row.get("config_use_native_zspace"),
     }
     return {key: value for key, value in fields.items() if value is not None}
 
@@ -672,7 +693,36 @@ def _cli_value(value: object) -> str:
     return str(value)
 
 
-def _recommended_cli_args(config: Mapping[str, object] | None) -> list[str]:
+def zspace_generation_control_processor_kwargs(
+    config: Mapping[str, object] | None,
+) -> dict[str, object]:
+    """Return kwargs suitable for ``build_zspace_repression_logits_processor``."""
+
+    if not config:
+        return {}
+    allowed = {
+        "top_k",
+        "curvature",
+        "temperature",
+        "entropy_target",
+        "entropy_tolerance",
+        "entropy_gain",
+        "min_temperature",
+        "max_temperature",
+        "repression_window",
+        "repression_strength",
+        "last_token_repression",
+        "mask_non_top_k",
+        "use_native_zspace",
+    }
+    return {key: value for key, value in config.items() if key in allowed}
+
+
+def zspace_generation_control_sweep_cli_args(
+    config: Mapping[str, object] | None,
+) -> list[str]:
+    """Return focused sweep CLI args for a recommended generation config."""
+
     if not config:
         return []
     flag_map = [
@@ -681,6 +731,9 @@ def _recommended_cli_args(config: Mapping[str, object] | None) -> list[str]:
         ("temperature", "--zspace-temperature-values"),
         ("entropy_target", "--zspace-entropy-target-values"),
         ("entropy_gain", "--zspace-entropy-gain-values"),
+        ("entropy_tolerance", "--zspace-entropy-tolerance"),
+        ("min_temperature", "--zspace-min-temperature"),
+        ("max_temperature", "--zspace-max-temperature"),
         ("repression_window", "--repression-window-values"),
         ("repression_strength", "--repression-strength-values"),
         ("last_token_repression", "--last-token-repression-values"),
@@ -690,6 +743,47 @@ def _recommended_cli_args(config: Mapping[str, object] | None) -> list[str]:
         if key not in config:
             continue
         args.extend([flag, _cli_value(config[key])])
+    if config.get("mask_non_top_k") is False:
+        args.append("--keep-non-top-k")
+    if config.get("use_native_zspace") is False:
+        args.append("--zspace-no-native")
+    return args
+
+
+def zspace_generation_control_bridge_cli_args(
+    config: Mapping[str, object] | None,
+    *,
+    include_enable_flag: bool = True,
+) -> list[str]:
+    """Return bridge/sweep CLI args for using one recommended config."""
+
+    if not config:
+        return []
+    flag_map = [
+        ("top_k", "--generation-zspace-top-k"),
+        ("curvature", "--generation-zspace-curvature"),
+        ("temperature", "--generation-zspace-temperature"),
+        ("entropy_target", "--generation-zspace-entropy-target"),
+        ("entropy_gain", "--generation-zspace-entropy-gain"),
+        ("entropy_tolerance", "--generation-zspace-entropy-tolerance"),
+        ("min_temperature", "--generation-zspace-min-temperature"),
+        ("max_temperature", "--generation-zspace-max-temperature"),
+        ("repression_window", "--generation-repression-window"),
+        ("repression_strength", "--generation-repression-strength"),
+        ("last_token_repression", "--generation-last-token-repression"),
+    ]
+    args: list[str] = ["--generation-zspace-softmax"] if include_enable_flag else []
+    for key, flag in flag_map:
+        if key not in config:
+            continue
+        value = config[key]
+        if key == "entropy_target" and value is None:
+            continue
+        args.extend([flag, _cli_value(value)])
+    if config.get("mask_non_top_k") is False:
+        args.append("--generation-zspace-keep-non-top-k")
+    if config.get("use_native_zspace") is False:
+        args.append("--generation-zspace-no-native")
     return args
 
 
@@ -756,6 +850,15 @@ def summarize_zspace_generation_control_sweep(
     top_runs = _ranked_control_rows(completed, top_n=top_n)
     best = top_runs[0] if top_runs else None
     recommended_config = _recommended_config(best)
+    recommended_processor_kwargs = zspace_generation_control_processor_kwargs(
+        recommended_config
+    )
+    recommended_sweep_cli_args = zspace_generation_control_sweep_cli_args(
+        recommended_config
+    )
+    recommended_bridge_cli_args = zspace_generation_control_bridge_cli_args(
+        recommended_config
+    )
     best_loop_delta = None if best is None else best.get("loop_score_delta_from_baseline")
     best_loop_ratio = None if best is None else best.get("loop_score_reduction_ratio")
     return {
@@ -780,7 +883,10 @@ def summarize_zspace_generation_control_sweep(
             baseline_loop_score=baseline_loop,
         ),
         "recommended_config": recommended_config,
-        "recommended_cli_args": _recommended_cli_args(recommended_config),
+        "recommended_processor_kwargs": recommended_processor_kwargs,
+        "recommended_sweep_cli_args": recommended_sweep_cli_args,
+        "recommended_bridge_cli_args": recommended_bridge_cli_args,
+        "recommended_cli_args": recommended_sweep_cli_args,
         "min_loop_score": min(loop_values) if loop_values else None,
         "max_loop_score": max(loop_values) if loop_values else None,
         "max_top_token_changed_count": (
