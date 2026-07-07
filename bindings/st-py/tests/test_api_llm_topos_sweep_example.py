@@ -45,11 +45,16 @@ def test_api_llm_topos_sweep_example_offline_writes_report(tmp_path, capsys) -> 
     assert printed["mode_counts"]["contextual"] == 1
     assert printed["mode_counts"]["guarded"] == 1
     assert printed["report_comparison"]["winners"]["widest_temperature_range"] == "current"
+    assert len(printed["response_samples"]) == 6
+    first_sample = printed["response_samples"][0]
+    assert first_sample["label"] == "open"
+    assert "topos route sets temperature=" in first_sample["text_preview"]
 
     report = json.loads(report_path.read_text(encoding="utf-8"))
     assert report["kind"] == "spiraltorch.api_llm_topos_sweep_report"
     assert report["prompt_count"] == 2
     assert report["route_count"] == 3
+    assert report["response_sample_count"] == 6
     assert report["adapter_winners"]["highest_request_temperature"] == "open"
     assert (tmp_path / "traces" / "00-open.jsonl").exists()
     assert (tmp_path / "traces" / "01-contextual.jsonl").exists()
@@ -67,4 +72,6 @@ def test_api_llm_topos_sweep_example_dry_run_writes_plan(tmp_path, capsys) -> No
     assert printed["prompt_count"] == 1
     assert printed["labels"] == ["open", "contextual", "guarded"]
     assert printed["live_provider"] == "offline"
+    assert printed["report_options"]["max_samples_per_route"] == 2
+    assert printed["report_options"]["max_text_chars"] == 360
     assert json.loads((tmp_path / "plan.json").read_text(encoding="utf-8")) == printed

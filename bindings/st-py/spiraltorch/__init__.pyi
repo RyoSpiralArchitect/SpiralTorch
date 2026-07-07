@@ -2654,6 +2654,7 @@ def run_api_llm_topos_sweep(
     labels: Sequence[str] | None = ...,
     near_best_tolerance: float = ...,
     report_out: str | PathLike[str] | None = ...,
+    report_options: Mapping[str, Any] | None = ...,
     clear: bool = ...,
     **kwargs: Any,
 ) -> Dict[str, Any]: ...
@@ -2663,6 +2664,8 @@ def api_llm_topos_sweep_report(
     sweep: Mapping[str, Any],
     *,
     created_at: str | None = ...,
+    max_samples_per_route: int = ...,
+    max_text_chars: int = ...,
 ) -> Dict[str, Any]: ...
 
 
