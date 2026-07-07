@@ -109,6 +109,13 @@ def summarize_history(
         and log_steps_per_second > 0.0
         else None
     )
+    estimated_seconds_until_next_checkpoint = (
+        float(log_steps_until_next_checkpoint) / log_steps_per_second
+        if isinstance(log_steps_until_next_checkpoint, int)
+        and log_steps_per_second is not None
+        and log_steps_per_second > 0.0
+        else None
+    )
     eval_losses = [
         _nested(row, "trace", "trace_last_eval_loss")
         for row in rows
@@ -146,6 +153,12 @@ def summarize_history(
             last, "checkpoint_progress", "next_checkpoint_step"
         ),
         "last_log_steps_until_next_checkpoint": log_steps_until_next_checkpoint,
+        "estimated_seconds_until_next_checkpoint": (
+            estimated_seconds_until_next_checkpoint
+        ),
+        "last_best_eval_loss_step": _nested(
+            last, "trace", "trace_best_eval_loss_step"
+        ),
         "first_loss": losses[0] if losses else None,
         "last_loss": losses[-1] if losses else None,
         "min_loss": min(losses) if losses else None,
@@ -181,11 +194,13 @@ def history_lines(
             f"last_next_checkpoint_step={_number_text(summary.get('last_next_checkpoint_step'))} "
             f"last_steps_until_next_checkpoint={_number_text(summary.get('last_log_steps_until_next_checkpoint'))} "
             f"estimated_seconds_until_next_eval={_number_text(summary.get('estimated_seconds_until_next_eval'))} "
+            f"estimated_seconds_until_next_checkpoint={_number_text(summary.get('estimated_seconds_until_next_checkpoint'))} "
             f"last_loss={_number_text(summary.get('last_loss'))} "
             f"min_loss={_number_text(summary.get('min_loss'))} "
             f"loss_delta={_number_text(summary.get('loss_delta'))} "
             f"last_eval_loss={_number_text(summary.get('last_eval_loss'))} "
             f"min_eval_loss={_number_text(summary.get('min_eval_loss'))} "
+            f"best_eval_loss_step={_number_text(summary.get('last_best_eval_loss_step'))} "
             f"guard_count={_number_text(summary.get('last_guard_count'))} "
             f"process={_number_text(summary.get('last_process_status'))} "
             f"final_ready={_number_text(summary.get('last_final_checkpoint_ready'))} "
@@ -208,6 +223,7 @@ def history_lines(
                 f"steps_until_next_checkpoint={_number_text(_nested(row, 'checkpoint_progress', 'log_steps_until_next_checkpoint'))} "
                 f"last_loss={_number_text(_nested(row, 'trace', 'trace_last_loss'))} "
                 f"last_eval_loss={_number_text(_nested(row, 'trace', 'trace_last_eval_loss'))} "
+                f"best_eval_loss_step={_number_text(_nested(row, 'trace', 'trace_best_eval_loss_step'))} "
                 f"final_ready={_number_text(row.get('final_checkpoint_ready'))} "
                 f"disk_free_gb={_number_text(row.get('disk_free_gb'))}"
             )

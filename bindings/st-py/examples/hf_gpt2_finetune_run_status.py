@@ -412,6 +412,7 @@ def status_lines(status: dict[str, Any], *, tail_evals: int) -> list[str]:
             f"last_loss={_number_text(trace.get('trace_last_loss'))} "
             f"last_eval_loss={_number_text(trace.get('trace_last_eval_loss'))} "
             f"min_eval_loss={_number_text(trace.get('trace_min_eval_loss'))} "
+            f"best_eval_loss_step={_number_text(trace.get('trace_best_eval_loss_step'))} "
             f"eval_loss_improvement={_number_text(trace.get('trace_eval_loss_improvement'))} "
             f"eval_loss_last_delta={_number_text(trace.get('trace_eval_loss_last_delta'))} "
             f"eval_loss_monotonic={_number_text(trace.get('trace_eval_loss_monotonic_nonincreasing'))} "

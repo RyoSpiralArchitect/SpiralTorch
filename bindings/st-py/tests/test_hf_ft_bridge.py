@@ -3978,6 +3978,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(status["log_progress"]["log_remaining_seconds"], 16.0)
         self.assertEqual(status["eval_progress"]["next_eval_step"], 30)
         self.assertEqual(status["eval_progress"]["log_steps_until_next_eval"], 6)
+        self.assertEqual(status["trace"]["trace_best_eval_loss_step"], 10)
         self.assertEqual(status["checkpoint_progress"]["next_checkpoint_step"], 40)
         self.assertEqual(
             status["checkpoint_progress"]["log_steps_until_next_checkpoint"], 16
@@ -3993,6 +3994,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("log_steps_until_next_eval=6", lines[0])
         self.assertIn("next_checkpoint_step=40", lines[0])
         self.assertIn("log_steps_until_next_checkpoint=16", lines[0])
+        self.assertIn("best_eval_loss_step=10", lines[0])
         self.assertIn("checkpoint_card=waiting_for_process", lines[0])
         self.assertIn("final_ready=true", lines[0])
         self.assertIn("hf_gpt2_ft_run_wait status=waiting", lines[-1])
@@ -4039,6 +4041,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                     "trace_max_global_step": 20,
                     "trace_last_loss": 2.1,
                     "trace_last_eval_loss": 1.8,
+                    "trace_best_eval_loss_step": 20,
                     "training_loss_guard_count": 0,
                 },
                 "log_progress": {
@@ -4065,6 +4068,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                     "trace_max_global_step": 30,
                     "trace_last_loss": 1.9,
                     "trace_last_eval_loss": 1.7,
+                    "trace_best_eval_loss_step": 30,
                     "training_loss_guard_count": 0,
                 },
                 "log_progress": {
@@ -4120,6 +4124,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(summary["estimated_seconds_until_next_eval"], 24.0)
         self.assertEqual(summary["last_next_checkpoint_step"], 40)
         self.assertEqual(summary["last_log_steps_until_next_checkpoint"], 6)
+        self.assertEqual(summary["estimated_seconds_until_next_checkpoint"], 24.0)
+        self.assertEqual(summary["last_best_eval_loss_step"], 30)
         self.assertEqual(summary["first_loss"], 2.1)
         self.assertEqual(summary["last_loss"], 1.9)
         self.assertEqual(summary["min_loss"], 1.9)
@@ -4133,6 +4139,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("estimated_seconds_until_next_eval=24", lines[0])
         self.assertIn("last_next_checkpoint_step=40", lines[0])
         self.assertIn("last_steps_until_next_checkpoint=6", lines[0])
+        self.assertIn("estimated_seconds_until_next_checkpoint=24", lines[0])
+        self.assertIn("best_eval_loss_step=30", lines[0])
         self.assertIn("last_loss=1.9", lines[0])
         self.assertIn("min_loss=1.9", lines[0])
         self.assertIn("loss_delta=-0.2", lines[0])
@@ -4142,6 +4150,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("index=1", lines[1])
         self.assertIn("next_checkpoint_step=40", lines[1])
         self.assertIn("steps_until_next_checkpoint=6", lines[1])
+        self.assertIn("best_eval_loss_step=30", lines[1])
         self.assertIn("last_loss=1.9", lines[1])
         self.assertIn("disk_free_gb=11.5", lines[1])
         self.assertEqual(written_lines, lines)
