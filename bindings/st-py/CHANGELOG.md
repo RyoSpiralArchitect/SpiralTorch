@@ -65,6 +65,10 @@
   resume, audit, and keep responsive on MPS/CPU machines; sweep summaries use
   the final trainer-trace eval loss as the effective after-train loss when the
   duplicate final eval pass is intentionally skipped.
+- FT trace telemetry: trainer trace summaries now include wall-clock duration,
+  log-interval step/sec statistics, eval-loss series points, and eval-runtime
+  stats so long local GPT-2 runs can expose throughput wobble beside loss
+  improvements.
 - Documentation: clarify the hard dependency boundary for larger local GPT-2
   FT runs: Rust keeps tensor/nn/text/logic/frac/rl/WGPU surfaces in the wheel,
   while Python explicitly brings Transformers, Torch, datasets, pyarrow,

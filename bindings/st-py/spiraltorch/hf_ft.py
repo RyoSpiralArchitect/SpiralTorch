@@ -946,6 +946,70 @@ def _min_numeric_metric(rows: Sequence[Mapping[str, object]], key: str) -> float
     return min(values) if values else None
 
 
+def _mean(values: Sequence[float]) -> float | None:
+    return None if not values else sum(values) / len(values)
+
+
+def _trace_time_bounds(
+    rows: Sequence[Mapping[str, object]],
+) -> tuple[float | None, float | None, float | None]:
+    times = [
+        float(value)
+        for row in rows
+        if (value := _safe_number(row.get("time_unix_s"))) is not None
+    ]
+    if not times:
+        return None, None, None
+    first_time = min(times)
+    last_time = max(times)
+    return first_time, last_time, last_time - first_time
+
+
+def _trace_log_step_rates(rows: Sequence[Mapping[str, object]]) -> list[float]:
+    log_rows: list[tuple[float, float]] = []
+    for row in rows:
+        if row.get("event") != "log":
+            continue
+        metrics = row.get("metrics")
+        if not isinstance(metrics, Mapping) or "loss" not in metrics:
+            continue
+        step = _safe_number(row.get("global_step"))
+        timestamp = _safe_number(row.get("time_unix_s"))
+        if step is None or timestamp is None:
+            continue
+        log_rows.append((float(step), float(timestamp)))
+
+    rates = []
+    for (prev_step, prev_time), (step, timestamp) in zip(log_rows, log_rows[1:]):
+        step_delta = step - prev_step
+        time_delta = timestamp - prev_time
+        if step_delta > 0.0 and time_delta > 0.0:
+            rates.append(step_delta / time_delta)
+    return rates
+
+
+def _trace_eval_loss_points(
+    rows: Sequence[Mapping[str, object]],
+) -> list[dict[str, object]]:
+    points = []
+    for row in rows:
+        metrics = row.get("metrics")
+        if row.get("event") != "evaluate" or not isinstance(metrics, Mapping):
+            continue
+        loss = _safe_number(metrics.get("eval_loss"))
+        if loss is None:
+            continue
+        points.append(
+            {
+                "step": _safe_number(row.get("global_step")),
+                "eval_loss": loss,
+                "eval_runtime": _safe_number(metrics.get("eval_runtime")),
+                "time_unix_s": _safe_number(row.get("time_unix_s")),
+            }
+        )
+    return points
+
+
 def summarize_hf_gpt2_finetune_trainer_trace(
     path_or_rows: str | Path | Sequence[Mapping[str, object]],
 ) -> dict[str, object]:
@@ -963,18 +1027,41 @@ def summarize_hf_gpt2_finetune_trainer_trace(
         step = _safe_number(row.get("global_step"))
         if step is not None and (max_step is None or step > max_step):
             max_step = step
+    first_time, last_time, duration_s = _trace_time_bounds(rows)
+    step_rates = _trace_log_step_rates(rows)
+    eval_loss_points = _trace_eval_loss_points(rows)
+    eval_runtimes = [
+        float(runtime)
+        for point in eval_loss_points
+        if (runtime := _safe_number(point.get("eval_runtime"))) is not None
+    ]
     return {
         "row_type": "hf_gpt2_finetune_trainer_trace_summary",
         "trace_event_count": len(rows),
         "trace_event_counts": event_counts,
         "trace_events": csv_label(sorted(event_counts)),
         "trace_max_global_step": max_step,
+        "trace_first_time_unix_s": first_time,
+        "trace_last_time_unix_s": last_time,
+        "trace_duration_s": duration_s,
         "trace_last_event": rows[-1].get("event") if rows else None,
         "trace_last_loss": _last_metric(rows, "loss"),
         "trace_min_loss": _min_numeric_metric(rows, "loss"),
         "trace_last_eval_loss": _last_metric(rows, "eval_loss"),
         "trace_min_eval_loss": _min_numeric_metric(rows, "eval_loss"),
         "trace_last_learning_rate": _last_metric(rows, "learning_rate"),
+        "trace_log_interval_count": len(step_rates),
+        "trace_log_steps_per_second_min": min(step_rates) if step_rates else None,
+        "trace_log_steps_per_second_mean": _mean(step_rates),
+        "trace_log_steps_per_second_max": max(step_rates) if step_rates else None,
+        "trace_eval_loss_points": eval_loss_points,
+        "trace_eval_loss_series": csv_label(
+            f"{point.get('step')}={point.get('eval_loss')}"
+            for point in eval_loss_points
+        ),
+        "trace_eval_runtime_min": min(eval_runtimes) if eval_runtimes else None,
+        "trace_eval_runtime_mean": _mean(eval_runtimes),
+        "trace_eval_runtime_max": max(eval_runtimes) if eval_runtimes else None,
     }
 
 
@@ -1032,6 +1119,22 @@ def _mapping_item(
 ) -> dict[str, object]:
     value = row.get(key)
     return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _trainer_trace_summary_for_card(
+    card: Mapping[str, object],
+) -> dict[str, object]:
+    summary = _mapping_item(card, "trainer_trace_summary")
+    trace_path = card.get("trainer_trace_jsonl")
+    if not isinstance(trace_path, (str, Path)) or not str(trace_path):
+        return summary
+    try:
+        trace_summary = summarize_hf_gpt2_finetune_trainer_trace(trace_path)
+    except (OSError, ValueError):
+        return summary
+    merged = dict(trace_summary)
+    merged.update(summary)
+    return merged
 
 
 def _numeric_delta(
@@ -1098,7 +1201,7 @@ def summarize_hf_gpt2_finetune_run_card(
     generation_before = _mapping_item(card, "generation_before_train")
     generation_after = _mapping_item(card, "generation_after_train")
     trainer_metrics = _mapping_item(card, "trainer_metrics")
-    trainer_trace = _mapping_item(card, "trainer_trace_summary")
+    trainer_trace = _trainer_trace_summary_for_card(card)
     corpus_scan = _mapping_item(card, "corpus_scan_report")
 
     effective_eval_after_loss, effective_eval_after_source = (
@@ -1175,6 +1278,24 @@ def summarize_hf_gpt2_finetune_run_card(
         "trace_event_count": _metric_number(trainer_trace, "trace_event_count"),
         "trace_last_loss": _metric_number(trainer_trace, "trace_last_loss"),
         "trace_min_eval_loss": _metric_number(trainer_trace, "trace_min_eval_loss"),
+        "trace_duration_s": _metric_number(trainer_trace, "trace_duration_s"),
+        "trace_log_steps_per_second_min": _metric_number(
+            trainer_trace,
+            "trace_log_steps_per_second_min",
+        ),
+        "trace_log_steps_per_second_mean": _metric_number(
+            trainer_trace,
+            "trace_log_steps_per_second_mean",
+        ),
+        "trace_log_steps_per_second_max": _metric_number(
+            trainer_trace,
+            "trace_log_steps_per_second_max",
+        ),
+        "trace_eval_runtime_max": _metric_number(
+            trainer_trace,
+            "trace_eval_runtime_max",
+        ),
+        "trace_eval_loss_series": trainer_trace.get("trace_eval_loss_series"),
         "generation_before_status": generation_before.get("status"),
         "generation_before_method": generation_before.get("generation_method"),
         "generation_after_status": generation_after.get("status"),

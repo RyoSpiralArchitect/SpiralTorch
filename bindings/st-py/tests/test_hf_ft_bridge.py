@@ -1242,6 +1242,116 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(summary["trace_last_loss"], 1.7)
         self.assertEqual(summary["trace_min_eval_loss"], 1.6)
 
+    def test_trainer_trace_summary_reports_throughput_and_eval_series(self) -> None:
+        rows = [
+            {
+                "event": "log",
+                "global_step": 10,
+                "time_unix_s": 100.0,
+                "metrics": {"loss": 2.0, "learning_rate": 5e-5},
+            },
+            {
+                "event": "evaluate",
+                "global_step": 10,
+                "time_unix_s": 110.0,
+                "metrics": {"eval_loss": 1.8, "eval_runtime": 4.0},
+            },
+            {
+                "event": "log",
+                "global_step": 30,
+                "time_unix_s": 140.0,
+                "metrics": {"loss": 1.5, "learning_rate": 4e-5},
+            },
+            {
+                "event": "evaluate",
+                "global_step": 30,
+                "time_unix_s": 145.0,
+                "metrics": {"eval_loss": 1.6, "eval_runtime": 6.0},
+            },
+        ]
+
+        summary = hf_ft.summarize_hf_gpt2_finetune_trainer_trace(rows)
+
+        self.assertEqual(summary["trace_duration_s"], 45.0)
+        self.assertEqual(summary["trace_log_interval_count"], 1)
+        self.assertEqual(summary["trace_log_steps_per_second_min"], 0.5)
+        self.assertEqual(summary["trace_log_steps_per_second_mean"], 0.5)
+        self.assertEqual(summary["trace_log_steps_per_second_max"], 0.5)
+        self.assertEqual(summary["trace_eval_loss_series"], "10=1.8,30=1.6")
+        self.assertEqual(summary["trace_eval_runtime_min"], 4.0)
+        self.assertEqual(summary["trace_eval_runtime_mean"], 5.0)
+        self.assertEqual(summary["trace_eval_runtime_max"], 6.0)
+        self.assertEqual(
+            summary["trace_eval_loss_points"],
+            [
+                {
+                    "step": 10,
+                    "eval_loss": 1.8,
+                    "eval_runtime": 4.0,
+                    "time_unix_s": 110.0,
+                },
+                {
+                    "step": 30,
+                    "eval_loss": 1.6,
+                    "eval_runtime": 6.0,
+                    "time_unix_s": 145.0,
+                },
+            ],
+        )
+
+    def test_run_card_summary_supplements_trace_telemetry_from_jsonl(self) -> None:
+        card = {
+            "row_type": "hf_gpt2_finetune_run_card",
+            "model_name": "gpt2",
+            "dataset_name": "local-files",
+            "eval_before_train": hf_ft.hf_gpt2_finetune_eval_report(
+                stage="before_train",
+                metrics={"eval_loss": 2.0},
+            ),
+            "eval_after_train": hf_ft.hf_gpt2_finetune_eval_report(
+                stage="after_train",
+                skipped_reason="final_step_eval_already_requested",
+            ),
+            "trainer_trace_summary": {
+                "trace_event_count": 1,
+                "trace_last_loss": 2.0,
+                "trace_last_eval_loss": 1.4,
+            },
+        }
+        rows = [
+            {
+                "event": "log",
+                "global_step": 1,
+                "time_unix_s": 10.0,
+                "metrics": {"loss": 2.0},
+            },
+            {
+                "event": "log",
+                "global_step": 5,
+                "time_unix_s": 18.0,
+                "metrics": {"loss": 1.5},
+            },
+            {
+                "event": "evaluate",
+                "global_step": 5,
+                "time_unix_s": 20.0,
+                "metrics": {"eval_loss": 1.4, "eval_runtime": 3.0},
+            },
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = f"{tmp}/trace.jsonl"
+            for row in rows:
+                hf_ft.write_hf_gpt2_finetune_trainer_trace_event(row, path)
+            card["trainer_trace_jsonl"] = path
+            summary = hf_ft.summarize_hf_gpt2_finetune_run_card(card)
+
+        self.assertEqual(summary["trace_event_count"], 1)
+        self.assertEqual(summary["trace_last_loss"], 2.0)
+        self.assertEqual(summary["trace_duration_s"], 10.0)
+        self.assertEqual(summary["trace_log_steps_per_second_mean"], 0.5)
+        self.assertEqual(summary["trace_eval_runtime_max"], 3.0)
+        self.assertEqual(summary["trace_eval_loss_series"], "5=1.4")
+
     def test_trainer_trace_callback_writes_jsonl_with_fake_transformers(self) -> None:
         fake_transformers = types.ModuleType("transformers")
 
