@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
@@ -141,6 +142,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--run-card", type=Path, default=None)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--wait-for-process-pid-file",
+        type=Path,
+        default=None,
+        help="Wait for the PID in this file to exit before checking checkpoints.",
+    )
     parser.add_argument("--wait", action="store_true")
     parser.add_argument(
         "--ready-file",
@@ -153,11 +160,21 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--no-ready-file-check", action="store_true")
     parser.add_argument("--poll-seconds", type=float, default=30.0)
+    parser.add_argument("--process-poll-seconds", type=float, default=None)
     parser.add_argument(
         "--timeout-seconds",
         type=float,
         default=0.0,
         help="Maximum wait time when --wait is set. 0 means wait forever.",
+    )
+    parser.add_argument(
+        "--process-timeout-seconds",
+        type=float,
+        default=0.0,
+        help=(
+            "Maximum wait time for --wait-for-process-pid-file. "
+            "0 means wait forever."
+        ),
     )
     args = parser.parse_args(argv)
     args.checkpoint = list(args.checkpoint or [])
@@ -177,8 +194,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         parser.error("--top-n must be non-negative")
     if args.poll_seconds <= 0.0:
         parser.error("--poll-seconds must be positive")
+    if args.process_poll_seconds is not None and args.process_poll_seconds <= 0.0:
+        parser.error("--process-poll-seconds must be positive")
     if args.timeout_seconds < 0.0:
         parser.error("--timeout-seconds must be non-negative")
+    if args.process_timeout_seconds < 0.0:
+        parser.error("--process-timeout-seconds must be non-negative")
     if args.compare_with_label and len(args.compare_with_label) != len(
         args.compare_with_sweep
     ):
@@ -292,6 +313,57 @@ def _command_row(command: Sequence[str]) -> str:
     return " ".join(command)
 
 
+def _read_pid_file(path: Path) -> int:
+    text = path.read_text(encoding="utf-8").strip()
+    try:
+        pid = int(text)
+    except ValueError as exc:
+        raise ValueError(f"PID file does not contain an integer: {path}") from exc
+    if pid <= 0:
+        raise ValueError(f"PID file must contain a positive PID: {path}")
+    return pid
+
+
+def _process_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _wait_for_process_exit(args: argparse.Namespace) -> dict[str, Any] | None:
+    pid_file: Path | None = args.wait_for_process_pid_file
+    if pid_file is None:
+        return None
+    row: dict[str, Any] = {"pid_file": str(pid_file)}
+    if args.dry_run:
+        row["status"] = "planned"
+        return row
+    pid = _read_pid_file(pid_file)
+    row["pid"] = pid
+    if not _process_alive(pid):
+        row["status"] = "already_exited"
+        return row
+    deadline = None
+    if args.process_timeout_seconds > 0.0:
+        deadline = time.monotonic() + float(args.process_timeout_seconds)
+    poll_seconds = (
+        float(args.process_poll_seconds)
+        if args.process_poll_seconds is not None
+        else float(args.poll_seconds)
+    )
+    print(f"checkpoint_generation_control_wait_process pid={pid} pid_file={pid_file}")
+    while _process_alive(pid):
+        if deadline is not None and time.monotonic() >= deadline:
+            raise TimeoutError(f"timed out waiting for process {pid} from {pid_file}")
+        time.sleep(poll_seconds)
+    row["status"] = "complete"
+    return row
+
+
 def _wait_for_model_dir(args: argparse.Namespace, job: SweepJob) -> None:
     if args.dry_run or _checkpoint_ready(args, job):
         return
@@ -338,6 +410,7 @@ def run_checkpoint_generation_control(
     runner: Runner | None = None,
 ) -> dict[str, Any]:
     runner = runner or _run_command
+    process_wait = _wait_for_process_exit(args)
     jobs = build_sweep_jobs(args)
     rows: list[dict[str, Any]] = []
     runnable_compare_jobs: list[SweepJob] = []
@@ -402,6 +475,8 @@ def run_checkpoint_generation_control(
     }
     if compare_row is not None:
         report["compare"] = compare_row
+    if process_wait is not None:
+        report["process_wait"] = process_wait
     if args.run_card is not None:
         args.run_card.parent.mkdir(parents=True, exist_ok=True)
         args.run_card.write_text(

@@ -1648,6 +1648,63 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
 
         self.assertIn("model.safetensors", str(cm.exception))
 
+    def test_checkpoint_generation_control_records_process_wait_plan(self) -> None:
+        module = load_checkpoint_generation_control_example()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "run"
+            pid_file = Path(tmp) / "ft.pid"
+            pid_file.write_text("99999999\n", encoding="utf-8")
+            args = module.parse_args(
+                [
+                    "--run-dir",
+                    str(run_dir),
+                    "--checkpoint",
+                    "checkpoint-4096",
+                    "--wait-for-process-pid-file",
+                    str(pid_file),
+                    "--dry-run",
+                ]
+            )
+            report = module.run_checkpoint_generation_control(args)
+
+        self.assertEqual(report["process_wait"]["status"], "planned")
+        self.assertEqual(report["process_wait"]["pid_file"], str(pid_file))
+
+    def test_checkpoint_generation_control_continues_after_exited_process(
+        self,
+    ) -> None:
+        module = load_checkpoint_generation_control_example()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = root / "run"
+            checkpoint_dir = run_dir / "checkpoint-4096"
+            checkpoint_dir.mkdir(parents=True)
+            (checkpoint_dir / "model.safetensors").write_text("ready", encoding="utf-8")
+            pid_file = root / "ft.pid"
+            pid_file.write_text("99999999\n", encoding="utf-8")
+            executed: list[list[str]] = []
+            args = module.parse_args(
+                [
+                    "--run-dir",
+                    str(run_dir),
+                    "--checkpoint",
+                    "checkpoint-4096",
+                    "--wait-for-process-pid-file",
+                    str(pid_file),
+                    "--no-compare",
+                ]
+            )
+            report = module.run_checkpoint_generation_control(
+                args,
+                runner=lambda command: executed.append(list(command)),
+            )
+
+        self.assertEqual(report["process_wait"]["status"], "already_exited")
+        self.assertEqual(report["status"], "complete")
+        self.assertEqual(len(executed), 3)
+
     def test_dry_run_builds_control_grid_without_loading_model(self) -> None:
         module = load_generation_control_sweep_example()
         with tempfile.TemporaryDirectory() as tmp:
