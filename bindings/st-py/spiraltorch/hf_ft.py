@@ -1052,6 +1052,23 @@ def _metric_number(
     return _safe_number(row.get(key))
 
 
+def _effective_eval_after_loss(
+    eval_after: Mapping[str, object],
+    trainer_trace: Mapping[str, object],
+) -> tuple[int | float | None, str | None]:
+    loss = _metric_number(eval_after, "eval_loss")
+    if loss is not None:
+        return loss, "eval_after_train"
+    if (
+        eval_after.get("status") == "skipped"
+        and eval_after.get("skipped_reason") == "final_step_eval_already_requested"
+    ):
+        trace_loss = _metric_number(trainer_trace, "trace_last_eval_loss")
+        if trace_loss is not None:
+            return trace_loss, "trainer_trace_last_eval_loss"
+    return None, None
+
+
 def _run_label(
     card: Mapping[str, object],
     *,
@@ -1084,8 +1101,11 @@ def summarize_hf_gpt2_finetune_run_card(
     trainer_trace = _mapping_item(card, "trainer_trace_summary")
     corpus_scan = _mapping_item(card, "corpus_scan_report")
 
+    effective_eval_after_loss, effective_eval_after_source = (
+        _effective_eval_after_loss(eval_after, trainer_trace)
+    )
     eval_loss_delta = _numeric_delta(
-        eval_after.get("eval_loss"),
+        effective_eval_after_loss,
         eval_before.get("eval_loss"),
     )
     eval_perplexity_delta = _numeric_delta(
@@ -1129,6 +1149,8 @@ def summarize_hf_gpt2_finetune_run_card(
         "eval_after_status": eval_after.get("status"),
         "eval_after_loss": _metric_number(eval_after, "eval_loss"),
         "eval_after_perplexity": _metric_number(eval_after, "eval_perplexity"),
+        "effective_eval_after_loss": effective_eval_after_loss,
+        "effective_eval_after_loss_source": effective_eval_after_source,
         "eval_loss_delta": eval_loss_delta,
         "eval_perplexity_delta": eval_perplexity_delta,
         "eval_loss_improved": (
@@ -1205,7 +1227,7 @@ def _ranked_sweep_rows(
     top_n: int,
 ) -> list[dict[str, object]]:
     def sort_key(row: Mapping[str, object]) -> tuple[float, float, str]:
-        eval_after = _safe_number(row.get("eval_after_loss"))
+        eval_after = _safe_number(row.get("effective_eval_after_loss"))
         eval_delta = _safe_number(row.get("eval_loss_delta"))
         return (
             math.inf if eval_after is None else float(eval_after),
@@ -1224,6 +1246,12 @@ def _ranked_sweep_rows(
                 "run_label": row.get("run_label"),
                 "run_card_path": row.get("run_card_path"),
                 "eval_after_loss": _safe_number(row.get("eval_after_loss")),
+                "effective_eval_after_loss": _safe_number(
+                    row.get("effective_eval_after_loss")
+                ),
+                "effective_eval_after_loss_source": row.get(
+                    "effective_eval_after_loss_source"
+                ),
                 "eval_loss_delta": _safe_number(row.get("eval_loss_delta")),
                 "eval_loss_improved": row.get("eval_loss_improved"),
                 "generation_continuation_changed": row.get(
@@ -1299,6 +1327,7 @@ def summarize_hf_gpt2_finetune_sweep_report(
         ),
         "best_eval_after_run_label": best_after_label,
         "best_eval_after_loss": _safe_number(comparison.get("best_eval_after_loss")),
+        "best_eval_after_loss_source": comparison.get("best_eval_after_loss_source"),
         "best_eval_loss_delta_run_label": best_delta_label,
         "best_eval_loss_delta": best_delta,
         "selected_run_label": selected_label,
@@ -1353,7 +1382,8 @@ def summarize_hf_gpt2_finetune_sweep_report_lines(
             "hf_gpt2_ft_sweep_top "
             f"rank={row.get('rank')} "
             f"run={row.get('run_label')} "
-            f"eval_after={row.get('eval_after_loss')} "
+            f"eval_after={row.get('effective_eval_after_loss')} "
+            f"source={row.get('effective_eval_after_loss_source')} "
             f"delta={row.get('eval_loss_delta')} "
             f"changed={row.get('generation_continuation_changed')}"
         )
@@ -1375,7 +1405,7 @@ def compare_hf_gpt2_finetune_run_cards(
         )
         for index, card in enumerate(cards_or_paths)
     ]
-    best_after = _best_summary(summaries, "eval_after_loss")
+    best_after = _best_summary(summaries, "effective_eval_after_loss")
     best_delta = _best_summary(summaries, "eval_loss_delta")
     run_label_values = [str(summary.get("run_label")) for summary in summaries]
     return {
@@ -1400,7 +1430,12 @@ def compare_hf_gpt2_finetune_run_cards(
             None if best_after is None else best_after.get("run_label")
         ),
         "best_eval_after_loss": (
-            None if best_after is None else best_after.get("eval_after_loss")
+            None if best_after is None else best_after.get("effective_eval_after_loss")
+        ),
+        "best_eval_after_loss_source": (
+            None
+            if best_after is None
+            else best_after.get("effective_eval_after_loss_source")
         ),
         "best_eval_loss_delta_run_label": (
             None if best_delta is None else best_delta.get("run_label")

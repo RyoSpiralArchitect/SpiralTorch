@@ -539,6 +539,41 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(sweep_summary["top_runs"][0]["run_label"], "strong")
         self.assertIn("selected=strong", sweep_lines[1])
 
+        trace_card = dict(base_card)
+        trace_card["eval_after_train"] = hf_ft.hf_gpt2_finetune_eval_report(
+            stage="after_train",
+            skipped_reason="final_step_eval_already_requested",
+        )
+        trace_card["trainer_trace_summary"] = {
+            "trace_event_count": 4,
+            "trace_last_loss": 1.4,
+            "trace_last_eval_loss": 1.45,
+            "trace_min_eval_loss": 1.45,
+        }
+        trace_summary = hf_ft.summarize_hf_gpt2_finetune_run_card(
+            trace_card,
+            run_label="trace",
+        )
+        trace_comparison = hf_ft.compare_hf_gpt2_finetune_run_cards(
+            [trace_card, weaker_card],
+            run_labels=["trace", "weak"],
+        )
+
+        self.assertIsNone(trace_summary["eval_after_loss"])
+        self.assertEqual(trace_summary["effective_eval_after_loss"], 1.45)
+        self.assertEqual(
+            trace_summary["effective_eval_after_loss_source"],
+            "trainer_trace_last_eval_loss",
+        )
+        self.assertAlmostEqual(trace_summary["eval_loss_delta"], -0.55)
+        self.assertTrue(trace_summary["eval_loss_improved"])
+        self.assertEqual(trace_comparison["best_eval_after_run_label"], "trace")
+        self.assertEqual(trace_comparison["best_eval_after_loss"], 1.45)
+        self.assertEqual(
+            trace_comparison["best_eval_after_loss_source"],
+            "trainer_trace_last_eval_loss",
+        )
+
     def test_sweep_example_builds_grid_and_writes_dry_run_report(self) -> None:
         module = load_sweep_example()
         with tempfile.TemporaryDirectory() as tmp:
