@@ -2523,6 +2523,23 @@ def compare_api_llm_topos_sweep_reports(
     labels: Sequence[str] | None = ...,
 ) -> Dict[str, Any]: ...
 
+def api_llm_topos_sweep_route_rewards(
+    report: Mapping[str, Any],
+    *,
+    profile: str = ...,
+) -> List[Dict[str, Any]]: ...
+
+def train_stagent_topos_route_policy(
+    report: Mapping[str, Any],
+    agent: Any,
+    *,
+    profile: str = ...,
+    episodes: int = ...,
+    state: int = ...,
+    selection_epsilon: float | None = ...,
+    max_update_events: int = ...,
+) -> Dict[str, Any]: ...
+
 
 def format_api_llm_context_prompt(
     prompt: str,
@@ -8005,6 +8022,7 @@ __all__ = [
     "api_llm_trace_from_response",
     "api_llm_usage_from_response",
     "api_llm_wasm_context_partials",
+    "api_llm_topos_sweep_route_rewards",
     "compare_api_llm_matrix_reports",
     "compare_api_llm_trace_runs",
     "compare_api_llm_topos_sweep_reports",
@@ -8018,6 +8036,7 @@ __all__ = [
     "run_api_llm_topos_sweep",
     "summarize_api_llm_trace_events",
     "api_llm_topos_sweep_report",
+    "train_stagent_topos_route_policy",
     "topos_runtime_adapter",
     "topos_runtime_request",
     "write_api_llm_trace_jsonl",

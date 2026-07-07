@@ -41,6 +41,7 @@ __all__ = [
     "compare_api_llm_matrix_reports",
     "compare_api_llm_trace_runs",
     "compare_api_llm_topos_sweep_reports",
+    "api_llm_topos_sweep_route_rewards",
     "format_api_llm_context_prompt",
     "load_api_llm_trace_events",
     "make_anthropic_messages_invoke",
@@ -51,6 +52,7 @@ __all__ = [
     "run_api_llm_topos_sweep",
     "summarize_api_llm_trace_events",
     "api_llm_topos_sweep_report",
+    "train_stagent_topos_route_policy",
     "topos_runtime_adapter",
     "topos_runtime_request",
     "topos_runtime_route",
@@ -4823,6 +4825,190 @@ def _topos_sweep_selection_profiles(
             "context_weight": _finite_float(row.get("context_weight")),
         }
     return profiles
+
+
+def _topos_sweep_report_or_self(payload: Mapping[str, Any]) -> Mapping[str, Any]:
+    if payload.get("kind") == "spiraltorch.api_llm_topos_sweep":
+        return api_llm_topos_sweep_report(payload)
+    return payload
+
+
+def api_llm_topos_sweep_route_rewards(
+    report: Mapping[str, Any],
+    *,
+    profile: str = "balanced",
+) -> list[dict[str, Any]]:
+    """Convert a topos sweep report into bounded route rewards for stAgent."""
+
+    report = _topos_sweep_report_or_self(report)
+    rows = [
+        row
+        for row in _list_from_sequence(report.get("selection_rows"))
+        if isinstance(row, Mapping)
+    ]
+    rewards: list[dict[str, Any]] = []
+    for index, row in enumerate(rows):
+        label = row.get("label")
+        if label in {None, ""}:
+            continue
+        scores = row.get("selection_scores")
+        reward = (
+            _finite_float(scores.get(profile))
+            if isinstance(scores, Mapping)
+            else None
+        )
+        if reward is None:
+            reward = _finite_float(row.get("trace_route_score"))
+        reward_value = max(0.0, min(1.0, reward or 0.0))
+        rewards.append(
+            {
+                "index": len(rewards),
+                "source_index": index,
+                "label": str(label),
+                "profile": profile,
+                "reward": reward_value,
+                "count": int(_finite_float(row.get("count")) or 0),
+                "trace_route_score": _finite_float(row.get("trace_route_score")) or 0.0,
+                "response_text_quality_score": _finite_float(
+                    row.get("response_text_quality_score")
+                )
+                or 0.0,
+                "response_completion_rate": _finite_float(
+                    row.get("response_completion_rate")
+                )
+                or 0.0,
+                "response_incomplete_rate": _finite_float(
+                    row.get("response_incomplete_rate")
+                )
+                or 0.0,
+                "adapter_runtime_route_score": _finite_float(
+                    row.get("adapter_runtime_route_score")
+                )
+                or 0.0,
+            }
+        )
+    return rewards
+
+
+def _agent_policy_report(agent: Any, state: int) -> dict[str, Any]:
+    policy_report = getattr(agent, "policy_report", None)
+    if not callable(policy_report):
+        return {}
+    result = policy_report(state)
+    return dict(result) if isinstance(result, Mapping) else {}
+
+
+def _agent_set_epsilon(agent: Any, epsilon: float | None) -> None:
+    if epsilon is None:
+        return
+    setter = getattr(agent, "set_epsilon", None)
+    if callable(setter):
+        setter(float(max(0.0, min(1.0, epsilon))))
+
+
+def _agent_select_action_trace(
+    agent: Any,
+    state: int,
+    policy_after: Mapping[str, Any],
+) -> dict[str, Any]:
+    select_action_trace = getattr(agent, "select_action_trace", None)
+    if callable(select_action_trace):
+        result = select_action_trace(state)
+        return dict(result) if isinstance(result, Mapping) else {"action": result}
+
+    q_values = [
+        float(value)
+        for value in (
+            _finite_float(value)
+            for value in _list_from_sequence(policy_after.get("q_values"))
+        )
+        if value is not None
+    ]
+    if q_values:
+        action = max(range(len(q_values)), key=lambda index: q_values[index])
+        return {
+            "state": state,
+            "action": action,
+            "q_values": q_values,
+            "greedy_action": action,
+            "explored": False,
+            "source": "policy_report",
+        }
+
+    raise AttributeError(
+        "agent must expose select_action_trace() or policy_report().q_values"
+    )
+
+
+def train_stagent_topos_route_policy(
+    report: Mapping[str, Any],
+    agent: Any,
+    *,
+    profile: str = "balanced",
+    episodes: int = 3,
+    state: int = 0,
+    selection_epsilon: float | None = 0.0,
+    max_update_events: int = 32,
+) -> dict[str, Any]:
+    """Train an stAgent-like bandit policy from topos sweep route rewards."""
+
+    route_rewards = api_llm_topos_sweep_route_rewards(report, profile=profile)
+    if not route_rewards:
+        raise ValueError("topos sweep report does not contain selection route rewards")
+
+    policy_before = _agent_policy_report(agent, state)
+    q_values = _list_from_sequence(policy_before.get("q_values"))
+    if q_values and len(q_values) != len(route_rewards):
+        raise ValueError(
+            "agent action dimension does not match route rewards "
+            f"({len(q_values)} != {len(route_rewards)})"
+        )
+
+    update_events: list[dict[str, Any]] = []
+    update_count = 0
+    bounded_episodes = max(1, int(episodes))
+    for episode in range(bounded_episodes):
+        for row in route_rewards:
+            action = int(row["index"])
+            reward = float(row["reward"])
+            agent.update(state, action, reward, state)
+            update_count += 1
+            if len(update_events) < max(0, int(max_update_events)):
+                update_events.append(
+                    {
+                        "episode": episode,
+                        "state": state,
+                        "action": action,
+                        "label": row["label"],
+                        "reward": reward,
+                    }
+                )
+
+    _agent_set_epsilon(agent, selection_epsilon)
+    policy_after = _agent_policy_report(agent, state)
+    trace = _agent_select_action_trace(agent, state, policy_after)
+    raw_action = _finite_float(trace.get("action"))
+    selected_index = int(raw_action) if raw_action is not None else 0
+    selected_row = (
+        route_rewards[selected_index] if 0 <= selected_index < len(route_rewards) else None
+    )
+    return {
+        "kind": "spiraltorch.api_llm_topos_sweep_stagent_route_policy",
+        "profile": profile,
+        "state": state,
+        "episodes": bounded_episodes,
+        "labels": [row["label"] for row in route_rewards],
+        "route_rewards": route_rewards,
+        "policy_before": policy_before,
+        "policy_after": policy_after,
+        "selection_trace": trace,
+        "selected_index": selected_index,
+        "selected_label": selected_row.get("label") if selected_row else None,
+        "selected_reward": selected_row.get("reward") if selected_row else None,
+        "update_count": update_count,
+        "update_events": update_events,
+        "truncated_update_events": update_count > len(update_events),
+    }
 
 
 def api_llm_topos_sweep_report(

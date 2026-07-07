@@ -127,7 +127,13 @@ PY
   `api_llm_live_provider_matrix_sweep.py` example can run several token-budget
   pairs and produce that comparison in one command. Pass `--resume-existing`
   when expanding a sweep so completed budget pairs are reused instead of
-  re-calling provider APIs. Browser-side WASM learning reports can also be
+  re-calling provider APIs. Topos sweep reports can be
+  distilled into route rewards with `api_llm_topos_sweep_route_rewards(...)`
+  and learned by any stAgent-shaped loop via
+  `train_stagent_topos_route_policy(...)`; the
+  `examples/api_llm_topos_stagent_route_policy.py` demo runs this keylessly or
+  reuses an existing sweep report with `--report report.json`. Browser-side
+  WASM learning reports can also be
   loaded with `load_wasm_report(...)`, summarized with `summarize_wasm_report(...)`,
   converted into reusable context via `api_llm_wasm_context_partials(...)`, and
   passed as `context_partials=` to `ApiLLMZSpaceRuntime` or
@@ -740,6 +746,12 @@ The RL surface is intentionally compact today: keep state/action loops native,
 use `policy_report(state)` or `select_action_trace(state)` to audit Q-values,
 epsilon, and greedy-vs-exploratory choices, then export `state_dict()` for
 handoff.
+
+For API-model topological routing, use
+`api_llm_topos_sweep_route_rewards(report, profile="grounded")` to convert a
+`run_api_llm_topos_sweep(...)` report into bounded route rewards, then call
+`train_stagent_topos_route_policy(report, agent, profile="grounded")` to update
+an stAgent-shaped policy and capture the selected route trace.
 
 ## Open-topos learning and inference hints
 
