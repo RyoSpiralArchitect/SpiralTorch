@@ -4108,6 +4108,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 },
                 "log_progress": {
                     "log_latest_step": 24,
+                    "log_max_steps": 40,
                     "log_remaining_seconds": 160.0,
                 },
                 "eval_progress": {
@@ -4138,6 +4139,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 },
                 "log_progress": {
                     "log_latest_step": 34,
+                    "log_max_steps": 40,
                     "log_remaining_seconds": 90.0,
                 },
                 "eval_progress": {
@@ -4184,6 +4186,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(summary["delta_log_step"], 10)
         self.assertEqual(summary["log_steps_per_second"], 0.25)
         self.assertEqual(summary["delta_trace_step"], 10)
+        self.assertEqual(summary["last_log_max_steps"], 40)
+        self.assertEqual(summary["last_log_remaining_seconds"], 90.0)
+        self.assertEqual(summary["last_log_steps_until_final"], 6)
+        self.assertEqual(summary["estimated_seconds_until_final"], 24.0)
         self.assertEqual(summary["last_next_eval_step"], 40)
         self.assertEqual(summary["last_log_steps_until_next_eval"], 6)
         self.assertEqual(summary["estimated_seconds_until_next_eval"], 24.0)
@@ -4205,6 +4211,9 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("label=demo", lines[0])
         self.assertIn("last_log_step=34", lines[0])
         self.assertIn("log_steps_per_second=0.25", lines[0])
+        self.assertIn("last_log_remaining_seconds=90", lines[0])
+        self.assertIn("last_steps_until_final=6", lines[0])
+        self.assertIn("estimated_seconds_until_final=24", lines[0])
         self.assertIn("estimated_seconds_until_next_eval=24", lines[0])
         self.assertIn("last_next_checkpoint_step=40", lines[0])
         self.assertIn("last_steps_until_next_checkpoint=6", lines[0])
@@ -4221,6 +4230,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("disk_status=ok", lines[0])
         self.assertIn("watch_stop_reason=checkpoint_ready", lines[0])
         self.assertIn("index=1", lines[1])
+        self.assertIn("log_remaining_seconds=90", lines[1])
         self.assertIn("next_checkpoint_step=40", lines[1])
         self.assertIn("steps_until_next_checkpoint=6", lines[1])
         self.assertIn("best_eval_loss_step=30", lines[1])

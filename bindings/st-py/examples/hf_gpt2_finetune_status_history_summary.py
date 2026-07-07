@@ -102,6 +102,12 @@ def summarize_history(
     log_steps_until_next_checkpoint = _nested(
         last, "checkpoint_progress", "log_steps_until_next_checkpoint"
     )
+    last_log_max_steps = _nested(last, "log_progress", "log_max_steps")
+    log_steps_until_final = (
+        max(int(last_log_max_steps) - int(last_log_step), 0)
+        if isinstance(last_log_max_steps, int) and isinstance(last_log_step, int)
+        else None
+    )
     estimated_seconds_until_next_eval = (
         float(log_steps_until_next_eval) / log_steps_per_second
         if isinstance(log_steps_until_next_eval, int)
@@ -112,6 +118,13 @@ def summarize_history(
     estimated_seconds_until_next_checkpoint = (
         float(log_steps_until_next_checkpoint) / log_steps_per_second
         if isinstance(log_steps_until_next_checkpoint, int)
+        and log_steps_per_second is not None
+        and log_steps_per_second > 0.0
+        else None
+    )
+    estimated_seconds_until_final = (
+        float(log_steps_until_final) / log_steps_per_second
+        if isinstance(log_steps_until_final, int)
         and log_steps_per_second is not None
         and log_steps_per_second > 0.0
         else None
@@ -151,6 +164,12 @@ def summarize_history(
         "first_trace_step": first_trace_step,
         "last_trace_step": last_trace_step,
         "delta_trace_step": delta_trace_step,
+        "last_log_max_steps": last_log_max_steps,
+        "last_log_remaining_seconds": _nested(
+            last, "log_progress", "log_remaining_seconds"
+        ),
+        "last_log_steps_until_final": log_steps_until_final,
+        "estimated_seconds_until_final": estimated_seconds_until_final,
         "last_next_eval_step": _nested(last, "eval_progress", "next_eval_step"),
         "last_log_steps_until_next_eval": log_steps_until_next_eval,
         "estimated_seconds_until_next_eval": estimated_seconds_until_next_eval,
@@ -200,6 +219,10 @@ def history_lines(
             f"delta_log_step={_number_text(summary.get('delta_log_step'))} "
             f"duration_seconds={_number_text(summary.get('duration_seconds'))} "
             f"log_steps_per_second={_number_text(summary.get('log_steps_per_second'))} "
+            f"last_log_max_steps={_number_text(summary.get('last_log_max_steps'))} "
+            f"last_log_remaining_seconds={_number_text(summary.get('last_log_remaining_seconds'))} "
+            f"last_steps_until_final={_number_text(summary.get('last_log_steps_until_final'))} "
+            f"estimated_seconds_until_final={_number_text(summary.get('estimated_seconds_until_final'))} "
             f"last_next_eval_step={_number_text(summary.get('last_next_eval_step'))} "
             f"last_steps_until_next_eval={_number_text(summary.get('last_log_steps_until_next_eval'))} "
             f"last_next_checkpoint_step={_number_text(summary.get('last_next_checkpoint_step'))} "
@@ -232,6 +255,7 @@ def history_lines(
                 "hf_gpt2_ft_status_history_point "
                 f"index={index} "
                 f"log_step={_number_text(_nested(row, 'log_progress', 'log_latest_step'))} "
+                f"log_remaining_seconds={_number_text(_nested(row, 'log_progress', 'log_remaining_seconds'))} "
                 f"next_eval_step={_number_text(_nested(row, 'eval_progress', 'next_eval_step'))} "
                 f"steps_until_next_eval={_number_text(_nested(row, 'eval_progress', 'log_steps_until_next_eval'))} "
                 f"next_checkpoint_step={_number_text(_nested(row, 'checkpoint_progress', 'next_checkpoint_step'))} "
