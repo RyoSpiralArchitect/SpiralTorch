@@ -3422,6 +3422,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             )
             out_path = run_dir / "status.json"
             lines_path = run_dir / "status.txt"
+            jsonl_path = run_dir / "status.jsonl"
             argv = [
                 str(run_dir),
                 "--max-steps",
@@ -3438,6 +3439,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 str(out_path),
                 "--lines-out",
                 str(lines_path),
+                "--jsonl-out",
+                str(jsonl_path),
             ]
             args = module.parse_args(argv)
             status = module.summarize_run(args)
@@ -3445,6 +3448,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             self.assertEqual(module.main(argv), 0)
             written = json.loads(out_path.read_text(encoding="utf-8"))
             written_lines = lines_path.read_text(encoding="utf-8").splitlines()
+            written_jsonl = [
+                json.loads(line)
+                for line in jsonl_path.read_text(encoding="utf-8").splitlines()
+            ]
             watch_path = run_dir / "watch-status.json"
             watch_argv = [
                 str(run_dir),
@@ -3537,6 +3544,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("final_ready=true", lines[0])
         self.assertIn("hf_gpt2_ft_run_wait status=waiting", lines[-1])
         self.assertEqual(written["process_status"], "alive")
+        self.assertEqual(len(written_jsonl), 1)
+        self.assertEqual(written_jsonl[0]["process_status"], "alive")
         self.assertEqual(watch_written["process_status"], "alive")
         self.assertEqual(watch_written["log_progress"]["log_latest_step"], 24)
         self.assertEqual(watch_written["eval_progress"]["next_eval_step"], 30)

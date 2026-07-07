@@ -43,6 +43,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--tail-evals", type=int, default=6)
     parser.add_argument("--out", type=Path, default=None)
     parser.add_argument("--lines-out", type=Path, default=None)
+    parser.add_argument("--jsonl-out", type=Path, default=None)
     parser.add_argument("--watch-interval-seconds", type=float, default=None)
     parser.add_argument("--watch-count", type=int, default=None)
     parser.add_argument("--watch-stop-on-final", action="store_true")
@@ -401,7 +402,12 @@ def _emit_status(args: argparse.Namespace, status: dict[str, Any]) -> None:
         args.lines_out.parent.mkdir(parents=True, exist_ok=True)
         args.lines_out.write_text("\n".join(lines) + "\n", encoding="utf-8")
         print(f"hf_gpt2_ft_run_status_lines {args.lines_out}")
-    if args.out is None and args.lines_out is None:
+    if args.jsonl_out is not None:
+        args.jsonl_out.parent.mkdir(parents=True, exist_ok=True)
+        with args.jsonl_out.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(status, ensure_ascii=False, sort_keys=True) + "\n")
+        print(f"hf_gpt2_ft_run_status_jsonl {args.jsonl_out}")
+    if args.out is None and args.lines_out is None and args.jsonl_out is None:
         print("\n".join(lines))
 
 
