@@ -1530,6 +1530,42 @@ def _trace_eval_loss_points(
     return points
 
 
+def _trace_eval_loss_trend(
+    points: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    losses = [
+        float(loss)
+        for point in points
+        if (loss := _safe_number(point.get("eval_loss"))) is not None
+    ]
+    steps = [
+        _safe_number(point.get("step"))
+        for point in points
+        if _safe_number(point.get("eval_loss")) is not None
+    ]
+    best_index = min(range(len(losses)), key=losses.__getitem__) if losses else None
+    return {
+        "trace_eval_loss_count": len(losses),
+        "trace_first_eval_loss": losses[0] if losses else None,
+        "trace_eval_loss_improvement": (
+            losses[0] - losses[-1] if len(losses) >= 2 else None
+        ),
+        "trace_eval_loss_last_delta": (
+            losses[-1] - losses[-2] if len(losses) >= 2 else None
+        ),
+        "trace_eval_loss_monotonic_nonincreasing": (
+            all(right <= left for left, right in zip(losses, losses[1:]))
+            if len(losses) >= 2
+            else None
+        ),
+        "trace_best_eval_loss_step": (
+            steps[best_index]
+            if best_index is not None and best_index < len(steps)
+            else None
+        ),
+    }
+
+
 def _trace_training_telemetry_values(
     rows: Sequence[Mapping[str, object]],
     *,
@@ -1606,6 +1642,7 @@ def summarize_hf_gpt2_finetune_trainer_trace(
     first_time, last_time, duration_s = _trace_time_bounds(rows)
     step_rates = _trace_log_step_rates(rows)
     eval_loss_points = _trace_eval_loss_points(rows)
+    eval_loss_trend = _trace_eval_loss_trend(eval_loss_points)
     eval_runtimes = [
         float(runtime)
         for point in eval_loss_points
@@ -1694,6 +1731,7 @@ def summarize_hf_gpt2_finetune_trainer_trace(
             f"{point.get('step')}={point.get('eval_loss')}"
             for point in eval_loss_points
         ),
+        **eval_loss_trend,
         "trace_eval_runtime_min": min(eval_runtimes) if eval_runtimes else None,
         "trace_eval_runtime_mean": _mean(eval_runtimes),
         "trace_eval_runtime_max": max(eval_runtimes) if eval_runtimes else None,

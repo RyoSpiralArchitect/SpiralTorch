@@ -88,6 +88,9 @@ def summary_lines(summary: dict[str, Any], *, tail_evals: int) -> list[str]:
             f"last_loss={_number_text(summary.get('trace_last_loss'))} "
             f"last_eval_loss={_number_text(summary.get('trace_last_eval_loss'))} "
             f"min_eval_loss={_number_text(summary.get('trace_min_eval_loss'))} "
+            f"eval_loss_improvement={_number_text(summary.get('trace_eval_loss_improvement'))} "
+            f"eval_loss_last_delta={_number_text(summary.get('trace_eval_loss_last_delta'))} "
+            f"eval_loss_monotonic={_number_text(summary.get('trace_eval_loss_monotonic_nonincreasing'))} "
             f"guard_count={_number_text(summary.get('training_loss_guard_count'))} "
             f"steps_per_second_mean={_number_text(summary.get('trace_log_steps_per_second_mean'))}"
         )
