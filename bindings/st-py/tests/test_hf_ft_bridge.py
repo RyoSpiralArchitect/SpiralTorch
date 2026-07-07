@@ -170,6 +170,109 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(probe["zspace_probe_status"], "missing_tokens")
         self.assertEqual(probe["zspace_probe_observed_token_count"], 0)
 
+    def test_default_zspace_probe_topos_uses_full_native_constructor(self) -> None:
+        captured = {}
+
+        class FakeTopos:
+            def __init__(self, *args):
+                captured["args"] = args
+
+        fake_st = types.SimpleNamespace(OpenCartesianTopos=FakeTopos)
+        topos = hf_ft._hf_gpt2_ft_default_topos(
+            fake_st,
+            curvature=-0.2,
+            observed_token_count=6,
+        )
+
+        self.assertIsInstance(topos, FakeTopos)
+        self.assertEqual(captured["args"], (-0.2, 1e-3, 1.0, 6, 64))
+
+    def test_projected_tensor_values_flattens_native_tolist_rows(self) -> None:
+        class FakeTensor:
+            def tolist(self):
+                return [[1, 2.5], [3, 4]]
+
+        self.assertEqual(
+            hf_ft._projected_tensor_values(FakeTensor()),
+            [1.0, 2.5, 3.0, 4.0],
+        )
+
+    def test_zspace_probe_runs_through_projector_with_default_topos(self) -> None:
+        captured = {}
+
+        class FakeTensor:
+            def __init__(self, rows, cols, data):
+                self.rows = rows
+                self.cols = cols
+                self._data = [float(value) for value in data]
+
+            def data(self):
+                return list(self._data)
+
+        class FakeTopos:
+            def __init__(self, curvature, tolerance, saturation, max_depth, max_volume):
+                captured["topos"] = (
+                    curvature,
+                    tolerance,
+                    saturation,
+                    max_depth,
+                    max_volume,
+                )
+                self._curvature = curvature
+
+            def curvature(self):
+                return self._curvature
+
+        class FakeEncoder:
+            def __init__(self, curvature, frequency):
+                captured["encoder"] = (curvature, frequency)
+
+        class FakeProjector:
+            def __init__(self, topos, encoder, *, strength):
+                captured["projector_strength"] = strength
+
+            def forward(self, tensor):
+                return FakeTensor(
+                    tensor.rows,
+                    tensor.cols,
+                    [value + 0.5 for value in tensor.data()],
+                )
+
+        fake_nn = types.ModuleType("spiraltorch.nn")
+        fake_nn.ZSpaceProjector = FakeProjector
+
+        def fake_hypergrad_topos(
+            *,
+            curvature,
+            tolerance,
+            saturation,
+            max_depth,
+            max_volume,
+        ):
+            return FakeTopos(curvature, tolerance, saturation, max_depth, max_volume)
+
+        with (
+            mock.patch.object(st, "Tensor", FakeTensor, create=True),
+            mock.patch.object(st, "hypergrad_topos", fake_hypergrad_topos, create=True),
+            mock.patch.object(st, "LanguageWaveEncoder", FakeEncoder, create=True),
+            mock.patch.dict(sys.modules, {"spiraltorch.nn": fake_nn}),
+        ):
+            probe = hf_ft.hf_gpt2_finetune_zspace_probe(
+                [1, 2, 3],
+                dim=4,
+                vocab_size=100,
+                curvature=-0.2,
+                frequency=0.7,
+                strength=0.5,
+                require=True,
+            )
+
+        self.assertEqual(probe["zspace_probe_status"], "ok")
+        self.assertEqual(captured["topos"], (-0.2, 1e-3, 1.0, 3, 64))
+        self.assertEqual(captured["encoder"], (-0.2, 0.7))
+        self.assertEqual(captured["projector_strength"], 0.5)
+        self.assertGreater(probe["zspace_probe_delta_l2"], 0.0)
+
     def test_corpus_file_report_records_lightweight_fingerprint(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             train_path = Path(tmp) / "train.txt"
@@ -796,6 +899,39 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(report["eval_loss"], 1.25)
         self.assertEqual(trainer.evaluate_calls, 1)
         self.assertEqual(skipped["status"], "skipped")
+
+    def test_example_prepare_special_tokens_compat_drops_batch_size(self) -> None:
+        module = load_bridge_example()
+
+        class FakeModel:
+            def __init__(self):
+                self.calls = []
+
+            def _prepare_special_tokens(
+                self,
+                generation_config,
+                kwargs_has_attention_mask=None,
+                device=None,
+            ):
+                self.calls.append(
+                    (generation_config, kwargs_has_attention_mask, device)
+                )
+                return "prepared"
+
+        model = FakeModel()
+        with self.assertRaises(TypeError):
+            model._prepare_special_tokens("cfg", batch_size=1)
+
+        with module._prepare_special_tokens_batch_size_compat(model) as installed:
+            self.assertTrue(installed)
+            self.assertEqual(
+                model._prepare_special_tokens("cfg", device="cpu", batch_size=1),
+                "prepared",
+            )
+
+        self.assertEqual(model.calls, [("cfg", None, "cpu")])
+        with self.assertRaises(TypeError):
+            model._prepare_special_tokens("cfg", batch_size=1)
 
     def test_example_generation_sample_restores_model_state(self) -> None:
         module = load_bridge_example()

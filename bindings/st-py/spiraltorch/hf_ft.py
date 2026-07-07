@@ -623,6 +623,64 @@ def _l2(values: Sequence[float]) -> float:
     return math.sqrt(sum(value * value for value in values))
 
 
+def _flatten_numeric_values(value: object) -> list[float]:
+    if isinstance(value, (str, bytes, bytearray)):
+        raise TypeError("numeric tensor values cannot be text")
+    if isinstance(value, Iterable):
+        flattened: list[float] = []
+        for item in value:
+            if isinstance(item, Iterable) and not isinstance(
+                item,
+                (str, bytes, bytearray),
+            ):
+                flattened.extend(_flatten_numeric_values(item))
+            else:
+                flattened.append(float(item))
+        return flattened
+    raise TypeError("numeric tensor values must be iterable")
+
+
+def _projected_tensor_values(value: object) -> list[float]:
+    for name in ("data", "tolist"):
+        exporter = getattr(value, name, None)
+        if callable(exporter):
+            return _flatten_numeric_values(exporter())
+    return _flatten_numeric_values(value)
+
+
+def _hf_gpt2_ft_default_topos(
+    st_module: object,
+    *,
+    curvature: float,
+    observed_token_count: int,
+) -> object:
+    max_depth = max(1, int(observed_token_count))
+    max_volume = max(64, max_depth * 8)
+    factory = getattr(st_module, "hypergrad_topos", None)
+    if callable(factory):
+        return factory(
+            curvature=float(curvature),
+            tolerance=1e-3,
+            saturation=1.0,
+            max_depth=max_depth,
+            max_volume=max_volume,
+        )
+
+    topos_cls = getattr(st_module, "OpenCartesianTopos", None)
+    if not callable(topos_cls):
+        topos_cls = getattr(st_module, "OpenTopos", None)
+    if not callable(topos_cls):
+        raise AttributeError("SpiralTorch native OpenCartesianTopos is unavailable")
+
+    try:
+        return topos_cls(float(curvature), 1e-3, 1.0, max_depth, max_volume)
+    except TypeError as new_exc:
+        try:
+            return topos_cls(float(curvature))
+        except TypeError:
+            raise new_exc
+
+
 def hf_gpt2_finetune_zspace_probe(
     token_ids: Sequence[int | float],
     *,
@@ -663,11 +721,15 @@ def hf_gpt2_finetune_zspace_probe(
         from spiraltorch.nn import ZSpaceProjector
 
         tensor = st.Tensor(1, len(values), values)
-        topos = st.OpenTopos(float(curvature))
+        topos = _hf_gpt2_ft_default_topos(
+            st,
+            curvature=float(curvature),
+            observed_token_count=observed,
+        )
         encoder = st.LanguageWaveEncoder(topos.curvature(), float(frequency))
         projector = ZSpaceProjector(topos, encoder, strength=float(strength))
         projected = projector.forward(tensor)
-        projected_values = [float(value) for value in projected.data()]
+        projected_values = _projected_tensor_values(projected)
     except Exception as exc:  # pragma: no cover - depends on native runtime.
         row.update(
             {

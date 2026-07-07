@@ -53,6 +53,11 @@
   `examples/hf_gpt2_finetune_sweep.py` so interrupted local GPT-2 FT sweeps can
   reuse successful run cards, run only missing/failed rows, and still compare
   reused plus newly completed runs in one report.
+- FT run-card hardening: keep Z-Space probes aligned with the current
+  `OpenCartesianTopos` constructor and native Tensor `.tolist()` export, and
+  make generation samples tolerate patched Hugging Face
+  `_prepare_special_tokens(..., batch_size=...)` call sites without falling
+  back to manual forward generation.
 - Documentation: clarify the hard dependency boundary for larger local GPT-2
   FT runs: Rust keeps tensor/nn/text/logic/frac/rl/WGPU surfaces in the wheel,
   while Python explicitly brings Transformers, Torch, datasets, pyarrow,

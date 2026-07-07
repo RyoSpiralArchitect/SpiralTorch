@@ -576,6 +576,50 @@ def _move_batch_to_device(batch: Mapping[str, Any], device: Any | None) -> dict[
     return moved
 
 
+@contextlib.contextmanager
+def _prepare_special_tokens_batch_size_compat(model: Any):
+    prepare = getattr(model, "_prepare_special_tokens", None)
+    if not callable(prepare):
+        yield False
+        return
+    try:
+        signature = inspect.signature(prepare)
+    except (TypeError, ValueError):
+        yield False
+        return
+    parameters = signature.parameters
+    accepts_batch_size = "batch_size" in parameters or any(
+        param.kind == inspect.Parameter.VAR_KEYWORD
+        for param in parameters.values()
+    )
+    if accepts_batch_size:
+        yield False
+        return
+
+    sentinel = object()
+    previous = getattr(model, "_prepare_special_tokens", sentinel)
+
+    def _compat_prepare_special_tokens(*args: Any, **kwargs: Any) -> Any:
+        kwargs.pop("batch_size", None)
+        return prepare(*args, **kwargs)
+
+    try:
+        setattr(model, "_prepare_special_tokens", _compat_prepare_special_tokens)
+    except Exception:
+        yield False
+        return
+    try:
+        yield True
+    finally:
+        try:
+            if previous is sentinel:
+                delattr(model, "_prepare_special_tokens")
+            else:
+                setattr(model, "_prepare_special_tokens", previous)
+        except Exception:
+            pass
+
+
 def _last_dim(value: Any) -> int | None:
     shape = getattr(value, "shape", None)
     if shape is not None and len(shape) > 0:
@@ -700,10 +744,11 @@ def _generation_sample(
         try:
             with torch.no_grad():
                 try:
-                    if isinstance(batch, Mapping):
-                        output_ids = model.generate(**batch, **generate_kwargs)
-                    else:
-                        output_ids = model.generate(batch, **generate_kwargs)
+                    with _prepare_special_tokens_batch_size_compat(model):
+                        if isinstance(batch, Mapping):
+                            output_ids = model.generate(**batch, **generate_kwargs)
+                        else:
+                            output_ids = model.generate(batch, **generate_kwargs)
                 except Exception as generate_exc:
                     if not isinstance(batch, Mapping):
                         raise
