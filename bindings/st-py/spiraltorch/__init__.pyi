@@ -275,6 +275,17 @@ def hf_gpt2_finetune_corpus_scan_report(
     encoding: str = ...,
 ) -> Dict[str, object]: ...
 
+def hf_gpt2_finetune_dataset_fit_report(
+    *,
+    raw_train_rows: object = ...,
+    raw_eval_rows: object = ...,
+    tokenized_train_rows: object = ...,
+    tokenized_eval_rows: object = ...,
+    block_size: int = ...,
+    min_train_blocks: int = ...,
+    min_eval_blocks: int = ...,
+) -> Dict[str, object]: ...
+
 def hf_gpt2_finetune_preflight_report(
     *,
     model_name: str = ...,
@@ -8103,6 +8114,7 @@ __all__ = [
     "HF_GPT2_FT_REQUIRED_RUST_SURFACES",
     "hf_gpt2_finetune_corpus_file_report",
     "hf_gpt2_finetune_corpus_scan_report",
+    "hf_gpt2_finetune_dataset_fit_report",
     "hf_gpt2_finetune_preflight_report",
     "hf_gpt2_finetune_rust_dependency_report",
     "hf_gpt2_finetune_summary_lines",

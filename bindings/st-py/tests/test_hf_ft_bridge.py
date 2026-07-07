@@ -204,6 +204,36 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             ["alpha spiral", "beta zspace"],
         )
 
+    def test_dataset_fit_report_flags_train_and_eval_readiness(self) -> None:
+        ready = hf_ft.hf_gpt2_finetune_dataset_fit_report(
+            raw_train_rows=142,
+            raw_eval_rows=20,
+            tokenized_train_rows=20,
+            tokenized_eval_rows=3,
+            block_size=64,
+        )
+        too_small = hf_ft.hf_gpt2_finetune_dataset_fit_report(
+            raw_train_rows=4,
+            raw_eval_rows=1,
+            tokenized_train_rows=1,
+            tokenized_eval_rows=0,
+            block_size=32,
+        )
+        empty_train = hf_ft.hf_gpt2_finetune_dataset_fit_report(
+            raw_train_rows=1,
+            tokenized_train_rows=0,
+            block_size=512,
+        )
+
+        self.assertEqual(ready["verdict"], "train_eval_ready")
+        self.assertTrue(ready["train_ready"])
+        self.assertTrue(ready["eval_ready"])
+        self.assertEqual(too_small["verdict"], "train_ready_eval_unusable")
+        self.assertTrue(too_small["eval_dropped_empty"])
+        self.assertIn("tokenized_eval_too_small", too_small["warnings"])
+        self.assertEqual(empty_train["verdict"], "not_trainable")
+        self.assertFalse(empty_train["train_ready"])
+
     def test_example_local_corpus_reports_attach_scan_to_cards(self) -> None:
         module = load_bridge_example()
         with tempfile.TemporaryDirectory() as tmp:
@@ -414,9 +444,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             st.hf_gpt2_finetune_corpus_scan_report,
             hf_ft.hf_gpt2_finetune_corpus_scan_report,
         )
+        self.assertIs(
+            st.hf_gpt2_finetune_dataset_fit_report,
+            hf_ft.hf_gpt2_finetune_dataset_fit_report,
+        )
         self.assertIn("hf_ft", st.__all__)
         self.assertIn("hf_gpt2_finetune_corpus_file_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_corpus_scan_report", st.__all__)
+        self.assertIn("hf_gpt2_finetune_dataset_fit_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_preflight_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_trainer_trace_callback", st.__all__)
         self.assertIs(

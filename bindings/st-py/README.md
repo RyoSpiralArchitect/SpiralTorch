@@ -413,6 +413,9 @@ large corpora instead of a full pre-train pass over every byte. When
 offline environment flags for model/tokenizer downloads; model-load,
 tokenization, `TrainingArguments`, and Trainer failures are written into the run
 card so long-run blockers leave structured evidence instead of only a traceback.
+After tokenization/grouping, `dataset_fit_report` records whether train/eval
+splits produced enough fixed-size blocks; empty eval blocks are reported and
+disabled instead of producing evaluation-looking traces without `eval_loss`.
 
 ## Minimal usage
 

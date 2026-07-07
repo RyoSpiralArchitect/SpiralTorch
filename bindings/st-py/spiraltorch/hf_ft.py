@@ -24,6 +24,7 @@ __all__ = [
     "hf_gpt2_finetune_preflight_report",
     "hf_gpt2_finetune_corpus_file_report",
     "hf_gpt2_finetune_corpus_scan_report",
+    "hf_gpt2_finetune_dataset_fit_report",
     "hf_gpt2_finetune_rust_dependency_report",
     "hf_gpt2_finetune_summary_lines",
     "hf_gpt2_finetune_trainer_trace_callback",
@@ -351,6 +352,77 @@ def hf_gpt2_finetune_corpus_scan_report(
         "all_files_available": not missing,
         "fingerprint": fingerprint.hexdigest() if rows else None,
         "files": rows,
+    }
+
+
+def _optional_int(value: object) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def hf_gpt2_finetune_dataset_fit_report(
+    *,
+    raw_train_rows: object = None,
+    raw_eval_rows: object = None,
+    tokenized_train_rows: object = None,
+    tokenized_eval_rows: object = None,
+    block_size: int = 128,
+    min_train_blocks: int = 1,
+    min_eval_blocks: int = 1,
+) -> dict[str, object]:
+    """Summarize whether tokenized local FT splits are train/eval ready."""
+
+    raw_train = _optional_int(raw_train_rows)
+    raw_eval = _optional_int(raw_eval_rows)
+    train_blocks = _optional_int(tokenized_train_rows)
+    eval_blocks = _optional_int(tokenized_eval_rows)
+    min_train = max(1, int(min_train_blocks))
+    min_eval = max(0, int(min_eval_blocks))
+    train_ready = train_blocks is not None and train_blocks >= min_train
+    eval_requested = raw_eval is not None and raw_eval > 0
+    eval_ready = (
+        None
+        if not eval_requested
+        else eval_blocks is not None and eval_blocks >= min_eval
+    )
+    warnings = []
+    if raw_train is not None and raw_train == 0:
+        warnings.append("raw_train_empty")
+    if train_blocks is None:
+        warnings.append("tokenized_train_unknown")
+    elif train_blocks < min_train:
+        warnings.append("tokenized_train_too_small")
+    if eval_requested:
+        if eval_blocks is None:
+            warnings.append("tokenized_eval_unknown")
+        elif eval_blocks < min_eval:
+            warnings.append("tokenized_eval_too_small")
+    verdict = "train_eval_ready"
+    if not train_ready:
+        verdict = "not_trainable"
+    elif eval_ready is False:
+        verdict = "train_ready_eval_unusable"
+    elif eval_ready is None:
+        verdict = "train_ready_eval_not_requested"
+    return {
+        "row_type": "hf_gpt2_finetune_dataset_fit_report",
+        "raw_train_rows": raw_train,
+        "raw_eval_rows": raw_eval,
+        "tokenized_train_rows": train_blocks,
+        "tokenized_eval_rows": eval_blocks,
+        "block_size": int(block_size),
+        "min_train_blocks": min_train,
+        "min_eval_blocks": min_eval,
+        "train_ready": bool(train_ready),
+        "eval_requested": bool(eval_requested),
+        "eval_ready": eval_ready,
+        "eval_dropped_empty": bool(eval_requested and eval_ready is False),
+        "verdict": verdict,
+        "warnings": csv_label(warnings),
     }
 
 
