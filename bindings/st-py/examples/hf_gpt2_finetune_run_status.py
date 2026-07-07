@@ -40,6 +40,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--max-steps", type=int, default=None)
     parser.add_argument("--eval-steps", type=int, default=None)
     parser.add_argument("--save-steps", type=int, default=None)
+    parser.add_argument("--min-free-disk-gb", type=float, default=None)
     parser.add_argument("--final-checkpoint", default=None)
     parser.add_argument("--tail-evals", type=int, default=6)
     parser.add_argument("--out", type=Path, default=None)
@@ -65,6 +66,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("--eval-steps must be positive")
     if args.save_steps is not None and args.save_steps <= 0:
         parser.error("--save-steps must be positive")
+    if args.min_free_disk_gb is not None and args.min_free_disk_gb < 0.0:
+        parser.error("--min-free-disk-gb must be non-negative")
     if args.tail_evals < 0:
         parser.error("--tail-evals must be non-negative")
     if args.log_tail_bytes <= 0:
@@ -355,6 +358,19 @@ def summarize_run(args: argparse.Namespace) -> dict[str, Any]:
         final_checkpoint_path = args.run_dir / str(args.final_checkpoint)
         final_checkpoint_ready = (final_checkpoint_path / "model.safetensors").is_file()
     disk = shutil.disk_usage(args.run_dir)
+    disk_free_gb = disk.free / (1024.0**3)
+    disk_margin_gb = (
+        None
+        if args.min_free_disk_gb is None
+        else disk_free_gb - float(args.min_free_disk_gb)
+    )
+    disk_status = (
+        "unchecked"
+        if args.min_free_disk_gb is None
+        else "ok"
+        if disk_margin_gb is not None and disk_margin_gb >= 0.0
+        else "low"
+    )
     latest_checkpoint = checkpoints[-1] if checkpoints else None
     return {
         "row_type": "hf_gpt2_finetune_run_status",
@@ -382,7 +398,10 @@ def summarize_run(args: argparse.Namespace) -> dict[str, Any]:
         if final_checkpoint_path is not None
         else None,
         "final_checkpoint_ready": final_checkpoint_ready,
-        "disk_free_gb": disk.free / (1024.0**3),
+        "min_free_disk_gb": args.min_free_disk_gb,
+        "disk_free_gb": disk_free_gb,
+        "disk_margin_gb": disk_margin_gb,
+        "disk_status": disk_status,
         "disk_total_gb": disk.total / (1024.0**3),
     }
 
@@ -421,7 +440,10 @@ def status_lines(status: dict[str, Any], *, tail_evals: int) -> list[str]:
             f"checkpoints={_number_text(status.get('checkpoint_count'))} "
             f"latest_checkpoint={_number_text(latest_checkpoint_name)} "
             f"final_ready={_number_text(status.get('final_checkpoint_ready'))} "
-            f"disk_free_gb={_number_text(status.get('disk_free_gb'))}"
+            f"disk_free_gb={_number_text(status.get('disk_free_gb'))} "
+            f"min_free_disk_gb={_number_text(status.get('min_free_disk_gb'))} "
+            f"disk_margin_gb={_number_text(status.get('disk_margin_gb'))} "
+            f"disk_status={_number_text(status.get('disk_status'))}"
         )
     ]
     eval_points = trace.get("trace_eval_loss_points")

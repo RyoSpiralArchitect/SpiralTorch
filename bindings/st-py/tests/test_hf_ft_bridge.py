@@ -3775,6 +3775,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 "10",
                 "--save-steps",
                 "20",
+                "--min-free-disk-gb",
+                "1.0",
                 "--final-checkpoint",
                 "checkpoint-20",
                 "--checkpoint-card",
@@ -3983,6 +3985,12 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(
             status["checkpoint_progress"]["log_steps_until_next_checkpoint"], 16
         )
+        self.assertEqual(status["min_free_disk_gb"], 1.0)
+        self.assertAlmostEqual(
+            status["disk_margin_gb"],
+            status["disk_free_gb"] - 1.0,
+        )
+        self.assertEqual(status["disk_status"], "ok")
         self.assertEqual(status["checkpoint_count"], 1)
         self.assertTrue(status["final_checkpoint_ready"])
         self.assertEqual(status["checkpoint_card_status"], "waiting_for_process")
@@ -3995,6 +4003,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("next_checkpoint_step=40", lines[0])
         self.assertIn("log_steps_until_next_checkpoint=16", lines[0])
         self.assertIn("best_eval_loss_step=10", lines[0])
+        self.assertIn("min_free_disk_gb=1", lines[0])
+        self.assertIn("disk_status=ok", lines[0])
         self.assertIn("checkpoint_card=waiting_for_process", lines[0])
         self.assertIn("final_ready=true", lines[0])
         self.assertIn("hf_gpt2_ft_run_wait status=waiting", lines[-1])
@@ -4037,6 +4047,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 "checkpoint_count": 1,
                 "latest_checkpoint": {"name": "checkpoint-20"},
                 "disk_free_gb": 12.0,
+                "disk_margin_gb": 8.0,
+                "disk_status": "ok",
                 "trace": {
                     "trace_max_global_step": 20,
                     "trace_last_loss": 2.1,
@@ -4064,6 +4076,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 "checkpoint_count": 1,
                 "latest_checkpoint": {"name": "checkpoint-20"},
                 "disk_free_gb": 11.5,
+                "disk_margin_gb": 7.5,
+                "disk_status": "ok",
                 "trace": {
                     "trace_max_global_step": 30,
                     "trace_last_loss": 1.9,
@@ -4132,6 +4146,9 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertAlmostEqual(summary["loss_delta"], -0.2)
         self.assertEqual(summary["min_eval_loss"], 1.7)
         self.assertEqual(summary["min_disk_free_gb"], 11.5)
+        self.assertEqual(summary["last_disk_margin_gb"], 7.5)
+        self.assertEqual(summary["min_disk_margin_gb"], 7.5)
+        self.assertEqual(summary["last_disk_status"], "ok")
         self.assertEqual(written["delta_log_step"], 10)
         self.assertIn("label=demo", lines[0])
         self.assertIn("last_log_step=34", lines[0])
@@ -4147,12 +4164,17 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("min_eval_loss=1.7", lines[0])
         self.assertIn("last_disk_free_gb=11.5", lines[0])
         self.assertIn("min_disk_free_gb=11.5", lines[0])
+        self.assertIn("last_disk_margin_gb=7.5", lines[0])
+        self.assertIn("min_disk_margin_gb=7.5", lines[0])
+        self.assertIn("disk_status=ok", lines[0])
         self.assertIn("index=1", lines[1])
         self.assertIn("next_checkpoint_step=40", lines[1])
         self.assertIn("steps_until_next_checkpoint=6", lines[1])
         self.assertIn("best_eval_loss_step=30", lines[1])
         self.assertIn("last_loss=1.9", lines[1])
         self.assertIn("disk_free_gb=11.5", lines[1])
+        self.assertIn("disk_margin_gb=7.5", lines[1])
+        self.assertIn("disk_status=ok", lines[1])
         self.assertEqual(written_lines, lines)
 
     def test_run_card_summary_supplements_trace_telemetry_from_jsonl(self) -> None:

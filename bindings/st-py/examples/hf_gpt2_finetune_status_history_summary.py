@@ -131,6 +131,11 @@ def summarize_history(
         for row in rows
         if isinstance(row.get("disk_free_gb"), (int, float))
     ]
+    disk_margin_values = [
+        row.get("disk_margin_gb")
+        for row in rows
+        if isinstance(row.get("disk_margin_gb"), (int, float))
+    ]
     return {
         "row_type": "hf_gpt2_ft_status_history_summary",
         "label": label,
@@ -172,6 +177,11 @@ def summarize_history(
         "last_latest_checkpoint": _latest_checkpoint_name(last),
         "min_disk_free_gb": min(disk_values) if disk_values else None,
         "last_disk_free_gb": last.get("disk_free_gb"),
+        "min_disk_margin_gb": min(disk_margin_values)
+        if disk_margin_values
+        else None,
+        "last_disk_margin_gb": last.get("disk_margin_gb"),
+        "last_disk_status": last.get("disk_status"),
     }
 
 
@@ -205,7 +215,10 @@ def history_lines(
             f"process={_number_text(summary.get('last_process_status'))} "
             f"final_ready={_number_text(summary.get('last_final_checkpoint_ready'))} "
             f"last_disk_free_gb={_number_text(summary.get('last_disk_free_gb'))} "
-            f"min_disk_free_gb={_number_text(summary.get('min_disk_free_gb'))}"
+            f"min_disk_free_gb={_number_text(summary.get('min_disk_free_gb'))} "
+            f"last_disk_margin_gb={_number_text(summary.get('last_disk_margin_gb'))} "
+            f"min_disk_margin_gb={_number_text(summary.get('min_disk_margin_gb'))} "
+            f"disk_status={_number_text(summary.get('last_disk_status'))}"
         )
     ]
     if tail <= 0:
@@ -225,7 +238,9 @@ def history_lines(
                 f"last_eval_loss={_number_text(_nested(row, 'trace', 'trace_last_eval_loss'))} "
                 f"best_eval_loss_step={_number_text(_nested(row, 'trace', 'trace_best_eval_loss_step'))} "
                 f"final_ready={_number_text(row.get('final_checkpoint_ready'))} "
-                f"disk_free_gb={_number_text(row.get('disk_free_gb'))}"
+                f"disk_free_gb={_number_text(row.get('disk_free_gb'))} "
+                f"disk_margin_gb={_number_text(row.get('disk_margin_gb'))} "
+                f"disk_status={_number_text(row.get('disk_status'))}"
             )
         )
     return lines
