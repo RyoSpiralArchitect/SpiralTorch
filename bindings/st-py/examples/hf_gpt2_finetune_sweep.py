@@ -364,6 +364,7 @@ def run_sweep(args: argparse.Namespace) -> dict[str, Any]:
             "comparison": None,
             "runs": runs,
         }
+        report["summary"] = st.summarize_hf_gpt2_finetune_sweep_report(report)
         _write_json(args.out_dir / "sweep-report.json", report)
         return report
 
@@ -411,6 +412,7 @@ def run_sweep(args: argparse.Namespace) -> dict[str, Any]:
         "comparison": comparison,
         "runs": runs,
     }
+    report["summary"] = st.summarize_hf_gpt2_finetune_sweep_report(report)
     _write_json(args.out_dir / "sweep-report.json", report)
     return report
 

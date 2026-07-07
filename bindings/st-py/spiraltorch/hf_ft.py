@@ -34,8 +34,11 @@ __all__ = [
     "hf_gpt2_finetune_zspace_probe",
     "compare_hf_gpt2_finetune_run_cards",
     "load_hf_gpt2_finetune_run_card",
+    "load_hf_gpt2_finetune_sweep_report",
     "load_hf_gpt2_finetune_trainer_trace",
     "summarize_hf_gpt2_finetune_run_card",
+    "summarize_hf_gpt2_finetune_sweep_report",
+    "summarize_hf_gpt2_finetune_sweep_report_lines",
     "summarize_hf_gpt2_finetune_trainer_trace",
     "write_hf_gpt2_finetune_run_card",
     "write_hf_gpt2_finetune_trainer_trace_event",
@@ -926,6 +929,19 @@ def load_hf_gpt2_finetune_run_card(path: str | Path) -> dict[str, object]:
     return dict(payload)
 
 
+def load_hf_gpt2_finetune_sweep_report(path: str | Path) -> dict[str, object]:
+    """Load one GPT-2 FT sweep report JSON artifact."""
+
+    input_path = Path(path)
+    try:
+        payload = json.loads(input_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{input_path} invalid JSON: {exc}") from exc
+    if not isinstance(payload, Mapping):
+        raise ValueError(f"{input_path} did not contain a JSON object")
+    return dict(payload)
+
+
 def _run_card_payload(
     card_or_path: str | Path | Mapping[str, object],
 ) -> tuple[dict[str, object], str | None]:
@@ -935,6 +951,17 @@ def _run_card_payload(
     if isinstance(card_or_path, Mapping):
         return dict(card_or_path), None
     raise TypeError("run card must be a Mapping or path")
+
+
+def _sweep_report_payload(
+    report_or_path: str | Path | Mapping[str, object],
+) -> tuple[dict[str, object], str | None]:
+    if isinstance(report_or_path, (str, Path)):
+        path = str(report_or_path)
+        return load_hf_gpt2_finetune_sweep_report(report_or_path), path
+    if isinstance(report_or_path, Mapping):
+        return dict(report_or_path), None
+    raise TypeError("sweep report must be a Mapping or path")
 
 
 def _mapping_item(
@@ -1099,6 +1126,174 @@ def _best_summary(
     if not candidates:
         return None
     return min(candidates, key=lambda item: item[0])[1]
+
+
+def _sweep_summary_rows(
+    comparison: Mapping[str, object],
+) -> list[dict[str, object]]:
+    summaries = comparison.get("summaries")
+    if not isinstance(summaries, Sequence) or isinstance(summaries, (str, bytes)):
+        return []
+    return [dict(row) for row in summaries if isinstance(row, Mapping)]
+
+
+def _ranked_sweep_rows(
+    summaries: Sequence[Mapping[str, object]],
+    *,
+    top_n: int,
+) -> list[dict[str, object]]:
+    def sort_key(row: Mapping[str, object]) -> tuple[float, float, str]:
+        eval_after = _safe_number(row.get("eval_after_loss"))
+        eval_delta = _safe_number(row.get("eval_loss_delta"))
+        return (
+            math.inf if eval_after is None else float(eval_after),
+            math.inf if eval_delta is None else float(eval_delta),
+            str(row.get("run_label") or ""),
+        )
+
+    ranked = sorted(summaries, key=sort_key)
+    if top_n >= 0:
+        ranked = ranked[:top_n]
+    rows = []
+    for index, row in enumerate(ranked, 1):
+        rows.append(
+            {
+                "rank": index,
+                "run_label": row.get("run_label"),
+                "run_card_path": row.get("run_card_path"),
+                "eval_after_loss": _safe_number(row.get("eval_after_loss")),
+                "eval_loss_delta": _safe_number(row.get("eval_loss_delta")),
+                "eval_loss_improved": row.get("eval_loss_improved"),
+                "generation_continuation_changed": row.get(
+                    "generation_continuation_changed"
+                ),
+                "trainer_train_loss": _safe_number(row.get("trainer_train_loss")),
+                "trace_event_count": _safe_number(row.get("trace_event_count")),
+                "dataset_fit_verdict": row.get("dataset_fit_verdict"),
+                "failure_stage": row.get("failure_stage"),
+            }
+        )
+    return rows
+
+
+def summarize_hf_gpt2_finetune_sweep_report(
+    report_or_path: str | Path | Mapping[str, object],
+    *,
+    top_n: int = 5,
+) -> dict[str, object]:
+    """Summarize a GPT-2 FT sweep report into a scale-up decision surface."""
+
+    if top_n < 0:
+        raise ValueError("top_n must be non-negative")
+    report, source_path = _sweep_report_payload(report_or_path)
+    comparison = _mapping_item(report, "comparison")
+    summaries = _sweep_summary_rows(comparison)
+    runs_value = report.get("runs")
+    runs = (
+        [dict(row) for row in runs_value if isinstance(row, Mapping)]
+        if isinstance(runs_value, Sequence) and not isinstance(runs_value, (str, bytes))
+        else []
+    )
+    best_delta = _safe_number(comparison.get("best_eval_loss_delta"))
+    best_delta_label = comparison.get("best_eval_loss_delta_run_label")
+    best_after_label = comparison.get("best_eval_after_run_label")
+    selected_reason = "best_eval_after_loss"
+    selected_label = best_after_label
+    if best_delta is not None and best_delta < 0.0 and best_delta_label:
+        selected_reason = "best_eval_loss_delta"
+        selected_label = best_delta_label
+
+    completed = _safe_number(report.get("completed_run_count"))
+    failed = _safe_number(report.get("failed_run_count"))
+    dry_run = bool(report.get("dry_run"))
+    if dry_run:
+        status = "planned"
+    elif completed is None or int(completed) <= 0:
+        status = "no_completed_runs"
+    elif failed is not None and int(failed) > 0:
+        status = "partial"
+    else:
+        status = "complete"
+
+    return {
+        "row_type": "hf_gpt2_finetune_sweep_report_summary",
+        "sweep_report_path": source_path,
+        "status": status,
+        "dry_run": dry_run,
+        "run_count": _safe_number(report.get("run_count")),
+        "attempted_run_count": _safe_number(report.get("attempted_run_count")),
+        "completed_run_count": completed,
+        "failed_run_count": failed,
+        "skipped_run_count": _safe_number(report.get("skipped_run_count")),
+        "comparison_run_count": _safe_number(comparison.get("run_count")),
+        "successful_run_count": _safe_number(comparison.get("successful_run_count")),
+        "eval_after_ok_count": _safe_number(comparison.get("eval_after_ok_count")),
+        "eval_loss_improved_count": _safe_number(
+            comparison.get("eval_loss_improved_count")
+        ),
+        "generation_changed_count": _safe_number(
+            comparison.get("generation_changed_count")
+        ),
+        "best_eval_after_run_label": best_after_label,
+        "best_eval_after_loss": _safe_number(comparison.get("best_eval_after_loss")),
+        "best_eval_loss_delta_run_label": best_delta_label,
+        "best_eval_loss_delta": best_delta,
+        "selected_run_label": selected_label,
+        "selected_reason": selected_reason if selected_label else None,
+        "top_runs": _ranked_sweep_rows(summaries, top_n=top_n),
+        "failed_runs": [
+            {
+                "name": row.get("name"),
+                "run_card": row.get("run_card"),
+                "returncode": row.get("returncode"),
+                "command_display": row.get("command_display"),
+            }
+            for row in runs
+            if row.get("returncode") is not None
+            and _safe_number(row.get("returncode")) != 0
+        ],
+    }
+
+
+def summarize_hf_gpt2_finetune_sweep_report_lines(
+    report_or_path: str | Path | Mapping[str, object],
+    *,
+    top_n: int = 3,
+) -> list[str]:
+    """Render a compact human-readable summary for a GPT-2 FT sweep report."""
+
+    summary = summarize_hf_gpt2_finetune_sweep_report(
+        report_or_path,
+        top_n=top_n,
+    )
+    lines = [
+        (
+            "hf_gpt2_ft_sweep "
+            f"status={summary.get('status')} "
+            f"runs={summary.get('completed_run_count')}/{summary.get('run_count')} "
+            f"failed={summary.get('failed_run_count')} "
+            f"skipped={summary.get('skipped_run_count')}"
+        ),
+        (
+            "hf_gpt2_ft_sweep_best "
+            f"selected={summary.get('selected_run_label')} "
+            f"reason={summary.get('selected_reason')} "
+            f"best_eval_after={summary.get('best_eval_after_loss')} "
+            f"best_delta={summary.get('best_eval_loss_delta')}"
+        ),
+    ]
+    for row in summary.get("top_runs", []):
+        if not isinstance(row, Mapping):
+            continue
+        lines.append(
+            "hf_gpt2_ft_sweep_top "
+            f"rank={row.get('rank')} "
+            f"run={row.get('run_label')} "
+            f"eval_after={row.get('eval_after_loss')} "
+            f"delta={row.get('eval_loss_delta')} "
+            f"changed={row.get('generation_continuation_changed')}"
+        )
+    return lines
 
 
 def compare_hf_gpt2_finetune_run_cards(

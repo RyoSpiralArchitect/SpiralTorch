@@ -453,6 +453,12 @@ the run cards are available, including the same
 `st.compare_hf_gpt2_finetune_run_cards(...)` comparison payload. Add
 `--dry-run` to inspect commands without loading Transformers, or
 `--require-wgpu-ready` when the SpiralTorch WGPU surface should gate each run.
+The report also embeds a compact `summary`; from notebooks or CI, call
+`st.load_hf_gpt2_finetune_sweep_report(...)`,
+`st.summarize_hf_gpt2_finetune_sweep_report(...)`, or
+`st.summarize_hf_gpt2_finetune_sweep_report_lines(...)` to recover the
+selected scale-up candidate, top eval-loss rows, failed runs, and
+dry-run/partial/complete status without hand-reading the full artifact.
 
 ## Minimal usage
 
