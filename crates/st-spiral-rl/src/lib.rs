@@ -14,7 +14,7 @@ mod geometry;
 mod hyper_surprise;
 pub mod schedules;
 
-pub use algorithms::{DqnAgent, PpoAgent, SacAgent};
+pub use algorithms::{DqnActionTrace, DqnAgent, PpoAgent, SacAgent};
 pub use geometry::{
     GeometryFeedback, GeometryFeedbackConfig, GeometryFeedbackSignal, GeometryTelemetry,
 };

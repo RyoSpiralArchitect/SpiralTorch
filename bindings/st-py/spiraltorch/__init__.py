@@ -152,6 +152,18 @@ def _install_spiral_rl_stub() -> None:
         def select_actions(self, *args: _Any, **kwargs: _Any) -> _NoReturn:  # pragma: no cover - exercised via tests
             self._missing("select_actions")
 
+        def q_values(self, *args: _Any, **kwargs: _Any) -> _NoReturn:
+            self._missing("q_values")
+
+        def greedy_action(self, *args: _Any, **kwargs: _Any) -> _NoReturn:
+            self._missing("greedy_action")
+
+        def policy_report(self, *args: _Any, **kwargs: _Any) -> _NoReturn:
+            self._missing("policy_report")
+
+        def select_action_trace(self, *args: _Any, **kwargs: _Any) -> _NoReturn:
+            self._missing("select_action_trace")
+
         def update(self, *args: _Any, **kwargs: _Any) -> _NoReturn:  # pragma: no cover - exercised via tests
             self._missing("update")
 

@@ -3173,6 +3173,18 @@ def _install_stub_bindings(module, error: ModuleNotFoundError) -> None:
             def select_actions(self, *args, **kwargs):
                 self._fail()
 
+            def q_values(self, *args, **kwargs):
+                self._fail()
+
+            def greedy_action(self, *args, **kwargs):
+                self._fail()
+
+            def policy_report(self, *args, **kwargs):
+                self._fail()
+
+            def select_action_trace(self, *args, **kwargs):
+                self._fail()
+
             def update(self, *args, **kwargs):
                 self._fail()
 

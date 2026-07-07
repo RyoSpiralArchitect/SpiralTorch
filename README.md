@@ -125,6 +125,7 @@ SpiralTorch’s “learning stack” is a set of minimal, runnable training base
 - **LLM (API model + Z-space runtime):** `PYTHONNOUSERSITE=1 python3 -S -s bindings/st-py/examples/api_llm_zspace_runtime.py` shows how an OpenAI-compatible response or arbitrary hosted-model callable becomes a Z-space partial trace with device preflight evidence, usage/latency telemetry, and posterior confidence. With `OPENAI_API_KEY` plus `pip install openai`, run `PYTHONPATH=bindings/st-py python3 bindings/st-py/examples/openai_api_llm_zspace_runtime.py --prompt "Describe SpiralTorch entering Z-space runtime."` to hit the OpenAI Responses API through the same bridge. With `ANTHROPIC_API_KEY` plus `pip install anthropic`, run `PYTHONPATH=bindings/st-py python3 bindings/st-py/examples/anthropic_api_llm_zspace_runtime.py --prompt "Describe SpiralTorch inference as bipolar geometry."` to route Anthropic Messages into the same trace path.
 - **LLM (API model prompt suite):** `PYTHONNOUSERSITE=1 PYTHONPATH=bindings/st-py python3 -S -s bindings/st-py/examples/api_llm_prompt_suite.py` runs several hosted-model-shaped prompts through one Z-space runtime, writes a compact JSONL artifact, and compares the suite without network access. `PYTHONNOUSERSITE=1 PYTHONPATH=bindings/st-py python3 -S -s bindings/st-py/examples/api_llm_provider_suite_compare.py` runs the same prompts through OpenAI-shaped and Anthropic-shaped callables, writes one JSONL artifact per route, and ranks the provider matrix by the same Z-space route score.
 - **LLM (API model open-topos sweep):** `PYTHONPATH=bindings/st-py python3 bindings/st-py/examples/api_llm_topos_sweep.py --prompt-limit 3 --context-prompt --out-dir /tmp/spiraltorch-topos-sweep` compares open/contextual/guarded topological runtime adapters around one provider-shaped callable, writes one JSONL trace per route plus `report.json` with bounded response previews, route scorecards, pairwise route deltas, response-side route winners, and balanced/quality/grounded/efficiency/latency selection profiles, and works offline by default. Add `--live-provider openai-responses|openai-chat|anthropic --model <model>` with the matching SDK/key installed to replay the same sweep through a hosted model.
+- **RL (stAgent policy trace):** `PYTHONPATH=bindings/st-py python3 bindings/st-py/examples/stagent_policy_trace.py --steps 200 --jsonl-out /tmp/stagent-policy.jsonl` runs a tiny native DQN bandit loop, emits per-step `select_action_trace()` records with Q-values/epsilon/explore-vs-greedy metadata, and prints a final `policy_report()` summary for handoff into Z-space/topos route selectors.
 - **LLM (live API provider matrix):** `PYTHONPATH=bindings/st-py python3 bindings/st-py/examples/api_llm_live_provider_matrix.py --prompt-limit 12 --repeat 3 --near-best-tolerance 0.02 --out-dir /tmp/spiraltorch-live-matrix` replays a larger prompt population through OpenAI Responses plus any available Anthropic routes (`claude-opus-4-8`, `claude-fable-5` by default), records per-route JSONL traces, and writes `report.json` with route settings, route score, near-best routes, quality/efficiency/text-quality score breakdowns, prompt coverage, repetition, latency, token, refusal, empty-text, completion-rate comparisons, and `selection_profiles` for balanced, quality, grounded, efficiency, or latency-sensitive routing. Claude 5/Opus 4.8 routes use adaptive thinking with `output_config.effort` rather than non-default sampling parameters, so keep `--anthropic-max-tokens` comfortably above the visible answer size to avoid measuring budget truncation instead of model behavior.
 - **LLM (live API provider matrix sweep):** `PYTHONPATH=bindings/st-py python3 bindings/st-py/examples/api_llm_live_provider_matrix_sweep.py --prompt-limit 12 --repeat 3 --budget-pairs 192:768,256:1024 --resume-existing --out-dir /tmp/spiraltorch-live-matrix-sweep` runs multiple live matrix budgets, writes one `report.json` per budget pair, then writes `sweep-report.json` with `compare_api_llm_matrix_reports(...)` so profile-winner stability and route tradeoffs can be audited across repeated sweeps. Use `--dry-run` to inspect the planned matrix without calling provider APIs, `--resume-existing` to avoid re-calling APIs for completed budget pairs, or `--force` to rerun them intentionally.
 - **LLM (live OpenAI + WASM context):** `PYTHONPATH=bindings/st-py python3 bindings/st-py/examples/openai_api_llm_wasm_context_runtime.py --wasm-report report.json --include-context-prompt --write-wasm-context-artifact /tmp/spiraltorch-wasm-context.json --trace-jsonl /tmp/spiraltorch-openai-wasm-trace.jsonl` sends a browser-exported WASM learning report through the OpenAI Responses bridge, optionally prepends bounded Z-space/WASM telemetry to the hosted-model prompt, persists the selected context handoff, and records trace telemetry such as `wasm.loss` and `wasm.webgpu_device_ready` beside the hosted response.
@@ -906,7 +907,8 @@ for t in range(1, T + 1):
         frac = (t - FORCE_EXPLORE) / (T - FORCE_EXPLORE)
         eps = eps_hi + (eps_lo - eps_hi) * frac
         agent.set_epsilon(eps)
-        a = agent.select_action(0)
+        trace = agent.select_action_trace(0)
+        a = trace["action"]
 
     r = reward(a)
     wins += r
@@ -2202,10 +2204,13 @@ import spiraltorch as st
 agent = st.rl.stAgent(state_dim=1, action_dim=2, discount=0.0, learning_rate=5e-2)
 agent.set_epsilon(0.1)
 
-action = agent.select_action(0)
+trace = agent.select_action_trace(0)
+action = int(trace["action"])
 agent.update(0, action, reward=1.0, next_state=0)
 
 print("ok (stAgent)")
+print("policy:", agent.policy_report(0))
+print("trace:", trace)
 print("also available:", [name for name in ("PpoAgent", "SacAgent") if hasattr(st.rl, name)])
 ```
 

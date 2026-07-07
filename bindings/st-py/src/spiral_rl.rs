@@ -11,7 +11,9 @@ use crate::tensor::tensor_err_to_py;
 #[cfg(feature = "spiral_rl")]
 use pyo3::exceptions::{PyDeprecationWarning, PyValueError};
 #[cfg(feature = "spiral_rl")]
-use st_spiral_rl::{schedules::EpsilonGreedySchedule, DqnAgent, PpoAgent, SacAgent, SpiralRlError};
+use st_spiral_rl::{
+    schedules::EpsilonGreedySchedule, DqnActionTrace, DqnAgent, PpoAgent, SacAgent, SpiralRlError,
+};
 
 #[cfg(feature = "spiral_rl")]
 fn rl_err_to_py(err: SpiralRlError) -> PyErr {
@@ -214,6 +216,60 @@ fn dqn_state_dict(py: Python<'_>, agent: &DqnAgent) -> PyResult<PyObject> {
     } else {
         dict.set_item("epsilon_schedule", py.None())?;
     }
+    Ok(dict.unbind().into_py(py))
+}
+
+#[cfg(feature = "spiral_rl")]
+fn set_optional_u32(
+    py: Python<'_>,
+    dict: &Bound<'_, PyDict>,
+    key: &str,
+    value: Option<u32>,
+) -> PyResult<()> {
+    if let Some(value) = value {
+        dict.set_item(key, value)
+    } else {
+        dict.set_item(key, py.None())
+    }
+}
+
+#[cfg(feature = "spiral_rl")]
+fn dqn_policy_report_dict(py: Python<'_>, agent: &DqnAgent, state: usize) -> PyResult<PyObject> {
+    let q_values = agent.q_values(state).map_err(rl_err_to_py)?;
+    let greedy_action = agent.greedy_action(state).map_err(rl_err_to_py)?;
+    let dict = PyDict::new(py);
+    dict.set_item("kind", "spiraltorch.rl.dqn_policy_report")?;
+    dict.set_item("state", state)?;
+    dict.set_item("state_dim", agent.state_dim())?;
+    dict.set_item("action_dim", agent.action_dim())?;
+    dict.set_item("q_values", q_values.clone())?;
+    dict.set_item("greedy_action", greedy_action)?;
+    dict.set_item("greedy_value", q_values[greedy_action])?;
+    dict.set_item("epsilon", agent.epsilon())?;
+    set_optional_u32(py, &dict, "schedule_step", agent.schedule_step())?;
+    Ok(dict.unbind().into_py(py))
+}
+
+#[cfg(feature = "spiral_rl")]
+fn dqn_action_trace_dict(py: Python<'_>, trace: DqnActionTrace) -> PyResult<PyObject> {
+    let dict = PyDict::new(py);
+    dict.set_item("kind", "spiraltorch.rl.dqn_action_trace")?;
+    dict.set_item("state", trace.state)?;
+    dict.set_item("action", trace.action)?;
+    dict.set_item("greedy_action", trace.greedy_action)?;
+    dict.set_item("greedy_value", trace.greedy_value)?;
+    dict.set_item("selected_value", trace.selected_value)?;
+    dict.set_item("epsilon_before", trace.epsilon_before)?;
+    dict.set_item("epsilon_after", trace.epsilon_after)?;
+    dict.set_item("explored", trace.explored)?;
+    set_optional_u32(
+        py,
+        &dict,
+        "schedule_step_before",
+        trace.schedule_step_before,
+    )?;
+    set_optional_u32(py, &dict, "schedule_step_after", trace.schedule_step_after)?;
+    dict.set_item("q_values", trace.q_values)?;
     Ok(dict.unbind().into_py(py))
 }
 
@@ -424,6 +480,26 @@ impl PyDqnAgent {
         self.inner.select_actions(&states)
     }
 
+    pub fn q_values(&self, state: usize) -> PyResult<Vec<f32>> {
+        self.inner.q_values(state).map_err(rl_err_to_py)
+    }
+
+    pub fn greedy_action(&self, state: usize) -> PyResult<usize> {
+        self.inner.greedy_action(state).map_err(rl_err_to_py)
+    }
+
+    pub fn policy_report(&self, py: Python<'_>, state: usize) -> PyResult<PyObject> {
+        dqn_policy_report_dict(py, &self.inner, state)
+    }
+
+    pub fn select_action_trace(&mut self, py: Python<'_>, state: usize) -> PyResult<PyObject> {
+        let trace = self
+            .inner
+            .select_action_trace(state)
+            .map_err(rl_err_to_py)?;
+        dqn_action_trace_dict(py, trace)
+    }
+
     pub fn update(&mut self, state: usize, action: usize, reward: f32, next_state: usize) {
         self.inner.update(state, action, reward, next_state);
     }
@@ -525,6 +601,23 @@ impl PyAgent {
 
     pub fn select_actions(&mut self, states: Vec<usize>) -> Vec<usize> {
         self.dqn.select_actions(&states)
+    }
+
+    pub fn q_values(&self, state: usize) -> PyResult<Vec<f32>> {
+        self.dqn.q_values(state).map_err(rl_err_to_py)
+    }
+
+    pub fn greedy_action(&self, state: usize) -> PyResult<usize> {
+        self.dqn.greedy_action(state).map_err(rl_err_to_py)
+    }
+
+    pub fn policy_report(&self, py: Python<'_>, state: usize) -> PyResult<PyObject> {
+        dqn_policy_report_dict(py, &self.dqn, state)
+    }
+
+    pub fn select_action_trace(&mut self, py: Python<'_>, state: usize) -> PyResult<PyObject> {
+        let trace = self.dqn.select_action_trace(state).map_err(rl_err_to_py)?;
+        dqn_action_trace_dict(py, trace)
     }
 
     pub fn update(&mut self, state: usize, action: usize, reward: f32, next_state: usize) {

@@ -39,6 +39,14 @@ def test_st_agent_stub_signals_missing_extension(spiraltorch_stub):
     with pytest.raises(RuntimeError):
         agent.select_actions([0])
     with pytest.raises(RuntimeError):
+        agent.q_values(0)
+    with pytest.raises(RuntimeError):
+        agent.greedy_action(0)
+    with pytest.raises(RuntimeError):
+        agent.policy_report(0)
+    with pytest.raises(RuntimeError):
+        agent.select_action_trace(0)
+    with pytest.raises(RuntimeError):
         agent.update(0, 0, 0.0, 0)
     with pytest.raises(RuntimeError):
         agent.update_batch([0], [0], [0.0], [0])

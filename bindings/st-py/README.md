@@ -704,10 +704,13 @@ agent = stAgent(state_dim=4, action_dim=2, discount=0.97, learning_rate=0.02)
 
 state = 0
 next_state = 1
-action = agent.select_action(state)
+trace = agent.select_action_trace(state)
+action = int(trace["action"])
 agent.update(state, int(action), reward=1.0, next_state=next_state)
 
 print("action:", action)
+print("policy:", agent.policy_report(state))
+print("trace:", trace)
 print("epsilon:", agent.state_dict()["epsilon"])
 ```
 
@@ -727,15 +730,16 @@ config = AgentConfig(
     seed=7,
 )
 agent = Agent(config)
-action = agent.select_action(0)
+trace = agent.select_action_trace(0)
+action = int(trace["action"])
 agent.update(0, int(action), 1.0, 1)
-print(agent.algo, agent.state_dict()["epsilon"])
+print(agent.algo, agent.policy_report(0), agent.state_dict()["epsilon"])
 ```
 
 The RL surface is intentionally compact today: keep state/action loops native,
-then export `state_dict()` for audit or handoff. Geometry-aware policy traces
-remain Rust-first until their Python facade is stable enough to document as a
-copy-paste path.
+use `policy_report(state)` or `select_action_trace(state)` to audit Q-values,
+epsilon, and greedy-vs-exploratory choices, then export `state_dict()` for
+handoff.
 
 ## Open-topos learning and inference hints
 
