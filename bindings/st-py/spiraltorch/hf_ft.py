@@ -1224,6 +1224,7 @@ def summarize_hf_gpt2_finetune_sweep_report(
         "attempted_run_count": _safe_number(report.get("attempted_run_count")),
         "completed_run_count": completed,
         "failed_run_count": failed,
+        "reused_run_count": _safe_number(report.get("reused_run_count")),
         "skipped_run_count": _safe_number(report.get("skipped_run_count")),
         "comparison_run_count": _safe_number(comparison.get("run_count")),
         "successful_run_count": _safe_number(comparison.get("successful_run_count")),
@@ -1272,6 +1273,7 @@ def summarize_hf_gpt2_finetune_sweep_report_lines(
             f"status={summary.get('status')} "
             f"runs={summary.get('completed_run_count')}/{summary.get('run_count')} "
             f"failed={summary.get('failed_run_count')} "
+            f"reused={summary.get('reused_run_count')} "
             f"skipped={summary.get('skipped_run_count')}"
         ),
         (

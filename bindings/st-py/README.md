@@ -458,7 +458,10 @@ The report also embeds a compact `summary`; from notebooks or CI, call
 `st.summarize_hf_gpt2_finetune_sweep_report(...)`, or
 `st.summarize_hf_gpt2_finetune_sweep_report_lines(...)` to recover the
 selected scale-up candidate, top eval-loss rows, failed runs, and
-dry-run/partial/complete status without hand-reading the full artifact.
+dry-run/partial/complete status without hand-reading the full artifact. For
+longer local runs, add `--resume-existing` to reuse successful per-run cards and
+continue only missing or failed rows after an interruption; add `--force` with
+that same command when you intentionally want to rerun every row.
 
 ## Minimal usage
 

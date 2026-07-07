@@ -486,6 +486,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(report["run_count"], 8)
         self.assertTrue(report["dry_run"])
         self.assertEqual(report["skipped_run_count"], 8)
+        self.assertEqual(report["reused_run_count"], 0)
         self.assertEqual(report["summary"]["status"], "planned")
         self.assertEqual(stored_report["row_type"], "hf_gpt2_finetune_sweep_report")
         self.assertEqual(stored_report["summary"]["run_count"], 8)
@@ -556,9 +557,95 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(report["attempted_run_count"], 2)
         self.assertEqual(report["completed_run_count"], 2)
         self.assertEqual(report["failed_run_count"], 0)
+        self.assertEqual(report["reused_run_count"], 0)
         self.assertEqual(report["comparison"]["run_count"], 2)
         self.assertIn("seed13", report["comparison"]["best_eval_after_run_label"])
         self.assertIn("seed13", report["summary"]["selected_run_label"])
+
+    def test_sweep_example_resume_existing_reuses_successful_run_cards(self) -> None:
+        module = load_sweep_example()
+        with tempfile.TemporaryDirectory() as tmp:
+            train_path = Path(tmp) / "train.txt"
+            train_path.write_text("alpha spiral\nbeta zspace\n", encoding="utf-8")
+            out_dir = Path(tmp) / "sweep"
+            args = module.parse_args(
+                [
+                    "--resume-existing",
+                    "--out-dir",
+                    str(out_dir),
+                    "--train-file",
+                    str(train_path),
+                    "--validation-fraction",
+                    "0.5",
+                    "--block-size-values",
+                    "8",
+                    "--learning-rate-values",
+                    "0.001",
+                    "--max-step-values",
+                    "1",
+                    "--seed-values",
+                    "7,13",
+                ]
+            )
+            runs = module.build_sweep_runs(args)
+            reusable_card = Path(runs[0]["run_card"])
+            hf_ft.write_hf_gpt2_finetune_run_card(
+                {
+                    "row_type": "hf_gpt2_finetune_run_card",
+                    "model_name": "gpt2",
+                    "dataset_name": "local-files",
+                    "dataset_source": "local_files",
+                    "load_status": "ok",
+                    "dataset_fit_report": {
+                        "verdict": "train_eval_ready",
+                        "train_ready": True,
+                        "eval_ready": True,
+                    },
+                    "eval_after_train": hf_ft.hf_gpt2_finetune_eval_report(
+                        stage="after_train",
+                        metrics={"eval_loss": 1.7},
+                    ),
+                },
+                reusable_card,
+            )
+
+            def fake_run(command, *, check=False):
+                del check
+                seed = int(command[command.index("--seed") + 1])
+                self.assertEqual(seed, 13)
+                run_card_path = Path(command[command.index("--run-card") + 1])
+                hf_ft.write_hf_gpt2_finetune_run_card(
+                    {
+                        "row_type": "hf_gpt2_finetune_run_card",
+                        "model_name": "gpt2",
+                        "dataset_name": "local-files",
+                        "dataset_source": "local_files",
+                        "load_status": "ok",
+                        "dataset_fit_report": {
+                            "verdict": "train_eval_ready",
+                            "train_ready": True,
+                            "eval_ready": True,
+                        },
+                        "eval_after_train": hf_ft.hf_gpt2_finetune_eval_report(
+                            stage="after_train",
+                            metrics={"eval_loss": 1.2},
+                        ),
+                    },
+                    run_card_path,
+                )
+                return types.SimpleNamespace(returncode=0)
+
+            with mock.patch.object(module.subprocess, "run", side_effect=fake_run):
+                report = module.run_sweep(args)
+
+        self.assertEqual(report["attempted_run_count"], 1)
+        self.assertEqual(report["reused_run_count"], 1)
+        self.assertEqual(report["completed_run_count"], 2)
+        self.assertEqual(report["runs"][0]["status"], "reused")
+        self.assertEqual(report["runs"][1]["status"], "completed")
+        self.assertEqual(report["comparison"]["run_count"], 2)
+        self.assertIn("seed13", report["summary"]["selected_run_label"])
+        self.assertEqual(report["summary"]["reused_run_count"], 1)
 
     def test_example_local_corpus_reports_attach_scan_to_cards(self) -> None:
         module = load_bridge_example()

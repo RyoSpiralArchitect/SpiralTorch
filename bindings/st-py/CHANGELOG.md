@@ -49,6 +49,10 @@
   `summarize_hf_gpt2_finetune_sweep_report(...)`, and
   `summarize_hf_gpt2_finetune_sweep_report_lines(...)`; sweep reports now
   embed a compact status/top-run/scale-up-candidate summary.
+- Sweep resume: add `--resume-existing` / `--force` to
+  `examples/hf_gpt2_finetune_sweep.py` so interrupted local GPT-2 FT sweeps can
+  reuse successful run cards, run only missing/failed rows, and still compare
+  reused plus newly completed runs in one report.
 - Documentation: clarify the hard dependency boundary for larger local GPT-2
   FT runs: Rust keeps tensor/nn/text/logic/frac/rl/WGPU surfaces in the wheel,
   while Python explicitly brings Transformers, Torch, datasets, pyarrow,

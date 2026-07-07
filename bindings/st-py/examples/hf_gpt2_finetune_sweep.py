@@ -58,6 +58,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--run-prefix", default="gpt2-ft")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--fail-fast", action="store_true")
+    parser.add_argument(
+        "--resume-existing",
+        action="store_true",
+        help="Reuse existing successful per-run run cards and run only missing/failed rows.",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Rerun all rows even when --resume-existing would find a reusable card.",
+    )
     parser.add_argument("--model-name", default="gpt2")
     parser.add_argument("--dataset-name", default="wikitext")
     parser.add_argument("--dataset-config", default="wikitext-2-raw-v1")
@@ -327,6 +337,8 @@ def build_sweep_runs(args: argparse.Namespace) -> list[dict[str, Any]]:
                 "command": command,
                 "command_display": shlex.join(command),
                 "returncode": None,
+                "status": "planned",
+                "reused": False,
             }
         )
     return runs
@@ -338,6 +350,25 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
         json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+
+
+def _is_reusable_run_card(path: Path) -> bool:
+    if not path.is_file():
+        return False
+    try:
+        card = st.load_hf_gpt2_finetune_run_card(path)
+    except (OSError, ValueError):
+        return False
+    if card.get("row_type") != "hf_gpt2_finetune_run_card":
+        return False
+    if card.get("failure_stage") or card.get("failure_error"):
+        return False
+    if card.get("load_status") == "error":
+        return False
+    dataset_fit = card.get("dataset_fit_report")
+    if isinstance(dataset_fit, dict) and dataset_fit.get("train_ready") is False:
+        return False
+    return True
 
 
 def run_sweep(args: argparse.Namespace) -> dict[str, Any]:
@@ -358,6 +389,7 @@ def run_sweep(args: argparse.Namespace) -> dict[str, Any]:
             "attempted_run_count": 0,
             "completed_run_count": 0,
             "failed_run_count": 0,
+            "reused_run_count": 0,
             "skipped_run_count": len(runs),
             "plan_path": str(args.out_dir / "sweep-plan.json"),
             "report_path": str(args.out_dir / "sweep-report.json"),
@@ -369,35 +401,51 @@ def run_sweep(args: argparse.Namespace) -> dict[str, Any]:
         return report
 
     completed_cards = []
+    completed_labels = []
     for run in runs:
+        run_card = Path(str(run["run_card"]))
+        if args.resume_existing and not args.force and _is_reusable_run_card(run_card):
+            print(f"sweep_reuse {run['name']}")
+            run["returncode"] = 0
+            run["status"] = "reused"
+            run["reused"] = True
+            completed_cards.append(str(run_card))
+            completed_labels.append(str(run["name"]))
+            continue
         Path(str(run["run_dir"])).mkdir(parents=True, exist_ok=True)
         print(f"sweep_run {run['name']}")
         result = subprocess.run(run["command"], check=False)
         run["returncode"] = int(result.returncode)
-        if result.returncode == 0 and Path(str(run["run_card"])).is_file():
-            completed_cards.append(str(run["run_card"]))
-        elif args.fail_fast:
-            break
+        if result.returncode == 0 and run_card.is_file():
+            run["status"] = "completed"
+            completed_cards.append(str(run_card))
+            completed_labels.append(str(run["name"]))
+        else:
+            run["status"] = "failed"
+            run["reused"] = False
+            if args.fail_fast:
+                break
 
     comparison = (
         st.compare_hf_gpt2_finetune_run_cards(
             completed_cards,
-            run_labels=[
-                str(run["name"])
-                for run in runs
-                if run.get("returncode") is not None
-                and int(run["returncode"]) == 0
-                and Path(str(run["run_card"])).is_file()
-            ],
+            run_labels=completed_labels,
         )
         if completed_cards
         else None
     )
-    attempted_run_count = sum(1 for run in runs if run.get("returncode") is not None)
+    attempted_run_count = sum(
+        1
+        for run in runs
+        if run.get("returncode") is not None and run.get("status") != "reused"
+    )
+    reused_run_count = sum(1 for run in runs if run.get("status") == "reused")
     failed_run_count = sum(
         1
         for run in runs
-        if run.get("returncode") is not None and int(run["returncode"]) != 0
+        if run.get("returncode") is not None
+        and run.get("status") != "reused"
+        and int(run["returncode"]) != 0
     )
     report = {
         "row_type": "hf_gpt2_finetune_sweep_report",
@@ -406,7 +454,8 @@ def run_sweep(args: argparse.Namespace) -> dict[str, Any]:
         "attempted_run_count": attempted_run_count,
         "completed_run_count": len(completed_cards),
         "failed_run_count": failed_run_count,
-        "skipped_run_count": len(runs) - attempted_run_count,
+        "reused_run_count": reused_run_count,
+        "skipped_run_count": sum(1 for run in runs if run.get("status") == "planned"),
         "plan_path": str(args.out_dir / "sweep-plan.json"),
         "report_path": str(args.out_dir / "sweep-report.json"),
         "comparison": comparison,
