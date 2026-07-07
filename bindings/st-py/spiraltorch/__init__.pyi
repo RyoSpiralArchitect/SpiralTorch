@@ -2512,6 +2512,18 @@ def compare_api_llm_matrix_reports(
 ) -> Dict[str, Any]: ...
 
 
+def compare_api_llm_topos_sweep_reports(
+    reports: (
+        Mapping[str, str | PathLike[str]]
+        | Sequence[str | PathLike[str]]
+        | str
+        | PathLike[str]
+    ),
+    *,
+    labels: Sequence[str] | None = ...,
+) -> Dict[str, Any]: ...
+
+
 def format_api_llm_context_prompt(
     prompt: str,
     context_partials: Any,
@@ -2641,8 +2653,16 @@ def run_api_llm_topos_sweep(
     request_kwargs: Mapping[str, Mapping[str, Any]] | None = ...,
     labels: Sequence[str] | None = ...,
     near_best_tolerance: float = ...,
+    report_out: str | PathLike[str] | None = ...,
     clear: bool = ...,
     **kwargs: Any,
+) -> Dict[str, Any]: ...
+
+
+def api_llm_topos_sweep_report(
+    sweep: Mapping[str, Any],
+    *,
+    created_at: str | None = ...,
 ) -> Dict[str, Any]: ...
 
 
@@ -7975,6 +7995,7 @@ __all__ = [
     "api_llm_wasm_context_partials",
     "compare_api_llm_matrix_reports",
     "compare_api_llm_trace_runs",
+    "compare_api_llm_topos_sweep_reports",
     "format_api_llm_context_prompt",
     "load_api_llm_trace_events",
     "make_anthropic_messages_invoke",
@@ -7984,6 +8005,7 @@ __all__ = [
     "run_api_llm_prompt_suite_matrix",
     "run_api_llm_topos_sweep",
     "summarize_api_llm_trace_events",
+    "api_llm_topos_sweep_report",
     "topos_runtime_adapter",
     "topos_runtime_request",
     "write_api_llm_trace_jsonl",
