@@ -590,7 +590,9 @@ probe or sweep recommendation before launching the FT bridge; the handoff and
 run-card/sweep summaries include ready-to-replay generation bridge CLI args when
 the recommendation carries logits-processor kwargs. Use
 `st.hf_gpt2_finetune_inference_distortion_handoff_lines(...)` when you want a
-compact, copy-friendly status/replay readout in notebooks or CI logs.
+compact, copy-friendly status/replay readout in notebooks or CI logs; bridge
+preflight/run-card artifacts and sweep `sweep-plan.json` / `sweep-report.json`
+preserve those same lines beside the structured handoff payload.
 
 ## Minimal usage
 

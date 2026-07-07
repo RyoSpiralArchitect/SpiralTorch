@@ -701,6 +701,16 @@ def _inference_distortion_handoff(args: argparse.Namespace) -> dict[str, Any] | 
     )
 
 
+def _inference_distortion_handoff_lines(
+    inference_handoff: dict[str, Any] | None,
+) -> list[str]:
+    if not isinstance(inference_handoff, dict):
+        return []
+    return st.hf_gpt2_finetune_inference_distortion_handoff_lines(
+        inference_handoff,
+    )
+
+
 def _generation_from_inference_distortion_plan(
     args: argparse.Namespace,
     inference_handoff: dict[str, Any] | None,
@@ -734,6 +744,7 @@ def run_sweep(args: argparse.Namespace) -> dict[str, Any]:
     runs = build_sweep_runs(args)
     args.out_dir.mkdir(parents=True, exist_ok=True)
     inference_handoff = _inference_distortion_handoff(args)
+    inference_handoff_lines = _inference_distortion_handoff_lines(inference_handoff)
     generation_inference_plan = _generation_from_inference_distortion_plan(
         args,
         inference_handoff,
@@ -744,6 +755,7 @@ def run_sweep(args: argparse.Namespace) -> dict[str, Any]:
         "inference_distortion_sweep_report": _inference_distortion_report_path(args),
         "inference_distortion_probe": _inference_distortion_probe_path(args),
         "inference_distortion_handoff": inference_handoff,
+        "inference_distortion_handoff_lines": inference_handoff_lines,
         "generation_from_inference_distortion": bool(
             args.generation_from_inference_distortion
         ),
@@ -767,6 +779,7 @@ def run_sweep(args: argparse.Namespace) -> dict[str, Any]:
             "inference_distortion_sweep_report": _inference_distortion_report_path(args),
             "inference_distortion_probe": _inference_distortion_probe_path(args),
             "inference_distortion_handoff": inference_handoff,
+            "inference_distortion_handoff_lines": inference_handoff_lines,
             "generation_from_inference_distortion": bool(
                 args.generation_from_inference_distortion
             ),
@@ -839,6 +852,7 @@ def run_sweep(args: argparse.Namespace) -> dict[str, Any]:
         "inference_distortion_sweep_report": _inference_distortion_report_path(args),
         "inference_distortion_probe": _inference_distortion_probe_path(args),
         "inference_distortion_handoff": inference_handoff,
+        "inference_distortion_handoff_lines": inference_handoff_lines,
         "generation_from_inference_distortion": bool(
             args.generation_from_inference_distortion
         ),

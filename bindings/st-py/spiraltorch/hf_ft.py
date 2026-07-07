@@ -775,6 +775,16 @@ def hf_gpt2_finetune_summary_lines(report: Mapping[str, object]) -> list[str]:
             f"truncated={scan.get('scan_truncated_files', 'none')} "
             f"errors={scan.get('scan_error_files', 'none')}"
         )
+    handoff_lines = report.get("inference_distortion_handoff_lines")
+    if isinstance(handoff_lines, Sequence) and not isinstance(
+        handoff_lines,
+        (str, bytes),
+    ):
+        lines.extend(str(line) for line in handoff_lines)
+    else:
+        handoff = report.get("inference_distortion_handoff")
+        if isinstance(handoff, Mapping):
+            lines.extend(hf_gpt2_finetune_inference_distortion_handoff_lines(handoff))
     lines.extend(runtime_import_preflight_summary_lines(report))
     return lines
 
@@ -2565,6 +2575,13 @@ def summarize_hf_gpt2_finetune_sweep_report_lines(
             "api_dropped="
             f"{summary.get('inference_distortion_api_request_dropped_key_count')}"
         )
+        bridge_args = list(summary.get("inference_distortion_bridge_cli_args") or [])
+        if bridge_args:
+            lines.append(
+                "hf_gpt2_ft_sweep_inference_handoff_replay "
+                f"arg_count={len(bridge_args)} "
+                f"args={csv_label(str(item) for item in bridge_args[:24])}"
+            )
     if summary.get("selected_run_card") or summary.get("selected_trainer_trace_jsonl"):
         lines.append(
             "hf_gpt2_ft_sweep_selected "

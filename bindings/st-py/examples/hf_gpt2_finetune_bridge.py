@@ -24,6 +24,7 @@ from spiraltorch.hf_ft import (
     hf_gpt2_finetune_eval_report,
     hf_gpt2_finetune_generation_report,
     hf_gpt2_finetune_inference_distortion_handoff_report,
+    hf_gpt2_finetune_inference_distortion_handoff_lines,
     hf_gpt2_finetune_preflight_report,
     hf_gpt2_finetune_summary_lines,
     hf_gpt2_finetune_trainer_trace_callback,
@@ -1387,6 +1388,9 @@ def _base_run_card(
             if isinstance(inference_distortion_handoff, Mapping)
             else None
         ),
+        "inference_distortion_handoff_lines": list(
+            preflight.get("inference_distortion_handoff_lines") or []
+        ),
         "load_status": "pending",
         "failure_stage": None,
         "failure_error": None,
@@ -1461,6 +1465,13 @@ def _main_with_runtime_access(
         None
         if inference_distortion_handoff is None
         else dict(inference_distortion_handoff)
+    )
+    preflight["inference_distortion_handoff_lines"] = (
+        []
+        if inference_distortion_handoff is None
+        else hf_gpt2_finetune_inference_distortion_handoff_lines(
+            inference_distortion_handoff
+        )
     )
     preflight["generation_from_inference_distortion_applied"] = (
         None

@@ -509,6 +509,18 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                     replay_arg_limit=24,
                 )
             )
+            preflight_lines = hf_ft.hf_gpt2_finetune_summary_lines(
+                {
+                    "hf_model_name": "gpt2",
+                    "hf_dataset_name": "local-files",
+                    "hf_dataset_config": "text",
+                    "hf_train_split": "train",
+                    "hf_text_column": "text",
+                    "hf_gpt2_ft_rust_surfaces": "st-tensor,st-nn",
+                    "hf_gpt2_ft_python_packages": "transformers,torch",
+                    "inference_distortion_handoff": handoff,
+                }
+            )
 
         self.assertEqual(handoff["status"], "ok")
         self.assertEqual(handoff["source_kind"], "probe")
@@ -521,6 +533,9 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("probe=direct-probe", handoff_lines[0])
         self.assertIn("hf_gpt2_ft_inference_handoff_replay", handoff_lines[1])
         self.assertIn("--generation-repression-strength", handoff_lines[1])
+        self.assertTrue(
+            any("probe=direct-probe" in line for line in preflight_lines)
+        )
         self.assertEqual(handoff["prompt"], "SpiralTorch direct probe")
         self.assertEqual(handoff["desire_pressure"], 0.83)
         self.assertEqual(handoff["psi_total"], 0.73)
@@ -1117,9 +1132,21 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             stored_plan["inference_distortion_handoff"]["recommended_probe"],
             "strong",
         )
+        self.assertTrue(
+            any(
+                "probe=strong" in line
+                for line in stored_plan["inference_distortion_handoff_lines"]
+            )
+        )
         self.assertEqual(
             stored_report["inference_distortion_handoff"]["recommended_probe"],
             "strong",
+        )
+        self.assertTrue(
+            any(
+                "probe=strong" in line
+                for line in stored_report["inference_distortion_handoff_lines"]
+            )
         )
         self.assertEqual(
             stored_report["summary"]["inference_distortion_recommended_probe"],
@@ -1260,6 +1287,18 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(
             stored_report["inference_distortion_handoff"]["source_kind"],
             "probe",
+        )
+        self.assertTrue(
+            any(
+                "probe=direct-probe" in line
+                for line in stored_report["inference_distortion_handoff_lines"]
+            )
+        )
+        self.assertTrue(
+            any(
+                "hf_gpt2_ft_inference_handoff_replay" in line
+                for line in stored_report["inference_distortion_handoff_lines"]
+            )
         )
         self.assertEqual(
             stored_report["summary"]["inference_distortion_recommended_probe"],
