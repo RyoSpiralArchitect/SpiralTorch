@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
+import inspect
 import json
 import math
 import os
@@ -1150,6 +1151,45 @@ def _merge_request(
     return request
 
 
+def _filter_supported_request_kwargs(
+    create: Callable[..., Any],
+    request: Mapping[str, Any],
+) -> dict[str, Any]:
+    try:
+        signature = inspect.signature(create)
+    except (TypeError, ValueError):
+        return dict(request)
+    parameters = signature.parameters
+    if any(param.kind == inspect.Parameter.VAR_KEYWORD for param in parameters.values()):
+        return dict(request)
+    accepted = {
+        name
+        for name, param in parameters.items()
+        if param.kind
+        in {
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.KEYWORD_ONLY,
+        }
+    }
+    if not accepted:
+        return dict(request)
+    return {key: value for key, value in request.items() if key in accepted}
+
+
+def _request_filter_report(
+    original: Mapping[str, Any],
+    filtered: Mapping[str, Any],
+) -> dict[str, Any]:
+    dropped = sorted(str(key) for key in set(original) - set(filtered))
+    return {
+        "original_key_count": len(original),
+        "sent_key_count": len(filtered),
+        "sent_keys": sorted(str(key) for key in filtered),
+        "dropped_keys": dropped,
+        "dropped_key_count": len(dropped),
+    }
+
+
 def make_openai_responses_invoke(
     *,
     client: Any | None = None,
@@ -1179,7 +1219,9 @@ def make_openai_responses_invoke(
         request = _merge_request(request_defaults, request_overrides, model=model)
         request.setdefault(input_key, prompt)
         create = _resolve_create(cached_client, ("responses",))
-        return create(**request)
+        filtered = _filter_supported_request_kwargs(create, request)
+        _invoke.last_request_filter = _request_filter_report(request, filtered)  # type: ignore[attr-defined]
+        return create(**filtered)
 
     return _invoke
 
@@ -1227,7 +1269,9 @@ def make_anthropic_messages_invoke(
             messages=override_messages if override_messages is not None else messages,
         )
         create = _resolve_create(cached_client, ("messages",))
-        return create(**request)
+        filtered = _filter_supported_request_kwargs(create, request)
+        _invoke.last_request_filter = _request_filter_report(request, filtered)  # type: ignore[attr-defined]
+        return create(**filtered)
 
     return _invoke
 
@@ -1277,7 +1321,9 @@ def make_openai_chat_invoke(
             messages=override_messages if override_messages is not None else messages,
         )
         create = _resolve_create(cached_client, ("chat", "completions"))
-        return create(**request)
+        filtered = _filter_supported_request_kwargs(create, request)
+        _invoke.last_request_filter = _request_filter_report(request, filtered)  # type: ignore[attr-defined]
+        return create(**filtered)
 
     return _invoke
 

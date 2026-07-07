@@ -54,6 +54,11 @@ DISTORTION_SWEEP_EXAMPLE_PATH = (
     / "examples"
     / "zspace_inference_distortion_sweep.py"
 )
+DISTORTION_OPENAI_SAMPLE_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "examples"
+    / "zspace_inference_distortion_local_gpt2_openai_sample.json"
+)
 
 
 def load_generation_control_sweep_example():
@@ -296,6 +301,25 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
             summarize_zspace_generation_control_sweep,
         )
 
+    def test_local_gpt2_openai_distortion_sample_is_sanitized(self) -> None:
+        sample_text = DISTORTION_OPENAI_SAMPLE_PATH.read_text(encoding="utf-8")
+        sample = json.loads(sample_text)
+
+        self.assertEqual(
+            sample["row_type"],
+            "zspace_inference_distortion_local_hf_api_sample",
+        )
+        self.assertNotIn("OPENAI_API_KEY", sample_text)
+        self.assertNotIn("resp_", sample_text)
+        self.assertNotIn("/Users/", sample_text)
+        summary = sample["summary"]
+        self.assertTrue(summary["local_changed"])
+        self.assertEqual(summary["api_request_dropped_key_count"], 2)
+        self.assertEqual(
+            summary["api_request_dropped_keys"],
+            ["frequency_penalty", "presence_penalty"],
+        )
+
     def test_inference_distortion_probe_summary_flattens_local_and_api(self) -> None:
         report = {
             "row_type": "zspace_inference_distortion_probe",
@@ -343,6 +367,11 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
                 "provider": "fake",
                 "model": "fake-distorted-api",
                 "text": "Fake API distortion route.",
+                "request_filter": {
+                    "dropped_key_count": 2,
+                    "dropped_keys": ["frequency_penalty", "presence_penalty"],
+                    "sent_keys": ["input", "model", "temperature", "top_p"],
+                },
                 "telemetry": {
                     "api_llm.total_tokens": 56.0,
                     "api_llm.response_entropy_norm": 0.9,
@@ -367,10 +396,16 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         self.assertEqual(summary["activation_event_count"], 64)
         self.assertEqual(summary["api_provider"], "fake")
         self.assertEqual(summary["api_total_tokens"], 56.0)
+        self.assertEqual(summary["api_request_dropped_key_count"], 2)
+        self.assertEqual(
+            summary["api_request_dropped_keys"],
+            ["frequency_penalty", "presence_penalty"],
+        )
         self.assertEqual(summary["distortion_energy"], 0.62)
         self.assertTrue(str(summary["probe_path"]).endswith("probe.json"))
         self.assertIn("zspace_inference_distortion_probe", lines[0])
         self.assertIn("top_changes=5", lines[0])
+        self.assertIn("api_dropped=2", lines[0])
 
         report["probe_path"] = "memory-probe.json"
         memory_summary = summarize_zspace_inference_distortion_probe(report)

@@ -5,6 +5,7 @@ import contextlib
 import inspect
 import json
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -502,8 +503,9 @@ def _run_api(args: argparse.Namespace, adapter: dict[str, Any]) -> dict[str, Any
         model=args.api_model,
         create_session=False,
     )
+    invoke = _api_invoke(args)
     trace = runtime.call(
-        _api_invoke(args),
+        invoke,
         args.prompt,
         provider=args.api_provider,
         model=args.api_model,
@@ -511,7 +513,11 @@ def _run_api(args: argparse.Namespace, adapter: dict[str, Any]) -> dict[str, Any
         context_prompt=True,
         context_prompt_options={"max_telemetry": 32},
     )
-    return trace.as_dict()
+    payload = trace.as_dict()
+    request_filter = getattr(invoke, "last_request_filter", None)
+    if isinstance(request_filter, Mapping):
+        payload["request_filter"] = dict(request_filter)
+    return payload
 
 
 def _probe_config(args: argparse.Namespace) -> dict[str, Any]:
@@ -565,6 +571,8 @@ def main(argv: list[str] | None = None) -> int:
         "local_hf": _run_local_hf(args, adapter),
         "api": _run_api(args, adapter),
     }
+    if args.out is not None:
+        report["probe_path"] = str(args.out)
     report["summary"] = st.summarize_zspace_inference_distortion_probe(report)
     report["summary_lines"] = st.summarize_zspace_inference_distortion_probe_lines(
         report

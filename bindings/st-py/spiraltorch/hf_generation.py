@@ -949,6 +949,7 @@ def summarize_zspace_inference_distortion_probe(
     api = _nested_mapping(report, "api")
     control = _nested_mapping(local, "generation_control")
     activation = _nested_mapping(local, "activation_report")
+    request_filter = _nested_mapping(api, "request_filter")
     request = _nested_mapping(adapter, "request")
     logits_kwargs = _nested_mapping(adapter, "logits_processor_kwargs")
     adapter_context_telemetry = _nested_mapping(adapter, "context_partial", "telemetry")
@@ -1026,6 +1027,15 @@ def summarize_zspace_inference_distortion_probe(
         "api_provider": api.get("provider"),
         "api_model": api.get("model"),
         "api_finish_reason": api.get("finish_reason"),
+        "api_request_dropped_key_count": _safe_number(
+            request_filter.get("dropped_key_count")
+        ),
+        "api_request_dropped_keys": list(request_filter.get("dropped_keys", []))
+        if isinstance(request_filter.get("dropped_keys"), list)
+        else [],
+        "api_request_sent_keys": list(request_filter.get("sent_keys", []))
+        if isinstance(request_filter.get("sent_keys"), list)
+        else [],
         "api_text_preview": _preview_text(api.get("text"), limit=max(0, int(preview_chars))),
         "api_total_tokens": _telemetry_number(telemetry, "api_llm.total_tokens"),
         "api_response_entropy_norm": _telemetry_number(
@@ -1056,6 +1066,7 @@ def summarize_zspace_inference_distortion_probe_lines(
             f"top_changes={summary.get('generation_control_top_token_changed_count')} "
             f"activation_events={summary.get('activation_event_count')} "
             f"api={summary.get('api_provider')} "
+            f"api_dropped={summary.get('api_request_dropped_key_count')} "
             f"energy={summary.get('distortion_energy')} "
             f"temp={summary.get('request_temperature')} "
             f"top_p={summary.get('request_top_p')}"

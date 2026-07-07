@@ -459,8 +459,11 @@ kwargs, matching activation hooks record and can gently intervene in selected
 modules, and API-model-shaped calls receive request overrides plus bounded
 Z-space context telemetry. Omit `--local-model` for a keyless fake API smoke, or
 add `--api-provider openai-responses|openai-chat|anthropic --api-model <model>`
-to reuse the same distortion adapter with a live provider. Load the artifact
-with `st.load_zspace_inference_distortion_probe(...)`, flatten it with
+to reuse the same distortion adapter with a live provider. Provider adapters
+filter request overrides against each SDK method signature and record
+`api_request_dropped_keys`, so Responses/Chat/Messages surface differences stay
+auditable instead of silently changing the experiment. Load the artifact with
+`st.load_zspace_inference_distortion_probe(...)`, flatten it with
 `st.summarize_zspace_inference_distortion_probe(...)`, or print compact status
 lines with `st.summarize_zspace_inference_distortion_probe_lines(...)`. When
 several pressure/coherence settings have been tried, call
@@ -468,6 +471,9 @@ several pressure/coherence settings have been tried, call
 `st.summarize_zspace_inference_distortion_probe_comparison_lines(...)` to rank
 the artifacts by local text changes, top-token changes, activation evidence,
 API non-empty response, and distortion energy.
+See `examples/zspace_inference_distortion_local_gpt2_openai_sample.json` for a
+sanitized local-GPT-2 plus OpenAI Responses run that keeps the local hook/logits
+evidence while omitting API keys, response ids, and absolute local paths.
 After a sweep, replay its recommended setting directly with
 `--from-sweep-report runs/zspace-inference-distortion-sweep/sweep-report.json`;
 the probe imports the saved prompt/runtime plus recommended distortion config,

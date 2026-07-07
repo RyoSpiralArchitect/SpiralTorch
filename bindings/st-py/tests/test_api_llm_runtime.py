@@ -985,6 +985,69 @@ def test_make_openai_responses_invoke_uses_client_factory_lazily() -> None:
             "input": "trace this response",
         }
     ]
+    assert getattr(invoke, "last_request_filter")["dropped_key_count"] == 0
+
+
+def test_make_openai_responses_invoke_drops_unsupported_strict_kwargs() -> None:
+    class StrictResponses:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        def create(
+            self,
+            *,
+            model: str,
+            input: str,
+            max_output_tokens: int,
+            temperature: float,
+            top_p: float,
+        ) -> dict[str, object]:
+            request = {
+                "model": model,
+                "input": input,
+                "max_output_tokens": max_output_tokens,
+                "temperature": temperature,
+                "top_p": top_p,
+            }
+            self.calls.append(request)
+            return {
+                "model": model,
+                "output_text": "Strict response entered Z-space.",
+                "usage": {"input_tokens": 4, "output_tokens": 4, "total_tokens": 8},
+            }
+
+    class StrictClient:
+        def __init__(self) -> None:
+            self.responses = StrictResponses()
+
+    client = StrictClient()
+    invoke = st.make_openai_responses_invoke(
+        client=client,
+        model="strict-response-model",
+        max_output_tokens=12,
+    )
+    response = invoke(
+        "distort this response",
+        temperature=0.7,
+        top_p=0.9,
+        frequency_penalty=0.4,
+        presence_penalty=0.2,
+    )
+
+    assert st.api_llm_text_from_response(response) == "Strict response entered Z-space."
+    assert client.responses.calls == [
+        {
+            "model": "strict-response-model",
+            "input": "distort this response",
+            "max_output_tokens": 12,
+            "temperature": 0.7,
+            "top_p": 0.9,
+        }
+    ]
+    assert getattr(invoke, "last_request_filter")["dropped_keys"] == [
+        "frequency_penalty",
+        "presence_penalty",
+    ]
 
 
 def test_runtime_call_openai_responses_records_trace() -> None:
