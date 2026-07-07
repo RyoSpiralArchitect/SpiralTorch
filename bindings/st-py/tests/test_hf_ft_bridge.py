@@ -2574,6 +2574,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             gradient_accumulation_steps=1,
             logging_steps=1,
             save_steps=5,
+            save_total_limit=2,
             seed=13,
             max_steps=1,
             eval_steps=1,
@@ -2619,6 +2620,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             gradient_accumulation_steps=1,
             logging_steps=1,
             save_steps=5,
+            save_total_limit=2,
             seed=13,
             max_steps=10,
             eval_steps=5,
@@ -2639,6 +2641,41 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertFalse(filtered["dataloader_pin_memory"])
         self.assertEqual(filtered["dataloader_num_workers"], 2)
         self.assertEqual(filtered["eval_accumulation_steps"], 4)
+
+    def test_example_training_arguments_include_save_total_limit(self) -> None:
+        module = load_bridge_example()
+
+        class SaveLimitTrainingArguments:
+            def __init__(self, output_dir=None, save_total_limit=None):
+                pass
+
+        args = types.SimpleNamespace(
+            output_dir="runs/gpt2",
+            train=True,
+            num_train_epochs=1.0,
+            learning_rate=5e-5,
+            per_device_train_batch_size=2,
+            per_device_eval_batch_size=2,
+            gradient_accumulation_steps=1,
+            logging_steps=1,
+            save_steps=5,
+            save_total_limit=1,
+            seed=13,
+            max_steps=10,
+            eval_steps=5,
+        )
+        raw = module._raw_training_arguments_kwargs(
+            args,
+            has_eval=False,
+            cls=SaveLimitTrainingArguments,
+        )
+        filtered = module._filter_training_arguments_kwargs(
+            SaveLimitTrainingArguments,
+            raw,
+        )
+
+        self.assertEqual(raw["save_total_limit"], 1)
+        self.assertEqual(filtered["save_total_limit"], 1)
 
     def test_example_dataloader_pin_memory_auto_prefers_cuda_only(self) -> None:
         module = load_bridge_example()

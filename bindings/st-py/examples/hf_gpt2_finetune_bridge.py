@@ -304,6 +304,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--gradient-accumulation-steps", type=int, default=8)
     parser.add_argument("--logging-steps", type=int, default=25)
     parser.add_argument("--save-steps", type=int, default=250)
+    parser.add_argument(
+        "--save-total-limit",
+        type=int,
+        default=2,
+        help=(
+            "Maximum number of Trainer checkpoints to keep. Lower this for "
+            "long local FT runs on disk-constrained machines."
+        ),
+    )
     parser.add_argument("--eval-steps", type=int, default=250)
     parser.add_argument("--eval-accumulation-steps", type=int, default=0)
     parser.add_argument("--dataloader-num-workers", type=int, default=0)
@@ -359,6 +368,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         parser.error("--block-size must be positive")
     if args.generation_max_new_tokens <= 0:
         parser.error("--generation-max-new-tokens must be positive")
+    if args.save_total_limit <= 0:
+        parser.error("--save-total-limit must be positive")
     if args.generation_temperature <= 0.0:
         parser.error("--generation-temperature must be positive")
     if args.generation_top_k < 0:
@@ -838,7 +849,7 @@ def _raw_training_arguments_kwargs(
         "gradient_accumulation_steps": int(args.gradient_accumulation_steps),
         "logging_steps": int(args.logging_steps),
         "save_steps": int(args.save_steps),
-        "save_total_limit": 2,
+        "save_total_limit": int(args.save_total_limit),
         "report_to": ["none"],
         "seed": int(args.seed),
         "save_strategy": "steps" if args.train else "no",
