@@ -25,12 +25,28 @@ SWEEP_PATH = (
 SCALE_UP_PATH = (
     Path(__file__).resolve().parents[1] / "examples" / "hf_gpt2_finetune_scale_up.py"
 )
+TRACE_SUMMARY_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "examples"
+    / "hf_gpt2_finetune_trace_summary.py"
+)
 
 
 def load_bridge_example():
     spec = importlib.util.spec_from_file_location(
         "hf_gpt2_finetune_bridge_test",
         EXAMPLE_PATH,
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_trace_summary_example():
+    spec = importlib.util.spec_from_file_location(
+        "hf_gpt2_finetune_trace_summary_test",
+        TRACE_SUMMARY_PATH,
     )
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -3271,6 +3287,65 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 },
             ],
         )
+
+    def test_trace_summary_example_renders_live_status_lines(self) -> None:
+        module = load_trace_summary_example()
+        rows = [
+            {
+                "event": "log",
+                "global_step": 10,
+                "time_unix_s": 100.0,
+                "metrics": {"loss": 2.0, "learning_rate": 5e-5},
+            },
+            {
+                "event": "evaluate",
+                "global_step": 10,
+                "time_unix_s": 110.0,
+                "metrics": {"eval_loss": 1.8, "eval_runtime": 4.0},
+            },
+            {
+                "event": "log",
+                "global_step": 20,
+                "time_unix_s": 130.0,
+                "metrics": {"loss": 1.7, "learning_rate": 4e-5},
+                "training_loss_guard": {"status": "ok"},
+            },
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            trace_path = Path(tmp) / "trace.jsonl"
+            out_path = Path(tmp) / "summary.json"
+            lines_path = Path(tmp) / "summary.txt"
+            for row in rows:
+                hf_ft.write_hf_gpt2_finetune_trainer_trace_event(row, trace_path)
+            argv = [
+                str(trace_path),
+                "--label",
+                "demo",
+                "--max-steps",
+                "40",
+                "--tail-evals",
+                "1",
+                "--out",
+                str(out_path),
+                "--lines-out",
+                str(lines_path),
+            ]
+            args = module.parse_args(argv)
+            summary = module.summarize_trace(args)
+            lines = module.summary_lines(summary, tail_evals=1)
+            self.assertEqual(module.main(argv), 0)
+            written = json.loads(out_path.read_text(encoding="utf-8"))
+            written_lines = lines_path.read_text(encoding="utf-8").splitlines()
+
+        self.assertEqual(summary["trace_max_global_step"], 20)
+        self.assertEqual(summary["training_loss_guard_count"], 1)
+        self.assertEqual(summary["progress"], 0.5)
+        self.assertEqual(written["training_loss_guard_count"], 1)
+        self.assertIn("label=demo", lines[0])
+        self.assertIn("latest_step=20", lines[0])
+        self.assertIn("guard_count=1", lines[0])
+        self.assertIn("step=10 eval_loss=1.8", lines[1])
+        self.assertEqual(written_lines, lines)
 
     def test_run_card_summary_supplements_trace_telemetry_from_jsonl(self) -> None:
         card = {
