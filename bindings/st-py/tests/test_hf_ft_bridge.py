@@ -3395,6 +3395,11 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 json.dumps({"status": "running"}),
                 encoding="utf-8",
             )
+            (run_dir / "ft.log").write_text(
+                " 50%|#####     | 20/40 [00:20<00:20,  1.00s/it]\n"
+                " 60%|######    | 24/40 [00:24<00:16,  1.00s/it]\n",
+                encoding="utf-8",
+            )
             pid_file = run_dir / "ft.pid"
             pid_file.write_text(f"{os.getpid()}\n", encoding="utf-8")
             checkpoint = run_dir / "checkpoint-20"
@@ -3441,11 +3446,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(status["process_status"], "alive")
         self.assertEqual(status["trace"]["trace_max_global_step"], 20)
         self.assertEqual(status["trace"]["progress"], 0.5)
+        self.assertEqual(status["log_progress"]["log_latest_step"], 24)
+        self.assertEqual(status["log_progress"]["log_progress"], 0.6)
         self.assertEqual(status["checkpoint_count"], 1)
         self.assertTrue(status["final_checkpoint_ready"])
         self.assertEqual(status["checkpoint_card_status"], "waiting_for_process")
         self.assertIn("process=alive", lines[0])
         self.assertIn("latest_step=20", lines[0])
+        self.assertIn("log_latest_step=24", lines[0])
         self.assertIn("checkpoint_card=waiting_for_process", lines[0])
         self.assertIn("final_ready=true", lines[0])
         self.assertIn("hf_gpt2_ft_run_wait status=waiting", lines[-1])

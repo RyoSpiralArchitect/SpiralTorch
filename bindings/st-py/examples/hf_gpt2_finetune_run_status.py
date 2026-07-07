@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -19,6 +20,8 @@ import spiraltorch as st
 
 DEFAULT_TRACE_NAME = "spiraltorch-hf-gpt2-ft-trainer-trace.jsonl"
 DEFAULT_RUN_CARD_NAME = "spiraltorch-hf-gpt2-ft-run-card.json"
+DEFAULT_LOG_NAME = "ft.log"
+PROGRESS_RE = re.compile(r"\b(?P<step>\d+)/(?:\s*)?(?P<max_steps>\d+)\s*\[")
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -27,6 +30,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--trace-jsonl", type=Path, default=None)
     parser.add_argument("--run-card", type=Path, default=None)
     parser.add_argument("--pid-file", type=Path, default=None)
+    parser.add_argument("--log-file", type=Path, default=None)
+    parser.add_argument("--log-tail-bytes", type=int, default=1_000_000)
     parser.add_argument("--checkpoint-card", type=Path, default=None)
     parser.add_argument("--max-steps", type=int, default=None)
     parser.add_argument("--final-checkpoint", default=None)
@@ -40,12 +45,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("--max-steps must be positive")
     if args.tail_evals < 0:
         parser.error("--tail-evals must be non-negative")
+    if args.log_tail_bytes <= 0:
+        parser.error("--log-tail-bytes must be positive")
     if args.trace_jsonl is None:
         args.trace_jsonl = args.run_dir / DEFAULT_TRACE_NAME
     if args.run_card is None:
         args.run_card = args.run_dir / DEFAULT_RUN_CARD_NAME
     if args.pid_file is None:
         args.pid_file = args.run_dir / "ft.pid"
+    if args.log_file is None:
+        args.log_file = args.run_dir / DEFAULT_LOG_NAME
     if args.final_checkpoint is None and args.max_steps is not None:
         args.final_checkpoint = f"checkpoint-{args.max_steps}"
     return args
@@ -90,6 +99,35 @@ def _process_status(pid: int | None) -> str:
     except PermissionError:
         return "alive"
     return "alive"
+
+
+def _read_tail(path: Path, max_bytes: int) -> str:
+    if not path.is_file():
+        return ""
+    with path.open("rb") as handle:
+        handle.seek(0, os.SEEK_END)
+        size = handle.tell()
+        handle.seek(max(0, size - max_bytes), os.SEEK_SET)
+        return handle.read().decode("utf-8", errors="ignore")
+
+
+def _log_progress(log_file: Path, max_bytes: int) -> dict[str, Any]:
+    text = _read_tail(log_file, max_bytes)
+    latest_step = None
+    latest_max_steps = None
+    for match in PROGRESS_RE.finditer(text):
+        latest_step = int(match.group("step"))
+        latest_max_steps = int(match.group("max_steps"))
+    progress = None
+    if latest_step is not None and latest_max_steps:
+        progress = min(max(float(latest_step) / float(latest_max_steps), 0.0), 1.0)
+    return {
+        "log_file": str(log_file),
+        "log_status": "ok" if log_file.is_file() else "missing",
+        "log_latest_step": latest_step,
+        "log_max_steps": latest_max_steps,
+        "log_progress": progress,
+    }
 
 
 def _trace_summary(trace_jsonl: Path, max_steps: int | None) -> dict[str, Any]:
@@ -146,6 +184,7 @@ def _checkpoint_rows(run_dir: Path) -> list[dict[str, Any]]:
 
 def summarize_run(args: argparse.Namespace) -> dict[str, Any]:
     trace = _trace_summary(args.trace_jsonl, args.max_steps)
+    log_progress = _log_progress(args.log_file, int(args.log_tail_bytes))
     run_card = _load_json(args.run_card)
     checkpoint_card = _load_json(args.checkpoint_card)
     pid = _read_pid(args.pid_file)
@@ -161,6 +200,7 @@ def summarize_run(args: argparse.Namespace) -> dict[str, Any]:
         "row_type": "hf_gpt2_finetune_run_status",
         "run_dir": str(args.run_dir),
         "trace": trace,
+        "log_progress": log_progress,
         "run_card_path": str(args.run_card),
         "run_card_status": (run_card or {}).get("status"),
         "pid_file": str(args.pid_file),
@@ -199,6 +239,8 @@ def status_lines(status: dict[str, Any], *, tail_evals: int) -> list[str]:
             f"latest_step={_number_text(trace.get('trace_max_global_step'))} "
             f"max_steps={_number_text(trace.get('max_steps'))} "
             f"progress={_number_text(trace.get('progress'))} "
+            f"log_latest_step={_number_text((status.get('log_progress') or {}).get('log_latest_step'))} "
+            f"log_progress={_number_text((status.get('log_progress') or {}).get('log_progress'))} "
             f"last_loss={_number_text(trace.get('trace_last_loss'))} "
             f"last_eval_loss={_number_text(trace.get('trace_last_eval_loss'))} "
             f"min_eval_loss={_number_text(trace.get('trace_min_eval_loss'))} "
