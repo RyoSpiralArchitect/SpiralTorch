@@ -55,6 +55,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--watch-count", type=int, default=None)
     parser.add_argument("--watch-stop-on-final", action="store_true")
     parser.add_argument("--watch-stop-on-process-exit", action="store_true")
+    parser.add_argument("--watch-stop-on-disk-low", action="store_true")
+    parser.add_argument("--watch-stop-on-training-guard", action="store_true")
     parser.add_argument("--watch-stop-on-eval-step", type=int, default=None)
     parser.add_argument("--watch-stop-on-checkpoint", default=None)
     args = parser.parse_args(argv)
@@ -443,7 +445,8 @@ def status_lines(status: dict[str, Any], *, tail_evals: int) -> list[str]:
             f"disk_free_gb={_number_text(status.get('disk_free_gb'))} "
             f"min_free_disk_gb={_number_text(status.get('min_free_disk_gb'))} "
             f"disk_margin_gb={_number_text(status.get('disk_margin_gb'))} "
-            f"disk_status={_number_text(status.get('disk_status'))}"
+            f"disk_status={_number_text(status.get('disk_status'))} "
+            f"watch_stop_reason={_number_text(status.get('watch_stop_reason'))}"
         )
     ]
     eval_points = trace.get("trace_eval_loss_points")
@@ -496,14 +499,25 @@ def _emit_status(args: argparse.Namespace, status: dict[str, Any]) -> None:
 
 
 def _should_stop_watch(args: argparse.Namespace, status: dict[str, Any]) -> bool:
+    return _watch_stop_reason(args, status) is not None
+
+
+def _watch_stop_reason(args: argparse.Namespace, status: dict[str, Any]) -> str | None:
     if args.watch_stop_on_final and status.get("final_checkpoint_ready") is True:
-        return True
+        return "final_checkpoint_ready"
     if args.watch_stop_on_checkpoint is not None and _checkpoint_target_ready(
         status, args.watch_stop_on_checkpoint
     ):
-        return True
+        return "checkpoint_ready"
     if args.watch_stop_on_process_exit and status.get("process_status") == "exited":
-        return True
+        return "process_exited"
+    if args.watch_stop_on_disk_low and status.get("disk_status") == "low":
+        return "disk_low"
+    if args.watch_stop_on_training_guard:
+        trace = status.get("trace") if isinstance(status.get("trace"), dict) else {}
+        guard_count = trace.get("training_loss_guard_count")
+        if isinstance(guard_count, int) and guard_count > 0:
+            return "training_loss_guard"
     if args.watch_stop_on_eval_step is not None:
         trace = status.get("trace") if isinstance(status.get("trace"), dict) else {}
         eval_points = trace.get("trace_eval_loss_points")
@@ -513,8 +527,8 @@ def _should_stop_watch(args: argparse.Namespace, status: dict[str, Any]) -> bool
                     continue
                 step = point.get("step")
                 if isinstance(step, int) and step >= args.watch_stop_on_eval_step:
-                    return True
-    return False
+                    return "eval_step_reached"
+    return None
 
 
 def _checkpoint_target_ready(status: dict[str, Any], target: str) -> bool:
@@ -546,9 +560,12 @@ def main(argv: list[str] | None = None) -> int:
         if count and not args.quiet:
             print()
         status = summarize_run(args)
+        stop_reason = _watch_stop_reason(args, status)
+        if stop_reason is not None:
+            status["watch_stop_reason"] = stop_reason
         _emit_status(args, status)
         count += 1
-        if _should_stop_watch(args, status):
+        if stop_reason is not None:
             break
         if args.watch_count is not None and count >= args.watch_count:
             break

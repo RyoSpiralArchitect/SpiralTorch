@@ -3969,6 +3969,54 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             watch_checkpoint_written = json.loads(
                 watch_checkpoint_path.read_text(encoding="utf-8")
             )
+            watch_disk_low_path = run_dir / "watch-disk-low-status.json"
+            watch_disk_low_argv = [
+                str(run_dir),
+                "--max-steps",
+                "40",
+                "--eval-steps",
+                "10",
+                "--save-steps",
+                "20",
+                "--min-free-disk-gb",
+                "1000000000",
+                "--watch-interval-seconds",
+                "0.01",
+                "--watch-count",
+                "2",
+                "--watch-stop-on-disk-low",
+                "--out",
+                str(watch_disk_low_path),
+            ]
+            watch_disk_low_args = module.parse_args(watch_disk_low_argv)
+            watch_disk_low_status = module.summarize_run(watch_disk_low_args)
+            self.assertEqual(
+                module._watch_stop_reason(
+                    watch_disk_low_args, watch_disk_low_status
+                ),
+                "disk_low",
+            )
+            self.assertEqual(module.main(watch_disk_low_argv), 0)
+            watch_disk_low_written = json.loads(
+                watch_disk_low_path.read_text(encoding="utf-8")
+            )
+            watch_guard_args = module.parse_args(
+                [
+                    str(run_dir),
+                    "--watch-interval-seconds",
+                    "0.01",
+                    "--watch-count",
+                    "1",
+                    "--watch-stop-on-training-guard",
+                ]
+            )
+            self.assertEqual(
+                module._watch_stop_reason(
+                    watch_guard_args,
+                    {"trace": {"training_loss_guard_count": 1}},
+                ),
+                "training_loss_guard",
+            )
 
         self.assertEqual(status["process_status"], "alive")
         self.assertIsInstance(status["time_unix_s"], float)
@@ -4035,6 +4083,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(
             watch_checkpoint_written["latest_checkpoint"]["name"], "checkpoint-20"
         )
+        self.assertEqual(watch_disk_low_written["watch_stop_reason"], "disk_low")
+        self.assertEqual(watch_disk_low_written["disk_status"], "low")
         self.assertEqual(written_lines, lines)
 
     def test_status_history_summary_example_summarizes_jsonl_progress(self) -> None:
