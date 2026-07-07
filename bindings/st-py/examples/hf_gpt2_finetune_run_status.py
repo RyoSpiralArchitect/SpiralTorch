@@ -21,7 +21,10 @@ import spiraltorch as st
 DEFAULT_TRACE_NAME = "spiraltorch-hf-gpt2-ft-trainer-trace.jsonl"
 DEFAULT_RUN_CARD_NAME = "spiraltorch-hf-gpt2-ft-run-card.json"
 DEFAULT_LOG_NAME = "ft.log"
-PROGRESS_RE = re.compile(r"\b(?P<step>\d+)/(?:\s*)?(?P<max_steps>\d+)\s*\[")
+PROGRESS_RE = re.compile(
+    r"\b(?P<step>\d+)/(?:\s*)?(?P<max_steps>\d+)\s*\["
+    r"(?P<elapsed>[^<,\]]+)(?:<(?P<remaining>[^,\]]+))?"
+)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -111,18 +114,41 @@ def _read_tail(path: Path, max_bytes: int) -> str:
         return handle.read().decode("utf-8", errors="ignore")
 
 
+def _parse_tqdm_duration_seconds(value: str | None) -> float | None:
+    if value is None:
+        return None
+    parts = value.strip().split(":")
+    if len(parts) not in (2, 3):
+        return None
+    try:
+        numbers = [float(part) for part in parts]
+    except ValueError:
+        return None
+    if len(numbers) == 2:
+        minutes, seconds = numbers
+        return minutes * 60.0 + seconds
+    hours, minutes, seconds = numbers
+    return hours * 3600.0 + minutes * 60.0 + seconds
+
+
 def _log_progress(
     log_file: Path, max_bytes: int, expected_max_steps: int | None = None
 ) -> dict[str, Any]:
     text = _read_tail(log_file, max_bytes)
     latest_step = None
     latest_max_steps = None
+    latest_elapsed_seconds = None
+    latest_remaining_seconds = None
     for match in PROGRESS_RE.finditer(text):
         max_steps = int(match.group("max_steps"))
         if expected_max_steps is not None and max_steps != expected_max_steps:
             continue
         latest_step = int(match.group("step"))
         latest_max_steps = max_steps
+        latest_elapsed_seconds = _parse_tqdm_duration_seconds(match.group("elapsed"))
+        latest_remaining_seconds = _parse_tqdm_duration_seconds(
+            match.group("remaining")
+        )
     progress = None
     if latest_step is not None and latest_max_steps:
         progress = min(max(float(latest_step) / float(latest_max_steps), 0.0), 1.0)
@@ -132,6 +158,8 @@ def _log_progress(
         "log_latest_step": latest_step,
         "log_max_steps": latest_max_steps,
         "log_progress": progress,
+        "log_elapsed_seconds": latest_elapsed_seconds,
+        "log_remaining_seconds": latest_remaining_seconds,
     }
 
 
@@ -250,6 +278,7 @@ def status_lines(status: dict[str, Any], *, tail_evals: int) -> list[str]:
             f"progress={_number_text(trace.get('progress'))} "
             f"log_latest_step={_number_text((status.get('log_progress') or {}).get('log_latest_step'))} "
             f"log_progress={_number_text((status.get('log_progress') or {}).get('log_progress'))} "
+            f"log_remaining_seconds={_number_text((status.get('log_progress') or {}).get('log_remaining_seconds'))} "
             f"last_loss={_number_text(trace.get('trace_last_loss'))} "
             f"last_eval_loss={_number_text(trace.get('trace_last_eval_loss'))} "
             f"min_eval_loss={_number_text(trace.get('trace_min_eval_loss'))} "
