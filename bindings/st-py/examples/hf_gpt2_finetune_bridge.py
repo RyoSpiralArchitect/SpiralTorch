@@ -11,6 +11,7 @@ import json
 import math
 import os
 import random
+import shutil
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -313,6 +314,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "long local FT runs on disk-constrained machines."
         ),
     )
+    parser.add_argument(
+        "--min-free-disk-gb",
+        type=float,
+        default=0.0,
+        help=(
+            "Abort before model/dataset loading unless the output filesystem "
+            "has at least this many GiB free. The default 0 only records "
+            "disk telemetry."
+        ),
+    )
     parser.add_argument("--eval-steps", type=int, default=250)
     parser.add_argument("--eval-accumulation-steps", type=int, default=0)
     parser.add_argument("--dataloader-num-workers", type=int, default=0)
@@ -370,6 +381,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         parser.error("--generation-max-new-tokens must be positive")
     if args.save_total_limit <= 0:
         parser.error("--save-total-limit must be positive")
+    if args.min_free_disk_gb < 0.0 or not math.isfinite(args.min_free_disk_gb):
+        parser.error("--min-free-disk-gb must be finite and non-negative")
     if args.generation_temperature <= 0.0:
         parser.error("--generation-temperature must be positive")
     if args.generation_top_k < 0:
@@ -1423,6 +1436,51 @@ def _preflight_dataset_config(args: argparse.Namespace) -> str | None:
     return args.dataset_format if _has_local_corpus(args) else args.dataset_config
 
 
+def _disk_usage_anchor(path: Path) -> Path:
+    candidate = path if path.exists() else path.parent
+    while not candidate.exists() and candidate.parent != candidate:
+        candidate = candidate.parent
+    return candidate
+
+
+def _disk_report(path: Path, *, min_free_gb: float = 0.0) -> dict[str, Any]:
+    anchor = _disk_usage_anchor(path)
+    report: dict[str, Any] = {
+        "row_type": "hf_gpt2_ft_disk_report",
+        "path": str(path),
+        "anchor": str(anchor),
+        "min_free_gb": float(min_free_gb),
+    }
+    try:
+        usage = shutil.disk_usage(anchor)
+    except OSError as exc:
+        report.update(
+            {
+                "status": "error",
+                "error": f"{exc.__class__.__name__}: {exc}",
+                "meets_min_free": None,
+            }
+        )
+        return report
+
+    gib = 1024.0**3
+    free_gb = usage.free / gib
+    meets_min_free = min_free_gb <= 0.0 or free_gb >= min_free_gb
+    report.update(
+        {
+            "status": "ok" if meets_min_free else "blocked",
+            "total_bytes": int(usage.total),
+            "used_bytes": int(usage.used),
+            "free_bytes": int(usage.free),
+            "total_gb": usage.total / gib,
+            "used_gb": usage.used / gib,
+            "free_gb": free_gb,
+            "meets_min_free": bool(meets_min_free),
+        }
+    )
+    return report
+
+
 def _base_run_card(
     args: argparse.Namespace,
     preflight: Mapping[str, Any],
@@ -1437,6 +1495,7 @@ def _base_run_card(
     return {
         "row_type": "hf_gpt2_finetune_run_card",
         "preflight": preflight,
+        "disk_report": dict(preflight.get("disk_report") or {}),
         "spiraltorch_version": getattr(st, "__version__", None),
         "transformers_version": getattr(transformers, "__version__", None),
         "torch_version": getattr(torch, "__version__", None),
@@ -1638,6 +1697,10 @@ def _main_with_runtime_access(
     preflight["trainer_loss_guard_enabled"] = not bool(args.no_trainer_loss_guard)
     preflight["trainer_loss_guard_threshold"] = args.trainer_loss_guard_threshold
     preflight["model_train_dtype"] = args.model_train_dtype
+    preflight["disk_report"] = _disk_report(
+        args.output_dir,
+        min_free_gb=args.min_free_disk_gb,
+    )
     _attach_local_corpus_reports(
         preflight,
         args,
@@ -1647,6 +1710,9 @@ def _main_with_runtime_access(
     for line in hf_gpt2_finetune_summary_lines(preflight):
         print(line)
     if not preflight["runtime_import_preflight_passed"]:
+        _write_card(preflight, args)
+        return 1
+    if preflight["disk_report"].get("status") != "ok":
         _write_card(preflight, args)
         return 1
     if not args.train and not args.metadata_only:

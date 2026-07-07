@@ -2677,6 +2677,21 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(raw["save_total_limit"], 1)
         self.assertEqual(filtered["save_total_limit"], 1)
 
+    def test_example_disk_report_records_free_space_and_threshold(self) -> None:
+        module = load_bridge_example()
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = Path(tmp) / "future-run"
+            ok_report = module._disk_report(output_dir, min_free_gb=0.0)
+            blocked_report = module._disk_report(output_dir, min_free_gb=10**9)
+
+        self.assertEqual(ok_report["row_type"], "hf_gpt2_ft_disk_report")
+        self.assertEqual(ok_report["path"], str(output_dir))
+        self.assertEqual(ok_report["status"], "ok")
+        self.assertGreater(ok_report["free_bytes"], 0)
+        self.assertTrue(ok_report["meets_min_free"])
+        self.assertEqual(blocked_report["status"], "blocked")
+        self.assertFalse(blocked_report["meets_min_free"])
+
     def test_example_dataloader_pin_memory_auto_prefers_cuda_only(self) -> None:
         module = load_bridge_example()
 
