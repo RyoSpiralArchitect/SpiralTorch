@@ -7,9 +7,14 @@ import argparse
 import json
 import shlex
 import subprocess
+import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
+
+PACKAGE_ROOT = Path(__file__).resolve().parents[1]
+if str(PACKAGE_ROOT) not in sys.path:
+    sys.path.insert(0, str(PACKAGE_ROOT))
 
 import spiraltorch as st
 

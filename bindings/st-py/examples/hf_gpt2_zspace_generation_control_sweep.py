@@ -9,11 +9,16 @@ import inspect
 import json
 import math
 import os
+import sys
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from itertools import product
 from pathlib import Path
 from typing import Any
+
+PACKAGE_ROOT = Path(__file__).resolve().parents[1]
+if str(PACKAGE_ROOT) not in sys.path:
+    sys.path.insert(0, str(PACKAGE_ROOT))
 
 from spiraltorch.hf_ft import hf_gpt2_finetune_generation_report
 from spiraltorch.hf_generation import build_zspace_repression_logits_processor
