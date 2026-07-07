@@ -111,6 +111,11 @@ def summarize_history(
         for row in rows
         if isinstance(_nested(row, "trace", "trace_last_eval_loss"), (int, float))
     ]
+    losses = [
+        _nested(row, "trace", "trace_last_loss")
+        for row in rows
+        if isinstance(_nested(row, "trace", "trace_last_loss"), (int, float))
+    ]
     disk_values = [
         row.get("disk_free_gb")
         for row in rows
@@ -134,6 +139,10 @@ def summarize_history(
         "last_next_eval_step": _nested(last, "eval_progress", "next_eval_step"),
         "last_log_steps_until_next_eval": log_steps_until_next_eval,
         "estimated_seconds_until_next_eval": estimated_seconds_until_next_eval,
+        "first_loss": losses[0] if losses else None,
+        "last_loss": losses[-1] if losses else None,
+        "min_loss": min(losses) if losses else None,
+        "loss_delta": (losses[-1] - losses[0]) if len(losses) >= 2 else None,
         "last_eval_loss": _nested(last, "trace", "trace_last_eval_loss"),
         "min_eval_loss": min(eval_losses) if eval_losses else None,
         "last_guard_count": _nested(last, "trace", "training_loss_guard_count"),
@@ -163,6 +172,9 @@ def history_lines(
             f"last_next_eval_step={_number_text(summary.get('last_next_eval_step'))} "
             f"last_steps_until_next_eval={_number_text(summary.get('last_log_steps_until_next_eval'))} "
             f"estimated_seconds_until_next_eval={_number_text(summary.get('estimated_seconds_until_next_eval'))} "
+            f"last_loss={_number_text(summary.get('last_loss'))} "
+            f"min_loss={_number_text(summary.get('min_loss'))} "
+            f"loss_delta={_number_text(summary.get('loss_delta'))} "
             f"last_eval_loss={_number_text(summary.get('last_eval_loss'))} "
             f"min_eval_loss={_number_text(summary.get('min_eval_loss'))} "
             f"guard_count={_number_text(summary.get('last_guard_count'))} "
@@ -183,6 +195,7 @@ def history_lines(
                 f"log_step={_number_text(_nested(row, 'log_progress', 'log_latest_step'))} "
                 f"next_eval_step={_number_text(_nested(row, 'eval_progress', 'next_eval_step'))} "
                 f"steps_until_next_eval={_number_text(_nested(row, 'eval_progress', 'log_steps_until_next_eval'))} "
+                f"last_loss={_number_text(_nested(row, 'trace', 'trace_last_loss'))} "
                 f"last_eval_loss={_number_text(_nested(row, 'trace', 'trace_last_eval_loss'))} "
                 f"final_ready={_number_text(row.get('final_checkpoint_ready'))} "
                 f"disk_free_gb={_number_text(row.get('disk_free_gb'))}"

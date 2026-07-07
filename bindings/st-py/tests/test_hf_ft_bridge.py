@@ -3985,6 +3985,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 "disk_free_gb": 12.0,
                 "trace": {
                     "trace_max_global_step": 20,
+                    "trace_last_loss": 2.1,
                     "trace_last_eval_loss": 1.8,
                     "training_loss_guard_count": 0,
                 },
@@ -4006,6 +4007,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 "disk_free_gb": 11.5,
                 "trace": {
                     "trace_max_global_step": 30,
+                    "trace_last_loss": 1.9,
                     "trace_last_eval_loss": 1.7,
                     "training_loss_guard_count": 0,
                 },
@@ -4056,6 +4058,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(summary["last_next_eval_step"], 40)
         self.assertEqual(summary["last_log_steps_until_next_eval"], 6)
         self.assertEqual(summary["estimated_seconds_until_next_eval"], 24.0)
+        self.assertEqual(summary["first_loss"], 2.1)
+        self.assertEqual(summary["last_loss"], 1.9)
+        self.assertEqual(summary["min_loss"], 1.9)
+        self.assertAlmostEqual(summary["loss_delta"], -0.2)
         self.assertEqual(summary["min_eval_loss"], 1.7)
         self.assertEqual(summary["min_disk_free_gb"], 11.5)
         self.assertEqual(written["delta_log_step"], 10)
@@ -4063,10 +4069,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("last_log_step=34", lines[0])
         self.assertIn("log_steps_per_second=0.25", lines[0])
         self.assertIn("estimated_seconds_until_next_eval=24", lines[0])
+        self.assertIn("last_loss=1.9", lines[0])
+        self.assertIn("min_loss=1.9", lines[0])
+        self.assertIn("loss_delta=-0.2", lines[0])
         self.assertIn("min_eval_loss=1.7", lines[0])
         self.assertIn("last_disk_free_gb=11.5", lines[0])
         self.assertIn("min_disk_free_gb=11.5", lines[0])
         self.assertIn("index=1", lines[1])
+        self.assertIn("last_loss=1.9", lines[1])
         self.assertIn("disk_free_gb=11.5", lines[1])
         self.assertEqual(written_lines, lines)
 
