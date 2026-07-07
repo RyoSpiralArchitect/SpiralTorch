@@ -1050,6 +1050,86 @@ def test_make_openai_responses_invoke_drops_unsupported_strict_kwargs() -> None:
     ]
 
 
+def test_make_openai_responses_invoke_retries_model_rejected_kwargs() -> None:
+    class UnsupportedParamError(Exception):
+        def __init__(self, param: str) -> None:
+            super().__init__(f"Unsupported parameter: '{param}' is not supported")
+            self.body = {"error": {"param": param}}
+
+    class RetryResponses:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        def create(self, **request: object) -> dict[str, object]:
+            self.calls.append(dict(request))
+            for key in ("temperature", "top_p", "frequency_penalty"):
+                if key in request:
+                    raise UnsupportedParamError(key)
+            return {
+                "model": request["model"],
+                "output_text": "Retried response entered Z-space.",
+                "usage": {"input_tokens": 4, "output_tokens": 5, "total_tokens": 9},
+            }
+
+    class RetryClient:
+        def __init__(self) -> None:
+            self.responses = RetryResponses()
+
+    client = RetryClient()
+    invoke = st.make_openai_responses_invoke(
+        client=client,
+        model="retry-response-model",
+        max_output_tokens=12,
+    )
+    response = invoke(
+        "distort this response safely",
+        temperature=0.7,
+        top_p=0.9,
+        frequency_penalty=0.4,
+    )
+    request_filter = getattr(invoke, "last_request_filter")
+
+    assert st.api_llm_text_from_response(response) == "Retried response entered Z-space."
+    assert client.responses.calls == [
+        {
+            "max_output_tokens": 12,
+            "temperature": 0.7,
+            "top_p": 0.9,
+            "frequency_penalty": 0.4,
+            "model": "retry-response-model",
+            "input": "distort this response safely",
+        },
+        {
+            "max_output_tokens": 12,
+            "top_p": 0.9,
+            "frequency_penalty": 0.4,
+            "model": "retry-response-model",
+            "input": "distort this response safely",
+        },
+        {
+            "max_output_tokens": 12,
+            "frequency_penalty": 0.4,
+            "model": "retry-response-model",
+            "input": "distort this response safely",
+        },
+        {
+            "max_output_tokens": 12,
+            "model": "retry-response-model",
+            "input": "distort this response safely",
+        },
+    ]
+    assert request_filter["dropped_keys"] == [
+        "frequency_penalty",
+        "temperature",
+        "top_p",
+    ]
+    assert request_filter["retry_dropped_keys"] == [
+        "frequency_penalty",
+        "temperature",
+        "top_p",
+    ]
+
+
 def test_runtime_call_openai_responses_records_trace() -> None:
     client = _FakeResponsesClient()
     runtime = st.ApiLLMZSpaceRuntime(

@@ -102,6 +102,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--api-model", default=None)
     parser.add_argument("--api-max-tokens", type=int, default=160)
+    parser.add_argument(
+        "--api-reasoning-effort",
+        choices=["minimal", "low", "medium", "high"],
+        default=None,
+        help="Optional OpenAI Responses reasoning effort for GPT-5-style routes.",
+    )
+    parser.add_argument(
+        "--api-text-verbosity",
+        choices=["low", "medium", "high"],
+        default=None,
+        help="Optional OpenAI Responses visible text verbosity.",
+    )
     parser.add_argument("--desire-pressure-values", default="0.45,0.8")
     parser.add_argument("--desire-stability-values", default="0.45")
     parser.add_argument("--psi-total-values", default="0.5,0.75")
@@ -187,6 +199,8 @@ def _runtime_plan(args: argparse.Namespace) -> MappingLike:
         "api_provider": args.api_provider,
         "api_model": args.api_model,
         "api_max_tokens": int(args.api_max_tokens),
+        "api_reasoning_effort": args.api_reasoning_effort,
+        "api_text_verbosity": args.api_text_verbosity,
     }
 
 
@@ -220,6 +234,10 @@ def _runtime_cli_args(runtime: MappingLike, *, sweep: bool) -> list[object]:
         args.extend(["--api-model", runtime["api_model"]])
     if runtime.get("api_max_tokens") is not None:
         args.extend(["--api-max-tokens", runtime["api_max_tokens"]])
+    if runtime.get("api_reasoning_effort"):
+        args.extend(["--api-reasoning-effort", runtime["api_reasoning_effort"]])
+    if runtime.get("api_text_verbosity"):
+        args.extend(["--api-text-verbosity", runtime["api_text_verbosity"]])
     if sweep:
         args.append("--resume-existing")
     return args

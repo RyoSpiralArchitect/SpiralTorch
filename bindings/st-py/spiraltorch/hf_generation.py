@@ -1034,6 +1034,14 @@ def summarize_zspace_inference_distortion_probe(
         "api_request_dropped_keys": list(request_filter.get("dropped_keys", []))
         if isinstance(request_filter.get("dropped_keys"), list)
         else [],
+        "api_request_retry_dropped_key_count": _safe_number(
+            request_filter.get("retry_dropped_key_count")
+        ),
+        "api_request_retry_dropped_keys": list(
+            request_filter.get("retry_dropped_keys", [])
+        )
+        if isinstance(request_filter.get("retry_dropped_keys"), list)
+        else [],
         "api_request_sent_keys": list(request_filter.get("sent_keys", []))
         if isinstance(request_filter.get("sent_keys"), list)
         else [],
@@ -1071,6 +1079,7 @@ def summarize_zspace_inference_distortion_probe_lines(
             f"activation_events={summary.get('activation_event_count')} "
             f"api={summary.get('api_provider')} "
             f"api_dropped={summary.get('api_request_dropped_key_count')} "
+            f"api_retry_dropped={summary.get('api_request_retry_dropped_key_count')} "
             f"effect={summary.get('effect_score')} "
             f"risk={summary.get('risk_score')} "
             f"energy={summary.get('distortion_energy')} "
@@ -1652,10 +1661,14 @@ def _distortion_recommendation_payload(
         dropped_keys = best.get("api_request_dropped_keys")
         sent_keys = best.get("api_request_sent_keys")
         dropped_count = best.get("api_request_dropped_key_count")
+        retry_dropped_keys = best.get("api_request_retry_dropped_keys")
+        retry_dropped_count = best.get("api_request_retry_dropped_key_count")
         if (
             isinstance(dropped_keys, list)
             or isinstance(sent_keys, list)
             or dropped_count is not None
+            or isinstance(retry_dropped_keys, list)
+            or retry_dropped_count is not None
         ):
             request_filter_mapping = {
                 "dropped_key_count": dropped_count,
@@ -1663,6 +1676,10 @@ def _distortion_recommendation_payload(
                 if isinstance(dropped_keys, list)
                 else [],
                 "sent_keys": list(sent_keys) if isinstance(sent_keys, list) else [],
+                "retry_dropped_key_count": retry_dropped_count,
+                "retry_dropped_keys": list(retry_dropped_keys)
+                if isinstance(retry_dropped_keys, list)
+                else [],
             }
     processor_kwargs = (
         zspace_inference_distortion_processor_kwargs(adapter_mapping)
@@ -1749,6 +1766,14 @@ def summarize_zspace_inference_distortion_sweep(
             request_filter.get("dropped_keys", [])
         )
         if isinstance(request_filter.get("dropped_keys"), list)
+        else [],
+        "recommended_api_request_retry_dropped_key_count": _safe_number(
+            request_filter.get("retry_dropped_key_count")
+        ),
+        "recommended_api_request_retry_dropped_keys": list(
+            request_filter.get("retry_dropped_keys", [])
+        )
+        if isinstance(request_filter.get("retry_dropped_keys"), list)
         else [],
         "recommended_api_request_sent_keys": list(request_filter.get("sent_keys", []))
         if isinstance(request_filter.get("sent_keys"), list)

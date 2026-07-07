@@ -46,6 +46,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--api-model", default=None)
     parser.add_argument("--api-max-tokens", type=int, default=160)
+    parser.add_argument(
+        "--api-reasoning-effort",
+        choices=["minimal", "low", "medium", "high"],
+        default=None,
+        help="Optional OpenAI Responses reasoning effort for GPT-5-style routes.",
+    )
+    parser.add_argument(
+        "--api-text-verbosity",
+        choices=["low", "medium", "high"],
+        default=None,
+        help="Optional OpenAI Responses visible text verbosity.",
+    )
     parser.add_argument("--desire-pressure", type=float, default=0.8)
     parser.add_argument("--desire-stability", type=float, default=0.45)
     parser.add_argument("--psi-total", type=float, default=0.7)
@@ -167,6 +179,20 @@ def _apply_sweep_handoff(args: argparse.Namespace, flags: set[str]) -> None:
         "--api-max-tokens",
         "api_max_tokens",
         runtime.get("api_max_tokens"),
+    )
+    _set_if_not_provided(
+        args,
+        flags,
+        "--api-reasoning-effort",
+        "api_reasoning_effort",
+        runtime.get("api_reasoning_effort"),
+    )
+    _set_if_not_provided(
+        args,
+        flags,
+        "--api-text-verbosity",
+        "api_text_verbosity",
+        runtime.get("api_text_verbosity"),
     )
     _set_if_not_provided(
         args,
@@ -465,9 +491,16 @@ def _run_local_hf(args: argparse.Namespace, adapter: dict[str, Any]) -> dict[str
 
 def _api_invoke(args: argparse.Namespace):
     if args.api_provider == "openai-responses":
+        request_defaults: dict[str, Any] = {
+            "max_output_tokens": args.api_max_tokens,
+        }
+        if args.api_reasoning_effort:
+            request_defaults["reasoning"] = {"effort": args.api_reasoning_effort}
+        if args.api_text_verbosity:
+            request_defaults["text"] = {"verbosity": args.api_text_verbosity}
         return st.make_openai_responses_invoke(
             model=args.api_model,
-            max_output_tokens=args.api_max_tokens,
+            **request_defaults,
         )
     if args.api_provider == "openai-chat":
         return st.make_openai_chat_invoke(
@@ -544,6 +577,8 @@ def _probe_runtime(args: argparse.Namespace) -> dict[str, Any]:
         "api_provider": args.api_provider,
         "api_model": args.api_model,
         "api_max_tokens": int(args.api_max_tokens),
+        "api_reasoning_effort": args.api_reasoning_effort,
+        "api_text_verbosity": args.api_text_verbosity,
     }
 
 

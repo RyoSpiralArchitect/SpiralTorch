@@ -379,6 +379,8 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
                 "request_filter": {
                     "dropped_key_count": 2,
                     "dropped_keys": ["frequency_penalty", "presence_penalty"],
+                    "retry_dropped_key_count": 1,
+                    "retry_dropped_keys": ["temperature"],
                     "sent_keys": ["input", "model", "temperature", "top_p"],
                 },
                 "telemetry": {
@@ -410,6 +412,8 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
             summary["api_request_dropped_keys"],
             ["frequency_penalty", "presence_penalty"],
         )
+        self.assertEqual(summary["api_request_retry_dropped_key_count"], 1)
+        self.assertEqual(summary["api_request_retry_dropped_keys"], ["temperature"])
         self.assertEqual(summary["distortion_energy"], 0.62)
         self.assertGreater(summary["effect_score"], 0.0)
         self.assertGreater(summary["risk_score"], 0.0)
@@ -566,6 +570,10 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
                     "0.4,0.8",
                     "--psi-total-values",
                     "0.5",
+                    "--api-reasoning-effort",
+                    "minimal",
+                    "--api-text-verbosity",
+                    "low",
                     "--top-n",
                     "2",
                 ]
@@ -647,7 +655,11 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         self.assertIn("Z-Space Inference Distortion Sweep", markdown)
         self.assertIn("Single-probe replay", markdown)
         self.assertIn("Focused sweep replay", markdown)
+        self.assertIn("--api-reasoning-effort minimal", stored_report["recommended_commands"]["probe"])
+        self.assertIn("--api-text-verbosity low", stored_report["recommended_commands"]["sweep"])
         self.assertEqual(replay_args.prompt, "SpiralTorch sweep")
+        self.assertEqual(replay_args.api_reasoning_effort, "minimal")
+        self.assertEqual(replay_args.api_text_verbosity, "low")
         self.assertEqual(
             replay_args.desire_pressure,
             sweep_summary["recommended_config"]["desire_pressure"],
@@ -663,6 +675,8 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
             sweep_summary["recommended_config"]["desire_pressure"],
         )
         self.assertEqual(replay_report["runtime"]["api_provider"], "fake")
+        self.assertEqual(replay_report["runtime"]["api_reasoning_effort"], "minimal")
+        self.assertEqual(replay_report["runtime"]["api_text_verbosity"], "low")
 
     def test_inference_distortion_sweep_reuses_existing_probe(self) -> None:
         module = load_distortion_sweep_example()
@@ -782,6 +796,8 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
             probe_payload["api"]["request_filter"] = {
                 "dropped_key_count": 1,
                 "dropped_keys": ["frequency_penalty"],
+                "retry_dropped_key_count": 1,
+                "retry_dropped_keys": ["temperature"],
                 "sent_keys": ["input", "model", "temperature", "top_p"],
             }
             probe_path.write_text(json.dumps(probe_payload, indent=2) + "\n")
@@ -831,6 +847,14 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         )
         self.assertEqual(
             imported_summary["recommended_api_request_dropped_key_count"],
+            1,
+        )
+        self.assertEqual(
+            imported_summary["recommended_api_request_retry_dropped_keys"],
+            ["temperature"],
+        )
+        self.assertEqual(
+            imported_summary["recommended_api_request_retry_dropped_key_count"],
             1,
         )
         self.assertEqual(replay_args.prompt, "SpiralTorch probe promotion")
@@ -883,6 +907,8 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
                 "request_filter": {
                     "dropped_key_count": 1,
                     "dropped_keys": ["presence_penalty"],
+                    "retry_dropped_key_count": 1,
+                    "retry_dropped_keys": ["top_p"],
                     "sent_keys": ["temperature", "top_p"],
                 },
             },
@@ -911,6 +937,10 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         self.assertEqual(
             summary["recommended_api_request_dropped_keys"],
             ["presence_penalty"],
+        )
+        self.assertEqual(
+            summary["recommended_api_request_retry_dropped_keys"],
+            ["top_p"],
         )
 
 

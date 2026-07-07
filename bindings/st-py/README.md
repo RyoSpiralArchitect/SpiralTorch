@@ -461,8 +461,11 @@ Z-space context telemetry. Omit `--local-model` for a keyless fake API smoke, or
 add `--api-provider openai-responses|openai-chat|anthropic --api-model <model>`
 to reuse the same distortion adapter with a live provider. Provider adapters
 filter request overrides against each SDK method signature and record
-`api_request_dropped_keys`, so Responses/Chat/Messages surface differences stay
-auditable instead of silently changing the experiment. Load the artifact with
+`api_request_dropped_keys`; they also retry once-per-parameter when a model
+rejects an otherwise SDK-shaped request option such as `temperature` or `top_p`,
+recording those server-side drops as `retry_dropped_keys`. Responses/Chat/Messages
+surface differences therefore stay auditable instead of silently changing the
+experiment. Load the artifact with
 `st.load_zspace_inference_distortion_probe(...)`, flatten it with
 `st.summarize_zspace_inference_distortion_probe(...)`, or print compact status
 lines with `st.summarize_zspace_inference_distortion_probe_lines(...)`. When

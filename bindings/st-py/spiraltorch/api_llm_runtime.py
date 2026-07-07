@@ -1179,15 +1179,89 @@ def _filter_supported_request_kwargs(
 def _request_filter_report(
     original: Mapping[str, Any],
     filtered: Mapping[str, Any],
+    *,
+    retry_dropped_keys: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     dropped = sorted(str(key) for key in set(original) - set(filtered))
-    return {
+    report = {
         "original_key_count": len(original),
         "sent_key_count": len(filtered),
         "sent_keys": sorted(str(key) for key in filtered),
         "dropped_keys": dropped,
         "dropped_key_count": len(dropped),
     }
+    retry_dropped = sorted(set(str(key) for key in retry_dropped_keys or []))
+    if retry_dropped:
+        report["retry_dropped_keys"] = retry_dropped
+        report["retry_dropped_key_count"] = len(retry_dropped)
+    return report
+
+
+def _unsupported_request_param(exc: Exception, request: Mapping[str, Any]) -> str | None:
+    candidates: list[Any] = [getattr(exc, "param", None)]
+    body = getattr(exc, "body", None)
+    if isinstance(body, Mapping):
+        error = body.get("error")
+        if isinstance(error, Mapping):
+            candidates.append(error.get("param"))
+        candidates.append(body.get("param"))
+    response = getattr(exc, "response", None)
+    json_method = getattr(response, "json", None)
+    if callable(json_method):
+        try:
+            payload = json_method()
+        except Exception:
+            payload = None
+        if isinstance(payload, Mapping):
+            error = payload.get("error")
+            if isinstance(error, Mapping):
+                candidates.append(error.get("param"))
+            candidates.append(payload.get("param"))
+
+    for candidate in candidates:
+        if isinstance(candidate, str) and candidate in request:
+            return candidate
+
+    message = str(exc)
+    if "Unsupported parameter" not in message and "unsupported parameter" not in message:
+        return None
+    for quote in ("'", '"'):
+        marker = f"parameter: {quote}"
+        start = message.find(marker)
+        if start >= 0:
+            start += len(marker)
+            end = message.find(quote, start)
+            if end > start:
+                candidate = message[start:end]
+                if candidate in request:
+                    return candidate
+    for key in request:
+        if str(key) in message:
+            return str(key)
+    return None
+
+
+def _create_with_unsupported_param_retry(
+    create: Callable[..., Any],
+    request: Mapping[str, Any],
+    *,
+    max_retries: int = 8,
+) -> tuple[Any, dict[str, Any], list[str]]:
+    filtered = _filter_supported_request_kwargs(create, request)
+    retry_dropped: list[str] = []
+    while True:
+        try:
+            return create(**filtered), filtered, retry_dropped
+        except Exception as exc:
+            param = _unsupported_request_param(exc, filtered)
+            if (
+                param is None
+                or param not in filtered
+                or len(retry_dropped) >= max(0, int(max_retries))
+            ):
+                raise
+            retry_dropped.append(param)
+            filtered = {key: value for key, value in filtered.items() if key != param}
 
 
 def make_openai_responses_invoke(
@@ -1219,9 +1293,16 @@ def make_openai_responses_invoke(
         request = _merge_request(request_defaults, request_overrides, model=model)
         request.setdefault(input_key, prompt)
         create = _resolve_create(cached_client, ("responses",))
-        filtered = _filter_supported_request_kwargs(create, request)
-        _invoke.last_request_filter = _request_filter_report(request, filtered)  # type: ignore[attr-defined]
-        return create(**filtered)
+        response, filtered, retry_dropped = _create_with_unsupported_param_retry(
+            create,
+            request,
+        )
+        _invoke.last_request_filter = _request_filter_report(  # type: ignore[attr-defined]
+            request,
+            filtered,
+            retry_dropped_keys=retry_dropped,
+        )
+        return response
 
     return _invoke
 
@@ -1269,9 +1350,16 @@ def make_anthropic_messages_invoke(
             messages=override_messages if override_messages is not None else messages,
         )
         create = _resolve_create(cached_client, ("messages",))
-        filtered = _filter_supported_request_kwargs(create, request)
-        _invoke.last_request_filter = _request_filter_report(request, filtered)  # type: ignore[attr-defined]
-        return create(**filtered)
+        response, filtered, retry_dropped = _create_with_unsupported_param_retry(
+            create,
+            request,
+        )
+        _invoke.last_request_filter = _request_filter_report(  # type: ignore[attr-defined]
+            request,
+            filtered,
+            retry_dropped_keys=retry_dropped,
+        )
+        return response
 
     return _invoke
 
@@ -1321,9 +1409,16 @@ def make_openai_chat_invoke(
             messages=override_messages if override_messages is not None else messages,
         )
         create = _resolve_create(cached_client, ("chat", "completions"))
-        filtered = _filter_supported_request_kwargs(create, request)
-        _invoke.last_request_filter = _request_filter_report(request, filtered)  # type: ignore[attr-defined]
-        return create(**filtered)
+        response, filtered, retry_dropped = _create_with_unsupported_param_retry(
+            create,
+            request,
+        )
+        _invoke.last_request_filter = _request_filter_report(  # type: ignore[attr-defined]
+            request,
+            filtered,
+            retry_dropped_keys=retry_dropped,
+        )
+        return response
 
     return _invoke
 
