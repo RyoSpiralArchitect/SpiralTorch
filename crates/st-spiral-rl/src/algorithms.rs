@@ -10,6 +10,22 @@ use std::cell::RefCell;
 use crate::{schedules::EpsilonGreedySchedule, RlResult, SpiralRlError};
 use st_tensor::TensorError;
 
+/// Auditable record of one DQN action selection.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DqnActionTrace {
+    pub state: usize,
+    pub action: usize,
+    pub greedy_action: usize,
+    pub greedy_value: f32,
+    pub selected_value: f32,
+    pub epsilon_before: f32,
+    pub epsilon_after: f32,
+    pub explored: bool,
+    pub schedule_step_before: Option<u32>,
+    pub schedule_step_after: Option<u32>,
+    pub q_values: Vec<f32>,
+}
+
 /// Discrete-action Deep Q Network agent implemented with a lightweight Q-table.
 #[derive(Clone, Debug)]
 pub struct DqnAgent {
@@ -70,6 +86,18 @@ impl DqnAgent {
         &mut self.table[state * self.action_dim + action]
     }
 
+    fn validate_state_index(&self, state: usize) -> RlResult<()> {
+        if state < self.state_dim {
+            Ok(())
+        } else {
+            Err(SpiralRlError::InvalidStateShape {
+                expected: self.state_dim,
+                rows: 1,
+                cols: state + 1,
+            })
+        }
+    }
+
     pub fn epsilon(&self) -> f32 {
         self.epsilon
     }
@@ -101,6 +129,58 @@ impl DqnAgent {
             self.advance_schedule();
             action
         }
+    }
+
+    /// Returns the current action-value row for a discrete state.
+    pub fn q_values(&self, state: usize) -> RlResult<Vec<f32>> {
+        self.validate_state_index(state)?;
+        Ok((0..self.action_dim)
+            .map(|action| self.q(state, action))
+            .collect())
+    }
+
+    /// Returns the greedy action for a state without advancing exploration state.
+    pub fn greedy_action(&self, state: usize) -> RlResult<usize> {
+        self.validate_state_index(state)?;
+        Ok((0..self.action_dim)
+            .max_by(|&lhs, &rhs| self.q(state, lhs).total_cmp(&self.q(state, rhs)))
+            .unwrap_or(0))
+    }
+
+    /// Selects an action and returns the policy state that led to the choice.
+    pub fn select_action_trace(&mut self, state: usize) -> RlResult<DqnActionTrace> {
+        let q_values = self.q_values(state)?;
+        let greedy_action = q_values
+            .iter()
+            .enumerate()
+            .max_by(|(_, lhs), (_, rhs)| lhs.total_cmp(rhs))
+            .map(|(action, _)| action)
+            .unwrap_or(0);
+        let epsilon_before = self.epsilon;
+        let schedule_step_before = self.schedule_step();
+        let explored = self.rng.gen::<f32>() < self.epsilon;
+        let action = if explored {
+            self.advance_schedule();
+            self.rng.gen_range(0..self.action_dim)
+        } else {
+            self.advance_schedule();
+            greedy_action
+        };
+        let epsilon_after = self.epsilon;
+        let schedule_step_after = self.schedule_step();
+        Ok(DqnActionTrace {
+            state,
+            action,
+            greedy_action,
+            greedy_value: q_values[greedy_action],
+            selected_value: q_values[action],
+            epsilon_before,
+            epsilon_after,
+            explored,
+            schedule_step_before,
+            schedule_step_after,
+            q_values,
+        })
     }
 
     /// Validates that the provided state observation matches the configured dimensionality.
@@ -470,5 +550,33 @@ mod tests {
         let updated = agent.q(0, 1);
         assert!((updated - 0.1).abs() < 1e-6);
         assert!(updated <= rewards[0]);
+    }
+
+    #[test]
+    fn dqn_action_trace_reports_policy_context() {
+        let mut agent = DqnAgent::new(2, 3, 0.95, 0.1).unwrap();
+        agent.set_epsilon(0.0);
+        agent.set_table(&[0.1, 0.7, -0.2, 0.0, 0.3, 0.2]).unwrap();
+
+        let trace = agent.select_action_trace(0).unwrap();
+
+        assert_eq!(trace.state, 0);
+        assert_eq!(trace.q_values, vec![0.1, 0.7, -0.2]);
+        assert_eq!(trace.greedy_action, 1);
+        assert_eq!(trace.action, 1);
+        assert_eq!(trace.greedy_value, 0.7);
+        assert_eq!(trace.selected_value, 0.7);
+        assert!(!trace.explored);
+        assert_eq!(trace.epsilon_before, 0.0);
+        assert_eq!(trace.epsilon_after, 0.0);
+    }
+
+    #[test]
+    fn dqn_q_values_reject_invalid_state_index() {
+        let agent = DqnAgent::new(2, 2, 0.95, 0.1).unwrap();
+        assert!(matches!(
+            agent.q_values(2),
+            Err(SpiralRlError::InvalidStateShape { .. })
+        ));
     }
 }

@@ -47,6 +47,8 @@ def test_spiral_rl_stub_agents_share_runtime_error(spiraltorch_stub):
     agent = object.__new__(stub_cls)
 
     _assert_stub_runtime_error(lambda: agent.select_action(0))
+    _assert_stub_runtime_error(lambda: agent.select_action_trace(0))
+    _assert_stub_runtime_error(lambda: agent.policy_report(0))
     _assert_stub_runtime_error(lambda: agent.set_epsilon(0.5))
     _assert_stub_runtime_error(lambda: agent.state_dict())
 
