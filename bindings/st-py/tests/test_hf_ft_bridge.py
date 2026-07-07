@@ -284,6 +284,98 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(skipped["status"], "skipped")
         self.assertEqual(errored["status"], "error")
 
+    def test_run_card_summary_and_comparison_surface_ft_deltas(self) -> None:
+        base_card = {
+            "row_type": "hf_gpt2_finetune_run_card",
+            "model_name": "gpt2",
+            "dataset_name": "local-files",
+            "dataset_source": "local_files",
+            "dataset_format": "text",
+            "block_size": 16,
+            "raw_train_rows": 8,
+            "raw_eval_rows": 2,
+            "tokenized_train_rows": 5,
+            "tokenized_eval_rows": 2,
+            "load_status": "ok",
+            "model_saved": True,
+            "dataset_fit_report": {
+                "verdict": "train_eval_ready",
+                "warnings": "none",
+                "train_ready": True,
+                "eval_ready": True,
+            },
+            "eval_before_train": hf_ft.hf_gpt2_finetune_eval_report(
+                stage="before_train",
+                metrics={"eval_loss": 2.0},
+            ),
+            "eval_after_train": hf_ft.hf_gpt2_finetune_eval_report(
+                stage="after_train",
+                metrics={"eval_loss": 1.5},
+            ),
+            "generation_before_train": hf_ft.hf_gpt2_finetune_generation_report(
+                stage="before_train",
+                prompt="SpiralTorch is",
+                generated_text="SpiralTorch is quiet.",
+                generated_continuation_text=" quiet.",
+                input_token_count=3,
+                output_token_count=5,
+            ),
+            "generation_after_train": hf_ft.hf_gpt2_finetune_generation_report(
+                stage="after_train",
+                prompt="SpiralTorch is",
+                generated_text="SpiralTorch is learning geometry.",
+                generated_continuation_text=" learning geometry.",
+                input_token_count=3,
+                output_token_count=7,
+            ),
+            "trainer_metrics": {"train_loss": 1.4, "train_runtime": 3.0},
+            "trainer_trace_summary": {
+                "trace_event_count": 4,
+                "trace_last_loss": 1.4,
+                "trace_min_eval_loss": 1.5,
+            },
+            "corpus_scan_report": {
+                "line_count": 10,
+                "rough_gpt2_token_estimate": 128,
+            },
+        }
+        weaker_card = dict(base_card)
+        weaker_card["eval_after_train"] = hf_ft.hf_gpt2_finetune_eval_report(
+            stage="after_train",
+            metrics={"eval_loss": 1.9},
+        )
+        weaker_card["generation_after_train"] = base_card["generation_before_train"]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            strong_path = Path(tmp) / "strong.json"
+            weak_path = Path(tmp) / "weak.json"
+            hf_ft.write_hf_gpt2_finetune_run_card(base_card, strong_path)
+            hf_ft.write_hf_gpt2_finetune_run_card(weaker_card, weak_path)
+            loaded = hf_ft.load_hf_gpt2_finetune_run_card(strong_path)
+            summary = hf_ft.summarize_hf_gpt2_finetune_run_card(
+                strong_path,
+                run_label="strong",
+            )
+            comparison = hf_ft.compare_hf_gpt2_finetune_run_cards(
+                [strong_path, weak_path],
+                run_labels=["strong", "weak"],
+            )
+
+        self.assertEqual(loaded["model_name"], "gpt2")
+        self.assertEqual(summary["row_type"], "hf_gpt2_finetune_run_card_summary")
+        self.assertEqual(summary["run_label"], "strong")
+        self.assertEqual(summary["dataset_fit_verdict"], "train_eval_ready")
+        self.assertEqual(summary["eval_loss_delta"], -0.5)
+        self.assertTrue(summary["eval_loss_improved"])
+        self.assertTrue(summary["generation_continuation_changed"])
+        self.assertEqual(summary["trainer_train_loss"], 1.4)
+        self.assertEqual(summary["trace_event_count"], 4)
+        self.assertEqual(comparison["run_count"], 2)
+        self.assertEqual(comparison["best_eval_after_run_label"], "strong")
+        self.assertEqual(comparison["best_eval_loss_delta_run_label"], "strong")
+        self.assertEqual(comparison["eval_loss_improved_count"], 2)
+        self.assertEqual(comparison["generation_changed_count"], 1)
+
     def test_example_local_corpus_reports_attach_scan_to_cards(self) -> None:
         module = load_bridge_example()
         with tempfile.TemporaryDirectory() as tmp:
@@ -625,6 +717,9 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("hf_gpt2_finetune_generation_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_preflight_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_trainer_trace_callback", st.__all__)
+        self.assertIn("compare_hf_gpt2_finetune_run_cards", st.__all__)
+        self.assertIn("load_hf_gpt2_finetune_run_card", st.__all__)
+        self.assertIn("summarize_hf_gpt2_finetune_run_card", st.__all__)
         self.assertIs(
             st.hf_gpt2_finetune_eval_report,
             hf_ft.hf_gpt2_finetune_eval_report,
@@ -632,6 +727,18 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIs(
             st.hf_gpt2_finetune_generation_report,
             hf_ft.hf_gpt2_finetune_generation_report,
+        )
+        self.assertIs(
+            st.compare_hf_gpt2_finetune_run_cards,
+            hf_ft.compare_hf_gpt2_finetune_run_cards,
+        )
+        self.assertIs(
+            st.load_hf_gpt2_finetune_run_card,
+            hf_ft.load_hf_gpt2_finetune_run_card,
+        )
+        self.assertIs(
+            st.summarize_hf_gpt2_finetune_run_card,
+            hf_ft.summarize_hf_gpt2_finetune_run_card,
         )
         self.assertIs(
             st.summarize_hf_gpt2_finetune_trainer_trace,

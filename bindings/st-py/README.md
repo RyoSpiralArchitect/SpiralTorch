@@ -425,6 +425,11 @@ Add `--eval-before-train` when you want a numeric baseline before updates; the
 bridge writes `eval_before_train` plus final `eval_after_train` reports with
 `eval_loss`, perplexity, raw metrics, and skipped/error status. Pass
 `--no-eval-after-train` only when a long run must avoid the final eval pass.
+After several runs, call
+`st.compare_hf_gpt2_finetune_run_cards([run_a, run_b, ...])` to flatten
+run-card JSON into eval-loss/perplexity deltas, generation-sample changes,
+dataset-fit status, and trainer metrics so tuning choices can be ranked without
+hand-reading each artifact.
 
 ## Minimal usage
 
