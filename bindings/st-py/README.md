@@ -516,6 +516,7 @@ PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_gpt2_finetune_sweep.
   --eval-before-train \
   --zspace-probe \
   --trainer-telemetry \
+  --inference-distortion-sweep-report runs/zspace-inference-distortion-sweep/sweep-report.json \
   --block-size-values 64,128 \
   --learning-rate-values 0.0001,0.00005 \
   --seed-values 7,13 \
@@ -525,6 +526,10 @@ PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_gpt2_finetune_sweep.
 It writes `sweep-plan.json` before launching runs and `sweep-report.json` after
 the run cards are available, including the same
 `st.compare_hf_gpt2_finetune_run_cards(...)` comparison payload. Add
+`--inference-distortion-sweep-report` after a local/API inference-distortion
+sweep to stamp its recommended prompt/runtime/config into each FT run card and
+first trainer-trace event; summaries surface the recommended probe, effect/risk,
+desire pressure, psi total, and API route beside eval/generation metrics. Add
 `--dry-run` to inspect commands without loading Transformers, or
 `--require-wgpu-ready` when the SpiralTorch WGPU surface should gate each run.
 The report also embeds a compact `summary`; from notebooks or CI, call
@@ -535,7 +540,9 @@ selected scale-up candidate, top eval-loss rows, failed runs, and
 dry-run/partial/complete status without hand-reading the full artifact. For
 longer local runs, add `--resume-existing` to reuse successful per-run cards and
 continue only missing or failed rows after an interruption; add `--force` with
-that same command when you intentionally want to rerun every row.
+that same command when you intentionally want to rerun every row. From Python,
+use `st.hf_gpt2_finetune_inference_distortion_handoff_report(...)` to inspect a
+sweep recommendation before launching the FT bridge.
 
 ## Minimal usage
 

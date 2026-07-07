@@ -100,6 +100,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--trainer-telemetry-prefix", default="hf_ft")
     parser.add_argument("--trainer-desire-gain", type=float, default=1.0)
     parser.add_argument("--trainer-psi-gain", type=float, default=1.0)
+    parser.add_argument(
+        "--inference-distortion-sweep-report",
+        type=Path,
+        default=None,
+        help=(
+            "Forward a Z-Space inference-distortion sweep recommendation into "
+            "each FT bridge run card and trainer trace."
+        ),
+    )
     parser.add_argument("--generation-prompt", default=None)
     parser.add_argument("--generation-max-new-tokens", type=int, default=16)
     parser.add_argument("--generation-do-sample", action="store_true")
@@ -274,6 +283,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             parser.error("--trainer-desire-gain must be finite and non-negative")
         if args.trainer_psi_gain < 0.0 or not math.isfinite(args.trainer_psi_gain):
             parser.error("--trainer-psi-gain must be finite and non-negative")
+    if (
+        args.inference_distortion_sweep_report is not None
+        and not args.inference_distortion_sweep_report.is_file()
+    ):
+        parser.error(
+            "--inference-distortion-sweep-report does not exist: "
+            f"{args.inference_distortion_sweep_report}"
+        )
     if args.corpus_scan and not args.train_file:
         parser.error("--corpus-scan requires --train-file")
     if args.corpus_scan_max_bytes_per_file < 0:
@@ -412,6 +429,13 @@ def _bridge_command(
         command.extend(["--trainer-telemetry-prefix", str(args.trainer_telemetry_prefix)])
         command.extend(["--trainer-desire-gain", str(args.trainer_desire_gain)])
         command.extend(["--trainer-psi-gain", str(args.trainer_psi_gain)])
+    if args.inference_distortion_sweep_report is not None:
+        command.extend(
+            [
+                "--inference-distortion-sweep-report",
+                str(args.inference_distortion_sweep_report),
+            ]
+        )
     if args.generation_prompt:
         command.extend(["--generation-prompt", str(args.generation_prompt)])
         command.extend(
@@ -608,6 +632,11 @@ def run_sweep(args: argparse.Namespace) -> dict[str, Any]:
     plan = {
         "row_type": "hf_gpt2_finetune_sweep_plan",
         "dry_run": bool(args.dry_run),
+        "inference_distortion_sweep_report": (
+            None
+            if args.inference_distortion_sweep_report is None
+            else str(args.inference_distortion_sweep_report)
+        ),
         "run_count": len(runs),
         "runs": runs,
     }
@@ -624,6 +653,11 @@ def run_sweep(args: argparse.Namespace) -> dict[str, Any]:
             "skipped_run_count": len(runs),
             "plan_path": str(args.out_dir / "sweep-plan.json"),
             "report_path": str(args.out_dir / "sweep-report.json"),
+            "inference_distortion_sweep_report": (
+                None
+                if args.inference_distortion_sweep_report is None
+                else str(args.inference_distortion_sweep_report)
+            ),
             "comparison": None,
             "runs": runs,
         }
@@ -689,6 +723,11 @@ def run_sweep(args: argparse.Namespace) -> dict[str, Any]:
         "skipped_run_count": sum(1 for run in runs if run.get("status") == "planned"),
         "plan_path": str(args.out_dir / "sweep-plan.json"),
         "report_path": str(args.out_dir / "sweep-report.json"),
+        "inference_distortion_sweep_report": (
+            None
+            if args.inference_distortion_sweep_report is None
+            else str(args.inference_distortion_sweep_report)
+        ),
         "comparison": comparison,
         "runs": runs,
     }

@@ -27,6 +27,7 @@ __all__ = [
     "hf_gpt2_finetune_dataset_fit_report",
     "hf_gpt2_finetune_eval_report",
     "hf_gpt2_finetune_generation_report",
+    "hf_gpt2_finetune_inference_distortion_handoff_report",
     "hf_gpt2_finetune_rust_dependency_report",
     "hf_gpt2_finetune_summary_lines",
     "hf_gpt2_finetune_training_telemetry_frame",
@@ -497,6 +498,75 @@ def hf_gpt2_finetune_generation_report(
         "generation_control": control_payload,
         "fallback_error": fallback_error_text,
         "error": error_text,
+    }
+
+
+def hf_gpt2_finetune_inference_distortion_handoff_report(
+    report_or_path: str | Path | Mapping[str, object],
+    *,
+    top_n: int = 3,
+) -> dict[str, object]:
+    """Summarize the inference-distortion sweep that motivated an FT run."""
+
+    from .hf_generation import (
+        load_zspace_inference_distortion_sweep,
+        summarize_zspace_inference_distortion_sweep,
+    )
+
+    summary = summarize_zspace_inference_distortion_sweep(
+        report_or_path,
+        top_n=top_n,
+    )
+    if isinstance(report_or_path, (str, Path)):
+        source_path = str(report_or_path)
+        try:
+            report = load_zspace_inference_distortion_sweep(report_or_path)
+        except (OSError, ValueError):
+            report = {}
+    else:
+        report = dict(report_or_path)
+        source_path = str(report.get("report_path") or summary.get("sweep_path") or "")
+    runtime = _mapping_item(report, "runtime")
+    config = _mapping_item(summary, "recommended_config")
+    request = _mapping_item(summary, "recommended_request")
+    processor_kwargs = _mapping_item(summary, "recommended_processor_kwargs")
+    activation_hook = _mapping_item(summary, "recommended_activation_hook")
+    status = "ok" if config else "missing_recommendation"
+    return {
+        "row_type": "hf_gpt2_finetune_inference_distortion_handoff",
+        "status": status,
+        "source_path": source_path or None,
+        "sweep_status": summary.get("status"),
+        "prompt": summary.get("prompt"),
+        "recommended_probe": summary.get("recommended_probe"),
+        "recommendation_reason": summary.get("recommendation_reason"),
+        "recommended_effect_score": _safe_number(
+            summary.get("recommended_effect_score")
+        ),
+        "recommended_risk_score": _safe_number(summary.get("recommended_risk_score")),
+        "recommended_probe_path": summary.get("recommended_probe_path"),
+        "recommended_config": config or None,
+        "recommended_request": request or None,
+        "recommended_processor_kwargs": processor_kwargs or None,
+        "recommended_activation_hook": activation_hook or None,
+        "recommended_probe_cli_args": list(
+            summary.get("recommended_probe_cli_args") or []
+        ),
+        "recommended_sweep_cli_args": list(
+            summary.get("recommended_sweep_cli_args") or []
+        ),
+        "runtime": runtime or None,
+        "local_model": runtime.get("local_model"),
+        "api_provider": runtime.get("api_provider"),
+        "api_model": runtime.get("api_model"),
+        "desire_pressure": _safe_number(config.get("desire_pressure")),
+        "desire_stability": _safe_number(config.get("desire_stability")),
+        "psi_total": _safe_number(config.get("psi_total")),
+        "coherence": _safe_number(config.get("coherence")),
+        "distortion_strength": _safe_number(config.get("distortion_strength")),
+        "base_temperature": _safe_number(config.get("base_temperature")),
+        "base_top_p": _safe_number(config.get("base_top_p")),
+        "include_penalties": config.get("include_penalties"),
     }
 
 
@@ -1460,6 +1530,7 @@ def summarize_hf_gpt2_finetune_run_card(
     trainer_metrics = _mapping_item(card, "trainer_metrics")
     trainer_trace = _trainer_trace_summary_for_card(card)
     corpus_scan = _mapping_item(card, "corpus_scan_report")
+    inference_handoff = _mapping_item(card, "inference_distortion_handoff")
 
     effective_eval_after_loss, effective_eval_after_source = (
         _effective_eval_after_loss(eval_after, trainer_trace)
@@ -1532,6 +1603,40 @@ def summarize_hf_gpt2_finetune_run_card(
             "train_steps_per_second",
         ),
         "trainer_metric_keys": csv_label(sorted(trainer_metrics)),
+        "inference_distortion_handoff_status": inference_handoff.get("status"),
+        "inference_distortion_sweep_path": inference_handoff.get("source_path"),
+        "inference_distortion_recommended_probe": inference_handoff.get(
+            "recommended_probe"
+        ),
+        "inference_distortion_recommendation_reason": inference_handoff.get(
+            "recommendation_reason"
+        ),
+        "inference_distortion_effect_score": _metric_number(
+            inference_handoff,
+            "recommended_effect_score",
+        ),
+        "inference_distortion_risk_score": _metric_number(
+            inference_handoff,
+            "recommended_risk_score",
+        ),
+        "inference_distortion_desire_pressure": _metric_number(
+            inference_handoff,
+            "desire_pressure",
+        ),
+        "inference_distortion_desire_stability": _metric_number(
+            inference_handoff,
+            "desire_stability",
+        ),
+        "inference_distortion_psi_total": _metric_number(
+            inference_handoff,
+            "psi_total",
+        ),
+        "inference_distortion_coherence": _metric_number(
+            inference_handoff,
+            "coherence",
+        ),
+        "inference_distortion_api_provider": inference_handoff.get("api_provider"),
+        "inference_distortion_api_model": inference_handoff.get("api_model"),
         "trace_event_count": _metric_number(trainer_trace, "trace_event_count"),
         "trace_last_loss": _metric_number(trainer_trace, "trace_last_loss"),
         "trace_min_eval_loss": _metric_number(trainer_trace, "trace_min_eval_loss"),
@@ -1797,6 +1902,24 @@ def _ranked_sweep_rows(
                 "trace_last_psi_total": _safe_number(row.get("trace_last_psi_total")),
                 "trace_max_psi_total": _safe_number(row.get("trace_max_psi_total")),
                 "trace_mean_psi_total": _safe_number(row.get("trace_mean_psi_total")),
+                "inference_distortion_recommended_probe": row.get(
+                    "inference_distortion_recommended_probe"
+                ),
+                "inference_distortion_effect_score": _safe_number(
+                    row.get("inference_distortion_effect_score")
+                ),
+                "inference_distortion_risk_score": _safe_number(
+                    row.get("inference_distortion_risk_score")
+                ),
+                "inference_distortion_desire_pressure": _safe_number(
+                    row.get("inference_distortion_desire_pressure")
+                ),
+                "inference_distortion_psi_total": _safe_number(
+                    row.get("inference_distortion_psi_total")
+                ),
+                "inference_distortion_api_provider": row.get(
+                    "inference_distortion_api_provider"
+                ),
                 "dataset_fit_verdict": row.get("dataset_fit_verdict"),
                 "failure_stage": row.get("failure_stage"),
             }
@@ -1916,6 +2039,12 @@ def summarize_hf_gpt2_finetune_sweep_report_lines(
     for row in summary.get("top_runs", []):
         if not isinstance(row, Mapping):
             continue
+        inference_fragment = ""
+        if row.get("inference_distortion_recommended_probe") is not None:
+            inference_fragment = (
+                f"infer_probe={row.get('inference_distortion_recommended_probe')} "
+                f"infer_effect={row.get('inference_distortion_effect_score')} "
+            )
         lines.append(
             "hf_gpt2_ft_sweep_top "
             f"rank={row.get('rank')} "
@@ -1928,6 +2057,7 @@ def summarize_hf_gpt2_finetune_sweep_report_lines(
             f"eval_series={row.get('trace_eval_loss_series')} "
             f"psi={row.get('trace_last_psi_total')} "
             f"desire={row.get('trace_last_desire_pressure')} "
+            f"{inference_fragment}"
             f"changed={row.get('generation_continuation_changed')} "
             f"zcontrol_changed={row.get('generation_after_control_top_token_changed_count')} "
             f"zcontrol_backend={row.get('generation_after_control_backend')}"
@@ -1999,6 +2129,7 @@ def hf_gpt2_finetune_trainer_trace_callback(
     reset: bool = True,
     zspace_probe_tokens: Sequence[int | float] | None = None,
     zspace_probe_kwargs: Mapping[str, object] | None = None,
+    inference_distortion_handoff: Mapping[str, object] | None = None,
     training_telemetry: bool = False,
     telemetry_prefix: str = "hf_ft",
     desire_gain: float = 1.0,
@@ -2018,6 +2149,11 @@ def hf_gpt2_finetune_trainer_trace_callback(
     trace_path = Path(path)
     probe_kwargs = dict(zspace_probe_kwargs or {})
     probe_tokens = list(zspace_probe_tokens or [])
+    inference_handoff = (
+        _json_safe(inference_distortion_handoff)
+        if isinstance(inference_distortion_handoff, Mapping)
+        else None
+    )
     desire_gain_value = _finite_non_negative(desire_gain, label="desire_gain")
     psi_gain_value = _finite_non_negative(psi_gain, label="psi_gain")
 
@@ -2082,6 +2218,8 @@ def hf_gpt2_finetune_trainer_trace_callback(
                     probe_tokens,
                     **probe_kwargs,
                 )
+            if inference_handoff is not None:
+                extra["inference_distortion_handoff"] = inference_handoff
             return self._emit("train_begin", args, state, control, extra=extra)
 
         def on_log(self, args, state, control, logs=None, **kwargs):  # type: ignore[no-untyped-def]

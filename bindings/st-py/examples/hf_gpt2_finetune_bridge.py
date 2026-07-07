@@ -23,6 +23,7 @@ from spiraltorch.hf_ft import (
     hf_gpt2_finetune_dataset_fit_report,
     hf_gpt2_finetune_eval_report,
     hf_gpt2_finetune_generation_report,
+    hf_gpt2_finetune_inference_distortion_handoff_report,
     hf_gpt2_finetune_preflight_report,
     hf_gpt2_finetune_summary_lines,
     hf_gpt2_finetune_trainer_trace_callback,
@@ -115,6 +116,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--trainer-telemetry-prefix", default="hf_ft")
     parser.add_argument("--trainer-desire-gain", type=float, default=1.0)
     parser.add_argument("--trainer-psi-gain", type=float, default=1.0)
+    parser.add_argument(
+        "--inference-distortion-sweep-report",
+        type=Path,
+        default=None,
+        help=(
+            "Attach a Z-Space inference-distortion sweep recommendation to the "
+            "FT run card and trainer trace handoff."
+        ),
+    )
     parser.add_argument("--allow-remote", action="store_true")
     parser.add_argument("--trust-remote-code", action="store_true")
     parser.add_argument("--train", action="store_true", help="Actually run Trainer.train().")
@@ -392,6 +402,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             parser.error("--trainer-desire-gain must be finite and non-negative")
         if args.trainer_psi_gain < 0.0 or not math.isfinite(args.trainer_psi_gain):
             parser.error("--trainer-psi-gain must be finite and non-negative")
+    if (
+        args.inference_distortion_sweep_report is not None
+        and not args.inference_distortion_sweep_report.is_file()
+    ):
+        parser.error(
+            "--inference-distortion-sweep-report does not exist: "
+            f"{args.inference_distortion_sweep_report}"
+        )
     if args.metadata_only and args.train:
         parser.error("--metadata-only and --train are mutually exclusive")
     if args.validation_file and not args.train_file:
@@ -1167,6 +1185,7 @@ def _base_run_card(
     *,
     corpus_file_report: Mapping[str, object] | None,
     corpus_scan_report: Mapping[str, object] | None,
+    inference_distortion_handoff: Mapping[str, object] | None,
     transformers: Any = None,
     torch: Any = None,
     datasets: Any = None,
@@ -1228,6 +1247,16 @@ def _base_run_card(
         "trainer_telemetry_prefix": args.trainer_telemetry_prefix,
         "trainer_desire_gain": args.trainer_desire_gain,
         "trainer_psi_gain": args.trainer_psi_gain,
+        "inference_distortion_sweep_report": (
+            None
+            if args.inference_distortion_sweep_report is None
+            else str(args.inference_distortion_sweep_report)
+        ),
+        "inference_distortion_handoff": (
+            dict(inference_distortion_handoff)
+            if isinstance(inference_distortion_handoff, Mapping)
+            else None
+        ),
         "load_status": "pending",
         "failure_stage": None,
         "failure_error": None,
@@ -1262,6 +1291,13 @@ def _main_with_runtime_access(
 ) -> int:
     corpus_file_report = _corpus_file_report(args)
     corpus_scan_report = _corpus_scan_report(args)
+    inference_distortion_handoff = (
+        None
+        if args.inference_distortion_sweep_report is None
+        else hf_gpt2_finetune_inference_distortion_handoff_report(
+            args.inference_distortion_sweep_report,
+        )
+    )
     preflight = hf_gpt2_finetune_preflight_report(
         model_name=args.model_name,
         dataset_name=_preflight_dataset_name(args),
@@ -1274,6 +1310,16 @@ def _main_with_runtime_access(
         require_hf_gpt2_ft=not args.no_require_hf_gpt2_ft,
     )
     preflight["hf_remote_access"] = dict(remote_access_report)
+    preflight["inference_distortion_sweep_report"] = (
+        None
+        if args.inference_distortion_sweep_report is None
+        else str(args.inference_distortion_sweep_report)
+    )
+    preflight["inference_distortion_handoff"] = (
+        None
+        if inference_distortion_handoff is None
+        else dict(inference_distortion_handoff)
+    )
     _attach_local_corpus_reports(
         preflight,
         args,
@@ -1300,6 +1346,7 @@ def _main_with_runtime_access(
         preflight,
         corpus_file_report=corpus_file_report,
         corpus_scan_report=corpus_scan_report,
+        inference_distortion_handoff=inference_distortion_handoff,
         transformers=transformers,
         torch=torch,
         datasets=datasets,
@@ -1478,6 +1525,7 @@ def _main_with_runtime_access(
                 telemetry_prefix=args.trainer_telemetry_prefix,
                 desire_gain=args.trainer_desire_gain,
                 psi_gain=args.trainer_psi_gain,
+                inference_distortion_handoff=card.get("inference_distortion_handoff"),
             )
         )
     try:

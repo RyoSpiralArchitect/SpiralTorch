@@ -378,6 +378,62 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(error_report["status"], "error")
         self.assertEqual(error_report["generated_text_sha256"], None)
 
+    def test_inference_distortion_handoff_report_flattens_recommendation(self) -> None:
+        sweep_report = {
+            "row_type": "zspace_inference_distortion_sweep",
+            "status": "complete",
+            "prompt": "SpiralTorch is",
+            "runtime": {
+                "api_provider": "fake",
+                "api_model": "fake-distorted-api",
+                "local_model": "runs/gpt2-small-zspace-ft",
+            },
+            "runs": [
+                {
+                    "name": "strong",
+                    "status": "ok",
+                    "probe_path": "/tmp/missing-strong-probe.json",
+                    "config": {
+                        "desire_pressure": 0.8,
+                        "desire_stability": 0.45,
+                        "psi_total": 0.7,
+                        "coherence": 0.5,
+                        "distortion_strength": 1.0,
+                        "base_temperature": 0.7,
+                        "base_top_p": 0.95,
+                        "include_penalties": True,
+                    },
+                }
+            ],
+            "comparison": {
+                "row_type": "zspace_inference_distortion_probe_comparison",
+                "recommended_probe": "strong",
+                "recommended_reason": "highest_effect_score_lowest_risk_tiebreak",
+                "top_probes": [
+                    {
+                        "label": "strong",
+                        "effect_score": 0.91,
+                        "risk_score": 0.22,
+                        "api_provider": "fake",
+                    }
+                ],
+            },
+        }
+
+        handoff = hf_ft.hf_gpt2_finetune_inference_distortion_handoff_report(
+            sweep_report,
+        )
+
+        self.assertEqual(handoff["status"], "ok")
+        self.assertEqual(handoff["prompt"], "SpiralTorch is")
+        self.assertEqual(handoff["recommended_probe"], "strong")
+        self.assertEqual(handoff["api_provider"], "fake")
+        self.assertEqual(handoff["api_model"], "fake-distorted-api")
+        self.assertEqual(handoff["desire_pressure"], 0.8)
+        self.assertEqual(handoff["psi_total"], 0.7)
+        self.assertTrue(handoff["include_penalties"])
+        self.assertIn("--desire-pressure", handoff["recommended_probe_cli_args"])
+
     def test_eval_report_records_loss_perplexity_and_status(self) -> None:
         report = hf_ft.hf_gpt2_finetune_eval_report(
             stage="after_train",
@@ -403,6 +459,21 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(errored["status"], "error")
 
     def test_run_card_summary_and_comparison_surface_ft_deltas(self) -> None:
+        inference_handoff = {
+            "row_type": "hf_gpt2_finetune_inference_distortion_handoff",
+            "status": "ok",
+            "source_path": "runs/zspace-inference-distortion-sweep/sweep-report.json",
+            "recommended_probe": "distort-002",
+            "recommendation_reason": "highest_effect_score_lowest_risk_tiebreak",
+            "recommended_effect_score": 0.88,
+            "recommended_risk_score": 0.21,
+            "desire_pressure": 0.8,
+            "desire_stability": 0.45,
+            "psi_total": 0.7,
+            "coherence": 0.5,
+            "api_provider": "fake",
+            "api_model": "fake-distorted-api",
+        }
         base_card = {
             "row_type": "hf_gpt2_finetune_run_card",
             "model_name": "gpt2",
@@ -457,6 +528,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 },
             ),
             "trainer_metrics": {"train_loss": 1.4, "train_runtime": 3.0},
+            "inference_distortion_handoff": inference_handoff,
             "trainer_trace_summary": {
                 "trace_event_count": 4,
                 "trace_last_loss": 1.4,
@@ -548,6 +620,15 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             "spiraltorch_zspace_softmax",
         )
         self.assertEqual(summary["trainer_train_loss"], 1.4)
+        self.assertEqual(summary["inference_distortion_handoff_status"], "ok")
+        self.assertEqual(
+            summary["inference_distortion_recommended_probe"],
+            "distort-002",
+        )
+        self.assertEqual(summary["inference_distortion_effect_score"], 0.88)
+        self.assertEqual(summary["inference_distortion_desire_pressure"], 0.8)
+        self.assertEqual(summary["inference_distortion_psi_total"], 0.7)
+        self.assertEqual(summary["inference_distortion_api_provider"], "fake")
         self.assertEqual(summary["trace_event_count"], 4)
         self.assertEqual(comparison["run_count"], 2)
         self.assertEqual(comparison["best_eval_after_run_label"], "strong")
@@ -582,10 +663,19 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             sweep_summary["top_runs"][0]["trace_eval_loss_series"],
             "0=2.0,3=1.5",
         )
+        self.assertEqual(
+            sweep_summary["top_runs"][0]["inference_distortion_recommended_probe"],
+            "distort-002",
+        )
+        self.assertEqual(
+            sweep_summary["top_runs"][0]["inference_distortion_effect_score"],
+            0.88,
+        )
         self.assertIn("selected=strong", sweep_lines[1])
         self.assertIn("trainer_sps=None", sweep_lines[2])
         self.assertIn("trace_sps_mean=0.5", sweep_lines[2])
         self.assertIn("eval_series=0=2.0,3=1.5", sweep_lines[2])
+        self.assertIn("infer_probe=distort-002", sweep_lines[2])
         self.assertIn("zcontrol_changed=2", sweep_lines[2])
         self.assertIn("zcontrol_backend=spiraltorch_zspace_softmax", sweep_lines[2])
 
@@ -629,8 +719,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             train_path = Path(tmp) / "train.txt"
             validation_path = Path(tmp) / "validation.txt"
+            distortion_report_path = Path(tmp) / "distortion-sweep-report.json"
             train_path.write_text("alpha spiral\nbeta zspace\n", encoding="utf-8")
             validation_path.write_text("gamma eval\n", encoding="utf-8")
+            distortion_report_path.write_text("{}", encoding="utf-8")
             out_dir = Path(tmp) / "sweep"
             args = module.parse_args(
                 [
@@ -679,6 +771,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                     "1.2",
                     "--trainer-psi-gain",
                     "0.8",
+                    "--inference-distortion-sweep-report",
+                    str(distortion_report_path),
                     "--generation-zspace-report-limit",
                     "2",
                     "--eval-before-train",
@@ -710,6 +804,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(report["summary"]["status"], "planned")
         self.assertEqual(stored_report["row_type"], "hf_gpt2_finetune_sweep_report")
         self.assertEqual(stored_report["summary"]["run_count"], 8)
+        self.assertEqual(
+            stored_report["inference_distortion_sweep_report"],
+            str(distortion_report_path),
+        )
         first_command = runs[0]["command"]
         self.assertIn("--train", first_command)
         self.assertIn("--corpus-scan", first_command)
@@ -734,6 +832,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("1.2", first_command)
         self.assertIn("--trainer-psi-gain", first_command)
         self.assertIn("0.8", first_command)
+        self.assertIn("--inference-distortion-sweep-report", first_command)
+        self.assertIn(str(distortion_report_path), first_command)
         self.assertIn("--generation-zspace-report-limit", first_command)
         self.assertIn("2", first_command)
         self.assertIn("--eval-before-train", first_command)
@@ -1535,6 +1635,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 callback = hf_ft.hf_gpt2_finetune_trainer_trace_callback(
                     path,
                     run_id="fake-run",
+                    inference_distortion_handoff={
+                        "status": "ok",
+                        "recommended_probe": "distort-002",
+                    },
                     training_telemetry=True,
                     desire_gain=1.2,
                     psi_gain=0.8,
@@ -1546,6 +1650,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
 
         self.assertEqual([row["event"] for row in rows], ["train_begin", "log"])
         self.assertEqual(rows[0]["run_id"], "fake-run")
+        self.assertEqual(
+            rows[0]["inference_distortion_handoff"]["recommended_probe"],
+            "distort-002",
+        )
         self.assertEqual(rows[1]["metrics"], {"loss": 2.0})
         self.assertIn("training_telemetry", rows[1])
         self.assertIn("telemetry", rows[1])
@@ -1580,6 +1688,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("hf_gpt2_finetune_dataset_fit_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_eval_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_generation_report", st.__all__)
+        self.assertIn(
+            "hf_gpt2_finetune_inference_distortion_handoff_report",
+            st.__all__,
+        )
         self.assertIn("hf_gpt2_finetune_preflight_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_training_telemetry_frame", st.__all__)
         self.assertIn("hf_gpt2_finetune_trainer_trace_callback", st.__all__)
@@ -1596,6 +1708,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIs(
             st.hf_gpt2_finetune_generation_report,
             hf_ft.hf_gpt2_finetune_generation_report,
+        )
+        self.assertIs(
+            st.hf_gpt2_finetune_inference_distortion_handoff_report,
+            hf_ft.hf_gpt2_finetune_inference_distortion_handoff_report,
         )
         self.assertIs(
             st.hf_gpt2_finetune_training_telemetry_frame,
