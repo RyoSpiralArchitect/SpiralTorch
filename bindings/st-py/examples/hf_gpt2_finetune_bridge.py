@@ -617,6 +617,30 @@ def _hf_remote_access_report(args: argparse.Namespace) -> dict[str, object]:
     }
 
 
+def _trainer_telemetry_auto_reason(
+    args: argparse.Namespace,
+    inference_distortion_handoff: Mapping[str, object] | None,
+) -> str | None:
+    if bool(getattr(args, "trainer_telemetry", False)):
+        return None
+    if bool(getattr(args, "no_trainer_trace", False)):
+        return None
+    if isinstance(inference_distortion_handoff, Mapping):
+        return "inference_distortion_handoff"
+    return None
+
+
+def _trainer_telemetry_enabled(
+    args: argparse.Namespace,
+    inference_distortion_handoff: Mapping[str, object] | None,
+) -> bool:
+    if bool(getattr(args, "no_trainer_trace", False)):
+        return False
+    return bool(getattr(args, "trainer_telemetry", False)) or (
+        _trainer_telemetry_auto_reason(args, inference_distortion_handoff) is not None
+    )
+
+
 @contextlib.contextmanager
 def _hf_remote_access(args: argparse.Namespace):
     if not args.allow_remote:
@@ -1370,6 +1394,14 @@ def _base_run_card(
             None if args.metadata_only else str(_trainer_trace_path(args))
         ),
         "trainer_telemetry_requested": bool(args.trainer_telemetry),
+        "trainer_telemetry_enabled": _trainer_telemetry_enabled(
+            args,
+            inference_distortion_handoff,
+        ),
+        "trainer_telemetry_auto_reason": _trainer_telemetry_auto_reason(
+            args,
+            inference_distortion_handoff,
+        ),
         "trainer_telemetry_prefix": args.trainer_telemetry_prefix,
         "trainer_desire_gain": args.trainer_desire_gain,
         "trainer_psi_gain": args.trainer_psi_gain,
@@ -1477,6 +1509,15 @@ def _main_with_runtime_access(
         None
         if generation_inference_distortion is None
         else dict(generation_inference_distortion)
+    )
+    preflight["trainer_telemetry_requested"] = bool(args.trainer_telemetry)
+    preflight["trainer_telemetry_enabled"] = _trainer_telemetry_enabled(
+        args,
+        inference_distortion_handoff,
+    )
+    preflight["trainer_telemetry_auto_reason"] = _trainer_telemetry_auto_reason(
+        args,
+        inference_distortion_handoff,
     )
     _attach_local_corpus_reports(
         preflight,
@@ -1679,7 +1720,10 @@ def _main_with_runtime_access(
                     "frequency": args.zspace_frequency,
                     "strength": args.zspace_strength,
                 },
-                training_telemetry=bool(args.trainer_telemetry),
+                training_telemetry=_trainer_telemetry_enabled(
+                    args,
+                    card.get("inference_distortion_handoff"),
+                ),
                 telemetry_prefix=args.trainer_telemetry_prefix,
                 desire_gain=args.trainer_desire_gain,
                 psi_gain=args.trainer_psi_gain,

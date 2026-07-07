@@ -385,8 +385,13 @@ After the contract passes, add `--train --max-train-samples 50000 --block-size
 train/log/evaluate/save/end events and summarizing loss/eval-loss telemetry
 back into the run card; add `--trainer-telemetry --trainer-desire-gain 1.0
 --trainer-psi-gain 1.0` to inject bounded desire/psi frames into those events
-and compare them across run cards. Pass `--no-trainer-trace` only when that
-audit trail is too noisy. Use `--require-runtime-device-ready-backend wgpu`
+and compare them across run cards. When an inference-distortion handoff is
+attached, the bridge auto-enables those trace telemetry frames so
+`hf_ft.inference_distortion.*` can be correlated with loss and eval events even
+if `--trainer-telemetry` was not passed explicitly; the run card records both
+`trainer_telemetry_requested` and the resolved enabled/auto-reason fields. Pass
+`--no-trainer-trace` only when that audit trail is too noisy. Use
+`--require-runtime-device-ready-backend wgpu`
 when the SpiralTorch WGPU surface must be available before the run starts.
 
 For a larger local corpus, bypass Hub datasets and feed files directly:
@@ -566,8 +571,9 @@ the run cards are available, including the same
 `--inference-distortion-sweep-report` after a ranked distortion grid, to stamp
 the recommended prompt/runtime/config into each FT run card and train-begin trace
 event; `sweep-plan.json` and dry-run `sweep-report.json` embed the same handoff
-so the scale-up plan can be audited before loading a model.
-When `--trainer-telemetry` is enabled, the same handoff also appears as
+so the scale-up plan can be audited before loading a model. Any attached
+handoff also enables trainer trace telemetry automatically unless
+`--no-trainer-trace` is set, so the same handoff appears as
 `hf_ft.inference_distortion.*` telemetry keys on each frame;
 summaries surface the recommended probe, effect/risk, desire pressure, psi total,
 API route, and provider request keys that were dropped or sent beside

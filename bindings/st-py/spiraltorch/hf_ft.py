@@ -2041,6 +2041,9 @@ def summarize_hf_gpt2_finetune_run_card(
             "train_steps_per_second",
         ),
         "trainer_metric_keys": csv_label(sorted(trainer_metrics)),
+        "trainer_telemetry_requested": card.get("trainer_telemetry_requested"),
+        "trainer_telemetry_enabled": card.get("trainer_telemetry_enabled"),
+        "trainer_telemetry_auto_reason": card.get("trainer_telemetry_auto_reason"),
         "inference_distortion_handoff_status": inference_handoff.get("status"),
         "inference_distortion_sweep_path": inference_handoff.get("source_path"),
         "inference_distortion_recommended_probe": inference_handoff.get(
@@ -2452,6 +2455,13 @@ def _ranked_sweep_rows(
                 "trainer_runtime": _safe_number(row.get("trainer_runtime")),
                 "trainer_steps_per_second": _safe_number(
                     row.get("trainer_steps_per_second")
+                ),
+                "trainer_telemetry_requested": row.get(
+                    "trainer_telemetry_requested"
+                ),
+                "trainer_telemetry_enabled": row.get("trainer_telemetry_enabled"),
+                "trainer_telemetry_auto_reason": row.get(
+                    "trainer_telemetry_auto_reason"
                 ),
                 "trace_event_count": _safe_number(row.get("trace_event_count")),
                 "trace_duration_s": _safe_number(row.get("trace_duration_s")),

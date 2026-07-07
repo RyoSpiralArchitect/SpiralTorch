@@ -721,6 +721,9 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 },
             ),
             "trainer_metrics": {"train_loss": 1.4, "train_runtime": 3.0},
+            "trainer_telemetry_requested": False,
+            "trainer_telemetry_enabled": True,
+            "trainer_telemetry_auto_reason": "inference_distortion_handoff",
             "inference_distortion_handoff": inference_handoff,
             "generation_from_inference_distortion": True,
             "generation_from_inference_distortion_applied": {
@@ -876,6 +879,12 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("--generation-ngram-repression-strength", bridge_cli_args)
         self.assertIn("0.9", bridge_cli_args)
         self.assertEqual(summary["trainer_train_loss"], 1.4)
+        self.assertFalse(summary["trainer_telemetry_requested"])
+        self.assertTrue(summary["trainer_telemetry_enabled"])
+        self.assertEqual(
+            summary["trainer_telemetry_auto_reason"],
+            "inference_distortion_handoff",
+        )
         self.assertEqual(summary["inference_distortion_handoff_status"], "ok")
         self.assertEqual(
             summary["inference_distortion_recommended_probe"],
@@ -992,6 +1001,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             sweep_summary["top_runs"][0]["inference_distortion_bridge_cli_args"],
         )
         self.assertEqual(sweep_summary["top_runs"][0]["trainer_runtime"], 3.0)
+        self.assertFalse(
+            sweep_summary["top_runs"][0]["trainer_telemetry_requested"]
+        )
+        self.assertTrue(sweep_summary["top_runs"][0]["trainer_telemetry_enabled"])
+        self.assertEqual(
+            sweep_summary["top_runs"][0]["trainer_telemetry_auto_reason"],
+            "inference_distortion_handoff",
+        )
         self.assertEqual(
             sweep_summary["top_runs"][0][
                 "generation_after_control_top_token_changed_count"
@@ -1523,6 +1540,29 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn(str(probe_path), first_command)
         self.assertNotIn("--inference-distortion-sweep-report", first_command)
         self.assertIn("--generation-from-inference-distortion", first_command)
+
+    def test_bridge_auto_enables_trainer_telemetry_for_inference_handoff(self) -> None:
+        module = load_bridge_example()
+        args = types.SimpleNamespace(
+            trainer_telemetry=False,
+            no_trainer_trace=False,
+        )
+        handoff = {"row_type": "hf_gpt2_finetune_inference_distortion_handoff"}
+
+        self.assertTrue(module._trainer_telemetry_enabled(args, handoff))
+        self.assertEqual(
+            module._trainer_telemetry_auto_reason(args, handoff),
+            "inference_distortion_handoff",
+        )
+
+        args.trainer_telemetry = True
+        self.assertTrue(module._trainer_telemetry_enabled(args, handoff))
+        self.assertIsNone(module._trainer_telemetry_auto_reason(args, handoff))
+
+        args.trainer_telemetry = False
+        args.no_trainer_trace = True
+        self.assertFalse(module._trainer_telemetry_enabled(args, handoff))
+        self.assertIsNone(module._trainer_telemetry_auto_reason(args, handoff))
 
     def test_sweep_example_compares_completed_run_cards(self) -> None:
         module = load_sweep_example()
