@@ -32,7 +32,10 @@ __all__ = [
     "hf_gpt2_finetune_trainer_trace_callback",
     "hf_gpt2_finetune_trainer_trace_event",
     "hf_gpt2_finetune_zspace_probe",
+    "compare_hf_gpt2_finetune_run_cards",
+    "load_hf_gpt2_finetune_run_card",
     "load_hf_gpt2_finetune_trainer_trace",
+    "summarize_hf_gpt2_finetune_run_card",
     "summarize_hf_gpt2_finetune_trainer_trace",
     "write_hf_gpt2_finetune_run_card",
     "write_hf_gpt2_finetune_trainer_trace_event",
@@ -907,6 +910,246 @@ def summarize_hf_gpt2_finetune_trainer_trace(
         "trace_last_eval_loss": _last_metric(rows, "eval_loss"),
         "trace_min_eval_loss": _min_numeric_metric(rows, "eval_loss"),
         "trace_last_learning_rate": _last_metric(rows, "learning_rate"),
+    }
+
+
+def load_hf_gpt2_finetune_run_card(path: str | Path) -> dict[str, object]:
+    """Load one GPT-2 FT run-card JSON artifact."""
+
+    input_path = Path(path)
+    try:
+        payload = json.loads(input_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{input_path} invalid JSON: {exc}") from exc
+    if not isinstance(payload, Mapping):
+        raise ValueError(f"{input_path} did not contain a JSON object")
+    return dict(payload)
+
+
+def _run_card_payload(
+    card_or_path: str | Path | Mapping[str, object],
+) -> tuple[dict[str, object], str | None]:
+    if isinstance(card_or_path, (str, Path)):
+        path = str(card_or_path)
+        return load_hf_gpt2_finetune_run_card(card_or_path), path
+    if isinstance(card_or_path, Mapping):
+        return dict(card_or_path), None
+    raise TypeError("run card must be a Mapping or path")
+
+
+def _mapping_item(
+    row: Mapping[str, object],
+    key: str,
+) -> dict[str, object]:
+    value = row.get(key)
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _numeric_delta(
+    after: object,
+    before: object,
+) -> float | None:
+    after_number = _safe_number(after)
+    before_number = _safe_number(before)
+    if after_number is None or before_number is None:
+        return None
+    return float(after_number) - float(before_number)
+
+
+def _metric_number(
+    row: Mapping[str, object],
+    key: str,
+) -> int | float | None:
+    return _safe_number(row.get(key))
+
+
+def _run_label(
+    card: Mapping[str, object],
+    *,
+    source_path: str | None,
+    run_label: str | None,
+) -> str:
+    if run_label:
+        return str(run_label)
+    for key in ("run_id", "output_dir", "model_name"):
+        value = card.get(key)
+        if value:
+            return str(value)
+    return source_path or "run"
+
+
+def summarize_hf_gpt2_finetune_run_card(
+    card_or_path: str | Path | Mapping[str, object],
+    *,
+    run_label: str | None = None,
+) -> dict[str, object]:
+    """Flatten one GPT-2 FT run card into comparison-friendly metrics."""
+
+    card, source_path = _run_card_payload(card_or_path)
+    dataset_fit = _mapping_item(card, "dataset_fit_report")
+    eval_before = _mapping_item(card, "eval_before_train")
+    eval_after = _mapping_item(card, "eval_after_train")
+    generation_before = _mapping_item(card, "generation_before_train")
+    generation_after = _mapping_item(card, "generation_after_train")
+    trainer_metrics = _mapping_item(card, "trainer_metrics")
+    trainer_trace = _mapping_item(card, "trainer_trace_summary")
+    corpus_scan = _mapping_item(card, "corpus_scan_report")
+
+    eval_loss_delta = _numeric_delta(
+        eval_after.get("eval_loss"),
+        eval_before.get("eval_loss"),
+    )
+    eval_perplexity_delta = _numeric_delta(
+        eval_after.get("eval_perplexity"),
+        eval_before.get("eval_perplexity"),
+    )
+    before_continuation_hash = generation_before.get("generated_continuation_sha256")
+    after_continuation_hash = generation_after.get("generated_continuation_sha256")
+    generation_changed = (
+        None
+        if not before_continuation_hash or not after_continuation_hash
+        else before_continuation_hash != after_continuation_hash
+    )
+
+    return {
+        "row_type": "hf_gpt2_finetune_run_card_summary",
+        "run_label": _run_label(card, source_path=source_path, run_label=run_label),
+        "run_card_path": source_path,
+        "model_name": card.get("model_name"),
+        "dataset_name": card.get("dataset_name"),
+        "dataset_source": card.get("dataset_source"),
+        "dataset_format": card.get("dataset_format"),
+        "block_size": _safe_number(card.get("block_size")),
+        "max_train_samples": _safe_number(card.get("max_train_samples")),
+        "max_eval_samples": _safe_number(card.get("max_eval_samples")),
+        "load_status": card.get("load_status"),
+        "failure_stage": card.get("failure_stage"),
+        "failure_error": card.get("failure_error"),
+        "model_saved": card.get("model_saved"),
+        "raw_train_rows": _safe_number(card.get("raw_train_rows")),
+        "raw_eval_rows": _safe_number(card.get("raw_eval_rows")),
+        "tokenized_train_rows": _safe_number(card.get("tokenized_train_rows")),
+        "tokenized_eval_rows": _safe_number(card.get("tokenized_eval_rows")),
+        "dataset_fit_verdict": dataset_fit.get("verdict"),
+        "dataset_fit_warnings": dataset_fit.get("warnings"),
+        "train_ready": dataset_fit.get("train_ready"),
+        "eval_ready": dataset_fit.get("eval_ready"),
+        "eval_before_status": eval_before.get("status"),
+        "eval_before_loss": _metric_number(eval_before, "eval_loss"),
+        "eval_before_perplexity": _metric_number(eval_before, "eval_perplexity"),
+        "eval_after_status": eval_after.get("status"),
+        "eval_after_loss": _metric_number(eval_after, "eval_loss"),
+        "eval_after_perplexity": _metric_number(eval_after, "eval_perplexity"),
+        "eval_loss_delta": eval_loss_delta,
+        "eval_perplexity_delta": eval_perplexity_delta,
+        "eval_loss_improved": (
+            None if eval_loss_delta is None else bool(eval_loss_delta < 0.0)
+        ),
+        "eval_perplexity_improved": (
+            None
+            if eval_perplexity_delta is None
+            else bool(eval_perplexity_delta < 0.0)
+        ),
+        "trainer_train_loss": _metric_number(trainer_metrics, "train_loss"),
+        "trainer_runtime": _metric_number(trainer_metrics, "train_runtime"),
+        "trainer_samples_per_second": _metric_number(
+            trainer_metrics,
+            "train_samples_per_second",
+        ),
+        "trainer_steps_per_second": _metric_number(
+            trainer_metrics,
+            "train_steps_per_second",
+        ),
+        "trainer_metric_keys": csv_label(sorted(trainer_metrics)),
+        "trace_event_count": _metric_number(trainer_trace, "trace_event_count"),
+        "trace_last_loss": _metric_number(trainer_trace, "trace_last_loss"),
+        "trace_min_eval_loss": _metric_number(trainer_trace, "trace_min_eval_loss"),
+        "generation_before_status": generation_before.get("status"),
+        "generation_before_method": generation_before.get("generation_method"),
+        "generation_after_status": generation_after.get("status"),
+        "generation_after_method": generation_after.get("generation_method"),
+        "generation_after_new_token_count": _metric_number(
+            generation_after,
+            "new_token_count",
+        ),
+        "generation_after_continuation_char_count": _metric_number(
+            generation_after,
+            "generated_continuation_char_count",
+        ),
+        "generation_continuation_changed": generation_changed,
+        "generation_before_continuation_sha256": before_continuation_hash,
+        "generation_after_continuation_sha256": after_continuation_hash,
+        "corpus_scan_line_count": _metric_number(corpus_scan, "line_count"),
+        "corpus_scan_rough_gpt2_token_estimate": _metric_number(
+            corpus_scan,
+            "rough_gpt2_token_estimate",
+        ),
+    }
+
+
+def _best_summary(
+    summaries: Sequence[Mapping[str, object]],
+    key: str,
+) -> Mapping[str, object] | None:
+    candidates = []
+    for summary in summaries:
+        value = _safe_number(summary.get(key))
+        if value is not None:
+            candidates.append((float(value), summary))
+    if not candidates:
+        return None
+    return min(candidates, key=lambda item: item[0])[1]
+
+
+def compare_hf_gpt2_finetune_run_cards(
+    cards_or_paths: Sequence[str | Path | Mapping[str, object]],
+    *,
+    run_labels: Sequence[str] | None = None,
+) -> dict[str, object]:
+    """Compare GPT-2 FT run cards by eval, generation, and trainer signals."""
+
+    labels = list(run_labels or [])
+    summaries = [
+        summarize_hf_gpt2_finetune_run_card(
+            card,
+            run_label=labels[index] if index < len(labels) else None,
+        )
+        for index, card in enumerate(cards_or_paths)
+    ]
+    best_after = _best_summary(summaries, "eval_after_loss")
+    best_delta = _best_summary(summaries, "eval_loss_delta")
+    run_label_values = [str(summary.get("run_label")) for summary in summaries]
+    return {
+        "row_type": "hf_gpt2_finetune_run_card_comparison",
+        "run_count": len(summaries),
+        "run_labels": csv_label(run_label_values),
+        "successful_run_count": sum(
+            1 for summary in summaries if not summary.get("failure_stage")
+        ),
+        "eval_after_ok_count": sum(
+            1 for summary in summaries if summary.get("eval_after_status") == "ok"
+        ),
+        "eval_loss_improved_count": sum(
+            1 for summary in summaries if summary.get("eval_loss_improved") is True
+        ),
+        "generation_changed_count": sum(
+            1
+            for summary in summaries
+            if summary.get("generation_continuation_changed") is True
+        ),
+        "best_eval_after_run_label": (
+            None if best_after is None else best_after.get("run_label")
+        ),
+        "best_eval_after_loss": (
+            None if best_after is None else best_after.get("eval_after_loss")
+        ),
+        "best_eval_loss_delta_run_label": (
+            None if best_delta is None else best_delta.get("run_label")
+        ),
+        "best_eval_loss_delta": (
+            None if best_delta is None else best_delta.get("eval_loss_delta")
+        ),
+        "summaries": summaries,
     }
 
 

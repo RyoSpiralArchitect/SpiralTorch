@@ -37,6 +37,10 @@
 - Eval reports: add `hf_gpt2_finetune_eval_report(...)`,
   `--eval-before-train`, and final run-card eval reports so local GPT-2 FT runs
   can compare eval loss/perplexity before and after training.
+- Run-card comparison: add `load_hf_gpt2_finetune_run_card(...)`,
+  `summarize_hf_gpt2_finetune_run_card(...)`, and
+  `compare_hf_gpt2_finetune_run_cards(...)` so multiple local FT runs can be
+  ranked by eval deltas, generation-sample changes, and trainer telemetry.
 - Documentation: clarify the hard dependency boundary for larger local GPT-2
   FT runs: Rust keeps tensor/nn/text/logic/frac/rl/WGPU surfaces in the wheel,
   while Python explicitly brings Transformers, Torch, datasets, pyarrow,

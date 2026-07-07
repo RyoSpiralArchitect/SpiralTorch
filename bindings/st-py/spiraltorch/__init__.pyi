@@ -352,6 +352,22 @@ def summarize_hf_gpt2_finetune_trainer_trace(
     path_or_rows: str | PathLike[str] | Sequence[Mapping[str, object]],
 ) -> Dict[str, object]: ...
 
+def load_hf_gpt2_finetune_run_card(
+    path: str | PathLike[str],
+) -> Dict[str, object]: ...
+
+def summarize_hf_gpt2_finetune_run_card(
+    card_or_path: str | PathLike[str] | Mapping[str, object],
+    *,
+    run_label: str | None = ...,
+) -> Dict[str, object]: ...
+
+def compare_hf_gpt2_finetune_run_cards(
+    cards_or_paths: Sequence[str | PathLike[str] | Mapping[str, object]],
+    *,
+    run_labels: Sequence[str] | None = ...,
+) -> Dict[str, object]: ...
+
 def hf_gpt2_finetune_trainer_trace_callback(
     path: str | PathLike[str],
     *,
@@ -8146,7 +8162,10 @@ __all__ = [
     "hf_gpt2_finetune_trainer_trace_callback",
     "hf_gpt2_finetune_trainer_trace_event",
     "hf_gpt2_finetune_zspace_probe",
+    "compare_hf_gpt2_finetune_run_cards",
+    "load_hf_gpt2_finetune_run_card",
     "load_hf_gpt2_finetune_trainer_trace",
+    "summarize_hf_gpt2_finetune_run_card",
     "summarize_hf_gpt2_finetune_trainer_trace",
     "write_hf_gpt2_finetune_run_card",
     "write_hf_gpt2_finetune_trainer_trace_event",
