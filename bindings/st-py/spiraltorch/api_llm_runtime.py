@@ -4126,9 +4126,11 @@ def _topos_sweep_report_recommendations(
     trace_comparison: Mapping[str, Any],
     adapter_winners: Mapping[str, str | None],
     response_winners: Mapping[str, str | None] | None = None,
+    selection_profiles: Mapping[str, Any] | None = None,
 ) -> list[str]:
     recommendations: list[str] = []
     response_winners = _mapping_or_empty(response_winners)
+    selection_profiles = _mapping_or_empty(selection_profiles)
     trace_winners = _mapping_or_empty(trace_comparison.get("winners"))
     best_trace = trace_winners.get("best_score")
     if best_trace:
@@ -4168,6 +4170,18 @@ def _topos_sweep_report_recommendations(
         response_latency,
     }:
         recommendations.append(f"inspect {response_tokens} for lower token use")
+    balanced = _mapping_or_empty(selection_profiles.get("balanced")).get("label")
+    quality = _mapping_or_empty(selection_profiles.get("quality")).get("label")
+    grounded = _mapping_or_empty(selection_profiles.get("grounded")).get("label")
+    latency = _mapping_or_empty(selection_profiles.get("latency")).get("label")
+    if balanced and balanced != best_trace:
+        recommendations.append(f"balanced selection profile chooses {balanced}")
+    if quality and quality not in {best_trace, balanced}:
+        recommendations.append(f"quality selection profile chooses {quality}")
+    if grounded and grounded not in {best_trace, balanced, quality}:
+        recommendations.append(f"grounded selection profile chooses {grounded}")
+    if latency and latency not in {best_trace, balanced, quality, grounded}:
+        recommendations.append(f"latency selection profile chooses {latency}")
     return recommendations
 
 
@@ -4586,6 +4600,231 @@ def _topos_sweep_response_winners(
     }
 
 
+def _topos_sweep_trace_rows(
+    trace_comparison: Mapping[str, Any],
+) -> dict[str, Mapping[str, Any]]:
+    runs = trace_comparison.get("runs")
+    if not isinstance(runs, Sequence) or isinstance(runs, (str, bytes, bytearray)):
+        return {}
+    return {
+        str(row.get("label")): row
+        for row in runs
+        if isinstance(row, Mapping) and row.get("label") not in {None, ""}
+    }
+
+
+def _topos_sweep_selection_row(
+    label: str,
+    *,
+    adapter: Mapping[str, Any],
+    response: Mapping[str, Any],
+    trace: Mapping[str, Any],
+) -> dict[str, Any]:
+    response_count = int(_finite_float(response.get("count")) or 0)
+    trace_count = int(_finite_float(trace.get("count")) or 0)
+    adapter_count = int(_finite_float(adapter.get("count")) or 0)
+    total_tokens = _response_route_stat(response, "total_tokens")
+    if total_tokens is None:
+        total_tokens = _finite_float(trace.get("total_tokens"))
+    row = {
+        "label": label,
+        "count": max(response_count, trace_count, adapter_count),
+        "trace_route_score": _finite_float(trace.get("route_score")),
+        "trace_quality_score": _finite_float(trace.get("quality_score")),
+        "trace_efficiency_score": _finite_float(trace.get("efficiency_score")),
+        "trace_text_quality_score": _finite_float(trace.get("text_quality_score")),
+        "response_text_quality_score": _response_route_stat(
+            response,
+            "text_quality_score",
+        ),
+        "response_prompt_coverage": _response_route_stat(response, "prompt_coverage"),
+        "response_completion_rate": _finite_float(response.get("completion_rate")),
+        "response_incomplete_rate": _finite_float(response.get("incomplete_rate")),
+        "response_confidence": _response_route_stat(response, "confidence"),
+        "latency_ms_mean": _response_route_stat(response, "latency_ms"),
+        "total_tokens": total_tokens,
+        "adapter_runtime_route_score": _finite_float(
+            adapter.get("runtime_route_score")
+        ),
+        "adapter_guard_score": _finite_float(adapter.get("runtime_route_guard_score")),
+        "adapter_exploration_score": _finite_float(
+            adapter.get("runtime_route_exploration_score")
+        ),
+        "adapter_context_score": _finite_float(
+            adapter.get("runtime_route_context_score")
+        ),
+        "closure_pressure": _finite_float(adapter.get("closure_pressure")),
+        "openness": _finite_float(adapter.get("openness")),
+        "context_weight": _finite_float(adapter.get("inference_plan_context_weight")),
+        "request_temperature": _finite_float(adapter.get("request_temperature")),
+        "mode": adapter.get("mode"),
+    }
+    row["selection_scores"] = {
+        profile: _topos_sweep_selection_profile_score(row, profile)
+        for profile in _SELECTION_PROFILES
+    }
+    return row
+
+
+def _topos_sweep_selection_profile_score(
+    row: Mapping[str, Any],
+    profile: str,
+) -> float:
+    trace_route = _bounded_unit(row.get("trace_route_score"))
+    trace_quality = _bounded_unit(row.get("trace_quality_score"))
+    trace_efficiency = _bounded_unit(row.get("trace_efficiency_score"))
+    response_quality = _bounded_unit(row.get("response_text_quality_score"))
+    prompt_coverage = _bounded_unit(row.get("response_prompt_coverage"))
+    completion = _bounded_unit(row.get("response_completion_rate"))
+    confidence = _bounded_unit(row.get("response_confidence"))
+    adapter_route = _bounded_unit(row.get("adapter_runtime_route_score"))
+    adapter_guard = _bounded_unit(row.get("adapter_guard_score"))
+    adapter_context = _bounded_unit(row.get("adapter_context_score"))
+    openness = _bounded_unit(row.get("openness"))
+    context_weight = _bounded_unit(row.get("context_weight"))
+    closure_reward = 1.0 - _bounded_unit(row.get("closure_pressure"))
+    latency_reward = 1.0 - _latency_cost(row)
+    token_reward = 1.0 - _token_cost(row)
+    incomplete_penalty = 0.08 * _bounded_unit(row.get("response_incomplete_rate"))
+    if profile == "quality":
+        score = (
+            0.30 * trace_quality
+            + 0.30 * response_quality
+            + 0.15 * prompt_coverage
+            + 0.10 * confidence
+            + 0.10 * completion
+            + 0.05 * adapter_route
+        )
+    elif profile == "grounded":
+        score = (
+            0.30 * response_quality
+            + 0.20 * prompt_coverage
+            + 0.20 * context_weight
+            + 0.15 * adapter_guard
+            + 0.10 * completion
+            + 0.05 * adapter_context
+        )
+    elif profile == "efficiency":
+        score = (
+            0.25 * trace_efficiency
+            + 0.20 * latency_reward
+            + 0.20 * token_reward
+            + 0.15 * response_quality
+            + 0.10 * completion
+            + 0.10 * adapter_route
+        )
+    elif profile == "latency":
+        score = (
+            0.40 * latency_reward
+            + 0.20 * token_reward
+            + 0.15 * response_quality
+            + 0.10 * completion
+            + 0.10 * trace_route
+            + 0.05 * adapter_route
+        )
+    else:
+        score = (
+            0.25 * trace_route
+            + 0.20 * adapter_route
+            + 0.20 * response_quality
+            + 0.10 * completion
+            + 0.10 * trace_efficiency
+            + 0.10 * closure_reward
+            + 0.05 * openness
+        )
+    return max(0.0, min(1.0, score - incomplete_penalty))
+
+
+def _topos_sweep_selection_rows(
+    labels: Sequence[Any],
+    adapter_rows: Sequence[Mapping[str, Any]],
+    response_route_rows: Sequence[Mapping[str, Any]],
+    trace_comparison: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    adapters = {str(row.get("label")): row for row in adapter_rows if row.get("label")}
+    responses = {
+        str(row.get("label")): row for row in response_route_rows if row.get("label")
+    }
+    traces = _topos_sweep_trace_rows(trace_comparison)
+    rows: list[dict[str, Any]] = []
+    for label in labels:
+        label_value = str(label)
+        rows.append(
+            _topos_sweep_selection_row(
+                label_value,
+                adapter=_mapping_or_empty(adapters.get(label_value)),
+                response=_mapping_or_empty(responses.get(label_value)),
+                trace=_mapping_or_empty(traces.get(label_value)),
+            )
+        )
+    return rows
+
+
+def _topos_sweep_selection_profiles(
+    rows: Sequence[Mapping[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    profiles: dict[str, dict[str, Any]] = {}
+    for profile in _SELECTION_PROFILES:
+        candidates: list[tuple[float, Mapping[str, Any]]] = []
+        for row in rows:
+            if int(row.get("count") or 0) <= 0:
+                continue
+            scores = row.get("selection_scores")
+            score = (
+                _finite_float(scores.get(profile))
+                if isinstance(scores, Mapping)
+                else None
+            )
+            if score is not None:
+                candidates.append((score, row))
+        if not candidates:
+            profiles[profile] = {"label": None, "score": 0.0}
+            continue
+        score, row = max(
+            candidates,
+            key=lambda item: (
+                item[0],
+                _finite_float(item[1].get("trace_route_score")) or 0.0,
+                str(item[1].get("label")),
+            ),
+        )
+        profiles[profile] = {
+            "label": row.get("label"),
+            "score": score,
+            "trace_route_score": _finite_float(row.get("trace_route_score")) or 0.0,
+            "trace_quality_score": _finite_float(row.get("trace_quality_score")) or 0.0,
+            "trace_efficiency_score": _finite_float(
+                row.get("trace_efficiency_score")
+            )
+            or 0.0,
+            "response_text_quality_score": _finite_float(
+                row.get("response_text_quality_score")
+            )
+            or 0.0,
+            "response_prompt_coverage": _finite_float(
+                row.get("response_prompt_coverage")
+            )
+            or 0.0,
+            "response_completion_rate": _finite_float(
+                row.get("response_completion_rate")
+            )
+            or 0.0,
+            "latency_ms_mean": _finite_float(row.get("latency_ms_mean")) or 0.0,
+            "total_tokens": _finite_float(row.get("total_tokens")) or 0.0,
+            "adapter_runtime_route_score": _finite_float(
+                row.get("adapter_runtime_route_score")
+            )
+            or 0.0,
+            "adapter_guard_score": _finite_float(row.get("adapter_guard_score")) or 0.0,
+            "adapter_context_score": _finite_float(row.get("adapter_context_score"))
+            or 0.0,
+            "closure_pressure": _finite_float(row.get("closure_pressure")),
+            "openness": _finite_float(row.get("openness")),
+            "context_weight": _finite_float(row.get("context_weight")),
+        }
+    return profiles
+
+
 def api_llm_topos_sweep_report(
     sweep: Mapping[str, Any],
     *,
@@ -4621,6 +4860,13 @@ def api_llm_topos_sweep_report(
         max_pair_rows=max_pair_rows,
     )
     response_winners = _topos_sweep_response_winners(response_route_rows)
+    selection_rows = _topos_sweep_selection_rows(
+        labels,
+        rows,
+        response_route_rows,
+        comparison,
+    )
+    selection_profiles = _topos_sweep_selection_profiles(selection_rows)
     report = {
         "kind": "spiraltorch.api_llm_topos_sweep_report",
         "source_kind": sweep.get("kind"),
@@ -4639,6 +4885,8 @@ def api_llm_topos_sweep_report(
         "response_winners": response_winners,
         "response_pair_count": len(response_pair_rows),
         "response_pair_rows": response_pair_rows,
+        "selection_rows": selection_rows,
+        "selection_profiles": selection_profiles,
         "comparison": dict(comparison),
     }
     report["recommendations"] = _topos_sweep_report_recommendations(
@@ -4646,6 +4894,7 @@ def api_llm_topos_sweep_report(
         trace_comparison=comparison,
         adapter_winners=adapter_winners,
         response_winners=response_winners,
+        selection_profiles=selection_profiles,
     )
     return report
 
@@ -4681,6 +4930,8 @@ def _topos_sweep_report_row(label: str, path: Path, report: Mapping[str, Any]) -
     comparison = _mapping_or_empty(report.get("comparison"))
     trace_winners = _mapping_or_empty(comparison.get("winners"))
     response_winners = _mapping_or_empty(report.get("response_winners"))
+    selection_profiles = _mapping_or_empty(report.get("selection_profiles"))
+    selection_winners, selection_scores = _report_profile_winners(selection_profiles)
     comparison_rows = [
         row for row in _list_from_sequence(comparison.get("runs")) if isinstance(row, Mapping)
     ]
@@ -4720,6 +4971,19 @@ def _topos_sweep_report_row(label: str, path: Path, report: Mapping[str, Any]) -
         "best_response_completion_route": response_winners.get(
             "highest_completion_rate"
         ),
+        "selection_profiles": dict(selection_profiles),
+        "selection_profile_winners": selection_winners,
+        "selection_profile_scores": selection_scores,
+        "selection_balanced_route": selection_winners.get("balanced"),
+        "selection_quality_route": selection_winners.get("quality"),
+        "selection_grounded_route": selection_winners.get("grounded"),
+        "selection_efficiency_route": selection_winners.get("efficiency"),
+        "selection_latency_route": selection_winners.get("latency"),
+        "selection_balanced_score": selection_scores.get("balanced", 0.0),
+        "selection_quality_score": selection_scores.get("quality", 0.0),
+        "selection_grounded_score": selection_scores.get("grounded", 0.0),
+        "selection_efficiency_score": selection_scores.get("efficiency", 0.0),
+        "selection_latency_score": selection_scores.get("latency", 0.0),
         "best_response_text_quality_score": (
             _stats(row.get("text_quality_score_mean") for row in response_winner_rows)[
                 "max"
@@ -4819,6 +5083,20 @@ def compare_api_llm_topos_sweep_reports(
             rows,
             "best_response_completion_rate",
         ),
+        "highest_selection_balanced_score": _winner(
+            rows,
+            "selection_balanced_score",
+        ),
+        "highest_selection_quality_score": _winner(rows, "selection_quality_score"),
+        "highest_selection_grounded_score": _winner(
+            rows,
+            "selection_grounded_score",
+        ),
+        "highest_selection_efficiency_score": _winner(
+            rows,
+            "selection_efficiency_score",
+        ),
+        "highest_selection_latency_score": _winner(rows, "selection_latency_score"),
     }
     recommendations: list[str] = []
     best = winners.get("highest_best_trace_route_score")
