@@ -182,6 +182,7 @@ def summarize_history(
         else None,
         "last_disk_margin_gb": last.get("disk_margin_gb"),
         "last_disk_status": last.get("disk_status"),
+        "last_watch_stop_reason": last.get("watch_stop_reason"),
     }
 
 
@@ -218,7 +219,8 @@ def history_lines(
             f"min_disk_free_gb={_number_text(summary.get('min_disk_free_gb'))} "
             f"last_disk_margin_gb={_number_text(summary.get('last_disk_margin_gb'))} "
             f"min_disk_margin_gb={_number_text(summary.get('min_disk_margin_gb'))} "
-            f"disk_status={_number_text(summary.get('last_disk_status'))}"
+            f"disk_status={_number_text(summary.get('last_disk_status'))} "
+            f"watch_stop_reason={_number_text(summary.get('last_watch_stop_reason'))}"
         )
     ]
     if tail <= 0:
@@ -240,7 +242,8 @@ def history_lines(
                 f"final_ready={_number_text(row.get('final_checkpoint_ready'))} "
                 f"disk_free_gb={_number_text(row.get('disk_free_gb'))} "
                 f"disk_margin_gb={_number_text(row.get('disk_margin_gb'))} "
-                f"disk_status={_number_text(row.get('disk_status'))}"
+                f"disk_status={_number_text(row.get('disk_status'))} "
+                f"watch_stop_reason={_number_text(row.get('watch_stop_reason'))}"
             )
         )
     return lines
