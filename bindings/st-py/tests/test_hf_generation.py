@@ -60,6 +60,11 @@ DISTORTION_OPENAI_SAMPLE_PATH = (
     / "examples"
     / "zspace_inference_distortion_local_gpt2_openai_sample.json"
 )
+DISTORTION_GPT5NANO_SAMPLE_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "examples"
+    / "zspace_inference_distortion_local_gpt2_gpt5nano_sample.json"
+)
 
 
 def load_generation_control_sweep_example():
@@ -328,6 +333,36 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
             summary["api_request_dropped_keys"],
             ["frequency_penalty", "presence_penalty"],
         )
+
+    def test_local_gpt2_gpt5nano_distortion_sample_is_sanitized(self) -> None:
+        sample_text = DISTORTION_GPT5NANO_SAMPLE_PATH.read_text(encoding="utf-8")
+        sample = json.loads(sample_text)
+
+        self.assertEqual(
+            sample["row_type"],
+            "zspace_inference_distortion_local_hf_gpt5nano_sample",
+        )
+        self.assertNotIn("OPENAI_API_KEY", sample_text)
+        self.assertNotIn("ANTHROPIC_API_KEY", sample_text)
+        self.assertNotIn("sk-", sample_text)
+        self.assertNotIn("resp_", sample_text)
+        self.assertNotIn("/Users/", sample_text)
+        summary = sample["summary"]
+        self.assertTrue(summary["local_changed"])
+        self.assertEqual(summary["api_model"], "gpt-5-nano")
+        self.assertEqual(summary["api_empty_text"], 0.0)
+        self.assertEqual(summary["api_request_dropped_key_count"], 4)
+        self.assertEqual(
+            summary["api_request_retry_dropped_keys"],
+            ["temperature", "top_p"],
+        )
+        self.assertEqual(
+            sample["runtime"]["api_reasoning_effort"],
+            "minimal",
+        )
+        self.assertEqual(sample["runtime"]["api_text_verbosity"], "low")
+        self.assertIn("api_retry_dropped=2", sample["compact_lines"][0])
+        self.assertIn("visible output", " ".join(sample["notes"]))
 
     def test_inference_distortion_probe_summary_flattens_local_and_api(self) -> None:
         report = {

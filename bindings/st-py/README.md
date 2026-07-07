@@ -477,6 +477,10 @@ API non-empty response, and distortion energy.
 See `examples/zspace_inference_distortion_local_gpt2_openai_sample.json` for a
 sanitized local-GPT-2 plus OpenAI Responses run that keeps the local hook/logits
 evidence while omitting API keys, response ids, and absolute local paths.
+`examples/zspace_inference_distortion_local_gpt2_gpt5nano_sample.json` shows the
+same pre-FT probe against `gpt-5-nano`, including model-rejected request knobs
+captured as `retry_dropped_keys` and the `--api-reasoning-effort minimal`
+`--api-text-verbosity low` route that keeps visible text flowing.
 After a sweep, replay its recommended setting directly with
 `--from-sweep-report runs/zspace-inference-distortion-sweep/sweep-report.json`;
 the probe imports the saved prompt/runtime plus recommended distortion config,
