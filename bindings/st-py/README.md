@@ -521,7 +521,9 @@ sweep. From Python, call `st.load_zspace_inference_distortion_sweep(...)`,
 `st.summarize_zspace_inference_distortion_sweep(...)`, or
 `st.summarize_zspace_inference_distortion_sweep_lines(...)` to recover the
 recommended config, request overrides, logits-processor kwargs, and focused
-single-probe/sweep CLI args. If you already have one or more probe artifacts,
+single-probe/sweep CLI args; single-probe summaries also expose the same
+effect/risk scores used to rank FT handoff candidates. If you already have one
+or more probe artifacts,
 `st.zspace_inference_distortion_sweep_report_from_probes(...)` promotes them to
 the same sweep-shaped report in memory, preserving request overrides,
 logits-processor kwargs, activation-hook settings, and provider request-filter

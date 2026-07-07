@@ -411,10 +411,14 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
             ["frequency_penalty", "presence_penalty"],
         )
         self.assertEqual(summary["distortion_energy"], 0.62)
+        self.assertGreater(summary["effect_score"], 0.0)
+        self.assertGreater(summary["risk_score"], 0.0)
         self.assertTrue(str(summary["probe_path"]).endswith("probe.json"))
         self.assertIn("zspace_inference_distortion_probe", lines[0])
         self.assertIn("top_changes=5", lines[0])
         self.assertIn("api_dropped=2", lines[0])
+        self.assertIn("effect=", lines[0])
+        self.assertIn("risk=", lines[0])
 
         report["probe_path"] = "memory-probe.json"
         memory_summary = summarize_zspace_inference_distortion_probe(report)

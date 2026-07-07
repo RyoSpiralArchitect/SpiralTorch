@@ -961,7 +961,7 @@ def summarize_zspace_inference_distortion_probe(
     telemetry.update(api_inference_telemetry)
     baseline_text = local.get("baseline_text")
     distorted_text = local.get("distorted_text")
-    return {
+    summary = {
         "row_type": "zspace_inference_distortion_probe_summary",
         "probe_path": source_path,
         "prompt": report.get("prompt"),
@@ -1045,6 +1045,9 @@ def summarize_zspace_inference_distortion_probe(
         ),
         "api_empty_text": _telemetry_number(telemetry, "api_llm.empty_text"),
     }
+    summary["effect_score"] = _probe_effect_score(summary)
+    summary["risk_score"] = _probe_risk_score(summary)
+    return summary
 
 
 def summarize_zspace_inference_distortion_probe_lines(
@@ -1068,6 +1071,8 @@ def summarize_zspace_inference_distortion_probe_lines(
             f"activation_events={summary.get('activation_event_count')} "
             f"api={summary.get('api_provider')} "
             f"api_dropped={summary.get('api_request_dropped_key_count')} "
+            f"effect={summary.get('effect_score')} "
+            f"risk={summary.get('risk_score')} "
             f"energy={summary.get('distortion_energy')} "
             f"temp={summary.get('request_temperature')} "
             f"top_p={summary.get('request_top_p')}"
