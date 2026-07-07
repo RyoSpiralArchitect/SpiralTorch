@@ -862,7 +862,9 @@ def _probe_payload(
     if isinstance(report_or_path, (str, Path)):
         return load_zspace_inference_distortion_probe(report_or_path), str(report_or_path)
     if isinstance(report_or_path, Mapping):
-        return dict(report_or_path), None
+        report = dict(report_or_path)
+        probe_path = report.get("probe_path")
+        return report, str(probe_path) if probe_path is not None else None
     raise TypeError("inference-distortion probe must be a Mapping or path")
 
 

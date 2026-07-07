@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import inspect
 import json
 import sys
 from pathlib import Path
@@ -148,7 +150,8 @@ def _generate_ids(
             [logits_processor]
         )
     try:
-        output_ids = model.generate(**batch, **generate_kwargs)
+        with _prepare_special_tokens_batch_size_compat(model):
+            output_ids = model.generate(**batch, **generate_kwargs)
         method = "model.generate"
         if logits_processor is not None:
             method += "+zspace_repression_softmax"
@@ -169,6 +172,50 @@ def _generate_ids(
         if logits_processor is not None:
             method += "+zspace_repression_softmax"
         return output_ids, method, f"{exc.__class__.__name__}: {exc}"
+
+
+@contextlib.contextmanager
+def _prepare_special_tokens_batch_size_compat(model: Any):
+    prepare = getattr(model, "_prepare_special_tokens", None)
+    if not callable(prepare):
+        yield False
+        return
+    try:
+        signature = inspect.signature(prepare)
+    except (TypeError, ValueError):
+        yield False
+        return
+    parameters = signature.parameters
+    accepts_batch_size = "batch_size" in parameters or any(
+        param.kind == inspect.Parameter.VAR_KEYWORD
+        for param in parameters.values()
+    )
+    if accepts_batch_size:
+        yield False
+        return
+
+    sentinel = object()
+    previous = getattr(model, "_prepare_special_tokens", sentinel)
+
+    def _compat_prepare_special_tokens(*args: Any, **kwargs: Any) -> Any:
+        kwargs.pop("batch_size", None)
+        return prepare(*args, **kwargs)
+
+    try:
+        setattr(model, "_prepare_special_tokens", _compat_prepare_special_tokens)
+    except Exception:
+        yield False
+        return
+    try:
+        yield True
+    finally:
+        try:
+            if previous is sentinel:
+                delattr(model, "_prepare_special_tokens")
+            else:
+                setattr(model, "_prepare_special_tokens", previous)
+        except Exception:
+            pass
 
 
 def _run_local_hf(args: argparse.Namespace, adapter: dict[str, Any]) -> dict[str, Any]:

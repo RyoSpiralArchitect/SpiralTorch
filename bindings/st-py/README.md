@@ -469,6 +469,27 @@ several pressure/coherence settings have been tried, call
 the artifacts by local text changes, top-token changes, activation evidence,
 API non-empty response, and distortion energy.
 
+For a reproducible pre-FT comparison, run the same probe over a small
+desire/psi/coherence grid:
+
+```bash
+PYTHONPATH=bindings/st-py python bindings/st-py/examples/zspace_inference_distortion_sweep.py \
+  --local-model runs/gpt2-small-zspace-ft \
+  --prompt "SpiralTorch is a tensor and geometry runtime that" \
+  --activation-name-contains transformer.h.0 \
+  --desire-pressure-values 0.45,0.8 \
+  --psi-total-values 0.5,0.75 \
+  --coherence-values 0.35,0.55 \
+  --out-dir runs/zspace-inference-distortion-sweep
+```
+
+The sweep writes `sweep-plan.json`, one probe artifact per setting, and
+`sweep-report.json` with comparison rows plus compact summary lines. It uses the
+keyless fake API route by default, so the local-HF hook path can be checked
+first. Add `--api-provider openai-responses|openai-chat|anthropic` plus
+`--api-model <model>` to replay the exact same distortion grid against a live
+API model.
+
 For the first real FT pass on a new corpus, use the sweep runner to make that
 comparison reproducible:
 

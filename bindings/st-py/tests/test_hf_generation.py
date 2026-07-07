@@ -37,12 +37,44 @@ SWEEP_EXAMPLE_PATH = (
     / "examples"
     / "hf_gpt2_zspace_generation_control_sweep.py"
 )
+DISTORTION_PROBE_EXAMPLE_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "examples"
+    / "zspace_inference_distortion_probe.py"
+)
+DISTORTION_SWEEP_EXAMPLE_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "examples"
+    / "zspace_inference_distortion_sweep.py"
+)
 
 
 def load_generation_control_sweep_example():
     spec = importlib.util.spec_from_file_location(
         "hf_gpt2_zspace_generation_control_sweep_test",
         SWEEP_EXAMPLE_PATH,
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_distortion_probe_example():
+    spec = importlib.util.spec_from_file_location(
+        "zspace_inference_distortion_probe_test",
+        DISTORTION_PROBE_EXAMPLE_PATH,
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_distortion_sweep_example():
+    spec = importlib.util.spec_from_file_location(
+        "zspace_inference_distortion_sweep_test",
+        DISTORTION_SWEEP_EXAMPLE_PATH,
     )
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -329,8 +361,13 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         self.assertEqual(summary["api_provider"], "fake")
         self.assertEqual(summary["api_total_tokens"], 56.0)
         self.assertEqual(summary["distortion_energy"], 0.62)
+        self.assertTrue(str(summary["probe_path"]).endswith("probe.json"))
         self.assertIn("zspace_inference_distortion_probe", lines[0])
         self.assertIn("top_changes=5", lines[0])
+
+        report["probe_path"] = "memory-probe.json"
+        memory_summary = summarize_zspace_inference_distortion_probe(report)
+        self.assertEqual(memory_summary["probe_path"], "memory-probe.json")
 
     def test_inference_distortion_probe_comparison_ranks_effect(self) -> None:
         weak = {
@@ -405,6 +442,90 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         )
         self.assertIn("recommended=strong", lines[0])
         self.assertIn("label=strong", lines[1])
+
+    def test_inference_distortion_sweep_dry_run_writes_plan(self) -> None:
+        module = load_distortion_sweep_example()
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "sweep"
+            args = module.parse_args(
+                [
+                    "--dry-run",
+                    "--out-dir",
+                    str(out_dir),
+                    "--prompt",
+                    "SpiralTorch sweep",
+                    "--desire-pressure-values",
+                    "0.4,0.8",
+                    "--psi-total-values",
+                    "0.5",
+                ]
+            )
+            runs = module.build_sweep_runs(args)
+            report = module.run_sweep(args)
+            plan = json.loads((out_dir / "sweep-plan.json").read_text())
+
+        self.assertEqual(len(runs), 2)
+        self.assertEqual(report["status"], "planned")
+        self.assertEqual(report["run_count"], 2)
+        self.assertEqual(plan["run_count"], 2)
+        self.assertIn("dp0p4", runs[0]["name"])
+        self.assertIn("dp0p8", runs[1]["name"])
+        self.assertEqual(plan["runtime"]["api_provider"], "fake")
+
+    def test_inference_distortion_probe_generate_compat_drops_batch_size(self) -> None:
+        module = load_distortion_probe_example()
+
+        class DummyModel:
+            def _prepare_special_tokens(self, generation_config, device=None):
+                return {"generation_config": generation_config, "device": device}
+
+        model = DummyModel()
+        with self.assertRaises(TypeError):
+            model._prepare_special_tokens("cfg", batch_size=1)
+
+        with module._prepare_special_tokens_batch_size_compat(model) as installed:
+            self.assertTrue(installed)
+            self.assertEqual(
+                model._prepare_special_tokens("cfg", device="cpu", batch_size=1),
+                {"generation_config": "cfg", "device": "cpu"},
+            )
+
+        with self.assertRaises(TypeError):
+            model._prepare_special_tokens("cfg", batch_size=1)
+
+    def test_inference_distortion_sweep_runs_fake_api_and_compares(self) -> None:
+        module = load_distortion_sweep_example()
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "sweep"
+            args = module.parse_args(
+                [
+                    "--out-dir",
+                    str(out_dir),
+                    "--prompt",
+                    "SpiralTorch sweep",
+                    "--desire-pressure-values",
+                    "0.4,0.8",
+                    "--psi-total-values",
+                    "0.5",
+                    "--top-n",
+                    "2",
+                ]
+            )
+            report = module.run_sweep(args)
+            stored_report = json.loads((out_dir / "sweep-report.json").read_text())
+            first_probe_exists = Path(stored_report["runs"][0]["probe_path"]).exists()
+
+        self.assertEqual(report["status"], "complete")
+        self.assertEqual(report["completed_run_count"], 2)
+        self.assertEqual(stored_report["comparison"]["probe_count"], 2)
+        self.assertEqual(len(stored_report["comparison"]["top_probes"]), 2)
+        self.assertIn("summary_lines", stored_report)
+        self.assertTrue(first_probe_exists)
+        self.assertTrue(stored_report["runs"][0]["summary"]["probe_path"])
+        self.assertEqual(
+            stored_report["comparison"]["top_probes"][0]["api_provider"],
+            "fake",
+        )
 
 
 class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
