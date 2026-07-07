@@ -827,9 +827,11 @@ result = st.run_api_llm_topos_sweep(
     context_prompt=True,
     create_session=False,
     jsonl_dir="/tmp/spiraltorch-topos-sweep",
+    report_out="/tmp/spiraltorch-topos-sweep/report.json",
 )
 
 print(result["labels"], result["comparison"]["topos_context"]["observed_run_rate"])
+print(st.compare_api_llm_topos_sweep_reports(result["report_path"])["winners"])
 ```
 
 ### 6) Zero-copy tensor exchange via DLPack

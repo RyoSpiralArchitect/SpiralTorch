@@ -40,6 +40,7 @@ __all__ = [
     "api_llm_wasm_context_partials",
     "compare_api_llm_matrix_reports",
     "compare_api_llm_trace_runs",
+    "compare_api_llm_topos_sweep_reports",
     "format_api_llm_context_prompt",
     "load_api_llm_trace_events",
     "make_anthropic_messages_invoke",
@@ -49,6 +50,7 @@ __all__ = [
     "run_api_llm_prompt_suite_matrix",
     "run_api_llm_topos_sweep",
     "summarize_api_llm_trace_events",
+    "api_llm_topos_sweep_report",
     "topos_runtime_adapter",
     "topos_runtime_request",
     "topos_runtime_route",
@@ -4041,6 +4043,269 @@ def run_api_llm_prompt_suite_matrix(
     }
 
 
+def _mapping_or_empty(value: Any) -> Mapping[str, Any]:
+    return value if isinstance(value, Mapping) else {}
+
+
+def _topos_adapter_report_row(label: str, adapter: Mapping[str, Any]) -> dict[str, Any]:
+    signal = _mapping_or_empty(adapter.get("signal"))
+    request = _mapping_or_empty(adapter.get("request"))
+    profile = _mapping_or_empty(adapter.get("runtime_profile"))
+    route = _mapping_or_empty(adapter.get("runtime_route"))
+    scores = _mapping_or_empty(route.get("scores"))
+    inference_plan = _mapping_or_empty(adapter.get("inference_plan"))
+    context_partial = _mapping_or_empty(adapter.get("context_partial"))
+    return {
+        "label": label,
+        "count": 1,
+        "origin": context_partial.get("origin"),
+        "mode": route.get("mode"),
+        "mode_id": _finite_float(route.get("mode_id")),
+        "score_key": route.get("score_key"),
+        "learning_action": route.get("learning_action"),
+        "inference_action": route.get("inference_action"),
+        "runtime_route_score": _finite_float(route.get("score")),
+        "runtime_route_training_score": _finite_float(scores.get("training")),
+        "runtime_route_inference_score": _finite_float(scores.get("inference")),
+        "runtime_route_guard_score": _finite_float(scores.get("guard")),
+        "runtime_route_exploration_score": _finite_float(scores.get("exploration")),
+        "runtime_route_context_score": _finite_float(scores.get("context")),
+        "request_temperature": _finite_float(request.get("temperature")),
+        "request_top_p": _finite_float(request.get("top_p")),
+        "request_frequency_penalty": _finite_float(request.get("frequency_penalty")),
+        "request_presence_penalty": _finite_float(request.get("presence_penalty")),
+        "inference_plan_temperature": _finite_float(inference_plan.get("temperature")),
+        "inference_plan_top_p": _finite_float(inference_plan.get("top_p")),
+        "inference_plan_context_weight": _finite_float(
+            inference_plan.get("context_weight")
+        ),
+        "closure_pressure": _finite_float(signal.get("closure_pressure")),
+        "openness": _finite_float(signal.get("openness")),
+        "guard_strength": _finite_float(signal.get("guard_strength")),
+        "exploration_hint": _finite_float(signal.get("exploration_hint")),
+        "learning_rate_scale": _finite_float(signal.get("learning_rate_scale")),
+        "temperature_scale": _finite_float(signal.get("temperature_scale")),
+        "runtime_control_energy": _finite_float(profile.get("control_energy")),
+        "runtime_closure_risk": _finite_float(profile.get("closure_risk")),
+        "runtime_exploration_budget": _finite_float(profile.get("exploration_budget")),
+        "runtime_training_rate_scale": _finite_float(profile.get("training_rate_scale")),
+        "runtime_inference_temperature": _finite_float(
+            profile.get("inference_temperature")
+        ),
+        "runtime_inference_context_weight": _finite_float(
+            profile.get("inference_context_weight")
+        ),
+    }
+
+
+def _topos_sweep_adapter_winners(rows: Sequence[Mapping[str, Any]]) -> dict[str, str | None]:
+    return {
+        "highest_runtime_route_score": _winner(rows, "runtime_route_score"),
+        "highest_guard_score": _winner(rows, "runtime_route_guard_score"),
+        "highest_exploration_score": _winner(rows, "runtime_route_exploration_score"),
+        "highest_context_score": _winner(rows, "runtime_route_context_score"),
+        "lowest_closure_pressure": _winner(
+            rows,
+            "closure_pressure",
+            higher_is_better=False,
+        ),
+        "highest_openness": _winner(rows, "openness"),
+        "lowest_request_temperature": _winner(
+            rows,
+            "request_temperature",
+            higher_is_better=False,
+        ),
+        "highest_request_temperature": _winner(rows, "request_temperature"),
+        "highest_context_weight": _winner(rows, "inference_plan_context_weight"),
+    }
+
+
+def _topos_sweep_report_recommendations(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    trace_comparison: Mapping[str, Any],
+    adapter_winners: Mapping[str, str | None],
+) -> list[str]:
+    recommendations: list[str] = []
+    trace_winners = _mapping_or_empty(trace_comparison.get("winners"))
+    best_trace = trace_winners.get("best_score")
+    if best_trace:
+        recommendations.append(f"prefer {best_trace} for the highest traced route score")
+    best_adapter = adapter_winners.get("highest_runtime_route_score")
+    if best_adapter and best_adapter != best_trace:
+        recommendations.append(
+            f"inspect {best_adapter} for the strongest topological route posture"
+        )
+    mode_counts = _count_labels(row.get("mode") for row in rows)
+    if len(mode_counts) > 1:
+        modes = ", ".join(f"{mode}:{count}" for mode, count in mode_counts.items())
+        recommendations.append(f"sweep covered multiple runtime modes ({modes})")
+    lowest_closure = adapter_winners.get("lowest_closure_pressure")
+    if lowest_closure and lowest_closure != best_trace:
+        recommendations.append(
+            f"inspect {lowest_closure} for lower open-topos closure pressure"
+        )
+    hottest = adapter_winners.get("highest_request_temperature")
+    coolest = adapter_winners.get("lowest_request_temperature")
+    if hottest and coolest and hottest != coolest:
+        recommendations.append(
+            f"compare sampling spread between cool {coolest} and hot {hottest}"
+        )
+    return recommendations
+
+
+def api_llm_topos_sweep_report(
+    sweep: Mapping[str, Any],
+    *,
+    created_at: str | None = None,
+) -> dict[str, Any]:
+    """Build a compact, serializable report from a topos sweep result."""
+
+    adapters = _mapping_or_empty(sweep.get("adapters"))
+    rows = [
+        _topos_adapter_report_row(str(label), adapter)
+        for label, adapter in adapters.items()
+        if isinstance(adapter, Mapping)
+    ]
+    comparison = _mapping_or_empty(sweep.get("comparison"))
+    adapter_winners = _topos_sweep_adapter_winners(rows)
+    mode_counts = _count_labels(row.get("mode") for row in rows)
+    report = {
+        "kind": "spiraltorch.api_llm_topos_sweep_report",
+        "source_kind": sweep.get("kind"),
+        "created_at": created_at,
+        "prompt_count": int(_finite_float(sweep.get("prompt_count")) or 0),
+        "route_count": len(rows),
+        "labels": [str(label) for label in _list_from_sequence(sweep.get("labels"))],
+        "jsonl_dir": sweep.get("jsonl_dir"),
+        "trace_paths": dict(_mapping_or_empty(sweep.get("trace_paths"))),
+        "mode_counts": mode_counts,
+        "adapter_rows": rows,
+        "adapter_winners": adapter_winners,
+        "comparison": dict(comparison),
+    }
+    report["recommendations"] = _topos_sweep_report_recommendations(
+        rows,
+        trace_comparison=comparison,
+        adapter_winners=adapter_winners,
+    )
+    return report
+
+
+def _topos_sweep_report_rows(report: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    rows = report.get("adapter_rows")
+    if not isinstance(rows, Sequence) or isinstance(rows, (str, bytes, bytearray)):
+        return []
+    return [row for row in rows if isinstance(row, Mapping)]
+
+
+def _topos_sweep_report_row(label: str, path: Path, report: Mapping[str, Any]) -> dict[str, Any]:
+    rows = _topos_sweep_report_rows(report)
+    comparison = _mapping_or_empty(report.get("comparison"))
+    trace_winners = _mapping_or_empty(comparison.get("winners"))
+    comparison_rows = [
+        row for row in _list_from_sequence(comparison.get("runs")) if isinstance(row, Mapping)
+    ]
+    route_scores = [
+        value
+        for value in (
+            _finite_float(row.get("route_score")) for row in comparison_rows
+        )
+        if value is not None
+    ]
+    temperatures = [
+        value
+        for value in (_finite_float(row.get("request_temperature")) for row in rows)
+        if value is not None
+    ]
+    mode_counts = report.get("mode_counts")
+    mode_counts_map = dict(mode_counts) if isinstance(mode_counts, Mapping) else {}
+    return {
+        "label": label,
+        "path": str(path),
+        "count": int(_finite_float(report.get("route_count")) or len(rows)),
+        "prompt_count": int(_finite_float(report.get("prompt_count")) or 0),
+        "route_count": int(_finite_float(report.get("route_count")) or len(rows)),
+        "mode_counts": mode_counts_map,
+        "mode_count": len(mode_counts_map),
+        "best_trace_route": trace_winners.get("best_score"),
+        "best_adapter_route": _mapping_or_empty(report.get("adapter_winners")).get(
+            "highest_runtime_route_score"
+        ),
+        "best_trace_route_score": max(route_scores) if route_scores else 0.0,
+        "adapter_runtime_route_score_mean": _stats(
+            row.get("runtime_route_score") for row in rows
+        )["mean"],
+        "adapter_runtime_route_score_max": _stats(
+            row.get("runtime_route_score") for row in rows
+        )["max"],
+        "closure_pressure_min": _stats(row.get("closure_pressure") for row in rows)[
+            "min"
+        ],
+        "openness_max": _stats(row.get("openness") for row in rows)["max"],
+        "request_temperature_min": min(temperatures) if temperatures else 0.0,
+        "request_temperature_max": max(temperatures) if temperatures else 0.0,
+        "request_temperature_range": (
+            max(temperatures) - min(temperatures) if temperatures else 0.0
+        ),
+    }
+
+
+def compare_api_llm_topos_sweep_reports(
+    reports: Mapping[str, str | Path] | Sequence[str | Path] | str | Path,
+    *,
+    labels: Sequence[str] | None = None,
+) -> dict[str, Any]:
+    """Compare compact reports written by API LLM topos sweeps."""
+
+    entries = _report_entries(reports, labels=labels)
+    rows: list[dict[str, Any]] = []
+    for label, path in entries:
+        rows.append(_topos_sweep_report_row(label, path, _read_json_mapping(path)))
+    rows.sort(
+        key=lambda row: (
+            _finite_float(row.get("best_trace_route_score")) or 0.0,
+            _finite_float(row.get("adapter_runtime_route_score_mean")) or 0.0,
+            str(row.get("label")),
+        ),
+        reverse=True,
+    )
+    winners = {
+        "highest_best_trace_route_score": _winner(rows, "best_trace_route_score"),
+        "highest_adapter_runtime_route_score": _winner(
+            rows,
+            "adapter_runtime_route_score_mean",
+        ),
+        "lowest_closure_pressure": _winner(
+            rows,
+            "closure_pressure_min",
+            higher_is_better=False,
+        ),
+        "highest_openness": _winner(rows, "openness_max"),
+        "widest_temperature_range": _winner(rows, "request_temperature_range"),
+        "most_runtime_modes": _winner(rows, "mode_count"),
+    }
+    recommendations: list[str] = []
+    best = winners.get("highest_best_trace_route_score")
+    if best:
+        recommendations.append(f"prefer {best} for the strongest traced topos sweep")
+    topology_best = winners.get("highest_adapter_runtime_route_score")
+    if topology_best and topology_best != best:
+        recommendations.append(
+            f"inspect {topology_best} for stronger adapter-side route posture"
+        )
+    widest = winners.get("widest_temperature_range")
+    if widest:
+        recommendations.append(f"{widest} spans the widest sampling-control range")
+    return {
+        "kind": "spiraltorch.api_llm_topos_sweep_report_comparison",
+        "count": len(rows),
+        "rows": rows,
+        "winners": winners,
+        "recommendations": recommendations,
+    }
+
+
 def run_api_llm_topos_sweep(
     prompts: Iterable[str],
     invoke: Callable[..., Any],
@@ -4066,6 +4331,7 @@ def run_api_llm_topos_sweep(
     request_kwargs: Mapping[str, Mapping[str, Any]] | None = None,
     labels: Sequence[str] | None = None,
     near_best_tolerance: float = 0.02,
+    report_out: str | Path | None = None,
     clear: bool = True,
     **kwargs: Any,
 ) -> dict[str, Any]:
@@ -4139,7 +4405,7 @@ def run_api_llm_topos_sweep(
         if trace_paths
         else None
     )
-    return {
+    result = {
         "kind": "spiraltorch.api_llm_topos_sweep",
         "count": len(suites),
         "prompt_count": len(prompt_list),
@@ -4150,3 +4416,14 @@ def run_api_llm_topos_sweep(
         "suites": suites,
         "comparison": comparison,
     }
+    if report_out is not None:
+        report = api_llm_topos_sweep_report(result)
+        report_path = Path(report_out)
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(
+            json.dumps(report, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+        result["report"] = report
+        result["report_path"] = str(report_path)
+    return result

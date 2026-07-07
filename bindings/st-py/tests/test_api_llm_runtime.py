@@ -12,9 +12,11 @@ def test_api_llm_runtime_exports_from_top_level() -> None:
     assert "ApiLLMZSpaceRuntime" in st.__all__
     assert "api_llm_geometry_context_partials" in st.__all__
     assert "api_llm_partial_from_response" in st.__all__
+    assert "api_llm_topos_sweep_report" in st.__all__
     assert "api_llm_wasm_context_partials" in st.__all__
     assert "compare_api_llm_matrix_reports" in st.__all__
     assert "compare_api_llm_trace_runs" in st.__all__
+    assert "compare_api_llm_topos_sweep_reports" in st.__all__
     assert "format_api_llm_context_prompt" in st.__all__
     assert "load_api_llm_trace_events" in st.__all__
     assert "make_anthropic_messages_invoke" in st.__all__
@@ -1288,6 +1290,7 @@ def test_run_api_llm_prompt_suite_matrix_compares_providers(tmp_path) -> None:
 
 def test_run_api_llm_topos_sweep_compares_runtime_routes(tmp_path) -> None:
     calls: list[tuple[str, dict[str, object]]] = []
+    report_path = tmp_path / "topos-sweep-report.json"
 
     def fake_api(prompt: str, **request_kwargs: object) -> dict[str, object]:
         calls.append((prompt, dict(request_kwargs)))
@@ -1339,6 +1342,7 @@ def test_run_api_llm_topos_sweep_compares_runtime_routes(tmp_path) -> None:
         context_prompt=True,
         context_prompt_options={"max_telemetry": 64},
         near_best_tolerance=1.0,
+        report_out=report_path,
     )
 
     assert result["kind"] == "spiraltorch.api_llm_topos_sweep"
@@ -1372,6 +1376,29 @@ def test_run_api_llm_topos_sweep_compares_runtime_routes(tmp_path) -> None:
     assert comparison["kind"] == "spiraltorch.api_llm_trace_comparison"
     assert comparison["count"] == 2
     assert comparison["topos_context"]["observed_run_rate"] == pytest.approx(1.0)
+    assert result["report_path"] == str(report_path)
+
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["kind"] == "spiraltorch.api_llm_topos_sweep_report"
+    assert report["route_count"] == 2
+    assert report["mode_counts"] == {"exploratory": 1, "guarded": 1}
+    assert report["adapter_winners"]["highest_guard_score"] == "guarded"
+    assert report["adapter_winners"]["highest_request_temperature"] == "open"
+    rows = {row["label"]: row for row in report["adapter_rows"]}
+    assert rows["open"]["mode"] == "exploratory"
+    assert rows["guarded"]["mode"] == "guarded"
+    assert rows["open"]["request_temperature"] == pytest.approx(
+        open_request["temperature"]
+    )
+    assert any("multiple runtime modes" in item for item in report["recommendations"])
+
+    report_from_memory = st.api_llm_topos_sweep_report(result)
+    assert report_from_memory["adapter_winners"] == report["adapter_winners"]
+    report_comparison = st.compare_api_llm_topos_sweep_reports({"demo": report_path})
+    assert report_comparison["kind"] == "spiraltorch.api_llm_topos_sweep_report_comparison"
+    assert report_comparison["rows"][0]["label"] == "demo"
+    assert report_comparison["rows"][0]["mode_count"] == 2
+    assert report_comparison["winners"]["widest_temperature_range"] == "demo"
 
 
 def test_compare_api_llm_matrix_reports_tracks_stable_profile_winners(tmp_path) -> None:
