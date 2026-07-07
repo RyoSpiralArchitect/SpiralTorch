@@ -16,6 +16,7 @@ __all__ = [
     "build_zspace_repression_logits_processor",
     "build_zspace_softmax_logits_processor",
     "compare_zspace_inference_distortion_probes",
+    "compare_zspace_generation_control_sweeps",
     "zspace_inference_distortion_sweep_report_from_probes",
     "zspace_inference_distortion_probe_cli_args",
     "zspace_inference_distortion_sweep_cli_args",
@@ -32,6 +33,7 @@ __all__ = [
     "summarize_zspace_inference_distortion_sweep_lines",
     "summarize_zspace_generation_control_run",
     "summarize_zspace_generation_control_sweep",
+    "summarize_zspace_generation_control_sweep_comparison_lines",
     "summarize_zspace_generation_control_sweep_lines",
     "zspace_inference_distortion_processor_kwargs",
 ]
@@ -2359,6 +2361,293 @@ def summarize_zspace_generation_control_sweep(
         "top_runs": top_runs,
         "summaries": summaries,
     }
+
+
+def _mean_safe_numbers(values: Sequence[object]) -> float | None:
+    numbers = [
+        float(value)
+        for item in values
+        if (value := _safe_number(item)) is not None
+    ]
+    if not numbers:
+        return None
+    return sum(numbers) / len(numbers)
+
+
+def _sum_safe_numbers(values: Sequence[object]) -> float:
+    return sum(
+        float(value)
+        for item in values
+        if (value := _safe_number(item)) is not None
+    )
+
+
+def _default_sweep_label(source: object, *, index: int) -> str:
+    if isinstance(source, (str, Path)):
+        stem = Path(source).stem
+        if stem:
+            return stem
+    return f"sweep-{index + 1}"
+
+
+def _generation_control_sweep_sources(
+    sweeps_or_paths: Mapping[str, object] | Sequence[object],
+    *,
+    labels: Sequence[str] | None,
+) -> list[tuple[str, object]]:
+    if isinstance(sweeps_or_paths, Mapping):
+        return [(str(label), source) for label, source in sweeps_or_paths.items()]
+    if isinstance(sweeps_or_paths, Sequence) and not isinstance(
+        sweeps_or_paths,
+        (str, bytes),
+    ):
+        label_values = list(labels or [])
+        return [
+            (
+                str(label_values[index])
+                if index < len(label_values)
+                else _default_sweep_label(source, index=index),
+                source,
+            )
+            for index, source in enumerate(sweeps_or_paths)
+        ]
+    raise TypeError("generation-control sweeps must be a mapping or sequence")
+
+
+def _generation_control_model_rows(
+    rows: Sequence[Mapping[str, object]],
+) -> list[dict[str, object]]:
+    grouped: dict[str, list[Mapping[str, object]]] = {}
+    for row in rows:
+        model_name = str(row.get("model_name") or "unknown")
+        grouped.setdefault(model_name, []).append(row)
+    model_rows = []
+    for model_name, group in grouped.items():
+        model_rows.append(
+            {
+                "model_name": model_name,
+                "sweep_count": len(group),
+                "prompt_count": len({str(row.get("prompt")) for row in group}),
+                "changed_from_baseline_total": _sum_safe_numbers(
+                    [row.get("changed_from_baseline_count") for row in group]
+                ),
+                "zspace_helped_count": sum(
+                    1
+                    for row in group
+                    if (
+                        (delta := _safe_number(
+                            row.get("best_loop_score_delta_from_baseline")
+                        ))
+                        is not None
+                        and float(delta) < 0.0
+                    )
+                ),
+                "mean_baseline_loop_score": _mean_safe_numbers(
+                    [row.get("baseline_loop_score") for row in group]
+                ),
+                "mean_best_loop_score": _mean_safe_numbers(
+                    [row.get("best_loop_score") for row in group]
+                ),
+                "mean_loop_score_delta_from_baseline": _mean_safe_numbers(
+                    [row.get("best_loop_score_delta_from_baseline") for row in group]
+                ),
+                "mean_loop_score_reduction_ratio": _mean_safe_numbers(
+                    [row.get("best_loop_score_reduction_ratio") for row in group]
+                ),
+                "max_top_token_changed_count": max(
+                    [
+                        float(value)
+                        for row in group
+                        if (
+                            value := _safe_number(
+                                row.get("max_top_token_changed_count")
+                            )
+                        )
+                        is not None
+                    ],
+                    default=None,
+                ),
+            }
+        )
+    return sorted(model_rows, key=lambda row: str(row.get("model_name") or ""))
+
+
+def _ranked_generation_sweep_rows(
+    rows: Sequence[Mapping[str, object]],
+    *,
+    top_n: int,
+) -> list[dict[str, object]]:
+    def sort_key(row: Mapping[str, object]) -> tuple[float, float, str]:
+        reduction = _safe_number(row.get("best_loop_score_reduction_ratio"))
+        best_loop = _safe_number(row.get("best_loop_score"))
+        return (
+            math.inf if reduction is None else -float(reduction),
+            math.inf if best_loop is None else float(best_loop),
+            str(row.get("label") or ""),
+        )
+
+    ranked = sorted(rows, key=sort_key)
+    if top_n >= 0:
+        ranked = ranked[:top_n]
+    return [dict(row, rank=index) for index, row in enumerate(ranked, 1)]
+
+
+def compare_zspace_generation_control_sweeps(
+    sweeps_or_paths: Mapping[str, object] | Sequence[object],
+    *,
+    labels: Sequence[str] | None = None,
+    top_n: int = 5,
+) -> dict[str, object]:
+    """Compare Z-Space generation-control sweeps across prompts or models."""
+
+    if top_n < 0:
+        raise ValueError("top_n must be non-negative")
+    sources = _generation_control_sweep_sources(
+        sweeps_or_paths,
+        labels=labels,
+    )
+    rows = []
+    for label, source in sources:
+        summary = summarize_zspace_generation_control_sweep(source, top_n=top_n)
+        rows.append(dict(summary, label=label))
+
+    top_sweeps = _ranked_generation_sweep_rows(rows, top_n=top_n)
+    best_reduction = top_sweeps[0] if top_sweeps else None
+    best_loop = min(
+        rows,
+        key=lambda row: (
+            math.inf
+            if _safe_number(row.get("best_loop_score")) is None
+            else float(_safe_number(row.get("best_loop_score"))),
+            str(row.get("label") or ""),
+        ),
+        default=None,
+    )
+    baseline_loop_values = [
+        float(value)
+        for row in rows
+        if (value := _safe_number(row.get("baseline_loop_score"))) is not None
+    ]
+    return {
+        "row_type": "zspace_generation_control_sweep_comparison",
+        "sweep_count": len(rows),
+        "completed_sweep_count": sum(
+            1 for row in rows if row.get("status") == "complete"
+        ),
+        "prompt_count": len({str(row.get("prompt")) for row in rows}),
+        "model_count": len({str(row.get("model_name")) for row in rows}),
+        "labels": ",".join(str(row.get("label")) for row in rows),
+        "changed_from_baseline_total": _sum_safe_numbers(
+            [row.get("changed_from_baseline_count") for row in rows]
+        ),
+        "zspace_helped_count": sum(
+            1
+            for row in rows
+            if (
+                (delta := _safe_number(row.get("best_loop_score_delta_from_baseline")))
+                is not None
+                and float(delta) < 0.0
+            )
+        ),
+        "mean_baseline_loop_score": _mean_safe_numbers(
+            [row.get("baseline_loop_score") for row in rows]
+        ),
+        "mean_best_loop_score": _mean_safe_numbers(
+            [row.get("best_loop_score") for row in rows]
+        ),
+        "mean_loop_score_delta_from_baseline": _mean_safe_numbers(
+            [row.get("best_loop_score_delta_from_baseline") for row in rows]
+        ),
+        "mean_loop_score_reduction_ratio": _mean_safe_numbers(
+            [row.get("best_loop_score_reduction_ratio") for row in rows]
+        ),
+        "max_baseline_loop_score": (
+            max(baseline_loop_values) if baseline_loop_values else None
+        ),
+        "max_top_token_changed_count": max(
+            [
+                float(value)
+                for row in rows
+                if (value := _safe_number(row.get("max_top_token_changed_count")))
+                is not None
+            ],
+            default=None,
+        ),
+        "recommended_sweep_label": (
+            None if best_reduction is None else best_reduction.get("label")
+        ),
+        "recommended_reason": (
+            None
+            if best_reduction is None
+            else "highest_loop_reduction_lowest_loop_tiebreak"
+        ),
+        "best_loop_score_label": None if best_loop is None else best_loop.get("label"),
+        "best_loop_score": None if best_loop is None else best_loop.get("best_loop_score"),
+        "model_rows": _generation_control_model_rows(rows),
+        "top_sweeps": top_sweeps,
+        "summaries": rows,
+    }
+
+
+def summarize_zspace_generation_control_sweep_comparison_lines(
+    comparison_or_sweeps: Mapping[str, object] | Sequence[object],
+    *,
+    top_n: int = 3,
+) -> list[str]:
+    """Render concise lines for multiple generation-control sweeps."""
+
+    comparison = (
+        dict(comparison_or_sweeps)
+        if isinstance(comparison_or_sweeps, Mapping)
+        and comparison_or_sweeps.get("row_type")
+        == "zspace_generation_control_sweep_comparison"
+        else compare_zspace_generation_control_sweeps(
+            comparison_or_sweeps,
+            top_n=top_n,
+        )
+    )
+    lines = [
+        (
+            "zspace_generation_control_compare "
+            f"sweeps={comparison.get('completed_sweep_count')}/"
+            f"{comparison.get('sweep_count')} "
+            f"prompts={comparison.get('prompt_count')} "
+            f"models={comparison.get('model_count')} "
+            f"helped={comparison.get('zspace_helped_count')} "
+            f"mean_baseline_loop={comparison.get('mean_baseline_loop_score')} "
+            f"mean_best_loop={comparison.get('mean_best_loop_score')} "
+            f"mean_delta={comparison.get('mean_loop_score_delta_from_baseline')} "
+            f"recommend={comparison.get('recommended_sweep_label')}"
+        )
+    ]
+    for row in comparison.get("model_rows", []):
+        if not isinstance(row, Mapping):
+            continue
+        lines.append(
+            "zspace_generation_control_model "
+            f"model={row.get('model_name')} "
+            f"sweeps={row.get('sweep_count')} "
+            f"helped={row.get('zspace_helped_count')} "
+            f"mean_baseline_loop={row.get('mean_baseline_loop_score')} "
+            f"mean_best_loop={row.get('mean_best_loop_score')} "
+            f"mean_delta={row.get('mean_loop_score_delta_from_baseline')} "
+            f"mean_reduction={row.get('mean_loop_score_reduction_ratio')}"
+        )
+    for row in comparison.get("top_sweeps", [])[:top_n]:
+        if not isinstance(row, Mapping):
+            continue
+        lines.append(
+            "zspace_generation_control_compare_top "
+            f"rank={row.get('rank')} "
+            f"label={row.get('label')} "
+            f"model={row.get('model_name')} "
+            f"loop={row.get('best_loop_score')} "
+            f"baseline_loop={row.get('baseline_loop_score')} "
+            f"delta={row.get('best_loop_score_delta_from_baseline')} "
+            f"reduction={row.get('best_loop_score_reduction_ratio')} "
+            f"top_changes={row.get('max_top_token_changed_count')}"
+        )
+    return lines
 
 
 def summarize_zspace_generation_control_sweep_lines(

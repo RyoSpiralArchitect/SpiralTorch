@@ -501,6 +501,19 @@ def summarize_zspace_generation_control_sweep(
     top_n: int = ...,
 ) -> Dict[str, object]: ...
 
+def compare_zspace_generation_control_sweeps(
+    sweeps_or_paths: Mapping[str, object] | Sequence[object],
+    *,
+    labels: Sequence[str] | None = ...,
+    top_n: int = ...,
+) -> Dict[str, object]: ...
+
+def summarize_zspace_generation_control_sweep_comparison_lines(
+    comparison_or_sweeps: Mapping[str, object] | Sequence[object],
+    *,
+    top_n: int = ...,
+) -> List[str]: ...
+
 def summarize_zspace_generation_control_sweep_lines(
     report_or_path: str | PathLike[str] | Mapping[str, object],
     *,
@@ -8493,6 +8506,8 @@ __all__ = [
     "summarize_zspace_inference_distortion_sweep_lines",
     "summarize_zspace_generation_control_run",
     "summarize_zspace_generation_control_sweep",
+    "compare_zspace_generation_control_sweeps",
+    "summarize_zspace_generation_control_sweep_comparison_lines",
     "summarize_zspace_generation_control_sweep_lines",
     "zspace_inference_distortion_processor_kwargs",
     "from_dlpack",

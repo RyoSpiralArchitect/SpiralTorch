@@ -15,6 +15,7 @@ from spiraltorch.hf_generation import (
     ZSpaceRepressionLogitsProcessor,
     build_zspace_activation_probe_hook,
     compare_zspace_inference_distortion_probes,
+    compare_zspace_generation_control_sweeps,
     load_zspace_inference_distortion_probe,
     load_zspace_inference_distortion_sweep,
     load_zspace_generation_control_sweep,
@@ -24,6 +25,7 @@ from spiraltorch.hf_generation import (
     summarize_zspace_inference_distortion_sweep,
     summarize_zspace_inference_distortion_sweep_lines,
     summarize_zspace_generation_control_sweep,
+    summarize_zspace_generation_control_sweep_comparison_lines,
     summarize_zspace_generation_control_sweep_lines,
     zspace_inference_distortion_probe_cli_args,
     zspace_inference_distortion_processor_kwargs,
@@ -268,6 +270,11 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         self.assertIn("zspace_generation_control_sweep_cli_args", st.__all__)
         self.assertIn("load_zspace_generation_control_sweep", st.__all__)
         self.assertIn("summarize_zspace_generation_control_sweep", st.__all__)
+        self.assertIn("compare_zspace_generation_control_sweeps", st.__all__)
+        self.assertIn(
+            "summarize_zspace_generation_control_sweep_comparison_lines",
+            st.__all__,
+        )
         self.assertIn("zspace_inference_distortion_processor_kwargs", st.__all__)
         self.assertIn("load_zspace_inference_distortion_probe", st.__all__)
         self.assertIn("summarize_zspace_inference_distortion_probe", st.__all__)
@@ -313,6 +320,14 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         self.assertIs(
             st.summarize_zspace_generation_control_sweep,
             summarize_zspace_generation_control_sweep,
+        )
+        self.assertIs(
+            st.compare_zspace_generation_control_sweeps,
+            compare_zspace_generation_control_sweeps,
+        )
+        self.assertIs(
+            st.summarize_zspace_generation_control_sweep_comparison_lines,
+            summarize_zspace_generation_control_sweep_comparison_lines,
         )
 
     def test_local_gpt2_openai_distortion_sample_is_sanitized(self) -> None:
@@ -1223,6 +1238,127 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
         self.assertIn("loop_delta=-3.0", lines[0])
         self.assertIn("top_changes=1", lines[1])
         self.assertIn("ngram=3/96/0.75", lines[1])
+
+    def test_generation_control_sweep_comparison_groups_model_runs(self) -> None:
+        def sweep_report(
+            *,
+            model_name: str,
+            prompt: str,
+            baseline_loop: float,
+            controlled_loop: float,
+            top_changes: int,
+        ) -> dict[str, object]:
+            baseline = {
+                "name": "baseline-greedy",
+                "kind": "baseline",
+                "status": "ok",
+                "config": {},
+                "generation": hf_ft.hf_gpt2_finetune_generation_report(
+                    stage="baseline",
+                    prompt=prompt,
+                    generated_text=f"{prompt} loop loop loop",
+                    generated_continuation_text=" loop loop loop",
+                ),
+                "repetition": {"loop_score": baseline_loop, "unique_word_ratio": 0.25},
+            }
+            controlled = {
+                "name": "zt3-rs1p25-lr0-k64",
+                "kind": "zspace_repression_softmax",
+                "status": "ok",
+                "config": {
+                    "top_k": 64,
+                    "curvature": -0.04,
+                    "temperature": 1.0,
+                    "entropy_target": 3.0,
+                    "entropy_tolerance": 1.0e-4,
+                    "entropy_gain": 0.5,
+                    "min_temperature": 0.7,
+                    "max_temperature": 2.4,
+                    "repression_window": 16,
+                    "repression_strength": 1.25,
+                    "last_token_repression": 0.0,
+                    "ngram_size": 3,
+                    "ngram_window": 96,
+                    "ngram_repression_strength": 0.75,
+                    "ngram_decay": 0.9,
+                    "mask_non_top_k": True,
+                    "use_native_zspace": True,
+                },
+                "generation": hf_ft.hf_gpt2_finetune_generation_report(
+                    stage="controlled",
+                    prompt=prompt,
+                    generated_text=f"{prompt} clean geometry {model_name}",
+                    generated_continuation_text=f" clean geometry {model_name}",
+                    generation_control={
+                        "status": "ok",
+                        "calls": 4,
+                        "backend": "spiraltorch_zspace_softmax",
+                        "top_token_changed_count": top_changes,
+                    },
+                ),
+                "repetition": {
+                    "loop_score": controlled_loop,
+                    "unique_word_ratio": 0.75,
+                },
+            }
+            return {
+                "row_type": "hf_gpt2_zspace_generation_control_sweep",
+                "status": "complete",
+                "dry_run": False,
+                "model_name": model_name,
+                "prompt": prompt,
+                "run_count": 2,
+                "runs": [baseline, controlled],
+            }
+
+        comparison = compare_zspace_generation_control_sweeps(
+            {
+                "base-prompt": sweep_report(
+                    model_name="base-model",
+                    prompt="SpiralTorch is",
+                    baseline_loop=10.0,
+                    controlled_loop=4.0,
+                    top_changes=3,
+                ),
+                "ft-prompt": sweep_report(
+                    model_name="ft-model",
+                    prompt="SpiralTorch is",
+                    baseline_loop=50.0,
+                    controlled_loop=5.0,
+                    top_changes=9,
+                ),
+            },
+            top_n=2,
+        )
+        lines = summarize_zspace_generation_control_sweep_comparison_lines(
+            comparison,
+            top_n=2,
+        )
+
+        self.assertEqual(
+            comparison["row_type"],
+            "zspace_generation_control_sweep_comparison",
+        )
+        self.assertEqual(comparison["sweep_count"], 2)
+        self.assertEqual(comparison["completed_sweep_count"], 2)
+        self.assertEqual(comparison["changed_from_baseline_total"], 2.0)
+        self.assertEqual(comparison["zspace_helped_count"], 2)
+        self.assertEqual(comparison["recommended_sweep_label"], "ft-prompt")
+        self.assertAlmostEqual(comparison["mean_baseline_loop_score"], 30.0)
+        self.assertAlmostEqual(comparison["mean_best_loop_score"], 4.5)
+        self.assertAlmostEqual(
+            comparison["mean_loop_score_delta_from_baseline"],
+            -25.5,
+        )
+        self.assertEqual(comparison["top_sweeps"][0]["label"], "ft-prompt")
+        model_rows = {
+            str(row["model_name"]): row for row in comparison["model_rows"]
+        }
+        self.assertEqual(model_rows["ft-model"]["mean_best_loop_score"], 5.0)
+        self.assertEqual(model_rows["ft-model"]["max_top_token_changed_count"], 9.0)
+        self.assertIn("recommend=ft-prompt", lines[0])
+        self.assertIn("model=ft-model", " ".join(lines))
+        self.assertIn("label=ft-prompt", lines[-2])
 
     def test_dry_run_builds_control_grid_without_loading_model(self) -> None:
         module = load_generation_control_sweep_example()
