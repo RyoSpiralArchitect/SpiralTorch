@@ -310,6 +310,231 @@ pub struct ToposRuntimeProfile {
     learning_inference_balance: f32,
 }
 
+/// Named runtime posture selected from a joint learning/inference profile.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ToposRuntimeMode {
+    Balanced,
+    Guarded,
+    Exploratory,
+    Contextual,
+    TrainingFirst,
+    InferenceFirst,
+}
+
+/// Component scores used to choose a [`ToposRuntimeMode`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ToposRuntimeRouteScores {
+    training_score: f32,
+    inference_score: f32,
+    guard_score: f32,
+    exploration_score: f32,
+    context_score: f32,
+}
+
+/// Decision layer that names how a topos profile should steer runtime behavior.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ToposRuntimeRoute {
+    profile: ToposRuntimeProfile,
+    mode: ToposRuntimeMode,
+    score: f32,
+    scores: ToposRuntimeRouteScores,
+}
+
+impl ToposRuntimeMode {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Balanced => "balanced",
+            Self::Guarded => "guarded",
+            Self::Exploratory => "exploratory",
+            Self::Contextual => "contextual",
+            Self::TrainingFirst => "training_first",
+            Self::InferenceFirst => "inference_first",
+        }
+    }
+
+    pub fn mode_id(&self) -> usize {
+        match self {
+            Self::Balanced => 0,
+            Self::Guarded => 1,
+            Self::Exploratory => 2,
+            Self::Contextual => 3,
+            Self::TrainingFirst => 4,
+            Self::InferenceFirst => 5,
+        }
+    }
+
+    pub fn score_key(&self) -> &'static str {
+        match self {
+            Self::Balanced | Self::Contextual => "context",
+            Self::Guarded => "guard",
+            Self::Exploratory => "exploration",
+            Self::TrainingFirst => "training",
+            Self::InferenceFirst => "inference",
+        }
+    }
+
+    pub fn learning_action(&self) -> &'static str {
+        match self {
+            Self::Guarded => "dampen_steps",
+            Self::Exploratory => "preserve_headroom",
+            Self::Contextual | Self::Balanced => "keep_balanced",
+            Self::TrainingFirst => "favor_learning",
+            Self::InferenceFirst => "hold_learning",
+        }
+    }
+
+    pub fn inference_action(&self) -> &'static str {
+        match self {
+            Self::Guarded => "tighten_sampling",
+            Self::Exploratory => "widen_sampling",
+            Self::Contextual => "raise_context_weight",
+            Self::TrainingFirst => "hold_sampling",
+            Self::InferenceFirst => "favor_inference",
+            Self::Balanced => "keep_balanced",
+        }
+    }
+}
+
+impl ToposRuntimeRouteScores {
+    pub fn training_score(&self) -> f32 {
+        self.training_score
+    }
+
+    pub fn inference_score(&self) -> f32 {
+        self.inference_score
+    }
+
+    pub fn guard_score(&self) -> f32 {
+        self.guard_score
+    }
+
+    pub fn exploration_score(&self) -> f32 {
+        self.exploration_score
+    }
+
+    pub fn context_score(&self) -> f32 {
+        self.context_score
+    }
+
+    pub fn vector(&self) -> [f32; 5] {
+        [
+            self.training_score,
+            self.inference_score,
+            self.guard_score,
+            self.exploration_score,
+            self.context_score,
+        ]
+    }
+}
+
+impl ToposRuntimeRoute {
+    fn from_profile(profile: ToposRuntimeProfile) -> Self {
+        let gradient_pressure = (profile.training_gradient_bias_scale() / 0.35).clamp(0.0, 1.0);
+        let rate_headroom = (profile.training_rate_scale() / 1.25).clamp(0.0, 1.0);
+        let temperature_headroom = (profile.inference_temperature() / 1.5).clamp(0.0, 1.0);
+        let context_pressure = (profile.inference_context_weight() / 1.25).clamp(0.0, 1.0);
+        let balance_centering =
+            (1.0 - (profile.learning_inference_balance() - 1.0).abs()).clamp(0.0, 1.0);
+        let training_score = (0.45 * (1.0 - profile.closure_risk())
+            + 0.25 * rate_headroom
+            + 0.2 * (1.0 - gradient_pressure)
+            + 0.1 * balance_centering)
+            .clamp(0.0, 1.0);
+        let inference_score = (0.3 * (1.0 - profile.closure_risk())
+            + 0.25 * profile.exploration_budget()
+            + 0.2 * context_pressure
+            + 0.15 * temperature_headroom
+            + 0.1 * profile.inference_top_p())
+        .clamp(0.0, 1.0);
+        let guard_score = (0.45 * profile.closure_risk()
+            + 0.35 * profile.control_energy()
+            + 0.2 * gradient_pressure)
+            .clamp(0.0, 1.0);
+        let exploration_score = (0.45 * profile.exploration_budget()
+            + 0.25 * temperature_headroom
+            + 0.2 * profile.inference_top_p()
+            + 0.1 * (1.0 - profile.control_energy()))
+        .clamp(0.0, 1.0);
+        let context_score = (0.4 * context_pressure
+            + 0.25 * (1.0 - profile.closure_risk())
+            + 0.2 * balance_centering
+            + 0.15 * (1.0 - profile.control_energy()))
+        .clamp(0.0, 1.0);
+        let scores = ToposRuntimeRouteScores {
+            training_score,
+            inference_score,
+            guard_score,
+            exploration_score,
+            context_score,
+        };
+        let mode = if guard_score >= 0.58 && guard_score >= exploration_score {
+            ToposRuntimeMode::Guarded
+        } else if exploration_score >= 0.62 && profile.exploration_budget() >= 0.45 {
+            ToposRuntimeMode::Exploratory
+        } else if context_score >= 0.6 && profile.inference_context_weight() >= 0.85 {
+            ToposRuntimeMode::Contextual
+        } else if training_score >= inference_score + 0.08 {
+            ToposRuntimeMode::TrainingFirst
+        } else if inference_score >= training_score + 0.08 {
+            ToposRuntimeMode::InferenceFirst
+        } else {
+            ToposRuntimeMode::Balanced
+        };
+        let score = match mode {
+            ToposRuntimeMode::Balanced => {
+                ((training_score + inference_score + context_score) / 3.0).clamp(0.0, 1.0)
+            }
+            ToposRuntimeMode::Guarded => guard_score,
+            ToposRuntimeMode::Exploratory => exploration_score,
+            ToposRuntimeMode::Contextual => context_score,
+            ToposRuntimeMode::TrainingFirst => training_score,
+            ToposRuntimeMode::InferenceFirst => inference_score,
+        };
+        Self {
+            profile,
+            mode,
+            score,
+            scores,
+        }
+    }
+
+    pub fn mode(&self) -> ToposRuntimeMode {
+        self.mode
+    }
+
+    pub fn mode_label(&self) -> &'static str {
+        self.mode.label()
+    }
+
+    pub fn mode_id(&self) -> usize {
+        self.mode.mode_id()
+    }
+
+    pub fn score(&self) -> f32 {
+        self.score
+    }
+
+    pub fn score_key(&self) -> &'static str {
+        self.mode.score_key()
+    }
+
+    pub fn learning_action(&self) -> &'static str {
+        self.mode.learning_action()
+    }
+
+    pub fn inference_action(&self) -> &'static str {
+        self.mode.inference_action()
+    }
+
+    pub fn scores(&self) -> ToposRuntimeRouteScores {
+        self.scores
+    }
+
+    pub fn profile(&self) -> ToposRuntimeProfile {
+        self.profile
+    }
+}
+
 impl ToposInferenceHints {
     pub fn temperature_scale(&self) -> f32 {
         self.temperature_scale
@@ -517,6 +742,11 @@ impl ToposRuntimeProfile {
             self.inference_temperature,
             self.inference_context_weight,
         ]
+    }
+
+    /// Names the runtime route implied by this joint profile.
+    pub fn route(&self) -> ToposRuntimeRoute {
+        ToposRuntimeRoute::from_profile(*self)
     }
 }
 
@@ -749,6 +979,27 @@ impl ToposControlSignal {
             base_presence_penalty,
         );
         ToposRuntimeProfile::from_parts(self, training_plan, inference_plan)
+    }
+
+    /// Named runtime route derived from this signal's joint learning/inference controls.
+    pub fn runtime_route(
+        &self,
+        training_gain: f32,
+        inference_gain: f32,
+        base_temperature: f32,
+        base_top_p: f32,
+        base_frequency_penalty: f32,
+        base_presence_penalty: f32,
+    ) -> ToposRuntimeRoute {
+        self.runtime_profile(
+            training_gain,
+            inference_gain,
+            base_temperature,
+            base_top_p,
+            base_frequency_penalty,
+            base_presence_penalty,
+        )
+        .route()
     }
 
     /// Compact runtime hint vector for optimizers and inference adapters.
@@ -3301,6 +3552,18 @@ mod tests {
         assert!((profile.control_energy() - 0.35998437).abs() < 1e-6);
         assert!((profile.learning_inference_balance() - 1.1984764).abs() < 1e-6);
         assert_eq!(profile.vector().len(), 6);
+        let route = profile.route();
+        assert_eq!(route.mode(), ToposRuntimeMode::Contextual);
+        assert_eq!(route.mode_label(), "contextual");
+        assert_eq!(route.mode_id(), 3);
+        assert_eq!(route.score_key(), "context");
+        assert_eq!(route.inference_action(), "raise_context_weight");
+        assert!((route.score() - 0.70263207).abs() < 1e-6);
+        assert!((route.scores().context_score() - route.score()).abs() < 1e-6);
+        assert!(route.scores().training_score() > route.scores().guard_score());
+        let signal_route = signal.runtime_route(0.5, 0.5, 0.8, 0.9, 0.1, 0.2);
+        assert_eq!(signal_route.mode(), route.mode());
+        assert!((signal_route.score() - route.score()).abs() < 1e-6);
     }
 
     #[test]

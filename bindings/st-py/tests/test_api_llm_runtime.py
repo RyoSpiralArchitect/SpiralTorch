@@ -728,7 +728,7 @@ def test_provider_wrapper_runtime_adapter_allows_explicit_request_override() -> 
     assert trace.inference is not None
 
 
-def test_api_llm_prompt_suite_accepts_topos_runtime_request_and_context() -> None:
+def test_api_llm_prompt_suite_accepts_topos_runtime_request_and_context(tmp_path) -> None:
     calls: list[tuple[str, dict[str, object]]] = []
     topos_payload = {"porosity": 0.25, "max_depth": 10, "max_volume": 100}
     request = st.topos_runtime_request(
@@ -770,6 +770,21 @@ def test_api_llm_prompt_suite_accepts_topos_runtime_request_and_context() -> Non
     assert "topos.temperature_scale" in calls[0][0]
     telemetry = result["traces"][0]["inference"]["telemetry"]["payload"]
     assert telemetry["topos.learning_rate_scale"] == pytest.approx(0.8919875)
+    assert telemetry["topos.runtime_route.score"] == pytest.approx(0.7053927755182756)
+    assert telemetry["topos.runtime_route.scores.context"] == pytest.approx(
+        0.7053927755182756
+    )
+
+    path = tmp_path / "topos-runtime-context.jsonl"
+    st.write_api_llm_trace_jsonl(result["traces"], path)
+    summary = st.summarize_api_llm_trace_events(path)
+
+    assert summary["topos_context"]["runtime_route_score"]["mean"] == pytest.approx(
+        0.7053927755182756
+    )
+    assert summary["topos_context"]["runtime_route_context_score"]["mean"] == pytest.approx(
+        0.7053927755182756
+    )
 
 
 def test_api_llm_geometry_context_partials_feed_context_prompt() -> None:

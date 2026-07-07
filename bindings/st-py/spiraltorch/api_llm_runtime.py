@@ -1641,19 +1641,39 @@ def _summarize_topos_context_telemetry(
             row.get("topos.runtime_route.score") for row in rows
         ),
         "runtime_route_training_score": _stats(
-            row.get("topos.runtime_route.training_score") for row in rows
+            row.get(
+                "topos.runtime_route.training_score",
+                row.get("topos.runtime_route.scores.training"),
+            )
+            for row in rows
         ),
         "runtime_route_inference_score": _stats(
-            row.get("topos.runtime_route.inference_score") for row in rows
+            row.get(
+                "topos.runtime_route.inference_score",
+                row.get("topos.runtime_route.scores.inference"),
+            )
+            for row in rows
         ),
         "runtime_route_guard_score": _stats(
-            row.get("topos.runtime_route.guard_score") for row in rows
+            row.get(
+                "topos.runtime_route.guard_score",
+                row.get("topos.runtime_route.scores.guard"),
+            )
+            for row in rows
         ),
         "runtime_route_exploration_score": _stats(
-            row.get("topos.runtime_route.exploration_score") for row in rows
+            row.get(
+                "topos.runtime_route.exploration_score",
+                row.get("topos.runtime_route.scores.exploration"),
+            )
+            for row in rows
         ),
         "runtime_route_context_score": _stats(
-            row.get("topos.runtime_route.context_score") for row in rows
+            row.get(
+                "topos.runtime_route.context_score",
+                row.get("topos.runtime_route.scores.context"),
+            )
+            for row in rows
         ),
     }
 

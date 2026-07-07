@@ -1138,6 +1138,28 @@ class OpenCartesianTopos:
         base_frequency_penalty: float = ...,
         base_presence_penalty: float = ...,
     ) -> Dict[str, object]: ...
+    def runtime_profile(
+        self,
+        observed_depth: int = ...,
+        visited_volume: int = ...,
+        training_gain: float = ...,
+        inference_gain: float = ...,
+        base_temperature: float = ...,
+        base_top_p: float = ...,
+        base_frequency_penalty: float = ...,
+        base_presence_penalty: float = ...,
+    ) -> Dict[str, object]: ...
+    def runtime_route(
+        self,
+        observed_depth: int = ...,
+        visited_volume: int = ...,
+        training_gain: float = ...,
+        inference_gain: float = ...,
+        base_temperature: float = ...,
+        base_top_p: float = ...,
+        base_frequency_penalty: float = ...,
+        base_presence_penalty: float = ...,
+    ) -> Dict[str, object]: ...
     def site(self) -> ZBoxSite: ...
     def guard_zbox(self, zbox: ZBox) -> None: ...
     def guard_cover(self, cover: Sequence[ZBox]) -> None: ...

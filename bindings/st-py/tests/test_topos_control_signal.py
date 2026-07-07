@@ -52,6 +52,12 @@ def test_topos_control_signal_from_mapping_normalises_pressure() -> None:
     assert signal["runtime_profile"]["learning_inference_balance"] == pytest.approx(
         0.9104766571449497
     )
+    assert signal["runtime_route"]["mode"] == "contextual"
+    assert signal["runtime_route"]["mode_id"] == 3
+    assert signal["runtime_route"]["score"] == pytest.approx(0.7053927755182756)
+    assert signal["runtime_route"]["scores"]["context"] == pytest.approx(
+        signal["runtime_route"]["score"]
+    )
 
 
 def test_named_topos_hints_are_exported_for_learning_and_inference() -> None:
@@ -171,6 +177,9 @@ def test_topos_control_partial_feeds_zspace_inference() -> None:
     assert telemetry["topos.regularization_scale"] > 1.0
     assert telemetry["topos.training_hints.gradient_bias_scale"] > 0.0
     assert telemetry["topos.inference_hints.context_weight"] > 0.0
+    assert telemetry["topos.runtime_route.mode_id"] == pytest.approx(3.0)
+    assert telemetry["topos.runtime_route.score"] > 0.0
+    assert "topos.runtime_route.runtime_profile.control_energy" not in telemetry
 
 
 def test_topos_control_partial_is_exported_from_top_level() -> None:
@@ -340,6 +349,28 @@ def test_open_topos_control_signal_can_override_porosity() -> None:
     assert "learning_rate_scale" in signal
     assert "temperature_scale" in signal
     assert "runtime_hints" in signal
+
+
+def test_open_topos_runtime_route_uses_native_method_when_available() -> None:
+    guard = st.hypergrad_topos(max_depth=10, max_volume=100)
+    if hasattr(guard, "with_porosity"):
+        guard = guard.with_porosity(0.25)
+    if not hasattr(guard, "runtime_route"):
+        pytest.skip("OpenCartesianTopos.runtime_route requires a freshly built native extension")
+
+    native = guard.runtime_route(4, 25, 1.0, 1.0, 0.8, 1.0, 0.0, 0.0)
+    routed = st.topos_runtime_route(
+        guard,
+        observed_depth=4,
+        visited_volume=25,
+        base_temperature=0.8,
+    )
+
+    assert native["mode"] == "contextual"
+    assert routed["mode"] == native["mode"]
+    assert routed["score"] == pytest.approx(native["score"])
+    assert native["scores"]["context"] == pytest.approx(native["score"])
+    assert native["runtime_profile"]["inference_temperature"] == pytest.approx(0.68265)
 
 
 def test_tensor_biome_control_signal_reflects_absorbed_volume() -> None:
