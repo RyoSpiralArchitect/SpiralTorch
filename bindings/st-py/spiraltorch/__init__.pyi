@@ -2666,6 +2666,7 @@ def api_llm_topos_sweep_report(
     created_at: str | None = ...,
     max_samples_per_route: int = ...,
     max_text_chars: int = ...,
+    max_pair_rows: int = ...,
 ) -> Dict[str, Any]: ...
 
 
