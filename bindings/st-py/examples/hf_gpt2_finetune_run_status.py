@@ -38,6 +38,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--log-tail-bytes", type=int, default=1_000_000)
     parser.add_argument("--checkpoint-card", type=Path, default=None)
     parser.add_argument("--max-steps", type=int, default=None)
+    parser.add_argument("--eval-steps", type=int, default=None)
     parser.add_argument("--final-checkpoint", default=None)
     parser.add_argument("--tail-evals", type=int, default=6)
     parser.add_argument("--out", type=Path, default=None)
@@ -51,6 +52,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error(f"run_dir does not exist: {args.run_dir}")
     if args.max_steps is not None and args.max_steps <= 0:
         parser.error("--max-steps must be positive")
+    if args.eval_steps is not None and args.eval_steps <= 0:
+        parser.error("--eval-steps must be positive")
     if args.tail_evals < 0:
         parser.error("--tail-evals must be non-negative")
     if args.log_tail_bytes <= 0:
@@ -202,6 +205,56 @@ def _trace_summary(trace_jsonl: Path, max_steps: int | None) -> dict[str, Any]:
     return summary
 
 
+def _infer_eval_steps(trace: dict[str, Any]) -> int | None:
+    eval_points = trace.get("trace_eval_loss_points")
+    if not isinstance(eval_points, list):
+        return None
+    steps = []
+    for point in eval_points:
+        if not isinstance(point, dict):
+            continue
+        step = point.get("step")
+        if isinstance(step, int) and step > 0:
+            steps.append(step)
+    steps = sorted(set(steps))
+    if len(steps) < 2:
+        return None
+    intervals = [right - left for left, right in zip(steps, steps[1:]) if right > left]
+    if not intervals:
+        return None
+    return intervals[-1]
+
+
+def _eval_progress(
+    trace: dict[str, Any],
+    log_progress: dict[str, Any],
+    eval_steps: int | None,
+    max_steps: int | None,
+) -> dict[str, Any]:
+    interval = eval_steps or _infer_eval_steps(trace)
+    trace_step = trace.get("trace_max_global_step")
+    log_step = log_progress.get("log_latest_step")
+    next_eval_step = None
+    trace_steps_until_next_eval = None
+    log_steps_until_next_eval = None
+    if interval is not None:
+        basis = log_step if isinstance(log_step, int) else trace_step
+        if isinstance(basis, (int, float)):
+            next_eval_step = int(((int(basis) // interval) + 1) * interval)
+            if max_steps is not None:
+                next_eval_step = min(next_eval_step, max_steps)
+        if next_eval_step is not None and isinstance(trace_step, (int, float)):
+            trace_steps_until_next_eval = max(int(next_eval_step) - int(trace_step), 0)
+        if next_eval_step is not None and isinstance(log_step, int):
+            log_steps_until_next_eval = max(int(next_eval_step) - log_step, 0)
+    return {
+        "eval_steps": interval,
+        "next_eval_step": next_eval_step,
+        "trace_steps_until_next_eval": trace_steps_until_next_eval,
+        "log_steps_until_next_eval": log_steps_until_next_eval,
+    }
+
+
 def _checkpoint_rows(run_dir: Path) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for path in sorted(run_dir.glob("checkpoint-*")):
@@ -231,6 +284,12 @@ def summarize_run(args: argparse.Namespace) -> dict[str, Any]:
         int(args.log_tail_bytes),
         expected_max_steps=args.max_steps,
     )
+    eval_progress = _eval_progress(
+        trace,
+        log_progress,
+        args.eval_steps,
+        args.max_steps,
+    )
     run_card = _load_json(args.run_card)
     checkpoint_card = _load_json(args.checkpoint_card)
     pid = _read_pid(args.pid_file)
@@ -247,6 +306,7 @@ def summarize_run(args: argparse.Namespace) -> dict[str, Any]:
         "run_dir": str(args.run_dir),
         "trace": trace,
         "log_progress": log_progress,
+        "eval_progress": eval_progress,
         "run_card_path": str(args.run_card),
         "run_card_status": (run_card or {}).get("status"),
         "pid_file": str(args.pid_file),
@@ -288,6 +348,8 @@ def status_lines(status: dict[str, Any], *, tail_evals: int) -> list[str]:
             f"log_latest_step={_number_text((status.get('log_progress') or {}).get('log_latest_step'))} "
             f"log_progress={_number_text((status.get('log_progress') or {}).get('log_progress'))} "
             f"log_remaining_seconds={_number_text((status.get('log_progress') or {}).get('log_remaining_seconds'))} "
+            f"next_eval_step={_number_text((status.get('eval_progress') or {}).get('next_eval_step'))} "
+            f"log_steps_until_next_eval={_number_text((status.get('eval_progress') or {}).get('log_steps_until_next_eval'))} "
             f"last_loss={_number_text(trace.get('trace_last_loss'))} "
             f"last_eval_loss={_number_text(trace.get('trace_last_eval_loss'))} "
             f"min_eval_loss={_number_text(trace.get('trace_min_eval_loss'))} "

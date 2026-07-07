@@ -3426,6 +3426,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 str(run_dir),
                 "--max-steps",
                 "40",
+                "--eval-steps",
+                "10",
                 "--final-checkpoint",
                 "checkpoint-20",
                 "--checkpoint-card",
@@ -3448,6 +3450,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 str(run_dir),
                 "--max-steps",
                 "40",
+                "--eval-steps",
+                "10",
                 "--watch-interval-seconds",
                 "0.01",
                 "--watch-count",
@@ -3462,6 +3466,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 str(run_dir),
                 "--max-steps",
                 "40",
+                "--eval-steps",
+                "10",
                 "--final-checkpoint",
                 "checkpoint-20",
                 "--watch-interval-seconds",
@@ -3490,6 +3496,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(status["log_progress"]["log_progress"], 0.6)
         self.assertEqual(status["log_progress"]["log_elapsed_seconds"], 24.0)
         self.assertEqual(status["log_progress"]["log_remaining_seconds"], 16.0)
+        self.assertEqual(status["eval_progress"]["next_eval_step"], 30)
+        self.assertEqual(status["eval_progress"]["log_steps_until_next_eval"], 6)
         self.assertEqual(status["checkpoint_count"], 1)
         self.assertTrue(status["final_checkpoint_ready"])
         self.assertEqual(status["checkpoint_card_status"], "waiting_for_process")
@@ -3497,12 +3505,15 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("latest_step=20", lines[0])
         self.assertIn("log_latest_step=24", lines[0])
         self.assertIn("log_remaining_seconds=16", lines[0])
+        self.assertIn("next_eval_step=30", lines[0])
+        self.assertIn("log_steps_until_next_eval=6", lines[0])
         self.assertIn("checkpoint_card=waiting_for_process", lines[0])
         self.assertIn("final_ready=true", lines[0])
         self.assertIn("hf_gpt2_ft_run_wait status=waiting", lines[-1])
         self.assertEqual(written["process_status"], "alive")
         self.assertEqual(watch_written["process_status"], "alive")
         self.assertEqual(watch_written["log_progress"]["log_latest_step"], 24)
+        self.assertEqual(watch_written["eval_progress"]["next_eval_step"], 30)
         self.assertTrue(watch_final_written["final_checkpoint_ready"])
         self.assertEqual(written_lines, lines)
 
