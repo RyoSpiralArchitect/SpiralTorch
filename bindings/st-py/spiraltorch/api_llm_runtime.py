@@ -41,6 +41,7 @@ __all__ = [
     "compare_api_llm_matrix_reports",
     "compare_api_llm_trace_runs",
     "compare_api_llm_topos_sweep_reports",
+    "api_llm_topos_route_policy_selection",
     "api_llm_topos_sweep_route_rewards",
     "format_api_llm_context_prompt",
     "load_api_llm_trace_events",
@@ -4833,6 +4834,18 @@ def _topos_sweep_report_or_self(payload: Mapping[str, Any]) -> Mapping[str, Any]
     return payload
 
 
+def _topos_row_by_label(
+    rows: Any,
+    label: str | None,
+) -> dict[str, Any] | None:
+    if label is None:
+        return None
+    for row in _list_from_sequence(rows):
+        if isinstance(row, Mapping) and str(row.get("label")) == label:
+            return dict(row)
+    return None
+
+
 def api_llm_topos_sweep_route_rewards(
     report: Mapping[str, Any],
     *,
@@ -4888,6 +4901,122 @@ def api_llm_topos_sweep_route_rewards(
             }
         )
     return rewards
+
+
+def _selected_topos_route_reward(
+    policy: Mapping[str, Any],
+    selected_label: str | None,
+    selected_index: int,
+) -> dict[str, Any] | None:
+    rows = [
+        dict(row)
+        for row in _list_from_sequence(policy.get("route_rewards"))
+        if isinstance(row, Mapping)
+    ]
+    for row in rows:
+        if selected_label is not None and str(row.get("label")) == selected_label:
+            return row
+    if 0 <= selected_index < len(rows):
+        return rows[selected_index]
+    return None
+
+
+def _topos_profile_entry_by_label(
+    topos_profiles: Any,
+    label: str,
+) -> tuple[str, Any] | None:
+    if topos_profiles is None:
+        return None
+    for candidate_label, spec in _topos_sweep_entries(topos_profiles):
+        if str(candidate_label) == label:
+            return str(candidate_label), spec
+    return None
+
+
+def api_llm_topos_route_policy_selection(
+    policy: Mapping[str, Any],
+    *,
+    report: Mapping[str, Any] | None = None,
+    topos_profiles: Any = None,
+    request_options: Mapping[str, Any] | None = None,
+    signal_options: Mapping[str, Any] | None = None,
+    adapter_options: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Turn a trained stAgent topos policy into a reusable route selection."""
+
+    if not isinstance(policy, Mapping):
+        raise TypeError("policy must be a mapping")
+
+    raw_index = _finite_float(policy.get("selected_index"))
+    selected_index = int(raw_index) if raw_index is not None else 0
+    selected_label = policy.get("selected_label")
+    selected_label_value = (
+        str(selected_label) if selected_label is not None and str(selected_label) else None
+    )
+    route_reward = _selected_topos_route_reward(
+        policy,
+        selected_label_value,
+        selected_index,
+    )
+    if route_reward is not None:
+        selected_label = route_reward.get("label")
+        raw_index = _finite_float(route_reward.get("index"))
+        if raw_index is not None:
+            selected_index = int(raw_index)
+    if selected_label is None or str(selected_label) == "":
+        raise ValueError("policy does not contain a selected topos route label")
+    label_value = str(selected_label)
+
+    report_map = _topos_sweep_report_or_self(report) if isinstance(report, Mapping) else {}
+    selection_row = _topos_row_by_label(report_map.get("selection_rows"), label_value)
+    adapter_row = _topos_row_by_label(report_map.get("adapter_rows"), label_value)
+    response_route_row = _topos_row_by_label(
+        report_map.get("response_route_rows"),
+        label_value,
+    )
+
+    adapter: dict[str, Any] | None = None
+    profile_entry = _topos_profile_entry_by_label(topos_profiles, label_value)
+    if profile_entry is not None:
+        _, spec = profile_entry
+        adapter = _topos_adapter_from_sweep_spec(
+            spec,
+            label=label_value,
+            request_options=request_options,
+            signal_options=signal_options,
+            adapter_options=adapter_options,
+        )
+    elif isinstance(report, Mapping):
+        adapters = _mapping_or_empty(report.get("adapters"))
+        report_adapter = adapters.get(label_value)
+        if isinstance(report_adapter, Mapping) and _is_topos_runtime_adapter(
+            report_adapter
+        ):
+            adapter = dict(report_adapter)
+
+    route_reward_map = route_reward or {}
+    selected_reward = _finite_float(policy.get("selected_reward"))
+    if selected_reward is None:
+        selected_reward = _finite_float(route_reward_map.get("reward"))
+    return {
+        "kind": "spiraltorch.api_llm_topos_route_policy_selection",
+        "selected_label": label_value,
+        "selected_index": selected_index,
+        "selected_reward": selected_reward,
+        "profile": policy.get("profile"),
+        "selection_trace": dict(_mapping_or_empty(policy.get("selection_trace"))),
+        "route_reward": dict(route_reward_map),
+        "selection_row": selection_row,
+        "adapter_row": adapter_row,
+        "response_route_row": response_route_row,
+        "adapter": adapter,
+        "request": dict(_mapping_or_empty(adapter.get("request"))) if adapter else {},
+        "runtime_route": (
+            dict(_mapping_or_empty(adapter.get("runtime_route"))) if adapter else {}
+        ),
+        "has_adapter": adapter is not None,
+        "has_request": bool(adapter and _mapping_or_empty(adapter.get("request"))),
+    }
 
 
 def _agent_policy_report(agent: Any, state: int) -> dict[str, Any]:
@@ -5005,6 +5134,7 @@ def train_stagent_topos_route_policy(
         "selected_index": selected_index,
         "selected_label": selected_row.get("label") if selected_row else None,
         "selected_reward": selected_row.get("reward") if selected_row else None,
+        "selected_route_reward": dict(selected_row) if selected_row else None,
         "update_count": update_count,
         "update_events": update_events,
         "truncated_update_events": update_count > len(update_events),

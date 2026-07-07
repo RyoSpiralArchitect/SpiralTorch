@@ -2529,6 +2529,16 @@ def api_llm_topos_sweep_route_rewards(
     profile: str = ...,
 ) -> List[Dict[str, Any]]: ...
 
+def api_llm_topos_route_policy_selection(
+    policy: Mapping[str, Any],
+    *,
+    report: Mapping[str, Any] | None = ...,
+    topos_profiles: Any = ...,
+    request_options: Mapping[str, Any] | None = ...,
+    signal_options: Mapping[str, Any] | None = ...,
+    adapter_options: Mapping[str, Any] | None = ...,
+) -> Dict[str, Any]: ...
+
 def train_stagent_topos_route_policy(
     report: Mapping[str, Any],
     agent: Any,
@@ -8022,6 +8032,7 @@ __all__ = [
     "api_llm_trace_from_response",
     "api_llm_usage_from_response",
     "api_llm_wasm_context_partials",
+    "api_llm_topos_route_policy_selection",
     "api_llm_topos_sweep_route_rewards",
     "compare_api_llm_matrix_reports",
     "compare_api_llm_trace_runs",
