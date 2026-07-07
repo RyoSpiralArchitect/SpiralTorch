@@ -617,6 +617,8 @@ def summarize_hf_gpt2_finetune_sweep_report(
 def hf_gpt2_finetune_scale_up_command(
     report_or_summary: str | PathLike[str] | Mapping[str, object],
     *,
+    model_name: str | PathLike[str] | None = ...,
+    resume_from_checkpoint: str | PathLike[str] | None = ...,
     max_steps: int | None = ...,
     max_steps_multiplier: float | None = ...,
     max_train_samples: int | None = ...,

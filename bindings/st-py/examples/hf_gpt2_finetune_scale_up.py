@@ -42,6 +42,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--max-train-samples", type=int, default=None)
     parser.add_argument("--max-train-samples-multiplier", type=float, default=None)
     parser.add_argument("--max-eval-samples", type=int, default=None)
+    parser.add_argument("--model-name", default=None)
+    parser.add_argument("--resume-from-checkpoint", type=Path, default=None)
     parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument("--output-suffix", default=None)
     parser.add_argument("--run-card", type=Path, default=None)
@@ -62,6 +64,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("--max-train-samples-multiplier must be positive")
     if args.max_eval_samples is not None and args.max_eval_samples < 0:
         parser.error("--max-eval-samples must be non-negative")
+    if (
+        args.resume_from_checkpoint is not None
+        and not args.resume_from_checkpoint.is_dir()
+    ):
+        parser.error(
+            "--resume-from-checkpoint does not exist or is not a directory: "
+            f"{args.resume_from_checkpoint}"
+        )
     return args
 
 
@@ -169,6 +179,8 @@ def _scale_up_command_from_source(args: argparse.Namespace) -> dict[str, Any]:
         output_suffix = "scaleup" if output_suffix is None else output_suffix
     command = st.hf_gpt2_finetune_scale_up_command(
         source_payload,
+        model_name=args.model_name,
+        resume_from_checkpoint=args.resume_from_checkpoint,
         max_steps=args.max_steps,
         max_steps_multiplier=max_steps_multiplier,
         max_train_samples=args.max_train_samples,

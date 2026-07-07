@@ -112,6 +112,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--run-card", type=Path, default=None)
     parser.add_argument("--trainer-trace-jsonl", type=Path, default=None)
     parser.add_argument("--trainer-trace-run-id", default=None)
+    parser.add_argument(
+        "--resume-from-checkpoint",
+        type=Path,
+        default=None,
+        help=(
+            "Resume Trainer.train() from an existing checkpoint directory, "
+            "including optimizer/scheduler state when present."
+        ),
+    )
     parser.add_argument("--no-trainer-trace", action="store_true")
     parser.add_argument("--trainer-telemetry", action="store_true")
     parser.add_argument("--trainer-telemetry-prefix", default="hf_ft")
@@ -474,6 +483,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     for path in [*args.train_file, *args.validation_file]:
         if not path.is_file():
             parser.error(f"local corpus file does not exist: {path}")
+    if (
+        args.resume_from_checkpoint is not None
+        and not args.resume_from_checkpoint.is_dir()
+    ):
+        parser.error(
+            "--resume-from-checkpoint does not exist or is not a directory: "
+            f"{args.resume_from_checkpoint}"
+        )
     return args
 
 
@@ -867,6 +884,12 @@ def _eval_after_train_skipped_reason(
     ):
         return "final_step_eval_already_requested"
     return None
+
+
+def _trainer_train_kwargs(args: argparse.Namespace) -> dict[str, object]:
+    if args.resume_from_checkpoint is None:
+        return {}
+    return {"resume_from_checkpoint": str(args.resume_from_checkpoint)}
 
 
 def _set_seed(torch: Any, transformers: Any, seed: int) -> None:
@@ -1340,6 +1363,11 @@ def _base_run_card(
         "torch_version": getattr(torch, "__version__", None),
         "datasets_version": getattr(datasets, "__version__", None),
         "model_name": args.model_name,
+        "resume_from_checkpoint": (
+            None
+            if args.resume_from_checkpoint is None
+            else str(args.resume_from_checkpoint)
+        ),
         "dataset_name": _preflight_dataset_name(args),
         "dataset_config": _preflight_dataset_config(args),
         "dataset_source": "local_files" if _has_local_corpus(args) else "hf_dataset",
@@ -1483,6 +1511,11 @@ def _main_with_runtime_access(
         require_hf_gpt2_ft=not args.no_require_hf_gpt2_ft,
     )
     preflight["hf_remote_access"] = dict(remote_access_report)
+    preflight["resume_from_checkpoint"] = (
+        None
+        if args.resume_from_checkpoint is None
+        else str(args.resume_from_checkpoint)
+    )
     preflight["inference_distortion_sweep_report"] = (
         None
         if args.inference_distortion_sweep_report is None
@@ -1745,7 +1778,7 @@ def _main_with_runtime_access(
                 stage="before_train",
                 eval_dataset_available=eval_dataset is not None,
             )
-        train_result = trainer.train()
+        train_result = trainer.train(**_trainer_train_kwargs(args))
         trainer.save_model(str(args.output_dir))
     except Exception as exc:
         card.update(

@@ -2125,6 +2125,8 @@ def _nearest_existing_parent(path: Path) -> Path | None:
 def hf_gpt2_finetune_scale_up_command(
     report_or_summary: str | Path | Mapping[str, object],
     *,
+    model_name: str | Path | None = None,
+    resume_from_checkpoint: str | Path | None = None,
     max_steps: int | None = None,
     max_steps_multiplier: float | None = 2.0,
     max_train_samples: int | None = None,
@@ -2198,6 +2200,10 @@ def hf_gpt2_finetune_scale_up_command(
         multiplier=max_train_samples_multiplier,
     )
     overrides = {
+        "--model-name": None if model_name is None else str(model_name),
+        "--resume-from-checkpoint": (
+            None if resume_from_checkpoint is None else str(resume_from_checkpoint)
+        ),
         "--output-dir": resolved_output_dir,
         "--run-card": resolved_run_card,
         "--trainer-trace-jsonl": resolved_trace,
@@ -2364,6 +2370,21 @@ def hf_gpt2_finetune_scale_up_preflight_report(
                         "field": flag,
                         "path": str(path),
                         "message": "input file does not exist",
+                    }
+                )
+
+    for flag in ("--resume-from-checkpoint",):
+        for value in _command_flag_values(command, flag):
+            path = Path(value)
+            exists = path.is_dir()
+            inputs.append({"flag": flag, "path": str(path), "exists": exists})
+            if not exists:
+                issues.append(
+                    {
+                        "severity": "error",
+                        "field": flag,
+                        "path": str(path),
+                        "message": "checkpoint directory does not exist",
                     }
                 )
 

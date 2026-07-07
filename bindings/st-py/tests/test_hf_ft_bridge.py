@@ -1427,6 +1427,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 "--max-eval-samples",
                 "20",
             ]
+            safe_checkpoint = Path(tmp) / "safe-checkpoint-512"
+            safe_checkpoint.mkdir()
 
             risky = run_card(
                 1.5,
@@ -1502,6 +1504,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             )
             explicit_scale_up_command = hf_ft.hf_gpt2_finetune_scale_up_command(
                 sweep_summary,
+                model_name=safe_checkpoint,
+                resume_from_checkpoint=safe_checkpoint,
                 max_steps=64,
                 max_train_samples=4096,
                 max_eval_samples=256,
@@ -1577,7 +1581,15 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             f"--output-dir {Path(tmp) / 'safe-long-run'}",
             explicit_scale_up_command["command_display"],
         )
-        self.assertEqual(explicit_scale_up_command["applied_override_count"], 6)
+        self.assertIn(
+            f"--model-name {safe_checkpoint}",
+            explicit_scale_up_command["command_display"],
+        )
+        self.assertIn(
+            f"--resume-from-checkpoint {safe_checkpoint}",
+            explicit_scale_up_command["command_display"],
+        )
+        self.assertEqual(explicit_scale_up_command["applied_override_count"], 8)
         self.assertTrue(
             any("hf_gpt2_ft_sweep_scale_up candidate=safe" in line for line in lines)
         )
@@ -2239,11 +2251,17 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             sweep_report_path = out_dir / "sweep-report.json"
             scale_up_artifact_path = out_dir / "scale-up-command.json"
             rewritten_artifact_path = out_dir / "scale-up-command-long.json"
+            resume_checkpoint = out_dir / "checkpoint-1"
+            resume_checkpoint.mkdir()
             scale_up_args = scale_up_module.parse_args(
                 [
                     str(sweep_report_path),
                     "--write-command",
                     str(rewritten_artifact_path),
+                    "--model-name",
+                    str(resume_checkpoint),
+                    "--resume-from-checkpoint",
+                    str(resume_checkpoint),
                     "--max-steps",
                     "64",
                     "--max-train-samples",
@@ -2368,6 +2386,11 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("--max-train-samples 4096", scale_up["command_display"])
         self.assertIn("--max-eval-samples 256", scale_up["command_display"])
         self.assertIn(f"--output-dir {out_dir / 'long-run'}", scale_up["command_display"])
+        self.assertIn(f"--model-name {resume_checkpoint}", scale_up["command_display"])
+        self.assertIn(
+            f"--resume-from-checkpoint {resume_checkpoint}",
+            scale_up["command_display"],
+        )
         self.assertEqual(scale_up["artifact_path"], str(rewritten_artifact_path))
         self.assertEqual(broken["preflight_status"], "blocked")
         self.assertEqual(broken["run_returncode"], 2)
@@ -2673,6 +2696,30 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(
             module._eval_after_train_skipped_reason(args, has_eval=True),
             "eval_after_train_policy_never",
+        )
+
+    def test_example_trainer_train_kwargs_records_resume_checkpoint(self) -> None:
+        module = load_bridge_example()
+        with tempfile.TemporaryDirectory() as tmp:
+            checkpoint = Path(tmp) / "checkpoint-512"
+            checkpoint.mkdir()
+            args = module.parse_args(
+                [
+                    "--metadata-only",
+                    "--resume-from-checkpoint",
+                    str(checkpoint),
+                ]
+            )
+
+        self.assertEqual(
+            module._trainer_train_kwargs(args),
+            {"resume_from_checkpoint": str(checkpoint)},
+        )
+        self.assertEqual(
+            module._trainer_train_kwargs(
+                types.SimpleNamespace(resume_from_checkpoint=None)
+            ),
+            {},
         )
 
     def test_example_limit_tokenized_eval_dataset_records_before_after(self) -> None:
