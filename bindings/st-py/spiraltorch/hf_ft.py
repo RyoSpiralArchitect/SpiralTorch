@@ -1707,6 +1707,14 @@ def summarize_hf_gpt2_finetune_run_card(
     generation_after = _mapping_item(card, "generation_after_train")
     generation_before_control = _generation_control(generation_before)
     generation_after_control = _generation_control(generation_after)
+    generation_inference = _mapping_item(
+        card,
+        "generation_from_inference_distortion_applied",
+    )
+    generation_inference_processor = _mapping_item(
+        generation_inference,
+        "processor_kwargs",
+    )
     trainer_metrics = _mapping_item(card, "trainer_metrics")
     trainer_trace = _trainer_trace_summary_for_card(card)
     corpus_scan = _mapping_item(card, "corpus_scan_report")
@@ -1894,6 +1902,44 @@ def summarize_hf_gpt2_finetune_run_card(
         ),
         "generation_before_status": generation_before.get("status"),
         "generation_before_method": generation_before.get("generation_method"),
+        "generation_from_inference_distortion": card.get(
+            "generation_from_inference_distortion"
+        ),
+        "generation_from_inference_distortion_status": generation_inference.get(
+            "status"
+        ),
+        "generation_from_inference_distortion_source_kind": generation_inference.get(
+            "source_kind"
+        ),
+        "generation_from_inference_distortion_probe": generation_inference.get(
+            "recommended_probe"
+        ),
+        "generation_from_inference_distortion_applied_arg_count": _metric_number(
+            generation_inference,
+            "applied_arg_count",
+        ),
+        "generation_from_inference_distortion_top_k": _metric_number(
+            generation_inference_processor,
+            "top_k",
+        ),
+        "generation_from_inference_distortion_temperature": _metric_number(
+            generation_inference_processor,
+            "temperature",
+        ),
+        "generation_from_inference_distortion_entropy_target": _metric_number(
+            generation_inference_processor,
+            "entropy_target",
+        ),
+        "generation_from_inference_distortion_repression_strength": _metric_number(
+            generation_inference_processor,
+            "repression_strength",
+        ),
+        "generation_from_inference_distortion_ngram_repression_strength": (
+            _metric_number(
+                generation_inference_processor,
+                "ngram_repression_strength",
+            )
+        ),
         "generation_before_control_status": generation_before_control.get("status"),
         "generation_before_control_calls": _metric_number(
             generation_before_control,
@@ -2054,6 +2100,39 @@ def _ranked_sweep_rows(
                 "eval_loss_improved": row.get("eval_loss_improved"),
                 "generation_continuation_changed": row.get(
                     "generation_continuation_changed"
+                ),
+                "generation_from_inference_distortion": row.get(
+                    "generation_from_inference_distortion"
+                ),
+                "generation_from_inference_distortion_status": row.get(
+                    "generation_from_inference_distortion_status"
+                ),
+                "generation_from_inference_distortion_probe": row.get(
+                    "generation_from_inference_distortion_probe"
+                ),
+                "generation_from_inference_distortion_applied_arg_count": (
+                    _safe_number(
+                        row.get(
+                            "generation_from_inference_distortion_applied_arg_count"
+                        )
+                    )
+                ),
+                "generation_from_inference_distortion_entropy_target": _safe_number(
+                    row.get("generation_from_inference_distortion_entropy_target")
+                ),
+                "generation_from_inference_distortion_repression_strength": (
+                    _safe_number(
+                        row.get(
+                            "generation_from_inference_distortion_repression_strength"
+                        )
+                    )
+                ),
+                "generation_from_inference_distortion_ngram_repression_strength": (
+                    _safe_number(
+                        row.get(
+                            "generation_from_inference_distortion_ngram_repression_strength"
+                        )
+                    )
                 ),
                 "generation_after_control_top_token_changed_count": _safe_number(
                     row.get("generation_after_control_top_token_changed_count")
@@ -2236,6 +2315,9 @@ def summarize_hf_gpt2_finetune_sweep_report(
         "generation_changed_count": _safe_number(
             comparison.get("generation_changed_count")
         ),
+        "generation_from_inference_distortion_count": _safe_number(
+            comparison.get("generation_from_inference_distortion_count")
+        ),
         "best_eval_after_run_label": best_after_label,
         "best_eval_after_loss": _safe_number(comparison.get("best_eval_after_loss")),
         "best_eval_after_loss_source": comparison.get("best_eval_after_loss_source"),
@@ -2370,6 +2452,18 @@ def summarize_hf_gpt2_finetune_sweep_report_lines(
                 "infer_trace="
                 f"{row.get('trace_inference_distortion_telemetry_count')} "
             )
+        generation_inference_fragment = ""
+        if row.get("generation_from_inference_distortion_status") is not None:
+            generation_inference_fragment = (
+                "gen_infer="
+                f"{row.get('generation_from_inference_distortion_status')} "
+                "gen_infer_probe="
+                f"{row.get('generation_from_inference_distortion_probe')} "
+                "gen_repress="
+                f"{row.get('generation_from_inference_distortion_repression_strength')} "
+                "gen_entropy="
+                f"{row.get('generation_from_inference_distortion_entropy_target')} "
+            )
         lines.append(
             "hf_gpt2_ft_sweep_top "
             f"rank={row.get('rank')} "
@@ -2383,6 +2477,7 @@ def summarize_hf_gpt2_finetune_sweep_report_lines(
             f"psi={row.get('trace_last_psi_total')} "
             f"desire={row.get('trace_last_desire_pressure')} "
             f"{inference_fragment}"
+            f"{generation_inference_fragment}"
             f"changed={row.get('generation_continuation_changed')} "
             f"zcontrol_changed={row.get('generation_after_control_top_token_changed_count')} "
             f"zcontrol_backend={row.get('generation_after_control_backend')}"
@@ -2425,6 +2520,11 @@ def compare_hf_gpt2_finetune_run_cards(
             1
             for summary in summaries
             if summary.get("generation_continuation_changed") is True
+        ),
+        "generation_from_inference_distortion_count": sum(
+            1
+            for summary in summaries
+            if summary.get("generation_from_inference_distortion_status") == "ok"
         ),
         "best_eval_after_run_label": (
             None if best_after is None else best_after.get("run_label")

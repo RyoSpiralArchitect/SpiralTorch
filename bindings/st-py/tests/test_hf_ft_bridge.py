@@ -626,6 +626,20 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             ),
             "trainer_metrics": {"train_loss": 1.4, "train_runtime": 3.0},
             "inference_distortion_handoff": inference_handoff,
+            "generation_from_inference_distortion": True,
+            "generation_from_inference_distortion_applied": {
+                "status": "ok",
+                "source_kind": "probe",
+                "recommended_probe": "distort-002",
+                "applied_arg_count": 6,
+                "processor_kwargs": {
+                    "top_k": 64,
+                    "temperature": 1.05,
+                    "entropy_target": 3.4,
+                    "repression_strength": 1.7,
+                    "ngram_repression_strength": 0.9,
+                },
+            },
             "trainer_trace_summary": {
                 "trace_event_count": 4,
                 "trace_last_loss": 1.4,
@@ -728,6 +742,33 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             summary["generation_after_control_backend"],
             "spiraltorch_zspace_softmax",
         )
+        self.assertTrue(summary["generation_from_inference_distortion"])
+        self.assertEqual(
+            summary["generation_from_inference_distortion_status"],
+            "ok",
+        )
+        self.assertEqual(
+            summary["generation_from_inference_distortion_probe"],
+            "distort-002",
+        )
+        self.assertEqual(
+            summary["generation_from_inference_distortion_applied_arg_count"],
+            6,
+        )
+        self.assertEqual(
+            summary["generation_from_inference_distortion_entropy_target"],
+            3.4,
+        )
+        self.assertEqual(
+            summary["generation_from_inference_distortion_repression_strength"],
+            1.7,
+        )
+        self.assertEqual(
+            summary[
+                "generation_from_inference_distortion_ngram_repression_strength"
+            ],
+            0.9,
+        )
         self.assertEqual(summary["trainer_train_loss"], 1.4)
         self.assertEqual(summary["inference_distortion_handoff_status"], "ok")
         self.assertEqual(
@@ -752,6 +793,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(comparison["best_eval_loss_delta_run_label"], "strong")
         self.assertEqual(comparison["eval_loss_improved_count"], 2)
         self.assertEqual(comparison["generation_changed_count"], 1)
+        self.assertEqual(comparison["generation_from_inference_distortion_count"], 2)
         self.assertEqual(loaded_sweep["run_count"], 2)
         self.assertEqual(
             sweep_summary["row_type"],
@@ -787,6 +829,18 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             "spiraltorch_zspace_softmax",
         )
         self.assertEqual(
+            sweep_summary["top_runs"][0][
+                "generation_from_inference_distortion_status"
+            ],
+            "ok",
+        )
+        self.assertEqual(
+            sweep_summary["top_runs"][0][
+                "generation_from_inference_distortion_repression_strength"
+            ],
+            1.7,
+        )
+        self.assertEqual(
             sweep_summary["top_runs"][0]["trace_log_steps_per_second_mean"],
             0.5,
         )
@@ -820,6 +874,9 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("trace_sps_mean=0.5", top_line)
         self.assertIn("eval_series=0=2.0,3=1.5", top_line)
         self.assertIn("infer_probe=distort-002", top_line)
+        self.assertIn("gen_infer=ok", top_line)
+        self.assertIn("gen_repress=1.7", top_line)
+        self.assertIn("gen_entropy=3.4", top_line)
         self.assertIn("zcontrol_changed=2", top_line)
         self.assertIn("zcontrol_backend=spiraltorch_zspace_softmax", top_line)
 

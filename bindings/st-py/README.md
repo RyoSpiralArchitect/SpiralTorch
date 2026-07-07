@@ -563,6 +563,9 @@ eval/generation metrics. Add `--generation-from-inference-distortion` with a
 generation prompt to reuse the handoff's `recommended_processor_kwargs` as the
 Z-Space/repression logits processor for before/after generated samples; omit it
 when you want to hand-tune `--generation-zspace-*` and repression flags instead.
+Run-card and sweep summaries expose the applied handoff probe plus key processor
+values such as entropy target and repression strengths beside generation-control
+telemetry, so the source of a decode change remains auditable.
 Add
 `--dry-run` to inspect commands without loading Transformers, or
 `--require-wgpu-ready` when the SpiralTorch WGPU surface should gate each run.
