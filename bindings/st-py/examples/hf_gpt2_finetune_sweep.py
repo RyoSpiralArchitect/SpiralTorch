@@ -96,6 +96,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default="always",
     )
     parser.add_argument("--no-trainer-trace", action="store_true")
+    parser.add_argument("--trainer-telemetry", action="store_true")
+    parser.add_argument("--trainer-telemetry-prefix", default="hf_ft")
+    parser.add_argument("--trainer-desire-gain", type=float, default=1.0)
+    parser.add_argument("--trainer-psi-gain", type=float, default=1.0)
     parser.add_argument("--generation-prompt", default=None)
     parser.add_argument("--generation-max-new-tokens", type=int, default=16)
     parser.add_argument("--generation-do-sample", action="store_true")
@@ -117,6 +121,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--generation-repression-window", type=int, default=32)
     parser.add_argument("--generation-repression-strength", type=float, default=1.0)
     parser.add_argument("--generation-last-token-repression", type=float, default=0.5)
+    parser.add_argument("--generation-ngram-size", type=int, default=0)
+    parser.add_argument("--generation-ngram-window", type=int, default=0)
+    parser.add_argument("--generation-ngram-repression-strength", type=float, default=0.0)
+    parser.add_argument("--generation-ngram-decay", type=float, default=1.0)
     parser.add_argument("--generation-zspace-report-limit", type=int, default=64)
     parser.add_argument("--generation-zspace-keep-non-top-k", action="store_true")
     parser.add_argument("--generation-zspace-no-native", action="store_true")
@@ -233,6 +241,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             parser.error(
                 "--generation-last-token-repression must be finite and non-negative"
             )
+        if args.generation_ngram_size < 0:
+            parser.error("--generation-ngram-size must be non-negative")
+        if args.generation_ngram_window < 0:
+            parser.error("--generation-ngram-window must be non-negative")
+        if args.generation_ngram_repression_strength < 0.0 or not math.isfinite(
+            args.generation_ngram_repression_strength
+        ):
+            parser.error(
+                "--generation-ngram-repression-strength must be finite and non-negative"
+            )
+        if (
+            args.generation_ngram_decay < 0.0
+            or args.generation_ngram_decay > 1.0
+            or not math.isfinite(args.generation_ngram_decay)
+        ):
+            parser.error("--generation-ngram-decay must be finite and in [0.0, 1.0]")
     if args.max_train_samples < 0 or args.max_eval_samples < 0:
         parser.error("--max-train-samples and --max-eval-samples must be non-negative")
     if args.max_eval_blocks < 0:
@@ -241,6 +265,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("--eval-accumulation-steps must be non-negative")
     if args.dataloader_num_workers < 0:
         parser.error("--dataloader-num-workers must be non-negative")
+    if args.trainer_telemetry and args.no_trainer_trace:
+        parser.error("--trainer-telemetry requires trainer tracing")
+    if args.trainer_telemetry:
+        if not str(args.trainer_telemetry_prefix).strip():
+            parser.error("--trainer-telemetry-prefix must be non-empty")
+        if args.trainer_desire_gain < 0.0 or not math.isfinite(args.trainer_desire_gain):
+            parser.error("--trainer-desire-gain must be finite and non-negative")
+        if args.trainer_psi_gain < 0.0 or not math.isfinite(args.trainer_psi_gain):
+            parser.error("--trainer-psi-gain must be finite and non-negative")
     if args.corpus_scan and not args.train_file:
         parser.error("--corpus-scan requires --train-file")
     if args.corpus_scan_max_bytes_per_file < 0:
@@ -374,6 +407,11 @@ def _bridge_command(
         command.append("--no-eval-after-train")
     if args.no_trainer_trace:
         command.append("--no-trainer-trace")
+    if args.trainer_telemetry:
+        command.append("--trainer-telemetry")
+        command.extend(["--trainer-telemetry-prefix", str(args.trainer_telemetry_prefix)])
+        command.extend(["--trainer-desire-gain", str(args.trainer_desire_gain)])
+        command.extend(["--trainer-psi-gain", str(args.trainer_psi_gain)])
     if args.generation_prompt:
         command.extend(["--generation-prompt", str(args.generation_prompt)])
         command.extend(
@@ -445,6 +483,19 @@ def _bridge_command(
                     "--generation-last-token-repression",
                     str(args.generation_last_token_repression),
                 ]
+            )
+            command.extend(["--generation-ngram-size", str(args.generation_ngram_size)])
+            command.extend(
+                ["--generation-ngram-window", str(args.generation_ngram_window)]
+            )
+            command.extend(
+                [
+                    "--generation-ngram-repression-strength",
+                    str(args.generation_ngram_repression_strength),
+                ]
+            )
+            command.extend(
+                ["--generation-ngram-decay", str(args.generation_ngram_decay)]
             )
             command.extend(
                 [

@@ -29,6 +29,7 @@ __all__ = [
     "hf_gpt2_finetune_generation_report",
     "hf_gpt2_finetune_rust_dependency_report",
     "hf_gpt2_finetune_summary_lines",
+    "hf_gpt2_finetune_training_telemetry_frame",
     "hf_gpt2_finetune_trainer_trace_callback",
     "hf_gpt2_finetune_trainer_trace_event",
     "hf_gpt2_finetune_zspace_probe",
@@ -815,6 +816,174 @@ def _safe_exp(value: int | float | None) -> float | None:
         return None
 
 
+def _bounded01(value: object) -> float | None:
+    number = _safe_number(value)
+    if number is None:
+        return None
+    finite = float(number)
+    if not math.isfinite(finite):
+        return None
+    magnitude = abs(finite)
+    return magnitude / (1.0 + magnitude)
+
+
+def _finite_non_negative(value: object, *, label: str) -> float:
+    number = float(value)
+    if not math.isfinite(number) or number < 0.0:
+        raise ValueError(f"{label} must be finite and non-negative")
+    return number
+
+
+def _prefixed_numeric_payload(
+    prefix: str,
+    values: Mapping[str, object],
+) -> dict[str, float]:
+    clean_prefix = str(prefix or "hf_ft").strip() or "hf_ft"
+    payload: dict[str, float] = {}
+    for key, value in values.items():
+        number = _safe_number(value)
+        if number is None:
+            continue
+        payload[f"{clean_prefix}.{key}"] = float(number)
+    return payload
+
+
+def hf_gpt2_finetune_training_telemetry_frame(
+    event: str,
+    *,
+    logs: Mapping[str, object] | None = None,
+    metrics: Mapping[str, object] | None = None,
+    state: object = None,
+    previous_loss: object = None,
+    telemetry_prefix: str = "hf_ft",
+    desire_gain: float = 1.0,
+    psi_gain: float = 1.0,
+) -> dict[str, object]:
+    """Derive desire/psi telemetry from HF Trainer logs during FT.
+
+    The frame is intentionally bounded and JSON-safe so it can be injected into
+    trainer traces, run cards, or Z-space partial telemetry without depending on
+    live native PSI hooks.
+    """
+
+    desire_gain_value = _finite_non_negative(desire_gain, label="desire_gain")
+    psi_gain_value = _finite_non_negative(psi_gain, label="psi_gain")
+    clean_prefix = str(telemetry_prefix or "hf_ft").strip() or "hf_ft"
+    metric_payload = _metric_fields(metrics if metrics is not None else logs)
+    global_step = _safe_number(_safe_attr(state, "global_step"))
+    max_steps = _safe_number(_safe_attr(state, "max_steps"))
+    epoch = _safe_number(_safe_attr(state, "epoch"))
+    progress = None
+    if global_step is not None and max_steps is not None and float(max_steps) > 0.0:
+        progress = max(0.0, min(1.0, float(global_step) / float(max_steps)))
+
+    loss_key = None
+    loss = None
+    for candidate in ("eval_loss", "loss", "train_loss"):
+        candidate_loss = _safe_number(metric_payload.get(candidate))
+        if candidate_loss is not None:
+            loss_key = candidate
+            loss = float(candidate_loss)
+            break
+    previous = _safe_number(previous_loss)
+    loss_delta = None if loss is None or previous is None else loss - float(previous)
+    loss_improvement = None if loss_delta is None else -loss_delta
+    loss_pressure = _bounded01(loss)
+    grad_norm = _safe_number(metric_payload.get("grad_norm"))
+    grad_pressure = _bounded01(grad_norm)
+    learning_rate = _safe_number(metric_payload.get("learning_rate"))
+    lr_pressure = None
+    if learning_rate is not None:
+        lr_pressure = _bounded01(float(learning_rate) * 10_000.0)
+    stability = None if loss_delta is None else 1.0 / (1.0 + abs(float(loss_delta)))
+    improvement_pressure = _bounded01(loss_improvement)
+    desire_pressure = (
+        None
+        if loss_pressure is None
+        else min(1.0, desire_gain_value * float(loss_pressure))
+    )
+    saturation_terms = [
+        value
+        for value in (loss_pressure, grad_pressure)
+        if value is not None
+    ]
+    desire_saturation = (
+        None
+        if not saturation_terms
+        else min(1.0, desire_gain_value * sum(saturation_terms) / len(saturation_terms))
+    )
+    psi_components = [
+        value
+        for value in (loss_pressure, grad_pressure, lr_pressure)
+        if value is not None
+    ]
+    psi_total = (
+        None
+        if not psi_components
+        else min(
+            1.0,
+            psi_gain_value
+            * sum(float(value) for value in psi_components)
+            / len(psi_components),
+        )
+    )
+    desire = {
+        "gain": desire_gain_value,
+        "pressure": desire_pressure,
+        "stability": stability,
+        "saturation": desire_saturation,
+        "improvement_pressure": improvement_pressure,
+    }
+    psi = {
+        "gain": psi_gain_value,
+        "total": psi_total,
+        "loss_component": loss_pressure,
+        "gradient_component": grad_pressure,
+        "learning_rate_component": lr_pressure,
+    }
+    telemetry_values = {
+        "step": global_step,
+        "max_steps": max_steps,
+        "epoch": epoch,
+        "progress": progress,
+        "loss": loss,
+        "loss_delta": loss_delta,
+        "loss_improvement": loss_improvement,
+        "grad_norm": grad_norm,
+        "learning_rate": learning_rate,
+        "desire.gain": desire_gain_value,
+        "desire.pressure": desire_pressure,
+        "desire.stability": stability,
+        "desire.saturation": desire_saturation,
+        "desire.improvement_pressure": improvement_pressure,
+        "psi.gain": psi_gain_value,
+        "psi.total": psi_total,
+        "psi.loss_component": loss_pressure,
+        "psi.gradient_component": grad_pressure,
+        "psi.learning_rate_component": lr_pressure,
+    }
+    telemetry = _prefixed_numeric_payload(clean_prefix, telemetry_values)
+    status = "ok" if telemetry else "empty"
+    return {
+        "row_type": "hf_gpt2_finetune_training_telemetry",
+        "status": status,
+        "event": str(event),
+        "telemetry_prefix": clean_prefix,
+        "metric_keys": csv_label(sorted(metric_payload)),
+        "loss_key": loss_key,
+        "loss": loss,
+        "previous_loss": previous,
+        "loss_delta": loss_delta,
+        "loss_improvement": loss_improvement,
+        "global_step": global_step,
+        "epoch": epoch,
+        "progress": progress,
+        "desire": {key: value for key, value in desire.items() if value is not None},
+        "psi": {key: value for key, value in psi.items() if value is not None},
+        "telemetry": telemetry,
+    }
+
+
 def hf_gpt2_finetune_eval_report(
     *,
     stage: str,
@@ -1017,6 +1186,39 @@ def _trace_eval_loss_points(
     return points
 
 
+def _trace_training_telemetry_values(
+    rows: Sequence[Mapping[str, object]],
+    *,
+    section: str,
+    key: str,
+) -> list[float]:
+    values = []
+    for row in rows:
+        source = row.get(section)
+        if not isinstance(source, Mapping):
+            telemetry = row.get("training_telemetry")
+            source = (
+                telemetry.get(section)
+                if isinstance(telemetry, Mapping)
+                else None
+            )
+        if not isinstance(source, Mapping):
+            continue
+        number = _safe_number(source.get(key))
+        if number is not None:
+            values.append(float(number))
+    return values
+
+
+def _trace_training_telemetry_count(rows: Sequence[Mapping[str, object]]) -> int:
+    count = 0
+    for row in rows:
+        telemetry = row.get("training_telemetry")
+        if isinstance(telemetry, Mapping) and telemetry.get("status") == "ok":
+            count += 1
+    return count
+
+
 def summarize_hf_gpt2_finetune_trainer_trace(
     path_or_rows: str | Path | Sequence[Mapping[str, object]],
 ) -> dict[str, object]:
@@ -1042,6 +1244,21 @@ def summarize_hf_gpt2_finetune_trainer_trace(
         for point in eval_loss_points
         if (runtime := _safe_number(point.get("eval_runtime"))) is not None
     ]
+    desire_pressures = _trace_training_telemetry_values(
+        rows,
+        section="desire",
+        key="pressure",
+    )
+    desire_stabilities = _trace_training_telemetry_values(
+        rows,
+        section="desire",
+        key="stability",
+    )
+    psi_totals = _trace_training_telemetry_values(
+        rows,
+        section="psi",
+        key="total",
+    )
     return {
         "row_type": "hf_gpt2_finetune_trainer_trace_summary",
         "trace_event_count": len(rows),
@@ -1069,6 +1286,17 @@ def summarize_hf_gpt2_finetune_trainer_trace(
         "trace_eval_runtime_min": min(eval_runtimes) if eval_runtimes else None,
         "trace_eval_runtime_mean": _mean(eval_runtimes),
         "trace_eval_runtime_max": max(eval_runtimes) if eval_runtimes else None,
+        "trace_training_telemetry_count": _trace_training_telemetry_count(rows),
+        "trace_last_desire_pressure": (
+            desire_pressures[-1] if desire_pressures else None
+        ),
+        "trace_max_desire_pressure": (
+            max(desire_pressures) if desire_pressures else None
+        ),
+        "trace_mean_desire_stability": _mean(desire_stabilities),
+        "trace_last_psi_total": psi_totals[-1] if psi_totals else None,
+        "trace_max_psi_total": max(psi_totals) if psi_totals else None,
+        "trace_mean_psi_total": _mean(psi_totals),
     }
 
 
@@ -1325,6 +1553,34 @@ def summarize_hf_gpt2_finetune_run_card(
             "trace_eval_runtime_max",
         ),
         "trace_eval_loss_series": trainer_trace.get("trace_eval_loss_series"),
+        "trace_training_telemetry_count": _metric_number(
+            trainer_trace,
+            "trace_training_telemetry_count",
+        ),
+        "trace_last_desire_pressure": _metric_number(
+            trainer_trace,
+            "trace_last_desire_pressure",
+        ),
+        "trace_max_desire_pressure": _metric_number(
+            trainer_trace,
+            "trace_max_desire_pressure",
+        ),
+        "trace_mean_desire_stability": _metric_number(
+            trainer_trace,
+            "trace_mean_desire_stability",
+        ),
+        "trace_last_psi_total": _metric_number(
+            trainer_trace,
+            "trace_last_psi_total",
+        ),
+        "trace_max_psi_total": _metric_number(
+            trainer_trace,
+            "trace_max_psi_total",
+        ),
+        "trace_mean_psi_total": _metric_number(
+            trainer_trace,
+            "trace_mean_psi_total",
+        ),
         "generation_before_status": generation_before.get("status"),
         "generation_before_method": generation_before.get("generation_method"),
         "generation_before_control_status": generation_before_control.get("status"),
@@ -1526,6 +1782,21 @@ def _ranked_sweep_rows(
                     row.get("trace_eval_runtime_max")
                 ),
                 "trace_eval_loss_series": row.get("trace_eval_loss_series"),
+                "trace_training_telemetry_count": _safe_number(
+                    row.get("trace_training_telemetry_count")
+                ),
+                "trace_last_desire_pressure": _safe_number(
+                    row.get("trace_last_desire_pressure")
+                ),
+                "trace_max_desire_pressure": _safe_number(
+                    row.get("trace_max_desire_pressure")
+                ),
+                "trace_mean_desire_stability": _safe_number(
+                    row.get("trace_mean_desire_stability")
+                ),
+                "trace_last_psi_total": _safe_number(row.get("trace_last_psi_total")),
+                "trace_max_psi_total": _safe_number(row.get("trace_max_psi_total")),
+                "trace_mean_psi_total": _safe_number(row.get("trace_mean_psi_total")),
                 "dataset_fit_verdict": row.get("dataset_fit_verdict"),
                 "failure_stage": row.get("failure_stage"),
             }
@@ -1655,6 +1926,8 @@ def summarize_hf_gpt2_finetune_sweep_report_lines(
             f"trainer_sps={row.get('trainer_steps_per_second')} "
             f"trace_sps_mean={row.get('trace_log_steps_per_second_mean')} "
             f"eval_series={row.get('trace_eval_loss_series')} "
+            f"psi={row.get('trace_last_psi_total')} "
+            f"desire={row.get('trace_last_desire_pressure')} "
             f"changed={row.get('generation_continuation_changed')} "
             f"zcontrol_changed={row.get('generation_after_control_top_token_changed_count')} "
             f"zcontrol_backend={row.get('generation_after_control_backend')}"
@@ -1726,6 +1999,10 @@ def hf_gpt2_finetune_trainer_trace_callback(
     reset: bool = True,
     zspace_probe_tokens: Sequence[int | float] | None = None,
     zspace_probe_kwargs: Mapping[str, object] | None = None,
+    training_telemetry: bool = False,
+    telemetry_prefix: str = "hf_ft",
+    desire_gain: float = 1.0,
+    psi_gain: float = 1.0,
 ):
     """Create a Transformers TrainerCallback that writes SpiralTorch JSONL."""
 
@@ -1741,12 +2018,15 @@ def hf_gpt2_finetune_trainer_trace_callback(
     trace_path = Path(path)
     probe_kwargs = dict(zspace_probe_kwargs or {})
     probe_tokens = list(zspace_probe_tokens or [])
+    desire_gain_value = _finite_non_negative(desire_gain, label="desire_gain")
+    psi_gain_value = _finite_non_negative(psi_gain, label="psi_gain")
 
     class SpiralTorchHFTrainerTraceCallback(base_cls):  # type: ignore[misc, valid-type]
         def __init__(self) -> None:
             self.path = trace_path
             self.run_id = run_id
             self.event_count = 0
+            self.last_telemetry_loss: float | None = None
             if reset:
                 self.path.parent.mkdir(parents=True, exist_ok=True)
                 self.path.write_text("", encoding="utf-8")
@@ -1762,6 +2042,25 @@ def hf_gpt2_finetune_trainer_trace_callback(
             metrics: Mapping[str, object] | None = None,
             extra: Mapping[str, object] | None = None,
         ) -> object:
+            merged_extra = dict(extra or {})
+            if training_telemetry:
+                telemetry_frame = hf_gpt2_finetune_training_telemetry_frame(
+                    event,
+                    logs=logs,
+                    metrics=metrics,
+                    state=state,
+                    previous_loss=self.last_telemetry_loss,
+                    telemetry_prefix=telemetry_prefix,
+                    desire_gain=desire_gain_value,
+                    psi_gain=psi_gain_value,
+                )
+                merged_extra["training_telemetry"] = telemetry_frame
+                merged_extra["telemetry"] = telemetry_frame.get("telemetry")
+                merged_extra["desire"] = telemetry_frame.get("desire")
+                merged_extra["psi"] = telemetry_frame.get("psi")
+                frame_loss = _safe_number(telemetry_frame.get("loss"))
+                if frame_loss is not None:
+                    self.last_telemetry_loss = float(frame_loss)
             row = hf_gpt2_finetune_trainer_trace_event(
                 event,
                 args=args,
@@ -1770,7 +2069,7 @@ def hf_gpt2_finetune_trainer_trace_callback(
                 logs=logs,
                 metrics=metrics,
                 run_id=self.run_id,
-                extra=extra,
+                extra=merged_extra,
             )
             write_hf_gpt2_finetune_trainer_trace_event(row, self.path)
             self.event_count += 1

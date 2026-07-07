@@ -111,6 +111,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--trainer-trace-jsonl", type=Path, default=None)
     parser.add_argument("--trainer-trace-run-id", default=None)
     parser.add_argument("--no-trainer-trace", action="store_true")
+    parser.add_argument("--trainer-telemetry", action="store_true")
+    parser.add_argument("--trainer-telemetry-prefix", default="hf_ft")
+    parser.add_argument("--trainer-desire-gain", type=float, default=1.0)
+    parser.add_argument("--trainer-psi-gain", type=float, default=1.0)
     parser.add_argument("--allow-remote", action="store_true")
     parser.add_argument("--trust-remote-code", action="store_true")
     parser.add_argument("--train", action="store_true", help="Actually run Trainer.train().")
@@ -379,6 +383,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         parser.error("--eval-accumulation-steps must be non-negative")
     if args.dataloader_num_workers < 0:
         parser.error("--dataloader-num-workers must be non-negative")
+    if args.trainer_telemetry and args.no_trainer_trace:
+        parser.error("--trainer-telemetry requires trainer tracing")
+    if args.trainer_telemetry:
+        if not str(args.trainer_telemetry_prefix).strip():
+            parser.error("--trainer-telemetry-prefix must be non-empty")
+        if args.trainer_desire_gain < 0.0 or not math.isfinite(args.trainer_desire_gain):
+            parser.error("--trainer-desire-gain must be finite and non-negative")
+        if args.trainer_psi_gain < 0.0 or not math.isfinite(args.trainer_psi_gain):
+            parser.error("--trainer-psi-gain must be finite and non-negative")
     if args.metadata_only and args.train:
         parser.error("--metadata-only and --train are mutually exclusive")
     if args.validation_file and not args.train_file:
@@ -1211,6 +1224,10 @@ def _base_run_card(
         "trainer_trace_jsonl": (
             None if args.metadata_only else str(_trainer_trace_path(args))
         ),
+        "trainer_telemetry_requested": bool(args.trainer_telemetry),
+        "trainer_telemetry_prefix": args.trainer_telemetry_prefix,
+        "trainer_desire_gain": args.trainer_desire_gain,
+        "trainer_psi_gain": args.trainer_psi_gain,
         "load_status": "pending",
         "failure_stage": None,
         "failure_error": None,
@@ -1457,6 +1474,10 @@ def _main_with_runtime_access(
                     "frequency": args.zspace_frequency,
                     "strength": args.zspace_strength,
                 },
+                training_telemetry=bool(args.trainer_telemetry),
+                telemetry_prefix=args.trainer_telemetry_prefix,
+                desire_gain=args.trainer_desire_gain,
+                psi_gain=args.trainer_psi_gain,
             )
         )
     try:

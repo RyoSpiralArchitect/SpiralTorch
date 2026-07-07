@@ -383,9 +383,11 @@ After the contract passes, add `--train --max-train-samples 50000 --block-size
 `AutoModelForCausalLM` / `Trainer` fine-tune. Train runs write
 `spiraltorch-hf-gpt2-ft-trainer-trace.jsonl` by default, capturing
 train/log/evaluate/save/end events and summarizing loss/eval-loss telemetry
-back into the run card; pass `--no-trainer-trace` only when that audit trail is
-too noisy. Use `--require-runtime-device-ready-backend wgpu` when the
-SpiralTorch WGPU surface must be available before the run starts.
+back into the run card; add `--trainer-telemetry --trainer-desire-gain 1.0
+--trainer-psi-gain 1.0` to inject bounded desire/psi frames into those events
+and compare them across run cards. Pass `--no-trainer-trace` only when that
+audit trail is too noisy. Use `--require-runtime-device-ready-backend wgpu`
+when the SpiralTorch WGPU surface must be available before the run starts.
 
 For a larger local corpus, bypass Hub datasets and feed files directly:
 
@@ -420,7 +422,11 @@ Add `--generation-prompt "SpiralTorch is" --generation-max-new-tokens 32` to
 store deterministic before/after text samples, generated continuation text,
 token deltas, and hashes in the same run card. Use `--generation-do-sample`
 with `--generation-temperature` and optional `--generation-top-k` when you want
-qualitative samples to include sampling variance.
+qualitative samples to include sampling variance. Add
+`--generation-zspace-softmax --generation-ngram-size 3 --generation-ngram-window
+96 --generation-ngram-repression-strength 0.75` to route post-FT generation
+through SpiralTorch's entropy thermostat plus phrase-scale repetition
+repression.
 Add `--eval-before-train` when you want a numeric baseline before updates; the
 bridge writes `eval_before_train` plus final `eval_after_train` reports with
 `eval_loss`, perplexity, raw metrics, and skipped/error status. Pass
@@ -447,6 +453,7 @@ PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_gpt2_finetune_sweep.
   --generation-prompt "SpiralTorch is" \
   --eval-before-train \
   --zspace-probe \
+  --trainer-telemetry \
   --block-size-values 64,128 \
   --learning-rate-values 0.0001,0.00005 \
   --seed-values 7,13 \

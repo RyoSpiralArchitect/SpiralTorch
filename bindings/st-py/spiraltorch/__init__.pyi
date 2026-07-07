@@ -400,6 +400,18 @@ def hf_gpt2_finetune_summary_lines(
     report: Mapping[str, object],
 ) -> List[str]: ...
 
+def hf_gpt2_finetune_training_telemetry_frame(
+    event: str,
+    *,
+    logs: Mapping[str, object] | None = ...,
+    metrics: Mapping[str, object] | None = ...,
+    state: object = ...,
+    previous_loss: object = ...,
+    telemetry_prefix: str = ...,
+    desire_gain: float = ...,
+    psi_gain: float = ...,
+) -> Dict[str, object]: ...
+
 def hf_gpt2_finetune_trainer_trace_event(
     event: str,
     *,
@@ -464,6 +476,10 @@ def hf_gpt2_finetune_trainer_trace_callback(
     reset: bool = ...,
     zspace_probe_tokens: Sequence[int | float] | None = ...,
     zspace_probe_kwargs: Mapping[str, object] | None = ...,
+    training_telemetry: bool = ...,
+    telemetry_prefix: str = ...,
+    desire_gain: float = ...,
+    psi_gain: float = ...,
 ) -> object: ...
 
 def hf_gpt2_finetune_zspace_probe(
@@ -8249,6 +8265,7 @@ __all__ = [
     "hf_gpt2_finetune_preflight_report",
     "hf_gpt2_finetune_rust_dependency_report",
     "hf_gpt2_finetune_summary_lines",
+    "hf_gpt2_finetune_training_telemetry_frame",
     "hf_gpt2_finetune_trainer_trace_callback",
     "hf_gpt2_finetune_trainer_trace_event",
     "hf_gpt2_finetune_zspace_probe",

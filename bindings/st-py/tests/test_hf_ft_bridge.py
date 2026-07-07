@@ -664,6 +664,21 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                     "3.0",
                     "--generation-repression-strength",
                     "1.25",
+                    "--generation-ngram-size",
+                    "3",
+                    "--generation-ngram-window",
+                    "96",
+                    "--generation-ngram-repression-strength",
+                    "0.75",
+                    "--generation-ngram-decay",
+                    "0.9",
+                    "--trainer-telemetry",
+                    "--trainer-telemetry-prefix",
+                    "hf_ft",
+                    "--trainer-desire-gain",
+                    "1.2",
+                    "--trainer-psi-gain",
+                    "0.8",
                     "--generation-zspace-report-limit",
                     "2",
                     "--eval-before-train",
@@ -704,6 +719,21 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("3.0", first_command)
         self.assertIn("--generation-repression-strength", first_command)
         self.assertIn("1.25", first_command)
+        self.assertIn("--generation-ngram-size", first_command)
+        self.assertIn("3", first_command)
+        self.assertIn("--generation-ngram-window", first_command)
+        self.assertIn("96", first_command)
+        self.assertIn("--generation-ngram-repression-strength", first_command)
+        self.assertIn("0.75", first_command)
+        self.assertIn("--generation-ngram-decay", first_command)
+        self.assertIn("0.9", first_command)
+        self.assertIn("--trainer-telemetry", first_command)
+        self.assertIn("--trainer-telemetry-prefix", first_command)
+        self.assertIn("hf_ft", first_command)
+        self.assertIn("--trainer-desire-gain", first_command)
+        self.assertIn("1.2", first_command)
+        self.assertIn("--trainer-psi-gain", first_command)
+        self.assertIn("0.8", first_command)
         self.assertIn("--generation-zspace-report-limit", first_command)
         self.assertIn("2", first_command)
         self.assertIn("--eval-before-train", first_command)
@@ -1306,6 +1336,32 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(summary["trace_last_loss"], 1.7)
         self.assertEqual(summary["trace_min_eval_loss"], 1.6)
 
+    def test_trainer_training_telemetry_frame_derives_desire_and_psi(self) -> None:
+        state = types.SimpleNamespace(global_step=4, epoch=0.4, max_steps=10)
+
+        frame = hf_ft.hf_gpt2_finetune_training_telemetry_frame(
+            "log",
+            logs={"loss": 2.0, "grad_norm": 4.0, "learning_rate": 5e-5},
+            state=state,
+            previous_loss=2.5,
+            telemetry_prefix="hf_ft",
+            desire_gain=1.2,
+            psi_gain=0.8,
+        )
+
+        self.assertEqual(frame["row_type"], "hf_gpt2_finetune_training_telemetry")
+        self.assertEqual(frame["status"], "ok")
+        self.assertEqual(frame["loss_key"], "loss")
+        self.assertAlmostEqual(frame["loss_delta"], -0.5)
+        self.assertAlmostEqual(frame["loss_improvement"], 0.5)
+        self.assertAlmostEqual(frame["progress"], 0.4)
+        self.assertIn("pressure", frame["desire"])
+        self.assertIn("total", frame["psi"])
+        telemetry = frame["telemetry"]
+        self.assertIn("hf_ft.loss", telemetry)
+        self.assertIn("hf_ft.desire.pressure", telemetry)
+        self.assertIn("hf_ft.psi.total", telemetry)
+
     def test_trainer_trace_summary_reports_throughput_and_eval_series(self) -> None:
         rows = [
             {
@@ -1402,6 +1458,25 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 "metrics": {"eval_loss": 1.4, "eval_runtime": 3.0},
             },
         ]
+        previous_loss = None
+        for row in rows:
+            if row["event"] != "log":
+                continue
+            frame = hf_ft.hf_gpt2_finetune_training_telemetry_frame(
+                row["event"],
+                logs=row["metrics"],
+                state=types.SimpleNamespace(
+                    global_step=row["global_step"],
+                    max_steps=5,
+                    epoch=None,
+                ),
+                previous_loss=previous_loss,
+            )
+            previous_loss = frame["loss"]
+            row["training_telemetry"] = frame
+            row["telemetry"] = frame["telemetry"]
+            row["desire"] = frame["desire"]
+            row["psi"] = frame["psi"]
         with tempfile.TemporaryDirectory() as tmp:
             path = f"{tmp}/trace.jsonl"
             for row in rows:
@@ -1436,6 +1511,9 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(summary["trace_log_steps_per_second_mean"], 0.5)
         self.assertEqual(summary["trace_eval_runtime_max"], 3.0)
         self.assertEqual(summary["trace_eval_loss_series"], "5=1.4")
+        self.assertEqual(summary["trace_training_telemetry_count"], 2)
+        self.assertIsNotNone(summary["trace_last_desire_pressure"])
+        self.assertIsNotNone(summary["trace_last_psi_total"])
         self.assertEqual(
             sweep_summary["top_runs"][0]["trace_eval_loss_series"],
             "5=1.4",
@@ -1457,14 +1535,26 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 callback = hf_ft.hf_gpt2_finetune_trainer_trace_callback(
                     path,
                     run_id="fake-run",
+                    training_telemetry=True,
+                    desire_gain=1.2,
+                    psi_gain=0.8,
                 )
             callback.on_train_begin(args, state, control)
             callback.on_log(args, state, control, logs={"loss": 2.0})
             rows = hf_ft.load_hf_gpt2_finetune_trainer_trace(path)
+            summary = hf_ft.summarize_hf_gpt2_finetune_trainer_trace(rows)
 
         self.assertEqual([row["event"] for row in rows], ["train_begin", "log"])
         self.assertEqual(rows[0]["run_id"], "fake-run")
         self.assertEqual(rows[1]["metrics"], {"loss": 2.0})
+        self.assertIn("training_telemetry", rows[1])
+        self.assertIn("telemetry", rows[1])
+        self.assertIn("desire", rows[1])
+        self.assertIn("psi", rows[1])
+        self.assertIn("hf_ft.psi.total", rows[1]["telemetry"])
+        self.assertEqual(summary["trace_training_telemetry_count"], 2)
+        self.assertIsNotNone(summary["trace_last_desire_pressure"])
+        self.assertIsNotNone(summary["trace_last_psi_total"])
         self.assertEqual(callback.event_count, 2)
 
     def test_top_level_exports_hf_ft_helpers(self) -> None:
@@ -1491,6 +1581,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("hf_gpt2_finetune_eval_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_generation_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_preflight_report", st.__all__)
+        self.assertIn("hf_gpt2_finetune_training_telemetry_frame", st.__all__)
         self.assertIn("hf_gpt2_finetune_trainer_trace_callback", st.__all__)
         self.assertIn("compare_hf_gpt2_finetune_run_cards", st.__all__)
         self.assertIn("load_hf_gpt2_finetune_run_card", st.__all__)
@@ -1505,6 +1596,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIs(
             st.hf_gpt2_finetune_generation_report,
             hf_ft.hf_gpt2_finetune_generation_report,
+        )
+        self.assertIs(
+            st.hf_gpt2_finetune_training_telemetry_frame,
+            hf_ft.hf_gpt2_finetune_training_telemetry_frame,
         )
         self.assertIs(
             st.compare_hf_gpt2_finetune_run_cards,
