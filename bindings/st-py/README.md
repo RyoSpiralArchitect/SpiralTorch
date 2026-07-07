@@ -421,6 +421,10 @@ store deterministic before/after text samples, generated continuation text,
 token deltas, and hashes in the same run card. Use `--generation-do-sample`
 with `--generation-temperature` and optional `--generation-top-k` when you want
 qualitative samples to include sampling variance.
+Add `--eval-before-train` when you want a numeric baseline before updates; the
+bridge writes `eval_before_train` plus final `eval_after_train` reports with
+`eval_loss`, perplexity, raw metrics, and skipped/error status. Pass
+`--no-eval-after-train` only when a long run must avoid the final eval pass.
 
 ## Minimal usage
 

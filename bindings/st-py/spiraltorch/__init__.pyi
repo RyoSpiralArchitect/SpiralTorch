@@ -286,6 +286,15 @@ def hf_gpt2_finetune_dataset_fit_report(
     min_eval_blocks: int = ...,
 ) -> Dict[str, object]: ...
 
+def hf_gpt2_finetune_eval_report(
+    *,
+    stage: str,
+    metrics: Mapping[str, object] | None = ...,
+    loss_key: str = ...,
+    error: object = ...,
+    skipped_reason: object = ...,
+) -> Dict[str, object]: ...
+
 def hf_gpt2_finetune_generation_report(
     *,
     stage: str,
@@ -8129,6 +8138,7 @@ __all__ = [
     "hf_gpt2_finetune_corpus_file_report",
     "hf_gpt2_finetune_corpus_scan_report",
     "hf_gpt2_finetune_dataset_fit_report",
+    "hf_gpt2_finetune_eval_report",
     "hf_gpt2_finetune_generation_report",
     "hf_gpt2_finetune_preflight_report",
     "hf_gpt2_finetune_rust_dependency_report",

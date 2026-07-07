@@ -25,6 +25,7 @@ __all__ = [
     "hf_gpt2_finetune_corpus_file_report",
     "hf_gpt2_finetune_corpus_scan_report",
     "hf_gpt2_finetune_dataset_fit_report",
+    "hf_gpt2_finetune_eval_report",
     "hf_gpt2_finetune_generation_report",
     "hf_gpt2_finetune_rust_dependency_report",
     "hf_gpt2_finetune_summary_lines",
@@ -727,6 +728,52 @@ def _metric_fields(values: Mapping[str, object] | None) -> dict[str, object]:
         str(key): _json_safe(value)
         for key, value in values.items()
         if not str(key).startswith("_")
+    }
+
+
+def _safe_exp(value: int | float | None) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(math.exp(float(value)))
+    except (OverflowError, ValueError):
+        return None
+
+
+def hf_gpt2_finetune_eval_report(
+    *,
+    stage: str,
+    metrics: Mapping[str, object] | None = None,
+    loss_key: str = "eval_loss",
+    error: object = None,
+    skipped_reason: object = None,
+) -> dict[str, object]:
+    """Summarize a GPT-2 FT eval pass for before/after run cards."""
+
+    metric_fields = _metric_fields(metrics)
+    loss = _safe_number(metric_fields.get(loss_key))
+    error_text = None if error is None else str(error)
+    skipped_text = None if skipped_reason is None else str(skipped_reason)
+    if error_text:
+        status = "error"
+    elif skipped_text:
+        status = "skipped"
+    elif metric_fields:
+        status = "ok"
+    else:
+        status = "empty"
+    return {
+        "row_type": "hf_gpt2_finetune_eval_report",
+        "stage": str(stage),
+        "status": status,
+        "loss_key": str(loss_key),
+        "eval_loss": loss,
+        "eval_perplexity": _safe_exp(loss),
+        "metric_count": len(metric_fields),
+        "metric_keys": csv_label(sorted(metric_fields)),
+        "metrics": metric_fields,
+        "error": error_text,
+        "skipped_reason": skipped_text,
     }
 
 
