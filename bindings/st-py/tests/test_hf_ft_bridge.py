@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import math
 import os
 import sys
@@ -18,12 +19,26 @@ from spiraltorch import hf_ft
 EXAMPLE_PATH = (
     Path(__file__).resolve().parents[1] / "examples" / "hf_gpt2_finetune_bridge.py"
 )
+SWEEP_PATH = (
+    Path(__file__).resolve().parents[1] / "examples" / "hf_gpt2_finetune_sweep.py"
+)
 
 
 def load_bridge_example():
     spec = importlib.util.spec_from_file_location(
         "hf_gpt2_finetune_bridge_test",
         EXAMPLE_PATH,
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_sweep_example():
+    spec = importlib.util.spec_from_file_location(
+        "hf_gpt2_finetune_sweep_test",
+        SWEEP_PATH,
     )
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -375,6 +390,127 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(comparison["best_eval_loss_delta_run_label"], "strong")
         self.assertEqual(comparison["eval_loss_improved_count"], 2)
         self.assertEqual(comparison["generation_changed_count"], 1)
+
+    def test_sweep_example_builds_grid_and_writes_dry_run_report(self) -> None:
+        module = load_sweep_example()
+        with tempfile.TemporaryDirectory() as tmp:
+            train_path = Path(tmp) / "train.txt"
+            validation_path = Path(tmp) / "validation.txt"
+            train_path.write_text("alpha spiral\nbeta zspace\n", encoding="utf-8")
+            validation_path.write_text("gamma eval\n", encoding="utf-8")
+            out_dir = Path(tmp) / "sweep"
+            args = module.parse_args(
+                [
+                    "--dry-run",
+                    "--out-dir",
+                    str(out_dir),
+                    "--train-file",
+                    str(train_path),
+                    "--validation-file",
+                    str(validation_path),
+                    "--corpus-scan",
+                    "--corpus-scan-max-bytes-per-file",
+                    "128",
+                    "--block-size-values",
+                    "8,16",
+                    "--learning-rate-values",
+                    "0.001,0.0005",
+                    "--max-step-values",
+                    "1",
+                    "--seed-values",
+                    "7,13",
+                    "--generation-prompt",
+                    "SpiralTorch is",
+                    "--generation-do-sample",
+                    "--generation-temperature",
+                    "0.8",
+                    "--generation-top-k",
+                    "12",
+                    "--eval-before-train",
+                    "--runtime-device-backend",
+                    "wgpu",
+                    "--require-wgpu-ready",
+                    "--zspace-probe",
+                ]
+            )
+            runs = module.build_sweep_runs(args)
+            report = module.run_sweep(args)
+            stored_report = json.loads((out_dir / "sweep-report.json").read_text())
+
+        self.assertEqual(len(runs), 8)
+        self.assertEqual(report["run_count"], 8)
+        self.assertTrue(report["dry_run"])
+        self.assertEqual(report["skipped_run_count"], 8)
+        self.assertEqual(stored_report["row_type"], "hf_gpt2_finetune_sweep_report")
+        first_command = runs[0]["command"]
+        self.assertIn("--train", first_command)
+        self.assertIn("--corpus-scan", first_command)
+        self.assertIn("--generation-do-sample", first_command)
+        self.assertIn("--eval-before-train", first_command)
+        self.assertIn("--runtime-device-backend", first_command)
+        self.assertIn("--require-wgpu-ready", first_command)
+        self.assertIn("--zspace-probe", first_command)
+        self.assertIn("bs8", runs[0]["name"])
+        self.assertIn("seed13", runs[-1]["name"])
+
+    def test_sweep_example_compares_completed_run_cards(self) -> None:
+        module = load_sweep_example()
+        with tempfile.TemporaryDirectory() as tmp:
+            train_path = Path(tmp) / "train.txt"
+            train_path.write_text("alpha spiral\nbeta zspace\n", encoding="utf-8")
+            out_dir = Path(tmp) / "sweep"
+            args = module.parse_args(
+                [
+                    "--out-dir",
+                    str(out_dir),
+                    "--train-file",
+                    str(train_path),
+                    "--validation-fraction",
+                    "0.5",
+                    "--block-size-values",
+                    "8",
+                    "--learning-rate-values",
+                    "0.001",
+                    "--max-step-values",
+                    "1",
+                    "--seed-values",
+                    "7,13",
+                ]
+            )
+
+            def fake_run(command, *, check=False):
+                del check
+                run_card_path = Path(command[command.index("--run-card") + 1])
+                seed = int(command[command.index("--seed") + 1])
+                loss = 1.8 if seed == 7 else 1.3
+                hf_ft.write_hf_gpt2_finetune_run_card(
+                    {
+                        "row_type": "hf_gpt2_finetune_run_card",
+                        "model_name": "gpt2",
+                        "dataset_name": "local-files",
+                        "dataset_source": "local_files",
+                        "dataset_fit_report": {
+                            "verdict": "train_eval_ready",
+                            "train_ready": True,
+                            "eval_ready": True,
+                        },
+                        "eval_after_train": hf_ft.hf_gpt2_finetune_eval_report(
+                            stage="after_train",
+                            metrics={"eval_loss": loss},
+                        ),
+                    },
+                    run_card_path,
+                )
+                return types.SimpleNamespace(returncode=0)
+
+            with mock.patch.object(module.subprocess, "run", side_effect=fake_run):
+                report = module.run_sweep(args)
+
+        self.assertEqual(report["attempted_run_count"], 2)
+        self.assertEqual(report["completed_run_count"], 2)
+        self.assertEqual(report["failed_run_count"], 0)
+        self.assertEqual(report["comparison"]["run_count"], 2)
+        self.assertIn("seed13", report["comparison"]["best_eval_after_run_label"])
 
     def test_example_local_corpus_reports_attach_scan_to_cards(self) -> None:
         module = load_bridge_example()
