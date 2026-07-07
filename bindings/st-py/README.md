@@ -528,8 +528,10 @@ the run cards are available, including the same
 `st.compare_hf_gpt2_finetune_run_cards(...)` comparison payload. Add
 `--inference-distortion-sweep-report` after a local/API inference-distortion
 sweep to stamp its recommended prompt/runtime/config into each FT run card and
-train-begin trace event. When `--trainer-telemetry` is enabled, the same handoff
-also appears as `hf_ft.inference_distortion.*` telemetry keys on each frame;
+train-begin trace event; `sweep-plan.json` and dry-run `sweep-report.json` embed
+the same handoff so the scale-up plan can be audited before loading a model.
+When `--trainer-telemetry` is enabled, the same handoff also appears as
+`hf_ft.inference_distortion.*` telemetry keys on each frame;
 summaries surface the recommended probe, effect/risk, desire pressure, psi total,
 and API route beside eval/generation metrics. Add
 `--dry-run` to inspect commands without loading Transformers, or

@@ -722,7 +722,51 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             distortion_report_path = Path(tmp) / "distortion-sweep-report.json"
             train_path.write_text("alpha spiral\nbeta zspace\n", encoding="utf-8")
             validation_path.write_text("gamma eval\n", encoding="utf-8")
-            distortion_report_path.write_text("{}", encoding="utf-8")
+            distortion_report_path.write_text(
+                json.dumps(
+                    {
+                        "row_type": "zspace_inference_distortion_sweep",
+                        "status": "complete",
+                        "prompt": "SpiralTorch is",
+                        "runtime": {
+                            "api_provider": "fake",
+                            "api_model": "fake-distorted-api",
+                        },
+                        "runs": [
+                            {
+                                "name": "strong",
+                                "status": "ok",
+                                "probe_path": "/tmp/missing-strong-probe.json",
+                                "config": {
+                                    "desire_pressure": 0.8,
+                                    "desire_stability": 0.45,
+                                    "psi_total": 0.7,
+                                    "coherence": 0.5,
+                                    "distortion_strength": 1.0,
+                                    "base_temperature": 0.7,
+                                    "base_top_p": 0.95,
+                                },
+                            }
+                        ],
+                        "comparison": {
+                            "row_type": "zspace_inference_distortion_probe_comparison",
+                            "recommended_probe": "strong",
+                            "recommended_reason": (
+                                "highest_effect_score_lowest_risk_tiebreak"
+                            ),
+                            "top_probes": [
+                                {
+                                    "label": "strong",
+                                    "effect_score": 0.91,
+                                    "risk_score": 0.22,
+                                    "api_provider": "fake",
+                                }
+                            ],
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
             out_dir = Path(tmp) / "sweep"
             args = module.parse_args(
                 [
@@ -794,7 +838,11 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             )
             runs = module.build_sweep_runs(args)
             report = module.run_sweep(args)
+            stored_plan = json.loads((out_dir / "sweep-plan.json").read_text())
             stored_report = json.loads((out_dir / "sweep-report.json").read_text())
+            sweep_lines = hf_ft.summarize_hf_gpt2_finetune_sweep_report_lines(
+                stored_report,
+            )
 
         self.assertEqual(len(runs), 8)
         self.assertEqual(report["run_count"], 8)
@@ -808,6 +856,19 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             stored_report["inference_distortion_sweep_report"],
             str(distortion_report_path),
         )
+        self.assertEqual(
+            stored_plan["inference_distortion_handoff"]["recommended_probe"],
+            "strong",
+        )
+        self.assertEqual(
+            stored_report["inference_distortion_handoff"]["recommended_probe"],
+            "strong",
+        )
+        self.assertEqual(
+            stored_report["summary"]["inference_distortion_recommended_probe"],
+            "strong",
+        )
+        self.assertIn("probe=strong", sweep_lines[2])
         first_command = runs[0]["command"]
         self.assertIn("--train", first_command)
         self.assertIn("--corpus-scan", first_command)

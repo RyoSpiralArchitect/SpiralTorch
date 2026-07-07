@@ -626,17 +626,31 @@ def _is_reusable_run_card(path: Path) -> bool:
     return True
 
 
+def _inference_distortion_report_path(args: argparse.Namespace) -> str | None:
+    return (
+        None
+        if args.inference_distortion_sweep_report is None
+        else str(args.inference_distortion_sweep_report)
+    )
+
+
+def _inference_distortion_handoff(args: argparse.Namespace) -> dict[str, Any] | None:
+    if args.inference_distortion_sweep_report is None:
+        return None
+    return st.hf_gpt2_finetune_inference_distortion_handoff_report(
+        args.inference_distortion_sweep_report,
+    )
+
+
 def run_sweep(args: argparse.Namespace) -> dict[str, Any]:
     runs = build_sweep_runs(args)
     args.out_dir.mkdir(parents=True, exist_ok=True)
+    inference_handoff = _inference_distortion_handoff(args)
     plan = {
         "row_type": "hf_gpt2_finetune_sweep_plan",
         "dry_run": bool(args.dry_run),
-        "inference_distortion_sweep_report": (
-            None
-            if args.inference_distortion_sweep_report is None
-            else str(args.inference_distortion_sweep_report)
-        ),
+        "inference_distortion_sweep_report": _inference_distortion_report_path(args),
+        "inference_distortion_handoff": inference_handoff,
         "run_count": len(runs),
         "runs": runs,
     }
@@ -653,11 +667,8 @@ def run_sweep(args: argparse.Namespace) -> dict[str, Any]:
             "skipped_run_count": len(runs),
             "plan_path": str(args.out_dir / "sweep-plan.json"),
             "report_path": str(args.out_dir / "sweep-report.json"),
-            "inference_distortion_sweep_report": (
-                None
-                if args.inference_distortion_sweep_report is None
-                else str(args.inference_distortion_sweep_report)
-            ),
+            "inference_distortion_sweep_report": _inference_distortion_report_path(args),
+            "inference_distortion_handoff": inference_handoff,
             "comparison": None,
             "runs": runs,
         }
@@ -723,11 +734,8 @@ def run_sweep(args: argparse.Namespace) -> dict[str, Any]:
         "skipped_run_count": sum(1 for run in runs if run.get("status") == "planned"),
         "plan_path": str(args.out_dir / "sweep-plan.json"),
         "report_path": str(args.out_dir / "sweep-report.json"),
-        "inference_distortion_sweep_report": (
-            None
-            if args.inference_distortion_sweep_report is None
-            else str(args.inference_distortion_sweep_report)
-        ),
+        "inference_distortion_sweep_report": _inference_distortion_report_path(args),
+        "inference_distortion_handoff": inference_handoff,
         "comparison": comparison,
         "runs": runs,
     }

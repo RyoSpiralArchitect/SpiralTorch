@@ -2095,6 +2095,7 @@ def summarize_hf_gpt2_finetune_sweep_report(
     report, source_path = _sweep_report_payload(report_or_path)
     comparison = _mapping_item(report, "comparison")
     summaries = _sweep_summary_rows(comparison)
+    inference_handoff = _mapping_item(report, "inference_distortion_handoff")
     runs_value = report.get("runs")
     runs = (
         [dict(row) for row in runs_value if isinstance(row, Mapping)]
@@ -2149,6 +2150,33 @@ def summarize_hf_gpt2_finetune_sweep_report(
         "best_eval_loss_delta": best_delta,
         "selected_run_label": selected_label,
         "selected_reason": selected_reason if selected_label else None,
+        "inference_distortion_sweep_report": report.get(
+            "inference_distortion_sweep_report"
+        ),
+        "inference_distortion_handoff_status": inference_handoff.get("status"),
+        "inference_distortion_recommended_probe": inference_handoff.get(
+            "recommended_probe"
+        ),
+        "inference_distortion_recommendation_reason": inference_handoff.get(
+            "recommendation_reason"
+        ),
+        "inference_distortion_effect_score": _metric_number(
+            inference_handoff,
+            "recommended_effect_score",
+        ),
+        "inference_distortion_risk_score": _metric_number(
+            inference_handoff,
+            "recommended_risk_score",
+        ),
+        "inference_distortion_desire_pressure": _metric_number(
+            inference_handoff,
+            "desire_pressure",
+        ),
+        "inference_distortion_psi_total": _metric_number(
+            inference_handoff,
+            "psi_total",
+        ),
+        "inference_distortion_api_provider": inference_handoff.get("api_provider"),
         "top_runs": _ranked_sweep_rows(summaries, top_n=top_n),
         "failed_runs": [
             {
@@ -2192,6 +2220,17 @@ def summarize_hf_gpt2_finetune_sweep_report_lines(
             f"best_delta={summary.get('best_eval_loss_delta')}"
         ),
     ]
+    if summary.get("inference_distortion_recommended_probe") is not None:
+        lines.append(
+            "hf_gpt2_ft_sweep_inference_handoff "
+            f"status={summary.get('inference_distortion_handoff_status')} "
+            f"probe={summary.get('inference_distortion_recommended_probe')} "
+            f"effect={summary.get('inference_distortion_effect_score')} "
+            f"risk={summary.get('inference_distortion_risk_score')} "
+            f"desire={summary.get('inference_distortion_desire_pressure')} "
+            f"psi={summary.get('inference_distortion_psi_total')} "
+            f"api={summary.get('inference_distortion_api_provider')}"
+        )
     for row in summary.get("top_runs", []):
         if not isinstance(row, Mapping):
             continue
