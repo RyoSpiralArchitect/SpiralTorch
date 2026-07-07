@@ -13,7 +13,8 @@ use st_tensor::{
     AmegaHypergrad, AmegaRealgrad, Complex32 as StComplex32, ComplexTensor, DesireGradientControl,
     DesireGradientInterpretation, GradientSummary, HypergradTelemetry, LanguageWaveEncoder,
     OpenCartesianTopos, Tensor, TensorBiome, ToposControlSignal, ToposInferenceHints,
-    ToposInferencePlan, ToposRuntimeProfile, ToposTrainingHints, ToposTrainingPlan, ZBox, ZBoxSite,
+    ToposInferencePlan, ToposRuntimeProfile, ToposRuntimeRoute, ToposRuntimeRouteScores,
+    ToposTrainingHints, ToposTrainingPlan, ZBox, ZBoxSite,
 };
 
 fn py_complex_to_st(values: Vec<PyComplex32>) -> Vec<StComplex32> {
@@ -77,6 +78,10 @@ fn topos_control_signal_to_pydict(
     dict.set_item(
         "runtime_profile",
         topos_runtime_profile_to_pydict(py, signal.runtime_profile(1.0, 1.0, 1.0, 1.0, 0.0, 0.0))?,
+    )?;
+    dict.set_item(
+        "runtime_route",
+        topos_runtime_route_to_pydict(py, signal.runtime_route(1.0, 1.0, 1.0, 1.0, 0.0, 0.0))?,
     )?;
     Ok(dict.into_py(py))
 }
@@ -172,6 +177,40 @@ fn topos_runtime_profile_to_pydict(
         profile.learning_inference_balance(),
     )?;
     dict.set_item("vector", profile.vector().to_vec())?;
+    Ok(dict.into_py(py))
+}
+
+fn topos_runtime_route_scores_to_pydict(
+    py: Python<'_>,
+    scores: ToposRuntimeRouteScores,
+) -> PyResult<PyObject> {
+    let dict = PyDict::new(py);
+    dict.set_item("training", scores.training_score())?;
+    dict.set_item("inference", scores.inference_score())?;
+    dict.set_item("guard", scores.guard_score())?;
+    dict.set_item("exploration", scores.exploration_score())?;
+    dict.set_item("context", scores.context_score())?;
+    dict.set_item("vector", scores.vector().to_vec())?;
+    Ok(dict.into_py(py))
+}
+
+fn topos_runtime_route_to_pydict(py: Python<'_>, route: ToposRuntimeRoute) -> PyResult<PyObject> {
+    let dict = PyDict::new(py);
+    dict.set_item("kind", "spiraltorch.topos_runtime_route")?;
+    dict.set_item("mode", route.mode_label())?;
+    dict.set_item("mode_id", route.mode_id())?;
+    dict.set_item("score", route.score())?;
+    dict.set_item("score_key", route.score_key())?;
+    dict.set_item("learning_action", route.learning_action())?;
+    dict.set_item("inference_action", route.inference_action())?;
+    dict.set_item(
+        "scores",
+        topos_runtime_route_scores_to_pydict(py, route.scores())?,
+    )?;
+    dict.set_item(
+        "runtime_profile",
+        topos_runtime_profile_to_pydict(py, route.profile())?,
+    )?;
     Ok(dict.into_py(py))
 }
 
@@ -405,6 +444,34 @@ impl PyOpenCartesianTopos {
             self.inner
                 .control_signal_for(observed_depth, visited_volume)
                 .runtime_profile(
+                    training_gain,
+                    inference_gain,
+                    base_temperature,
+                    base_top_p,
+                    base_frequency_penalty,
+                    base_presence_penalty,
+                ),
+        )
+    }
+
+    #[pyo3(signature = (observed_depth=0, visited_volume=0, training_gain=1.0, inference_gain=1.0, base_temperature=1.0, base_top_p=1.0, base_frequency_penalty=0.0, base_presence_penalty=0.0))]
+    pub fn runtime_route(
+        &self,
+        py: Python<'_>,
+        observed_depth: usize,
+        visited_volume: usize,
+        training_gain: f32,
+        inference_gain: f32,
+        base_temperature: f32,
+        base_top_p: f32,
+        base_frequency_penalty: f32,
+        base_presence_penalty: f32,
+    ) -> PyResult<PyObject> {
+        topos_runtime_route_to_pydict(
+            py,
+            self.inner
+                .control_signal_for(observed_depth, visited_volume)
+                .runtime_route(
                     training_gain,
                     inference_gain,
                     base_temperature,

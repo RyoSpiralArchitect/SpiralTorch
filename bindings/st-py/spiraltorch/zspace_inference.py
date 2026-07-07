@@ -1014,6 +1014,7 @@ def _normalise_topos_control_signal(payload: Mapping[str, Any]) -> dict[str, Any
         training_plan=training_plan,
         inference_plan=inference_plan,
     )
+    runtime_route = _topos_runtime_route_from_profile(runtime_profile)
     return {
         "curvature": curvature,
         "tolerance": tolerance,
@@ -1043,6 +1044,7 @@ def _normalise_topos_control_signal(payload: Mapping[str, Any]) -> dict[str, Any
         "inference_hints": inference_hints,
         "inference_plan": inference_plan,
         "runtime_profile": runtime_profile,
+        "runtime_route": runtime_route,
     }
 
 
@@ -1315,6 +1317,43 @@ def topos_runtime_route(
             training_gain=training_gain,
             inference_gain=inference_gain,
         )
+    elif (
+        callable(getattr(topos, "runtime_route", None))
+        and signal_options.get("porosity") is None
+        and float(min_temperature) == 0.0
+        and float(max_temperature) == 2.0
+        and float(min_top_p) == 0.05
+        and float(max_top_p) == 1.0
+    ):
+        try:
+            route = topos.runtime_route(
+                int(signal_options.get("observed_depth", 0)),
+                int(signal_options.get("visited_volume", 0)),
+                float(training_gain),
+                float(inference_gain),
+                float(base_temperature),
+                float(base_top_p),
+                float(base_frequency_penalty),
+                float(base_presence_penalty),
+            )
+        except Exception:
+            route = None
+        if isinstance(route, MappingABC):
+            return dict(route)
+        profile = topos_runtime_profile(
+            topos,
+            training_gain=training_gain,
+            inference_gain=inference_gain,
+            base_temperature=base_temperature,
+            base_top_p=base_top_p,
+            min_temperature=min_temperature,
+            max_temperature=max_temperature,
+            min_top_p=min_top_p,
+            max_top_p=max_top_p,
+            base_frequency_penalty=base_frequency_penalty,
+            base_presence_penalty=base_presence_penalty,
+            **signal_options,
+        )
     else:
         profile = topos_runtime_profile(
             topos,
@@ -1375,6 +1414,11 @@ def topos_control_partial(
     telemetry_signal.pop("training_plan", None)
     telemetry_signal.pop("inference_plan", None)
     telemetry_signal.pop("runtime_profile", None)
+    runtime_route = telemetry_signal.get("runtime_route")
+    if isinstance(runtime_route, MappingABC):
+        route_payload = dict(runtime_route)
+        route_payload.pop("runtime_profile", None)
+        telemetry_signal["runtime_route"] = route_payload
     telemetry = _flatten_telemetry(telemetry_signal, prefix=f"{telemetry_prefix}.")
     return ZSpacePartialBundle(
         metrics,
