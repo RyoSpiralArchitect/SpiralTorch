@@ -4,6 +4,7 @@ import contextlib
 import io
 import importlib.util
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -52,6 +53,11 @@ SWEEP_COMPARE_EXAMPLE_PATH = (
     / "examples"
     / "hf_gpt2_zspace_generation_control_compare.py"
 )
+CHECKPOINT_GENERATION_CONTROL_EXAMPLE_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "examples"
+    / "hf_gpt2_ft_checkpoint_generation_control.py"
+)
 DISTORTION_PROBE_EXAMPLE_PATH = (
     Path(__file__).resolve().parents[1]
     / "examples"
@@ -93,6 +99,21 @@ def load_generation_control_compare_example():
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(module)
+    return module
+
+
+def load_checkpoint_generation_control_example():
+    spec = importlib.util.spec_from_file_location(
+        "hf_gpt2_ft_checkpoint_generation_control_test",
+        CHECKPOINT_GENERATION_CONTROL_EXAMPLE_PATH,
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.modules.pop(spec.name, None)
     return module
 
 
@@ -1505,6 +1526,102 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
         self.assertEqual(comparison["recommended_sweep_label"], "checkpoint-512")
         self.assertEqual(stored["recommended_sweep_label"], "checkpoint-512")
         self.assertTrue(any("recommend=checkpoint-512" in line for line in lines))
+
+    def test_checkpoint_generation_control_dry_run_plans_default_prompts(self) -> None:
+        module = load_checkpoint_generation_control_example()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "run"
+            args = module.parse_args(
+                [
+                    "--run-dir",
+                    str(run_dir),
+                    "--checkpoint",
+                    "checkpoint-2048",
+                    "--label-prefix",
+                    "new",
+                    "--dry-run",
+                ]
+            )
+            jobs = module.build_sweep_jobs(args)
+            compare_command = module.build_compare_command(args, jobs)
+            report = module.run_checkpoint_generation_control(args)
+
+        self.assertEqual(len(jobs), 3)
+        self.assertEqual(jobs[0].out.name, "checkpoint-2048-generation-control-sweep.json")
+        self.assertEqual(
+            jobs[1].out.name,
+            "prompt-desire-coherence-checkpoint-2048-generation-control-sweep.json",
+        )
+        self.assertEqual(
+            jobs[2].out.name,
+            "prompt-tokenless-ft-checkpoint-2048-generation-control-sweep.json",
+        )
+        self.assertIn("new-spiral-checkpoint-2048", compare_command)
+        self.assertTrue(
+            any(
+                item.endswith("generation-control-compare-3prompt-2048.json")
+                for item in compare_command
+            )
+        )
+        self.assertEqual(report["status"], "planned")
+        self.assertEqual(report["sweep_count"], 3)
+        self.assertEqual(report["compare"]["status"], "planned")
+
+    def test_checkpoint_generation_control_runs_sweeps_and_compare_with_runner(
+        self,
+    ) -> None:
+        module = load_checkpoint_generation_control_example()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = root / "run"
+            (run_dir / "checkpoint-2048").mkdir(parents=True)
+            run_card = root / "checkpoint-generation-control.json"
+            executed: list[list[str]] = []
+
+            def fake_runner(command):
+                executed.append(list(command))
+                if "hf_gpt2_zspace_generation_control_sweep.py" in command[1]:
+                    out = Path(command[command.index("--out") + 1])
+                    out.write_text(
+                        json.dumps(
+                            {
+                                "row_type": "hf_gpt2_zspace_generation_control_sweep",
+                                "status": "complete",
+                            }
+                        ),
+                        encoding="utf-8",
+                    )
+                if "hf_gpt2_zspace_generation_control_compare.py" in command[1]:
+                    out = Path(command[command.index("--out") + 1])
+                    lines_out = Path(command[command.index("--lines-out") + 1])
+                    out.write_text('{"status":"complete"}\n', encoding="utf-8")
+                    lines_out.write_text("ok\n", encoding="utf-8")
+                return None
+
+            args = module.parse_args(
+                [
+                    "--run-dir",
+                    str(run_dir),
+                    "--checkpoint",
+                    "checkpoint-2048",
+                    "--run-card",
+                    str(run_card),
+                    "--top-n",
+                    "2",
+                ]
+            )
+            report = module.run_checkpoint_generation_control(args, runner=fake_runner)
+            stored = json.loads(run_card.read_text(encoding="utf-8"))
+            lines_exists = (
+                run_dir / "generation-control-compare-3prompt-2048.txt"
+            ).is_file()
+
+        self.assertEqual(report["status"], "complete")
+        self.assertEqual(stored["sweep_count"], 3)
+        self.assertEqual(len(executed), 4)
+        self.assertTrue(lines_exists)
 
     def test_dry_run_builds_control_grid_without_loading_model(self) -> None:
         module = load_generation_control_sweep_example()
