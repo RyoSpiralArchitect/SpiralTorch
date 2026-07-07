@@ -586,7 +586,9 @@ longer local runs, add `--resume-existing` to reuse successful per-run cards and
 continue only missing or failed rows after an interruption; add `--force` with
 that same command when you intentionally want to rerun every row. From Python,
 use `st.hf_gpt2_finetune_inference_distortion_handoff_report(...)` to inspect a
-probe or sweep recommendation before launching the FT bridge.
+probe or sweep recommendation before launching the FT bridge; the handoff and
+run-card/sweep summaries include ready-to-replay generation bridge CLI args when
+the recommendation carries logits-processor kwargs.
 
 ## Minimal usage
 

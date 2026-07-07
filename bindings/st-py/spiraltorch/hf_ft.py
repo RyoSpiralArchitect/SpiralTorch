@@ -573,6 +573,7 @@ def hf_gpt2_finetune_inference_distortion_handoff_report(
     activation_hook = _mapping_item(summary, "recommended_activation_hook")
     dropped_keys = _unique(summary.get("recommended_api_request_dropped_keys"))
     sent_keys = _unique(summary.get("recommended_api_request_sent_keys"))
+    bridge_cli_args = _generation_inference_bridge_cli_args(processor_kwargs)
     status = "ok" if config else "missing_recommendation"
     return {
         "row_type": "hf_gpt2_finetune_inference_distortion_handoff",
@@ -593,6 +594,7 @@ def hf_gpt2_finetune_inference_distortion_handoff_report(
         "recommended_request": request or None,
         "recommended_request_filter": request_filter or None,
         "recommended_processor_kwargs": processor_kwargs or None,
+        "recommended_bridge_cli_args": bridge_cli_args,
         "recommended_activation_hook": activation_hook or None,
         "recommended_probe_cli_args": list(
             summary.get("recommended_probe_cli_args") or []
@@ -1848,6 +1850,9 @@ def summarize_hf_gpt2_finetune_run_card(
         "inference_distortion_api_request_sent_keys": csv_label(
             _unique(inference_handoff.get("api_request_sent_keys"))
         ),
+        "inference_distortion_bridge_cli_args": list(
+            inference_handoff.get("recommended_bridge_cli_args") or []
+        ),
         "trace_event_count": _metric_number(trainer_trace, "trace_event_count"),
         "trace_last_loss": _metric_number(trainer_trace, "trace_last_loss"),
         "trace_min_eval_loss": _metric_number(trainer_trace, "trace_min_eval_loss"),
@@ -2246,6 +2251,9 @@ def _ranked_sweep_rows(
                 "inference_distortion_api_request_sent_keys": row.get(
                     "inference_distortion_api_request_sent_keys"
                 ),
+                "inference_distortion_bridge_cli_args": list(
+                    row.get("inference_distortion_bridge_cli_args") or []
+                ),
                 "dataset_fit_verdict": row.get("dataset_fit_verdict"),
                 "failure_stage": row.get("failure_stage"),
             }
@@ -2447,6 +2455,9 @@ def summarize_hf_gpt2_finetune_sweep_report(
         ),
         "inference_distortion_api_request_sent_keys": csv_label(
             _unique(inference_handoff.get("api_request_sent_keys"))
+        ),
+        "inference_distortion_bridge_cli_args": list(
+            inference_handoff.get("recommended_bridge_cli_args") or []
         ),
         "top_runs": _ranked_sweep_rows(summaries, top_n=top_n),
         "failed_runs": [

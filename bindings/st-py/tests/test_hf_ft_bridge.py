@@ -522,6 +522,19 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             handoff["recommended_processor_kwargs"]["repression_strength"],
             1.7,
         )
+        self.assertIn(
+            "--generation-zspace-softmax",
+            handoff["recommended_bridge_cli_args"],
+        )
+        self.assertIn(
+            "--generation-repression-strength",
+            handoff["recommended_bridge_cli_args"],
+        )
+        self.assertIn("1.7", handoff["recommended_bridge_cli_args"])
+        self.assertIn(
+            "--generation-ngram-repression-strength",
+            handoff["recommended_bridge_cli_args"],
+        )
         self.assertEqual(
             handoff["recommended_activation_hook"]["name_contains"],
             ["attn", "mlp"],
@@ -570,6 +583,11 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             "api_request_dropped_key_count": 2,
             "api_request_dropped_keys": ["frequency_penalty", "presence_penalty"],
             "api_request_sent_keys": ["temperature", "top_p"],
+            "recommended_bridge_cli_args": [
+                "--generation-zspace-softmax",
+                "--generation-repression-strength",
+                "1.7",
+            ],
         }
         base_card = {
             "row_type": "hf_gpt2_finetune_run_card",
@@ -797,6 +815,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             summary["inference_distortion_api_request_dropped_keys"],
             "frequency_penalty,presence_penalty",
         )
+        self.assertIn(
+            "--generation-repression-strength",
+            summary["inference_distortion_bridge_cli_args"],
+        )
         self.assertEqual(summary["trace_event_count"], 4)
         self.assertEqual(comparison["run_count"], 2)
         self.assertEqual(comparison["best_eval_after_run_label"], "strong")
@@ -832,7 +854,15 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             sweep_summary["inference_distortion_api_request_dropped_key_count"],
             2,
         )
+        self.assertIn(
+            "--generation-repression-strength",
+            sweep_summary["inference_distortion_bridge_cli_args"],
+        )
         self.assertEqual(sweep_summary["top_runs"][0]["run_label"], "strong")
+        self.assertIn(
+            "--generation-repression-strength",
+            sweep_summary["top_runs"][0]["inference_distortion_bridge_cli_args"],
+        )
         self.assertEqual(sweep_summary["top_runs"][0]["trainer_runtime"], 3.0)
         self.assertEqual(
             sweep_summary["top_runs"][0][
