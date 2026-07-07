@@ -533,6 +533,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("probe=direct-probe", handoff_lines[0])
         self.assertIn("hf_gpt2_ft_inference_handoff_replay", handoff_lines[1])
         self.assertIn("--generation-repression-strength", handoff_lines[1])
+        self.assertIn("hf_gpt2_ft_inference_handoff_generation", handoff_lines[2])
+        self.assertIn("--generation-from-inference-distortion", handoff_lines[2])
         self.assertTrue(
             any("probe=direct-probe" in line for line in preflight_lines)
         )
@@ -559,6 +561,23 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn(
             "--generation-ngram-repression-strength",
             handoff["recommended_bridge_cli_args"],
+        )
+        self.assertIn(
+            "--inference-distortion-probe",
+            handoff["recommended_source_cli_args"],
+        )
+        self.assertIn(str(probe_path), handoff["recommended_source_cli_args"])
+        self.assertIn(
+            "--generation-from-inference-distortion",
+            handoff["recommended_generation_handoff_cli_args"],
+        )
+        self.assertIn(
+            "--inference-distortion-probe",
+            handoff["recommended_explicit_generation_bridge_cli_args"],
+        )
+        self.assertIn(
+            "--generation-repression-strength",
+            handoff["recommended_explicit_generation_bridge_cli_args"],
         )
         self.assertEqual(
             handoff["recommended_activation_hook"]["name_contains"],
@@ -609,6 +628,18 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             "api_request_dropped_keys": ["frequency_penalty", "presence_penalty"],
             "api_request_sent_keys": ["temperature", "top_p"],
             "recommended_bridge_cli_args": [
+                "--generation-zspace-softmax",
+                "--generation-repression-strength",
+                "1.7",
+            ],
+            "recommended_generation_handoff_cli_args": [
+                "--inference-distortion-sweep-report",
+                "runs/zspace-inference-distortion-sweep/sweep-report.json",
+                "--generation-from-inference-distortion",
+            ],
+            "recommended_explicit_generation_bridge_cli_args": [
+                "--inference-distortion-sweep-report",
+                "runs/zspace-inference-distortion-sweep/sweep-report.json",
                 "--generation-zspace-softmax",
                 "--generation-repression-strength",
                 "1.7",
@@ -844,7 +875,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             "--generation-repression-strength",
             summary["inference_distortion_bridge_cli_args"],
         )
-        self.assertEqual(summary["inference_distortion_handoff_line_count"], 2)
+        self.assertEqual(summary["inference_distortion_handoff_line_count"], 3)
         self.assertTrue(
             any(
                 "probe=distort-002" in line
@@ -855,6 +886,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn(
             "--generation-repression-strength",
             summary["inference_distortion_replay_cli_preview"],
+        )
+        self.assertIn(
+            "--generation-from-inference-distortion",
+            summary["inference_distortion_generation_handoff_cli_preview"],
+        )
+        self.assertIn(
+            "--generation-repression-strength",
+            summary["inference_distortion_explicit_generation_bridge_cli_preview"],
         )
         self.assertEqual(summary["trace_event_count"], 4)
         self.assertEqual(comparison["run_count"], 2)
@@ -895,10 +934,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             "--generation-repression-strength",
             sweep_summary["inference_distortion_bridge_cli_args"],
         )
-        self.assertEqual(sweep_summary["inference_distortion_handoff_line_count"], 2)
+        self.assertEqual(sweep_summary["inference_distortion_handoff_line_count"], 3)
         self.assertIn(
             "--generation-repression-strength",
             sweep_summary["inference_distortion_replay_cli_preview"],
+        )
+        self.assertIn(
+            "--generation-from-inference-distortion",
+            sweep_summary["inference_distortion_generation_handoff_cli_preview"],
         )
         self.assertEqual(sweep_summary["top_runs"][0]["run_label"], "strong")
         self.assertIn(
@@ -1317,6 +1360,12 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 for line in stored_report["inference_distortion_handoff_lines"]
             )
         )
+        self.assertTrue(
+            any(
+                "hf_gpt2_ft_inference_handoff_generation" in line
+                for line in stored_report["inference_distortion_handoff_lines"]
+            )
+        )
         self.assertEqual(
             stored_report["summary"]["inference_distortion_recommended_probe"],
             "direct-probe",
@@ -1332,6 +1381,18 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn(
             "--generation-repression-strength",
             stored_report["summary"]["inference_distortion_replay_cli_preview"],
+        )
+        self.assertIn(
+            "--generation-from-inference-distortion",
+            stored_report["summary"][
+                "inference_distortion_generation_handoff_cli_preview"
+            ],
+        )
+        self.assertIn(
+            "--inference-distortion-probe",
+            stored_report["summary"][
+                "inference_distortion_generation_handoff_cli_args"
+            ],
         )
         self.assertEqual(
             stored_plan["generation_from_inference_distortion_plan"]["status"],

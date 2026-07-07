@@ -593,7 +593,11 @@ the recommendation carries logits-processor kwargs. Use
 compact, copy-friendly status/replay readout in notebooks or CI logs; bridge
 preflight/run-card artifacts and sweep `sweep-plan.json` / `sweep-report.json`
 preserve those same lines beside the structured handoff payload, and run-card /
-sweep summary helpers surface the same lines plus replay-arg previews.
+sweep summary helpers surface the same lines plus replay-arg previews. Handoff
+reports also include source-selector args such as `--inference-distortion-probe`,
+automatic generation handoff args with `--generation-from-inference-distortion`,
+and explicit Z-Space generation bridge args when you want to replay the same
+processor settings without relying on the automatic override.
 
 ## Minimal usage
 

@@ -575,11 +575,34 @@ def hf_gpt2_finetune_inference_distortion_handoff_report(
     dropped_keys = _unique(summary.get("recommended_api_request_dropped_keys"))
     sent_keys = _unique(summary.get("recommended_api_request_sent_keys"))
     bridge_cli_args = _generation_inference_bridge_cli_args(processor_kwargs)
+    source_path_value = source_path or None
+    if source_kind == "probe":
+        source_cli_args = (
+            ["--inference-distortion-probe", source_path_value]
+            if source_path_value
+            else []
+        )
+    else:
+        source_cli_args = (
+            ["--inference-distortion-sweep-report", source_path_value]
+            if source_path_value
+            else []
+        )
+    generation_handoff_cli_args = (
+        [*source_cli_args, "--generation-from-inference-distortion"]
+        if source_cli_args
+        else []
+    )
+    explicit_generation_bridge_cli_args = (
+        [*source_cli_args, *bridge_cli_args]
+        if source_cli_args and bridge_cli_args
+        else []
+    )
     status = "ok" if config else "missing_recommendation"
     return {
         "row_type": "hf_gpt2_finetune_inference_distortion_handoff",
         "status": status,
-        "source_path": source_path or None,
+        "source_path": source_path_value,
         "source_kind": source_kind,
         "source_row_type": input_row_type,
         "sweep_status": summary.get("status"),
@@ -596,6 +619,11 @@ def hf_gpt2_finetune_inference_distortion_handoff_report(
         "recommended_request_filter": request_filter or None,
         "recommended_processor_kwargs": processor_kwargs or None,
         "recommended_bridge_cli_args": bridge_cli_args,
+        "recommended_source_cli_args": source_cli_args,
+        "recommended_generation_handoff_cli_args": generation_handoff_cli_args,
+        "recommended_explicit_generation_bridge_cli_args": (
+            explicit_generation_bridge_cli_args
+        ),
         "recommended_activation_hook": activation_hook or None,
         "recommended_probe_cli_args": list(
             summary.get("recommended_probe_cli_args") or []
@@ -645,10 +673,17 @@ def hf_gpt2_finetune_inference_distortion_handoff_lines(
     replay_args = [
         str(item) for item in list(handoff.get("recommended_bridge_cli_args") or [])
     ]
+    generation_handoff_args = [
+        str(item)
+        for item in list(handoff.get("recommended_generation_handoff_cli_args") or [])
+    ]
     replay_limit = max(0, int(replay_arg_limit))
     replay_preview = csv_label(replay_args[:replay_limit])
     if replay_limit and len(replay_args) > replay_limit:
         replay_preview = f"{replay_preview},..."
+    generation_preview = csv_label(generation_handoff_args[:replay_limit])
+    if replay_limit and len(generation_handoff_args) > replay_limit:
+        generation_preview = f"{generation_preview},..."
     lines = [
         (
             "hf_gpt2_ft_inference_handoff "
@@ -668,6 +703,12 @@ def hf_gpt2_finetune_inference_distortion_handoff_lines(
             "hf_gpt2_ft_inference_handoff_replay "
             f"arg_count={len(replay_args)} "
             f"args={replay_preview}"
+        )
+    if generation_handoff_args:
+        lines.append(
+            "hf_gpt2_ft_inference_handoff_generation "
+            f"arg_count={len(generation_handoff_args)} "
+            f"args={generation_preview}"
         )
     return lines
 
@@ -1827,6 +1868,15 @@ def summarize_hf_gpt2_finetune_run_card(
     inference_bridge_cli_args = list(
         inference_handoff.get("recommended_bridge_cli_args") or []
     )
+    inference_source_cli_args = list(
+        inference_handoff.get("recommended_source_cli_args") or []
+    )
+    inference_generation_handoff_cli_args = list(
+        inference_handoff.get("recommended_generation_handoff_cli_args") or []
+    )
+    inference_explicit_generation_bridge_cli_args = list(
+        inference_handoff.get("recommended_explicit_generation_bridge_cli_args") or []
+    )
 
     effective_eval_after_loss, effective_eval_after_source = (
         _effective_eval_after_loss(eval_after, trainer_trace)
@@ -1949,6 +1999,19 @@ def summarize_hf_gpt2_finetune_run_card(
         "inference_distortion_replay_arg_count": len(inference_bridge_cli_args),
         "inference_distortion_replay_cli_preview": _cli_arg_preview(
             inference_bridge_cli_args,
+        ),
+        "inference_distortion_source_cli_args": inference_source_cli_args,
+        "inference_distortion_generation_handoff_cli_args": (
+            inference_generation_handoff_cli_args
+        ),
+        "inference_distortion_generation_handoff_cli_preview": _cli_arg_preview(
+            inference_generation_handoff_cli_args,
+        ),
+        "inference_distortion_explicit_generation_bridge_cli_args": (
+            inference_explicit_generation_bridge_cli_args
+        ),
+        "inference_distortion_explicit_generation_bridge_cli_preview": (
+            _cli_arg_preview(inference_explicit_generation_bridge_cli_args)
         ),
         "trace_event_count": _metric_number(trainer_trace, "trace_event_count"),
         "trace_last_loss": _metric_number(trainer_trace, "trace_last_loss"),
@@ -2399,6 +2462,15 @@ def summarize_hf_gpt2_finetune_sweep_report(
     inference_bridge_cli_args = list(
         inference_handoff.get("recommended_bridge_cli_args") or []
     )
+    inference_source_cli_args = list(
+        inference_handoff.get("recommended_source_cli_args") or []
+    )
+    inference_generation_handoff_cli_args = list(
+        inference_handoff.get("recommended_generation_handoff_cli_args") or []
+    )
+    inference_explicit_generation_bridge_cli_args = list(
+        inference_handoff.get("recommended_explicit_generation_bridge_cli_args") or []
+    )
     generation_inference_plan = _mapping_item(
         report,
         "generation_from_inference_distortion_plan",
@@ -2567,6 +2639,19 @@ def summarize_hf_gpt2_finetune_sweep_report(
         "inference_distortion_replay_cli_preview": _cli_arg_preview(
             inference_bridge_cli_args,
         ),
+        "inference_distortion_source_cli_args": inference_source_cli_args,
+        "inference_distortion_generation_handoff_cli_args": (
+            inference_generation_handoff_cli_args
+        ),
+        "inference_distortion_generation_handoff_cli_preview": _cli_arg_preview(
+            inference_generation_handoff_cli_args,
+        ),
+        "inference_distortion_explicit_generation_bridge_cli_args": (
+            inference_explicit_generation_bridge_cli_args
+        ),
+        "inference_distortion_explicit_generation_bridge_cli_preview": (
+            _cli_arg_preview(inference_explicit_generation_bridge_cli_args)
+        ),
         "top_runs": _ranked_sweep_rows(summaries, top_n=top_n),
         "failed_runs": [
             {
@@ -2629,6 +2714,15 @@ def summarize_hf_gpt2_finetune_sweep_report_lines(
                 "hf_gpt2_ft_sweep_inference_handoff_replay "
                 f"arg_count={len(bridge_args)} "
                 f"args={_cli_arg_preview(bridge_args)}"
+            )
+        generation_handoff_args = list(
+            summary.get("inference_distortion_generation_handoff_cli_args") or []
+        )
+        if generation_handoff_args:
+            lines.append(
+                "hf_gpt2_ft_sweep_inference_handoff_generation "
+                f"arg_count={len(generation_handoff_args)} "
+                f"args={_cli_arg_preview(generation_handoff_args)}"
             )
     if summary.get("selected_run_card") or summary.get("selected_trainer_trace_jsonl"):
         lines.append(
