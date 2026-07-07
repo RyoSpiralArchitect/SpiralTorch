@@ -40,6 +40,11 @@ STATUS_HISTORY_SUMMARY_PATH = (
     / "examples"
     / "hf_gpt2_finetune_status_history_summary.py"
 )
+WAIT_LAUNCH_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "examples"
+    / "hf_gpt2_finetune_wait_launch.py"
+)
 
 
 def load_bridge_example():
@@ -79,6 +84,17 @@ def load_status_history_summary_example():
     spec = importlib.util.spec_from_file_location(
         "hf_gpt2_finetune_status_history_summary_test",
         STATUS_HISTORY_SUMMARY_PATH,
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_wait_launch_example():
+    spec = importlib.util.spec_from_file_location(
+        "hf_gpt2_finetune_wait_launch_test",
+        WAIT_LAUNCH_PATH,
     )
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -2977,6 +2993,67 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(fake_datasets.train_stream.shuffle_calls, [(16, 13)])
         self.assertEqual(fake_datasets.calls[0][2]["streaming"], True)
         self.assertEqual(fake_datasets.calls[0][2]["revision"], "main")
+
+    def test_wait_launch_example_dry_run_records_ready_handoff(self) -> None:
+        module = load_wait_launch_example()
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            checkpoint = tmp_path / "checkpoint-4096"
+            checkpoint.mkdir()
+            (checkpoint / "model.safetensors").write_text("ready", encoding="utf-8")
+            status_card = tmp_path / "generation-control.json"
+            status_card.write_text(json.dumps({"status": "ok"}), encoding="utf-8")
+            manifest = tmp_path / "wait-launch.json"
+            args = module.parse_args(
+                [
+                    "--checkpoint",
+                    str(checkpoint),
+                    "--status-card",
+                    str(status_card),
+                    "--manifest",
+                    str(manifest),
+                    "--dry-run",
+                    "--",
+                    sys.executable,
+                    "-c",
+                    "print('next')",
+                ]
+            )
+            payload = module.run_wait_launch(args)
+            stored = json.loads(manifest.read_text())
+
+        self.assertEqual(payload["status"], "dry_run")
+        self.assertEqual(payload["returncode"], 0)
+        self.assertTrue(stored["checkpoint_ready"])
+        self.assertEqual(stored["status_card_status"], "ok")
+        self.assertEqual(stored["command"][:2], [sys.executable, "-c"])
+
+    def test_wait_launch_example_blocks_missing_checkpoint(self) -> None:
+        module = load_wait_launch_example()
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            manifest = tmp_path / "wait-launch.json"
+            args = module.parse_args(
+                [
+                    "--checkpoint",
+                    str(tmp_path / "checkpoint-missing"),
+                    "--manifest",
+                    str(manifest),
+                    "--checkpoint-timeout-seconds",
+                    "0",
+                    "--dry-run",
+                    "--",
+                    sys.executable,
+                    "-c",
+                    "print('next')",
+                ]
+            )
+            payload = module.run_wait_launch(args)
+            stored = json.loads(manifest.read_text())
+
+        self.assertEqual(payload["status"], "blocked_missing_checkpoint")
+        self.assertEqual(payload["returncode"], 2)
+        self.assertFalse(stored["checkpoint_ready"])
 
     def test_example_trainer_eval_report_wraps_evaluate(self) -> None:
         module = load_bridge_example()
