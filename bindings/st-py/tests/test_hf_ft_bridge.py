@@ -375,6 +375,41 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 [strong_path, weak_path],
                 run_labels=["strong", "weak"],
             )
+            sweep_report_path = Path(tmp) / "sweep-report.json"
+            sweep_report = {
+                "row_type": "hf_gpt2_finetune_sweep_report",
+                "dry_run": False,
+                "run_count": 2,
+                "attempted_run_count": 2,
+                "completed_run_count": 2,
+                "failed_run_count": 0,
+                "skipped_run_count": 0,
+                "comparison": comparison,
+                "runs": [
+                    {
+                        "name": "strong",
+                        "run_card": str(strong_path),
+                        "returncode": 0,
+                    },
+                    {
+                        "name": "weak",
+                        "run_card": str(weak_path),
+                        "returncode": 0,
+                    },
+                ],
+            }
+            sweep_report_path.write_text(json.dumps(sweep_report), encoding="utf-8")
+            loaded_sweep = hf_ft.load_hf_gpt2_finetune_sweep_report(
+                sweep_report_path,
+            )
+            sweep_summary = hf_ft.summarize_hf_gpt2_finetune_sweep_report(
+                sweep_report_path,
+                top_n=1,
+            )
+            sweep_lines = hf_ft.summarize_hf_gpt2_finetune_sweep_report_lines(
+                sweep_report,
+                top_n=1,
+            )
 
         self.assertEqual(loaded["model_name"], "gpt2")
         self.assertEqual(summary["row_type"], "hf_gpt2_finetune_run_card_summary")
@@ -390,6 +425,16 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(comparison["best_eval_loss_delta_run_label"], "strong")
         self.assertEqual(comparison["eval_loss_improved_count"], 2)
         self.assertEqual(comparison["generation_changed_count"], 1)
+        self.assertEqual(loaded_sweep["run_count"], 2)
+        self.assertEqual(
+            sweep_summary["row_type"],
+            "hf_gpt2_finetune_sweep_report_summary",
+        )
+        self.assertEqual(sweep_summary["status"], "complete")
+        self.assertEqual(sweep_summary["selected_run_label"], "strong")
+        self.assertEqual(sweep_summary["selected_reason"], "best_eval_loss_delta")
+        self.assertEqual(sweep_summary["top_runs"][0]["run_label"], "strong")
+        self.assertIn("selected=strong", sweep_lines[1])
 
     def test_sweep_example_builds_grid_and_writes_dry_run_report(self) -> None:
         module = load_sweep_example()
@@ -441,7 +486,9 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(report["run_count"], 8)
         self.assertTrue(report["dry_run"])
         self.assertEqual(report["skipped_run_count"], 8)
+        self.assertEqual(report["summary"]["status"], "planned")
         self.assertEqual(stored_report["row_type"], "hf_gpt2_finetune_sweep_report")
+        self.assertEqual(stored_report["summary"]["run_count"], 8)
         first_command = runs[0]["command"]
         self.assertIn("--train", first_command)
         self.assertIn("--corpus-scan", first_command)
@@ -511,6 +558,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(report["failed_run_count"], 0)
         self.assertEqual(report["comparison"]["run_count"], 2)
         self.assertIn("seed13", report["comparison"]["best_eval_after_run_label"])
+        self.assertIn("seed13", report["summary"]["selected_run_label"])
 
     def test_example_local_corpus_reports_attach_scan_to_cards(self) -> None:
         module = load_bridge_example()
@@ -855,7 +903,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("hf_gpt2_finetune_trainer_trace_callback", st.__all__)
         self.assertIn("compare_hf_gpt2_finetune_run_cards", st.__all__)
         self.assertIn("load_hf_gpt2_finetune_run_card", st.__all__)
+        self.assertIn("load_hf_gpt2_finetune_sweep_report", st.__all__)
         self.assertIn("summarize_hf_gpt2_finetune_run_card", st.__all__)
+        self.assertIn("summarize_hf_gpt2_finetune_sweep_report", st.__all__)
+        self.assertIn("summarize_hf_gpt2_finetune_sweep_report_lines", st.__all__)
         self.assertIs(
             st.hf_gpt2_finetune_eval_report,
             hf_ft.hf_gpt2_finetune_eval_report,
@@ -873,8 +924,20 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             hf_ft.load_hf_gpt2_finetune_run_card,
         )
         self.assertIs(
+            st.load_hf_gpt2_finetune_sweep_report,
+            hf_ft.load_hf_gpt2_finetune_sweep_report,
+        )
+        self.assertIs(
             st.summarize_hf_gpt2_finetune_run_card,
             hf_ft.summarize_hf_gpt2_finetune_run_card,
+        )
+        self.assertIs(
+            st.summarize_hf_gpt2_finetune_sweep_report,
+            hf_ft.summarize_hf_gpt2_finetune_sweep_report,
+        )
+        self.assertIs(
+            st.summarize_hf_gpt2_finetune_sweep_report_lines,
+            hf_ft.summarize_hf_gpt2_finetune_sweep_report_lines,
         )
         self.assertIs(
             st.summarize_hf_gpt2_finetune_trainer_trace,

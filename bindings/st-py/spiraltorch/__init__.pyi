@@ -356,11 +356,27 @@ def load_hf_gpt2_finetune_run_card(
     path: str | PathLike[str],
 ) -> Dict[str, object]: ...
 
+def load_hf_gpt2_finetune_sweep_report(
+    path: str | PathLike[str],
+) -> Dict[str, object]: ...
+
 def summarize_hf_gpt2_finetune_run_card(
     card_or_path: str | PathLike[str] | Mapping[str, object],
     *,
     run_label: str | None = ...,
 ) -> Dict[str, object]: ...
+
+def summarize_hf_gpt2_finetune_sweep_report(
+    report_or_path: str | PathLike[str] | Mapping[str, object],
+    *,
+    top_n: int = ...,
+) -> Dict[str, object]: ...
+
+def summarize_hf_gpt2_finetune_sweep_report_lines(
+    report_or_path: str | PathLike[str] | Mapping[str, object],
+    *,
+    top_n: int = ...,
+) -> list[str]: ...
 
 def compare_hf_gpt2_finetune_run_cards(
     cards_or_paths: Sequence[str | PathLike[str] | Mapping[str, object]],
@@ -8164,8 +8180,11 @@ __all__ = [
     "hf_gpt2_finetune_zspace_probe",
     "compare_hf_gpt2_finetune_run_cards",
     "load_hf_gpt2_finetune_run_card",
+    "load_hf_gpt2_finetune_sweep_report",
     "load_hf_gpt2_finetune_trainer_trace",
     "summarize_hf_gpt2_finetune_run_card",
+    "summarize_hf_gpt2_finetune_sweep_report",
+    "summarize_hf_gpt2_finetune_sweep_report_lines",
     "summarize_hf_gpt2_finetune_trainer_trace",
     "write_hf_gpt2_finetune_run_card",
     "write_hf_gpt2_finetune_trainer_trace_event",

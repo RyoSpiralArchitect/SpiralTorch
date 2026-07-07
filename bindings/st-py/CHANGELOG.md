@@ -45,6 +45,10 @@
   GPT-2 bridge grids across block size, learning rate, step budget, and seed,
   carrying corpus scans, generation/eval reports, Z-Space probes, WGPU gates,
   and run-card comparisons into `sweep-plan.json` / `sweep-report.json`.
+- Sweep summaries: add `load_hf_gpt2_finetune_sweep_report(...)`,
+  `summarize_hf_gpt2_finetune_sweep_report(...)`, and
+  `summarize_hf_gpt2_finetune_sweep_report_lines(...)`; sweep reports now
+  embed a compact status/top-run/scale-up-candidate summary.
 - Documentation: clarify the hard dependency boundary for larger local GPT-2
   FT runs: Rust keeps tensor/nn/text/logic/frac/rl/WGPU surfaces in the wheel,
   while Python explicitly brings Transformers, Torch, datasets, pyarrow,
