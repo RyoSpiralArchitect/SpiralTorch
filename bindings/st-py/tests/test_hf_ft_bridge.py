@@ -844,6 +844,18 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             "--generation-repression-strength",
             summary["inference_distortion_bridge_cli_args"],
         )
+        self.assertEqual(summary["inference_distortion_handoff_line_count"], 2)
+        self.assertTrue(
+            any(
+                "probe=distort-002" in line
+                for line in summary["inference_distortion_handoff_lines"]
+            )
+        )
+        self.assertEqual(summary["inference_distortion_replay_arg_count"], 3)
+        self.assertIn(
+            "--generation-repression-strength",
+            summary["inference_distortion_replay_cli_preview"],
+        )
         self.assertEqual(summary["trace_event_count"], 4)
         self.assertEqual(comparison["run_count"], 2)
         self.assertEqual(comparison["best_eval_after_run_label"], "strong")
@@ -882,6 +894,11 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn(
             "--generation-repression-strength",
             sweep_summary["inference_distortion_bridge_cli_args"],
+        )
+        self.assertEqual(sweep_summary["inference_distortion_handoff_line_count"], 2)
+        self.assertIn(
+            "--generation-repression-strength",
+            sweep_summary["inference_distortion_replay_cli_preview"],
         )
         self.assertEqual(sweep_summary["top_runs"][0]["run_label"], "strong")
         self.assertIn(
@@ -1303,6 +1320,18 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(
             stored_report["summary"]["inference_distortion_recommended_probe"],
             "direct-probe",
+        )
+        self.assertTrue(
+            any(
+                "probe=direct-probe" in line
+                for line in stored_report["summary"][
+                    "inference_distortion_handoff_lines"
+                ]
+            )
+        )
+        self.assertIn(
+            "--generation-repression-strength",
+            stored_report["summary"]["inference_distortion_replay_cli_preview"],
         )
         self.assertEqual(
             stored_plan["generation_from_inference_distortion_plan"]["status"],

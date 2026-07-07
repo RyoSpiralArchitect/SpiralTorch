@@ -1764,6 +1764,32 @@ def _generation_inference_bridge_cli_args(
     )
 
 
+def _string_sequence(value: object) -> list[str]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        return []
+    return [str(item) for item in value]
+
+
+def _inference_handoff_lines_from_payload(
+    payload: Mapping[str, object],
+    handoff: Mapping[str, object],
+) -> list[str]:
+    lines = _string_sequence(payload.get("inference_distortion_handoff_lines"))
+    if lines:
+        return lines
+    if handoff:
+        return hf_gpt2_finetune_inference_distortion_handoff_lines(handoff)
+    return []
+
+
+def _cli_arg_preview(args: Sequence[object], *, limit: int = 24) -> str:
+    values = [str(item) for item in args]
+    preview = csv_label(values[: max(0, int(limit))])
+    if limit and len(values) > int(limit):
+        return f"{preview},..."
+    return preview
+
+
 def summarize_hf_gpt2_finetune_run_card(
     card_or_path: str | Path | Mapping[str, object],
     *,
@@ -1794,6 +1820,13 @@ def summarize_hf_gpt2_finetune_run_card(
     trainer_trace = _trainer_trace_summary_for_card(card)
     corpus_scan = _mapping_item(card, "corpus_scan_report")
     inference_handoff = _mapping_item(card, "inference_distortion_handoff")
+    inference_handoff_lines = _inference_handoff_lines_from_payload(
+        card,
+        inference_handoff,
+    )
+    inference_bridge_cli_args = list(
+        inference_handoff.get("recommended_bridge_cli_args") or []
+    )
 
     effective_eval_after_loss, effective_eval_after_source = (
         _effective_eval_after_loss(eval_after, trainer_trace)
@@ -1910,8 +1943,12 @@ def summarize_hf_gpt2_finetune_run_card(
         "inference_distortion_api_request_sent_keys": csv_label(
             _unique(inference_handoff.get("api_request_sent_keys"))
         ),
-        "inference_distortion_bridge_cli_args": list(
-            inference_handoff.get("recommended_bridge_cli_args") or []
+        "inference_distortion_handoff_lines": inference_handoff_lines,
+        "inference_distortion_handoff_line_count": len(inference_handoff_lines),
+        "inference_distortion_bridge_cli_args": inference_bridge_cli_args,
+        "inference_distortion_replay_arg_count": len(inference_bridge_cli_args),
+        "inference_distortion_replay_cli_preview": _cli_arg_preview(
+            inference_bridge_cli_args,
         ),
         "trace_event_count": _metric_number(trainer_trace, "trace_event_count"),
         "trace_last_loss": _metric_number(trainer_trace, "trace_last_loss"),
@@ -2355,6 +2392,13 @@ def summarize_hf_gpt2_finetune_sweep_report(
     comparison = _mapping_item(report, "comparison")
     summaries = _sweep_summary_rows(comparison)
     inference_handoff = _mapping_item(report, "inference_distortion_handoff")
+    inference_handoff_lines = _inference_handoff_lines_from_payload(
+        report,
+        inference_handoff,
+    )
+    inference_bridge_cli_args = list(
+        inference_handoff.get("recommended_bridge_cli_args") or []
+    )
     generation_inference_plan = _mapping_item(
         report,
         "generation_from_inference_distortion_plan",
@@ -2516,8 +2560,12 @@ def summarize_hf_gpt2_finetune_sweep_report(
         "inference_distortion_api_request_sent_keys": csv_label(
             _unique(inference_handoff.get("api_request_sent_keys"))
         ),
-        "inference_distortion_bridge_cli_args": list(
-            inference_handoff.get("recommended_bridge_cli_args") or []
+        "inference_distortion_handoff_lines": inference_handoff_lines,
+        "inference_distortion_handoff_line_count": len(inference_handoff_lines),
+        "inference_distortion_bridge_cli_args": inference_bridge_cli_args,
+        "inference_distortion_replay_arg_count": len(inference_bridge_cli_args),
+        "inference_distortion_replay_cli_preview": _cli_arg_preview(
+            inference_bridge_cli_args,
         ),
         "top_runs": _ranked_sweep_rows(summaries, top_n=top_n),
         "failed_runs": [
@@ -2580,7 +2628,7 @@ def summarize_hf_gpt2_finetune_sweep_report_lines(
             lines.append(
                 "hf_gpt2_ft_sweep_inference_handoff_replay "
                 f"arg_count={len(bridge_args)} "
-                f"args={csv_label(str(item) for item in bridge_args[:24])}"
+                f"args={_cli_arg_preview(bridge_args)}"
             )
     if summary.get("selected_run_card") or summary.get("selected_trainer_trace_jsonl"):
         lines.append(
