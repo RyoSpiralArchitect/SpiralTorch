@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "spiraltorch"
-version = "0.4.11"
+version = "0.4.12"
 description = "Rust-first learning primitives for SpiralTorch"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -36,6 +36,57 @@ spiral-model-zoo = "spiraltorch.model_zoo:main"
 spiral-export = "spiral.export:main"
 spiral-plugin = "spiraltorch.plugin_cli:main"
 spiral-runtime-preflight = "spiraltorch.runtime_imports:main"
+
+[project.optional-dependencies]
+hf-runtime = [
+  "transformers>=4.40",
+  "torch>=2.2",
+  "tokenizers>=0.15",
+  "safetensors>=0.4",
+]
+hf-finetune = [
+  "transformers>=4.40",
+  "torch>=2.2",
+  "tokenizers>=0.15",
+  "datasets>=2.18",
+  "accelerate>=0.27",
+  "safetensors>=0.4",
+  "pyarrow>=15",
+  "tqdm>=4.66",
+]
+hf-peft = [
+  "transformers>=4.40",
+  "torch>=2.2",
+  "tokenizers>=0.15",
+  "accelerate>=0.27",
+  "peft>=0.10",
+  "safetensors>=0.4",
+]
+hf-gpt2-ft = [
+  "transformers>=4.40",
+  "torch>=2.2",
+  "tokenizers>=0.15",
+  "datasets>=2.18",
+  "accelerate>=0.27",
+  "safetensors>=0.4",
+  "pyarrow>=15",
+  "tqdm>=4.66",
+  "evaluate>=0.4",
+  "peft>=0.10",
+]
+hf-trl-sft = [
+  "transformers>=4.40",
+  "torch>=2.2",
+  "tokenizers>=0.15",
+  "datasets>=2.18",
+  "accelerate>=0.27",
+  "safetensors>=0.4",
+  "pyarrow>=15",
+  "tqdm>=4.66",
+  "peft>=0.10",
+  "trl>=0.12",
+  "trackio>=0.2",
+]
 
 [project.urls]
 Homepage = "https://github.com/RyoSpiralArchitect/SpiralTorch"
