@@ -1847,6 +1847,32 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             "direct-probe",
         )
 
+    def test_generation_from_inference_distortion_records_missing_processor(self) -> None:
+        module = load_bridge_example()
+        args = types.SimpleNamespace(
+            generation_from_inference_distortion=True,
+            generation_zspace_softmax=False,
+        )
+
+        report = module._apply_inference_distortion_generation_defaults(
+            args,
+            {
+                "source_kind": "probe",
+                "recommended_probe": "empty-probe",
+            },
+        )
+
+        self.assertEqual(report["status"], "missing_processor_kwargs")
+        self.assertFalse(args.generation_zspace_softmax)
+        self.assertEqual(
+            args._generation_from_inference_distortion_applied["status"],
+            "missing_processor_kwargs",
+        )
+        self.assertEqual(
+            args._generation_from_inference_distortion_applied["recommended_probe"],
+            "empty-probe",
+        )
+
     def test_trainer_trace_event_round_trip_and_summary(self) -> None:
         args = types.SimpleNamespace(
             output_dir="runs/gpt2",

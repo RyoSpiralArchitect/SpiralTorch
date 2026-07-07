@@ -964,14 +964,25 @@ def _apply_inference_distortion_generation_defaults(
 ) -> Mapping[str, object] | None:
     if not getattr(args, "generation_from_inference_distortion", False):
         return None
+
+    def _record(report: Mapping[str, object]) -> Mapping[str, object]:
+        payload = dict(report)
+        setattr(args, "_generation_from_inference_distortion_applied", payload)
+        return payload
+
     if not isinstance(inference_distortion_handoff, Mapping):
-        return {"status": "missing_handoff"}
+        return _record({"status": "missing_handoff"})
     processor_kwargs = inference_distortion_handoff.get("recommended_processor_kwargs")
     if not isinstance(processor_kwargs, Mapping) or not processor_kwargs:
-        return {
-            "status": "missing_processor_kwargs",
-            "recommended_probe": inference_distortion_handoff.get("recommended_probe"),
-        }
+        return _record(
+            {
+                "status": "missing_processor_kwargs",
+                "source_kind": inference_distortion_handoff.get("source_kind"),
+                "recommended_probe": inference_distortion_handoff.get(
+                    "recommended_probe"
+                ),
+            }
+        )
 
     args.generation_zspace_softmax = True
     applied: dict[str, object] = {}
@@ -998,8 +1009,7 @@ def _apply_inference_distortion_generation_defaults(
         "applied_args": applied,
         "processor_kwargs": dict(processor_kwargs),
     }
-    setattr(args, "_generation_from_inference_distortion_applied", report)
-    return report
+    return _record(report)
 
 
 def _generation_logits_processor(args: argparse.Namespace) -> Any | None:
