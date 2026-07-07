@@ -843,6 +843,14 @@ def hf_gpt2_finetune_summary_lines(report: Mapping[str, object]) -> list[str]:
         handoff = report.get("inference_distortion_handoff")
         if isinstance(handoff, Mapping):
             lines.extend(hf_gpt2_finetune_inference_distortion_handoff_lines(handoff))
+    if report.get("trainer_telemetry_enabled") is not None:
+        lines.append(
+            "hf_gpt2_ft_trainer_telemetry "
+            f"requested={report.get('trainer_telemetry_requested')} "
+            f"enabled={report.get('trainer_telemetry_enabled')} "
+            f"auto={report.get('trainer_telemetry_auto_reason')} "
+            f"prefix={report.get('trainer_telemetry_prefix')}"
+        )
     lines.extend(runtime_import_preflight_summary_lines(report))
     return lines
 
@@ -2714,6 +2722,9 @@ def summarize_hf_gpt2_finetune_sweep_report(
                 "ngram_repression_strength",
             )
         ),
+        "trainer_telemetry_requested": report.get("trainer_telemetry_requested"),
+        "trainer_telemetry_enabled": report.get("trainer_telemetry_enabled"),
+        "trainer_telemetry_auto_reason": report.get("trainer_telemetry_auto_reason"),
         "best_eval_after_run_label": best_after_label,
         "best_eval_after_loss": _safe_number(comparison.get("best_eval_after_loss")),
         "best_eval_after_loss_source": comparison.get("best_eval_after_loss_source"),
@@ -2904,6 +2915,13 @@ def summarize_hf_gpt2_finetune_sweep_report_lines(
             "ngram_repress="
             f"{summary.get('generation_from_inference_distortion_plan_ngram_repression_strength')}"
         )
+    if summary.get("trainer_telemetry_enabled") is not None:
+        lines.append(
+            "hf_gpt2_ft_sweep_trainer_telemetry "
+            f"requested={summary.get('trainer_telemetry_requested')} "
+            f"enabled={summary.get('trainer_telemetry_enabled')} "
+            f"auto={summary.get('trainer_telemetry_auto_reason')}"
+        )
     for row in summary.get("top_runs", []):
         if not isinstance(row, Mapping):
             continue
@@ -2943,6 +2961,8 @@ def summarize_hf_gpt2_finetune_sweep_report_lines(
             f"eval_series={row.get('trace_eval_loss_series')} "
             f"psi={row.get('trace_last_psi_total')} "
             f"desire={row.get('trace_last_desire_pressure')} "
+            f"telemetry={row.get('trainer_telemetry_enabled')} "
+            f"telemetry_auto={row.get('trainer_telemetry_auto_reason')} "
             f"{inference_fragment}"
             f"{generation_inference_fragment}"
             f"changed={row.get('generation_continuation_changed')} "

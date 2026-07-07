@@ -530,6 +530,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                     "hf_gpt2_ft_rust_surfaces": "st-tensor,st-nn",
                     "hf_gpt2_ft_python_packages": "transformers,torch",
                     "inference_distortion_handoff": handoff,
+                    "trainer_telemetry_requested": False,
+                    "trainer_telemetry_enabled": True,
+                    "trainer_telemetry_auto_reason": "inference_distortion_handoff",
+                    "trainer_telemetry_prefix": "hf_ft",
                 }
             )
 
@@ -548,6 +552,13 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("--generation-from-inference-distortion", handoff_lines[2])
         self.assertTrue(
             any("probe=direct-probe" in line for line in preflight_lines)
+        )
+        self.assertTrue(
+            any(
+                "hf_gpt2_ft_trainer_telemetry" in line
+                and "auto=inference_distortion_handoff" in line
+                for line in preflight_lines
+            )
         )
         self.assertEqual(handoff["prompt"], "SpiralTorch direct probe")
         self.assertEqual(handoff["desire_pressure"], 0.83)
@@ -1075,6 +1086,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         top_line = next(line for line in sweep_lines if "hf_gpt2_ft_sweep_top" in line)
         self.assertIn("trainer_sps=None", top_line)
         self.assertIn("trace_sps_mean=0.5", top_line)
+        self.assertIn("telemetry=True", top_line)
+        self.assertIn("telemetry_auto=inference_distortion_handoff", top_line)
         self.assertIn("eval_series=0=2.0,3=1.5", top_line)
         self.assertIn("infer_probe=distort-002", top_line)
         self.assertIn("gen_infer=ok", top_line)
@@ -1284,7 +1297,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             stored_report["summary"]["inference_distortion_recommended_probe"],
             "strong",
         )
+        self.assertTrue(stored_plan["trainer_telemetry_requested"])
+        self.assertTrue(stored_plan["trainer_telemetry_enabled"])
+        self.assertIsNone(stored_plan["trainer_telemetry_auto_reason"])
+        self.assertTrue(stored_report["summary"]["trainer_telemetry_enabled"])
         self.assertTrue(any("probe=strong" in line for line in sweep_lines))
+        self.assertTrue(
+            any("hf_gpt2_ft_sweep_trainer_telemetry" in line for line in sweep_lines)
+        )
         first_command = runs[0]["command"]
         self.assertIn("--train", first_command)
         self.assertIn("--corpus-scan", first_command)
@@ -1405,7 +1425,6 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                     "--generation-from-inference-distortion",
                     "--inference-distortion-probe",
                     str(probe_path),
-                    "--trainer-telemetry",
                 ]
             )
             runs = module.build_sweep_runs(args)
@@ -1416,6 +1435,12 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(report["run_count"], 1)
         self.assertEqual(stored_plan["inference_distortion_probe"], str(probe_path))
         self.assertIsNone(stored_plan["inference_distortion_sweep_report"])
+        self.assertFalse(stored_plan["trainer_telemetry_requested"])
+        self.assertTrue(stored_plan["trainer_telemetry_enabled"])
+        self.assertEqual(
+            stored_plan["trainer_telemetry_auto_reason"],
+            "inference_distortion_handoff",
+        )
         self.assertEqual(
             stored_report["inference_distortion_handoff"]["source_kind"],
             "probe",
@@ -1494,6 +1519,12 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             ],
             "ok",
         )
+        self.assertFalse(stored_report["summary"]["trainer_telemetry_requested"])
+        self.assertTrue(stored_report["summary"]["trainer_telemetry_enabled"])
+        self.assertEqual(
+            stored_report["summary"]["trainer_telemetry_auto_reason"],
+            "inference_distortion_handoff",
+        )
         self.assertEqual(
             stored_report["summary"][
                 "generation_from_inference_distortion_plan_probe"
@@ -1533,6 +1564,13 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         )
         self.assertTrue(
             any("hf_gpt2_ft_sweep_generation_inference_plan" in line for line in direct_lines)
+        )
+        self.assertTrue(
+            any(
+                "hf_gpt2_ft_sweep_trainer_telemetry" in line
+                and "auto=inference_distortion_handoff" in line
+                for line in direct_lines
+            )
         )
         self.assertTrue(any("repress=1.5" in line for line in direct_lines))
         first_command = runs[0]["command"]

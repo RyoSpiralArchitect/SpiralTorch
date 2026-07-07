@@ -711,6 +711,28 @@ def _inference_distortion_handoff_lines(
     )
 
 
+def _trainer_telemetry_auto_reason(
+    args: argparse.Namespace,
+    inference_handoff: dict[str, Any] | None,
+) -> str | None:
+    if args.trainer_telemetry or args.no_trainer_trace:
+        return None
+    if isinstance(inference_handoff, dict):
+        return "inference_distortion_handoff"
+    return None
+
+
+def _trainer_telemetry_enabled(
+    args: argparse.Namespace,
+    inference_handoff: dict[str, Any] | None,
+) -> bool:
+    if args.no_trainer_trace:
+        return False
+    return bool(args.trainer_telemetry) or (
+        _trainer_telemetry_auto_reason(args, inference_handoff) is not None
+    )
+
+
 def _generation_from_inference_distortion_plan(
     args: argparse.Namespace,
     inference_handoff: dict[str, Any] | None,
@@ -749,6 +771,11 @@ def run_sweep(args: argparse.Namespace) -> dict[str, Any]:
         args,
         inference_handoff,
     )
+    trainer_telemetry_enabled = _trainer_telemetry_enabled(args, inference_handoff)
+    trainer_telemetry_auto_reason = _trainer_telemetry_auto_reason(
+        args,
+        inference_handoff,
+    )
     plan = {
         "row_type": "hf_gpt2_finetune_sweep_plan",
         "dry_run": bool(args.dry_run),
@@ -756,6 +783,9 @@ def run_sweep(args: argparse.Namespace) -> dict[str, Any]:
         "inference_distortion_probe": _inference_distortion_probe_path(args),
         "inference_distortion_handoff": inference_handoff,
         "inference_distortion_handoff_lines": inference_handoff_lines,
+        "trainer_telemetry_requested": bool(args.trainer_telemetry),
+        "trainer_telemetry_enabled": trainer_telemetry_enabled,
+        "trainer_telemetry_auto_reason": trainer_telemetry_auto_reason,
         "generation_from_inference_distortion": bool(
             args.generation_from_inference_distortion
         ),
@@ -780,6 +810,9 @@ def run_sweep(args: argparse.Namespace) -> dict[str, Any]:
             "inference_distortion_probe": _inference_distortion_probe_path(args),
             "inference_distortion_handoff": inference_handoff,
             "inference_distortion_handoff_lines": inference_handoff_lines,
+            "trainer_telemetry_requested": bool(args.trainer_telemetry),
+            "trainer_telemetry_enabled": trainer_telemetry_enabled,
+            "trainer_telemetry_auto_reason": trainer_telemetry_auto_reason,
             "generation_from_inference_distortion": bool(
                 args.generation_from_inference_distortion
             ),
@@ -853,6 +886,9 @@ def run_sweep(args: argparse.Namespace) -> dict[str, Any]:
         "inference_distortion_probe": _inference_distortion_probe_path(args),
         "inference_distortion_handoff": inference_handoff,
         "inference_distortion_handoff_lines": inference_handoff_lines,
+        "trainer_telemetry_requested": bool(args.trainer_telemetry),
+        "trainer_telemetry_enabled": trainer_telemetry_enabled,
+        "trainer_telemetry_auto_reason": trainer_telemetry_auto_reason,
         "generation_from_inference_distortion": bool(
             args.generation_from_inference_distortion
         ),

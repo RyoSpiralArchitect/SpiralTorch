@@ -577,7 +577,10 @@ handoff also enables trainer trace telemetry automatically unless
 `hf_ft.inference_distortion.*` telemetry keys on each frame;
 summaries surface the recommended probe, effect/risk, desire pressure, psi total,
 API route, and provider request keys that were dropped or sent beside
-eval/generation metrics. Add `--generation-from-inference-distortion` with a
+eval/generation metrics. The bridge preflight line and sweep summaries also
+show whether telemetry was explicitly requested or auto-enabled from the
+handoff, which makes dry-run plans honest before the model is loaded. Add
+`--generation-from-inference-distortion` with a
 generation prompt to reuse the handoff's `recommended_processor_kwargs` as the
 Z-Space/repression logits processor for before/after generated samples; omit it
 when you want to hand-tune `--generation-zspace-*` and repression flags instead.
