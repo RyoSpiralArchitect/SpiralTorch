@@ -468,6 +468,10 @@ several pressure/coherence settings have been tried, call
 `st.summarize_zspace_inference_distortion_probe_comparison_lines(...)` to rank
 the artifacts by local text changes, top-token changes, activation evidence,
 API non-empty response, and distortion energy.
+After a sweep, replay its recommended setting directly with
+`--from-sweep-report runs/zspace-inference-distortion-sweep/sweep-report.json`;
+the probe imports the saved prompt/runtime plus recommended distortion config,
+while any explicitly passed CLI flag overrides the handoff value.
 
 For a reproducible pre-FT comparison, run the same probe over a small
 desire/psi/coherence grid:

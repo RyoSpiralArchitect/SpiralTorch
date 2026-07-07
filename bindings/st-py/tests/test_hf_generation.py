@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+import io
 import importlib.util
 import json
 import tempfile
@@ -535,6 +537,32 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
                 loaded_sweep,
                 top_n=1,
             )
+            probe_module = load_distortion_probe_example()
+            replay_args = probe_module.parse_args(
+                [
+                    "--from-sweep-report",
+                    str(out_dir / "sweep-report.json"),
+                ]
+            )
+            override_args = probe_module.parse_args(
+                [
+                    "--from-sweep-report",
+                    str(out_dir / "sweep-report.json"),
+                    "--desire-pressure",
+                    "0.2",
+                ]
+            )
+            replay_path = out_dir / "replay-probe.json"
+            with contextlib.redirect_stdout(io.StringIO()):
+                replay_exit = probe_module.main(
+                    [
+                        "--from-sweep-report",
+                        str(out_dir / "sweep-report.json"),
+                        "--out",
+                        str(replay_path),
+                    ]
+                )
+            replay_report = json.loads(replay_path.read_text())
 
         self.assertEqual(report["status"], "complete")
         self.assertEqual(report["completed_run_count"], 2)
@@ -571,6 +599,22 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         self.assertIn("Z-Space Inference Distortion Sweep", markdown)
         self.assertIn("Single-probe replay", markdown)
         self.assertIn("Focused sweep replay", markdown)
+        self.assertEqual(replay_args.prompt, "SpiralTorch sweep")
+        self.assertEqual(
+            replay_args.desire_pressure,
+            sweep_summary["recommended_config"]["desire_pressure"],
+        )
+        self.assertEqual(override_args.desire_pressure, 0.2)
+        self.assertEqual(replay_exit, 0)
+        self.assertEqual(
+            replay_report["handoff"]["recommended_probe"],
+            sweep_summary["recommended_probe"],
+        )
+        self.assertEqual(
+            replay_report["config"]["desire_pressure"],
+            sweep_summary["recommended_config"]["desire_pressure"],
+        )
+        self.assertEqual(replay_report["runtime"]["api_provider"], "fake")
 
     def test_inference_distortion_sweep_reuses_existing_probe(self) -> None:
         module = load_distortion_sweep_example()

@@ -16,6 +16,8 @@ import spiraltorch as st
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    provided_flags = _provided_flags(raw_argv)
     parser = argparse.ArgumentParser(
         description=(
             "Probe one shared Z-space inference distortion against a local HF "
@@ -24,6 +26,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--prompt", default="Describe SpiralTorch as a Z-space runtime.")
     parser.add_argument("--out", type=Path, default=None)
+    parser.add_argument(
+        "--from-sweep-report",
+        type=Path,
+        default=None,
+        help="Load the recommended prompt/runtime/distortion config from a sweep-report.json.",
+    )
     parser.add_argument("--local-model", type=Path, default=None)
     parser.add_argument("--allow-remote", action="store_true")
     parser.add_argument("--trust-remote-code", action="store_true")
@@ -45,7 +53,156 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--base-temperature", type=float, default=0.7)
     parser.add_argument("--base-top-p", type=float, default=0.95)
     parser.add_argument("--include-penalties", action="store_true")
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.from_sweep_report is not None:
+        try:
+            _apply_sweep_handoff(args, provided_flags)
+        except Exception as exc:
+            parser.error(str(exc))
+    return args
+
+
+def _provided_flags(argv: list[str]) -> set[str]:
+    flags = set()
+    for item in argv:
+        if not item.startswith("--"):
+            continue
+        flags.add(item.split("=", 1)[0])
+    return flags
+
+
+def _flag_was_provided(flags: set[str], flag: str) -> bool:
+    return flag in flags
+
+
+def _set_if_not_provided(
+    args: argparse.Namespace,
+    flags: set[str],
+    flag: str,
+    attr: str,
+    value: Any,
+) -> None:
+    if value is None or _flag_was_provided(flags, flag):
+        return
+    setattr(args, attr, value)
+
+
+def _extend_if_not_provided(
+    args: argparse.Namespace,
+    flags: set[str],
+    flag: str,
+    attr: str,
+    values: Any,
+) -> None:
+    if values is None or _flag_was_provided(flags, flag):
+        return
+    if isinstance(values, list):
+        setattr(args, attr, list(values))
+
+
+def _apply_sweep_handoff(args: argparse.Namespace, flags: set[str]) -> None:
+    summary = st.summarize_zspace_inference_distortion_sweep(args.from_sweep_report)
+    config = summary.get("recommended_config")
+    runtime = st.load_zspace_inference_distortion_sweep(args.from_sweep_report).get(
+        "runtime"
+    )
+    if not isinstance(config, dict):
+        raise ValueError(f"{args.from_sweep_report} did not contain a recommended config")
+    runtime = runtime if isinstance(runtime, dict) else {}
+    args.sweep_handoff = {
+        "source": str(args.from_sweep_report),
+        "recommended_probe": summary.get("recommended_probe"),
+        "recommendation_reason": summary.get("recommendation_reason"),
+        "recommended_probe_path": summary.get("recommended_probe_path"),
+        "applied_config": dict(config),
+    }
+    _set_if_not_provided(args, flags, "--prompt", "prompt", summary.get("prompt"))
+    _set_if_not_provided(
+        args,
+        flags,
+        "--local-model",
+        "local_model",
+        Path(str(runtime["local_model"])) if runtime.get("local_model") else None,
+    )
+    if runtime.get("allow_remote") and not _flag_was_provided(flags, "--allow-remote"):
+        args.allow_remote = True
+    if runtime.get("trust_remote_code") and not _flag_was_provided(
+        flags,
+        "--trust-remote-code",
+    ):
+        args.trust_remote_code = True
+    _set_if_not_provided(
+        args,
+        flags,
+        "--max-new-tokens",
+        "max_new_tokens",
+        runtime.get("max_new_tokens"),
+    )
+    _extend_if_not_provided(
+        args,
+        flags,
+        "--activation-module-name",
+        "activation_module_name",
+        runtime.get("activation_module_name"),
+    )
+    _extend_if_not_provided(
+        args,
+        flags,
+        "--activation-name-contains",
+        "activation_name_contains",
+        runtime.get("activation_name_contains"),
+    )
+    _set_if_not_provided(
+        args,
+        flags,
+        "--api-provider",
+        "api_provider",
+        runtime.get("api_provider"),
+    )
+    _set_if_not_provided(args, flags, "--api-model", "api_model", runtime.get("api_model"))
+    _set_if_not_provided(
+        args,
+        flags,
+        "--api-max-tokens",
+        "api_max_tokens",
+        runtime.get("api_max_tokens"),
+    )
+    _set_if_not_provided(
+        args,
+        flags,
+        "--desire-pressure",
+        "desire_pressure",
+        config.get("desire_pressure"),
+    )
+    _set_if_not_provided(
+        args,
+        flags,
+        "--desire-stability",
+        "desire_stability",
+        config.get("desire_stability"),
+    )
+    _set_if_not_provided(args, flags, "--psi-total", "psi_total", config.get("psi_total"))
+    _set_if_not_provided(args, flags, "--coherence", "coherence", config.get("coherence"))
+    _set_if_not_provided(
+        args,
+        flags,
+        "--distortion-strength",
+        "distortion_strength",
+        config.get("distortion_strength"),
+    )
+    _set_if_not_provided(
+        args,
+        flags,
+        "--base-temperature",
+        "base_temperature",
+        config.get("base_temperature"),
+    )
+    _set_if_not_provided(args, flags, "--base-top-p", "base_top_p", config.get("base_top_p"))
+    if config.get("include_penalties") and not _flag_was_provided(
+        flags,
+        "--include-penalties",
+    ):
+        args.include_penalties = True
 
 
 def _text_from_tokens(tokenizer: Any, token_ids: Any) -> str:
@@ -357,6 +514,33 @@ def _run_api(args: argparse.Namespace, adapter: dict[str, Any]) -> dict[str, Any
     return trace.as_dict()
 
 
+def _probe_config(args: argparse.Namespace) -> dict[str, Any]:
+    return {
+        "desire_pressure": float(args.desire_pressure),
+        "desire_stability": float(args.desire_stability),
+        "psi_total": float(args.psi_total),
+        "coherence": float(args.coherence),
+        "distortion_strength": float(args.distortion_strength),
+        "base_temperature": float(args.base_temperature),
+        "base_top_p": float(args.base_top_p),
+        "include_penalties": bool(args.include_penalties),
+    }
+
+
+def _probe_runtime(args: argparse.Namespace) -> dict[str, Any]:
+    return {
+        "local_model": str(args.local_model) if args.local_model is not None else None,
+        "allow_remote": bool(args.allow_remote),
+        "trust_remote_code": bool(args.trust_remote_code),
+        "max_new_tokens": int(args.max_new_tokens),
+        "activation_module_name": list(args.activation_module_name),
+        "activation_name_contains": list(args.activation_name_contains),
+        "api_provider": args.api_provider,
+        "api_model": args.api_model,
+        "api_max_tokens": int(args.api_max_tokens),
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     adapter = st.api_llm_zspace_inference_distortion_adapter(
@@ -374,6 +558,9 @@ def main(argv: list[str] | None = None) -> int:
     report = {
         "row_type": "zspace_inference_distortion_probe",
         "prompt": args.prompt,
+        "config": _probe_config(args),
+        "runtime": _probe_runtime(args),
+        "handoff": getattr(args, "sweep_handoff", None),
         "adapter": adapter,
         "local_hf": _run_local_hf(args, adapter),
         "api": _run_api(args, adapter),
