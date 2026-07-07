@@ -49,6 +49,8 @@ def test_api_llm_topos_sweep_example_offline_writes_report(tmp_path, capsys) -> 
     first_sample = printed["response_samples"][0]
     assert first_sample["label"] == "open"
     assert "topos route sets temperature=" in first_sample["text_preview"]
+    assert printed["response_winners"]["lowest_topos_closure_pressure"] == "open"
+    assert printed["response_winners"]["highest_topos_context_weight"] == "guarded"
     assert len(printed["response_route_rows"]) == 3
     assert printed["response_route_rows"][0]["label"] == "open"
     assert len(printed["response_pair_rows"]) == 6
@@ -61,6 +63,8 @@ def test_api_llm_topos_sweep_example_offline_writes_report(tmp_path, capsys) -> 
     assert report["route_count"] == 3
     assert report["response_sample_count"] == 6
     assert report["response_pair_count"] == 6
+    assert report["response_winners"]["highest_topos_openness"] == "open"
+    assert report["response_winners"]["highest_topos_context_weight"] == "guarded"
     assert report["adapter_winners"]["highest_request_temperature"] == "open"
     assert (tmp_path / "traces" / "00-open.jsonl").exists()
     assert (tmp_path / "traces" / "01-contextual.jsonl").exists()
