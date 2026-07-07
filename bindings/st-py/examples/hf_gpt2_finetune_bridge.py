@@ -285,6 +285,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--num-train-epochs", type=float, default=1.0)
     parser.add_argument("--max-steps", type=int, default=-1)
     parser.add_argument("--learning-rate", type=float, default=5e-5)
+    parser.add_argument(
+        "--model-train-dtype",
+        choices=("auto", "native", "float32"),
+        default="auto",
+        help=(
+            "Model dtype policy before Trainer.train(). auto casts fp16/bf16 "
+            "loaded checkpoints back to float32 for stable continued FT."
+        ),
+    )
     parser.add_argument("--per-device-train-batch-size", type=int, default=2)
     parser.add_argument("--per-device-eval-batch-size", type=int, default=2)
     parser.add_argument("--gradient-accumulation-steps", type=int, default=8)
@@ -934,6 +943,42 @@ def _model_device(model: Any) -> Any | None:
     return getattr(first_param, "device", None)
 
 
+def _model_first_parameter_dtype(model: Any) -> str | None:
+    parameters = getattr(model, "parameters", None)
+    if not callable(parameters):
+        return None
+    try:
+        first_param = next(iter(parameters()))
+    except StopIteration:
+        return None
+    dtype = getattr(first_param, "dtype", None)
+    return None if dtype is None else str(dtype)
+
+
+def _prepare_model_train_dtype(model: Any, args: argparse.Namespace) -> dict[str, object]:
+    mode = str(getattr(args, "model_train_dtype", "auto"))
+    before = _model_first_parameter_dtype(model)
+    should_cast = bool(getattr(args, "train", False)) and (
+        mode == "float32" or (mode == "auto" and before in {"torch.float16", "torch.bfloat16"})
+    )
+    cast_status = "not_requested"
+    if should_cast:
+        cast_model = getattr(model, "float", None)
+        if callable(cast_model):
+            cast_model()
+            cast_status = "cast_float32"
+        else:
+            cast_status = "missing_float_method"
+    return {
+        "row_type": "hf_gpt2_finetune_model_dtype_report",
+        "policy": mode,
+        "train_requested": bool(getattr(args, "train", False)),
+        "dtype_before": before,
+        "dtype_after": _model_first_parameter_dtype(model),
+        "cast_status": cast_status,
+    }
+
+
 def _move_batch_to_device(batch: Mapping[str, Any], device: Any | None) -> dict[str, Any]:
     if device is None:
         return dict(batch)
@@ -1381,6 +1426,8 @@ def _base_run_card(
         "torch_version": getattr(torch, "__version__", None),
         "datasets_version": getattr(datasets, "__version__", None),
         "model_name": args.model_name,
+        "model_train_dtype": args.model_train_dtype,
+        "model_dtype_report": None,
         "resume_from_checkpoint": (
             None
             if args.resume_from_checkpoint is None
@@ -1574,6 +1621,7 @@ def _main_with_runtime_access(
     )
     preflight["trainer_loss_guard_enabled"] = not bool(args.no_trainer_loss_guard)
     preflight["trainer_loss_guard_threshold"] = args.trainer_loss_guard_threshold
+    preflight["model_train_dtype"] = args.model_train_dtype
     _attach_local_corpus_reports(
         preflight,
         args,
@@ -1616,6 +1664,7 @@ def _main_with_runtime_access(
             args.model_name,
             **_loader_kwargs(args),
         )
+        card["model_dtype_report"] = _prepare_model_train_dtype(model, args)
         if getattr(tokenizer, "pad_token_id", None) is not None:
             model.config.pad_token_id = tokenizer.pad_token_id
     except Exception as exc:

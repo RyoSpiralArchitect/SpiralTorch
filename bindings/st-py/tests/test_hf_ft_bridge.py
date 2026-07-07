@@ -2676,6 +2676,49 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             )
         )
 
+    def test_example_model_train_dtype_auto_casts_saved_fp16_checkpoint(self) -> None:
+        module = load_bridge_example()
+
+        class FakeParam:
+            def __init__(self, dtype):
+                self.dtype = dtype
+
+        class FakeModel:
+            def __init__(self, dtype):
+                self.param = FakeParam(dtype)
+                self.float_calls = 0
+
+            def parameters(self):
+                return iter([self.param])
+
+            def float(self):
+                self.float_calls += 1
+                self.param.dtype = "torch.float32"
+                return self
+
+        fp16_model = FakeModel("torch.float16")
+        fp32_model = FakeModel("torch.float32")
+        fp16_report = module._prepare_model_train_dtype(
+            fp16_model,
+            types.SimpleNamespace(train=True, model_train_dtype="auto"),
+        )
+        fp32_report = module._prepare_model_train_dtype(
+            fp32_model,
+            types.SimpleNamespace(train=True, model_train_dtype="auto"),
+        )
+        native_report = module._prepare_model_train_dtype(
+            FakeModel("torch.float16"),
+            types.SimpleNamespace(train=True, model_train_dtype="native"),
+        )
+
+        self.assertEqual(fp16_report["cast_status"], "cast_float32")
+        self.assertEqual(fp16_report["dtype_before"], "torch.float16")
+        self.assertEqual(fp16_report["dtype_after"], "torch.float32")
+        self.assertEqual(fp16_model.float_calls, 1)
+        self.assertEqual(fp32_report["cast_status"], "not_requested")
+        self.assertEqual(fp32_model.float_calls, 0)
+        self.assertEqual(native_report["cast_status"], "not_requested")
+
     def test_example_eval_after_train_policy_skips_duplicate_final_eval(self) -> None:
         module = load_bridge_example()
         args = types.SimpleNamespace(
