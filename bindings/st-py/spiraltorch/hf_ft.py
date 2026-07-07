@@ -1842,6 +1842,66 @@ def _metric_number(
     return _safe_number(row.get(key))
 
 
+def _guard_number(value: object) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+
+
+def _trainer_loss_guard_report(
+    logs: Mapping[str, object] | None,
+    *,
+    threshold: float | None,
+) -> dict[str, object] | None:
+    if not logs:
+        return None
+    issues: list[dict[str, object]] = []
+    numeric: dict[str, float | None] = {}
+    for key in ("loss", "eval_loss", "grad_norm"):
+        if key not in logs:
+            continue
+        number = _guard_number(logs.get(key))
+        numeric[key] = number
+        if number is None:
+            continue
+        if not math.isfinite(number):
+            issues.append(
+                {
+                    "kind": "nonfinite_metric",
+                    "metric": key,
+                    "value": str(logs.get(key)),
+                }
+            )
+    loss = numeric.get("loss")
+    if (
+        threshold is not None
+        and threshold > 0.0
+        and loss is not None
+        and math.isfinite(loss)
+        and abs(loss) > threshold
+    ):
+        issues.append(
+            {
+                "kind": "loss_exceeds_threshold",
+                "metric": "loss",
+                "value": loss,
+                "threshold": threshold,
+            }
+        )
+    if not issues:
+        return None
+    return {
+        "row_type": "hf_gpt2_finetune_training_loss_guard",
+        "status": "stop_requested",
+        "threshold": threshold,
+        "issues": issues,
+        "metrics": numeric,
+    }
+
+
 def _bounded_pressure(value: object, *, scale: float = 1.0) -> float | None:
     number = _safe_number(value)
     if number is None:
@@ -4174,6 +4234,8 @@ def hf_gpt2_finetune_trainer_trace_callback(
     telemetry_prefix: str = "hf_ft",
     desire_gain: float = 1.0,
     psi_gain: float = 1.0,
+    stop_on_nonfinite_loss: bool = True,
+    loss_guard_threshold: float | None = 1.0e6,
 ):
     """Create a Transformers TrainerCallback that writes SpiralTorch JSONL."""
 
@@ -4196,6 +4258,14 @@ def hf_gpt2_finetune_trainer_trace_callback(
     )
     desire_gain_value = _finite_non_negative(desire_gain, label="desire_gain")
     psi_gain_value = _finite_non_negative(psi_gain, label="psi_gain")
+    loss_threshold_value = (
+        None
+        if loss_guard_threshold is None
+        else _finite_non_negative(
+            loss_guard_threshold,
+            label="loss_guard_threshold",
+        )
+    )
 
     class SpiralTorchHFTrainerTraceCallback(base_cls):  # type: ignore[misc, valid-type]
         def __init__(self) -> None:
@@ -4268,7 +4338,19 @@ def hf_gpt2_finetune_trainer_trace_callback(
             return self._emit("train_begin", args, state, control, extra=extra)
 
         def on_log(self, args, state, control, logs=None, **kwargs):  # type: ignore[no-untyped-def]
-            return self._emit("log", args, state, control, logs=logs)
+            extra = {}
+            if stop_on_nonfinite_loss:
+                guard = _trainer_loss_guard_report(
+                    logs,
+                    threshold=loss_threshold_value,
+                )
+                if guard is not None:
+                    extra["training_loss_guard"] = guard
+                    try:
+                        setattr(control, "should_training_stop", True)
+                    except Exception:
+                        pass
+            return self._emit("log", args, state, control, logs=logs, extra=extra)
 
         def on_evaluate(self, args, state, control, metrics=None, **kwargs):  # type: ignore[no-untyped-def]
             return self._emit("evaluate", args, state, control, metrics=metrics)

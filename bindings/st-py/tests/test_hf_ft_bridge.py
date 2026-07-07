@@ -3315,10 +3315,17 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 )
             callback.on_train_begin(args, state, control)
             callback.on_log(args, state, control, logs={"loss": 2.0})
+            self.assertFalse(getattr(control, "should_training_stop", False))
+            callback.on_log(
+                args,
+                state,
+                control,
+                logs={"loss": 2.0e6, "grad_norm": float("nan")},
+            )
             rows = hf_ft.load_hf_gpt2_finetune_trainer_trace(path)
             summary = hf_ft.summarize_hf_gpt2_finetune_trainer_trace(rows)
 
-        self.assertEqual([row["event"] for row in rows], ["train_begin", "log"])
+        self.assertEqual([row["event"] for row in rows], ["train_begin", "log", "log"])
         self.assertEqual(rows[0]["run_id"], "fake-run")
         self.assertEqual(
             rows[0]["inference_distortion_handoff"]["recommended_probe"],
@@ -3330,6 +3337,16 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("desire", rows[1])
         self.assertIn("psi", rows[1])
         self.assertIn("hf_ft.psi.total", rows[1]["telemetry"])
+        self.assertTrue(getattr(control, "should_training_stop", False))
+        self.assertEqual(
+            rows[2]["training_loss_guard"]["status"],
+            "stop_requested",
+        )
+        guard_kinds = {
+            issue["kind"] for issue in rows[2]["training_loss_guard"]["issues"]
+        }
+        self.assertIn("loss_exceeds_threshold", guard_kinds)
+        self.assertIn("nonfinite_metric", guard_kinds)
         self.assertEqual(
             rows[1]["telemetry"]["hf_ft.inference_distortion.desire_pressure"],
             0.8,
@@ -3340,8 +3357,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             ],
             "distort-002",
         )
-        self.assertEqual(summary["trace_training_telemetry_count"], 2)
-        self.assertEqual(summary["trace_inference_distortion_telemetry_count"], 2)
+        self.assertEqual(summary["trace_training_telemetry_count"], 3)
+        self.assertEqual(summary["trace_inference_distortion_telemetry_count"], 3)
         self.assertEqual(
             summary["trace_last_inference_distortion_desire_pressure"],
             0.8,
@@ -3386,7 +3403,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         )
         self.assertIsNotNone(summary["trace_last_desire_pressure"])
         self.assertIsNotNone(summary["trace_last_psi_total"])
-        self.assertEqual(callback.event_count, 2)
+        self.assertEqual(callback.event_count, 3)
 
     def test_top_level_exports_hf_ft_helpers(self) -> None:
         self.assertIs(

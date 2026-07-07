@@ -127,6 +127,20 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--trainer-desire-gain", type=float, default=1.0)
     parser.add_argument("--trainer-psi-gain", type=float, default=1.0)
     parser.add_argument(
+        "--no-trainer-loss-guard",
+        action="store_true",
+        help=(
+            "Disable the trainer trace callback guard that stops on non-finite "
+            "or explosively large losses."
+        ),
+    )
+    parser.add_argument(
+        "--trainer-loss-guard-threshold",
+        type=float,
+        default=1.0e6,
+        help="Stop training when a logged train loss exceeds this absolute value.",
+    )
+    parser.add_argument(
         "--inference-distortion-sweep-report",
         type=Path,
         default=None,
@@ -429,6 +443,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             parser.error("--trainer-desire-gain must be finite and non-negative")
         if args.trainer_psi_gain < 0.0 or not math.isfinite(args.trainer_psi_gain):
             parser.error("--trainer-psi-gain must be finite and non-negative")
+    if args.trainer_loss_guard_threshold < 0.0 or not math.isfinite(
+        args.trainer_loss_guard_threshold
+    ):
+        parser.error("--trainer-loss-guard-threshold must be finite and non-negative")
     if (
         args.inference_distortion_sweep_report is not None
         and not args.inference_distortion_sweep_report.is_file()
@@ -1433,6 +1451,8 @@ def _base_run_card(
         "trainer_telemetry_prefix": args.trainer_telemetry_prefix,
         "trainer_desire_gain": args.trainer_desire_gain,
         "trainer_psi_gain": args.trainer_psi_gain,
+        "trainer_loss_guard_enabled": not bool(args.no_trainer_loss_guard),
+        "trainer_loss_guard_threshold": args.trainer_loss_guard_threshold,
         "inference_distortion_sweep_report": (
             None
             if args.inference_distortion_sweep_report is None
@@ -1552,6 +1572,8 @@ def _main_with_runtime_access(
         args,
         inference_distortion_handoff,
     )
+    preflight["trainer_loss_guard_enabled"] = not bool(args.no_trainer_loss_guard)
+    preflight["trainer_loss_guard_threshold"] = args.trainer_loss_guard_threshold
     _attach_local_corpus_reports(
         preflight,
         args,
@@ -1760,6 +1782,8 @@ def _main_with_runtime_access(
                 telemetry_prefix=args.trainer_telemetry_prefix,
                 desire_gain=args.trainer_desire_gain,
                 psi_gain=args.trainer_psi_gain,
+                stop_on_nonfinite_loss=not bool(args.no_trainer_loss_guard),
+                loss_guard_threshold=args.trainer_loss_guard_threshold,
                 inference_distortion_handoff=card.get("inference_distortion_handoff"),
             )
         )

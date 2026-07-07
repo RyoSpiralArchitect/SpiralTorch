@@ -662,6 +662,8 @@ def hf_gpt2_finetune_trainer_trace_callback(
     telemetry_prefix: str = ...,
     desire_gain: float = ...,
     psi_gain: float = ...,
+    stop_on_nonfinite_loss: bool = ...,
+    loss_guard_threshold: float | None = ...,
 ) -> object: ...
 
 def hf_gpt2_finetune_zspace_probe(
