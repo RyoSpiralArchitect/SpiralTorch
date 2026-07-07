@@ -17,7 +17,9 @@ from spiraltorch.hf_ft import (
     HF_GPT2_FT_DEFAULT_DEVICE_BACKENDS,
     hf_gpt2_finetune_preflight_report,
     hf_gpt2_finetune_summary_lines,
+    hf_gpt2_finetune_trainer_trace_callback,
     hf_gpt2_finetune_zspace_probe,
+    summarize_hf_gpt2_finetune_trainer_trace,
     write_hf_gpt2_finetune_run_card,
 )
 
@@ -37,6 +39,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--text-column", default="text")
     parser.add_argument("--output-dir", type=Path, default=Path("runs/hf-gpt2-ft"))
     parser.add_argument("--run-card", type=Path, default=None)
+    parser.add_argument("--trainer-trace-jsonl", type=Path, default=None)
+    parser.add_argument("--trainer-trace-run-id", default=None)
+    parser.add_argument("--no-trainer-trace", action="store_true")
     parser.add_argument("--allow-remote", action="store_true")
     parser.add_argument("--trust-remote-code", action="store_true")
     parser.add_argument("--train", action="store_true", help="Actually run Trainer.train().")
@@ -263,6 +268,14 @@ def _write_card(card: Mapping[str, Any], args: argparse.Namespace) -> None:
     print(f"run_card {path}")
 
 
+def _trainer_trace_path(args: argparse.Namespace) -> Path | None:
+    if args.no_trainer_trace:
+        return None
+    return args.trainer_trace_jsonl or (
+        args.output_dir / "spiraltorch-hf-gpt2-ft-trainer-trace.jsonl"
+    )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     preflight = hf_gpt2_finetune_preflight_report(
@@ -312,10 +325,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     preview_texts = _text_rows(raw_train, args.text_column)
 
     zspace_probe = None
+    preview_token_ids: list[int | float] = []
     if args.zspace_probe and preview_texts:
         encoded = tokenizer(preview_texts[0])
+        preview_token_ids = list(encoded.get("input_ids", []))
         zspace_probe = hf_gpt2_finetune_zspace_probe(
-            encoded.get("input_ids", []),
+            preview_token_ids,
             dim=args.zspace_probe_dim,
             vocab_size=_tokenizer_vocab_size(tokenizer),
             curvature=args.zspace_curvature,
@@ -344,6 +359,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         "zspace_probe": zspace_probe,
         "train_requested": bool(args.train),
         "metadata_only": bool(args.metadata_only),
+        "trainer_trace_jsonl": (
+            None if args.metadata_only else str(_trainer_trace_path(args))
+        ),
     }
     if args.metadata_only:
         _write_card(card, args)
@@ -360,20 +378,45 @@ def main(argv: Sequence[str] | None = None) -> int:
             cls=training_args_cls,
         )
     )
+    trace_path = _trainer_trace_path(args)
+    callbacks = []
+    if trace_path is not None:
+        callbacks.append(
+            hf_gpt2_finetune_trainer_trace_callback(
+                trace_path,
+                run_id=args.trainer_trace_run_id or args.output_dir.name,
+                zspace_probe_tokens=preview_token_ids if args.zspace_probe else None,
+                zspace_probe_kwargs={
+                    "dim": args.zspace_probe_dim,
+                    "vocab_size": _tokenizer_vocab_size(tokenizer),
+                    "curvature": args.zspace_curvature,
+                    "frequency": args.zspace_frequency,
+                    "strength": args.zspace_strength,
+                },
+            )
+        )
     trainer = transformers.Trainer(
         model=model,
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         data_collator=collator,
+        callbacks=callbacks,
     )
     train_result = trainer.train()
     trainer.save_model(str(args.output_dir))
+    trainer_trace_summary = (
+        None
+        if trace_path is None or not trace_path.exists()
+        else summarize_hf_gpt2_finetune_trainer_trace(trace_path)
+    )
     card.update(
         {
             "tokenized_train_rows": len(train_dataset),
             "tokenized_eval_rows": None if eval_dataset is None else len(eval_dataset),
             "trainer_metrics": dict(getattr(train_result, "metrics", {}) or {}),
+            "trainer_trace_jsonl": None if trace_path is None else str(trace_path),
+            "trainer_trace_summary": trainer_trace_summary,
             "model_saved": True,
         }
     )

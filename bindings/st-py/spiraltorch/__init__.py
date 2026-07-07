@@ -780,8 +780,13 @@ from .hf_ft import (
     hf_gpt2_finetune_preflight_report,
     hf_gpt2_finetune_rust_dependency_report,
     hf_gpt2_finetune_summary_lines,
+    hf_gpt2_finetune_trainer_trace_callback,
+    hf_gpt2_finetune_trainer_trace_event,
     hf_gpt2_finetune_zspace_probe,
+    load_hf_gpt2_finetune_trainer_trace,
+    summarize_hf_gpt2_finetune_trainer_trace,
     write_hf_gpt2_finetune_run_card,
+    write_hf_gpt2_finetune_trainer_trace_event,
 )
 
 from .gnn_trace import (
@@ -924,8 +929,13 @@ _EXTRAS = [
     "hf_gpt2_finetune_preflight_report",
     "hf_gpt2_finetune_rust_dependency_report",
     "hf_gpt2_finetune_summary_lines",
+    "hf_gpt2_finetune_trainer_trace_callback",
+    "hf_gpt2_finetune_trainer_trace_event",
     "hf_gpt2_finetune_zspace_probe",
+    "load_hf_gpt2_finetune_trainer_trace",
+    "summarize_hf_gpt2_finetune_trainer_trace",
     "write_hf_gpt2_finetune_run_card",
+    "write_hf_gpt2_finetune_trainer_trace_event",
     "load_gnn_band_replay_trace","flatten_gnn_band_replay_rows",
     "summarize_gnn_band_replays","compare_gnn_band_replay_runs","write_gnn_band_replay_html",
     "load_kdsl_trace_events","write_kdsl_trace_jsonl","write_kdsl_trace_html",

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sys
+import tempfile
 import types
 import unittest
 from unittest import mock
@@ -91,6 +93,81 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(probe["zspace_probe_status"], "missing_tokens")
         self.assertEqual(probe["zspace_probe_observed_token_count"], 0)
 
+    def test_trainer_trace_event_round_trip_and_summary(self) -> None:
+        args = types.SimpleNamespace(
+            output_dir="runs/gpt2",
+            learning_rate=5e-5,
+            per_device_train_batch_size=2,
+            gradient_accumulation_steps=8,
+            num_train_epochs=1.0,
+        )
+        state = types.SimpleNamespace(
+            global_step=3,
+            epoch=0.25,
+            max_steps=10,
+            log_history=[{"loss": 1.8}],
+        )
+        control = types.SimpleNamespace(
+            should_training_stop=False,
+            should_evaluate=True,
+            should_save=False,
+        )
+
+        row = hf_ft.hf_gpt2_finetune_trainer_trace_event(
+            "log",
+            args=args,
+            state=state,
+            control=control,
+            logs={"loss": 1.7, "learning_rate": 4.5e-5},
+            run_id="demo",
+        )
+        eval_row = hf_ft.hf_gpt2_finetune_trainer_trace_event(
+            "evaluate",
+            args=args,
+            state=state,
+            control=control,
+            metrics={"eval_loss": 1.6},
+            run_id="demo",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = f"{tmp}/trace.jsonl"
+            hf_ft.write_hf_gpt2_finetune_trainer_trace_event(row, path)
+            hf_ft.write_hf_gpt2_finetune_trainer_trace_event(eval_row, path)
+            loaded = hf_ft.load_hf_gpt2_finetune_trainer_trace(path)
+            summary = hf_ft.summarize_hf_gpt2_finetune_trainer_trace(path)
+
+        self.assertEqual([item["event"] for item in loaded], ["log", "evaluate"])
+        self.assertEqual(summary["trace_event_count"], 2)
+        self.assertEqual(summary["trace_max_global_step"], 3)
+        self.assertEqual(summary["trace_last_loss"], 1.7)
+        self.assertEqual(summary["trace_min_eval_loss"], 1.6)
+
+    def test_trainer_trace_callback_writes_jsonl_with_fake_transformers(self) -> None:
+        fake_transformers = types.ModuleType("transformers")
+
+        class TrainerCallback:
+            pass
+
+        fake_transformers.TrainerCallback = TrainerCallback
+        args = types.SimpleNamespace(output_dir="runs/gpt2")
+        state = types.SimpleNamespace(global_step=0, epoch=0.0, max_steps=1)
+        control = types.SimpleNamespace()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = f"{tmp}/trace.jsonl"
+            with mock.patch.dict(sys.modules, {"transformers": fake_transformers}):
+                callback = hf_ft.hf_gpt2_finetune_trainer_trace_callback(
+                    path,
+                    run_id="fake-run",
+                )
+            callback.on_train_begin(args, state, control)
+            callback.on_log(args, state, control, logs={"loss": 2.0})
+            rows = hf_ft.load_hf_gpt2_finetune_trainer_trace(path)
+
+        self.assertEqual([row["event"] for row in rows], ["train_begin", "log"])
+        self.assertEqual(rows[0]["run_id"], "fake-run")
+        self.assertEqual(rows[1]["metrics"], {"loss": 2.0})
+        self.assertEqual(callback.event_count, 2)
+
     def test_top_level_exports_hf_ft_helpers(self) -> None:
         self.assertIs(
             st.hf_gpt2_finetune_preflight_report,
@@ -102,6 +179,11 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         )
         self.assertIn("hf_ft", st.__all__)
         self.assertIn("hf_gpt2_finetune_preflight_report", st.__all__)
+        self.assertIn("hf_gpt2_finetune_trainer_trace_callback", st.__all__)
+        self.assertIs(
+            st.summarize_hf_gpt2_finetune_trainer_trace,
+            hf_ft.summarize_hf_gpt2_finetune_trainer_trace,
+        )
 
 
 if __name__ == "__main__":

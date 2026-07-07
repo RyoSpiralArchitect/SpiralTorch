@@ -273,6 +273,40 @@ def hf_gpt2_finetune_summary_lines(
     report: Mapping[str, object],
 ) -> List[str]: ...
 
+def hf_gpt2_finetune_trainer_trace_event(
+    event: str,
+    *,
+    args: object = ...,
+    state: object = ...,
+    control: object = ...,
+    logs: Mapping[str, object] | None = ...,
+    metrics: Mapping[str, object] | None = ...,
+    run_id: str | None = ...,
+    extra: Mapping[str, object] | None = ...,
+) -> Dict[str, object]: ...
+
+def write_hf_gpt2_finetune_trainer_trace_event(
+    row: Mapping[str, object],
+    path: str | PathLike[str],
+) -> str: ...
+
+def load_hf_gpt2_finetune_trainer_trace(
+    path: str | PathLike[str],
+) -> List[Dict[str, object]]: ...
+
+def summarize_hf_gpt2_finetune_trainer_trace(
+    path_or_rows: str | PathLike[str] | Sequence[Mapping[str, object]],
+) -> Dict[str, object]: ...
+
+def hf_gpt2_finetune_trainer_trace_callback(
+    path: str | PathLike[str],
+    *,
+    run_id: str | None = ...,
+    reset: bool = ...,
+    zspace_probe_tokens: Sequence[int | float] | None = ...,
+    zspace_probe_kwargs: Mapping[str, object] | None = ...,
+) -> object: ...
+
 def hf_gpt2_finetune_zspace_probe(
     token_ids: Sequence[int | float],
     *,
@@ -8050,8 +8084,13 @@ __all__ = [
     "hf_gpt2_finetune_preflight_report",
     "hf_gpt2_finetune_rust_dependency_report",
     "hf_gpt2_finetune_summary_lines",
+    "hf_gpt2_finetune_trainer_trace_callback",
+    "hf_gpt2_finetune_trainer_trace_event",
     "hf_gpt2_finetune_zspace_probe",
+    "load_hf_gpt2_finetune_trainer_trace",
+    "summarize_hf_gpt2_finetune_trainer_trace",
     "write_hf_gpt2_finetune_run_card",
+    "write_hf_gpt2_finetune_trainer_trace_event",
     "from_dlpack",
     "to_dlpack",
     "ZSpaceBarycenter",

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import time
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -22,8 +23,13 @@ __all__ = [
     "hf_gpt2_finetune_preflight_report",
     "hf_gpt2_finetune_rust_dependency_report",
     "hf_gpt2_finetune_summary_lines",
+    "hf_gpt2_finetune_trainer_trace_callback",
+    "hf_gpt2_finetune_trainer_trace_event",
     "hf_gpt2_finetune_zspace_probe",
+    "load_hf_gpt2_finetune_trainer_trace",
+    "summarize_hf_gpt2_finetune_trainer_trace",
     "write_hf_gpt2_finetune_run_card",
+    "write_hf_gpt2_finetune_trainer_trace_event",
 ]
 
 
@@ -293,6 +299,262 @@ def hf_gpt2_finetune_zspace_probe(
         }
     )
     return row
+
+
+def _json_safe(value: object) -> object:
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, Mapping):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, Iterable) and not isinstance(value, (str, bytes, bytearray)):
+        return [_json_safe(item) for item in value]
+    return str(value)
+
+
+def _safe_attr(value: object, name: str, default: object = None) -> object:
+    if value is None:
+        return default
+    return getattr(value, name, default)
+
+
+def _safe_number(value: object) -> int | float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return None if math.isnan(value) else value
+    try:
+        number = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return None if math.isnan(number) else number
+
+
+def _metric_fields(values: Mapping[str, object] | None) -> dict[str, object]:
+    if not values:
+        return {}
+    return {
+        str(key): _json_safe(value)
+        for key, value in values.items()
+        if not str(key).startswith("_")
+    }
+
+
+def hf_gpt2_finetune_trainer_trace_event(
+    event: str,
+    *,
+    args: object = None,
+    state: object = None,
+    control: object = None,
+    logs: Mapping[str, object] | None = None,
+    metrics: Mapping[str, object] | None = None,
+    run_id: str | None = None,
+    extra: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    """Build one JSON-safe HF Trainer trace row for SpiralTorch run cards."""
+
+    metric_payload = _metric_fields(metrics if metrics is not None else logs)
+    global_step = _safe_number(_safe_attr(state, "global_step"))
+    epoch = _safe_number(_safe_attr(state, "epoch"))
+    row: dict[str, object] = {
+        "row_type": "hf_gpt2_finetune_trainer_trace",
+        "event": str(event),
+        "time_unix_s": time.time(),
+        "run_id": run_id,
+        "global_step": global_step,
+        "epoch": epoch,
+        "max_steps": _safe_number(_safe_attr(state, "max_steps")),
+        "num_train_epochs": _safe_number(_safe_attr(args, "num_train_epochs")),
+        "output_dir": _json_safe(_safe_attr(args, "output_dir")),
+        "learning_rate": _safe_number(_safe_attr(args, "learning_rate")),
+        "per_device_train_batch_size": _safe_number(
+            _safe_attr(args, "per_device_train_batch_size")
+        ),
+        "gradient_accumulation_steps": _safe_number(
+            _safe_attr(args, "gradient_accumulation_steps")
+        ),
+        "log_history_count": _safe_number(
+            len(_safe_attr(state, "log_history", []) or [])
+        ),
+        "should_training_stop": bool(
+            _safe_attr(control, "should_training_stop", False)
+        ),
+        "should_evaluate": bool(_safe_attr(control, "should_evaluate", False)),
+        "should_save": bool(_safe_attr(control, "should_save", False)),
+        "metrics": metric_payload,
+        "metric_keys": csv_label(sorted(metric_payload)),
+    }
+    if extra:
+        row.update({str(key): _json_safe(value) for key, value in extra.items()})
+    return row
+
+
+def write_hf_gpt2_finetune_trainer_trace_event(
+    row: Mapping[str, object],
+    path: str | Path,
+) -> str:
+    """Append one HF Trainer trace event as JSONL and return the path."""
+
+    output_path = Path(path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(dict(row), ensure_ascii=False, sort_keys=True) + "\n")
+    return str(output_path)
+
+
+def load_hf_gpt2_finetune_trainer_trace(path: str | Path) -> list[dict[str, object]]:
+    """Load SpiralTorch HF Trainer trace JSONL rows."""
+
+    rows = []
+    input_path = Path(path)
+    with input_path.open("r", encoding="utf-8") as handle:
+        for line_no, raw_line in enumerate(handle, 1):
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"{input_path}:{line_no} invalid JSONL: {exc}") from exc
+            if isinstance(payload, Mapping):
+                rows.append(dict(payload))
+    return rows
+
+
+def _last_metric(rows: Sequence[Mapping[str, object]], key: str) -> object:
+    for row in reversed(rows):
+        metrics = row.get("metrics")
+        if isinstance(metrics, Mapping) and key in metrics:
+            return metrics[key]
+    return None
+
+
+def _min_numeric_metric(rows: Sequence[Mapping[str, object]], key: str) -> float | None:
+    values = []
+    for row in rows:
+        metrics = row.get("metrics")
+        if not isinstance(metrics, Mapping):
+            continue
+        number = _safe_number(metrics.get(key))
+        if number is not None:
+            values.append(float(number))
+    return min(values) if values else None
+
+
+def summarize_hf_gpt2_finetune_trainer_trace(
+    path_or_rows: str | Path | Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    """Summarize HF Trainer trace rows for a GPT-2 fine-tune run card."""
+
+    if isinstance(path_or_rows, (str, Path)):
+        rows = load_hf_gpt2_finetune_trainer_trace(path_or_rows)
+    else:
+        rows = [dict(row) for row in path_or_rows]
+    event_counts: dict[str, int] = {}
+    max_step: int | float | None = None
+    for row in rows:
+        event = str(row.get("event") or "unknown")
+        event_counts[event] = event_counts.get(event, 0) + 1
+        step = _safe_number(row.get("global_step"))
+        if step is not None and (max_step is None or step > max_step):
+            max_step = step
+    return {
+        "row_type": "hf_gpt2_finetune_trainer_trace_summary",
+        "trace_event_count": len(rows),
+        "trace_event_counts": event_counts,
+        "trace_events": csv_label(sorted(event_counts)),
+        "trace_max_global_step": max_step,
+        "trace_last_event": rows[-1].get("event") if rows else None,
+        "trace_last_loss": _last_metric(rows, "loss"),
+        "trace_min_loss": _min_numeric_metric(rows, "loss"),
+        "trace_last_eval_loss": _last_metric(rows, "eval_loss"),
+        "trace_min_eval_loss": _min_numeric_metric(rows, "eval_loss"),
+        "trace_last_learning_rate": _last_metric(rows, "learning_rate"),
+    }
+
+
+def hf_gpt2_finetune_trainer_trace_callback(
+    path: str | Path,
+    *,
+    run_id: str | None = None,
+    reset: bool = True,
+    zspace_probe_tokens: Sequence[int | float] | None = None,
+    zspace_probe_kwargs: Mapping[str, object] | None = None,
+):
+    """Create a Transformers TrainerCallback that writes SpiralTorch JSONL."""
+
+    try:
+        import importlib
+
+        transformers = importlib.import_module("transformers")
+    except Exception as exc:  # pragma: no cover - depends on optional dependency.
+        raise RuntimeError(
+            "hf_gpt2_finetune_trainer_trace_callback requires transformers"
+        ) from exc
+    base_cls = getattr(transformers, "TrainerCallback", object)
+    trace_path = Path(path)
+    probe_kwargs = dict(zspace_probe_kwargs or {})
+    probe_tokens = list(zspace_probe_tokens or [])
+
+    class SpiralTorchHFTrainerTraceCallback(base_cls):  # type: ignore[misc, valid-type]
+        def __init__(self) -> None:
+            self.path = trace_path
+            self.run_id = run_id
+            self.event_count = 0
+            if reset:
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+                self.path.write_text("", encoding="utf-8")
+
+        def _emit(
+            self,
+            event: str,
+            args: object,
+            state: object,
+            control: object,
+            *,
+            logs: Mapping[str, object] | None = None,
+            metrics: Mapping[str, object] | None = None,
+            extra: Mapping[str, object] | None = None,
+        ) -> object:
+            row = hf_gpt2_finetune_trainer_trace_event(
+                event,
+                args=args,
+                state=state,
+                control=control,
+                logs=logs,
+                metrics=metrics,
+                run_id=self.run_id,
+                extra=extra,
+            )
+            write_hf_gpt2_finetune_trainer_trace_event(row, self.path)
+            self.event_count += 1
+            return control
+
+        def on_train_begin(self, args, state, control, **kwargs):  # type: ignore[no-untyped-def]
+            extra = {}
+            if probe_tokens:
+                extra["zspace_probe"] = hf_gpt2_finetune_zspace_probe(
+                    probe_tokens,
+                    **probe_kwargs,
+                )
+            return self._emit("train_begin", args, state, control, extra=extra)
+
+        def on_log(self, args, state, control, logs=None, **kwargs):  # type: ignore[no-untyped-def]
+            return self._emit("log", args, state, control, logs=logs)
+
+        def on_evaluate(self, args, state, control, metrics=None, **kwargs):  # type: ignore[no-untyped-def]
+            return self._emit("evaluate", args, state, control, metrics=metrics)
+
+        def on_save(self, args, state, control, **kwargs):  # type: ignore[no-untyped-def]
+            return self._emit("save", args, state, control)
+
+        def on_train_end(self, args, state, control, **kwargs):  # type: ignore[no-untyped-def]
+            return self._emit("train_end", args, state, control)
+
+    return SpiralTorchHFTrainerTraceCallback()
 
 
 def write_hf_gpt2_finetune_run_card(

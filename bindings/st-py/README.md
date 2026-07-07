@@ -380,9 +380,12 @@ PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_gpt2_finetune_bridge
 
 After the contract passes, add `--train --max-train-samples 50000 --block-size
 128 --output-dir runs/gpt2-small-zspace-ft` to run a real local
-`AutoModelForCausalLM` / `Trainer` fine-tune. Use
-`--require-runtime-device-ready-backend wgpu` when the SpiralTorch WGPU surface
-must be available before the run starts.
+`AutoModelForCausalLM` / `Trainer` fine-tune. Train runs write
+`spiraltorch-hf-gpt2-ft-trainer-trace.jsonl` by default, capturing
+train/log/evaluate/save/end events and summarizing loss/eval-loss telemetry
+back into the run card; pass `--no-trainer-trace` only when that audit trail is
+too noisy. Use `--require-runtime-device-ready-backend wgpu` when the
+SpiralTorch WGPU surface must be available before the run starts.
 
 ## Minimal usage
 
