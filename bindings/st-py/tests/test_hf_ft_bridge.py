@@ -3397,7 +3397,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             )
             (run_dir / "ft.log").write_text(
                 " 50%|#####     | 20/40 [00:20<00:20,  1.00s/it]\n"
-                " 60%|######    | 24/40 [00:24<00:16,  1.00s/it]\n",
+                " 60%|######    | 24/40 [00:24<00:16,  1.00s/it]\n"
+                "  5%|5         | 51/964 [00:07<01:56,  7.83it/s]\n",
                 encoding="utf-8",
             )
             pid_file = run_dir / "ft.pid"

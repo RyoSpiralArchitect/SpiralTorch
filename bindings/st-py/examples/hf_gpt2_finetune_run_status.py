@@ -111,13 +111,18 @@ def _read_tail(path: Path, max_bytes: int) -> str:
         return handle.read().decode("utf-8", errors="ignore")
 
 
-def _log_progress(log_file: Path, max_bytes: int) -> dict[str, Any]:
+def _log_progress(
+    log_file: Path, max_bytes: int, expected_max_steps: int | None = None
+) -> dict[str, Any]:
     text = _read_tail(log_file, max_bytes)
     latest_step = None
     latest_max_steps = None
     for match in PROGRESS_RE.finditer(text):
+        max_steps = int(match.group("max_steps"))
+        if expected_max_steps is not None and max_steps != expected_max_steps:
+            continue
         latest_step = int(match.group("step"))
-        latest_max_steps = int(match.group("max_steps"))
+        latest_max_steps = max_steps
     progress = None
     if latest_step is not None and latest_max_steps:
         progress = min(max(float(latest_step) / float(latest_max_steps), 0.0), 1.0)
@@ -184,7 +189,11 @@ def _checkpoint_rows(run_dir: Path) -> list[dict[str, Any]]:
 
 def summarize_run(args: argparse.Namespace) -> dict[str, Any]:
     trace = _trace_summary(args.trace_jsonl, args.max_steps)
-    log_progress = _log_progress(args.log_file, int(args.log_tail_bytes))
+    log_progress = _log_progress(
+        args.log_file,
+        int(args.log_tail_bytes),
+        expected_max_steps=args.max_steps,
+    )
     run_card = _load_json(args.run_card)
     checkpoint_card = _load_json(args.checkpoint_card)
     pid = _read_pid(args.pid_file)
