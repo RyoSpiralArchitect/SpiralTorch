@@ -275,7 +275,7 @@ For notebook or CI preflight without a training script, either run the CLI:
 
 ```bash
 spiral-runtime-preflight \
-  --preset hf-runtime \
+  --preset hf-gpt2-ft \
   --require \
   --runtime-device-backend wgpu \
   --json-out ft-runtime.json
@@ -287,8 +287,8 @@ or call the same contract from Python:
 import spiraltorch as st
 
 report = st.runtime_import_preflight_report(
-    runtime_import_presets=["hf-runtime"],
-    required_runtime_import_presets=["hf-runtime"],
+    runtime_import_presets=["hf-gpt2-ft"],
+    required_runtime_import_presets=["hf-gpt2-ft"],
     runtime_device_backends=["wgpu"],
 )
 st.write_runtime_import_preflight_report(report, "ft-runtime.json")
@@ -339,12 +339,29 @@ without launching a training job:
 
 ```bash
 spiral-runtime-preflight \
-  --preset hf-finetune \
+  --preset hf-gpt2-ft \
   --require \
   --runtime-device-backend wgpu \
   --json-out ft-runtime.json
 spiral-runtime-preflight --preset hf-peft --require --json
 ```
+
+Install the stronger local GPT-2 fine-tuning dependency surface with
+`pip install "spiraltorch[hf-gpt2-ft]"`. Use `hf-runtime` for inference-only
+`transformers`/`torch`/`tokenizers` checks, `hf-finetune` for the lighter
+`datasets`/`accelerate`/`safetensors` contract, `hf-peft` for PEFT adapter
+workflows, and `hf-trl-sft` when a TRL SFT loop should be importable in the
+same environment.
+
+For a real local GPT-2-small FT run with a larger dataset, treat this as a hard
+dependency boundary rather than a suggestion: the Rust wheel already exposes the
+default `nn`, `text`, `logic`, `spiral_rl`, and WGPU-backed tensor/runtime
+surface, while Python must bring the HF data/model stack. In practice,
+`st-tensor`/`st-nn` map to `torch` plus WGPU readiness evidence, `st-text` and
+`st-logic` map to `transformers`/`tokenizers`, large local corpora require
+`datasets` + `pyarrow`, training orchestration requires `accelerate` and
+`safetensors`, and adapter/evaluation experiments should have `peft` and
+`evaluate` available before the first long run starts.
 
 ## Minimal usage
 

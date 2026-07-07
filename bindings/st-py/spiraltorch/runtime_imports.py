@@ -64,6 +64,18 @@ TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS: dict[str, list[str]] = {
         "accelerate",
         "safetensors",
     ],
+    "hf-gpt2-ft": [
+        "transformers",
+        "torch",
+        "tokenizers",
+        "datasets",
+        "accelerate",
+        "safetensors",
+        "pyarrow",
+        "tqdm",
+        "evaluate",
+        "peft",
+    ],
     "hf-peft": [
         "transformers",
         "torch",
@@ -72,16 +84,34 @@ TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS: dict[str, list[str]] = {
         "peft",
         "safetensors",
     ],
+    "hf-trl-sft": [
+        "transformers",
+        "torch",
+        "tokenizers",
+        "datasets",
+        "accelerate",
+        "safetensors",
+        "pyarrow",
+        "tqdm",
+        "peft",
+        "trl",
+        "trackio",
+    ],
 }
 
 RUNTIME_IMPORT_INSTALL_HINTS: dict[str, str] = {
     "accelerate": "pip install accelerate",
     "datasets": "pip install datasets",
+    "evaluate": "pip install evaluate",
     "peft": "pip install peft",
+    "pyarrow": "pip install pyarrow",
     "safetensors": "pip install safetensors",
     "tokenizers": "pip install tokenizers",
     "torch": "pip install torch",
+    "tqdm": "pip install tqdm",
+    "trackio": "pip install trackio",
     "transformers": "pip install transformers",
+    "trl": "pip install trl",
 }
 
 
@@ -1057,8 +1087,9 @@ def _runtime_import_arg_parser() -> argparse.ArgumentParser:
         default=[],
         help=(
             "Named import bundle to probe. Use hf-runtime for Transformers, "
-            "hf-finetune for datasets/accelerate/safetensors, or hf-peft for "
-            "PEFT adapter workflows."
+            "hf-finetune for datasets/accelerate/safetensors, hf-gpt2-ft for "
+            "local GPT-2-scale fine-tuning, hf-peft for adapter workflows, or "
+            "hf-trl-sft for TRL SFT handoffs."
         ),
     )
     parser.add_argument(

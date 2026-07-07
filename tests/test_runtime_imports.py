@@ -98,6 +98,35 @@ class RuntimeImportsTest(unittest.TestCase):
             pyproject,
         )
 
+    def test_pyproject_exposes_hf_ft_extras(self) -> None:
+        pyproject = PYPROJECT_PATH.read_text(encoding="utf-8")
+
+        self.assertIn("[project.optional-dependencies]", pyproject)
+        for extra in [
+            "hf-runtime",
+            "hf-finetune",
+            "hf-peft",
+            "hf-gpt2-ft",
+            "hf-trl-sft",
+        ]:
+            with self.subTest(extra=extra):
+                self.assertIn(f"{extra} = [", pyproject)
+        for dependency in [
+            '"transformers>=4.40"',
+            '"torch>=2.2"',
+            '"tokenizers>=0.15"',
+            '"datasets>=2.18"',
+            '"accelerate>=0.27"',
+            '"safetensors>=0.4"',
+            '"pyarrow>=15"',
+            '"evaluate>=0.4"',
+            '"peft>=0.10"',
+            '"trl>=0.12"',
+            '"trackio>=0.2"',
+        ]:
+            with self.subTest(dependency=dependency):
+                self.assertIn(dependency, pyproject)
+
     def test_pep561_marker_and_top_level_stubs_are_shipped(self) -> None:
         self.assertTrue(PY_TYPED_PATH.is_file())
         self.assertTrue(TOP_LEVEL_STUB_PATH.is_file())
@@ -181,6 +210,22 @@ class RuntimeImportsTest(unittest.TestCase):
             module.runtime_import_preset_modules(["hf-peft"]),
             ["hf-peft=transformers|torch|tokenizers|accelerate|peft|safetensors"],
         )
+        self.assertEqual(
+            module.runtime_import_preset_modules(["hf-gpt2-ft"]),
+            [
+                "hf-gpt2-ft="
+                "transformers|torch|tokenizers|datasets|accelerate|safetensors|"
+                "pyarrow|tqdm|evaluate|peft"
+            ],
+        )
+        self.assertEqual(
+            module.runtime_import_preset_modules(["hf-trl-sft"]),
+            [
+                "hf-trl-sft="
+                "transformers|torch|tokenizers|datasets|accelerate|safetensors|"
+                "pyarrow|tqdm|peft|trl|trackio"
+            ],
+        )
 
     def test_failed_ft_runtime_imports_emit_install_hints(self) -> None:
         module = load_runtime_imports()
@@ -231,9 +276,14 @@ class RuntimeImportsTest(unittest.TestCase):
         )
         self.assertEqual(
             module.runtime_import_install_hints_label(
-                ["torch", "spiraltorch_unknown_plugin"]
+                ["torch", "pyarrow", "evaluate", "trl", "spiraltorch_unknown_plugin"]
             ),
-            "torch=pip install torch",
+            (
+                "torch=pip install torch,"
+                "pyarrow=pip install pyarrow,"
+                "evaluate=pip install evaluate,"
+                "trl=pip install trl"
+            ),
         )
 
     def test_preflight_report_requires_requested_preset_when_require_all(self) -> None:
@@ -412,6 +462,8 @@ class RuntimeImportsTest(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         self.assertIn("hf-finetune=", stdout.getvalue())
+        self.assertIn("hf-gpt2-ft=", stdout.getvalue())
+        self.assertIn("hf-trl-sft=", stdout.getvalue())
 
     def test_cli_writes_json_out_in_quiet_mode(self) -> None:
         module = load_runtime_imports()

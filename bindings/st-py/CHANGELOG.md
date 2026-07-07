@@ -1,5 +1,15 @@
 # SpiralTorch (Python) changelog
 
+## 0.4.12
+
+- Packaging: add Hugging Face / PyTorch optional dependency extras for local
+  fine-tuning handoffs: `hf-runtime`, `hf-finetune`, `hf-peft`,
+  `hf-gpt2-ft`, and `hf-trl-sft`.
+- Runtime preflight: add `hf-gpt2-ft` and `hf-trl-sft` import presets so
+  local GPT-2-scale FT runs can require `torch`, `transformers`,
+  `tokenizers`, `datasets`, `accelerate`, `safetensors`, `pyarrow`, and
+  related adapter/evaluation modules before a long run starts.
+
 ## 0.4.11
 
 - Python API: expose runtime import preflight helpers directly from
