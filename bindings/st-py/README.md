@@ -425,6 +425,11 @@ Add `--eval-before-train` when you want a numeric baseline before updates; the
 bridge writes `eval_before_train` plus final `eval_after_train` reports with
 `eval_loss`, perplexity, raw metrics, and skipped/error status. Pass
 `--no-eval-after-train` only when a long run must avoid the final eval pass.
+For heavier local eval loops, add `--max-eval-blocks N` to cap grouped eval
+blocks, use `--eval-after-train-policy skip-if-final-step-eval` when
+`max_steps` already lands on an eval boundary, and leave
+`--dataloader-pin-memory auto` so MPS/CPU runs avoid unsupported pin-memory
+warnings while CUDA can still opt in.
 After several runs, call
 `st.compare_hf_gpt2_finetune_run_cards([run_a, run_b, ...])` to flatten
 run-card JSON into eval-loss/perplexity deltas, generation-sample changes,

@@ -58,6 +58,11 @@
   make generation samples tolerate patched Hugging Face
   `_prepare_special_tokens(..., batch_size=...)` call sites without falling
   back to manual forward generation.
+- FT eval controls: add `--max-eval-blocks`,
+  `--eval-after-train-policy skip-if-final-step-eval`,
+  `--dataloader-pin-memory auto|true|false`, `--dataloader-num-workers`, and
+  `--eval-accumulation-steps` to make longer local GPT-2 FT runs easier to
+  resume, audit, and keep responsive on MPS/CPU machines.
 - Documentation: clarify the hard dependency boundary for larger local GPT-2
   FT runs: Rust keeps tensor/nn/text/logic/frac/rl/WGPU surfaces in the wheel,
   while Python explicitly brings Transformers, Torch, datasets, pyarrow,

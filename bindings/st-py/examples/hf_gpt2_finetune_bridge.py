@@ -119,6 +119,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--max-train-samples", type=int, default=4096)
     parser.add_argument("--max-eval-samples", type=int, default=512)
+    parser.add_argument(
+        "--max-eval-blocks",
+        type=int,
+        default=0,
+        help=(
+            "Cap tokenized eval blocks after grouping. The default 0 keeps all "
+            "blocks produced by --max-eval-samples."
+        ),
+    )
     parser.add_argument("--block-size", type=int, default=128)
     parser.add_argument(
         "--eval-before-train",
@@ -132,6 +141,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--no-eval-after-train",
         action="store_true",
         help="Skip the final Trainer.evaluate() run-card pass after training.",
+    )
+    parser.add_argument(
+        "--eval-after-train-policy",
+        choices=("always", "never", "skip-if-final-step-eval"),
+        default="always",
+        help=(
+            "Control the post-train run-card evaluate pass. "
+            "'skip-if-final-step-eval' avoids a duplicate full eval when "
+            "max_steps lands exactly on an eval_steps boundary."
+        ),
     )
     parser.add_argument(
         "--generation-prompt",
@@ -168,6 +187,18 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--logging-steps", type=int, default=25)
     parser.add_argument("--save-steps", type=int, default=250)
     parser.add_argument("--eval-steps", type=int, default=250)
+    parser.add_argument("--eval-accumulation-steps", type=int, default=0)
+    parser.add_argument("--dataloader-num-workers", type=int, default=0)
+    parser.add_argument(
+        "--dataloader-pin-memory",
+        choices=("auto", "true", "false"),
+        default="auto",
+        help=(
+            "TrainingArguments dataloader_pin_memory policy. auto enables it "
+            "for CUDA and disables it for CPU/MPS to avoid unsupported MPS "
+            "pin-memory warnings."
+        ),
+    )
     parser.add_argument("--seed", type=int, default=13)
     parser.add_argument(
         "--runtime-device-backend",
@@ -204,6 +235,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         parser.error("--max-train-samples must be non-negative")
     if args.max_eval_samples is not None and args.max_eval_samples < 0:
         parser.error("--max-eval-samples must be non-negative")
+    if args.max_eval_blocks is not None and args.max_eval_blocks < 0:
+        parser.error("--max-eval-blocks must be non-negative")
     if args.block_size <= 0:
         parser.error("--block-size must be positive")
     if args.generation_max_new_tokens <= 0:
@@ -218,6 +251,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         parser.error("--per-device-eval-batch-size must be positive")
     if args.gradient_accumulation_steps <= 0:
         parser.error("--gradient-accumulation-steps must be positive")
+    if args.eval_accumulation_steps < 0:
+        parser.error("--eval-accumulation-steps must be non-negative")
+    if args.dataloader_num_workers < 0:
+        parser.error("--dataloader-num-workers must be non-negative")
     if args.metadata_only and args.train:
         parser.error("--metadata-only and --train are mutually exclusive")
     if args.validation_file and not args.train_file:
@@ -249,6 +286,17 @@ def _select_rows(dataset: Any, limit: int | None) -> Any:
         return dataset
     count = min(int(limit), len(dataset))
     return dataset.select(range(count))
+
+
+def _limit_tokenized_eval_dataset(
+    eval_dataset: Any | None,
+    args: argparse.Namespace,
+) -> tuple[Any | None, int | None, int | None]:
+    if eval_dataset is None:
+        return None, None, None
+    before = len(eval_dataset)
+    limited = _select_rows(eval_dataset, getattr(args, "max_eval_blocks", 0))
+    return limited, before, len(limited)
 
 
 def _load_dataset_split(
@@ -523,6 +571,13 @@ def _raw_training_arguments_kwargs(
         "save_strategy": "steps" if args.train else "no",
         strategy_key: "steps" if has_eval and args.train else "no",
     }
+    resolved_pin_memory = getattr(args, "_resolved_dataloader_pin_memory", None)
+    if resolved_pin_memory is not None:
+        kwargs["dataloader_pin_memory"] = bool(resolved_pin_memory)
+    if getattr(args, "dataloader_num_workers", None) is not None:
+        kwargs["dataloader_num_workers"] = int(args.dataloader_num_workers)
+    if has_eval and getattr(args, "eval_accumulation_steps", 0) > 0:
+        kwargs["eval_accumulation_steps"] = int(args.eval_accumulation_steps)
     if has_eval:
         kwargs["eval_steps"] = int(args.eval_steps)
     if args.max_steps is not None and args.max_steps > 0:
@@ -540,6 +595,54 @@ def _training_arguments_kwargs(
         cls,
         _raw_training_arguments_kwargs(args, has_eval=has_eval, cls=cls),
     )
+
+
+def _torch_cuda_available(torch: Any) -> bool:
+    cuda = getattr(torch, "cuda", None)
+    available = getattr(cuda, "is_available", None)
+    if not callable(available):
+        return False
+    try:
+        return bool(available())
+    except Exception:
+        return False
+
+
+def _resolve_dataloader_pin_memory(torch: Any, args: argparse.Namespace) -> bool:
+    mode = str(getattr(args, "dataloader_pin_memory", "auto"))
+    if mode == "true":
+        return True
+    if mode == "false":
+        return False
+    return _torch_cuda_available(torch)
+
+
+def _final_step_eval_likely(args: argparse.Namespace, *, has_eval: bool) -> bool:
+    if not has_eval or not bool(getattr(args, "train", False)):
+        return False
+    max_steps = int(getattr(args, "max_steps", -1) or -1)
+    eval_steps = int(getattr(args, "eval_steps", 0) or 0)
+    if max_steps <= 0 or eval_steps <= 0:
+        return False
+    return max_steps % eval_steps == 0
+
+
+def _eval_after_train_skipped_reason(
+    args: argparse.Namespace,
+    *,
+    has_eval: bool,
+) -> str | None:
+    if bool(getattr(args, "no_eval_after_train", False)):
+        return "no_eval_after_train_requested"
+    policy = str(getattr(args, "eval_after_train_policy", "always"))
+    if policy == "never":
+        return "eval_after_train_policy_never"
+    if policy == "skip-if-final-step-eval" and _final_step_eval_likely(
+        args,
+        has_eval=has_eval,
+    ):
+        return "final_step_eval_already_requested"
+    return None
 
 
 def _set_seed(torch: Any, transformers: Any, seed: int) -> None:
@@ -866,10 +969,23 @@ def _base_run_card(
         "block_size": args.block_size,
         "max_train_samples": args.max_train_samples,
         "max_eval_samples": args.max_eval_samples,
+        "max_eval_blocks": args.max_eval_blocks,
         "eval_before_train_requested": bool(args.eval_before_train),
-        "eval_after_train_requested": not bool(args.no_eval_after_train),
+        "eval_after_train_policy": args.eval_after_train_policy,
+        "eval_after_train_requested": (
+            not bool(args.no_eval_after_train)
+            and args.eval_after_train_policy != "never"
+        ),
         "eval_before_train": None,
         "eval_after_train": None,
+        "dataloader_pin_memory": args.dataloader_pin_memory,
+        "resolved_dataloader_pin_memory": getattr(
+            args,
+            "_resolved_dataloader_pin_memory",
+            None,
+        ),
+        "dataloader_num_workers": args.dataloader_num_workers,
+        "eval_accumulation_steps": args.eval_accumulation_steps,
         "generation_prompt": args.generation_prompt,
         "generation_max_new_tokens": args.generation_max_new_tokens,
         "generation_do_sample": bool(args.generation_do_sample),
@@ -947,6 +1063,7 @@ def _main_with_runtime_access(
     transformers = _module("transformers")
     torch = _module("torch")
     datasets = _module("datasets")
+    args._resolved_dataloader_pin_memory = _resolve_dataloader_pin_memory(torch, args)
     _set_seed(torch, transformers, args.seed)
 
     card = _base_run_card(
@@ -1036,6 +1153,11 @@ def _main_with_runtime_access(
         eval_dataset = (
             None if raw_eval is None else _tokenize_dataset(raw_eval, tokenizer, args)
         )
+        (
+            eval_dataset,
+            tokenized_eval_rows_before_limit,
+            tokenized_eval_rows,
+        ) = _limit_tokenized_eval_dataset(eval_dataset, args)
     except Exception as exc:
         card.update(
             {
@@ -1046,7 +1168,6 @@ def _main_with_runtime_access(
         _write_card(card, args)
         return 1
     tokenized_train_rows = len(train_dataset)
-    tokenized_eval_rows = None if eval_dataset is None else len(eval_dataset)
     dataset_fit_report = hf_gpt2_finetune_dataset_fit_report(
         raw_train_rows=len(raw_train),
         raw_eval_rows=None if raw_eval is None else len(raw_eval),
@@ -1057,6 +1178,9 @@ def _main_with_runtime_access(
     card.update(
         {
             "tokenized_train_rows": tokenized_train_rows,
+            "tokenized_eval_rows_before_block_limit": (
+                tokenized_eval_rows_before_limit
+            ),
             "tokenized_eval_rows": tokenized_eval_rows,
             "dataset_fit_report": dataset_fit_report,
         }
@@ -1149,11 +1273,20 @@ def _main_with_runtime_access(
         )
         _write_card(card, args)
         return 1
-    if not args.no_eval_after_train:
+    eval_after_skip_reason = _eval_after_train_skipped_reason(
+        args,
+        has_eval=eval_dataset is not None,
+    )
+    if eval_after_skip_reason is None:
         card["eval_after_train"] = _trainer_eval_report(
             trainer,
             stage="after_train",
             eval_dataset_available=eval_dataset is not None,
+        )
+    else:
+        card["eval_after_train"] = hf_gpt2_finetune_eval_report(
+            stage="after_train",
+            skipped_reason=eval_after_skip_reason,
         )
     card["generation_after_train"] = _generation_sample(
         torch,

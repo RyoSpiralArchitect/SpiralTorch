@@ -89,6 +89,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--corpus-scan-sample-lines", type=int, default=8)
     parser.add_argument("--eval-before-train", action="store_true")
     parser.add_argument("--no-eval-after-train", action="store_true")
+    parser.add_argument(
+        "--eval-after-train-policy",
+        choices=("always", "never", "skip-if-final-step-eval"),
+        default="always",
+    )
     parser.add_argument("--no-trainer-trace", action="store_true")
     parser.add_argument("--generation-prompt", default=None)
     parser.add_argument("--generation-max-new-tokens", type=int, default=16)
@@ -118,12 +123,20 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--seed-values", type=_int_values, default=[13])
     parser.add_argument("--max-train-samples", type=int, default=4096)
     parser.add_argument("--max-eval-samples", type=int, default=512)
+    parser.add_argument("--max-eval-blocks", type=int, default=0)
     parser.add_argument("--per-device-train-batch-size", type=int, default=2)
     parser.add_argument("--per-device-eval-batch-size", type=int, default=2)
     parser.add_argument("--gradient-accumulation-steps", type=int, default=8)
     parser.add_argument("--logging-steps", type=int, default=25)
     parser.add_argument("--save-steps", type=int, default=250)
     parser.add_argument("--eval-steps", type=int, default=250)
+    parser.add_argument("--eval-accumulation-steps", type=int, default=0)
+    parser.add_argument("--dataloader-num-workers", type=int, default=0)
+    parser.add_argument(
+        "--dataloader-pin-memory",
+        choices=("auto", "true", "false"),
+        default="auto",
+    )
     args = parser.parse_args(argv)
     if not args.bridge_script.is_file():
         parser.error(f"--bridge-script does not exist: {args.bridge_script}")
@@ -143,6 +156,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("--generation-top-k must be non-negative")
     if args.max_train_samples < 0 or args.max_eval_samples < 0:
         parser.error("--max-train-samples and --max-eval-samples must be non-negative")
+    if args.max_eval_blocks < 0:
+        parser.error("--max-eval-blocks must be non-negative")
+    if args.eval_accumulation_steps < 0:
+        parser.error("--eval-accumulation-steps must be non-negative")
+    if args.dataloader_num_workers < 0:
+        parser.error("--dataloader-num-workers must be non-negative")
     if args.corpus_scan and not args.train_file:
         parser.error("--corpus-scan requires --train-file")
     if args.corpus_scan_max_bytes_per_file < 0:
@@ -215,6 +234,8 @@ def _bridge_command(
         str(args.max_train_samples),
         "--max-eval-samples",
         str(args.max_eval_samples),
+        "--max-eval-blocks",
+        str(args.max_eval_blocks),
         "--per-device-train-batch-size",
         str(args.per_device_train_batch_size),
         "--per-device-eval-batch-size",
@@ -227,6 +248,12 @@ def _bridge_command(
         str(args.save_steps),
         "--eval-steps",
         str(args.eval_steps),
+        "--eval-accumulation-steps",
+        str(args.eval_accumulation_steps),
+        "--dataloader-num-workers",
+        str(args.dataloader_num_workers),
+        "--dataloader-pin-memory",
+        str(args.dataloader_pin_memory),
     ]
     if args.train_file:
         _append_repeated(command, "--train-file", args.train_file)
@@ -263,6 +290,7 @@ def _bridge_command(
         )
     if args.eval_before_train:
         command.append("--eval-before-train")
+    command.extend(["--eval-after-train-policy", str(args.eval_after_train_policy)])
     if args.no_eval_after_train:
         command.append("--no-eval-after-train")
     if args.no_trainer_trace:

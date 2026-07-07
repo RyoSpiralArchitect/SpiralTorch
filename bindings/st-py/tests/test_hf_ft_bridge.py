@@ -575,6 +575,16 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                     "--generation-top-k",
                     "12",
                     "--eval-before-train",
+                    "--eval-after-train-policy",
+                    "skip-if-final-step-eval",
+                    "--max-eval-blocks",
+                    "64",
+                    "--eval-accumulation-steps",
+                    "8",
+                    "--dataloader-num-workers",
+                    "2",
+                    "--dataloader-pin-memory",
+                    "false",
                     "--runtime-device-backend",
                     "wgpu",
                     "--require-wgpu-ready",
@@ -598,6 +608,16 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("--corpus-scan", first_command)
         self.assertIn("--generation-do-sample", first_command)
         self.assertIn("--eval-before-train", first_command)
+        self.assertIn("--eval-after-train-policy", first_command)
+        self.assertIn("skip-if-final-step-eval", first_command)
+        self.assertIn("--max-eval-blocks", first_command)
+        self.assertIn("64", first_command)
+        self.assertIn("--eval-accumulation-steps", first_command)
+        self.assertIn("8", first_command)
+        self.assertIn("--dataloader-num-workers", first_command)
+        self.assertIn("2", first_command)
+        self.assertIn("--dataloader-pin-memory", first_command)
+        self.assertIn("false", first_command)
         self.assertIn("--runtime-device-backend", first_command)
         self.assertIn("--require-wgpu-ready", first_command)
         self.assertIn("--zspace-probe", first_command)
@@ -844,6 +864,120 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             "overwrite_output_dir",
             module._dropped_training_arguments_kwargs(MinimalTrainingArguments, raw),
         )
+
+    def test_example_training_arguments_include_eval_runtime_knobs(self) -> None:
+        module = load_bridge_example()
+
+        class RuntimeTrainingArguments:
+            def __init__(
+                self,
+                output_dir=None,
+                dataloader_pin_memory=None,
+                dataloader_num_workers=None,
+                eval_accumulation_steps=None,
+            ):
+                pass
+
+        args = types.SimpleNamespace(
+            output_dir="runs/gpt2",
+            train=True,
+            num_train_epochs=1.0,
+            learning_rate=5e-5,
+            per_device_train_batch_size=2,
+            per_device_eval_batch_size=2,
+            gradient_accumulation_steps=1,
+            logging_steps=1,
+            save_steps=5,
+            seed=13,
+            max_steps=10,
+            eval_steps=5,
+            eval_accumulation_steps=4,
+            dataloader_num_workers=2,
+            _resolved_dataloader_pin_memory=False,
+        )
+        raw = module._raw_training_arguments_kwargs(
+            args,
+            has_eval=True,
+            cls=RuntimeTrainingArguments,
+        )
+        filtered = module._filter_training_arguments_kwargs(
+            RuntimeTrainingArguments,
+            raw,
+        )
+
+        self.assertFalse(filtered["dataloader_pin_memory"])
+        self.assertEqual(filtered["dataloader_num_workers"], 2)
+        self.assertEqual(filtered["eval_accumulation_steps"], 4)
+
+    def test_example_dataloader_pin_memory_auto_prefers_cuda_only(self) -> None:
+        module = load_bridge_example()
+
+        class FakeCuda:
+            def __init__(self, available):
+                self.available = available
+
+            def is_available(self):
+                return self.available
+
+        false_args = types.SimpleNamespace(dataloader_pin_memory="auto")
+        true_args = types.SimpleNamespace(dataloader_pin_memory="true")
+        explicit_false_args = types.SimpleNamespace(dataloader_pin_memory="false")
+
+        self.assertFalse(
+            module._resolve_dataloader_pin_memory(
+                types.SimpleNamespace(cuda=FakeCuda(False)),
+                false_args,
+            )
+        )
+        self.assertTrue(
+            module._resolve_dataloader_pin_memory(
+                types.SimpleNamespace(cuda=FakeCuda(True)),
+                false_args,
+            )
+        )
+        self.assertTrue(
+            module._resolve_dataloader_pin_memory(types.SimpleNamespace(), true_args)
+        )
+        self.assertFalse(
+            module._resolve_dataloader_pin_memory(
+                types.SimpleNamespace(),
+                explicit_false_args,
+            )
+        )
+
+    def test_example_eval_after_train_policy_skips_duplicate_final_eval(self) -> None:
+        module = load_bridge_example()
+        args = types.SimpleNamespace(
+            train=True,
+            max_steps=160,
+            eval_steps=40,
+            no_eval_after_train=False,
+            eval_after_train_policy="skip-if-final-step-eval",
+        )
+
+        self.assertEqual(
+            module._eval_after_train_skipped_reason(args, has_eval=True),
+            "final_step_eval_already_requested",
+        )
+        args.max_steps = 161
+        self.assertIsNone(module._eval_after_train_skipped_reason(args, has_eval=True))
+        args.eval_after_train_policy = "never"
+        self.assertEqual(
+            module._eval_after_train_skipped_reason(args, has_eval=True),
+            "eval_after_train_policy_never",
+        )
+
+    def test_example_limit_tokenized_eval_dataset_records_before_after(self) -> None:
+        module = load_bridge_example()
+        dataset = FakeDataset([{"text": str(index)} for index in range(5)])
+        limited, before, after = module._limit_tokenized_eval_dataset(
+            dataset,
+            types.SimpleNamespace(max_eval_blocks=2),
+        )
+
+        self.assertEqual(before, 5)
+        self.assertEqual(after, 2)
+        self.assertEqual(len(limited), 2)
 
     def test_example_local_corpus_loader_uses_data_files_and_split(self) -> None:
         module = load_bridge_example()
