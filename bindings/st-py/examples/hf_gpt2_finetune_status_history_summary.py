@@ -72,6 +72,40 @@ def summarize_history(
     last_log_step = _nested(last, "log_progress", "log_latest_step")
     first_trace_step = _nested(first, "trace", "trace_max_global_step")
     last_trace_step = _nested(last, "trace", "trace_max_global_step")
+    first_time = first.get("time_unix_s")
+    last_time = last.get("time_unix_s")
+    duration_seconds = (
+        float(last_time) - float(first_time)
+        if isinstance(first_time, (int, float)) and isinstance(last_time, (int, float))
+        else None
+    )
+    delta_log_step = (
+        int(last_log_step) - int(first_log_step)
+        if isinstance(first_log_step, int) and isinstance(last_log_step, int)
+        else None
+    )
+    delta_trace_step = (
+        int(last_trace_step) - int(first_trace_step)
+        if isinstance(first_trace_step, int) and isinstance(last_trace_step, int)
+        else None
+    )
+    log_steps_per_second = (
+        float(delta_log_step) / duration_seconds
+        if isinstance(delta_log_step, int)
+        and duration_seconds is not None
+        and duration_seconds > 0.0
+        else None
+    )
+    log_steps_until_next_eval = _nested(
+        last, "eval_progress", "log_steps_until_next_eval"
+    )
+    estimated_seconds_until_next_eval = (
+        float(log_steps_until_next_eval) / log_steps_per_second
+        if isinstance(log_steps_until_next_eval, int)
+        and log_steps_per_second is not None
+        and log_steps_per_second > 0.0
+        else None
+    )
     eval_losses = [
         _nested(row, "trace", "trace_last_eval_loss")
         for row in rows
@@ -87,24 +121,19 @@ def summarize_history(
         "label": label,
         "history_jsonl": str(history_jsonl),
         "row_count": len(rows),
+        "first_time_unix_s": first_time,
+        "last_time_unix_s": last_time,
+        "duration_seconds": duration_seconds,
         "first_log_step": first_log_step,
         "last_log_step": last_log_step,
-        "delta_log_step": (
-            int(last_log_step) - int(first_log_step)
-            if isinstance(first_log_step, int) and isinstance(last_log_step, int)
-            else None
-        ),
+        "delta_log_step": delta_log_step,
+        "log_steps_per_second": log_steps_per_second,
         "first_trace_step": first_trace_step,
         "last_trace_step": last_trace_step,
-        "delta_trace_step": (
-            int(last_trace_step) - int(first_trace_step)
-            if isinstance(first_trace_step, int) and isinstance(last_trace_step, int)
-            else None
-        ),
+        "delta_trace_step": delta_trace_step,
         "last_next_eval_step": _nested(last, "eval_progress", "next_eval_step"),
-        "last_log_steps_until_next_eval": _nested(
-            last, "eval_progress", "log_steps_until_next_eval"
-        ),
+        "last_log_steps_until_next_eval": log_steps_until_next_eval,
+        "estimated_seconds_until_next_eval": estimated_seconds_until_next_eval,
         "last_eval_loss": _nested(last, "trace", "trace_last_eval_loss"),
         "min_eval_loss": min(eval_losses) if eval_losses else None,
         "last_guard_count": _nested(last, "trace", "training_loss_guard_count"),
@@ -129,8 +158,11 @@ def history_lines(
             f"first_log_step={_number_text(summary.get('first_log_step'))} "
             f"last_log_step={_number_text(summary.get('last_log_step'))} "
             f"delta_log_step={_number_text(summary.get('delta_log_step'))} "
+            f"duration_seconds={_number_text(summary.get('duration_seconds'))} "
+            f"log_steps_per_second={_number_text(summary.get('log_steps_per_second'))} "
             f"last_next_eval_step={_number_text(summary.get('last_next_eval_step'))} "
             f"last_steps_until_next_eval={_number_text(summary.get('last_log_steps_until_next_eval'))} "
+            f"estimated_seconds_until_next_eval={_number_text(summary.get('estimated_seconds_until_next_eval'))} "
             f"last_eval_loss={_number_text(summary.get('last_eval_loss'))} "
             f"min_eval_loss={_number_text(summary.get('min_eval_loss'))} "
             f"guard_count={_number_text(summary.get('last_guard_count'))} "

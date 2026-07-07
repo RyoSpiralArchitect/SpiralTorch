@@ -3539,6 +3539,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             )
 
         self.assertEqual(status["process_status"], "alive")
+        self.assertIsInstance(status["time_unix_s"], float)
         self.assertEqual(status["trace"]["trace_max_global_step"], 20)
         self.assertEqual(status["trace"]["progress"], 0.5)
         self.assertEqual(status["log_progress"]["log_latest_step"], 24)
@@ -3575,6 +3576,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         module = load_status_history_summary_example()
         rows = [
             {
+                "time_unix_s": 100.0,
                 "process_status": "alive",
                 "final_checkpoint_ready": False,
                 "checkpoint_count": 1,
@@ -3595,6 +3597,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 },
             },
             {
+                "time_unix_s": 140.0,
                 "process_status": "alive",
                 "final_checkpoint_ready": False,
                 "checkpoint_count": 1,
@@ -3645,15 +3648,20 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             written_lines = lines_path.read_text(encoding="utf-8").splitlines()
 
         self.assertEqual(summary["row_count"], 2)
+        self.assertEqual(summary["duration_seconds"], 40.0)
         self.assertEqual(summary["delta_log_step"], 10)
+        self.assertEqual(summary["log_steps_per_second"], 0.25)
         self.assertEqual(summary["delta_trace_step"], 10)
         self.assertEqual(summary["last_next_eval_step"], 40)
         self.assertEqual(summary["last_log_steps_until_next_eval"], 6)
+        self.assertEqual(summary["estimated_seconds_until_next_eval"], 24.0)
         self.assertEqual(summary["min_eval_loss"], 1.7)
         self.assertEqual(summary["min_disk_free_gb"], 11.5)
         self.assertEqual(written["delta_log_step"], 10)
         self.assertIn("label=demo", lines[0])
         self.assertIn("last_log_step=34", lines[0])
+        self.assertIn("log_steps_per_second=0.25", lines[0])
+        self.assertIn("estimated_seconds_until_next_eval=24", lines[0])
         self.assertIn("min_eval_loss=1.7", lines[0])
         self.assertIn("index=1", lines[1])
         self.assertEqual(written_lines, lines)

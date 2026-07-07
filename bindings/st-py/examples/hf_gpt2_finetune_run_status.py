@@ -307,6 +307,7 @@ def summarize_run(args: argparse.Namespace) -> dict[str, Any]:
     latest_checkpoint = checkpoints[-1] if checkpoints else None
     return {
         "row_type": "hf_gpt2_finetune_run_status",
+        "time_unix_s": time.time(),
         "run_dir": str(args.run_dir),
         "trace": trace,
         "log_progress": log_progress,
