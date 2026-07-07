@@ -391,6 +391,7 @@ For a larger local corpus, bypass Hub datasets and feed files directly:
 
 ```bash
 PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_gpt2_finetune_bridge.py \
+  --corpus-scan \
   --train \
   --train-file data/corpus-000.txt \
   --train-file data/corpus-001.txt \
@@ -403,7 +404,15 @@ PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_gpt2_finetune_bridge
 
 The run card stores `corpus_file_report` with file counts, total bytes, missing
 files, and a lightweight path/size/mtime fingerprint so repeat FT runs can be
-compared before reading model metrics.
+compared before reading model metrics. With `--corpus-scan`, it also stores
+`corpus_scan_report`: streamed line counts, nonempty/empty-line shape, rough
+GPT-2 token estimates, short sample texts, and per-file scan hashes. Use
+`--corpus-scan-max-bytes-per-file` when you want a bounded preview of very
+large corpora instead of a full pre-train pass over every byte. When
+`--allow-remote` is explicit, the bridge temporarily relaxes local Hugging Face
+offline environment flags for model/tokenizer downloads; model-load,
+tokenization, `TrainingArguments`, and Trainer failures are written into the run
+card so long-run blockers leave structured evidence instead of only a traceback.
 
 ## Minimal usage
 

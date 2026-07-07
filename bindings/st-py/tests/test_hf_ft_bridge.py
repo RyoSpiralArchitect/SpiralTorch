@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 import tempfile
 import types
@@ -175,6 +176,129 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIsInstance(report["fingerprint"], str)
         self.assertGreater(report["total_bytes"], 0)
 
+    def test_corpus_scan_report_streams_line_shape(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            train_path = Path(tmp) / "train.txt"
+            train_path.write_text(
+                "alpha spiral\n\nbeta zspace\ngamma torch\n",
+                encoding="utf-8",
+            )
+            report = hf_ft.hf_gpt2_finetune_corpus_scan_report(
+                train_files=[train_path],
+                dataset_format="text",
+                text_column="text",
+                sample_line_limit=2,
+            )
+
+        self.assertEqual(report["row_type"], "hf_gpt2_finetune_corpus_scan_report")
+        self.assertEqual(report["dataset_source"], "local_files")
+        self.assertEqual(report["file_count"], 1)
+        self.assertEqual(report["line_count"], 4)
+        self.assertEqual(report["nonempty_line_count"], 3)
+        self.assertEqual(report["empty_line_count"], 1)
+        self.assertEqual(report["scan_truncated_files"], "none")
+        self.assertEqual(report["scan_error_files"], "none")
+        self.assertGreater(report["rough_gpt2_token_estimate"], 0)
+        self.assertEqual(
+            report["files"][0]["sample_texts"],
+            ["alpha spiral", "beta zspace"],
+        )
+
+    def test_example_local_corpus_reports_attach_scan_to_cards(self) -> None:
+        module = load_bridge_example()
+        with tempfile.TemporaryDirectory() as tmp:
+            train_path = Path(tmp) / "train.txt"
+            train_path.write_text("alpha\nbeta\n", encoding="utf-8")
+            args = types.SimpleNamespace(
+                train_file=[train_path],
+                validation_file=[],
+                dataset_format="text",
+                text_column="text",
+                validation_fraction=0.0,
+                corpus_scan=True,
+                corpus_scan_max_bytes_per_file=0,
+                corpus_scan_sample_lines=1,
+            )
+            file_report = module._corpus_file_report(args)
+            scan_report = module._corpus_scan_report(args)
+            card = module._attach_local_corpus_reports(
+                {},
+                args,
+                corpus_file_report=file_report,
+                corpus_scan_report=scan_report,
+            )
+
+        self.assertEqual(card["dataset_source"], "local_files")
+        self.assertEqual(card["corpus_file_report"]["file_count"], 1)
+        self.assertEqual(card["corpus_scan_report"]["line_count"], 2)
+        self.assertEqual(
+            card["corpus_scan_report"]["files"][0]["sample_texts"],
+            ["alpha"],
+        )
+
+    def test_example_allow_remote_temporarily_overrides_offline_env(self) -> None:
+        module = load_bridge_example()
+        args = types.SimpleNamespace(allow_remote=True)
+        with mock.patch.dict(
+            os.environ,
+            {
+                "HF_HUB_OFFLINE": "1",
+                "TRANSFORMERS_OFFLINE": "1",
+                "HF_DATASETS_OFFLINE": "1",
+            },
+        ):
+            report = module._hf_remote_access_report(args)
+            self.assertTrue(report["offline_env_overridden"])
+            with module._hf_remote_access(args):
+                self.assertEqual(os.environ["HF_HUB_OFFLINE"], "0")
+                self.assertEqual(os.environ["TRANSFORMERS_OFFLINE"], "0")
+                self.assertEqual(os.environ["HF_DATASETS_OFFLINE"], "0")
+            self.assertEqual(os.environ["HF_HUB_OFFLINE"], "1")
+
+    def test_example_training_arguments_kwargs_follow_signature(self) -> None:
+        module = load_bridge_example()
+
+        class MinimalTrainingArguments:
+            def __init__(
+                self,
+                output_dir=None,
+                per_device_train_batch_size=1,
+                eval_strategy="no",
+            ):
+                pass
+
+        args = types.SimpleNamespace(
+            output_dir="runs/gpt2",
+            train=True,
+            num_train_epochs=1.0,
+            learning_rate=5e-5,
+            per_device_train_batch_size=2,
+            per_device_eval_batch_size=2,
+            gradient_accumulation_steps=1,
+            logging_steps=1,
+            save_steps=5,
+            seed=13,
+            max_steps=1,
+            eval_steps=1,
+        )
+        raw = module._raw_training_arguments_kwargs(
+            args,
+            has_eval=True,
+            cls=MinimalTrainingArguments,
+        )
+        filtered = module._filter_training_arguments_kwargs(
+            MinimalTrainingArguments,
+            raw,
+        )
+
+        self.assertIn("overwrite_output_dir", raw)
+        self.assertNotIn("overwrite_output_dir", filtered)
+        self.assertIn("eval_strategy", filtered)
+        self.assertIn(
+            "overwrite_output_dir",
+            module._dropped_training_arguments_kwargs(MinimalTrainingArguments, raw),
+        )
+
     def test_example_local_corpus_loader_uses_data_files_and_split(self) -> None:
         module = load_bridge_example()
         fake_datasets = FakeDatasets()
@@ -286,8 +410,13 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             st.hf_gpt2_finetune_rust_dependency_report,
             hf_ft.hf_gpt2_finetune_rust_dependency_report,
         )
+        self.assertIs(
+            st.hf_gpt2_finetune_corpus_scan_report,
+            hf_ft.hf_gpt2_finetune_corpus_scan_report,
+        )
         self.assertIn("hf_ft", st.__all__)
         self.assertIn("hf_gpt2_finetune_corpus_file_report", st.__all__)
+        self.assertIn("hf_gpt2_finetune_corpus_scan_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_preflight_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_trainer_trace_callback", st.__all__)
         self.assertIs(
