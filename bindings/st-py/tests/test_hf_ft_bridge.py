@@ -451,6 +451,12 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 "trace_event_count": 4,
                 "trace_last_loss": 1.4,
                 "trace_min_eval_loss": 1.5,
+                "trace_duration_s": 42.0,
+                "trace_log_steps_per_second_min": 0.25,
+                "trace_log_steps_per_second_mean": 0.5,
+                "trace_log_steps_per_second_max": 1.0,
+                "trace_eval_runtime_max": 3.5,
+                "trace_eval_loss_series": "0=2.0,3=1.5",
             },
             "corpus_scan_report": {
                 "line_count": 10,
@@ -537,7 +543,19 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(sweep_summary["selected_run_label"], "strong")
         self.assertEqual(sweep_summary["selected_reason"], "best_eval_loss_delta")
         self.assertEqual(sweep_summary["top_runs"][0]["run_label"], "strong")
+        self.assertEqual(sweep_summary["top_runs"][0]["trainer_runtime"], 3.0)
+        self.assertEqual(
+            sweep_summary["top_runs"][0]["trace_log_steps_per_second_mean"],
+            0.5,
+        )
+        self.assertEqual(
+            sweep_summary["top_runs"][0]["trace_eval_loss_series"],
+            "0=2.0,3=1.5",
+        )
         self.assertIn("selected=strong", sweep_lines[1])
+        self.assertIn("trainer_sps=None", sweep_lines[2])
+        self.assertIn("trace_sps_mean=0.5", sweep_lines[2])
+        self.assertIn("eval_series=0=2.0,3=1.5", sweep_lines[2])
 
         trace_card = dict(base_card)
         trace_card["eval_after_train"] = hf_ft.hf_gpt2_finetune_eval_report(
@@ -1343,7 +1361,28 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             for row in rows:
                 hf_ft.write_hf_gpt2_finetune_trainer_trace_event(row, path)
             card["trainer_trace_jsonl"] = path
+            card_path = Path(tmp) / "run-card.json"
+            hf_ft.write_hf_gpt2_finetune_run_card(card, card_path)
             summary = hf_ft.summarize_hf_gpt2_finetune_run_card(card)
+            sweep_summary = hf_ft.summarize_hf_gpt2_finetune_sweep_report(
+                {
+                    "row_type": "hf_gpt2_finetune_sweep_report",
+                    "dry_run": False,
+                    "run_count": 1,
+                    "completed_run_count": 1,
+                    "failed_run_count": 0,
+                    "comparison": {
+                        "summaries": [
+                            {
+                                "run_label": "demo",
+                                "run_card_path": str(card_path),
+                                "effective_eval_after_loss": 1.4,
+                            }
+                        ],
+                    },
+                },
+                top_n=1,
+            )
 
         self.assertEqual(summary["trace_event_count"], 1)
         self.assertEqual(summary["trace_last_loss"], 2.0)
@@ -1351,6 +1390,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(summary["trace_log_steps_per_second_mean"], 0.5)
         self.assertEqual(summary["trace_eval_runtime_max"], 3.0)
         self.assertEqual(summary["trace_eval_loss_series"], "5=1.4")
+        self.assertEqual(
+            sweep_summary["top_runs"][0]["trace_eval_loss_series"],
+            "5=1.4",
+        )
 
     def test_trainer_trace_callback_writes_jsonl_with_fake_transformers(self) -> None:
         fake_transformers = types.ModuleType("transformers")

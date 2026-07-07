@@ -68,7 +68,8 @@
 - FT trace telemetry: trainer trace summaries now include wall-clock duration,
   log-interval step/sec statistics, eval-loss series points, and eval-runtime
   stats so long local GPT-2 runs can expose throughput wobble beside loss
-  improvements.
+  improvements; sweep top-run summaries surface the same throughput/eval-series
+  fields next to eval deltas.
 - Documentation: clarify the hard dependency boundary for larger local GPT-2
   FT runs: Rust keeps tensor/nn/text/logic/frac/rl/WGPU surfaces in the wheel,
   while Python explicitly brings Transformers, Torch, datasets, pyarrow,

@@ -1339,7 +1339,26 @@ def _sweep_summary_rows(
     summaries = comparison.get("summaries")
     if not isinstance(summaries, Sequence) or isinstance(summaries, (str, bytes)):
         return []
-    return [dict(row) for row in summaries if isinstance(row, Mapping)]
+    rows = []
+    for row in summaries:
+        if not isinstance(row, Mapping):
+            continue
+        summary = dict(row)
+        run_card_path = summary.get("run_card_path")
+        if isinstance(run_card_path, (str, Path)) and str(run_card_path):
+            try:
+                refreshed = summarize_hf_gpt2_finetune_run_card(
+                    run_card_path,
+                    run_label=(
+                        str(summary["run_label"]) if summary.get("run_label") else None
+                    ),
+                )
+            except (OSError, TypeError, ValueError):
+                pass
+            else:
+                summary.update(refreshed)
+        rows.append(summary)
+    return rows
 
 
 def _ranked_sweep_rows(
@@ -1379,7 +1398,25 @@ def _ranked_sweep_rows(
                     "generation_continuation_changed"
                 ),
                 "trainer_train_loss": _safe_number(row.get("trainer_train_loss")),
+                "trainer_runtime": _safe_number(row.get("trainer_runtime")),
+                "trainer_steps_per_second": _safe_number(
+                    row.get("trainer_steps_per_second")
+                ),
                 "trace_event_count": _safe_number(row.get("trace_event_count")),
+                "trace_duration_s": _safe_number(row.get("trace_duration_s")),
+                "trace_log_steps_per_second_min": _safe_number(
+                    row.get("trace_log_steps_per_second_min")
+                ),
+                "trace_log_steps_per_second_mean": _safe_number(
+                    row.get("trace_log_steps_per_second_mean")
+                ),
+                "trace_log_steps_per_second_max": _safe_number(
+                    row.get("trace_log_steps_per_second_max")
+                ),
+                "trace_eval_runtime_max": _safe_number(
+                    row.get("trace_eval_runtime_max")
+                ),
+                "trace_eval_loss_series": row.get("trace_eval_loss_series"),
                 "dataset_fit_verdict": row.get("dataset_fit_verdict"),
                 "failure_stage": row.get("failure_stage"),
             }
@@ -1506,6 +1543,9 @@ def summarize_hf_gpt2_finetune_sweep_report_lines(
             f"eval_after={row.get('effective_eval_after_loss')} "
             f"source={row.get('effective_eval_after_loss_source')} "
             f"delta={row.get('eval_loss_delta')} "
+            f"trainer_sps={row.get('trainer_steps_per_second')} "
+            f"trace_sps_mean={row.get('trace_log_steps_per_second_mean')} "
+            f"eval_series={row.get('trace_eval_loss_series')} "
             f"changed={row.get('generation_continuation_changed')}"
         )
     return lines
