@@ -12,7 +12,10 @@ from spiraltorch.hf_generation import (
     ZSpaceActivationProbeHook,
     ZSpaceRepressionLogitsProcessor,
     build_zspace_activation_probe_hook,
+    load_zspace_inference_distortion_probe,
     load_zspace_generation_control_sweep,
+    summarize_zspace_inference_distortion_probe,
+    summarize_zspace_inference_distortion_probe_lines,
     summarize_zspace_generation_control_sweep,
     summarize_zspace_generation_control_sweep_lines,
     zspace_inference_distortion_processor_kwargs,
@@ -209,6 +212,9 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         self.assertIn("load_zspace_generation_control_sweep", st.__all__)
         self.assertIn("summarize_zspace_generation_control_sweep", st.__all__)
         self.assertIn("zspace_inference_distortion_processor_kwargs", st.__all__)
+        self.assertIn("load_zspace_inference_distortion_probe", st.__all__)
+        self.assertIn("summarize_zspace_inference_distortion_probe", st.__all__)
+        self.assertIn("summarize_zspace_inference_distortion_probe_lines", st.__all__)
         self.assertIs(st.ZSpaceRepressionLogitsProcessor, ZSpaceRepressionLogitsProcessor)
         self.assertIs(st.ZSpaceActivationProbeHook, ZSpaceActivationProbeHook)
         self.assertIs(
@@ -224,9 +230,92 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
             zspace_inference_distortion_processor_kwargs,
         )
         self.assertIs(
+            st.load_zspace_inference_distortion_probe,
+            load_zspace_inference_distortion_probe,
+        )
+        self.assertIs(
+            st.summarize_zspace_inference_distortion_probe,
+            summarize_zspace_inference_distortion_probe,
+        )
+        self.assertIs(
             st.summarize_zspace_generation_control_sweep,
             summarize_zspace_generation_control_sweep,
         )
+
+    def test_inference_distortion_probe_summary_flattens_local_and_api(self) -> None:
+        report = {
+            "row_type": "zspace_inference_distortion_probe",
+            "prompt": "SpiralTorch is",
+            "adapter": {
+                "distortion_energy": 0.62,
+                "request": {"temperature": 0.98, "top_p": 0.77},
+                "logits_processor_kwargs": {
+                    "repression_strength": 1.5,
+                    "ngram_repression_strength": 1.1,
+                },
+                "context_partial": {
+                    "telemetry": {
+                        "zspace.desire.pressure": 0.8,
+                        "zspace.desire.stability": 0.45,
+                        "zspace.psi.total": 0.7,
+                        "zspace.coherence": 0.45,
+                    }
+                },
+            },
+            "local_hf": {
+                "status": "ok",
+                "changed": True,
+                "model": "local-model",
+                "baseline_method": "manual_forward_fallback",
+                "distorted_method": "manual_forward_fallback+zspace_repression_softmax",
+                "baseline_text": "SpiralTorch is baseline language.",
+                "distorted_text": "SpiralTorch is distorted geometry.",
+                "generation_control": {
+                    "status": "ok",
+                    "backend": "spiraltorch_zspace_softmax",
+                    "calls": 24,
+                    "top_token_changed_count": 5,
+                    "ngram_repressed_token_total": 1,
+                },
+                "activation_report": {
+                    "status": "ok",
+                    "event_count": 64,
+                    "reported_event_count": 16,
+                    "output_l2_min": 15.0,
+                    "output_l2_max": 366.0,
+                },
+            },
+            "api": {
+                "provider": "fake",
+                "model": "fake-distorted-api",
+                "text": "Fake API distortion route.",
+                "telemetry": {
+                    "api_llm.total_tokens": 56.0,
+                    "api_llm.response_entropy_norm": 0.9,
+                    "api_llm.empty_text": 0.0,
+                    "zspace.request.temperature": 0.98,
+                },
+            },
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "probe.json"
+            path.write_text(json.dumps(report), encoding="utf-8")
+            loaded = load_zspace_inference_distortion_probe(path)
+            summary = summarize_zspace_inference_distortion_probe(path)
+            lines = summarize_zspace_inference_distortion_probe_lines(loaded)
+
+        self.assertEqual(loaded["row_type"], "zspace_inference_distortion_probe")
+        self.assertEqual(summary["local_status"], "ok")
+        self.assertTrue(summary["local_changed"])
+        self.assertEqual(summary["generation_control_backend"], "spiraltorch_zspace_softmax")
+        self.assertEqual(summary["generation_control_top_token_changed_count"], 5)
+        self.assertEqual(summary["activation_event_count"], 64)
+        self.assertEqual(summary["api_provider"], "fake")
+        self.assertEqual(summary["api_total_tokens"], 56.0)
+        self.assertEqual(summary["distortion_energy"], 0.62)
+        self.assertIn("zspace_inference_distortion_probe", lines[0])
+        self.assertIn("top_changes=5", lines[0])
 
 
 class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):

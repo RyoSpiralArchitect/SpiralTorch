@@ -459,7 +459,10 @@ kwargs, matching activation hooks record and can gently intervene in selected
 modules, and API-model-shaped calls receive request overrides plus bounded
 Z-space context telemetry. Omit `--local-model` for a keyless fake API smoke, or
 add `--api-provider openai-responses|openai-chat|anthropic --api-model <model>`
-to reuse the same distortion adapter with a live provider.
+to reuse the same distortion adapter with a live provider. Load the artifact
+with `st.load_zspace_inference_distortion_probe(...)`, flatten it with
+`st.summarize_zspace_inference_distortion_probe(...)`, or print compact status
+lines with `st.summarize_zspace_inference_distortion_probe_lines(...)`.
 
 For the first real FT pass on a new corpus, use the sweep runner to make that
 comparison reproducible:

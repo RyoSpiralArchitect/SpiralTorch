@@ -331,6 +331,10 @@ def main(argv: list[str] | None = None) -> int:
         "local_hf": _run_local_hf(args, adapter),
         "api": _run_api(args, adapter),
     }
+    report["summary"] = st.summarize_zspace_inference_distortion_probe(report)
+    report["summary_lines"] = st.summarize_zspace_inference_distortion_probe_lines(
+        report
+    )
     payload = json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True)
     if args.out is not None:
         args.out.parent.mkdir(parents=True, exist_ok=True)

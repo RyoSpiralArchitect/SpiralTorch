@@ -18,7 +18,10 @@ __all__ = [
     "zspace_generation_control_bridge_cli_args",
     "zspace_generation_control_processor_kwargs",
     "zspace_generation_control_sweep_cli_args",
+    "load_zspace_inference_distortion_probe",
     "load_zspace_generation_control_sweep",
+    "summarize_zspace_inference_distortion_probe",
+    "summarize_zspace_inference_distortion_probe_lines",
     "summarize_zspace_generation_control_run",
     "summarize_zspace_generation_control_sweep",
     "summarize_zspace_generation_control_sweep_lines",
@@ -836,6 +839,207 @@ def load_zspace_generation_control_sweep(path: str | Path) -> dict[str, object]:
     if not isinstance(payload, Mapping):
         raise ValueError(f"{input_path} did not contain a JSON object")
     return dict(payload)
+
+
+def load_zspace_inference_distortion_probe(path: str | Path) -> dict[str, object]:
+    """Load one Z-Space inference-distortion probe JSON artifact."""
+
+    input_path = Path(path)
+    try:
+        payload = json.loads(input_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{input_path} invalid JSON: {exc}") from exc
+    if not isinstance(payload, Mapping):
+        raise ValueError(f"{input_path} did not contain a JSON object")
+    return dict(payload)
+
+
+def _probe_payload(
+    report_or_path: str | Path | Mapping[str, object],
+) -> tuple[dict[str, object], str | None]:
+    if isinstance(report_or_path, (str, Path)):
+        return load_zspace_inference_distortion_probe(report_or_path), str(report_or_path)
+    if isinstance(report_or_path, Mapping):
+        return dict(report_or_path), None
+    raise TypeError("inference-distortion probe must be a Mapping or path")
+
+
+def _telemetry_number(
+    row: Mapping[str, object],
+    key: str,
+) -> int | float | None:
+    value = row.get(key)
+    if isinstance(value, Mapping):
+        return None
+    return _safe_number(value)
+
+
+def _first_number(*values: object) -> int | float | None:
+    for value in values:
+        number = _safe_number(value)
+        if number is not None:
+            return number
+    return None
+
+
+def _nested_mapping(
+    row: Mapping[str, object],
+    *keys: str,
+) -> dict[str, object]:
+    current: object = row
+    for key in keys:
+        if not isinstance(current, Mapping):
+            return {}
+        current = current.get(key)
+    return dict(current) if isinstance(current, Mapping) else {}
+
+
+def _preview_text(value: object, *, limit: int) -> str | None:
+    if value is None:
+        return None
+    text = str(value)
+    if len(text) <= limit:
+        return text
+    return f"{text[: max(0, limit - 1)]}..."
+
+
+def summarize_zspace_inference_distortion_probe(
+    report_or_path: str | Path | Mapping[str, object],
+    *,
+    preview_chars: int = 160,
+) -> dict[str, object]:
+    """Summarize a local-HF/API Z-Space inference-distortion probe."""
+
+    report, source_path = _probe_payload(report_or_path)
+    adapter = _nested_mapping(report, "adapter")
+    local = _nested_mapping(report, "local_hf")
+    api = _nested_mapping(report, "api")
+    control = _nested_mapping(local, "generation_control")
+    activation = _nested_mapping(local, "activation_report")
+    request = _nested_mapping(adapter, "request")
+    logits_kwargs = _nested_mapping(adapter, "logits_processor_kwargs")
+    adapter_context_telemetry = _nested_mapping(adapter, "context_partial", "telemetry")
+    api_telemetry = _nested_mapping(api, "telemetry")
+    telemetry = dict(adapter_context_telemetry)
+    telemetry.update(api_telemetry)
+    api_inference_telemetry = _nested_mapping(api, "inference", "telemetry", "payload")
+    telemetry.update(api_inference_telemetry)
+    baseline_text = local.get("baseline_text")
+    distorted_text = local.get("distorted_text")
+    return {
+        "row_type": "zspace_inference_distortion_probe_summary",
+        "probe_path": source_path,
+        "prompt": report.get("prompt"),
+        "distortion_energy": _safe_number(adapter.get("distortion_energy")),
+        "desire_pressure": _telemetry_number(telemetry, "zspace.desire.pressure"),
+        "desire_stability": _telemetry_number(telemetry, "zspace.desire.stability"),
+        "psi_total": _telemetry_number(telemetry, "zspace.psi.total"),
+        "coherence": _telemetry_number(telemetry, "zspace.coherence"),
+        "request_temperature": _first_number(
+            request.get("temperature"),
+            telemetry.get("zspace.request.temperature"),
+        ),
+        "request_top_p": _first_number(
+            request.get("top_p"),
+            telemetry.get("zspace.request.top_p"),
+        ),
+        "request_frequency_penalty": _telemetry_number(
+            telemetry,
+            "zspace.request.frequency_penalty",
+        ),
+        "request_presence_penalty": _telemetry_number(
+            telemetry,
+            "zspace.request.presence_penalty",
+        ),
+        "logits_repression_strength": _first_number(
+            logits_kwargs.get("repression_strength"),
+            telemetry.get("zspace.logits.repression_strength"),
+        ),
+        "logits_ngram_repression_strength": _first_number(
+            logits_kwargs.get("ngram_repression_strength"),
+            telemetry.get("zspace.logits.ngram_repression_strength"),
+        ),
+        "local_status": local.get("status"),
+        "local_changed": local.get("changed"),
+        "local_model": local.get("model"),
+        "local_baseline_method": local.get("baseline_method"),
+        "local_distorted_method": local.get("distorted_method"),
+        "local_baseline_fallback_error": local.get("baseline_fallback_error"),
+        "local_distorted_fallback_error": local.get("distorted_fallback_error"),
+        "local_baseline_preview": _preview_text(
+            baseline_text,
+            limit=max(0, int(preview_chars)),
+        ),
+        "local_distorted_preview": _preview_text(
+            distorted_text,
+            limit=max(0, int(preview_chars)),
+        ),
+        "generation_control_status": control.get("status"),
+        "generation_control_backend": control.get("backend"),
+        "generation_control_calls": _safe_number(control.get("calls")),
+        "generation_control_top_token_changed_count": _safe_number(
+            control.get("top_token_changed_count")
+        ),
+        "generation_control_ngram_repressed_token_total": _safe_number(
+            control.get("ngram_repressed_token_total")
+        ),
+        "activation_status": activation.get("status"),
+        "activation_event_count": _safe_number(activation.get("event_count")),
+        "activation_reported_event_count": _safe_number(
+            activation.get("reported_event_count")
+        ),
+        "activation_output_l2_min": _safe_number(activation.get("output_l2_min")),
+        "activation_output_l2_max": _safe_number(activation.get("output_l2_max")),
+        "api_provider": api.get("provider"),
+        "api_model": api.get("model"),
+        "api_finish_reason": api.get("finish_reason"),
+        "api_text_preview": _preview_text(api.get("text"), limit=max(0, int(preview_chars))),
+        "api_total_tokens": _telemetry_number(telemetry, "api_llm.total_tokens"),
+        "api_response_entropy_norm": _telemetry_number(
+            telemetry,
+            "api_llm.response_entropy_norm",
+        ),
+        "api_empty_text": _telemetry_number(telemetry, "api_llm.empty_text"),
+    }
+
+
+def summarize_zspace_inference_distortion_probe_lines(
+    report_or_path: str | Path | Mapping[str, object],
+    *,
+    preview_chars: int = 96,
+) -> list[str]:
+    """Render a compact text summary for an inference-distortion probe."""
+
+    summary = summarize_zspace_inference_distortion_probe(
+        report_or_path,
+        preview_chars=preview_chars,
+    )
+    lines = [
+        (
+            "zspace_inference_distortion_probe "
+            f"local={summary.get('local_status')} "
+            f"changed={summary.get('local_changed')} "
+            f"backend={summary.get('generation_control_backend')} "
+            f"top_changes={summary.get('generation_control_top_token_changed_count')} "
+            f"activation_events={summary.get('activation_event_count')} "
+            f"api={summary.get('api_provider')} "
+            f"energy={summary.get('distortion_energy')} "
+            f"temp={summary.get('request_temperature')} "
+            f"top_p={summary.get('request_top_p')}"
+        )
+    ]
+    if summary.get("local_baseline_preview") or summary.get("local_distorted_preview"):
+        lines.append(
+            "zspace_inference_distortion_local "
+            f"baseline={summary.get('local_baseline_preview')!r} "
+            f"distorted={summary.get('local_distorted_preview')!r}"
+        )
+    if summary.get("api_text_preview"):
+        lines.append(
+            "zspace_inference_distortion_api "
+            f"text={summary.get('api_text_preview')!r}"
+        )
+    return lines
 
 
 def _sweep_payload(

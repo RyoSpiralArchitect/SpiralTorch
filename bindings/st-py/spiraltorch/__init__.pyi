@@ -385,6 +385,22 @@ def zspace_generation_control_bridge_cli_args(
     include_enable_flag: bool = ...,
 ) -> List[str]: ...
 
+def load_zspace_inference_distortion_probe(
+    path: str | PathLike[str],
+) -> Dict[str, object]: ...
+
+def summarize_zspace_inference_distortion_probe(
+    report_or_path: str | PathLike[str] | Mapping[str, object],
+    *,
+    preview_chars: int = ...,
+) -> Dict[str, object]: ...
+
+def summarize_zspace_inference_distortion_probe_lines(
+    report_or_path: str | PathLike[str] | Mapping[str, object],
+    *,
+    preview_chars: int = ...,
+) -> List[str]: ...
+
 def load_zspace_generation_control_sweep(
     path: str | PathLike[str],
 ) -> Dict[str, object]: ...
@@ -8351,7 +8367,10 @@ __all__ = [
     "zspace_generation_control_bridge_cli_args",
     "zspace_generation_control_processor_kwargs",
     "zspace_generation_control_sweep_cli_args",
+    "load_zspace_inference_distortion_probe",
     "load_zspace_generation_control_sweep",
+    "summarize_zspace_inference_distortion_probe",
+    "summarize_zspace_inference_distortion_probe_lines",
     "summarize_zspace_generation_control_run",
     "summarize_zspace_generation_control_sweep",
     "summarize_zspace_generation_control_sweep_lines",
