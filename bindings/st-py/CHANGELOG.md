@@ -15,6 +15,10 @@
 - Trainer trace: add HF Trainer callback helpers that write SpiralTorch JSONL
   rows for train/log/evaluate/save/end events and summarize loss/eval-loss
   telemetry back into the GPT-2 FT run card.
+- Local corpus: let `examples/hf_gpt2_finetune_bridge.py` train from repeated
+  `--train-file` / `--validation-file` inputs via the Hugging Face
+  `text`/`json`/`csv` dataset builders, with lightweight file manifests and
+  fingerprints written into the run card.
 - Documentation: clarify the hard dependency boundary for larger local GPT-2
   FT runs: Rust keeps tensor/nn/text/logic/frac/rl/WGPU surfaces in the wheel,
   while Python explicitly brings Transformers, Torch, datasets, pyarrow,

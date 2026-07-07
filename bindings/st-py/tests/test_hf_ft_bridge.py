@@ -1,14 +1,74 @@
 from __future__ import annotations
 
+import importlib.util
 import sys
 import tempfile
 import types
 import unittest
+from pathlib import Path
 from unittest import mock
 
 import spiraltorch as st
 import spiraltorch.runtime_imports as runtime_imports
 from spiraltorch import hf_ft
+
+
+EXAMPLE_PATH = (
+    Path(__file__).resolve().parents[1] / "examples" / "hf_gpt2_finetune_bridge.py"
+)
+
+
+def load_bridge_example():
+    spec = importlib.util.spec_from_file_location(
+        "hf_gpt2_finetune_bridge_test",
+        EXAMPLE_PATH,
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+class FakeDataset:
+    def __init__(self, rows):
+        self.rows = list(rows)
+        self.column_names = ["text"]
+
+    def __len__(self):
+        return len(self.rows)
+
+    def __getitem__(self, index):
+        return self.rows[index]
+
+    def select(self, indices):
+        return FakeDataset([self.rows[index] for index in indices])
+
+    def train_test_split(self, *, test_size, seed):
+        del seed
+        test_count = max(1, int(round(len(self.rows) * float(test_size))))
+        test_count = min(test_count, len(self.rows) - 1)
+        return {
+            "train": FakeDataset(self.rows[:-test_count]),
+            "test": FakeDataset(self.rows[-test_count:]),
+        }
+
+
+class FakeDatasets:
+    def __init__(self):
+        self.calls = []
+
+    def load_dataset(self, dataset_format, *, data_files):
+        self.calls.append((dataset_format, data_files))
+        return {
+            "train": FakeDataset(
+                [
+                    {"text": "alpha spiral"},
+                    {"text": "beta zspace"},
+                    {"text": "gamma torch"},
+                    {"text": "delta local"},
+                ]
+            )
+        }
 
 
 class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
@@ -92,6 +152,55 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
 
         self.assertEqual(probe["zspace_probe_status"], "missing_tokens")
         self.assertEqual(probe["zspace_probe_observed_token_count"], 0)
+
+    def test_corpus_file_report_records_lightweight_fingerprint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            train_path = Path(tmp) / "train.txt"
+            val_path = Path(tmp) / "val.txt"
+            train_path.write_text("alpha\nbeta\n", encoding="utf-8")
+            val_path.write_text("gamma\n", encoding="utf-8")
+            report = hf_ft.hf_gpt2_finetune_corpus_file_report(
+                train_files=[train_path],
+                validation_files=[val_path],
+                dataset_format="text",
+                text_column="text",
+            )
+
+        self.assertEqual(report["dataset_source"], "local_files")
+        self.assertEqual(report["file_count"], 2)
+        self.assertEqual(report["train_file_count"], 1)
+        self.assertEqual(report["validation_file_count"], 1)
+        self.assertEqual(report["missing_files"], "none")
+        self.assertTrue(report["all_files_available"])
+        self.assertIsInstance(report["fingerprint"], str)
+        self.assertGreater(report["total_bytes"], 0)
+
+    def test_example_local_corpus_loader_uses_data_files_and_split(self) -> None:
+        module = load_bridge_example()
+        fake_datasets = FakeDatasets()
+        with tempfile.TemporaryDirectory() as tmp:
+            train_path = Path(tmp) / "train.txt"
+            train_path.write_text("alpha\nbeta\ngamma\ndelta\n", encoding="utf-8")
+            args = types.SimpleNamespace(
+                train_file=[train_path],
+                validation_file=[],
+                dataset_format="text",
+                text_column="text",
+                validation_fraction=0.25,
+                seed=13,
+            )
+            raw_train, raw_eval, report = module._load_raw_datasets(
+                fake_datasets,
+                args,
+            )
+
+        self.assertEqual(fake_datasets.calls[0][0], "text")
+        self.assertEqual(fake_datasets.calls[0][1], {"train": [str(train_path)]})
+        self.assertEqual(len(raw_train), 3)
+        self.assertEqual(len(raw_eval), 1)
+        self.assertEqual(report["dataset_source"], "local_files")
+        self.assertEqual(module._preflight_dataset_name(args), "local-files")
+        self.assertEqual(module._preflight_dataset_config(args), "text")
 
     def test_trainer_trace_event_round_trip_and_summary(self) -> None:
         args = types.SimpleNamespace(
@@ -178,6 +287,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             hf_ft.hf_gpt2_finetune_rust_dependency_report,
         )
         self.assertIn("hf_ft", st.__all__)
+        self.assertIn("hf_gpt2_finetune_corpus_file_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_preflight_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_trainer_trace_callback", st.__all__)
         self.assertIs(

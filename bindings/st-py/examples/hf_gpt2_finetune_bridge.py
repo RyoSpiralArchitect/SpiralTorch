@@ -15,6 +15,7 @@ from typing import Any
 import spiraltorch as st
 from spiraltorch.hf_ft import (
     HF_GPT2_FT_DEFAULT_DEVICE_BACKENDS,
+    hf_gpt2_finetune_corpus_file_report,
     hf_gpt2_finetune_preflight_report,
     hf_gpt2_finetune_summary_lines,
     hf_gpt2_finetune_trainer_trace_callback,
@@ -37,6 +38,38 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--train-split", default="train")
     parser.add_argument("--eval-split", default="validation")
     parser.add_argument("--text-column", default="text")
+    parser.add_argument(
+        "--train-file",
+        action="append",
+        type=Path,
+        default=[],
+        help=(
+            "Local corpus file for training. May be repeated. When present, "
+            "--dataset-name/--dataset-config are bypassed."
+        ),
+    )
+    parser.add_argument(
+        "--validation-file",
+        action="append",
+        type=Path,
+        default=[],
+        help="Local corpus file for validation/eval. May be repeated.",
+    )
+    parser.add_argument(
+        "--dataset-format",
+        choices=("text", "json", "csv"),
+        default="text",
+        help="datasets.load_dataset builder used for --train-file inputs.",
+    )
+    parser.add_argument(
+        "--validation-fraction",
+        type=float,
+        default=0.0,
+        help=(
+            "If using --train-file without --validation-file, split this "
+            "fraction from train as validation."
+        ),
+    )
     parser.add_argument("--output-dir", type=Path, default=Path("runs/hf-gpt2-ft"))
     parser.add_argument("--run-card", type=Path, default=None)
     parser.add_argument("--trainer-trace-jsonl", type=Path, default=None)
@@ -108,6 +141,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         parser.error("--gradient-accumulation-steps must be positive")
     if args.metadata_only and args.train:
         parser.error("--metadata-only and --train are mutually exclusive")
+    if args.validation_file and not args.train_file:
+        parser.error("--validation-file requires --train-file")
+    if args.validation_file and args.validation_fraction > 0.0:
+        parser.error("--validation-file and --validation-fraction are mutually exclusive")
+    if args.validation_fraction < 0.0 or args.validation_fraction >= 1.0:
+        parser.error("--validation-fraction must be in [0.0, 1.0)")
+    for path in [*args.train_file, *args.validation_file]:
+        if not path.is_file():
+            parser.error(f"local corpus file does not exist: {path}")
     return args
 
 
@@ -133,6 +175,47 @@ def _load_dataset_split(
     if args.dataset_config:
         return datasets.load_dataset(args.dataset_name, args.dataset_config, **kwargs)
     return datasets.load_dataset(args.dataset_name, **kwargs)
+
+
+def _has_local_corpus(args: argparse.Namespace) -> bool:
+    return bool(args.train_file)
+
+
+def _local_data_files(args: argparse.Namespace) -> dict[str, list[str]]:
+    data_files = {"train": [str(path) for path in args.train_file]}
+    if args.validation_file:
+        data_files["validation"] = [str(path) for path in args.validation_file]
+    return data_files
+
+
+def _load_raw_datasets(
+    datasets: Any,
+    args: argparse.Namespace,
+) -> tuple[Any, Any | None, dict[str, object] | None]:
+    if not _has_local_corpus(args):
+        return (
+            _load_dataset_split(datasets, args, args.train_split),
+            _load_dataset_split(datasets, args, args.eval_split),
+            None,
+        )
+
+    corpus_report = hf_gpt2_finetune_corpus_file_report(
+        train_files=args.train_file,
+        validation_files=args.validation_file,
+        dataset_format=args.dataset_format,
+        text_column=args.text_column,
+    )
+    loaded = datasets.load_dataset(args.dataset_format, data_files=_local_data_files(args))
+    raw_train = loaded["train"]
+    raw_eval = loaded["validation"] if "validation" in loaded else None
+    if raw_eval is None and args.validation_fraction > 0.0:
+        split = raw_train.train_test_split(
+            test_size=float(args.validation_fraction),
+            seed=int(args.seed),
+        )
+        raw_train = split["train"]
+        raw_eval = split["test"]
+    return raw_train, raw_eval, corpus_report
 
 
 def _loader_kwargs(args: argparse.Namespace) -> dict[str, object]:
@@ -262,6 +345,14 @@ def _required_ready_backends(args: argparse.Namespace) -> list[str]:
     return backends
 
 
+def _preflight_dataset_name(args: argparse.Namespace) -> str:
+    return "local-files" if _has_local_corpus(args) else args.dataset_name
+
+
+def _preflight_dataset_config(args: argparse.Namespace) -> str | None:
+    return args.dataset_format if _has_local_corpus(args) else args.dataset_config
+
+
 def _write_card(card: Mapping[str, Any], args: argparse.Namespace) -> None:
     path = args.run_card or (args.output_dir / "spiraltorch-hf-gpt2-ft-run-card.json")
     write_hf_gpt2_finetune_run_card(card, path)
@@ -280,8 +371,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     preflight = hf_gpt2_finetune_preflight_report(
         model_name=args.model_name,
-        dataset_name=args.dataset_name,
-        dataset_config=args.dataset_config,
+        dataset_name=_preflight_dataset_name(args),
+        dataset_config=_preflight_dataset_config(args),
         train_split=args.train_split,
         eval_split=args.eval_split,
         text_column=args.text_column,
@@ -316,11 +407,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if getattr(tokenizer, "pad_token_id", None) is not None:
         model.config.pad_token_id = tokenizer.pad_token_id
 
-    raw_train = _select_rows(
-        _load_dataset_split(datasets, args, args.train_split),
-        args.max_train_samples,
-    )
-    raw_eval = _load_dataset_split(datasets, args, args.eval_split)
+    raw_train, raw_eval, corpus_report = _load_raw_datasets(datasets, args)
+    raw_train = _select_rows(raw_train, args.max_train_samples)
     raw_eval = None if raw_eval is None else _select_rows(raw_eval, args.max_eval_samples)
     preview_texts = _text_rows(raw_train, args.text_column)
 
@@ -346,8 +434,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         "torch_version": getattr(torch, "__version__", None),
         "datasets_version": getattr(datasets, "__version__", None),
         "model_name": args.model_name,
-        "dataset_name": args.dataset_name,
-        "dataset_config": args.dataset_config,
+        "dataset_name": _preflight_dataset_name(args),
+        "dataset_config": _preflight_dataset_config(args),
+        "dataset_source": "local_files" if _has_local_corpus(args) else "hf_dataset",
+        "dataset_format": args.dataset_format if _has_local_corpus(args) else None,
+        "corpus_file_report": corpus_report,
+        "validation_fraction": args.validation_fraction if _has_local_corpus(args) else None,
         "train_split": args.train_split,
         "eval_split": args.eval_split,
         "text_column": args.text_column,
