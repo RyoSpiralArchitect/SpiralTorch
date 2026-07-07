@@ -760,6 +760,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 "trace_log_steps_per_second_max": 1.0,
                 "trace_eval_runtime_max": 3.5,
                 "trace_eval_loss_series": "0=2.0,3=1.5",
+                "trace_inference_distortion_telemetry_count": 4,
+                "trace_last_inference_distortion_risk_score": 0.21,
+                "trace_last_inference_distortion_api_compatibility_score": 0.84,
+                "trace_last_inference_distortion_api_request_dropped_key_count": 2,
+                "trace_last_inference_distortion_api_request_retry_dropped_key_count": 1,
+                "trace_last_inference_distortion_logits_repression_strength": 1.7,
+                "trace_last_inference_distortion_logits_ngram_repression_strength": 0.9,
+                "trace_last_inference_distortion_include_penalties": 1.0,
             },
             "corpus_scan_report": {
                 "line_count": 10,
@@ -895,6 +903,18 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(
             summary["trainer_telemetry_auto_reason"],
             "inference_distortion_handoff",
+        )
+        self.assertEqual(
+            summary["trace_last_inference_distortion_risk_score"],
+            0.21,
+        )
+        self.assertEqual(
+            summary["trace_last_inference_distortion_api_request_retry_dropped_key_count"],
+            1,
+        )
+        self.assertEqual(
+            summary["trace_last_inference_distortion_logits_repression_strength"],
+            1.7,
         )
         self.assertEqual(summary["inference_distortion_handoff_status"], "ok")
         self.assertEqual(
@@ -1051,6 +1071,24 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             "0=2.0,3=1.5",
         )
         self.assertEqual(
+            sweep_summary["top_runs"][0][
+                "trace_last_inference_distortion_risk_score"
+            ],
+            0.21,
+        )
+        self.assertEqual(
+            sweep_summary["top_runs"][0][
+                "trace_last_inference_distortion_api_request_retry_dropped_key_count"
+            ],
+            1,
+        )
+        self.assertEqual(
+            sweep_summary["top_runs"][0][
+                "trace_last_inference_distortion_logits_repression_strength"
+            ],
+            1.7,
+        )
+        self.assertEqual(
             sweep_summary["top_runs"][0]["inference_distortion_recommended_probe"],
             "distort-002",
         )
@@ -1088,6 +1126,9 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("trace_sps_mean=0.5", top_line)
         self.assertIn("telemetry=True", top_line)
         self.assertIn("telemetry_auto=inference_distortion_handoff", top_line)
+        self.assertIn("infer_trace_risk=0.21", top_line)
+        self.assertIn("infer_trace_retry_drop=1", top_line)
+        self.assertIn("infer_trace_repress=1.7", top_line)
         self.assertIn("eval_series=0=2.0,3=1.5", top_line)
         self.assertIn("infer_probe=distort-002", top_line)
         self.assertIn("gen_infer=ok", top_line)
@@ -2282,7 +2323,12 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 "psi_total": 0.7,
                 "coherence": 0.5,
                 "include_penalties": True,
+                "api_request_dropped_key_count": 2,
                 "api_request_retry_dropped_key_count": 1,
+                "recommended_processor_kwargs": {
+                    "repression_strength": 1.7,
+                    "ngram_repression_strength": 0.9,
+                },
             },
         )
 
@@ -2316,6 +2362,22 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 "hf_ft.inference_distortion.api_request_retry_dropped_key_count"
             ],
             1,
+        )
+        self.assertEqual(
+            telemetry["hf_ft.inference_distortion.api_request_dropped_key_count"],
+            2,
+        )
+        self.assertEqual(
+            telemetry["hf_ft.inference_distortion.logits_repression_strength"],
+            1.7,
+        )
+        self.assertEqual(
+            telemetry["hf_ft.inference_distortion.logits_ngram_repression_strength"],
+            0.9,
+        )
+        self.assertEqual(
+            telemetry["hf_ft.inference_distortion.include_penalties"],
+            1.0,
         )
         self.assertEqual(
             frame["inference_distortion_handoff"]["recommended_probe"],
@@ -2499,9 +2561,17 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                         "status": "ok",
                         "recommended_probe": "distort-002",
                         "recommended_effect_score": 0.88,
+                        "recommended_risk_score": 0.21,
                         "recommended_api_compatibility_score": 0.84,
                         "desire_pressure": 0.8,
                         "psi_total": 0.7,
+                        "include_penalties": True,
+                        "api_request_dropped_key_count": 2,
+                        "api_request_retry_dropped_key_count": 1,
+                        "recommended_processor_kwargs": {
+                            "repression_strength": 1.7,
+                            "ngram_repression_strength": 0.9,
+                        },
                     },
                     training_telemetry=True,
                     desire_gain=1.2,
@@ -2545,8 +2615,38 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             0.88,
         )
         self.assertEqual(
+            summary["trace_last_inference_distortion_risk_score"],
+            0.21,
+        )
+        self.assertEqual(
             summary["trace_last_inference_distortion_api_compatibility_score"],
             0.84,
+        )
+        self.assertEqual(
+            summary[
+                "trace_last_inference_distortion_api_request_dropped_key_count"
+            ],
+            2,
+        )
+        self.assertEqual(
+            summary[
+                "trace_last_inference_distortion_api_request_retry_dropped_key_count"
+            ],
+            1,
+        )
+        self.assertEqual(
+            summary["trace_last_inference_distortion_logits_repression_strength"],
+            1.7,
+        )
+        self.assertEqual(
+            summary[
+                "trace_last_inference_distortion_logits_ngram_repression_strength"
+            ],
+            0.9,
+        )
+        self.assertEqual(
+            summary["trace_last_inference_distortion_include_penalties"],
+            1.0,
         )
         self.assertIsNotNone(summary["trace_last_desire_pressure"])
         self.assertIsNotNone(summary["trace_last_psi_total"])

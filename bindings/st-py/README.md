@@ -579,7 +579,10 @@ summaries surface the recommended probe, effect/risk, desire pressure, psi total
 API route, and provider request keys that were dropped or sent beside
 eval/generation metrics. The bridge preflight line and sweep summaries also
 show whether telemetry was explicitly requested or auto-enabled from the
-handoff, which makes dry-run plans honest before the model is loaded. Add
+handoff, which makes dry-run plans honest before the model is loaded. Trace
+summaries carry the handoff's risk/API retry-drop counts plus logits repression
+strengths beside loss/eval telemetry, so post-run comparisons can distinguish
+"it trained well" from "it trained well under an aggressive decode field." Add
 `--generation-from-inference-distortion` with a
 generation prompt to reuse the handoff's `recommended_processor_kwargs` as the
 Z-Space/repression logits processor for before/after generated samples; omit it

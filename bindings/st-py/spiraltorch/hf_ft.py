@@ -1630,9 +1630,33 @@ def summarize_hf_gpt2_finetune_trainer_trace(
         rows,
         "inference_distortion.effect_score",
     )
+    inference_risk_scores = _trace_numeric_telemetry_values(
+        rows,
+        "inference_distortion.risk_score",
+    )
     inference_api_compatibility_scores = _trace_numeric_telemetry_values(
         rows,
         "inference_distortion.api_compatibility_score",
+    )
+    inference_api_dropped_counts = _trace_numeric_telemetry_values(
+        rows,
+        "inference_distortion.api_request_dropped_key_count",
+    )
+    inference_api_retry_dropped_counts = _trace_numeric_telemetry_values(
+        rows,
+        "inference_distortion.api_request_retry_dropped_key_count",
+    )
+    inference_repression_strengths = _trace_numeric_telemetry_values(
+        rows,
+        "inference_distortion.logits_repression_strength",
+    )
+    inference_ngram_repression_strengths = _trace_numeric_telemetry_values(
+        rows,
+        "inference_distortion.logits_ngram_repression_strength",
+    )
+    inference_include_penalties = _trace_numeric_telemetry_values(
+        rows,
+        "inference_distortion.include_penalties",
     )
     inference_handoff_present = _trace_numeric_telemetry_values(
         rows,
@@ -1686,10 +1710,36 @@ def summarize_hf_gpt2_finetune_trainer_trace(
         "trace_last_inference_distortion_effect_score": (
             inference_effect_scores[-1] if inference_effect_scores else None
         ),
+        "trace_last_inference_distortion_risk_score": (
+            inference_risk_scores[-1] if inference_risk_scores else None
+        ),
         "trace_last_inference_distortion_api_compatibility_score": (
             inference_api_compatibility_scores[-1]
             if inference_api_compatibility_scores
             else None
+        ),
+        "trace_last_inference_distortion_api_request_dropped_key_count": (
+            inference_api_dropped_counts[-1]
+            if inference_api_dropped_counts
+            else None
+        ),
+        "trace_last_inference_distortion_api_request_retry_dropped_key_count": (
+            inference_api_retry_dropped_counts[-1]
+            if inference_api_retry_dropped_counts
+            else None
+        ),
+        "trace_last_inference_distortion_logits_repression_strength": (
+            inference_repression_strengths[-1]
+            if inference_repression_strengths
+            else None
+        ),
+        "trace_last_inference_distortion_logits_ngram_repression_strength": (
+            inference_ngram_repression_strengths[-1]
+            if inference_ngram_repression_strengths
+            else None
+        ),
+        "trace_last_inference_distortion_include_penalties": (
+            inference_include_penalties[-1] if inference_include_penalties else None
         ),
     }
 
@@ -2200,6 +2250,42 @@ def summarize_hf_gpt2_finetune_run_card(
             trainer_trace,
             "trace_last_inference_distortion_effect_score",
         ),
+        "trace_last_inference_distortion_risk_score": _metric_number(
+            trainer_trace,
+            "trace_last_inference_distortion_risk_score",
+        ),
+        "trace_last_inference_distortion_api_compatibility_score": _metric_number(
+            trainer_trace,
+            "trace_last_inference_distortion_api_compatibility_score",
+        ),
+        "trace_last_inference_distortion_api_request_dropped_key_count": (
+            _metric_number(
+                trainer_trace,
+                "trace_last_inference_distortion_api_request_dropped_key_count",
+            )
+        ),
+        "trace_last_inference_distortion_api_request_retry_dropped_key_count": (
+            _metric_number(
+                trainer_trace,
+                "trace_last_inference_distortion_api_request_retry_dropped_key_count",
+            )
+        ),
+        "trace_last_inference_distortion_logits_repression_strength": (
+            _metric_number(
+                trainer_trace,
+                "trace_last_inference_distortion_logits_repression_strength",
+            )
+        ),
+        "trace_last_inference_distortion_logits_ngram_repression_strength": (
+            _metric_number(
+                trainer_trace,
+                "trace_last_inference_distortion_logits_ngram_repression_strength",
+            )
+        ),
+        "trace_last_inference_distortion_include_penalties": _metric_number(
+            trainer_trace,
+            "trace_last_inference_distortion_include_penalties",
+        ),
         "generation_before_status": generation_before.get("status"),
         "generation_before_method": generation_before.get("generation_method"),
         "generation_from_inference_distortion": card.get(
@@ -2513,8 +2599,42 @@ def _ranked_sweep_rows(
                 "trace_last_inference_distortion_effect_score": _safe_number(
                     row.get("trace_last_inference_distortion_effect_score")
                 ),
+                "trace_last_inference_distortion_risk_score": _safe_number(
+                    row.get("trace_last_inference_distortion_risk_score")
+                ),
                 "trace_last_inference_distortion_api_compatibility_score": _safe_number(
                     row.get("trace_last_inference_distortion_api_compatibility_score")
+                ),
+                "trace_last_inference_distortion_api_request_dropped_key_count": (
+                    _safe_number(
+                        row.get(
+                            "trace_last_inference_distortion_api_request_dropped_key_count"
+                        )
+                    )
+                ),
+                "trace_last_inference_distortion_api_request_retry_dropped_key_count": (
+                    _safe_number(
+                        row.get(
+                            "trace_last_inference_distortion_api_request_retry_dropped_key_count"
+                        )
+                    )
+                ),
+                "trace_last_inference_distortion_logits_repression_strength": (
+                    _safe_number(
+                        row.get(
+                            "trace_last_inference_distortion_logits_repression_strength"
+                        )
+                    )
+                ),
+                "trace_last_inference_distortion_logits_ngram_repression_strength": (
+                    _safe_number(
+                        row.get(
+                            "trace_last_inference_distortion_logits_ngram_repression_strength"
+                        )
+                    )
+                ),
+                "trace_last_inference_distortion_include_penalties": _safe_number(
+                    row.get("trace_last_inference_distortion_include_penalties")
                 ),
                 "inference_distortion_recommended_probe": row.get(
                     "inference_distortion_recommended_probe"
@@ -2936,6 +3056,12 @@ def summarize_hf_gpt2_finetune_sweep_report_lines(
             inference_fragment += (
                 "infer_trace="
                 f"{row.get('trace_inference_distortion_telemetry_count')} "
+                "infer_trace_risk="
+                f"{row.get('trace_last_inference_distortion_risk_score')} "
+                "infer_trace_retry_drop="
+                f"{row.get('trace_last_inference_distortion_api_request_retry_dropped_key_count')} "
+                "infer_trace_repress="
+                f"{row.get('trace_last_inference_distortion_logits_repression_strength')} "
             )
         generation_inference_fragment = ""
         if row.get("generation_from_inference_distortion_status") is not None:
