@@ -4125,8 +4125,10 @@ def _topos_sweep_report_recommendations(
     *,
     trace_comparison: Mapping[str, Any],
     adapter_winners: Mapping[str, str | None],
+    response_winners: Mapping[str, str | None] | None = None,
 ) -> list[str]:
     recommendations: list[str] = []
+    response_winners = _mapping_or_empty(response_winners)
     trace_winners = _mapping_or_empty(trace_comparison.get("winners"))
     best_trace = trace_winners.get("best_score")
     if best_trace:
@@ -4151,6 +4153,21 @@ def _topos_sweep_report_recommendations(
         recommendations.append(
             f"compare sampling spread between cool {coolest} and hot {hottest}"
         )
+    response_quality = response_winners.get("highest_text_quality_score")
+    if response_quality and response_quality != best_trace:
+        recommendations.append(
+            f"inspect {response_quality} for stronger bounded response text quality"
+        )
+    response_latency = response_winners.get("lowest_latency_ms")
+    if response_latency and response_latency not in {best_trace, response_quality}:
+        recommendations.append(f"inspect {response_latency} for lower response latency")
+    response_tokens = response_winners.get("lowest_total_tokens")
+    if response_tokens and response_tokens not in {
+        best_trace,
+        response_quality,
+        response_latency,
+    }:
+        recommendations.append(f"inspect {response_tokens} for lower token use")
     return recommendations
 
 
@@ -4468,6 +4485,107 @@ def _topos_sweep_response_pair_rows(
     return pairs
 
 
+def _response_route_stat(
+    row: Mapping[str, Any],
+    key: str,
+    *,
+    stat: str = "mean",
+) -> float | None:
+    value = row.get(key)
+    if isinstance(value, Mapping):
+        return _finite_float(value.get(stat))
+    return _finite_float(value)
+
+
+def _topos_sweep_response_winner_rows(
+    rows: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    winner_rows: list[dict[str, Any]] = []
+    for row in rows:
+        label = row.get("label")
+        count = int(_finite_float(row.get("count")) or 0)
+        winner_rows.append(
+            {
+                "label": label,
+                "count": count,
+                "completion_rate": _finite_float(row.get("completion_rate")),
+                "incomplete_rate": _finite_float(row.get("incomplete_rate")),
+                "text_chars_mean": _response_route_stat(row, "text_chars"),
+                "latency_ms_mean": _response_route_stat(row, "latency_ms"),
+                "prompt_tokens_mean": _response_route_stat(row, "prompt_tokens"),
+                "completion_tokens_mean": _response_route_stat(
+                    row,
+                    "completion_tokens",
+                ),
+                "total_tokens_mean": _response_route_stat(row, "total_tokens"),
+                "confidence_mean": _response_route_stat(row, "confidence"),
+                "text_quality_score_mean": _response_route_stat(
+                    row,
+                    "text_quality_score",
+                ),
+                "prompt_coverage_mean": _response_route_stat(row, "prompt_coverage"),
+                "topos_runtime_route_score_mean": _response_route_stat(
+                    row,
+                    "topos_runtime_route_score",
+                ),
+                "topos_closure_pressure_mean": _response_route_stat(
+                    row,
+                    "topos_closure_pressure",
+                ),
+                "topos_openness_mean": _response_route_stat(row, "topos_openness"),
+                "topos_inference_context_weight_mean": _response_route_stat(
+                    row,
+                    "topos_inference_context_weight",
+                ),
+            }
+        )
+    return winner_rows
+
+
+def _topos_sweep_response_winners(
+    rows: Sequence[Mapping[str, Any]],
+) -> dict[str, str | None]:
+    winner_rows = _topos_sweep_response_winner_rows(rows)
+    return {
+        "highest_completion_rate": _winner(winner_rows, "completion_rate"),
+        "lowest_incomplete_rate": _winner(
+            winner_rows,
+            "incomplete_rate",
+            higher_is_better=False,
+        ),
+        "highest_text_quality_score": _winner(
+            winner_rows,
+            "text_quality_score_mean",
+        ),
+        "highest_prompt_coverage": _winner(winner_rows, "prompt_coverage_mean"),
+        "lowest_latency_ms": _winner(
+            winner_rows,
+            "latency_ms_mean",
+            higher_is_better=False,
+        ),
+        "lowest_total_tokens": _winner(
+            winner_rows,
+            "total_tokens_mean",
+            higher_is_better=False,
+        ),
+        "highest_confidence": _winner(winner_rows, "confidence_mean"),
+        "highest_topos_runtime_route_score": _winner(
+            winner_rows,
+            "topos_runtime_route_score_mean",
+        ),
+        "lowest_topos_closure_pressure": _winner(
+            winner_rows,
+            "topos_closure_pressure_mean",
+            higher_is_better=False,
+        ),
+        "highest_topos_openness": _winner(winner_rows, "topos_openness_mean"),
+        "highest_topos_context_weight": _winner(
+            winner_rows,
+            "topos_inference_context_weight_mean",
+        ),
+    }
+
+
 def api_llm_topos_sweep_report(
     sweep: Mapping[str, Any],
     *,
@@ -4502,6 +4620,7 @@ def api_llm_topos_sweep_report(
         labels,
         max_pair_rows=max_pair_rows,
     )
+    response_winners = _topos_sweep_response_winners(response_route_rows)
     report = {
         "kind": "spiraltorch.api_llm_topos_sweep_report",
         "source_kind": sweep.get("kind"),
@@ -4517,6 +4636,7 @@ def api_llm_topos_sweep_report(
         "response_sample_count": len(response_samples),
         "response_samples": response_samples,
         "response_route_rows": response_route_rows,
+        "response_winners": response_winners,
         "response_pair_count": len(response_pair_rows),
         "response_pair_rows": response_pair_rows,
         "comparison": dict(comparison),
@@ -4525,12 +4645,22 @@ def api_llm_topos_sweep_report(
         rows,
         trace_comparison=comparison,
         adapter_winners=adapter_winners,
+        response_winners=response_winners,
     )
     return report
 
 
 def _topos_sweep_report_rows(report: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     rows = report.get("adapter_rows")
+    if not isinstance(rows, Sequence) or isinstance(rows, (str, bytes, bytearray)):
+        return []
+    return [row for row in rows if isinstance(row, Mapping)]
+
+
+def _topos_sweep_report_response_route_rows(
+    report: Mapping[str, Any],
+) -> list[Mapping[str, Any]]:
+    rows = report.get("response_route_rows")
     if not isinstance(rows, Sequence) or isinstance(rows, (str, bytes, bytearray)):
         return []
     return [row for row in rows if isinstance(row, Mapping)]
@@ -4545,9 +4675,12 @@ def _topos_sweep_report_pair_rows(report: Mapping[str, Any]) -> list[Mapping[str
 
 def _topos_sweep_report_row(label: str, path: Path, report: Mapping[str, Any]) -> dict[str, Any]:
     rows = _topos_sweep_report_rows(report)
+    response_route_rows = _topos_sweep_report_response_route_rows(report)
+    response_winner_rows = _topos_sweep_response_winner_rows(response_route_rows)
     pair_rows = _topos_sweep_report_pair_rows(report)
     comparison = _mapping_or_empty(report.get("comparison"))
     trace_winners = _mapping_or_empty(comparison.get("winners"))
+    response_winners = _mapping_or_empty(report.get("response_winners"))
     comparison_rows = [
         row for row in _list_from_sequence(comparison.get("runs")) if isinstance(row, Mapping)
     ]
@@ -4578,6 +4711,36 @@ def _topos_sweep_report_row(label: str, path: Path, report: Mapping[str, Any]) -
         "response_pair_count": int(_finite_float(report.get("response_pair_count")) or 0),
         "response_text_overlap_mean": (
             response_text_overlap["mean"] if pair_rows else None
+        ),
+        "best_response_text_quality_route": response_winners.get(
+            "highest_text_quality_score"
+        ),
+        "best_response_latency_route": response_winners.get("lowest_latency_ms"),
+        "best_response_total_tokens_route": response_winners.get("lowest_total_tokens"),
+        "best_response_completion_route": response_winners.get(
+            "highest_completion_rate"
+        ),
+        "best_response_text_quality_score": (
+            _stats(row.get("text_quality_score_mean") for row in response_winner_rows)[
+                "max"
+            ]
+            if response_winner_rows
+            else None
+        ),
+        "lowest_response_latency_ms": (
+            _stats(row.get("latency_ms_mean") for row in response_winner_rows)["min"]
+            if response_winner_rows
+            else None
+        ),
+        "lowest_response_total_tokens": (
+            _stats(row.get("total_tokens_mean") for row in response_winner_rows)["min"]
+            if response_winner_rows
+            else None
+        ),
+        "best_response_completion_rate": (
+            _stats(row.get("completion_rate") for row in response_winner_rows)["max"]
+            if response_winner_rows
+            else None
         ),
         "mode_counts": mode_counts_map,
         "mode_count": len(mode_counts_map),
@@ -4638,6 +4801,24 @@ def compare_api_llm_topos_sweep_reports(
         "widest_temperature_range": _winner(rows, "request_temperature_range"),
         "most_runtime_modes": _winner(rows, "mode_count"),
         "highest_response_text_overlap": _winner(rows, "response_text_overlap_mean"),
+        "highest_response_text_quality_score": _winner(
+            rows,
+            "best_response_text_quality_score",
+        ),
+        "lowest_response_latency_ms": _winner(
+            rows,
+            "lowest_response_latency_ms",
+            higher_is_better=False,
+        ),
+        "lowest_response_total_tokens": _winner(
+            rows,
+            "lowest_response_total_tokens",
+            higher_is_better=False,
+        ),
+        "highest_response_completion_rate": _winner(
+            rows,
+            "best_response_completion_rate",
+        ),
     }
     recommendations: list[str] = []
     best = winners.get("highest_best_trace_route_score")
@@ -4654,6 +4835,12 @@ def compare_api_llm_topos_sweep_reports(
     overlap = winners.get("highest_response_text_overlap")
     if overlap:
         recommendations.append(f"{overlap} has the most similar bounded route samples")
+    response_quality = winners.get("highest_response_text_quality_score")
+    if response_quality and response_quality != best:
+        recommendations.append(f"{response_quality} has the strongest response samples")
+    response_latency = winners.get("lowest_response_latency_ms")
+    if response_latency and response_latency not in {best, response_quality}:
+        recommendations.append(f"{response_latency} has the lowest response latency")
     return {
         "kind": "spiraltorch.api_llm_topos_sweep_report_comparison",
         "count": len(rows),

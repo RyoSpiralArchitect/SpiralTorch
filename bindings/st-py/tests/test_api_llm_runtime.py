@@ -1394,6 +1394,9 @@ def test_run_api_llm_topos_sweep_compares_runtime_routes(tmp_path) -> None:
     assert samples["guarded"]["topos_closure_pressure"] == pytest.approx(
         result["adapters"]["guarded"]["signal"]["closure_pressure"]
     )
+    assert report["response_winners"]["highest_topos_runtime_route_score"] == "open"
+    assert report["response_winners"]["lowest_topos_closure_pressure"] == "open"
+    assert report["response_winners"]["highest_topos_context_weight"] == "guarded"
     assert len(report["response_route_rows"]) == 2
     route_rows = {row["label"]: row for row in report["response_route_rows"]}
     assert route_rows["open"]["count"] == 1
@@ -1427,8 +1430,11 @@ def test_run_api_llm_topos_sweep_compares_runtime_routes(tmp_path) -> None:
     assert report_comparison["rows"][0]["response_sample_count"] == 2
     assert report_comparison["rows"][0]["response_pair_count"] == 1
     assert report_comparison["rows"][0]["response_text_overlap_mean"] > 0.0
+    assert report_comparison["rows"][0]["best_response_text_quality_score"] > 0.0
     assert report_comparison["winners"]["widest_temperature_range"] == "demo"
     assert report_comparison["winners"]["highest_response_text_overlap"] == "demo"
+    assert report_comparison["winners"]["highest_response_text_quality_score"] == "demo"
+    assert report_comparison["winners"]["highest_response_completion_rate"] == "demo"
 
 
 def test_compare_api_llm_matrix_reports_tracks_stable_profile_winners(tmp_path) -> None:
