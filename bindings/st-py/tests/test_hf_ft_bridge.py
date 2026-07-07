@@ -30,6 +30,11 @@ TRACE_SUMMARY_PATH = (
     / "examples"
     / "hf_gpt2_finetune_trace_summary.py"
 )
+RUN_STATUS_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "examples"
+    / "hf_gpt2_finetune_run_status.py"
+)
 
 
 def load_bridge_example():
@@ -47,6 +52,17 @@ def load_trace_summary_example():
     spec = importlib.util.spec_from_file_location(
         "hf_gpt2_finetune_trace_summary_test",
         TRACE_SUMMARY_PATH,
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_run_status_example():
+    spec = importlib.util.spec_from_file_location(
+        "hf_gpt2_finetune_run_status_test",
+        RUN_STATUS_PATH,
     )
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -3345,6 +3361,95 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("latest_step=20", lines[0])
         self.assertIn("guard_count=1", lines[0])
         self.assertIn("step=10 eval_loss=1.8", lines[1])
+        self.assertEqual(written_lines, lines)
+
+    def test_run_status_example_summarizes_live_ft_run_directory(self) -> None:
+        module = load_run_status_example()
+        rows = [
+            {
+                "event": "log",
+                "global_step": 10,
+                "time_unix_s": 100.0,
+                "metrics": {"loss": 2.0},
+            },
+            {
+                "event": "evaluate",
+                "global_step": 10,
+                "time_unix_s": 110.0,
+                "metrics": {"eval_loss": 1.8, "eval_runtime": 4.0},
+            },
+            {
+                "event": "log",
+                "global_step": 20,
+                "time_unix_s": 130.0,
+                "metrics": {"loss": 1.7},
+            },
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "run"
+            run_dir.mkdir()
+            trace_path = run_dir / "spiraltorch-hf-gpt2-ft-trainer-trace.jsonl"
+            for row in rows:
+                hf_ft.write_hf_gpt2_finetune_trainer_trace_event(row, trace_path)
+            (run_dir / "spiraltorch-hf-gpt2-ft-run-card.json").write_text(
+                json.dumps({"status": "running"}),
+                encoding="utf-8",
+            )
+            pid_file = run_dir / "ft.pid"
+            pid_file.write_text(f"{os.getpid()}\n", encoding="utf-8")
+            checkpoint = run_dir / "checkpoint-20"
+            checkpoint.mkdir()
+            (checkpoint / "model.safetensors").write_text("ready", encoding="utf-8")
+            checkpoint_card = run_dir / "checkpoint-20-generation-control.json"
+            checkpoint_card.write_text(
+                json.dumps(
+                    {
+                        "status": "waiting_for_process",
+                        "process_wait": {
+                            "status": "waiting",
+                            "pid": os.getpid(),
+                            "waited_seconds": 12.5,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            out_path = run_dir / "status.json"
+            lines_path = run_dir / "status.txt"
+            argv = [
+                str(run_dir),
+                "--max-steps",
+                "40",
+                "--final-checkpoint",
+                "checkpoint-20",
+                "--checkpoint-card",
+                str(checkpoint_card),
+                "--tail-evals",
+                "1",
+                "--out",
+                str(out_path),
+                "--lines-out",
+                str(lines_path),
+            ]
+            args = module.parse_args(argv)
+            status = module.summarize_run(args)
+            lines = module.status_lines(status, tail_evals=1)
+            self.assertEqual(module.main(argv), 0)
+            written = json.loads(out_path.read_text(encoding="utf-8"))
+            written_lines = lines_path.read_text(encoding="utf-8").splitlines()
+
+        self.assertEqual(status["process_status"], "alive")
+        self.assertEqual(status["trace"]["trace_max_global_step"], 20)
+        self.assertEqual(status["trace"]["progress"], 0.5)
+        self.assertEqual(status["checkpoint_count"], 1)
+        self.assertTrue(status["final_checkpoint_ready"])
+        self.assertEqual(status["checkpoint_card_status"], "waiting_for_process")
+        self.assertIn("process=alive", lines[0])
+        self.assertIn("latest_step=20", lines[0])
+        self.assertIn("checkpoint_card=waiting_for_process", lines[0])
+        self.assertIn("final_ready=true", lines[0])
+        self.assertIn("hf_gpt2_ft_run_wait status=waiting", lines[-1])
+        self.assertEqual(written["process_status"], "alive")
         self.assertEqual(written_lines, lines)
 
     def test_run_card_summary_supplements_trace_telemetry_from_jsonl(self) -> None:
