@@ -597,6 +597,14 @@ def hf_gpt2_finetune_scale_up_command(
     trainer_trace_jsonl: str | PathLike[str] | None = ...,
 ) -> Dict[str, object]: ...
 
+def hf_gpt2_finetune_scale_up_preflight_report(
+    command_or_artifact: str | PathLike[str] | Mapping[str, object] | Sequence[object],
+) -> Dict[str, object]: ...
+
+def hf_gpt2_finetune_scale_up_preflight_lines(
+    report_or_command: str | PathLike[str] | Mapping[str, object] | Sequence[object],
+) -> list[str]: ...
+
 def summarize_hf_gpt2_finetune_sweep_report_lines(
     report_or_path: str | PathLike[str] | Mapping[str, object],
     *,
@@ -8446,6 +8454,8 @@ __all__ = [
     "hf_gpt2_finetune_preflight_report",
     "hf_gpt2_finetune_rust_dependency_report",
     "hf_gpt2_finetune_scale_up_command",
+    "hf_gpt2_finetune_scale_up_preflight_lines",
+    "hf_gpt2_finetune_scale_up_preflight_report",
     "hf_gpt2_finetune_summary_lines",
     "hf_gpt2_finetune_training_telemetry_frame",
     "hf_gpt2_finetune_trainer_trace_callback",

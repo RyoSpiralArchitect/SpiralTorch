@@ -616,6 +616,9 @@ resolved command's executable, bridge script, input files, and output parents;
 add `--require-ready` to fail before `--run` when an input artifact has gone
 missing. When `--write-command` is combined with `--run`, the written artifact is
 updated after execution so it includes `run_returncode` beside the preflight.
+From Python, use `st.hf_gpt2_finetune_scale_up_preflight_report(...)` or
+`st.hf_gpt2_finetune_scale_up_preflight_lines(...)` on a command artifact,
+sweep report, or command list to run the same check in notebooks and CI.
 
 Add
 `--generation-from-inference-distortion` with a

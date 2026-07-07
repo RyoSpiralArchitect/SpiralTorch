@@ -5,7 +5,9 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import shlex
+import shutil
 import time
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
@@ -33,6 +35,8 @@ __all__ = [
     "hf_gpt2_finetune_inference_distortion_handoff_lines",
     "hf_gpt2_finetune_rust_dependency_report",
     "hf_gpt2_finetune_scale_up_command",
+    "hf_gpt2_finetune_scale_up_preflight_lines",
+    "hf_gpt2_finetune_scale_up_preflight_report",
     "hf_gpt2_finetune_summary_lines",
     "hf_gpt2_finetune_training_telemetry_frame",
     "hf_gpt2_finetune_trainer_trace_callback",
@@ -2041,6 +2045,15 @@ def _command_flag_value(command: Sequence[object], flag: str) -> str | None:
     return None
 
 
+def _command_flag_values(command: Sequence[object], flag: str) -> list[str]:
+    values = [str(item) for item in command]
+    found = []
+    for index, item in enumerate(values):
+        if item == flag and index + 1 < len(values):
+            found.append(values[index + 1])
+    return found
+
+
 def _scaled_int_flag_value(
     command: Sequence[object],
     flag: str,
@@ -2098,6 +2111,13 @@ def _command_with_overrides(
             continue
         updated = _replace_or_append_command_flag(updated, str(flag), value)
     return updated
+
+
+def _nearest_existing_parent(path: Path) -> Path | None:
+    current = path
+    while not current.exists() and current.parent != current:
+        current = current.parent
+    return current if current.exists() else None
 
 
 def hf_gpt2_finetune_scale_up_command(
@@ -2204,6 +2224,237 @@ def hf_gpt2_finetune_scale_up_command(
         "applied_overrides": applied,
         "applied_override_count": len(applied),
     }
+
+
+def _scale_up_preflight_command_from_source(
+    command_or_artifact: str | Path | Mapping[str, object] | Sequence[object],
+) -> tuple[list[str] | None, str | None]:
+    if isinstance(command_or_artifact, (str, Path)):
+        path = Path(command_or_artifact)
+        if path.is_file():
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            command, _ = _scale_up_preflight_command_from_source(payload)
+            return command, str(path)
+        return None, str(path)
+    if isinstance(command_or_artifact, Mapping):
+        command_value = command_or_artifact.get("command")
+        if not isinstance(command_value, Sequence) or isinstance(
+            command_value,
+            (str, bytes),
+        ):
+            command_value = command_or_artifact.get("scale_up_candidate_command")
+        if isinstance(command_value, Sequence) and not isinstance(
+            command_value,
+            (str, bytes),
+        ):
+            return [str(item) for item in command_value], None
+        scale_up_command = hf_gpt2_finetune_scale_up_command(command_or_artifact)
+        command_value = scale_up_command.get("command")
+        if isinstance(command_value, Sequence) and not isinstance(
+            command_value,
+            (str, bytes),
+        ):
+            return [str(item) for item in command_value], None
+        return None, None
+    if isinstance(command_or_artifact, Sequence) and not isinstance(
+        command_or_artifact,
+        (str, bytes),
+    ):
+        return [str(item) for item in command_or_artifact], None
+    return None, None
+
+
+def hf_gpt2_finetune_scale_up_preflight_report(
+    command_or_artifact: str | Path | Mapping[str, object] | Sequence[object],
+) -> dict[str, object]:
+    """Preflight a resolved scale-up command before a longer FT run."""
+
+    command, source_path = _scale_up_preflight_command_from_source(command_or_artifact)
+    if not command:
+        return {
+            "row_type": "hf_gpt2_finetune_scale_up_preflight",
+            "status": "blocked",
+            "ready": False,
+            "source_path": source_path,
+            "command": command,
+            "error_count": 1,
+            "warning_count": 0,
+            "issues": [
+                {
+                    "severity": "error",
+                    "field": "command",
+                    "message": "scale-up artifact does not contain a command list",
+                }
+            ],
+            "inputs": [],
+            "outputs": [],
+        }
+
+    issues: list[dict[str, object]] = []
+    inputs: list[dict[str, object]] = []
+    outputs: list[dict[str, object]] = []
+    executable = command[0] if command else None
+    executable_resolved = None
+    if executable:
+        if os.sep in executable:
+            executable_path = Path(executable)
+            executable_resolved = str(executable_path)
+            if not executable_path.is_file():
+                issues.append(
+                    {
+                        "severity": "error",
+                        "field": "executable",
+                        "path": executable,
+                        "message": "command executable does not exist",
+                    }
+                )
+        else:
+            executable_resolved = shutil.which(executable)
+            if executable_resolved is None:
+                issues.append(
+                    {
+                        "severity": "error",
+                        "field": "executable",
+                        "path": executable,
+                        "message": "command executable is not on PATH",
+                    }
+                )
+    else:
+        issues.append(
+            {
+                "severity": "error",
+                "field": "executable",
+                "message": "command is empty",
+            }
+        )
+
+    bridge_script = (
+        command[1] if len(command) > 1 and not command[1].startswith("-") else None
+    )
+    if (
+        bridge_script
+        and bridge_script.endswith(".py")
+        and not Path(bridge_script).is_file()
+    ):
+        issues.append(
+            {
+                "severity": "error",
+                "field": "bridge_script",
+                "path": bridge_script,
+                "message": "bridge script does not exist",
+            }
+        )
+
+    for flag in (
+        "--train-file",
+        "--validation-file",
+        "--inference-distortion-sweep-report",
+        "--inference-distortion-probe",
+    ):
+        for value in _command_flag_values(command, flag):
+            path = Path(value)
+            exists = path.is_file()
+            inputs.append({"flag": flag, "path": str(path), "exists": exists})
+            if not exists:
+                issues.append(
+                    {
+                        "severity": "error",
+                        "field": flag,
+                        "path": str(path),
+                        "message": "input file does not exist",
+                    }
+                )
+
+    for flag in ("--output-dir", "--run-card", "--trainer-trace-jsonl"):
+        value = _command_flag_value(command, flag)
+        if value is None:
+            continue
+        path = Path(value)
+        parent = path if flag == "--output-dir" else path.parent
+        nearest = _nearest_existing_parent(parent)
+        writable = bool(nearest and os.access(nearest, os.W_OK))
+        outputs.append(
+            {
+                "flag": flag,
+                "path": str(path),
+                "exists": path.exists(),
+                "parent": str(parent),
+                "parent_exists": parent.exists(),
+                "nearest_existing_parent": None if nearest is None else str(nearest),
+                "nearest_existing_parent_writable": writable,
+            }
+        )
+        if nearest is None or not writable:
+            issues.append(
+                {
+                    "severity": "error",
+                    "field": flag,
+                    "path": str(path),
+                    "message": "output parent is not writable",
+                }
+            )
+        elif path.exists():
+            issues.append(
+                {
+                    "severity": "warning",
+                    "field": flag,
+                    "path": str(path),
+                    "message": "output target already exists",
+                }
+            )
+
+    error_count = sum(1 for issue in issues if issue.get("severity") == "error")
+    warning_count = sum(1 for issue in issues if issue.get("severity") == "warning")
+    return {
+        "row_type": "hf_gpt2_finetune_scale_up_preflight",
+        "status": "ready" if error_count == 0 else "blocked",
+        "ready": error_count == 0,
+        "source_path": source_path,
+        "command": command,
+        "command_display": _shell_join_args(command),
+        "command_preview": _cli_arg_preview(command),
+        "error_count": error_count,
+        "warning_count": warning_count,
+        "executable": executable,
+        "executable_resolved": executable_resolved,
+        "bridge_script": bridge_script,
+        "inputs": inputs,
+        "outputs": outputs,
+        "issues": issues,
+    }
+
+
+def hf_gpt2_finetune_scale_up_preflight_lines(
+    report_or_command: str | Path | Mapping[str, object] | Sequence[object],
+) -> list[str]:
+    """Render concise lines for a scale-up command preflight report."""
+
+    report = (
+        dict(report_or_command)
+        if isinstance(report_or_command, Mapping)
+        and report_or_command.get("row_type") == "hf_gpt2_finetune_scale_up_preflight"
+        else hf_gpt2_finetune_scale_up_preflight_report(report_or_command)
+    )
+    lines = [
+        (
+            "hf_gpt2_ft_scale_up_preflight "
+            f"status={report.get('status')} "
+            f"errors={report.get('error_count')} "
+            f"warnings={report.get('warning_count')} "
+            f"executable={report.get('executable_resolved') or report.get('executable')}"
+        )
+    ]
+    for issue in report.get("issues", []):
+        if not isinstance(issue, Mapping):
+            continue
+        lines.append(
+            "hf_gpt2_ft_scale_up_preflight_issue "
+            f"severity={issue.get('severity')} "
+            f"field={issue.get('field')} "
+            f"path={issue.get('path')} "
+            f"message={issue.get('message')}"
+        )
+    return lines
 
 
 def summarize_hf_gpt2_finetune_run_card(

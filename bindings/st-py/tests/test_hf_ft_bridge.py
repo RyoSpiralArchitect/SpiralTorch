@@ -2108,6 +2108,12 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             )
             scale_up = scale_up_module.run_scale_up(scale_up_args)
             rewritten = json.loads(rewritten_artifact_path.read_text())
+            direct_preflight = hf_ft.hf_gpt2_finetune_scale_up_preflight_report(
+                rewritten_artifact_path
+            )
+            direct_preflight_lines = (
+                hf_ft.hf_gpt2_finetune_scale_up_preflight_lines(direct_preflight)
+            )
             broken_artifact = dict(rewritten)
             broken_command = [str(item) for item in rewritten["command"]]
             broken_train_path = Path(tmp) / "missing-train.txt"
@@ -2124,6 +2130,9 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 ]
             )
             broken = scale_up_module.run_scale_up(broken_args)
+            direct_broken_preflight = st.hf_gpt2_finetune_scale_up_preflight_report(
+                broken_artifact_path
+            )
             from_command_artifact_args = scale_up_module.parse_args(
                 [
                     str(scale_up_artifact_path),
@@ -2198,6 +2207,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(scale_up["preflight_error_count"], 0)
         self.assertEqual(rewritten["status"], "ok")
         self.assertEqual(rewritten["preflight_status"], "ready")
+        self.assertEqual(direct_preflight["status"], "ready")
+        self.assertEqual(direct_preflight["error_count"], 0)
+        self.assertTrue(
+            any(
+                "hf_gpt2_ft_scale_up_preflight status=ready" in line
+                for line in direct_preflight_lines
+            )
+        )
         self.assertIn("seed13", scale_up["scale_up_candidate_label"])
         self.assertIn("--max-steps 64", scale_up["command_display"])
         self.assertIn("--max-train-samples 4096", scale_up["command_display"])
@@ -2206,6 +2223,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(scale_up["artifact_path"], str(rewritten_artifact_path))
         self.assertEqual(broken["preflight_status"], "blocked")
         self.assertEqual(broken["run_returncode"], 2)
+        self.assertEqual(direct_broken_preflight["status"], "blocked")
         self.assertTrue(
             any(
                 issue.get("field") == "--train-file"
@@ -3208,6 +3226,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         )
         self.assertIn("hf_gpt2_finetune_preflight_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_scale_up_command", st.__all__)
+        self.assertIn("hf_gpt2_finetune_scale_up_preflight_lines", st.__all__)
+        self.assertIn("hf_gpt2_finetune_scale_up_preflight_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_training_telemetry_frame", st.__all__)
         self.assertIn("hf_gpt2_finetune_trainer_trace_callback", st.__all__)
         self.assertIn("compare_hf_gpt2_finetune_run_cards", st.__all__)
@@ -3239,6 +3259,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIs(
             st.hf_gpt2_finetune_scale_up_command,
             hf_ft.hf_gpt2_finetune_scale_up_command,
+        )
+        self.assertIs(
+            st.hf_gpt2_finetune_scale_up_preflight_lines,
+            hf_ft.hf_gpt2_finetune_scale_up_preflight_lines,
+        )
+        self.assertIs(
+            st.hf_gpt2_finetune_scale_up_preflight_report,
+            hf_ft.hf_gpt2_finetune_scale_up_preflight_report,
         )
         self.assertIs(
             st.compare_hf_gpt2_finetune_run_cards,
