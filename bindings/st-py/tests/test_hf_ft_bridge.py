@@ -22,6 +22,9 @@ EXAMPLE_PATH = (
 SWEEP_PATH = (
     Path(__file__).resolve().parents[1] / "examples" / "hf_gpt2_finetune_sweep.py"
 )
+SCALE_UP_PATH = (
+    Path(__file__).resolve().parents[1] / "examples" / "hf_gpt2_finetune_scale_up.py"
+)
 
 
 def load_bridge_example():
@@ -39,6 +42,17 @@ def load_sweep_example():
     spec = importlib.util.spec_from_file_location(
         "hf_gpt2_finetune_sweep_test",
         SWEEP_PATH,
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_scale_up_example():
+    spec = importlib.util.spec_from_file_location(
+        "hf_gpt2_finetune_scale_up_test",
+        SCALE_UP_PATH,
     )
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -2015,6 +2029,137 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 for line in sweep_lines
             )
         )
+
+    def test_scale_up_example_replays_sweep_report_and_command_artifact(self) -> None:
+        sweep_module = load_sweep_example()
+        scale_up_module = load_scale_up_example()
+        with tempfile.TemporaryDirectory() as tmp:
+            train_path = Path(tmp) / "train.txt"
+            train_path.write_text("alpha spiral\nbeta zspace\n", encoding="utf-8")
+            out_dir = Path(tmp) / "sweep"
+            sweep_args = sweep_module.parse_args(
+                [
+                    "--out-dir",
+                    str(out_dir),
+                    "--train-file",
+                    str(train_path),
+                    "--validation-fraction",
+                    "0.5",
+                    "--block-size-values",
+                    "8",
+                    "--learning-rate-values",
+                    "0.001",
+                    "--max-step-values",
+                    "1",
+                    "--seed-values",
+                    "7,13",
+                ]
+            )
+
+            def fake_sweep_run(command, *, check=False):
+                del check
+                run_card_path = Path(command[command.index("--run-card") + 1])
+                seed = int(command[command.index("--seed") + 1])
+                loss = 1.8 if seed == 7 else 1.3
+                hf_ft.write_hf_gpt2_finetune_run_card(
+                    {
+                        "row_type": "hf_gpt2_finetune_run_card",
+                        "model_name": "gpt2",
+                        "dataset_name": "local-files",
+                        "dataset_source": "local_files",
+                        "dataset_fit_report": {
+                            "verdict": "train_eval_ready",
+                            "train_ready": True,
+                            "eval_ready": True,
+                        },
+                        "eval_after_train": hf_ft.hf_gpt2_finetune_eval_report(
+                            stage="after_train",
+                            metrics={"eval_loss": loss},
+                        ),
+                    },
+                    run_card_path,
+                )
+                return types.SimpleNamespace(returncode=0)
+
+            with mock.patch.object(
+                sweep_module.subprocess,
+                "run",
+                side_effect=fake_sweep_run,
+            ):
+                sweep_module.run_sweep(sweep_args)
+
+            sweep_report_path = out_dir / "sweep-report.json"
+            scale_up_artifact_path = out_dir / "scale-up-command.json"
+            rewritten_artifact_path = out_dir / "scale-up-command-long.json"
+            scale_up_args = scale_up_module.parse_args(
+                [
+                    str(sweep_report_path),
+                    "--write-command",
+                    str(rewritten_artifact_path),
+                    "--max-steps",
+                    "64",
+                    "--max-train-samples",
+                    "4096",
+                    "--max-eval-samples",
+                    "256",
+                    "--output-dir",
+                    str(out_dir / "long-run"),
+                ]
+            )
+            scale_up = scale_up_module.run_scale_up(scale_up_args)
+            rewritten = json.loads(rewritten_artifact_path.read_text())
+            from_command_artifact_args = scale_up_module.parse_args(
+                [
+                    str(scale_up_artifact_path),
+                    "--output-suffix",
+                    "longer",
+                ]
+            )
+            from_command_artifact = scale_up_module.run_scale_up(
+                from_command_artifact_args
+            )
+
+            run_args = scale_up_module.parse_args(
+                [
+                    str(rewritten_artifact_path),
+                    "--run",
+                    "--max-steps",
+                    "128",
+                    "--output-dir",
+                    str(out_dir / "long-run-exec"),
+                ]
+            )
+
+            def fake_scale_up_run(command, *, check=False):
+                del check
+                self.assertIn("--max-steps", command)
+                self.assertEqual(command[command.index("--max-steps") + 1], "128")
+                self.assertIn("--output-dir", command)
+                self.assertEqual(
+                    command[command.index("--output-dir") + 1],
+                    str(out_dir / "long-run-exec"),
+                )
+                return types.SimpleNamespace(returncode=0)
+
+            with mock.patch.object(
+                scale_up_module.subprocess,
+                "run",
+                side_effect=fake_scale_up_run,
+            ) as run_mock:
+                executed = scale_up_module.run_scale_up(run_args)
+
+        self.assertEqual(scale_up["status"], "ok")
+        self.assertEqual(rewritten["status"], "ok")
+        self.assertIn("seed13", scale_up["scale_up_candidate_label"])
+        self.assertIn("--max-steps 64", scale_up["command_display"])
+        self.assertIn("--max-train-samples 4096", scale_up["command_display"])
+        self.assertIn("--max-eval-samples 256", scale_up["command_display"])
+        self.assertIn(f"--output-dir {out_dir / 'long-run'}", scale_up["command_display"])
+        self.assertEqual(scale_up["artifact_path"], str(rewritten_artifact_path))
+        self.assertEqual(from_command_artifact["status"], "ok")
+        self.assertIn("-longer", from_command_artifact["command_display"])
+        self.assertEqual(executed["run_returncode"], 0)
+        run_mock.assert_called_once()
 
     def test_sweep_example_resume_existing_reuses_successful_run_cards(self) -> None:
         module = load_sweep_example()

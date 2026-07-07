@@ -595,7 +595,21 @@ into a shell-safe longer-run command, defaulting to doubled `--max-steps` and
 `--max-train-samples` while writing a fresh run card and trainer trace under a
 `-scaleup` output directory; the sweep CLI writes the same payload to
 `scale-up-command.json` and surfaces its status/preview in the embedded
-summary. Add
+summary. To inspect or execute that next run without hand-copying shell text:
+
+```bash
+PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_gpt2_finetune_scale_up.py \
+  runs/gpt2-small-zspace-sweep/sweep-report.json \
+  --write-command runs/gpt2-small-zspace-sweep/scale-up-command-long.json \
+  --max-steps 2000 \
+  --max-train-samples 200000
+
+PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_gpt2_finetune_scale_up.py \
+  runs/gpt2-small-zspace-sweep/scale-up-command-long.json \
+  --run
+```
+
+Add
 `--generation-from-inference-distortion` with a
 generation prompt to reuse the handoff's `recommended_processor_kwargs` as the
 Z-Space/repression logits processor for before/after generated samples; omit it
