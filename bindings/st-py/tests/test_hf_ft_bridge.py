@@ -45,6 +45,11 @@ WAIT_LAUNCH_PATH = (
     / "examples"
     / "hf_gpt2_finetune_wait_launch.py"
 )
+WAIT_LAUNCH_SUMMARY_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "examples"
+    / "hf_gpt2_finetune_wait_launch_summary.py"
+)
 
 
 def load_bridge_example():
@@ -95,6 +100,17 @@ def load_wait_launch_example():
     spec = importlib.util.spec_from_file_location(
         "hf_gpt2_finetune_wait_launch_test",
         WAIT_LAUNCH_PATH,
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_wait_launch_summary_example():
+    spec = importlib.util.spec_from_file_location(
+        "hf_gpt2_finetune_wait_launch_summary_test",
+        WAIT_LAUNCH_SUMMARY_PATH,
     )
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -3104,6 +3120,89 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(stored["launched_pid"], launched_pid_value)
         self.assertEqual(stored["launched_log_file"], str(launched_log))
         self.assertIn("next-run-ready", launched_log_text)
+
+    def test_wait_launch_summary_example_summarizes_history(self) -> None:
+        module = load_wait_launch_summary_example()
+        with tempfile.TemporaryDirectory() as tmp:
+            history = Path(tmp) / "wait-launch-history.jsonl"
+            rows = [
+                {
+                    "row_type": "hf_gpt2_finetune_wait_launch",
+                    "status": "waiting_for_process",
+                    "time_unix_s": 10.0,
+                    "process_alive": True,
+                    "checkpoint_ready": False,
+                    "status_card_status": "waiting_for_process",
+                    "launched_pid": None,
+                    "returncode": None,
+                },
+                {
+                    "row_type": "hf_gpt2_finetune_wait_launch",
+                    "status": "launching",
+                    "time_unix_s": 70.0,
+                    "process_alive": False,
+                    "checkpoint_ready": True,
+                    "status_card_status": "ok",
+                    "launched_pid": 123,
+                    "launched_pid_file": "next.pid",
+                    "launched_log_file": "next.log",
+                    "returncode": None,
+                },
+                {
+                    "row_type": "hf_gpt2_finetune_wait_launch",
+                    "status": "finished",
+                    "time_unix_s": 80.0,
+                    "process_alive": False,
+                    "checkpoint_ready": True,
+                    "status_card_status": "ok",
+                    "launched_pid": 123,
+                    "returncode": 0,
+                },
+            ]
+            history.write_text(
+                "\n".join(json.dumps(row) for row in rows) + "\n",
+                encoding="utf-8",
+            )
+
+            loaded = module._load_history(history)
+            summary = module.summarize_history(
+                loaded,
+                label="fineweb",
+                history_jsonl=history,
+            )
+            lines = module.history_lines(summary, loaded, tail=2)
+            ok = module.main([str(history), "--require-launched"])
+
+        self.assertEqual(summary["row_count"], 3)
+        self.assertEqual(summary["duration_seconds"], 70.0)
+        self.assertEqual(summary["last_status"], "finished")
+        self.assertTrue(summary["launched"])
+        self.assertEqual(summary["last_launched_pid"], 123)
+        self.assertEqual(summary["last_returncode"], 0)
+        self.assertEqual(ok, 0)
+        self.assertTrue(any("launched=true" in line for line in lines))
+
+    def test_wait_launch_summary_example_require_launched_fails_before_launch(self) -> None:
+        module = load_wait_launch_summary_example()
+        with tempfile.TemporaryDirectory() as tmp:
+            history = Path(tmp) / "wait-launch-history.jsonl"
+            history.write_text(
+                json.dumps(
+                    {
+                        "row_type": "hf_gpt2_finetune_wait_launch",
+                        "status": "waiting_for_process",
+                        "time_unix_s": 10.0,
+                        "process_alive": True,
+                        "checkpoint_ready": False,
+                        "status_card_status": "waiting_for_process",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            result = module.main([str(history), "--require-launched"])
+
+        self.assertEqual(result, 2)
 
     def test_example_trainer_eval_report_wraps_evaluate(self) -> None:
         module = load_bridge_example()
