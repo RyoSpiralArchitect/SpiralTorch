@@ -32,11 +32,19 @@ class ZSpaceRepressionLogitsProcessorTests(unittest.TestCase):
 
         processed = processor(input_ids, scores)
         report = processor.report()
+        aggregate_only = processor.report(limit=0)
 
         self.assertEqual(int(torch.argmax(processed, dim=-1).item()), 1)
         self.assertEqual(report["calls"], 1)
+        self.assertEqual(report["reported_rows"], 1)
         self.assertEqual(report["top_token_changed_count"], 1)
+        self.assertEqual(report["reported_top_token_changed_count"], 1)
+        self.assertEqual(aggregate_only["calls"], 1)
+        self.assertEqual(aggregate_only["reported_rows"], 0)
+        self.assertEqual(aggregate_only["rows"], [])
+        self.assertEqual(aggregate_only["top_token_changed_count"], 1)
         self.assertEqual(report["rows"][0]["backend"], "math_zspace_softmax")
+        self.assertEqual(report["backend"], "math_zspace_softmax")
         self.assertGreater(report["rows"][0]["max_repression"], 0.0)
 
     def test_softmax_only_records_entropy_without_reordering_greedy(self) -> None:

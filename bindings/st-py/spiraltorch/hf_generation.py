@@ -280,31 +280,54 @@ class ZSpaceRepressionLogitsProcessor:
         return processed
 
     def report(self, *, limit: int | None = None) -> dict[str, object]:
-        reports = self._reports[-limit:] if limit is not None else list(self._reports)
+        all_reports = list(self._reports)
+        if limit is None:
+            row_reports = all_reports
+        elif limit <= 0:
+            row_reports = []
+        else:
+            row_reports = all_reports[-limit:]
         rows = [
             row
-            for report in reports
+            for report in row_reports
             for row in report.get("rows", [])
             if isinstance(row, Mapping)
         ]
+        aggregate_rows = [
+            row
+            for report in all_reports
+            for row in report.get("rows", [])
+            if isinstance(row, Mapping)
+        ]
+        backends = [
+            str(row["backend"])
+            for row in aggregate_rows
+            if row.get("backend")
+        ]
         changed = sum(1 for row in rows if row.get("top_token_changed") is True)
+        aggregate_changed = sum(
+            1 for row in aggregate_rows if row.get("top_token_changed") is True
+        )
         temperatures = [
             float(row["temperature"])
-            for row in rows
+            for row in aggregate_rows
             if isinstance(row.get("temperature"), (int, float))
         ]
         entropies = [
             float(row["entropy"])
-            for row in rows
+            for row in aggregate_rows
             if isinstance(row.get("entropy"), (int, float))
         ]
         return {
             "row_type": "zspace_repression_generation_control",
-            "status": "ok" if reports else "unused",
+            "status": "ok" if all_reports else "unused",
             "processor": "ZSpaceRepressionLogitsProcessor",
-            "calls": len(reports),
+            "calls": len(all_reports),
+            "reported_rows": len(rows),
+            "backend": backends[0] if backends else None,
             "rows": rows,
-            "top_token_changed_count": changed,
+            "top_token_changed_count": aggregate_changed,
+            "reported_top_token_changed_count": changed,
             "temperature_min": min(temperatures) if temperatures else None,
             "temperature_max": max(temperatures) if temperatures else None,
             "entropy_min": min(entropies) if entropies else None,

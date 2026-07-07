@@ -204,6 +204,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--generation-repression-strength", type=float, default=1.0)
     parser.add_argument("--generation-last-token-repression", type=float, default=0.5)
     parser.add_argument(
+        "--generation-zspace-report-limit",
+        type=int,
+        default=64,
+        help=(
+            "Maximum number of recent Z-Space generation-control calls to keep "
+            "in each run-card generation_control.rows payload. Use 0 for "
+            "aggregate-only telemetry."
+        ),
+    )
+    parser.add_argument(
         "--generation-zspace-keep-non-top-k",
         action="store_true",
         help="Leave logits outside the Z-Space top-k set unchanged.",
@@ -327,6 +337,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             )
         if args.generation_repression_window < 0:
             parser.error("--generation-repression-window must be non-negative")
+        if args.generation_zspace_report_limit < 0:
+            parser.error("--generation-zspace-report-limit must be non-negative")
         if args.generation_repression_strength < 0.0 or not math.isfinite(
             args.generation_repression_strength
         ):
@@ -863,13 +875,17 @@ def _generation_logits_processor_list(processor: Any) -> Any:
     return [processor]
 
 
-def _generation_processor_report(processor: Any | None) -> Mapping[str, object] | None:
+def _generation_processor_report_for_args(
+    processor: Any | None,
+    args: argparse.Namespace,
+) -> Mapping[str, object] | None:
     if processor is None:
         return None
     report = getattr(processor, "report", None)
     if not callable(report):
         return None
-    payload = report()
+    limit = getattr(args, "generation_zspace_report_limit", 64)
+    payload = report(limit=int(limit))
     return dict(payload) if isinstance(payload, Mapping) else None
 
 
@@ -1042,7 +1058,10 @@ def _generation_sample(
             max_new_tokens=args.generation_max_new_tokens,
             generation_method=generation_method,
             fallback_error=fallback_error,
-            generation_control=_generation_processor_report(logits_processor),
+            generation_control=_generation_processor_report_for_args(
+                logits_processor,
+                args,
+            ),
         )
     except Exception as exc:
         return hf_gpt2_finetune_generation_report(
@@ -1051,7 +1070,10 @@ def _generation_sample(
             max_new_tokens=args.generation_max_new_tokens,
             generation_method=generation_method,
             fallback_error=fallback_error,
-            generation_control=_generation_processor_report(logits_processor),
+            generation_control=_generation_processor_report_for_args(
+                logits_processor,
+                args,
+            ),
             error=f"{exc.__class__.__name__}: {exc}",
         )
 

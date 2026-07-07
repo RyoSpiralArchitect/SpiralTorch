@@ -117,6 +117,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--generation-repression-window", type=int, default=32)
     parser.add_argument("--generation-repression-strength", type=float, default=1.0)
     parser.add_argument("--generation-last-token-repression", type=float, default=0.5)
+    parser.add_argument("--generation-zspace-report-limit", type=int, default=64)
     parser.add_argument("--generation-zspace-keep-non-top-k", action="store_true")
     parser.add_argument("--generation-zspace-no-native", action="store_true")
     parser.add_argument("--runtime-device-backend", action="append", default=[])
@@ -220,6 +221,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             )
         if args.generation_repression_window < 0:
             parser.error("--generation-repression-window must be non-negative")
+        if args.generation_zspace_report_limit < 0:
+            parser.error("--generation-zspace-report-limit must be non-negative")
         if args.generation_repression_strength < 0.0 or not math.isfinite(
             args.generation_repression_strength
         ):
@@ -441,6 +444,12 @@ def _bridge_command(
                 [
                     "--generation-last-token-repression",
                     str(args.generation_last_token_repression),
+                ]
+            )
+            command.extend(
+                [
+                    "--generation-zspace-report-limit",
+                    str(args.generation_zspace_report_limit),
                 ]
             )
             if args.generation_zspace_keep_non_top_k:

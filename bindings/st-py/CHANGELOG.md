@@ -78,8 +78,10 @@
   `ZSpaceRepressionLogitsProcessor` and bridge/sweep
   `--generation-zspace-softmax` flags so local GPT-2 samples can apply a
   repetition-repression field before Z-Space entropy-temperature softmax and
-  record the resulting control telemetry in run cards; include a sanitized
-  2560-step GPT-2 generation-control sample artifact.
+  record bounded `generation_control` telemetry in run cards; run-card and
+  sweep summaries surface top-token-change, entropy, temperature, and backend
+  fields, and include a sanitized 2560-step GPT-2 generation-control sample
+  artifact.
 - Documentation: clarify the hard dependency boundary for larger local GPT-2
   FT runs: Rust keeps tensor/nn/text/logic/frac/rl/WGPU surfaces in the wheel,
   while Python explicitly brings Transformers, Torch, datasets, pyarrow,

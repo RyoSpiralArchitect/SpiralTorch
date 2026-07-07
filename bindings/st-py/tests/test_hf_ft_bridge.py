@@ -445,6 +445,16 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 generated_continuation_text=" learning geometry.",
                 input_token_count=3,
                 output_token_count=7,
+                generation_control={
+                    "status": "ok",
+                    "calls": 7,
+                    "top_token_changed_count": 2,
+                    "temperature_min": 0.7,
+                    "temperature_max": 1.2,
+                    "entropy_min": 2.8,
+                    "entropy_max": 4.1,
+                    "backend": "spiraltorch_zspace_softmax",
+                },
             ),
             "trainer_metrics": {"train_loss": 1.4, "train_runtime": 3.0},
             "trainer_trace_summary": {
@@ -527,6 +537,16 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(summary["eval_loss_delta"], -0.5)
         self.assertTrue(summary["eval_loss_improved"])
         self.assertTrue(summary["generation_continuation_changed"])
+        self.assertEqual(summary["generation_after_control_status"], "ok")
+        self.assertEqual(summary["generation_after_control_calls"], 7)
+        self.assertEqual(
+            summary["generation_after_control_top_token_changed_count"],
+            2,
+        )
+        self.assertEqual(
+            summary["generation_after_control_backend"],
+            "spiraltorch_zspace_softmax",
+        )
         self.assertEqual(summary["trainer_train_loss"], 1.4)
         self.assertEqual(summary["trace_event_count"], 4)
         self.assertEqual(comparison["run_count"], 2)
@@ -545,6 +565,16 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(sweep_summary["top_runs"][0]["run_label"], "strong")
         self.assertEqual(sweep_summary["top_runs"][0]["trainer_runtime"], 3.0)
         self.assertEqual(
+            sweep_summary["top_runs"][0][
+                "generation_after_control_top_token_changed_count"
+            ],
+            2,
+        )
+        self.assertEqual(
+            sweep_summary["top_runs"][0]["generation_after_control_backend"],
+            "spiraltorch_zspace_softmax",
+        )
+        self.assertEqual(
             sweep_summary["top_runs"][0]["trace_log_steps_per_second_mean"],
             0.5,
         )
@@ -556,6 +586,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("trainer_sps=None", sweep_lines[2])
         self.assertIn("trace_sps_mean=0.5", sweep_lines[2])
         self.assertIn("eval_series=0=2.0,3=1.5", sweep_lines[2])
+        self.assertIn("zcontrol_changed=2", sweep_lines[2])
+        self.assertIn("zcontrol_backend=spiraltorch_zspace_softmax", sweep_lines[2])
 
         trace_card = dict(base_card)
         trace_card["eval_after_train"] = hf_ft.hf_gpt2_finetune_eval_report(
@@ -627,6 +659,13 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                     "0.8",
                     "--generation-top-k",
                     "12",
+                    "--generation-zspace-softmax",
+                    "--generation-zspace-entropy-target",
+                    "3.0",
+                    "--generation-repression-strength",
+                    "1.25",
+                    "--generation-zspace-report-limit",
+                    "2",
                     "--eval-before-train",
                     "--eval-after-train-policy",
                     "skip-if-final-step-eval",
@@ -660,6 +699,13 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("--train", first_command)
         self.assertIn("--corpus-scan", first_command)
         self.assertIn("--generation-do-sample", first_command)
+        self.assertIn("--generation-zspace-softmax", first_command)
+        self.assertIn("--generation-zspace-entropy-target", first_command)
+        self.assertIn("3.0", first_command)
+        self.assertIn("--generation-repression-strength", first_command)
+        self.assertIn("1.25", first_command)
+        self.assertIn("--generation-zspace-report-limit", first_command)
+        self.assertIn("2", first_command)
         self.assertIn("--eval-before-train", first_command)
         self.assertIn("--eval-after-train-policy", first_command)
         self.assertIn("skip-if-final-step-eval", first_command)

@@ -1162,6 +1162,26 @@ def _metric_number(
     return _safe_number(row.get(key))
 
 
+def _generation_control(
+    row: Mapping[str, object],
+) -> dict[str, object]:
+    return _mapping_item(row, "generation_control")
+
+
+def _generation_control_backend(
+    control: Mapping[str, object],
+) -> str | None:
+    backend = control.get("backend")
+    if backend:
+        return str(backend)
+    rows = control.get("rows")
+    if isinstance(rows, Sequence) and not isinstance(rows, (str, bytes)):
+        for row in rows:
+            if isinstance(row, Mapping) and row.get("backend"):
+                return str(row.get("backend"))
+    return None
+
+
 def _effective_eval_after_loss(
     eval_after: Mapping[str, object],
     trainer_trace: Mapping[str, object],
@@ -1207,6 +1227,8 @@ def summarize_hf_gpt2_finetune_run_card(
     eval_after = _mapping_item(card, "eval_after_train")
     generation_before = _mapping_item(card, "generation_before_train")
     generation_after = _mapping_item(card, "generation_after_train")
+    generation_before_control = _generation_control(generation_before)
+    generation_after_control = _generation_control(generation_after)
     trainer_metrics = _mapping_item(card, "trainer_metrics")
     trainer_trace = _trainer_trace_summary_for_card(card)
     corpus_scan = _mapping_item(card, "corpus_scan_report")
@@ -1305,8 +1327,70 @@ def summarize_hf_gpt2_finetune_run_card(
         "trace_eval_loss_series": trainer_trace.get("trace_eval_loss_series"),
         "generation_before_status": generation_before.get("status"),
         "generation_before_method": generation_before.get("generation_method"),
+        "generation_before_control_status": generation_before_control.get("status"),
+        "generation_before_control_calls": _metric_number(
+            generation_before_control,
+            "calls",
+        ),
+        "generation_before_control_top_token_changed_count": _metric_number(
+            generation_before_control,
+            "top_token_changed_count",
+        ),
+        "generation_before_control_temperature_min": _metric_number(
+            generation_before_control,
+            "temperature_min",
+        ),
+        "generation_before_control_temperature_max": _metric_number(
+            generation_before_control,
+            "temperature_max",
+        ),
+        "generation_before_control_entropy_min": _metric_number(
+            generation_before_control,
+            "entropy_min",
+        ),
+        "generation_before_control_entropy_max": _metric_number(
+            generation_before_control,
+            "entropy_max",
+        ),
+        "generation_before_control_backend": _generation_control_backend(
+            generation_before_control
+        ),
+        "generation_before_control_native_error": generation_before_control.get(
+            "native_error"
+        ),
         "generation_after_status": generation_after.get("status"),
         "generation_after_method": generation_after.get("generation_method"),
+        "generation_after_control_status": generation_after_control.get("status"),
+        "generation_after_control_calls": _metric_number(
+            generation_after_control,
+            "calls",
+        ),
+        "generation_after_control_top_token_changed_count": _metric_number(
+            generation_after_control,
+            "top_token_changed_count",
+        ),
+        "generation_after_control_temperature_min": _metric_number(
+            generation_after_control,
+            "temperature_min",
+        ),
+        "generation_after_control_temperature_max": _metric_number(
+            generation_after_control,
+            "temperature_max",
+        ),
+        "generation_after_control_entropy_min": _metric_number(
+            generation_after_control,
+            "entropy_min",
+        ),
+        "generation_after_control_entropy_max": _metric_number(
+            generation_after_control,
+            "entropy_max",
+        ),
+        "generation_after_control_backend": _generation_control_backend(
+            generation_after_control
+        ),
+        "generation_after_control_native_error": generation_after_control.get(
+            "native_error"
+        ),
         "generation_after_new_token_count": _metric_number(
             generation_after,
             "new_token_count",
@@ -1403,6 +1487,24 @@ def _ranked_sweep_rows(
                 "eval_loss_improved": row.get("eval_loss_improved"),
                 "generation_continuation_changed": row.get(
                     "generation_continuation_changed"
+                ),
+                "generation_after_control_top_token_changed_count": _safe_number(
+                    row.get("generation_after_control_top_token_changed_count")
+                ),
+                "generation_after_control_temperature_min": _safe_number(
+                    row.get("generation_after_control_temperature_min")
+                ),
+                "generation_after_control_temperature_max": _safe_number(
+                    row.get("generation_after_control_temperature_max")
+                ),
+                "generation_after_control_entropy_min": _safe_number(
+                    row.get("generation_after_control_entropy_min")
+                ),
+                "generation_after_control_entropy_max": _safe_number(
+                    row.get("generation_after_control_entropy_max")
+                ),
+                "generation_after_control_backend": row.get(
+                    "generation_after_control_backend"
                 ),
                 "trainer_train_loss": _safe_number(row.get("trainer_train_loss")),
                 "trainer_runtime": _safe_number(row.get("trainer_runtime")),
@@ -1553,7 +1655,9 @@ def summarize_hf_gpt2_finetune_sweep_report_lines(
             f"trainer_sps={row.get('trainer_steps_per_second')} "
             f"trace_sps_mean={row.get('trace_log_steps_per_second_mean')} "
             f"eval_series={row.get('trace_eval_loss_series')} "
-            f"changed={row.get('generation_continuation_changed')}"
+            f"changed={row.get('generation_continuation_changed')} "
+            f"zcontrol_changed={row.get('generation_after_control_top_token_changed_count')} "
+            f"zcontrol_backend={row.get('generation_after_control_backend')}"
         )
     return lines
 
