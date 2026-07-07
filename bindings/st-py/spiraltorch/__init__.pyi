@@ -583,6 +583,20 @@ def summarize_hf_gpt2_finetune_sweep_report(
     top_n: int = ...,
 ) -> Dict[str, object]: ...
 
+def hf_gpt2_finetune_scale_up_command(
+    report_or_summary: str | PathLike[str] | Mapping[str, object],
+    *,
+    max_steps: int | None = ...,
+    max_steps_multiplier: float | None = ...,
+    max_train_samples: int | None = ...,
+    max_train_samples_multiplier: float | None = ...,
+    max_eval_samples: int | None = ...,
+    output_dir: str | PathLike[str] | None = ...,
+    output_suffix: str = ...,
+    run_card: str | PathLike[str] | None = ...,
+    trainer_trace_jsonl: str | PathLike[str] | None = ...,
+) -> Dict[str, object]: ...
+
 def summarize_hf_gpt2_finetune_sweep_report_lines(
     report_or_path: str | PathLike[str] | Mapping[str, object],
     *,
@@ -8431,6 +8445,7 @@ __all__ = [
     "hf_gpt2_finetune_inference_distortion_handoff_lines",
     "hf_gpt2_finetune_preflight_report",
     "hf_gpt2_finetune_rust_dependency_report",
+    "hf_gpt2_finetune_scale_up_command",
     "hf_gpt2_finetune_summary_lines",
     "hf_gpt2_finetune_training_telemetry_frame",
     "hf_gpt2_finetune_trainer_trace_callback",

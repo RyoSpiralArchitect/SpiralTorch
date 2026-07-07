@@ -587,7 +587,11 @@ strengths beside loss/eval telemetry, so post-run comparisons can distinguish
 the next longer run prefer near-best eval loss with lower distortion pressure
 instead of blindly following raw eval loss alone; those fields include the
 candidate run card, trace path, output directory, and replay command when the
-sweep report has matching run metadata. Add
+sweep report has matching run metadata. From Python,
+`st.hf_gpt2_finetune_scale_up_command(summary_or_report)` turns that candidate
+into a shell-safe longer-run command, defaulting to doubled `--max-steps` and
+`--max-train-samples` while writing a fresh run card and trainer trace under a
+`-scaleup` output directory. Add
 `--generation-from-inference-distortion` with a
 generation prompt to reuse the handoff's `recommended_processor_kwargs` as the
 Z-Space/repression logits processor for before/after generated samples; omit it

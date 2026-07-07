@@ -32,6 +32,7 @@ __all__ = [
     "hf_gpt2_finetune_inference_distortion_handoff_report",
     "hf_gpt2_finetune_inference_distortion_handoff_lines",
     "hf_gpt2_finetune_rust_dependency_report",
+    "hf_gpt2_finetune_scale_up_command",
     "hf_gpt2_finetune_summary_lines",
     "hf_gpt2_finetune_training_telemetry_frame",
     "hf_gpt2_finetune_trainer_trace_callback",
@@ -2030,6 +2031,179 @@ def _shell_join_args(args: Sequence[object]) -> str:
     if not values:
         return ""
     return shlex.join(values)
+
+
+def _command_flag_value(command: Sequence[object], flag: str) -> str | None:
+    values = [str(item) for item in command]
+    for index, item in enumerate(values):
+        if item == flag and index + 1 < len(values):
+            return values[index + 1]
+    return None
+
+
+def _scaled_int_flag_value(
+    command: Sequence[object],
+    flag: str,
+    *,
+    explicit: int | None,
+    multiplier: float | None,
+) -> int | None:
+    if explicit is not None:
+        return int(explicit)
+    if multiplier is None:
+        return None
+    current = _safe_number(_command_flag_value(command, flag))
+    if current is None or float(current) <= 0.0:
+        return None
+    return max(1, int(math.ceil(float(current) * float(multiplier))))
+
+
+def _replace_or_append_command_flag(
+    command: Sequence[object],
+    flag: str,
+    value: object,
+) -> list[str]:
+    values = [str(item) for item in command]
+    replacement = str(value)
+    for index, item in enumerate(values):
+        if item != flag:
+            continue
+        if index + 1 < len(values):
+            values[index + 1] = replacement
+        else:
+            values.append(replacement)
+        return values
+    values.extend([flag, replacement])
+    return values
+
+
+def _path_with_suffix(path: object, suffix: str) -> str | None:
+    if path is None:
+        return None
+    text = str(path)
+    if not text:
+        return None
+    clean_suffix = str(suffix or "scaleup").strip() or "scaleup"
+    value = Path(text)
+    return str(value.with_name(f"{value.name}-{clean_suffix}"))
+
+
+def _command_with_overrides(
+    command: Sequence[object],
+    overrides: Mapping[str, object],
+) -> list[str]:
+    updated = [str(item) for item in command]
+    for flag, value in overrides.items():
+        if value is None:
+            continue
+        updated = _replace_or_append_command_flag(updated, str(flag), value)
+    return updated
+
+
+def hf_gpt2_finetune_scale_up_command(
+    report_or_summary: str | Path | Mapping[str, object],
+    *,
+    max_steps: int | None = None,
+    max_steps_multiplier: float | None = 2.0,
+    max_train_samples: int | None = None,
+    max_train_samples_multiplier: float | None = 2.0,
+    max_eval_samples: int | None = None,
+    output_dir: str | Path | None = None,
+    output_suffix: str = "scaleup",
+    run_card: str | Path | None = None,
+    trainer_trace_jsonl: str | Path | None = None,
+) -> dict[str, object]:
+    """Build a longer FT command from the distortion-adjusted scale-up candidate."""
+
+    if isinstance(report_or_summary, Mapping) and report_or_summary.get(
+        "row_type"
+    ) == "hf_gpt2_finetune_sweep_report_summary":
+        summary = dict(report_or_summary)
+    else:
+        summary = summarize_hf_gpt2_finetune_sweep_report(report_or_summary)
+    command_value = summary.get("scale_up_candidate_command")
+    if not isinstance(command_value, Sequence) or isinstance(
+        command_value,
+        (str, bytes),
+    ):
+        return {
+            "row_type": "hf_gpt2_finetune_scale_up_command",
+            "status": "missing_candidate_command",
+            "scale_up_candidate_label": summary.get("scale_up_candidate_label"),
+        }
+    base_command = [str(item) for item in command_value]
+    resolved_output_dir = (
+        str(output_dir)
+        if output_dir is not None
+        else _path_with_suffix(
+            summary.get("scale_up_candidate_output_dir")
+            or summary.get("scale_up_candidate_run_dir")
+            or _command_flag_value(base_command, "--output-dir"),
+            output_suffix,
+        )
+    )
+    resolved_run_card = (
+        str(run_card)
+        if run_card is not None
+        else (
+            str(Path(resolved_output_dir) / "spiraltorch-hf-gpt2-ft-run-card.json")
+            if resolved_output_dir
+            else None
+        )
+    )
+    resolved_trace = (
+        str(trainer_trace_jsonl)
+        if trainer_trace_jsonl is not None
+        else (
+            str(
+                Path(resolved_output_dir)
+                / "spiraltorch-hf-gpt2-ft-trainer-trace.jsonl"
+            )
+            if resolved_output_dir
+            else None
+        )
+    )
+    resolved_max_steps = _scaled_int_flag_value(
+        base_command,
+        "--max-steps",
+        explicit=max_steps,
+        multiplier=max_steps_multiplier,
+    )
+    resolved_max_train_samples = _scaled_int_flag_value(
+        base_command,
+        "--max-train-samples",
+        explicit=max_train_samples,
+        multiplier=max_train_samples_multiplier,
+    )
+    overrides = {
+        "--output-dir": resolved_output_dir,
+        "--run-card": resolved_run_card,
+        "--trainer-trace-jsonl": resolved_trace,
+        "--max-steps": resolved_max_steps,
+        "--max-train-samples": resolved_max_train_samples,
+        "--max-eval-samples": max_eval_samples,
+    }
+    command = _command_with_overrides(base_command, overrides)
+    applied = {key: value for key, value in overrides.items() if value is not None}
+    return {
+        "row_type": "hf_gpt2_finetune_scale_up_command",
+        "status": "ok",
+        "scale_up_candidate_label": summary.get("scale_up_candidate_label"),
+        "scale_up_candidate_reason": summary.get("scale_up_candidate_reason"),
+        "scale_up_candidate_distortion_adjusted_eval_loss": summary.get(
+            "scale_up_candidate_distortion_adjusted_eval_loss"
+        ),
+        "scale_up_candidate_distortion_pressure_index": summary.get(
+            "scale_up_candidate_distortion_pressure_index"
+        ),
+        "base_command": base_command,
+        "base_command_display": _shell_join_args(base_command),
+        "command": command,
+        "command_display": _shell_join_args(command),
+        "command_preview": _cli_arg_preview(command),
+        "applied_overrides": applied,
+        "applied_override_count": len(applied),
+    }
 
 
 def summarize_hf_gpt2_finetune_run_card(

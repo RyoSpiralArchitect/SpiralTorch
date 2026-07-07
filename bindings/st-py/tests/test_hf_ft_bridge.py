@@ -1231,6 +1231,40 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             safe_path = Path(tmp) / "safe.json"
             risky_trace = Path(tmp) / "risky-trace.jsonl"
             safe_trace = Path(tmp) / "safe-trace.jsonl"
+            risky_output_dir = Path(tmp) / "risky-out"
+            safe_output_dir = Path(tmp) / "safe-out"
+            risky_command = [
+                "python",
+                "bridge",
+                "--output-dir",
+                str(risky_output_dir),
+                "--run-card",
+                str(risky_path),
+                "--trainer-trace-jsonl",
+                str(risky_trace),
+                "--max-steps",
+                "10",
+                "--max-train-samples",
+                "100",
+                "--max-eval-samples",
+                "20",
+            ]
+            safe_command = [
+                "python",
+                "bridge",
+                "--output-dir",
+                str(safe_output_dir),
+                "--run-card",
+                str(safe_path),
+                "--trainer-trace-jsonl",
+                str(safe_trace),
+                "--max-steps",
+                "10",
+                "--max-train-samples",
+                "100",
+                "--max-eval-samples",
+                "20",
+            ]
 
             risky = run_card(
                 1.5,
@@ -1276,13 +1310,9 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                         "run_card": str(risky_path),
                         "trainer_trace_jsonl": str(risky_trace),
                         "run_dir": str(Path(tmp) / "risky-run"),
-                        "command": [
-                            "python",
-                            "bridge",
-                            "--run-card",
-                            str(risky_path),
-                        ],
-                        "command_display": f"python bridge --run-card {risky_path}",
+                        "output_dir": str(risky_output_dir),
+                        "command": risky_command,
+                        "command_display": " ".join(risky_command),
                     },
                     {
                         "name": "safe",
@@ -1291,13 +1321,9 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                         "run_card": str(safe_path),
                         "trainer_trace_jsonl": str(safe_trace),
                         "run_dir": str(Path(tmp) / "safe-run"),
-                        "command": [
-                            "python",
-                            "bridge",
-                            "--run-card",
-                            str(safe_path),
-                        ],
-                        "command_display": f"python bridge --run-card {safe_path}",
+                        "output_dir": str(safe_output_dir),
+                        "command": safe_command,
+                        "command_display": " ".join(safe_command),
                     },
                 ],
             }
@@ -1308,6 +1334,16 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             lines = hf_ft.summarize_hf_gpt2_finetune_sweep_report_lines(
                 sweep_report,
                 top_n=2,
+            )
+            scale_up_command = hf_ft.hf_gpt2_finetune_scale_up_command(
+                sweep_summary
+            )
+            explicit_scale_up_command = hf_ft.hf_gpt2_finetune_scale_up_command(
+                sweep_summary,
+                max_steps=64,
+                max_train_samples=4096,
+                max_eval_samples=256,
+                output_dir=Path(tmp) / "safe-long-run",
             )
 
         self.assertEqual(comparison["best_eval_after_run_label"], "risky")
@@ -1342,12 +1378,58 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         )
         self.assertEqual(
             sweep_summary["scale_up_candidate_command"],
-            ["python", "bridge", "--run-card", str(safe_path)],
+            safe_command,
         )
+        self.assertEqual(scale_up_command["status"], "ok")
+        self.assertEqual(scale_up_command["scale_up_candidate_label"], "safe")
+        self.assertEqual(scale_up_command["base_command"], safe_command)
+        self.assertIn("--max-steps 20", scale_up_command["command_display"])
+        self.assertIn("--max-train-samples 200", scale_up_command["command_display"])
+        self.assertIn(
+            f"--output-dir {safe_output_dir}-scaleup",
+            scale_up_command["command_display"],
+        )
+        self.assertIn(
+            f"--run-card {safe_output_dir}-scaleup/spiraltorch-hf-gpt2-ft-run-card.json",
+            scale_up_command["command_display"],
+        )
+        self.assertIn(
+            (
+                f"--trainer-trace-jsonl {safe_output_dir}-scaleup/"
+                "spiraltorch-hf-gpt2-ft-trainer-trace.jsonl"
+            ),
+            scale_up_command["command_display"],
+        )
+        self.assertIn("--max-eval-samples 20", scale_up_command["command_display"])
+        self.assertEqual(scale_up_command["applied_override_count"], 5)
+        self.assertIn("--max-steps 64", explicit_scale_up_command["command_display"])
+        self.assertIn(
+            "--max-train-samples 4096",
+            explicit_scale_up_command["command_display"],
+        )
+        self.assertIn(
+            "--max-eval-samples 256",
+            explicit_scale_up_command["command_display"],
+        )
+        self.assertIn(
+            f"--output-dir {Path(tmp) / 'safe-long-run'}",
+            explicit_scale_up_command["command_display"],
+        )
+        self.assertEqual(explicit_scale_up_command["applied_override_count"], 6)
         self.assertTrue(
             any("hf_gpt2_ft_sweep_scale_up candidate=safe" in line for line in lines)
         )
         self.assertTrue(any(f"card={safe_path}" in line for line in lines))
+        missing_scale_up_command = hf_ft.hf_gpt2_finetune_scale_up_command(
+            {
+                "row_type": "hf_gpt2_finetune_sweep_report_summary",
+                "scale_up_candidate_label": "missing",
+            }
+        )
+        self.assertEqual(
+            missing_scale_up_command["status"],
+            "missing_candidate_command",
+        )
 
     def test_sweep_example_builds_grid_and_writes_dry_run_report(self) -> None:
         module = load_sweep_example()
@@ -2861,6 +2943,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             st.__all__,
         )
         self.assertIn("hf_gpt2_finetune_preflight_report", st.__all__)
+        self.assertIn("hf_gpt2_finetune_scale_up_command", st.__all__)
         self.assertIn("hf_gpt2_finetune_training_telemetry_frame", st.__all__)
         self.assertIn("hf_gpt2_finetune_trainer_trace_callback", st.__all__)
         self.assertIn("compare_hf_gpt2_finetune_run_cards", st.__all__)
@@ -2888,6 +2971,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIs(
             st.hf_gpt2_finetune_training_telemetry_frame,
             hf_ft.hf_gpt2_finetune_training_telemetry_frame,
+        )
+        self.assertIs(
+            st.hf_gpt2_finetune_scale_up_command,
+            hf_ft.hf_gpt2_finetune_scale_up_command,
         )
         self.assertIs(
             st.compare_hf_gpt2_finetune_run_cards,
