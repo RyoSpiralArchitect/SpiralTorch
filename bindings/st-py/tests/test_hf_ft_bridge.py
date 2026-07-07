@@ -4064,7 +4064,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("log_steps_per_second=0.25", lines[0])
         self.assertIn("estimated_seconds_until_next_eval=24", lines[0])
         self.assertIn("min_eval_loss=1.7", lines[0])
+        self.assertIn("last_disk_free_gb=11.5", lines[0])
+        self.assertIn("min_disk_free_gb=11.5", lines[0])
         self.assertIn("index=1", lines[1])
+        self.assertIn("disk_free_gb=11.5", lines[1])
         self.assertEqual(written_lines, lines)
 
     def test_run_card_summary_supplements_trace_telemetry_from_jsonl(self) -> None:

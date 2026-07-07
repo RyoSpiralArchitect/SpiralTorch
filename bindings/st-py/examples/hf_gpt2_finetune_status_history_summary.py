@@ -167,7 +167,9 @@ def history_lines(
             f"min_eval_loss={_number_text(summary.get('min_eval_loss'))} "
             f"guard_count={_number_text(summary.get('last_guard_count'))} "
             f"process={_number_text(summary.get('last_process_status'))} "
-            f"final_ready={_number_text(summary.get('last_final_checkpoint_ready'))}"
+            f"final_ready={_number_text(summary.get('last_final_checkpoint_ready'))} "
+            f"last_disk_free_gb={_number_text(summary.get('last_disk_free_gb'))} "
+            f"min_disk_free_gb={_number_text(summary.get('min_disk_free_gb'))}"
         )
     ]
     if tail <= 0:
@@ -182,7 +184,8 @@ def history_lines(
                 f"next_eval_step={_number_text(_nested(row, 'eval_progress', 'next_eval_step'))} "
                 f"steps_until_next_eval={_number_text(_nested(row, 'eval_progress', 'log_steps_until_next_eval'))} "
                 f"last_eval_loss={_number_text(_nested(row, 'trace', 'trace_last_eval_loss'))} "
-                f"final_ready={_number_text(row.get('final_checkpoint_ready'))}"
+                f"final_ready={_number_text(row.get('final_checkpoint_ready'))} "
+                f"disk_free_gb={_number_text(row.get('disk_free_gb'))}"
             )
         )
     return lines
