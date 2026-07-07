@@ -46,6 +46,24 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--poll-seconds", type=float, default=60.0)
     parser.add_argument("--checkpoint-timeout-seconds", type=float, default=1800.0)
     parser.add_argument("--status-card-timeout-seconds", type=float, default=1800.0)
+    parser.add_argument(
+        "--launched-pid-file",
+        type=Path,
+        default=None,
+        help="Write the launched command PID here before waiting for it.",
+    )
+    parser.add_argument(
+        "--launched-log-file",
+        type=Path,
+        default=None,
+        help="Redirect launched command stdout/stderr to this log file.",
+    )
+    parser.add_argument(
+        "--launched-log-mode",
+        choices=("append", "write"),
+        default="append",
+        help="Append to or replace --launched-log-file. Defaults to append.",
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
@@ -123,6 +141,7 @@ def _write_manifest(
     status: str,
     *,
     returncode: int | None = None,
+    launch_error: str | None = None,
 ) -> dict[str, Any]:
     pid = _resolved_pid(args)
     payload: dict[str, Any] = {
@@ -137,9 +156,18 @@ def _write_manifest(
         "checkpoint_ready": _checkpoint_ready(args),
         "status_card": None if args.status_card is None else str(args.status_card),
         "status_card_status": _status_card_status(args),
+        "launched_pid_file": (
+            None if args.launched_pid_file is None else str(args.launched_pid_file)
+        ),
+        "launched_pid": _read_pid(args.launched_pid_file),
+        "launched_log_file": (
+            None if args.launched_log_file is None else str(args.launched_log_file)
+        ),
+        "launched_log_mode": args.launched_log_mode,
         "command": [str(item) for item in args.command],
         "dry_run": bool(args.dry_run),
         "returncode": returncode,
+        "launch_error": launch_error,
     }
     args.manifest.parent.mkdir(parents=True, exist_ok=True)
     args.manifest.write_text(
@@ -152,6 +180,7 @@ def _write_manifest(
         f"process_alive={payload['process_alive']} "
         f"checkpoint_ready={payload['checkpoint_ready']} "
         f"status_card_status={payload['status_card_status']} "
+        f"launched_pid={payload['launched_pid']} "
         f"returncode={returncode}",
         flush=True,
     )
@@ -174,6 +203,33 @@ def _wait_until(
         remaining = max(0.0, timeout_seconds - elapsed)
         time.sleep(min(float(args.poll_seconds), remaining))
     return True
+
+
+def _run_command(args: argparse.Namespace) -> tuple[int, str | None]:
+    command = [str(item) for item in args.command]
+    log_handle = None
+    try:
+        stdout = None
+        stderr = None
+        if args.launched_log_file is not None:
+            args.launched_log_file.parent.mkdir(parents=True, exist_ok=True)
+            mode = "a" if args.launched_log_mode == "append" else "w"
+            log_handle = args.launched_log_file.open(mode, encoding="utf-8")
+            stdout = log_handle
+            stderr = subprocess.STDOUT
+        process = subprocess.Popen(command, stdout=stdout, stderr=stderr)
+        if args.launched_pid_file is not None:
+            args.launched_pid_file.parent.mkdir(parents=True, exist_ok=True)
+            args.launched_pid_file.write_text(
+                f"{int(process.pid)}\n",
+                encoding="utf-8",
+            )
+        return int(process.wait()), None
+    except OSError as exc:
+        return 2, f"{exc.__class__.__name__}: {exc}"
+    finally:
+        if log_handle is not None:
+            log_handle.close()
 
 
 def run_wait_launch(args: argparse.Namespace) -> dict[str, Any]:
@@ -204,8 +260,13 @@ def run_wait_launch(args: argparse.Namespace) -> dict[str, Any]:
         return _write_manifest(args, "dry_run", returncode=0)
 
     _write_manifest(args, "launching")
-    result = subprocess.run([str(item) for item in args.command], check=False)
-    return _write_manifest(args, "finished", returncode=int(result.returncode))
+    returncode, launch_error = _run_command(args)
+    return _write_manifest(
+        args,
+        "finished" if launch_error is None else "launch_error",
+        returncode=returncode,
+        launch_error=launch_error,
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
