@@ -10,6 +10,7 @@ from .optim import Amegagrad, amegagrad
 
 export: ModuleType
 hf_ft: ModuleType
+hf_generation: ModuleType
 hpo: ModuleType
 inference: ModuleType
 optim: ModuleType
@@ -306,8 +307,39 @@ def hf_gpt2_finetune_generation_report(
     max_new_tokens: int = ...,
     generation_method: object = ...,
     fallback_error: object = ...,
+    generation_control: Mapping[str, object] | None = ...,
     error: object = ...,
 ) -> Dict[str, object]: ...
+
+class ZSpaceRepressionLogitsProcessor:
+    def __init__(
+        self,
+        *,
+        top_k: int = ...,
+        curvature: float = ...,
+        temperature: float = ...,
+        entropy_target: float | None = ...,
+        entropy_tolerance: float = ...,
+        entropy_gain: float = ...,
+        min_temperature: float | None = ...,
+        max_temperature: float | None = ...,
+        repression_window: int = ...,
+        repression_strength: float = ...,
+        last_token_repression: float = ...,
+        mask_non_top_k: bool = ...,
+        use_native_zspace: bool = ...,
+    ) -> None: ...
+    def __call__(self, input_ids: Any, scores: Any) -> Any: ...
+    def report(self, *, limit: int | None = ...) -> Dict[str, object]: ...
+    def reset_report(self) -> None: ...
+
+def build_zspace_repression_logits_processor(
+    **kwargs: object,
+) -> ZSpaceRepressionLogitsProcessor: ...
+
+def build_zspace_softmax_logits_processor(
+    **kwargs: object,
+) -> ZSpaceRepressionLogitsProcessor: ...
 
 def hf_gpt2_finetune_preflight_report(
     *,
@@ -8164,6 +8196,7 @@ __all__ = [
     "trace_wgpu_first_runtime_matrix",
     "write_wgpu_first_runtime_matrix",
     "hf_ft",
+    "hf_generation",
     "HF_GPT2_FT_DEFAULT_DEVICE_BACKENDS",
     "HF_GPT2_FT_REQUIRED_PYTHON_PACKAGES",
     "HF_GPT2_FT_REQUIRED_RUST_SURFACES",
@@ -8188,6 +8221,9 @@ __all__ = [
     "summarize_hf_gpt2_finetune_trainer_trace",
     "write_hf_gpt2_finetune_run_card",
     "write_hf_gpt2_finetune_trainer_trace_event",
+    "ZSpaceRepressionLogitsProcessor",
+    "build_zspace_repression_logits_processor",
+    "build_zspace_softmax_logits_processor",
     "from_dlpack",
     "to_dlpack",
     "ZSpaceBarycenter",

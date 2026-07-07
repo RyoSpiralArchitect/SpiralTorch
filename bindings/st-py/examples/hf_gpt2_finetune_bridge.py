@@ -8,6 +8,7 @@ import contextlib
 import importlib
 import inspect
 import json
+import math
 import os
 import random
 from collections.abc import Mapping, Sequence
@@ -29,6 +30,7 @@ from spiraltorch.hf_ft import (
     summarize_hf_gpt2_finetune_trainer_trace,
     write_hf_gpt2_finetune_run_card,
 )
+from spiraltorch.hf_generation import build_zspace_repression_logits_processor
 
 
 DEFAULT_MODEL = "gpt2"
@@ -178,6 +180,39 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=0,
         help="Optional top-k sampling cutoff used only with --generation-do-sample.",
     )
+    parser.add_argument(
+        "--generation-zspace-softmax",
+        action="store_true",
+        help=(
+            "Apply a SpiralTorch ZSpaceSoftmax logits processor with optional "
+            "repetition repression before generation token selection."
+        ),
+    )
+    parser.add_argument("--generation-zspace-top-k", type=int, default=64)
+    parser.add_argument("--generation-zspace-curvature", type=float, default=-0.04)
+    parser.add_argument("--generation-zspace-temperature", type=float, default=1.0)
+    parser.add_argument("--generation-zspace-entropy-target", type=float, default=None)
+    parser.add_argument("--generation-zspace-entropy-gain", type=float, default=0.5)
+    parser.add_argument(
+        "--generation-zspace-entropy-tolerance",
+        type=float,
+        default=1.0e-4,
+    )
+    parser.add_argument("--generation-zspace-min-temperature", type=float, default=None)
+    parser.add_argument("--generation-zspace-max-temperature", type=float, default=None)
+    parser.add_argument("--generation-repression-window", type=int, default=32)
+    parser.add_argument("--generation-repression-strength", type=float, default=1.0)
+    parser.add_argument("--generation-last-token-repression", type=float, default=0.5)
+    parser.add_argument(
+        "--generation-zspace-keep-non-top-k",
+        action="store_true",
+        help="Leave logits outside the Z-Space top-k set unchanged.",
+    )
+    parser.add_argument(
+        "--generation-zspace-no-native",
+        action="store_true",
+        help="Use the pure-Python Z-Space softmax fallback even when native NN is available.",
+    )
     parser.add_argument("--num-train-epochs", type=float, default=1.0)
     parser.add_argument("--max-steps", type=int, default=-1)
     parser.add_argument("--learning-rate", type=float, default=5e-5)
@@ -245,6 +280,63 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         parser.error("--generation-temperature must be positive")
     if args.generation_top_k < 0:
         parser.error("--generation-top-k must be non-negative")
+    if args.generation_zspace_softmax:
+        if args.generation_zspace_top_k <= 0:
+            parser.error("--generation-zspace-top-k must be positive")
+        if args.generation_zspace_curvature >= 0.0 or not math.isfinite(
+            args.generation_zspace_curvature
+        ):
+            parser.error("--generation-zspace-curvature must be finite and negative")
+        if args.generation_zspace_temperature <= 0.0 or not math.isfinite(
+            args.generation_zspace_temperature
+        ):
+            parser.error("--generation-zspace-temperature must be finite and positive")
+        if args.generation_zspace_entropy_target is not None and not math.isfinite(
+            args.generation_zspace_entropy_target
+        ):
+            parser.error("--generation-zspace-entropy-target must be finite")
+        if args.generation_zspace_entropy_gain < 0.0 or not math.isfinite(
+            args.generation_zspace_entropy_gain
+        ):
+            parser.error("--generation-zspace-entropy-gain must be finite and non-negative")
+        if args.generation_zspace_entropy_tolerance < 0.0 or not math.isfinite(
+            args.generation_zspace_entropy_tolerance
+        ):
+            parser.error(
+                "--generation-zspace-entropy-tolerance must be finite and non-negative"
+            )
+        if args.generation_zspace_min_temperature is not None and (
+            args.generation_zspace_min_temperature <= 0.0
+            or not math.isfinite(args.generation_zspace_min_temperature)
+        ):
+            parser.error("--generation-zspace-min-temperature must be finite and positive")
+        if args.generation_zspace_max_temperature is not None and (
+            args.generation_zspace_max_temperature <= 0.0
+            or not math.isfinite(args.generation_zspace_max_temperature)
+        ):
+            parser.error("--generation-zspace-max-temperature must be finite and positive")
+        if (
+            args.generation_zspace_min_temperature is not None
+            and args.generation_zspace_max_temperature is not None
+            and args.generation_zspace_min_temperature
+            > args.generation_zspace_max_temperature
+        ):
+            parser.error(
+                "--generation-zspace-min-temperature must be <= "
+                "--generation-zspace-max-temperature"
+            )
+        if args.generation_repression_window < 0:
+            parser.error("--generation-repression-window must be non-negative")
+        if args.generation_repression_strength < 0.0 or not math.isfinite(
+            args.generation_repression_strength
+        ):
+            parser.error("--generation-repression-strength must be finite and non-negative")
+        if args.generation_last_token_repression < 0.0 or not math.isfinite(
+            args.generation_last_token_repression
+        ):
+            parser.error(
+                "--generation-last-token-repression must be finite and non-negative"
+            )
     if args.per_device_train_batch_size <= 0:
         parser.error("--per-device-train-batch-size must be positive")
     if args.per_device_eval_batch_size <= 0:
@@ -740,12 +832,57 @@ def _first_sequence(value: Any) -> Any:
         return value
 
 
+def _generation_logits_processor(args: argparse.Namespace) -> Any | None:
+    if not getattr(args, "generation_zspace_softmax", False):
+        return None
+    return build_zspace_repression_logits_processor(
+        top_k=getattr(args, "generation_zspace_top_k", 64),
+        curvature=getattr(args, "generation_zspace_curvature", -0.04),
+        temperature=getattr(args, "generation_zspace_temperature", 1.0),
+        entropy_target=getattr(args, "generation_zspace_entropy_target", None),
+        entropy_tolerance=getattr(args, "generation_zspace_entropy_tolerance", 1.0e-4),
+        entropy_gain=getattr(args, "generation_zspace_entropy_gain", 0.5),
+        min_temperature=getattr(args, "generation_zspace_min_temperature", None),
+        max_temperature=getattr(args, "generation_zspace_max_temperature", None),
+        repression_window=getattr(args, "generation_repression_window", 32),
+        repression_strength=getattr(args, "generation_repression_strength", 1.0),
+        last_token_repression=getattr(args, "generation_last_token_repression", 0.5),
+        mask_non_top_k=not getattr(args, "generation_zspace_keep_non_top_k", False),
+        use_native_zspace=not getattr(args, "generation_zspace_no_native", False),
+    )
+
+
+def _generation_logits_processor_list(processor: Any) -> Any:
+    try:
+        transformers = importlib.import_module("transformers")
+        processor_list_type = getattr(transformers, "LogitsProcessorList", None)
+        if processor_list_type is not None:
+            return processor_list_type([processor])
+    except Exception:
+        pass
+    return [processor]
+
+
+def _generation_processor_report(processor: Any | None) -> Mapping[str, object] | None:
+    if processor is None:
+        return None
+    report = getattr(processor, "report", None)
+    if not callable(report):
+        return None
+    payload = report()
+    return dict(payload) if isinstance(payload, Mapping) else None
+
+
 def _next_token_from_logits(
     torch: Any,
     logits: Any,
     args: argparse.Namespace,
+    input_ids: Any = None,
+    logits_processor: Any | None = None,
 ) -> Any:
     last_logits = logits[:, -1, :]
+    if logits_processor is not None:
+        last_logits = logits_processor(input_ids, last_logits)
     if not args.generation_do_sample:
         return torch.argmax(last_logits, dim=-1, keepdim=True)
     scaled = last_logits / float(args.generation_temperature)
@@ -766,6 +903,7 @@ def _manual_forward_generate(
     model: Any,
     batch: Mapping[str, Any],
     args: argparse.Namespace,
+    logits_processor: Any | None = None,
 ) -> Any:
     input_ids = batch.get("input_ids")
     if input_ids is None:
@@ -783,7 +921,13 @@ def _manual_forward_generate(
             logits = outputs.get("logits")
         if logits is None:
             raise ValueError("model forward output did not include logits")
-        next_token = _next_token_from_logits(torch, logits, args)
+        next_token = _next_token_from_logits(
+            torch,
+            logits,
+            args,
+            input_ids=generated,
+            logits_processor=logits_processor,
+        )
         generated = torch.cat([generated, next_token], dim=-1)
         if attention_mask is not None:
             attention_mask = torch.cat(
@@ -811,8 +955,12 @@ def _generation_sample(
         return None
     prompt = str(args.generation_prompt)
     generation_method = "model.generate"
+    logits_processor = None
     fallback_error = None
     try:
+        logits_processor = _generation_logits_processor(args)
+        if logits_processor is not None:
+            generation_method = "model.generate+zspace_repression_softmax"
         encoded = tokenizer(prompt, return_tensors="pt")
         input_ids = encoded.get("input_ids") if isinstance(encoded, Mapping) else None
         input_tokens = _last_dim(input_ids)
@@ -838,6 +986,10 @@ def _generation_sample(
             generate_kwargs["temperature"] = float(args.generation_temperature)
             if int(args.generation_top_k) > 0:
                 generate_kwargs["top_k"] = int(args.generation_top_k)
+        if logits_processor is not None:
+            generate_kwargs["logits_processor"] = _generation_logits_processor_list(
+                logits_processor
+            )
 
         was_training = bool(getattr(model, "training", False))
         eval_model = getattr(model, "eval", None)
@@ -856,13 +1008,21 @@ def _generation_sample(
                     if not isinstance(batch, Mapping):
                         raise
                     fallback_error = f"{generate_exc.__class__.__name__}: {generate_exc}"
-                    generation_method = "manual_forward_fallback"
+                    generation_method = (
+                        "manual_forward_fallback+zspace_repression_softmax"
+                        if logits_processor is not None
+                        else "manual_forward_fallback"
+                    )
+                    reset_report = getattr(logits_processor, "reset_report", None)
+                    if callable(reset_report):
+                        reset_report()
                     output_ids = _manual_forward_generate(
                         torch,
                         tokenizer,
                         model,
                         batch,
                         args,
+                        logits_processor=logits_processor,
                     )
         finally:
             if was_training and callable(train_model):
@@ -882,6 +1042,7 @@ def _generation_sample(
             max_new_tokens=args.generation_max_new_tokens,
             generation_method=generation_method,
             fallback_error=fallback_error,
+            generation_control=_generation_processor_report(logits_processor),
         )
     except Exception as exc:
         return hf_gpt2_finetune_generation_report(
@@ -890,6 +1051,7 @@ def _generation_sample(
             max_new_tokens=args.generation_max_new_tokens,
             generation_method=generation_method,
             fallback_error=fallback_error,
+            generation_control=_generation_processor_report(logits_processor),
             error=f"{exc.__class__.__name__}: {exc}",
         )
 

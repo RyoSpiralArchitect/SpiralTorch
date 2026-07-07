@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import shlex
 import subprocess
 import sys
@@ -100,6 +101,24 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--generation-do-sample", action="store_true")
     parser.add_argument("--generation-temperature", type=float, default=1.0)
     parser.add_argument("--generation-top-k", type=int, default=0)
+    parser.add_argument("--generation-zspace-softmax", action="store_true")
+    parser.add_argument("--generation-zspace-top-k", type=int, default=64)
+    parser.add_argument("--generation-zspace-curvature", type=float, default=-0.04)
+    parser.add_argument("--generation-zspace-temperature", type=float, default=1.0)
+    parser.add_argument("--generation-zspace-entropy-target", type=float, default=None)
+    parser.add_argument("--generation-zspace-entropy-gain", type=float, default=0.5)
+    parser.add_argument(
+        "--generation-zspace-entropy-tolerance",
+        type=float,
+        default=1.0e-4,
+    )
+    parser.add_argument("--generation-zspace-min-temperature", type=float, default=None)
+    parser.add_argument("--generation-zspace-max-temperature", type=float, default=None)
+    parser.add_argument("--generation-repression-window", type=int, default=32)
+    parser.add_argument("--generation-repression-strength", type=float, default=1.0)
+    parser.add_argument("--generation-last-token-repression", type=float, default=0.5)
+    parser.add_argument("--generation-zspace-keep-non-top-k", action="store_true")
+    parser.add_argument("--generation-zspace-no-native", action="store_true")
     parser.add_argument("--runtime-device-backend", action="append", default=[])
     parser.add_argument(
         "--require-runtime-device-ready-backend",
@@ -154,6 +173,63 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("--generation-temperature must be positive")
     if args.generation_top_k < 0:
         parser.error("--generation-top-k must be non-negative")
+    if args.generation_zspace_softmax:
+        if args.generation_zspace_top_k <= 0:
+            parser.error("--generation-zspace-top-k must be positive")
+        if args.generation_zspace_curvature >= 0.0 or not math.isfinite(
+            args.generation_zspace_curvature
+        ):
+            parser.error("--generation-zspace-curvature must be finite and negative")
+        if args.generation_zspace_temperature <= 0.0 or not math.isfinite(
+            args.generation_zspace_temperature
+        ):
+            parser.error("--generation-zspace-temperature must be finite and positive")
+        if args.generation_zspace_entropy_target is not None and not math.isfinite(
+            args.generation_zspace_entropy_target
+        ):
+            parser.error("--generation-zspace-entropy-target must be finite")
+        if args.generation_zspace_entropy_gain < 0.0 or not math.isfinite(
+            args.generation_zspace_entropy_gain
+        ):
+            parser.error("--generation-zspace-entropy-gain must be finite and non-negative")
+        if args.generation_zspace_entropy_tolerance < 0.0 or not math.isfinite(
+            args.generation_zspace_entropy_tolerance
+        ):
+            parser.error(
+                "--generation-zspace-entropy-tolerance must be finite and non-negative"
+            )
+        if args.generation_zspace_min_temperature is not None and (
+            args.generation_zspace_min_temperature <= 0.0
+            or not math.isfinite(args.generation_zspace_min_temperature)
+        ):
+            parser.error("--generation-zspace-min-temperature must be finite and positive")
+        if args.generation_zspace_max_temperature is not None and (
+            args.generation_zspace_max_temperature <= 0.0
+            or not math.isfinite(args.generation_zspace_max_temperature)
+        ):
+            parser.error("--generation-zspace-max-temperature must be finite and positive")
+        if (
+            args.generation_zspace_min_temperature is not None
+            and args.generation_zspace_max_temperature is not None
+            and args.generation_zspace_min_temperature
+            > args.generation_zspace_max_temperature
+        ):
+            parser.error(
+                "--generation-zspace-min-temperature must be <= "
+                "--generation-zspace-max-temperature"
+            )
+        if args.generation_repression_window < 0:
+            parser.error("--generation-repression-window must be non-negative")
+        if args.generation_repression_strength < 0.0 or not math.isfinite(
+            args.generation_repression_strength
+        ):
+            parser.error("--generation-repression-strength must be finite and non-negative")
+        if args.generation_last_token_repression < 0.0 or not math.isfinite(
+            args.generation_last_token_repression
+        ):
+            parser.error(
+                "--generation-last-token-repression must be finite and non-negative"
+            )
     if args.max_train_samples < 0 or args.max_eval_samples < 0:
         parser.error("--max-train-samples and --max-eval-samples must be non-negative")
     if args.max_eval_blocks < 0:
@@ -304,6 +380,73 @@ def _bridge_command(
             command.append("--generation-do-sample")
         command.extend(["--generation-temperature", str(args.generation_temperature)])
         command.extend(["--generation-top-k", str(args.generation_top_k)])
+        if args.generation_zspace_softmax:
+            command.append("--generation-zspace-softmax")
+            command.extend(["--generation-zspace-top-k", str(args.generation_zspace_top_k)])
+            command.extend(
+                ["--generation-zspace-curvature", str(args.generation_zspace_curvature)]
+            )
+            command.extend(
+                [
+                    "--generation-zspace-temperature",
+                    str(args.generation_zspace_temperature),
+                ]
+            )
+            if args.generation_zspace_entropy_target is not None:
+                command.extend(
+                    [
+                        "--generation-zspace-entropy-target",
+                        str(args.generation_zspace_entropy_target),
+                    ]
+                )
+            command.extend(
+                [
+                    "--generation-zspace-entropy-gain",
+                    str(args.generation_zspace_entropy_gain),
+                ]
+            )
+            command.extend(
+                [
+                    "--generation-zspace-entropy-tolerance",
+                    str(args.generation_zspace_entropy_tolerance),
+                ]
+            )
+            if args.generation_zspace_min_temperature is not None:
+                command.extend(
+                    [
+                        "--generation-zspace-min-temperature",
+                        str(args.generation_zspace_min_temperature),
+                    ]
+                )
+            if args.generation_zspace_max_temperature is not None:
+                command.extend(
+                    [
+                        "--generation-zspace-max-temperature",
+                        str(args.generation_zspace_max_temperature),
+                    ]
+                )
+            command.extend(
+                [
+                    "--generation-repression-window",
+                    str(args.generation_repression_window),
+                ]
+            )
+            command.extend(
+                [
+                    "--generation-repression-strength",
+                    str(args.generation_repression_strength),
+                ]
+            )
+            command.extend(
+                [
+                    "--generation-last-token-repression",
+                    str(args.generation_last_token_repression),
+                ]
+            )
+            if args.generation_zspace_keep_non_top_k:
+                command.append("--generation-zspace-keep-non-top-k")
+            if args.generation_zspace_no_native:
+                command.append("--generation-zspace-no-native")
     for backend in args.runtime_device_backend:
         command.extend(["--runtime-device-backend", str(backend)])
     for backend in args.require_runtime_device_ready_backend:

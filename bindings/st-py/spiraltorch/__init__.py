@@ -800,6 +800,12 @@ from .hf_ft import (
     write_hf_gpt2_finetune_trainer_trace_event,
 )
 
+from .hf_generation import (
+    ZSpaceRepressionLogitsProcessor,
+    build_zspace_repression_logits_processor,
+    build_zspace_softmax_logits_processor,
+)
+
 from .gnn_trace import (
     load_gnn_band_replay_trace,
     flatten_gnn_band_replay_rows,
@@ -958,6 +964,9 @@ _EXTRAS = [
     "summarize_hf_gpt2_finetune_trainer_trace",
     "write_hf_gpt2_finetune_run_card",
     "write_hf_gpt2_finetune_trainer_trace_event",
+    "ZSpaceRepressionLogitsProcessor",
+    "build_zspace_repression_logits_processor",
+    "build_zspace_softmax_logits_processor",
     "load_gnn_band_replay_trace","flatten_gnn_band_replay_rows",
     "summarize_gnn_band_replays","compare_gnn_band_replay_runs","write_gnn_band_replay_html",
     "load_kdsl_trace_events","write_kdsl_trace_jsonl","write_kdsl_trace_html",
@@ -8085,6 +8094,7 @@ for _name in [
     "plugin",
     "ecosystem",
     "hf_ft",
+    "hf_generation",
     "selfsup",
     "export",
     "compat",

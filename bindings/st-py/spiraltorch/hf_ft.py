@@ -445,6 +445,7 @@ def hf_gpt2_finetune_generation_report(
     max_new_tokens: int = 32,
     generation_method: object = None,
     fallback_error: object = None,
+    generation_control: Mapping[str, object] | None = None,
     error: object = None,
 ) -> dict[str, object]:
     """Summarize a GPT-2 FT before/after generation sample for run cards."""
@@ -463,6 +464,11 @@ def hf_gpt2_finetune_generation_report(
     fallback_error_text = None if fallback_error is None else str(fallback_error)
     error_text = None if error is None else str(error)
     status = "error" if error_text else ("ok" if text else "empty")
+    control_payload = (
+        _json_safe(generation_control)
+        if isinstance(generation_control, Mapping)
+        else None
+    )
     return {
         "row_type": "hf_gpt2_finetune_generation_report",
         "stage": str(stage),
@@ -487,6 +493,7 @@ def hf_gpt2_finetune_generation_report(
         "new_token_count": new_tokens,
         "max_new_tokens": int(max_new_tokens),
         "generation_method": method_text,
+        "generation_control": control_payload,
         "fallback_error": fallback_error_text,
         "error": error_text,
     }
