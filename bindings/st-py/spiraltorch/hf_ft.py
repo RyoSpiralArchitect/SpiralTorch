@@ -529,8 +529,11 @@ def hf_gpt2_finetune_inference_distortion_handoff_report(
     runtime = _mapping_item(report, "runtime")
     config = _mapping_item(summary, "recommended_config")
     request = _mapping_item(summary, "recommended_request")
+    request_filter = _mapping_item(summary, "recommended_request_filter")
     processor_kwargs = _mapping_item(summary, "recommended_processor_kwargs")
     activation_hook = _mapping_item(summary, "recommended_activation_hook")
+    dropped_keys = _unique(summary.get("recommended_api_request_dropped_keys"))
+    sent_keys = _unique(summary.get("recommended_api_request_sent_keys"))
     status = "ok" if config else "missing_recommendation"
     return {
         "row_type": "hf_gpt2_finetune_inference_distortion_handoff",
@@ -547,6 +550,7 @@ def hf_gpt2_finetune_inference_distortion_handoff_report(
         "recommended_probe_path": summary.get("recommended_probe_path"),
         "recommended_config": config or None,
         "recommended_request": request or None,
+        "recommended_request_filter": request_filter or None,
         "recommended_processor_kwargs": processor_kwargs or None,
         "recommended_activation_hook": activation_hook or None,
         "recommended_probe_cli_args": list(
@@ -559,6 +563,11 @@ def hf_gpt2_finetune_inference_distortion_handoff_report(
         "local_model": runtime.get("local_model"),
         "api_provider": runtime.get("api_provider"),
         "api_model": runtime.get("api_model"),
+        "api_request_dropped_key_count": _safe_number(
+            summary.get("recommended_api_request_dropped_key_count")
+        ),
+        "api_request_dropped_keys": dropped_keys,
+        "api_request_sent_keys": sent_keys,
         "desire_pressure": _safe_number(config.get("desire_pressure")),
         "desire_stability": _safe_number(config.get("desire_stability")),
         "psi_total": _safe_number(config.get("psi_total")),
@@ -971,6 +980,9 @@ def _inference_distortion_telemetry_values(
         ),
         "inference_distortion.request_temperature": request.get("temperature"),
         "inference_distortion.request_top_p": request.get("top_p"),
+        "inference_distortion.api_request_dropped_key_count": handoff.get(
+            "api_request_dropped_key_count"
+        ),
         "inference_distortion.logits_repression_strength": processor.get(
             "repression_strength"
         ),
@@ -1765,6 +1777,16 @@ def summarize_hf_gpt2_finetune_run_card(
         ),
         "inference_distortion_api_provider": inference_handoff.get("api_provider"),
         "inference_distortion_api_model": inference_handoff.get("api_model"),
+        "inference_distortion_api_request_dropped_key_count": _metric_number(
+            inference_handoff,
+            "api_request_dropped_key_count",
+        ),
+        "inference_distortion_api_request_dropped_keys": csv_label(
+            _unique(inference_handoff.get("api_request_dropped_keys"))
+        ),
+        "inference_distortion_api_request_sent_keys": csv_label(
+            _unique(inference_handoff.get("api_request_sent_keys"))
+        ),
         "trace_event_count": _metric_number(trainer_trace, "trace_event_count"),
         "trace_last_loss": _metric_number(trainer_trace, "trace_last_loss"),
         "trace_min_eval_loss": _metric_number(trainer_trace, "trace_min_eval_loss"),
@@ -2076,11 +2098,41 @@ def _ranked_sweep_rows(
                 "inference_distortion_api_provider": row.get(
                     "inference_distortion_api_provider"
                 ),
+                "inference_distortion_api_request_dropped_key_count": _safe_number(
+                    row.get("inference_distortion_api_request_dropped_key_count")
+                ),
+                "inference_distortion_api_request_dropped_keys": row.get(
+                    "inference_distortion_api_request_dropped_keys"
+                ),
+                "inference_distortion_api_request_sent_keys": row.get(
+                    "inference_distortion_api_request_sent_keys"
+                ),
                 "dataset_fit_verdict": row.get("dataset_fit_verdict"),
                 "failure_stage": row.get("failure_stage"),
             }
         )
     return rows
+
+
+def _selected_sweep_run(
+    runs: Sequence[Mapping[str, object]],
+    label: object,
+) -> dict[str, object]:
+    if label is None:
+        return {}
+    label_text = str(label)
+    for row in runs:
+        if str(row.get("name")) == label_text:
+            return dict(row)
+    return {}
+
+
+def _sweep_run_command(row: Mapping[str, object]) -> list[object] | None:
+    command = row.get("command")
+    if isinstance(command, Sequence) and not isinstance(command, (str, bytes)):
+        safe = _json_safe(command)
+        return list(safe) if isinstance(safe, list) else None
+    return None
 
 
 def summarize_hf_gpt2_finetune_sweep_report(
@@ -2110,6 +2162,7 @@ def summarize_hf_gpt2_finetune_sweep_report(
     if best_delta is not None and best_delta < 0.0 and best_delta_label:
         selected_reason = "best_eval_loss_delta"
         selected_label = best_delta_label
+    selected_run = _selected_sweep_run(runs, selected_label)
 
     completed = _safe_number(report.get("completed_run_count"))
     failed = _safe_number(report.get("failed_run_count"))
@@ -2150,6 +2203,17 @@ def summarize_hf_gpt2_finetune_sweep_report(
         "best_eval_loss_delta": best_delta,
         "selected_run_label": selected_label,
         "selected_reason": selected_reason if selected_label else None,
+        "selected_run_name": selected_run.get("name"),
+        "selected_run_status": selected_run.get("status"),
+        "selected_run_reused": selected_run.get("reused"),
+        "selected_run_returncode": _safe_number(selected_run.get("returncode")),
+        "selected_run_dir": selected_run.get("run_dir"),
+        "selected_output_dir": selected_run.get("output_dir")
+        or selected_run.get("run_dir"),
+        "selected_run_card": selected_run.get("run_card"),
+        "selected_trainer_trace_jsonl": selected_run.get("trainer_trace_jsonl"),
+        "selected_command_display": selected_run.get("command_display"),
+        "selected_command": _sweep_run_command(selected_run),
         "inference_distortion_sweep_report": report.get(
             "inference_distortion_sweep_report"
         ),
@@ -2177,6 +2241,16 @@ def summarize_hf_gpt2_finetune_sweep_report(
             "psi_total",
         ),
         "inference_distortion_api_provider": inference_handoff.get("api_provider"),
+        "inference_distortion_api_request_dropped_key_count": _metric_number(
+            inference_handoff,
+            "api_request_dropped_key_count",
+        ),
+        "inference_distortion_api_request_dropped_keys": csv_label(
+            _unique(inference_handoff.get("api_request_dropped_keys"))
+        ),
+        "inference_distortion_api_request_sent_keys": csv_label(
+            _unique(inference_handoff.get("api_request_sent_keys"))
+        ),
         "top_runs": _ranked_sweep_rows(summaries, top_n=top_n),
         "failed_runs": [
             {
@@ -2229,7 +2303,18 @@ def summarize_hf_gpt2_finetune_sweep_report_lines(
             f"risk={summary.get('inference_distortion_risk_score')} "
             f"desire={summary.get('inference_distortion_desire_pressure')} "
             f"psi={summary.get('inference_distortion_psi_total')} "
-            f"api={summary.get('inference_distortion_api_provider')}"
+            f"api={summary.get('inference_distortion_api_provider')} "
+            "api_dropped="
+            f"{summary.get('inference_distortion_api_request_dropped_key_count')}"
+        )
+    if summary.get("selected_run_card") or summary.get("selected_trainer_trace_jsonl"):
+        lines.append(
+            "hf_gpt2_ft_sweep_selected "
+            f"run={summary.get('selected_run_label')} "
+            f"status={summary.get('selected_run_status')} "
+            f"card={summary.get('selected_run_card')} "
+            f"trace={summary.get('selected_trainer_trace_jsonl')} "
+            f"dir={summary.get('selected_run_dir')}"
         )
     for row in summary.get("top_runs", []):
         if not isinstance(row, Mapping):

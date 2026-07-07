@@ -1461,6 +1461,7 @@ def _distortion_recommendation_payload(
     dict[str, object],
     dict[str, object],
     dict[str, object],
+    dict[str, object],
 ]:
     config = None
     if selected_run is not None and isinstance(selected_run.get("config"), Mapping):
@@ -1480,6 +1481,28 @@ def _distortion_recommendation_payload(
     adapter_mapping = dict(adapter) if isinstance(adapter, Mapping) else {}
     request = adapter_mapping.get("request")
     activation_hook = adapter_mapping.get("activation_hook")
+    api = probe_payload.get("api")
+    api_mapping = dict(api) if isinstance(api, Mapping) else {}
+    request_filter = api_mapping.get("request_filter")
+    request_filter_mapping = (
+        dict(request_filter) if isinstance(request_filter, Mapping) else {}
+    )
+    if not request_filter_mapping and best is not None:
+        dropped_keys = best.get("api_request_dropped_keys")
+        sent_keys = best.get("api_request_sent_keys")
+        dropped_count = best.get("api_request_dropped_key_count")
+        if (
+            isinstance(dropped_keys, list)
+            or isinstance(sent_keys, list)
+            or dropped_count is not None
+        ):
+            request_filter_mapping = {
+                "dropped_key_count": dropped_count,
+                "dropped_keys": list(dropped_keys)
+                if isinstance(dropped_keys, list)
+                else [],
+                "sent_keys": list(sent_keys) if isinstance(sent_keys, list) else [],
+            }
     processor_kwargs = (
         zspace_inference_distortion_processor_kwargs(adapter_mapping)
         if adapter_mapping
@@ -1490,6 +1513,7 @@ def _distortion_recommendation_payload(
         dict(request) if isinstance(request, Mapping) else {},
         processor_kwargs,
         dict(activation_hook) if isinstance(activation_hook, Mapping) else {},
+        request_filter_mapping,
     )
 
 
@@ -1521,7 +1545,13 @@ def summarize_zspace_inference_distortion_sweep(
     best = top_probes[0] if top_probes else None
     recommended_probe = None if best is None else best.get("label")
     selected_run = _distortion_selected_run(runs, recommended_probe)
-    config, request, processor_kwargs, activation_hook = _distortion_recommendation_payload(
+    (
+        config,
+        request,
+        processor_kwargs,
+        activation_hook,
+        request_filter,
+    ) = _distortion_recommendation_payload(
         selected_run,
         best,
     )
@@ -1550,6 +1580,18 @@ def summarize_zspace_inference_distortion_sweep(
         ),
         "recommended_config": config,
         "recommended_request": request,
+        "recommended_request_filter": request_filter,
+        "recommended_api_request_dropped_key_count": _safe_number(
+            request_filter.get("dropped_key_count")
+        ),
+        "recommended_api_request_dropped_keys": list(
+            request_filter.get("dropped_keys", [])
+        )
+        if isinstance(request_filter.get("dropped_keys"), list)
+        else [],
+        "recommended_api_request_sent_keys": list(request_filter.get("sent_keys", []))
+        if isinstance(request_filter.get("sent_keys"), list)
+        else [],
         "recommended_processor_kwargs": processor_kwargs,
         "recommended_activation_hook": activation_hook,
         "recommended_probe_cli_args": zspace_inference_distortion_probe_cli_args(config),

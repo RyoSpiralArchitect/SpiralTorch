@@ -415,6 +415,12 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                         "effect_score": 0.91,
                         "risk_score": 0.22,
                         "api_provider": "fake",
+                        "api_request_dropped_key_count": 2,
+                        "api_request_dropped_keys": [
+                            "frequency_penalty",
+                            "presence_penalty",
+                        ],
+                        "api_request_sent_keys": ["temperature", "top_p"],
                     }
                 ],
             },
@@ -432,6 +438,12 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(handoff["desire_pressure"], 0.8)
         self.assertEqual(handoff["psi_total"], 0.7)
         self.assertTrue(handoff["include_penalties"])
+        self.assertEqual(handoff["api_request_dropped_key_count"], 2)
+        self.assertEqual(
+            handoff["api_request_dropped_keys"],
+            ["frequency_penalty", "presence_penalty"],
+        )
+        self.assertEqual(handoff["api_request_sent_keys"], ["temperature", "top_p"])
         self.assertIn("--desire-pressure", handoff["recommended_probe_cli_args"])
 
     def test_eval_report_records_loss_perplexity_and_status(self) -> None:
@@ -473,6 +485,9 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             "coherence": 0.5,
             "api_provider": "fake",
             "api_model": "fake-distorted-api",
+            "api_request_dropped_key_count": 2,
+            "api_request_dropped_keys": ["frequency_penalty", "presence_penalty"],
+            "api_request_sent_keys": ["temperature", "top_p"],
         }
         base_card = {
             "row_type": "hf_gpt2_finetune_run_card",
@@ -575,17 +590,29 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 "completed_run_count": 2,
                 "failed_run_count": 0,
                 "skipped_run_count": 0,
+                "inference_distortion_handoff": inference_handoff,
                 "comparison": comparison,
                 "runs": [
                     {
                         "name": "strong",
+                        "run_dir": str(Path(tmp) / "strong-run"),
                         "run_card": str(strong_path),
+                        "trainer_trace_jsonl": str(Path(tmp) / "strong-trace.jsonl"),
+                        "command": [
+                            "python",
+                            "bridge",
+                            "--run-card",
+                            str(strong_path),
+                        ],
+                        "command_display": f"python bridge --run-card {strong_path}",
                         "returncode": 0,
+                        "status": "completed",
                     },
                     {
                         "name": "weak",
                         "run_card": str(weak_path),
                         "returncode": 0,
+                        "status": "completed",
                     },
                 ],
             }
@@ -629,6 +656,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(summary["inference_distortion_desire_pressure"], 0.8)
         self.assertEqual(summary["inference_distortion_psi_total"], 0.7)
         self.assertEqual(summary["inference_distortion_api_provider"], "fake")
+        self.assertEqual(
+            summary["inference_distortion_api_request_dropped_key_count"],
+            2,
+        )
+        self.assertEqual(
+            summary["inference_distortion_api_request_dropped_keys"],
+            "frequency_penalty,presence_penalty",
+        )
         self.assertEqual(summary["trace_event_count"], 4)
         self.assertEqual(comparison["run_count"], 2)
         self.assertEqual(comparison["best_eval_after_run_label"], "strong")
@@ -643,6 +678,20 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(sweep_summary["status"], "complete")
         self.assertEqual(sweep_summary["selected_run_label"], "strong")
         self.assertEqual(sweep_summary["selected_reason"], "best_eval_loss_delta")
+        self.assertEqual(sweep_summary["selected_run_status"], "completed")
+        self.assertEqual(sweep_summary["selected_run_card"], str(strong_path))
+        self.assertEqual(
+            sweep_summary["selected_trainer_trace_jsonl"],
+            str(Path(tmp) / "strong-trace.jsonl"),
+        )
+        self.assertEqual(
+            sweep_summary["selected_command"],
+            ["python", "bridge", "--run-card", str(strong_path)],
+        )
+        self.assertEqual(
+            sweep_summary["inference_distortion_api_request_dropped_key_count"],
+            2,
+        )
         self.assertEqual(sweep_summary["top_runs"][0]["run_label"], "strong")
         self.assertEqual(sweep_summary["top_runs"][0]["trainer_runtime"], 3.0)
         self.assertEqual(
@@ -671,13 +720,26 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             sweep_summary["top_runs"][0]["inference_distortion_effect_score"],
             0.88,
         )
+        self.assertEqual(
+            sweep_summary["top_runs"][0][
+                "inference_distortion_api_request_dropped_key_count"
+            ],
+            2,
+        )
         self.assertIn("selected=strong", sweep_lines[1])
-        self.assertIn("trainer_sps=None", sweep_lines[2])
-        self.assertIn("trace_sps_mean=0.5", sweep_lines[2])
-        self.assertIn("eval_series=0=2.0,3=1.5", sweep_lines[2])
-        self.assertIn("infer_probe=distort-002", sweep_lines[2])
-        self.assertIn("zcontrol_changed=2", sweep_lines[2])
-        self.assertIn("zcontrol_backend=spiraltorch_zspace_softmax", sweep_lines[2])
+        self.assertTrue(
+            any("hf_gpt2_ft_sweep_selected" in line for line in sweep_lines)
+        )
+        self.assertTrue(
+            any("api_dropped=2" in line for line in sweep_lines)
+        )
+        top_line = next(line for line in sweep_lines if "hf_gpt2_ft_sweep_top" in line)
+        self.assertIn("trainer_sps=None", top_line)
+        self.assertIn("trace_sps_mean=0.5", top_line)
+        self.assertIn("eval_series=0=2.0,3=1.5", top_line)
+        self.assertIn("infer_probe=distort-002", top_line)
+        self.assertIn("zcontrol_changed=2", top_line)
+        self.assertIn("zcontrol_backend=spiraltorch_zspace_softmax", top_line)
 
         trace_card = dict(base_card)
         trace_card["eval_after_train"] = hf_ft.hf_gpt2_finetune_eval_report(
@@ -868,7 +930,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             stored_report["summary"]["inference_distortion_recommended_probe"],
             "strong",
         )
-        self.assertIn("probe=strong", sweep_lines[2])
+        self.assertTrue(any("probe=strong" in line for line in sweep_lines))
         first_command = runs[0]["command"]
         self.assertIn("--train", first_command)
         self.assertIn("--corpus-scan", first_command)

@@ -539,14 +539,16 @@ the same handoff so the scale-up plan can be audited before loading a model.
 When `--trainer-telemetry` is enabled, the same handoff also appears as
 `hf_ft.inference_distortion.*` telemetry keys on each frame;
 summaries surface the recommended probe, effect/risk, desire pressure, psi total,
-and API route beside eval/generation metrics. Add
+API route, and provider request keys that were dropped or sent beside
+eval/generation metrics. Add
 `--dry-run` to inspect commands without loading Transformers, or
 `--require-wgpu-ready` when the SpiralTorch WGPU surface should gate each run.
 The report also embeds a compact `summary`; from notebooks or CI, call
 `st.load_hf_gpt2_finetune_sweep_report(...)`,
 `st.summarize_hf_gpt2_finetune_sweep_report(...)`, or
 `st.summarize_hf_gpt2_finetune_sweep_report_lines(...)` to recover the
-selected scale-up candidate, top eval-loss rows, failed runs, and
+selected scale-up candidate plus its command/run-card/trace/output directory,
+top eval-loss rows, failed runs, and
 dry-run/partial/complete status without hand-reading the full artifact. For
 longer local runs, add `--resume-existing` to reuse successful per-run cards and
 continue only missing or failed rows after an interruption; add `--force` with
