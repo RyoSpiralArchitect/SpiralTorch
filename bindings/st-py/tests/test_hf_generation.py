@@ -471,6 +471,10 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         self.assertIn("dp0p4", runs[0]["name"])
         self.assertIn("dp0p8", runs[1]["name"])
         self.assertEqual(plan["runtime"]["api_provider"], "fake")
+        self.assertEqual(plan["execution"]["resume_existing"], False)
+        self.assertEqual(report["attempted_run_count"], 0)
+        self.assertEqual(report["completed_run_count"], 0)
+        self.assertEqual(report["skipped_run_count"], 2)
 
     def test_inference_distortion_probe_generate_compat_drops_batch_size(self) -> None:
         module = load_distortion_probe_example()
@@ -526,6 +530,97 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
             stored_report["comparison"]["top_probes"][0]["api_provider"],
             "fake",
         )
+
+    def test_inference_distortion_sweep_reuses_existing_probe(self) -> None:
+        module = load_distortion_sweep_example()
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "sweep"
+            base_args = module.parse_args(
+                [
+                    "--out-dir",
+                    str(out_dir),
+                    "--prompt",
+                    "SpiralTorch resume sweep",
+                    "--desire-pressure-values",
+                    "0.4",
+                    "--psi-total-values",
+                    "0.5",
+                    "--top-n",
+                    "1",
+                ]
+            )
+            initial_report = module.run_sweep(base_args)
+            original_run_probe = module._run_probe
+
+            def _fail_if_called(*_args, **_kwargs):
+                raise AssertionError("resume-existing should not rerun probes")
+
+            try:
+                module._run_probe = _fail_if_called
+                resume_args = module.parse_args(
+                    [
+                        "--resume-existing",
+                        "--out-dir",
+                        str(out_dir),
+                        "--prompt",
+                        "SpiralTorch resume sweep",
+                        "--desire-pressure-values",
+                        "0.4",
+                        "--psi-total-values",
+                        "0.5",
+                        "--top-n",
+                        "1",
+                    ]
+                )
+                resumed_report = module.run_sweep(resume_args)
+                report_only_args = module.parse_args(
+                    [
+                        "--report-only",
+                        "--out-dir",
+                        str(out_dir),
+                        "--prompt",
+                        "SpiralTorch resume sweep",
+                        "--desire-pressure-values",
+                        "0.4",
+                        "--psi-total-values",
+                        "0.5",
+                        "--top-n",
+                        "1",
+                    ]
+                )
+                report_only = module.run_sweep(report_only_args)
+                stale_args = module.parse_args(
+                    [
+                        "--report-only",
+                        "--out-dir",
+                        str(out_dir),
+                        "--prompt",
+                        "Changed prompt",
+                        "--desire-pressure-values",
+                        "0.4",
+                        "--psi-total-values",
+                        "0.5",
+                        "--top-n",
+                        "1",
+                    ]
+                )
+                stale_report = module.run_sweep(stale_args)
+            finally:
+                module._run_probe = original_run_probe
+
+        self.assertEqual(initial_report["status"], "complete")
+        self.assertEqual(resumed_report["status"], "complete")
+        self.assertEqual(resumed_report["attempted_run_count"], 0)
+        self.assertEqual(resumed_report["reused_run_count"], 1)
+        self.assertEqual(resumed_report["completed_run_count"], 1)
+        self.assertEqual(resumed_report["runs"][0]["status"], "reused")
+        self.assertEqual(report_only["status"], "reported")
+        self.assertEqual(report_only["reported_run_count"], 1)
+        self.assertEqual(report_only["attempted_run_count"], 0)
+        self.assertEqual(report_only["comparison"]["probe_count"], 1)
+        self.assertEqual(stale_report["status"], "partial")
+        self.assertEqual(stale_report["stale_run_count"], 1)
+        self.assertEqual(stale_report["comparison"]["probe_count"], 0)
 
 
 class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):

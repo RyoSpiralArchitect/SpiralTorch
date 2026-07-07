@@ -488,7 +488,11 @@ The sweep writes `sweep-plan.json`, one probe artifact per setting, and
 keyless fake API route by default, so the local-HF hook path can be checked
 first. Add `--api-provider openai-responses|openai-chat|anthropic` plus
 `--api-model <model>` to replay the exact same distortion grid against a live
-API model.
+API model. For interrupted or paid-provider sweeps, add `--resume-existing` to
+reuse successful probe artifacts, `--report-only` to rebuild `sweep-report.json`
+without touching local/API models, or `--force` when every row should be
+rerun intentionally. Existing artifacts are reused only when the saved prompt,
+distortion config, and runtime/provider settings match the current sweep.
 
 For the first real FT pass on a new corpus, use the sweep runner to make that
 comparison reproducible:
