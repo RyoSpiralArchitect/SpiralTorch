@@ -47,6 +47,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--watch-count", type=int, default=None)
     parser.add_argument("--watch-stop-on-final", action="store_true")
     parser.add_argument("--watch-stop-on-process-exit", action="store_true")
+    parser.add_argument("--watch-stop-on-eval-step", type=int, default=None)
     args = parser.parse_args(argv)
     if not args.run_dir.exists():
         parser.error(f"run_dir does not exist: {args.run_dir}")
@@ -62,6 +63,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("--watch-interval-seconds must be positive")
     if args.watch_count is not None and args.watch_count <= 0:
         parser.error("--watch-count must be positive")
+    if args.watch_stop_on_eval_step is not None and args.watch_stop_on_eval_step < 0:
+        parser.error("--watch-stop-on-eval-step must be non-negative")
     if args.trace_jsonl is None:
         args.trace_jsonl = args.run_dir / DEFAULT_TRACE_NAME
     if args.run_card is None:
@@ -407,6 +410,16 @@ def _should_stop_watch(args: argparse.Namespace, status: dict[str, Any]) -> bool
         return True
     if args.watch_stop_on_process_exit and status.get("process_status") == "exited":
         return True
+    if args.watch_stop_on_eval_step is not None:
+        trace = status.get("trace") if isinstance(status.get("trace"), dict) else {}
+        eval_points = trace.get("trace_eval_loss_points")
+        if isinstance(eval_points, list):
+            for point in eval_points:
+                if not isinstance(point, dict):
+                    continue
+                step = point.get("step")
+                if isinstance(step, int) and step >= args.watch_stop_on_eval_step:
+                    return True
     return False
 
 

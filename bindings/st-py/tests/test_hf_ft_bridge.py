@@ -3488,6 +3488,32 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             watch_final_written = json.loads(
                 watch_final_path.read_text(encoding="utf-8")
             )
+            watch_eval_path = run_dir / "watch-eval-status.json"
+            watch_eval_argv = [
+                str(run_dir),
+                "--max-steps",
+                "40",
+                "--eval-steps",
+                "10",
+                "--watch-interval-seconds",
+                "0.01",
+                "--watch-count",
+                "2",
+                "--watch-stop-on-eval-step",
+                "10",
+                "--out",
+                str(watch_eval_path),
+            ]
+            watch_eval_args = module.parse_args(watch_eval_argv)
+            self.assertTrue(
+                module._should_stop_watch(
+                    watch_eval_args, module.summarize_run(watch_eval_args)
+                )
+            )
+            self.assertEqual(module.main(watch_eval_argv), 0)
+            watch_eval_written = json.loads(
+                watch_eval_path.read_text(encoding="utf-8")
+            )
 
         self.assertEqual(status["process_status"], "alive")
         self.assertEqual(status["trace"]["trace_max_global_step"], 20)
@@ -3515,6 +3541,9 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(watch_written["log_progress"]["log_latest_step"], 24)
         self.assertEqual(watch_written["eval_progress"]["next_eval_step"], 30)
         self.assertTrue(watch_final_written["final_checkpoint_ready"])
+        self.assertEqual(
+            watch_eval_written["trace"]["trace_eval_loss_points"][-1]["step"], 10
+        )
         self.assertEqual(written_lines, lines)
 
     def test_run_card_summary_supplements_trace_telemetry_from_jsonl(self) -> None:
