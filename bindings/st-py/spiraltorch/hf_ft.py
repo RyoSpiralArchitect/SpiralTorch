@@ -506,18 +506,56 @@ def hf_gpt2_finetune_inference_distortion_handoff_report(
     *,
     top_n: int = 3,
 ) -> dict[str, object]:
-    """Summarize the inference-distortion sweep that motivated an FT run."""
+    """Summarize the inference-distortion probe/sweep that motivated an FT run."""
 
     from .hf_generation import (
         load_zspace_inference_distortion_sweep,
         summarize_zspace_inference_distortion_sweep,
+        zspace_inference_distortion_sweep_report_from_probes,
     )
 
+    input_row_type = None
+    if isinstance(report_or_path, Mapping):
+        input_row_type = report_or_path.get("row_type")
+    elif isinstance(report_or_path, (str, Path)):
+        try:
+            raw_payload = json.loads(Path(report_or_path).read_text(encoding="utf-8"))
+            if isinstance(raw_payload, Mapping):
+                input_row_type = raw_payload.get("row_type")
+        except Exception:
+            input_row_type = None
+    source_kind = (
+        "probe"
+        if input_row_type == "zspace_inference_distortion_probe"
+        else "sweep"
+    )
+    summary_source: str | Path | Mapping[str, object] = report_or_path
+    if source_kind == "probe":
+        label = None
+        if isinstance(report_or_path, (str, Path)):
+            label = Path(report_or_path).stem
+        summary_source = zspace_inference_distortion_sweep_report_from_probes(
+            report_or_path,
+            labels=None if label is None else [label],
+            report_path=report_or_path if isinstance(report_or_path, (str, Path)) else None,
+            top_n=top_n,
+        )
     summary = summarize_zspace_inference_distortion_sweep(
-        report_or_path,
+        summary_source,
         top_n=top_n,
     )
-    if isinstance(report_or_path, (str, Path)):
+    if isinstance(summary_source, Mapping):
+        report = dict(summary_source)
+        source_path = str(
+            report.get("report_path")
+            or summary.get("sweep_path")
+            or (
+                report_or_path
+                if isinstance(report_or_path, (str, Path))
+                else report.get("source_path") or ""
+            )
+        )
+    elif isinstance(report_or_path, (str, Path)):
         source_path = str(report_or_path)
         try:
             report = load_zspace_inference_distortion_sweep(report_or_path)
@@ -539,6 +577,8 @@ def hf_gpt2_finetune_inference_distortion_handoff_report(
         "row_type": "hf_gpt2_finetune_inference_distortion_handoff",
         "status": status,
         "source_path": source_path or None,
+        "source_kind": source_kind,
+        "source_row_type": input_row_type,
         "sweep_status": summary.get("status"),
         "prompt": summary.get("prompt"),
         "recommended_probe": summary.get("recommended_probe"),

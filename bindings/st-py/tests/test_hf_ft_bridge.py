@@ -446,6 +446,88 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(handoff["api_request_sent_keys"], ["temperature", "top_p"])
         self.assertIn("--desire-pressure", handoff["recommended_probe_cli_args"])
 
+    def test_inference_distortion_handoff_report_accepts_probe_artifact(self) -> None:
+        probe_report = {
+            "row_type": "zspace_inference_distortion_probe",
+            "prompt": "SpiralTorch direct probe",
+            "runtime": {
+                "api_provider": "fake",
+                "api_model": "fake-distorted-api",
+                "local_model": "runs/gpt2-small-zspace-ft",
+            },
+            "config": {
+                "desire_pressure": 0.83,
+                "desire_stability": 0.41,
+                "psi_total": 0.73,
+                "coherence": 0.52,
+                "distortion_strength": 1.1,
+                "base_temperature": 0.7,
+                "base_top_p": 0.95,
+                "include_penalties": True,
+            },
+            "adapter": {
+                "request": {"temperature": 1.08, "top_p": 0.76},
+                "logits_processor_kwargs": {
+                    "repression_strength": 1.7,
+                    "ngram_repression_strength": 0.9,
+                },
+                "activation_hook": {
+                    "name_contains": ["attn", "mlp"],
+                    "intervention_scale": 0.91,
+                },
+            },
+            "local_hf": {
+                "status": "ok",
+                "changed": True,
+                "generation_control": {
+                    "status": "ok",
+                    "backend": "spiraltorch_zspace_softmax",
+                    "top_token_changed_count": 6,
+                },
+                "activation_report": {"status": "ok", "event_count": 12},
+            },
+            "api": {
+                "provider": "fake",
+                "model": "fake-distorted-api",
+                "text": "Fake direct probe response",
+                "request_filter": {
+                    "dropped_key_count": 1,
+                    "dropped_keys": ["presence_penalty"],
+                    "sent_keys": ["temperature", "top_p"],
+                },
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            probe_path = Path(tmp) / "direct-probe.json"
+            probe_path.write_text(json.dumps(probe_report), encoding="utf-8")
+            handoff = hf_ft.hf_gpt2_finetune_inference_distortion_handoff_report(
+                probe_path,
+            )
+
+        self.assertEqual(handoff["status"], "ok")
+        self.assertEqual(handoff["source_kind"], "probe")
+        self.assertEqual(
+            handoff["source_row_type"],
+            "zspace_inference_distortion_probe",
+        )
+        self.assertEqual(handoff["recommended_probe"], "direct-probe")
+        self.assertEqual(handoff["prompt"], "SpiralTorch direct probe")
+        self.assertEqual(handoff["desire_pressure"], 0.83)
+        self.assertEqual(handoff["psi_total"], 0.73)
+        self.assertEqual(
+            handoff["recommended_request"],
+            {"temperature": 1.08, "top_p": 0.76},
+        )
+        self.assertEqual(
+            handoff["recommended_processor_kwargs"]["repression_strength"],
+            1.7,
+        )
+        self.assertEqual(
+            handoff["recommended_activation_hook"]["name_contains"],
+            ["attn", "mlp"],
+        )
+        self.assertEqual(handoff["api_request_dropped_keys"], ["presence_penalty"])
+
     def test_eval_report_records_loss_perplexity_and_status(self) -> None:
         report = hf_ft.hf_gpt2_finetune_eval_report(
             stage="after_train",
@@ -975,6 +1057,100 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("--zspace-probe", first_command)
         self.assertIn("bs8", runs[0]["name"])
         self.assertIn("seed13", runs[-1]["name"])
+
+    def test_sweep_example_accepts_inference_distortion_probe(self) -> None:
+        module = load_sweep_example()
+        with tempfile.TemporaryDirectory() as tmp:
+            train_path = Path(tmp) / "train.txt"
+            probe_path = Path(tmp) / "direct-probe.json"
+            train_path.write_text("alpha spiral\nbeta zspace\n", encoding="utf-8")
+            probe_path.write_text(
+                json.dumps(
+                    {
+                        "row_type": "zspace_inference_distortion_probe",
+                        "prompt": "SpiralTorch direct sweep probe",
+                        "runtime": {
+                            "api_provider": "fake",
+                            "api_model": "fake-distorted-api",
+                        },
+                        "config": {
+                            "desire_pressure": 0.84,
+                            "desire_stability": 0.42,
+                            "psi_total": 0.74,
+                            "coherence": 0.5,
+                            "distortion_strength": 1.0,
+                            "base_temperature": 0.7,
+                            "base_top_p": 0.95,
+                        },
+                        "adapter": {
+                            "request": {"temperature": 1.04, "top_p": 0.78},
+                            "logits_processor_kwargs": {
+                                "repression_strength": 1.5,
+                            },
+                            "activation_hook": {"name_contains": ["attn"]},
+                        },
+                        "local_hf": {
+                            "status": "ok",
+                            "changed": True,
+                            "generation_control": {
+                                "status": "ok",
+                                "top_token_changed_count": 3,
+                            },
+                            "activation_report": {
+                                "status": "ok",
+                                "event_count": 6,
+                            },
+                        },
+                        "api": {
+                            "provider": "fake",
+                            "model": "fake-distorted-api",
+                            "text": "Fake probe",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            out_dir = Path(tmp) / "sweep"
+            args = module.parse_args(
+                [
+                    "--dry-run",
+                    "--out-dir",
+                    str(out_dir),
+                    "--train-file",
+                    str(train_path),
+                    "--block-size-values",
+                    "8",
+                    "--learning-rate-values",
+                    "0.001",
+                    "--max-step-values",
+                    "1",
+                    "--seed-values",
+                    "7",
+                    "--inference-distortion-probe",
+                    str(probe_path),
+                    "--trainer-telemetry",
+                ]
+            )
+            runs = module.build_sweep_runs(args)
+            report = module.run_sweep(args)
+            stored_plan = json.loads((out_dir / "sweep-plan.json").read_text())
+            stored_report = json.loads((out_dir / "sweep-report.json").read_text())
+
+        self.assertEqual(report["run_count"], 1)
+        self.assertEqual(stored_plan["inference_distortion_probe"], str(probe_path))
+        self.assertIsNone(stored_plan["inference_distortion_sweep_report"])
+        self.assertEqual(
+            stored_report["inference_distortion_handoff"]["source_kind"],
+            "probe",
+        )
+        self.assertEqual(
+            stored_report["summary"]["inference_distortion_recommended_probe"],
+            "direct-probe",
+        )
+        first_command = runs[0]["command"]
+        self.assertIn("--inference-distortion-probe", first_command)
+        self.assertIn(str(probe_path), first_command)
+        self.assertNotIn("--inference-distortion-sweep-report", first_command)
 
     def test_sweep_example_compares_completed_run_cards(self) -> None:
         module = load_sweep_example()

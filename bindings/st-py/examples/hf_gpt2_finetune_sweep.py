@@ -109,6 +109,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "each FT bridge run card and trainer trace."
         ),
     )
+    parser.add_argument(
+        "--inference-distortion-probe",
+        type=Path,
+        default=None,
+        help=(
+            "Forward one saved Z-Space inference-distortion probe directly into "
+            "each FT bridge run card and trainer trace."
+        ),
+    )
     parser.add_argument("--generation-prompt", default=None)
     parser.add_argument("--generation-max-new-tokens", type=int, default=16)
     parser.add_argument("--generation-do-sample", action="store_true")
@@ -291,6 +300,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "--inference-distortion-sweep-report does not exist: "
             f"{args.inference_distortion_sweep_report}"
         )
+    if (
+        args.inference_distortion_probe is not None
+        and not args.inference_distortion_probe.is_file()
+    ):
+        parser.error(
+            "--inference-distortion-probe does not exist: "
+            f"{args.inference_distortion_probe}"
+        )
+    if (
+        args.inference_distortion_sweep_report is not None
+        and args.inference_distortion_probe is not None
+    ):
+        parser.error(
+            "--inference-distortion-sweep-report and --inference-distortion-probe "
+            "are mutually exclusive"
+        )
     if args.corpus_scan and not args.train_file:
         parser.error("--corpus-scan requires --train-file")
     if args.corpus_scan_max_bytes_per_file < 0:
@@ -434,6 +459,13 @@ def _bridge_command(
             [
                 "--inference-distortion-sweep-report",
                 str(args.inference_distortion_sweep_report),
+            ]
+        )
+    if args.inference_distortion_probe is not None:
+        command.extend(
+            [
+                "--inference-distortion-probe",
+                str(args.inference_distortion_probe),
             ]
         )
     if args.generation_prompt:
@@ -634,11 +666,24 @@ def _inference_distortion_report_path(args: argparse.Namespace) -> str | None:
     )
 
 
+def _inference_distortion_probe_path(args: argparse.Namespace) -> str | None:
+    return (
+        None
+        if args.inference_distortion_probe is None
+        else str(args.inference_distortion_probe)
+    )
+
+
+def _inference_distortion_source_path(args: argparse.Namespace) -> str | None:
+    return _inference_distortion_report_path(args) or _inference_distortion_probe_path(args)
+
+
 def _inference_distortion_handoff(args: argparse.Namespace) -> dict[str, Any] | None:
-    if args.inference_distortion_sweep_report is None:
+    source_path = _inference_distortion_source_path(args)
+    if source_path is None:
         return None
     return st.hf_gpt2_finetune_inference_distortion_handoff_report(
-        args.inference_distortion_sweep_report,
+        source_path,
     )
 
 
@@ -650,6 +695,7 @@ def run_sweep(args: argparse.Namespace) -> dict[str, Any]:
         "row_type": "hf_gpt2_finetune_sweep_plan",
         "dry_run": bool(args.dry_run),
         "inference_distortion_sweep_report": _inference_distortion_report_path(args),
+        "inference_distortion_probe": _inference_distortion_probe_path(args),
         "inference_distortion_handoff": inference_handoff,
         "run_count": len(runs),
         "runs": runs,
@@ -668,6 +714,7 @@ def run_sweep(args: argparse.Namespace) -> dict[str, Any]:
             "plan_path": str(args.out_dir / "sweep-plan.json"),
             "report_path": str(args.out_dir / "sweep-report.json"),
             "inference_distortion_sweep_report": _inference_distortion_report_path(args),
+            "inference_distortion_probe": _inference_distortion_probe_path(args),
             "inference_distortion_handoff": inference_handoff,
             "comparison": None,
             "runs": runs,
@@ -735,6 +782,7 @@ def run_sweep(args: argparse.Namespace) -> dict[str, Any]:
         "plan_path": str(args.out_dir / "sweep-plan.json"),
         "report_path": str(args.out_dir / "sweep-report.json"),
         "inference_distortion_sweep_report": _inference_distortion_report_path(args),
+        "inference_distortion_probe": _inference_distortion_probe_path(args),
         "inference_distortion_handoff": inference_handoff,
         "comparison": comparison,
         "runs": runs,

@@ -386,6 +386,23 @@ def compare_zspace_inference_distortion_probes(
     preview_chars: int = ...,
 ) -> Dict[str, object]: ...
 
+def zspace_inference_distortion_sweep_report_from_probes(
+    probes: (
+        Mapping[str, str | PathLike[str] | Mapping[str, object]]
+        | Sequence[str | PathLike[str] | Mapping[str, object]]
+        | str
+        | PathLike[str]
+        | Mapping[str, object]
+    ),
+    *,
+    labels: Sequence[str] | None = ...,
+    prompt: object | None = ...,
+    runtime: Mapping[str, object] | None = ...,
+    report_path: str | PathLike[str] | None = ...,
+    top_n: int = ...,
+    preview_chars: int = ...,
+) -> Dict[str, object]: ...
+
 def zspace_inference_distortion_processor_kwargs(
     adapter_or_config: Mapping[str, object] | None = ...,
     **overrides: object,
@@ -8427,6 +8444,7 @@ __all__ = [
     "build_zspace_repression_logits_processor",
     "build_zspace_softmax_logits_processor",
     "compare_zspace_inference_distortion_probes",
+    "zspace_inference_distortion_sweep_report_from_probes",
     "zspace_inference_distortion_probe_cli_args",
     "zspace_inference_distortion_sweep_cli_args",
     "zspace_generation_control_bridge_cli_args",

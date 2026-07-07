@@ -31,6 +31,7 @@ from spiraltorch.hf_generation import (
     zspace_generation_control_bridge_cli_args,
     zspace_generation_control_processor_kwargs,
     zspace_generation_control_sweep_cli_args,
+    zspace_inference_distortion_sweep_report_from_probes,
 )
 
 try:
@@ -253,6 +254,10 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         self.assertIn("compare_zspace_inference_distortion_probes", st.__all__)
         self.assertIn("build_zspace_repression_logits_processor", st.__all__)
         self.assertIn("build_zspace_softmax_logits_processor", st.__all__)
+        self.assertIn(
+            "zspace_inference_distortion_sweep_report_from_probes",
+            st.__all__,
+        )
         self.assertIn("zspace_generation_control_bridge_cli_args", st.__all__)
         self.assertIn("zspace_generation_control_processor_kwargs", st.__all__)
         self.assertIn("zspace_generation_control_sweep_cli_args", st.__all__)
@@ -283,6 +288,10 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         self.assertIs(
             st.load_zspace_inference_distortion_probe,
             load_zspace_inference_distortion_probe,
+        )
+        self.assertIs(
+            st.zspace_inference_distortion_sweep_report_from_probes,
+            zspace_inference_distortion_sweep_report_from_probes,
         )
         self.assertIs(
             st.compare_zspace_inference_distortion_probes,
@@ -822,6 +831,83 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         )
         self.assertEqual(replay_args.prompt, "SpiralTorch probe promotion")
         self.assertEqual(replay_args.api_provider, "fake")
+
+    def test_inference_distortion_probe_helper_promotes_inline_probe(self) -> None:
+        probe = {
+            "row_type": "zspace_inference_distortion_probe",
+            "name": "inline-probe",
+            "prompt": "SpiralTorch inline probe",
+            "runtime": {
+                "api_provider": "fake",
+                "api_model": "fake-distorted-api",
+                "local_model": "runs/gpt2-small-zspace-ft",
+            },
+            "config": {
+                "desire_pressure": 0.82,
+                "desire_stability": 0.4,
+                "psi_total": 0.72,
+                "coherence": 0.5,
+                "distortion_strength": 1.1,
+                "base_temperature": 0.7,
+                "base_top_p": 0.95,
+                "include_penalties": True,
+            },
+            "adapter": {
+                "request": {"temperature": 1.05, "top_p": 0.75},
+                "activation_hook": {
+                    "name_contains": ["attn"],
+                    "intervention_scale": 0.9,
+                },
+                "logits_processor_kwargs": {
+                    "repression_strength": 1.6,
+                    "ngram_repression_strength": 0.8,
+                },
+            },
+            "local_hf": {
+                "status": "ok",
+                "changed": True,
+                "generation_control": {
+                    "status": "ok",
+                    "top_token_changed_count": 4,
+                },
+                "activation_report": {"status": "ok", "event_count": 8},
+            },
+            "api": {
+                "provider": "fake",
+                "model": "fake-distorted-api",
+                "text": "fake distorted response",
+                "request_filter": {
+                    "dropped_key_count": 1,
+                    "dropped_keys": ["presence_penalty"],
+                    "sent_keys": ["temperature", "top_p"],
+                },
+            },
+        }
+
+        report = zspace_inference_distortion_sweep_report_from_probes(
+            probe,
+            labels=["inline-live-probe"],
+            top_n=1,
+        )
+        summary = summarize_zspace_inference_distortion_sweep(report, top_n=1)
+
+        self.assertEqual(report["status"], "reported")
+        self.assertEqual(report["completed_run_count"], 1)
+        self.assertEqual(summary["recommended_probe"], "inline-live-probe")
+        self.assertEqual(summary["recommended_config"]["desire_pressure"], 0.82)
+        self.assertEqual(summary["recommended_request"]["temperature"], 1.05)
+        self.assertEqual(
+            summary["recommended_processor_kwargs"]["repression_strength"],
+            1.6,
+        )
+        self.assertEqual(
+            summary["recommended_activation_hook"]["name_contains"],
+            ["attn"],
+        )
+        self.assertEqual(
+            summary["recommended_api_request_dropped_keys"],
+            ["presence_penalty"],
+        )
 
 
 class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):

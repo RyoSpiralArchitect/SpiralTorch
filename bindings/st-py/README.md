@@ -521,7 +521,11 @@ sweep. From Python, call `st.load_zspace_inference_distortion_sweep(...)`,
 `st.summarize_zspace_inference_distortion_sweep(...)`, or
 `st.summarize_zspace_inference_distortion_sweep_lines(...)` to recover the
 recommended config, request overrides, logits-processor kwargs, and focused
-single-probe/sweep CLI args.
+single-probe/sweep CLI args. If you already have one or more probe artifacts,
+`st.zspace_inference_distortion_sweep_report_from_probes(...)` promotes them to
+the same sweep-shaped report in memory, preserving request overrides,
+logits-processor kwargs, activation-hook settings, and provider request-filter
+audit for downstream FT handoff.
 
 For the first real FT pass on a new corpus, use the sweep runner to make that
 comparison reproducible:
@@ -535,7 +539,7 @@ PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_gpt2_finetune_sweep.
   --eval-before-train \
   --zspace-probe \
   --trainer-telemetry \
-  --inference-distortion-sweep-report runs/zspace-inference-distortion-sweep/sweep-report.json \
+  --inference-distortion-probe runs/inference-distortion/live-local-api-probe.json \
   --block-size-values 64,128 \
   --learning-rate-values 0.0001,0.00005 \
   --seed-values 7,13 \
@@ -545,10 +549,11 @@ PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_gpt2_finetune_sweep.
 It writes `sweep-plan.json` before launching runs and `sweep-report.json` after
 the run cards are available, including the same
 `st.compare_hf_gpt2_finetune_run_cards(...)` comparison payload. Add
-`--inference-distortion-sweep-report` after a local/API inference-distortion
-sweep to stamp its recommended prompt/runtime/config into each FT run card and
-train-begin trace event; `sweep-plan.json` and dry-run `sweep-report.json` embed
-the same handoff so the scale-up plan can be audited before loading a model.
+`--inference-distortion-probe` after one local/API inference-distortion probe, or
+`--inference-distortion-sweep-report` after a ranked distortion grid, to stamp
+the recommended prompt/runtime/config into each FT run card and train-begin trace
+event; `sweep-plan.json` and dry-run `sweep-report.json` embed the same handoff
+so the scale-up plan can be audited before loading a model.
 When `--trainer-telemetry` is enabled, the same handoff also appears as
 `hf_ft.inference_distortion.*` telemetry keys on each frame;
 summaries surface the recommended probe, effect/risk, desire pressure, psi total,
@@ -567,7 +572,7 @@ longer local runs, add `--resume-existing` to reuse successful per-run cards and
 continue only missing or failed rows after an interruption; add `--force` with
 that same command when you intentionally want to rerun every row. From Python,
 use `st.hf_gpt2_finetune_inference_distortion_handoff_report(...)` to inspect a
-sweep recommendation before launching the FT bridge.
+probe or sweep recommendation before launching the FT bridge.
 
 ## Minimal usage
 

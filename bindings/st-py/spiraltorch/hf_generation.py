@@ -16,6 +16,7 @@ __all__ = [
     "build_zspace_repression_logits_processor",
     "build_zspace_softmax_logits_processor",
     "compare_zspace_inference_distortion_probes",
+    "zspace_inference_distortion_sweep_report_from_probes",
     "zspace_inference_distortion_probe_cli_args",
     "zspace_inference_distortion_sweep_cli_args",
     "zspace_generation_control_bridge_cli_args",
@@ -1252,6 +1253,158 @@ def compare_zspace_inference_distortion_probes(
     }
 
 
+def _distortion_probe_runtime(report: Mapping[str, object]) -> dict[str, object] | None:
+    runtime = report.get("runtime")
+    if isinstance(runtime, Mapping):
+        return dict(runtime)
+    api = _nested_mapping(report, "api")
+    local = _nested_mapping(report, "local_hf")
+    if not api and not local:
+        return None
+    return {
+        "local_model": local.get("model"),
+        "allow_remote": None,
+        "trust_remote_code": None,
+        "max_new_tokens": None,
+        "activation_module_name": [],
+        "activation_name_contains": [],
+        "api_provider": api.get("provider"),
+        "api_model": api.get("model"),
+        "api_max_tokens": None,
+    }
+
+
+def _unique_distortion_probe_label(existing: set[str], raw: object, *, index: int) -> str:
+    base = str(raw or f"probe-{index:03d}").strip() or f"probe-{index:03d}"
+    label = base
+    suffix = 2
+    while label in existing:
+        label = f"{base}-{suffix}"
+        suffix += 1
+    existing.add(label)
+    return label
+
+
+def _probe_path_for_source(source: str | Path | Mapping[str, object]) -> str | None:
+    if isinstance(source, (str, Path)):
+        return str(source)
+    probe_path = source.get("probe_path") if isinstance(source, Mapping) else None
+    return str(probe_path) if probe_path is not None else None
+
+
+def zspace_inference_distortion_sweep_report_from_probes(
+    probes: (
+        Mapping[str, str | Path | Mapping[str, object]]
+        | Sequence[str | Path | Mapping[str, object]]
+        | str
+        | Path
+        | Mapping[str, object]
+    ),
+    *,
+    labels: Sequence[str] | None = None,
+    prompt: object | None = None,
+    runtime: Mapping[str, object] | None = None,
+    report_path: str | Path | None = None,
+    top_n: int = 5,
+    preview_chars: int = 96,
+) -> dict[str, object]:
+    """Promote saved inference-distortion probes into a sweep-shaped report."""
+
+    if top_n < 0:
+        raise ValueError("top_n must be non-negative")
+    inputs = _iter_probe_inputs(probes, labels=labels)
+    runs: list[dict[str, object]] = []
+    comparison_inputs: dict[str, str | Path | Mapping[str, object]] = {}
+    names: set[str] = set()
+    prompt_value = prompt
+    runtime_value = dict(runtime) if isinstance(runtime, Mapping) else None
+    for index, (label, source) in enumerate(inputs, start=1):
+        probe_payload, source_path = _probe_payload(source)
+        name = _unique_distortion_probe_label(
+            names,
+            label or probe_payload.get("name") or _default_probe_label(source, index=index),
+            index=index,
+        )
+        if prompt_value is None and probe_payload.get("prompt") is not None:
+            prompt_value = probe_payload.get("prompt")
+        if runtime_value is None:
+            runtime_value = _distortion_probe_runtime(probe_payload)
+        summary_source: str | Path | Mapping[str, object]
+        summary_source = source if isinstance(source, (str, Path)) else probe_payload
+        summary = summarize_zspace_inference_distortion_probe(
+            summary_source,
+            preview_chars=preview_chars,
+        )
+        config = probe_payload.get("config")
+        run: dict[str, object] = {
+            "name": name,
+            "index": index,
+            "config": dict(config) if isinstance(config, Mapping) else {},
+            "probe_path": source_path or _probe_path_for_source(source),
+            "status": "reported",
+            "summary": summary,
+            "reported": True,
+        }
+        if source_path is None:
+            run["probe_payload"] = probe_payload
+        runs.append(run)
+        comparison_inputs[name] = summary_source
+    comparison = compare_zspace_inference_distortion_probes(
+        comparison_inputs,
+        top_n=top_n,
+        preview_chars=preview_chars,
+    )
+    report: dict[str, object] = {
+        "row_type": "zspace_inference_distortion_sweep",
+        "status": "reported",
+        "dry_run": False,
+        "prompt": prompt_value,
+        "runtime": runtime_value or {},
+        "execution": {
+            "resume_existing": False,
+            "force": False,
+            "report_only": True,
+            "from_probe_count": len(runs),
+        },
+        "run_count": len(runs),
+        "attempted_run_count": 0,
+        "completed_run_count": len(runs),
+        "failed_run_count": 0,
+        "missing_run_count": 0,
+        "stale_run_count": 0,
+        "reused_run_count": 0,
+        "reported_run_count": len(runs),
+        "skipped_run_count": 0,
+        "runs": runs,
+        "comparison": comparison,
+        "summary_lines": summarize_zspace_inference_distortion_probe_comparison_lines(
+            comparison,
+            top_n=top_n,
+            preview_chars=preview_chars,
+        ),
+        "source_probe_paths": [
+            str(path)
+            for path in (
+                run.get("probe_path")
+                for run in runs
+                if run.get("probe_path") is not None
+            )
+        ],
+        "report_path": None if report_path is None else str(report_path),
+    }
+    report["summary"] = summarize_zspace_inference_distortion_sweep(
+        report,
+        top_n=top_n,
+        preview_chars=preview_chars,
+    )
+    report["summary_lines"] = summarize_zspace_inference_distortion_sweep_lines(
+        report,
+        top_n=top_n,
+        preview_chars=preview_chars,
+    )
+    return report
+
+
 def summarize_zspace_inference_distortion_probe_comparison_lines(
     comparison_or_probes: (
         Mapping[str, object]
@@ -1469,10 +1622,13 @@ def _distortion_recommendation_payload(
     if config is None:
         config = _distortion_config_from_summary(best)
     probe_payload: dict[str, object] = {}
+    inline_probe = None if selected_run is None else selected_run.get("probe_payload")
+    if isinstance(inline_probe, Mapping):
+        probe_payload = dict(inline_probe)
     probe_path = None if selected_run is None else selected_run.get("probe_path")
     if probe_path is None and best is not None:
         probe_path = best.get("probe_path")
-    if probe_path is not None and Path(str(probe_path)).is_file():
+    if not probe_payload and probe_path is not None and Path(str(probe_path)).is_file():
         try:
             probe_payload = load_zspace_inference_distortion_probe(str(probe_path))
         except Exception:

@@ -125,6 +125,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "FT run card and trainer trace handoff."
         ),
     )
+    parser.add_argument(
+        "--inference-distortion-probe",
+        type=Path,
+        default=None,
+        help=(
+            "Attach one saved Z-Space inference-distortion probe directly; it "
+            "is promoted to the same FT handoff shape as a sweep report."
+        ),
+    )
     parser.add_argument("--allow-remote", action="store_true")
     parser.add_argument("--trust-remote-code", action="store_true")
     parser.add_argument("--train", action="store_true", help="Actually run Trainer.train().")
@@ -409,6 +418,22 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         parser.error(
             "--inference-distortion-sweep-report does not exist: "
             f"{args.inference_distortion_sweep_report}"
+        )
+    if (
+        args.inference_distortion_probe is not None
+        and not args.inference_distortion_probe.is_file()
+    ):
+        parser.error(
+            "--inference-distortion-probe does not exist: "
+            f"{args.inference_distortion_probe}"
+        )
+    if (
+        args.inference_distortion_sweep_report is not None
+        and args.inference_distortion_probe is not None
+    ):
+        parser.error(
+            "--inference-distortion-sweep-report and --inference-distortion-probe "
+            "are mutually exclusive"
         )
     if args.metadata_only and args.train:
         parser.error("--metadata-only and --train are mutually exclusive")
@@ -1252,6 +1277,11 @@ def _base_run_card(
             if args.inference_distortion_sweep_report is None
             else str(args.inference_distortion_sweep_report)
         ),
+        "inference_distortion_probe": (
+            None
+            if args.inference_distortion_probe is None
+            else str(args.inference_distortion_probe)
+        ),
         "inference_distortion_handoff": (
             dict(inference_distortion_handoff)
             if isinstance(inference_distortion_handoff, Mapping)
@@ -1291,11 +1321,14 @@ def _main_with_runtime_access(
 ) -> int:
     corpus_file_report = _corpus_file_report(args)
     corpus_scan_report = _corpus_scan_report(args)
+    inference_distortion_source = (
+        args.inference_distortion_sweep_report or args.inference_distortion_probe
+    )
     inference_distortion_handoff = (
         None
-        if args.inference_distortion_sweep_report is None
+        if inference_distortion_source is None
         else hf_gpt2_finetune_inference_distortion_handoff_report(
-            args.inference_distortion_sweep_report,
+            inference_distortion_source,
         )
     )
     preflight = hf_gpt2_finetune_preflight_report(
@@ -1314,6 +1347,11 @@ def _main_with_runtime_access(
         None
         if args.inference_distortion_sweep_report is None
         else str(args.inference_distortion_sweep_report)
+    )
+    preflight["inference_distortion_probe"] = (
+        None
+        if args.inference_distortion_probe is None
+        else str(args.inference_distortion_probe)
     )
     preflight["inference_distortion_handoff"] = (
         None
