@@ -459,6 +459,9 @@ def test_topos_runtime_adapter_is_serializable_context_payload() -> None:
     assert adapter["context_partial"]["telemetry"][
         "topos.runtime_route.context_score"
     ] == pytest.approx(0.6956782798030483)
+    assert adapter["context_partial"]["telemetry"][
+        "topos.runtime_route.scores.context"
+    ] == pytest.approx(0.6956782798030483)
 
 
 def test_topos_runtime_adapter_can_be_used_directly_as_prompt_context() -> None:
@@ -519,6 +522,9 @@ def test_api_llm_prompt_suite_applies_topos_runtime_adapter_directly() -> None:
         0.4041837060714286
     )
     assert telemetry["topos.runtime_route.score"] == pytest.approx(0.6956782798030483)
+    assert telemetry["topos.runtime_route.scores.context"] == pytest.approx(
+        0.6956782798030483
+    )
 
 
 def test_api_llm_trace_summary_surfaces_topos_runtime_hints(tmp_path) -> None:

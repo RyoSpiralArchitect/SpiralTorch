@@ -268,6 +268,12 @@ def topos_runtime_adapter(
     )
     route = topos_runtime_route(runtime_profile=profile)
     telemetry = dict(partial.telemetry_payload() or {})
+    route_prefix = f"{telemetry_prefix}.runtime_route."
+    telemetry = {
+        key: value
+        for key, value in telemetry.items()
+        if not str(key).startswith(route_prefix)
+    }
     for key, value in inference_plan.items():
         numeric = _finite_float(value)
         if numeric is not None:
@@ -282,6 +288,7 @@ def topos_runtime_adapter(
         numeric = _finite_float(value)
         if numeric is not None:
             telemetry[f"{telemetry_prefix}.runtime_route.{key}_score"] = numeric
+            telemetry[f"{telemetry_prefix}.runtime_route.scores.{key}"] = numeric
     return {
         "kind": "spiraltorch.topos_runtime_adapter",
         "signal": signal,
