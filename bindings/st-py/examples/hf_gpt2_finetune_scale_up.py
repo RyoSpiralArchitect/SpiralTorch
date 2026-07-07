@@ -38,12 +38,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Exit non-zero when the source does not contain a runnable command.",
     )
     parser.add_argument("--max-steps", type=int, default=None)
-    parser.add_argument("--max-steps-multiplier", type=float, default=2.0)
+    parser.add_argument("--max-steps-multiplier", type=float, default=None)
     parser.add_argument("--max-train-samples", type=int, default=None)
-    parser.add_argument("--max-train-samples-multiplier", type=float, default=2.0)
+    parser.add_argument("--max-train-samples-multiplier", type=float, default=None)
     parser.add_argument("--max-eval-samples", type=int, default=None)
     parser.add_argument("--output-dir", type=Path, default=None)
-    parser.add_argument("--output-suffix", default="scaleup")
+    parser.add_argument("--output-suffix", default=None)
     parser.add_argument("--run-card", type=Path, default=None)
     parser.add_argument("--trainer-trace-jsonl", type=Path, default=None)
     args = parser.parse_args(argv)
@@ -88,12 +88,18 @@ def _flag_value(command: Sequence[object], flag: str) -> str | None:
 def _summary_from_scale_up_artifact(
     artifact: Mapping[str, Any],
 ) -> dict[str, Any]:
-    base_command = artifact.get("base_command")
-    if not isinstance(base_command, Sequence) or isinstance(base_command, (str, bytes)):
-        base_command = artifact.get("command")
-    if not isinstance(base_command, Sequence) or isinstance(base_command, (str, bytes)):
-        base_command = []
-    command = [str(item) for item in base_command]
+    command_value = artifact.get("command")
+    if not isinstance(command_value, Sequence) or isinstance(
+        command_value,
+        (str, bytes),
+    ):
+        command_value = artifact.get("base_command")
+    if not isinstance(command_value, Sequence) or isinstance(
+        command_value,
+        (str, bytes),
+    ):
+        command_value = []
+    command = [str(item) for item in command_value]
     return {
         "row_type": "hf_gpt2_finetune_sweep_report_summary",
         "scale_up_candidate_label": artifact.get("scale_up_candidate_label"),
@@ -116,23 +122,57 @@ def _summary_from_scale_up_artifact(
 
 def _scale_up_command_from_source(args: argparse.Namespace) -> dict[str, Any]:
     source = _read_json(args.source)
-    if source.get("row_type") == "hf_gpt2_finetune_scale_up_command":
+    source_is_scale_up_artifact = (
+        source.get("row_type") == "hf_gpt2_finetune_scale_up_command"
+    )
+    if source_is_scale_up_artifact:
         source_payload: str | Path | Mapping[str, Any] = _summary_from_scale_up_artifact(
             source
         )
     else:
         source_payload = source
+    max_steps_multiplier = args.max_steps_multiplier
+    max_train_samples_multiplier = args.max_train_samples_multiplier
+    if not source_is_scale_up_artifact:
+        max_steps_multiplier = (
+            2.0 if max_steps_multiplier is None else max_steps_multiplier
+        )
+        max_train_samples_multiplier = (
+            2.0
+            if max_train_samples_multiplier is None
+            else max_train_samples_multiplier
+        )
+    output_dir = args.output_dir
+    run_card = args.run_card
+    trainer_trace_jsonl = args.trainer_trace_jsonl
+    output_suffix = args.output_suffix
+    if source_is_scale_up_artifact and isinstance(source_payload, Mapping):
+        source_command = source_payload.get("scale_up_candidate_command")
+        if (
+            output_dir is None
+            and output_suffix is None
+            and isinstance(source_command, Sequence)
+            and not isinstance(source_command, (str, bytes))
+        ):
+            output_dir = _flag_value(source_command, "--output-dir")
+            run_card = run_card or _flag_value(source_command, "--run-card")
+            trainer_trace_jsonl = trainer_trace_jsonl or _flag_value(
+                source_command,
+                "--trainer-trace-jsonl",
+            )
+    else:
+        output_suffix = "scaleup" if output_suffix is None else output_suffix
     command = st.hf_gpt2_finetune_scale_up_command(
         source_payload,
         max_steps=args.max_steps,
-        max_steps_multiplier=args.max_steps_multiplier,
+        max_steps_multiplier=max_steps_multiplier,
         max_train_samples=args.max_train_samples,
-        max_train_samples_multiplier=args.max_train_samples_multiplier,
+        max_train_samples_multiplier=max_train_samples_multiplier,
         max_eval_samples=args.max_eval_samples,
-        output_dir=args.output_dir,
-        output_suffix=args.output_suffix,
-        run_card=args.run_card,
-        trainer_trace_jsonl=args.trainer_trace_jsonl,
+        output_dir=output_dir,
+        output_suffix=output_suffix or "scaleup",
+        run_card=run_card,
+        trainer_trace_jsonl=trainer_trace_jsonl,
     )
     command["source_path"] = str(args.source)
     if args.write_command is not None:

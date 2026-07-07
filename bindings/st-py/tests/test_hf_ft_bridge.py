@@ -2119,6 +2119,31 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 from_command_artifact_args
             )
 
+            exact_run_args = scale_up_module.parse_args(
+                [
+                    str(rewritten_artifact_path),
+                    "--run",
+                ]
+            )
+
+            def fake_exact_replay(command, *, check=False):
+                del check
+                self.assertIn("--max-steps", command)
+                self.assertEqual(command[command.index("--max-steps") + 1], "64")
+                self.assertIn("--output-dir", command)
+                self.assertEqual(
+                    command[command.index("--output-dir") + 1],
+                    str(out_dir / "long-run"),
+                )
+                return types.SimpleNamespace(returncode=0)
+
+            with mock.patch.object(
+                scale_up_module.subprocess,
+                "run",
+                side_effect=fake_exact_replay,
+            ) as exact_run_mock:
+                exact_executed = scale_up_module.run_scale_up(exact_run_args)
+
             run_args = scale_up_module.parse_args(
                 [
                     str(rewritten_artifact_path),
@@ -2158,6 +2183,9 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(scale_up["artifact_path"], str(rewritten_artifact_path))
         self.assertEqual(from_command_artifact["status"], "ok")
         self.assertIn("-longer", from_command_artifact["command_display"])
+        self.assertIn("--max-steps 2", from_command_artifact["command_display"])
+        self.assertEqual(exact_executed["run_returncode"], 0)
+        exact_run_mock.assert_called_once()
         self.assertEqual(executed["run_returncode"], 0)
         run_mock.assert_called_once()
 

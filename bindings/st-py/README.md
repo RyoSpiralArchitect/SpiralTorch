@@ -609,6 +609,10 @@ PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_gpt2_finetune_scale_
   --run
 ```
 
+When the source is a saved `scale-up-command*.json`, the CLI replays that saved
+command as-is unless you pass explicit overrides such as `--max-steps` or
+`--output-dir`.
+
 Add
 `--generation-from-inference-distortion` with a
 generation prompt to reuse the handoff's `recommended_processor_kwargs` as the
