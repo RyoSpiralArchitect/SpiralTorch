@@ -565,7 +565,9 @@ Z-Space/repression logits processor for before/after generated samples; omit it
 when you want to hand-tune `--generation-zspace-*` and repression flags instead.
 Run-card and sweep summaries expose the applied handoff probe plus key processor
 values such as entropy target and repression strengths beside generation-control
-telemetry, so the source of a decode change remains auditable.
+telemetry, plus ready-to-replay bridge CLI args for turning the same inferred
+distortion into explicit `--generation-zspace-*` / repression flags, so the
+source of a decode change remains auditable.
 Dry-run `sweep-plan.json` / `sweep-report.json` also include the planned
 handoff-driven generation processor values before any model is loaded.
 Add

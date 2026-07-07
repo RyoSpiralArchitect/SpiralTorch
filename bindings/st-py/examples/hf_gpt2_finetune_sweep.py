@@ -716,12 +716,17 @@ def _generation_from_inference_distortion_plan(
             "recommended_probe": inference_handoff.get("recommended_probe"),
             "source_kind": inference_handoff.get("source_kind"),
         }
+    bridge_cli_args = st.zspace_generation_control_bridge_cli_args(
+        processor_kwargs,
+        include_enable_flag=True,
+    )
     return {
         "status": "ok",
         "source_kind": inference_handoff.get("source_kind"),
         "recommended_probe": inference_handoff.get("recommended_probe"),
         "applied_arg_count": len(processor_kwargs),
         "processor_kwargs": dict(processor_kwargs),
+        "bridge_cli_args": bridge_cli_args,
     }
 
 

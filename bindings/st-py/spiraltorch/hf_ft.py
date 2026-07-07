@@ -10,6 +10,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from .hf_generation import zspace_generation_control_bridge_cli_args
 from .runtime_imports import (
     csv_label,
     runtime_import_preflight_report,
@@ -1692,6 +1693,15 @@ def _run_label(
     return source_path or "run"
 
 
+def _generation_inference_bridge_cli_args(
+    processor_kwargs: Mapping[str, object],
+) -> list[str]:
+    return zspace_generation_control_bridge_cli_args(
+        processor_kwargs,
+        include_enable_flag=True,
+    )
+
+
 def summarize_hf_gpt2_finetune_run_card(
     card_or_path: str | Path | Mapping[str, object],
     *,
@@ -1714,6 +1724,9 @@ def summarize_hf_gpt2_finetune_run_card(
     generation_inference_processor = _mapping_item(
         generation_inference,
         "processor_kwargs",
+    )
+    generation_inference_bridge_cli_args = _generation_inference_bridge_cli_args(
+        generation_inference_processor,
     )
     trainer_metrics = _mapping_item(card, "trainer_metrics")
     trainer_trace = _trainer_trace_summary_for_card(card)
@@ -1918,6 +1931,9 @@ def summarize_hf_gpt2_finetune_run_card(
             generation_inference,
             "applied_arg_count",
         ),
+        "generation_from_inference_distortion_bridge_cli_args": (
+            generation_inference_bridge_cli_args
+        ),
         "generation_from_inference_distortion_top_k": _metric_number(
             generation_inference_processor,
             "top_k",
@@ -2117,6 +2133,10 @@ def _ranked_sweep_rows(
                         )
                     )
                 ),
+                "generation_from_inference_distortion_bridge_cli_args": list(
+                    row.get("generation_from_inference_distortion_bridge_cli_args")
+                    or []
+                ),
                 "generation_from_inference_distortion_entropy_target": _safe_number(
                     row.get("generation_from_inference_distortion_entropy_target")
                 ),
@@ -2275,6 +2295,11 @@ def summarize_hf_gpt2_finetune_sweep_report(
         generation_inference_plan,
         "processor_kwargs",
     )
+    generation_inference_plan_bridge_cli_args = (
+        _generation_inference_bridge_cli_args(
+            generation_inference_plan_processor,
+        )
+    )
     runs_value = report.get("runs")
     runs = (
         [dict(row) for row in runs_value if isinstance(row, Mapping)]
@@ -2340,6 +2365,9 @@ def summarize_hf_gpt2_finetune_sweep_report(
         ),
         "generation_from_inference_distortion_plan_applied_arg_count": (
             _metric_number(generation_inference_plan, "applied_arg_count")
+        ),
+        "generation_from_inference_distortion_plan_bridge_cli_args": (
+            generation_inference_plan_bridge_cli_args
         ),
         "generation_from_inference_distortion_plan_top_k": _metric_number(
             generation_inference_plan_processor,

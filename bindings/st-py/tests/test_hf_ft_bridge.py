@@ -769,6 +769,16 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             ],
             0.9,
         )
+        bridge_cli_args = summary[
+            "generation_from_inference_distortion_bridge_cli_args"
+        ]
+        self.assertIn("--generation-zspace-softmax", bridge_cli_args)
+        self.assertIn("--generation-zspace-entropy-target", bridge_cli_args)
+        self.assertIn("3.4", bridge_cli_args)
+        self.assertIn("--generation-repression-strength", bridge_cli_args)
+        self.assertIn("1.7", bridge_cli_args)
+        self.assertIn("--generation-ngram-repression-strength", bridge_cli_args)
+        self.assertIn("0.9", bridge_cli_args)
         self.assertEqual(summary["trainer_train_loss"], 1.4)
         self.assertEqual(summary["inference_distortion_handoff_status"], "ok")
         self.assertEqual(
@@ -804,6 +814,12 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(sweep_summary["selected_reason"], "best_eval_loss_delta")
         self.assertEqual(sweep_summary["selected_run_status"], "completed")
         self.assertEqual(sweep_summary["selected_run_card"], str(strong_path))
+        self.assertIn(
+            "--generation-repression-strength",
+            sweep_summary["top_runs"][0][
+                "generation_from_inference_distortion_bridge_cli_args"
+            ],
+        )
         self.assertEqual(
             sweep_summary["selected_trainer_trace_jsonl"],
             str(Path(tmp) / "strong-trace.jsonl"),
@@ -1219,6 +1235,12 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             ]["repression_strength"],
             1.5,
         )
+        self.assertIn(
+            "--generation-repression-strength",
+            stored_plan["generation_from_inference_distortion_plan"][
+                "bridge_cli_args"
+            ],
+        )
         self.assertEqual(
             stored_report["summary"][
                 "generation_from_inference_distortion_plan_status"
@@ -1249,6 +1271,16 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             ],
             0.75,
         )
+        plan_bridge_cli_args = stored_report["summary"][
+            "generation_from_inference_distortion_plan_bridge_cli_args"
+        ]
+        self.assertIn("--generation-zspace-softmax", plan_bridge_cli_args)
+        self.assertIn("--generation-zspace-entropy-target", plan_bridge_cli_args)
+        self.assertIn("3.25", plan_bridge_cli_args)
+        self.assertIn("--generation-repression-strength", plan_bridge_cli_args)
+        self.assertIn("1.5", plan_bridge_cli_args)
+        self.assertIn("--generation-ngram-repression-strength", plan_bridge_cli_args)
+        self.assertIn("0.75", plan_bridge_cli_args)
         direct_lines = hf_ft.summarize_hf_gpt2_finetune_sweep_report_lines(
             stored_report,
         )
