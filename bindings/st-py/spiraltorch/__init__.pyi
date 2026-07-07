@@ -255,6 +255,14 @@ HF_GPT2_FT_REQUIRED_RUST_SURFACES: List[Dict[str, str]]
 
 def hf_gpt2_finetune_rust_dependency_report() -> Dict[str, Any]: ...
 
+def hf_gpt2_finetune_corpus_file_report(
+    *,
+    train_files: object = ...,
+    validation_files: object = ...,
+    dataset_format: str = ...,
+    text_column: str = ...,
+) -> Dict[str, object]: ...
+
 def hf_gpt2_finetune_preflight_report(
     *,
     model_name: str = ...,
@@ -8081,6 +8089,7 @@ __all__ = [
     "HF_GPT2_FT_DEFAULT_DEVICE_BACKENDS",
     "HF_GPT2_FT_REQUIRED_PYTHON_PACKAGES",
     "HF_GPT2_FT_REQUIRED_RUST_SURFACES",
+    "hf_gpt2_finetune_corpus_file_report",
     "hf_gpt2_finetune_preflight_report",
     "hf_gpt2_finetune_rust_dependency_report",
     "hf_gpt2_finetune_summary_lines",

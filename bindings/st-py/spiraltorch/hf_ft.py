@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import time
+import hashlib
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,7 @@ __all__ = [
     "HF_GPT2_FT_REQUIRED_PYTHON_PACKAGES",
     "HF_GPT2_FT_REQUIRED_RUST_SURFACES",
     "hf_gpt2_finetune_preflight_report",
+    "hf_gpt2_finetune_corpus_file_report",
     "hf_gpt2_finetune_rust_dependency_report",
     "hf_gpt2_finetune_summary_lines",
     "hf_gpt2_finetune_trainer_trace_callback",
@@ -106,6 +108,18 @@ HF_GPT2_FT_REQUIRED_RUST_SURFACES = [
 ]
 
 
+def _path_values(values: object) -> list[Path]:
+    if values is None:
+        return []
+    if isinstance(values, (str, Path)):
+        raw_values = [values]
+    elif isinstance(values, Iterable):
+        raw_values = list(values)
+    else:
+        raw_values = [values]
+    return [Path(value) for value in raw_values if str(value)]
+
+
 def _unique(values: object) -> list[str]:
     if values is None:
         return []
@@ -116,6 +130,65 @@ def _unique(values: object) -> list[str]:
     else:
         raw_values = [str(values)]
     return list(dict.fromkeys(value.strip() for value in raw_values if value.strip()))
+
+
+def hf_gpt2_finetune_corpus_file_report(
+    *,
+    train_files: object = None,
+    validation_files: object = None,
+    dataset_format: str = "text",
+    text_column: str = "text",
+) -> dict[str, object]:
+    """Build a lightweight manifest for local GPT-2 FT corpus files."""
+
+    rows = []
+    fingerprint = hashlib.sha256()
+    total_bytes = 0
+    missing = []
+    readable = []
+    for split, paths in (
+        ("train", _path_values(train_files)),
+        ("validation", _path_values(validation_files)),
+    ):
+        for path in paths:
+            label = str(path)
+            row: dict[str, object] = {
+                "split": split,
+                "path": label,
+                "exists": path.is_file(),
+                "bytes": None,
+                "mtime_ns": None,
+            }
+            if not path.is_file():
+                missing.append(label)
+            else:
+                stat = path.stat()
+                size = int(stat.st_size)
+                mtime_ns = int(stat.st_mtime_ns)
+                row.update({"bytes": size, "mtime_ns": mtime_ns})
+                readable.append(label)
+                total_bytes += size
+                fingerprint.update(
+                    f"{split}\0{path.resolve()}\0{size}\0{mtime_ns}\n".encode()
+                )
+            rows.append(row)
+    return {
+        "row_type": "hf_gpt2_finetune_corpus_file_report",
+        "dataset_source": "local_files" if rows else "hf_dataset",
+        "dataset_format": str(dataset_format),
+        "text_column": str(text_column),
+        "file_count": len(rows),
+        "train_file_count": sum(1 for row in rows if row["split"] == "train"),
+        "validation_file_count": sum(
+            1 for row in rows if row["split"] == "validation"
+        ),
+        "total_bytes": total_bytes,
+        "readable_files": csv_label(readable),
+        "missing_files": csv_label(missing),
+        "all_files_available": not missing,
+        "fingerprint": fingerprint.hexdigest() if rows else None,
+        "files": rows,
+    }
 
 
 def hf_gpt2_finetune_rust_dependency_report() -> dict[str, object]:

@@ -387,6 +387,24 @@ back into the run card; pass `--no-trainer-trace` only when that audit trail is
 too noisy. Use `--require-runtime-device-ready-backend wgpu` when the
 SpiralTorch WGPU surface must be available before the run starts.
 
+For a larger local corpus, bypass Hub datasets and feed files directly:
+
+```bash
+PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_gpt2_finetune_bridge.py \
+  --train \
+  --train-file data/corpus-000.txt \
+  --train-file data/corpus-001.txt \
+  --validation-fraction 0.02 \
+  --dataset-format text \
+  --max-train-samples 50000 \
+  --block-size 128 \
+  --output-dir runs/gpt2-small-zspace-ft
+```
+
+The run card stores `corpus_file_report` with file counts, total bytes, missing
+files, and a lightweight path/size/mtime fingerprint so repeat FT runs can be
+compared before reading model metrics.
+
 ## Minimal usage
 
 ### Model Zoo discovery + launch
