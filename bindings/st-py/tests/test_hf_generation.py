@@ -484,8 +484,13 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
             },
             "api": {
                 "provider": "fake",
-                "text": "weak route",
-                "telemetry": {"api_llm.empty_text": 0.0},
+                "text": "",
+                "request_filter": {
+                    "dropped_key_count": 0,
+                    "dropped_keys": [],
+                    "sent_keys": ["input", "model"],
+                },
+                "telemetry": {"api_llm.empty_text": 1.0},
             },
         }
         strong = {
@@ -509,6 +514,13 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
             "api": {
                 "provider": "fake",
                 "text": "strong route",
+                "request_filter": {
+                    "dropped_key_count": 2,
+                    "dropped_keys": ["temperature", "top_p"],
+                    "retry_dropped_key_count": 2,
+                    "retry_dropped_keys": ["temperature", "top_p"],
+                    "sent_keys": ["input", "model", "reasoning", "text"],
+                },
                 "telemetry": {"api_llm.empty_text": 0.0},
             },
         }
@@ -529,13 +541,25 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         self.assertEqual(comparison["recommended_probe"], "strong")
         self.assertEqual(comparison["local_changed_count"], 1)
         self.assertEqual(comparison["activation_observed_count"], 1)
+        self.assertEqual(comparison["api_visible_text_count"], 1)
+        self.assertEqual(comparison["api_empty_text_count"], 1)
+        self.assertEqual(comparison["api_retry_dropped_probe_count"], 1)
+        self.assertEqual(comparison["api_retry_dropped_key_total"], 2.0)
+        self.assertEqual(
+            comparison["api_retry_dropped_keys"],
+            ["temperature", "top_p"],
+        )
         self.assertEqual(comparison["top_probes"][0]["label"], "strong")
         self.assertGreater(
             comparison["top_probes"][0]["effect_score"],
             comparison["top_probes"][1]["effect_score"],
         )
         self.assertIn("recommended=strong", lines[0])
+        self.assertIn("api_visible=1", lines[0])
+        self.assertIn("api_empty=1", lines[0])
+        self.assertIn("api_retry_dropped=1", lines[0])
         self.assertIn("label=strong", lines[1])
+        self.assertIn("api_retry_dropped=2", lines[1])
 
     def test_inference_distortion_sweep_dry_run_writes_plan(self) -> None:
         module = load_distortion_sweep_example()

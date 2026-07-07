@@ -1196,6 +1196,12 @@ def _ranked_probe_rows(
     return ranked
 
 
+def _string_list(value: object) -> list[str]:
+    if isinstance(value, list):
+        return [str(item) for item in value]
+    return []
+
+
 def compare_zspace_inference_distortion_probes(
     probes: (
         Mapping[str, str | Path | Mapping[str, object]]
@@ -1245,6 +1251,32 @@ def compare_zspace_inference_distortion_probes(
         )
         is not None
     ]
+    api_empty_values = [
+        float(value)
+        for row in rows
+        if (value := _safe_number(row.get("api_empty_text"))) is not None
+    ]
+    api_retry_dropped_values = [
+        float(value)
+        for row in rows
+        if (
+            value := _safe_number(row.get("api_request_retry_dropped_key_count"))
+        )
+        is not None
+    ]
+    api_dropped_values = [
+        float(value)
+        for row in rows
+        if (value := _safe_number(row.get("api_request_dropped_key_count")))
+        is not None
+    ]
+    api_retry_dropped_keys = sorted(
+        {
+            key
+            for row in rows
+            for key in _string_list(row.get("api_request_retry_dropped_keys"))
+        }
+    )
     return {
         "row_type": "zspace_inference_distortion_probe_comparison",
         "probe_count": len(rows),
@@ -1253,6 +1285,18 @@ def compare_zspace_inference_distortion_probes(
         "activation_observed_count": activation_observed_count,
         "max_top_token_changed_count": (
             max(top_change_values) if top_change_values else None
+        ),
+        "api_visible_text_count": sum(1 for value in api_empty_values if value <= 0.0),
+        "api_empty_text_count": sum(1 for value in api_empty_values if value > 0.0),
+        "api_retry_dropped_probe_count": sum(
+            1 for value in api_retry_dropped_values if value > 0.0
+        ),
+        "api_retry_dropped_key_total": (
+            sum(api_retry_dropped_values) if api_retry_dropped_values else None
+        ),
+        "api_retry_dropped_keys": api_retry_dropped_keys,
+        "api_request_dropped_key_total": (
+            sum(api_dropped_values) if api_dropped_values else None
         ),
         "recommended_probe": None if best is None else best.get("label"),
         "recommended_reason": (
@@ -1454,7 +1498,10 @@ def summarize_zspace_inference_distortion_probe_comparison_lines(
             f"risk={comparison.get('best_risk_score')} "
             f"changed={comparison.get('local_changed_count')} "
             f"activation={comparison.get('activation_observed_count')} "
-            f"max_top_changes={comparison.get('max_top_token_changed_count')}"
+            f"max_top_changes={comparison.get('max_top_token_changed_count')} "
+            f"api_visible={comparison.get('api_visible_text_count')} "
+            f"api_empty={comparison.get('api_empty_text_count')} "
+            f"api_retry_dropped={comparison.get('api_retry_dropped_probe_count')}"
         )
     ]
     for row in comparison.get("top_probes", []):
@@ -1469,6 +1516,8 @@ def summarize_zspace_inference_distortion_probe_comparison_lines(
             f"changed={row.get('local_changed')} "
             f"top_changes={row.get('generation_control_top_token_changed_count')} "
             f"api={row.get('api_provider')} "
+            f"api_empty={row.get('api_empty_text')} "
+            f"api_retry_dropped={row.get('api_request_retry_dropped_key_count')} "
             f"energy={row.get('distortion_energy')}"
         )
     return lines
