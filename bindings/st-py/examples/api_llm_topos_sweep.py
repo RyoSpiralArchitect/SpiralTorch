@@ -272,6 +272,7 @@ def main(argv: Sequence[str] | None = None) -> None:
                 "trace_winners": (result["comparison"] or {}).get("winners"),
                 "adapter_winners": result["report"]["adapter_winners"],
                 "response_winners": result["report"]["response_winners"],
+                "selection_profiles": result["report"]["selection_profiles"],
                 "response_route_rows": result["report"]["response_route_rows"],
                 "response_pair_rows": result["report"]["response_pair_rows"],
                 "response_samples": result["report"]["response_samples"],

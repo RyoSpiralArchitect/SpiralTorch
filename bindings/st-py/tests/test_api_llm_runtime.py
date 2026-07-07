@@ -1419,22 +1419,44 @@ def test_run_api_llm_topos_sweep_compares_runtime_routes(tmp_path) -> None:
     assert rows["open"]["request_temperature"] == pytest.approx(
         open_request["temperature"]
     )
+    assert set(report["selection_profiles"]) == {
+        "balanced",
+        "quality",
+        "grounded",
+        "efficiency",
+        "latency",
+    }
+    assert len(report["selection_rows"]) == 2
+    selection_rows = {row["label"]: row for row in report["selection_rows"]}
+    assert set(selection_rows) == {"open", "guarded"}
+    assert report["selection_profiles"]["balanced"]["label"] in result["labels"]
+    assert report["selection_profiles"]["quality"]["score"] > 0.0
+    assert 0.0 <= selection_rows["open"]["selection_scores"]["balanced"] <= 1.0
+    assert 0.0 <= selection_rows["guarded"]["selection_scores"]["grounded"] <= 1.0
     assert any("multiple runtime modes" in item for item in report["recommendations"])
 
     report_from_memory = st.api_llm_topos_sweep_report(result)
     assert report_from_memory["adapter_winners"] == report["adapter_winners"]
+    assert report_from_memory["selection_profiles"] == report["selection_profiles"]
     report_comparison = st.compare_api_llm_topos_sweep_reports({"demo": report_path})
     assert report_comparison["kind"] == "spiraltorch.api_llm_topos_sweep_report_comparison"
     assert report_comparison["rows"][0]["label"] == "demo"
     assert report_comparison["rows"][0]["mode_count"] == 2
     assert report_comparison["rows"][0]["response_sample_count"] == 2
     assert report_comparison["rows"][0]["response_pair_count"] == 1
+    assert (
+        report_comparison["rows"][0]["selection_profile_winners"]["balanced"]
+        in result["labels"]
+    )
+    assert report_comparison["rows"][0]["selection_balanced_score"] > 0.0
     assert report_comparison["rows"][0]["response_text_overlap_mean"] > 0.0
     assert report_comparison["rows"][0]["best_response_text_quality_score"] > 0.0
     assert report_comparison["winners"]["widest_temperature_range"] == "demo"
     assert report_comparison["winners"]["highest_response_text_overlap"] == "demo"
     assert report_comparison["winners"]["highest_response_text_quality_score"] == "demo"
     assert report_comparison["winners"]["highest_response_completion_rate"] == "demo"
+    assert report_comparison["winners"]["highest_selection_balanced_score"] == "demo"
+    assert report_comparison["winners"]["highest_selection_grounded_score"] == "demo"
 
 
 def test_compare_api_llm_matrix_reports_tracks_stable_profile_winners(tmp_path) -> None:
