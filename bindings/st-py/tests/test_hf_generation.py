@@ -1648,6 +1648,38 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
 
         self.assertIn("model.safetensors", str(cm.exception))
 
+    def test_checkpoint_generation_control_writes_checkpoint_wait_card(self) -> None:
+        module = load_checkpoint_generation_control_example()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = root / "run"
+            (run_dir / "checkpoint-4096").mkdir(parents=True)
+            run_card = root / "wait-card.json"
+            args = module.parse_args(
+                [
+                    "--run-dir",
+                    str(run_dir),
+                    "--checkpoint",
+                    "checkpoint-4096",
+                    "--run-card",
+                    str(run_card),
+                    "--wait",
+                    "--poll-seconds",
+                    "0.01",
+                    "--timeout-seconds",
+                    "0.01",
+                    "--no-compare",
+                ]
+            )
+
+            with self.assertRaises(TimeoutError):
+                module.run_checkpoint_generation_control(args, runner=lambda _: None)
+            stored = json.loads(run_card.read_text(encoding="utf-8"))
+
+        self.assertEqual(stored["status"], "waiting_for_checkpoint")
+        self.assertIn("model.safetensors", stored["checkpoint_wait"]["missing"][0])
+
     def test_checkpoint_generation_control_records_process_wait_plan(self) -> None:
         module = load_checkpoint_generation_control_example()
 

@@ -313,6 +313,30 @@ def _command_row(command: Sequence[str]) -> str:
     return " ".join(command)
 
 
+def _write_status_card(
+    args: argparse.Namespace,
+    status: str,
+    **extra: Any,
+) -> None:
+    if args.run_card is None:
+        return
+    report: dict[str, Any] = {
+        "row_type": "hf_gpt2_ft_checkpoint_generation_control",
+        "status": status,
+        "dry_run": bool(args.dry_run),
+        "run_dir": str(args.run_dir),
+        "checkpoint_count": len(args.checkpoint),
+        "prompt_count": len(prompt_specs(args)),
+        "time_unix_s": time.time(),
+    }
+    report.update(extra)
+    args.run_card.parent.mkdir(parents=True, exist_ok=True)
+    args.run_card.write_text(
+        json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
 def _read_pid_file(path: Path) -> int:
     text = path.read_text(encoding="utf-8").strip()
     try:
@@ -346,7 +370,11 @@ def _wait_for_process_exit(args: argparse.Namespace) -> dict[str, Any] | None:
     row["pid"] = pid
     if not _process_alive(pid):
         row["status"] = "already_exited"
+        _write_status_card(args, "process_already_exited", process_wait=row)
         return row
+    started = time.monotonic()
+    row["status"] = "waiting"
+    row["started_unix_s"] = time.time()
     deadline = None
     if args.process_timeout_seconds > 0.0:
         deadline = time.monotonic() + float(args.process_timeout_seconds)
@@ -356,11 +384,18 @@ def _wait_for_process_exit(args: argparse.Namespace) -> dict[str, Any] | None:
         else float(args.poll_seconds)
     )
     print(f"checkpoint_generation_control_wait_process pid={pid} pid_file={pid_file}")
+    _write_status_card(args, "waiting_for_process", process_wait=row)
     while _process_alive(pid):
+        row["waited_seconds"] = time.monotonic() - started
+        row["last_heartbeat_unix_s"] = time.time()
+        _write_status_card(args, "waiting_for_process", process_wait=row)
         if deadline is not None and time.monotonic() >= deadline:
             raise TimeoutError(f"timed out waiting for process {pid} from {pid_file}")
         time.sleep(poll_seconds)
     row["status"] = "complete"
+    row["waited_seconds"] = time.monotonic() - started
+    row["completed_unix_s"] = time.time()
+    _write_status_card(args, "process_exited", process_wait=row)
     return row
 
 
@@ -372,10 +407,33 @@ def _wait_for_model_dir(args: argparse.Namespace, job: SweepJob) -> None:
     deadline = None
     if args.timeout_seconds > 0.0:
         deadline = time.monotonic() + float(args.timeout_seconds)
+    started = time.monotonic()
     while not _checkpoint_ready(args, job):
+        wait_row = {
+            "checkpoint": job.checkpoint,
+            "model_name": str(job.model_dir),
+            "missing": [str(path) for path in _missing_ready_files(args, job)],
+            "waited_seconds": time.monotonic() - started,
+            "last_heartbeat_unix_s": time.time(),
+        }
+        _write_status_card(
+            args,
+            "waiting_for_checkpoint",
+            checkpoint_wait=wait_row,
+        )
         if deadline is not None and time.monotonic() >= deadline:
             raise TimeoutError(_checkpoint_not_ready_message(args, job))
         time.sleep(float(args.poll_seconds))
+    _write_status_card(
+        args,
+        "checkpoint_ready",
+        checkpoint_wait={
+            "checkpoint": job.checkpoint,
+            "model_name": str(job.model_dir),
+            "waited_seconds": time.monotonic() - started,
+            "completed_unix_s": time.time(),
+        },
+    )
 
 
 def _missing_ready_files(args: argparse.Namespace, job: SweepJob) -> list[Path]:
