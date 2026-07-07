@@ -3443,6 +3443,20 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             self.assertEqual(module.main(argv), 0)
             written = json.loads(out_path.read_text(encoding="utf-8"))
             written_lines = lines_path.read_text(encoding="utf-8").splitlines()
+            watch_path = run_dir / "watch-status.json"
+            watch_argv = [
+                str(run_dir),
+                "--max-steps",
+                "40",
+                "--watch-interval-seconds",
+                "0.01",
+                "--watch-count",
+                "1",
+                "--out",
+                str(watch_path),
+            ]
+            self.assertEqual(module.main(watch_argv), 0)
+            watch_written = json.loads(watch_path.read_text(encoding="utf-8"))
 
         self.assertEqual(status["process_status"], "alive")
         self.assertEqual(status["trace"]["trace_max_global_step"], 20)
@@ -3462,6 +3476,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("final_ready=true", lines[0])
         self.assertIn("hf_gpt2_ft_run_wait status=waiting", lines[-1])
         self.assertEqual(written["process_status"], "alive")
+        self.assertEqual(watch_written["process_status"], "alive")
+        self.assertEqual(watch_written["log_progress"]["log_latest_step"], 24)
         self.assertEqual(written_lines, lines)
 
     def test_run_card_summary_supplements_trace_telemetry_from_jsonl(self) -> None:

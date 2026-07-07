@@ -9,6 +9,7 @@ import os
 import re
 import shutil
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -41,6 +42,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--tail-evals", type=int, default=6)
     parser.add_argument("--out", type=Path, default=None)
     parser.add_argument("--lines-out", type=Path, default=None)
+    parser.add_argument("--watch-interval-seconds", type=float, default=None)
+    parser.add_argument("--watch-count", type=int, default=None)
     args = parser.parse_args(argv)
     if not args.run_dir.exists():
         parser.error(f"run_dir does not exist: {args.run_dir}")
@@ -50,6 +53,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("--tail-evals must be non-negative")
     if args.log_tail_bytes <= 0:
         parser.error("--log-tail-bytes must be positive")
+    if args.watch_interval_seconds is not None and args.watch_interval_seconds <= 0.0:
+        parser.error("--watch-interval-seconds must be positive")
+    if args.watch_count is not None and args.watch_count <= 0:
+        parser.error("--watch-count must be positive")
     if args.trace_jsonl is None:
         args.trace_jsonl = args.run_dir / DEFAULT_TRACE_NAME
     if args.run_card is None:
@@ -316,9 +323,7 @@ def status_lines(status: dict[str, Any], *, tail_evals: int) -> list[str]:
     return lines
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = parse_args(argv)
-    status = summarize_run(args)
+def _emit_status(args: argparse.Namespace, status: dict[str, Any]) -> None:
     lines = status_lines(status, tail_evals=args.tail_evals)
     payload = json.dumps(status, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     if args.out is not None:
@@ -331,6 +336,22 @@ def main(argv: list[str] | None = None) -> int:
         print(f"hf_gpt2_ft_run_status_lines {args.lines_out}")
     if args.out is None and args.lines_out is None:
         print("\n".join(lines))
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    if args.watch_interval_seconds is None:
+        _emit_status(args, summarize_run(args))
+        return 0
+    count = 0
+    while True:
+        if count:
+            print()
+        _emit_status(args, summarize_run(args))
+        count += 1
+        if args.watch_count is not None and count >= args.watch_count:
+            break
+        time.sleep(float(args.watch_interval_seconds))
     return 0
 
 
