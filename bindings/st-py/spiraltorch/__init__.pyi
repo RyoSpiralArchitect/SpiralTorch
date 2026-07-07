@@ -349,6 +349,7 @@ def summarize_zspace_generation_control_run(
     row: Mapping[str, object],
     *,
     baseline_continuation_sha256: object = ...,
+    baseline_loop_score: object = ...,
 ) -> Dict[str, object]: ...
 
 def summarize_zspace_generation_control_sweep(

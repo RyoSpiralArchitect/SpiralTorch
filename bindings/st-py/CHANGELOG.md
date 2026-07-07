@@ -88,7 +88,8 @@
   control telemetry emitted without running Trainer or loading datasets; include
   a compact local GPT-2 2560-step grid sample showing softmax-only versus
   repression-driven loop relaxation, plus Python helpers to load and summarize
-  those sweep artifacts.
+  those sweep artifacts with recommended config and CLI arguments for the next
+  decode run.
 - Documentation: clarify the hard dependency boundary for larger local GPT-2
   FT runs: Rust keeps tensor/nn/text/logic/frac/rl/WGPU surfaces in the wheel,
   while Python explicitly brings Transformers, Torch, datasets, pyarrow,

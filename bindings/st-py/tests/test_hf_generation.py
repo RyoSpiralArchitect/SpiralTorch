@@ -204,13 +204,31 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
         self.assertEqual(loaded["run_count"], 2)
         self.assertEqual(summary["completed_run_count"], 2)
         self.assertEqual(summary["changed_from_baseline_count"], 1)
+        self.assertEqual(summary["baseline_loop_score"], 3.0)
         self.assertEqual(summary["best_loop_score_run"], "zt3-rs1p25-lr0-k64")
+        self.assertEqual(summary["recommended_run"], "zt3-rs1p25-lr0-k64")
+        self.assertEqual(
+            summary["recommendation_reason"],
+            "lowest_loop_score_with_baseline_reduction",
+        )
+        self.assertEqual(summary["recommended_config"]["repression_strength"], 1.25)
+        self.assertEqual(summary["recommended_config"]["entropy_target"], 3.0)
+        self.assertIn("--repression-strength-values", summary["recommended_cli_args"])
+        self.assertIn("1.25", summary["recommended_cli_args"])
+        self.assertEqual(summary["best_loop_score_delta_from_baseline"], -3.0)
+        self.assertEqual(summary["best_loop_score_reduction_ratio"], 1.0)
         self.assertEqual(summary["top_runs"][0]["loop_score"], 0.0)
+        self.assertEqual(
+            summary["top_runs"][0]["loop_score_delta_from_baseline"],
+            -3.0,
+        )
         self.assertEqual(
             summary["top_runs"][0]["control_backend"],
             "spiraltorch_zspace_softmax",
         )
         self.assertIn("best=zt3-rs1p25-lr0-k64", lines[0])
+        self.assertIn("recommend=zt3-rs1p25-lr0-k64", lines[0])
+        self.assertIn("loop_delta=-3.0", lines[0])
         self.assertIn("top_changes=1", lines[1])
 
     def test_dry_run_builds_control_grid_without_loading_model(self) -> None:

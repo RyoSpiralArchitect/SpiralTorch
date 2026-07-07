@@ -520,6 +520,7 @@ def summarize_zspace_generation_control_run(
     row: Mapping[str, object],
     *,
     baseline_continuation_sha256: object = None,
+    baseline_loop_score: object = None,
 ) -> dict[str, object]:
     """Flatten one generation-control sweep row for comparison."""
 
@@ -538,6 +539,16 @@ def summarize_zspace_generation_control_run(
         if not continuation_hash or not baseline_hash
         else str(continuation_hash) != baseline_hash
     )
+    loop_score = _safe_number(repetition.get("loop_score"))
+    baseline_loop = _safe_number(baseline_loop_score)
+    loop_delta = None
+    loop_reduction_ratio = None
+    if loop_score is not None and baseline_loop is not None:
+        loop_delta = float(loop_score) - float(baseline_loop)
+        if float(baseline_loop) > 0.0:
+            loop_reduction_ratio = (float(baseline_loop) - float(loop_score)) / float(
+                baseline_loop
+            )
     return {
         "row_type": "zspace_generation_control_run_summary",
         "name": row.get("name"),
@@ -553,7 +564,10 @@ def summarize_zspace_generation_control_run(
         ),
         "new_token_count": _safe_number(generation.get("new_token_count")),
         "changed_from_baseline": changed_from_baseline,
-        "loop_score": _safe_number(repetition.get("loop_score")),
+        "loop_score": loop_score,
+        "baseline_loop_score": baseline_loop,
+        "loop_score_delta_from_baseline": loop_delta,
+        "loop_score_reduction_ratio": loop_reduction_ratio,
         "unique_word_ratio": _safe_number(repetition.get("unique_word_ratio")),
         "repeated_ngram_total": _safe_number(
             repetition.get("repeated_ngram_total")
@@ -605,6 +619,15 @@ def _baseline_continuation_hash(rows: Sequence[Mapping[str, object]]) -> object:
     return None
 
 
+def _baseline_loop_score(rows: Sequence[Mapping[str, object]]) -> int | float | None:
+    for row in rows:
+        if row.get("kind") != "baseline":
+            continue
+        repetition = _run_repetition(row)
+        return _safe_number(repetition.get("loop_score"))
+    return None
+
+
 def _ranked_control_rows(
     rows: Sequence[Mapping[str, object]],
     *,
@@ -625,6 +648,70 @@ def _ranked_control_rows(
     return [dict(row, rank=index) for index, row in enumerate(ranked, 1)]
 
 
+def _recommended_config(row: Mapping[str, object] | None) -> dict[str, object] | None:
+    if row is None or row.get("kind") == "baseline":
+        return None
+    fields = {
+        "top_k": row.get("config_top_k"),
+        "curvature": row.get("config_curvature"),
+        "temperature": row.get("config_temperature"),
+        "entropy_target": row.get("config_entropy_target"),
+        "entropy_gain": row.get("config_entropy_gain"),
+        "repression_window": row.get("config_repression_window"),
+        "repression_strength": row.get("config_repression_strength"),
+        "last_token_repression": row.get("config_last_token_repression"),
+    }
+    return {key: value for key, value in fields.items() if value is not None}
+
+
+def _cli_value(value: object) -> str:
+    if value is None:
+        return "none"
+    if isinstance(value, float):
+        return f"{value:g}"
+    return str(value)
+
+
+def _recommended_cli_args(config: Mapping[str, object] | None) -> list[str]:
+    if not config:
+        return []
+    flag_map = [
+        ("top_k", "--zspace-top-k-values"),
+        ("curvature", "--zspace-curvature-values"),
+        ("temperature", "--zspace-temperature-values"),
+        ("entropy_target", "--zspace-entropy-target-values"),
+        ("entropy_gain", "--zspace-entropy-gain-values"),
+        ("repression_window", "--repression-window-values"),
+        ("repression_strength", "--repression-strength-values"),
+        ("last_token_repression", "--last-token-repression-values"),
+    ]
+    args: list[str] = []
+    for key, flag in flag_map:
+        if key not in config:
+            continue
+        args.extend([flag, _cli_value(config[key])])
+    return args
+
+
+def _recommendation_reason(
+    best: Mapping[str, object] | None,
+    *,
+    baseline_loop_score: int | float | None,
+) -> str | None:
+    if best is None:
+        return None
+    loop_score = _safe_number(best.get("loop_score"))
+    top_changes = _safe_number(best.get("control_top_token_changed_count"))
+    if baseline_loop_score is not None and loop_score is not None:
+        if float(loop_score) < float(baseline_loop_score):
+            return (
+                "lowest_loop_score_with_baseline_reduction"
+                if top_changes is not None and float(top_changes) > 0.0
+                else "lowest_loop_score"
+            )
+    return "lowest_loop_score"
+
+
 def summarize_zspace_generation_control_sweep(
     report_or_path: str | Path | Mapping[str, object],
     *,
@@ -642,10 +729,12 @@ def summarize_zspace_generation_control_sweep(
         else []
     )
     baseline_hash = _baseline_continuation_hash(runs)
+    baseline_loop = _baseline_loop_score(runs)
     summaries = [
         summarize_zspace_generation_control_run(
             row,
             baseline_continuation_sha256=baseline_hash,
+            baseline_loop_score=baseline_loop,
         )
         for row in runs
     ]
@@ -666,6 +755,9 @@ def summarize_zspace_generation_control_sweep(
     )
     top_runs = _ranked_control_rows(completed, top_n=top_n)
     best = top_runs[0] if top_runs else None
+    recommended_config = _recommended_config(best)
+    best_loop_delta = None if best is None else best.get("loop_score_delta_from_baseline")
+    best_loop_ratio = None if best is None else best.get("loop_score_reduction_ratio")
     return {
         "row_type": "zspace_generation_control_sweep_summary",
         "sweep_path": source_path,
@@ -677,8 +769,18 @@ def summarize_zspace_generation_control_sweep(
         "completed_run_count": len(completed),
         "failed_run_count": sum(1 for row in summaries if row.get("status") != "ok"),
         "changed_from_baseline_count": changed_from_baseline_count,
+        "baseline_loop_score": baseline_loop,
         "best_loop_score_run": None if best is None else best.get("name"),
         "best_loop_score": None if best is None else best.get("loop_score"),
+        "best_loop_score_delta_from_baseline": best_loop_delta,
+        "best_loop_score_reduction_ratio": best_loop_ratio,
+        "recommended_run": None if best is None else best.get("name"),
+        "recommendation_reason": _recommendation_reason(
+            best,
+            baseline_loop_score=baseline_loop,
+        ),
+        "recommended_config": recommended_config,
+        "recommended_cli_args": _recommended_cli_args(recommended_config),
         "min_loop_score": min(loop_values) if loop_values else None,
         "max_loop_score": max(loop_values) if loop_values else None,
         "max_top_token_changed_count": (
@@ -707,7 +809,9 @@ def summarize_zspace_generation_control_sweep_lines(
             f"runs={summary.get('completed_run_count')}/{summary.get('run_count')} "
             f"changed={summary.get('changed_from_baseline_count')} "
             f"best={summary.get('best_loop_score_run')} "
-            f"best_loop={summary.get('best_loop_score')}"
+            f"best_loop={summary.get('best_loop_score')} "
+            f"recommend={summary.get('recommended_run')} "
+            f"loop_delta={summary.get('best_loop_score_delta_from_baseline')}"
         )
     ]
     for row in summary.get("top_runs", []):
