@@ -565,7 +565,9 @@ PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_gpt2_finetune_sweep.
 ```
 
 It writes `sweep-plan.json` before launching runs and `sweep-report.json` after
-the run cards are available, including the same
+the run cards are available, plus `scale-up-command.json` with the
+distortion-adjusted next-run command when a completed candidate is available,
+including the same
 `st.compare_hf_gpt2_finetune_run_cards(...)` comparison payload. Add
 `--inference-distortion-probe` after one local/API inference-distortion probe, or
 `--inference-distortion-sweep-report` after a ranked distortion grid, to stamp
@@ -591,7 +593,9 @@ sweep report has matching run metadata. From Python,
 `st.hf_gpt2_finetune_scale_up_command(summary_or_report)` turns that candidate
 into a shell-safe longer-run command, defaulting to doubled `--max-steps` and
 `--max-train-samples` while writing a fresh run card and trainer trace under a
-`-scaleup` output directory. Add
+`-scaleup` output directory; the sweep CLI writes the same payload to
+`scale-up-command.json` and surfaces its status/preview in the embedded
+summary. Add
 `--generation-from-inference-distortion` with a
 generation prompt to reuse the handoff's `recommended_processor_kwargs` as the
 Z-Space/repression logits processor for before/after generated samples; omit it

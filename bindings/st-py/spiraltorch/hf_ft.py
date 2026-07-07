@@ -3028,6 +3028,7 @@ def summarize_hf_gpt2_finetune_sweep_report(
         report,
         "generation_from_inference_distortion_plan",
     )
+    scale_up_command_payload = _mapping_item(report, "scale_up_command")
     generation_inference_plan_processor = _mapping_item(
         generation_inference_plan,
         "processor_kwargs",
@@ -3183,6 +3184,19 @@ def summarize_hf_gpt2_finetune_sweep_report(
             "command_display"
         ),
         "scale_up_candidate_command": _sweep_run_command(scale_up_candidate_run),
+        "scale_up_command_path": report.get("scale_up_command_path")
+        or scale_up_command_payload.get("artifact_path"),
+        "scale_up_command_status": report.get("scale_up_command_status")
+        or scale_up_command_payload.get("status"),
+        "scale_up_command_applied_override_count": _safe_number(
+            scale_up_command_payload.get("applied_override_count")
+        ),
+        "scale_up_command_preview": report.get("scale_up_command_preview")
+        or scale_up_command_payload.get("command_preview"),
+        "scale_up_command_display": scale_up_command_payload.get("command_display"),
+        "scale_up_command_base_display": scale_up_command_payload.get(
+            "base_command_display"
+        ),
         "selected_run_name": selected_run.get("name"),
         "selected_run_status": selected_run.get("status"),
         "selected_run_reused": selected_run.get("reused"),
@@ -3328,6 +3342,14 @@ def summarize_hf_gpt2_finetune_sweep_report_lines(
             f"card={summary.get('scale_up_candidate_run_card')} "
             f"trace={summary.get('scale_up_candidate_trainer_trace_jsonl')} "
             f"dir={summary.get('scale_up_candidate_run_dir')}"
+        )
+    if summary.get("scale_up_command_status") is not None:
+        lines.append(
+            "hf_gpt2_ft_sweep_scale_up_command "
+            f"status={summary.get('scale_up_command_status')} "
+            f"overrides={summary.get('scale_up_command_applied_override_count')} "
+            f"path={summary.get('scale_up_command_path')} "
+            f"preview={summary.get('scale_up_command_preview')}"
         )
     if summary.get("inference_distortion_recommended_probe") is not None:
         lines.append(

@@ -60,6 +60,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--fail-fast", action="store_true")
     parser.add_argument(
+        "--scale-up-command-path",
+        type=Path,
+        default=None,
+        help=(
+            "Write the distortion-adjusted scale-up replay command artifact here. "
+            "Defaults to OUT_DIR/scale-up-command.json."
+        ),
+    )
+    parser.add_argument(
         "--resume-existing",
         action="store_true",
         help="Reuse existing successful per-run run cards and run only missing/failed rows.",
@@ -653,6 +662,30 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
     )
 
 
+def _scale_up_command_path(args: argparse.Namespace) -> Path:
+    return args.scale_up_command_path or (args.out_dir / "scale-up-command.json")
+
+
+def _attach_scale_up_command_artifact(
+    args: argparse.Namespace,
+    report: dict[str, Any],
+) -> dict[str, Any]:
+    summary = report.get("summary")
+    if not isinstance(summary, dict):
+        summary = st.summarize_hf_gpt2_finetune_sweep_report(report)
+        report["summary"] = summary
+    scale_up_command = st.hf_gpt2_finetune_scale_up_command(summary)
+    scale_up_path = _scale_up_command_path(args)
+    scale_up_command["artifact_path"] = str(scale_up_path)
+    report["scale_up_command_path"] = str(scale_up_path)
+    report["scale_up_command_status"] = scale_up_command.get("status")
+    report["scale_up_command_preview"] = scale_up_command.get("command_preview")
+    report["scale_up_command"] = scale_up_command
+    _write_json(scale_up_path, scale_up_command)
+    report["summary"] = st.summarize_hf_gpt2_finetune_sweep_report(report)
+    return scale_up_command
+
+
 def _is_reusable_run_card(path: Path) -> bool:
     if not path.is_file():
         return False
@@ -821,6 +854,7 @@ def run_sweep(args: argparse.Namespace) -> dict[str, Any]:
             "runs": runs,
         }
         report["summary"] = st.summarize_hf_gpt2_finetune_sweep_report(report)
+        _attach_scale_up_command_artifact(args, report)
         _write_json(args.out_dir / "sweep-report.json", report)
         return report
 
@@ -897,6 +931,7 @@ def run_sweep(args: argparse.Namespace) -> dict[str, Any]:
         "runs": runs,
     }
     report["summary"] = st.summarize_hf_gpt2_finetune_sweep_report(report)
+    _attach_scale_up_command_artifact(args, report)
     _write_json(args.out_dir / "sweep-report.json", report)
     return report
 
@@ -906,6 +941,16 @@ def main(argv: list[str] | None = None) -> int:
     report = run_sweep(args)
     report_path = args.out_dir / "sweep-report.json"
     print(f"sweep_report {report_path}")
+    scale_up_command = report.get("scale_up_command")
+    if isinstance(scale_up_command, dict):
+        print(
+            "scale_up_command "
+            f"{report.get('scale_up_command_path')} "
+            f"status={scale_up_command.get('status')}"
+        )
+        command_display = scale_up_command.get("command_display")
+        if command_display:
+            print(f"scale_up_replay {command_display}")
     failed = int(report.get("failed_run_count") or 0)
     return 1 if failed and args.fail_fast else 0
 

@@ -1557,6 +1557,9 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             report = module.run_sweep(args)
             stored_plan = json.loads((out_dir / "sweep-plan.json").read_text())
             stored_report = json.loads((out_dir / "sweep-report.json").read_text())
+            scale_up_command = json.loads(
+                (out_dir / "scale-up-command.json").read_text()
+            )
             sweep_lines = hf_ft.summarize_hf_gpt2_finetune_sweep_report_lines(
                 stored_report,
             )
@@ -1567,8 +1570,22 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(report["skipped_run_count"], 8)
         self.assertEqual(report["reused_run_count"], 0)
         self.assertEqual(report["summary"]["status"], "planned")
+        self.assertEqual(report["scale_up_command_status"], "missing_candidate_command")
+        self.assertEqual(
+            report["scale_up_command_path"],
+            str(out_dir / "scale-up-command.json"),
+        )
+        self.assertEqual(scale_up_command["status"], "missing_candidate_command")
+        self.assertEqual(
+            scale_up_command["artifact_path"],
+            str(out_dir / "scale-up-command.json"),
+        )
         self.assertEqual(stored_report["row_type"], "hf_gpt2_finetune_sweep_report")
         self.assertEqual(stored_report["summary"]["run_count"], 8)
+        self.assertEqual(
+            stored_report["summary"]["scale_up_command_status"],
+            "missing_candidate_command",
+        )
         self.assertEqual(
             stored_report["inference_distortion_sweep_report"],
             str(distortion_report_path),
@@ -1602,6 +1619,13 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIsNone(stored_plan["trainer_telemetry_auto_reason"])
         self.assertTrue(stored_report["summary"]["trainer_telemetry_enabled"])
         self.assertTrue(any("probe=strong" in line for line in sweep_lines))
+        self.assertTrue(
+            any(
+                "hf_gpt2_ft_sweep_scale_up_command "
+                "status=missing_candidate_command" in line
+                for line in sweep_lines
+            )
+        )
         self.assertTrue(
             any("hf_gpt2_ft_sweep_trainer_telemetry" in line for line in sweep_lines)
         )
@@ -1954,6 +1978,13 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
 
             with mock.patch.object(module.subprocess, "run", side_effect=fake_run):
                 report = module.run_sweep(args)
+            stored_report = json.loads((out_dir / "sweep-report.json").read_text())
+            scale_up_command = json.loads(
+                (out_dir / "scale-up-command.json").read_text()
+            )
+            sweep_lines = hf_ft.summarize_hf_gpt2_finetune_sweep_report_lines(
+                stored_report,
+            )
 
         self.assertEqual(report["attempted_run_count"], 2)
         self.assertEqual(report["completed_run_count"], 2)
@@ -1962,6 +1993,28 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(report["comparison"]["run_count"], 2)
         self.assertIn("seed13", report["comparison"]["best_eval_after_run_label"])
         self.assertIn("seed13", report["summary"]["selected_run_label"])
+        self.assertEqual(report["scale_up_command_status"], "ok")
+        self.assertEqual(
+            report["scale_up_command_path"],
+            str(out_dir / "scale-up-command.json"),
+        )
+        self.assertEqual(scale_up_command["status"], "ok")
+        self.assertIn("seed13", scale_up_command["scale_up_candidate_label"])
+        self.assertIn("--max-steps 2", scale_up_command["command_display"])
+        self.assertIn("--max-train-samples 8192", scale_up_command["command_display"])
+        self.assertIn("-scaleup", scale_up_command["command_display"])
+        self.assertEqual(scale_up_command["applied_override_count"], 5)
+        self.assertEqual(stored_report["summary"]["scale_up_command_status"], "ok")
+        self.assertIn(
+            "--max-steps 2",
+            stored_report["summary"]["scale_up_command_preview"],
+        )
+        self.assertTrue(
+            any(
+                "hf_gpt2_ft_sweep_scale_up_command status=ok" in line
+                for line in sweep_lines
+            )
+        )
 
     def test_sweep_example_resume_existing_reuses_successful_run_cards(self) -> None:
         module = load_sweep_example()
