@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import shlex
 import time
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
@@ -619,9 +620,17 @@ def hf_gpt2_finetune_inference_distortion_handoff_report(
         "recommended_request_filter": request_filter or None,
         "recommended_processor_kwargs": processor_kwargs or None,
         "recommended_bridge_cli_args": bridge_cli_args,
+        "recommended_bridge_cli_display": _shell_join_args(bridge_cli_args),
         "recommended_source_cli_args": source_cli_args,
+        "recommended_source_cli_display": _shell_join_args(source_cli_args),
         "recommended_generation_handoff_cli_args": generation_handoff_cli_args,
+        "recommended_generation_handoff_cli_display": _shell_join_args(
+            generation_handoff_cli_args
+        ),
         "recommended_explicit_generation_bridge_cli_args": (
+            explicit_generation_bridge_cli_args
+        ),
+        "recommended_explicit_generation_bridge_cli_display": _shell_join_args(
             explicit_generation_bridge_cli_args
         ),
         "recommended_activation_hook": activation_hook or None,
@@ -673,17 +682,13 @@ def hf_gpt2_finetune_inference_distortion_handoff_lines(
     replay_args = [
         str(item) for item in list(handoff.get("recommended_bridge_cli_args") or [])
     ]
-    generation_handoff_args = [
-        str(item)
-        for item in list(handoff.get("recommended_generation_handoff_cli_args") or [])
-    ]
+    generation_handoff_args = _handoff_generation_handoff_cli_args(handoff)
     replay_limit = max(0, int(replay_arg_limit))
-    replay_preview = csv_label(replay_args[:replay_limit])
-    if replay_limit and len(replay_args) > replay_limit:
-        replay_preview = f"{replay_preview},..."
-    generation_preview = csv_label(generation_handoff_args[:replay_limit])
-    if replay_limit and len(generation_handoff_args) > replay_limit:
-        generation_preview = f"{generation_preview},..."
+    replay_preview = _cli_arg_preview(replay_args, limit=replay_limit)
+    generation_preview = _cli_arg_preview(
+        generation_handoff_args,
+        limit=replay_limit,
+    )
     lines = [
         (
             "hf_gpt2_ft_inference_handoff "
@@ -1823,12 +1828,68 @@ def _inference_handoff_lines_from_payload(
     return []
 
 
+def _handoff_source_cli_args(handoff: Mapping[str, object]) -> list[str]:
+    existing = _string_sequence(handoff.get("recommended_source_cli_args"))
+    if existing:
+        return existing
+    source_path = handoff.get("source_path")
+    if source_path is None:
+        return []
+    source_kind = handoff.get("source_kind")
+    flag = (
+        "--inference-distortion-probe"
+        if source_kind == "probe"
+        else "--inference-distortion-sweep-report"
+    )
+    return [flag, str(source_path)]
+
+
+def _handoff_bridge_cli_args(handoff: Mapping[str, object]) -> list[str]:
+    return _string_sequence(handoff.get("recommended_bridge_cli_args"))
+
+
+def _handoff_generation_handoff_cli_args(
+    handoff: Mapping[str, object],
+) -> list[str]:
+    existing = _string_sequence(
+        handoff.get("recommended_generation_handoff_cli_args")
+    )
+    if existing:
+        return existing
+    source_args = _handoff_source_cli_args(handoff)
+    if not source_args:
+        return []
+    return [*source_args, "--generation-from-inference-distortion"]
+
+
+def _handoff_explicit_generation_bridge_cli_args(
+    handoff: Mapping[str, object],
+) -> list[str]:
+    existing = _string_sequence(
+        handoff.get("recommended_explicit_generation_bridge_cli_args")
+    )
+    if existing:
+        return existing
+    source_args = _handoff_source_cli_args(handoff)
+    bridge_args = _handoff_bridge_cli_args(handoff)
+    if not source_args or not bridge_args:
+        return []
+    return [*source_args, *bridge_args]
+
+
 def _cli_arg_preview(args: Sequence[object], *, limit: int = 24) -> str:
     values = [str(item) for item in args]
-    preview = csv_label(values[: max(0, int(limit))])
+    preview = _shell_join_args(values[: max(0, int(limit))])
     if limit and len(values) > int(limit):
-        return f"{preview},..."
+        return f"{preview} ..."
     return preview
+
+
+def _shell_join_args(args: Sequence[object]) -> str:
+    values = [str(item) for item in args]
+    if not values:
+        return ""
+    return shlex.join(values)
 
 
 def summarize_hf_gpt2_finetune_run_card(
@@ -1865,17 +1926,21 @@ def summarize_hf_gpt2_finetune_run_card(
         card,
         inference_handoff,
     )
-    inference_bridge_cli_args = list(
-        inference_handoff.get("recommended_bridge_cli_args") or []
+    inference_bridge_cli_args = _handoff_bridge_cli_args(inference_handoff)
+    inference_source_cli_args = _handoff_source_cli_args(inference_handoff)
+    inference_generation_handoff_cli_args = _handoff_generation_handoff_cli_args(
+        inference_handoff,
     )
-    inference_source_cli_args = list(
-        inference_handoff.get("recommended_source_cli_args") or []
+    inference_explicit_generation_bridge_cli_args = (
+        _handoff_explicit_generation_bridge_cli_args(inference_handoff)
     )
-    inference_generation_handoff_cli_args = list(
-        inference_handoff.get("recommended_generation_handoff_cli_args") or []
+    inference_bridge_cli_display = _shell_join_args(inference_bridge_cli_args)
+    inference_source_cli_display = _shell_join_args(inference_source_cli_args)
+    inference_generation_handoff_cli_display = _shell_join_args(
+        inference_generation_handoff_cli_args
     )
-    inference_explicit_generation_bridge_cli_args = list(
-        inference_handoff.get("recommended_explicit_generation_bridge_cli_args") or []
+    inference_explicit_generation_bridge_cli_display = _shell_join_args(
+        inference_explicit_generation_bridge_cli_args
     )
 
     effective_eval_after_loss, effective_eval_after_source = (
@@ -1996,19 +2061,27 @@ def summarize_hf_gpt2_finetune_run_card(
         "inference_distortion_handoff_lines": inference_handoff_lines,
         "inference_distortion_handoff_line_count": len(inference_handoff_lines),
         "inference_distortion_bridge_cli_args": inference_bridge_cli_args,
+        "inference_distortion_bridge_cli_display": inference_bridge_cli_display,
         "inference_distortion_replay_arg_count": len(inference_bridge_cli_args),
         "inference_distortion_replay_cli_preview": _cli_arg_preview(
             inference_bridge_cli_args,
         ),
         "inference_distortion_source_cli_args": inference_source_cli_args,
+        "inference_distortion_source_cli_display": inference_source_cli_display,
         "inference_distortion_generation_handoff_cli_args": (
             inference_generation_handoff_cli_args
+        ),
+        "inference_distortion_generation_handoff_cli_display": (
+            inference_generation_handoff_cli_display
         ),
         "inference_distortion_generation_handoff_cli_preview": _cli_arg_preview(
             inference_generation_handoff_cli_args,
         ),
         "inference_distortion_explicit_generation_bridge_cli_args": (
             inference_explicit_generation_bridge_cli_args
+        ),
+        "inference_distortion_explicit_generation_bridge_cli_display": (
+            inference_explicit_generation_bridge_cli_display
         ),
         "inference_distortion_explicit_generation_bridge_cli_preview": (
             _cli_arg_preview(inference_explicit_generation_bridge_cli_args)
@@ -2459,17 +2532,21 @@ def summarize_hf_gpt2_finetune_sweep_report(
         report,
         inference_handoff,
     )
-    inference_bridge_cli_args = list(
-        inference_handoff.get("recommended_bridge_cli_args") or []
+    inference_bridge_cli_args = _handoff_bridge_cli_args(inference_handoff)
+    inference_source_cli_args = _handoff_source_cli_args(inference_handoff)
+    inference_generation_handoff_cli_args = _handoff_generation_handoff_cli_args(
+        inference_handoff,
     )
-    inference_source_cli_args = list(
-        inference_handoff.get("recommended_source_cli_args") or []
+    inference_explicit_generation_bridge_cli_args = (
+        _handoff_explicit_generation_bridge_cli_args(inference_handoff)
     )
-    inference_generation_handoff_cli_args = list(
-        inference_handoff.get("recommended_generation_handoff_cli_args") or []
+    inference_bridge_cli_display = _shell_join_args(inference_bridge_cli_args)
+    inference_source_cli_display = _shell_join_args(inference_source_cli_args)
+    inference_generation_handoff_cli_display = _shell_join_args(
+        inference_generation_handoff_cli_args
     )
-    inference_explicit_generation_bridge_cli_args = list(
-        inference_handoff.get("recommended_explicit_generation_bridge_cli_args") or []
+    inference_explicit_generation_bridge_cli_display = _shell_join_args(
+        inference_explicit_generation_bridge_cli_args
     )
     generation_inference_plan = _mapping_item(
         report,
@@ -2635,19 +2712,27 @@ def summarize_hf_gpt2_finetune_sweep_report(
         "inference_distortion_handoff_lines": inference_handoff_lines,
         "inference_distortion_handoff_line_count": len(inference_handoff_lines),
         "inference_distortion_bridge_cli_args": inference_bridge_cli_args,
+        "inference_distortion_bridge_cli_display": inference_bridge_cli_display,
         "inference_distortion_replay_arg_count": len(inference_bridge_cli_args),
         "inference_distortion_replay_cli_preview": _cli_arg_preview(
             inference_bridge_cli_args,
         ),
         "inference_distortion_source_cli_args": inference_source_cli_args,
+        "inference_distortion_source_cli_display": inference_source_cli_display,
         "inference_distortion_generation_handoff_cli_args": (
             inference_generation_handoff_cli_args
+        ),
+        "inference_distortion_generation_handoff_cli_display": (
+            inference_generation_handoff_cli_display
         ),
         "inference_distortion_generation_handoff_cli_preview": _cli_arg_preview(
             inference_generation_handoff_cli_args,
         ),
         "inference_distortion_explicit_generation_bridge_cli_args": (
             inference_explicit_generation_bridge_cli_args
+        ),
+        "inference_distortion_explicit_generation_bridge_cli_display": (
+            inference_explicit_generation_bridge_cli_display
         ),
         "inference_distortion_explicit_generation_bridge_cli_preview": (
             _cli_arg_preview(inference_explicit_generation_bridge_cli_args)
