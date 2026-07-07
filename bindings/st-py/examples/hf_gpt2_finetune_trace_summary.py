@@ -24,6 +24,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--label", default=None)
     parser.add_argument("--max-steps", type=int, default=None)
     parser.add_argument("--tail-evals", type=int, default=6)
+    parser.add_argument("--require-eval-loss-monotonic", action="store_true")
+    parser.add_argument("--min-eval-loss-improvement", type=float, default=None)
     args = parser.parse_args(argv)
     if not args.trace_jsonl.is_file():
         parser.error(f"trace_jsonl does not exist: {args.trace_jsonl}")
@@ -31,6 +33,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("--max-steps must be positive")
     if args.tail_evals < 0:
         parser.error("--tail-evals must be non-negative")
+    if (
+        args.min_eval_loss_improvement is not None
+        and args.min_eval_loss_improvement < 0.0
+    ):
+        parser.error("--min-eval-loss-improvement must be non-negative")
     return args
 
 
@@ -111,6 +118,28 @@ def summary_lines(summary: dict[str, Any], *, tail_evals: int) -> list[str]:
     return lines
 
 
+def validate_summary_gates(
+    summary: dict[str, Any],
+    *,
+    require_eval_loss_monotonic: bool,
+    min_eval_loss_improvement: float | None,
+) -> list[str]:
+    failures: list[str] = []
+    if require_eval_loss_monotonic:
+        if summary.get("trace_eval_loss_monotonic_nonincreasing") is not True:
+            failures.append("eval_loss_not_monotonic_nonincreasing")
+    if min_eval_loss_improvement is not None:
+        improvement = summary.get("trace_eval_loss_improvement")
+        if not isinstance(improvement, (int, float)):
+            failures.append("eval_loss_improvement_missing")
+        elif float(improvement) < float(min_eval_loss_improvement):
+            failures.append(
+                "eval_loss_improvement_below_min:"
+                f"{improvement}<{min_eval_loss_improvement}"
+            )
+    return failures
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     summary = summarize_trace(args)
@@ -126,6 +155,18 @@ def main(argv: list[str] | None = None) -> int:
         print(f"hf_gpt2_ft_trace_summary_lines {args.lines_out}")
     if args.out is None and args.lines_out is None:
         print("\n".join(lines))
+    failures = validate_summary_gates(
+        summary,
+        require_eval_loss_monotonic=args.require_eval_loss_monotonic,
+        min_eval_loss_improvement=args.min_eval_loss_improvement,
+    )
+    if failures:
+        print(
+            "hf_gpt2_ft_trace_summary_gate_failed "
+            + ",".join(failures),
+            file=sys.stderr,
+        )
+        return 1
     return 0
 
 

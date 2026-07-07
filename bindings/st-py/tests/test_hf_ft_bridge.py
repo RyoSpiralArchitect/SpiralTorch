@@ -3348,6 +3348,12 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 "metrics": {"loss": 1.7, "learning_rate": 4e-5},
                 "training_loss_guard": {"status": "ok"},
             },
+            {
+                "event": "evaluate",
+                "global_step": 20,
+                "time_unix_s": 135.0,
+                "metrics": {"eval_loss": 1.6, "eval_runtime": 5.0},
+            },
         ]
         with tempfile.TemporaryDirectory() as tmp:
             trace_path = Path(tmp) / "trace.jsonl"
@@ -3367,6 +3373,9 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 str(out_path),
                 "--lines-out",
                 str(lines_path),
+                "--require-eval-loss-monotonic",
+                "--min-eval-loss-improvement",
+                "0.1",
             ]
             args = module.parse_args(argv)
             summary = module.summarize_trace(args)
@@ -3378,12 +3387,22 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(summary["trace_max_global_step"], 20)
         self.assertEqual(summary["training_loss_guard_count"], 1)
         self.assertEqual(summary["progress"], 0.5)
+        self.assertEqual(summary["trace_eval_loss_improvement"], 0.19999999999999996)
+        self.assertTrue(summary["trace_eval_loss_monotonic_nonincreasing"])
         self.assertEqual(written["training_loss_guard_count"], 1)
         self.assertIn("label=demo", lines[0])
         self.assertIn("latest_step=20", lines[0])
         self.assertIn("guard_count=1", lines[0])
-        self.assertIn("eval_loss_monotonic=none", lines[0])
-        self.assertIn("step=10 eval_loss=1.8", lines[1])
+        self.assertIn("eval_loss_monotonic=true", lines[0])
+        self.assertIn("step=20 eval_loss=1.6", lines[1])
+        self.assertEqual(
+            module.validate_summary_gates(
+                summary,
+                require_eval_loss_monotonic=True,
+                min_eval_loss_improvement=0.5,
+            ),
+            ["eval_loss_improvement_below_min:0.19999999999999996<0.5"],
+        )
         self.assertEqual(written_lines, lines)
 
     def test_run_status_example_summarizes_live_ft_run_directory(self) -> None:
