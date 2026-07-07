@@ -416,6 +416,11 @@ card so long-run blockers leave structured evidence instead of only a traceback.
 After tokenization/grouping, `dataset_fit_report` records whether train/eval
 splits produced enough fixed-size blocks; empty eval blocks are reported and
 disabled instead of producing evaluation-looking traces without `eval_loss`.
+Add `--generation-prompt "SpiralTorch is" --generation-max-new-tokens 32` to
+store deterministic before/after text samples, generated continuation text,
+token deltas, and hashes in the same run card. Use `--generation-do-sample`
+with `--generation-temperature` and optional `--generation-top-k` when you want
+qualitative samples to include sampling variance.
 
 ## Minimal usage
 

@@ -286,6 +286,20 @@ def hf_gpt2_finetune_dataset_fit_report(
     min_eval_blocks: int = ...,
 ) -> Dict[str, object]: ...
 
+def hf_gpt2_finetune_generation_report(
+    *,
+    stage: str,
+    prompt: object = ...,
+    generated_text: object = ...,
+    generated_continuation_text: object = ...,
+    input_token_count: object = ...,
+    output_token_count: object = ...,
+    max_new_tokens: int = ...,
+    generation_method: object = ...,
+    fallback_error: object = ...,
+    error: object = ...,
+) -> Dict[str, object]: ...
+
 def hf_gpt2_finetune_preflight_report(
     *,
     model_name: str = ...,
@@ -8115,6 +8129,7 @@ __all__ = [
     "hf_gpt2_finetune_corpus_file_report",
     "hf_gpt2_finetune_corpus_scan_report",
     "hf_gpt2_finetune_dataset_fit_report",
+    "hf_gpt2_finetune_generation_report",
     "hf_gpt2_finetune_preflight_report",
     "hf_gpt2_finetune_rust_dependency_report",
     "hf_gpt2_finetune_summary_lines",

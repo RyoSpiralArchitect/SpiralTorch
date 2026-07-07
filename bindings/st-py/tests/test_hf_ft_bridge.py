@@ -234,6 +234,31 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(empty_train["verdict"], "not_trainable")
         self.assertFalse(empty_train["train_ready"])
 
+    def test_generation_report_records_text_and_token_delta(self) -> None:
+        report = hf_ft.hf_gpt2_finetune_generation_report(
+            stage="after_train",
+            prompt="SpiralTorch is",
+            generated_text="SpiralTorch is learning geometry.",
+            generated_continuation_text=" learning geometry.",
+            input_token_count=3,
+            output_token_count=8,
+            max_new_tokens=16,
+        )
+        error_report = hf_ft.hf_gpt2_finetune_generation_report(
+            stage="before_train",
+            prompt="SpiralTorch is",
+            max_new_tokens=16,
+            error="RuntimeError: unavailable",
+        )
+
+        self.assertEqual(report["row_type"], "hf_gpt2_finetune_generation_report")
+        self.assertEqual(report["status"], "ok")
+        self.assertEqual(report["new_token_count"], 5)
+        self.assertEqual(report["generated_continuation_text"], " learning geometry.")
+        self.assertIsInstance(report["generated_text_sha256"], str)
+        self.assertEqual(error_report["status"], "error")
+        self.assertEqual(error_report["generated_text_sha256"], None)
+
     def test_example_local_corpus_reports_attach_scan_to_cards(self) -> None:
         module = load_bridge_example()
         with tempfile.TemporaryDirectory() as tmp:
@@ -356,6 +381,97 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(module._preflight_dataset_name(args), "local-files")
         self.assertEqual(module._preflight_dataset_config(args), "text")
 
+    def test_example_generation_sample_restores_model_state(self) -> None:
+        module = load_bridge_example()
+
+        class FakeTensor:
+            def __init__(self, values):
+                self.values = list(values)
+                self.shape = (len(self.values),)
+
+            def to(self, device):
+                self.device = device
+                return self
+
+            def __len__(self):
+                return len(self.values)
+
+        class FakeBatchTensor(FakeTensor):
+            def __init__(self, values):
+                super().__init__(values)
+                self.shape = (1, len(self.values))
+
+        class FakeTokenizer:
+            pad_token_id = 0
+            eos_token_id = 99
+
+            def __call__(self, prompt, return_tensors=None):
+                self.last_prompt = prompt
+                self.last_return_tensors = return_tensors
+                return {"input_ids": FakeBatchTensor([1, 2, 3])}
+
+            def decode(self, tokens, *, skip_special_tokens=True):
+                self.last_skip_special_tokens = skip_special_tokens
+                return "SpiralTorch is learning geometry."
+
+        class FakeNoGrad:
+            def __enter__(self):
+                return None
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class FakeTorch:
+            def no_grad(self):
+                return FakeNoGrad()
+
+        class FakeParam:
+            device = "fake-device"
+
+        class FakeModel:
+            def __init__(self):
+                self.training = True
+                self.generate_kwargs = None
+
+            def parameters(self):
+                return iter([FakeParam()])
+
+            def eval(self):
+                self.training = False
+
+            def train(self):
+                self.training = True
+
+            def generate(self, **kwargs):
+                self.generate_kwargs = kwargs
+                return [FakeTensor([1, 2, 3, 4, 5])]
+
+        args = types.SimpleNamespace(
+            generation_prompt="SpiralTorch is",
+            generation_max_new_tokens=8,
+            generation_do_sample=False,
+            generation_temperature=1.0,
+            generation_top_k=0,
+        )
+        tokenizer = FakeTokenizer()
+        model = FakeModel()
+        report = module._generation_sample(
+            FakeTorch(),
+            tokenizer,
+            model,
+            args,
+            stage="before_train",
+        )
+
+        self.assertEqual(report["status"], "ok")
+        self.assertEqual(report["input_token_count"], 3)
+        self.assertEqual(report["output_token_count"], 5)
+        self.assertEqual(report["new_token_count"], 2)
+        self.assertEqual(report["generated_continuation_text"], " learning geometry.")
+        self.assertTrue(model.training)
+        self.assertEqual(model.generate_kwargs["max_new_tokens"], 8)
+        self.assertFalse(model.generate_kwargs["do_sample"])
+
     def test_trainer_trace_event_round_trip_and_summary(self) -> None:
         args = types.SimpleNamespace(
             output_dir="runs/gpt2",
@@ -452,8 +568,13 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("hf_gpt2_finetune_corpus_file_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_corpus_scan_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_dataset_fit_report", st.__all__)
+        self.assertIn("hf_gpt2_finetune_generation_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_preflight_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_trainer_trace_callback", st.__all__)
+        self.assertIs(
+            st.hf_gpt2_finetune_generation_report,
+            hf_ft.hf_gpt2_finetune_generation_report,
+        )
         self.assertIs(
             st.summarize_hf_gpt2_finetune_trainer_trace,
             hf_ft.summarize_hf_gpt2_finetune_trainer_trace,

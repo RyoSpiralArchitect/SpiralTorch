@@ -25,6 +25,7 @@ __all__ = [
     "hf_gpt2_finetune_corpus_file_report",
     "hf_gpt2_finetune_corpus_scan_report",
     "hf_gpt2_finetune_dataset_fit_report",
+    "hf_gpt2_finetune_generation_report",
     "hf_gpt2_finetune_rust_dependency_report",
     "hf_gpt2_finetune_summary_lines",
     "hf_gpt2_finetune_trainer_trace_callback",
@@ -423,6 +424,64 @@ def hf_gpt2_finetune_dataset_fit_report(
         "eval_dropped_empty": bool(eval_requested and eval_ready is False),
         "verdict": verdict,
         "warnings": csv_label(warnings),
+    }
+
+
+def hf_gpt2_finetune_generation_report(
+    *,
+    stage: str,
+    prompt: object = "",
+    generated_text: object = None,
+    generated_continuation_text: object = None,
+    input_token_count: object = None,
+    output_token_count: object = None,
+    max_new_tokens: int = 32,
+    generation_method: object = None,
+    fallback_error: object = None,
+    error: object = None,
+) -> dict[str, object]:
+    """Summarize a GPT-2 FT before/after generation sample for run cards."""
+
+    prompt_text = "" if prompt is None else str(prompt)
+    text = "" if generated_text is None else str(generated_text)
+    continuation = (
+        "" if generated_continuation_text is None else str(generated_continuation_text)
+    )
+    input_tokens = _optional_int(input_token_count)
+    output_tokens = _optional_int(output_token_count)
+    new_tokens = None
+    if input_tokens is not None and output_tokens is not None:
+        new_tokens = max(0, output_tokens - input_tokens)
+    method_text = None if generation_method is None else str(generation_method)
+    fallback_error_text = None if fallback_error is None else str(fallback_error)
+    error_text = None if error is None else str(error)
+    status = "error" if error_text else ("ok" if text else "empty")
+    return {
+        "row_type": "hf_gpt2_finetune_generation_report",
+        "stage": str(stage),
+        "status": status,
+        "prompt": prompt_text,
+        "generated_text": text,
+        "generated_continuation_text": continuation,
+        "prompt_char_count": len(prompt_text),
+        "generated_char_count": len(text),
+        "generated_continuation_char_count": len(continuation),
+        "prompt_sha256": hashlib.sha256(prompt_text.encode("utf-8")).hexdigest(),
+        "generated_text_sha256": (
+            hashlib.sha256(text.encode("utf-8")).hexdigest() if text else None
+        ),
+        "generated_continuation_sha256": (
+            hashlib.sha256(continuation.encode("utf-8")).hexdigest()
+            if continuation
+            else None
+        ),
+        "input_token_count": input_tokens,
+        "output_token_count": output_tokens,
+        "new_token_count": new_tokens,
+        "max_new_tokens": int(max_new_tokens),
+        "generation_method": method_text,
+        "fallback_error": fallback_error_text,
+        "error": error_text,
     }
 
 

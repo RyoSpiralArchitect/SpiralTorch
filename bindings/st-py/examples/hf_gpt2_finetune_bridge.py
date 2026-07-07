@@ -20,6 +20,7 @@ from spiraltorch.hf_ft import (
     hf_gpt2_finetune_corpus_file_report,
     hf_gpt2_finetune_corpus_scan_report,
     hf_gpt2_finetune_dataset_fit_report,
+    hf_gpt2_finetune_generation_report,
     hf_gpt2_finetune_preflight_report,
     hf_gpt2_finetune_summary_lines,
     hf_gpt2_finetune_trainer_trace_callback,
@@ -118,6 +119,32 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--max-train-samples", type=int, default=4096)
     parser.add_argument("--max-eval-samples", type=int, default=512)
     parser.add_argument("--block-size", type=int, default=128)
+    parser.add_argument(
+        "--generation-prompt",
+        default=None,
+        help=(
+            "Optional prompt to generate before and after training. Samples are "
+            "written to the run card for qualitative FT comparison."
+        ),
+    )
+    parser.add_argument("--generation-max-new-tokens", type=int, default=32)
+    parser.add_argument(
+        "--generation-do-sample",
+        action="store_true",
+        help="Use sampling for generation samples instead of deterministic decode.",
+    )
+    parser.add_argument(
+        "--generation-temperature",
+        type=float,
+        default=1.0,
+        help="Sampling temperature used only with --generation-do-sample.",
+    )
+    parser.add_argument(
+        "--generation-top-k",
+        type=int,
+        default=0,
+        help="Optional top-k sampling cutoff used only with --generation-do-sample.",
+    )
     parser.add_argument("--num-train-epochs", type=float, default=1.0)
     parser.add_argument("--max-steps", type=int, default=-1)
     parser.add_argument("--learning-rate", type=float, default=5e-5)
@@ -165,6 +192,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         parser.error("--max-eval-samples must be non-negative")
     if args.block_size <= 0:
         parser.error("--block-size must be positive")
+    if args.generation_max_new_tokens <= 0:
+        parser.error("--generation-max-new-tokens must be positive")
+    if args.generation_temperature <= 0.0:
+        parser.error("--generation-temperature must be positive")
+    if args.generation_top_k < 0:
+        parser.error("--generation-top-k must be non-negative")
     if args.per_device_train_batch_size <= 0:
         parser.error("--per-device-train-batch-size must be positive")
     if args.per_device_eval_batch_size <= 0:
@@ -505,6 +538,200 @@ def _set_seed(torch: Any, transformers: Any, seed: int) -> None:
         manual_seed(seed)
 
 
+def _model_device(model: Any) -> Any | None:
+    device = getattr(model, "device", None)
+    if device is not None:
+        return device
+    parameters = getattr(model, "parameters", None)
+    if not callable(parameters):
+        return None
+    try:
+        first_param = next(iter(parameters()))
+    except StopIteration:
+        return None
+    return getattr(first_param, "device", None)
+
+
+def _move_batch_to_device(batch: Mapping[str, Any], device: Any | None) -> dict[str, Any]:
+    if device is None:
+        return dict(batch)
+    moved = {}
+    for key, value in batch.items():
+        move = getattr(value, "to", None)
+        moved[key] = move(device) if callable(move) else value
+    return moved
+
+
+def _last_dim(value: Any) -> int | None:
+    shape = getattr(value, "shape", None)
+    if shape is not None and len(shape) > 0:
+        return int(shape[-1])
+    try:
+        return len(value)
+    except TypeError:
+        return None
+
+
+def _first_sequence(value: Any) -> Any:
+    try:
+        return value[0]
+    except (TypeError, KeyError, IndexError):
+        return value
+
+
+def _next_token_from_logits(
+    torch: Any,
+    logits: Any,
+    args: argparse.Namespace,
+) -> Any:
+    last_logits = logits[:, -1, :]
+    if not args.generation_do_sample:
+        return torch.argmax(last_logits, dim=-1, keepdim=True)
+    scaled = last_logits / float(args.generation_temperature)
+    if int(args.generation_top_k) > 0:
+        vocab_size = int(getattr(scaled, "shape", [0, 0])[-1])
+        k = min(int(args.generation_top_k), vocab_size)
+        values, indices = torch.topk(scaled, k=k, dim=-1)
+        probs = torch.softmax(values, dim=-1)
+        sampled = torch.multinomial(probs, num_samples=1)
+        return indices.gather(-1, sampled)
+    probs = torch.softmax(scaled, dim=-1)
+    return torch.multinomial(probs, num_samples=1)
+
+
+def _manual_forward_generate(
+    torch: Any,
+    tokenizer: Any,
+    model: Any,
+    batch: Mapping[str, Any],
+    args: argparse.Namespace,
+) -> Any:
+    input_ids = batch.get("input_ids")
+    if input_ids is None:
+        raise ValueError("tokenizer output did not include input_ids")
+    generated = input_ids
+    attention_mask = batch.get("attention_mask")
+    eos_token_id = getattr(tokenizer, "eos_token_id", None)
+    for _ in range(int(args.generation_max_new_tokens)):
+        call_kwargs = {"input_ids": generated}
+        if attention_mask is not None:
+            call_kwargs["attention_mask"] = attention_mask
+        outputs = model(**call_kwargs)
+        logits = getattr(outputs, "logits", None)
+        if logits is None and isinstance(outputs, Mapping):
+            logits = outputs.get("logits")
+        if logits is None:
+            raise ValueError("model forward output did not include logits")
+        next_token = _next_token_from_logits(torch, logits, args)
+        generated = torch.cat([generated, next_token], dim=-1)
+        if attention_mask is not None:
+            attention_mask = torch.cat(
+                [attention_mask, torch.ones_like(next_token)],
+                dim=-1,
+            )
+        if eos_token_id is not None:
+            try:
+                if bool((next_token == eos_token_id).all().item()):
+                    break
+            except (AttributeError, TypeError, ValueError):
+                pass
+    return generated
+
+
+def _generation_sample(
+    torch: Any,
+    tokenizer: Any,
+    model: Any,
+    args: argparse.Namespace,
+    *,
+    stage: str,
+) -> dict[str, object] | None:
+    if not args.generation_prompt:
+        return None
+    prompt = str(args.generation_prompt)
+    generation_method = "model.generate"
+    fallback_error = None
+    try:
+        encoded = tokenizer(prompt, return_tensors="pt")
+        input_ids = encoded.get("input_ids") if isinstance(encoded, Mapping) else None
+        input_tokens = _last_dim(input_ids)
+        model_device = _model_device(model)
+        batch = (
+            _move_batch_to_device(encoded, model_device)
+            if isinstance(encoded, Mapping)
+            else encoded
+        )
+        generate_kwargs: dict[str, Any] = {
+            "max_new_tokens": int(args.generation_max_new_tokens),
+            "do_sample": bool(args.generation_do_sample),
+        }
+        pad_token_id = getattr(tokenizer, "pad_token_id", None)
+        eos_token_id = getattr(tokenizer, "eos_token_id", None)
+        if pad_token_id is not None:
+            generate_kwargs["pad_token_id"] = pad_token_id
+        elif eos_token_id is not None:
+            generate_kwargs["pad_token_id"] = eos_token_id
+        if eos_token_id is not None:
+            generate_kwargs["eos_token_id"] = eos_token_id
+        if args.generation_do_sample:
+            generate_kwargs["temperature"] = float(args.generation_temperature)
+            if int(args.generation_top_k) > 0:
+                generate_kwargs["top_k"] = int(args.generation_top_k)
+
+        was_training = bool(getattr(model, "training", False))
+        eval_model = getattr(model, "eval", None)
+        train_model = getattr(model, "train", None)
+        if callable(eval_model):
+            eval_model()
+        try:
+            with torch.no_grad():
+                try:
+                    if isinstance(batch, Mapping):
+                        output_ids = model.generate(**batch, **generate_kwargs)
+                    else:
+                        output_ids = model.generate(batch, **generate_kwargs)
+                except Exception as generate_exc:
+                    if not isinstance(batch, Mapping):
+                        raise
+                    fallback_error = f"{generate_exc.__class__.__name__}: {generate_exc}"
+                    generation_method = "manual_forward_fallback"
+                    output_ids = _manual_forward_generate(
+                        torch,
+                        tokenizer,
+                        model,
+                        batch,
+                        args,
+                    )
+        finally:
+            if was_training and callable(train_model):
+                train_model()
+
+        first_output = _first_sequence(output_ids)
+        output_tokens = _last_dim(first_output)
+        text = tokenizer.decode(first_output, skip_special_tokens=True)
+        continuation = text[len(prompt) :] if text.startswith(prompt) else text
+        return hf_gpt2_finetune_generation_report(
+            stage=stage,
+            prompt=prompt,
+            generated_text=text,
+            generated_continuation_text=continuation,
+            input_token_count=input_tokens,
+            output_token_count=output_tokens,
+            max_new_tokens=args.generation_max_new_tokens,
+            generation_method=generation_method,
+            fallback_error=fallback_error,
+        )
+    except Exception as exc:
+        return hf_gpt2_finetune_generation_report(
+            stage=stage,
+            prompt=prompt,
+            max_new_tokens=args.generation_max_new_tokens,
+            generation_method=generation_method,
+            fallback_error=fallback_error,
+            error=f"{exc.__class__.__name__}: {exc}",
+        )
+
+
 def _runtime_backends(args: argparse.Namespace) -> list[str]:
     return args.runtime_device_backend or list(HF_GPT2_FT_DEFAULT_DEVICE_BACKENDS)
 
@@ -557,6 +784,13 @@ def _base_run_card(
         "block_size": args.block_size,
         "max_train_samples": args.max_train_samples,
         "max_eval_samples": args.max_eval_samples,
+        "generation_prompt": args.generation_prompt,
+        "generation_max_new_tokens": args.generation_max_new_tokens,
+        "generation_do_sample": bool(args.generation_do_sample),
+        "generation_temperature": args.generation_temperature,
+        "generation_top_k": args.generation_top_k,
+        "generation_before_train": None,
+        "generation_after_train": None,
         "zspace_probe": None,
         "train_requested": bool(args.train),
         "metadata_only": bool(args.metadata_only),
@@ -662,6 +896,13 @@ def _main_with_runtime_access(
         _write_card(card, args)
         return 1
     card["load_status"] = "ok"
+    card["generation_before_train"] = _generation_sample(
+        torch,
+        tokenizer,
+        model,
+        args,
+        stage="before_train",
+    )
 
     raw_train, raw_eval, loaded_corpus_report = _load_raw_datasets(datasets, args)
     if loaded_corpus_report is not None:
@@ -816,6 +1057,13 @@ def _main_with_runtime_access(
         )
         _write_card(card, args)
         return 1
+    card["generation_after_train"] = _generation_sample(
+        torch,
+        tokenizer,
+        getattr(trainer, "model", model),
+        args,
+        stage="after_train",
+    )
     trainer_trace_summary = (
         None
         if trace_path is None or not trace_path.exists()
