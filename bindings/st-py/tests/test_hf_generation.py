@@ -549,17 +549,81 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
             comparison["api_retry_dropped_keys"],
             ["temperature", "top_p"],
         )
+        self.assertAlmostEqual(
+            comparison["best_api_compatibility_score"],
+            0.8477329113244411,
+        )
+        self.assertAlmostEqual(
+            comparison["api_compatibility_score_min"],
+            0.5430435064265411,
+        )
         self.assertEqual(comparison["top_probes"][0]["label"], "strong")
         self.assertGreater(
             comparison["top_probes"][0]["effect_score"],
             comparison["top_probes"][1]["effect_score"],
         )
         self.assertIn("recommended=strong", lines[0])
+        self.assertIn("api_compat=0.8477329113244411", lines[0])
         self.assertIn("api_visible=1", lines[0])
         self.assertIn("api_empty=1", lines[0])
         self.assertIn("api_retry_dropped=1", lines[0])
         self.assertIn("label=strong", lines[1])
         self.assertIn("api_retry_dropped=2", lines[1])
+
+    def test_inference_distortion_comparison_prefers_api_compatibility_tiebreak(self) -> None:
+        base = {
+            "row_type": "zspace_inference_distortion_probe",
+            "prompt": "tie",
+            "adapter": {
+                "distortion_energy": 0.6,
+                "request": {"temperature": 0.95, "top_p": 0.8},
+            },
+            "local_hf": {
+                "status": "ok",
+                "changed": True,
+                "generation_control": {"top_token_changed_count": 4},
+                "activation_report": {"event_count": 64},
+            },
+            "api": {
+                "provider": "fake",
+                "text": "visible route",
+                "telemetry": {"api_llm.empty_text": 0.0},
+            },
+        }
+        retry = json.loads(json.dumps(base))
+        retry["api"]["request_filter"] = {
+            "dropped_key_count": 2,
+            "dropped_keys": ["temperature", "top_p"],
+            "retry_dropped_key_count": 2,
+            "retry_dropped_keys": ["temperature", "top_p"],
+            "sent_keys": ["input", "model", "reasoning", "text"],
+        }
+        clean = json.loads(json.dumps(base))
+        clean["api"]["request_filter"] = {
+            "dropped_key_count": 0,
+            "dropped_keys": [],
+            "sent_keys": ["input", "model", "temperature", "top_p"],
+        }
+
+        comparison = compare_zspace_inference_distortion_probes(
+            {"a-retry": retry, "z-clean": clean},
+            top_n=2,
+        )
+        lines = summarize_zspace_inference_distortion_probe_comparison_lines(
+            comparison
+        )
+
+        self.assertEqual(comparison["recommended_probe"], "z-clean")
+        self.assertEqual(
+            comparison["recommended_reason"],
+            "highest_effect_score_lowest_risk_api_compatibility_tiebreak",
+        )
+        self.assertEqual(comparison["top_probes"][0]["api_compatibility_score"], 1.0)
+        self.assertLess(
+            comparison["top_probes"][1]["api_compatibility_score"],
+            comparison["top_probes"][0]["api_compatibility_score"],
+        )
+        self.assertIn("recommended=z-clean", lines[0])
 
     def test_inference_distortion_sweep_dry_run_writes_plan(self) -> None:
         module = load_distortion_sweep_example()

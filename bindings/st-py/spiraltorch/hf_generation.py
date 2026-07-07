@@ -1055,6 +1055,7 @@ def summarize_zspace_inference_distortion_probe(
     }
     summary["effect_score"] = _probe_effect_score(summary)
     summary["risk_score"] = _probe_risk_score(summary)
+    summary["api_compatibility_score"] = _probe_api_compatibility_score(summary)
     return summary
 
 
@@ -1176,6 +1177,25 @@ def _probe_risk_score(row: Mapping[str, object]) -> float:
     return 0.45 * energy + 0.25 * top_changes + 0.20 * activation_l2 + 0.10 * api_empty
 
 
+def _probe_api_compatibility_score(row: Mapping[str, object]) -> float:
+    api_empty_value = _safe_number(row.get("api_empty_text"))
+    visible_text = (
+        1.0 - _score_number(api_empty_value, scale=1.0)
+        if api_empty_value is not None
+        else 0.5
+    )
+    retry_drop = 1.0 - _score_number(
+        row.get("api_request_retry_dropped_key_count"),
+        scale=4.0,
+    )
+    request_drop = 1.0 - _score_number(
+        row.get("api_request_dropped_key_count"),
+        scale=8.0,
+    )
+    score = 0.60 * visible_text + 0.25 * retry_drop + 0.15 * request_drop
+    return _clamp(score, 0.0, 1.0)
+
+
 def _ranked_probe_rows(
     rows: Sequence[Mapping[str, object]],
     *,
@@ -1186,6 +1206,7 @@ def _ranked_probe_rows(
         key=lambda row: (
             -float(row.get("effect_score") or 0.0),
             float(row.get("risk_score") or 0.0),
+            -float(row.get("api_compatibility_score") or 0.0),
             str(row.get("label") or ""),
         ),
     )
@@ -1231,6 +1252,7 @@ def compare_zspace_inference_distortion_probes(
         summary["label"] = label or _default_probe_label(source, index=index)
         summary["effect_score"] = _probe_effect_score(summary)
         summary["risk_score"] = _probe_risk_score(summary)
+        summary["api_compatibility_score"] = _probe_api_compatibility_score(summary)
         rows.append(summary)
     top_probes = _ranked_probe_rows(rows, top_n=top_n)
     best = top_probes[0] if top_probes else None
@@ -1277,6 +1299,11 @@ def compare_zspace_inference_distortion_probes(
             for key in _string_list(row.get("api_request_retry_dropped_keys"))
         }
     )
+    api_compatibility_values = [
+        float(value)
+        for row in rows
+        if (value := _safe_number(row.get("api_compatibility_score"))) is not None
+    ]
     return {
         "row_type": "zspace_inference_distortion_probe_comparison",
         "probe_count": len(rows),
@@ -1298,14 +1325,25 @@ def compare_zspace_inference_distortion_probes(
         "api_request_dropped_key_total": (
             sum(api_dropped_values) if api_dropped_values else None
         ),
+        "api_compatibility_score_min": (
+            min(api_compatibility_values) if api_compatibility_values else None
+        ),
+        "api_compatibility_score_mean": (
+            sum(api_compatibility_values) / len(api_compatibility_values)
+            if api_compatibility_values
+            else None
+        ),
         "recommended_probe": None if best is None else best.get("label"),
         "recommended_reason": (
             None
             if best is None
-            else "highest_effect_score_lowest_risk_tiebreak"
+            else "highest_effect_score_lowest_risk_api_compatibility_tiebreak"
         ),
         "best_effect_score": None if best is None else best.get("effect_score"),
         "best_risk_score": None if best is None else best.get("risk_score"),
+        "best_api_compatibility_score": (
+            None if best is None else best.get("api_compatibility_score")
+        ),
         "top_probes": top_probes,
         "summaries": rows,
     }
@@ -1496,6 +1534,7 @@ def summarize_zspace_inference_distortion_probe_comparison_lines(
             f"recommended={comparison.get('recommended_probe')} "
             f"effect={comparison.get('best_effect_score')} "
             f"risk={comparison.get('best_risk_score')} "
+            f"api_compat={comparison.get('best_api_compatibility_score')} "
             f"changed={comparison.get('local_changed_count')} "
             f"activation={comparison.get('activation_observed_count')} "
             f"max_top_changes={comparison.get('max_top_token_changed_count')} "
@@ -1513,6 +1552,7 @@ def summarize_zspace_inference_distortion_probe_comparison_lines(
             f"label={row.get('label')} "
             f"effect={row.get('effect_score')} "
             f"risk={row.get('risk_score')} "
+            f"api_compat={row.get('api_compatibility_score')} "
             f"changed={row.get('local_changed')} "
             f"top_changes={row.get('generation_control_top_token_changed_count')} "
             f"api={row.get('api_provider')} "

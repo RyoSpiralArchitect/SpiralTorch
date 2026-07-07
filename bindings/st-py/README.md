@@ -474,7 +474,9 @@ several pressure/coherence settings have been tried, call
 `st.summarize_zspace_inference_distortion_probe_comparison_lines(...)` to rank
 the artifacts by local text changes, top-token changes, activation evidence,
 API non-empty response, request-drop/retry-drop compatibility, and distortion
-energy.
+energy. Comparisons also compute `api_compatibility_score` so equal-effect
+candidates prefer visible text with fewer server-side request retries before
+falling back to labels.
 See `examples/zspace_inference_distortion_local_gpt2_openai_sample.json` for a
 sanitized local-GPT-2 plus OpenAI Responses run that keeps the local hook/logits
 evidence while omitting API keys, response ids, and absolute local paths.
