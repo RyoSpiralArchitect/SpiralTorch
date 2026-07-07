@@ -56,6 +56,40 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--model-name", default=DEFAULT_MODEL)
     parser.add_argument("--dataset-name", default=DEFAULT_DATASET)
     parser.add_argument("--dataset-config", default=DEFAULT_DATASET_CONFIG)
+    parser.add_argument(
+        "--dataset-revision",
+        default=None,
+        help=(
+            "Optional Hugging Face dataset revision/branch/commit. Use this to "
+            "pin a large remote corpus while keeping the run reproducible."
+        ),
+    )
+    parser.add_argument(
+        "--dataset-streaming",
+        action="store_true",
+        help=(
+            "Load remote HF datasets with streaming=True, then materialize only "
+            "--max-train-samples/--max-eval-samples rows before tokenization."
+        ),
+    )
+    parser.add_argument(
+        "--streaming-shuffle-buffer-size",
+        type=int,
+        default=0,
+        help=(
+            "Shuffle streamed train rows with this buffer before sampling. "
+            "Use 0 to keep provider order."
+        ),
+    )
+    parser.add_argument(
+        "--streaming-validation-samples",
+        type=int,
+        default=0,
+        help=(
+            "When streaming and no eval split is loaded, take this many rows "
+            "from the train stream as validation before train sampling."
+        ),
+    )
     parser.add_argument("--train-split", default="train")
     parser.add_argument("--eval-split", default="validation")
     parser.add_argument("--text-column", default="text")
@@ -375,6 +409,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         parser.error("--max-eval-samples must be non-negative")
     if args.max_eval_blocks is not None and args.max_eval_blocks < 0:
         parser.error("--max-eval-blocks must be non-negative")
+    if args.streaming_shuffle_buffer_size < 0:
+        parser.error("--streaming-shuffle-buffer-size must be non-negative")
+    if args.streaming_validation_samples < 0:
+        parser.error("--streaming-validation-samples must be non-negative")
+    if args.dataset_streaming and args.train_file:
+        parser.error("--dataset-streaming is only supported for remote HF datasets")
+    if args.dataset_streaming and (
+        args.max_train_samples is None or args.max_train_samples <= 0
+    ):
+        parser.error("--dataset-streaming requires a positive --max-train-samples")
     if args.block_size <= 0:
         parser.error("--block-size must be positive")
     if args.generation_max_new_tokens <= 0:
@@ -580,13 +624,52 @@ def _load_dataset_split(
     if not split:
         return None
     kwargs = {"split": split}
-    if args.dataset_config:
-        return datasets.load_dataset(args.dataset_name, args.dataset_config, **kwargs)
-    return datasets.load_dataset(args.dataset_name, **kwargs)
+    if args.dataset_revision:
+        kwargs["revision"] = args.dataset_revision
+    if args.dataset_streaming and not _has_local_corpus(args):
+        kwargs["streaming"] = True
+    with _streaming_dataset_cpu_default_device(args):
+        if args.dataset_config:
+            return datasets.load_dataset(
+                args.dataset_name,
+                args.dataset_config,
+                **kwargs,
+            )
+        return datasets.load_dataset(args.dataset_name, **kwargs)
 
 
 def _has_local_corpus(args: argparse.Namespace) -> bool:
     return bool(args.train_file)
+
+
+def _uses_streaming_dataset(args: argparse.Namespace) -> bool:
+    return bool(args.dataset_streaming and not _has_local_corpus(args))
+
+
+@contextlib.contextmanager
+def _streaming_dataset_cpu_default_device(args: argparse.Namespace):
+    if not _uses_streaming_dataset(args):
+        yield
+        return
+    try:
+        torch = importlib.import_module("torch")
+        get_default_device = getattr(torch, "get_default_device", None)
+        set_default_device = getattr(torch, "set_default_device", None)
+        if not callable(get_default_device) or not callable(set_default_device):
+            yield
+            return
+        previous = get_default_device()
+        set_default_device("cpu")
+    except Exception:
+        yield
+        return
+    try:
+        yield
+    finally:
+        try:
+            set_default_device(previous)
+        except Exception:
+            pass
 
 
 def _local_data_files(args: argparse.Namespace) -> dict[str, list[str]]:
@@ -594,6 +677,59 @@ def _local_data_files(args: argparse.Namespace) -> dict[str, list[str]]:
     if args.validation_file:
         data_files["validation"] = [str(path) for path in args.validation_file]
     return data_files
+
+
+def _maybe_shuffle_streaming_dataset(dataset: Any, args: argparse.Namespace) -> Any:
+    buffer_size = int(getattr(args, "streaming_shuffle_buffer_size", 0) or 0)
+    if buffer_size <= 0:
+        return dataset
+    shuffle = getattr(dataset, "shuffle", None)
+    if not callable(shuffle):
+        return dataset
+    return shuffle(buffer_size=buffer_size, seed=int(args.seed))
+
+
+def _streaming_take(dataset: Any, count: int) -> Any:
+    take = getattr(dataset, "take", None)
+    if callable(take):
+        return take(int(count))
+    rows = []
+    for index, row in enumerate(dataset):
+        if index >= int(count):
+            break
+        rows.append(row)
+    return rows
+
+
+def _streaming_skip(dataset: Any, count: int) -> Any:
+    skip = getattr(dataset, "skip", None)
+    if callable(skip):
+        return skip(int(count))
+
+    def skipped_rows():
+        for index, row in enumerate(dataset):
+            if index >= int(count):
+                yield row
+
+    return skipped_rows()
+
+
+def _materialize_streaming_dataset(
+    datasets: Any,
+    dataset: Any | None,
+    *,
+    limit: int | None,
+) -> Any | None:
+    if dataset is None:
+        return None
+    if limit is None or int(limit) <= 0:
+        return None
+    rows = []
+    for index, row in enumerate(dataset):
+        if index >= int(limit):
+            break
+        rows.append(dict(row) if isinstance(row, Mapping) else row)
+    return datasets.Dataset.from_list(rows)
 
 
 def _corpus_file_report(args: argparse.Namespace) -> dict[str, object] | None:
@@ -651,9 +787,41 @@ def _load_raw_datasets(
     args: argparse.Namespace,
 ) -> tuple[Any, Any | None, dict[str, object] | None]:
     if not _has_local_corpus(args):
+        raw_train = _load_dataset_split(datasets, args, args.train_split)
+        raw_eval = None
+        try:
+            raw_eval = _load_dataset_split(datasets, args, args.eval_split)
+        except Exception:
+            if (
+                not _uses_streaming_dataset(args)
+                or int(args.streaming_validation_samples) <= 0
+            ):
+                raise
+        if _uses_streaming_dataset(args):
+            with _streaming_dataset_cpu_default_device(args):
+                raw_train = _maybe_shuffle_streaming_dataset(raw_train, args)
+                if raw_eval is None and int(args.streaming_validation_samples) > 0:
+                    raw_eval = _streaming_take(
+                        raw_train,
+                        int(args.streaming_validation_samples),
+                    )
+                    raw_train = _streaming_skip(
+                        raw_train,
+                        int(args.streaming_validation_samples),
+                    )
+                raw_train = _materialize_streaming_dataset(
+                    datasets,
+                    raw_train,
+                    limit=args.max_train_samples,
+                )
+                raw_eval = _materialize_streaming_dataset(
+                    datasets,
+                    raw_eval,
+                    limit=args.max_eval_samples,
+                )
         return (
-            _load_dataset_split(datasets, args, args.train_split),
-            _load_dataset_split(datasets, args, args.eval_split),
+            raw_train,
+            raw_eval,
             None,
         )
 
@@ -1510,6 +1678,10 @@ def _base_run_card(
         ),
         "dataset_name": _preflight_dataset_name(args),
         "dataset_config": _preflight_dataset_config(args),
+        "dataset_revision": args.dataset_revision,
+        "dataset_streaming": bool(args.dataset_streaming),
+        "streaming_shuffle_buffer_size": args.streaming_shuffle_buffer_size,
+        "streaming_validation_samples": args.streaming_validation_samples,
         "dataset_source": "local_files" if _has_local_corpus(args) else "hf_dataset",
         "dataset_format": args.dataset_format if _has_local_corpus(args) else None,
         "corpus_file_report": corpus_file_report,
@@ -1645,6 +1817,10 @@ def _main_with_runtime_access(
         model_name=args.model_name,
         dataset_name=_preflight_dataset_name(args),
         dataset_config=_preflight_dataset_config(args),
+        dataset_revision=args.dataset_revision,
+        dataset_streaming=args.dataset_streaming,
+        streaming_shuffle_buffer_size=args.streaming_shuffle_buffer_size,
+        streaming_validation_samples=args.streaming_validation_samples,
         train_split=args.train_split,
         eval_split=args.eval_split,
         text_column=args.text_column,
@@ -1697,6 +1873,10 @@ def _main_with_runtime_access(
     preflight["trainer_loss_guard_enabled"] = not bool(args.no_trainer_loss_guard)
     preflight["trainer_loss_guard_threshold"] = args.trainer_loss_guard_threshold
     preflight["model_train_dtype"] = args.model_train_dtype
+    preflight["dataset_revision"] = args.dataset_revision
+    preflight["dataset_streaming"] = bool(args.dataset_streaming)
+    preflight["streaming_shuffle_buffer_size"] = args.streaming_shuffle_buffer_size
+    preflight["streaming_validation_samples"] = args.streaming_validation_samples
     preflight["disk_report"] = _disk_report(
         args.output_dir,
         min_free_gb=args.min_free_disk_gb,

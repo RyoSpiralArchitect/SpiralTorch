@@ -2904,6 +2904,80 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(module._preflight_dataset_name(args), "local-files")
         self.assertEqual(module._preflight_dataset_config(args), "text")
 
+    def test_example_streaming_remote_dataset_materializes_bounded_splits(self) -> None:
+        module = load_bridge_example()
+
+        class FakeStream:
+            def __init__(self, rows):
+                self.rows = list(rows)
+                self.shuffle_calls = []
+
+            def __iter__(self):
+                return iter(self.rows)
+
+            def shuffle(self, *, buffer_size, seed):
+                self.shuffle_calls.append((buffer_size, seed))
+                return self
+
+            def take(self, count):
+                return FakeStream(self.rows[: int(count)])
+
+            def skip(self, count):
+                return FakeStream(self.rows[int(count) :])
+
+        class FakeStreamingDatasets:
+            class Dataset:
+                @staticmethod
+                def from_list(rows):
+                    return FakeDataset(rows)
+
+            def __init__(self):
+                self.calls = []
+                self.train_stream = FakeStream(
+                    [
+                        {"text": "validation zero"},
+                        {"text": "validation one"},
+                        {"text": "train two"},
+                        {"text": "train three"},
+                        {"text": "train four"},
+                        {"text": "train five"},
+                    ]
+                )
+
+            def load_dataset(self, name, *args, **kwargs):
+                self.calls.append((name, args, kwargs))
+                if kwargs.get("split") == "validation":
+                    raise ValueError("validation split unavailable")
+                return self.train_stream
+
+        fake_datasets = FakeStreamingDatasets()
+        args = types.SimpleNamespace(
+            train_file=[],
+            validation_file=[],
+            dataset_name="HuggingFaceFW/fineweb-edu",
+            dataset_config=None,
+            dataset_revision="main",
+            dataset_streaming=True,
+            train_split="train",
+            eval_split="validation",
+            max_train_samples=3,
+            max_eval_samples=2,
+            streaming_validation_samples=2,
+            streaming_shuffle_buffer_size=16,
+            seed=13,
+        )
+
+        raw_train, raw_eval, report = module._load_raw_datasets(fake_datasets, args)
+
+        self.assertIsNone(report)
+        self.assertEqual(len(raw_train), 3)
+        self.assertEqual(len(raw_eval), 2)
+        self.assertEqual(raw_eval[0]["text"], "validation zero")
+        self.assertEqual(raw_train[0]["text"], "train two")
+        self.assertEqual(fake_datasets.train_stream.shuffle_calls, [(16, 13)])
+        self.assertEqual(fake_datasets.calls[0][2]["streaming"], True)
+        self.assertEqual(fake_datasets.calls[0][2]["revision"], "main")
+
     def test_example_trainer_eval_report_wraps_evaluate(self) -> None:
         module = load_bridge_example()
 

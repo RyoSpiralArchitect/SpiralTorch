@@ -763,6 +763,10 @@ def hf_gpt2_finetune_preflight_report(
     model_name: str = "gpt2",
     dataset_name: str | None = "wikitext",
     dataset_config: str | None = "wikitext-2-raw-v1",
+    dataset_revision: str | None = None,
+    dataset_streaming: bool = False,
+    streaming_shuffle_buffer_size: int = 0,
+    streaming_validation_samples: int = 0,
     train_split: str = "train",
     eval_split: str | None = "validation",
     text_column: str = "text",
@@ -791,6 +795,10 @@ def hf_gpt2_finetune_preflight_report(
             "hf_model_name": str(model_name),
             "hf_dataset_name": dataset_name,
             "hf_dataset_config": dataset_config,
+            "hf_dataset_revision": dataset_revision,
+            "hf_dataset_streaming": bool(dataset_streaming),
+            "hf_streaming_shuffle_buffer_size": int(streaming_shuffle_buffer_size),
+            "hf_streaming_validation_samples": int(streaming_validation_samples),
             "hf_train_split": str(train_split),
             "hf_eval_split": eval_split,
             "hf_text_column": str(text_column),
@@ -812,6 +820,8 @@ def hf_gpt2_finetune_summary_lines(report: Mapping[str, object]) -> list[str]:
             f"model={report.get('hf_model_name')} "
             f"dataset={report.get('hf_dataset_name')} "
             f"config={report.get('hf_dataset_config')} "
+            f"revision={report.get('hf_dataset_revision')} "
+            f"streaming={report.get('hf_dataset_streaming')} "
             f"train_split={report.get('hf_train_split')} "
             f"text_column={report.get('hf_text_column')}"
         ),
@@ -2702,6 +2712,15 @@ def summarize_hf_gpt2_finetune_run_card(
         "run_card_path": source_path,
         "model_name": card.get("model_name"),
         "dataset_name": card.get("dataset_name"),
+        "dataset_config": card.get("dataset_config"),
+        "dataset_revision": card.get("dataset_revision"),
+        "dataset_streaming": card.get("dataset_streaming"),
+        "streaming_shuffle_buffer_size": _safe_number(
+            card.get("streaming_shuffle_buffer_size")
+        ),
+        "streaming_validation_samples": _safe_number(
+            card.get("streaming_validation_samples")
+        ),
         "dataset_source": card.get("dataset_source"),
         "dataset_format": card.get("dataset_format"),
         "block_size": _safe_number(card.get("block_size")),
