@@ -47,6 +47,11 @@ SWEEP_EXAMPLE_PATH = (
     / "examples"
     / "hf_gpt2_zspace_generation_control_sweep.py"
 )
+SWEEP_COMPARE_EXAMPLE_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "examples"
+    / "hf_gpt2_zspace_generation_control_compare.py"
+)
 DISTORTION_PROBE_EXAMPLE_PATH = (
     Path(__file__).resolve().parents[1]
     / "examples"
@@ -73,6 +78,17 @@ def load_generation_control_sweep_example():
     spec = importlib.util.spec_from_file_location(
         "hf_gpt2_zspace_generation_control_sweep_test",
         SWEEP_EXAMPLE_PATH,
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_generation_control_compare_example():
+    spec = importlib.util.spec_from_file_location(
+        "hf_gpt2_zspace_generation_control_compare_test",
+        SWEEP_COMPARE_EXAMPLE_PATH,
     )
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -1371,6 +1387,124 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
         self.assertIn("recommend=ft-prompt", lines[0])
         self.assertIn("model=ft-model", " ".join(lines))
         self.assertIn("label=ft-prompt", lines[-2])
+
+    def test_generation_control_compare_example_writes_json_and_lines(self) -> None:
+        module = load_generation_control_compare_example()
+
+        def sweep_report(path: Path, *, model_name: str, loop_score: float) -> None:
+            report = {
+                "row_type": "hf_gpt2_zspace_generation_control_sweep",
+                "status": "complete",
+                "dry_run": False,
+                "model_name": model_name,
+                "prompt": "SpiralTorch is",
+                "run_count": 2,
+                "runs": [
+                    {
+                        "name": "baseline-greedy",
+                        "kind": "baseline",
+                        "status": "ok",
+                        "config": {},
+                        "generation": hf_ft.hf_gpt2_finetune_generation_report(
+                            stage="baseline",
+                            prompt="SpiralTorch is",
+                            generated_text="SpiralTorch is loop loop loop",
+                            generated_continuation_text=" loop loop loop",
+                        ),
+                        "repetition": {
+                            "loop_score": 9.0,
+                            "unique_word_ratio": 0.25,
+                        },
+                    },
+                    {
+                        "name": "zt3-rs1-lr1-k64",
+                        "kind": "zspace_repression_softmax",
+                        "status": "ok",
+                        "config": {
+                            "top_k": 64,
+                            "curvature": -0.04,
+                            "temperature": 1.0,
+                            "entropy_target": 3.0,
+                            "entropy_tolerance": 1.0e-4,
+                            "entropy_gain": 0.5,
+                            "min_temperature": 0.7,
+                            "max_temperature": 2.4,
+                            "repression_window": 16,
+                            "repression_strength": 1.0,
+                            "last_token_repression": 1.0,
+                            "ngram_size": 3,
+                            "ngram_window": 96,
+                            "ngram_repression_strength": 1.0,
+                            "ngram_decay": 0.95,
+                        },
+                        "generation": hf_ft.hf_gpt2_finetune_generation_report(
+                            stage="controlled",
+                            prompt="SpiralTorch is",
+                            generated_text=f"SpiralTorch is {model_name}",
+                            generated_continuation_text=f" {model_name}",
+                            generation_control={
+                                "status": "ok",
+                                "calls": 4,
+                                "top_token_changed_count": 2,
+                            },
+                        ),
+                        "repetition": {
+                            "loop_score": loop_score,
+                            "unique_word_ratio": 1.0,
+                        },
+                    },
+                ],
+            }
+            path.write_text(json.dumps(report), encoding="utf-8")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            first = root / "first.json"
+            second = root / "second.json"
+            out = root / "comparison.json"
+            lines_out = root / "comparison.txt"
+            sweep_report(first, model_name="warmstart", loop_score=5.0)
+            sweep_report(second, model_name="checkpoint-512", loop_score=2.0)
+            args = module.parse_args(
+                [
+                    str(first),
+                    str(second),
+                    "--label",
+                    "warmstart",
+                    "--label",
+                    "checkpoint-512",
+                    "--out",
+                    str(out),
+                    "--lines-out",
+                    str(lines_out),
+                    "--top-n",
+                    "2",
+                ]
+            )
+            comparison = module.compare_sweeps(args)
+            rc = module.main(
+                [
+                    str(first),
+                    str(second),
+                    "--label",
+                    "warmstart",
+                    "--label",
+                    "checkpoint-512",
+                    "--out",
+                    str(out),
+                    "--lines-out",
+                    str(lines_out),
+                    "--top-n",
+                    "2",
+                ]
+            )
+            stored = json.loads(out.read_text(encoding="utf-8"))
+            lines = lines_out.read_text(encoding="utf-8").splitlines()
+
+        self.assertEqual(rc, 0)
+        self.assertEqual(comparison["recommended_sweep_label"], "checkpoint-512")
+        self.assertEqual(stored["recommended_sweep_label"], "checkpoint-512")
+        self.assertTrue(any("recommend=checkpoint-512" in line for line in lines))
 
     def test_dry_run_builds_control_grid_without_loading_model(self) -> None:
         module = load_generation_control_sweep_example()
