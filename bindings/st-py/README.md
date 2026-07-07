@@ -528,8 +528,10 @@ the run cards are available, including the same
 `st.compare_hf_gpt2_finetune_run_cards(...)` comparison payload. Add
 `--inference-distortion-sweep-report` after a local/API inference-distortion
 sweep to stamp its recommended prompt/runtime/config into each FT run card and
-first trainer-trace event; summaries surface the recommended probe, effect/risk,
-desire pressure, psi total, and API route beside eval/generation metrics. Add
+train-begin trace event. When `--trainer-telemetry` is enabled, the same handoff
+also appears as `hf_ft.inference_distortion.*` telemetry keys on each frame;
+summaries surface the recommended probe, effect/risk, desire pressure, psi total,
+and API route beside eval/generation metrics. Add
 `--dry-run` to inspect commands without loading Transformers, or
 `--require-wgpu-ready` when the SpiralTorch WGPU surface should gate each run.
 The report also embeds a compact `summary`; from notebooks or CI, call

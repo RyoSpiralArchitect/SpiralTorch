@@ -867,6 +867,14 @@ def _safe_number(value: object) -> int | float | None:
     return None if math.isnan(number) else number
 
 
+def _first_safe_number(*values: object) -> int | float | None:
+    for value in values:
+        number = _safe_number(value)
+        if number is not None:
+            return number
+    return None
+
+
 def _metric_fields(values: Mapping[str, object] | None) -> dict[str, object]:
     if not values:
         return {}
@@ -918,6 +926,65 @@ def _prefixed_numeric_payload(
     return payload
 
 
+def _inference_distortion_telemetry_values(
+    handoff: Mapping[str, object] | None,
+) -> dict[str, object]:
+    if not isinstance(handoff, Mapping):
+        return {}
+    config = _mapping_item(handoff, "recommended_config")
+    request = _mapping_item(handoff, "recommended_request")
+    processor = _mapping_item(handoff, "recommended_processor_kwargs")
+    include_penalties = handoff.get("include_penalties")
+    if include_penalties is None:
+        include_penalties = config.get("include_penalties")
+    values = {
+        "inference_distortion.handoff_present": 1.0,
+        "inference_distortion.effect_score": handoff.get("recommended_effect_score"),
+        "inference_distortion.risk_score": handoff.get("recommended_risk_score"),
+        "inference_distortion.desire_pressure": _first_safe_number(
+            handoff.get("desire_pressure"),
+            config.get("desire_pressure"),
+        ),
+        "inference_distortion.desire_stability": _first_safe_number(
+            handoff.get("desire_stability"),
+            config.get("desire_stability"),
+        ),
+        "inference_distortion.psi_total": _first_safe_number(
+            handoff.get("psi_total"),
+            config.get("psi_total"),
+        ),
+        "inference_distortion.coherence": _first_safe_number(
+            handoff.get("coherence"),
+            config.get("coherence"),
+        ),
+        "inference_distortion.distortion_strength": _first_safe_number(
+            handoff.get("distortion_strength"),
+            config.get("distortion_strength"),
+        ),
+        "inference_distortion.base_temperature": _first_safe_number(
+            handoff.get("base_temperature"),
+            config.get("base_temperature"),
+        ),
+        "inference_distortion.base_top_p": _first_safe_number(
+            handoff.get("base_top_p"),
+            config.get("base_top_p"),
+        ),
+        "inference_distortion.request_temperature": request.get("temperature"),
+        "inference_distortion.request_top_p": request.get("top_p"),
+        "inference_distortion.logits_repression_strength": processor.get(
+            "repression_strength"
+        ),
+        "inference_distortion.logits_ngram_repression_strength": processor.get(
+            "ngram_repression_strength"
+        ),
+    }
+    if isinstance(include_penalties, bool):
+        values["inference_distortion.include_penalties"] = (
+            1.0 if include_penalties else 0.0
+        )
+    return values
+
+
 def hf_gpt2_finetune_training_telemetry_frame(
     event: str,
     *,
@@ -928,6 +995,7 @@ def hf_gpt2_finetune_training_telemetry_frame(
     telemetry_prefix: str = "hf_ft",
     desire_gain: float = 1.0,
     psi_gain: float = 1.0,
+    inference_distortion_handoff: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """Derive desire/psi telemetry from HF Trainer logs during FT.
 
@@ -1032,6 +1100,16 @@ def hf_gpt2_finetune_training_telemetry_frame(
         "psi.gradient_component": grad_pressure,
         "psi.learning_rate_component": lr_pressure,
     }
+    inference_handoff = (
+        _json_safe(inference_distortion_handoff)
+        if isinstance(inference_distortion_handoff, Mapping)
+        else None
+    )
+    telemetry_values.update(
+        _inference_distortion_telemetry_values(
+            inference_handoff if isinstance(inference_handoff, Mapping) else None
+        )
+    )
     telemetry = _prefixed_numeric_payload(clean_prefix, telemetry_values)
     status = "ok" if telemetry else "empty"
     return {
@@ -1050,6 +1128,7 @@ def hf_gpt2_finetune_training_telemetry_frame(
         "progress": progress,
         "desire": {key: value for key, value in desire.items() if value is not None},
         "psi": {key: value for key, value in psi.items() if value is not None},
+        "inference_distortion_handoff": inference_handoff,
         "telemetry": telemetry,
     }
 
@@ -1289,6 +1368,29 @@ def _trace_training_telemetry_count(rows: Sequence[Mapping[str, object]]) -> int
     return count
 
 
+def _trace_numeric_telemetry_values(
+    rows: Sequence[Mapping[str, object]],
+    key_suffix: str,
+) -> list[float]:
+    suffix = str(key_suffix)
+    values = []
+    for row in rows:
+        source = row.get("telemetry")
+        if not isinstance(source, Mapping):
+            frame = row.get("training_telemetry")
+            source = frame.get("telemetry") if isinstance(frame, Mapping) else None
+        if not isinstance(source, Mapping):
+            continue
+        for key, value in source.items():
+            key_text = str(key)
+            if key_text == suffix or key_text.endswith(f".{suffix}"):
+                number = _safe_number(value)
+                if number is not None:
+                    values.append(float(number))
+                break
+    return values
+
+
 def summarize_hf_gpt2_finetune_trainer_trace(
     path_or_rows: str | Path | Sequence[Mapping[str, object]],
 ) -> dict[str, object]:
@@ -1329,6 +1431,22 @@ def summarize_hf_gpt2_finetune_trainer_trace(
         section="psi",
         key="total",
     )
+    inference_desire_pressures = _trace_numeric_telemetry_values(
+        rows,
+        "inference_distortion.desire_pressure",
+    )
+    inference_psi_totals = _trace_numeric_telemetry_values(
+        rows,
+        "inference_distortion.psi_total",
+    )
+    inference_effect_scores = _trace_numeric_telemetry_values(
+        rows,
+        "inference_distortion.effect_score",
+    )
+    inference_handoff_present = _trace_numeric_telemetry_values(
+        rows,
+        "inference_distortion.handoff_present",
+    )
     return {
         "row_type": "hf_gpt2_finetune_trainer_trace_summary",
         "trace_event_count": len(rows),
@@ -1367,6 +1485,16 @@ def summarize_hf_gpt2_finetune_trainer_trace(
         "trace_last_psi_total": psi_totals[-1] if psi_totals else None,
         "trace_max_psi_total": max(psi_totals) if psi_totals else None,
         "trace_mean_psi_total": _mean(psi_totals),
+        "trace_inference_distortion_telemetry_count": len(inference_handoff_present),
+        "trace_last_inference_distortion_desire_pressure": (
+            inference_desire_pressures[-1] if inference_desire_pressures else None
+        ),
+        "trace_last_inference_distortion_psi_total": (
+            inference_psi_totals[-1] if inference_psi_totals else None
+        ),
+        "trace_last_inference_distortion_effect_score": (
+            inference_effect_scores[-1] if inference_effect_scores else None
+        ),
     }
 
 
@@ -1686,6 +1814,22 @@ def summarize_hf_gpt2_finetune_run_card(
             trainer_trace,
             "trace_mean_psi_total",
         ),
+        "trace_inference_distortion_telemetry_count": _metric_number(
+            trainer_trace,
+            "trace_inference_distortion_telemetry_count",
+        ),
+        "trace_last_inference_distortion_desire_pressure": _metric_number(
+            trainer_trace,
+            "trace_last_inference_distortion_desire_pressure",
+        ),
+        "trace_last_inference_distortion_psi_total": _metric_number(
+            trainer_trace,
+            "trace_last_inference_distortion_psi_total",
+        ),
+        "trace_last_inference_distortion_effect_score": _metric_number(
+            trainer_trace,
+            "trace_last_inference_distortion_effect_score",
+        ),
         "generation_before_status": generation_before.get("status"),
         "generation_before_method": generation_before.get("generation_method"),
         "generation_before_control_status": generation_before_control.get("status"),
@@ -1902,6 +2046,18 @@ def _ranked_sweep_rows(
                 "trace_last_psi_total": _safe_number(row.get("trace_last_psi_total")),
                 "trace_max_psi_total": _safe_number(row.get("trace_max_psi_total")),
                 "trace_mean_psi_total": _safe_number(row.get("trace_mean_psi_total")),
+                "trace_inference_distortion_telemetry_count": _safe_number(
+                    row.get("trace_inference_distortion_telemetry_count")
+                ),
+                "trace_last_inference_distortion_desire_pressure": _safe_number(
+                    row.get("trace_last_inference_distortion_desire_pressure")
+                ),
+                "trace_last_inference_distortion_psi_total": _safe_number(
+                    row.get("trace_last_inference_distortion_psi_total")
+                ),
+                "trace_last_inference_distortion_effect_score": _safe_number(
+                    row.get("trace_last_inference_distortion_effect_score")
+                ),
                 "inference_distortion_recommended_probe": row.get(
                     "inference_distortion_recommended_probe"
                 ),
@@ -2044,6 +2200,11 @@ def summarize_hf_gpt2_finetune_sweep_report_lines(
             inference_fragment = (
                 f"infer_probe={row.get('inference_distortion_recommended_probe')} "
                 f"infer_effect={row.get('inference_distortion_effect_score')} "
+            )
+        if row.get("trace_inference_distortion_telemetry_count") is not None:
+            inference_fragment += (
+                "infer_trace="
+                f"{row.get('trace_inference_distortion_telemetry_count')} "
             )
         lines.append(
             "hf_gpt2_ft_sweep_top "
@@ -2189,6 +2350,11 @@ def hf_gpt2_finetune_trainer_trace_callback(
                     telemetry_prefix=telemetry_prefix,
                     desire_gain=desire_gain_value,
                     psi_gain=psi_gain_value,
+                    inference_distortion_handoff=(
+                        inference_handoff
+                        if isinstance(inference_handoff, Mapping)
+                        else None
+                    ),
                 )
                 merged_extra["training_telemetry"] = telemetry_frame
                 merged_extra["telemetry"] = telemetry_frame.get("telemetry")

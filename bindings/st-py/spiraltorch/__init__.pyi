@@ -511,6 +511,7 @@ def hf_gpt2_finetune_training_telemetry_frame(
     telemetry_prefix: str = ...,
     desire_gain: float = ...,
     psi_gain: float = ...,
+    inference_distortion_handoff: Mapping[str, object] | None = ...,
 ) -> Dict[str, object]: ...
 
 def hf_gpt2_finetune_trainer_trace_event(
@@ -577,6 +578,7 @@ def hf_gpt2_finetune_trainer_trace_callback(
     reset: bool = ...,
     zspace_probe_tokens: Sequence[int | float] | None = ...,
     zspace_probe_kwargs: Mapping[str, object] | None = ...,
+    inference_distortion_handoff: Mapping[str, object] | None = ...,
     training_telemetry: bool = ...,
     telemetry_prefix: str = ...,
     desire_gain: float = ...,

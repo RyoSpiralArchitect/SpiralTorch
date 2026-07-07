@@ -1447,6 +1447,15 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             telemetry_prefix="hf_ft",
             desire_gain=1.2,
             psi_gain=0.8,
+            inference_distortion_handoff={
+                "recommended_probe": "distort-002",
+                "recommended_effect_score": 0.88,
+                "recommended_risk_score": 0.21,
+                "desire_pressure": 0.8,
+                "psi_total": 0.7,
+                "coherence": 0.5,
+                "include_penalties": True,
+            },
         )
 
         self.assertEqual(frame["row_type"], "hf_gpt2_finetune_training_telemetry")
@@ -1461,6 +1470,19 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("hf_ft.loss", telemetry)
         self.assertIn("hf_ft.desire.pressure", telemetry)
         self.assertIn("hf_ft.psi.total", telemetry)
+        self.assertEqual(
+            telemetry["hf_ft.inference_distortion.desire_pressure"],
+            0.8,
+        )
+        self.assertEqual(telemetry["hf_ft.inference_distortion.psi_total"], 0.7)
+        self.assertEqual(
+            telemetry["hf_ft.inference_distortion.effect_score"],
+            0.88,
+        )
+        self.assertEqual(
+            frame["inference_distortion_handoff"]["recommended_probe"],
+            "distort-002",
+        )
 
     def test_trainer_trace_summary_reports_throughput_and_eval_series(self) -> None:
         rows = [
@@ -1638,6 +1660,9 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                     inference_distortion_handoff={
                         "status": "ok",
                         "recommended_probe": "distort-002",
+                        "recommended_effect_score": 0.88,
+                        "desire_pressure": 0.8,
+                        "psi_total": 0.7,
                     },
                     training_telemetry=True,
                     desire_gain=1.2,
@@ -1660,7 +1685,26 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("desire", rows[1])
         self.assertIn("psi", rows[1])
         self.assertIn("hf_ft.psi.total", rows[1]["telemetry"])
+        self.assertEqual(
+            rows[1]["telemetry"]["hf_ft.inference_distortion.desire_pressure"],
+            0.8,
+        )
+        self.assertEqual(
+            rows[1]["training_telemetry"]["inference_distortion_handoff"][
+                "recommended_probe"
+            ],
+            "distort-002",
+        )
         self.assertEqual(summary["trace_training_telemetry_count"], 2)
+        self.assertEqual(summary["trace_inference_distortion_telemetry_count"], 2)
+        self.assertEqual(
+            summary["trace_last_inference_distortion_desire_pressure"],
+            0.8,
+        )
+        self.assertEqual(
+            summary["trace_last_inference_distortion_effect_score"],
+            0.88,
+        )
         self.assertIsNotNone(summary["trace_last_desire_pressure"])
         self.assertIsNotNone(summary["trace_last_psi_total"])
         self.assertEqual(callback.event_count, 2)
