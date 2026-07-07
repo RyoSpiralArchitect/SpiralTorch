@@ -142,6 +142,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--run-card", type=Path, default=None)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--wait", action="store_true")
+    parser.add_argument(
+        "--ready-file",
+        action="append",
+        default=None,
+        help=(
+            "Relative file that must exist under the checkpoint before sweeping. "
+            "Defaults to model.safetensors. May be repeated."
+        ),
+    )
+    parser.add_argument("--no-ready-file-check", action="store_true")
     parser.add_argument("--poll-seconds", type=float, default=30.0)
     parser.add_argument(
         "--timeout-seconds",
@@ -154,6 +164,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     args.prompt = list(args.prompt or [])
     args.compare_with_sweep = list(args.compare_with_sweep or [])
     args.compare_with_label = list(args.compare_with_label or [])
+    args.ready_file = [] if args.no_ready_file_check else list(args.ready_file or ["model.safetensors"])
     if not args.checkpoint:
         parser.error("--checkpoint must be provided at least once")
     if args.max_new_tokens is not None and args.max_new_tokens <= 0:
@@ -282,17 +293,36 @@ def _command_row(command: Sequence[str]) -> str:
 
 
 def _wait_for_model_dir(args: argparse.Namespace, job: SweepJob) -> None:
-    if args.dry_run or job.model_dir.is_dir():
+    if args.dry_run or _checkpoint_ready(args, job):
         return
     if not args.wait:
-        raise FileNotFoundError(f"checkpoint directory does not exist: {job.model_dir}")
+        raise FileNotFoundError(_checkpoint_not_ready_message(args, job))
     deadline = None
     if args.timeout_seconds > 0.0:
         deadline = time.monotonic() + float(args.timeout_seconds)
-    while not job.model_dir.is_dir():
+    while not _checkpoint_ready(args, job):
         if deadline is not None and time.monotonic() >= deadline:
-            raise TimeoutError(f"timed out waiting for checkpoint: {job.model_dir}")
+            raise TimeoutError(_checkpoint_not_ready_message(args, job))
         time.sleep(float(args.poll_seconds))
+
+
+def _missing_ready_files(args: argparse.Namespace, job: SweepJob) -> list[Path]:
+    if not job.model_dir.is_dir():
+        return [job.model_dir]
+    return [
+        job.model_dir / str(ready_file)
+        for ready_file in args.ready_file
+        if not (job.model_dir / str(ready_file)).is_file()
+    ]
+
+
+def _checkpoint_ready(args: argparse.Namespace, job: SweepJob) -> bool:
+    return not _missing_ready_files(args, job)
+
+
+def _checkpoint_not_ready_message(args: argparse.Namespace, job: SweepJob) -> str:
+    missing = ", ".join(str(path) for path in _missing_ready_files(args, job))
+    return f"checkpoint is not ready: {job.model_dir}; missing {missing}"
 
 
 Runner = Callable[[Sequence[str]], subprocess.CompletedProcess[str] | None]

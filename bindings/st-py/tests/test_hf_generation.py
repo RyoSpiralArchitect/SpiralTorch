@@ -1577,6 +1577,10 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
             root = Path(tmp)
             run_dir = root / "run"
             (run_dir / "checkpoint-2048").mkdir(parents=True)
+            (run_dir / "checkpoint-2048" / "model.safetensors").write_text(
+                "ready",
+                encoding="utf-8",
+            )
             run_card = root / "checkpoint-generation-control.json"
             executed: list[list[str]] = []
 
@@ -1622,6 +1626,27 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
         self.assertEqual(stored["sweep_count"], 3)
         self.assertEqual(len(executed), 4)
         self.assertTrue(lines_exists)
+
+    def test_checkpoint_generation_control_requires_ready_file(self) -> None:
+        module = load_checkpoint_generation_control_example()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "run"
+            (run_dir / "checkpoint-2048").mkdir(parents=True)
+            args = module.parse_args(
+                [
+                    "--run-dir",
+                    str(run_dir),
+                    "--checkpoint",
+                    "checkpoint-2048",
+                    "--no-compare",
+                ]
+            )
+
+            with self.assertRaises(FileNotFoundError) as cm:
+                module.run_checkpoint_generation_control(args, runner=lambda _: None)
+
+        self.assertIn("model.safetensors", str(cm.exception))
 
     def test_dry_run_builds_control_grid_without_loading_model(self) -> None:
         module = load_generation_control_sweep_example()
