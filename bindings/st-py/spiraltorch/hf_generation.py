@@ -1842,6 +1842,16 @@ def summarize_zspace_inference_distortion_sweep(
         "recommendation_reason": comparison.get("recommended_reason"),
         "recommended_effect_score": None if best is None else best.get("effect_score"),
         "recommended_risk_score": None if best is None else best.get("risk_score"),
+        "recommended_api_compatibility_score": (
+            None if best is None else best.get("api_compatibility_score")
+        ),
+        "api_compatibility_score_min": comparison.get("api_compatibility_score_min"),
+        "api_compatibility_score_mean": comparison.get("api_compatibility_score_mean"),
+        "api_visible_text_count": comparison.get("api_visible_text_count"),
+        "api_empty_text_count": comparison.get("api_empty_text_count"),
+        "api_retry_dropped_probe_count": comparison.get(
+            "api_retry_dropped_probe_count"
+        ),
         "recommended_probe_path": (
             None if selected_run is None else selected_run.get("probe_path")
         ),

@@ -414,12 +414,15 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                         "label": "strong",
                         "effect_score": 0.91,
                         "risk_score": 0.22,
+                        "api_compatibility_score": 0.84,
                         "api_provider": "fake",
                         "api_request_dropped_key_count": 2,
                         "api_request_dropped_keys": [
                             "frequency_penalty",
                             "presence_penalty",
                         ],
+                        "api_request_retry_dropped_key_count": 1,
+                        "api_request_retry_dropped_keys": ["temperature"],
                         "api_request_sent_keys": ["temperature", "top_p"],
                     }
                 ],
@@ -429,12 +432,16 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         handoff = hf_ft.hf_gpt2_finetune_inference_distortion_handoff_report(
             sweep_report,
         )
+        handoff_lines = hf_ft.hf_gpt2_finetune_inference_distortion_handoff_lines(
+            handoff,
+        )
 
         self.assertEqual(handoff["status"], "ok")
         self.assertEqual(handoff["prompt"], "SpiralTorch is")
         self.assertEqual(handoff["recommended_probe"], "strong")
         self.assertEqual(handoff["api_provider"], "fake")
         self.assertEqual(handoff["api_model"], "fake-distorted-api")
+        self.assertEqual(handoff["recommended_api_compatibility_score"], 0.84)
         self.assertEqual(handoff["desire_pressure"], 0.8)
         self.assertEqual(handoff["psi_total"], 0.7)
         self.assertTrue(handoff["include_penalties"])
@@ -443,8 +450,12 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             handoff["api_request_dropped_keys"],
             ["frequency_penalty", "presence_penalty"],
         )
+        self.assertEqual(handoff["api_request_retry_dropped_key_count"], 1)
+        self.assertEqual(handoff["api_request_retry_dropped_keys"], ["temperature"])
         self.assertEqual(handoff["api_request_sent_keys"], ["temperature", "top_p"])
         self.assertIn("--desire-pressure", handoff["recommended_probe_cli_args"])
+        self.assertIn("api_compat=0.84", handoff_lines[0])
+        self.assertIn("retry_dropped=1", handoff_lines[0])
 
     def test_inference_distortion_handoff_report_accepts_probe_artifact(self) -> None:
         probe_report = {
@@ -626,6 +637,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             "recommendation_reason": "highest_effect_score_lowest_risk_tiebreak",
             "recommended_effect_score": 0.88,
             "recommended_risk_score": 0.21,
+            "recommended_api_compatibility_score": 0.84,
             "desire_pressure": 0.8,
             "desire_stability": 0.45,
             "psi_total": 0.7,
@@ -634,6 +646,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             "api_model": "fake-distorted-api",
             "api_request_dropped_key_count": 2,
             "api_request_dropped_keys": ["frequency_penalty", "presence_penalty"],
+            "api_request_retry_dropped_key_count": 1,
+            "api_request_retry_dropped_keys": ["temperature"],
             "api_request_sent_keys": ["temperature", "top_p"],
             "recommended_bridge_cli_args": [
                 "--generation-zspace-softmax",
@@ -868,6 +882,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             "distort-002",
         )
         self.assertEqual(summary["inference_distortion_effect_score"], 0.88)
+        self.assertEqual(summary["inference_distortion_api_compatibility_score"], 0.84)
         self.assertEqual(summary["inference_distortion_desire_pressure"], 0.8)
         self.assertEqual(summary["inference_distortion_psi_total"], 0.7)
         self.assertEqual(summary["inference_distortion_api_provider"], "fake")
@@ -878,6 +893,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(
             summary["inference_distortion_api_request_dropped_keys"],
             "frequency_penalty,presence_penalty",
+        )
+        self.assertEqual(
+            summary["inference_distortion_api_request_retry_dropped_key_count"],
+            1,
+        )
+        self.assertEqual(
+            summary["inference_distortion_api_request_retry_dropped_keys"],
+            "temperature",
         )
         self.assertIn(
             "--generation-repression-strength",
@@ -1009,9 +1032,21 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         )
         self.assertEqual(
             sweep_summary["top_runs"][0][
+                "inference_distortion_api_compatibility_score"
+            ],
+            0.84,
+        )
+        self.assertEqual(
+            sweep_summary["top_runs"][0][
                 "inference_distortion_api_request_dropped_key_count"
             ],
             2,
+        )
+        self.assertEqual(
+            sweep_summary["top_runs"][0][
+                "inference_distortion_api_request_retry_dropped_key_count"
+            ],
+            1,
         )
         self.assertIn("selected=strong", sweep_lines[1])
         self.assertTrue(
@@ -2164,10 +2199,12 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 "recommended_probe": "distort-002",
                 "recommended_effect_score": 0.88,
                 "recommended_risk_score": 0.21,
+                "recommended_api_compatibility_score": 0.84,
                 "desire_pressure": 0.8,
                 "psi_total": 0.7,
                 "coherence": 0.5,
                 "include_penalties": True,
+                "api_request_retry_dropped_key_count": 1,
             },
         )
 
@@ -2191,6 +2228,16 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(
             telemetry["hf_ft.inference_distortion.effect_score"],
             0.88,
+        )
+        self.assertEqual(
+            telemetry["hf_ft.inference_distortion.api_compatibility_score"],
+            0.84,
+        )
+        self.assertEqual(
+            telemetry[
+                "hf_ft.inference_distortion.api_request_retry_dropped_key_count"
+            ],
+            1,
         )
         self.assertEqual(
             frame["inference_distortion_handoff"]["recommended_probe"],
@@ -2374,6 +2421,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                         "status": "ok",
                         "recommended_probe": "distort-002",
                         "recommended_effect_score": 0.88,
+                        "recommended_api_compatibility_score": 0.84,
                         "desire_pressure": 0.8,
                         "psi_total": 0.7,
                     },
@@ -2417,6 +2465,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(
             summary["trace_last_inference_distortion_effect_score"],
             0.88,
+        )
+        self.assertEqual(
+            summary["trace_last_inference_distortion_api_compatibility_score"],
+            0.84,
         )
         self.assertIsNotNone(summary["trace_last_desire_pressure"])
         self.assertIsNotNone(summary["trace_last_psi_total"])

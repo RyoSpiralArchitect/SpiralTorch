@@ -574,6 +574,9 @@ def hf_gpt2_finetune_inference_distortion_handoff_report(
     processor_kwargs = _mapping_item(summary, "recommended_processor_kwargs")
     activation_hook = _mapping_item(summary, "recommended_activation_hook")
     dropped_keys = _unique(summary.get("recommended_api_request_dropped_keys"))
+    retry_dropped_keys = _unique(
+        summary.get("recommended_api_request_retry_dropped_keys")
+    )
     sent_keys = _unique(summary.get("recommended_api_request_sent_keys"))
     bridge_cli_args = _generation_inference_bridge_cli_args(processor_kwargs)
     source_path_value = source_path or None
@@ -614,6 +617,9 @@ def hf_gpt2_finetune_inference_distortion_handoff_report(
             summary.get("recommended_effect_score")
         ),
         "recommended_risk_score": _safe_number(summary.get("recommended_risk_score")),
+        "recommended_api_compatibility_score": _safe_number(
+            summary.get("recommended_api_compatibility_score")
+        ),
         "recommended_probe_path": summary.get("recommended_probe_path"),
         "recommended_config": config or None,
         "recommended_request": request or None,
@@ -648,6 +654,10 @@ def hf_gpt2_finetune_inference_distortion_handoff_report(
             summary.get("recommended_api_request_dropped_key_count")
         ),
         "api_request_dropped_keys": dropped_keys,
+        "api_request_retry_dropped_key_count": _safe_number(
+            summary.get("recommended_api_request_retry_dropped_key_count")
+        ),
+        "api_request_retry_dropped_keys": retry_dropped_keys,
         "api_request_sent_keys": sent_keys,
         "desire_pressure": _safe_number(config.get("desire_pressure")),
         "desire_stability": _safe_number(config.get("desire_stability")),
@@ -697,10 +707,12 @@ def hf_gpt2_finetune_inference_distortion_handoff_lines(
             f"probe={handoff.get('recommended_probe')} "
             f"effect={handoff.get('recommended_effect_score')} "
             f"risk={handoff.get('recommended_risk_score')} "
+            f"api_compat={handoff.get('recommended_api_compatibility_score')} "
             f"desire={handoff.get('desire_pressure')} "
             f"psi={handoff.get('psi_total')} "
             f"api={handoff.get('api_provider')} "
             f"dropped={handoff.get('api_request_dropped_key_count')}"
+            f" retry_dropped={handoff.get('api_request_retry_dropped_key_count')}"
         )
     ]
     if replay_args:
@@ -1099,6 +1111,9 @@ def _inference_distortion_telemetry_values(
         "inference_distortion.handoff_present": 1.0,
         "inference_distortion.effect_score": handoff.get("recommended_effect_score"),
         "inference_distortion.risk_score": handoff.get("recommended_risk_score"),
+        "inference_distortion.api_compatibility_score": handoff.get(
+            "recommended_api_compatibility_score"
+        ),
         "inference_distortion.desire_pressure": _first_safe_number(
             handoff.get("desire_pressure"),
             config.get("desire_pressure"),
@@ -1131,6 +1146,9 @@ def _inference_distortion_telemetry_values(
         "inference_distortion.request_top_p": request.get("top_p"),
         "inference_distortion.api_request_dropped_key_count": handoff.get(
             "api_request_dropped_key_count"
+        ),
+        "inference_distortion.api_request_retry_dropped_key_count": handoff.get(
+            "api_request_retry_dropped_key_count"
         ),
         "inference_distortion.logits_repression_strength": processor.get(
             "repression_strength"
@@ -1604,6 +1622,10 @@ def summarize_hf_gpt2_finetune_trainer_trace(
         rows,
         "inference_distortion.effect_score",
     )
+    inference_api_compatibility_scores = _trace_numeric_telemetry_values(
+        rows,
+        "inference_distortion.api_compatibility_score",
+    )
     inference_handoff_present = _trace_numeric_telemetry_values(
         rows,
         "inference_distortion.handoff_present",
@@ -1655,6 +1677,11 @@ def summarize_hf_gpt2_finetune_trainer_trace(
         ),
         "trace_last_inference_distortion_effect_score": (
             inference_effect_scores[-1] if inference_effect_scores else None
+        ),
+        "trace_last_inference_distortion_api_compatibility_score": (
+            inference_api_compatibility_scores[-1]
+            if inference_api_compatibility_scores
+            else None
         ),
     }
 
@@ -2030,6 +2057,10 @@ def summarize_hf_gpt2_finetune_run_card(
             inference_handoff,
             "recommended_risk_score",
         ),
+        "inference_distortion_api_compatibility_score": _metric_number(
+            inference_handoff,
+            "recommended_api_compatibility_score",
+        ),
         "inference_distortion_desire_pressure": _metric_number(
             inference_handoff,
             "desire_pressure",
@@ -2054,6 +2085,13 @@ def summarize_hf_gpt2_finetune_run_card(
         ),
         "inference_distortion_api_request_dropped_keys": csv_label(
             _unique(inference_handoff.get("api_request_dropped_keys"))
+        ),
+        "inference_distortion_api_request_retry_dropped_key_count": _metric_number(
+            inference_handoff,
+            "api_request_retry_dropped_key_count",
+        ),
+        "inference_distortion_api_request_retry_dropped_keys": csv_label(
+            _unique(inference_handoff.get("api_request_retry_dropped_keys"))
         ),
         "inference_distortion_api_request_sent_keys": csv_label(
             _unique(inference_handoff.get("api_request_sent_keys"))
@@ -2457,6 +2495,9 @@ def _ranked_sweep_rows(
                 "trace_last_inference_distortion_effect_score": _safe_number(
                     row.get("trace_last_inference_distortion_effect_score")
                 ),
+                "trace_last_inference_distortion_api_compatibility_score": _safe_number(
+                    row.get("trace_last_inference_distortion_api_compatibility_score")
+                ),
                 "inference_distortion_recommended_probe": row.get(
                     "inference_distortion_recommended_probe"
                 ),
@@ -2465,6 +2506,9 @@ def _ranked_sweep_rows(
                 ),
                 "inference_distortion_risk_score": _safe_number(
                     row.get("inference_distortion_risk_score")
+                ),
+                "inference_distortion_api_compatibility_score": _safe_number(
+                    row.get("inference_distortion_api_compatibility_score")
                 ),
                 "inference_distortion_desire_pressure": _safe_number(
                     row.get("inference_distortion_desire_pressure")
@@ -2480,6 +2524,12 @@ def _ranked_sweep_rows(
                 ),
                 "inference_distortion_api_request_dropped_keys": row.get(
                     "inference_distortion_api_request_dropped_keys"
+                ),
+                "inference_distortion_api_request_retry_dropped_key_count": _safe_number(
+                    row.get("inference_distortion_api_request_retry_dropped_key_count")
+                ),
+                "inference_distortion_api_request_retry_dropped_keys": row.get(
+                    "inference_distortion_api_request_retry_dropped_keys"
                 ),
                 "inference_distortion_api_request_sent_keys": row.get(
                     "inference_distortion_api_request_sent_keys"
@@ -2690,6 +2740,10 @@ def summarize_hf_gpt2_finetune_sweep_report(
             inference_handoff,
             "recommended_risk_score",
         ),
+        "inference_distortion_api_compatibility_score": _metric_number(
+            inference_handoff,
+            "recommended_api_compatibility_score",
+        ),
         "inference_distortion_desire_pressure": _metric_number(
             inference_handoff,
             "desire_pressure",
@@ -2705,6 +2759,13 @@ def summarize_hf_gpt2_finetune_sweep_report(
         ),
         "inference_distortion_api_request_dropped_keys": csv_label(
             _unique(inference_handoff.get("api_request_dropped_keys"))
+        ),
+        "inference_distortion_api_request_retry_dropped_key_count": _metric_number(
+            inference_handoff,
+            "api_request_retry_dropped_key_count",
+        ),
+        "inference_distortion_api_request_retry_dropped_keys": csv_label(
+            _unique(inference_handoff.get("api_request_retry_dropped_keys"))
         ),
         "inference_distortion_api_request_sent_keys": csv_label(
             _unique(inference_handoff.get("api_request_sent_keys"))
@@ -2787,11 +2848,14 @@ def summarize_hf_gpt2_finetune_sweep_report_lines(
             f"probe={summary.get('inference_distortion_recommended_probe')} "
             f"effect={summary.get('inference_distortion_effect_score')} "
             f"risk={summary.get('inference_distortion_risk_score')} "
+            f"api_compat={summary.get('inference_distortion_api_compatibility_score')} "
             f"desire={summary.get('inference_distortion_desire_pressure')} "
             f"psi={summary.get('inference_distortion_psi_total')} "
             f"api={summary.get('inference_distortion_api_provider')} "
             "api_dropped="
             f"{summary.get('inference_distortion_api_request_dropped_key_count')}"
+            " api_retry_dropped="
+            f"{summary.get('inference_distortion_api_request_retry_dropped_key_count')}"
         )
         bridge_args = list(summary.get("inference_distortion_bridge_cli_args") or [])
         if bridge_args:
@@ -2838,6 +2902,7 @@ def summarize_hf_gpt2_finetune_sweep_report_lines(
             inference_fragment = (
                 f"infer_probe={row.get('inference_distortion_recommended_probe')} "
                 f"infer_effect={row.get('inference_distortion_effect_score')} "
+                f"infer_api_compat={row.get('inference_distortion_api_compatibility_score')} "
             )
         if row.get("trace_inference_distortion_telemetry_count") is not None:
             inference_fragment += (

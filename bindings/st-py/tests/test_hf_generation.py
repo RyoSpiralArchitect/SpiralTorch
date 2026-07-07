@@ -1027,6 +1027,7 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
                 "provider": "fake",
                 "model": "fake-distorted-api",
                 "text": "fake distorted response",
+                "telemetry": {"api_llm.empty_text": 0.0},
                 "request_filter": {
                     "dropped_key_count": 1,
                     "dropped_keys": ["presence_penalty"],
@@ -1048,6 +1049,9 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         self.assertEqual(report["completed_run_count"], 1)
         self.assertEqual(summary["recommended_probe"], "inline-live-probe")
         self.assertEqual(summary["recommended_config"]["desire_pressure"], 0.82)
+        self.assertGreater(summary["recommended_api_compatibility_score"], 0.0)
+        self.assertEqual(summary["api_visible_text_count"], 1)
+        self.assertEqual(summary["api_retry_dropped_probe_count"], 1)
         self.assertEqual(summary["recommended_request"]["temperature"], 1.05)
         self.assertEqual(
             summary["recommended_processor_kwargs"]["repression_strength"],
