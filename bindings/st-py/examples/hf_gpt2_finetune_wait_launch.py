@@ -43,6 +43,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument("--manifest", type=Path, required=True)
+    parser.add_argument(
+        "--jsonl-out",
+        type=Path,
+        default=None,
+        help="Append every wait/launch state to this JSONL history file.",
+    )
     parser.add_argument("--poll-seconds", type=float, default=60.0)
     parser.add_argument("--checkpoint-timeout-seconds", type=float, default=1800.0)
     parser.add_argument("--status-card-timeout-seconds", type=float, default=1800.0)
@@ -174,6 +180,10 @@ def _write_manifest(
         json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+    if args.jsonl_out is not None:
+        args.jsonl_out.parent.mkdir(parents=True, exist_ok=True)
+        with args.jsonl_out.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
     print(
         "hf_gpt2_ft_wait_launch "
         f"status={status} "

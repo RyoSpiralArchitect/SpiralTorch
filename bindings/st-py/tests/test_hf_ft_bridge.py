@@ -3004,6 +3004,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             status_card = tmp_path / "generation-control.json"
             status_card.write_text(json.dumps({"status": "ok"}), encoding="utf-8")
             manifest = tmp_path / "wait-launch.json"
+            history = tmp_path / "wait-launch-history.jsonl"
             args = module.parse_args(
                 [
                     "--checkpoint",
@@ -3012,6 +3013,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                     str(status_card),
                     "--manifest",
                     str(manifest),
+                    "--jsonl-out",
+                    str(history),
                     "--dry-run",
                     "--",
                     sys.executable,
@@ -3021,12 +3024,19 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             )
             payload = module.run_wait_launch(args)
             stored = json.loads(manifest.read_text())
+            history_rows = [
+                json.loads(line)
+                for line in history.read_text().splitlines()
+                if line.strip()
+            ]
 
         self.assertEqual(payload["status"], "dry_run")
         self.assertEqual(payload["returncode"], 0)
         self.assertTrue(stored["checkpoint_ready"])
         self.assertEqual(stored["status_card_status"], "ok")
         self.assertEqual(stored["command"][:2], [sys.executable, "-c"])
+        self.assertEqual(len(history_rows), 1)
+        self.assertEqual(history_rows[0]["status"], "dry_run")
 
     def test_wait_launch_example_blocks_missing_checkpoint(self) -> None:
         module = load_wait_launch_example()
