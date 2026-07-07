@@ -35,6 +35,11 @@ RUN_STATUS_PATH = (
     / "examples"
     / "hf_gpt2_finetune_run_status.py"
 )
+STATUS_HISTORY_SUMMARY_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "examples"
+    / "hf_gpt2_finetune_status_history_summary.py"
+)
 
 
 def load_bridge_example():
@@ -63,6 +68,17 @@ def load_run_status_example():
     spec = importlib.util.spec_from_file_location(
         "hf_gpt2_finetune_run_status_test",
         RUN_STATUS_PATH,
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_status_history_summary_example():
+    spec = importlib.util.spec_from_file_location(
+        "hf_gpt2_finetune_status_history_summary_test",
+        STATUS_HISTORY_SUMMARY_PATH,
     )
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -3553,6 +3569,93 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(
             watch_eval_written["trace"]["trace_eval_loss_points"][-1]["step"], 10
         )
+        self.assertEqual(written_lines, lines)
+
+    def test_status_history_summary_example_summarizes_jsonl_progress(self) -> None:
+        module = load_status_history_summary_example()
+        rows = [
+            {
+                "process_status": "alive",
+                "final_checkpoint_ready": False,
+                "checkpoint_count": 1,
+                "latest_checkpoint": {"name": "checkpoint-20"},
+                "disk_free_gb": 12.0,
+                "trace": {
+                    "trace_max_global_step": 20,
+                    "trace_last_eval_loss": 1.8,
+                    "training_loss_guard_count": 0,
+                },
+                "log_progress": {
+                    "log_latest_step": 24,
+                    "log_remaining_seconds": 160.0,
+                },
+                "eval_progress": {
+                    "next_eval_step": 30,
+                    "log_steps_until_next_eval": 6,
+                },
+            },
+            {
+                "process_status": "alive",
+                "final_checkpoint_ready": False,
+                "checkpoint_count": 1,
+                "latest_checkpoint": {"name": "checkpoint-20"},
+                "disk_free_gb": 11.5,
+                "trace": {
+                    "trace_max_global_step": 30,
+                    "trace_last_eval_loss": 1.7,
+                    "training_loss_guard_count": 0,
+                },
+                "log_progress": {
+                    "log_latest_step": 34,
+                    "log_remaining_seconds": 90.0,
+                },
+                "eval_progress": {
+                    "next_eval_step": 40,
+                    "log_steps_until_next_eval": 6,
+                },
+            },
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            history_path = Path(tmp) / "history.jsonl"
+            out_path = Path(tmp) / "history-summary.json"
+            lines_path = Path(tmp) / "history-summary.txt"
+            history_path.write_text(
+                "\n".join(json.dumps(row) for row in rows) + "\n",
+                encoding="utf-8",
+            )
+            argv = [
+                str(history_path),
+                "--label",
+                "demo",
+                "--tail",
+                "1",
+                "--out",
+                str(out_path),
+                "--lines-out",
+                str(lines_path),
+            ]
+            args = module.parse_args(argv)
+            loaded_rows = module._load_history(args.history_jsonl)
+            summary = module.summarize_history(
+                loaded_rows, label=args.label, history_jsonl=args.history_jsonl
+            )
+            lines = module.history_lines(summary, loaded_rows, tail=args.tail)
+            self.assertEqual(module.main(argv), 0)
+            written = json.loads(out_path.read_text(encoding="utf-8"))
+            written_lines = lines_path.read_text(encoding="utf-8").splitlines()
+
+        self.assertEqual(summary["row_count"], 2)
+        self.assertEqual(summary["delta_log_step"], 10)
+        self.assertEqual(summary["delta_trace_step"], 10)
+        self.assertEqual(summary["last_next_eval_step"], 40)
+        self.assertEqual(summary["last_log_steps_until_next_eval"], 6)
+        self.assertEqual(summary["min_eval_loss"], 1.7)
+        self.assertEqual(summary["min_disk_free_gb"], 11.5)
+        self.assertEqual(written["delta_log_step"], 10)
+        self.assertIn("label=demo", lines[0])
+        self.assertIn("last_log_step=34", lines[0])
+        self.assertIn("min_eval_loss=1.7", lines[0])
+        self.assertIn("index=1", lines[1])
         self.assertEqual(written_lines, lines)
 
     def test_run_card_summary_supplements_trace_telemetry_from_jsonl(self) -> None:
