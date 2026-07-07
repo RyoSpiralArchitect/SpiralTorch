@@ -742,6 +742,87 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         self.assertEqual(stale_report["stale_run_count"], 1)
         self.assertEqual(stale_report["comparison"]["probe_count"], 0)
 
+    def test_inference_distortion_sweep_promotes_saved_probe(self) -> None:
+        module = load_distortion_sweep_example()
+        probe_module = load_distortion_probe_example()
+        with tempfile.TemporaryDirectory() as tmp:
+            source_dir = Path(tmp) / "source"
+            source_args = module.parse_args(
+                [
+                    "--out-dir",
+                    str(source_dir),
+                    "--prompt",
+                    "SpiralTorch probe promotion",
+                    "--desire-pressure-values",
+                    "0.8",
+                    "--psi-total-values",
+                    "0.7",
+                    "--api-provider",
+                    "fake",
+                    "--top-n",
+                    "1",
+                ]
+            )
+            source_report = module.run_sweep(source_args)
+            probe_path = Path(source_report["runs"][0]["probe_path"])
+            probe_payload = json.loads(probe_path.read_text())
+            probe_payload["api"]["request_filter"] = {
+                "dropped_key_count": 1,
+                "dropped_keys": ["frequency_penalty"],
+                "sent_keys": ["input", "model", "temperature", "top_p"],
+            }
+            probe_path.write_text(json.dumps(probe_payload, indent=2) + "\n")
+
+            import_dir = Path(tmp) / "imported"
+            import_args = module.parse_args(
+                [
+                    "--from-probe",
+                    str(probe_path),
+                    "--from-probe-label",
+                    "saved-live-probe",
+                    "--out-dir",
+                    str(import_dir),
+                    "--top-n",
+                    "1",
+                ]
+            )
+            imported_report = module.run_sweep(import_args)
+            imported_summary = summarize_zspace_inference_distortion_sweep(
+                import_dir / "sweep-report.json",
+                top_n=1,
+            )
+            replay_args = probe_module.parse_args(
+                [
+                    "--from-sweep-report",
+                    str(import_dir / "sweep-report.json"),
+                ]
+            )
+
+        self.assertEqual(imported_report["status"], "reported")
+        self.assertEqual(imported_report["completed_run_count"], 1)
+        self.assertEqual(imported_report["reported_run_count"], 1)
+        self.assertEqual(imported_report["attempted_run_count"], 0)
+        self.assertEqual(imported_report["prompt"], "SpiralTorch probe promotion")
+        self.assertEqual(imported_report["runtime"]["api_provider"], "fake")
+        self.assertEqual(
+            imported_summary["recommended_probe"],
+            "saved-live-probe",
+        )
+        self.assertEqual(
+            imported_summary["recommended_probe_path"],
+            str(probe_path),
+        )
+        self.assertEqual(
+            imported_summary["recommended_api_request_dropped_keys"],
+            ["frequency_penalty"],
+        )
+        self.assertEqual(
+            imported_summary["recommended_api_request_dropped_key_count"],
+            1,
+        )
+        self.assertEqual(replay_args.prompt, "SpiralTorch probe promotion")
+        self.assertEqual(replay_args.api_provider, "fake")
+
 
 class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
     def test_summarize_generation_control_sweep_ranks_loop_scores(self) -> None:

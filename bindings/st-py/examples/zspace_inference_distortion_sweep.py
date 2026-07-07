@@ -45,6 +45,8 @@ def _label_float(value: float) -> str:
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    provided_flags = _provided_flags(raw_argv)
     parser = argparse.ArgumentParser(
         description=(
             "Run a small Z-space inference-distortion grid and compare local HF "
@@ -56,6 +58,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--markdown-out", type=Path, default=None)
     parser.add_argument("--no-markdown-report", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--from-probe",
+        action="append",
+        type=Path,
+        default=[],
+        help=(
+            "Promote an existing probe JSON into this sweep report without "
+            "calling local/API models. Repeat to compare several saved probes."
+        ),
+    )
+    parser.add_argument(
+        "--from-probe-label",
+        action="append",
+        default=[],
+        help="Optional label for the matching --from-probe path.",
+    )
     parser.add_argument(
         "--resume-existing",
         action="store_true",
@@ -93,15 +111,24 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--base-top-p", type=float, default=0.95)
     parser.add_argument("--include-penalties", action="store_true")
     parser.add_argument("--top-n", type=int, default=5)
-    args = parser.parse_args(argv)
+    args = parser.parse_args(raw_argv)
+    args.provided_flags = provided_flags
     if args.max_new_tokens < 0:
         parser.error("--max-new-tokens must be non-negative")
     if args.api_max_tokens <= 0:
         parser.error("--api-max-tokens must be positive")
     if args.top_n < 0:
         parser.error("--top-n must be non-negative")
+    if args.from_probe and args.dry_run:
+        parser.error("--from-probe cannot be used with --dry-run")
+    if args.from_probe and args.force:
+        parser.error("--from-probe cannot be used with --force")
     if args.force and args.report_only:
         parser.error("--force cannot be used with --report-only")
+    if len(args.from_probe_label) > len(args.from_probe):
+        parser.error("--from-probe-label cannot be provided more times than --from-probe")
+    if args.from_probe:
+        args.report_only = True
     try:
         args.desire_pressure_grid = _float_values(
             args.desire_pressure_values,
@@ -126,6 +153,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     except ValueError as exc:
         parser.error(str(exc))
     return args
+
+
+def _provided_flags(argv: list[str]) -> set[str]:
+    flags = set()
+    for item in argv:
+        if item.startswith("--"):
+            flags.add(item.split("=", 1)[0])
+    return flags
 
 
 def _write_json(path: Path, payload: MappingLike) -> None:
@@ -330,6 +365,7 @@ def _execution_plan(args: argparse.Namespace) -> MappingLike:
         "resume_existing": bool(args.resume_existing),
         "force": bool(args.force),
         "report_only": bool(args.report_only),
+        "from_probe_count": len(args.from_probe),
     }
 
 
@@ -483,6 +519,8 @@ def _build_report(
     reused_run_count: int,
     reported_run_count: int,
     dry_run: bool = False,
+    prompt: object | None = None,
+    runtime: MappingLike | None = None,
 ) -> MappingLike:
     comparison = (
         st.compare_zspace_inference_distortion_probes(
@@ -508,8 +546,8 @@ def _build_report(
         "row_type": "zspace_inference_distortion_sweep",
         "status": status,
         "dry_run": bool(dry_run),
-        "prompt": args.prompt,
-        "runtime": _runtime_plan(args),
+        "prompt": args.prompt if prompt is None else prompt,
+        "runtime": _runtime_plan(args) if runtime is None else dict(runtime),
         "execution": _execution_plan(args),
         "run_count": len(runs),
         "attempted_run_count": int(attempted_run_count),
@@ -546,6 +584,131 @@ def _build_report(
     return report
 
 
+def _probe_runtime(report: MappingLike) -> MappingLike | None:
+    runtime = report.get("runtime")
+    if isinstance(runtime, dict):
+        return dict(runtime)
+    api = report.get("api")
+    api = api if isinstance(api, dict) else {}
+    local = report.get("local_hf")
+    local = local if isinstance(local, dict) else {}
+    if not api and not local:
+        return None
+    return {
+        "local_model": local.get("model"),
+        "allow_remote": None,
+        "trust_remote_code": None,
+        "max_new_tokens": None,
+        "activation_module_name": [],
+        "activation_name_contains": [],
+        "api_provider": api.get("provider"),
+        "api_model": api.get("model"),
+        "api_max_tokens": None,
+    }
+
+
+def _unique_probe_name(existing: set[str], raw: object, *, index: int) -> str:
+    base = str(raw or f"probe-{index:03d}").strip() or f"probe-{index:03d}"
+    name = base
+    suffix = 2
+    while name in existing:
+        name = f"{base}-{suffix}"
+        suffix += 1
+    existing.add(name)
+    return name
+
+
+def _import_probe_run(
+    args: argparse.Namespace,
+    probe_path: Path,
+    *,
+    index: int,
+    existing_names: set[str],
+) -> tuple[MappingLike, MappingLike | None]:
+    report = st.load_zspace_inference_distortion_probe(probe_path)
+    summary = st.summarize_zspace_inference_distortion_probe(probe_path)
+    label = (
+        args.from_probe_label[index - 1]
+        if index - 1 < len(args.from_probe_label)
+        else report.get("name") or probe_path.stem
+    )
+    config = report.get("config")
+    run = {
+        "name": _unique_probe_name(existing_names, label, index=index),
+        "index": index,
+        "config": dict(config) if isinstance(config, dict) else {},
+        "probe_path": str(probe_path),
+        "status": "reported",
+        "summary": summary,
+        "reported": True,
+    }
+    return run, report
+
+
+def _run_from_probe_report(args: argparse.Namespace) -> MappingLike:
+    args.out_dir.mkdir(parents=True, exist_ok=True)
+    completed: list[MappingLike] = []
+    failed: list[MappingLike] = []
+    probe_reports: list[MappingLike] = []
+    names: set[str] = set()
+    for index, probe_path in enumerate(args.from_probe, start=1):
+        try:
+            run, report = _import_probe_run(
+                args,
+                probe_path,
+                index=index,
+                existing_names=names,
+            )
+            completed.append(run)
+            if isinstance(report, dict):
+                probe_reports.append(report)
+        except Exception as exc:
+            failure = {
+                "name": _unique_probe_name(names, probe_path.stem, index=index),
+                "index": index,
+                "config": {},
+                "probe_path": str(probe_path),
+                "status": "missing"
+                if isinstance(exc, FileNotFoundError)
+                else "stale",
+                "error": f"{exc.__class__.__name__}: {exc}",
+            }
+            failed.append(failure)
+            completed.append(failure)
+    prompt = args.prompt
+    flags = getattr(args, "provided_flags", set())
+    first_report = probe_reports[0] if probe_reports else {}
+    if "--prompt" not in flags and first_report.get("prompt") is not None:
+        prompt = first_report.get("prompt")
+    runtime = _probe_runtime(first_report) if first_report else None
+    plan: MappingLike = {
+        "row_type": "zspace_inference_distortion_sweep_plan",
+        "dry_run": False,
+        "prompt": prompt,
+        "runtime": _runtime_plan(args) if runtime is None else dict(runtime),
+        "execution": _execution_plan(args),
+        "run_count": len(completed),
+        "runs": completed,
+        "source_probe_paths": [str(path) for path in args.from_probe],
+    }
+    _write_json(args.out_dir / "sweep-plan.json", plan)
+    report = _build_report(
+        args,
+        runs=completed,
+        failed=failed,
+        attempted_run_count=0,
+        reused_run_count=0,
+        reported_run_count=sum(
+            1 for run in completed if run.get("status") == "reported"
+        ),
+        prompt=prompt,
+        runtime=runtime,
+    )
+    report["source_probe_paths"] = [str(path) for path in args.from_probe]
+    _write_report_outputs(args, report)
+    return report
+
+
 def _write_report_outputs(args: argparse.Namespace, report: MappingLike) -> None:
     markdown_path = _markdown_path(args)
     if markdown_path is not None:
@@ -556,6 +719,8 @@ def _write_report_outputs(args: argparse.Namespace, report: MappingLike) -> None
 
 def run_sweep(args: argparse.Namespace) -> MappingLike:
     args.out_dir.mkdir(parents=True, exist_ok=True)
+    if args.from_probe:
+        return _run_from_probe_report(args)
     runs = build_sweep_runs(args)
     plan: MappingLike = {
         "row_type": "zspace_inference_distortion_sweep_plan",

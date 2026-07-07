@@ -501,8 +501,21 @@ fake API route by default, so the local-HF hook path can be checked first. Add
 <model>` to replay the exact same distortion grid against a live API model. For
 interrupted or paid-provider sweeps, add `--resume-existing` to reuse successful
 probe artifacts, `--report-only` to rebuild `sweep-report.json` and
-`sweep-report.md` without touching local/API models, or `--force` when every row
-should be rerun intentionally. Existing artifacts are reused only when the saved
+`sweep-report.md` without touching local/API models, or promote one or more
+single-probe artifacts directly:
+
+```bash
+PYTHONPATH=bindings/st-py python bindings/st-py/examples/zspace_inference_distortion_sweep.py \
+  --from-probe runs/inference-distortion/live-local-api-probe.json \
+  --from-probe-label live-openai-check \
+  --out-dir runs/zspace-inference-distortion-sweep
+```
+
+The `--from-probe` path preserves the saved prompt/runtime/config, local
+generation-control evidence, activation-hook report, and provider request-filter
+audit, so a live API probe can be promoted into a reusable pre-FT handoff without
+paying for another provider call. Use `--force` only when every row should be
+rerun intentionally. Existing grid artifacts are reused only when the saved
 prompt, distortion config, and runtime/provider settings match the current
 sweep. From Python, call `st.load_zspace_inference_distortion_sweep(...)`,
 `st.summarize_zspace_inference_distortion_sweep(...)`, or
