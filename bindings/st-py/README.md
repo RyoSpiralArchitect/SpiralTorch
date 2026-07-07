@@ -462,7 +462,12 @@ add `--api-provider openai-responses|openai-chat|anthropic --api-model <model>`
 to reuse the same distortion adapter with a live provider. Load the artifact
 with `st.load_zspace_inference_distortion_probe(...)`, flatten it with
 `st.summarize_zspace_inference_distortion_probe(...)`, or print compact status
-lines with `st.summarize_zspace_inference_distortion_probe_lines(...)`.
+lines with `st.summarize_zspace_inference_distortion_probe_lines(...)`. When
+several pressure/coherence settings have been tried, call
+`st.compare_zspace_inference_distortion_probes(...)` or
+`st.summarize_zspace_inference_distortion_probe_comparison_lines(...)` to rank
+the artifacts by local text changes, top-token changes, activation evidence,
+API non-empty response, and distortion energy.
 
 For the first real FT pass on a new corpus, use the sweep runner to make that
 comparison reproducible:

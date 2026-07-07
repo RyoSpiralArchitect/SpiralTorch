@@ -12,9 +12,11 @@ from spiraltorch.hf_generation import (
     ZSpaceActivationProbeHook,
     ZSpaceRepressionLogitsProcessor,
     build_zspace_activation_probe_hook,
+    compare_zspace_inference_distortion_probes,
     load_zspace_inference_distortion_probe,
     load_zspace_generation_control_sweep,
     summarize_zspace_inference_distortion_probe,
+    summarize_zspace_inference_distortion_probe_comparison_lines,
     summarize_zspace_inference_distortion_probe_lines,
     summarize_zspace_generation_control_sweep,
     summarize_zspace_generation_control_sweep_lines,
@@ -204,6 +206,7 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         self.assertIn("ZSpaceRepressionLogitsProcessor", st.__all__)
         self.assertIn("ZSpaceActivationProbeHook", st.__all__)
         self.assertIn("build_zspace_activation_probe_hook", st.__all__)
+        self.assertIn("compare_zspace_inference_distortion_probes", st.__all__)
         self.assertIn("build_zspace_repression_logits_processor", st.__all__)
         self.assertIn("build_zspace_softmax_logits_processor", st.__all__)
         self.assertIn("zspace_generation_control_bridge_cli_args", st.__all__)
@@ -214,6 +217,10 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         self.assertIn("zspace_inference_distortion_processor_kwargs", st.__all__)
         self.assertIn("load_zspace_inference_distortion_probe", st.__all__)
         self.assertIn("summarize_zspace_inference_distortion_probe", st.__all__)
+        self.assertIn(
+            "summarize_zspace_inference_distortion_probe_comparison_lines",
+            st.__all__,
+        )
         self.assertIn("summarize_zspace_inference_distortion_probe_lines", st.__all__)
         self.assertIs(st.ZSpaceRepressionLogitsProcessor, ZSpaceRepressionLogitsProcessor)
         self.assertIs(st.ZSpaceActivationProbeHook, ZSpaceActivationProbeHook)
@@ -234,8 +241,16 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
             load_zspace_inference_distortion_probe,
         )
         self.assertIs(
+            st.compare_zspace_inference_distortion_probes,
+            compare_zspace_inference_distortion_probes,
+        )
+        self.assertIs(
             st.summarize_zspace_inference_distortion_probe,
             summarize_zspace_inference_distortion_probe,
+        )
+        self.assertIs(
+            st.summarize_zspace_inference_distortion_probe_comparison_lines,
+            summarize_zspace_inference_distortion_probe_comparison_lines,
         )
         self.assertIs(
             st.summarize_zspace_generation_control_sweep,
@@ -316,6 +331,80 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         self.assertEqual(summary["distortion_energy"], 0.62)
         self.assertIn("zspace_inference_distortion_probe", lines[0])
         self.assertIn("top_changes=5", lines[0])
+
+    def test_inference_distortion_probe_comparison_ranks_effect(self) -> None:
+        weak = {
+            "row_type": "zspace_inference_distortion_probe",
+            "prompt": "weak",
+            "adapter": {
+                "distortion_energy": 0.2,
+                "request": {"temperature": 0.8, "top_p": 0.9},
+                "logits_processor_kwargs": {"repression_strength": 0.8},
+            },
+            "local_hf": {
+                "status": "ok",
+                "changed": False,
+                "generation_control": {
+                    "status": "ok",
+                    "backend": "spiraltorch_zspace_softmax",
+                    "top_token_changed_count": 0,
+                },
+                "activation_report": {"status": "unused", "event_count": 0},
+            },
+            "api": {
+                "provider": "fake",
+                "text": "weak route",
+                "telemetry": {"api_llm.empty_text": 0.0},
+            },
+        }
+        strong = {
+            "row_type": "zspace_inference_distortion_probe",
+            "prompt": "strong",
+            "adapter": {
+                "distortion_energy": 0.62,
+                "request": {"temperature": 0.98, "top_p": 0.77},
+                "logits_processor_kwargs": {"repression_strength": 1.5},
+            },
+            "local_hf": {
+                "status": "ok",
+                "changed": True,
+                "generation_control": {
+                    "status": "ok",
+                    "backend": "spiraltorch_zspace_softmax",
+                    "top_token_changed_count": 5,
+                },
+                "activation_report": {"status": "ok", "event_count": 64},
+            },
+            "api": {
+                "provider": "fake",
+                "text": "strong route",
+                "telemetry": {"api_llm.empty_text": 0.0},
+            },
+        }
+
+        comparison = compare_zspace_inference_distortion_probes(
+            {"weak": weak, "strong": strong},
+            top_n=2,
+        )
+        lines = summarize_zspace_inference_distortion_probe_comparison_lines(
+            comparison
+        )
+
+        self.assertEqual(
+            comparison["row_type"],
+            "zspace_inference_distortion_probe_comparison",
+        )
+        self.assertEqual(comparison["probe_count"], 2)
+        self.assertEqual(comparison["recommended_probe"], "strong")
+        self.assertEqual(comparison["local_changed_count"], 1)
+        self.assertEqual(comparison["activation_observed_count"], 1)
+        self.assertEqual(comparison["top_probes"][0]["label"], "strong")
+        self.assertGreater(
+            comparison["top_probes"][0]["effect_score"],
+            comparison["top_probes"][1]["effect_score"],
+        )
+        self.assertIn("recommended=strong", lines[0])
+        self.assertIn("label=strong", lines[1])
 
 
 class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):

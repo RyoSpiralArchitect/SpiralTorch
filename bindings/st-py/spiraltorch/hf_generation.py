@@ -15,6 +15,7 @@ __all__ = [
     "build_zspace_activation_probe_hook",
     "build_zspace_repression_logits_processor",
     "build_zspace_softmax_logits_processor",
+    "compare_zspace_inference_distortion_probes",
     "zspace_generation_control_bridge_cli_args",
     "zspace_generation_control_processor_kwargs",
     "zspace_generation_control_sweep_cli_args",
@@ -22,6 +23,7 @@ __all__ = [
     "load_zspace_generation_control_sweep",
     "summarize_zspace_inference_distortion_probe",
     "summarize_zspace_inference_distortion_probe_lines",
+    "summarize_zspace_inference_distortion_probe_comparison_lines",
     "summarize_zspace_generation_control_run",
     "summarize_zspace_generation_control_sweep",
     "summarize_zspace_generation_control_sweep_lines",
@@ -903,6 +905,17 @@ def _preview_text(value: object, *, limit: int) -> str | None:
     return f"{text[: max(0, limit - 1)]}..."
 
 
+def _truthy(value: object) -> bool:
+    return value is True or str(value).lower() in {"true", "1", "yes", "ok"}
+
+
+def _score_number(value: object, *, scale: float = 1.0) -> float:
+    number = _safe_number(value)
+    if number is None:
+        return 0.0
+    return math.tanh(max(0.0, float(number)) / max(scale, EPSILON))
+
+
 def summarize_zspace_inference_distortion_probe(
     report_or_path: str | Path | Mapping[str, object],
     *,
@@ -1038,6 +1051,227 @@ def summarize_zspace_inference_distortion_probe_lines(
         lines.append(
             "zspace_inference_distortion_api "
             f"text={summary.get('api_text_preview')!r}"
+        )
+    return lines
+
+
+def _iter_probe_inputs(
+    probes: (
+        Mapping[str, str | Path | Mapping[str, object]]
+        | Sequence[str | Path | Mapping[str, object]]
+        | str
+        | Path
+        | Mapping[str, object]
+    ),
+    *,
+    labels: Sequence[str] | None,
+) -> list[tuple[str | None, str | Path | Mapping[str, object]]]:
+    if isinstance(probes, Mapping):
+        if "row_type" in probes or "adapter" in probes or "local_hf" in probes:
+            label = labels[0] if labels else None
+            return [(label, probes)]
+        return [(str(label), value) for label, value in probes.items()]
+    if isinstance(probes, (str, Path)):
+        label = labels[0] if labels else None
+        return [(label, probes)]
+    if isinstance(probes, (bytes, bytearray)):
+        raise TypeError("probes must be paths, mappings, or sequences")
+    try:
+        values = list(probes)
+    except TypeError as exc:
+        raise TypeError("probes must be paths, mappings, or sequences") from exc
+    result = []
+    for index, value in enumerate(values):
+        label = labels[index] if labels and index < len(labels) else None
+        result.append((label, value))
+    return result
+
+
+def _default_probe_label(
+    source: str | Path | Mapping[str, object],
+    *,
+    index: int,
+) -> str:
+    if isinstance(source, (str, Path)):
+        path = Path(source)
+        return path.stem or str(path) or f"probe_{index}"
+    prompt = source.get("prompt") if isinstance(source, Mapping) else None
+    if prompt:
+        return str(prompt)[:48]
+    return f"probe_{index}"
+
+
+def _probe_effect_score(row: Mapping[str, object]) -> float:
+    local_changed = 1.0 if _truthy(row.get("local_changed")) else 0.0
+    top_changes = _score_number(
+        row.get("generation_control_top_token_changed_count"),
+        scale=8.0,
+    )
+    activation = _score_number(row.get("activation_event_count"), scale=64.0)
+    api_non_empty = 1.0 - _score_number(row.get("api_empty_text"), scale=1.0)
+    energy = _score_number(row.get("distortion_energy"), scale=1.0)
+    return (
+        0.35 * local_changed
+        + 0.28 * top_changes
+        + 0.17 * activation
+        + 0.10 * api_non_empty
+        + 0.10 * energy
+    )
+
+
+def _probe_risk_score(row: Mapping[str, object]) -> float:
+    energy = _score_number(row.get("distortion_energy"), scale=1.0)
+    top_changes = _score_number(
+        row.get("generation_control_top_token_changed_count"),
+        scale=24.0,
+    )
+    activation_l2 = _score_number(row.get("activation_output_l2_max"), scale=512.0)
+    api_empty = _score_number(row.get("api_empty_text"), scale=1.0)
+    return 0.45 * energy + 0.25 * top_changes + 0.20 * activation_l2 + 0.10 * api_empty
+
+
+def _ranked_probe_rows(
+    rows: Sequence[Mapping[str, object]],
+    *,
+    top_n: int,
+) -> list[dict[str, object]]:
+    ranked = sorted(
+        (dict(row) for row in rows),
+        key=lambda row: (
+            -float(row.get("effect_score") or 0.0),
+            float(row.get("risk_score") or 0.0),
+            str(row.get("label") or ""),
+        ),
+    )
+    if top_n >= 0:
+        ranked = ranked[:top_n]
+    for index, row in enumerate(ranked, 1):
+        row["rank"] = index
+    return ranked
+
+
+def compare_zspace_inference_distortion_probes(
+    probes: (
+        Mapping[str, str | Path | Mapping[str, object]]
+        | Sequence[str | Path | Mapping[str, object]]
+        | str
+        | Path
+        | Mapping[str, object]
+    ),
+    *,
+    labels: Sequence[str] | None = None,
+    top_n: int = 5,
+    preview_chars: int = 96,
+) -> dict[str, object]:
+    """Compare multiple Z-Space inference-distortion probe artifacts."""
+
+    if top_n < 0:
+        raise ValueError("top_n must be non-negative")
+    rows: list[dict[str, object]] = []
+    for index, (label, source) in enumerate(
+        _iter_probe_inputs(probes, labels=labels),
+        start=1,
+    ):
+        summary = summarize_zspace_inference_distortion_probe(
+            source,
+            preview_chars=preview_chars,
+        )
+        summary["label"] = label or _default_probe_label(source, index=index)
+        summary["effect_score"] = _probe_effect_score(summary)
+        summary["risk_score"] = _probe_risk_score(summary)
+        rows.append(summary)
+    top_probes = _ranked_probe_rows(rows, top_n=top_n)
+    best = top_probes[0] if top_probes else None
+    changed_count = sum(1 for row in rows if _truthy(row.get("local_changed")))
+    activation_observed_count = sum(
+        1
+        for row in rows
+        if _safe_number(row.get("activation_event_count")) is not None
+        and float(row.get("activation_event_count") or 0.0) > 0.0
+    )
+    top_change_values = [
+        float(value)
+        for row in rows
+        if (
+            value := _safe_number(
+                row.get("generation_control_top_token_changed_count")
+            )
+        )
+        is not None
+    ]
+    return {
+        "row_type": "zspace_inference_distortion_probe_comparison",
+        "probe_count": len(rows),
+        "labels": [row.get("label") for row in rows],
+        "local_changed_count": changed_count,
+        "activation_observed_count": activation_observed_count,
+        "max_top_token_changed_count": (
+            max(top_change_values) if top_change_values else None
+        ),
+        "recommended_probe": None if best is None else best.get("label"),
+        "recommended_reason": (
+            None
+            if best is None
+            else "highest_effect_score_lowest_risk_tiebreak"
+        ),
+        "best_effect_score": None if best is None else best.get("effect_score"),
+        "best_risk_score": None if best is None else best.get("risk_score"),
+        "top_probes": top_probes,
+        "summaries": rows,
+    }
+
+
+def summarize_zspace_inference_distortion_probe_comparison_lines(
+    comparison_or_probes: (
+        Mapping[str, object]
+        | Mapping[str, str | Path | Mapping[str, object]]
+        | Sequence[str | Path | Mapping[str, object]]
+        | str
+        | Path
+    ),
+    *,
+    top_n: int = 3,
+    preview_chars: int = 96,
+) -> list[str]:
+    """Render compact status lines for an inference-distortion comparison."""
+
+    if (
+        isinstance(comparison_or_probes, Mapping)
+        and comparison_or_probes.get("row_type")
+        == "zspace_inference_distortion_probe_comparison"
+    ):
+        comparison = dict(comparison_or_probes)
+    else:
+        comparison = compare_zspace_inference_distortion_probes(
+            comparison_or_probes,
+            top_n=top_n,
+            preview_chars=preview_chars,
+        )
+    lines = [
+        (
+            "zspace_inference_distortion_compare "
+            f"probes={comparison.get('probe_count')} "
+            f"recommended={comparison.get('recommended_probe')} "
+            f"effect={comparison.get('best_effect_score')} "
+            f"risk={comparison.get('best_risk_score')} "
+            f"changed={comparison.get('local_changed_count')} "
+            f"activation={comparison.get('activation_observed_count')} "
+            f"max_top_changes={comparison.get('max_top_token_changed_count')}"
+        )
+    ]
+    for row in comparison.get("top_probes", []):
+        if not isinstance(row, Mapping):
+            continue
+        lines.append(
+            "zspace_inference_distortion_top "
+            f"rank={row.get('rank')} "
+            f"label={row.get('label')} "
+            f"effect={row.get('effect_score')} "
+            f"risk={row.get('risk_score')} "
+            f"changed={row.get('local_changed')} "
+            f"top_changes={row.get('generation_control_top_token_changed_count')} "
+            f"api={row.get('api_provider')} "
+            f"energy={row.get('distortion_energy')}"
         )
     return lines
 
