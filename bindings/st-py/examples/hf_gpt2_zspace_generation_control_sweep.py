@@ -488,6 +488,14 @@ def _summary(runs: Sequence[Mapping[str, object]]) -> dict[str, object]:
 
     best_loop = min(completed, key=loop_score, default=None)
     control_changed_counts = []
+    control_call_counts = []
+    control_reported_rows = []
+    control_entropy_mins = []
+    control_entropy_maxes = []
+    control_temperature_mins = []
+    control_temperature_maxes = []
+    control_ngram_repressed_totals = []
+    control_max_ngram_repressions = []
     for row in completed:
         generation = row.get("generation")
         if not isinstance(generation, Mapping):
@@ -497,6 +505,30 @@ def _summary(runs: Sequence[Mapping[str, object]]) -> dict[str, object]:
             value = control.get("top_token_changed_count")
             if isinstance(value, (int, float)):
                 control_changed_counts.append(float(value))
+            value = control.get("calls")
+            if isinstance(value, (int, float)):
+                control_call_counts.append(float(value))
+            value = control.get("reported_rows")
+            if isinstance(value, (int, float)):
+                control_reported_rows.append(float(value))
+            value = control.get("entropy_min")
+            if isinstance(value, (int, float)):
+                control_entropy_mins.append(float(value))
+            value = control.get("entropy_max")
+            if isinstance(value, (int, float)):
+                control_entropy_maxes.append(float(value))
+            value = control.get("temperature_min")
+            if isinstance(value, (int, float)):
+                control_temperature_mins.append(float(value))
+            value = control.get("temperature_max")
+            if isinstance(value, (int, float)):
+                control_temperature_maxes.append(float(value))
+            value = control.get("ngram_repressed_token_total")
+            if isinstance(value, (int, float)):
+                control_ngram_repressed_totals.append(float(value))
+            value = control.get("max_ngram_repression")
+            if isinstance(value, (int, float)):
+                control_max_ngram_repressions.append(float(value))
     return {
         "row_type": "hf_gpt2_zspace_generation_control_sweep_summary",
         "completed_run_count": len(completed),
@@ -505,6 +537,32 @@ def _summary(runs: Sequence[Mapping[str, object]]) -> dict[str, object]:
         "best_loop_score": None if best_loop is None else loop_score(best_loop),
         "max_top_token_changed_count": (
             max(control_changed_counts) if control_changed_counts else None
+        ),
+        "max_control_calls": max(control_call_counts) if control_call_counts else None,
+        "max_control_reported_rows": (
+            max(control_reported_rows) if control_reported_rows else None
+        ),
+        "control_entropy_min": (
+            min(control_entropy_mins) if control_entropy_mins else None
+        ),
+        "control_entropy_max": (
+            max(control_entropy_maxes) if control_entropy_maxes else None
+        ),
+        "control_temperature_min": (
+            min(control_temperature_mins) if control_temperature_mins else None
+        ),
+        "control_temperature_max": (
+            max(control_temperature_maxes) if control_temperature_maxes else None
+        ),
+        "max_control_ngram_repressed_token_total": (
+            max(control_ngram_repressed_totals)
+            if control_ngram_repressed_totals
+            else None
+        ),
+        "max_control_ngram_repression": (
+            max(control_max_ngram_repressions)
+            if control_max_ngram_repressions
+            else None
         ),
     }
 

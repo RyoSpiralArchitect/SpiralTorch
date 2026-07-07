@@ -2310,6 +2310,43 @@ def summarize_zspace_generation_control_sweep(
         if (value := _safe_number(row.get("control_top_token_changed_count")))
         is not None
     ]
+    control_calls = [
+        float(value)
+        for row in completed
+        if (value := _safe_number(row.get("control_calls"))) is not None
+    ]
+    control_entropy_mins = [
+        float(value)
+        for row in completed
+        if (value := _safe_number(row.get("control_entropy_min"))) is not None
+    ]
+    control_entropy_maxes = [
+        float(value)
+        for row in completed
+        if (value := _safe_number(row.get("control_entropy_max"))) is not None
+    ]
+    control_temperature_mins = [
+        float(value)
+        for row in completed
+        if (value := _safe_number(row.get("control_temperature_min"))) is not None
+    ]
+    control_temperature_maxes = [
+        float(value)
+        for row in completed
+        if (value := _safe_number(row.get("control_temperature_max"))) is not None
+    ]
+    control_ngram_totals = [
+        float(value)
+        for row in completed
+        if (value := _safe_number(row.get("control_ngram_repressed_token_total")))
+        is not None
+    ]
+    control_ngram_repressions = [
+        float(value)
+        for row in completed
+        if (value := _safe_number(row.get("control_max_ngram_repression")))
+        is not None
+    ]
     changed_from_baseline_count = sum(
         1 for row in completed if row.get("changed_from_baseline") is True
     )
@@ -2357,6 +2394,25 @@ def summarize_zspace_generation_control_sweep(
         "max_loop_score": max(loop_values) if loop_values else None,
         "max_top_token_changed_count": (
             max(control_changes) if control_changes else None
+        ),
+        "max_control_calls": max(control_calls) if control_calls else None,
+        "control_entropy_min": (
+            min(control_entropy_mins) if control_entropy_mins else None
+        ),
+        "control_entropy_max": (
+            max(control_entropy_maxes) if control_entropy_maxes else None
+        ),
+        "control_temperature_min": (
+            min(control_temperature_mins) if control_temperature_mins else None
+        ),
+        "control_temperature_max": (
+            max(control_temperature_maxes) if control_temperature_maxes else None
+        ),
+        "max_control_ngram_repressed_token_total": (
+            max(control_ngram_totals) if control_ngram_totals else None
+        ),
+        "max_control_ngram_repression": (
+            max(control_ngram_repressions) if control_ngram_repressions else None
         ),
         "top_runs": top_runs,
         "summaries": summaries,

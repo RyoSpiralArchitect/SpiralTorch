@@ -1143,8 +1143,13 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
                     "calls": 2,
                     "backend": "spiraltorch_zspace_softmax",
                     "top_token_changed_count": 1,
+                    "reported_rows": 2,
                     "temperature_min": 0.7,
                     "temperature_max": 1.1,
+                    "entropy_min": 2.5,
+                    "entropy_max": 3.25,
+                    "ngram_repressed_token_total": 4,
+                    "max_ngram_repression": 0.75,
                 },
             ),
             "repetition": {
@@ -1224,6 +1229,13 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
         )
         self.assertEqual(summary["best_loop_score_delta_from_baseline"], -3.0)
         self.assertEqual(summary["best_loop_score_reduction_ratio"], 1.0)
+        self.assertEqual(summary["max_control_calls"], 2.0)
+        self.assertEqual(summary["control_entropy_min"], 2.5)
+        self.assertEqual(summary["control_entropy_max"], 3.25)
+        self.assertEqual(summary["control_temperature_min"], 0.7)
+        self.assertEqual(summary["control_temperature_max"], 1.1)
+        self.assertEqual(summary["max_control_ngram_repressed_token_total"], 4.0)
+        self.assertEqual(summary["max_control_ngram_repression"], 0.75)
         self.assertEqual(summary["top_runs"][0]["loop_score"], 0.0)
         self.assertEqual(
             summary["top_runs"][0]["loop_score_delta_from_baseline"],
