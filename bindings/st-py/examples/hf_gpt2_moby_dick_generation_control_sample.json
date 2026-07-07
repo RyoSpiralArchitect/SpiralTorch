@@ -99,5 +99,42 @@
       }
     ]
   },
-  "observed_effect": "A full-novel corpus immediately gives a stronger literary attractor than the tiny SpiralTorch corpus: the model shifts from a generic religious loop into Moby-Dick-like quoted dialogue. Z-Space repetition control demonstrably changes greedy ranks, but on this short 320-step checkpoint it mostly relocates rather than fully dissolves the attractor, pointing to longer FT runs and phrase-scale repression/decay as the next useful controls."
+  "phrase_scale_followup_grid": {
+    "description": "Follow-up grid after adding token n-gram phrase memory to ZSpaceRepressionLogitsProcessor. The key difference from token-level repression is ngram_window=96, which can see the repeated quoted-dialogue phrase instead of only the last 16 tokens.",
+    "run_count": 19,
+    "completed_run_count": 19,
+    "failed_run_count": 0,
+    "changed_from_baseline_count": 18,
+    "max_top_token_changed_count": 7,
+    "best_loop_score": 0.0,
+    "baseline_loop_score": 8.0,
+    "best_run": {
+      "name": "ztnone-rs0p75-lr0-ng3-nw96-nr0p75-k64",
+      "continuation": " will tell you what I know of him.\u201d\u201cI know him, sir; he is a man of great intelligence.\u201d\u201cHe is a very good man, sir.\u201d \u201cI know him;",
+      "loop_score": 0.0,
+      "unique_word_ratio": 0.8148148148148148,
+      "top_token_changed_count": 7,
+      "ngram_repressed_token_total": 11,
+      "max_ngram_repression": 1.5,
+      "ngram_size": 3,
+      "ngram_window": 96,
+      "ngram_repression_strength": 0.75,
+      "backend": "spiraltorch_zspace_softmax"
+    },
+    "stronger_phrase_run": {
+      "name": "ztnone-rs0p75-lr0-ng3-nw96-nr1p25-k64",
+      "continuation": " will tell you what I know of him.\u201d\u201cI know him, sir; he is a man of great intelligence.\u201d\u201cHe is a very good man, sir.\u201d \u201cI have seen him",
+      "loop_score": 0.0,
+      "unique_word_ratio": 0.8571428571428571,
+      "top_token_changed_count": 7,
+      "ngram_repressed_token_total": 9,
+      "max_ngram_repression": 2.5,
+      "ngram_size": 3,
+      "ngram_window": 96,
+      "ngram_repression_strength": 1.25,
+      "backend": "spiraltorch_zspace_softmax"
+    },
+    "observed_effect": "A longer phrase memory turns the previous relocation-only behavior into a real greedy-loop break: the model stays inside the Moby-Dick-like dialogue attractor, but stops repeating the exact quoted phrase."
+  },
+  "observed_effect": "A full-novel corpus immediately gives a stronger literary attractor than the tiny SpiralTorch corpus: the model shifts from a generic religious loop into Moby-Dick-like quoted dialogue. Token-level Z-Space repetition control changes greedy ranks but mostly relocates the attractor; phrase-scale n-gram memory with ngram_window=96 breaks the repeated dialogue loop while preserving the literary domain attraction."
 }

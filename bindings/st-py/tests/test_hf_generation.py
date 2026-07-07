@@ -101,6 +101,32 @@ class ZSpaceRepressionLogitsProcessorTests(unittest.TestCase):
         self.assertIsNotNone(report["entropy_min"])
         self.assertIsNotNone(report["temperature_max"])
 
+    def test_ngram_repression_penalizes_phrase_completion(self) -> None:
+        processor = ZSpaceRepressionLogitsProcessor(
+            top_k=3,
+            curvature=-1.0,
+            temperature=1.0,
+            min_temperature=0.5,
+            max_temperature=2.0,
+            repression_window=8,
+            repression_strength=0.0,
+            last_token_repression=0.0,
+            ngram_size=3,
+            ngram_repression_strength=2.0,
+            use_native_zspace=False,
+        )
+        input_ids = torch.tensor([[1, 2, 3, 1, 2]], dtype=torch.long)
+        scores = torch.tensor([[0.0, 0.0, 0.0, 4.0, 3.9]], dtype=torch.float32)
+
+        processed = processor(input_ids, scores)
+        report = processor.report()
+
+        self.assertEqual(int(torch.argmax(processed, dim=-1).item()), 4)
+        self.assertEqual(report["top_token_changed_count"], 1)
+        self.assertEqual(report["ngram_repressed_token_total"], 1)
+        self.assertGreater(report["max_ngram_repression"], 0.0)
+        self.assertEqual(report["rows"][0]["ngram_repressed_token_count"], 1)
+
     def test_generation_report_embeds_zspace_control_payload(self) -> None:
         control = {
             "row_type": "zspace_repression_generation_control",
@@ -179,6 +205,10 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
                 "repression_window": 16,
                 "repression_strength": 1.25,
                 "last_token_repression": 0.0,
+                "ngram_size": 3,
+                "ngram_window": 96,
+                "ngram_repression_strength": 0.75,
+                "ngram_decay": 0.9,
                 "mask_non_top_k": True,
                 "use_native_zspace": True,
             },
@@ -233,16 +263,33 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
         )
         self.assertEqual(summary["recommended_config"]["repression_strength"], 1.25)
         self.assertEqual(summary["recommended_config"]["entropy_target"], 3.0)
+        self.assertEqual(summary["recommended_config"]["ngram_size"], 3)
+        self.assertEqual(summary["recommended_config"]["ngram_window"], 96)
+        self.assertEqual(
+            summary["recommended_config"]["ngram_repression_strength"],
+            0.75,
+        )
         self.assertEqual(summary["recommended_processor_kwargs"]["top_k"], 64)
         self.assertEqual(
             summary["recommended_processor_kwargs"]["min_temperature"],
             0.7,
         )
+        self.assertEqual(summary["recommended_processor_kwargs"]["ngram_decay"], 0.9)
+        self.assertEqual(summary["recommended_processor_kwargs"]["ngram_window"], 96)
         self.assertIn("--repression-strength-values", summary["recommended_sweep_cli_args"])
         self.assertIn("1.25", summary["recommended_sweep_cli_args"])
+        self.assertIn("--ngram-size-values", summary["recommended_sweep_cli_args"])
+        self.assertIn("--ngram-window-values", summary["recommended_sweep_cli_args"])
+        self.assertIn("--ngram-repression-strength-values", summary["recommended_sweep_cli_args"])
         self.assertEqual(summary["recommended_cli_args"], summary["recommended_sweep_cli_args"])
         self.assertIn("--generation-zspace-softmax", summary["recommended_bridge_cli_args"])
         self.assertIn("--generation-repression-strength", summary["recommended_bridge_cli_args"])
+        self.assertIn("--generation-ngram-size", summary["recommended_bridge_cli_args"])
+        self.assertIn("--generation-ngram-window", summary["recommended_bridge_cli_args"])
+        self.assertIn(
+            "--generation-ngram-repression-strength",
+            summary["recommended_bridge_cli_args"],
+        )
         self.assertIn("1.25", summary["recommended_bridge_cli_args"])
         self.assertEqual(
             zspace_generation_control_processor_kwargs(summary["recommended_config"]),
@@ -271,6 +318,7 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
         self.assertIn("recommend=zt3-rs1p25-lr0-k64", lines[0])
         self.assertIn("loop_delta=-3.0", lines[0])
         self.assertIn("top_changes=1", lines[1])
+        self.assertIn("ngram=3/96/0.75", lines[1])
 
     def test_dry_run_builds_control_grid_without_loading_model(self) -> None:
         module = load_generation_control_sweep_example()

@@ -203,6 +203,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--generation-repression-window", type=int, default=32)
     parser.add_argument("--generation-repression-strength", type=float, default=1.0)
     parser.add_argument("--generation-last-token-repression", type=float, default=0.5)
+    parser.add_argument("--generation-ngram-size", type=int, default=0)
+    parser.add_argument("--generation-ngram-window", type=int, default=0)
+    parser.add_argument("--generation-ngram-repression-strength", type=float, default=0.0)
+    parser.add_argument("--generation-ngram-decay", type=float, default=1.0)
     parser.add_argument(
         "--generation-zspace-report-limit",
         type=int,
@@ -349,6 +353,22 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             parser.error(
                 "--generation-last-token-repression must be finite and non-negative"
             )
+        if args.generation_ngram_size < 0:
+            parser.error("--generation-ngram-size must be non-negative")
+        if args.generation_ngram_window < 0:
+            parser.error("--generation-ngram-window must be non-negative")
+        if args.generation_ngram_repression_strength < 0.0 or not math.isfinite(
+            args.generation_ngram_repression_strength
+        ):
+            parser.error(
+                "--generation-ngram-repression-strength must be finite and non-negative"
+            )
+        if (
+            args.generation_ngram_decay < 0.0
+            or args.generation_ngram_decay > 1.0
+            or not math.isfinite(args.generation_ngram_decay)
+        ):
+            parser.error("--generation-ngram-decay must be finite and in [0.0, 1.0]")
     if args.per_device_train_batch_size <= 0:
         parser.error("--per-device-train-batch-size must be positive")
     if args.per_device_eval_batch_size <= 0:
@@ -859,6 +879,14 @@ def _generation_logits_processor(args: argparse.Namespace) -> Any | None:
         repression_window=getattr(args, "generation_repression_window", 32),
         repression_strength=getattr(args, "generation_repression_strength", 1.0),
         last_token_repression=getattr(args, "generation_last_token_repression", 0.5),
+        ngram_size=getattr(args, "generation_ngram_size", 0),
+        ngram_repression_strength=getattr(
+            args,
+            "generation_ngram_repression_strength",
+            0.0,
+        ),
+        ngram_window=getattr(args, "generation_ngram_window", 0),
+        ngram_decay=getattr(args, "generation_ngram_decay", 1.0),
         mask_non_top_k=not getattr(args, "generation_zspace_keep_non_top_k", False),
         use_native_zspace=not getattr(args, "generation_zspace_no_native", False),
     )

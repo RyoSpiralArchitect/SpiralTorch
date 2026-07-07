@@ -69,6 +69,20 @@ def _positive_int_values(value: str) -> list[int]:
     return values
 
 
+def _non_negative_int_values(value: str) -> list[int]:
+    values = [int(item) for item in _csv_items(value)]
+    if any(item < 0 for item in values):
+        raise argparse.ArgumentTypeError("all values must be non-negative integers")
+    return values
+
+
+def _unit_interval_float_values(value: str) -> list[float]:
+    values = _float_values(value)
+    if any(item < 0.0 or item > 1.0 for item in values):
+        raise argparse.ArgumentTypeError("all values must be in [0.0, 1.0]")
+    return values
+
+
 def _optional_float_values(value: str) -> list[float | None]:
     result: list[float | None] = []
     for item in _csv_items(value):
@@ -113,6 +127,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--repression-window-values", type=_positive_int_values, default=[16])
     parser.add_argument("--repression-strength-values", type=_non_negative_float_values, default=[0.0, 1.0])
     parser.add_argument("--last-token-repression-values", type=_non_negative_float_values, default=[0.0, 1.0])
+    parser.add_argument("--ngram-size-values", type=_non_negative_int_values, default=[0])
+    parser.add_argument("--ngram-window-values", type=_non_negative_int_values, default=[0])
+    parser.add_argument("--ngram-repression-strength-values", type=_non_negative_float_values, default=[0.0])
+    parser.add_argument("--ngram-decay-values", type=_unit_interval_float_values, default=[1.0])
     parser.add_argument("--keep-non-top-k", action="store_true")
     parser.add_argument("--zspace-no-native", action="store_true")
     parser.add_argument("--report-limit", type=int, default=64)
@@ -184,6 +202,10 @@ def build_control_runs(args: argparse.Namespace) -> list[dict[str, object]]:
         args.repression_window_values,
         args.repression_strength_values,
         args.last_token_repression_values,
+        args.ngram_size_values,
+        args.ngram_window_values,
+        args.ngram_repression_strength_values,
+        args.ngram_decay_values,
     )
     for (
         top_k,
@@ -194,11 +216,18 @@ def build_control_runs(args: argparse.Namespace) -> list[dict[str, object]]:
         repression_window,
         repression_strength,
         last_token_repression,
+        ngram_size,
+        ngram_window,
+        ngram_repression_strength,
+        ngram_decay,
     ) in grid:
         name = (
             f"zt{_label_number(entropy_target)}"
             f"-rs{_label_number(repression_strength)}"
             f"-lr{_label_number(last_token_repression)}"
+            f"-ng{ngram_size}"
+            f"-nw{ngram_window}"
+            f"-nr{_label_number(ngram_repression_strength)}"
             f"-k{top_k}"
         )
         runs.append(
@@ -217,6 +246,10 @@ def build_control_runs(args: argparse.Namespace) -> list[dict[str, object]]:
                     "repression_window": int(repression_window),
                     "repression_strength": float(repression_strength),
                     "last_token_repression": float(last_token_repression),
+                    "ngram_size": int(ngram_size),
+                    "ngram_window": int(ngram_window),
+                    "ngram_repression_strength": float(ngram_repression_strength),
+                    "ngram_decay": float(ngram_decay),
                     "mask_non_top_k": not bool(args.keep_non_top_k),
                     "use_native_zspace": not bool(args.zspace_no_native),
                 },

@@ -69,6 +69,13 @@ def _non_negative_int(value: object, *, label: str) -> int:
     return result
 
 
+def _unit_interval_float(value: object, *, label: str) -> float:
+    result = _finite_float(value, label=label)
+    if result < 0.0 or result > 1.0:
+        raise ValueError(f"{label} must be in [0.0, 1.0]")
+    return result
+
+
 def _safe_number(value: object) -> int | float | None:
     if isinstance(value, bool):
         return None
@@ -176,6 +183,10 @@ class ZSpaceRepressionLogitsProcessor:
         repression_window: int = 32,
         repression_strength: float = 1.0,
         last_token_repression: float = 0.5,
+        ngram_size: int = 0,
+        ngram_window: int = 0,
+        ngram_repression_strength: float = 0.0,
+        ngram_decay: float = 1.0,
         mask_non_top_k: bool = True,
         use_native_zspace: bool = True,
     ) -> None:
@@ -217,6 +228,13 @@ class ZSpaceRepressionLogitsProcessor:
             last_token_repression,
             label="last_token_repression",
         )
+        self.ngram_size = _non_negative_int(ngram_size, label="ngram_size")
+        self.ngram_window = _non_negative_int(ngram_window, label="ngram_window")
+        self.ngram_repression_strength = _non_negative_float(
+            ngram_repression_strength,
+            label="ngram_repression_strength",
+        )
+        self.ngram_decay = _unit_interval_float(ngram_decay, label="ngram_decay")
         self.mask_non_top_k = bool(mask_non_top_k)
         self.use_native_zspace = bool(use_native_zspace)
         self._native_layer: Any | None = None
@@ -243,12 +261,15 @@ class ZSpaceRepressionLogitsProcessor:
             row_values = [float(item) for item in top_values[row].detach().cpu().tolist()]
             row_indices = [int(item) for item in top_indices[row].detach().cpu().tolist()]
             input_row = input_ids[row] if input_ids is not None else []
-            token_counts, last_token = self._recent_token_counts(input_row)
+            token_counts, last_token, recent_tokens = self._recent_repression_state(
+                input_row
+            )
             adjusted_values, repression = self._apply_repression(
                 row_values,
                 row_indices,
                 token_counts,
                 last_token,
+                recent_tokens,
             )
             probabilities, zspace_report = self._zspace_probabilities(adjusted_values)
             log_probabilities = [
@@ -278,6 +299,10 @@ class ZSpaceRepressionLogitsProcessor:
                     "after_top_log_probability": log_probabilities[after_pos],
                     "repressed_token_count": repression["repressed_token_count"],
                     "max_repression": repression["max_repression"],
+                    "ngram_repressed_token_count": repression[
+                        "ngram_repressed_token_count"
+                    ],
+                    "max_ngram_repression": repression["max_ngram_repression"],
                     "entropy": zspace_report.get("entropy"),
                     "temperature": zspace_report.get("temperature"),
                     "adaptive_temperature": zspace_report.get("adaptive_temperature"),
@@ -301,6 +326,10 @@ class ZSpaceRepressionLogitsProcessor:
                 "repression_window": self.repression_window,
                 "repression_strength": self.repression_strength,
                 "last_token_repression": self.last_token_repression,
+                "ngram_size": self.ngram_size,
+                "ngram_window": self.ngram_window,
+                "ngram_repression_strength": self.ngram_repression_strength,
+                "ngram_decay": self.ngram_decay,
                 "mask_non_top_k": self.mask_non_top_k,
                 "rows": rows,
             }
@@ -346,6 +375,16 @@ class ZSpaceRepressionLogitsProcessor:
             for row in aggregate_rows
             if isinstance(row.get("entropy"), (int, float))
         ]
+        ngram_repressed = [
+            int(row["ngram_repressed_token_count"])
+            for row in aggregate_rows
+            if isinstance(row.get("ngram_repressed_token_count"), (int, float))
+        ]
+        ngram_repressions = [
+            float(row["max_ngram_repression"])
+            for row in aggregate_rows
+            if isinstance(row.get("max_ngram_repression"), (int, float))
+        ]
         return {
             "row_type": "zspace_repression_generation_control",
             "status": "ok" if all_reports else "unused",
@@ -360,21 +399,30 @@ class ZSpaceRepressionLogitsProcessor:
             "temperature_max": max(temperatures) if temperatures else None,
             "entropy_min": min(entropies) if entropies else None,
             "entropy_max": max(entropies) if entropies else None,
+            "ngram_repressed_token_total": (
+                sum(ngram_repressed) if ngram_repressed else 0
+            ),
+            "max_ngram_repression": (
+                max(ngram_repressions) if ngram_repressions else 0.0
+            ),
             "native_error": self._native_error,
         }
 
     def reset_report(self) -> None:
         self._reports.clear()
 
-    def _recent_token_counts(self, input_row: Any) -> tuple[dict[int, int], int | None]:
-        if self.repression_window <= 0:
-            return {}, None
+    def _recent_repression_state(
+        self,
+        input_row: Any,
+    ) -> tuple[dict[int, int], int | None, list[int]]:
         tokens = _tensor_row_to_ints(input_row)
-        recent = tokens[-self.repression_window :]
+        recent = tokens[-self.repression_window :] if self.repression_window > 0 else []
         counts: dict[int, int] = {}
         for token in recent:
             counts[token] = counts.get(token, 0) + 1
-        return counts, (recent[-1] if recent else None)
+        ngram_window = self.ngram_window or self.repression_window
+        ngram_recent = tokens[-ngram_window:] if ngram_window > 0 else []
+        return counts, (recent[-1] if recent else None), ngram_recent
 
     def _apply_repression(
         self,
@@ -382,22 +430,68 @@ class ZSpaceRepressionLogitsProcessor:
         indices: Sequence[int],
         counts: Mapping[int, int],
         last_token: int | None,
+        recent_tokens: Sequence[int],
     ) -> tuple[list[float], dict[str, object]]:
         if not values:
-            return [], {"repressed_token_count": 0, "max_repression": 0.0}
+            return [], {
+                "repressed_token_count": 0,
+                "max_repression": 0.0,
+                "ngram_repressed_token_count": 0,
+                "max_ngram_repression": 0.0,
+            }
         adjusted: list[float] = []
         penalties: list[float] = []
+        ngram_penalties: list[float] = []
         for value, token in zip(values, indices):
             count = counts.get(int(token), 0)
             penalty = self.repression_strength * float(count)
             if last_token is not None and int(token) == int(last_token):
                 penalty += self.last_token_repression
+            ngram_penalty = self._ngram_repression_penalty(
+                recent_tokens,
+                int(token),
+            )
+            penalty += ngram_penalty
             adjusted.append(float(value) - penalty)
             penalties.append(penalty)
+            ngram_penalties.append(ngram_penalty)
         return adjusted, {
             "repressed_token_count": sum(1 for penalty in penalties if penalty > 0.0),
             "max_repression": max(penalties) if penalties else 0.0,
+            "ngram_repressed_token_count": sum(
+                1 for penalty in ngram_penalties if penalty > 0.0
+            ),
+            "max_ngram_repression": (
+                max(ngram_penalties) if ngram_penalties else 0.0
+            ),
         }
+
+    def _ngram_repression_penalty(
+        self,
+        recent_tokens: Sequence[int],
+        candidate_token: int,
+    ) -> float:
+        if (
+            self.ngram_size <= 1
+            or self.ngram_repression_strength <= 0.0
+            or len(recent_tokens) < self.ngram_size
+        ):
+            return 0.0
+        prefix_size = self.ngram_size - 1
+        prefix = tuple(int(token) for token in recent_tokens[-prefix_size:])
+        candidate_ngram = (*prefix, int(candidate_token))
+        weighted_matches = 0.0
+        latest_start = len(recent_tokens) - self.ngram_size
+        for start in range(0, latest_start + 1):
+            ngram = tuple(
+                int(token)
+                for token in recent_tokens[start : start + self.ngram_size]
+            )
+            if ngram != candidate_ngram:
+                continue
+            distance = max(0, latest_start - start)
+            weighted_matches += self.ngram_decay ** distance
+        return self.ngram_repression_strength * weighted_matches
 
     def _zspace_probabilities(
         self,
@@ -595,6 +689,12 @@ def summarize_zspace_generation_control_run(
         "control_temperature_max": _safe_number(control.get("temperature_max")),
         "control_entropy_min": _safe_number(control.get("entropy_min")),
         "control_entropy_max": _safe_number(control.get("entropy_max")),
+        "control_ngram_repressed_token_total": _safe_number(
+            control.get("ngram_repressed_token_total")
+        ),
+        "control_max_ngram_repression": _safe_number(
+            control.get("max_ngram_repression")
+        ),
         "control_native_error": control.get("native_error"),
         "config_top_k": _safe_number(config.get("top_k")),
         "config_curvature": _safe_number(config.get("curvature")),
@@ -613,6 +713,12 @@ def summarize_zspace_generation_control_run(
         "config_last_token_repression": _safe_number(
             config.get("last_token_repression")
         ),
+        "config_ngram_size": _safe_number(config.get("ngram_size")),
+        "config_ngram_window": _safe_number(config.get("ngram_window")),
+        "config_ngram_repression_strength": _safe_number(
+            config.get("ngram_repression_strength")
+        ),
+        "config_ngram_decay": _safe_number(config.get("ngram_decay")),
         "config_mask_non_top_k": (
             bool(config["mask_non_top_k"]) if "mask_non_top_k" in config else None
         ),
@@ -679,6 +785,12 @@ def _recommended_config(row: Mapping[str, object] | None) -> dict[str, object] |
         "repression_window": row.get("config_repression_window"),
         "repression_strength": row.get("config_repression_strength"),
         "last_token_repression": row.get("config_last_token_repression"),
+        "ngram_size": row.get("config_ngram_size"),
+        "ngram_window": row.get("config_ngram_window"),
+        "ngram_repression_strength": row.get(
+            "config_ngram_repression_strength"
+        ),
+        "ngram_decay": row.get("config_ngram_decay"),
         "mask_non_top_k": row.get("config_mask_non_top_k"),
         "use_native_zspace": row.get("config_use_native_zspace"),
     }
@@ -712,6 +824,10 @@ def zspace_generation_control_processor_kwargs(
         "repression_window",
         "repression_strength",
         "last_token_repression",
+        "ngram_size",
+        "ngram_window",
+        "ngram_repression_strength",
+        "ngram_decay",
         "mask_non_top_k",
         "use_native_zspace",
     }
@@ -737,6 +853,10 @@ def zspace_generation_control_sweep_cli_args(
         ("repression_window", "--repression-window-values"),
         ("repression_strength", "--repression-strength-values"),
         ("last_token_repression", "--last-token-repression-values"),
+        ("ngram_size", "--ngram-size-values"),
+        ("ngram_window", "--ngram-window-values"),
+        ("ngram_repression_strength", "--ngram-repression-strength-values"),
+        ("ngram_decay", "--ngram-decay-values"),
     ]
     args: list[str] = []
     for key, flag in flag_map:
@@ -771,6 +891,10 @@ def zspace_generation_control_bridge_cli_args(
         ("repression_window", "--generation-repression-window"),
         ("repression_strength", "--generation-repression-strength"),
         ("last_token_repression", "--generation-last-token-repression"),
+        ("ngram_size", "--generation-ngram-size"),
+        ("ngram_window", "--generation-ngram-window"),
+        ("ngram_repression_strength", "--generation-ngram-repression-strength"),
+        ("ngram_decay", "--generation-ngram-decay"),
     ]
     args: list[str] = ["--generation-zspace-softmax"] if include_enable_flag else []
     for key, flag in flag_map:
@@ -932,6 +1056,10 @@ def summarize_zspace_generation_control_sweep_lines(
             f"top_changes={row.get('control_top_token_changed_count')} "
             f"backend={row.get('control_backend')} "
             f"rs={row.get('config_repression_strength')} "
+            f"ngram={row.get('config_ngram_size')}/"
+            f"{row.get('config_ngram_window')}/"
+            f"{row.get('config_ngram_repression_strength')} "
+            f"ngram_hits={row.get('control_ngram_repressed_token_total')} "
             f"entropy_target={row.get('config_entropy_target')}"
         )
     return lines

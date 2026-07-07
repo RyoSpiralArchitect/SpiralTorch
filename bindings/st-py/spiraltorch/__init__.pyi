@@ -326,6 +326,10 @@ class ZSpaceRepressionLogitsProcessor:
         repression_window: int = ...,
         repression_strength: float = ...,
         last_token_repression: float = ...,
+        ngram_size: int = ...,
+        ngram_window: int = ...,
+        ngram_repression_strength: float = ...,
+        ngram_decay: float = ...,
         mask_non_top_k: bool = ...,
         use_native_zspace: bool = ...,
     ) -> None: ...
