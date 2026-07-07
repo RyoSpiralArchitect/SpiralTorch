@@ -21,6 +21,18 @@ def _load_example():
     return module
 
 
+def _load_route_policy_example():
+    path = EXAMPLES_DIR / "api_llm_topos_stagent_route_policy.py"
+    spec = importlib.util.spec_from_file_location(
+        "api_llm_topos_stagent_route_policy_example",
+        path,
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def test_api_llm_topos_sweep_example_offline_writes_report(tmp_path, capsys) -> None:
     example = _load_example()
     capsys.readouterr()
@@ -96,3 +108,37 @@ def test_api_llm_topos_sweep_example_dry_run_writes_plan(tmp_path, capsys) -> No
     assert printed["report_options"]["max_text_chars"] == 360
     assert printed["report_options"]["max_pair_rows"] == 24
     assert json.loads((tmp_path / "plan.json").read_text(encoding="utf-8")) == printed
+
+
+def test_api_llm_topos_stagent_route_policy_example_offline(tmp_path, capsys) -> None:
+    example = _load_route_policy_example()
+    capsys.readouterr()
+
+    policy_out = tmp_path / "policy.json"
+    example.main(
+        [
+            "--out-dir",
+            str(tmp_path),
+            "--prompt-limit",
+            "1",
+            "--profile",
+            "grounded",
+            "--episodes",
+            "3",
+            "--policy-out",
+            str(policy_out),
+        ]
+    )
+
+    printed = json.loads(capsys.readouterr().out)
+    assert printed["kind"] == "spiraltorch.api_llm_topos_stagent_route_policy_demo"
+    assert printed["report"] == str(tmp_path / "report.json")
+    assert printed["profile"] == "grounded"
+    assert printed["labels"] == ["open", "contextual", "guarded"]
+    assert printed["selected_label"] in printed["labels"]
+    assert len(printed["route_rewards"]) == 3
+    assert printed["update_count"] == 9
+    assert policy_out.exists()
+    policy = json.loads(policy_out.read_text(encoding="utf-8"))
+    assert policy["kind"] == "spiraltorch.api_llm_topos_sweep_stagent_route_policy"
+    assert policy["selected_label"] == printed["selected_label"]

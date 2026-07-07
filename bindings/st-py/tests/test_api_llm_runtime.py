@@ -13,6 +13,7 @@ def test_api_llm_runtime_exports_from_top_level() -> None:
     assert "api_llm_geometry_context_partials" in st.__all__
     assert "api_llm_partial_from_response" in st.__all__
     assert "api_llm_topos_sweep_report" in st.__all__
+    assert "api_llm_topos_sweep_route_rewards" in st.__all__
     assert "api_llm_wasm_context_partials" in st.__all__
     assert "compare_api_llm_matrix_reports" in st.__all__
     assert "compare_api_llm_trace_runs" in st.__all__
@@ -26,6 +27,7 @@ def test_api_llm_runtime_exports_from_top_level() -> None:
     assert "run_api_llm_prompt_suite_matrix" in st.__all__
     assert "run_api_llm_topos_sweep" in st.__all__
     assert "summarize_api_llm_trace_events" in st.__all__
+    assert "train_stagent_topos_route_policy" in st.__all__
     assert "topos_runtime_adapter" in st.__all__
     assert "topos_runtime_request" in st.__all__
     assert "topos_runtime_route" in st.__all__
@@ -215,6 +217,38 @@ def _canvas_wasm_report(
             "lossStats": {"count": 2, "finiteCount": 2, "mean": 0.08, "rms": 0.09},
         },
     }
+
+
+class _FakeToposRouteAgent:
+    def __init__(self, action_dim: int) -> None:
+        self.q_values = [0.0 for _ in range(action_dim)]
+        self.epsilon = 0.25
+        self.updates: list[tuple[int, int, float, int]] = []
+
+    def policy_report(self, state: int) -> dict[str, object]:
+        return {"state": state, "q_values": list(self.q_values), "epsilon": self.epsilon}
+
+    def set_epsilon(self, epsilon: float) -> None:
+        self.epsilon = epsilon
+
+    def update(self, state: int, action: int, reward: float, next_state: int) -> None:
+        self.updates.append((state, action, reward, next_state))
+        self.q_values[action] += 0.5 * (reward - self.q_values[action])
+
+    def select_action_trace(self, state: int) -> dict[str, object]:
+        action = max(range(len(self.q_values)), key=lambda index: self.q_values[index])
+        return {
+            "state": state,
+            "action": action,
+            "q_values": list(self.q_values),
+            "epsilon_before": self.epsilon,
+            "epsilon_after": self.epsilon,
+            "explored": False,
+        }
+
+
+class _FakeToposRoutePolicyOnlyAgent(_FakeToposRouteAgent):
+    select_action_trace = None
 
 
 def test_api_llm_text_from_chat_completion_shape() -> None:
@@ -1457,6 +1491,90 @@ def test_run_api_llm_topos_sweep_compares_runtime_routes(tmp_path) -> None:
     assert report_comparison["winners"]["highest_response_completion_rate"] == "demo"
     assert report_comparison["winners"]["highest_selection_balanced_score"] == "demo"
     assert report_comparison["winners"]["highest_selection_grounded_score"] == "demo"
+
+
+def test_topos_sweep_route_rewards_train_stagent_policy() -> None:
+    report = {
+        "kind": "spiraltorch.api_llm_topos_sweep_report",
+        "selection_rows": [
+            {
+                "label": "open",
+                "count": 2,
+                "trace_route_score": 0.4,
+                "response_text_quality_score": 0.7,
+                "response_completion_rate": 1.0,
+                "response_incomplete_rate": 0.0,
+                "adapter_runtime_route_score": 0.5,
+                "selection_scores": {"balanced": 0.42, "grounded": 0.33},
+            },
+            {
+                "label": "guarded",
+                "count": 2,
+                "trace_route_score": 0.8,
+                "response_text_quality_score": 0.9,
+                "response_completion_rate": 1.0,
+                "response_incomplete_rate": 0.0,
+                "adapter_runtime_route_score": 0.85,
+                "selection_scores": {"balanced": 0.73, "grounded": 0.91},
+            },
+        ],
+    }
+
+    rewards = st.api_llm_topos_sweep_route_rewards(report, profile="grounded")
+    assert [row["label"] for row in rewards] == ["open", "guarded"]
+    assert rewards[0]["reward"] == pytest.approx(0.33)
+    assert rewards[1]["reward"] == pytest.approx(0.91)
+
+    agent = _FakeToposRouteAgent(action_dim=len(rewards))
+    policy = st.train_stagent_topos_route_policy(
+        report,
+        agent,
+        profile="grounded",
+        episodes=4,
+        selection_epsilon=0.0,
+        max_update_events=3,
+    )
+
+    assert policy["kind"] == "spiraltorch.api_llm_topos_sweep_stagent_route_policy"
+    assert policy["selected_label"] == "guarded"
+    assert policy["selected_reward"] == pytest.approx(0.91)
+    assert policy["selection_trace"]["action"] == 1
+    assert policy["policy_after"]["q_values"][1] > policy["policy_after"]["q_values"][0]
+    assert policy["update_count"] == 8
+    assert len(policy["update_events"]) == 3
+    assert policy["truncated_update_events"] is True
+    assert agent.epsilon == pytest.approx(0.0)
+
+
+def test_topos_sweep_route_policy_rejects_agent_action_mismatch() -> None:
+    report = {
+        "kind": "spiraltorch.api_llm_topos_sweep_report",
+        "selection_rows": [
+            {"label": "open", "selection_scores": {"balanced": 0.4}},
+            {"label": "guarded", "selection_scores": {"balanced": 0.7}},
+        ],
+    }
+    agent = _FakeToposRouteAgent(action_dim=3)
+
+    with pytest.raises(ValueError, match="agent action dimension"):
+        st.train_stagent_topos_route_policy(report, agent)
+
+
+def test_topos_sweep_route_policy_can_derive_trace_from_policy_report() -> None:
+    report = {
+        "kind": "spiraltorch.api_llm_topos_sweep_report",
+        "selection_rows": [
+            {"label": "open", "selection_scores": {"balanced": 0.2}},
+            {"label": "guarded", "selection_scores": {"balanced": 0.8}},
+        ],
+    }
+    agent = _FakeToposRoutePolicyOnlyAgent(action_dim=2)
+
+    policy = st.train_stagent_topos_route_policy(report, agent, episodes=2)
+
+    assert policy["selected_label"] == "guarded"
+    assert policy["selection_trace"]["source"] == "policy_report"
+    assert policy["selection_trace"]["greedy_action"] == 1
 
 
 def test_compare_api_llm_matrix_reports_tracks_stable_profile_winners(tmp_path) -> None:
