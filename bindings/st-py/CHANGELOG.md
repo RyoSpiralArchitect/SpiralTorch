@@ -30,6 +30,10 @@
   `dataset_fit_report` so tokenized train/eval block counts, empty eval splits,
   and non-trainable block-size/data combinations are explicit before Trainer
   work proceeds.
+- Generation samples: add `hf_gpt2_finetune_generation_report(...)` plus
+  `--generation-prompt` / `--generation-max-new-tokens` so local GPT-2 FT run
+  cards can compare before/after generated text, continuation text, token
+  deltas, and hashes beside numeric Trainer telemetry.
 - Documentation: clarify the hard dependency boundary for larger local GPT-2
   FT runs: Rust keeps tensor/nn/text/logic/frac/rl/WGPU surfaces in the wheel,
   while Python explicitly brings Transformers, Torch, datasets, pyarrow,
