@@ -26,6 +26,7 @@ from .zspace_inference import (
     topos_control_signal,
     topos_inference_plan,
     topos_runtime_profile,
+    topos_runtime_route,
 )
 
 __all__ = [
@@ -49,6 +50,7 @@ __all__ = [
     "summarize_api_llm_trace_events",
     "topos_runtime_adapter",
     "topos_runtime_request",
+    "topos_runtime_route",
     "write_api_llm_trace_jsonl",
 ]
 
@@ -84,6 +86,7 @@ _REPORT_ROUTE_METRICS = (
     "topos_runtime_control_energy_mean",
     "topos_runtime_closure_risk_mean",
     "topos_runtime_exploration_budget_mean",
+    "topos_runtime_route_score_mean",
 )
 _TEXT_QUALITY_STOPWORDS = frozenset(
     {
@@ -263,6 +266,7 @@ def topos_runtime_adapter(
         base_frequency_penalty=_profile_option_float("base_frequency_penalty", 0.0),
         base_presence_penalty=_profile_option_float("base_presence_penalty", 0.0),
     )
+    route = topos_runtime_route(runtime_profile=profile)
     telemetry = dict(partial.telemetry_payload() or {})
     for key, value in inference_plan.items():
         numeric = _finite_float(value)
@@ -272,11 +276,18 @@ def topos_runtime_adapter(
         numeric = _finite_float(value)
         if numeric is not None:
             telemetry[f"{telemetry_prefix}.runtime_profile.{key}"] = numeric
+    telemetry[f"{telemetry_prefix}.runtime_route.mode_id"] = float(route["mode_id"])
+    telemetry[f"{telemetry_prefix}.runtime_route.score"] = float(route["score"])
+    for key, value in route.get("scores", {}).items():
+        numeric = _finite_float(value)
+        if numeric is not None:
+            telemetry[f"{telemetry_prefix}.runtime_route.{key}_score"] = numeric
     return {
         "kind": "spiraltorch.topos_runtime_adapter",
         "signal": signal,
         "inference_plan": inference_plan,
         "runtime_profile": profile,
+        "runtime_route": route,
         "request": request,
         "context_partial": {
             "origin": partial.origin,
@@ -1623,6 +1634,27 @@ def _summarize_topos_context_telemetry(
         "runtime_profile_learning_inference_balance": _stats(
             row.get("topos.runtime_profile.learning_inference_balance") for row in rows
         ),
+        "runtime_route_mode_id": _stats(
+            row.get("topos.runtime_route.mode_id") for row in rows
+        ),
+        "runtime_route_score": _stats(
+            row.get("topos.runtime_route.score") for row in rows
+        ),
+        "runtime_route_training_score": _stats(
+            row.get("topos.runtime_route.training_score") for row in rows
+        ),
+        "runtime_route_inference_score": _stats(
+            row.get("topos.runtime_route.inference_score") for row in rows
+        ),
+        "runtime_route_guard_score": _stats(
+            row.get("topos.runtime_route.guard_score") for row in rows
+        ),
+        "runtime_route_exploration_score": _stats(
+            row.get("topos.runtime_route.exploration_score") for row in rows
+        ),
+        "runtime_route_context_score": _stats(
+            row.get("topos.runtime_route.context_score") for row in rows
+        ),
     }
 
 
@@ -2161,6 +2193,34 @@ def _comparison_row(label: str, path: Path, summary: Mapping[str, Any]) -> dict[
             summary,
             "runtime_profile_learning_inference_balance",
         ),
+        "topos_runtime_route_mode_id_mean": _topos_context_stat(
+            summary,
+            "runtime_route_mode_id",
+        ),
+        "topos_runtime_route_score_mean": _topos_context_stat(
+            summary,
+            "runtime_route_score",
+        ),
+        "topos_runtime_route_training_score_mean": _topos_context_stat(
+            summary,
+            "runtime_route_training_score",
+        ),
+        "topos_runtime_route_inference_score_mean": _topos_context_stat(
+            summary,
+            "runtime_route_inference_score",
+        ),
+        "topos_runtime_route_guard_score_mean": _topos_context_stat(
+            summary,
+            "runtime_route_guard_score",
+        ),
+        "topos_runtime_route_exploration_score_mean": _topos_context_stat(
+            summary,
+            "runtime_route_exploration_score",
+        ),
+        "topos_runtime_route_context_score_mean": _topos_context_stat(
+            summary,
+            "runtime_route_context_score",
+        ),
         "last_text_preview": summary.get("last_text_preview"),
     }
     row["quality_score"] = _quality_score(row)
@@ -2388,6 +2448,22 @@ def _comparison_topos_context(
             rows,
             "topos_runtime_exploration_budget_mean",
         ),
+        "highest_runtime_route_score": _winner(
+            rows,
+            "topos_runtime_route_score_mean",
+        ),
+        "highest_runtime_route_guard_score": _winner(
+            rows,
+            "topos_runtime_route_guard_score_mean",
+        ),
+        "highest_runtime_route_exploration_score": _winner(
+            rows,
+            "topos_runtime_route_exploration_score_mean",
+        ),
+        "highest_runtime_route_context_score": _winner(
+            rows,
+            "topos_runtime_route_context_score_mean",
+        ),
         "lowest_optimizer_rate_scale": _winner(
             rows,
             "topos_optimizer_rate_scale_mean",
@@ -2431,6 +2507,18 @@ def _comparison_topos_context(
         ),
         "runtime_exploration_budget": _numeric_stats_with_range(
             row.get("topos_runtime_exploration_budget_mean") for row in observed
+        ),
+        "runtime_route_score": _numeric_stats_with_range(
+            row.get("topos_runtime_route_score_mean") for row in observed
+        ),
+        "runtime_route_guard_score": _numeric_stats_with_range(
+            row.get("topos_runtime_route_guard_score_mean") for row in observed
+        ),
+        "runtime_route_exploration_score": _numeric_stats_with_range(
+            row.get("topos_runtime_route_exploration_score_mean") for row in observed
+        ),
+        "runtime_route_context_score": _numeric_stats_with_range(
+            row.get("topos_runtime_route_context_score_mean") for row in observed
         ),
     }
 
@@ -3054,6 +3142,10 @@ def compare_api_llm_trace_runs(
             "topos_runtime_closure_risk_mean",
             higher_is_better=False,
         ),
+        "highest_topos_runtime_route_score": _winner(
+            rows,
+            "topos_runtime_route_score_mean",
+        ),
     }
     best = winners.get("best_score")
     near_best_tolerance_value = max(0.0, _finite_float(near_best_tolerance) or 0.0)
@@ -3108,6 +3200,11 @@ def compare_api_llm_trace_runs(
     if highest_topos_weight and highest_topos_weight != best:
         recommendations.append(
             f"inspect {highest_topos_weight} for the strongest open-topos context weight"
+        )
+    highest_topos_route = winners.get("highest_topos_runtime_route_score")
+    if highest_topos_route and highest_topos_route != best:
+        recommendations.append(
+            f"inspect {highest_topos_route} for the strongest open-topos runtime route score"
         )
     return {
         "kind": "spiraltorch.api_llm_trace_comparison",

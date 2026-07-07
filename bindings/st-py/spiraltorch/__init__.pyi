@@ -2957,6 +2957,23 @@ def topos_runtime_profile(
     **signal_options: Any,
 ) -> Dict[str, object]: ...
 
+def topos_runtime_route(
+    topos: Any | None = ...,
+    *,
+    runtime_profile: Mapping[str, Any] | None = ...,
+    training_gain: float = ...,
+    inference_gain: float = ...,
+    base_temperature: float = ...,
+    base_top_p: float = ...,
+    min_temperature: float = ...,
+    max_temperature: float = ...,
+    min_top_p: float = ...,
+    max_top_p: float = ...,
+    base_frequency_penalty: float = ...,
+    base_presence_penalty: float = ...,
+    **signal_options: Any,
+) -> Dict[str, object]: ...
+
 def topos_control_partial(
     topos: Any | None = ...,
     *,
