@@ -536,6 +536,7 @@ PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_gpt2_finetune_sweep.
   --validation-fraction 0.02 \
   --corpus-scan \
   --generation-prompt "SpiralTorch is" \
+  --generation-from-inference-distortion \
   --eval-before-train \
   --zspace-probe \
   --trainer-telemetry \
@@ -558,7 +559,11 @@ When `--trainer-telemetry` is enabled, the same handoff also appears as
 `hf_ft.inference_distortion.*` telemetry keys on each frame;
 summaries surface the recommended probe, effect/risk, desire pressure, psi total,
 API route, and provider request keys that were dropped or sent beside
-eval/generation metrics. Add
+eval/generation metrics. Add `--generation-from-inference-distortion` with a
+generation prompt to reuse the handoff's `recommended_processor_kwargs` as the
+Z-Space/repression logits processor for before/after generated samples; omit it
+when you want to hand-tune `--generation-zspace-*` and repression flags instead.
+Add
 `--dry-run` to inspect commands without loading Transformers, or
 `--require-wgpu-ready` when the SpiralTorch WGPU surface should gate each run.
 The report also embeds a compact `summary`; from notebooks or CI, call

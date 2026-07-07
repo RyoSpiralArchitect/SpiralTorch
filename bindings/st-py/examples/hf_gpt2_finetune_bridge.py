@@ -211,6 +211,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "repetition repression before generation token selection."
         ),
     )
+    parser.add_argument(
+        "--generation-from-inference-distortion",
+        action="store_true",
+        help=(
+            "Populate generation Z-Space/repression settings from the attached "
+            "inference-distortion probe or sweep handoff."
+        ),
+    )
     parser.add_argument("--generation-zspace-top-k", type=int, default=64)
     parser.add_argument("--generation-zspace-curvature", type=float, default=-0.04)
     parser.add_argument("--generation-zspace-temperature", type=float, default=1.0)
@@ -435,6 +443,17 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "--inference-distortion-sweep-report and --inference-distortion-probe "
             "are mutually exclusive"
         )
+    if (
+        args.generation_from_inference_distortion
+        and args.inference_distortion_sweep_report is None
+        and args.inference_distortion_probe is None
+    ):
+        parser.error(
+            "--generation-from-inference-distortion requires "
+            "--inference-distortion-probe or --inference-distortion-sweep-report"
+        )
+    if args.generation_from_inference_distortion and not args.generation_prompt:
+        parser.error("--generation-from-inference-distortion requires --generation-prompt")
     if args.metadata_only and args.train:
         parser.error("--metadata-only and --train are mutually exclusive")
     if args.validation_file and not args.train_file:
@@ -920,6 +939,69 @@ def _first_sequence(value: Any) -> Any:
         return value
 
 
+_GENERATION_PROCESSOR_ARG_MAP = {
+    "top_k": "generation_zspace_top_k",
+    "curvature": "generation_zspace_curvature",
+    "temperature": "generation_zspace_temperature",
+    "entropy_target": "generation_zspace_entropy_target",
+    "entropy_tolerance": "generation_zspace_entropy_tolerance",
+    "entropy_gain": "generation_zspace_entropy_gain",
+    "min_temperature": "generation_zspace_min_temperature",
+    "max_temperature": "generation_zspace_max_temperature",
+    "repression_window": "generation_repression_window",
+    "repression_strength": "generation_repression_strength",
+    "last_token_repression": "generation_last_token_repression",
+    "ngram_size": "generation_ngram_size",
+    "ngram_window": "generation_ngram_window",
+    "ngram_repression_strength": "generation_ngram_repression_strength",
+    "ngram_decay": "generation_ngram_decay",
+}
+
+
+def _apply_inference_distortion_generation_defaults(
+    args: argparse.Namespace,
+    inference_distortion_handoff: Mapping[str, object] | None,
+) -> Mapping[str, object] | None:
+    if not getattr(args, "generation_from_inference_distortion", False):
+        return None
+    if not isinstance(inference_distortion_handoff, Mapping):
+        return {"status": "missing_handoff"}
+    processor_kwargs = inference_distortion_handoff.get("recommended_processor_kwargs")
+    if not isinstance(processor_kwargs, Mapping) or not processor_kwargs:
+        return {
+            "status": "missing_processor_kwargs",
+            "recommended_probe": inference_distortion_handoff.get("recommended_probe"),
+        }
+
+    args.generation_zspace_softmax = True
+    applied: dict[str, object] = {}
+    for source_key, attr in _GENERATION_PROCESSOR_ARG_MAP.items():
+        if source_key not in processor_kwargs:
+            continue
+        value = processor_kwargs[source_key]
+        setattr(args, attr, value)
+        applied[attr] = value
+    if "mask_non_top_k" in processor_kwargs:
+        keep_non_top_k = not bool(processor_kwargs["mask_non_top_k"])
+        args.generation_zspace_keep_non_top_k = keep_non_top_k
+        applied["generation_zspace_keep_non_top_k"] = keep_non_top_k
+    if "use_native_zspace" in processor_kwargs:
+        no_native = not bool(processor_kwargs["use_native_zspace"])
+        args.generation_zspace_no_native = no_native
+        applied["generation_zspace_no_native"] = no_native
+
+    report = {
+        "status": "ok",
+        "source_kind": inference_distortion_handoff.get("source_kind"),
+        "recommended_probe": inference_distortion_handoff.get("recommended_probe"),
+        "applied_arg_count": len(applied),
+        "applied_args": applied,
+        "processor_kwargs": dict(processor_kwargs),
+    }
+    setattr(args, "_generation_from_inference_distortion_applied", report)
+    return report
+
+
 def _generation_logits_processor(args: argparse.Namespace) -> Any | None:
     if not getattr(args, "generation_zspace_softmax", False):
         return None
@@ -1260,6 +1342,14 @@ def _base_run_card(
         "generation_do_sample": bool(args.generation_do_sample),
         "generation_temperature": args.generation_temperature,
         "generation_top_k": args.generation_top_k,
+        "generation_from_inference_distortion": bool(
+            getattr(args, "generation_from_inference_distortion", False)
+        ),
+        "generation_from_inference_distortion_applied": getattr(
+            args,
+            "_generation_from_inference_distortion_applied",
+            None,
+        ),
         "generation_before_train": None,
         "generation_after_train": None,
         "zspace_probe": None,
@@ -1331,6 +1421,10 @@ def _main_with_runtime_access(
             inference_distortion_source,
         )
     )
+    generation_inference_distortion = _apply_inference_distortion_generation_defaults(
+        args,
+        inference_distortion_handoff,
+    )
     preflight = hf_gpt2_finetune_preflight_report(
         model_name=args.model_name,
         dataset_name=_preflight_dataset_name(args),
@@ -1357,6 +1451,11 @@ def _main_with_runtime_access(
         None
         if inference_distortion_handoff is None
         else dict(inference_distortion_handoff)
+    )
+    preflight["generation_from_inference_distortion_applied"] = (
+        None
+        if generation_inference_distortion is None
+        else dict(generation_inference_distortion)
     )
     _attach_local_corpus_reports(
         preflight,

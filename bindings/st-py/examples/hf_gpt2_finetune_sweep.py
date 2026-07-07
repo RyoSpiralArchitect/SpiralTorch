@@ -124,6 +124,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--generation-temperature", type=float, default=1.0)
     parser.add_argument("--generation-top-k", type=int, default=0)
     parser.add_argument("--generation-zspace-softmax", action="store_true")
+    parser.add_argument("--generation-from-inference-distortion", action="store_true")
     parser.add_argument("--generation-zspace-top-k", type=int, default=64)
     parser.add_argument("--generation-zspace-curvature", type=float, default=-0.04)
     parser.add_argument("--generation-zspace-temperature", type=float, default=1.0)
@@ -316,6 +317,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "--inference-distortion-sweep-report and --inference-distortion-probe "
             "are mutually exclusive"
         )
+    if (
+        args.generation_from_inference_distortion
+        and args.inference_distortion_sweep_report is None
+        and args.inference_distortion_probe is None
+    ):
+        parser.error(
+            "--generation-from-inference-distortion requires "
+            "--inference-distortion-probe or --inference-distortion-sweep-report"
+        )
+    if args.generation_from_inference_distortion and not args.generation_prompt:
+        parser.error("--generation-from-inference-distortion requires --generation-prompt")
     if args.corpus_scan and not args.train_file:
         parser.error("--corpus-scan requires --train-file")
     if args.corpus_scan_max_bytes_per_file < 0:
@@ -477,6 +489,8 @@ def _bridge_command(
             command.append("--generation-do-sample")
         command.extend(["--generation-temperature", str(args.generation_temperature)])
         command.extend(["--generation-top-k", str(args.generation_top_k)])
+        if args.generation_from_inference_distortion:
+            command.append("--generation-from-inference-distortion")
         if args.generation_zspace_softmax:
             command.append("--generation-zspace-softmax")
             command.extend(["--generation-zspace-top-k", str(args.generation_zspace_top_k)])

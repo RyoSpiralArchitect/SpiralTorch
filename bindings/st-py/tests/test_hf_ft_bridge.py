@@ -1126,6 +1126,9 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                     "1",
                     "--seed-values",
                     "7",
+                    "--generation-prompt",
+                    "SpiralTorch is",
+                    "--generation-from-inference-distortion",
                     "--inference-distortion-probe",
                     str(probe_path),
                     "--trainer-telemetry",
@@ -1151,6 +1154,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("--inference-distortion-probe", first_command)
         self.assertIn(str(probe_path), first_command)
         self.assertNotIn("--inference-distortion-sweep-report", first_command)
+        self.assertIn("--generation-from-inference-distortion", first_command)
 
     def test_sweep_example_compares_completed_run_cards(self) -> None:
         module = load_sweep_example()
@@ -1685,6 +1689,57 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertTrue(model.training)
         self.assertEqual(model.generate_kwargs["max_new_tokens"], 8)
         self.assertFalse(model.generate_kwargs["do_sample"])
+
+    def test_generation_from_inference_distortion_applies_processor_kwargs(self) -> None:
+        module = load_bridge_example()
+        args = types.SimpleNamespace(
+            generation_from_inference_distortion=True,
+            generation_zspace_softmax=False,
+            generation_zspace_keep_non_top_k=False,
+            generation_zspace_no_native=False,
+        )
+        handoff = {
+            "source_kind": "probe",
+            "recommended_probe": "direct-probe",
+            "recommended_processor_kwargs": {
+                "top_k": 32,
+                "curvature": -0.05,
+                "temperature": 1.1,
+                "entropy_target": 3.2,
+                "entropy_tolerance": 1.0e-5,
+                "entropy_gain": 0.7,
+                "min_temperature": 0.6,
+                "max_temperature": 2.2,
+                "repression_window": 24,
+                "repression_strength": 1.7,
+                "last_token_repression": 0.4,
+                "ngram_size": 3,
+                "ngram_window": 80,
+                "ngram_repression_strength": 0.9,
+                "ngram_decay": 0.85,
+                "mask_non_top_k": False,
+                "use_native_zspace": False,
+            },
+        }
+
+        report = module._apply_inference_distortion_generation_defaults(
+            args,
+            handoff,
+        )
+
+        self.assertEqual(report["status"], "ok")
+        self.assertTrue(args.generation_zspace_softmax)
+        self.assertEqual(args.generation_zspace_top_k, 32)
+        self.assertEqual(args.generation_zspace_curvature, -0.05)
+        self.assertEqual(args.generation_zspace_entropy_target, 3.2)
+        self.assertEqual(args.generation_repression_strength, 1.7)
+        self.assertEqual(args.generation_ngram_repression_strength, 0.9)
+        self.assertTrue(args.generation_zspace_keep_non_top_k)
+        self.assertTrue(args.generation_zspace_no_native)
+        self.assertEqual(
+            args._generation_from_inference_distortion_applied["recommended_probe"],
+            "direct-probe",
+        )
 
     def test_trainer_trace_event_round_trip_and_summary(self) -> None:
         args = types.SimpleNamespace(
