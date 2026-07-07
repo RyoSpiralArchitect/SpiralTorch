@@ -1384,6 +1384,16 @@ def test_run_api_llm_topos_sweep_compares_runtime_routes(tmp_path) -> None:
     assert report["mode_counts"] == {"exploratory": 1, "guarded": 1}
     assert report["adapter_winners"]["highest_guard_score"] == "guarded"
     assert report["adapter_winners"]["highest_request_temperature"] == "open"
+    assert report["response_sample_count"] == 2
+    samples = {row["label"]: row for row in report["response_samples"]}
+    assert "open topos route temperature=" in samples["open"]["text_preview"]
+    assert "guarded topos route temperature=" in samples["guarded"]["text_preview"]
+    assert samples["open"]["topos_openness"] == pytest.approx(
+        result["adapters"]["open"]["signal"]["openness"]
+    )
+    assert samples["guarded"]["topos_closure_pressure"] == pytest.approx(
+        result["adapters"]["guarded"]["signal"]["closure_pressure"]
+    )
     rows = {row["label"]: row for row in report["adapter_rows"]}
     assert rows["open"]["mode"] == "exploratory"
     assert rows["guarded"]["mode"] == "guarded"
@@ -1398,6 +1408,7 @@ def test_run_api_llm_topos_sweep_compares_runtime_routes(tmp_path) -> None:
     assert report_comparison["kind"] == "spiraltorch.api_llm_topos_sweep_report_comparison"
     assert report_comparison["rows"][0]["label"] == "demo"
     assert report_comparison["rows"][0]["mode_count"] == 2
+    assert report_comparison["rows"][0]["response_sample_count"] == 2
     assert report_comparison["winners"]["widest_temperature_range"] == "demo"
 
 

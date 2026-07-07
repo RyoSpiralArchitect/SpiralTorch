@@ -4154,10 +4154,114 @@ def _topos_sweep_report_recommendations(
     return recommendations
 
 
+def _topos_sweep_suite_events(
+    label: str,
+    sweep: Mapping[str, Any],
+) -> list[Mapping[str, Any]]:
+    suites = _mapping_or_empty(sweep.get("suites"))
+    suite = _mapping_or_empty(suites.get(label))
+    traces = suite.get("traces")
+    if isinstance(traces, Sequence) and not isinstance(
+        traces,
+        (str, bytes, bytearray),
+    ):
+        return [
+            _trace_payload(trace)
+            for trace in traces
+            if isinstance(trace, (ApiLLMTrace, Mapping))
+        ]
+    path = _mapping_or_empty(sweep.get("trace_paths")).get(label)
+    if isinstance(path, (str, Path)):
+        try:
+            return load_api_llm_trace_events(path)
+        except (OSError, ValueError, json.JSONDecodeError):
+            return []
+    return []
+
+
+def _sample_preview(value: Any, *, limit: int) -> str | None:
+    if limit <= 0:
+        return None
+    return _preview(value, limit=limit)
+
+
+def _topos_sweep_response_sample_row(
+    label: str,
+    event: Mapping[str, Any],
+    *,
+    index: int,
+    max_text_chars: int,
+) -> dict[str, Any]:
+    usage = _mapping_at(event, "usage")
+    telemetry = _mapping_at(event, "telemetry")
+    text_quality = _trace_text_quality(event)
+    text = str(event.get("text") or "")
+    return {
+        "label": label,
+        "index": index,
+        "provider": event.get("provider"),
+        "model": event.get("model"),
+        "finish_reason": event.get("finish_reason"),
+        "prompt_preview": _sample_preview(
+            event.get("prompt"),
+            limit=max_text_chars,
+        ),
+        "text_preview": _sample_preview(text, limit=max_text_chars),
+        "text_chars": len(text),
+        "latency_ms": _finite_float(event.get("latency_ms")),
+        "prompt_tokens": _finite_float(usage.get("prompt_tokens")),
+        "completion_tokens": _finite_float(usage.get("completion_tokens")),
+        "total_tokens": _finite_float(usage.get("total_tokens")),
+        "confidence": _trace_confidence(event),
+        "text_quality_score": _finite_float(text_quality.get("text_quality_score")),
+        "prompt_coverage": _finite_float(text_quality.get("prompt_coverage")),
+        "topos_runtime_route_score": _finite_float(
+            telemetry.get("topos.runtime_route.score")
+        ),
+        "topos_closure_pressure": _finite_float(telemetry.get("topos.closure_pressure")),
+        "topos_openness": _finite_float(telemetry.get("topos.openness")),
+        "topos_inference_context_weight": _finite_float(
+            telemetry.get(
+                "topos.inference_plan.context_weight",
+                telemetry.get("topos.runtime_profile.inference_context_weight"),
+            )
+        ),
+    }
+
+
+def _topos_sweep_response_samples(
+    sweep: Mapping[str, Any],
+    labels: Sequence[Any],
+    *,
+    max_samples_per_route: int,
+    max_text_chars: int,
+) -> list[dict[str, Any]]:
+    sample_limit = max(0, int(max_samples_per_route))
+    text_limit = max(0, int(max_text_chars))
+    if sample_limit <= 0:
+        return []
+    samples: list[dict[str, Any]] = []
+    for label in labels:
+        label_value = str(label)
+        events = _topos_sweep_suite_events(label_value, sweep)
+        for index, event in enumerate(events[:sample_limit]):
+            samples.append(
+                _topos_sweep_response_sample_row(
+                    label_value,
+                    event,
+                    index=index,
+                    max_text_chars=text_limit,
+                )
+            )
+    return samples
+
+
 def api_llm_topos_sweep_report(
     sweep: Mapping[str, Any],
     *,
     created_at: str | None = None,
+    max_samples_per_route: int = 2,
+    max_text_chars: int = 360,
 ) -> dict[str, Any]:
     """Build a compact, serializable report from a topos sweep result."""
 
@@ -4170,18 +4274,29 @@ def api_llm_topos_sweep_report(
     comparison = _mapping_or_empty(sweep.get("comparison"))
     adapter_winners = _topos_sweep_adapter_winners(rows)
     mode_counts = _count_labels(row.get("mode") for row in rows)
+    labels = [str(label) for label in _list_from_sequence(sweep.get("labels"))]
+    if not labels:
+        labels = [str(label) for label in adapters.keys()]
+    response_samples = _topos_sweep_response_samples(
+        sweep,
+        labels,
+        max_samples_per_route=max_samples_per_route,
+        max_text_chars=max_text_chars,
+    )
     report = {
         "kind": "spiraltorch.api_llm_topos_sweep_report",
         "source_kind": sweep.get("kind"),
         "created_at": created_at,
         "prompt_count": int(_finite_float(sweep.get("prompt_count")) or 0),
         "route_count": len(rows),
-        "labels": [str(label) for label in _list_from_sequence(sweep.get("labels"))],
+        "labels": labels,
         "jsonl_dir": sweep.get("jsonl_dir"),
         "trace_paths": dict(_mapping_or_empty(sweep.get("trace_paths"))),
         "mode_counts": mode_counts,
         "adapter_rows": rows,
         "adapter_winners": adapter_winners,
+        "response_sample_count": len(response_samples),
+        "response_samples": response_samples,
         "comparison": dict(comparison),
     }
     report["recommendations"] = _topos_sweep_report_recommendations(
@@ -4226,6 +4341,9 @@ def _topos_sweep_report_row(label: str, path: Path, report: Mapping[str, Any]) -
         "count": int(_finite_float(report.get("route_count")) or len(rows)),
         "prompt_count": int(_finite_float(report.get("prompt_count")) or 0),
         "route_count": int(_finite_float(report.get("route_count")) or len(rows)),
+        "response_sample_count": int(
+            _finite_float(report.get("response_sample_count")) or 0
+        ),
         "mode_counts": mode_counts_map,
         "mode_count": len(mode_counts_map),
         "best_trace_route": trace_winners.get("best_score"),
@@ -4332,6 +4450,7 @@ def run_api_llm_topos_sweep(
     labels: Sequence[str] | None = None,
     near_best_tolerance: float = 0.02,
     report_out: str | Path | None = None,
+    report_options: Mapping[str, Any] | None = None,
     clear: bool = True,
     **kwargs: Any,
 ) -> dict[str, Any]:
@@ -4417,7 +4536,7 @@ def run_api_llm_topos_sweep(
         "comparison": comparison,
     }
     if report_out is not None:
-        report = api_llm_topos_sweep_report(result)
+        report = api_llm_topos_sweep_report(result, **dict(report_options or {}))
         report_path = Path(report_out)
         report_path.parent.mkdir(parents=True, exist_ok=True)
         report_path.write_text(

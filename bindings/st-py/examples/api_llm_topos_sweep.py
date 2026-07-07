@@ -192,6 +192,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--base-top-p", type=float, default=0.95)
     parser.add_argument("--include-penalties", action="store_true")
     parser.add_argument("--near-best-tolerance", type=float, default=0.05)
+    parser.add_argument("--report-samples-per-route", type=int, default=2)
+    parser.add_argument("--report-text-chars", type=int, default=360)
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args(argv)
 
@@ -216,6 +218,10 @@ def main(argv: Sequence[str] | None = None) -> None:
             "labels": list(profiles.keys()),
             "live_provider": args.live_provider,
             "request_options": request_options,
+            "report_options": {
+                "max_samples_per_route": args.report_samples_per_route,
+                "max_text_chars": args.report_text_chars,
+            },
         }
         (out_dir / "plan.json").write_text(
             json.dumps(plan, indent=2, sort_keys=True),
@@ -244,6 +250,10 @@ def main(argv: Sequence[str] | None = None) -> None:
         request_options=request_options,
         near_best_tolerance=args.near_best_tolerance,
         report_out=out_dir / "report.json",
+        report_options={
+            "max_samples_per_route": args.report_samples_per_route,
+            "max_text_chars": args.report_text_chars,
+        },
         **provider_request,
     )
     report_comparison = st.compare_api_llm_topos_sweep_reports(
@@ -258,6 +268,7 @@ def main(argv: Sequence[str] | None = None) -> None:
                 "mode_counts": result["report"]["mode_counts"],
                 "trace_winners": (result["comparison"] or {}).get("winners"),
                 "adapter_winners": result["report"]["adapter_winners"],
+                "response_samples": result["report"]["response_samples"],
                 "report_comparison": report_comparison,
             },
             indent=2,
