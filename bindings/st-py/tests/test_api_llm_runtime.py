@@ -22,6 +22,7 @@ def test_api_llm_runtime_exports_from_top_level() -> None:
     assert "make_openai_responses_invoke" in st.__all__
     assert "run_api_llm_prompt_suite" in st.__all__
     assert "run_api_llm_prompt_suite_matrix" in st.__all__
+    assert "run_api_llm_topos_sweep" in st.__all__
     assert "summarize_api_llm_trace_events" in st.__all__
     assert "topos_runtime_adapter" in st.__all__
     assert "topos_runtime_request" in st.__all__
@@ -1283,6 +1284,94 @@ def test_run_api_llm_prompt_suite_matrix_compares_providers(tmp_path) -> None:
     assert comparison["near_best_tolerance"] == 0.05
     assert {row["label"] for row in comparison["runs"]} == {"fast api", "deep/api"}
     assert comparison["winners"]["lowest_total_tokens"] == "fast api"
+
+
+def test_run_api_llm_topos_sweep_compares_runtime_routes(tmp_path) -> None:
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    def fake_api(prompt: str, **request_kwargs: object) -> dict[str, object]:
+        calls.append((prompt, dict(request_kwargs)))
+        route_label = "guarded" if "topos:sweep:guarded" in prompt else "open"
+        return {
+            "model": "topos-sweep-model",
+            "output_text": (
+                f"{route_label} topos route temperature="
+                f"{float(request_kwargs['temperature']):.3f}"
+            ),
+            "status": "completed",
+            "usage": {"prompt_tokens": 10, "completion_tokens": 8, "total_tokens": 18},
+        }
+
+    result = st.run_api_llm_topos_sweep(
+        ["steer one hosted model through the topos sweep"],
+        fake_api,
+        z_state=[0.2, -0.1, 0.4, 0.05],
+        topos_profiles={
+            "open": {
+                "porosity": 0.7,
+                "max_depth": 10,
+                "max_volume": 100,
+                "observed_depth": 1,
+                "visited_volume": 8,
+                "request_options": {
+                    "base_temperature": 0.9,
+                    "base_top_p": 0.95,
+                    "include_penalties": True,
+                },
+            },
+            "guarded": {
+                "porosity": 0.02,
+                "max_depth": 10,
+                "max_volume": 100,
+                "observed_depth": 9,
+                "visited_volume": 95,
+                "request_options": {
+                    "base_temperature": 0.9,
+                    "base_top_p": 0.95,
+                    "include_penalties": True,
+                },
+            },
+        },
+        provider="topos-provider",
+        model="topos-sweep-model",
+        create_session=False,
+        jsonl_dir=tmp_path,
+        context_prompt=True,
+        context_prompt_options={"max_telemetry": 64},
+        near_best_tolerance=1.0,
+    )
+
+    assert result["kind"] == "spiraltorch.api_llm_topos_sweep"
+    assert result["labels"] == ["open", "guarded"]
+    assert set(result["trace_paths"]) == {"open", "guarded"}
+    assert result["trace_paths"]["open"].endswith("00-open.jsonl")
+    assert result["trace_paths"]["guarded"].endswith("01-guarded.jsonl")
+    assert len(calls) == 2
+    assert "origin=topos:sweep:open" in calls[0][0]
+    assert "origin=topos:sweep:guarded" in calls[1][0]
+
+    open_request = result["adapters"]["open"]["request"]
+    guarded_request = result["adapters"]["guarded"]["request"]
+    assert calls[0][1]["temperature"] == pytest.approx(open_request["temperature"])
+    assert calls[1][1]["temperature"] == pytest.approx(guarded_request["temperature"])
+    assert "frequency_penalty" in calls[0][1]
+    assert "presence_penalty" in calls[1][1]
+    assert open_request["temperature"] != pytest.approx(guarded_request["temperature"])
+
+    for label in ("open", "guarded"):
+        route = result["adapters"][label]["runtime_route"]
+        telemetry = result["suites"][label]["traces"][0]["inference"]["telemetry"][
+            "payload"
+        ]
+        assert telemetry["topos.runtime_route.score"] == pytest.approx(route["score"])
+        assert telemetry[
+            f"topos.runtime_route.scores.{route['score_key']}"
+        ] == pytest.approx(route["score"])
+
+    comparison = result["comparison"]
+    assert comparison["kind"] == "spiraltorch.api_llm_trace_comparison"
+    assert comparison["count"] == 2
+    assert comparison["topos_context"]["observed_run_rate"] == pytest.approx(1.0)
 
 
 def test_compare_api_llm_matrix_reports_tracks_stable_profile_winners(tmp_path) -> None:

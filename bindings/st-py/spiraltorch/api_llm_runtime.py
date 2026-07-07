@@ -47,6 +47,7 @@ __all__ = [
     "make_openai_responses_invoke",
     "run_api_llm_prompt_suite",
     "run_api_llm_prompt_suite_matrix",
+    "run_api_llm_topos_sweep",
     "summarize_api_llm_trace_events",
     "topos_runtime_adapter",
     "topos_runtime_request",
@@ -59,6 +60,57 @@ _OPENAI_INSTALL_HINT = "pip install openai"
 _ANTHROPIC_INSTALL_HINT = "pip install anthropic"
 _API_LLM_TRACE_SCHEMA = "spiraltorch.api_llm_trace.v1"
 _SELECTION_PROFILES = ("balanced", "quality", "grounded", "efficiency", "latency")
+_TOPOS_SWEEP_SIGNAL_KEYS = frozenset(
+    {
+        "curvature",
+        "tolerance",
+        "saturation",
+        "max_depth",
+        "max_volume",
+        "porosity",
+        "observed_depth",
+        "visited_volume",
+    }
+)
+_TOPOS_SWEEP_REQUEST_KEYS = frozenset(
+    {
+        "gain",
+        "base_temperature",
+        "base_top_p",
+        "min_temperature",
+        "max_temperature",
+        "min_top_p",
+        "max_top_p",
+        "include_temperature",
+        "include_top_p",
+        "include_penalties",
+        "base_frequency_penalty",
+        "base_presence_penalty",
+    }
+)
+_TOPOS_SWEEP_ADAPTER_KEYS = frozenset(
+    {
+        "bundle_weight",
+        "training_gain",
+        "origin",
+        "telemetry_prefix",
+        "gradient_dim",
+    }
+)
+_TOPOS_SWEEP_SPEC_OPTION_KEYS = frozenset(
+    {
+        "topos",
+        "signal_options",
+        "request_options",
+        "adapter_options",
+    }
+)
+_TOPOS_SWEEP_RESERVED_KEYS = (
+    _TOPOS_SWEEP_SIGNAL_KEYS
+    | _TOPOS_SWEEP_REQUEST_KEYS
+    | _TOPOS_SWEEP_ADAPTER_KEYS
+    | _TOPOS_SWEEP_SPEC_OPTION_KEYS
+)
 _REPORT_ROUTE_METRICS = (
     "route_score",
     "quality_score",
@@ -303,6 +355,153 @@ def topos_runtime_adapter(
             "telemetry": telemetry,
         },
     }
+
+
+def _is_topos_runtime_adapter(value: Any) -> bool:
+    return (
+        isinstance(value, Mapping)
+        and value.get("kind") == "spiraltorch.topos_runtime_adapter"
+    )
+
+
+def _is_single_topos_sweep_spec(value: Any) -> bool:
+    if not isinstance(value, Mapping):
+        return False
+    if _is_topos_runtime_adapter(value):
+        return True
+    if any(key in value for key in _TOPOS_SWEEP_SPEC_OPTION_KEYS):
+        return True
+    return any(key in value for key in _TOPOS_SWEEP_SIGNAL_KEYS)
+
+
+def _topos_sweep_entries(
+    topos_profiles: Any,
+    *,
+    labels: Sequence[str] | None = None,
+) -> list[tuple[str, Any]]:
+    if topos_profiles is None:
+        raise ValueError("topos_profiles must contain at least one profile")
+
+    label_list = [str(label) for label in labels] if labels is not None else None
+    if isinstance(topos_profiles, Mapping) and not _is_single_topos_sweep_spec(
+        topos_profiles
+    ):
+        raw_entries = [(str(label), spec) for label, spec in topos_profiles.items()]
+    elif isinstance(topos_profiles, (str, bytes, bytearray)):
+        raise TypeError("topos_profiles must be mappings or sequences, not text")
+    else:
+        try:
+            iterator = iter(topos_profiles)
+        except TypeError:
+            raw_entries = [("topos", topos_profiles)]
+        else:
+            if _is_single_topos_sweep_spec(topos_profiles):
+                raw_entries = [("topos", topos_profiles)]
+            else:
+                raw_entries = [
+                    (
+                        label_list[index]
+                        if label_list is not None and index < len(label_list)
+                        else f"topos-{index}",
+                        spec,
+                    )
+                    for index, spec in enumerate(iterator)
+                ]
+
+    if label_list is not None and not (
+        isinstance(topos_profiles, Mapping)
+        and not _is_single_topos_sweep_spec(topos_profiles)
+    ):
+        raw_entries = [
+            (
+                label_list[index] if index < len(label_list) else label,
+                spec,
+            )
+            for index, (label, spec) in enumerate(raw_entries)
+        ]
+    if not raw_entries:
+        raise ValueError("topos_profiles must contain at least one profile")
+    return raw_entries
+
+
+def _merge_mapping_option(
+    target: dict[str, Any],
+    value: Any,
+    *,
+    label: str,
+) -> None:
+    if value is None:
+        return
+    if not isinstance(value, Mapping):
+        raise TypeError(f"{label} must be a mapping")
+    target.update(dict(value))
+
+
+def _topos_adapter_from_sweep_spec(
+    spec: Any,
+    *,
+    label: str,
+    request_options: Mapping[str, Any] | None,
+    signal_options: Mapping[str, Any] | None,
+    adapter_options: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    if _is_topos_runtime_adapter(spec):
+        return dict(spec)
+
+    profile_request = dict(request_options or {})
+    profile_signal = dict(signal_options or {})
+    profile_adapter = dict(adapter_options or {})
+    topos = spec
+
+    if isinstance(spec, Mapping):
+        payload = dict(spec)
+        if _is_single_topos_sweep_spec(payload):
+            topos = payload.get("topos", None)
+            if "topos" not in payload:
+                topos = {
+                    key: value
+                    for key, value in payload.items()
+                    if key not in _TOPOS_SWEEP_RESERVED_KEYS
+                }
+                if not topos:
+                    topos = None
+            _merge_mapping_option(
+                profile_signal,
+                payload.get("signal_options"),
+                label="signal_options",
+            )
+            _merge_mapping_option(
+                profile_request,
+                payload.get("request_options"),
+                label="request_options",
+            )
+            _merge_mapping_option(
+                profile_adapter,
+                payload.get("adapter_options"),
+                label="adapter_options",
+            )
+            for key in _TOPOS_SWEEP_SIGNAL_KEYS:
+                if key in payload:
+                    profile_signal[key] = payload[key]
+            for key in _TOPOS_SWEEP_REQUEST_KEYS:
+                if key in payload:
+                    profile_request[key] = payload[key]
+            for key in _TOPOS_SWEEP_ADAPTER_KEYS:
+                if key in payload:
+                    profile_adapter[key] = payload[key]
+        else:
+            topos = payload
+
+    adapter_request = dict(profile_request)
+    inline_request = profile_adapter.pop("request_options", None)
+    _merge_mapping_option(
+        adapter_request,
+        inline_request,
+        label="adapter_options.request_options",
+    )
+    profile_adapter.setdefault("origin", f"topos:sweep:{label}")
+    profile_adapter["request_options"] = adapter_request
+    return topos_runtime_adapter(topos, **profile_adapter, **profile_signal)
 
 
 def _content_text(content: Any) -> str:
@@ -3837,6 +4036,117 @@ def run_api_llm_prompt_suite_matrix(
         "labels": list(suites.keys()),
         "jsonl_dir": str(out_dir) if out_dir is not None else None,
         "trace_paths": trace_paths,
+        "suites": suites,
+        "comparison": comparison,
+    }
+
+
+def run_api_llm_topos_sweep(
+    prompts: Iterable[str],
+    invoke: Callable[..., Any],
+    *args: Any,
+    z_state: Sequence[float],
+    topos_profiles: Any,
+    backend: str | None = "auto",
+    provider: str | None = None,
+    model: str | None = None,
+    session: Any | None = None,
+    session_factory: Callable[..., Any] | None = None,
+    create_session: bool = True,
+    alpha: float = 0.35,
+    smoothing: float = 0.35,
+    strategy: str = "mean",
+    jsonl_dir: str | Path | None = None,
+    context_partials: Any = None,
+    context_prompt: bool = False,
+    context_prompt_options: Mapping[str, Any] | None = None,
+    request_options: Mapping[str, Any] | None = None,
+    signal_options: Mapping[str, Any] | None = None,
+    adapter_options: Mapping[str, Any] | None = None,
+    request_kwargs: Mapping[str, Mapping[str, Any]] | None = None,
+    labels: Sequence[str] | None = None,
+    near_best_tolerance: float = 0.02,
+    clear: bool = True,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Run one API-model prompt suite through multiple topological adapters.
+
+    ``topos_profiles`` may be a label-to-profile mapping, a sequence of profile
+    mappings, an already-built ``topos_runtime_adapter`` payload, or raw topos
+    parameters.  Each profile gets its own fresh runtime so trace comparisons
+    reflect the adapter's request/context differences rather than accumulated
+    state from another route.
+    """
+
+    prompt_list = list(prompts)
+    entries = _topos_sweep_entries(topos_profiles, labels=labels)
+    request_kwargs_map = dict(request_kwargs or {})
+    out_dir = Path(jsonl_dir) if jsonl_dir is not None else None
+    if out_dir is not None:
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+    adapters: dict[str, dict[str, Any]] = {}
+    suites: dict[str, dict[str, Any]] = {}
+    trace_paths: dict[str, str] = {}
+
+    for index, (label, spec) in enumerate(entries):
+        label_value = str(label)
+        adapter = _topos_adapter_from_sweep_spec(
+            spec,
+            label=label_value,
+            request_options=request_options,
+            signal_options=signal_options,
+            adapter_options=adapter_options,
+        )
+        adapters[label_value] = adapter
+
+        jsonl_out: Path | None = None
+        if out_dir is not None:
+            safe_label = _safe_trace_label(label_value, fallback=f"topos-{index}")
+            jsonl_out = out_dir / f"{index:02d}-{safe_label}.jsonl"
+
+        route_kwargs = dict(kwargs)
+        route_kwargs.update(dict(request_kwargs_map.get(label_value, {})))
+        suite = run_api_llm_prompt_suite(
+            prompt_list,
+            invoke,
+            *args,
+            z_state=z_state,
+            backend=backend,
+            provider=provider,
+            model=model,
+            session=session,
+            session_factory=session_factory,
+            create_session=create_session,
+            alpha=alpha,
+            smoothing=smoothing,
+            strategy=strategy,
+            jsonl_out=jsonl_out,
+            context_partials=context_partials,
+            runtime_adapter=adapter,
+            context_prompt=context_prompt,
+            context_prompt_options=context_prompt_options,
+            clear=clear,
+            **route_kwargs,
+        )
+        suites[label_value] = suite
+        path = suite.get("jsonl")
+        if isinstance(path, str):
+            trace_paths[label_value] = path
+
+    comparison = (
+        compare_api_llm_trace_runs(trace_paths, near_best_tolerance=near_best_tolerance)
+        if trace_paths
+        else None
+    )
+    return {
+        "kind": "spiraltorch.api_llm_topos_sweep",
+        "count": len(suites),
+        "prompt_count": len(prompt_list),
+        "labels": list(suites.keys()),
+        "jsonl_dir": str(out_dir) if out_dir is not None else None,
+        "trace_paths": trace_paths,
+        "adapters": adapters,
         "suites": suites,
         "comparison": comparison,
     }

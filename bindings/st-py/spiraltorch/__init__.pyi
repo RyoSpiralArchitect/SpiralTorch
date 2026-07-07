@@ -2616,6 +2616,36 @@ def run_api_llm_prompt_suite_matrix(
 ) -> Dict[str, Any]: ...
 
 
+def run_api_llm_topos_sweep(
+    prompts: Iterable[str],
+    invoke: Callable[..., Any],
+    *args: Any,
+    z_state: Sequence[float],
+    topos_profiles: Any,
+    backend: str | None = ...,
+    provider: str | None = ...,
+    model: str | None = ...,
+    session: Any | None = ...,
+    session_factory: Callable[..., Any] | None = ...,
+    create_session: bool = ...,
+    alpha: float = ...,
+    smoothing: float = ...,
+    strategy: str = ...,
+    jsonl_dir: str | PathLike[str] | None = ...,
+    context_partials: Any = ...,
+    context_prompt: bool = ...,
+    context_prompt_options: Mapping[str, Any] | None = ...,
+    request_options: Mapping[str, Any] | None = ...,
+    signal_options: Mapping[str, Any] | None = ...,
+    adapter_options: Mapping[str, Any] | None = ...,
+    request_kwargs: Mapping[str, Mapping[str, Any]] | None = ...,
+    labels: Sequence[str] | None = ...,
+    near_best_tolerance: float = ...,
+    clear: bool = ...,
+    **kwargs: Any,
+) -> Dict[str, Any]: ...
+
+
 def make_openai_responses_invoke(
     *,
     client: Any | None = ...,
@@ -7952,6 +7982,7 @@ __all__ = [
     "make_openai_responses_invoke",
     "run_api_llm_prompt_suite",
     "run_api_llm_prompt_suite_matrix",
+    "run_api_llm_topos_sweep",
     "summarize_api_llm_trace_events",
     "topos_runtime_adapter",
     "topos_runtime_request",

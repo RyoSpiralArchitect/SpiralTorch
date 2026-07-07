@@ -798,6 +798,40 @@ trainer.step(st.z.metrics(speed=0.0, memory=0.0, stability=0.0, telemetry={"topo
 print(training["gradient_bias_scale"], runtime["request"]["temperature"])
 ```
 
+For hosted-model experiments, sweep several topological postures through the
+same prompt/provider and compare the traces:
+
+```python
+import spiraltorch as st
+
+
+def invoke_api_model(prompt: str, **request):
+    route = "guarded" if "topos:sweep:guarded" in prompt else "open"
+    return {
+        "model": "demo-topos-model",
+        "output_text": f"{route} route temperature={request['temperature']:.2f}",
+        "status": "completed",
+        "usage": {"prompt_tokens": 8, "completion_tokens": 6, "total_tokens": 14},
+    }
+
+
+result = st.run_api_llm_topos_sweep(
+    ["Explain this route in one paragraph."],
+    invoke_api_model,
+    z_state=[0.2, -0.1, 0.4, 0.05],
+    topos_profiles={
+        "open": {"porosity": 0.7, "max_depth": 10, "max_volume": 100},
+        "guarded": {"porosity": 0.02, "observed_depth": 9, "max_depth": 10},
+    },
+    request_options={"base_temperature": 0.8, "include_penalties": True},
+    context_prompt=True,
+    create_session=False,
+    jsonl_dir="/tmp/spiraltorch-topos-sweep",
+)
+
+print(result["labels"], result["comparison"]["topos_context"]["observed_run_rate"])
+```
+
 ### 6) Zero-copy tensor exchange via DLPack
 
 ```python
