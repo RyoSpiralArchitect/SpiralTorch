@@ -44,6 +44,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--out", type=Path, default=None)
     parser.add_argument("--lines-out", type=Path, default=None)
     parser.add_argument("--jsonl-out", type=Path, default=None)
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Write requested status artifacts without printing per-cycle path notices.",
+    )
     parser.add_argument("--watch-interval-seconds", type=float, default=None)
     parser.add_argument("--watch-count", type=int, default=None)
     parser.add_argument("--watch-stop-on-final", action="store_true")
@@ -401,16 +406,19 @@ def _emit_status(args: argparse.Namespace, status: dict[str, Any]) -> None:
     if args.out is not None:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(payload, encoding="utf-8")
-        print(f"hf_gpt2_ft_run_status_json {args.out}")
+        if not args.quiet:
+            print(f"hf_gpt2_ft_run_status_json {args.out}")
     if args.lines_out is not None:
         args.lines_out.parent.mkdir(parents=True, exist_ok=True)
         args.lines_out.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        print(f"hf_gpt2_ft_run_status_lines {args.lines_out}")
+        if not args.quiet:
+            print(f"hf_gpt2_ft_run_status_lines {args.lines_out}")
     if args.jsonl_out is not None:
         args.jsonl_out.parent.mkdir(parents=True, exist_ok=True)
         with args.jsonl_out.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(status, ensure_ascii=False, sort_keys=True) + "\n")
-        print(f"hf_gpt2_ft_run_status_jsonl {args.jsonl_out}")
+        if not args.quiet:
+            print(f"hf_gpt2_ft_run_status_jsonl {args.jsonl_out}")
     if args.out is None and args.lines_out is None and args.jsonl_out is None:
         print("\n".join(lines))
 
@@ -440,7 +448,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     count = 0
     while True:
-        if count:
+        if count and not args.quiet:
             print()
         status = summarize_run(args)
         _emit_status(args, status)

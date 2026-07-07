@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import math
 import os
@@ -8,6 +9,7 @@ import sys
 import tempfile
 import types
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
 
@@ -3810,6 +3812,68 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             ]
             self.assertEqual(module.main(watch_argv), 0)
             watch_written = json.loads(watch_path.read_text(encoding="utf-8"))
+            quiet_path = run_dir / "quiet-status.json"
+            quiet_lines_path = run_dir / "quiet-status.txt"
+            quiet_jsonl_path = run_dir / "quiet-status.jsonl"
+            quiet_argv = [
+                str(run_dir),
+                "--max-steps",
+                "40",
+                "--eval-steps",
+                "10",
+                "--checkpoint-card",
+                str(checkpoint_card),
+                "--tail-evals",
+                "1",
+                "--out",
+                str(quiet_path),
+                "--lines-out",
+                str(quiet_lines_path),
+                "--jsonl-out",
+                str(quiet_jsonl_path),
+                "--quiet",
+            ]
+            quiet_stdout = io.StringIO()
+            with redirect_stdout(quiet_stdout):
+                self.assertEqual(module.main(quiet_argv), 0)
+            quiet_written = json.loads(quiet_path.read_text(encoding="utf-8"))
+            quiet_written_lines = quiet_lines_path.read_text(
+                encoding="utf-8"
+            ).splitlines()
+            quiet_written_jsonl = [
+                json.loads(line)
+                for line in quiet_jsonl_path.read_text(encoding="utf-8").splitlines()
+            ]
+            quiet_watch_path = run_dir / "quiet-watch-status.json"
+            quiet_watch_jsonl_path = run_dir / "quiet-watch-status.jsonl"
+            quiet_watch_argv = [
+                str(run_dir),
+                "--max-steps",
+                "40",
+                "--eval-steps",
+                "10",
+                "--watch-interval-seconds",
+                "0.01",
+                "--watch-count",
+                "2",
+                "--out",
+                str(quiet_watch_path),
+                "--jsonl-out",
+                str(quiet_watch_jsonl_path),
+                "--quiet",
+            ]
+            quiet_watch_stdout = io.StringIO()
+            with redirect_stdout(quiet_watch_stdout):
+                self.assertEqual(module.main(quiet_watch_argv), 0)
+            quiet_watch_written = json.loads(
+                quiet_watch_path.read_text(encoding="utf-8")
+            )
+            quiet_watch_jsonl = [
+                json.loads(line)
+                for line in quiet_watch_jsonl_path.read_text(
+                    encoding="utf-8"
+                ).splitlines()
+            ]
             watch_final_path = run_dir / "watch-final-status.json"
             watch_final_argv = [
                 str(run_dir),
@@ -3892,6 +3956,17 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(watch_written["process_status"], "alive")
         self.assertEqual(watch_written["log_progress"]["log_latest_step"], 24)
         self.assertEqual(watch_written["eval_progress"]["next_eval_step"], 30)
+        self.assertEqual(quiet_stdout.getvalue(), "")
+        self.assertEqual(quiet_written["process_status"], "alive")
+        self.assertEqual(
+            quiet_written_lines,
+            module.status_lines(quiet_written, tail_evals=1),
+        )
+        self.assertEqual(len(quiet_written_jsonl), 1)
+        self.assertEqual(quiet_written_jsonl[0]["process_status"], "alive")
+        self.assertEqual(quiet_watch_stdout.getvalue(), "")
+        self.assertEqual(quiet_watch_written["process_status"], "alive")
+        self.assertEqual(len(quiet_watch_jsonl), 2)
         self.assertTrue(watch_final_written["final_checkpoint_ready"])
         self.assertEqual(
             watch_eval_written["trace"]["trace_eval_loss_points"][-1]["step"], 10
