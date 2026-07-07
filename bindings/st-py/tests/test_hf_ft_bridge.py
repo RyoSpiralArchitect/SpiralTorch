@@ -392,6 +392,154 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(error_report["status"], "error")
         self.assertEqual(error_report["generated_text_sha256"], None)
 
+    def test_generation_curve_report_joins_eval_trace_and_control_sweeps(self) -> None:
+        def sweep_report(
+            *,
+            model_name: str,
+            prompt: str,
+            baseline_loop: float,
+            controlled_loop: float,
+            top_changes: int,
+        ) -> dict[str, object]:
+            baseline = {
+                "name": "baseline-greedy",
+                "kind": "baseline",
+                "status": "ok",
+                "config": {},
+                "generation": hf_ft.hf_gpt2_finetune_generation_report(
+                    stage="baseline",
+                    prompt=prompt,
+                    generated_text=f"{prompt} loop loop loop",
+                    generated_continuation_text=" loop loop loop",
+                ),
+                "repetition": {
+                    "loop_score": baseline_loop,
+                    "unique_word_ratio": 0.25,
+                },
+            }
+            controlled = {
+                "name": "zt3-rs1p25-lr0-k64",
+                "kind": "zspace_repression_softmax",
+                "status": "ok",
+                "config": {
+                    "top_k": 64,
+                    "curvature": -0.04,
+                    "temperature": 1.0,
+                    "entropy_target": 3.0,
+                    "entropy_tolerance": 1.0e-4,
+                    "entropy_gain": 0.5,
+                    "min_temperature": 0.7,
+                    "max_temperature": 2.4,
+                    "repression_window": 16,
+                    "repression_strength": 1.25,
+                    "last_token_repression": 0.0,
+                    "ngram_size": 3,
+                    "ngram_window": 96,
+                    "ngram_repression_strength": 0.75,
+                    "ngram_decay": 0.9,
+                    "mask_non_top_k": True,
+                    "use_native_zspace": True,
+                },
+                "generation": hf_ft.hf_gpt2_finetune_generation_report(
+                    stage="controlled",
+                    prompt=prompt,
+                    generated_text=f"{prompt} clean geometry {model_name}",
+                    generated_continuation_text=f" clean geometry {model_name}",
+                    generation_control={
+                        "status": "ok",
+                        "calls": 4,
+                        "backend": "spiraltorch_zspace_softmax",
+                        "top_token_changed_count": top_changes,
+                    },
+                ),
+                "repetition": {
+                    "loop_score": controlled_loop,
+                    "unique_word_ratio": 0.75,
+                },
+            }
+            return {
+                "row_type": "hf_gpt2_zspace_generation_control_sweep",
+                "status": "complete",
+                "dry_run": False,
+                "model_name": model_name,
+                "prompt": prompt,
+                "run_count": 2,
+                "runs": [baseline, controlled],
+            }
+
+        card = {
+            "row_type": "hf_gpt2_finetune_run_card",
+            "model_name": "gpt2",
+            "output_dir": "runs/latest-ft",
+            "dataset_name": "Salesforce/wikitext",
+            "dataset_config": "wikitext-103-raw-v1",
+            "trainer_trace_summary": {
+                "trace_eval_loss_series": "0=4.0,384=3.2,512=3.1",
+                "trace_eval_loss_points": [
+                    {"step": 0, "eval_loss": 4.0},
+                    {"step": 384, "eval_loss": 3.2},
+                    {"step": 512, "eval_loss": 3.1},
+                ],
+            },
+        }
+        sweeps = {
+            "base": sweep_report(
+                model_name="gpt2",
+                prompt="SpiralTorch is",
+                baseline_loop=9.0,
+                controlled_loop=5.0,
+                top_changes=3,
+            ),
+            "ckpt384": sweep_report(
+                model_name="runs/latest-ft/checkpoint-384",
+                prompt="SpiralTorch is",
+                baseline_loop=80.0,
+                controlled_loop=4.0,
+                top_changes=11,
+            ),
+            "final": sweep_report(
+                model_name="runs/latest-ft",
+                prompt="SpiralTorch is",
+                baseline_loop=90.0,
+                controlled_loop=2.0,
+                top_changes=14,
+            ),
+        }
+
+        report = hf_ft.hf_gpt2_finetune_generation_curve_report(
+            card,
+            sweeps,
+            top_n=3,
+        )
+        lines = hf_ft.hf_gpt2_finetune_generation_curve_lines(report, top_n=2)
+        direct_lines = hf_ft.hf_gpt2_finetune_generation_curve_lines(
+            card,
+            sweeps,
+            top_n=1,
+        )
+
+        self.assertEqual(report["row_type"], "hf_gpt2_finetune_generation_curve")
+        self.assertEqual(report["curve_model_count"], 3)
+        self.assertEqual(report["recommended_model_name"], "runs/latest-ft")
+        self.assertEqual(report["recommended_step"], 512)
+        rows = {str(row["model_name"]): row for row in report["curve_rows"]}
+        self.assertEqual(rows["gpt2"]["step"], 0)
+        self.assertEqual(rows["gpt2"]["eval_loss"], 4.0)
+        self.assertEqual(rows["runs/latest-ft/checkpoint-384"]["step"], 384)
+        self.assertEqual(
+            rows["runs/latest-ft/checkpoint-384"]["eval_loss"],
+            3.2,
+        )
+        self.assertTrue(rows["runs/latest-ft/checkpoint-384"]["is_checkpoint"])
+        self.assertEqual(rows["runs/latest-ft"]["step"], 512)
+        self.assertEqual(rows["runs/latest-ft"]["eval_loss"], 3.1)
+        self.assertTrue(rows["runs/latest-ft"]["is_final_output"])
+        self.assertIn("eval_loss_series=0=4.0,384=3.2,512=3.1", lines[0])
+        self.assertIn("recommend=runs/latest-ft", lines[0])
+        self.assertIn("model=runs/latest-ft/checkpoint-384", " ".join(lines))
+        self.assertIn("zspace_generation_control_compare", " ".join(lines))
+        self.assertIn("hf_gpt2_ft_generation_curve", direct_lines[0])
+
     def test_inference_distortion_handoff_report_flattens_recommendation(self) -> None:
         sweep_report = {
             "row_type": "zspace_inference_distortion_sweep",
@@ -3215,6 +3363,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("hf_gpt2_finetune_corpus_scan_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_dataset_fit_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_eval_report", st.__all__)
+        self.assertIn("hf_gpt2_finetune_generation_curve_lines", st.__all__)
+        self.assertIn("hf_gpt2_finetune_generation_curve_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_generation_report", st.__all__)
         self.assertIn(
             "hf_gpt2_finetune_inference_distortion_handoff_report",
@@ -3243,6 +3393,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIs(
             st.hf_gpt2_finetune_generation_report,
             hf_ft.hf_gpt2_finetune_generation_report,
+        )
+        self.assertIs(
+            st.hf_gpt2_finetune_generation_curve_report,
+            hf_ft.hf_gpt2_finetune_generation_curve_report,
+        )
+        self.assertIs(
+            st.hf_gpt2_finetune_generation_curve_lines,
+            hf_ft.hf_gpt2_finetune_generation_curve_lines,
         )
         self.assertIs(
             st.hf_gpt2_finetune_inference_distortion_handoff_report,

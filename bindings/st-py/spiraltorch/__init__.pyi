@@ -311,6 +311,24 @@ def hf_gpt2_finetune_generation_report(
     error: object = ...,
 ) -> Dict[str, object]: ...
 
+def hf_gpt2_finetune_generation_curve_report(
+    card_or_path: str | PathLike[str] | Mapping[str, object],
+    sweeps_or_paths: Mapping[str, object] | Sequence[object],
+    *,
+    labels: Sequence[str] | None = ...,
+    step_by_model: Mapping[str, object] | None = ...,
+    top_n: int = ...,
+) -> Dict[str, object]: ...
+
+def hf_gpt2_finetune_generation_curve_lines(
+    report_or_card: str | PathLike[str] | Mapping[str, object],
+    sweeps_or_paths: Mapping[str, object] | Sequence[object] | None = ...,
+    *,
+    labels: Sequence[str] | None = ...,
+    step_by_model: Mapping[str, object] | None = ...,
+    top_n: int = ...,
+) -> List[str]: ...
+
 def hf_gpt2_finetune_inference_distortion_handoff_report(
     report_or_path: str | PathLike[str] | Mapping[str, object],
     *,
@@ -8461,6 +8479,8 @@ __all__ = [
     "hf_gpt2_finetune_corpus_scan_report",
     "hf_gpt2_finetune_dataset_fit_report",
     "hf_gpt2_finetune_eval_report",
+    "hf_gpt2_finetune_generation_curve_lines",
+    "hf_gpt2_finetune_generation_curve_report",
     "hf_gpt2_finetune_generation_report",
     "hf_gpt2_finetune_inference_distortion_handoff_report",
     "hf_gpt2_finetune_inference_distortion_handoff_lines",

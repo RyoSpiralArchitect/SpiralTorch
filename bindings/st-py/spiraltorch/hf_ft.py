@@ -30,6 +30,8 @@ __all__ = [
     "hf_gpt2_finetune_corpus_scan_report",
     "hf_gpt2_finetune_dataset_fit_report",
     "hf_gpt2_finetune_eval_report",
+    "hf_gpt2_finetune_generation_curve_lines",
+    "hf_gpt2_finetune_generation_curve_report",
     "hf_gpt2_finetune_generation_report",
     "hf_gpt2_finetune_inference_distortion_handoff_report",
     "hf_gpt2_finetune_inference_distortion_handoff_lines",
@@ -3716,6 +3718,349 @@ def summarize_hf_gpt2_finetune_sweep_report_lines(
             f"changed={row.get('generation_continuation_changed')} "
             f"zcontrol_changed={row.get('generation_after_control_top_token_changed_count')} "
             f"zcontrol_backend={row.get('generation_after_control_backend')}"
+        )
+    return lines
+
+
+def _curve_step_value(value: object) -> int | float | None:
+    number = _safe_number(value)
+    if number is None:
+        return None
+    finite = float(number)
+    if not math.isfinite(finite):
+        return None
+    return int(finite) if finite.is_integer() else finite
+
+
+def _curve_eval_loss_points(
+    trace_summary: Mapping[str, object],
+) -> list[dict[str, object]]:
+    raw_points = trace_summary.get("trace_eval_loss_points")
+    if not isinstance(raw_points, Sequence) or isinstance(
+        raw_points,
+        (str, bytes, bytearray),
+    ):
+        return []
+    points: list[dict[str, object]] = []
+    for raw_point in raw_points:
+        if not isinstance(raw_point, Mapping):
+            continue
+        step = _curve_step_value(raw_point.get("step"))
+        loss = _safe_number(raw_point.get("eval_loss"))
+        if step is None or loss is None:
+            continue
+        points.append(
+            {
+                "step": step,
+                "eval_loss": float(loss),
+                "eval_runtime": _safe_number(raw_point.get("eval_runtime")),
+                "time_unix_s": _safe_number(raw_point.get("time_unix_s")),
+            }
+        )
+    return sorted(points, key=lambda point: float(point["step"]))
+
+
+def _curve_eval_loss_by_step(
+    points: Sequence[Mapping[str, object]],
+) -> dict[int | float, float]:
+    losses: dict[int | float, float] = {}
+    for point in points:
+        step = _curve_step_value(point.get("step"))
+        loss = _safe_number(point.get("eval_loss"))
+        if step is not None and loss is not None:
+            losses[step] = float(loss)
+    return losses
+
+
+def _curve_path_text(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    return Path(text).as_posix().rstrip("/")
+
+
+def _curve_pathish_equal(left: object, right: object) -> bool:
+    left_text = _curve_path_text(left)
+    right_text = _curve_path_text(right)
+    if not left_text or not right_text:
+        return False
+    return (
+        left_text == right_text
+        or left_text.endswith(f"/{right_text}")
+        or right_text.endswith(f"/{left_text}")
+    )
+
+
+def _curve_run_dir_candidates(
+    card: Mapping[str, object],
+    source_path: str | None,
+) -> list[str]:
+    candidates: list[str] = []
+    for key in ("output_dir", "run_dir", "scale_up_candidate_output_dir"):
+        text = _curve_path_text(card.get(key))
+        if text:
+            candidates.append(text)
+    trace_path = _curve_path_text(card.get("trainer_trace_jsonl"))
+    if trace_path:
+        candidates.append(Path(trace_path).parent.as_posix())
+    if source_path:
+        candidates.append(Path(source_path).parent.as_posix())
+    unique: list[str] = []
+    for candidate in candidates:
+        if candidate not in unique:
+            unique.append(candidate)
+    return unique
+
+
+def _curve_checkpoint_step(model_name: object) -> int | None:
+    text = _curve_path_text(model_name)
+    if not text:
+        return None
+    for segment in reversed(text.split("/")):
+        if not segment.startswith("checkpoint-"):
+            continue
+        raw_step = segment[len("checkpoint-") :]
+        if raw_step.isdigit():
+            return int(raw_step)
+    return None
+
+
+def _curve_explicit_step(
+    model_name: object,
+    step_by_model: Mapping[str, object] | None,
+) -> int | float | None:
+    if not step_by_model:
+        return None
+    name = str(model_name)
+    basename = Path(name).name
+    for key, value in step_by_model.items():
+        key_text = str(key)
+        if key_text == name or key_text == basename:
+            return _curve_step_value(value)
+    return None
+
+
+def _curve_model_step(
+    model_name: object,
+    *,
+    card: Mapping[str, object],
+    source_path: str | None,
+    step_by_model: Mapping[str, object] | None,
+    eval_loss_by_step: Mapping[int | float, float],
+) -> int | float | None:
+    explicit = _curve_explicit_step(model_name, step_by_model)
+    if explicit is not None:
+        return explicit
+    checkpoint_step = _curve_checkpoint_step(model_name)
+    if checkpoint_step is not None:
+        return checkpoint_step
+    base_model = card.get("model_name")
+    if base_model is not None and str(model_name) == str(base_model):
+        return 0 if 0 in eval_loss_by_step else None
+    max_step = max(eval_loss_by_step, key=float, default=None)
+    if max_step is None:
+        return None
+    for run_dir in _curve_run_dir_candidates(card, source_path):
+        if _curve_pathish_equal(model_name, run_dir):
+            return max_step
+    return None
+
+
+def _curve_best_row(
+    rows: Sequence[Mapping[str, object]],
+) -> dict[str, object] | None:
+    if not rows:
+        return None
+
+    def sort_key(row: Mapping[str, object]) -> tuple[float, float, float, str]:
+        best_loop = _safe_number(row.get("mean_best_loop_score"))
+        reduction = _safe_number(row.get("mean_loop_score_reduction_ratio"))
+        eval_loss = _safe_number(row.get("eval_loss"))
+        return (
+            math.inf if best_loop is None else float(best_loop),
+            math.inf if reduction is None else -float(reduction),
+            math.inf if eval_loss is None else float(eval_loss),
+            str(row.get("model_name") or ""),
+        )
+
+    return dict(min(rows, key=sort_key))
+
+
+def hf_gpt2_finetune_generation_curve_report(
+    card_or_path: str | Path | Mapping[str, object],
+    sweeps_or_paths: Mapping[str, object] | Sequence[object],
+    *,
+    labels: Sequence[str] | None = None,
+    step_by_model: Mapping[str, object] | None = None,
+    top_n: int = 5,
+) -> dict[str, object]:
+    """Join FT eval-loss trace points with generation-control sweep summaries."""
+
+    if top_n < 0:
+        raise ValueError("top_n must be non-negative")
+    from .hf_generation import compare_zspace_generation_control_sweeps
+
+    card, source_path = _run_card_payload(card_or_path)
+    trace_summary = _trainer_trace_summary_for_card(card)
+    eval_points = _curve_eval_loss_points(trace_summary)
+    eval_by_step = _curve_eval_loss_by_step(eval_points)
+    comparison = compare_zspace_generation_control_sweeps(
+        sweeps_or_paths,
+        labels=labels,
+        top_n=top_n,
+    )
+    rows: list[dict[str, object]] = []
+    for model_row in comparison.get("model_rows", []):
+        if not isinstance(model_row, Mapping):
+            continue
+        model_name = str(model_row.get("model_name") or "unknown")
+        step = _curve_model_step(
+            model_name,
+            card=card,
+            source_path=source_path,
+            step_by_model=step_by_model,
+            eval_loss_by_step=eval_by_step,
+        )
+        eval_loss = eval_by_step.get(step) if step is not None else None
+        rows.append(
+            {
+                "model_name": model_name,
+                "step": step,
+                "eval_loss": eval_loss,
+                "eval_loss_source": (
+                    None if step is None or eval_loss is None else f"trace_step_{step}"
+                ),
+                "is_checkpoint": _curve_checkpoint_step(model_name) is not None,
+                "is_final_output": any(
+                    _curve_pathish_equal(model_name, run_dir)
+                    for run_dir in _curve_run_dir_candidates(card, source_path)
+                ),
+                "sweep_count": model_row.get("sweep_count"),
+                "prompt_count": model_row.get("prompt_count"),
+                "zspace_helped_count": model_row.get("zspace_helped_count"),
+                "mean_baseline_loop_score": model_row.get(
+                    "mean_baseline_loop_score"
+                ),
+                "mean_best_loop_score": model_row.get("mean_best_loop_score"),
+                "mean_loop_score_delta_from_baseline": model_row.get(
+                    "mean_loop_score_delta_from_baseline"
+                ),
+                "mean_loop_score_reduction_ratio": model_row.get(
+                    "mean_loop_score_reduction_ratio"
+                ),
+                "max_top_token_changed_count": model_row.get(
+                    "max_top_token_changed_count"
+                ),
+            }
+        )
+    rows = sorted(
+        rows,
+        key=lambda row: (
+            math.inf if row.get("step") is None else float(row["step"]),
+            str(row.get("model_name") or ""),
+        ),
+    )
+    best_row = _curve_best_row(rows)
+    return {
+        "row_type": "hf_gpt2_finetune_generation_curve",
+        "status": "complete",
+        "run_card_path": source_path,
+        "model_name": card.get("model_name"),
+        "dataset_name": card.get("dataset_name"),
+        "dataset_config": card.get("dataset_config"),
+        "eval_loss_series": trace_summary.get("trace_eval_loss_series"),
+        "eval_loss_points": eval_points,
+        "comparison": comparison,
+        "curve_rows": rows,
+        "curve_model_count": len(rows),
+        "sweep_count": comparison.get("sweep_count"),
+        "completed_sweep_count": comparison.get("completed_sweep_count"),
+        "prompt_count": comparison.get("prompt_count"),
+        "recommended_model_name": (
+            None if best_row is None else best_row.get("model_name")
+        ),
+        "recommended_step": None if best_row is None else best_row.get("step"),
+        "recommended_eval_loss": (
+            None if best_row is None else best_row.get("eval_loss")
+        ),
+        "recommended_mean_best_loop_score": (
+            None if best_row is None else best_row.get("mean_best_loop_score")
+        ),
+        "recommended_reason": (
+            None
+            if best_row is None
+            else "lowest_mean_best_loop_highest_reduction_eval_loss_tiebreak"
+        ),
+    }
+
+
+def hf_gpt2_finetune_generation_curve_lines(
+    report_or_card: str | Path | Mapping[str, object],
+    sweeps_or_paths: Mapping[str, object] | Sequence[object] | None = None,
+    *,
+    labels: Sequence[str] | None = None,
+    step_by_model: Mapping[str, object] | None = None,
+    top_n: int = 3,
+) -> list[str]:
+    """Render a compact checkpoint-generation curve for FT run artifacts."""
+
+    from .hf_generation import summarize_zspace_generation_control_sweep_comparison_lines
+
+    if (
+        isinstance(report_or_card, Mapping)
+        and report_or_card.get("row_type") == "hf_gpt2_finetune_generation_curve"
+    ):
+        report = dict(report_or_card)
+    else:
+        if sweeps_or_paths is None:
+            raise TypeError(
+                "sweeps_or_paths is required when report_or_card is not a curve"
+            )
+        report = hf_gpt2_finetune_generation_curve_report(
+            report_or_card,
+            sweeps_or_paths,
+            labels=labels,
+            step_by_model=step_by_model,
+            top_n=top_n,
+        )
+    lines = [
+        (
+            "hf_gpt2_ft_generation_curve "
+            f"status={report.get('status')} "
+            f"prompts={report.get('prompt_count')} "
+            f"models={report.get('curve_model_count')} "
+            f"sweeps={report.get('completed_sweep_count')}/"
+            f"{report.get('sweep_count')} "
+            f"eval_loss_series={report.get('eval_loss_series')} "
+            f"recommend={report.get('recommended_model_name')} "
+            f"step={report.get('recommended_step')}"
+        )
+    ]
+    for row in report.get("curve_rows", []):
+        if not isinstance(row, Mapping):
+            continue
+        lines.append(
+            "hf_gpt2_ft_generation_curve_row "
+            f"model={row.get('model_name')} "
+            f"step={row.get('step')} "
+            f"eval_loss={row.get('eval_loss')} "
+            f"sweeps={row.get('sweep_count')} "
+            f"helped={row.get('zspace_helped_count')} "
+            f"mean_baseline_loop={row.get('mean_baseline_loop_score')} "
+            f"mean_best_loop={row.get('mean_best_loop_score')} "
+            f"mean_delta={row.get('mean_loop_score_delta_from_baseline')} "
+            f"mean_reduction={row.get('mean_loop_score_reduction_ratio')} "
+            f"top_changes={row.get('max_top_token_changed_count')}"
+        )
+    comparison = report.get("comparison")
+    if isinstance(comparison, Mapping):
+        lines.extend(
+            summarize_zspace_generation_control_sweep_comparison_lines(
+                comparison,
+                top_n=top_n,
+            )
         )
     return lines
 
