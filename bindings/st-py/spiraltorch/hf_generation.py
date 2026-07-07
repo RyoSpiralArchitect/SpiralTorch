@@ -3,14 +3,20 @@
 from __future__ import annotations
 
 import importlib
+import json
 import math
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
 __all__ = [
     "ZSpaceRepressionLogitsProcessor",
     "build_zspace_repression_logits_processor",
     "build_zspace_softmax_logits_processor",
+    "load_zspace_generation_control_sweep",
+    "summarize_zspace_generation_control_run",
+    "summarize_zspace_generation_control_sweep",
+    "summarize_zspace_generation_control_sweep_lines",
 ]
 
 
@@ -58,6 +64,25 @@ def _non_negative_int(value: object, *, label: str) -> int:
     if result < 0:
         raise ValueError(f"{label} must be non-negative")
     return result
+
+
+def _safe_number(value: object) -> int | float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)) and math.isfinite(float(value)):
+        return value
+    try:
+        number = float(str(value))
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(number):
+        return None
+    return number
+
+
+def _mapping_item(row: Mapping[str, object], key: str) -> dict[str, object]:
+    value = row.get(key)
+    return dict(value) if isinstance(value, Mapping) else {}
 
 
 def _row_list(value: Any) -> list[float]:
@@ -449,3 +474,254 @@ def build_zspace_softmax_logits_processor(
     """Alias for callers that first reach for the ZSpaceSoftmax surface."""
 
     return build_zspace_repression_logits_processor(**kwargs)
+
+
+def load_zspace_generation_control_sweep(path: str | Path) -> dict[str, object]:
+    """Load one Z-Space generation-control sweep JSON artifact."""
+
+    input_path = Path(path)
+    try:
+        payload = json.loads(input_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{input_path} invalid JSON: {exc}") from exc
+    if not isinstance(payload, Mapping):
+        raise ValueError(f"{input_path} did not contain a JSON object")
+    return dict(payload)
+
+
+def _sweep_payload(
+    report_or_path: str | Path | Mapping[str, object],
+) -> tuple[dict[str, object], str | None]:
+    if isinstance(report_or_path, (str, Path)):
+        return load_zspace_generation_control_sweep(report_or_path), str(report_or_path)
+    if isinstance(report_or_path, Mapping):
+        return dict(report_or_path), None
+    raise TypeError("generation-control sweep must be a Mapping or path")
+
+
+def _run_generation(row: Mapping[str, object]) -> dict[str, object]:
+    return _mapping_item(row, "generation")
+
+
+def _run_control(row: Mapping[str, object]) -> dict[str, object]:
+    generation = _run_generation(row)
+    return _mapping_item(generation, "generation_control")
+
+
+def _run_repetition(row: Mapping[str, object]) -> dict[str, object]:
+    return _mapping_item(row, "repetition")
+
+
+def _run_config(row: Mapping[str, object]) -> dict[str, object]:
+    return _mapping_item(row, "config")
+
+
+def summarize_zspace_generation_control_run(
+    row: Mapping[str, object],
+    *,
+    baseline_continuation_sha256: object = None,
+) -> dict[str, object]:
+    """Flatten one generation-control sweep row for comparison."""
+
+    generation = _run_generation(row)
+    control = _run_control(row)
+    repetition = _run_repetition(row)
+    config = _run_config(row)
+    continuation_hash = generation.get("generated_continuation_sha256")
+    baseline_hash = (
+        None
+        if baseline_continuation_sha256 is None
+        else str(baseline_continuation_sha256)
+    )
+    changed_from_baseline = (
+        None
+        if not continuation_hash or not baseline_hash
+        else str(continuation_hash) != baseline_hash
+    )
+    return {
+        "row_type": "zspace_generation_control_run_summary",
+        "name": row.get("name"),
+        "kind": row.get("kind"),
+        "status": row.get("status"),
+        "error": row.get("error"),
+        "generation_status": generation.get("status"),
+        "generation_method": generation.get("generation_method"),
+        "continuation": generation.get("generated_continuation_text"),
+        "continuation_sha256": continuation_hash,
+        "continuation_char_count": _safe_number(
+            generation.get("generated_continuation_char_count")
+        ),
+        "new_token_count": _safe_number(generation.get("new_token_count")),
+        "changed_from_baseline": changed_from_baseline,
+        "loop_score": _safe_number(repetition.get("loop_score")),
+        "unique_word_ratio": _safe_number(repetition.get("unique_word_ratio")),
+        "repeated_ngram_total": _safe_number(
+            repetition.get("repeated_ngram_total")
+        ),
+        "max_ngram_repetition": _safe_number(
+            repetition.get("max_ngram_repetition")
+        ),
+        "consecutive_repeated_tokens": _safe_number(
+            repetition.get("consecutive_repeated_tokens")
+        ),
+        "control_status": control.get("status"),
+        "control_backend": control.get("backend"),
+        "control_calls": _safe_number(control.get("calls")),
+        "control_reported_rows": _safe_number(control.get("reported_rows")),
+        "control_top_token_changed_count": _safe_number(
+            control.get("top_token_changed_count")
+        ),
+        "control_reported_top_token_changed_count": _safe_number(
+            control.get("reported_top_token_changed_count")
+        ),
+        "control_temperature_min": _safe_number(control.get("temperature_min")),
+        "control_temperature_max": _safe_number(control.get("temperature_max")),
+        "control_entropy_min": _safe_number(control.get("entropy_min")),
+        "control_entropy_max": _safe_number(control.get("entropy_max")),
+        "control_native_error": control.get("native_error"),
+        "config_top_k": _safe_number(config.get("top_k")),
+        "config_curvature": _safe_number(config.get("curvature")),
+        "config_temperature": _safe_number(config.get("temperature")),
+        "config_entropy_target": _safe_number(config.get("entropy_target")),
+        "config_entropy_gain": _safe_number(config.get("entropy_gain")),
+        "config_repression_window": _safe_number(config.get("repression_window")),
+        "config_repression_strength": _safe_number(
+            config.get("repression_strength")
+        ),
+        "config_last_token_repression": _safe_number(
+            config.get("last_token_repression")
+        ),
+    }
+
+
+def _baseline_continuation_hash(rows: Sequence[Mapping[str, object]]) -> object:
+    for row in rows:
+        if row.get("kind") != "baseline":
+            continue
+        generation = _run_generation(row)
+        value = generation.get("generated_continuation_sha256")
+        if value:
+            return value
+    return None
+
+
+def _ranked_control_rows(
+    rows: Sequence[Mapping[str, object]],
+    *,
+    top_n: int,
+) -> list[dict[str, object]]:
+    def sort_key(row: Mapping[str, object]) -> tuple[float, float, str]:
+        loop_score = _safe_number(row.get("loop_score"))
+        changes = _safe_number(row.get("control_top_token_changed_count"))
+        return (
+            math.inf if loop_score is None else float(loop_score),
+            0.0 if changes is None else -float(changes),
+            str(row.get("name") or ""),
+        )
+
+    ranked = sorted(rows, key=sort_key)
+    if top_n >= 0:
+        ranked = ranked[:top_n]
+    return [dict(row, rank=index) for index, row in enumerate(ranked, 1)]
+
+
+def summarize_zspace_generation_control_sweep(
+    report_or_path: str | Path | Mapping[str, object],
+    *,
+    top_n: int = 5,
+) -> dict[str, object]:
+    """Summarize a Z-Space generation-control sweep artifact."""
+
+    if top_n < 0:
+        raise ValueError("top_n must be non-negative")
+    report, source_path = _sweep_payload(report_or_path)
+    runs_value = report.get("runs")
+    runs = (
+        [dict(row) for row in runs_value if isinstance(row, Mapping)]
+        if isinstance(runs_value, Sequence) and not isinstance(runs_value, (str, bytes))
+        else []
+    )
+    baseline_hash = _baseline_continuation_hash(runs)
+    summaries = [
+        summarize_zspace_generation_control_run(
+            row,
+            baseline_continuation_sha256=baseline_hash,
+        )
+        for row in runs
+    ]
+    completed = [row for row in summaries if row.get("status") == "ok"]
+    loop_values = [
+        float(value)
+        for row in completed
+        if (value := _safe_number(row.get("loop_score"))) is not None
+    ]
+    control_changes = [
+        float(value)
+        for row in completed
+        if (value := _safe_number(row.get("control_top_token_changed_count")))
+        is not None
+    ]
+    changed_from_baseline_count = sum(
+        1 for row in completed if row.get("changed_from_baseline") is True
+    )
+    top_runs = _ranked_control_rows(completed, top_n=top_n)
+    best = top_runs[0] if top_runs else None
+    return {
+        "row_type": "zspace_generation_control_sweep_summary",
+        "sweep_path": source_path,
+        "status": report.get("status"),
+        "dry_run": bool(report.get("dry_run")),
+        "model_name": report.get("model_name"),
+        "prompt": report.get("prompt"),
+        "run_count": _safe_number(report.get("run_count")) or len(runs),
+        "completed_run_count": len(completed),
+        "failed_run_count": sum(1 for row in summaries if row.get("status") != "ok"),
+        "changed_from_baseline_count": changed_from_baseline_count,
+        "best_loop_score_run": None if best is None else best.get("name"),
+        "best_loop_score": None if best is None else best.get("loop_score"),
+        "min_loop_score": min(loop_values) if loop_values else None,
+        "max_loop_score": max(loop_values) if loop_values else None,
+        "max_top_token_changed_count": (
+            max(control_changes) if control_changes else None
+        ),
+        "top_runs": top_runs,
+        "summaries": summaries,
+    }
+
+
+def summarize_zspace_generation_control_sweep_lines(
+    report_or_path: str | Path | Mapping[str, object],
+    *,
+    top_n: int = 3,
+) -> list[str]:
+    """Render a compact text summary for a generation-control sweep."""
+
+    summary = summarize_zspace_generation_control_sweep(
+        report_or_path,
+        top_n=top_n,
+    )
+    lines = [
+        (
+            "zspace_generation_control_sweep "
+            f"status={summary.get('status')} "
+            f"runs={summary.get('completed_run_count')}/{summary.get('run_count')} "
+            f"changed={summary.get('changed_from_baseline_count')} "
+            f"best={summary.get('best_loop_score_run')} "
+            f"best_loop={summary.get('best_loop_score')}"
+        )
+    ]
+    for row in summary.get("top_runs", []):
+        if not isinstance(row, Mapping):
+            continue
+        lines.append(
+            "zspace_generation_control_top "
+            f"rank={row.get('rank')} "
+            f"name={row.get('name')} "
+            f"loop={row.get('loop_score')} "
+            f"changed={row.get('changed_from_baseline')} "
+            f"top_changes={row.get('control_top_token_changed_count')} "
+            f"backend={row.get('control_backend')} "
+            f"rs={row.get('config_repression_strength')} "
+            f"entropy_target={row.get('config_entropy_target')}"
+        )
+    return lines

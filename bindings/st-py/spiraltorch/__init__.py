@@ -804,6 +804,10 @@ from .hf_generation import (
     ZSpaceRepressionLogitsProcessor,
     build_zspace_repression_logits_processor,
     build_zspace_softmax_logits_processor,
+    load_zspace_generation_control_sweep,
+    summarize_zspace_generation_control_run,
+    summarize_zspace_generation_control_sweep,
+    summarize_zspace_generation_control_sweep_lines,
 )
 
 from .gnn_trace import (
@@ -967,6 +971,10 @@ _EXTRAS = [
     "ZSpaceRepressionLogitsProcessor",
     "build_zspace_repression_logits_processor",
     "build_zspace_softmax_logits_processor",
+    "load_zspace_generation_control_sweep",
+    "summarize_zspace_generation_control_run",
+    "summarize_zspace_generation_control_sweep",
+    "summarize_zspace_generation_control_sweep_lines",
     "load_gnn_band_replay_trace","flatten_gnn_band_replay_rows",
     "summarize_gnn_band_replays","compare_gnn_band_replay_runs","write_gnn_band_replay_html",
     "load_kdsl_trace_events","write_kdsl_trace_jsonl","write_kdsl_trace_html",

@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import tempfile
 import unittest
 from pathlib import Path
 
 import spiraltorch as st
 from spiraltorch import hf_ft
-from spiraltorch.hf_generation import ZSpaceRepressionLogitsProcessor
+from spiraltorch.hf_generation import (
+    ZSpaceRepressionLogitsProcessor,
+    load_zspace_generation_control_sweep,
+    summarize_zspace_generation_control_sweep,
+    summarize_zspace_generation_control_sweep_lines,
+)
 
 try:
     import torch
@@ -116,10 +122,97 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         self.assertIn("ZSpaceRepressionLogitsProcessor", st.__all__)
         self.assertIn("build_zspace_repression_logits_processor", st.__all__)
         self.assertIn("build_zspace_softmax_logits_processor", st.__all__)
+        self.assertIn("load_zspace_generation_control_sweep", st.__all__)
+        self.assertIn("summarize_zspace_generation_control_sweep", st.__all__)
         self.assertIs(st.ZSpaceRepressionLogitsProcessor, ZSpaceRepressionLogitsProcessor)
+        self.assertIs(
+            st.summarize_zspace_generation_control_sweep,
+            summarize_zspace_generation_control_sweep,
+        )
 
 
 class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
+    def test_summarize_generation_control_sweep_ranks_loop_scores(self) -> None:
+        baseline = {
+            "name": "baseline-greedy",
+            "kind": "baseline",
+            "status": "ok",
+            "config": {},
+            "generation": hf_ft.hf_gpt2_finetune_generation_report(
+                stage="baseline",
+                prompt="SpiralTorch is",
+                generated_text="SpiralTorch is wrapper wrapper wrapper",
+                generated_continuation_text=" wrapper wrapper wrapper",
+                input_token_count=3,
+                output_token_count=6,
+            ),
+            "repetition": {
+                "loop_score": 3.0,
+                "unique_word_ratio": 0.33,
+                "repeated_ngram_total": 2,
+                "max_ngram_repetition": 2,
+            },
+        }
+        controlled = {
+            "name": "zt3-rs1p25-lr0-k64",
+            "kind": "zspace_repression_softmax",
+            "status": "ok",
+            "config": {
+                "top_k": 64,
+                "entropy_target": 3.0,
+                "repression_strength": 1.25,
+            },
+            "generation": hf_ft.hf_gpt2_finetune_generation_report(
+                stage="controlled",
+                prompt="SpiralTorch is",
+                generated_text="SpiralTorch is geometry runtime",
+                generated_continuation_text=" geometry runtime",
+                input_token_count=3,
+                output_token_count=5,
+                generation_control={
+                    "status": "ok",
+                    "calls": 2,
+                    "backend": "spiraltorch_zspace_softmax",
+                    "top_token_changed_count": 1,
+                    "temperature_min": 0.7,
+                    "temperature_max": 1.1,
+                },
+            ),
+            "repetition": {
+                "loop_score": 0.0,
+                "unique_word_ratio": 1.0,
+                "repeated_ngram_total": 0,
+                "max_ngram_repetition": 1,
+            },
+        }
+        report = {
+            "row_type": "hf_gpt2_zspace_generation_control_sweep",
+            "status": "complete",
+            "dry_run": False,
+            "model_name": "gpt2",
+            "prompt": "SpiralTorch is",
+            "run_count": 2,
+            "runs": [baseline, controlled],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "sweep.json"
+            path.write_text(json.dumps(report), encoding="utf-8")
+            loaded = load_zspace_generation_control_sweep(path)
+            summary = summarize_zspace_generation_control_sweep(path, top_n=1)
+            lines = summarize_zspace_generation_control_sweep_lines(loaded, top_n=1)
+
+        self.assertEqual(loaded["run_count"], 2)
+        self.assertEqual(summary["completed_run_count"], 2)
+        self.assertEqual(summary["changed_from_baseline_count"], 1)
+        self.assertEqual(summary["best_loop_score_run"], "zt3-rs1p25-lr0-k64")
+        self.assertEqual(summary["top_runs"][0]["loop_score"], 0.0)
+        self.assertEqual(
+            summary["top_runs"][0]["control_backend"],
+            "spiraltorch_zspace_softmax",
+        )
+        self.assertIn("best=zt3-rs1p25-lr0-k64", lines[0])
+        self.assertIn("top_changes=1", lines[1])
+
     def test_dry_run_builds_control_grid_without_loading_model(self) -> None:
         module = load_generation_control_sweep_example()
         with tempfile.TemporaryDirectory() as tmp:

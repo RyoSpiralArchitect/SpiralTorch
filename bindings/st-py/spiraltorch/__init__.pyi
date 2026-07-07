@@ -341,6 +341,28 @@ def build_zspace_softmax_logits_processor(
     **kwargs: object,
 ) -> ZSpaceRepressionLogitsProcessor: ...
 
+def load_zspace_generation_control_sweep(
+    path: str | PathLike[str],
+) -> Dict[str, object]: ...
+
+def summarize_zspace_generation_control_run(
+    row: Mapping[str, object],
+    *,
+    baseline_continuation_sha256: object = ...,
+) -> Dict[str, object]: ...
+
+def summarize_zspace_generation_control_sweep(
+    report_or_path: str | PathLike[str] | Mapping[str, object],
+    *,
+    top_n: int = ...,
+) -> Dict[str, object]: ...
+
+def summarize_zspace_generation_control_sweep_lines(
+    report_or_path: str | PathLike[str] | Mapping[str, object],
+    *,
+    top_n: int = ...,
+) -> List[str]: ...
+
 def hf_gpt2_finetune_preflight_report(
     *,
     model_name: str = ...,
@@ -8224,6 +8246,10 @@ __all__ = [
     "ZSpaceRepressionLogitsProcessor",
     "build_zspace_repression_logits_processor",
     "build_zspace_softmax_logits_processor",
+    "load_zspace_generation_control_sweep",
+    "summarize_zspace_generation_control_run",
+    "summarize_zspace_generation_control_sweep",
+    "summarize_zspace_generation_control_sweep_lines",
     "from_dlpack",
     "to_dlpack",
     "ZSpaceBarycenter",
