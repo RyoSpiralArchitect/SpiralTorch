@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import shlex
 import sys
 from itertools import product
 from pathlib import Path
@@ -52,6 +53,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--prompt", default="Describe SpiralTorch as a Z-space runtime.")
     parser.add_argument("--out-dir", type=Path, default=Path("runs/zspace-inference-distortion-sweep"))
+    parser.add_argument("--markdown-out", type=Path, default=None)
+    parser.add_argument("--no-markdown-report", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument(
         "--resume-existing",
@@ -133,6 +136,11 @@ def _write_json(path: Path, payload: MappingLike) -> None:
     )
 
 
+def _write_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text.rstrip() + "\n", encoding="utf-8")
+
+
 def _runtime_plan(args: argparse.Namespace) -> MappingLike:
     return {
         "local_model": str(args.local_model) if args.local_model is not None else None,
@@ -145,6 +153,172 @@ def _runtime_plan(args: argparse.Namespace) -> MappingLike:
         "api_model": args.api_model,
         "api_max_tokens": int(args.api_max_tokens),
     }
+
+
+def _markdown_path(args: argparse.Namespace) -> Path | None:
+    if args.no_markdown_report:
+        return None
+    return args.markdown_out or (args.out_dir / "sweep-report.md")
+
+
+def _shell_join(parts: list[object]) -> str:
+    return " ".join(shlex.quote(str(part)) for part in parts)
+
+
+def _runtime_cli_args(runtime: MappingLike, *, sweep: bool) -> list[object]:
+    args: list[object] = []
+    if runtime.get("local_model"):
+        args.extend(["--local-model", runtime["local_model"]])
+    if runtime.get("allow_remote"):
+        args.append("--allow-remote")
+    if runtime.get("trust_remote_code"):
+        args.append("--trust-remote-code")
+    if runtime.get("max_new_tokens") is not None:
+        args.extend(["--max-new-tokens", runtime["max_new_tokens"]])
+    for name in runtime.get("activation_module_name") or []:
+        args.extend(["--activation-module-name", name])
+    for needle in runtime.get("activation_name_contains") or []:
+        args.extend(["--activation-name-contains", needle])
+    if runtime.get("api_provider"):
+        args.extend(["--api-provider", runtime["api_provider"]])
+    if runtime.get("api_model"):
+        args.extend(["--api-model", runtime["api_model"]])
+    if runtime.get("api_max_tokens") is not None:
+        args.extend(["--api-max-tokens", runtime["api_max_tokens"]])
+    if sweep:
+        args.append("--resume-existing")
+    return args
+
+
+def _recommended_commands(report: MappingLike) -> MappingLike:
+    summary = report.get("summary")
+    runtime = report.get("runtime")
+    if not isinstance(summary, dict) or not isinstance(runtime, dict):
+        return {}
+    if summary.get("recommended_probe") is None:
+        return {}
+    prompt = report.get("prompt") or ""
+    probe_args = [
+        "PYTHONPATH=bindings/st-py",
+        "python3",
+        "bindings/st-py/examples/zspace_inference_distortion_probe.py",
+        "--prompt",
+        prompt,
+    ]
+    probe_args.extend(_runtime_cli_args(runtime, sweep=False))
+    probe_args.extend(summary.get("recommended_probe_cli_args") or [])
+    sweep_args = [
+        "PYTHONPATH=bindings/st-py",
+        "python3",
+        "bindings/st-py/examples/zspace_inference_distortion_sweep.py",
+        "--out-dir",
+        Path(str(report.get("report_path") or ".")).parent,
+        "--prompt",
+        prompt,
+    ]
+    sweep_args.extend(_runtime_cli_args(runtime, sweep=True))
+    sweep_args.extend(summary.get("recommended_sweep_cli_args") or [])
+    return {
+        "probe": _shell_join(probe_args),
+        "sweep": _shell_join(sweep_args),
+    }
+
+
+def _recommendation_from_summary(summary: object) -> MappingLike | None:
+    if not isinstance(summary, dict) or summary.get("recommended_probe") is None:
+        return None
+    return {
+        "probe": summary.get("recommended_probe"),
+        "reason": summary.get("recommendation_reason"),
+        "effect_score": summary.get("recommended_effect_score"),
+        "risk_score": summary.get("recommended_risk_score"),
+        "probe_path": summary.get("recommended_probe_path"),
+        "config": summary.get("recommended_config"),
+        "request": summary.get("recommended_request"),
+        "processor_kwargs": summary.get("recommended_processor_kwargs"),
+        "activation_hook": summary.get("recommended_activation_hook"),
+        "probe_cli_args": summary.get("recommended_probe_cli_args"),
+        "sweep_cli_args": summary.get("recommended_sweep_cli_args"),
+    }
+
+
+def _markdown_table_value(value: object) -> str:
+    if value is None:
+        return ""
+    return str(value).replace("|", "\\|")
+
+
+def _markdown_report(report: MappingLike) -> str:
+    summary = report.get("summary")
+    summary = summary if isinstance(summary, dict) else {}
+    commands = report.get("recommended_commands")
+    commands = commands if isinstance(commands, dict) else {}
+    lines = [
+        "# Z-Space Inference Distortion Sweep",
+        "",
+        (
+            f"- status: `{report.get('status')}` "
+            f"({summary.get('completed_run_count')}/{summary.get('run_count')} complete)"
+        ),
+        f"- prompt: `{report.get('prompt')}`",
+        f"- recommended: `{summary.get('recommended_probe')}`",
+        f"- effect/risk: `{summary.get('recommended_effect_score')}` / `{summary.get('recommended_risk_score')}`",
+        "",
+        "## Recommendation",
+        "",
+    ]
+    if summary.get("recommended_config"):
+        lines.extend(
+            [
+                "```json",
+                json.dumps(
+                    summary.get("recommended_config"),
+                    ensure_ascii=False,
+                    indent=2,
+                    sort_keys=True,
+                ),
+                "```",
+                "",
+            ]
+        )
+    if commands.get("probe"):
+        lines.extend(["Single-probe replay:", "", "```bash", str(commands["probe"]), "```", ""])
+    if commands.get("sweep"):
+        lines.extend(["Focused sweep replay:", "", "```bash", str(commands["sweep"]), "```", ""])
+
+    lines.extend(
+        [
+            "## Top Probes",
+            "",
+            "| rank | label | effect | risk | changed | top changes | api | energy |",
+            "| --- | --- | ---: | ---: | --- | ---: | --- | ---: |",
+        ]
+    )
+    for row in summary.get("top_probes", []) if isinstance(summary, dict) else []:
+        if not isinstance(row, dict):
+            continue
+        lines.append(
+            "| "
+            + " | ".join(
+                _markdown_table_value(value)
+                for value in [
+                    row.get("rank"),
+                    row.get("label"),
+                    row.get("effect_score"),
+                    row.get("risk_score"),
+                    row.get("local_changed"),
+                    row.get("generation_control_top_token_changed_count"),
+                    row.get("api_provider"),
+                    row.get("distortion_energy"),
+                ]
+            )
+            + " |"
+        )
+    if report.get("summary_lines"):
+        lines.extend(["", "## Compact Lines", "", "```text"])
+        lines.extend(str(line) for line in report.get("summary_lines", []))
+        lines.extend(["```"])
+    return "\n".join(lines)
 
 
 def _matching_mapping(expected: MappingLike, actual: object) -> bool:
@@ -359,7 +533,25 @@ def _build_report(
         "plan_path": str(args.out_dir / "sweep-plan.json"),
         "report_path": str(args.out_dir / "sweep-report.json"),
     }
+    report["summary"] = st.summarize_zspace_inference_distortion_sweep(
+        report,
+        top_n=args.top_n,
+    )
+    report["summary_lines"] = st.summarize_zspace_inference_distortion_sweep_lines(
+        report,
+        top_n=args.top_n,
+    )
+    report["recommendation"] = _recommendation_from_summary(report["summary"])
+    report["recommended_commands"] = _recommended_commands(report)
     return report
+
+
+def _write_report_outputs(args: argparse.Namespace, report: MappingLike) -> None:
+    markdown_path = _markdown_path(args)
+    if markdown_path is not None:
+        report["markdown_path"] = str(markdown_path)
+        _write_text(markdown_path, _markdown_report(report))
+    _write_json(args.out_dir / "sweep-report.json", report)
 
 
 def run_sweep(args: argparse.Namespace) -> MappingLike:
@@ -385,7 +577,7 @@ def run_sweep(args: argparse.Namespace) -> MappingLike:
             reported_run_count=0,
             dry_run=True,
         )
-        _write_json(args.out_dir / "sweep-report.json", report)
+        _write_report_outputs(args, report)
         return report
 
     completed = []
@@ -442,7 +634,7 @@ def run_sweep(args: argparse.Namespace) -> MappingLike:
         reused_run_count=reused_run_count,
         reported_run_count=reported_run_count,
     )
-    _write_json(args.out_dir / "sweep-report.json", report)
+    _write_report_outputs(args, report)
     return report
 
 

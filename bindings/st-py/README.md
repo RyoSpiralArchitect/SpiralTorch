@@ -483,16 +483,22 @@ PYTHONPATH=bindings/st-py python bindings/st-py/examples/zspace_inference_distor
   --out-dir runs/zspace-inference-distortion-sweep
 ```
 
-The sweep writes `sweep-plan.json`, one probe artifact per setting, and
-`sweep-report.json` with comparison rows plus compact summary lines. It uses the
-keyless fake API route by default, so the local-HF hook path can be checked
-first. Add `--api-provider openai-responses|openai-chat|anthropic` plus
-`--api-model <model>` to replay the exact same distortion grid against a live
-API model. For interrupted or paid-provider sweeps, add `--resume-existing` to
-reuse successful probe artifacts, `--report-only` to rebuild `sweep-report.json`
-without touching local/API models, or `--force` when every row should be
-rerun intentionally. Existing artifacts are reused only when the saved prompt,
-distortion config, and runtime/provider settings match the current sweep.
+The sweep writes `sweep-plan.json`, one probe artifact per setting,
+`sweep-report.json`, and `sweep-report.md` with comparison rows, a recommended
+probe/config, replay commands, and compact summary lines. It uses the keyless
+fake API route by default, so the local-HF hook path can be checked first. Add
+`--api-provider openai-responses|openai-chat|anthropic` plus `--api-model
+<model>` to replay the exact same distortion grid against a live API model. For
+interrupted or paid-provider sweeps, add `--resume-existing` to reuse successful
+probe artifacts, `--report-only` to rebuild `sweep-report.json` and
+`sweep-report.md` without touching local/API models, or `--force` when every row
+should be rerun intentionally. Existing artifacts are reused only when the saved
+prompt, distortion config, and runtime/provider settings match the current
+sweep. From Python, call `st.load_zspace_inference_distortion_sweep(...)`,
+`st.summarize_zspace_inference_distortion_sweep(...)`, or
+`st.summarize_zspace_inference_distortion_sweep_lines(...)` to recover the
+recommended config, request overrides, logits-processor kwargs, and focused
+single-probe/sweep CLI args.
 
 For the first real FT pass on a new corpus, use the sweep runner to make that
 comparison reproducible:

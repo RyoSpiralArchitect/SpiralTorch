@@ -14,13 +14,18 @@ from spiraltorch.hf_generation import (
     build_zspace_activation_probe_hook,
     compare_zspace_inference_distortion_probes,
     load_zspace_inference_distortion_probe,
+    load_zspace_inference_distortion_sweep,
     load_zspace_generation_control_sweep,
     summarize_zspace_inference_distortion_probe,
     summarize_zspace_inference_distortion_probe_comparison_lines,
     summarize_zspace_inference_distortion_probe_lines,
+    summarize_zspace_inference_distortion_sweep,
+    summarize_zspace_inference_distortion_sweep_lines,
     summarize_zspace_generation_control_sweep,
     summarize_zspace_generation_control_sweep_lines,
+    zspace_inference_distortion_probe_cli_args,
     zspace_inference_distortion_processor_kwargs,
+    zspace_inference_distortion_sweep_cli_args,
     zspace_generation_control_bridge_cli_args,
     zspace_generation_control_processor_kwargs,
     zspace_generation_control_sweep_cli_args,
@@ -518,11 +523,27 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
             report = module.run_sweep(args)
             stored_report = json.loads((out_dir / "sweep-report.json").read_text())
             first_probe_exists = Path(stored_report["runs"][0]["probe_path"]).exists()
+            markdown = (out_dir / "sweep-report.md").read_text()
+            loaded_sweep = load_zspace_inference_distortion_sweep(
+                out_dir / "sweep-report.json"
+            )
+            sweep_summary = summarize_zspace_inference_distortion_sweep(
+                out_dir / "sweep-report.json",
+                top_n=2,
+            )
+            sweep_lines = summarize_zspace_inference_distortion_sweep_lines(
+                loaded_sweep,
+                top_n=1,
+            )
 
         self.assertEqual(report["status"], "complete")
         self.assertEqual(report["completed_run_count"], 2)
         self.assertEqual(stored_report["comparison"]["probe_count"], 2)
         self.assertEqual(len(stored_report["comparison"]["top_probes"]), 2)
+        self.assertIn("summary", stored_report)
+        self.assertIn("recommendation", stored_report)
+        self.assertIn("recommended_commands", stored_report)
+        self.assertIn("markdown_path", stored_report)
         self.assertIn("summary_lines", stored_report)
         self.assertTrue(first_probe_exists)
         self.assertTrue(stored_report["runs"][0]["summary"]["probe_path"])
@@ -530,6 +551,26 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
             stored_report["comparison"]["top_probes"][0]["api_provider"],
             "fake",
         )
+        self.assertEqual(sweep_summary["row_type"], "zspace_inference_distortion_sweep_summary")
+        self.assertEqual(sweep_summary["completed_run_count"], 2)
+        self.assertIn("--desire-pressure", sweep_summary["recommended_probe_cli_args"])
+        self.assertIn("--desire-pressure-values", sweep_summary["recommended_sweep_cli_args"])
+        self.assertEqual(
+            zspace_inference_distortion_probe_cli_args(
+                sweep_summary["recommended_config"]
+            ),
+            sweep_summary["recommended_probe_cli_args"],
+        )
+        self.assertEqual(
+            zspace_inference_distortion_sweep_cli_args(
+                sweep_summary["recommended_config"]
+            ),
+            sweep_summary["recommended_sweep_cli_args"],
+        )
+        self.assertIn("zspace_inference_distortion_sweep", sweep_lines[0])
+        self.assertIn("Z-Space Inference Distortion Sweep", markdown)
+        self.assertIn("Single-probe replay", markdown)
+        self.assertIn("Focused sweep replay", markdown)
 
     def test_inference_distortion_sweep_reuses_existing_probe(self) -> None:
         module = load_distortion_sweep_example()

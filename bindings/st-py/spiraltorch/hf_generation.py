@@ -16,14 +16,19 @@ __all__ = [
     "build_zspace_repression_logits_processor",
     "build_zspace_softmax_logits_processor",
     "compare_zspace_inference_distortion_probes",
+    "zspace_inference_distortion_probe_cli_args",
+    "zspace_inference_distortion_sweep_cli_args",
     "zspace_generation_control_bridge_cli_args",
     "zspace_generation_control_processor_kwargs",
     "zspace_generation_control_sweep_cli_args",
     "load_zspace_inference_distortion_probe",
+    "load_zspace_inference_distortion_sweep",
     "load_zspace_generation_control_sweep",
     "summarize_zspace_inference_distortion_probe",
     "summarize_zspace_inference_distortion_probe_lines",
     "summarize_zspace_inference_distortion_probe_comparison_lines",
+    "summarize_zspace_inference_distortion_sweep",
+    "summarize_zspace_inference_distortion_sweep_lines",
     "summarize_zspace_generation_control_run",
     "summarize_zspace_generation_control_sweep",
     "summarize_zspace_generation_control_sweep_lines",
@@ -856,6 +861,19 @@ def load_zspace_inference_distortion_probe(path: str | Path) -> dict[str, object
     return dict(payload)
 
 
+def load_zspace_inference_distortion_sweep(path: str | Path) -> dict[str, object]:
+    """Load a Z-Space inference-distortion sweep JSON artifact."""
+
+    input_path = Path(path)
+    try:
+        payload = json.loads(input_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{input_path} invalid JSON: {exc}") from exc
+    if not isinstance(payload, Mapping):
+        raise ValueError(f"{input_path} did not contain a JSON object")
+    return dict(payload)
+
+
 def _probe_payload(
     report_or_path: str | Path | Mapping[str, object],
 ) -> tuple[dict[str, object], str | None]:
@@ -1274,6 +1292,298 @@ def summarize_zspace_inference_distortion_probe_comparison_lines(
             f"top_changes={row.get('generation_control_top_token_changed_count')} "
             f"api={row.get('api_provider')} "
             f"energy={row.get('distortion_energy')}"
+        )
+    return lines
+
+
+def _distortion_sweep_payload(
+    report_or_path: str | Path | Mapping[str, object],
+) -> tuple[dict[str, object], str | None]:
+    if isinstance(report_or_path, (str, Path)):
+        return load_zspace_inference_distortion_sweep(report_or_path), str(report_or_path)
+    if isinstance(report_or_path, Mapping):
+        report = dict(report_or_path)
+        report_path = report.get("report_path")
+        return report, str(report_path) if report_path is not None else None
+    raise TypeError("inference-distortion sweep must be a Mapping or path")
+
+
+def zspace_inference_distortion_probe_cli_args(
+    config: Mapping[str, object] | None,
+) -> list[str]:
+    """Return focused single-probe CLI args for a distortion config."""
+
+    if not config:
+        return []
+    flag_map = [
+        ("desire_pressure", "--desire-pressure"),
+        ("desire_stability", "--desire-stability"),
+        ("psi_total", "--psi-total"),
+        ("coherence", "--coherence"),
+        ("distortion_strength", "--distortion-strength"),
+        ("base_temperature", "--base-temperature"),
+        ("base_top_p", "--base-top-p"),
+    ]
+    args: list[str] = []
+    for key, flag in flag_map:
+        if key in config and config[key] is not None:
+            args.extend([flag, _cli_value(config[key])])
+    if config.get("include_penalties") is True:
+        args.append("--include-penalties")
+    return args
+
+
+def zspace_inference_distortion_sweep_cli_args(
+    config: Mapping[str, object] | None,
+) -> list[str]:
+    """Return focused sweep CLI args for replaying one distortion config."""
+
+    if not config:
+        return []
+    flag_map = [
+        ("desire_pressure", "--desire-pressure-values"),
+        ("desire_stability", "--desire-stability-values"),
+        ("psi_total", "--psi-total-values"),
+        ("coherence", "--coherence-values"),
+        ("distortion_strength", "--distortion-strength-values"),
+        ("base_temperature", "--base-temperature"),
+        ("base_top_p", "--base-top-p"),
+    ]
+    args: list[str] = []
+    for key, flag in flag_map:
+        if key in config and config[key] is not None:
+            args.extend([flag, _cli_value(config[key])])
+    if config.get("include_penalties") is True:
+        args.append("--include-penalties")
+    return args
+
+
+def _distortion_sweep_runs(report: Mapping[str, object]) -> list[dict[str, object]]:
+    runs_value = report.get("runs")
+    if not isinstance(runs_value, Sequence) or isinstance(runs_value, (str, bytes)):
+        return []
+    return [dict(row) for row in runs_value if isinstance(row, Mapping)]
+
+
+def _distortion_success_probe_inputs(
+    runs: Sequence[Mapping[str, object]],
+) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for row in runs:
+        if row.get("status") not in {"ok", "reused", "reported"}:
+            continue
+        probe_path = row.get("probe_path")
+        if probe_path is None:
+            continue
+        path = Path(str(probe_path))
+        if path.is_file():
+            result[str(row.get("name") or path.stem)] = str(path)
+    return result
+
+
+def _distortion_comparison_for_sweep(
+    report: Mapping[str, object],
+    runs: Sequence[Mapping[str, object]],
+    *,
+    top_n: int,
+    preview_chars: int,
+) -> dict[str, object]:
+    probe_inputs = _distortion_success_probe_inputs(runs)
+    if probe_inputs:
+        return compare_zspace_inference_distortion_probes(
+            probe_inputs,
+            top_n=top_n,
+            preview_chars=preview_chars,
+        )
+    comparison = report.get("comparison")
+    if (
+        isinstance(comparison, Mapping)
+        and comparison.get("row_type")
+        == "zspace_inference_distortion_probe_comparison"
+    ):
+        copied = dict(comparison)
+        top = copied.get("top_probes")
+        if isinstance(top, Sequence) and not isinstance(top, (str, bytes)):
+            copied["top_probes"] = [
+                dict(row)
+                for row in list(top)[: max(0, int(top_n))]
+                if isinstance(row, Mapping)
+            ]
+        return copied
+    return compare_zspace_inference_distortion_probes({}, top_n=top_n)
+
+
+def _distortion_selected_run(
+    runs: Sequence[Mapping[str, object]],
+    label: object,
+) -> dict[str, object] | None:
+    if label is None:
+        return None
+    text = str(label)
+    for row in runs:
+        if str(row.get("name")) == text:
+            return dict(row)
+    return None
+
+
+def _distortion_config_from_summary(
+    row: Mapping[str, object] | None,
+) -> dict[str, object] | None:
+    if row is None:
+        return None
+    fields = {
+        "desire_pressure": row.get("desire_pressure"),
+        "desire_stability": row.get("desire_stability"),
+        "psi_total": row.get("psi_total"),
+        "coherence": row.get("coherence"),
+        "base_temperature": row.get("request_temperature"),
+        "base_top_p": row.get("request_top_p"),
+    }
+    return {key: value for key, value in fields.items() if value is not None}
+
+
+def _distortion_recommendation_payload(
+    selected_run: Mapping[str, object] | None,
+    best: Mapping[str, object] | None,
+) -> tuple[
+    dict[str, object] | None,
+    dict[str, object],
+    dict[str, object],
+    dict[str, object],
+]:
+    config = None
+    if selected_run is not None and isinstance(selected_run.get("config"), Mapping):
+        config = dict(selected_run["config"])  # type: ignore[index]
+    if config is None:
+        config = _distortion_config_from_summary(best)
+    probe_payload: dict[str, object] = {}
+    probe_path = None if selected_run is None else selected_run.get("probe_path")
+    if probe_path is None and best is not None:
+        probe_path = best.get("probe_path")
+    if probe_path is not None and Path(str(probe_path)).is_file():
+        try:
+            probe_payload = load_zspace_inference_distortion_probe(str(probe_path))
+        except Exception:
+            probe_payload = {}
+    adapter = probe_payload.get("adapter")
+    adapter_mapping = dict(adapter) if isinstance(adapter, Mapping) else {}
+    request = adapter_mapping.get("request")
+    activation_hook = adapter_mapping.get("activation_hook")
+    processor_kwargs = (
+        zspace_inference_distortion_processor_kwargs(adapter_mapping)
+        if adapter_mapping
+        else {}
+    )
+    return (
+        config,
+        dict(request) if isinstance(request, Mapping) else {},
+        processor_kwargs,
+        dict(activation_hook) if isinstance(activation_hook, Mapping) else {},
+    )
+
+
+def summarize_zspace_inference_distortion_sweep(
+    report_or_path: str | Path | Mapping[str, object],
+    *,
+    top_n: int = 5,
+    preview_chars: int = 96,
+) -> dict[str, object]:
+    """Summarize a Z-Space inference-distortion sweep artifact."""
+
+    if top_n < 0:
+        raise ValueError("top_n must be non-negative")
+    report, source_path = _distortion_sweep_payload(report_or_path)
+    runs = _distortion_sweep_runs(report)
+    comparison = _distortion_comparison_for_sweep(
+        report,
+        runs,
+        top_n=top_n,
+        preview_chars=preview_chars,
+    )
+    top_probes_value = comparison.get("top_probes")
+    top_probes = (
+        [dict(row) for row in top_probes_value if isinstance(row, Mapping)]
+        if isinstance(top_probes_value, Sequence)
+        and not isinstance(top_probes_value, (str, bytes))
+        else []
+    )
+    best = top_probes[0] if top_probes else None
+    recommended_probe = None if best is None else best.get("label")
+    selected_run = _distortion_selected_run(runs, recommended_probe)
+    config, request, processor_kwargs, activation_hook = _distortion_recommendation_payload(
+        selected_run,
+        best,
+    )
+    return {
+        "row_type": "zspace_inference_distortion_sweep_summary",
+        "sweep_path": source_path,
+        "status": report.get("status"),
+        "dry_run": bool(report.get("dry_run")),
+        "prompt": report.get("prompt"),
+        "run_count": _safe_number(report.get("run_count")) or len(runs),
+        "completed_run_count": sum(
+            1 for row in runs if row.get("status") in {"ok", "reused", "reported"}
+        ),
+        "attempted_run_count": _safe_number(report.get("attempted_run_count")),
+        "reused_run_count": _safe_number(report.get("reused_run_count")),
+        "reported_run_count": _safe_number(report.get("reported_run_count")),
+        "failed_run_count": _safe_number(report.get("failed_run_count")),
+        "missing_run_count": _safe_number(report.get("missing_run_count")),
+        "stale_run_count": _safe_number(report.get("stale_run_count")),
+        "recommended_probe": recommended_probe,
+        "recommendation_reason": comparison.get("recommended_reason"),
+        "recommended_effect_score": None if best is None else best.get("effect_score"),
+        "recommended_risk_score": None if best is None else best.get("risk_score"),
+        "recommended_probe_path": (
+            None if selected_run is None else selected_run.get("probe_path")
+        ),
+        "recommended_config": config,
+        "recommended_request": request,
+        "recommended_processor_kwargs": processor_kwargs,
+        "recommended_activation_hook": activation_hook,
+        "recommended_probe_cli_args": zspace_inference_distortion_probe_cli_args(config),
+        "recommended_sweep_cli_args": zspace_inference_distortion_sweep_cli_args(config),
+        "recommended_cli_args": zspace_inference_distortion_sweep_cli_args(config),
+        "comparison": comparison,
+        "top_probes": top_probes,
+    }
+
+
+def summarize_zspace_inference_distortion_sweep_lines(
+    report_or_path: str | Path | Mapping[str, object],
+    *,
+    top_n: int = 3,
+    preview_chars: int = 96,
+) -> list[str]:
+    """Render compact status lines for an inference-distortion sweep."""
+
+    summary = summarize_zspace_inference_distortion_sweep(
+        report_or_path,
+        top_n=top_n,
+        preview_chars=preview_chars,
+    )
+    lines = [
+        (
+            "zspace_inference_distortion_sweep "
+            f"status={summary.get('status')} "
+            f"runs={summary.get('completed_run_count')}/{summary.get('run_count')} "
+            f"recommend={summary.get('recommended_probe')} "
+            f"effect={summary.get('recommended_effect_score')} "
+            f"risk={summary.get('recommended_risk_score')} "
+            f"stale={summary.get('stale_run_count')}"
+        )
+    ]
+    for row in summary.get("top_probes", []):
+        if not isinstance(row, Mapping):
+            continue
+        lines.append(
+            "zspace_inference_distortion_sweep_top "
+            f"rank={row.get('rank')} "
+            f"label={row.get('label')} "
+            f"effect={row.get('effect_score')} "
+            f"risk={row.get('risk_score')} "
+            f"changed={row.get('local_changed')} "
+            f"top_changes={row.get('generation_control_top_token_changed_count')}"
         )
     return lines
 

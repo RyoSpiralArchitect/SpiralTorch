@@ -385,6 +385,14 @@ def zspace_inference_distortion_processor_kwargs(
     **overrides: object,
 ) -> Dict[str, object]: ...
 
+def zspace_inference_distortion_probe_cli_args(
+    config: Mapping[str, object] | None,
+) -> List[str]: ...
+
+def zspace_inference_distortion_sweep_cli_args(
+    config: Mapping[str, object] | None,
+) -> List[str]: ...
+
 def zspace_generation_control_processor_kwargs(
     config: Mapping[str, object] | None,
 ) -> Dict[str, object]: ...
@@ -400,6 +408,10 @@ def zspace_generation_control_bridge_cli_args(
 ) -> List[str]: ...
 
 def load_zspace_inference_distortion_probe(
+    path: str | PathLike[str],
+) -> Dict[str, object]: ...
+
+def load_zspace_inference_distortion_sweep(
     path: str | PathLike[str],
 ) -> Dict[str, object]: ...
 
@@ -423,6 +435,20 @@ def summarize_zspace_inference_distortion_probe_comparison_lines(
         | str
         | PathLike[str]
     ),
+    *,
+    top_n: int = ...,
+    preview_chars: int = ...,
+) -> List[str]: ...
+
+def summarize_zspace_inference_distortion_sweep(
+    report_or_path: str | PathLike[str] | Mapping[str, object],
+    *,
+    top_n: int = ...,
+    preview_chars: int = ...,
+) -> Dict[str, object]: ...
+
+def summarize_zspace_inference_distortion_sweep_lines(
+    report_or_path: str | PathLike[str] | Mapping[str, object],
     *,
     top_n: int = ...,
     preview_chars: int = ...,
@@ -8392,14 +8418,19 @@ __all__ = [
     "build_zspace_repression_logits_processor",
     "build_zspace_softmax_logits_processor",
     "compare_zspace_inference_distortion_probes",
+    "zspace_inference_distortion_probe_cli_args",
+    "zspace_inference_distortion_sweep_cli_args",
     "zspace_generation_control_bridge_cli_args",
     "zspace_generation_control_processor_kwargs",
     "zspace_generation_control_sweep_cli_args",
     "load_zspace_inference_distortion_probe",
+    "load_zspace_inference_distortion_sweep",
     "load_zspace_generation_control_sweep",
     "summarize_zspace_inference_distortion_probe",
     "summarize_zspace_inference_distortion_probe_comparison_lines",
     "summarize_zspace_inference_distortion_probe_lines",
+    "summarize_zspace_inference_distortion_sweep",
+    "summarize_zspace_inference_distortion_sweep_lines",
     "summarize_zspace_generation_control_run",
     "summarize_zspace_generation_control_sweep",
     "summarize_zspace_generation_control_sweep_lines",
