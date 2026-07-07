@@ -70,6 +70,10 @@
   stats so long local GPT-2 runs can expose throughput wobble beside loss
   improvements; sweep top-run summaries surface the same throughput/eval-series
   fields next to eval deltas.
+- FT generation sample: add a sanitized local GPT-2 long-run sample artifact
+  showing a fixed prompt shift from generic Torch/Tor wording before training
+  toward SpiralTorch runtime / Python bindings wording after 640/1280/2560
+  steps, with eval-loss and throughput evidence beside the text.
 - Documentation: clarify the hard dependency boundary for larger local GPT-2
   FT runs: Rust keeps tensor/nn/text/logic/frac/rl/WGPU surfaces in the wheel,
   while Python explicitly brings Transformers, Torch, datasets, pyarrow,

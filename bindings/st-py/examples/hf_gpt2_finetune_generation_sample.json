@@ -1,0 +1,54 @@
+{
+  "decode": {
+    "generation_method": "model.generate",
+    "max_new_tokens": 32,
+    "sampling": false
+  },
+  "generation_shift_summary": {
+    "baseline": "Generic GPT-2 continuation drifts toward Torch/Tor-network wording.",
+    "step_1280": "Continuation becomes a readable SpiralTorch runtime / Python-bindings description.",
+    "step_2560": "Continuation binds strongly to SpiralTorch and Python wrapper wording, with a mild greedy repetition loop."
+  },
+  "kind": "spiraltorch.hf_gpt2_finetune_generation.sample",
+  "model": "gpt2",
+  "prompt": "SpiralTorch is a tensor and geometry runtime that",
+  "runs": {
+    "before_train": {
+      "continuation": " allows you to use the Torch library to create a simple, scalable, and scalable Tor network.\n\nTorch is a lightweight, fast, and secure",
+      "eval_loss": 2.711756944656372,
+      "generated_text": "SpiralTorch is a tensor and geometry runtime that allows you to use the Torch library to create a simple, scalable, and scalable Tor network.\n\nTorch is a lightweight, fast, and secure",
+      "generated_text_sha256": "016906cad271f979512b707b404864b06c70c7f8374627ecd0d8262011e4d834",
+      "output_token_count": 45
+    },
+    "step_1280": {
+      "continuation": " runs on top of the Python bindings. The runtime is designed to be lightweight, fast, and lightweight without sacrificing stability. The runtime is also designed to be lightweight",
+      "eval_loss": 1.5831480026245117,
+      "eval_loss_delta_from_before": -1.1286089420318604,
+      "generated_text": "SpiralTorch is a tensor and geometry runtime that runs on top of the Python bindings. The runtime is designed to be lightweight, fast, and lightweight without sacrificing stability. The runtime is also designed to be lightweight",
+      "generated_text_sha256": "331b1d69f85365dfa13768454c98fe328eb46643b1edbdb330fb131a92830e23",
+      "output_token_count": 45,
+      "trainer_steps_per_second": 0.603
+    },
+    "step_2560": {
+      "continuation": " exposes a Python wrapper for SpiralTorch. The SpiralTorch runtime exposes a Python wrapper for SpiralTorch. The SpiralTorch runtime exposes a Python wrapper",
+      "eval_loss": 1.4147881269454956,
+      "eval_loss_delta_from_before": -1.2969688177108765,
+      "generated_text": "SpiralTorch is a tensor and geometry runtime that exposes a Python wrapper for SpiralTorch. The SpiralTorch runtime exposes a Python wrapper for SpiralTorch. The SpiralTorch runtime exposes a Python wrapper",
+      "generated_text_sha256": "ec1291f6da9fa3ec5521e8a68e0e07078ce443401da7f9118a858ce3968d127e",
+      "output_token_count": 45,
+      "trace_eval_loss_series": "0=2.711756944656372,640=1.652132272720337,1280=1.5186359882354736,1920=1.444643497467041,2560=1.4147881269454956",
+      "trace_log_steps_per_second_mean": 1.276526448546728,
+      "trainer_steps_per_second": 1.208
+    },
+    "step_640": {
+      "continuation": " uses the SpiralTorch runtime module to embed tensors into the Python runtime. SpiralTorch is a Python runtime that uses the SpiralTorch runtime module to",
+      "eval_loss": 1.7362204790115356,
+      "eval_loss_delta_from_before": -0.9755364656448364,
+      "generated_text": "SpiralTorch is a tensor and geometry runtime that uses the SpiralTorch runtime module to embed tensors into the Python runtime. SpiralTorch is a Python runtime that uses the SpiralTorch runtime module to",
+      "generated_text_sha256": "c9da302e202bfd074c1d6258b34e2c15c0b39a06028380faa70abf0c6b5ffe48",
+      "output_token_count": 45,
+      "trainer_steps_per_second": 0.927
+    }
+  },
+  "sample_note": "Sanitized local GPT-2 fine-tune generation sample from SpiralTorch run cards; checkpoint files, local /tmp paths, and corpus text are omitted."
+}
