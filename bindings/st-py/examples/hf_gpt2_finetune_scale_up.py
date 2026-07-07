@@ -79,6 +79,11 @@ def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
     )
 
 
+def _write_command_artifact(args: argparse.Namespace, command: Mapping[str, Any]) -> None:
+    if args.write_command is not None:
+        _write_json(args.write_command, command)
+
+
 def _flag_value(command: Sequence[object], flag: str) -> str | None:
     values = [str(item) for item in command]
     for index, item in enumerate(values):
@@ -356,16 +361,17 @@ def run_scale_up(args: argparse.Namespace) -> dict[str, Any]:
     command["preflight_status"] = preflight.get("status")
     command["preflight_error_count"] = preflight.get("error_count")
     command["preflight_warning_count"] = preflight.get("warning_count")
-    if args.write_command is not None:
-        _write_json(args.write_command, command)
     if command.get("status") != "ok":
         if args.run or args.require_ready:
             command["run_returncode"] = 2
+        _write_command_artifact(args, command)
         return command
     if (args.run or args.require_ready) and not preflight.get("ready"):
         command["run_returncode"] = 2
+        _write_command_artifact(args, command)
         return command
     if not args.run:
+        _write_command_artifact(args, command)
         return command
     command_values = command.get("command")
     if not isinstance(command_values, Sequence) or isinstance(
@@ -373,9 +379,11 @@ def run_scale_up(args: argparse.Namespace) -> dict[str, Any]:
         (str, bytes),
     ):
         command["run_returncode"] = 2
+        _write_command_artifact(args, command)
         return command
     result = subprocess.run([str(item) for item in command_values], check=False)
     command["run_returncode"] = int(result.returncode)
+    _write_command_artifact(args, command)
     return command
 
 

@@ -614,7 +614,8 @@ command as-is unless you pass explicit overrides such as `--max-steps` or
 `--output-dir`. Each replay also includes a lightweight preflight over the
 resolved command's executable, bridge script, input files, and output parents;
 add `--require-ready` to fail before `--run` when an input artifact has gone
-missing.
+missing. When `--write-command` is combined with `--run`, the written artifact is
+updated after execution so it includes `run_returncode` beside the preflight.
 
 Add
 `--generation-from-inference-distortion` with a

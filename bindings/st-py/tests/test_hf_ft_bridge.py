@@ -2160,10 +2160,13 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             ) as exact_run_mock:
                 exact_executed = scale_up_module.run_scale_up(exact_run_args)
 
+            run_result_artifact_path = out_dir / "scale-up-command-run-result.json"
             run_args = scale_up_module.parse_args(
                 [
                     str(rewritten_artifact_path),
                     "--run",
+                    "--write-command",
+                    str(run_result_artifact_path),
                     "--max-steps",
                     "128",
                     "--output-dir",
@@ -2188,6 +2191,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 side_effect=fake_scale_up_run,
             ) as run_mock:
                 executed = scale_up_module.run_scale_up(run_args)
+            run_result = json.loads(run_result_artifact_path.read_text())
 
         self.assertEqual(scale_up["status"], "ok")
         self.assertEqual(scale_up["preflight_status"], "ready")
@@ -2218,6 +2222,9 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         exact_run_mock.assert_called_once()
         self.assertEqual(executed["preflight_status"], "ready")
         self.assertEqual(executed["run_returncode"], 0)
+        self.assertEqual(run_result["preflight_status"], "ready")
+        self.assertEqual(run_result["run_returncode"], 0)
+        self.assertIn("--max-steps 128", run_result["command_display"])
         run_mock.assert_called_once()
 
     def test_sweep_example_resume_existing_reuses_successful_run_cards(self) -> None:
