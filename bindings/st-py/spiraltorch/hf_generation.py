@@ -10,7 +10,9 @@ from pathlib import Path
 from typing import Any
 
 __all__ = [
+    "ZSpaceActivationProbeHook",
     "ZSpaceRepressionLogitsProcessor",
+    "build_zspace_activation_probe_hook",
     "build_zspace_repression_logits_processor",
     "build_zspace_softmax_logits_processor",
     "zspace_generation_control_bridge_cli_args",
@@ -20,6 +22,7 @@ __all__ = [
     "summarize_zspace_generation_control_run",
     "summarize_zspace_generation_control_sweep",
     "summarize_zspace_generation_control_sweep_lines",
+    "zspace_inference_distortion_processor_kwargs",
 ]
 
 
@@ -93,6 +96,10 @@ def _safe_number(value: object) -> int | float | None:
 def _mapping_item(row: Mapping[str, object], key: str) -> dict[str, object]:
     value = row.get(key)
     return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _clamp(value: float, low: float, high: float) -> float:
+    return max(low, min(high, value))
 
 
 def _row_list(value: Any) -> list[float]:
@@ -571,6 +578,251 @@ def build_zspace_softmax_logits_processor(
     """Alias for callers that first reach for the ZSpaceSoftmax surface."""
 
     return build_zspace_repression_logits_processor(**kwargs)
+
+
+def zspace_inference_distortion_processor_kwargs(
+    adapter_or_config: Mapping[str, object] | None = None,
+    **overrides: object,
+) -> dict[str, object]:
+    """Return local-HF logits-processor kwargs from a distortion adapter.
+
+    ``zspace_inference_distortion_adapter`` returns a serializable payload that
+    can drive both hosted API request controls and local HF logits processors.
+    This helper extracts only the kwargs accepted by
+    :class:`ZSpaceRepressionLogitsProcessor`, with explicit overrides winning.
+    """
+
+    source = dict(adapter_or_config or {})
+    if isinstance(source.get("logits_processor_kwargs"), Mapping):
+        source = dict(source["logits_processor_kwargs"])  # type: ignore[index]
+    source.update(overrides)
+    allowed = {
+        "top_k",
+        "curvature",
+        "temperature",
+        "entropy_target",
+        "entropy_tolerance",
+        "entropy_gain",
+        "min_temperature",
+        "max_temperature",
+        "repression_window",
+        "repression_strength",
+        "last_token_repression",
+        "ngram_size",
+        "ngram_window",
+        "ngram_repression_strength",
+        "ngram_decay",
+        "mask_non_top_k",
+        "use_native_zspace",
+    }
+    return {key: value for key, value in source.items() if key in allowed}
+
+
+def _selected_module_names(
+    model: Any,
+    *,
+    module_names: Sequence[str] | None,
+    name_contains: Sequence[str] | None,
+    max_modules: int,
+) -> list[tuple[str, Any]]:
+    if max_modules <= 0:
+        return []
+    named_modules = getattr(model, "named_modules", None)
+    if not callable(named_modules):
+        raise TypeError("model must expose named_modules()")
+    exact = {str(name) for name in (module_names or [])}
+    contains = [str(part) for part in (name_contains or []) if str(part)]
+    selected: list[tuple[str, Any]] = []
+    for name, module in named_modules():
+        if not name:
+            continue
+        if exact and name not in exact:
+            continue
+        if contains and not any(part in name for part in contains):
+            continue
+        if not exact and not contains:
+            continue
+        selected.append((str(name), module))
+        if len(selected) >= max(0, int(max_modules)):
+            break
+    return selected
+
+
+def _activation_summary(value: Any) -> dict[str, object]:
+    tensor = value[0] if isinstance(value, (tuple, list)) and value else value
+    shape = getattr(tensor, "shape", None)
+    summary: dict[str, object] = {
+        "shape": [int(dim) for dim in shape] if shape is not None else None,
+    }
+    try:
+        detached = tensor.detach() if hasattr(tensor, "detach") else tensor
+        numeric = detached.float() if hasattr(detached, "float") else detached
+        abs_value = numeric.abs() if hasattr(numeric, "abs") else None
+        square = numeric.pow(2) if hasattr(numeric, "pow") else None
+        if abs_value is not None:
+            summary["mean_abs"] = float(abs_value.mean().item())
+            summary["max_abs"] = float(abs_value.max().item())
+        if square is not None:
+            summary["l2"] = float(square.sum().sqrt().item())
+    except Exception as exc:  # pragma: no cover - defensive optional torch path.
+        summary["error"] = f"{exc.__class__.__name__}: {exc}"
+    return summary
+
+
+def _intervene_activation(
+    output: Any,
+    *,
+    scale: float,
+    bias: float,
+) -> Any:
+    if scale == 1.0 and bias == 0.0:
+        return output
+    if isinstance(output, tuple) and output:
+        first = _intervene_activation(output[0], scale=scale, bias=bias)
+        return (first, *output[1:])
+    if isinstance(output, list) and output:
+        updated = list(output)
+        updated[0] = _intervene_activation(updated[0], scale=scale, bias=bias)
+        return updated
+    adjusted = output
+    try:
+        if scale != 1.0:
+            adjusted = adjusted * scale
+        if bias != 0.0:
+            adjusted = adjusted + bias
+        return adjusted
+    except Exception:
+        return output
+
+
+class ZSpaceActivationProbeHook:
+    """Attach lightweight activation analysis/intervention hooks to HF models."""
+
+    def __init__(
+        self,
+        *,
+        module_names: Sequence[str] | None = None,
+        name_contains: Sequence[str] | None = None,
+        max_modules: int = 8,
+        record_limit: int = 64,
+        intervention_scale: float = 1.0,
+        intervention_bias: float = 0.0,
+        origin: str = "hf:activation_probe",
+    ) -> None:
+        self.module_names = [str(name) for name in (module_names or [])]
+        self.name_contains = [str(part) for part in (name_contains or [])]
+        self.max_modules = _non_negative_int(max_modules, label="max_modules")
+        self.record_limit = _non_negative_int(record_limit, label="record_limit")
+        self.intervention_scale = _finite_float(
+            intervention_scale,
+            label="intervention_scale",
+        )
+        self.intervention_bias = _finite_float(
+            intervention_bias,
+            label="intervention_bias",
+        )
+        self.origin = str(origin)
+        self._handles: list[Any] = []
+        self._events: list[dict[str, object]] = []
+        self._attached_modules: list[str] = []
+
+    def attach(self, model: Any) -> "ZSpaceActivationProbeHook":
+        """Register hooks on selected modules and return ``self``."""
+
+        self.close()
+        selected = _selected_module_names(
+            model,
+            module_names=self.module_names,
+            name_contains=self.name_contains,
+            max_modules=self.max_modules,
+        )
+        for name, module in selected:
+            register = getattr(module, "register_forward_hook", None)
+            if not callable(register):
+                continue
+            handle = register(self._hook(name))
+            self._handles.append(handle)
+            self._attached_modules.append(name)
+        return self
+
+    def close(self) -> None:
+        """Remove active hooks."""
+
+        for handle in self._handles:
+            remove = getattr(handle, "remove", None)
+            if callable(remove):
+                remove()
+        self._handles.clear()
+        self._attached_modules.clear()
+
+    def reset_report(self) -> None:
+        self._events.clear()
+
+    def report(self, *, limit: int | None = None) -> dict[str, object]:
+        if limit is None:
+            events = list(self._events)
+        elif limit <= 0:
+            events = []
+        else:
+            events = list(self._events[-limit:])
+        l2_values = [
+            float(event["output_l2"])
+            for event in self._events
+            if isinstance(event.get("output_l2"), (int, float))
+        ]
+        return {
+            "row_type": "zspace_activation_probe_hook_report",
+            "status": "ok" if self._events else "unused",
+            "origin": self.origin,
+            "attached_modules": list(self._attached_modules),
+            "event_count": len(self._events),
+            "reported_event_count": len(events),
+            "intervention_scale": self.intervention_scale,
+            "intervention_bias": self.intervention_bias,
+            "output_l2_min": min(l2_values) if l2_values else None,
+            "output_l2_max": max(l2_values) if l2_values else None,
+            "events": events,
+        }
+
+    def __enter__(self) -> "ZSpaceActivationProbeHook":
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
+        del exc_type, exc, tb
+        self.close()
+
+    def _hook(self, name: str):
+        def _capture(_module: Any, _inputs: Any, output: Any) -> Any:
+            summary = _activation_summary(output)
+            event = {
+                "module": name,
+                "output_shape": summary.get("shape"),
+                "output_l2": summary.get("l2"),
+                "output_mean_abs": summary.get("mean_abs"),
+                "output_max_abs": summary.get("max_abs"),
+                "intervened": self.intervention_scale != 1.0
+                or self.intervention_bias != 0.0,
+            }
+            if summary.get("error"):
+                event["error"] = summary["error"]
+            self._events.append(event)
+            if self.record_limit and len(self._events) > self.record_limit:
+                self._events = self._events[-self.record_limit :]
+            return _intervene_activation(
+                output,
+                scale=self.intervention_scale,
+                bias=self.intervention_bias,
+            )
+
+        return _capture
+
+
+def build_zspace_activation_probe_hook(
+    **kwargs: object,
+) -> ZSpaceActivationProbeHook:
+    """Build a local-HF activation analysis/intervention hook."""
+
+    return ZSpaceActivationProbeHook(**kwargs)
 
 
 def load_zspace_generation_control_sweep(path: str | Path) -> dict[str, object]:

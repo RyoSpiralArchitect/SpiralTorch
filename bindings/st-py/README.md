@@ -442,6 +442,25 @@ run-card JSON into eval-loss/perplexity deltas, generation-sample changes,
 dataset-fit status, and trainer metrics so tuning choices can be ranked without
 hand-reading each artifact.
 
+Before another FT pass, the same desire/psi pressure can be tested at inference
+time:
+
+```bash
+PYTHONPATH=bindings/st-py python bindings/st-py/examples/zspace_inference_distortion_probe.py \
+  --local-model runs/gpt2-small-zspace-ft \
+  --prompt "SpiralTorch is a tensor and geometry runtime that" \
+  --activation-name-contains transformer.h.0 \
+  --out runs/zspace-inference-distortion-probe.json
+```
+
+The probe builds one `api_llm_zspace_inference_distortion_adapter(...)` and
+uses it three ways: local HF logits receive `ZSpaceRepressionLogitsProcessor`
+kwargs, matching activation hooks record and can gently intervene in selected
+modules, and API-model-shaped calls receive request overrides plus bounded
+Z-space context telemetry. Omit `--local-model` for a keyless fake API smoke, or
+add `--api-provider openai-responses|openai-chat|anthropic --api-model <model>`
+to reuse the same distortion adapter with a live provider.
+
 For the first real FT pass on a new corpus, use the sweep runner to make that
 comparison reproducible:
 

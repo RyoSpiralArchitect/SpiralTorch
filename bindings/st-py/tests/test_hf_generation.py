@@ -9,10 +9,13 @@ from pathlib import Path
 import spiraltorch as st
 from spiraltorch import hf_ft
 from spiraltorch.hf_generation import (
+    ZSpaceActivationProbeHook,
     ZSpaceRepressionLogitsProcessor,
+    build_zspace_activation_probe_hook,
     load_zspace_generation_control_sweep,
     summarize_zspace_generation_control_sweep,
     summarize_zspace_generation_control_sweep_lines,
+    zspace_inference_distortion_processor_kwargs,
     zspace_generation_control_bridge_cli_args,
     zspace_generation_control_processor_kwargs,
     zspace_generation_control_sweep_cli_args,
@@ -145,10 +148,59 @@ class ZSpaceRepressionLogitsProcessorTests(unittest.TestCase):
 
         self.assertEqual(report["generation_control"], control)
 
+    def test_distortion_adapter_feeds_logits_processor_kwargs(self) -> None:
+        adapter = st.api_llm_zspace_inference_distortion_adapter(
+            desire_pressure=0.9,
+            desire_stability=0.35,
+            psi_total=0.8,
+            distortion_strength=1.0,
+            use_native_zspace=False,
+        )
+        kwargs = zspace_inference_distortion_processor_kwargs(
+            adapter,
+            top_k=3,
+        )
+        processor = ZSpaceRepressionLogitsProcessor(**kwargs)
+        input_ids = torch.tensor([[0, 0, 0]], dtype=torch.long)
+        scores = torch.tensor([[4.0, 3.5, 1.0]], dtype=torch.float32)
+
+        processed = processor(input_ids, scores)
+        report = processor.report()
+
+        self.assertEqual(int(torch.argmax(processed, dim=-1).item()), 1)
+        self.assertGreater(kwargs["repression_strength"], 0.75)
+        self.assertEqual(report["top_token_changed_count"], 1)
+
+    def test_activation_probe_hook_records_and_intervenes(self) -> None:
+        model = torch.nn.Sequential(torch.nn.Linear(2, 2, bias=False))
+        with torch.no_grad():
+            model[0].weight.copy_(torch.eye(2))
+        hook = ZSpaceActivationProbeHook(
+            module_names=["0"],
+            intervention_scale=0.5,
+        ).attach(model)
+
+        try:
+            output = model(torch.tensor([[2.0, 4.0]], dtype=torch.float32))
+            report = hook.report()
+            aggregate_only = hook.report(limit=0)
+        finally:
+            hook.close()
+
+        self.assertTrue(torch.allclose(output, torch.tensor([[1.0, 2.0]])))
+        self.assertEqual(report["event_count"], 1)
+        self.assertEqual(report["reported_event_count"], 1)
+        self.assertEqual(aggregate_only["reported_event_count"], 0)
+        self.assertEqual(report["events"][0]["module"], "0")
+        self.assertTrue(report["events"][0]["intervened"])
+        self.assertGreater(report["events"][0]["output_l2"], 0.0)
+
 
 class ZSpaceGenerationExportTests(unittest.TestCase):
     def test_top_level_exports_generation_processor(self) -> None:
         self.assertIn("ZSpaceRepressionLogitsProcessor", st.__all__)
+        self.assertIn("ZSpaceActivationProbeHook", st.__all__)
+        self.assertIn("build_zspace_activation_probe_hook", st.__all__)
         self.assertIn("build_zspace_repression_logits_processor", st.__all__)
         self.assertIn("build_zspace_softmax_logits_processor", st.__all__)
         self.assertIn("zspace_generation_control_bridge_cli_args", st.__all__)
@@ -156,10 +208,20 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         self.assertIn("zspace_generation_control_sweep_cli_args", st.__all__)
         self.assertIn("load_zspace_generation_control_sweep", st.__all__)
         self.assertIn("summarize_zspace_generation_control_sweep", st.__all__)
+        self.assertIn("zspace_inference_distortion_processor_kwargs", st.__all__)
         self.assertIs(st.ZSpaceRepressionLogitsProcessor, ZSpaceRepressionLogitsProcessor)
+        self.assertIs(st.ZSpaceActivationProbeHook, ZSpaceActivationProbeHook)
+        self.assertIs(
+            st.build_zspace_activation_probe_hook,
+            build_zspace_activation_probe_hook,
+        )
         self.assertIs(
             st.zspace_generation_control_bridge_cli_args,
             zspace_generation_control_bridge_cli_args,
+        )
+        self.assertIs(
+            st.zspace_inference_distortion_processor_kwargs,
+            zspace_inference_distortion_processor_kwargs,
         )
         self.assertIs(
             st.summarize_zspace_generation_control_sweep,

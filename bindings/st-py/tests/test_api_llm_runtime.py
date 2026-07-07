@@ -12,6 +12,7 @@ def test_api_llm_runtime_exports_from_top_level() -> None:
     assert "ApiLLMZSpaceRuntime" in st.__all__
     assert "api_llm_geometry_context_partials" in st.__all__
     assert "api_llm_partial_from_response" in st.__all__
+    assert "api_llm_zspace_inference_distortion_adapter" in st.__all__
     assert "api_llm_topos_sweep_report" in st.__all__
     assert "api_llm_topos_route_policy_selection" in st.__all__
     assert "api_llm_topos_sweep_route_rewards" in st.__all__
@@ -518,6 +519,58 @@ def test_topos_runtime_adapter_can_be_used_directly_as_prompt_context() -> None:
     assert "origin=topos:runtime" in prompt
     assert "topos.learning_rate_scale=0.891988" in prompt
     assert "User prompt: Route through the topos adapter." in prompt
+
+
+def test_zspace_inference_distortion_adapter_drives_api_runtime() -> None:
+    adapter = st.api_llm_zspace_inference_distortion_adapter(
+        desire_pressure=0.8,
+        desire_stability=0.4,
+        psi_total=0.7,
+        coherence=0.35,
+        distortion_strength=1.25,
+        base_temperature=0.7,
+        include_penalties=True,
+    )
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    def fake_api(prompt: str, **request_kwargs: object) -> dict[str, object]:
+        calls.append((prompt, dict(request_kwargs)))
+        return {
+            "model": "distorted-api",
+            "output_text": "Distorted API route stayed coherent.",
+            "usage": {"prompt_tokens": 8, "completion_tokens": 6, "total_tokens": 14},
+        }
+
+    runtime = st.ApiLLMZSpaceRuntime(
+        [0.12, -0.04, 0.33, -0.11],
+        provider="example",
+        create_session=False,
+    )
+    trace = runtime.call(
+        fake_api,
+        "probe API distortion",
+        runtime_adapter=adapter,
+        context_prompt=True,
+        context_prompt_options={"max_telemetry": 32},
+    )
+
+    assert adapter["kind"] == "spiraltorch.zspace_inference_distortion_adapter"
+    assert adapter["request"]["temperature"] > 0.7
+    assert adapter["request"]["top_p"] <= 1.0
+    assert adapter["logits_processor_kwargs"]["repression_strength"] > 0.75
+    assert calls[0][1]["temperature"] == pytest.approx(adapter["request"]["temperature"])
+    assert calls[0][1]["frequency_penalty"] == pytest.approx(
+        adapter["request"]["frequency_penalty"]
+    )
+    assert "origin=zspace:inference_distortion" in calls[0][0]
+    assert "zspace.distortion.energy" in calls[0][0]
+    telemetry = trace.as_dict()["inference"]["telemetry"]["payload"]
+    assert telemetry["zspace.distortion.energy"] == pytest.approx(
+        adapter["distortion_energy"]
+    )
+    assert telemetry["zspace.request.temperature"] == pytest.approx(
+        adapter["request"]["temperature"]
+    )
 
 
 def test_api_llm_prompt_suite_applies_topos_runtime_adapter_directly() -> None:

@@ -694,6 +694,7 @@ from .api_llm_runtime import (
     ApiLLMTrace,
     ApiLLMZSpaceRuntime,
     api_llm_geometry_context_partials,
+    api_llm_zspace_inference_distortion_adapter,
     api_llm_partial_from_response,
     api_llm_text_from_response,
     api_llm_trace_from_response,
@@ -802,7 +803,9 @@ from .hf_ft import (
 )
 
 from .hf_generation import (
+    ZSpaceActivationProbeHook,
     ZSpaceRepressionLogitsProcessor,
+    build_zspace_activation_probe_hook,
     build_zspace_repression_logits_processor,
     build_zspace_softmax_logits_processor,
     zspace_generation_control_bridge_cli_args,
@@ -812,6 +815,7 @@ from .hf_generation import (
     summarize_zspace_generation_control_run,
     summarize_zspace_generation_control_sweep,
     summarize_zspace_generation_control_sweep_lines,
+    zspace_inference_distortion_processor_kwargs,
 )
 
 from .gnn_trace import (
@@ -973,7 +977,9 @@ _EXTRAS = [
     "summarize_hf_gpt2_finetune_trainer_trace",
     "write_hf_gpt2_finetune_run_card",
     "write_hf_gpt2_finetune_trainer_trace_event",
+    "ZSpaceActivationProbeHook",
     "ZSpaceRepressionLogitsProcessor",
+    "build_zspace_activation_probe_hook",
     "build_zspace_repression_logits_processor",
     "build_zspace_softmax_logits_processor",
     "zspace_generation_control_bridge_cli_args",
@@ -983,6 +989,7 @@ _EXTRAS = [
     "summarize_zspace_generation_control_run",
     "summarize_zspace_generation_control_sweep",
     "summarize_zspace_generation_control_sweep_lines",
+    "zspace_inference_distortion_processor_kwargs",
     "load_gnn_band_replay_trace","flatten_gnn_band_replay_rows",
     "summarize_gnn_band_replays","compare_gnn_band_replay_runs","write_gnn_band_replay_html",
     "load_kdsl_trace_events","write_kdsl_trace_jsonl","write_kdsl_trace_html",
@@ -1019,6 +1026,7 @@ _EXTRAS = [
     "semantic_scale_stack_partial","semantic_scale_stack_probe",
     "ApiLLMTrace","ApiLLMZSpaceRuntime",
     "api_llm_geometry_context_partials",
+    "api_llm_zspace_inference_distortion_adapter",
     "api_llm_partial_from_response","api_llm_text_from_response",
     "api_llm_trace_from_response","api_llm_usage_from_response",
     "api_llm_wasm_context_partials",

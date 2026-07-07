@@ -33,6 +33,7 @@ __all__ = [
     "ApiLLMTrace",
     "ApiLLMZSpaceRuntime",
     "api_llm_geometry_context_partials",
+    "api_llm_zspace_inference_distortion_adapter",
     "api_llm_partial_from_response",
     "api_llm_text_from_response",
     "api_llm_trace_from_response",
@@ -223,6 +224,24 @@ def _finite_float(value: Any) -> float | None:
     return numeric if math.isfinite(numeric) else None
 
 
+def _clamp(value: float, low: float, high: float) -> float:
+    return max(low, min(high, value))
+
+
+def _unit_or_default(value: Any, default: float) -> float:
+    numeric = _finite_float(value)
+    if numeric is None:
+        return _clamp(float(default), 0.0, 1.0)
+    return _clamp(float(numeric), 0.0, 1.0)
+
+
+def _non_negative_or_default(value: Any, default: float) -> float:
+    numeric = _finite_float(value)
+    if numeric is None:
+        return max(0.0, float(default))
+    return max(0.0, float(numeric))
+
+
 def topos_runtime_request(
     topos: Any | None = None,
     *,
@@ -357,6 +376,189 @@ def topos_runtime_adapter(
             "origin": partial.origin,
             "weight": float(partial.weight),
             "metrics": partial.resolved(),
+            "telemetry": telemetry,
+        },
+    }
+
+
+def api_llm_zspace_inference_distortion_adapter(
+    *,
+    desire_pressure: float | None = None,
+    desire_stability: float | None = None,
+    psi_total: float | None = None,
+    coherence: float | None = None,
+    distortion_strength: float = 1.0,
+    bundle_weight: float = 1.0,
+    origin: str | None = "zspace:inference_distortion",
+    telemetry_prefix: str = "zspace",
+    gradient_dim: int = 6,
+    base_temperature: float = 1.0,
+    base_top_p: float = 1.0,
+    min_temperature: float = 0.05,
+    max_temperature: float = 2.0,
+    min_top_p: float = 0.05,
+    max_top_p: float = 1.0,
+    include_temperature: bool = True,
+    include_top_p: bool = True,
+    include_penalties: bool = False,
+    base_frequency_penalty: float = 0.0,
+    base_presence_penalty: float = 0.0,
+    top_k: int = 64,
+    curvature: float = -0.04,
+    entropy_target: float | None = 3.0,
+    entropy_gain: float = 0.5,
+    repression_window: int = 32,
+    base_repression_strength: float = 0.75,
+    base_last_token_repression: float = 0.25,
+    ngram_size: int = 3,
+    ngram_window: int = 96,
+    base_ngram_repression_strength: float = 0.5,
+    ngram_decay: float = 0.9,
+    use_native_zspace: bool = True,
+    activation_name_contains: Sequence[str] | None = None,
+    activation_module_names: Sequence[str] | None = None,
+) -> dict[str, Any]:
+    """Build a shared Z-space distortion adapter for local HF and API inference.
+
+    Hosted API models cannot expose logits directly, so the adapter translates
+    the same desire/psi pressure into request controls plus context telemetry.
+    Local HF callers can also pass ``logits_processor_kwargs`` to
+    ``ZSpaceRepressionLogitsProcessor`` and ``activation_hook`` to
+    ``ZSpaceActivationProbeHook``.
+    """
+
+    pressure = _unit_or_default(desire_pressure, 0.5)
+    stability = _unit_or_default(desire_stability, 0.65)
+    psi = _unit_or_default(psi_total, 0.5)
+    coherence_value = _unit_or_default(coherence, stability)
+    strength = _non_negative_or_default(distortion_strength, 1.0)
+    bundle_weight_value = _non_negative_or_default(bundle_weight, 1.0)
+    closure = 1.0 - stability
+    distortion_energy = _clamp(
+        strength
+        * (0.42 * pressure + 0.35 * psi + 0.23 * closure)
+        * (1.0 - 0.25 * coherence_value),
+        0.0,
+        1.0,
+    )
+
+    base_temperature_value = max(0.0, float(base_temperature))
+    base_top_p_value = _clamp(float(base_top_p), min_top_p, max_top_p)
+    temperature = _clamp(
+        base_temperature_value * (1.0 + 0.65 * distortion_energy),
+        min_temperature,
+        max_temperature,
+    )
+    top_p = _clamp(
+        base_top_p_value * (1.0 - 0.35 * distortion_energy + 0.08 * coherence_value),
+        min_top_p,
+        max_top_p,
+    )
+    frequency_penalty = _clamp(
+        base_frequency_penalty + 0.6 * distortion_energy,
+        -2.0,
+        2.0,
+    )
+    presence_penalty = _clamp(
+        base_presence_penalty + 0.25 * max(pressure, closure),
+        -2.0,
+        2.0,
+    )
+
+    request: dict[str, float] = {}
+    if include_temperature:
+        request["temperature"] = float(temperature)
+    if include_top_p:
+        request["top_p"] = float(top_p)
+    if include_penalties:
+        request["frequency_penalty"] = float(frequency_penalty)
+        request["presence_penalty"] = float(presence_penalty)
+
+    logits_temperature = _clamp(temperature, 0.05, 10.0)
+    logits_processor_kwargs = {
+        "top_k": int(max(1, top_k)),
+        "curvature": float(curvature),
+        "temperature": float(logits_temperature),
+        "entropy_target": (
+            None
+            if entropy_target is None
+            else max(0.0, float(entropy_target) + distortion_energy)
+        ),
+        "entropy_gain": float(max(0.0, entropy_gain)),
+        "repression_window": int(max(0, repression_window)),
+        "repression_strength": float(
+            max(0.0, base_repression_strength + 1.25 * distortion_energy)
+        ),
+        "last_token_repression": float(
+            max(0.0, base_last_token_repression + 0.75 * closure)
+        ),
+        "ngram_size": int(max(0, ngram_size)),
+        "ngram_window": int(max(0, ngram_window)),
+        "ngram_repression_strength": float(
+            max(0.0, base_ngram_repression_strength + distortion_energy)
+        ),
+        "ngram_decay": _clamp(float(ngram_decay), 0.0, 1.0),
+        "use_native_zspace": bool(use_native_zspace),
+    }
+    activation_hook = {
+        "module_names": list(activation_module_names or []),
+        "name_contains": list(activation_name_contains or []),
+        "intervention_scale": float(_clamp(1.0 - 0.12 * distortion_energy, 0.5, 1.5)),
+        "intervention_bias": 0.0,
+        "origin": "hf:activation_probe:zspace_distortion",
+    }
+    metrics = {
+        "speed": _clamp(1.0 - 0.35 * distortion_energy, 0.0, 1.0),
+        "memory": distortion_energy,
+        "stability": stability,
+        "frac": psi,
+        "drs": pressure - psi,
+        "gradient": [
+            pressure,
+            psi,
+            stability,
+            coherence_value,
+            distortion_energy,
+            strength,
+        ][: max(1, int(gradient_dim))],
+    }
+    while len(metrics["gradient"]) < max(1, int(gradient_dim)):
+        metrics["gradient"].append(0.0)
+    telemetry = _prefixed(
+        {
+            "desire.pressure": pressure,
+            "desire.stability": stability,
+            "psi.total": psi,
+            "coherence": coherence_value,
+            "distortion.strength": strength,
+            "distortion.energy": distortion_energy,
+            "request.temperature": temperature,
+            "request.top_p": top_p,
+            "request.frequency_penalty": frequency_penalty,
+            "request.presence_penalty": presence_penalty,
+            "logits.repression_strength": logits_processor_kwargs[
+                "repression_strength"
+            ],
+            "logits.ngram_repression_strength": logits_processor_kwargs[
+                "ngram_repression_strength"
+            ],
+            "activation.intervention_scale": activation_hook["intervention_scale"],
+        },
+        telemetry_prefix,
+    )
+    return {
+        "kind": "spiraltorch.zspace_inference_distortion_adapter",
+        "desire": {"pressure": pressure, "stability": stability},
+        "psi": {"total": psi},
+        "coherence": coherence_value,
+        "distortion_energy": distortion_energy,
+        "request": request,
+        "logits_processor_kwargs": logits_processor_kwargs,
+        "activation_hook": activation_hook,
+        "context_partial": {
+            "origin": origin,
+            "weight": bundle_weight_value,
+            "metrics": metrics,
             "telemetry": telemetry,
         },
     }
@@ -1239,10 +1441,9 @@ def _trace_payload(trace: ApiLLMTrace | Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _context_bundle_from_mapping(mapping: Mapping[str, Any]) -> ZSpacePartialBundle:
-    if mapping.get("kind") == "spiraltorch.topos_runtime_adapter":
-        context = mapping.get("context_partial")
-        if isinstance(context, Mapping):
-            return _context_bundle_from_mapping(context)
+    context = mapping.get("context_partial")
+    if isinstance(context, Mapping):
+        return _context_bundle_from_mapping(context)
     metrics = mapping.get("metrics")
     if isinstance(metrics, Mapping):
         return ZSpacePartialBundle(

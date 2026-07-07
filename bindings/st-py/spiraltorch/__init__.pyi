@@ -311,6 +311,23 @@ def hf_gpt2_finetune_generation_report(
     error: object = ...,
 ) -> Dict[str, object]: ...
 
+class ZSpaceActivationProbeHook:
+    def __init__(
+        self,
+        *,
+        module_names: Sequence[str] | None = ...,
+        name_contains: Sequence[str] | None = ...,
+        max_modules: int = ...,
+        record_limit: int = ...,
+        intervention_scale: float = ...,
+        intervention_bias: float = ...,
+        origin: str = ...,
+    ) -> None: ...
+    def attach(self, model: Any) -> ZSpaceActivationProbeHook: ...
+    def close(self) -> None: ...
+    def reset_report(self) -> None: ...
+    def report(self, *, limit: int | None = ...) -> Dict[str, object]: ...
+
 class ZSpaceRepressionLogitsProcessor:
     def __init__(
         self,
@@ -344,6 +361,15 @@ def build_zspace_repression_logits_processor(
 def build_zspace_softmax_logits_processor(
     **kwargs: object,
 ) -> ZSpaceRepressionLogitsProcessor: ...
+
+def build_zspace_activation_probe_hook(
+    **kwargs: object,
+) -> ZSpaceActivationProbeHook: ...
+
+def zspace_inference_distortion_processor_kwargs(
+    adapter_or_config: Mapping[str, object] | None = ...,
+    **overrides: object,
+) -> Dict[str, object]: ...
 
 def zspace_generation_control_processor_kwargs(
     config: Mapping[str, object] | None,
@@ -2697,6 +2723,44 @@ def api_llm_geometry_context_partials(
     consensus_strategy: str = ...,
     consensus_origin: str = ...,
 ) -> List[ZSpacePartialBundle]: ...
+
+def api_llm_zspace_inference_distortion_adapter(
+    *,
+    desire_pressure: float | None = ...,
+    desire_stability: float | None = ...,
+    psi_total: float | None = ...,
+    coherence: float | None = ...,
+    distortion_strength: float = ...,
+    bundle_weight: float = ...,
+    origin: str | None = ...,
+    telemetry_prefix: str = ...,
+    gradient_dim: int = ...,
+    base_temperature: float = ...,
+    base_top_p: float = ...,
+    min_temperature: float = ...,
+    max_temperature: float = ...,
+    min_top_p: float = ...,
+    max_top_p: float = ...,
+    include_temperature: bool = ...,
+    include_top_p: bool = ...,
+    include_penalties: bool = ...,
+    base_frequency_penalty: float = ...,
+    base_presence_penalty: float = ...,
+    top_k: int = ...,
+    curvature: float = ...,
+    entropy_target: float | None = ...,
+    entropy_gain: float = ...,
+    repression_window: int = ...,
+    base_repression_strength: float = ...,
+    base_last_token_repression: float = ...,
+    ngram_size: int = ...,
+    ngram_window: int = ...,
+    base_ngram_repression_strength: float = ...,
+    ngram_decay: float = ...,
+    use_native_zspace: bool = ...,
+    activation_name_contains: Sequence[str] | None = ...,
+    activation_module_names: Sequence[str] | None = ...,
+) -> Dict[str, Any]: ...
 
 
 def api_llm_trace_from_response(
@@ -8279,7 +8343,9 @@ __all__ = [
     "summarize_hf_gpt2_finetune_trainer_trace",
     "write_hf_gpt2_finetune_run_card",
     "write_hf_gpt2_finetune_trainer_trace_event",
+    "ZSpaceActivationProbeHook",
     "ZSpaceRepressionLogitsProcessor",
+    "build_zspace_activation_probe_hook",
     "build_zspace_repression_logits_processor",
     "build_zspace_softmax_logits_processor",
     "zspace_generation_control_bridge_cli_args",
@@ -8289,6 +8355,7 @@ __all__ = [
     "summarize_zspace_generation_control_run",
     "summarize_zspace_generation_control_sweep",
     "summarize_zspace_generation_control_sweep_lines",
+    "zspace_inference_distortion_processor_kwargs",
     "from_dlpack",
     "to_dlpack",
     "ZSpaceBarycenter",
@@ -8314,6 +8381,7 @@ __all__ = [
     "ApiLLMTrace",
     "ApiLLMZSpaceRuntime",
     "api_llm_geometry_context_partials",
+    "api_llm_zspace_inference_distortion_adapter",
     "api_llm_partial_from_response",
     "api_llm_text_from_response",
     "api_llm_trace_from_response",
