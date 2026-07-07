@@ -611,7 +611,10 @@ PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_gpt2_finetune_scale_
 
 When the source is a saved `scale-up-command*.json`, the CLI replays that saved
 command as-is unless you pass explicit overrides such as `--max-steps` or
-`--output-dir`.
+`--output-dir`. Each replay also includes a lightweight preflight over the
+resolved command's executable, bridge script, input files, and output parents;
+add `--require-ready` to fail before `--run` when an input artifact has gone
+missing.
 
 Add
 `--generation-from-inference-distortion` with a

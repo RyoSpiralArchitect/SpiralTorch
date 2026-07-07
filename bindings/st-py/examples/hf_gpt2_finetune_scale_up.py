@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shlex
+import shutil
 import subprocess
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -83,6 +85,173 @@ def _flag_value(command: Sequence[object], flag: str) -> str | None:
         if item == flag and index + 1 < len(values):
             return values[index + 1]
     return None
+
+
+def _flag_values(command: Sequence[object], flag: str) -> list[str]:
+    values = [str(item) for item in command]
+    found = []
+    for index, item in enumerate(values):
+        if item == flag and index + 1 < len(values):
+            found.append(values[index + 1])
+    return found
+
+
+def _nearest_existing_parent(path: Path) -> Path | None:
+    current = path
+    while not current.exists() and current.parent != current:
+        current = current.parent
+    return current if current.exists() else None
+
+
+def _command_preflight(command_payload: Mapping[str, Any]) -> dict[str, Any]:
+    command_value = command_payload.get("command")
+    if not isinstance(command_value, Sequence) or isinstance(
+        command_value,
+        (str, bytes),
+    ):
+        return {
+            "row_type": "hf_gpt2_finetune_scale_up_preflight",
+            "status": "blocked",
+            "ready": False,
+            "error_count": 1,
+            "warning_count": 0,
+            "issues": [
+                {
+                    "severity": "error",
+                    "field": "command",
+                    "message": "scale-up artifact does not contain a command list",
+                }
+            ],
+        }
+    command = [str(item) for item in command_value]
+    issues: list[dict[str, Any]] = []
+    inputs: list[dict[str, Any]] = []
+    outputs: list[dict[str, Any]] = []
+
+    executable = command[0] if command else None
+    executable_resolved = None
+    if executable:
+        if os.sep in executable:
+            executable_path = Path(executable)
+            executable_resolved = str(executable_path)
+            if not executable_path.is_file():
+                issues.append(
+                    {
+                        "severity": "error",
+                        "field": "executable",
+                        "path": executable,
+                        "message": "command executable does not exist",
+                    }
+                )
+        else:
+            executable_resolved = shutil.which(executable)
+            if executable_resolved is None:
+                issues.append(
+                    {
+                        "severity": "error",
+                        "field": "executable",
+                        "path": executable,
+                        "message": "command executable is not on PATH",
+                    }
+                )
+    else:
+        issues.append(
+            {
+                "severity": "error",
+                "field": "executable",
+                "message": "command is empty",
+            }
+        )
+
+    bridge_script = (
+        command[1] if len(command) > 1 and not command[1].startswith("-") else None
+    )
+    if (
+        bridge_script
+        and bridge_script.endswith(".py")
+        and not Path(bridge_script).is_file()
+    ):
+        issues.append(
+            {
+                "severity": "error",
+                "field": "bridge_script",
+                "path": bridge_script,
+                "message": "bridge script does not exist",
+            }
+        )
+
+    for flag in (
+        "--train-file",
+        "--validation-file",
+        "--inference-distortion-sweep-report",
+        "--inference-distortion-probe",
+    ):
+        for value in _flag_values(command, flag):
+            path = Path(value)
+            exists = path.is_file()
+            inputs.append({"flag": flag, "path": str(path), "exists": exists})
+            if not exists:
+                issues.append(
+                    {
+                        "severity": "error",
+                        "field": flag,
+                        "path": str(path),
+                        "message": "input file does not exist",
+                    }
+                )
+
+    for flag in ("--output-dir", "--run-card", "--trainer-trace-jsonl"):
+        value = _flag_value(command, flag)
+        if value is None:
+            continue
+        path = Path(value)
+        parent = path if flag == "--output-dir" else path.parent
+        nearest = _nearest_existing_parent(parent)
+        writable = bool(nearest and os.access(nearest, os.W_OK))
+        output = {
+            "flag": flag,
+            "path": str(path),
+            "exists": path.exists(),
+            "parent": str(parent),
+            "parent_exists": parent.exists(),
+            "nearest_existing_parent": None if nearest is None else str(nearest),
+            "nearest_existing_parent_writable": writable,
+        }
+        outputs.append(output)
+        if nearest is None or not writable:
+            issues.append(
+                {
+                    "severity": "error",
+                    "field": flag,
+                    "path": str(path),
+                    "message": "output parent is not writable",
+                }
+            )
+        elif path.exists():
+            issues.append(
+                {
+                    "severity": "warning",
+                    "field": flag,
+                    "path": str(path),
+                    "message": "output target already exists",
+                }
+            )
+
+    error_count = sum(1 for issue in issues if issue.get("severity") == "error")
+    warning_count = sum(1 for issue in issues if issue.get("severity") == "warning")
+    return {
+        "row_type": "hf_gpt2_finetune_scale_up_preflight",
+        "status": "ready" if error_count == 0 else "blocked",
+        "ready": error_count == 0,
+        "error_count": error_count,
+        "warning_count": warning_count,
+        "executable": executable,
+        "executable_resolved": executable_resolved,
+        "bridge_script": bridge_script,
+        "inputs": inputs,
+        "outputs": outputs,
+        "issues": issues,
+    }
 
 
 def _summary_from_scale_up_artifact(
@@ -182,11 +351,19 @@ def _scale_up_command_from_source(args: argparse.Namespace) -> dict[str, Any]:
 
 def run_scale_up(args: argparse.Namespace) -> dict[str, Any]:
     command = _scale_up_command_from_source(args)
+    preflight = _command_preflight(command)
+    command["preflight"] = preflight
+    command["preflight_status"] = preflight.get("status")
+    command["preflight_error_count"] = preflight.get("error_count")
+    command["preflight_warning_count"] = preflight.get("warning_count")
     if args.write_command is not None:
         _write_json(args.write_command, command)
     if command.get("status") != "ok":
         if args.run or args.require_ready:
             command["run_returncode"] = 2
+        return command
+    if (args.run or args.require_ready) and not preflight.get("ready"):
+        command["run_returncode"] = 2
         return command
     if not args.run:
         return command
@@ -208,6 +385,24 @@ def main(argv: list[str] | None = None) -> int:
     print(f"scale_up_command status={command.get('status')}")
     if command.get("artifact_path"):
         print(f"scale_up_artifact {command.get('artifact_path')}")
+    print(
+        "scale_up_preflight "
+        f"status={command.get('preflight_status')} "
+        f"errors={command.get('preflight_error_count')} "
+        f"warnings={command.get('preflight_warning_count')}"
+    )
+    preflight = command.get("preflight")
+    if isinstance(preflight, Mapping):
+        for issue in preflight.get("issues", []):
+            if not isinstance(issue, Mapping):
+                continue
+            print(
+                "scale_up_preflight_issue "
+                f"severity={issue.get('severity')} "
+                f"field={issue.get('field')} "
+                f"path={issue.get('path')} "
+                f"message={issue.get('message')}"
+            )
     display = command.get("command_display")
     if display:
         print(f"scale_up_replay {display}")

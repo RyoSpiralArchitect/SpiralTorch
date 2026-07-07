@@ -2108,6 +2108,22 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             )
             scale_up = scale_up_module.run_scale_up(scale_up_args)
             rewritten = json.loads(rewritten_artifact_path.read_text())
+            broken_artifact = dict(rewritten)
+            broken_command = [str(item) for item in rewritten["command"]]
+            broken_train_path = Path(tmp) / "missing-train.txt"
+            broken_command[broken_command.index("--train-file") + 1] = str(
+                broken_train_path
+            )
+            broken_artifact["command"] = broken_command
+            broken_artifact_path = out_dir / "scale-up-command-broken.json"
+            broken_artifact_path.write_text(json.dumps(broken_artifact), encoding="utf-8")
+            broken_args = scale_up_module.parse_args(
+                [
+                    str(broken_artifact_path),
+                    "--require-ready",
+                ]
+            )
+            broken = scale_up_module.run_scale_up(broken_args)
             from_command_artifact_args = scale_up_module.parse_args(
                 [
                     str(scale_up_artifact_path),
@@ -2174,18 +2190,33 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 executed = scale_up_module.run_scale_up(run_args)
 
         self.assertEqual(scale_up["status"], "ok")
+        self.assertEqual(scale_up["preflight_status"], "ready")
+        self.assertEqual(scale_up["preflight_error_count"], 0)
         self.assertEqual(rewritten["status"], "ok")
+        self.assertEqual(rewritten["preflight_status"], "ready")
         self.assertIn("seed13", scale_up["scale_up_candidate_label"])
         self.assertIn("--max-steps 64", scale_up["command_display"])
         self.assertIn("--max-train-samples 4096", scale_up["command_display"])
         self.assertIn("--max-eval-samples 256", scale_up["command_display"])
         self.assertIn(f"--output-dir {out_dir / 'long-run'}", scale_up["command_display"])
         self.assertEqual(scale_up["artifact_path"], str(rewritten_artifact_path))
+        self.assertEqual(broken["preflight_status"], "blocked")
+        self.assertEqual(broken["run_returncode"], 2)
+        self.assertTrue(
+            any(
+                issue.get("field") == "--train-file"
+                and issue.get("severity") == "error"
+                for issue in broken["preflight"]["issues"]
+            )
+        )
         self.assertEqual(from_command_artifact["status"], "ok")
+        self.assertEqual(from_command_artifact["preflight_status"], "ready")
         self.assertIn("-longer", from_command_artifact["command_display"])
         self.assertIn("--max-steps 2", from_command_artifact["command_display"])
+        self.assertEqual(exact_executed["preflight_status"], "ready")
         self.assertEqual(exact_executed["run_returncode"], 0)
         exact_run_mock.assert_called_once()
+        self.assertEqual(executed["preflight_status"], "ready")
         self.assertEqual(executed["run_returncode"], 0)
         run_mock.assert_called_once()
 
