@@ -317,6 +317,13 @@ def hf_gpt2_finetune_inference_distortion_handoff_report(
     top_n: int = ...,
 ) -> Dict[str, object]: ...
 
+def hf_gpt2_finetune_inference_distortion_handoff_lines(
+    report_or_path: str | PathLike[str] | Mapping[str, object],
+    *,
+    top_n: int = ...,
+    replay_arg_limit: int = ...,
+) -> List[str]: ...
+
 class ZSpaceActivationProbeHook:
     def __init__(
         self,
@@ -8421,6 +8428,7 @@ __all__ = [
     "hf_gpt2_finetune_eval_report",
     "hf_gpt2_finetune_generation_report",
     "hf_gpt2_finetune_inference_distortion_handoff_report",
+    "hf_gpt2_finetune_inference_distortion_handoff_lines",
     "hf_gpt2_finetune_preflight_report",
     "hf_gpt2_finetune_rust_dependency_report",
     "hf_gpt2_finetune_summary_lines",

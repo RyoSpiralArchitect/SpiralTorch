@@ -29,6 +29,7 @@ __all__ = [
     "hf_gpt2_finetune_eval_report",
     "hf_gpt2_finetune_generation_report",
     "hf_gpt2_finetune_inference_distortion_handoff_report",
+    "hf_gpt2_finetune_inference_distortion_handoff_lines",
     "hf_gpt2_finetune_rust_dependency_report",
     "hf_gpt2_finetune_summary_lines",
     "hf_gpt2_finetune_training_telemetry_frame",
@@ -620,6 +621,55 @@ def hf_gpt2_finetune_inference_distortion_handoff_report(
         "base_top_p": _safe_number(config.get("base_top_p")),
         "include_penalties": config.get("include_penalties"),
     }
+
+
+def hf_gpt2_finetune_inference_distortion_handoff_lines(
+    report_or_path: str | Path | Mapping[str, object],
+    *,
+    top_n: int = 3,
+    replay_arg_limit: int = 24,
+) -> list[str]:
+    """Render compact human-readable lines for an inference-distortion handoff."""
+
+    if (
+        isinstance(report_or_path, Mapping)
+        and report_or_path.get("row_type")
+        == "hf_gpt2_finetune_inference_distortion_handoff"
+    ):
+        handoff = dict(report_or_path)
+    else:
+        handoff = hf_gpt2_finetune_inference_distortion_handoff_report(
+            report_or_path,
+            top_n=top_n,
+        )
+    replay_args = [
+        str(item) for item in list(handoff.get("recommended_bridge_cli_args") or [])
+    ]
+    replay_limit = max(0, int(replay_arg_limit))
+    replay_preview = csv_label(replay_args[:replay_limit])
+    if replay_limit and len(replay_args) > replay_limit:
+        replay_preview = f"{replay_preview},..."
+    lines = [
+        (
+            "hf_gpt2_ft_inference_handoff "
+            f"status={handoff.get('status')} "
+            f"source={handoff.get('source_kind')} "
+            f"probe={handoff.get('recommended_probe')} "
+            f"effect={handoff.get('recommended_effect_score')} "
+            f"risk={handoff.get('recommended_risk_score')} "
+            f"desire={handoff.get('desire_pressure')} "
+            f"psi={handoff.get('psi_total')} "
+            f"api={handoff.get('api_provider')} "
+            f"dropped={handoff.get('api_request_dropped_key_count')}"
+        )
+    ]
+    if replay_args:
+        lines.append(
+            "hf_gpt2_ft_inference_handoff_replay "
+            f"arg_count={len(replay_args)} "
+            f"args={replay_preview}"
+        )
+    return lines
 
 
 def hf_gpt2_finetune_rust_dependency_report() -> dict[str, object]:

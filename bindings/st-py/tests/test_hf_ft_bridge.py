@@ -503,6 +503,12 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             handoff = hf_ft.hf_gpt2_finetune_inference_distortion_handoff_report(
                 probe_path,
             )
+            handoff_lines = (
+                hf_ft.hf_gpt2_finetune_inference_distortion_handoff_lines(
+                    probe_path,
+                    replay_arg_limit=24,
+                )
+            )
 
         self.assertEqual(handoff["status"], "ok")
         self.assertEqual(handoff["source_kind"], "probe")
@@ -511,6 +517,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             "zspace_inference_distortion_probe",
         )
         self.assertEqual(handoff["recommended_probe"], "direct-probe")
+        self.assertIn("status=ok", handoff_lines[0])
+        self.assertIn("probe=direct-probe", handoff_lines[0])
+        self.assertIn("hf_gpt2_ft_inference_handoff_replay", handoff_lines[1])
+        self.assertIn("--generation-repression-strength", handoff_lines[1])
         self.assertEqual(handoff["prompt"], "SpiralTorch direct probe")
         self.assertEqual(handoff["desire_pressure"], 0.83)
         self.assertEqual(handoff["psi_total"], 0.73)
@@ -2284,6 +2294,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             "hf_gpt2_finetune_inference_distortion_handoff_report",
             st.__all__,
         )
+        self.assertIn(
+            "hf_gpt2_finetune_inference_distortion_handoff_lines",
+            st.__all__,
+        )
         self.assertIn("hf_gpt2_finetune_preflight_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_training_telemetry_frame", st.__all__)
         self.assertIn("hf_gpt2_finetune_trainer_trace_callback", st.__all__)
@@ -2304,6 +2318,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIs(
             st.hf_gpt2_finetune_inference_distortion_handoff_report,
             hf_ft.hf_gpt2_finetune_inference_distortion_handoff_report,
+        )
+        self.assertIs(
+            st.hf_gpt2_finetune_inference_distortion_handoff_lines,
+            hf_ft.hf_gpt2_finetune_inference_distortion_handoff_lines,
         )
         self.assertIs(
             st.hf_gpt2_finetune_training_telemetry_frame,

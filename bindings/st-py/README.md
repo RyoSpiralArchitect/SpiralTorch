@@ -588,7 +588,9 @@ that same command when you intentionally want to rerun every row. From Python,
 use `st.hf_gpt2_finetune_inference_distortion_handoff_report(...)` to inspect a
 probe or sweep recommendation before launching the FT bridge; the handoff and
 run-card/sweep summaries include ready-to-replay generation bridge CLI args when
-the recommendation carries logits-processor kwargs.
+the recommendation carries logits-processor kwargs. Use
+`st.hf_gpt2_finetune_inference_distortion_handoff_lines(...)` when you want a
+compact, copy-friendly status/replay readout in notebooks or CI logs.
 
 ## Minimal usage
 
