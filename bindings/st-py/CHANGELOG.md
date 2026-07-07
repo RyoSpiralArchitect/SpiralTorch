@@ -1,5 +1,22 @@
 # SpiralTorch (Python) changelog
 
+## 0.4.13
+
+- Python API: add `spiraltorch.hf_ft` plus top-level
+  `hf_gpt2_finetune_preflight_report(...)`,
+  `hf_gpt2_finetune_rust_dependency_report(...)`,
+  `hf_gpt2_finetune_zspace_probe(...)`, and
+  `write_hf_gpt2_finetune_run_card(...)` helpers for local GPT-2-scale
+  fine-tuning handoffs.
+- Examples: add `examples/hf_gpt2_finetune_bridge.py`, a local
+  `AutoModelForCausalLM` / `Trainer` bridge that records the `hf-gpt2-ft`
+  dependency contract, SpiralTorch WGPU/CPU runtime readiness, optional
+  Z-Space token probe metrics, and a JSON run card before long FT runs.
+- Documentation: clarify the hard dependency boundary for larger local GPT-2
+  FT runs: Rust keeps tensor/nn/text/logic/frac/rl/WGPU surfaces in the wheel,
+  while Python explicitly brings Transformers, Torch, datasets, pyarrow,
+  accelerate, safetensors, PEFT, and evaluation packages.
+
 ## 0.4.12
 
 - Packaging: add Hugging Face / PyTorch optional dependency extras for local
