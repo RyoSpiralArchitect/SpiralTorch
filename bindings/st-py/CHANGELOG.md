@@ -34,6 +34,9 @@
   `--generation-prompt` / `--generation-max-new-tokens` so local GPT-2 FT run
   cards can compare before/after generated text, continuation text, token
   deltas, and hashes beside numeric Trainer telemetry.
+- Eval reports: add `hf_gpt2_finetune_eval_report(...)`,
+  `--eval-before-train`, and final run-card eval reports so local GPT-2 FT runs
+  can compare eval loss/perplexity before and after training.
 - Documentation: clarify the hard dependency boundary for larger local GPT-2
   FT runs: Rust keeps tensor/nn/text/logic/frac/rl/WGPU surfaces in the wheel,
   while Python explicitly brings Transformers, Torch, datasets, pyarrow,

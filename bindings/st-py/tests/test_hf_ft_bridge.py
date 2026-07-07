@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import math
 import os
 import sys
 import tempfile
@@ -259,6 +260,30 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(error_report["status"], "error")
         self.assertEqual(error_report["generated_text_sha256"], None)
 
+    def test_eval_report_records_loss_perplexity_and_status(self) -> None:
+        report = hf_ft.hf_gpt2_finetune_eval_report(
+            stage="after_train",
+            metrics={"eval_loss": 2.0, "eval_runtime": 0.5, "_private": "drop"},
+        )
+        skipped = hf_ft.hf_gpt2_finetune_eval_report(
+            stage="before_train",
+            skipped_reason="eval_dataset_unavailable",
+        )
+        errored = hf_ft.hf_gpt2_finetune_eval_report(
+            stage="after_train",
+            error="RuntimeError: unavailable",
+        )
+
+        self.assertEqual(report["row_type"], "hf_gpt2_finetune_eval_report")
+        self.assertEqual(report["status"], "ok")
+        self.assertEqual(report["eval_loss"], 2.0)
+        self.assertAlmostEqual(report["eval_perplexity"], math.exp(2.0))
+        self.assertEqual(report["metric_count"], 2)
+        self.assertIn("eval_loss", report["metric_keys"])
+        self.assertNotIn("_private", report["metrics"])
+        self.assertEqual(skipped["status"], "skipped")
+        self.assertEqual(errored["status"], "error")
+
     def test_example_local_corpus_reports_attach_scan_to_cards(self) -> None:
         module = load_bridge_example()
         with tempfile.TemporaryDirectory() as tmp:
@@ -380,6 +405,34 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(report["dataset_source"], "local_files")
         self.assertEqual(module._preflight_dataset_name(args), "local-files")
         self.assertEqual(module._preflight_dataset_config(args), "text")
+
+    def test_example_trainer_eval_report_wraps_evaluate(self) -> None:
+        module = load_bridge_example()
+
+        class FakeTrainer:
+            def __init__(self):
+                self.evaluate_calls = 0
+
+            def evaluate(self):
+                self.evaluate_calls += 1
+                return {"eval_loss": 1.25, "eval_samples_per_second": 2.0}
+
+        trainer = FakeTrainer()
+        report = module._trainer_eval_report(
+            trainer,
+            stage="before_train",
+            eval_dataset_available=True,
+        )
+        skipped = module._trainer_eval_report(
+            trainer,
+            stage="after_train",
+            eval_dataset_available=False,
+        )
+
+        self.assertEqual(report["status"], "ok")
+        self.assertEqual(report["eval_loss"], 1.25)
+        self.assertEqual(trainer.evaluate_calls, 1)
+        self.assertEqual(skipped["status"], "skipped")
 
     def test_example_generation_sample_restores_model_state(self) -> None:
         module = load_bridge_example()
@@ -568,9 +621,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("hf_gpt2_finetune_corpus_file_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_corpus_scan_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_dataset_fit_report", st.__all__)
+        self.assertIn("hf_gpt2_finetune_eval_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_generation_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_preflight_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_trainer_trace_callback", st.__all__)
+        self.assertIs(
+            st.hf_gpt2_finetune_eval_report,
+            hf_ft.hf_gpt2_finetune_eval_report,
+        )
         self.assertIs(
             st.hf_gpt2_finetune_generation_report,
             hf_ft.hf_gpt2_finetune_generation_report,

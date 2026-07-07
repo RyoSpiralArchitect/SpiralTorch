@@ -20,6 +20,7 @@ from spiraltorch.hf_ft import (
     hf_gpt2_finetune_corpus_file_report,
     hf_gpt2_finetune_corpus_scan_report,
     hf_gpt2_finetune_dataset_fit_report,
+    hf_gpt2_finetune_eval_report,
     hf_gpt2_finetune_generation_report,
     hf_gpt2_finetune_preflight_report,
     hf_gpt2_finetune_summary_lines,
@@ -119,6 +120,19 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--max-train-samples", type=int, default=4096)
     parser.add_argument("--max-eval-samples", type=int, default=512)
     parser.add_argument("--block-size", type=int, default=128)
+    parser.add_argument(
+        "--eval-before-train",
+        action="store_true",
+        help=(
+            "Run Trainer.evaluate() before Trainer.train() when an eval split is "
+            "available, and record loss/perplexity in the run card."
+        ),
+    )
+    parser.add_argument(
+        "--no-eval-after-train",
+        action="store_true",
+        help="Skip the final Trainer.evaluate() run-card pass after training.",
+    )
     parser.add_argument(
         "--generation-prompt",
         default=None,
@@ -732,6 +746,29 @@ def _generation_sample(
         )
 
 
+def _trainer_eval_report(
+    trainer: Any,
+    *,
+    stage: str,
+    eval_dataset_available: bool,
+) -> dict[str, object]:
+    if not eval_dataset_available:
+        return hf_gpt2_finetune_eval_report(
+            stage=stage,
+            skipped_reason="eval_dataset_unavailable",
+        )
+    try:
+        return hf_gpt2_finetune_eval_report(
+            stage=stage,
+            metrics=dict(trainer.evaluate() or {}),
+        )
+    except Exception as exc:
+        return hf_gpt2_finetune_eval_report(
+            stage=stage,
+            error=f"{exc.__class__.__name__}: {exc}",
+        )
+
+
 def _runtime_backends(args: argparse.Namespace) -> list[str]:
     return args.runtime_device_backend or list(HF_GPT2_FT_DEFAULT_DEVICE_BACKENDS)
 
@@ -784,6 +821,10 @@ def _base_run_card(
         "block_size": args.block_size,
         "max_train_samples": args.max_train_samples,
         "max_eval_samples": args.max_eval_samples,
+        "eval_before_train_requested": bool(args.eval_before_train),
+        "eval_after_train_requested": not bool(args.no_eval_after_train),
+        "eval_before_train": None,
+        "eval_after_train": None,
         "generation_prompt": args.generation_prompt,
         "generation_max_new_tokens": args.generation_max_new_tokens,
         "generation_do_sample": bool(args.generation_do_sample),
@@ -1046,6 +1087,12 @@ def _main_with_runtime_access(
             data_collator=collator,
             callbacks=callbacks,
         )
+        if args.eval_before_train:
+            card["eval_before_train"] = _trainer_eval_report(
+                trainer,
+                stage="before_train",
+                eval_dataset_available=eval_dataset is not None,
+            )
         train_result = trainer.train()
         trainer.save_model(str(args.output_dir))
     except Exception as exc:
@@ -1057,6 +1104,12 @@ def _main_with_runtime_access(
         )
         _write_card(card, args)
         return 1
+    if not args.no_eval_after_train:
+        card["eval_after_train"] = _trainer_eval_report(
+            trainer,
+            stage="after_train",
+            eval_dataset_available=eval_dataset is not None,
+        )
     card["generation_after_train"] = _generation_sample(
         torch,
         tokenizer,
