@@ -19,6 +19,13 @@
   `--train-file` / `--validation-file` inputs via the Hugging Face
   `text`/`json`/`csv` dataset builders, with lightweight file manifests and
   fingerprints written into the run card.
+- Corpus scan: add `hf_gpt2_finetune_corpus_scan_report(...)` and
+  `--corpus-scan` so large local GPT-2 FT runs can record streamed line/byte,
+  empty-line, sample-text, and rough token-shape evidence before Trainer work.
+- FT runtime hardening: make `--allow-remote` temporarily override local
+  Hugging Face offline environment flags, record model-load/train failures into
+  run cards, and filter `TrainingArguments` kwargs against the installed
+  Transformers signature for 4.x/5.x compatibility.
 - Documentation: clarify the hard dependency boundary for larger local GPT-2
   FT runs: Rust keeps tensor/nn/text/logic/frac/rl/WGPU surfaces in the wheel,
   while Python explicitly brings Transformers, Torch, datasets, pyarrow,

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import time
-import hashlib
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -23,6 +23,7 @@ __all__ = [
     "HF_GPT2_FT_REQUIRED_RUST_SURFACES",
     "hf_gpt2_finetune_preflight_report",
     "hf_gpt2_finetune_corpus_file_report",
+    "hf_gpt2_finetune_corpus_scan_report",
     "hf_gpt2_finetune_rust_dependency_report",
     "hf_gpt2_finetune_summary_lines",
     "hf_gpt2_finetune_trainer_trace_callback",
@@ -191,6 +192,168 @@ def hf_gpt2_finetune_corpus_file_report(
     }
 
 
+def hf_gpt2_finetune_corpus_scan_report(
+    *,
+    train_files: object = None,
+    validation_files: object = None,
+    dataset_format: str = "text",
+    text_column: str = "text",
+    sample_line_limit: int = 8,
+    sample_preview_chars: int = 160,
+    max_bytes_per_file: int | None = None,
+    encoding: str = "utf-8",
+) -> dict[str, object]:
+    """Stream local corpus files and summarize text shape before long FT runs."""
+
+    sample_limit = max(0, int(sample_line_limit))
+    preview_chars = max(0, int(sample_preview_chars))
+    max_bytes = None
+    if max_bytes_per_file is not None and int(max_bytes_per_file) > 0:
+        max_bytes = int(max_bytes_per_file)
+
+    rows = []
+    missing = []
+    truncated = []
+    scan_errors = []
+    total_scanned_bytes = 0
+    total_line_count = 0
+    total_nonempty_line_count = 0
+    total_empty_line_count = 0
+    total_nonempty_line_bytes = 0
+    max_line_bytes = 0
+    fingerprint = hashlib.sha256()
+
+    for split, paths in (
+        ("train", _path_values(train_files)),
+        ("validation", _path_values(validation_files)),
+    ):
+        for path in paths:
+            label = str(path)
+            row_hash = hashlib.sha256()
+            row: dict[str, object] = {
+                "split": split,
+                "path": label,
+                "exists": path.is_file(),
+                "scan_truncated": False,
+                "scanned_bytes": 0,
+                "line_count": 0,
+                "nonempty_line_count": 0,
+                "empty_line_count": 0,
+                "nonempty_line_bytes": 0,
+                "max_line_bytes": 0,
+                "rough_gpt2_token_estimate": 0,
+                "mean_nonempty_line_bytes": None,
+                "scanned_content_sha256": None,
+                "sample_texts": [],
+                "error": None,
+            }
+            if not path.is_file():
+                missing.append(label)
+                row["error"] = "missing_file"
+                rows.append(row)
+                continue
+
+            try:
+                with path.open("rb") as handle:
+                    while True:
+                        line = handle.readline()
+                        if not line:
+                            break
+                        if (
+                            max_bytes is not None
+                            and int(row["scanned_bytes"]) + len(line) > max_bytes
+                        ):
+                            row["scan_truncated"] = True
+                            truncated.append(label)
+                            break
+
+                        row_hash.update(line)
+                        row["scanned_bytes"] = int(row["scanned_bytes"]) + len(line)
+                        row["line_count"] = int(row["line_count"]) + 1
+                        stripped = line.strip()
+                        line_length = len(line)
+                        row["max_line_bytes"] = max(
+                            int(row["max_line_bytes"]),
+                            line_length,
+                        )
+                        if stripped:
+                            row["nonempty_line_count"] = (
+                                int(row["nonempty_line_count"]) + 1
+                            )
+                            row["nonempty_line_bytes"] = (
+                                int(row["nonempty_line_bytes"]) + len(stripped)
+                            )
+                            samples = row["sample_texts"]
+                            if (
+                                isinstance(samples, list)
+                                and len(samples) < sample_limit
+                            ):
+                                text = line.decode(encoding, errors="replace").strip()
+                                samples.append(text[:preview_chars])
+                        else:
+                            row["empty_line_count"] = int(row["empty_line_count"]) + 1
+            except OSError as exc:
+                scan_errors.append(label)
+                row["error"] = f"{exc.__class__.__name__}: {exc}"
+
+            nonempty_count = int(row["nonempty_line_count"])
+            nonempty_bytes = int(row["nonempty_line_bytes"])
+            if nonempty_count:
+                row["mean_nonempty_line_bytes"] = nonempty_bytes / nonempty_count
+            row["rough_gpt2_token_estimate"] = int(math.ceil(nonempty_bytes / 4.0))
+            row["scanned_content_sha256"] = (
+                row_hash.hexdigest() if int(row["scanned_bytes"]) else None
+            )
+
+            total_scanned_bytes += int(row["scanned_bytes"])
+            total_line_count += int(row["line_count"])
+            total_nonempty_line_count += nonempty_count
+            total_empty_line_count += int(row["empty_line_count"])
+            total_nonempty_line_bytes += nonempty_bytes
+            max_line_bytes = max(max_line_bytes, int(row["max_line_bytes"]))
+            fingerprint.update(
+                (
+                    f"{split}\0{path.resolve()}\0{row['scanned_bytes']}\0"
+                    f"{row['line_count']}\0{row['scanned_content_sha256']}\0"
+                    f"{row['scan_truncated']}\n"
+                ).encode()
+            )
+            rows.append(row)
+
+    return {
+        "row_type": "hf_gpt2_finetune_corpus_scan_report",
+        "dataset_source": "local_files" if rows else "hf_dataset",
+        "dataset_format": str(dataset_format),
+        "text_column": str(text_column),
+        "encoding": str(encoding),
+        "sample_line_limit": sample_limit,
+        "sample_preview_chars": preview_chars,
+        "max_bytes_per_file": max_bytes,
+        "scan_mode": "bounded" if max_bytes is not None else "full",
+        "file_count": len(rows),
+        "scanned_bytes": total_scanned_bytes,
+        "line_count": total_line_count,
+        "nonempty_line_count": total_nonempty_line_count,
+        "empty_line_count": total_empty_line_count,
+        "nonempty_line_bytes": total_nonempty_line_bytes,
+        "max_line_bytes": max_line_bytes,
+        "mean_nonempty_line_bytes": (
+            None
+            if total_nonempty_line_count == 0
+            else total_nonempty_line_bytes / total_nonempty_line_count
+        ),
+        "rough_gpt2_token_estimate": int(math.ceil(total_nonempty_line_bytes / 4.0)),
+        "scan_truncated_file_count": len(truncated),
+        "scan_truncated_files": csv_label(truncated),
+        "scan_error_count": len(scan_errors),
+        "scan_error_files": csv_label(scan_errors),
+        "missing_files": csv_label(missing),
+        "all_files_available": not missing,
+        "fingerprint": fingerprint.hexdigest() if rows else None,
+        "files": rows,
+    }
+
+
 def hf_gpt2_finetune_rust_dependency_report() -> dict[str, object]:
     """Describe the Rust crate surfaces that matter for GPT-2-scale local FT."""
 
@@ -274,6 +437,26 @@ def hf_gpt2_finetune_summary_lines(report: Mapping[str, object]) -> list[str]:
             f"python={report.get('hf_gpt2_ft_python_packages', 'none')}"
         ),
     ]
+    corpus = report.get("corpus_file_report")
+    if isinstance(corpus, Mapping):
+        lines.append(
+            "hf_gpt2_corpus_files "
+            f"source={corpus.get('dataset_source')} "
+            f"files={corpus.get('file_count')} "
+            f"bytes={corpus.get('total_bytes')} "
+            f"missing={corpus.get('missing_files', 'none')}"
+        )
+    scan = report.get("corpus_scan_report")
+    if isinstance(scan, Mapping):
+        lines.append(
+            "hf_gpt2_corpus_scan "
+            f"mode={scan.get('scan_mode')} "
+            f"lines={scan.get('line_count')} "
+            f"nonempty={scan.get('nonempty_line_count')} "
+            f"rough_tokens={scan.get('rough_gpt2_token_estimate')} "
+            f"truncated={scan.get('scan_truncated_files', 'none')} "
+            f"errors={scan.get('scan_error_files', 'none')}"
+        )
     lines.extend(runtime_import_preflight_summary_lines(report))
     return lines
 
