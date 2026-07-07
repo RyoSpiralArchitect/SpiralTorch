@@ -39,6 +39,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--checkpoint-card", type=Path, default=None)
     parser.add_argument("--max-steps", type=int, default=None)
     parser.add_argument("--eval-steps", type=int, default=None)
+    parser.add_argument("--save-steps", type=int, default=None)
     parser.add_argument("--final-checkpoint", default=None)
     parser.add_argument("--tail-evals", type=int, default=6)
     parser.add_argument("--out", type=Path, default=None)
@@ -54,6 +55,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--watch-stop-on-final", action="store_true")
     parser.add_argument("--watch-stop-on-process-exit", action="store_true")
     parser.add_argument("--watch-stop-on-eval-step", type=int, default=None)
+    parser.add_argument("--watch-stop-on-checkpoint", default=None)
     args = parser.parse_args(argv)
     if not args.run_dir.exists():
         parser.error(f"run_dir does not exist: {args.run_dir}")
@@ -61,6 +63,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("--max-steps must be positive")
     if args.eval_steps is not None and args.eval_steps <= 0:
         parser.error("--eval-steps must be positive")
+    if args.save_steps is not None and args.save_steps <= 0:
+        parser.error("--save-steps must be positive")
     if args.tail_evals < 0:
         parser.error("--tail-evals must be non-negative")
     if args.log_tail_bytes <= 0:
@@ -71,6 +75,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("--watch-count must be positive")
     if args.watch_stop_on_eval_step is not None and args.watch_stop_on_eval_step < 0:
         parser.error("--watch-stop-on-eval-step must be non-negative")
+    if args.watch_stop_on_checkpoint is not None:
+        args.watch_stop_on_checkpoint = args.watch_stop_on_checkpoint.strip()
+        if not args.watch_stop_on_checkpoint:
+            parser.error("--watch-stop-on-checkpoint must be non-empty")
     if args.trace_jsonl is None:
         args.trace_jsonl = args.run_dir / DEFAULT_TRACE_NAME
     if args.run_card is None:
@@ -264,6 +272,37 @@ def _eval_progress(
     }
 
 
+def _step_interval_progress(
+    *,
+    interval: int | None,
+    log_progress: dict[str, Any],
+    trace: dict[str, Any],
+    max_steps: int | None,
+    label: str,
+) -> dict[str, Any]:
+    next_step = None
+    trace_steps_until_next = None
+    log_steps_until_next = None
+    if interval is not None:
+        trace_step = trace.get("trace_max_global_step")
+        log_step = log_progress.get("log_latest_step")
+        basis = log_step if isinstance(log_step, int) else trace_step
+        if isinstance(basis, (int, float)):
+            next_step = int(((int(basis) // interval) + 1) * interval)
+            if max_steps is not None:
+                next_step = min(next_step, max_steps)
+        if next_step is not None and isinstance(trace_step, (int, float)):
+            trace_steps_until_next = max(int(next_step) - int(trace_step), 0)
+        if next_step is not None and isinstance(log_step, int):
+            log_steps_until_next = max(int(next_step) - log_step, 0)
+    return {
+        f"{label}_steps": interval,
+        f"next_{label}_step": next_step,
+        f"trace_steps_until_next_{label}": trace_steps_until_next,
+        f"log_steps_until_next_{label}": log_steps_until_next,
+    }
+
+
 def _checkpoint_rows(run_dir: Path) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for path in sorted(run_dir.glob("checkpoint-*")):
@@ -299,6 +338,13 @@ def summarize_run(args: argparse.Namespace) -> dict[str, Any]:
         args.eval_steps,
         args.max_steps,
     )
+    checkpoint_progress = _step_interval_progress(
+        interval=args.save_steps,
+        log_progress=log_progress,
+        trace=trace,
+        max_steps=args.max_steps,
+        label="checkpoint",
+    )
     run_card = _load_json(args.run_card)
     checkpoint_card = _load_json(args.checkpoint_card)
     pid = _read_pid(args.pid_file)
@@ -317,6 +363,7 @@ def summarize_run(args: argparse.Namespace) -> dict[str, Any]:
         "trace": trace,
         "log_progress": log_progress,
         "eval_progress": eval_progress,
+        "checkpoint_progress": checkpoint_progress,
         "run_card_path": str(args.run_card),
         "run_card_status": (run_card or {}).get("status"),
         "pid_file": str(args.pid_file),
@@ -360,6 +407,8 @@ def status_lines(status: dict[str, Any], *, tail_evals: int) -> list[str]:
             f"log_remaining_seconds={_number_text((status.get('log_progress') or {}).get('log_remaining_seconds'))} "
             f"next_eval_step={_number_text((status.get('eval_progress') or {}).get('next_eval_step'))} "
             f"log_steps_until_next_eval={_number_text((status.get('eval_progress') or {}).get('log_steps_until_next_eval'))} "
+            f"next_checkpoint_step={_number_text((status.get('checkpoint_progress') or {}).get('next_checkpoint_step'))} "
+            f"log_steps_until_next_checkpoint={_number_text((status.get('checkpoint_progress') or {}).get('log_steps_until_next_checkpoint'))} "
             f"last_loss={_number_text(trace.get('trace_last_loss'))} "
             f"last_eval_loss={_number_text(trace.get('trace_last_eval_loss'))} "
             f"min_eval_loss={_number_text(trace.get('trace_min_eval_loss'))} "
@@ -426,6 +475,10 @@ def _emit_status(args: argparse.Namespace, status: dict[str, Any]) -> None:
 def _should_stop_watch(args: argparse.Namespace, status: dict[str, Any]) -> bool:
     if args.watch_stop_on_final and status.get("final_checkpoint_ready") is True:
         return True
+    if args.watch_stop_on_checkpoint is not None and _checkpoint_target_ready(
+        status, args.watch_stop_on_checkpoint
+    ):
+        return True
     if args.watch_stop_on_process_exit and status.get("process_status") == "exited":
         return True
     if args.watch_stop_on_eval_step is not None:
@@ -438,6 +491,25 @@ def _should_stop_watch(args: argparse.Namespace, status: dict[str, Any]) -> bool
                 step = point.get("step")
                 if isinstance(step, int) and step >= args.watch_stop_on_eval_step:
                     return True
+    return False
+
+
+def _checkpoint_target_ready(status: dict[str, Any], target: str) -> bool:
+    checkpoints = status.get("checkpoints")
+    if not isinstance(checkpoints, list):
+        return False
+    token = target.removeprefix("checkpoint-")
+    target_step = int(token) if token.isdigit() else None
+    target_name = f"checkpoint-{target_step}" if target_step is not None else target
+    for row in checkpoints:
+        if not isinstance(row, dict):
+            continue
+        if row.get("model_safetensors_ready") is not True:
+            continue
+        if row.get("name") == target or row.get("name") == target_name:
+            return True
+        if target_step is not None and row.get("step") == target_step:
+            return True
     return False
 
 
