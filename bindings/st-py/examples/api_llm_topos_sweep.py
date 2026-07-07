@@ -194,6 +194,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--near-best-tolerance", type=float, default=0.05)
     parser.add_argument("--report-samples-per-route", type=int, default=2)
     parser.add_argument("--report-text-chars", type=int, default=360)
+    parser.add_argument("--report-pair-rows", type=int, default=24)
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args(argv)
 
@@ -221,6 +222,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             "report_options": {
                 "max_samples_per_route": args.report_samples_per_route,
                 "max_text_chars": args.report_text_chars,
+                "max_pair_rows": args.report_pair_rows,
             },
         }
         (out_dir / "plan.json").write_text(
@@ -253,6 +255,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         report_options={
             "max_samples_per_route": args.report_samples_per_route,
             "max_text_chars": args.report_text_chars,
+            "max_pair_rows": args.report_pair_rows,
         },
         **provider_request,
     )
@@ -268,6 +271,8 @@ def main(argv: Sequence[str] | None = None) -> None:
                 "mode_counts": result["report"]["mode_counts"],
                 "trace_winners": (result["comparison"] or {}).get("winners"),
                 "adapter_winners": result["report"]["adapter_winners"],
+                "response_route_rows": result["report"]["response_route_rows"],
+                "response_pair_rows": result["report"]["response_pair_rows"],
                 "response_samples": result["report"]["response_samples"],
                 "report_comparison": report_comparison,
             },

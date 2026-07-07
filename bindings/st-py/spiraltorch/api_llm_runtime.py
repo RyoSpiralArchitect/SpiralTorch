@@ -4199,6 +4199,7 @@ def _topos_sweep_response_sample_row(
     return {
         "label": label,
         "index": index,
+        "prompt_index": index,
         "provider": event.get("provider"),
         "model": event.get("model"),
         "finish_reason": event.get("finish_reason"),
@@ -4256,12 +4257,224 @@ def _topos_sweep_response_samples(
     return samples
 
 
+def _finish_reason_completed(label: str) -> bool:
+    return label in {
+        "stop",
+        "completed",
+        "complete",
+        "success",
+        "end_turn",
+        "stop_sequence",
+    }
+
+
+def _finish_reason_incomplete(label: str) -> bool:
+    return label in {"incomplete", "length", "max_tokens"}
+
+
+def _topos_sweep_response_route_rows(
+    samples: Sequence[Mapping[str, Any]],
+    labels: Sequence[Any],
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for label in labels:
+        label_value = str(label)
+        route_samples = [
+            sample for sample in samples if str(sample.get("label")) == label_value
+        ]
+        count = len(route_samples)
+        finish_reasons = [_finish_reason_label(sample) for sample in route_samples]
+        completed = sum(
+            1 for reason in finish_reasons if _finish_reason_completed(reason)
+        )
+        incomplete = sum(
+            1 for reason in finish_reasons if _finish_reason_incomplete(reason)
+        )
+        rows.append(
+            {
+                "label": label_value,
+                "count": count,
+                "finish_reasons": _count_labels(finish_reasons),
+                "completion_rate": completed / count if count else 0.0,
+                "incomplete_rate": incomplete / count if count else 0.0,
+                "text_chars": _stats(
+                    sample.get("text_chars") for sample in route_samples
+                ),
+                "latency_ms": _stats(
+                    sample.get("latency_ms") for sample in route_samples
+                ),
+                "prompt_tokens": _stats(
+                    sample.get("prompt_tokens") for sample in route_samples
+                ),
+                "completion_tokens": _stats(
+                    sample.get("completion_tokens") for sample in route_samples
+                ),
+                "total_tokens": _stats(
+                    sample.get("total_tokens") for sample in route_samples
+                ),
+                "confidence": _stats(
+                    sample.get("confidence") for sample in route_samples
+                ),
+                "text_quality_score": _stats(
+                    sample.get("text_quality_score") for sample in route_samples
+                ),
+                "prompt_coverage": _stats(
+                    sample.get("prompt_coverage") for sample in route_samples
+                ),
+                "topos_runtime_route_score": _stats(
+                    sample.get("topos_runtime_route_score") for sample in route_samples
+                ),
+                "topos_closure_pressure": _stats(
+                    sample.get("topos_closure_pressure") for sample in route_samples
+                ),
+                "topos_openness": _stats(
+                    sample.get("topos_openness") for sample in route_samples
+                ),
+                "topos_inference_context_weight": _stats(
+                    sample.get("topos_inference_context_weight")
+                    for sample in route_samples
+                ),
+            }
+        )
+    return rows
+
+
+def _sample_index(sample: Mapping[str, Any]) -> int | None:
+    value = _finite_float(sample.get("prompt_index", sample.get("index")))
+    if value is None:
+        return None
+    return int(value)
+
+
+def _sample_text_overlap(left: Mapping[str, Any], right: Mapping[str, Any]) -> float:
+    left_tokens = set(_significant_tokens(left.get("text_preview")))
+    right_tokens = set(_significant_tokens(right.get("text_preview")))
+    if not left_tokens and not right_tokens:
+        return 1.0
+    union = left_tokens | right_tokens
+    if not union:
+        return 0.0
+    return len(left_tokens & right_tokens) / len(union)
+
+
+def _sample_numeric_delta(
+    left: Mapping[str, Any],
+    right: Mapping[str, Any],
+    key: str,
+) -> float | None:
+    left_value = _finite_float(left.get(key))
+    right_value = _finite_float(right.get(key))
+    if left_value is None or right_value is None:
+        return None
+    return right_value - left_value
+
+
+def _topos_sweep_response_pair_rows(
+    samples: Sequence[Mapping[str, Any]],
+    labels: Sequence[Any],
+    *,
+    max_pair_rows: int,
+) -> list[dict[str, Any]]:
+    pair_limit = max(0, int(max_pair_rows))
+    if pair_limit <= 0:
+        return []
+    label_values = [str(label) for label in labels]
+    by_label_index: dict[tuple[str, int], Mapping[str, Any]] = {}
+    prompt_indices: set[int] = set()
+    for sample in samples:
+        label = str(sample.get("label"))
+        index = _sample_index(sample)
+        if label and index is not None:
+            by_label_index[(label, index)] = sample
+            prompt_indices.add(index)
+
+    pairs: list[dict[str, Any]] = []
+    for index in sorted(prompt_indices):
+        for left_position, left_label in enumerate(label_values):
+            left = by_label_index.get((left_label, index))
+            if left is None:
+                continue
+            for right_label in label_values[left_position + 1 :]:
+                right = by_label_index.get((right_label, index))
+                if right is None:
+                    continue
+                pairs.append(
+                    {
+                        "prompt_index": index,
+                        "left_label": left_label,
+                        "right_label": right_label,
+                        "pair": f"{left_label}->{right_label}",
+                        "left_finish_reason": left.get("finish_reason"),
+                        "right_finish_reason": right.get("finish_reason"),
+                        "text_overlap": _sample_text_overlap(left, right),
+                        "right_minus_left_text_chars": _sample_numeric_delta(
+                            left,
+                            right,
+                            "text_chars",
+                        ),
+                        "right_minus_left_latency_ms": _sample_numeric_delta(
+                            left,
+                            right,
+                            "latency_ms",
+                        ),
+                        "right_minus_left_total_tokens": _sample_numeric_delta(
+                            left,
+                            right,
+                            "total_tokens",
+                        ),
+                        "right_minus_left_completion_tokens": _sample_numeric_delta(
+                            left,
+                            right,
+                            "completion_tokens",
+                        ),
+                        "right_minus_left_confidence": _sample_numeric_delta(
+                            left,
+                            right,
+                            "confidence",
+                        ),
+                        "right_minus_left_text_quality_score": _sample_numeric_delta(
+                            left,
+                            right,
+                            "text_quality_score",
+                        ),
+                        "right_minus_left_topos_runtime_route_score": (
+                            _sample_numeric_delta(
+                                left,
+                                right,
+                                "topos_runtime_route_score",
+                            )
+                        ),
+                        "right_minus_left_topos_closure_pressure": _sample_numeric_delta(
+                            left,
+                            right,
+                            "topos_closure_pressure",
+                        ),
+                        "right_minus_left_topos_openness": _sample_numeric_delta(
+                            left,
+                            right,
+                            "topos_openness",
+                        ),
+                        "right_minus_left_topos_context_weight": _sample_numeric_delta(
+                            left,
+                            right,
+                            "topos_inference_context_weight",
+                        ),
+                        "left_text_preview": left.get("text_preview"),
+                        "right_text_preview": right.get("text_preview"),
+                    }
+                )
+                if len(pairs) >= pair_limit:
+                    return pairs
+    return pairs
+
+
 def api_llm_topos_sweep_report(
     sweep: Mapping[str, Any],
     *,
     created_at: str | None = None,
     max_samples_per_route: int = 2,
     max_text_chars: int = 360,
+    max_pair_rows: int = 24,
 ) -> dict[str, Any]:
     """Build a compact, serializable report from a topos sweep result."""
 
@@ -4283,6 +4496,12 @@ def api_llm_topos_sweep_report(
         max_samples_per_route=max_samples_per_route,
         max_text_chars=max_text_chars,
     )
+    response_route_rows = _topos_sweep_response_route_rows(response_samples, labels)
+    response_pair_rows = _topos_sweep_response_pair_rows(
+        response_samples,
+        labels,
+        max_pair_rows=max_pair_rows,
+    )
     report = {
         "kind": "spiraltorch.api_llm_topos_sweep_report",
         "source_kind": sweep.get("kind"),
@@ -4297,6 +4516,9 @@ def api_llm_topos_sweep_report(
         "adapter_winners": adapter_winners,
         "response_sample_count": len(response_samples),
         "response_samples": response_samples,
+        "response_route_rows": response_route_rows,
+        "response_pair_count": len(response_pair_rows),
+        "response_pair_rows": response_pair_rows,
         "comparison": dict(comparison),
     }
     report["recommendations"] = _topos_sweep_report_recommendations(
@@ -4314,8 +4536,16 @@ def _topos_sweep_report_rows(report: Mapping[str, Any]) -> list[Mapping[str, Any
     return [row for row in rows if isinstance(row, Mapping)]
 
 
+def _topos_sweep_report_pair_rows(report: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    rows = report.get("response_pair_rows")
+    if not isinstance(rows, Sequence) or isinstance(rows, (str, bytes, bytearray)):
+        return []
+    return [row for row in rows if isinstance(row, Mapping)]
+
+
 def _topos_sweep_report_row(label: str, path: Path, report: Mapping[str, Any]) -> dict[str, Any]:
     rows = _topos_sweep_report_rows(report)
+    pair_rows = _topos_sweep_report_pair_rows(report)
     comparison = _mapping_or_empty(report.get("comparison"))
     trace_winners = _mapping_or_empty(comparison.get("winners"))
     comparison_rows = [
@@ -4335,6 +4565,7 @@ def _topos_sweep_report_row(label: str, path: Path, report: Mapping[str, Any]) -
     ]
     mode_counts = report.get("mode_counts")
     mode_counts_map = dict(mode_counts) if isinstance(mode_counts, Mapping) else {}
+    response_text_overlap = _stats(row.get("text_overlap") for row in pair_rows)
     return {
         "label": label,
         "path": str(path),
@@ -4343,6 +4574,10 @@ def _topos_sweep_report_row(label: str, path: Path, report: Mapping[str, Any]) -
         "route_count": int(_finite_float(report.get("route_count")) or len(rows)),
         "response_sample_count": int(
             _finite_float(report.get("response_sample_count")) or 0
+        ),
+        "response_pair_count": int(_finite_float(report.get("response_pair_count")) or 0),
+        "response_text_overlap_mean": (
+            response_text_overlap["mean"] if pair_rows else None
         ),
         "mode_counts": mode_counts_map,
         "mode_count": len(mode_counts_map),
@@ -4402,6 +4637,7 @@ def compare_api_llm_topos_sweep_reports(
         "highest_openness": _winner(rows, "openness_max"),
         "widest_temperature_range": _winner(rows, "request_temperature_range"),
         "most_runtime_modes": _winner(rows, "mode_count"),
+        "highest_response_text_overlap": _winner(rows, "response_text_overlap_mean"),
     }
     recommendations: list[str] = []
     best = winners.get("highest_best_trace_route_score")
@@ -4415,6 +4651,9 @@ def compare_api_llm_topos_sweep_reports(
     widest = winners.get("widest_temperature_range")
     if widest:
         recommendations.append(f"{widest} spans the widest sampling-control range")
+    overlap = winners.get("highest_response_text_overlap")
+    if overlap:
+        recommendations.append(f"{overlap} has the most similar bounded route samples")
     return {
         "kind": "spiraltorch.api_llm_topos_sweep_report_comparison",
         "count": len(rows),
