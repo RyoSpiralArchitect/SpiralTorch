@@ -585,7 +585,9 @@ strengths beside loss/eval telemetry, so post-run comparisons can distinguish
 "it trained well" from "it trained well under an aggressive decode field."
 `distortion_adjusted_eval_loss` and the sweep `scale_up_candidate_*` fields let
 the next longer run prefer near-best eval loss with lower distortion pressure
-instead of blindly following raw eval loss alone. Add
+instead of blindly following raw eval loss alone; those fields include the
+candidate run card, trace path, output directory, and replay command when the
+sweep report has matching run metadata. Add
 `--generation-from-inference-distortion` with a
 generation prompt to reuse the handoff's `recommended_processor_kwargs` as the
 Z-Space/repression logits processor for before/after generated samples; omit it

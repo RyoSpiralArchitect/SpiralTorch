@@ -2879,6 +2879,10 @@ def summarize_hf_gpt2_finetune_sweep_report(
         selected_reason = "best_eval_loss_delta"
         selected_label = best_delta_label
     selected_run = _selected_sweep_run(runs, selected_label)
+    scale_up_candidate_label = (
+        None if scale_up_candidate is None else scale_up_candidate.get("run_label")
+    )
+    scale_up_candidate_run = _selected_sweep_run(runs, scale_up_candidate_label)
 
     completed = _safe_number(report.get("completed_run_count"))
     failed = _safe_number(report.get("failed_run_count"))
@@ -2967,9 +2971,7 @@ def summarize_hf_gpt2_finetune_sweep_report(
         "best_eval_loss_delta": best_delta,
         "selected_run_label": selected_label,
         "selected_reason": selected_reason if selected_label else None,
-        "scale_up_candidate_label": (
-            None if scale_up_candidate is None else scale_up_candidate.get("run_label")
-        ),
+        "scale_up_candidate_label": scale_up_candidate_label,
         "scale_up_candidate_reason": (
             None
             if scale_up_candidate is None
@@ -2990,6 +2992,23 @@ def summarize_hf_gpt2_finetune_sweep_report(
             if scale_up_candidate is None
             else _safe_number(scale_up_candidate.get("effective_eval_after_loss"))
         ),
+        "scale_up_candidate_run_name": scale_up_candidate_run.get("name"),
+        "scale_up_candidate_status": scale_up_candidate_run.get("status"),
+        "scale_up_candidate_reused": scale_up_candidate_run.get("reused"),
+        "scale_up_candidate_returncode": _safe_number(
+            scale_up_candidate_run.get("returncode")
+        ),
+        "scale_up_candidate_run_dir": scale_up_candidate_run.get("run_dir"),
+        "scale_up_candidate_output_dir": scale_up_candidate_run.get("output_dir")
+        or scale_up_candidate_run.get("run_dir"),
+        "scale_up_candidate_run_card": scale_up_candidate_run.get("run_card"),
+        "scale_up_candidate_trainer_trace_jsonl": scale_up_candidate_run.get(
+            "trainer_trace_jsonl"
+        ),
+        "scale_up_candidate_command_display": scale_up_candidate_run.get(
+            "command_display"
+        ),
+        "scale_up_candidate_command": _sweep_run_command(scale_up_candidate_run),
         "selected_run_name": selected_run.get("name"),
         "selected_run_status": selected_run.get("status"),
         "selected_run_reused": selected_run.get("reused"),
@@ -3125,12 +3144,16 @@ def summarize_hf_gpt2_finetune_sweep_report_lines(
             "hf_gpt2_ft_sweep_scale_up "
             f"candidate={summary.get('scale_up_candidate_label')} "
             f"reason={summary.get('scale_up_candidate_reason')} "
+            f"status={summary.get('scale_up_candidate_status')} "
             "adjusted_eval="
             f"{summary.get('scale_up_candidate_distortion_adjusted_eval_loss')} "
             "pressure="
             f"{summary.get('scale_up_candidate_distortion_pressure_index')} "
             "eval_after="
-            f"{summary.get('scale_up_candidate_effective_eval_after_loss')}"
+            f"{summary.get('scale_up_candidate_effective_eval_after_loss')} "
+            f"card={summary.get('scale_up_candidate_run_card')} "
+            f"trace={summary.get('scale_up_candidate_trainer_trace_jsonl')} "
+            f"dir={summary.get('scale_up_candidate_run_dir')}"
         )
     if summary.get("inference_distortion_recommended_probe") is not None:
         lines.append(

@@ -1004,6 +1004,19 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             sweep_summary["scale_up_candidate_distortion_pressure_index"],
             0.3366666667,
         )
+        self.assertEqual(sweep_summary["scale_up_candidate_status"], "completed")
+        self.assertEqual(
+            sweep_summary["scale_up_candidate_run_card"],
+            str(strong_path),
+        )
+        self.assertEqual(
+            sweep_summary["scale_up_candidate_trainer_trace_jsonl"],
+            str(Path(tmp) / "strong-trace.jsonl"),
+        )
+        self.assertEqual(
+            sweep_summary["scale_up_candidate_command"],
+            ["python", "bridge", "--run-card", str(strong_path)],
+        )
         self.assertEqual(sweep_summary["selected_run_status"], "completed")
         self.assertEqual(sweep_summary["selected_run_card"], str(strong_path))
         self.assertIn(
@@ -1213,35 +1226,42 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 },
             }
 
-        risky = run_card(
-            1.5,
-            trace={
-                "trace_last_inference_distortion_risk_score": 1.0,
-                "trace_last_inference_distortion_api_compatibility_score": 0.0,
-                "trace_last_inference_distortion_api_request_dropped_key_count": 4,
-                "trace_last_inference_distortion_api_request_retry_dropped_key_count": 2,
-                "trace_last_inference_distortion_logits_repression_strength": 4.0,
-                "trace_last_inference_distortion_logits_ngram_repression_strength": 4.0,
-            },
-        )
-        safe = run_card(
-            1.54,
-            trace={
-                "trace_last_inference_distortion_risk_score": 0.0,
-                "trace_last_inference_distortion_api_compatibility_score": 1.0,
-                "trace_last_inference_distortion_api_request_dropped_key_count": 0,
-                "trace_last_inference_distortion_api_request_retry_dropped_key_count": 0,
-                "trace_last_inference_distortion_logits_repression_strength": 0.0,
-                "trace_last_inference_distortion_logits_ngram_repression_strength": 0.0,
-            },
-        )
+        with tempfile.TemporaryDirectory() as tmp:
+            risky_path = Path(tmp) / "risky.json"
+            safe_path = Path(tmp) / "safe.json"
+            risky_trace = Path(tmp) / "risky-trace.jsonl"
+            safe_trace = Path(tmp) / "safe-trace.jsonl"
 
-        comparison = hf_ft.compare_hf_gpt2_finetune_run_cards(
-            [risky, safe],
-            run_labels=["risky", "safe"],
-        )
-        sweep_summary = hf_ft.summarize_hf_gpt2_finetune_sweep_report(
-            {
+            risky = run_card(
+                1.5,
+                trace={
+                    "trace_last_inference_distortion_risk_score": 1.0,
+                    "trace_last_inference_distortion_api_compatibility_score": 0.0,
+                    "trace_last_inference_distortion_api_request_dropped_key_count": 4,
+                    "trace_last_inference_distortion_api_request_retry_dropped_key_count": 2,
+                    "trace_last_inference_distortion_logits_repression_strength": 4.0,
+                    "trace_last_inference_distortion_logits_ngram_repression_strength": 4.0,
+                },
+            )
+            safe = run_card(
+                1.54,
+                trace={
+                    "trace_last_inference_distortion_risk_score": 0.0,
+                    "trace_last_inference_distortion_api_compatibility_score": 1.0,
+                    "trace_last_inference_distortion_api_request_dropped_key_count": 0,
+                    "trace_last_inference_distortion_api_request_retry_dropped_key_count": 0,
+                    "trace_last_inference_distortion_logits_repression_strength": 0.0,
+                    "trace_last_inference_distortion_logits_ngram_repression_strength": 0.0,
+                },
+            )
+            hf_ft.write_hf_gpt2_finetune_run_card(risky, risky_path)
+            hf_ft.write_hf_gpt2_finetune_run_card(safe, safe_path)
+
+            comparison = hf_ft.compare_hf_gpt2_finetune_run_cards(
+                [risky_path, safe_path],
+                run_labels=["risky", "safe"],
+            )
+            sweep_report = {
                 "row_type": "hf_gpt2_finetune_sweep_report",
                 "dry_run": False,
                 "run_count": 2,
@@ -1249,27 +1269,46 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 "failed_run_count": 0,
                 "comparison": comparison,
                 "runs": [
-                    {"name": "risky", "status": "completed", "returncode": 0},
-                    {"name": "safe", "status": "completed", "returncode": 0},
+                    {
+                        "name": "risky",
+                        "status": "completed",
+                        "returncode": 0,
+                        "run_card": str(risky_path),
+                        "trainer_trace_jsonl": str(risky_trace),
+                        "run_dir": str(Path(tmp) / "risky-run"),
+                        "command": [
+                            "python",
+                            "bridge",
+                            "--run-card",
+                            str(risky_path),
+                        ],
+                        "command_display": f"python bridge --run-card {risky_path}",
+                    },
+                    {
+                        "name": "safe",
+                        "status": "completed",
+                        "returncode": 0,
+                        "run_card": str(safe_path),
+                        "trainer_trace_jsonl": str(safe_trace),
+                        "run_dir": str(Path(tmp) / "safe-run"),
+                        "command": [
+                            "python",
+                            "bridge",
+                            "--run-card",
+                            str(safe_path),
+                        ],
+                        "command_display": f"python bridge --run-card {safe_path}",
+                    },
                 ],
-            },
-            top_n=2,
-        )
-        lines = hf_ft.summarize_hf_gpt2_finetune_sweep_report_lines(
-            {
-                "row_type": "hf_gpt2_finetune_sweep_report",
-                "dry_run": False,
-                "run_count": 2,
-                "completed_run_count": 2,
-                "failed_run_count": 0,
-                "comparison": comparison,
-                "runs": [
-                    {"name": "risky", "status": "completed", "returncode": 0},
-                    {"name": "safe", "status": "completed", "returncode": 0},
-                ],
-            },
-            top_n=2,
-        )
+            }
+            sweep_summary = hf_ft.summarize_hf_gpt2_finetune_sweep_report(
+                sweep_report,
+                top_n=2,
+            )
+            lines = hf_ft.summarize_hf_gpt2_finetune_sweep_report_lines(
+                sweep_report,
+                top_n=2,
+            )
 
         self.assertEqual(comparison["best_eval_after_run_label"], "risky")
         self.assertEqual(comparison["best_distortion_adjusted_run_label"], "safe")
@@ -1295,9 +1334,20 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             sweep_summary["scale_up_candidate_reason"],
             "lowest_distortion_adjusted_eval_loss",
         )
+        self.assertEqual(sweep_summary["scale_up_candidate_status"], "completed")
+        self.assertEqual(sweep_summary["scale_up_candidate_run_card"], str(safe_path))
+        self.assertEqual(
+            sweep_summary["scale_up_candidate_trainer_trace_jsonl"],
+            str(safe_trace),
+        )
+        self.assertEqual(
+            sweep_summary["scale_up_candidate_command"],
+            ["python", "bridge", "--run-card", str(safe_path)],
+        )
         self.assertTrue(
             any("hf_gpt2_ft_sweep_scale_up candidate=safe" in line for line in lines)
         )
+        self.assertTrue(any(f"card={safe_path}" in line for line in lines))
 
     def test_sweep_example_builds_grid_and_writes_dry_run_report(self) -> None:
         module = load_sweep_example()
