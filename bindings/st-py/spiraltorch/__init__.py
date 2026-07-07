@@ -773,6 +773,17 @@ from .runtime_imports import (
     write_runtime_import_preflight_report,
 )
 
+from .hf_ft import (
+    HF_GPT2_FT_DEFAULT_DEVICE_BACKENDS,
+    HF_GPT2_FT_REQUIRED_PYTHON_PACKAGES,
+    HF_GPT2_FT_REQUIRED_RUST_SURFACES,
+    hf_gpt2_finetune_preflight_report,
+    hf_gpt2_finetune_rust_dependency_report,
+    hf_gpt2_finetune_summary_lines,
+    hf_gpt2_finetune_zspace_probe,
+    write_hf_gpt2_finetune_run_card,
+)
+
 from .gnn_trace import (
     load_gnn_band_replay_trace,
     flatten_gnn_band_replay_rows,
@@ -907,6 +918,14 @@ _EXTRAS = [
     "runtime_device_backends_from_source","runtime_device_report_fields",
     "runtime_device_requirement_failures",
     "write_runtime_import_preflight_report",
+    "HF_GPT2_FT_DEFAULT_DEVICE_BACKENDS",
+    "HF_GPT2_FT_REQUIRED_PYTHON_PACKAGES",
+    "HF_GPT2_FT_REQUIRED_RUST_SURFACES",
+    "hf_gpt2_finetune_preflight_report",
+    "hf_gpt2_finetune_rust_dependency_report",
+    "hf_gpt2_finetune_summary_lines",
+    "hf_gpt2_finetune_zspace_probe",
+    "write_hf_gpt2_finetune_run_card",
     "load_gnn_band_replay_trace","flatten_gnn_band_replay_rows",
     "summarize_gnn_band_replays","compare_gnn_band_replay_runs","write_gnn_band_replay_html",
     "load_kdsl_trace_events","write_kdsl_trace_jsonl","write_kdsl_trace_html",
@@ -8033,6 +8052,7 @@ for _name in [
     "telemetry",
     "plugin",
     "ecosystem",
+    "hf_ft",
     "selfsup",
     "export",
     "compat",

@@ -292,6 +292,11 @@ report = st.runtime_import_preflight_report(
     runtime_device_backends=["wgpu"],
 )
 st.write_runtime_import_preflight_report(report, "ft-runtime.json")
+
+ft_report = st.hf_gpt2_finetune_preflight_report(
+    runtime_device_backends=["wgpu", "cpu"],
+)
+print(ft_report["hf_gpt2_ft_rust_surfaces"])
 ```
 
 ## Building wheels
@@ -362,6 +367,22 @@ surface, while Python must bring the HF data/model stack. In practice,
 `datasets` + `pyarrow`, training orchestration requires `accelerate` and
 `safetensors`, and adapter/evaluation experiments should have `peft` and
 `evaluate` available before the first long run starts.
+
+The local GPT-2 bridge turns that boundary into an executable run card:
+
+```bash
+PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_gpt2_finetune_bridge.py \
+  --metadata-only \
+  --allow-remote \
+  --zspace-probe \
+  --run-card ft-run-card.json
+```
+
+After the contract passes, add `--train --max-train-samples 50000 --block-size
+128 --output-dir runs/gpt2-small-zspace-ft` to run a real local
+`AutoModelForCausalLM` / `Trainer` fine-tune. Use
+`--require-runtime-device-ready-backend wgpu` when the SpiralTorch WGPU surface
+must be available before the run starts.
 
 ## Minimal usage
 

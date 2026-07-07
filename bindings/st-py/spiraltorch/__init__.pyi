@@ -9,6 +9,7 @@ from types import ModuleType
 from .optim import Amegagrad, amegagrad
 
 export: ModuleType
+hf_ft: ModuleType
 hpo: ModuleType
 inference: ModuleType
 optim: ModuleType
@@ -244,6 +245,46 @@ def runtime_imports_from_source(
 ) -> List[str]: ...
 
 def write_runtime_import_preflight_report(
+    report: Mapping[str, object],
+    path: str | PathLike[str],
+) -> str: ...
+
+HF_GPT2_FT_DEFAULT_DEVICE_BACKENDS: List[str]
+HF_GPT2_FT_REQUIRED_PYTHON_PACKAGES: List[str]
+HF_GPT2_FT_REQUIRED_RUST_SURFACES: List[Dict[str, str]]
+
+def hf_gpt2_finetune_rust_dependency_report() -> Dict[str, Any]: ...
+
+def hf_gpt2_finetune_preflight_report(
+    *,
+    model_name: str = ...,
+    dataset_name: str | None = ...,
+    dataset_config: str | None = ...,
+    train_split: str = ...,
+    eval_split: str | None = ...,
+    text_column: str = ...,
+    runtime_device_backends: object = ...,
+    required_runtime_device_ready_backends: object = ...,
+    require_hf_gpt2_ft: bool = ...,
+    describe_runtime_devices: Callable[..., Mapping[str, object]] | None = ...,
+) -> Dict[str, object]: ...
+
+def hf_gpt2_finetune_summary_lines(
+    report: Mapping[str, object],
+) -> List[str]: ...
+
+def hf_gpt2_finetune_zspace_probe(
+    token_ids: Sequence[int | float],
+    *,
+    dim: int = ...,
+    vocab_size: int | None = ...,
+    curvature: float = ...,
+    frequency: float = ...,
+    strength: float = ...,
+    require: bool = ...,
+) -> Dict[str, object]: ...
+
+def write_hf_gpt2_finetune_run_card(
     report: Mapping[str, object],
     path: str | PathLike[str],
 ) -> str: ...
@@ -8002,6 +8043,15 @@ __all__ = [
     "trace_wgpu_first_runtime",
     "trace_wgpu_first_runtime_matrix",
     "write_wgpu_first_runtime_matrix",
+    "hf_ft",
+    "HF_GPT2_FT_DEFAULT_DEVICE_BACKENDS",
+    "HF_GPT2_FT_REQUIRED_PYTHON_PACKAGES",
+    "HF_GPT2_FT_REQUIRED_RUST_SURFACES",
+    "hf_gpt2_finetune_preflight_report",
+    "hf_gpt2_finetune_rust_dependency_report",
+    "hf_gpt2_finetune_summary_lines",
+    "hf_gpt2_finetune_zspace_probe",
+    "write_hf_gpt2_finetune_run_card",
     "from_dlpack",
     "to_dlpack",
     "ZSpaceBarycenter",
