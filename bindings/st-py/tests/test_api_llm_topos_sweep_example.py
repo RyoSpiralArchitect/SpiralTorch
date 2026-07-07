@@ -136,6 +136,10 @@ def test_api_llm_topos_stagent_route_policy_example_offline(tmp_path, capsys) ->
     assert printed["profile"] == "grounded"
     assert printed["labels"] == ["open", "contextual", "guarded"]
     assert printed["selected_label"] in printed["labels"]
+    assert printed["policy_selection"]["selected_label"] == printed["selected_label"]
+    assert printed["policy_selection"]["has_adapter"] is True
+    assert "temperature" in printed["selected_request"]
+    assert printed["selected_runtime_route"]
     assert len(printed["route_rewards"]) == 3
     assert printed["update_count"] == 9
     assert policy_out.exists()

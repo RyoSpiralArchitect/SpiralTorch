@@ -751,7 +751,10 @@ For API-model topological routing, use
 `api_llm_topos_sweep_route_rewards(report, profile="grounded")` to convert a
 `run_api_llm_topos_sweep(...)` report into bounded route rewards, then call
 `train_stagent_topos_route_policy(report, agent, profile="grounded")` to update
-an stAgent-shaped policy and capture the selected route trace.
+an stAgent-shaped policy and capture the selected route trace. Use
+`api_llm_topos_route_policy_selection(policy, report=..., topos_profiles=...)`
+to recover the selected route record and, when raw profiles are available,
+rebuild the request/runtime-route payload for the next hosted-model call.
 
 ## Open-topos learning and inference hints
 

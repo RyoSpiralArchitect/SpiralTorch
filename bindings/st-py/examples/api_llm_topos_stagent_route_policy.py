@@ -212,12 +212,14 @@ def main(argv: Sequence[str] | None = None) -> None:
     if args.report is not None:
         report = _load_report(args.report)
         report_path = str(args.report)
+        selection_profiles = None
     else:
         report, report_path = _build_offline_report(
             out_dir=args.out_dir,
             prompt_limit=args.prompt_limit,
             context_prompt=args.context_prompt,
         )
+        selection_profiles = TOPOS_PROFILES
 
     route_rewards = st.api_llm_topos_sweep_route_rewards(report, profile=args.profile)
     agent, agent_kind = _agent(
@@ -232,6 +234,16 @@ def main(argv: Sequence[str] | None = None) -> None:
         episodes=args.episodes,
         selection_epsilon=args.selection_epsilon,
     )
+    selection = st.api_llm_topos_route_policy_selection(
+        policy,
+        report=report,
+        topos_profiles=selection_profiles,
+        request_options={
+            "base_temperature": 0.9,
+            "base_top_p": 0.95,
+            "include_penalties": True,
+        },
+    )
     summary = {
         "kind": "spiraltorch.api_llm_topos_stagent_route_policy_demo",
         "agent": agent_kind,
@@ -241,7 +253,10 @@ def main(argv: Sequence[str] | None = None) -> None:
         "selected_label": policy["selected_label"],
         "selected_reward": policy["selected_reward"],
         "selection_trace": policy["selection_trace"],
+        "policy_selection": selection,
         "policy_after": policy["policy_after"],
+        "selected_request": selection["request"],
+        "selected_runtime_route": selection["runtime_route"],
         "route_rewards": route_rewards,
         "update_count": policy["update_count"],
     }
