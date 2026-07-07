@@ -82,6 +82,12 @@
   sweep summaries surface top-token-change, entropy, temperature, and backend
   fields, and include a sanitized 2560-step GPT-2 generation-control sample
   artifact.
+- HF generation sweep: add `examples/hf_gpt2_zspace_generation_control_sweep.py`
+  for generation-only Z-Space/repression grids against an existing
+  `AutoModelForCausalLM`, with generated text, loopiness metrics, and bounded
+  control telemetry emitted without running Trainer or loading datasets; include
+  a compact local GPT-2 2560-step grid sample showing softmax-only versus
+  repression-driven loop relaxation.
 - Documentation: clarify the hard dependency boundary for larger local GPT-2
   FT runs: Rust keeps tensor/nn/text/logic/frac/rl/WGPU surfaces in the wheel,
   while Python explicitly brings Transformers, Torch, datasets, pyarrow,
