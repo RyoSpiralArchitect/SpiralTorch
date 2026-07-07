@@ -431,6 +431,29 @@ run-card JSON into eval-loss/perplexity deltas, generation-sample changes,
 dataset-fit status, and trainer metrics so tuning choices can be ranked without
 hand-reading each artifact.
 
+For the first real FT pass on a new corpus, use the sweep runner to make that
+comparison reproducible:
+
+```bash
+PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_gpt2_finetune_sweep.py \
+  --train-file data/corpus-000.txt \
+  --validation-fraction 0.02 \
+  --corpus-scan \
+  --generation-prompt "SpiralTorch is" \
+  --eval-before-train \
+  --zspace-probe \
+  --block-size-values 64,128 \
+  --learning-rate-values 0.0001,0.00005 \
+  --seed-values 7,13 \
+  --out-dir runs/gpt2-small-zspace-sweep
+```
+
+It writes `sweep-plan.json` before launching runs and `sweep-report.json` after
+the run cards are available, including the same
+`st.compare_hf_gpt2_finetune_run_cards(...)` comparison payload. Add
+`--dry-run` to inspect commands without loading Transformers, or
+`--require-wgpu-ready` when the SpiralTorch WGPU surface should gate each run.
+
 ## Minimal usage
 
 ### Model Zoo discovery + launch

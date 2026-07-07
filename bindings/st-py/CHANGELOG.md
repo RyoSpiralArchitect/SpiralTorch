@@ -41,6 +41,10 @@
   `summarize_hf_gpt2_finetune_run_card(...)`, and
   `compare_hf_gpt2_finetune_run_cards(...)` so multiple local FT runs can be
   ranked by eval deltas, generation-sample changes, and trainer telemetry.
+- FT sweep runner: add `examples/hf_gpt2_finetune_sweep.py` to execute local
+  GPT-2 bridge grids across block size, learning rate, step budget, and seed,
+  carrying corpus scans, generation/eval reports, Z-Space probes, WGPU gates,
+  and run-card comparisons into `sweep-plan.json` / `sweep-report.json`.
 - Documentation: clarify the hard dependency boundary for larger local GPT-2
   FT runs: Rust keeps tensor/nn/text/logic/frac/rl/WGPU surfaces in the wheel,
   while Python explicitly brings Transformers, Torch, datasets, pyarrow,

@@ -1,0 +1,428 @@
+#!/usr/bin/env python3
+"""Run small local GPT-2 fine-tune sweeps and compare SpiralTorch run cards."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import shlex
+import subprocess
+import sys
+from itertools import product
+from pathlib import Path
+from typing import Any
+
+import spiraltorch as st
+
+
+DEFAULT_BRIDGE = Path(__file__).resolve().with_name("hf_gpt2_finetune_bridge.py")
+
+
+def _csv_ints(value: str, *, name: str) -> list[int]:
+    values = [int(item.strip()) for item in str(value).split(",") if item.strip()]
+    if not values:
+        raise argparse.ArgumentTypeError(f"{name} must contain at least one integer")
+    return values
+
+
+def _csv_floats(value: str, *, name: str) -> list[float]:
+    values = [float(item.strip()) for item in str(value).split(",") if item.strip()]
+    if not values:
+        raise argparse.ArgumentTypeError(f"{name} must contain at least one float")
+    return values
+
+
+def _positive_int_values(value: str) -> list[int]:
+    values = _csv_ints(value, name="value list")
+    if any(item <= 0 for item in values):
+        raise argparse.ArgumentTypeError("all values must be positive")
+    return values
+
+
+def _int_values(value: str) -> list[int]:
+    return _csv_ints(value, name="value list")
+
+
+def _positive_float_values(value: str) -> list[float]:
+    values = _csv_floats(value, name="value list")
+    if any(item <= 0.0 for item in values):
+        raise argparse.ArgumentTypeError("all values must be positive")
+    return values
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--bridge-script", type=Path, default=DEFAULT_BRIDGE)
+    parser.add_argument("--python", default=sys.executable)
+    parser.add_argument("--out-dir", type=Path, default=Path("runs/hf-gpt2-ft-sweep"))
+    parser.add_argument("--run-prefix", default="gpt2-ft")
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--fail-fast", action="store_true")
+    parser.add_argument("--model-name", default="gpt2")
+    parser.add_argument("--dataset-name", default="wikitext")
+    parser.add_argument("--dataset-config", default="wikitext-2-raw-v1")
+    parser.add_argument("--train-split", default="train")
+    parser.add_argument("--eval-split", default="validation")
+    parser.add_argument("--text-column", default="text")
+    parser.add_argument("--train-file", action="append", type=Path, default=[])
+    parser.add_argument("--validation-file", action="append", type=Path, default=[])
+    parser.add_argument(
+        "--dataset-format",
+        choices=("text", "json", "csv"),
+        default="text",
+    )
+    parser.add_argument("--validation-fraction", type=float, default=0.0)
+    parser.add_argument("--allow-remote", action="store_true")
+    parser.add_argument("--trust-remote-code", action="store_true")
+    parser.add_argument("--corpus-scan", action="store_true")
+    parser.add_argument("--corpus-scan-max-bytes-per-file", type=int, default=0)
+    parser.add_argument("--corpus-scan-sample-lines", type=int, default=8)
+    parser.add_argument("--eval-before-train", action="store_true")
+    parser.add_argument("--no-eval-after-train", action="store_true")
+    parser.add_argument("--no-trainer-trace", action="store_true")
+    parser.add_argument("--generation-prompt", default=None)
+    parser.add_argument("--generation-max-new-tokens", type=int, default=16)
+    parser.add_argument("--generation-do-sample", action="store_true")
+    parser.add_argument("--generation-temperature", type=float, default=1.0)
+    parser.add_argument("--generation-top-k", type=int, default=0)
+    parser.add_argument("--runtime-device-backend", action="append", default=[])
+    parser.add_argument(
+        "--require-runtime-device-ready-backend",
+        action="append",
+        default=[],
+    )
+    parser.add_argument("--require-wgpu-ready", action="store_true")
+    parser.add_argument("--no-require-hf-gpt2-ft", action="store_true")
+    parser.add_argument("--zspace-probe", action="store_true")
+    parser.add_argument("--zspace-probe-dim", type=int, default=64)
+    parser.add_argument("--zspace-curvature", type=float, default=-0.04)
+    parser.add_argument("--zspace-frequency", type=float, default=0.65)
+    parser.add_argument("--zspace-strength", type=float, default=1.0)
+    parser.add_argument("--block-size-values", type=_positive_int_values, default=[128])
+    parser.add_argument(
+        "--learning-rate-values",
+        type=_positive_float_values,
+        default=[5e-5],
+    )
+    parser.add_argument("--max-step-values", type=_int_values, default=[1])
+    parser.add_argument("--seed-values", type=_int_values, default=[13])
+    parser.add_argument("--max-train-samples", type=int, default=4096)
+    parser.add_argument("--max-eval-samples", type=int, default=512)
+    parser.add_argument("--per-device-train-batch-size", type=int, default=2)
+    parser.add_argument("--per-device-eval-batch-size", type=int, default=2)
+    parser.add_argument("--gradient-accumulation-steps", type=int, default=8)
+    parser.add_argument("--logging-steps", type=int, default=25)
+    parser.add_argument("--save-steps", type=int, default=250)
+    parser.add_argument("--eval-steps", type=int, default=250)
+    args = parser.parse_args(argv)
+    if not args.bridge_script.is_file():
+        parser.error(f"--bridge-script does not exist: {args.bridge_script}")
+    if args.validation_file and not args.train_file:
+        parser.error("--validation-file requires --train-file")
+    if args.validation_file and args.validation_fraction > 0.0:
+        parser.error(
+            "--validation-file and --validation-fraction are mutually exclusive"
+        )
+    if args.validation_fraction < 0.0 or args.validation_fraction >= 1.0:
+        parser.error("--validation-fraction must be in [0.0, 1.0)")
+    if args.generation_max_new_tokens <= 0:
+        parser.error("--generation-max-new-tokens must be positive")
+    if args.generation_temperature <= 0.0:
+        parser.error("--generation-temperature must be positive")
+    if args.generation_top_k < 0:
+        parser.error("--generation-top-k must be non-negative")
+    if args.max_train_samples < 0 or args.max_eval_samples < 0:
+        parser.error("--max-train-samples and --max-eval-samples must be non-negative")
+    if args.corpus_scan and not args.train_file:
+        parser.error("--corpus-scan requires --train-file")
+    if args.corpus_scan_max_bytes_per_file < 0:
+        parser.error("--corpus-scan-max-bytes-per-file must be non-negative")
+    if args.corpus_scan_sample_lines < 0:
+        parser.error("--corpus-scan-sample-lines must be non-negative")
+    if args.zspace_probe_dim <= 0:
+        parser.error("--zspace-probe-dim must be positive")
+    for path in [*args.train_file, *args.validation_file]:
+        if not path.is_file():
+            parser.error(f"local corpus file does not exist: {path}")
+    return args
+
+
+def _append_repeated(command: list[str], flag: str, values: list[Path]) -> None:
+    for value in values:
+        command.extend([flag, str(value)])
+
+
+def _run_name(
+    args: argparse.Namespace,
+    *,
+    index: int,
+    block_size: int,
+    learning_rate: float,
+    max_steps: int,
+    seed: int,
+) -> str:
+    lr_label = f"{learning_rate:.0e}".replace("+", "").replace("-", "m")
+    return (
+        f"{args.run_prefix}-{index:03d}"
+        f"-bs{block_size}-lr{lr_label}-steps{max_steps}-seed{seed}"
+    )
+
+
+def _bridge_command(
+    args: argparse.Namespace,
+    *,
+    run_dir: Path,
+    run_card: Path,
+    trainer_trace: Path,
+    block_size: int,
+    learning_rate: float,
+    max_steps: int,
+    seed: int,
+) -> list[str]:
+    command = [
+        str(args.python),
+        str(args.bridge_script),
+        "--model-name",
+        str(args.model_name),
+        "--train",
+        "--output-dir",
+        str(run_dir),
+        "--run-card",
+        str(run_card),
+        "--trainer-trace-jsonl",
+        str(trainer_trace),
+        "--text-column",
+        str(args.text_column),
+        "--block-size",
+        str(block_size),
+        "--learning-rate",
+        str(learning_rate),
+        "--max-steps",
+        str(max_steps),
+        "--seed",
+        str(seed),
+        "--max-train-samples",
+        str(args.max_train_samples),
+        "--max-eval-samples",
+        str(args.max_eval_samples),
+        "--per-device-train-batch-size",
+        str(args.per_device_train_batch_size),
+        "--per-device-eval-batch-size",
+        str(args.per_device_eval_batch_size),
+        "--gradient-accumulation-steps",
+        str(args.gradient_accumulation_steps),
+        "--logging-steps",
+        str(args.logging_steps),
+        "--save-steps",
+        str(args.save_steps),
+        "--eval-steps",
+        str(args.eval_steps),
+    ]
+    if args.train_file:
+        _append_repeated(command, "--train-file", args.train_file)
+        _append_repeated(command, "--validation-file", args.validation_file)
+        command.extend(["--dataset-format", str(args.dataset_format)])
+        if args.validation_fraction > 0.0:
+            command.extend(["--validation-fraction", str(args.validation_fraction)])
+    else:
+        command.extend(
+            [
+                "--dataset-name",
+                str(args.dataset_name),
+                "--dataset-config",
+                str(args.dataset_config),
+                "--train-split",
+                str(args.train_split),
+                "--eval-split",
+                str(args.eval_split),
+            ]
+        )
+    if args.allow_remote:
+        command.append("--allow-remote")
+    if args.trust_remote_code:
+        command.append("--trust-remote-code")
+    if args.corpus_scan:
+        command.append("--corpus-scan")
+        command.extend(
+            [
+                "--corpus-scan-max-bytes-per-file",
+                str(args.corpus_scan_max_bytes_per_file),
+                "--corpus-scan-sample-lines",
+                str(args.corpus_scan_sample_lines),
+            ]
+        )
+    if args.eval_before_train:
+        command.append("--eval-before-train")
+    if args.no_eval_after_train:
+        command.append("--no-eval-after-train")
+    if args.no_trainer_trace:
+        command.append("--no-trainer-trace")
+    if args.generation_prompt:
+        command.extend(["--generation-prompt", str(args.generation_prompt)])
+        command.extend(
+            ["--generation-max-new-tokens", str(args.generation_max_new_tokens)]
+        )
+        if args.generation_do_sample:
+            command.append("--generation-do-sample")
+        command.extend(["--generation-temperature", str(args.generation_temperature)])
+        command.extend(["--generation-top-k", str(args.generation_top_k)])
+    for backend in args.runtime_device_backend:
+        command.extend(["--runtime-device-backend", str(backend)])
+    for backend in args.require_runtime_device_ready_backend:
+        command.extend(["--require-runtime-device-ready-backend", str(backend)])
+    if args.require_wgpu_ready:
+        command.append("--require-wgpu-ready")
+    if args.no_require_hf_gpt2_ft:
+        command.append("--no-require-hf-gpt2-ft")
+    if args.zspace_probe:
+        command.append("--zspace-probe")
+        command.extend(["--zspace-probe-dim", str(args.zspace_probe_dim)])
+        command.extend(["--zspace-curvature", str(args.zspace_curvature)])
+        command.extend(["--zspace-frequency", str(args.zspace_frequency)])
+        command.extend(["--zspace-strength", str(args.zspace_strength)])
+    return command
+
+
+def build_sweep_runs(args: argparse.Namespace) -> list[dict[str, Any]]:
+    runs = []
+    grid = product(
+        args.block_size_values,
+        args.learning_rate_values,
+        args.max_step_values,
+        args.seed_values,
+    )
+    for index, (block_size, learning_rate, max_steps, seed) in enumerate(grid, 1):
+        name = _run_name(
+            args,
+            index=index,
+            block_size=block_size,
+            learning_rate=learning_rate,
+            max_steps=max_steps,
+            seed=seed,
+        )
+        run_dir = args.out_dir / name
+        run_card = run_dir / "spiraltorch-hf-gpt2-ft-run-card.json"
+        trainer_trace = run_dir / "spiraltorch-hf-gpt2-ft-trainer-trace.jsonl"
+        command = _bridge_command(
+            args,
+            run_dir=run_dir,
+            run_card=run_card,
+            trainer_trace=trainer_trace,
+            block_size=block_size,
+            learning_rate=learning_rate,
+            max_steps=max_steps,
+            seed=seed,
+        )
+        runs.append(
+            {
+                "name": name,
+                "index": index,
+                "block_size": block_size,
+                "learning_rate": learning_rate,
+                "max_steps": max_steps,
+                "seed": seed,
+                "run_dir": str(run_dir),
+                "run_card": str(run_card),
+                "trainer_trace_jsonl": str(trainer_trace),
+                "command": command,
+                "command_display": shlex.join(command),
+                "returncode": None,
+            }
+        )
+    return runs
+
+
+def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def run_sweep(args: argparse.Namespace) -> dict[str, Any]:
+    runs = build_sweep_runs(args)
+    args.out_dir.mkdir(parents=True, exist_ok=True)
+    plan = {
+        "row_type": "hf_gpt2_finetune_sweep_plan",
+        "dry_run": bool(args.dry_run),
+        "run_count": len(runs),
+        "runs": runs,
+    }
+    _write_json(args.out_dir / "sweep-plan.json", plan)
+    if args.dry_run:
+        report = {
+            "row_type": "hf_gpt2_finetune_sweep_report",
+            "dry_run": True,
+            "run_count": len(runs),
+            "attempted_run_count": 0,
+            "completed_run_count": 0,
+            "failed_run_count": 0,
+            "skipped_run_count": len(runs),
+            "plan_path": str(args.out_dir / "sweep-plan.json"),
+            "report_path": str(args.out_dir / "sweep-report.json"),
+            "comparison": None,
+            "runs": runs,
+        }
+        _write_json(args.out_dir / "sweep-report.json", report)
+        return report
+
+    completed_cards = []
+    for run in runs:
+        Path(str(run["run_dir"])).mkdir(parents=True, exist_ok=True)
+        print(f"sweep_run {run['name']}")
+        result = subprocess.run(run["command"], check=False)
+        run["returncode"] = int(result.returncode)
+        if result.returncode == 0 and Path(str(run["run_card"])).is_file():
+            completed_cards.append(str(run["run_card"]))
+        elif args.fail_fast:
+            break
+
+    comparison = (
+        st.compare_hf_gpt2_finetune_run_cards(
+            completed_cards,
+            run_labels=[
+                str(run["name"])
+                for run in runs
+                if run.get("returncode") is not None
+                and int(run["returncode"]) == 0
+                and Path(str(run["run_card"])).is_file()
+            ],
+        )
+        if completed_cards
+        else None
+    )
+    attempted_run_count = sum(1 for run in runs if run.get("returncode") is not None)
+    failed_run_count = sum(
+        1
+        for run in runs
+        if run.get("returncode") is not None and int(run["returncode"]) != 0
+    )
+    report = {
+        "row_type": "hf_gpt2_finetune_sweep_report",
+        "dry_run": False,
+        "run_count": len(runs),
+        "attempted_run_count": attempted_run_count,
+        "completed_run_count": len(completed_cards),
+        "failed_run_count": failed_run_count,
+        "skipped_run_count": len(runs) - attempted_run_count,
+        "plan_path": str(args.out_dir / "sweep-plan.json"),
+        "report_path": str(args.out_dir / "sweep-report.json"),
+        "comparison": comparison,
+        "runs": runs,
+    }
+    _write_json(args.out_dir / "sweep-report.json", report)
+    return report
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    report = run_sweep(args)
+    report_path = args.out_dir / "sweep-report.json"
+    print(f"sweep_report {report_path}")
+    failed = int(report.get("failed_run_count") or 0)
+    return 1 if failed and args.fail_fast else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
