@@ -26,6 +26,10 @@
   Hugging Face offline environment flags, record model-load/train failures into
   run cards, and filter `TrainingArguments` kwargs against the installed
   Transformers signature for 4.x/5.x compatibility.
+- Dataset fit: add `hf_gpt2_finetune_dataset_fit_report(...)` and run-card
+  `dataset_fit_report` so tokenized train/eval block counts, empty eval splits,
+  and non-trainable block-size/data combinations are explicit before Trainer
+  work proceeds.
 - Documentation: clarify the hard dependency boundary for larger local GPT-2
   FT runs: Rust keeps tensor/nn/text/logic/frac/rl/WGPU surfaces in the wheel,
   while Python explicitly brings Transformers, Torch, datasets, pyarrow,

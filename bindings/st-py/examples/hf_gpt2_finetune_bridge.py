@@ -19,6 +19,7 @@ from spiraltorch.hf_ft import (
     HF_GPT2_FT_DEFAULT_DEVICE_BACKENDS,
     hf_gpt2_finetune_corpus_file_report,
     hf_gpt2_finetune_corpus_scan_report,
+    hf_gpt2_finetune_dataset_fit_report,
     hf_gpt2_finetune_preflight_report,
     hf_gpt2_finetune_summary_lines,
     hf_gpt2_finetune_trainer_trace_callback,
@@ -565,6 +566,7 @@ def _base_run_card(
         "load_status": "pending",
         "failure_stage": None,
         "failure_error": None,
+        "dataset_fit_report": None,
     }
 
 
@@ -716,6 +718,37 @@ def _main_with_runtime_access(
         )
         _write_card(card, args)
         return 1
+    tokenized_train_rows = len(train_dataset)
+    tokenized_eval_rows = None if eval_dataset is None else len(eval_dataset)
+    dataset_fit_report = hf_gpt2_finetune_dataset_fit_report(
+        raw_train_rows=len(raw_train),
+        raw_eval_rows=None if raw_eval is None else len(raw_eval),
+        tokenized_train_rows=tokenized_train_rows,
+        tokenized_eval_rows=tokenized_eval_rows,
+        block_size=args.block_size,
+    )
+    card.update(
+        {
+            "tokenized_train_rows": tokenized_train_rows,
+            "tokenized_eval_rows": tokenized_eval_rows,
+            "dataset_fit_report": dataset_fit_report,
+        }
+    )
+    if dataset_fit_report["train_ready"] is not True:
+        card.update(
+            {
+                "failure_stage": "dataset_fit",
+                "failure_error": (
+                    "tokenized train split produced too few blocks: "
+                    f"{dataset_fit_report['warnings']}"
+                ),
+            }
+        )
+        _write_card(card, args)
+        return 1
+    if dataset_fit_report["eval_dropped_empty"] is True:
+        eval_dataset = None
+        card["tokenized_eval_rows"] = tokenized_eval_rows
     collator = transformers.DataCollatorForLanguageModeling(
         tokenizer=tokenizer,
         mlm=False,
@@ -790,8 +823,6 @@ def _main_with_runtime_access(
     )
     card.update(
         {
-            "tokenized_train_rows": len(train_dataset),
-            "tokenized_eval_rows": None if eval_dataset is None else len(eval_dataset),
             "trainer_metrics": dict(getattr(train_result, "metrics", {}) or {}),
             "trainer_trace_jsonl": None if trace_path is None else str(trace_path),
             "trainer_trace_summary": trainer_trace_summary,
