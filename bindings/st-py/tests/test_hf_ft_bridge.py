@@ -1142,7 +1142,9 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                         "adapter": {
                             "request": {"temperature": 1.04, "top_p": 0.78},
                             "logits_processor_kwargs": {
+                                "entropy_target": 3.25,
                                 "repression_strength": 1.5,
+                                "ngram_repression_strength": 0.75,
                             },
                             "activation_hook": {"name_contains": ["attn"]},
                         },
@@ -1207,6 +1209,53 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             stored_report["summary"]["inference_distortion_recommended_probe"],
             "direct-probe",
         )
+        self.assertEqual(
+            stored_plan["generation_from_inference_distortion_plan"]["status"],
+            "ok",
+        )
+        self.assertEqual(
+            stored_plan["generation_from_inference_distortion_plan"][
+                "processor_kwargs"
+            ]["repression_strength"],
+            1.5,
+        )
+        self.assertEqual(
+            stored_report["summary"][
+                "generation_from_inference_distortion_plan_status"
+            ],
+            "ok",
+        )
+        self.assertEqual(
+            stored_report["summary"][
+                "generation_from_inference_distortion_plan_probe"
+            ],
+            "direct-probe",
+        )
+        self.assertEqual(
+            stored_report["summary"][
+                "generation_from_inference_distortion_plan_entropy_target"
+            ],
+            3.25,
+        )
+        self.assertEqual(
+            stored_report["summary"][
+                "generation_from_inference_distortion_plan_repression_strength"
+            ],
+            1.5,
+        )
+        self.assertEqual(
+            stored_report["summary"][
+                "generation_from_inference_distortion_plan_ngram_repression_strength"
+            ],
+            0.75,
+        )
+        direct_lines = hf_ft.summarize_hf_gpt2_finetune_sweep_report_lines(
+            stored_report,
+        )
+        self.assertTrue(
+            any("hf_gpt2_ft_sweep_generation_inference_plan" in line for line in direct_lines)
+        )
+        self.assertTrue(any("repress=1.5" in line for line in direct_lines))
         first_command = runs[0]["command"]
         self.assertIn("--inference-distortion-probe", first_command)
         self.assertIn(str(probe_path), first_command)

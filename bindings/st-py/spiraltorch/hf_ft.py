@@ -2267,6 +2267,14 @@ def summarize_hf_gpt2_finetune_sweep_report(
     comparison = _mapping_item(report, "comparison")
     summaries = _sweep_summary_rows(comparison)
     inference_handoff = _mapping_item(report, "inference_distortion_handoff")
+    generation_inference_plan = _mapping_item(
+        report,
+        "generation_from_inference_distortion_plan",
+    )
+    generation_inference_plan_processor = _mapping_item(
+        generation_inference_plan,
+        "processor_kwargs",
+    )
     runs_value = report.get("runs")
     runs = (
         [dict(row) for row in runs_value if isinstance(row, Mapping)]
@@ -2317,6 +2325,45 @@ def summarize_hf_gpt2_finetune_sweep_report(
         ),
         "generation_from_inference_distortion_count": _safe_number(
             comparison.get("generation_from_inference_distortion_count")
+        ),
+        "generation_from_inference_distortion_requested": report.get(
+            "generation_from_inference_distortion"
+        ),
+        "generation_from_inference_distortion_plan_status": (
+            generation_inference_plan.get("status")
+        ),
+        "generation_from_inference_distortion_plan_probe": (
+            generation_inference_plan.get("recommended_probe")
+        ),
+        "generation_from_inference_distortion_plan_source_kind": (
+            generation_inference_plan.get("source_kind")
+        ),
+        "generation_from_inference_distortion_plan_applied_arg_count": (
+            _metric_number(generation_inference_plan, "applied_arg_count")
+        ),
+        "generation_from_inference_distortion_plan_top_k": _metric_number(
+            generation_inference_plan_processor,
+            "top_k",
+        ),
+        "generation_from_inference_distortion_plan_temperature": _metric_number(
+            generation_inference_plan_processor,
+            "temperature",
+        ),
+        "generation_from_inference_distortion_plan_entropy_target": _metric_number(
+            generation_inference_plan_processor,
+            "entropy_target",
+        ),
+        "generation_from_inference_distortion_plan_repression_strength": (
+            _metric_number(
+                generation_inference_plan_processor,
+                "repression_strength",
+            )
+        ),
+        "generation_from_inference_distortion_plan_ngram_repression_strength": (
+            _metric_number(
+                generation_inference_plan_processor,
+                "ngram_repression_strength",
+            )
         ),
         "best_eval_after_run_label": best_after_label,
         "best_eval_after_loss": _safe_number(comparison.get("best_eval_after_loss")),
@@ -2437,6 +2484,18 @@ def summarize_hf_gpt2_finetune_sweep_report_lines(
             f"card={summary.get('selected_run_card')} "
             f"trace={summary.get('selected_trainer_trace_jsonl')} "
             f"dir={summary.get('selected_run_dir')}"
+        )
+    if summary.get("generation_from_inference_distortion_plan_status") is not None:
+        lines.append(
+            "hf_gpt2_ft_sweep_generation_inference_plan "
+            f"status={summary.get('generation_from_inference_distortion_plan_status')} "
+            f"probe={summary.get('generation_from_inference_distortion_plan_probe')} "
+            "repress="
+            f"{summary.get('generation_from_inference_distortion_plan_repression_strength')} "
+            "entropy="
+            f"{summary.get('generation_from_inference_distortion_plan_entropy_target')} "
+            "ngram_repress="
+            f"{summary.get('generation_from_inference_distortion_plan_ngram_repression_strength')}"
         )
     for row in summary.get("top_runs", []):
         if not isinstance(row, Mapping):

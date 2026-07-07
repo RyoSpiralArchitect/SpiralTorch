@@ -701,16 +701,48 @@ def _inference_distortion_handoff(args: argparse.Namespace) -> dict[str, Any] | 
     )
 
 
+def _generation_from_inference_distortion_plan(
+    args: argparse.Namespace,
+    inference_handoff: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not args.generation_from_inference_distortion:
+        return None
+    if not isinstance(inference_handoff, dict):
+        return {"status": "missing_handoff"}
+    processor_kwargs = inference_handoff.get("recommended_processor_kwargs")
+    if not isinstance(processor_kwargs, dict) or not processor_kwargs:
+        return {
+            "status": "missing_processor_kwargs",
+            "recommended_probe": inference_handoff.get("recommended_probe"),
+            "source_kind": inference_handoff.get("source_kind"),
+        }
+    return {
+        "status": "ok",
+        "source_kind": inference_handoff.get("source_kind"),
+        "recommended_probe": inference_handoff.get("recommended_probe"),
+        "applied_arg_count": len(processor_kwargs),
+        "processor_kwargs": dict(processor_kwargs),
+    }
+
+
 def run_sweep(args: argparse.Namespace) -> dict[str, Any]:
     runs = build_sweep_runs(args)
     args.out_dir.mkdir(parents=True, exist_ok=True)
     inference_handoff = _inference_distortion_handoff(args)
+    generation_inference_plan = _generation_from_inference_distortion_plan(
+        args,
+        inference_handoff,
+    )
     plan = {
         "row_type": "hf_gpt2_finetune_sweep_plan",
         "dry_run": bool(args.dry_run),
         "inference_distortion_sweep_report": _inference_distortion_report_path(args),
         "inference_distortion_probe": _inference_distortion_probe_path(args),
         "inference_distortion_handoff": inference_handoff,
+        "generation_from_inference_distortion": bool(
+            args.generation_from_inference_distortion
+        ),
+        "generation_from_inference_distortion_plan": generation_inference_plan,
         "run_count": len(runs),
         "runs": runs,
     }
@@ -730,6 +762,10 @@ def run_sweep(args: argparse.Namespace) -> dict[str, Any]:
             "inference_distortion_sweep_report": _inference_distortion_report_path(args),
             "inference_distortion_probe": _inference_distortion_probe_path(args),
             "inference_distortion_handoff": inference_handoff,
+            "generation_from_inference_distortion": bool(
+                args.generation_from_inference_distortion
+            ),
+            "generation_from_inference_distortion_plan": generation_inference_plan,
             "comparison": None,
             "runs": runs,
         }
@@ -798,6 +834,10 @@ def run_sweep(args: argparse.Namespace) -> dict[str, Any]:
         "inference_distortion_sweep_report": _inference_distortion_report_path(args),
         "inference_distortion_probe": _inference_distortion_probe_path(args),
         "inference_distortion_handoff": inference_handoff,
+        "generation_from_inference_distortion": bool(
+            args.generation_from_inference_distortion
+        ),
+        "generation_from_inference_distortion_plan": generation_inference_plan,
         "comparison": comparison,
         "runs": runs,
     }
