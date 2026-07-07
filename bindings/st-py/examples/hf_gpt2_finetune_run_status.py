@@ -44,6 +44,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--lines-out", type=Path, default=None)
     parser.add_argument("--watch-interval-seconds", type=float, default=None)
     parser.add_argument("--watch-count", type=int, default=None)
+    parser.add_argument("--watch-stop-on-final", action="store_true")
+    parser.add_argument("--watch-stop-on-process-exit", action="store_true")
     args = parser.parse_args(argv)
     if not args.run_dir.exists():
         parser.error(f"run_dir does not exist: {args.run_dir}")
@@ -338,6 +340,14 @@ def _emit_status(args: argparse.Namespace, status: dict[str, Any]) -> None:
         print("\n".join(lines))
 
 
+def _should_stop_watch(args: argparse.Namespace, status: dict[str, Any]) -> bool:
+    if args.watch_stop_on_final and status.get("final_checkpoint_ready") is True:
+        return True
+    if args.watch_stop_on_process_exit and status.get("process_status") == "exited":
+        return True
+    return False
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     if args.watch_interval_seconds is None:
@@ -347,8 +357,11 @@ def main(argv: list[str] | None = None) -> int:
     while True:
         if count:
             print()
-        _emit_status(args, summarize_run(args))
+        status = summarize_run(args)
+        _emit_status(args, status)
         count += 1
+        if _should_stop_watch(args, status):
+            break
         if args.watch_count is not None and count >= args.watch_count:
             break
         time.sleep(float(args.watch_interval_seconds))
