@@ -49,6 +49,47 @@
   `summarize_hf_gpt2_finetune_sweep_report(...)`, and
   `summarize_hf_gpt2_finetune_sweep_report_lines(...)`; sweep reports now
   embed a compact status/top-run/scale-up-candidate summary.
+- Sweep resume: add `--resume-existing` / `--force` to
+  `examples/hf_gpt2_finetune_sweep.py` so interrupted local GPT-2 FT sweeps can
+  reuse successful run cards, run only missing/failed rows, and still compare
+  reused plus newly completed runs in one report.
+- FT run-card hardening: keep Z-Space probes aligned with the current
+  `OpenCartesianTopos` constructor and native Tensor `.tolist()` export, and
+  make generation samples tolerate patched Hugging Face
+  `_prepare_special_tokens(..., batch_size=...)` call sites without falling
+  back to manual forward generation.
+- FT eval controls: add `--max-eval-blocks`,
+  `--eval-after-train-policy skip-if-final-step-eval`,
+  `--dataloader-pin-memory auto|true|false`, `--dataloader-num-workers`, and
+  `--eval-accumulation-steps` to make longer local GPT-2 FT runs easier to
+  resume, audit, and keep responsive on MPS/CPU machines; sweep summaries use
+  the final trainer-trace eval loss as the effective after-train loss when the
+  duplicate final eval pass is intentionally skipped.
+- FT trace telemetry: trainer trace summaries now include wall-clock duration,
+  log-interval step/sec statistics, eval-loss series points, and eval-runtime
+  stats so long local GPT-2 runs can expose throughput wobble beside loss
+  improvements; sweep top-run summaries surface the same throughput/eval-series
+  fields next to eval deltas.
+- FT generation sample: add a sanitized local GPT-2 long-run sample artifact
+  showing a fixed prompt shift from generic Torch/Tor wording before training
+  toward SpiralTorch runtime / Python bindings wording after 640/1280/2560
+  steps, with eval-loss and throughput evidence beside the text.
+- HF generation control: add `spiraltorch.hf_generation` with
+  `ZSpaceRepressionLogitsProcessor` and bridge/sweep
+  `--generation-zspace-softmax` flags so local GPT-2 samples can apply a
+  repetition-repression field before Z-Space entropy-temperature softmax and
+  record bounded `generation_control` telemetry in run cards; run-card and
+  sweep summaries surface top-token-change, entropy, temperature, and backend
+  fields, and include a sanitized 2560-step GPT-2 generation-control sample
+  artifact.
+- HF generation sweep: add `examples/hf_gpt2_zspace_generation_control_sweep.py`
+  for generation-only Z-Space/repression grids against an existing
+  `AutoModelForCausalLM`, with generated text, loopiness metrics, and bounded
+  control telemetry emitted without running Trainer or loading datasets; include
+  a compact local GPT-2 2560-step grid sample showing softmax-only versus
+  repression-driven loop relaxation, plus Python helpers to load and summarize
+  those sweep artifacts with recommended processor kwargs plus bridge/sweep CLI
+  arguments for the next decode run.
 - Documentation: clarify the hard dependency boundary for larger local GPT-2
   FT runs: Rust keeps tensor/nn/text/logic/frac/rl/WGPU surfaces in the wheel,
   while Python explicitly brings Transformers, Torch, datasets, pyarrow,

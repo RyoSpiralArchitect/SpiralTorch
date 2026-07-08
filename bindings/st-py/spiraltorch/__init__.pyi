@@ -10,6 +10,8 @@ from .optim import Amegagrad, amegagrad
 
 export: ModuleType
 hf_ft: ModuleType
+hf_ft_status: ModuleType
+hf_generation: ModuleType
 hpo: ModuleType
 inference: ModuleType
 optim: ModuleType
@@ -36,6 +38,293 @@ def summarize_trainer_trace_events(
     event_type: str = ...,
     keys: Iterable[str] | None = ...,
 ) -> Dict[str, Any]: ...
+
+def load_hf_gpt2_finetune_status_history(
+    path: str | PathLike[str],
+) -> List[Dict[str, Any]]: ...
+
+def summarize_hf_gpt2_finetune_status_history(
+    rows: List[Dict[str, Any]],
+    *,
+    label: str | None = ...,
+    history_jsonl: str | PathLike[str],
+) -> Dict[str, Any]: ...
+
+def hf_gpt2_finetune_status_history_lines(
+    summary: Dict[str, Any],
+    rows: List[Dict[str, Any]],
+    *,
+    tail: int,
+    tail_evals: int = ...,
+) -> List[str]: ...
+
+def hf_gpt2_finetune_monitor_report(
+    *,
+    direct: Any = ...,
+    eval_watch: Any = ...,
+    checkpoint_watch: Any = ...,
+    final_watch: Any = ...,
+    wait_launch: Any = ...,
+    milestone_step: int | None = ...,
+    label: str | None = ...,
+    run_dir: str | PathLike[str] | None = ...,
+    next_run_dir: str | PathLike[str] | None = ...,
+) -> Dict[str, Any]: ...
+
+def hf_gpt2_finetune_monitor_lines(
+    snapshot: Dict[str, Any],
+) -> List[str]: ...
+
+def hf_gpt2_finetune_milestone_capture_report(
+    monitor_or_status: Any,
+    *,
+    milestone_step: int | None = ...,
+    label: str | None = ...,
+    iteration: int | None = ...,
+    commands: Sequence[Mapping[str, Any]] | None = ...,
+) -> Dict[str, Any]: ...
+
+def hf_gpt2_finetune_milestone_capture_lines(
+    report_or_monitor: Mapping[str, Any],
+    *,
+    milestone_step: int | None = ...,
+    label: str | None = ...,
+) -> List[str]: ...
+
+def hf_gpt2_finetune_milestone_handoff_report(
+    capture_or_monitor: Mapping[str, Any],
+    *,
+    run_dir: str | PathLike[str] | None = ...,
+    checkpoint: str | None = ...,
+    label_prefix: str | None = ...,
+    python: str = ...,
+    script: str | PathLike[str] = ...,
+    compare_with_sweep: Sequence[str | PathLike[str]] | str | PathLike[str] | None = ...,
+    compare_with_label: Sequence[str] | str | None = ...,
+    curve_out: str | PathLike[str] | None = ...,
+    curve_lines_out: str | PathLike[str] | None = ...,
+    trainer_trace_jsonl: str | PathLike[str] | None = ...,
+    run_card: str | PathLike[str] | None = ...,
+    top_n: int = ...,
+    wait: bool = ...,
+    dry_run: bool = ...,
+) -> Dict[str, Any]: ...
+
+def hf_gpt2_finetune_milestone_handoff_lines(
+    report_or_capture: Mapping[str, Any],
+    **kwargs: Any,
+) -> List[str]: ...
+
+def hf_gpt2_finetune_milestone_handoff_execution_report(
+    report_or_capture: Mapping[str, Any],
+    *,
+    run: bool = ...,
+    use_package_api: bool = ...,
+    cwd: str | PathLike[str] | None = ...,
+    env: Mapping[str, Any] | None = ...,
+    timeout: float | None = ...,
+    capture_output: bool = ...,
+    check: bool = ...,
+    runner: Callable[..., Any] | None = ...,
+    package_runner: Callable[..., Mapping[str, Any]] | None = ...,
+    out: str | PathLike[str] | None = ...,
+    lines_out: str | PathLike[str] | None = ...,
+    max_output_chars: int | None = ...,
+    **handoff_kwargs: Any,
+) -> Dict[str, Any]: ...
+
+def hf_gpt2_finetune_milestone_handoff_execution_lines(
+    report_or_handoff: Mapping[str, Any],
+    **kwargs: Any,
+) -> List[str]: ...
+
+def hf_gpt2_finetune_milestone_runtime_report(
+    *,
+    direct: Any = ...,
+    eval_watch: Any = ...,
+    checkpoint_watch: Any = ...,
+    final_watch: Any = ...,
+    wait_launch: Any = ...,
+    milestone_step: int | None = ...,
+    label: str | None = ...,
+    run_dir: str | PathLike[str] | None = ...,
+    next_run_dir: str | PathLike[str] | None = ...,
+    capture_iteration: int | None = ...,
+    capture_commands: Sequence[Mapping[str, Any]] | None = ...,
+    checkpoint: str | None = ...,
+    label_prefix: str | None = ...,
+    python: str = ...,
+    script: str | PathLike[str] = ...,
+    compare_with_sweep: Sequence[str | PathLike[str]] | str | PathLike[str] | None = ...,
+    compare_with_label: Sequence[str] | str | None = ...,
+    curve_out: str | PathLike[str] | None = ...,
+    curve_lines_out: str | PathLike[str] | None = ...,
+    trainer_trace_jsonl: str | PathLike[str] | None = ...,
+    run_card: str | PathLike[str] | None = ...,
+    top_n: int = ...,
+    wait: bool = ...,
+    dry_run: bool = ...,
+    execute: bool = ...,
+    use_package_api: bool = ...,
+    cwd: str | PathLike[str] | None = ...,
+    env: Mapping[str, Any] | None = ...,
+    timeout: float | None = ...,
+    capture_output: bool = ...,
+    check: bool = ...,
+    runner: Callable[..., Any] | None = ...,
+    package_runner: Callable[..., Mapping[str, Any]] | None = ...,
+    out: str | PathLike[str] | None = ...,
+    lines_out: str | PathLike[str] | None = ...,
+    max_output_chars: int | None = ...,
+) -> Dict[str, Any]: ...
+
+def hf_gpt2_finetune_milestone_runtime_lines(
+    report: Mapping[str, Any],
+) -> List[str]: ...
+
+def hf_gpt2_finetune_milestone_runtime_sources(
+    run_dir: str | PathLike[str],
+    *,
+    next_run_dir: str | PathLike[str] | None = ...,
+    direct: str | PathLike[str] | None = ...,
+    eval_watch: str | PathLike[str] | None = ...,
+    checkpoint_watch: str | PathLike[str] | None = ...,
+    final_watch: str | PathLike[str] | None = ...,
+    wait_launch: str | PathLike[str] | None = ...,
+) -> Dict[str, str | None]: ...
+
+def hf_gpt2_finetune_milestone_runtime_artifact_paths(
+    run_dir: str | PathLike[str],
+    *,
+    milestone_step: int | str | None = ...,
+    report: Mapping[str, Any] | None = ...,
+) -> Dict[str, str]: ...
+
+def write_hf_gpt2_finetune_milestone_runtime_report(
+    report: Mapping[str, Any],
+    *,
+    run_dir: str | PathLike[str] | None = ...,
+    out: str | PathLike[str] | None = ...,
+    lines_out: str | PathLike[str] | None = ...,
+) -> Dict[str, Any]: ...
+
+def hf_gpt2_finetune_milestone_runtime_from_run_dir_report(
+    run_dir: str | PathLike[str],
+    *,
+    next_run_dir: str | PathLike[str] | None = ...,
+    direct: Any = ...,
+    eval_watch: Any = ...,
+    checkpoint_watch: Any = ...,
+    final_watch: Any = ...,
+    wait_launch: Any = ...,
+    out: str | PathLike[str] | None = ...,
+    lines_out: str | PathLike[str] | None = ...,
+    **runtime_kwargs: Any,
+) -> Dict[str, Any]: ...
+
+def hf_gpt2_finetune_milestone_runtime_from_run_dir_archive(
+    run_dir: str | PathLike[str],
+    *,
+    next_run_dir: str | PathLike[str] | None = ...,
+    direct: Any = ...,
+    eval_watch: Any = ...,
+    checkpoint_watch: Any = ...,
+    final_watch: Any = ...,
+    wait_launch: Any = ...,
+    out: str | PathLike[str] | None = ...,
+    lines_out: str | PathLike[str] | None = ...,
+    **runtime_kwargs: Any,
+) -> Dict[str, Any]: ...
+
+def hf_gpt2_finetune_run_artifact_manifest(
+    run_dir: str | PathLike[str],
+    *,
+    next_run_dir: str | PathLike[str] | None = ...,
+    generation_limit: int = ...,
+    checkpoint_limit: int = ...,
+    out: str | PathLike[str] | None = ...,
+    lines_out: str | PathLike[str] | None = ...,
+) -> Dict[str, Any]: ...
+
+def hf_gpt2_finetune_run_artifact_manifest_lines(
+    report: Mapping[str, Any],
+    *,
+    top_n: int = ...,
+) -> List[str]: ...
+
+def hf_gpt2_finetune_run_artifact_manifest_paths(
+    run_dir: str | PathLike[str],
+) -> Dict[str, str]: ...
+
+def write_hf_gpt2_finetune_run_artifact_manifest(
+    report: Mapping[str, Any],
+    *,
+    run_dir: str | PathLike[str] | None = ...,
+    out: str | PathLike[str] | None = ...,
+    lines_out: str | PathLike[str] | None = ...,
+    top_n: int = ...,
+) -> Dict[str, Any]: ...
+
+def hf_gpt2_finetune_run_ops_snapshot_report(
+    run_dir: str | PathLike[str],
+    *,
+    next_run_dir: str | PathLike[str] | None = ...,
+    generation_limit: int = ...,
+    checkpoint_limit: int = ...,
+    milestone_step: int | None = ...,
+    label: str | None = ...,
+    execute: bool = ...,
+    dry_run: bool = ...,
+    use_package_api: bool = ...,
+    package_runner: Callable[..., Mapping[str, Any]] | None = ...,
+    runner: Callable[..., Any] | None = ...,
+    out: str | PathLike[str] | None = ...,
+    lines_out: str | PathLike[str] | None = ...,
+    **runtime_kwargs: Any,
+) -> Dict[str, Any]: ...
+
+def hf_gpt2_finetune_run_ops_snapshot_lines(
+    report: Mapping[str, Any],
+) -> List[str]: ...
+
+def hf_gpt2_finetune_run_ops_snapshot_paths(
+    run_dir: str | PathLike[str],
+) -> Dict[str, str]: ...
+
+def write_hf_gpt2_finetune_run_ops_snapshot(
+    report: Mapping[str, Any],
+    *,
+    run_dir: str | PathLike[str] | None = ...,
+    out: str | PathLike[str] | None = ...,
+    lines_out: str | PathLike[str] | None = ...,
+) -> Dict[str, Any]: ...
+
+load_hf_finetune_status_history: Callable[..., List[Dict[str, Any]]]
+summarize_hf_finetune_status_history: Callable[..., Dict[str, Any]]
+hf_finetune_status_history_lines: Callable[..., List[str]]
+hf_finetune_monitor_report: Callable[..., Dict[str, Any]]
+hf_finetune_monitor_lines: Callable[..., List[str]]
+hf_finetune_milestone_capture_report: Callable[..., Dict[str, Any]]
+hf_finetune_milestone_capture_lines: Callable[..., List[str]]
+hf_finetune_milestone_handoff_report: Callable[..., Dict[str, Any]]
+hf_finetune_milestone_handoff_lines: Callable[..., List[str]]
+hf_finetune_milestone_handoff_execution_report: Callable[..., Dict[str, Any]]
+hf_finetune_milestone_handoff_execution_lines: Callable[..., List[str]]
+hf_finetune_milestone_runtime_report: Callable[..., Dict[str, Any]]
+hf_finetune_milestone_runtime_lines: Callable[..., List[str]]
+hf_finetune_milestone_runtime_sources: Callable[..., Dict[str, str | None]]
+hf_finetune_milestone_runtime_artifact_paths: Callable[..., Dict[str, str]]
+write_hf_finetune_milestone_runtime_report: Callable[..., Dict[str, Any]]
+hf_finetune_milestone_runtime_from_run_dir_report: Callable[..., Dict[str, Any]]
+hf_finetune_milestone_runtime_from_run_dir_archive: Callable[..., Dict[str, Any]]
+hf_finetune_run_artifact_manifest: Callable[..., Dict[str, Any]]
+hf_finetune_run_artifact_manifest_lines: Callable[..., List[str]]
+hf_finetune_run_artifact_manifest_paths: Callable[..., Dict[str, str]]
+write_hf_finetune_run_artifact_manifest: Callable[..., Dict[str, Any]]
+hf_finetune_run_ops_snapshot_report: Callable[..., Dict[str, Any]]
+hf_finetune_run_ops_snapshot_lines: Callable[..., List[str]]
+hf_finetune_run_ops_snapshot_paths: Callable[..., Dict[str, str]]
+write_hf_finetune_run_ops_snapshot: Callable[..., Dict[str, Any]]
 
 def summarize_transformers_trainer_runtime_bridge(
     transformers_trace_jsonl: str,
@@ -250,8 +539,76 @@ def write_runtime_import_preflight_report(
 ) -> str: ...
 
 HF_GPT2_FT_DEFAULT_DEVICE_BACKENDS: List[str]
+HF_GPT2_FT_RUN_CARD_FILENAME: str
+HF_GPT2_FT_TRAINER_TRACE_FILENAME: str
 HF_GPT2_FT_REQUIRED_PYTHON_PACKAGES: List[str]
 HF_GPT2_FT_REQUIRED_RUST_SURFACES: List[Dict[str, str]]
+HF_FINETUNE_DEFAULT_DEVICE_BACKENDS: List[str]
+HF_FINETUNE_DEFAULT_MODEL_CONFIGS: Dict[str, Any]
+HF_FINETUNE_DEFAULT_MODEL_PROFILE: str
+HF_FINETUNE_MODEL_CONFIG_SCHEMA: str
+HF_FINETUNE_RUN_CARD_FILENAME: str
+HF_FINETUNE_TRAINER_TRACE_FILENAME: str
+HF_FINETUNE_REQUIRED_PYTHON_PACKAGES: List[str]
+HF_FINETUNE_REQUIRED_RUST_SURFACES: List[Dict[str, str]]
+load_hf_finetune_model_configs: Callable[..., Dict[str, Any]]
+hf_finetune_model_profiles: Callable[..., Dict[str, Dict[str, Any]]]
+resolve_hf_finetune_model_profile: Callable[..., Dict[str, Any]]
+hf_finetune_model_profile_catalog: Callable[..., Dict[str, Any]]
+hf_finetune_model_profile_catalog_lines: Callable[..., List[str]]
+hf_finetune_model_profile_cli_args: Callable[..., List[str]]
+hf_finetune_model_profile_launch_bundle_lines: Callable[..., List[str]]
+hf_finetune_model_profile_launch_bundle_report: Callable[..., Dict[str, Any]]
+hf_finetune_model_profile_launch_bundle_report_lines: Callable[..., List[str]]
+hf_finetune_model_profile_launch_plan: Callable[..., Dict[str, Any]]
+hf_finetune_model_profile_launch_plan_lines: Callable[..., List[str]]
+hf_finetune_model_profile_launch_script: Callable[..., str]
+hf_finetune_model_profile_lines: Callable[..., List[str]]
+hf_finetune_model_profile_preflight_report: Callable[..., Dict[str, Any]]
+hf_finetune_model_profile_preflight_lines: Callable[..., List[str]]
+hf_finetune_model_profile_runtime_contract_from_artifact: Callable[..., Dict[str, Any]]
+hf_finetune_model_profile_runtime_contract: Callable[..., Dict[str, Any]]
+hf_finetune_model_profile_runtime_contract_lines: Callable[..., List[str]]
+load_hf_finetune_model_profile_launch_plan: Callable[..., Dict[str, Any]]
+write_hf_finetune_model_profile_launch_bundle: Callable[..., Dict[str, Any]]
+write_hf_finetune_model_profile_launch_plan: Callable[..., Dict[str, Any]]
+write_hf_finetune_model_profile_launch_script: Callable[..., Dict[str, Any]]
+hf_finetune_rust_dependency_report: Callable[..., Dict[str, Any]]
+hf_finetune_corpus_file_report: Callable[..., Dict[str, Any]]
+hf_finetune_corpus_scan_report: Callable[..., Dict[str, Any]]
+hf_finetune_dataset_fit_report: Callable[..., Dict[str, Any]]
+hf_finetune_generation_report: Callable[..., Dict[str, Any]]
+hf_finetune_inference_distortion_handoff_report: Callable[..., Dict[str, Any]]
+hf_finetune_inference_distortion_runtime_plan: Callable[..., Dict[str, Any]]
+hf_finetune_inference_distortion_runtime_adapter: Callable[..., Callable[..., Any]]
+hf_finetune_inference_distortion_request_kwargs: Callable[..., Dict[str, Any]]
+hf_finetune_inference_distortion_handoff_lines: Callable[..., List[str]]
+hf_finetune_milestone_report: Callable[..., Dict[str, Any]]
+hf_finetune_milestone_lines: Callable[..., List[str]]
+hf_finetune_preflight_report: Callable[..., Dict[str, Any]]
+hf_finetune_summary_lines: Callable[..., List[str]]
+hf_finetune_zspace_probe: Callable[..., Dict[str, Any]]
+hf_finetune_training_telemetry_frame: Callable[..., Dict[str, Any]]
+hf_finetune_eval_report: Callable[..., Dict[str, Any]]
+hf_finetune_trainer_trace_event: Callable[..., Dict[str, Any]]
+write_hf_finetune_trainer_trace_event: Callable[..., None]
+load_hf_finetune_trainer_trace: Callable[..., List[Dict[str, Any]]]
+summarize_hf_finetune_trainer_trace: Callable[..., Dict[str, Any]]
+load_hf_finetune_run_card: Callable[..., Dict[str, Any]]
+load_hf_finetune_sweep_report: Callable[..., Dict[str, Any]]
+hf_finetune_disk_headroom_plan: Callable[..., Dict[str, Any]]
+hf_gpt2_finetune_disk_headroom_plan: Callable[..., Dict[str, Any]]
+hf_finetune_scale_up_command: Callable[..., Dict[str, Any]]
+hf_finetune_scale_up_preflight_report: Callable[..., Dict[str, Any]]
+hf_finetune_scale_up_preflight_lines: Callable[..., List[str]]
+summarize_hf_finetune_run_card: Callable[..., Dict[str, Any]]
+summarize_hf_finetune_sweep_report: Callable[..., Dict[str, Any]]
+summarize_hf_finetune_sweep_report_lines: Callable[..., List[str]]
+hf_finetune_generation_curve_report: Callable[..., Dict[str, Any]]
+hf_finetune_generation_curve_lines: Callable[..., List[str]]
+compare_hf_finetune_run_cards: Callable[..., Dict[str, Any]]
+hf_finetune_trainer_trace_callback: Callable[..., Any]
+write_hf_finetune_run_card: Callable[..., str]
 
 def hf_gpt2_finetune_rust_dependency_report() -> Dict[str, Any]: ...
 
@@ -306,8 +663,464 @@ def hf_gpt2_finetune_generation_report(
     max_new_tokens: int = ...,
     generation_method: object = ...,
     fallback_error: object = ...,
+    generation_control: Mapping[str, object] | None = ...,
     error: object = ...,
 ) -> Dict[str, object]: ...
+
+def hf_gpt2_finetune_generation_curve_report(
+    card_or_path: str | PathLike[str] | Mapping[str, object],
+    sweeps_or_paths: Mapping[str, object] | Sequence[object],
+    *,
+    labels: Sequence[str] | None = ...,
+    step_by_model: Mapping[str, object] | None = ...,
+    top_n: int = ...,
+) -> Dict[str, object]: ...
+
+def hf_gpt2_finetune_generation_curve_lines(
+    report_or_card: str | PathLike[str] | Mapping[str, object],
+    sweeps_or_paths: Mapping[str, object] | Sequence[object] | None = ...,
+    *,
+    labels: Sequence[str] | None = ...,
+    step_by_model: Mapping[str, object] | None = ...,
+    top_n: int = ...,
+) -> List[str]: ...
+
+def hf_gpt2_finetune_inference_distortion_handoff_report(
+    report_or_path: str | PathLike[str] | Mapping[str, object],
+    *,
+    top_n: int = ...,
+) -> Dict[str, object]: ...
+
+def hf_gpt2_finetune_inference_distortion_handoff_lines(
+    report_or_path: str | PathLike[str] | Mapping[str, object],
+    *,
+    top_n: int = ...,
+    replay_arg_limit: int = ...,
+) -> List[str]: ...
+
+def hf_gpt2_finetune_inference_distortion_runtime_plan(
+    report_or_path: str | PathLike[str] | Mapping[str, object],
+    *,
+    top_n: int = ...,
+    request: Mapping[str, object] | None = ...,
+) -> Dict[str, object]: ...
+
+def hf_gpt2_finetune_inference_distortion_runtime_adapter(
+    report_or_path: str | PathLike[str] | Mapping[str, object],
+    *,
+    top_n: int = ...,
+) -> Dict[str, object]: ...
+
+def hf_gpt2_finetune_inference_distortion_request_kwargs(
+    report_or_path: str | PathLike[str] | Mapping[str, object],
+    *,
+    top_n: int = ...,
+    request: Mapping[str, object] | None = ...,
+) -> Dict[str, object]: ...
+
+def hf_gpt2_finetune_milestone_report(
+    status_or_path: str | PathLike[str] | Mapping[str, object],
+    *,
+    milestone_step: int,
+    label: str | None = ...,
+) -> Dict[str, object]: ...
+
+def hf_gpt2_finetune_milestone_lines(
+    report_or_status: str | PathLike[str] | Mapping[str, object],
+    *,
+    milestone_step: int | None = ...,
+    label: str | None = ...,
+) -> List[str]: ...
+
+class ZSpaceActivationProbeHook:
+    def __init__(
+        self,
+        *,
+        module_names: Sequence[str] | None = ...,
+        name_contains: Sequence[str] | None = ...,
+        max_modules: int = ...,
+        record_limit: int = ...,
+        intervention_scale: float = ...,
+        intervention_bias: float = ...,
+        origin: str = ...,
+    ) -> None: ...
+    def attach(self, model: Any) -> ZSpaceActivationProbeHook: ...
+    def close(self) -> None: ...
+    def reset_report(self) -> None: ...
+    def report(self, *, limit: int | None = ...) -> Dict[str, object]: ...
+
+class ZSpaceRepressionLogitsProcessor:
+    def __init__(
+        self,
+        *,
+        top_k: int = ...,
+        curvature: float = ...,
+        temperature: float = ...,
+        entropy_target: float | None = ...,
+        entropy_tolerance: float = ...,
+        entropy_gain: float = ...,
+        min_temperature: float | None = ...,
+        max_temperature: float | None = ...,
+        repression_window: int = ...,
+        repression_strength: float = ...,
+        last_token_repression: float = ...,
+        ngram_size: int = ...,
+        ngram_window: int = ...,
+        ngram_repression_strength: float = ...,
+        ngram_decay: float = ...,
+        mask_non_top_k: bool = ...,
+        use_native_zspace: bool = ...,
+    ) -> None: ...
+    def __call__(self, input_ids: Any, scores: Any) -> Any: ...
+    def report(self, *, limit: int | None = ...) -> Dict[str, object]: ...
+    def reset_report(self) -> None: ...
+
+def build_zspace_repression_logits_processor(
+    **kwargs: object,
+) -> ZSpaceRepressionLogitsProcessor: ...
+
+def build_zspace_softmax_logits_processor(
+    **kwargs: object,
+) -> ZSpaceRepressionLogitsProcessor: ...
+
+def build_zspace_activation_probe_hook(
+    **kwargs: object,
+) -> ZSpaceActivationProbeHook: ...
+
+def compare_zspace_inference_distortion_probes(
+    probes: (
+        Mapping[str, str | PathLike[str] | Mapping[str, object]]
+        | Sequence[str | PathLike[str] | Mapping[str, object]]
+        | str
+        | PathLike[str]
+        | Mapping[str, object]
+    ),
+    *,
+    labels: Sequence[str] | None = ...,
+    top_n: int = ...,
+    preview_chars: int = ...,
+) -> Dict[str, object]: ...
+
+def zspace_inference_distortion_sweep_report_from_probes(
+    probes: (
+        Mapping[str, str | PathLike[str] | Mapping[str, object]]
+        | Sequence[str | PathLike[str] | Mapping[str, object]]
+        | str
+        | PathLike[str]
+        | Mapping[str, object]
+    ),
+    *,
+    labels: Sequence[str] | None = ...,
+    prompt: object | None = ...,
+    runtime: Mapping[str, object] | None = ...,
+    report_path: str | PathLike[str] | None = ...,
+    top_n: int = ...,
+    preview_chars: int = ...,
+) -> Dict[str, object]: ...
+
+def zspace_inference_distortion_processor_kwargs(
+    adapter_or_config: Mapping[str, object] | None = ...,
+    **overrides: object,
+) -> Dict[str, object]: ...
+
+def zspace_inference_distortion_probe_cli_args(
+    config: Mapping[str, object] | None,
+) -> List[str]: ...
+
+def zspace_inference_distortion_geometry_probe(
+    adapter_or_config: Mapping[str, object] | None,
+    *,
+    zspace_eval_with_derivative_stable: object | None = ...,
+) -> Dict[str, object]: ...
+
+def zspace_inference_distortion_probe_report(
+    *,
+    prompt: object,
+    config: Mapping[str, object] | None = ...,
+    runtime: Mapping[str, object] | None = ...,
+    adapter: Mapping[str, object] | None = ...,
+    local_hf: Mapping[str, object] | None = ...,
+    api: Mapping[str, object] | None = ...,
+    handoff: Mapping[str, object] | None = ...,
+    name: object | None = ...,
+    probe_path: str | PathLike[str] | None = ...,
+    runtime_preflight: Mapping[str, object] | None = ...,
+    geometry_probe: Mapping[str, object] | None = ...,
+    include_summary: bool = ...,
+) -> Dict[str, object]: ...
+
+def zspace_inference_distortion_runtime_plan(
+    *,
+    model_configs: Mapping[str, object] | str | PathLike[str] | None = ...,
+    model_profile: str | None = ...,
+    local_model: str | PathLike[str] | None = ...,
+    tokenizer_name: str | PathLike[str] | None = ...,
+    allow_remote: bool = ...,
+    trust_remote_code: bool = ...,
+    max_new_tokens: int | None = ...,
+    activation_module_name: Sequence[object] | object | None = ...,
+    activation_name_contains: Sequence[object] | object | None = ...,
+    api_provider: str | None = ...,
+    api_model: str | None = ...,
+    api_max_tokens: int = ...,
+    api_reasoning_effort: str | None = ...,
+    api_text_verbosity: str | None = ...,
+) -> Dict[str, object]: ...
+
+def zspace_inference_distortion_runtime_cli_args(
+    runtime: Mapping[str, object] | None,
+    *,
+    sweep: bool = ...,
+) -> List[str]: ...
+
+def zspace_inference_distortion_runtime_preflight(
+    runtime: Mapping[str, object] | None = ...,
+    *,
+    backends: Sequence[object] | object | None = ...,
+    required_ready_backends: Sequence[object] | object | None = ...,
+    describe_runtime_devices: object | None = ...,
+    device_kwargs: Mapping[str, object] | None = ...,
+) -> Dict[str, object]: ...
+
+def zspace_inference_distortion_sweep_cli_args(
+    config: Mapping[str, object] | None,
+) -> List[str]: ...
+
+def zspace_generation_control_processor_kwargs(
+    config: Mapping[str, object] | None,
+) -> Dict[str, object]: ...
+
+def zspace_generation_control_profile_config(
+    model_configs: Mapping[str, object] | str | PathLike[str] | None = ...,
+    *,
+    model_profile: str | None = ...,
+) -> Dict[str, object]: ...
+
+def zspace_generation_control_sweep_cli_args(
+    config: Mapping[str, object] | None,
+) -> List[str]: ...
+
+def zspace_generation_control_bridge_cli_args(
+    config: Mapping[str, object] | None,
+    *,
+    include_enable_flag: bool = ...,
+) -> List[str]: ...
+
+class ZSpaceCheckpointPromptSpec:
+    label: str
+    prompt: str
+    filename_prefix: str
+    def __init__(
+        self,
+        label: str,
+        prompt: str,
+        filename_prefix: str,
+    ) -> None: ...
+
+class ZSpaceCheckpointSweepJob:
+    checkpoint: str
+    prompt: ZSpaceCheckpointPromptSpec
+    model_dir: PathLike[str]
+    out: PathLike[str]
+    label: str
+    def __init__(
+        self,
+        checkpoint: str,
+        prompt: ZSpaceCheckpointPromptSpec,
+        model_dir: str | PathLike[str],
+        out: str | PathLike[str],
+        label: str,
+    ) -> None: ...
+
+def default_zspace_checkpoint_generation_prompts() -> List[ZSpaceCheckpointPromptSpec]: ...
+
+def zspace_checkpoint_generation_control_jobs(
+    *,
+    run_dir: str | PathLike[str],
+    checkpoint: Sequence[str] | str,
+    prompt: Sequence[Any] | Any | None = ...,
+    label_prefix: str = ...,
+) -> List[ZSpaceCheckpointSweepJob]: ...
+
+def zspace_checkpoint_generation_control_sweep_command(
+    job: ZSpaceCheckpointSweepJob,
+    *,
+    python: str | None = ...,
+    sweep_script: str | PathLike[str] | None = ...,
+    allow_remote: bool = ...,
+    trust_remote_code: bool = ...,
+    max_new_tokens: int | None = ...,
+    do_sample: bool = ...,
+    sample_temperature: float | None = ...,
+    sample_top_k: int | None = ...,
+) -> List[str]: ...
+
+def zspace_checkpoint_generation_control_compare_output_paths(
+    *,
+    run_dir: str | PathLike[str],
+    checkpoint: Sequence[str] | str,
+    compare_out: str | PathLike[str] | None = ...,
+    compare_lines_out: str | PathLike[str] | None = ...,
+) -> Tuple[PathLike[str], PathLike[str]]: ...
+
+def zspace_checkpoint_generation_control_compare_command(
+    jobs: Sequence[ZSpaceCheckpointSweepJob],
+    *,
+    run_dir: str | PathLike[str],
+    checkpoint: Sequence[str] | str,
+    python: str | None = ...,
+    compare_script: str | PathLike[str] | None = ...,
+    compare_with_sweep: Sequence[str | PathLike[str]] | str | PathLike[str] | None = ...,
+    compare_with_label: Sequence[str] | str | None = ...,
+    compare_out: str | PathLike[str] | None = ...,
+    compare_lines_out: str | PathLike[str] | None = ...,
+    top_n: int = ...,
+) -> List[str]: ...
+
+def zspace_checkpoint_generation_control_curve_command(
+    jobs: Sequence[ZSpaceCheckpointSweepJob],
+    *,
+    run_dir: str | PathLike[str],
+    checkpoint: Sequence[str] | str,
+    python: str | None = ...,
+    curve_script: str | PathLike[str] | None = ...,
+    curve_out: str | PathLike[str] | None = ...,
+    curve_lines_out: str | PathLike[str] | None = ...,
+    curve_run_card: str | PathLike[str] | None = ...,
+    curve_trainer_trace_jsonl: str | PathLike[str] | None = ...,
+    curve_model_name: str | None = ...,
+    curve_dataset_name: str | None = ...,
+    curve_dataset_config: str | None = ...,
+    compare_with_sweep: Sequence[str | PathLike[str]] | str | PathLike[str] | None = ...,
+    compare_with_label: Sequence[str] | str | None = ...,
+    top_n: int = ...,
+) -> List[str]: ...
+
+def zspace_checkpoint_generation_control_report(
+    *,
+    run_dir: str | PathLike[str],
+    checkpoint: Sequence[str] | str,
+    prompt: Sequence[Any] | Any | None = ...,
+    label_prefix: str = ...,
+    python: str | None = ...,
+    sweep_script: str | PathLike[str] | None = ...,
+    compare_script: str | PathLike[str] | None = ...,
+    curve_script: str | PathLike[str] | None = ...,
+    allow_remote: bool = ...,
+    trust_remote_code: bool = ...,
+    max_new_tokens: int | None = ...,
+    do_sample: bool = ...,
+    sample_temperature: float | None = ...,
+    sample_top_k: int | None = ...,
+    overwrite: bool = ...,
+    no_compare: bool = ...,
+    top_n: int = ...,
+    compare_out: str | PathLike[str] | None = ...,
+    compare_lines_out: str | PathLike[str] | None = ...,
+    curve_out: str | PathLike[str] | None = ...,
+    curve_lines_out: str | PathLike[str] | None = ...,
+    curve_run_card: str | PathLike[str] | None = ...,
+    curve_trainer_trace_jsonl: str | PathLike[str] | None = ...,
+    curve_model_name: str | None = ...,
+    curve_dataset_name: str | None = ...,
+    curve_dataset_config: str | None = ...,
+    compare_with_sweep: Sequence[str | PathLike[str]] | str | PathLike[str] | None = ...,
+    compare_with_label: Sequence[str] | str | None = ...,
+    run_card: str | PathLike[str] | None = ...,
+    dry_run: bool = ...,
+    wait_for_process_pid_file: str | PathLike[str] | None = ...,
+    wait: bool = ...,
+    ready_file: Sequence[str] | str | None = ...,
+    no_ready_file_check: bool = ...,
+    poll_seconds: float = ...,
+    process_poll_seconds: float | None = ...,
+    timeout_seconds: float = ...,
+    process_timeout_seconds: float = ...,
+    runner: Callable[[Sequence[str]], Any] | None = ...,
+) -> Dict[str, Any]: ...
+
+def load_zspace_inference_distortion_probe(
+    path: str | PathLike[str],
+) -> Dict[str, object]: ...
+
+def load_zspace_inference_distortion_sweep(
+    path: str | PathLike[str],
+) -> Dict[str, object]: ...
+
+def summarize_zspace_inference_distortion_probe(
+    report_or_path: str | PathLike[str] | Mapping[str, object],
+    *,
+    preview_chars: int = ...,
+) -> Dict[str, object]: ...
+
+def summarize_zspace_inference_distortion_probe_lines(
+    report_or_path: str | PathLike[str] | Mapping[str, object],
+    *,
+    preview_chars: int = ...,
+) -> List[str]: ...
+
+def summarize_zspace_inference_distortion_probe_comparison_lines(
+    comparison_or_probes: (
+        Mapping[str, object]
+        | Mapping[str, str | PathLike[str] | Mapping[str, object]]
+        | Sequence[str | PathLike[str] | Mapping[str, object]]
+        | str
+        | PathLike[str]
+    ),
+    *,
+    top_n: int = ...,
+    preview_chars: int = ...,
+) -> List[str]: ...
+
+def summarize_zspace_inference_distortion_sweep(
+    report_or_path: str | PathLike[str] | Mapping[str, object],
+    *,
+    top_n: int = ...,
+    preview_chars: int = ...,
+) -> Dict[str, object]: ...
+
+def summarize_zspace_inference_distortion_sweep_lines(
+    report_or_path: str | PathLike[str] | Mapping[str, object],
+    *,
+    top_n: int = ...,
+    preview_chars: int = ...,
+) -> List[str]: ...
+
+def load_zspace_generation_control_sweep(
+    path: str | PathLike[str],
+) -> Dict[str, object]: ...
+
+def summarize_zspace_generation_control_run(
+    row: Mapping[str, object],
+    *,
+    baseline_continuation_sha256: object = ...,
+    baseline_loop_score: object = ...,
+) -> Dict[str, object]: ...
+
+def summarize_zspace_generation_control_sweep(
+    report_or_path: str | PathLike[str] | Mapping[str, object],
+    *,
+    top_n: int = ...,
+) -> Dict[str, object]: ...
+
+def compare_zspace_generation_control_sweeps(
+    sweeps_or_paths: Mapping[str, object] | Sequence[object],
+    *,
+    labels: Sequence[str] | None = ...,
+    top_n: int = ...,
+) -> Dict[str, object]: ...
+
+def summarize_zspace_generation_control_sweep_comparison_lines(
+    comparison_or_sweeps: Mapping[str, object] | Sequence[object],
+    *,
+    top_n: int = ...,
+) -> List[str]: ...
+
+def summarize_zspace_generation_control_sweep_lines(
+    report_or_path: str | PathLike[str] | Mapping[str, object],
+    *,
+    top_n: int = ...,
+) -> List[str]: ...
 
 def hf_gpt2_finetune_preflight_report(
     *,
@@ -326,6 +1139,19 @@ def hf_gpt2_finetune_preflight_report(
 def hf_gpt2_finetune_summary_lines(
     report: Mapping[str, object],
 ) -> List[str]: ...
+
+def hf_gpt2_finetune_training_telemetry_frame(
+    event: str,
+    *,
+    logs: Mapping[str, object] | None = ...,
+    metrics: Mapping[str, object] | None = ...,
+    state: object = ...,
+    previous_loss: object = ...,
+    telemetry_prefix: str = ...,
+    desire_gain: float = ...,
+    psi_gain: float = ...,
+    inference_distortion_handoff: Mapping[str, object] | None = ...,
+) -> Dict[str, object]: ...
 
 def hf_gpt2_finetune_trainer_trace_event(
     event: str,
@@ -350,6 +1176,8 @@ def load_hf_gpt2_finetune_trainer_trace(
 
 def summarize_hf_gpt2_finetune_trainer_trace(
     path_or_rows: str | PathLike[str] | Sequence[Mapping[str, object]],
+    *,
+    max_steps: object = ...,
 ) -> Dict[str, object]: ...
 
 def load_hf_gpt2_finetune_run_card(
@@ -372,6 +1200,33 @@ def summarize_hf_gpt2_finetune_sweep_report(
     top_n: int = ...,
 ) -> Dict[str, object]: ...
 
+def hf_gpt2_finetune_scale_up_command(
+    report_or_summary: str | PathLike[str] | Mapping[str, object],
+    *,
+    model_name: str | PathLike[str] | None = ...,
+    resume_from_checkpoint: str | PathLike[str] | None = ...,
+    max_steps: int | None = ...,
+    max_steps_multiplier: float | None = ...,
+    max_train_samples: int | None = ...,
+    max_train_samples_multiplier: float | None = ...,
+    max_eval_samples: int | None = ...,
+    max_eval_blocks: int | None = ...,
+    streaming_validation_samples: int | None = ...,
+    output_dir: str | PathLike[str] | None = ...,
+    output_suffix: str = ...,
+    run_card: str | PathLike[str] | None = ...,
+    trainer_trace_jsonl: str | PathLike[str] | None = ...,
+    trainer_trace_run_id: str | None = ...,
+) -> Dict[str, object]: ...
+
+def hf_gpt2_finetune_scale_up_preflight_report(
+    command_or_artifact: str | PathLike[str] | Mapping[str, object] | Sequence[object],
+) -> Dict[str, object]: ...
+
+def hf_gpt2_finetune_scale_up_preflight_lines(
+    report_or_command: str | PathLike[str] | Mapping[str, object] | Sequence[object],
+) -> list[str]: ...
+
 def summarize_hf_gpt2_finetune_sweep_report_lines(
     report_or_path: str | PathLike[str] | Mapping[str, object],
     *,
@@ -391,6 +1246,13 @@ def hf_gpt2_finetune_trainer_trace_callback(
     reset: bool = ...,
     zspace_probe_tokens: Sequence[int | float] | None = ...,
     zspace_probe_kwargs: Mapping[str, object] | None = ...,
+    inference_distortion_handoff: Mapping[str, object] | None = ...,
+    training_telemetry: bool = ...,
+    telemetry_prefix: str = ...,
+    desire_gain: float = ...,
+    psi_gain: float = ...,
+    stop_on_nonfinite_loss: bool = ...,
+    loss_guard_threshold: float | None = ...,
 ) -> object: ...
 
 def hf_gpt2_finetune_zspace_probe(
@@ -2609,6 +3471,44 @@ def api_llm_geometry_context_partials(
     consensus_origin: str = ...,
 ) -> List[ZSpacePartialBundle]: ...
 
+def api_llm_zspace_inference_distortion_adapter(
+    *,
+    desire_pressure: float | None = ...,
+    desire_stability: float | None = ...,
+    psi_total: float | None = ...,
+    coherence: float | None = ...,
+    distortion_strength: float = ...,
+    bundle_weight: float = ...,
+    origin: str | None = ...,
+    telemetry_prefix: str = ...,
+    gradient_dim: int = ...,
+    base_temperature: float = ...,
+    base_top_p: float = ...,
+    min_temperature: float = ...,
+    max_temperature: float = ...,
+    min_top_p: float = ...,
+    max_top_p: float = ...,
+    include_temperature: bool = ...,
+    include_top_p: bool = ...,
+    include_penalties: bool = ...,
+    base_frequency_penalty: float = ...,
+    base_presence_penalty: float = ...,
+    top_k: int = ...,
+    curvature: float = ...,
+    entropy_target: float | None = ...,
+    entropy_gain: float = ...,
+    repression_window: int = ...,
+    base_repression_strength: float = ...,
+    base_last_token_repression: float = ...,
+    ngram_size: int = ...,
+    ngram_window: int = ...,
+    base_ngram_repression_strength: float = ...,
+    ngram_decay: float = ...,
+    use_native_zspace: bool = ...,
+    activation_name_contains: Sequence[str] | None = ...,
+    activation_module_names: Sequence[str] | None = ...,
+) -> Dict[str, Any]: ...
+
 
 def api_llm_trace_from_response(
     response: Any,
@@ -2750,6 +3650,32 @@ def topos_runtime_adapter(
     telemetry_prefix: str = ...,
     gradient_dim: int = ...,
     request_options: Mapping[str, Any] | None = ...,
+    **signal_options: Any,
+) -> Dict[str, Any]: ...
+
+def topos_api_llm_request_plan(
+    topos: Any | None = ...,
+    *,
+    request: Mapping[str, Any] | None = ...,
+    request_options: Mapping[str, Any] | None = ...,
+    bundle_weight: float = ...,
+    training_gain: float = ...,
+    origin: str | None = ...,
+    telemetry_prefix: str = ...,
+    gradient_dim: int = ...,
+    **signal_options: Any,
+) -> Dict[str, Any]: ...
+
+def topos_api_llm_request_kwargs(
+    topos: Any | None = ...,
+    *,
+    request: Mapping[str, Any] | None = ...,
+    request_options: Mapping[str, Any] | None = ...,
+    bundle_weight: float = ...,
+    training_gain: float = ...,
+    origin: str | None = ...,
+    telemetry_prefix: str = ...,
+    gradient_dim: int = ...,
     **signal_options: Any,
 ) -> Dict[str, Any]: ...
 
@@ -3408,6 +4334,155 @@ def fracdiff_gl_1d(
     pad_constant: Optional[float] = ...,
 ) -> List[float]: ...
 
+def fft_radix2(
+    a: Tuple[float, float],
+    b: Tuple[float, float],
+    twiddle: Tuple[float, float],
+) -> Tuple[Tuple[float, float], Tuple[float, float]]: ...
+
+def fft_radix4(
+    values: Sequence[Tuple[float, float]],
+    twiddles: Sequence[Tuple[float, float]],
+) -> List[Tuple[float, float]]: ...
+
+def fft_complex32(
+    signal: Sequence[Tuple[float, float]],
+    inverse: bool = ...,
+) -> List[Tuple[float, float]]: ...
+
+def fft_real(signal: Sequence[float], inverse: bool = ...) -> List[Tuple[float, float]]: ...
+
+def drl_default_thresholds() -> Dict[str, Dict[str, float]]: ...
+
+def drl_analyse_word(
+    word: Mapping[str, Any],
+    thresholds: Mapping[str, Mapping[str, float]] | None = ...,
+    *,
+    hazard_cut: float | None = ...,
+    min_radius: float = ...,
+    direction_queries: Mapping[str, Sequence[Mapping[str, Any]]] | None = ...,
+) -> Dict[str, Any]: ...
+
+def drl_analyze_word(
+    word: Mapping[str, Any],
+    thresholds: Mapping[str, Mapping[str, float]] | None = ...,
+    *,
+    hazard_cut: float | None = ...,
+    min_radius: float = ...,
+    direction_queries: Mapping[str, Sequence[Mapping[str, Any]]] | None = ...,
+) -> Dict[str, Any]: ...
+
+def drl_existence_load(word: Mapping[str, Any]) -> float: ...
+
+def drl_safe_radii(
+    word: Mapping[str, Any],
+    thresholds: Mapping[str, Mapping[str, float]] | None = ...,
+) -> Dict[str, float]: ...
+
+def drl_frame_hazard(
+    word: Mapping[str, Any],
+    frame: str | Mapping[str, Any],
+) -> float: ...
+
+def drl_trainer_penalty(metrics: Mapping[str, Any], min_radius: float = ...) -> float: ...
+
+def drl_aggregate_penalty(
+    metrics: Sequence[Mapping[str, Any]],
+    min_radius: float = ...,
+) -> float: ...
+
+def drl_frame_summary(metrics: Mapping[str, Any]) -> Dict[str, float]: ...
+
+def kv_redis_available() -> bool: ...
+
+def kv_choice_schema_fields() -> List[str]: ...
+
+def kv_rank_choice_key(
+    rows: int,
+    cols: int,
+    k: int,
+    subgroup: bool = ...,
+    namespace: str = ...,
+) -> str: ...
+
+def kv_choice_key_from_rank_plan(plan: RankPlan, namespace: str = ...) -> str: ...
+
+def kv_choice_from_rank_plan(plan: RankPlan) -> Dict[str, Any]: ...
+
+def kv_json_set_options(
+    *,
+    expiry_seconds: int | None = ...,
+    expiry_milliseconds: int | None = ...,
+    expiry_at_seconds: int | None = ...,
+    expiry_at_milliseconds: int | None = ...,
+    keep_ttl: bool = ...,
+    persist: bool = ...,
+    condition: Literal["always", "nx", "xx"] = ...,
+) -> Dict[str, Any]: ...
+
+def kv_redis_set_json(
+    url: str,
+    key: str,
+    value: Any,
+    options: Mapping[str, Any] | None = ...,
+) -> bool: ...
+
+def kv_redis_get_json(url: str, key: str) -> Any: ...
+
+def kv_redis_set_choice(
+    url: str,
+    key: str,
+    choice: Mapping[str, Any],
+    options: Mapping[str, Any] | None = ...,
+) -> bool: ...
+
+def kv_redis_get_choice(url: str, key: str) -> Dict[str, Any] | None: ...
+
+def kv_redis_push_choice(
+    url: str,
+    key: str,
+    choice: Mapping[str, Any],
+    max_len: int | None = ...,
+) -> int: ...
+
+def kv_redis_lrange_choice(
+    url: str,
+    key: str,
+    start: int = ...,
+    stop: int = ...,
+) -> List[Dict[str, Any]]: ...
+
+def wgpu_kernel_reports_available() -> bool: ...
+
+def wgpu_kernel_catalog() -> List[Dict[str, Any]]: ...
+
+def wgpu_kernel_descriptor(name: str) -> Dict[str, Any] | None: ...
+
+def wgpu_rank_kernel_report(
+    kind: Literal["topk", "midk", "bottomk"],
+    rows: int,
+    cols: int,
+    k: int,
+    *,
+    subgroup: bool = ...,
+    use_two_stage: bool = ...,
+    fft_tile: int = ...,
+    fft_radix: int = ...,
+    fft_segments: int = ...,
+    compaction_tile: int = ...,
+) -> Dict[str, Any]: ...
+
+def wgpu_kernel_report_from_rank_plan(plan: RankPlan) -> Dict[str, Any]: ...
+
+def wgpu_softmax_kernel_report(
+    rows: int,
+    cols: int,
+    *,
+    subgroup: bool = ...,
+    hardmax: bool = ...,
+    mask: bool = ...,
+) -> Dict[str, Any]: ...
+
 def mean_squared_error(predictions: Tensor, targets: Tensor) -> float: ...
 
 def info_nce(
@@ -3523,6 +4598,125 @@ class SpiralTorchVision:
     def snapshot(self) -> Dict[str, object]: ...
     def state_dict(self) -> Dict[str, object]: ...
     def load_state_dict(self, state: Mapping[str, object], *, strict: bool = ...) -> None: ...
+
+class ImageTensor:
+    def __init__(self, channels: int, height: int, width: int, data: Sequence[float]) -> None: ...
+    @staticmethod
+    def zeros(channels: int, height: int, width: int) -> ImageTensor: ...
+    @staticmethod
+    def from_tensor(tensor: Tensor, channels: int, height: int, width: int) -> ImageTensor: ...
+    @property
+    def channels(self) -> int: ...
+    @property
+    def height(self) -> int: ...
+    @property
+    def width(self) -> int: ...
+    def shape(self) -> Tuple[int, int, int]: ...
+    def data(self) -> List[float]: ...
+    def pixel(self, channel: int, y: int, x: int) -> float: ...
+    def set_pixel(self, channel: int, y: int, x: int, value: float) -> None: ...
+    def relu_inplace(self) -> None: ...
+    def flatten(self) -> List[float]: ...
+    def to_tensor(self) -> Tensor: ...
+    def to_dict(self) -> Dict[str, object]: ...
+
+class TransformPipeline:
+    def __init__(self, *, seed: int | None = ...) -> None: ...
+    @staticmethod
+    def standard_classification(
+        image_size: int = ...,
+        *,
+        seed: int | None = ...,
+    ) -> TransformPipeline: ...
+    def add_normalize(self, means: Sequence[float], stds: Sequence[float]) -> None: ...
+    def add_resize(self, height: int, width: int) -> None: ...
+    def add_center_crop(self, height: int, width: int) -> None: ...
+    def add_horizontal_flip(self, probability: float = ...) -> None: ...
+    def add_color_jitter(
+        self,
+        *,
+        brightness: float = ...,
+        contrast: float = ...,
+        saturation: float = ...,
+        hue: float = ...,
+    ) -> None: ...
+    def operations(self) -> List[str]: ...
+    def __len__(self) -> int: ...
+    def len(self) -> int: ...
+    def is_empty(self) -> bool: ...
+    def has_gpu_dispatcher(self) -> bool: ...
+    def apply(self, image: ImageTensor) -> ImageTensor: ...
+    def apply_inplace(self, image: ImageTensor) -> None: ...
+    def audit(self) -> Dict[str, object]: ...
+
+class VisionSample:
+    def __init__(
+        self,
+        image: ImageTensor,
+        *,
+        target: Tensor | None = ...,
+        label: str | None = ...,
+        boxes: Sequence[Tuple[float, float, float, float]] | None = ...,
+        masks: Sequence[ImageTensor] | None = ...,
+    ) -> None: ...
+    @property
+    def image(self) -> ImageTensor: ...
+    @property
+    def target(self) -> Tensor | None: ...
+    @property
+    def label(self) -> str | None: ...
+    @property
+    def boxes(self) -> List[Tuple[float, float, float, float]] | None: ...
+    @property
+    def masks(self) -> List[ImageTensor] | None: ...
+    def to_dict(self) -> Dict[str, object]: ...
+
+class TensorVisionDataset:
+    def __init__(self, descriptor: str = ...) -> None: ...
+    def descriptor(self) -> Dict[str, object]: ...
+    def push_sample(self, sample: VisionSample) -> None: ...
+    def push(
+        self,
+        image: ImageTensor,
+        *,
+        target: Tensor | None = ...,
+        label: str | None = ...,
+        boxes: Sequence[Tuple[float, float, float, float]] | None = ...,
+        masks: Sequence[ImageTensor] | None = ...,
+    ) -> None: ...
+    def get(self, index: int) -> VisionSample: ...
+    def __len__(self) -> int: ...
+    def len(self) -> int: ...
+    def is_empty(self) -> bool: ...
+    def dataloader(
+        self,
+        batch_size: int,
+        *,
+        seed: int | None = ...,
+        pipeline: TransformPipeline | None = ...,
+        shuffle: bool = ...,
+    ) -> VisionDataLoader: ...
+
+class VisionBatch:
+    def __len__(self) -> int: ...
+    def len(self) -> int: ...
+    def is_empty(self) -> bool: ...
+    def images(self) -> List[ImageTensor]: ...
+    def targets(self) -> List[Tensor | None]: ...
+    def labels(self) -> List[str | None]: ...
+    def boxes(self) -> List[List[Tuple[float, float, float, float]] | None]: ...
+    def stack(self) -> Tensor: ...
+    def to_dict(self) -> Dict[str, object]: ...
+
+class VisionDataLoader:
+    def reset(self) -> None: ...
+    def enable_shuffle(self, shuffle: bool) -> None: ...
+    def next_batch(self) -> VisionBatch | None: ...
+
+class VisionModel:
+    def metadata(self) -> Dict[str, object]: ...
+    def forward(self, images: Sequence[ImageTensor]) -> Tensor: ...
+    def extract_features(self, stage: str, image: ImageTensor) -> Tensor: ...
 
 class CanvasTransformer:
     def __init__(self, width: int, height: int, *, smoothing: float = ...) -> None: ...
@@ -3921,6 +5115,29 @@ def apply_vision_update(
     weight: float = ...,
     include_patch: bool = ...,
 ) -> CanvasSnapshot: ...
+
+def vision_dataset_catalog() -> List[Dict[str, object]]: ...
+
+def vision_dataset_descriptor(name: str) -> Dict[str, object] | None: ...
+
+def vision_model_catalog() -> List[Dict[str, object]]: ...
+
+def vision_model_descriptor(name: str) -> Dict[str, object] | None: ...
+
+def vision_transform_audit_catalog() -> List[Dict[str, object]]: ...
+
+def vision_standard_classification_pipeline(
+    image_size: int = ...,
+    *,
+    seed: int | None = ...,
+) -> TransformPipeline: ...
+
+def vision_create_classification_model(
+    kind: str,
+    num_classes: int = ...,
+    *,
+    seed: int | None = ...,
+) -> VisionModel: ...
 
 def zrelativity_heatmap(
     model: ZRelativityModel,
@@ -6368,6 +7585,21 @@ class ContextualLagrangianGate:
     @property
     def gauge(self) -> str: ...
 
+def token_scale_stack(
+    embeddings: Tensor | Sequence[Sequence[float]],
+    scales: Sequence[float],
+    threshold: float,
+    metric: str = ...,
+) -> ScaleStack: ...
+
+def token_coherence_levels(
+    embeddings: Tensor | Sequence[Sequence[float]],
+    scales: Sequence[float],
+    threshold: float,
+    levels: Sequence[float],
+    metric: str = ...,
+) -> List[Optional[float]]: ...
+
 
 class ArnoldTonguePeak:
     @property
@@ -6825,6 +8057,27 @@ class _FracModule(ModuleType):
         pad_constant: Optional[float] = ...,
     ) -> List[float]: ...
 
+    def fft_radix2(
+        a: Tuple[float, float],
+        b: Tuple[float, float],
+        twiddle: Tuple[float, float],
+    ) -> Tuple[Tuple[float, float], Tuple[float, float]]: ...
+
+    def fft_radix4(
+        values: Sequence[Tuple[float, float]],
+        twiddles: Sequence[Tuple[float, float]],
+    ) -> List[Tuple[float, float]]: ...
+
+    def fft_complex32(
+        signal: Sequence[Tuple[float, float]],
+        inverse: bool = ...,
+    ) -> List[Tuple[float, float]]: ...
+
+    def fft_real(
+        signal: Sequence[float],
+        inverse: bool = ...,
+    ) -> List[Tuple[float, float]]: ...
+
     def fractal_field_probe(
         generator: Any,
         log_start: float,
@@ -7186,6 +8439,169 @@ spiral_rl: ModuleType
 
 rec: ModuleType
 
+class _TextModule(ModuleType):
+    ContextualLagrangianGate: type[ContextualLagrangianGate]
+    ContextualPulseFrame: type[ContextualPulseFrame]
+
+    def token_scale_stack(
+        self,
+        embeddings: Tensor | Sequence[Sequence[float]],
+        scales: Sequence[float],
+        threshold: float,
+        metric: str = ...,
+    ) -> ScaleStack: ...
+
+    def token_coherence_levels(
+        self,
+        embeddings: Tensor | Sequence[Sequence[float]],
+        scales: Sequence[float],
+        threshold: float,
+        levels: Sequence[float],
+        metric: str = ...,
+    ) -> List[Optional[float]]: ...
+
+text: _TextModule
+
+class _SafetyModule(ModuleType):
+    def drl_default_thresholds() -> Dict[str, Dict[str, float]]: ...
+
+    def drl_analyse_word(
+        word: Mapping[str, Any],
+        thresholds: Mapping[str, Mapping[str, float]] | None = ...,
+        *,
+        hazard_cut: float | None = ...,
+        min_radius: float = ...,
+        direction_queries: Mapping[str, Sequence[Mapping[str, Any]]] | None = ...,
+    ) -> Dict[str, Any]: ...
+
+    def drl_analyze_word(
+        word: Mapping[str, Any],
+        thresholds: Mapping[str, Mapping[str, float]] | None = ...,
+        *,
+        hazard_cut: float | None = ...,
+        min_radius: float = ...,
+        direction_queries: Mapping[str, Sequence[Mapping[str, Any]]] | None = ...,
+    ) -> Dict[str, Any]: ...
+
+    def drl_existence_load(word: Mapping[str, Any]) -> float: ...
+
+    def drl_safe_radii(
+        word: Mapping[str, Any],
+        thresholds: Mapping[str, Mapping[str, float]] | None = ...,
+    ) -> Dict[str, float]: ...
+
+    def drl_frame_hazard(
+        word: Mapping[str, Any],
+        frame: str | Mapping[str, Any],
+    ) -> float: ...
+
+    def drl_trainer_penalty(metrics: Mapping[str, Any], min_radius: float = ...) -> float: ...
+
+    def drl_aggregate_penalty(
+        metrics: Sequence[Mapping[str, Any]],
+        min_radius: float = ...,
+    ) -> float: ...
+
+    def drl_frame_summary(metrics: Mapping[str, Any]) -> Dict[str, float]: ...
+
+safety: _SafetyModule
+
+class _KvModule(ModuleType):
+    def kv_redis_available() -> bool: ...
+
+    def kv_choice_schema_fields() -> List[str]: ...
+
+    def kv_rank_choice_key(
+        rows: int,
+        cols: int,
+        k: int,
+        subgroup: bool = ...,
+        namespace: str = ...,
+    ) -> str: ...
+
+    def kv_choice_key_from_rank_plan(plan: RankPlan, namespace: str = ...) -> str: ...
+
+    def kv_choice_from_rank_plan(plan: RankPlan) -> Dict[str, Any]: ...
+
+    def kv_json_set_options(
+        *,
+        expiry_seconds: int | None = ...,
+        expiry_milliseconds: int | None = ...,
+        expiry_at_seconds: int | None = ...,
+        expiry_at_milliseconds: int | None = ...,
+        keep_ttl: bool = ...,
+        persist: bool = ...,
+        condition: Literal["always", "nx", "xx"] = ...,
+    ) -> Dict[str, Any]: ...
+
+    def kv_redis_set_json(
+        url: str,
+        key: str,
+        value: Any,
+        options: Mapping[str, Any] | None = ...,
+    ) -> bool: ...
+
+    def kv_redis_get_json(url: str, key: str) -> Any: ...
+
+    def kv_redis_set_choice(
+        url: str,
+        key: str,
+        choice: Mapping[str, Any],
+        options: Mapping[str, Any] | None = ...,
+    ) -> bool: ...
+
+    def kv_redis_get_choice(url: str, key: str) -> Dict[str, Any] | None: ...
+
+    def kv_redis_push_choice(
+        url: str,
+        key: str,
+        choice: Mapping[str, Any],
+        max_len: int | None = ...,
+    ) -> int: ...
+
+    def kv_redis_lrange_choice(
+        url: str,
+        key: str,
+        start: int = ...,
+        stop: int = ...,
+    ) -> List[Dict[str, Any]]: ...
+
+kv: _KvModule
+
+class _WgpuModule(ModuleType):
+    def wgpu_kernel_reports_available() -> bool: ...
+
+    def wgpu_kernel_catalog() -> List[Dict[str, Any]]: ...
+
+    def wgpu_kernel_descriptor(name: str) -> Dict[str, Any] | None: ...
+
+    def wgpu_rank_kernel_report(
+        kind: Literal["topk", "midk", "bottomk"],
+        rows: int,
+        cols: int,
+        k: int,
+        *,
+        subgroup: bool = ...,
+        use_two_stage: bool = ...,
+        fft_tile: int = ...,
+        fft_radix: int = ...,
+        fft_segments: int = ...,
+        compaction_tile: int = ...,
+    ) -> Dict[str, Any]: ...
+
+    def wgpu_kernel_report_from_rank_plan(plan: RankPlan) -> Dict[str, Any]: ...
+
+    def wgpu_softmax_kernel_report(
+        rows: int,
+        cols: int,
+        *,
+        subgroup: bool = ...,
+        hardmax: bool = ...,
+        mask: bool = ...,
+    ) -> Dict[str, Any]: ...
+
+wgpu: _WgpuModule
+
 class _TelemetryModule(ModuleType):
     DashboardMetric: type[DashboardMetric]
     DashboardEvent: type[DashboardEvent]
@@ -7531,6 +8947,13 @@ class _ZSpaceModule(ModuleType):
 zspace: _ZSpaceModule
 
 class _VisionModule(ModuleType):
+    ImageTensor: type[ImageTensor]
+    TransformPipeline: type[TransformPipeline]
+    VisionSample: type[VisionSample]
+    TensorVisionDataset: type[TensorVisionDataset]
+    VisionBatch: type[VisionBatch]
+    VisionDataLoader: type[VisionDataLoader]
+    VisionModel: type[VisionModel]
     ChronoSnapshot: type[ChronoSnapshot]
     ZSpaceStreamFrame: type[ZSpaceStreamFrame]
     StreamedVolume: type[StreamedVolume]
@@ -7540,6 +8963,31 @@ class _VisionModule(ModuleType):
     SliceProfile: type[SliceProfile]
     FractalCanvas: type[FractalCanvas]
     InfiniteZSpacePatch: type[InfiniteZSpacePatch]
+
+    def vision_dataset_catalog(self) -> List[Dict[str, object]]: ...
+
+    def vision_dataset_descriptor(self, name: str) -> Dict[str, object] | None: ...
+
+    def vision_model_catalog(self) -> List[Dict[str, object]]: ...
+
+    def vision_model_descriptor(self, name: str) -> Dict[str, object] | None: ...
+
+    def vision_transform_audit_catalog(self) -> List[Dict[str, object]]: ...
+
+    def vision_standard_classification_pipeline(
+        self,
+        image_size: int = ...,
+        *,
+        seed: int | None = ...,
+    ) -> TransformPipeline: ...
+
+    def vision_create_classification_model(
+        self,
+        kind: str,
+        num_classes: int = ...,
+        *,
+        seed: int | None = ...,
+    ) -> VisionModel: ...
 
     def vision_online_step(
         self,
@@ -8164,30 +9612,204 @@ __all__ = [
     "trace_wgpu_first_runtime_matrix",
     "write_wgpu_first_runtime_matrix",
     "hf_ft",
+    "hf_generation",
+    "hf_ft_status",
+    "HF_FINETUNE_DEFAULT_DEVICE_BACKENDS",
+    "HF_FINETUNE_DEFAULT_MODEL_CONFIGS",
+    "HF_FINETUNE_MODEL_CONFIG_SCHEMA",
+    "HF_FINETUNE_RUN_CARD_FILENAME",
+    "HF_FINETUNE_TRAINER_TRACE_FILENAME",
+    "HF_FINETUNE_REQUIRED_PYTHON_PACKAGES",
+    "HF_FINETUNE_REQUIRED_RUST_SURFACES",
     "HF_GPT2_FT_DEFAULT_DEVICE_BACKENDS",
+    "HF_GPT2_FT_RUN_CARD_FILENAME",
+    "HF_GPT2_FT_TRAINER_TRACE_FILENAME",
     "HF_GPT2_FT_REQUIRED_PYTHON_PACKAGES",
     "HF_GPT2_FT_REQUIRED_RUST_SURFACES",
+    "hf_finetune_corpus_file_report",
+    "hf_finetune_corpus_scan_report",
+    "hf_finetune_dataset_fit_report",
+    "hf_finetune_disk_headroom_plan",
+    "hf_finetune_eval_report",
+    "hf_finetune_generation_curve_lines",
+    "hf_finetune_generation_curve_report",
+    "hf_finetune_generation_report",
+    "hf_finetune_inference_distortion_handoff_report",
+    "hf_finetune_inference_distortion_handoff_lines",
+    "hf_finetune_inference_distortion_request_kwargs",
+    "hf_finetune_inference_distortion_runtime_adapter",
+    "hf_finetune_inference_distortion_runtime_plan",
+    "hf_finetune_milestone_lines",
+    "hf_finetune_milestone_report",
+    "hf_finetune_model_profile_catalog",
+    "hf_finetune_model_profile_catalog_lines",
+    "hf_finetune_model_profile_cli_args",
+    "hf_finetune_model_profile_launch_bundle_lines",
+    "hf_finetune_model_profile_launch_bundle_report",
+    "hf_finetune_model_profile_launch_bundle_report_lines",
+    "hf_finetune_model_profile_launch_plan",
+    "hf_finetune_model_profile_launch_plan_lines",
+    "hf_finetune_model_profile_launch_script",
+    "hf_finetune_model_profile_lines",
+    "hf_finetune_model_profile_preflight_lines",
+    "hf_finetune_model_profile_preflight_report",
+    "hf_finetune_model_profile_runtime_contract_from_artifact",
+    "hf_finetune_model_profile_runtime_contract",
+    "hf_finetune_model_profile_runtime_contract_lines",
+    "hf_finetune_model_profiles",
+    "load_hf_finetune_model_profile_launch_plan",
+    "write_hf_finetune_model_profile_launch_bundle",
+    "write_hf_finetune_model_profile_launch_plan",
+    "write_hf_finetune_model_profile_launch_script",
+    "hf_finetune_preflight_report",
+    "hf_finetune_rust_dependency_report",
+    "hf_finetune_monitor_lines",
+    "hf_finetune_monitor_report",
+    "hf_finetune_milestone_capture_lines",
+    "hf_finetune_milestone_capture_report",
+    "hf_finetune_milestone_handoff_execution_lines",
+    "hf_finetune_milestone_handoff_execution_report",
+    "hf_finetune_milestone_handoff_lines",
+    "hf_finetune_milestone_handoff_report",
+    "hf_finetune_milestone_runtime_artifact_paths",
+    "hf_finetune_milestone_runtime_from_run_dir_archive",
+    "hf_finetune_milestone_runtime_from_run_dir_report",
+    "hf_finetune_milestone_runtime_lines",
+    "hf_finetune_milestone_runtime_report",
+    "hf_finetune_milestone_runtime_sources",
+    "hf_finetune_run_artifact_manifest",
+    "hf_finetune_run_artifact_manifest_lines",
+    "hf_finetune_run_artifact_manifest_paths",
+    "hf_finetune_run_ops_snapshot_lines",
+    "hf_finetune_run_ops_snapshot_paths",
+    "hf_finetune_run_ops_snapshot_report",
+    "hf_finetune_status_history_lines",
+    "hf_finetune_scale_up_command",
+    "hf_finetune_scale_up_preflight_lines",
+    "hf_finetune_scale_up_preflight_report",
+    "hf_finetune_summary_lines",
+    "hf_finetune_training_telemetry_frame",
+    "hf_finetune_trainer_trace_callback",
+    "hf_finetune_trainer_trace_event",
+    "hf_finetune_zspace_probe",
+    "compare_hf_finetune_run_cards",
+    "load_hf_finetune_model_configs",
+    "load_hf_finetune_run_card",
+    "load_hf_finetune_sweep_report",
+    "load_hf_finetune_status_history",
+    "load_hf_finetune_trainer_trace",
+    "summarize_hf_finetune_run_card",
+    "summarize_hf_finetune_sweep_report",
+    "summarize_hf_finetune_sweep_report_lines",
+    "summarize_hf_finetune_status_history",
+    "summarize_hf_finetune_trainer_trace",
+    "resolve_hf_finetune_model_profile",
+    "write_hf_finetune_run_artifact_manifest",
+    "write_hf_finetune_run_ops_snapshot",
+    "write_hf_finetune_milestone_runtime_report",
+    "write_hf_finetune_run_card",
+    "write_hf_finetune_trainer_trace_event",
     "hf_gpt2_finetune_corpus_file_report",
     "hf_gpt2_finetune_corpus_scan_report",
     "hf_gpt2_finetune_dataset_fit_report",
     "hf_gpt2_finetune_eval_report",
+    "hf_gpt2_finetune_generation_curve_lines",
+    "hf_gpt2_finetune_generation_curve_report",
     "hf_gpt2_finetune_generation_report",
+    "hf_gpt2_finetune_inference_distortion_handoff_report",
+    "hf_gpt2_finetune_inference_distortion_handoff_lines",
+    "hf_gpt2_finetune_inference_distortion_request_kwargs",
+    "hf_gpt2_finetune_inference_distortion_runtime_adapter",
+    "hf_gpt2_finetune_inference_distortion_runtime_plan",
+    "hf_gpt2_finetune_milestone_lines",
+    "hf_gpt2_finetune_milestone_report",
     "hf_gpt2_finetune_preflight_report",
     "hf_gpt2_finetune_rust_dependency_report",
+    "hf_gpt2_finetune_monitor_lines",
+    "hf_gpt2_finetune_monitor_report",
+    "hf_gpt2_finetune_milestone_capture_lines",
+    "hf_gpt2_finetune_milestone_capture_report",
+    "hf_gpt2_finetune_milestone_handoff_execution_lines",
+    "hf_gpt2_finetune_milestone_handoff_execution_report",
+    "hf_gpt2_finetune_milestone_handoff_lines",
+    "hf_gpt2_finetune_milestone_handoff_report",
+    "hf_gpt2_finetune_milestone_runtime_artifact_paths",
+    "hf_gpt2_finetune_milestone_runtime_from_run_dir_archive",
+    "hf_gpt2_finetune_milestone_runtime_from_run_dir_report",
+    "hf_gpt2_finetune_milestone_runtime_lines",
+    "hf_gpt2_finetune_milestone_runtime_report",
+    "hf_gpt2_finetune_milestone_runtime_sources",
+    "hf_gpt2_finetune_run_artifact_manifest",
+    "hf_gpt2_finetune_run_artifact_manifest_lines",
+    "hf_gpt2_finetune_run_artifact_manifest_paths",
+    "hf_gpt2_finetune_run_ops_snapshot_lines",
+    "hf_gpt2_finetune_run_ops_snapshot_paths",
+    "hf_gpt2_finetune_run_ops_snapshot_report",
+    "hf_gpt2_finetune_status_history_lines",
+    "hf_gpt2_finetune_scale_up_command",
+    "hf_gpt2_finetune_scale_up_preflight_lines",
+    "hf_gpt2_finetune_scale_up_preflight_report",
     "hf_gpt2_finetune_summary_lines",
+    "hf_gpt2_finetune_training_telemetry_frame",
     "hf_gpt2_finetune_trainer_trace_callback",
     "hf_gpt2_finetune_trainer_trace_event",
     "hf_gpt2_finetune_zspace_probe",
     "compare_hf_gpt2_finetune_run_cards",
     "load_hf_gpt2_finetune_run_card",
     "load_hf_gpt2_finetune_sweep_report",
+    "load_hf_gpt2_finetune_status_history",
     "load_hf_gpt2_finetune_trainer_trace",
     "summarize_hf_gpt2_finetune_run_card",
     "summarize_hf_gpt2_finetune_sweep_report",
     "summarize_hf_gpt2_finetune_sweep_report_lines",
+    "summarize_hf_gpt2_finetune_status_history",
     "summarize_hf_gpt2_finetune_trainer_trace",
+    "write_hf_gpt2_finetune_run_artifact_manifest",
+    "write_hf_gpt2_finetune_run_ops_snapshot",
+    "write_hf_gpt2_finetune_milestone_runtime_report",
     "write_hf_gpt2_finetune_run_card",
     "write_hf_gpt2_finetune_trainer_trace_event",
+    "ZSpaceActivationProbeHook",
+    "ZSpaceCheckpointPromptSpec",
+    "ZSpaceCheckpointSweepJob",
+    "ZSpaceRepressionLogitsProcessor",
+    "build_zspace_activation_probe_hook",
+    "build_zspace_repression_logits_processor",
+    "build_zspace_softmax_logits_processor",
+    "compare_zspace_inference_distortion_probes",
+    "default_zspace_checkpoint_generation_prompts",
+    "zspace_inference_distortion_sweep_report_from_probes",
+    "zspace_inference_distortion_geometry_probe",
+    "zspace_inference_distortion_probe_cli_args",
+    "zspace_inference_distortion_probe_report",
+    "zspace_inference_distortion_runtime_cli_args",
+    "zspace_inference_distortion_runtime_plan",
+    "zspace_inference_distortion_runtime_preflight",
+    "zspace_inference_distortion_sweep_cli_args",
+    "zspace_generation_control_bridge_cli_args",
+    "zspace_generation_control_profile_config",
+    "zspace_generation_control_processor_kwargs",
+    "zspace_generation_control_sweep_cli_args",
+    "zspace_checkpoint_generation_control_compare_command",
+    "zspace_checkpoint_generation_control_compare_output_paths",
+    "zspace_checkpoint_generation_control_curve_command",
+    "zspace_checkpoint_generation_control_jobs",
+    "zspace_checkpoint_generation_control_report",
+    "zspace_checkpoint_generation_control_sweep_command",
+    "load_zspace_inference_distortion_probe",
+    "load_zspace_inference_distortion_sweep",
+    "load_zspace_generation_control_sweep",
+    "summarize_zspace_inference_distortion_probe",
+    "summarize_zspace_inference_distortion_probe_comparison_lines",
+    "summarize_zspace_inference_distortion_probe_lines",
+    "summarize_zspace_inference_distortion_sweep",
+    "summarize_zspace_inference_distortion_sweep_lines",
+    "summarize_zspace_generation_control_run",
+    "summarize_zspace_generation_control_sweep",
+    "compare_zspace_generation_control_sweeps",
+    "summarize_zspace_generation_control_sweep_comparison_lines",
+    "summarize_zspace_generation_control_sweep_lines",
+    "zspace_inference_distortion_processor_kwargs",
     "from_dlpack",
     "to_dlpack",
     "ZSpaceBarycenter",
@@ -8213,6 +9835,7 @@ __all__ = [
     "ApiLLMTrace",
     "ApiLLMZSpaceRuntime",
     "api_llm_geometry_context_partials",
+    "api_llm_zspace_inference_distortion_adapter",
     "api_llm_partial_from_response",
     "api_llm_text_from_response",
     "api_llm_trace_from_response",
@@ -8234,6 +9857,8 @@ __all__ = [
     "summarize_api_llm_trace_events",
     "api_llm_topos_sweep_report",
     "train_stagent_topos_route_policy",
+    "topos_api_llm_request_kwargs",
+    "topos_api_llm_request_plan",
     "topos_runtime_adapter",
     "topos_runtime_request",
     "write_api_llm_trace_jsonl",
@@ -8272,6 +9897,20 @@ __all__ = [
     "ZSpaceCoherenceSequencer",
     "step_many",
     "stream_zspace_training",
+    "ImageTensor",
+    "TransformPipeline",
+    "VisionSample",
+    "TensorVisionDataset",
+    "VisionBatch",
+    "VisionDataLoader",
+    "VisionModel",
+    "vision_dataset_catalog",
+    "vision_dataset_descriptor",
+    "vision_model_catalog",
+    "vision_model_descriptor",
+    "vision_transform_audit_catalog",
+    "vision_standard_classification_pipeline",
+    "vision_create_classification_model",
     "vision_online_step",
     "stream_vision_training",
     "ZConv",
@@ -8296,6 +9935,9 @@ __all__ = [
     "robotics",
     "spiral_rl",
     "rec",
+    "safety",
+    "kv",
+    "wgpu",
     "telemetry",
     "ecosystem",
     "selfsup",
@@ -8325,6 +9967,37 @@ __all__ = [
     "masked_mse",
     "gl_coeffs_adaptive",
     "fracdiff_gl_1d",
+    "fft_radix2",
+    "fft_radix4",
+    "fft_complex32",
+    "fft_real",
+    "drl_default_thresholds",
+    "drl_analyse_word",
+    "drl_analyze_word",
+    "drl_existence_load",
+    "drl_safe_radii",
+    "drl_frame_hazard",
+    "drl_trainer_penalty",
+    "drl_aggregate_penalty",
+    "drl_frame_summary",
+    "kv_redis_available",
+    "kv_choice_schema_fields",
+    "kv_rank_choice_key",
+    "kv_choice_key_from_rank_plan",
+    "kv_choice_from_rank_plan",
+    "kv_json_set_options",
+    "kv_redis_set_json",
+    "kv_redis_get_json",
+    "kv_redis_set_choice",
+    "kv_redis_get_choice",
+    "kv_redis_push_choice",
+    "kv_redis_lrange_choice",
+    "wgpu_kernel_reports_available",
+    "wgpu_kernel_catalog",
+    "wgpu_kernel_descriptor",
+    "wgpu_rank_kernel_report",
+    "wgpu_kernel_report_from_rank_plan",
+    "wgpu_softmax_kernel_report",
     "zspace_eval",
     "zspace_snapshot",
     "softlogic_feedback",
@@ -8334,6 +10007,8 @@ __all__ = [
     "RecEpochReport",
     "ContextualLagrangianGate",
     "ContextualPulseFrame",
+    "token_scale_stack",
+    "token_coherence_levels",
     "Recommender",
     "Agent",
     "AgentConfig",

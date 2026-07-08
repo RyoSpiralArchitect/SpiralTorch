@@ -36,6 +36,26 @@ spiral-model-zoo = "spiraltorch.model_zoo:main"
 spiral-export = "spiral.export:main"
 spiral-plugin = "spiraltorch.plugin_cli:main"
 spiral-runtime-preflight = "spiraltorch.runtime_imports:main"
+spiral-hf-profile = "spiraltorch.hf_cli:profile_main"
+spiral-hf-finetune = "spiraltorch.hf_cli:finetune_bridge_main"
+spiral-hf-finetune-sweep = "spiraltorch.hf_cli:finetune_sweep_main"
+spiral-hf-scale-up = "spiraltorch.hf_cli:finetune_scale_up_main"
+spiral-hf-trace-summary = "spiraltorch.hf_cli:finetune_trace_summary_main"
+spiral-hf-run-status = "spiraltorch.hf_cli:finetune_run_status_main"
+spiral-hf-monitor-snapshot = "spiraltorch.hf_cli:finetune_monitor_snapshot_main"
+spiral-hf-status-history = "spiraltorch.hf_cli:finetune_status_history_main"
+spiral-hf-wait-launch = "spiraltorch.hf_cli:finetune_wait_launch_main"
+spiral-hf-wait-launch-summary = "spiraltorch.hf_cli:finetune_wait_launch_summary_main"
+spiral-hf-milestone-capture = "spiraltorch.hf_cli:finetune_milestone_capture_main"
+spiral-hf-milestone-runtime = "spiraltorch.hf_cli:finetune_milestone_runtime_main"
+spiral-hf-checkpoint-generation-control = "spiraltorch.hf_cli:checkpoint_generation_control_main"
+spiral-hf-zspace-generation-control-sweep = "spiraltorch.hf_cli:zspace_generation_control_sweep_main"
+spiral-hf-zspace-generation-control-compare = "spiraltorch.hf_cli:zspace_generation_control_compare_main"
+spiral-zspace-inference-distortion-probe = "spiraltorch.hf_cli:zspace_inference_distortion_probe_main"
+spiral-zspace-inference-distortion-sweep = "spiraltorch.hf_cli:zspace_inference_distortion_sweep_main"
+spiral-hf-generation-curve = "spiraltorch.hf_cli:finetune_generation_curve_main"
+spiral-hf-run-artifacts = "spiraltorch.hf_cli:finetune_run_artifacts_main"
+spiral-hf-run-ops = "spiraltorch.hf_cli:finetune_run_ops_main"
 
 [project.optional-dependencies]
 hf-runtime = [
@@ -63,6 +83,18 @@ hf-peft = [
   "safetensors>=0.4",
 ]
 hf-gpt2-ft = [
+  "transformers>=4.40",
+  "torch>=2.2",
+  "tokenizers>=0.15",
+  "datasets>=2.18",
+  "accelerate>=0.27",
+  "safetensors>=0.4",
+  "pyarrow>=15",
+  "tqdm>=4.66",
+  "evaluate>=0.4",
+  "peft>=0.10",
+]
+hf-full-finetune = [
   "transformers>=4.40",
   "torch>=2.2",
   "tokenizers>=0.15",

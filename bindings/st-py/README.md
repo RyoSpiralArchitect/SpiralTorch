@@ -79,6 +79,27 @@ PY
   checkpoint presets.
 - `LanguageWaveEncoder` + `Hypergrad` so Python callers can stream Z-space
   text, accumulate gradients, and project back into the Poincaré ball.
+- `spiraltorch.text` for contextual Lagrangian gates plus token-level semantic
+  scale stacks via `token_scale_stack` and `token_coherence_levels`, useful for
+  FT/runtime probes over local-HF embeddings.
+- `spiraltorch.frac` for Rust-backed fractional/Mellin/Z-space probes, including
+  `fft_real`, `fft_complex32`, `fft_radix2`, and `fft_radix4` from
+  `st-frac::fft` for lightweight spectrum checks during WASM, telemetry, and
+  local-HF inference experiments.
+- `spiraltorch.safety` for Rust-backed Drift-Response Linguistics metrics,
+  including `drl_analyse_word`, `drl_trainer_penalty`, and frame summaries that
+  can be injected into FT telemetry, prompt/runtime drift reports, or API-model
+  routing traces.
+- `spiraltorch.kv` for planner-choice persistence helpers, including
+  `kv_choice_from_rank_plan`, Redis-compatible choice keys, validated JSON SET
+  option payloads, and `kv_redis_*` calls when built with `--features kv-redis`.
+- `spiraltorch.wgpu` for GPU-free WGPU kernel catalog and selection reports,
+  including `wgpu_kernel_catalog`, `wgpu_kernel_report_from_rank_plan`, and
+  softmax/rank-k dispatch descriptors for runtime trace cards.
+- `spiraltorch.vision` for Rust-backed `ImageTensor`, `TransformPipeline`,
+  in-memory vision datasets/dataloaders, lightweight classification models,
+  static dataset/model catalogs, and transform GPU-coverage audit reports that
+  can be reused by FT, WASM, and runtime probe scripts.
 - `TensorBiome` to cultivate open-topos rewrites, weight shoots, stack the
   harvest, and guard tensors that can be re-imported into Z-space.
 - Unified planning helpers (`plan`, `plan_topk`, `describe_device`,
@@ -94,6 +115,34 @@ PY
 - Lightweight runtime orchestration via `SpiralSession` so callers can record
   backend intent, inspect device preflight evidence, and reuse the same
   `RankPlan` helpers as the Rust executors.
+
+### Rust-to-Python exposure queue
+
+The native exposure queue is intentionally ordered by immediate experiment
+value:
+
+1. `st-frac::fft` spectrum helpers, now exposed as `st.frac.fft_real`,
+   `st.frac.fft_complex32`, `st.frac.fft_radix2`, and `st.frac.fft_radix4`.
+2. `spiral-safety::drift_response` DRL metrics, now exposed as
+   `st.safety.drl_analyse_word`, `st.safety.drl_trainer_penalty`, and related
+   summary helpers for FT telemetry penalties, prompt/runtime drift reports, and
+   safety-aware training traces.
+3. `st-kv` JSON/choice persistence, now exposed as `st.kv_choice_from_rank_plan`,
+   `st.kv_rank_choice_key`, `st.kv_json_set_options`, and `kv_redis_*` helpers
+   when the binding is built with `--features kv-redis`, so Python experiments
+   can reuse the same Redis-backed rank/choice stores as Rust workers.
+4. `st-backend-wgpu` kernel descriptor/report helpers, now exposed as
+   `st.wgpu_kernel_catalog`, `st.wgpu_kernel_report_from_rank_plan`, and
+   `st.wgpu_softmax_kernel_report` for WGPU-first runtime selection without
+   requiring direct Rust inspection or a live GPU device.
+5. `st-vision` image preprocessing, dataset, dataloader, and lightweight model
+   helpers, now exposed as `st.ImageTensor`, `st.TransformPipeline`,
+   `st.TensorVisionDataset`, `st.VisionDataLoader`,
+   `st.vision_create_classification_model`, and catalog/audit helpers for
+   FT/WASM/runtime probes without dropping into Rust.
+6. `st-text::semantics` token helpers, now exposed as `st.token_scale_stack`
+   and `st.token_coherence_levels` so local-HF embeddings can be inspected with
+   the same semantic scale-stack implementation as Rust.
 - Hosted/API-model LLM runtime bridge via `ApiLLMZSpaceRuntime` so an
   OpenAI-compatible response mapping, SDK response object, or arbitrary API
   callable can be converted into Z-space metrics, usage/latency telemetry, and
@@ -229,6 +278,14 @@ PY
   `vision.ZSpaceStreamFrameAggregator` so Python can attach chrono summaries,
   aggregate live frame streams, and ingest temporal updates without dropping to
   Rust glue code.
+- Vision preprocessing via `vision.ImageTensor` and
+  `vision.TransformPipeline`: resize, center-crop, deterministic horizontal
+  flip, normalize, audit GPU transform coverage, and inspect canonical
+  dataset/model catalogs from Python.
+- Vision mini-pipelines via `vision.TensorVisionDataset`,
+  `vision.VisionDataLoader`, and `vision.VisionModel`: build small in-memory
+  batches, apply Rust transforms during loading, stack image batches, and run
+  lightweight classification forward/feature extraction from Python.
 - Online stream-loop helpers `vision.vision_online_step(...)` and
   `vision.stream_vision_training(...)` to wire frame streams into
   `SpiralTorchVision` + `ZSpaceTrainer` loops directly from Python.
@@ -275,7 +332,7 @@ For notebook or CI preflight without a training script, either run the CLI:
 
 ```bash
 spiral-runtime-preflight \
-  --preset hf-gpt2-ft \
+  --preset hf-full-finetune \
   --require \
   --runtime-device-backend wgpu \
   --json-out ft-runtime.json
@@ -287,17 +344,23 @@ or call the same contract from Python:
 import spiraltorch as st
 
 report = st.runtime_import_preflight_report(
-    runtime_import_presets=["hf-gpt2-ft"],
-    required_runtime_import_presets=["hf-gpt2-ft"],
+    runtime_import_presets=["hf-full-finetune"],
+    required_runtime_import_presets=["hf-full-finetune"],
     runtime_device_backends=["wgpu"],
 )
 st.write_runtime_import_preflight_report(report, "ft-runtime.json")
 
-ft_report = st.hf_gpt2_finetune_preflight_report(
+ft_report = st.hf_finetune_preflight_report(
     runtime_device_backends=["wgpu", "cpu"],
 )
-print(ft_report["hf_gpt2_ft_rust_surfaces"])
+print(ft_report["model_profile_id"], ft_report["hf_model_name"])
+print(ft_report["hf_finetune_rust_surfaces"])
 ```
+
+With no explicit `model_name`, the generic HF preflight resolves the default
+model profile (`causal-lm-local-smoke`) and records its model/tokenizer/family
+metadata. Pass `model_name=...` for a one-off override, or `model_configs=` plus
+`model_profile=` to pin another config-driven route.
 
 ## Building wheels
 
@@ -344,21 +407,24 @@ without launching a training job:
 
 ```bash
 spiral-runtime-preflight \
-  --preset hf-gpt2-ft \
+  --preset hf-full-finetune \
   --require \
   --runtime-device-backend wgpu \
   --json-out ft-runtime.json
 spiral-runtime-preflight --preset hf-peft --require --json
 ```
 
-Install the stronger local GPT-2 fine-tuning dependency surface with
-`pip install "spiraltorch[hf-gpt2-ft]"`. Use `hf-runtime` for inference-only
+Install the stronger local Hugging Face fine-tuning dependency surface with
+`pip install "spiraltorch[hf-full-finetune]"` or compose a narrower surface with
+`pip install "spiraltorch[hf-finetune,hf-peft]"`. The older
+`spiraltorch[hf-gpt2-ft]` extra remains available as a compatibility alias for
+historical scripts. Use `hf-runtime` for inference-only
 `transformers`/`torch`/`tokenizers` checks, `hf-finetune` for the lighter
 `datasets`/`accelerate`/`safetensors` contract, `hf-peft` for PEFT adapter
 workflows, and `hf-trl-sft` when a TRL SFT loop should be importable in the
 same environment.
 
-For a real local GPT-2-small FT run with a larger dataset, treat this as a hard
+For a real local causal-LM FT run with a larger dataset, treat this as a hard
 dependency boundary rather than a suggestion: the Rust wheel already exposes the
 default `nn`, `text`, `logic`, `spiral_rl`, and WGPU-backed tensor/runtime
 surface, while Python must bring the HF data/model stack. In practice,
@@ -368,10 +434,122 @@ surface, while Python must bring the HF data/model stack. In practice,
 `safetensors`, and adapter/evaluation experiments should have `peft` and
 `evaluate` available before the first long run starts.
 
-The local GPT-2 bridge turns that boundary into an executable run card:
+The generic HF bridge turns that boundary into an executable run card. The
+historical `hf_gpt2_*` scripts still work, but new runs should prefer the
+`hf_*` entrypoints plus a model profile so the same path can target the default
+`causal-lm-local-smoke` profile, GPT-2/DistilGPT-2 baselines, Pythia, Qwen,
+tiny CI models, or another local `AutoModelForCausalLM` profile. Keep
+model-specific settings in
+`bindings/st-py/examples/hf_finetune_model_configs.example.json` or a copied
+config file rather than baking them into the script name. The generic
+`spiral-hf-finetune`, `spiral-hf-finetune-sweep`, and
+`spiral-hf-zspace-generation-control-sweep` entrypoints default to the built-in
+`causal-lm-local-smoke` profile when no `--model-name`, `--model-profile`, or
+`--model-configs` is supplied; pass any of those flags to pin a specific model
+explicitly. Profiles can carry
+model/tokenizer names, model family and parameter-scale labels, training shape,
+dataset/revision/streaming defaults, generation/Z-Space softmax knobs, activation
+hook selectors, and local runtime policy such as remote-code trust, disk guards,
+dataloader pinning, tokenizer-estimate policy, or required SpiralTorch backends.
+Profiles may also use `extends` to create model-neutral aliases or override only
+one nested section without duplicating model-specific settings:
 
 ```bash
-PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_gpt2_finetune_bridge.py \
+spiral-hf-profile --list
+
+spiral-hf-profile \
+  --model-profile causal-lm-local-smoke
+
+spiral-hf-profile \
+  --model-configs bindings/st-py/examples/hf_finetune_model_configs.example.json \
+  --model-profile pythia-70m-local-smoke
+
+spiral-hf-profile \
+  --model-configs bindings/st-py/examples/hf_finetune_model_configs.example.json \
+  --model-profile qwen2-0.5b-local-smoke \
+  --cli-args
+
+spiral-hf-profile \
+  --model-configs bindings/st-py/examples/hf_finetune_model_configs.example.json \
+  --model-profile qwen2-0.5b-local-smoke \
+  --runtime-contract
+
+spiral-hf-profile \
+  --runtime-contract-artifact runs/hf-finetune-qwen2-zspace-ft/runtime-contract.json
+
+spiral-hf-profile \
+  --model-configs bindings/st-py/examples/hf_finetune_model_configs.example.json \
+  --model-profile qwen2-0.5b-local-smoke \
+  --preflight \
+  --mode inference
+
+spiral-hf-profile \
+  --model-configs bindings/st-py/examples/hf_finetune_model_configs.example.json \
+  --model-profile qwen2-0.5b-local-smoke \
+  --preflight \
+  --mode finetune \
+  --require
+
+spiral-hf-profile \
+  --model-configs bindings/st-py/examples/hf_finetune_model_configs.example.json \
+  --model-profile qwen2-0.5b-local-smoke \
+  --launch-plan \
+  --mode finetune \
+  --output-dir runs/hf-finetune-qwen2-zspace-ft \
+  --zspace-probe \
+  --bundle-dir runs/hf-finetune-qwen2-zspace-ft
+
+spiral-hf-profile \
+  --inspect-bundle runs/hf-finetune-qwen2-zspace-ft \
+  --refresh-preflight
+
+PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_finetune_bridge.py \
+  --model-configs bindings/st-py/examples/hf_finetune_model_configs.example.json \
+  --model-profile causal-lm-local-smoke \
+  --metadata-only \
+  --allow-remote \
+  --zspace-probe \
+  --run-card ft-run-card.json
+```
+
+Use `spiral-hf-profile --list --json` or
+`st.hf_finetune_model_profile_catalog(...)` when automation needs the same
+profile catalog as structured data before choosing a model/run shape. Use
+`st.hf_finetune_model_profile_runtime_contract(...)` when FT, local inference,
+or Z-Space generation code needs a single profile-derived contract containing
+the selected model/tokenizer, activation hook selectors, Z-Space generation
+knobs, runtime preset, rough token-estimate policy, focused generation-control
+CLI args, and expanded local-inference runtime CLI args. The same contract is
+embedded into profile-backed inference-distortion runtime plans and checkpoint
+generation-control reports, so downstream artifacts can be replayed or audited
+without re-resolving the model config. Use
+`spiral-hf-profile --runtime-contract-artifact ...` or
+`st.hf_finetune_model_profile_runtime_contract_from_artifact(...)` to recover
+that contract from a saved run card/report/contract JSON when you are stitching
+a later FT, local-HF inference probe, or Z-Space generation-control run back together. Add
+`--preflight` to probe the selected profile's inference, finetune, PEFT, or
+TRL-SFT runtime preset before launching a long run; add `--require` when that
+probe should act as a CI/local gate instead of an observational report. Add
+`--launch-plan` when you want the resolved command, expanded profile args, and
+preflight result in one artifact before deciding whether to run metadata-only
+smoke, local inference diagnostics, or a full FT job; pair it with `--out` and
+`--lines-out` to keep a reproducible run manifest next to the eventual run card.
+Add `--script-out` when you also want an executable shell handoff that replays
+the reviewed command without re-resolving the profile. For normal runs,
+`--bundle-dir` writes all three artifacts together:
+`profile-launch-plan.json`, `profile-launch-plan.lines`, and
+`profile-launch-plan.sh`. Use `--inspect-bundle` before replaying the shell
+handoff to verify that the bundle is complete, executable, and still matches the
+planned command. Add `--refresh-preflight` to re-probe the current runtime
+imports/devices from the stored plan, and `--require-refresh-preflight` when
+that refreshed runtime check should become a hard gate.
+
+After installing from a wheel, use the installed console entrypoint instead of
+the repo path:
+
+```bash
+spiral-hf-finetune \
+  --model-profile causal-lm-local-smoke \
   --metadata-only \
   --allow-remote \
   --zspace-probe \
@@ -381,16 +559,27 @@ PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_gpt2_finetune_bridge
 After the contract passes, add `--train --max-train-samples 50000 --block-size
 128 --output-dir runs/gpt2-small-zspace-ft` to run a real local
 `AutoModelForCausalLM` / `Trainer` fine-tune. Train runs write
-`spiraltorch-hf-gpt2-ft-trainer-trace.jsonl` by default, capturing
+`spiraltorch-hf-finetune-run-card.json` and
+`spiraltorch-hf-finetune-trainer-trace.jsonl` by default when launched through
+the generic `hf_*` wrappers, capturing
 train/log/evaluate/save/end events and summarizing loss/eval-loss telemetry
-back into the run card; pass `--no-trainer-trace` only when that audit trail is
-too noisy. Use `--require-runtime-device-ready-backend wgpu` when the
-SpiralTorch WGPU surface must be available before the run starts.
+back into the run card; add `--trainer-telemetry --trainer-desire-gain 1.0
+--trainer-psi-gain 1.0` to inject bounded desire/psi frames into those events
+and compare them across run cards. When an inference-distortion handoff is
+attached, the bridge auto-enables those trace telemetry frames so
+`hf_ft.inference_distortion.*` can be correlated with loss and eval events even
+if `--trainer-telemetry` was not passed explicitly; the run card records both
+`trainer_telemetry_requested` and the resolved enabled/auto-reason fields. Pass
+`--no-trainer-trace` only when that audit trail is too noisy. Use
+`--require-runtime-device-ready-backend wgpu`
+when the SpiralTorch WGPU surface must be available before the run starts.
 
 For a larger local corpus, bypass Hub datasets and feed files directly:
 
 ```bash
-PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_gpt2_finetune_bridge.py \
+PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_finetune_bridge.py \
+  --model-configs bindings/st-py/examples/hf_finetune_model_configs.example.json \
+  --model-profile qwen2-0.5b-local-smoke \
   --corpus-scan \
   --train \
   --train-file data/corpus-000.txt \
@@ -399,7 +588,7 @@ PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_gpt2_finetune_bridge
   --dataset-format text \
   --max-train-samples 50000 \
   --block-size 128 \
-  --output-dir runs/gpt2-small-zspace-ft
+  --output-dir runs/hf-finetune-qwen2-zspace-ft
 ```
 
 The run card stores `corpus_file_report` with file counts, total bytes, missing
@@ -420,45 +609,333 @@ Add `--generation-prompt "SpiralTorch is" --generation-max-new-tokens 32` to
 store deterministic before/after text samples, generated continuation text,
 token deltas, and hashes in the same run card. Use `--generation-do-sample`
 with `--generation-temperature` and optional `--generation-top-k` when you want
-qualitative samples to include sampling variance.
+qualitative samples to include sampling variance. Add
+`--generation-zspace-softmax --generation-ngram-size 3 --generation-ngram-window
+96 --generation-ngram-repression-strength 0.75` to route post-FT generation
+through SpiralTorch's entropy thermostat plus phrase-scale repetition
+repression.
 Add `--eval-before-train` when you want a numeric baseline before updates; the
 bridge writes `eval_before_train` plus final `eval_after_train` reports with
 `eval_loss`, perplexity, raw metrics, and skipped/error status. Pass
 `--no-eval-after-train` only when a long run must avoid the final eval pass.
+For heavier local eval loops, add `--max-eval-blocks N` to cap grouped eval
+blocks, use `--eval-after-train-policy skip-if-final-step-eval` when
+`max_steps` already lands on an eval boundary, and leave
+`--dataloader-pin-memory auto` so MPS/CPU runs avoid unsupported pin-memory
+warnings while CUDA can still opt in.
 After several runs, call
-`st.compare_hf_gpt2_finetune_run_cards([run_a, run_b, ...])` to flatten
+`st.compare_hf_finetune_run_cards([run_a, run_b, ...])` to flatten
 run-card JSON into eval-loss/perplexity deltas, generation-sample changes,
 dataset-fit status, and trainer metrics so tuning choices can be ranked without
 hand-reading each artifact.
+
+Before another FT pass, the same desire/psi pressure can be tested at inference
+time:
+
+```bash
+PYTHONPATH=bindings/st-py python bindings/st-py/examples/zspace_inference_distortion_probe.py \
+  --local-model runs/gpt2-small-zspace-ft \
+  --prompt "SpiralTorch is a tensor and geometry runtime that" \
+  --activation-name-contains transformer.h.0 \
+  --out runs/zspace-inference-distortion-probe.json
+```
+
+When a previous FT/profile artifact already carries a model-profile runtime
+contract, pass it directly instead of repeating model-specific flags:
+
+```bash
+PYTHONPATH=bindings/st-py python bindings/st-py/examples/zspace_inference_distortion_probe.py \
+  --runtime-contract-artifact runs/hf-finetune-qwen2-zspace-ft/runtime-contract.json \
+  --prompt "SpiralTorch is a tensor and geometry runtime that" \
+  --out runs/zspace-inference-distortion-probe.json
+```
+
+The probe builds one `api_llm_zspace_inference_distortion_adapter(...)` and
+uses it three ways: local HF logits receive `ZSpaceRepressionLogitsProcessor`
+kwargs, matching activation hooks record and can gently intervene in selected
+modules, and API-model-shaped calls receive request overrides plus bounded
+Z-space context telemetry. Omit `--local-model` for a keyless fake API smoke, or
+add `--api-provider openai-responses|openai-chat|anthropic --api-model <model>`
+to reuse the same distortion adapter with a live provider. Provider adapters
+filter request overrides against each SDK method signature and record
+`api_request_dropped_keys`; they also retry once-per-parameter when a model
+rejects an otherwise SDK-shaped request option such as `temperature` or `top_p`,
+recording those server-side drops as `retry_dropped_keys`. Responses/Chat/Messages
+surface differences therefore stay auditable instead of silently changing the
+experiment. Load the artifact with
+`st.load_zspace_inference_distortion_probe(...)`, flatten it with
+`st.summarize_zspace_inference_distortion_probe(...)`, or print compact status
+lines with `st.summarize_zspace_inference_distortion_probe_lines(...)`. When
+several pressure/coherence settings have been tried, call
+`st.compare_zspace_inference_distortion_probes(...)` or
+`st.summarize_zspace_inference_distortion_probe_comparison_lines(...)` to rank
+the artifacts by local text changes, top-token changes, activation evidence,
+API non-empty response, request-drop/retry-drop compatibility, and distortion
+energy. Comparisons also compute `api_compatibility_score` so equal-effect
+candidates prefer visible text with fewer server-side request retries before
+falling back to labels.
+See `examples/zspace_inference_distortion_local_gpt2_openai_sample.json` for a
+sanitized local-GPT-2 plus OpenAI Responses run that keeps the local hook/logits
+evidence while omitting API keys, response ids, and absolute local paths.
+`examples/zspace_inference_distortion_local_gpt2_gpt5nano_sample.json` shows the
+same pre-FT probe against `gpt-5-nano`, including model-rejected request knobs
+captured as `retry_dropped_keys` and the `--api-reasoning-effort minimal`
+`--api-text-verbosity low` route that keeps visible text flowing.
+After a sweep, replay its recommended setting directly with
+`--from-sweep-report runs/zspace-inference-distortion-sweep/sweep-report.json`;
+the probe imports the saved prompt/runtime plus recommended distortion config,
+while any explicitly passed CLI flag overrides the handoff value.
+
+For a reproducible pre-FT comparison, run the same probe over a small
+desire/psi/coherence grid:
+
+```bash
+PYTHONPATH=bindings/st-py python bindings/st-py/examples/zspace_inference_distortion_sweep.py \
+  --local-model runs/gpt2-small-zspace-ft \
+  --prompt "SpiralTorch is a tensor and geometry runtime that" \
+  --activation-name-contains transformer.h.0 \
+  --desire-pressure-values 0.45,0.8 \
+  --psi-total-values 0.5,0.75 \
+  --coherence-values 0.35,0.55 \
+  --out-dir runs/zspace-inference-distortion-sweep
+```
+
+`--runtime-contract-artifact <run-card-or-contract.json>` works here too; the
+sweep report keeps that artifact reference in its replay commands while still
+letting explicit CLI flags override any recovered local-model/tokenizer/hook
+defaults.
+
+The sweep writes `sweep-plan.json`, one probe artifact per setting,
+`sweep-report.json`, and `sweep-report.md` with comparison rows, a recommended
+probe/config, replay commands, and compact summary lines. It uses the keyless
+fake API route by default, so the local-HF hook path can be checked first. Add
+`--api-provider openai-responses|openai-chat|anthropic` plus `--api-model
+<model>` to replay the exact same distortion grid against a live API model. For
+interrupted or paid-provider sweeps, add `--resume-existing` to reuse successful
+probe artifacts, `--report-only` to rebuild `sweep-report.json` and
+`sweep-report.md` without touching local/API models, or promote one or more
+single-probe artifacts directly:
+
+```bash
+PYTHONPATH=bindings/st-py python bindings/st-py/examples/zspace_inference_distortion_sweep.py \
+  --from-probe runs/inference-distortion/live-local-api-probe.json \
+  --from-probe-label live-openai-check \
+  --out-dir runs/zspace-inference-distortion-sweep
+```
+
+The `--from-probe` path preserves the saved prompt/runtime/config, local
+generation-control evidence, activation-hook report, and provider request-filter
+audit, so a live API probe can be promoted into a reusable pre-FT handoff without
+paying for another provider call. Use `--force` only when every row should be
+rerun intentionally. Existing grid artifacts are reused only when the saved
+prompt, distortion config, and runtime/provider settings match the current
+sweep. From Python, call `st.load_zspace_inference_distortion_sweep(...)`,
+`st.summarize_zspace_inference_distortion_sweep(...)`, or
+`st.summarize_zspace_inference_distortion_sweep_lines(...)` to recover the
+recommended config, request overrides, logits-processor kwargs, and focused
+single-probe/sweep CLI args; single-probe summaries also expose the same
+effect/risk scores used to rank FT handoff candidates. If you already have one
+or more probe artifacts,
+`st.zspace_inference_distortion_sweep_report_from_probes(...)` promotes them to
+the same sweep-shaped report in memory, preserving request overrides,
+logits-processor kwargs, activation-hook settings, and provider request-filter
+audit for downstream FT handoff.
 
 For the first real FT pass on a new corpus, use the sweep runner to make that
 comparison reproducible:
 
 ```bash
-PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_gpt2_finetune_sweep.py \
+PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_finetune_sweep.py \
+  --model-configs bindings/st-py/examples/hf_finetune_model_configs.example.json \
+  --model-profile causal-lm-local-smoke \
   --train-file data/corpus-000.txt \
   --validation-fraction 0.02 \
   --corpus-scan \
   --generation-prompt "SpiralTorch is" \
+  --generation-from-inference-distortion \
   --eval-before-train \
   --zspace-probe \
+  --trainer-telemetry \
+  --inference-distortion-probe runs/inference-distortion/live-local-api-probe.json \
   --block-size-values 64,128 \
   --learning-rate-values 0.0001,0.00005 \
   --seed-values 7,13 \
-  --out-dir runs/gpt2-small-zspace-sweep
+  --out-dir runs/hf-causal-lm-zspace-sweep
+```
+
+For checkpoint-level local inference, use the generic generation-control
+wrapper so the fine-tuned checkpoint stays the model path while the profile can
+provide tokenizer, decode defaults, Z-Space softmax grids, and runtime access
+policy such as `allow_remote` / `trust_remote_code`. The same profile reference
+is forwarded into generated sweep and generation-curve commands, so downstream
+artifacts keep model/dataset metadata without retyping it:
+
+```bash
+spiral-hf-zspace-generation-control-sweep \
+  --dry-run \
+  --model-configs bindings/st-py/examples/hf_finetune_model_configs.example.json \
+  --model-profile pythia-70m-local-smoke \
+  --prompt "SpiralTorch is" \
+  --out runs/pythia-zspace-generation-control-sweep.json
+
+spiral-hf-checkpoint-generation-control \
+  --run-dir runs/local-causal-lm-zspace-ft \
+  --checkpoint checkpoint-2048 \
+  --model-configs bindings/st-py/examples/hf_finetune_model_configs.example.json \
+  --model-profile local-causal-lm-template \
+  --dry-run
+
+PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_checkpoint_generation_control.py \
+  --run-dir runs/local-causal-lm-zspace-ft \
+  --checkpoint checkpoint-2048 \
+  --model-configs bindings/st-py/examples/hf_finetune_model_configs.example.json \
+  --model-profile local-causal-lm-template \
+  --dry-run
+```
+
+When a long FT run is still live, `spiral-hf-generation-curve` can join
+checkpoint generation-control sweeps with a trainer trace before the final run
+card exists. Pass the same `--model-configs/--model-profile` to stamp model and
+dataset metadata into the curve artifact instead of hand-writing `--model-name`:
+
+```bash
+spiral-hf-generation-curve \
+  runs/local-causal-lm-zspace-ft/prompt-spiral-checkpoint-2048-generation-control-sweep.json \
+  --trainer-trace-jsonl runs/local-causal-lm-zspace-ft/spiraltorch-hf-finetune-trainer-trace.jsonl \
+  --run-dir runs/local-causal-lm-zspace-ft \
+  --model-configs bindings/st-py/examples/hf_finetune_model_configs.example.json \
+  --model-profile local-causal-lm-template \
+  --out runs/local-causal-lm-zspace-ft/generation-curve.json \
+  --lines-out runs/local-causal-lm-zspace-ft/generation-curve.lines
 ```
 
 It writes `sweep-plan.json` before launching runs and `sweep-report.json` after
-the run cards are available, including the same
-`st.compare_hf_gpt2_finetune_run_cards(...)` comparison payload. Add
+the run cards are available, plus `scale-up-command.json` with the
+distortion-adjusted next-run command when a completed candidate is available,
+including the same
+`st.compare_hf_finetune_run_cards(...)` comparison payload. Add
+`--inference-distortion-probe` after one local/API inference-distortion probe, or
+`--inference-distortion-sweep-report` after a ranked distortion grid, to stamp
+the recommended prompt/runtime/config into each FT run card and train-begin trace
+event; `sweep-plan.json` and dry-run `sweep-report.json` embed the same handoff
+so the scale-up plan can be audited before loading a model. Any attached
+handoff also enables trainer trace telemetry automatically unless
+`--no-trainer-trace` is set, so the same handoff appears as
+`hf_ft.inference_distortion.*` telemetry keys on each frame;
+summaries surface the recommended probe, effect/risk, desire pressure, psi total,
+API route, and provider request keys that were dropped or sent beside
+eval/generation metrics. The bridge preflight line and sweep summaries also
+show whether telemetry was explicitly requested or auto-enabled from the
+handoff, which makes dry-run plans honest before the model is loaded. Trace
+summaries carry the handoff's risk/API retry-drop counts plus logits repression
+strengths beside loss/eval telemetry, so post-run comparisons can distinguish
+"it trained well" from "it trained well under an aggressive decode field."
+`distortion_adjusted_eval_loss` and the sweep `scale_up_candidate_*` fields let
+the next longer run prefer near-best eval loss with lower distortion pressure
+instead of blindly following raw eval loss alone; those fields include the
+candidate run card, trace path, output directory, and replay command when the
+sweep report has matching run metadata. From Python,
+`st.hf_finetune_scale_up_command(summary_or_report)` turns that candidate into a
+shell-safe longer-run command, defaulting to doubled `--max-steps` and
+`--max-train-samples` while writing a fresh run card and trainer trace under a
+`-scaleup` output directory. The GPT-2-specific
+`st.hf_gpt2_finetune_scale_up_command(...)` name remains as a compatibility
+alias, but new code should use the generic Hugging Face FT name. The sweep CLI
+writes the same payload to `scale-up-command.json` and surfaces its
+status/preview in the embedded summary. To inspect or execute that next run
+without hand-copying shell text:
+
+```bash
+spiral-hf-scale-up \
+  runs/hf-finetune-sweep/sweep-report.json \
+  --write-command runs/hf-finetune-sweep/scale-up-command-long.json \
+  --max-steps 2000 \
+  --max-train-samples 200000
+
+spiral-hf-scale-up \
+  runs/hf-finetune-sweep/scale-up-command-long.json \
+  --run
+```
+
+When running from a source checkout without installing the console script, use
+`PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_finetune_scale_up.py`
+with the same arguments.
+
+When the source is a saved `scale-up-command*.json`, the CLI replays that saved
+command as-is unless you pass explicit overrides such as `--max-steps` or
+`--output-dir`. Each replay also includes a lightweight preflight over the
+resolved command's executable, bridge script, input files, and output parents;
+add `--require-ready` to fail before `--run` when an input artifact has gone
+missing. When `--write-command` is combined with `--run`, the written artifact is
+updated after execution so it includes `run_returncode` beside the preflight.
+From Python, use `st.hf_finetune_scale_up_preflight_report(...)` or
+`st.hf_finetune_scale_up_preflight_lines(...)` on a command artifact, sweep
+report, or command list to run the same check in notebooks and CI.
+
+Add
+`--generation-from-inference-distortion` with a
+generation prompt to reuse the handoff's `recommended_processor_kwargs` as the
+Z-Space/repression logits processor for before/after generated samples; omit it
+when you want to hand-tune `--generation-zspace-*` and repression flags instead.
+Run-card and sweep summaries expose the applied handoff probe plus key processor
+values such as entropy target and repression strengths beside generation-control
+telemetry, plus ready-to-replay bridge CLI args for turning the same inferred
+distortion into explicit `--generation-zspace-*` / repression flags, so the
+source of a decode change remains auditable.
+Dry-run `sweep-plan.json` / `sweep-report.json` also include the planned
+handoff-driven generation processor values before any model is loaded.
+Add
 `--dry-run` to inspect commands without loading Transformers, or
 `--require-wgpu-ready` when the SpiralTorch WGPU surface should gate each run.
 The report also embeds a compact `summary`; from notebooks or CI, call
-`st.load_hf_gpt2_finetune_sweep_report(...)`,
-`st.summarize_hf_gpt2_finetune_sweep_report(...)`, or
-`st.summarize_hf_gpt2_finetune_sweep_report_lines(...)` to recover the
-selected scale-up candidate, top eval-loss rows, failed runs, and
-dry-run/partial/complete status without hand-reading the full artifact.
+`st.load_hf_finetune_sweep_report(...)`,
+`st.summarize_hf_finetune_sweep_report(...)`, or
+`st.summarize_hf_finetune_sweep_report_lines(...)` to recover the
+selected scale-up candidate plus its command/run-card/trace/output directory,
+top eval-loss rows, failed runs, and
+dry-run/partial/complete status without hand-reading the full artifact. For
+longer local runs, add `--resume-existing` to reuse successful per-run cards and
+continue only missing or failed rows after an interruption; add `--force` with
+that same command when you intentionally want to rerun every row. From Python,
+use `st.hf_finetune_inference_distortion_handoff_report(...)` to inspect a
+probe or sweep recommendation before launching the FT bridge; the handoff and
+run-card/sweep summaries include ready-to-replay generation bridge CLI args and
+the chosen probe's `api_compatibility_score` when the recommendation carries
+logits-processor kwargs. Use
+`st.hf_finetune_inference_distortion_handoff_lines(...)` when you want a
+compact, copy-friendly status/replay readout in notebooks or CI logs; bridge
+preflight/run-card artifacts and sweep `sweep-plan.json` / `sweep-report.json`
+preserve those same lines beside the structured handoff payload, and run-card /
+sweep summary helpers surface the same lines plus replay-arg previews. Handoff
+reports also include source-selector args such as `--inference-distortion-probe`,
+automatic generation handoff args with `--generation-from-inference-distortion`,
+and explicit Z-Space generation bridge args when you want to replay the same
+processor settings without relying on the automatic override; shell-safe display
+strings are included alongside the structured arg lists.
+After a longer run is producing checkpoint/status artifacts, use the generic
+installed ops CLIs to archive what happened without remembering GPT-2-specific
+filenames:
+
+```bash
+spiral-hf-run-status --run-dir runs/hf-finetune-qwen2-zspace-ft --max-steps 2000
+spiral-hf-trace-summary \
+  runs/hf-finetune-qwen2-zspace-ft/spiraltorch-hf-finetune-trainer-trace.jsonl \
+  --max-steps 2000
+spiral-hf-monitor-snapshot \
+  --run-dir runs/hf-finetune-qwen2-zspace-ft \
+  --run-status-history-jsonl runs/hf-finetune-qwen2-zspace-ft/status.jsonl
+spiral-hf-run-artifacts --run-dir runs/hf-finetune-qwen2-zspace-ft
+spiral-hf-run-ops --run-dir runs/hf-finetune-qwen2-zspace-ft --dry-run
+```
+
+`spiral-hf-run-status` watches the generic run card/trainer trace names by
+default, falling back to legacy GPT-2 filenames when only those exist.
+`spiral-hf-monitor-snapshot` folds live status/watch histories into one compact
+readout for handoffs and CI logs. The archive commands write
+`hf-finetune-run-artifact-manifest.json` and
+`hf-finetune-run-ops-snapshot.json` by default. They still read legacy
+`spiraltorch-hf-gpt2-ft-*` run cards/traces, but prefer the generic
+`spiraltorch-hf-finetune-*` artifacts when both exist.
 
 ## Minimal usage
 

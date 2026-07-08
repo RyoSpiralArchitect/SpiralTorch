@@ -12,6 +12,7 @@ def test_api_llm_runtime_exports_from_top_level() -> None:
     assert "ApiLLMZSpaceRuntime" in st.__all__
     assert "api_llm_geometry_context_partials" in st.__all__
     assert "api_llm_partial_from_response" in st.__all__
+    assert "api_llm_zspace_inference_distortion_adapter" in st.__all__
     assert "api_llm_topos_sweep_report" in st.__all__
     assert "api_llm_topos_route_policy_selection" in st.__all__
     assert "api_llm_topos_sweep_route_rewards" in st.__all__
@@ -29,6 +30,8 @@ def test_api_llm_runtime_exports_from_top_level() -> None:
     assert "run_api_llm_topos_sweep" in st.__all__
     assert "summarize_api_llm_trace_events" in st.__all__
     assert "train_stagent_topos_route_policy" in st.__all__
+    assert "topos_api_llm_request_kwargs" in st.__all__
+    assert "topos_api_llm_request_plan" in st.__all__
     assert "topos_runtime_adapter" in st.__all__
     assert "topos_runtime_request" in st.__all__
     assert "topos_runtime_route" in st.__all__
@@ -520,6 +523,124 @@ def test_topos_runtime_adapter_can_be_used_directly_as_prompt_context() -> None:
     assert "User prompt: Route through the topos adapter." in prompt
 
 
+def test_topos_api_llm_request_plan_merges_kwargs_and_adapter() -> None:
+    plan = st.topos_api_llm_request_plan(
+        {"porosity": 0.25, "max_depth": 10, "max_volume": 100},
+        request={"model": "gpt-test", "temperature": 1.4, "max_tokens": 64},
+        request_options={"base_temperature": 0.8, "include_penalties": True},
+        observed_depth=4,
+        visited_volume=25,
+    )
+
+    assert plan["kind"] == "spiraltorch.topos_api_llm_request_plan"
+    assert plan["base_request"]["temperature"] == pytest.approx(1.4)
+    assert plan["request"]["model"] == "gpt-test"
+    assert plan["request"]["max_tokens"] == 64
+    assert plan["request"]["temperature"] == pytest.approx(0.68265)
+    assert plan["request_overrides"]["temperature"] == pytest.approx(0.68265)
+    assert plan["adapter"]["kind"] == "spiraltorch.topos_runtime_adapter"
+    assert plan["runtime_route"]["mode"] == "contextual"
+    assert plan["context_partial"]["origin"] == "topos:runtime"
+
+
+def test_topos_api_llm_request_plan_can_drive_runtime_adapter_request() -> None:
+    calls: list[tuple[str, dict[str, object]]] = []
+    plan = st.topos_api_llm_request_plan(
+        {"porosity": 0.25, "max_depth": 10, "max_volume": 100},
+        request_options={"base_temperature": 0.8},
+        observed_depth=4,
+        visited_volume=25,
+    )
+    runtime = st.ApiLLMZSpaceRuntime([0.1, -0.2, 0.3, -0.4])
+
+    def fake_api(prompt: str, **request_kwargs: object) -> dict[str, object]:
+        calls.append((prompt, dict(request_kwargs)))
+        return {
+            "model": "topos-plan-test",
+            "output_text": "Topos request plan reached the API runtime.",
+            "usage": {"total_tokens": 8},
+        }
+
+    trace = runtime.call(
+        fake_api,
+        "Route with the request plan.",
+        runtime_adapter=plan,
+        context_prompt=True,
+    )
+
+    assert calls
+    assert calls[0][1]["temperature"] == pytest.approx(0.68265)
+    assert "origin=topos:runtime" in calls[0][0]
+    assert trace.telemetry["api_llm.total_tokens"] == pytest.approx(8.0)
+    assert trace.inference is not None
+
+
+def test_topos_api_llm_request_kwargs_returns_merged_request_only() -> None:
+    request = st.topos_api_llm_request_kwargs(
+        {"porosity": 0.25, "max_depth": 10, "max_volume": 100},
+        request={"model": "gpt-test", "temperature": 1.4},
+        request_options={"base_temperature": 0.8, "include_top_p": False},
+        observed_depth=4,
+        visited_volume=25,
+    )
+
+    assert request["model"] == "gpt-test"
+    assert request["temperature"] == pytest.approx(0.68265)
+    assert "top_p" not in request
+
+
+def test_zspace_inference_distortion_adapter_drives_api_runtime() -> None:
+    adapter = st.api_llm_zspace_inference_distortion_adapter(
+        desire_pressure=0.8,
+        desire_stability=0.4,
+        psi_total=0.7,
+        coherence=0.35,
+        distortion_strength=1.25,
+        base_temperature=0.7,
+        include_penalties=True,
+    )
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    def fake_api(prompt: str, **request_kwargs: object) -> dict[str, object]:
+        calls.append((prompt, dict(request_kwargs)))
+        return {
+            "model": "distorted-api",
+            "output_text": "Distorted API route stayed coherent.",
+            "usage": {"prompt_tokens": 8, "completion_tokens": 6, "total_tokens": 14},
+        }
+
+    runtime = st.ApiLLMZSpaceRuntime(
+        [0.12, -0.04, 0.33, -0.11],
+        provider="example",
+        create_session=False,
+    )
+    trace = runtime.call(
+        fake_api,
+        "probe API distortion",
+        runtime_adapter=adapter,
+        context_prompt=True,
+        context_prompt_options={"max_telemetry": 32},
+    )
+
+    assert adapter["kind"] == "spiraltorch.zspace_inference_distortion_adapter"
+    assert adapter["request"]["temperature"] > 0.7
+    assert adapter["request"]["top_p"] <= 1.0
+    assert adapter["logits_processor_kwargs"]["repression_strength"] > 0.75
+    assert calls[0][1]["temperature"] == pytest.approx(adapter["request"]["temperature"])
+    assert calls[0][1]["frequency_penalty"] == pytest.approx(
+        adapter["request"]["frequency_penalty"]
+    )
+    assert "origin=zspace:inference_distortion" in calls[0][0]
+    assert "zspace.distortion.energy" in calls[0][0]
+    telemetry = trace.as_dict()["inference"]["telemetry"]["payload"]
+    assert telemetry["zspace.distortion.energy"] == pytest.approx(
+        adapter["distortion_energy"]
+    )
+    assert telemetry["zspace.request.temperature"] == pytest.approx(
+        adapter["request"]["temperature"]
+    )
+
+
 def test_api_llm_prompt_suite_applies_topos_runtime_adapter_directly() -> None:
     calls: list[tuple[str, dict[str, object]]] = []
     adapter = st.topos_runtime_adapter(
@@ -931,6 +1052,149 @@ def test_make_openai_responses_invoke_uses_client_factory_lazily() -> None:
             "model": "response-model-test",
             "input": "trace this response",
         }
+    ]
+    assert getattr(invoke, "last_request_filter")["dropped_key_count"] == 0
+
+
+def test_make_openai_responses_invoke_drops_unsupported_strict_kwargs() -> None:
+    class StrictResponses:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        def create(
+            self,
+            *,
+            model: str,
+            input: str,
+            max_output_tokens: int,
+            temperature: float,
+            top_p: float,
+        ) -> dict[str, object]:
+            request = {
+                "model": model,
+                "input": input,
+                "max_output_tokens": max_output_tokens,
+                "temperature": temperature,
+                "top_p": top_p,
+            }
+            self.calls.append(request)
+            return {
+                "model": model,
+                "output_text": "Strict response entered Z-space.",
+                "usage": {"input_tokens": 4, "output_tokens": 4, "total_tokens": 8},
+            }
+
+    class StrictClient:
+        def __init__(self) -> None:
+            self.responses = StrictResponses()
+
+    client = StrictClient()
+    invoke = st.make_openai_responses_invoke(
+        client=client,
+        model="strict-response-model",
+        max_output_tokens=12,
+    )
+    response = invoke(
+        "distort this response",
+        temperature=0.7,
+        top_p=0.9,
+        frequency_penalty=0.4,
+        presence_penalty=0.2,
+    )
+
+    assert st.api_llm_text_from_response(response) == "Strict response entered Z-space."
+    assert client.responses.calls == [
+        {
+            "model": "strict-response-model",
+            "input": "distort this response",
+            "max_output_tokens": 12,
+            "temperature": 0.7,
+            "top_p": 0.9,
+        }
+    ]
+    assert getattr(invoke, "last_request_filter")["dropped_keys"] == [
+        "frequency_penalty",
+        "presence_penalty",
+    ]
+
+
+def test_make_openai_responses_invoke_retries_model_rejected_kwargs() -> None:
+    class UnsupportedParamError(Exception):
+        def __init__(self, param: str) -> None:
+            super().__init__(f"Unsupported parameter: '{param}' is not supported")
+            self.body = {"error": {"param": param}}
+
+    class RetryResponses:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        def create(self, **request: object) -> dict[str, object]:
+            self.calls.append(dict(request))
+            for key in ("temperature", "top_p", "frequency_penalty"):
+                if key in request:
+                    raise UnsupportedParamError(key)
+            return {
+                "model": request["model"],
+                "output_text": "Retried response entered Z-space.",
+                "usage": {"input_tokens": 4, "output_tokens": 5, "total_tokens": 9},
+            }
+
+    class RetryClient:
+        def __init__(self) -> None:
+            self.responses = RetryResponses()
+
+    client = RetryClient()
+    invoke = st.make_openai_responses_invoke(
+        client=client,
+        model="retry-response-model",
+        max_output_tokens=12,
+    )
+    response = invoke(
+        "distort this response safely",
+        temperature=0.7,
+        top_p=0.9,
+        frequency_penalty=0.4,
+    )
+    request_filter = getattr(invoke, "last_request_filter")
+
+    assert st.api_llm_text_from_response(response) == "Retried response entered Z-space."
+    assert client.responses.calls == [
+        {
+            "max_output_tokens": 12,
+            "temperature": 0.7,
+            "top_p": 0.9,
+            "frequency_penalty": 0.4,
+            "model": "retry-response-model",
+            "input": "distort this response safely",
+        },
+        {
+            "max_output_tokens": 12,
+            "top_p": 0.9,
+            "frequency_penalty": 0.4,
+            "model": "retry-response-model",
+            "input": "distort this response safely",
+        },
+        {
+            "max_output_tokens": 12,
+            "frequency_penalty": 0.4,
+            "model": "retry-response-model",
+            "input": "distort this response safely",
+        },
+        {
+            "max_output_tokens": 12,
+            "model": "retry-response-model",
+            "input": "distort this response safely",
+        },
+    ]
+    assert request_filter["dropped_keys"] == [
+        "frequency_penalty",
+        "temperature",
+        "top_p",
+    ]
+    assert request_filter["retry_dropped_keys"] == [
+        "frequency_penalty",
+        "temperature",
+        "top_p",
     ]
 
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
+import inspect
 import json
 import math
 import os
@@ -33,6 +34,7 @@ __all__ = [
     "ApiLLMTrace",
     "ApiLLMZSpaceRuntime",
     "api_llm_geometry_context_partials",
+    "api_llm_zspace_inference_distortion_adapter",
     "api_llm_partial_from_response",
     "api_llm_text_from_response",
     "api_llm_trace_from_response",
@@ -54,6 +56,8 @@ __all__ = [
     "summarize_api_llm_trace_events",
     "api_llm_topos_sweep_report",
     "train_stagent_topos_route_policy",
+    "topos_api_llm_request_kwargs",
+    "topos_api_llm_request_plan",
     "topos_runtime_adapter",
     "topos_runtime_request",
     "topos_runtime_route",
@@ -223,6 +227,24 @@ def _finite_float(value: Any) -> float | None:
     return numeric if math.isfinite(numeric) else None
 
 
+def _clamp(value: float, low: float, high: float) -> float:
+    return max(low, min(high, value))
+
+
+def _unit_or_default(value: Any, default: float) -> float:
+    numeric = _finite_float(value)
+    if numeric is None:
+        return _clamp(float(default), 0.0, 1.0)
+    return _clamp(float(numeric), 0.0, 1.0)
+
+
+def _non_negative_or_default(value: Any, default: float) -> float:
+    numeric = _finite_float(value)
+    if numeric is None:
+        return max(0.0, float(default))
+    return max(0.0, float(numeric))
+
+
 def topos_runtime_request(
     topos: Any | None = None,
     *,
@@ -357,6 +379,260 @@ def topos_runtime_adapter(
             "origin": partial.origin,
             "weight": float(partial.weight),
             "metrics": partial.resolved(),
+            "telemetry": telemetry,
+        },
+    }
+
+
+def topos_api_llm_request_plan(
+    topos: Any | None = None,
+    *,
+    request: Mapping[str, Any] | None = None,
+    request_options: Mapping[str, Any] | None = None,
+    bundle_weight: float = 1.0,
+    training_gain: float = 1.0,
+    origin: str | None = "topos:runtime",
+    telemetry_prefix: str = "topos",
+    gradient_dim: int = 6,
+    **signal_options: Any,
+) -> dict[str, Any]:
+    """Build merged hosted-LLM request kwargs plus the traced topos adapter."""
+
+    base_request = dict(request or {})
+    adapter = topos_runtime_adapter(
+        topos,
+        bundle_weight=bundle_weight,
+        training_gain=training_gain,
+        origin=origin,
+        telemetry_prefix=telemetry_prefix,
+        gradient_dim=gradient_dim,
+        request_options=request_options,
+        **signal_options,
+    )
+    request_overrides = dict(adapter.get("request") or {})
+    merged_request = dict(base_request)
+    merged_request.update(request_overrides)
+    return {
+        "kind": "spiraltorch.topos_api_llm_request_plan",
+        "base_request": base_request,
+        "request_overrides": request_overrides,
+        "request": merged_request,
+        "adapter": adapter,
+        "signal": adapter.get("signal"),
+        "inference_plan": adapter.get("inference_plan"),
+        "runtime_profile": adapter.get("runtime_profile"),
+        "runtime_route": adapter.get("runtime_route"),
+        "context_partial": adapter.get("context_partial"),
+    }
+
+
+def topos_api_llm_request_kwargs(
+    topos: Any | None = None,
+    *,
+    request: Mapping[str, Any] | None = None,
+    request_options: Mapping[str, Any] | None = None,
+    bundle_weight: float = 1.0,
+    training_gain: float = 1.0,
+    origin: str | None = "topos:runtime",
+    telemetry_prefix: str = "topos",
+    gradient_dim: int = 6,
+    **signal_options: Any,
+) -> dict[str, Any]:
+    """Return only merged hosted-LLM request kwargs from a topos plan."""
+
+    return dict(
+        topos_api_llm_request_plan(
+            topos,
+            request=request,
+            request_options=request_options,
+            bundle_weight=bundle_weight,
+            training_gain=training_gain,
+            origin=origin,
+            telemetry_prefix=telemetry_prefix,
+            gradient_dim=gradient_dim,
+            **signal_options,
+        )["request"]
+    )
+
+
+def api_llm_zspace_inference_distortion_adapter(
+    *,
+    desire_pressure: float | None = None,
+    desire_stability: float | None = None,
+    psi_total: float | None = None,
+    coherence: float | None = None,
+    distortion_strength: float = 1.0,
+    bundle_weight: float = 1.0,
+    origin: str | None = "zspace:inference_distortion",
+    telemetry_prefix: str = "zspace",
+    gradient_dim: int = 6,
+    base_temperature: float = 1.0,
+    base_top_p: float = 1.0,
+    min_temperature: float = 0.05,
+    max_temperature: float = 2.0,
+    min_top_p: float = 0.05,
+    max_top_p: float = 1.0,
+    include_temperature: bool = True,
+    include_top_p: bool = True,
+    include_penalties: bool = False,
+    base_frequency_penalty: float = 0.0,
+    base_presence_penalty: float = 0.0,
+    top_k: int = 64,
+    curvature: float = -0.04,
+    entropy_target: float | None = 3.0,
+    entropy_gain: float = 0.5,
+    repression_window: int = 32,
+    base_repression_strength: float = 0.75,
+    base_last_token_repression: float = 0.25,
+    ngram_size: int = 3,
+    ngram_window: int = 96,
+    base_ngram_repression_strength: float = 0.5,
+    ngram_decay: float = 0.9,
+    use_native_zspace: bool = True,
+    activation_name_contains: Sequence[str] | None = None,
+    activation_module_names: Sequence[str] | None = None,
+) -> dict[str, Any]:
+    """Build a shared Z-space distortion adapter for local HF and API inference.
+
+    Hosted API models cannot expose logits directly, so the adapter translates
+    the same desire/psi pressure into request controls plus context telemetry.
+    Local HF callers can also pass ``logits_processor_kwargs`` to
+    ``ZSpaceRepressionLogitsProcessor`` and ``activation_hook`` to
+    ``ZSpaceActivationProbeHook``.
+    """
+
+    pressure = _unit_or_default(desire_pressure, 0.5)
+    stability = _unit_or_default(desire_stability, 0.65)
+    psi = _unit_or_default(psi_total, 0.5)
+    coherence_value = _unit_or_default(coherence, stability)
+    strength = _non_negative_or_default(distortion_strength, 1.0)
+    bundle_weight_value = _non_negative_or_default(bundle_weight, 1.0)
+    closure = 1.0 - stability
+    distortion_energy = _clamp(
+        strength
+        * (0.42 * pressure + 0.35 * psi + 0.23 * closure)
+        * (1.0 - 0.25 * coherence_value),
+        0.0,
+        1.0,
+    )
+
+    base_temperature_value = max(0.0, float(base_temperature))
+    base_top_p_value = _clamp(float(base_top_p), min_top_p, max_top_p)
+    temperature = _clamp(
+        base_temperature_value * (1.0 + 0.65 * distortion_energy),
+        min_temperature,
+        max_temperature,
+    )
+    top_p = _clamp(
+        base_top_p_value * (1.0 - 0.35 * distortion_energy + 0.08 * coherence_value),
+        min_top_p,
+        max_top_p,
+    )
+    frequency_penalty = _clamp(
+        base_frequency_penalty + 0.6 * distortion_energy,
+        -2.0,
+        2.0,
+    )
+    presence_penalty = _clamp(
+        base_presence_penalty + 0.25 * max(pressure, closure),
+        -2.0,
+        2.0,
+    )
+
+    request: dict[str, float] = {}
+    if include_temperature:
+        request["temperature"] = float(temperature)
+    if include_top_p:
+        request["top_p"] = float(top_p)
+    if include_penalties:
+        request["frequency_penalty"] = float(frequency_penalty)
+        request["presence_penalty"] = float(presence_penalty)
+
+    logits_temperature = _clamp(temperature, 0.05, 10.0)
+    logits_processor_kwargs = {
+        "top_k": int(max(1, top_k)),
+        "curvature": float(curvature),
+        "temperature": float(logits_temperature),
+        "entropy_target": (
+            None
+            if entropy_target is None
+            else max(0.0, float(entropy_target) + distortion_energy)
+        ),
+        "entropy_gain": float(max(0.0, entropy_gain)),
+        "repression_window": int(max(0, repression_window)),
+        "repression_strength": float(
+            max(0.0, base_repression_strength + 1.25 * distortion_energy)
+        ),
+        "last_token_repression": float(
+            max(0.0, base_last_token_repression + 0.75 * closure)
+        ),
+        "ngram_size": int(max(0, ngram_size)),
+        "ngram_window": int(max(0, ngram_window)),
+        "ngram_repression_strength": float(
+            max(0.0, base_ngram_repression_strength + distortion_energy)
+        ),
+        "ngram_decay": _clamp(float(ngram_decay), 0.0, 1.0),
+        "use_native_zspace": bool(use_native_zspace),
+    }
+    activation_hook = {
+        "module_names": list(activation_module_names or []),
+        "name_contains": list(activation_name_contains or []),
+        "intervention_scale": float(_clamp(1.0 - 0.12 * distortion_energy, 0.5, 1.5)),
+        "intervention_bias": 0.0,
+        "origin": "hf:activation_probe:zspace_distortion",
+    }
+    metrics = {
+        "speed": _clamp(1.0 - 0.35 * distortion_energy, 0.0, 1.0),
+        "memory": distortion_energy,
+        "stability": stability,
+        "frac": psi,
+        "drs": pressure - psi,
+        "gradient": [
+            pressure,
+            psi,
+            stability,
+            coherence_value,
+            distortion_energy,
+            strength,
+        ][: max(1, int(gradient_dim))],
+    }
+    while len(metrics["gradient"]) < max(1, int(gradient_dim)):
+        metrics["gradient"].append(0.0)
+    telemetry = _prefixed(
+        {
+            "desire.pressure": pressure,
+            "desire.stability": stability,
+            "psi.total": psi,
+            "coherence": coherence_value,
+            "distortion.strength": strength,
+            "distortion.energy": distortion_energy,
+            "request.temperature": temperature,
+            "request.top_p": top_p,
+            "request.frequency_penalty": frequency_penalty,
+            "request.presence_penalty": presence_penalty,
+            "logits.repression_strength": logits_processor_kwargs[
+                "repression_strength"
+            ],
+            "logits.ngram_repression_strength": logits_processor_kwargs[
+                "ngram_repression_strength"
+            ],
+            "activation.intervention_scale": activation_hook["intervention_scale"],
+        },
+        telemetry_prefix,
+    )
+    return {
+        "kind": "spiraltorch.zspace_inference_distortion_adapter",
+        "desire": {"pressure": pressure, "stability": stability},
+        "psi": {"total": psi},
+        "coherence": coherence_value,
+        "distortion_energy": distortion_energy,
+        "request": request,
+        "logits_processor_kwargs": logits_processor_kwargs,
+        "activation_hook": activation_hook,
+        "context_partial": {
+            "origin": origin,
+            "weight": bundle_weight_value,
+            "metrics": metrics,
             "telemetry": telemetry,
         },
     }
@@ -948,6 +1224,119 @@ def _merge_request(
     return request
 
 
+def _filter_supported_request_kwargs(
+    create: Callable[..., Any],
+    request: Mapping[str, Any],
+) -> dict[str, Any]:
+    try:
+        signature = inspect.signature(create)
+    except (TypeError, ValueError):
+        return dict(request)
+    parameters = signature.parameters
+    if any(param.kind == inspect.Parameter.VAR_KEYWORD for param in parameters.values()):
+        return dict(request)
+    accepted = {
+        name
+        for name, param in parameters.items()
+        if param.kind
+        in {
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.KEYWORD_ONLY,
+        }
+    }
+    if not accepted:
+        return dict(request)
+    return {key: value for key, value in request.items() if key in accepted}
+
+
+def _request_filter_report(
+    original: Mapping[str, Any],
+    filtered: Mapping[str, Any],
+    *,
+    retry_dropped_keys: Sequence[str] | None = None,
+) -> dict[str, Any]:
+    dropped = sorted(str(key) for key in set(original) - set(filtered))
+    report = {
+        "original_key_count": len(original),
+        "sent_key_count": len(filtered),
+        "sent_keys": sorted(str(key) for key in filtered),
+        "dropped_keys": dropped,
+        "dropped_key_count": len(dropped),
+    }
+    retry_dropped = sorted(set(str(key) for key in retry_dropped_keys or []))
+    if retry_dropped:
+        report["retry_dropped_keys"] = retry_dropped
+        report["retry_dropped_key_count"] = len(retry_dropped)
+    return report
+
+
+def _unsupported_request_param(exc: Exception, request: Mapping[str, Any]) -> str | None:
+    candidates: list[Any] = [getattr(exc, "param", None)]
+    body = getattr(exc, "body", None)
+    if isinstance(body, Mapping):
+        error = body.get("error")
+        if isinstance(error, Mapping):
+            candidates.append(error.get("param"))
+        candidates.append(body.get("param"))
+    response = getattr(exc, "response", None)
+    json_method = getattr(response, "json", None)
+    if callable(json_method):
+        try:
+            payload = json_method()
+        except Exception:
+            payload = None
+        if isinstance(payload, Mapping):
+            error = payload.get("error")
+            if isinstance(error, Mapping):
+                candidates.append(error.get("param"))
+            candidates.append(payload.get("param"))
+
+    for candidate in candidates:
+        if isinstance(candidate, str) and candidate in request:
+            return candidate
+
+    message = str(exc)
+    if "Unsupported parameter" not in message and "unsupported parameter" not in message:
+        return None
+    for quote in ("'", '"'):
+        marker = f"parameter: {quote}"
+        start = message.find(marker)
+        if start >= 0:
+            start += len(marker)
+            end = message.find(quote, start)
+            if end > start:
+                candidate = message[start:end]
+                if candidate in request:
+                    return candidate
+    for key in request:
+        if str(key) in message:
+            return str(key)
+    return None
+
+
+def _create_with_unsupported_param_retry(
+    create: Callable[..., Any],
+    request: Mapping[str, Any],
+    *,
+    max_retries: int = 8,
+) -> tuple[Any, dict[str, Any], list[str]]:
+    filtered = _filter_supported_request_kwargs(create, request)
+    retry_dropped: list[str] = []
+    while True:
+        try:
+            return create(**filtered), filtered, retry_dropped
+        except Exception as exc:
+            param = _unsupported_request_param(exc, filtered)
+            if (
+                param is None
+                or param not in filtered
+                or len(retry_dropped) >= max(0, int(max_retries))
+            ):
+                raise
+            retry_dropped.append(param)
+            filtered = {key: value for key, value in filtered.items() if key != param}
+
+
 def make_openai_responses_invoke(
     *,
     client: Any | None = None,
@@ -977,7 +1366,16 @@ def make_openai_responses_invoke(
         request = _merge_request(request_defaults, request_overrides, model=model)
         request.setdefault(input_key, prompt)
         create = _resolve_create(cached_client, ("responses",))
-        return create(**request)
+        response, filtered, retry_dropped = _create_with_unsupported_param_retry(
+            create,
+            request,
+        )
+        _invoke.last_request_filter = _request_filter_report(  # type: ignore[attr-defined]
+            request,
+            filtered,
+            retry_dropped_keys=retry_dropped,
+        )
+        return response
 
     return _invoke
 
@@ -1025,7 +1423,16 @@ def make_anthropic_messages_invoke(
             messages=override_messages if override_messages is not None else messages,
         )
         create = _resolve_create(cached_client, ("messages",))
-        return create(**request)
+        response, filtered, retry_dropped = _create_with_unsupported_param_retry(
+            create,
+            request,
+        )
+        _invoke.last_request_filter = _request_filter_report(  # type: ignore[attr-defined]
+            request,
+            filtered,
+            retry_dropped_keys=retry_dropped,
+        )
+        return response
 
     return _invoke
 
@@ -1075,7 +1482,16 @@ def make_openai_chat_invoke(
             messages=override_messages if override_messages is not None else messages,
         )
         create = _resolve_create(cached_client, ("chat", "completions"))
-        return create(**request)
+        response, filtered, retry_dropped = _create_with_unsupported_param_retry(
+            create,
+            request,
+        )
+        _invoke.last_request_filter = _request_filter_report(  # type: ignore[attr-defined]
+            request,
+            filtered,
+            retry_dropped_keys=retry_dropped,
+        )
+        return response
 
     return _invoke
 
@@ -1239,10 +1655,9 @@ def _trace_payload(trace: ApiLLMTrace | Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _context_bundle_from_mapping(mapping: Mapping[str, Any]) -> ZSpacePartialBundle:
-    if mapping.get("kind") == "spiraltorch.topos_runtime_adapter":
-        context = mapping.get("context_partial")
-        if isinstance(context, Mapping):
-            return _context_bundle_from_mapping(context)
+    context = mapping.get("context_partial")
+    if isinstance(context, Mapping):
+        return _context_bundle_from_mapping(context)
     metrics = mapping.get("metrics")
     if isinstance(metrics, Mapping):
         return ZSpacePartialBundle(

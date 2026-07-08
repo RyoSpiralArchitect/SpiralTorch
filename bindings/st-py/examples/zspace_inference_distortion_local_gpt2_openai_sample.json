@@ -1,0 +1,45 @@
+{
+  "row_type": "zspace_inference_distortion_local_hf_api_sample",
+  "command": "PYTHONPATH=bindings/st-py python3 bindings/st-py/examples/zspace_inference_distortion_probe.py --prompt 'SpiralTorch is a Z-space runtime for language models because' --local-model <local-gpt2-dir> --activation-name-contains attn --activation-name-contains mlp --api-provider openai-responses --api-model gpt-4.1-mini --include-penalties --out runs/inference-distortion/local-gpt2-openai-probe.json",
+  "summary": {
+    "local_status": "ok",
+    "local_changed": true,
+    "local_baseline_method": "model.generate",
+    "local_distorted_method": "model.generate+zspace_repression_softmax",
+    "generation_control_backend": "spiraltorch_zspace_softmax",
+    "generation_control_calls": 32,
+    "generation_control_top_token_changed_count": 10,
+    "activation_status": "ok",
+    "activation_event_count": 64,
+    "api_provider": "openai-responses",
+    "api_model": "gpt-4.1-mini",
+    "api_finish_reason": "incomplete",
+    "api_total_tokens": 370.0,
+    "api_response_entropy_norm": 0.8402414367263833,
+    "distortion_energy": 0.7626432,
+    "request_temperature": 1.047002656,
+    "request_top_p": 0.732901136,
+    "api_request_dropped_key_count": 2,
+    "api_request_dropped_keys": [
+      "frequency_penalty",
+      "presence_penalty"
+    ],
+    "api_request_sent_keys": [
+      "input",
+      "max_output_tokens",
+      "model",
+      "temperature",
+      "top_p"
+    ]
+  },
+  "previews": {
+    "local_baseline": "SpiralTorch is a Z-space runtime for language models because it is a pure-Python library...",
+    "local_distorted": "SpiralTorch is a Z-space runtime for language models because it allows you to write your own code...",
+    "api_text": "SpiralTorch is a Z-space runtime for language models because it leverages the unique properties of Z-space inference distortion..."
+  },
+  "notes": [
+    "The local HF path used the same distortion adapter for ZSpaceRepressionLogitsProcessor and activation intervention hooks.",
+    "The OpenAI Responses route accepted temperature/top_p but dropped frequency_penalty/presence_penalty through the SDK signature filter.",
+    "No API key, provider response id, or local absolute model path is stored in this sample."
+  ]
+}

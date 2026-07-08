@@ -1,0 +1,78 @@
+{
+  "row_type": "zspace_inference_distortion_local_hf_gpt5nano_sample",
+  "description": "Sanitized pre-FT probe showing one shared Z-Space inference distortion adapter applied to local GPT-2 logits/hooks and an OpenAI Responses GPT-5 nano route.",
+  "command": "PYTHONPATH=bindings/st-py python3 bindings/st-py/examples/zspace_inference_distortion_probe.py --prompt 'SpiralTorch is a Z-space runtime for language models. Explain what changes when inference is distorted by desire, psi, and coherence.' --local-model <local-gpt2-dir> --max-new-tokens 24 --activation-name-contains attn --activation-name-contains mlp --api-provider openai-responses --api-model gpt-5-nano --api-max-tokens 256 --api-reasoning-effort minimal --api-text-verbosity low --desire-pressure 0.88 --desire-stability 0.35 --psi-total 0.78 --coherence 0.42 --distortion-strength 1.15 --base-temperature 0.7 --base-top-p 0.92 --include-penalties --out runs/inference-distortion/preft-local-gpt2-openai-gpt5nano-minimal-low-probe.json",
+  "runtime": {
+    "local_model": "<local-gpt2-dir>",
+    "max_new_tokens": 24,
+    "activation_name_contains": [
+      "attn",
+      "mlp"
+    ],
+    "api_provider": "openai-responses",
+    "api_model": "gpt-5-nano",
+    "api_max_tokens": 256,
+    "api_reasoning_effort": "minimal",
+    "api_text_verbosity": "low"
+  },
+  "summary": {
+    "local_status": "ok",
+    "local_changed": true,
+    "local_baseline_method": "model.generate",
+    "local_distorted_method": "model.generate+zspace_repression_softmax",
+    "generation_control_backend": "spiraltorch_zspace_softmax",
+    "generation_control_calls": 24,
+    "generation_control_top_token_changed_count": 5,
+    "generation_control_ngram_repressed_token_total": 5,
+    "activation_status": "ok",
+    "activation_event_count": 64,
+    "activation_reported_event_count": 16,
+    "activation_output_l2_max": 108.73527526855469,
+    "api_provider": "openai-responses",
+    "api_model": "gpt-5-nano",
+    "api_finish_reason": "incomplete",
+    "api_empty_text": 0.0,
+    "api_total_tokens": 545.0,
+    "api_response_entropy_norm": 0.7886369242615057,
+    "distortion_energy": 0.8152689249999999,
+    "request_temperature": 1.070947360875,
+    "request_top_p": 0.68839540615,
+    "api_request_dropped_key_count": 4,
+    "api_request_dropped_keys": [
+      "frequency_penalty",
+      "presence_penalty",
+      "temperature",
+      "top_p"
+    ],
+    "api_request_retry_dropped_key_count": 2,
+    "api_request_retry_dropped_keys": [
+      "temperature",
+      "top_p"
+    ],
+    "api_request_sent_keys": [
+      "input",
+      "max_output_tokens",
+      "model",
+      "reasoning",
+      "text"
+    ],
+    "effect_score": 0.80200758987286,
+    "risk_score": 0.3958091022779243
+  },
+  "previews": {
+    "local_baseline": "SpiralTorch is a Z-space runtime for language models. Explain what changes when inference is distorted by desire, psi, and coherence. The Z-space runtime is a...",
+    "local_distorted": "SpiralTorch is a Z-space runtime for language models. Explain what changes when inference is distorted by desire, psi, and coherence. The following code snipp...",
+    "api_text": "In SpiralTorch, when inference is distorted by desire, psi, and coherence, the following changes occur in the Z-space telemetry and behavior: Desire-based d..."
+  },
+  "compact_lines": [
+    "zspace_inference_distortion_probe local=ok changed=True backend=spiraltorch_zspace_softmax top_changes=5 activation_events=64 api=openai-responses api_dropped=4 api_retry_dropped=2 effect=0.80200758987286 risk=0.3958091022779243 energy=0.8152689249999999 temp=1.070947360875 top_p=0.68839540615",
+    "zspace_inference_distortion_local baseline='SpiralTorch is a Z-space runtime for language models. Explain what changes when inference is di...' distorted='SpiralTorch is a Z-space runtime for language models. Explain what changes when inference is di...'",
+    "zspace_inference_distortion_api text='In SpiralTorch, when inference is distorted by desire, psi, and coherence, the following change...'"
+  ],
+  "notes": [
+    "The local HF path used the same distortion adapter for ZSpaceRepressionLogitsProcessor and activation intervention hooks.",
+    "GPT-5 nano rejected temperature/top_p server-side, so the OpenAI adapter retried after dropping those parameters and recorded retry_dropped_keys.",
+    "The route kept visible output by sending reasoning={effort:minimal} and text={verbosity:low}.",
+    "No API key, provider response id, or local absolute model path is stored in this sample."
+  ]
+}

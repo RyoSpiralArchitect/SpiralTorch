@@ -1,0 +1,140 @@
+{
+  "row_type": "hf_gpt2_moby_dick_generation_control_sample",
+  "description": "Sanitized one-novel GPT-2 fine-tuning sample on the Project Gutenberg Moby-Dick text, followed by a SpiralTorch Z-Space generation-control grid.",
+  "source": {
+    "name": "Moby-Dick; or, The Whale",
+    "author": "Herman Melville",
+    "provider": "Project Gutenberg",
+    "ebook_id": 2701,
+    "downloaded_text_bytes": 1276263,
+    "body_text_bytes": 1234513,
+    "body_lines": 21936,
+    "nonempty_body_lines": 18914,
+    "rough_body_tokens": 302939,
+    "train_lines": 20839,
+    "validation_lines": 1097
+  },
+  "fine_tune": {
+    "model_name": "gpt2",
+    "max_steps": 320,
+    "block_size": 128,
+    "learning_rate": 0.00005,
+    "per_device_train_batch_size": 1,
+    "gradient_accumulation_steps": 4,
+    "tokenized_train_rows": 2255,
+    "tokenized_eval_rows": 122,
+    "train_runtime_s": 575.7046,
+    "train_steps_per_second": 0.556,
+    "train_loss": 4.394898223876953,
+    "eval_loss_before_train": 4.989928722381592,
+    "eval_loss_step_160": 4.321269989013672,
+    "eval_loss_after_train": 4.269535541534424
+  },
+  "prompt": "Call me Ishmael, and I",
+  "generation_before_train": {
+    "method": "model.generate",
+    "continuation": " will tell you what I have seen.\n\nI have seen the Lord, and I have seen the Lord's face.\n\nI have seen the Lord's face.\n\nI have seen the Lord's face.\n\nI",
+    "observed_effect": "The unfine-tuned greedy decode falls into a generic religious repetition loop."
+  },
+  "generation_after_train": {
+    "method": "model.generate",
+    "continuation": " will tell you what I know of him.\u201d\u201cI know him, sir.\u201d\u201cI know him, sir.\u201d\u201cI know him, sir.\u201d\u201cI know him, sir",
+    "loop_score": 8.0,
+    "unique_word_ratio": 0.55,
+    "observed_effect": "After only 320 steps on the full novel, the model has already moved into a Moby-Dick-like dialogue attractor, but greedy decoding still loops."
+  },
+  "zspace_generation_control_grid": {
+    "run_count": 13,
+    "completed_run_count": 13,
+    "failed_run_count": 0,
+    "changed_from_baseline_count": 8,
+    "max_top_token_changed_count": 6,
+    "baseline": {
+      "name": "baseline-greedy",
+      "continuation": " will tell you what I know of him.\u201d\u201cI know him, sir.\u201d\u201cI know him, sir.\u201d\u201cI know him, sir.\u201d\u201cI know him, sir",
+      "loop_score": 8.0,
+      "unique_word_ratio": 0.55,
+      "repeated_ngram_total": 6,
+      "max_ngram_repetition": 3
+    },
+    "representative_runs": [
+      {
+        "name": "ztnone-rs0-lr0-k64",
+        "meaning": "ZSpaceSoftmax only audits and reshapes probabilities; greedy rank is unchanged, so the dialogue loop remains.",
+        "continuation": " will tell you what I know of him.\u201d\u201cI know him, sir.\u201d\u201cI know him, sir.\u201d\u201cI know him, sir.\u201d\u201cI know him, sir",
+        "loop_score": 8.0,
+        "unique_word_ratio": 0.55,
+        "top_token_changed_count": 0,
+        "temperature_min": 1.0,
+        "temperature_max": 1.0,
+        "entropy_min": 3.534095048904419,
+        "entropy_max": 4.147578239440918,
+        "backend": "spiraltorch_zspace_softmax"
+      },
+      {
+        "name": "ztnone-rs0p75-lr0-k64",
+        "meaning": "Moderate repetition repression changes the greedy top token twice and expands the dialogue phrase, but does not fully escape the attractor.",
+        "continuation": " will tell you what I know of him.\u201d\u201cI know him, sir; he is a man of great intelligence.\u201d\u201cI know him, sir; he is a man of great intelligence.\u201d\ufffd",
+        "loop_score": 8.0,
+        "unique_word_ratio": 0.6071428571428571,
+        "top_token_changed_count": 2,
+        "temperature_min": 1.0,
+        "temperature_max": 1.0,
+        "entropy_min": 3.631105899810791,
+        "entropy_max": 4.149270057678223,
+        "backend": "spiraltorch_zspace_softmax"
+      },
+      {
+        "name": "zt3-rs1p25-lr0-k64",
+        "meaning": "Entropy targeting plus stronger repression changes six top tokens and moves the model into a different semantic continuation, but this undertrained checkpoint still repeats at a larger phrase scale.",
+        "continuation": " will tell you what it is.\u201d\u201cI am the son of a man, and I have been living in this land for forty years.\u201d\u201cI am the son of a man, and I have been living",
+        "loop_score": 10.0,
+        "unique_word_ratio": 0.6764705882352942,
+        "top_token_changed_count": 6,
+        "temperature_min": 0.699999988079071,
+        "temperature_max": 0.699999988079071,
+        "entropy_min": 3.4533355236053467,
+        "entropy_max": 4.140199184417725,
+        "backend": "spiraltorch_zspace_softmax"
+      }
+    ]
+  },
+  "phrase_scale_followup_grid": {
+    "description": "Follow-up grid after adding token n-gram phrase memory to ZSpaceRepressionLogitsProcessor. The key difference from token-level repression is ngram_window=96, which can see the repeated quoted-dialogue phrase instead of only the last 16 tokens.",
+    "run_count": 19,
+    "completed_run_count": 19,
+    "failed_run_count": 0,
+    "changed_from_baseline_count": 18,
+    "max_top_token_changed_count": 7,
+    "best_loop_score": 0.0,
+    "baseline_loop_score": 8.0,
+    "best_run": {
+      "name": "ztnone-rs0p75-lr0-ng3-nw96-nr0p75-k64",
+      "continuation": " will tell you what I know of him.\u201d\u201cI know him, sir; he is a man of great intelligence.\u201d\u201cHe is a very good man, sir.\u201d \u201cI know him;",
+      "loop_score": 0.0,
+      "unique_word_ratio": 0.8148148148148148,
+      "top_token_changed_count": 7,
+      "ngram_repressed_token_total": 11,
+      "max_ngram_repression": 1.5,
+      "ngram_size": 3,
+      "ngram_window": 96,
+      "ngram_repression_strength": 0.75,
+      "backend": "spiraltorch_zspace_softmax"
+    },
+    "stronger_phrase_run": {
+      "name": "ztnone-rs0p75-lr0-ng3-nw96-nr1p25-k64",
+      "continuation": " will tell you what I know of him.\u201d\u201cI know him, sir; he is a man of great intelligence.\u201d\u201cHe is a very good man, sir.\u201d \u201cI have seen him",
+      "loop_score": 0.0,
+      "unique_word_ratio": 0.8571428571428571,
+      "top_token_changed_count": 7,
+      "ngram_repressed_token_total": 9,
+      "max_ngram_repression": 2.5,
+      "ngram_size": 3,
+      "ngram_window": 96,
+      "ngram_repression_strength": 1.25,
+      "backend": "spiraltorch_zspace_softmax"
+    },
+    "observed_effect": "A longer phrase memory turns the previous relocation-only behavior into a real greedy-loop break: the model stays inside the Moby-Dick-like dialogue attractor, but stops repeating the exact quoted phrase."
+  },
+  "observed_effect": "A full-novel corpus immediately gives a stronger literary attractor than the tiny SpiralTorch corpus: the model shifts from a generic religious loop into Moby-Dick-like quoted dialogue. Token-level Z-Space repetition control changes greedy ranks but mostly relocates the attractor; phrase-scale n-gram memory with ngram_window=96 breaks the repeated dialogue loop while preserving the literary domain attraction."
+}

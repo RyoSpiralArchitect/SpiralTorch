@@ -29,6 +29,23 @@ PY_TYPED_PATH = REPO_ROOT / "bindings" / "st-py" / "spiraltorch" / "py.typed"
 PYPROJECT_PATH = REPO_ROOT / "bindings" / "st-py" / "pyproject.toml"
 
 
+def pyproject_scripts() -> dict[str, str]:
+    scripts: dict[str, str] = {}
+    in_scripts = False
+    for raw_line in PYPROJECT_PATH.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            in_scripts = line == "[project.scripts]"
+            continue
+        if not in_scripts or "=" not in line:
+            continue
+        name, value = line.split("=", 1)
+        scripts[name.strip()] = value.strip().strip('"')
+    return scripts
+
+
 def load_runtime_imports():
     spec = importlib.util.spec_from_file_location(
         "spiraltorch_runtime_imports_test",
@@ -97,6 +114,56 @@ class RuntimeImportsTest(unittest.TestCase):
             'spiral-runtime-preflight = "spiraltorch.runtime_imports:main"',
             pyproject,
         )
+
+    def test_pyproject_console_scripts_resolve_to_callables(self) -> None:
+        scripts = pyproject_scripts()
+        self.assertIn("spiral-hf-profile", scripts)
+        self.assertIn("spiral-zspace-inference-distortion-probe", scripts)
+        self.assertIn("spiral-zspace-inference-distortion-sweep", scripts)
+        script = """
+import importlib
+import json
+import sys
+
+scripts = json.loads(sys.argv[1])
+failures = []
+for name, target in scripts.items():
+    module_name, _, attr_path = target.partition(":")
+    try:
+        value = importlib.import_module(module_name)
+        for attr in attr_path.split(".") if attr_path else []:
+            value = getattr(value, attr)
+        if not callable(value):
+            failures.append([name, target, "not callable"])
+    except Exception as exc:
+        failures.append([name, target, f"{exc.__class__.__name__}: {exc}"])
+print("SPIRALTORCH_SCRIPT_ENTRYPOINTS=" + json.dumps(failures, sort_keys=True))
+"""
+        env = os.environ.copy()
+        env["PYTHONNOUSERSITE"] = "1"
+        env["PYTHONPATH"] = str(REPO_ROOT / "bindings" / "st-py")
+        completed = subprocess.run(
+            [sys.executable, "-P", "-c", script, json.dumps(scripts, sort_keys=True)],
+            env=env,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(
+            completed.returncode,
+            0,
+            completed.stdout + completed.stderr,
+        )
+        marker = "SPIRALTORCH_SCRIPT_ENTRYPOINTS="
+        failures = None
+        for line in completed.stdout.splitlines():
+            if line.startswith(marker):
+                failures = json.loads(line[len(marker) :])
+                break
+        self.assertIsNotNone(
+            failures,
+            completed.stdout + completed.stderr,
+        )
+        self.assertEqual(failures, [])
 
     def test_pyproject_exposes_hf_ft_extras(self) -> None:
         pyproject = PYPROJECT_PATH.read_text(encoding="utf-8")

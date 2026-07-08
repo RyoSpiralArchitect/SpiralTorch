@@ -1,0 +1,31 @@
+{
+  "row_type": "hf_gpt2_zspace_generation_control_sample",
+  "description": "Sanitized local GPT-2 2560-step checkpoint generation sample showing greedy loop relaxation after SpiralTorch Z-Space softmax plus repetition repression.",
+  "prompt": "SpiralTorch is a tensor and geometry runtime that",
+  "baseline_greedy_2560_continuation": " exposes a Python wrapper for SpiralTorch. The SpiralTorch runtime exposes a Python wrapper for SpiralTorch. The SpiralTorch runtime exposes a Python wrapper",
+  "zspace_repression_softmax_continuation": " exposes SpiralTorch as a Python module. The `spiraltorch` bindings are used to build SpiralTorch, and the `spiraltorch",
+  "generation_method": "model.generate+zspace_repression_softmax",
+  "generation_control": {
+    "processor": "ZSpaceRepressionLogitsProcessor",
+    "backend": "spiraltorch_zspace_softmax",
+    "top_k": 64,
+    "curvature": -0.04,
+    "temperature": 1.0,
+    "entropy_target": 3.0,
+    "min_temperature": 0.7,
+    "max_temperature": 2.4,
+    "repression_window": 16,
+    "repression_strength": 1.25,
+    "last_token_repression": 1.0,
+    "max_new_tokens": 32,
+    "calls": 32,
+    "reported_rows": 32,
+    "top_token_changed_count": 5,
+    "reported_top_token_changed_count": 5,
+    "temperature_min": 0.699999988079071,
+    "temperature_max": 1.0719492435455322,
+    "entropy_min": 2.7373955249786377,
+    "entropy_max": 4.13801383972168
+  },
+  "observed_effect": "The controlled decode keeps the SpiralTorch/Python-binding domain attraction while breaking the tight wrapper-runtime-wrapper repetition loop observed in the baseline greedy sample."
+}

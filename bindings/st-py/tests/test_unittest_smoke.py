@@ -1448,6 +1448,19 @@ class SpiralTorchSmokeTest(unittest.TestCase):
                 pass
 
     def test_mellin_windowed_and_stable_eval_smoke(self) -> None:
+        fft = st.frac.fft_real([1.0, 0.0, 0.0, 0.0])
+        self.assertEqual(len(fft), 4)
+        self.assertTrue(all(abs(re - 1.0) < 1e-6 and abs(im) < 1e-6 for re, im in fft))
+        recovered = st.fft_complex32(fft, inverse=True)
+        self.assertAlmostEqual(recovered[0][0], 1.0, delta=1e-6)
+        self.assertAlmostEqual(recovered[0][1], 0.0, delta=1e-6)
+        self.assertTrue(
+            all(abs(re) < 1e-6 and abs(im) < 1e-6 for re, im in recovered[1:])
+        )
+        top, bottom = st.frac.fft_radix2((1.0, 0.0), (0.5, 0.0), (1.0, 0.0))
+        self.assertEqual(top, (1.5, 0.0))
+        self.assertEqual(bottom, (0.5, 0.0))
+
         for window in ("hann", "tukey", "blackman"):
             grid = st.frac.MellinLogGrid.exp_decay(
                 -3.0,
@@ -1476,6 +1489,304 @@ class SpiralTorchSmokeTest(unittest.TestCase):
         )
         self.assertEqual(len(vals2), 1)
         self.assertEqual(len(derivs2), 1)
+
+    def test_drl_safety_metrics_smoke(self) -> None:
+        word = {
+            "name": "AI",
+            "definition_entropy": 0.72,
+            "timing_signal": 1.4,
+            "base_lambda": 1.0,
+            "beta": 1.0,
+            "frames": {
+                "Normative": {
+                    "phi": 0.65,
+                    "c": 0.9,
+                    "S": 0.8,
+                    "a_den": -0.05,
+                    "a_con": 0.2,
+                    "b_den": 0.4,
+                    "b_con": 0.8,
+                    "kappa": 0.35,
+                    "timing_scale": 1.0,
+                    "directional_axes": {
+                        "definition_break": {
+                            "value_components": [-0.2],
+                            "risk_components": [0.9],
+                            "kappa_components": [0.6],
+                            "value_curvature_components": [0.1],
+                            "risk_curvature_components": [0.5],
+                            "kappa_slope_components": [0.05],
+                        }
+                    },
+                }
+            },
+        }
+        queries = {
+            "Normative": [
+                {"axis": "definition_break", "weights": [1.0], "label": "break"}
+            ]
+        }
+
+        thresholds = st.safety.drl_default_thresholds()
+        self.assertIn("Normative", thresholds)
+        metrics = st.safety.drl_analyse_word(word, direction_queries=queries)
+        alias_metrics = st.drl_analyze_word(word)
+        self.assertEqual(metrics["word"]["name"], "AI")
+        self.assertIn("Normative", metrics["frame_hazards"])
+        self.assertIn("Normative", metrics["safe_radii"])
+        self.assertIn("break", metrics["direction_signatures"]["Normative"])
+        self.assertAlmostEqual(
+            st.drl_existence_load(word),
+            metrics["existence_load"],
+            delta=1e-6,
+        )
+        self.assertAlmostEqual(
+            st.drl_frame_hazard(word, "Normative"),
+            metrics["frame_hazards"]["Normative"],
+            delta=1e-6,
+        )
+        self.assertEqual(
+            st.drl_safe_radii(word)["Normative"],
+            metrics["safe_radii"]["Normative"],
+        )
+        penalty = st.safety.drl_trainer_penalty(metrics)
+        self.assertGreater(penalty, 0.0)
+        self.assertAlmostEqual(
+            st.drl_aggregate_penalty([metrics, metrics]),
+            2.0 * penalty,
+            delta=1e-6,
+        )
+        summary = st.safety.drl_frame_summary(metrics)
+        self.assertGreater(summary["Normative"], 0.0)
+        self.assertAlmostEqual(
+            alias_metrics["existence_load"],
+            metrics["existence_load"],
+            delta=1e-6,
+        )
+
+    def test_kv_choice_payload_smoke(self) -> None:
+        plan = st.plan("topk", 16, 128, 8, backend="wgpu")
+        choice = st.kv.kv_choice_from_rank_plan(plan)
+        fields = st.kv_choice_schema_fields()
+        self.assertIn("use_2ce", fields)
+        for field in fields:
+            self.assertIn(field, choice)
+        self.assertEqual(choice["rank_kind"], "topk")
+        self.assertEqual(choice["rows"], 16)
+        self.assertEqual(choice["cols"], 128)
+        self.assertEqual(choice["k"], 8)
+        self.assertEqual(choice["wg"], plan.workgroup)
+        self.assertEqual(choice["kl"], plan.lanes)
+        self.assertEqual(choice["ch"], plan.channel_stride)
+
+        key = st.kv_rank_choice_key(16, 128, 8, choice["subgroup"])
+        self.assertEqual(key, st.kv.kv_choice_key_from_rank_plan(plan))
+        self.assertTrue(key.startswith("spiral:heur:v1:sg:"))
+        self.assertIn(":c:7:k:3", key)
+
+        options = st.kv_json_set_options(expiry_seconds=30, condition="nx")
+        self.assertEqual(options["expiry"]["keyword"], "EX")
+        self.assertEqual(options["fragments"], ["EX", 30, "NX"])
+        keep_ttl = st.kv.kv_json_set_options(keep_ttl=True, condition="xx")
+        self.assertEqual(keep_ttl["fragments"], ["KEEPTTL", "XX"])
+        with self.assertRaises(ValueError):
+            st.kv_json_set_options(expiry_seconds=1, keep_ttl=True)
+        with self.assertRaises(ValueError):
+            st.kv_json_set_options(condition="sometimes")
+
+        self.assertIsInstance(st.kv_redis_available(), bool)
+        if not st.kv_redis_available():
+            with self.assertRaises(NotImplementedError):
+                st.kv.kv_redis_get_json("redis://127.0.0.1/", "spiral:test")
+
+    def test_text_token_scale_stack_smoke(self) -> None:
+        embeddings = st.Tensor(
+            4,
+            2,
+            [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                1.0,
+                1.0,
+                1.0,
+            ],
+        )
+        stack = st.token_scale_stack(
+            embeddings,
+            [1.0, 2.0, 3.0],
+            0.25,
+            metric="euclidean",
+        )
+        self.assertEqual(stack.mode, "semantic::euclidean")
+        self.assertEqual(len(stack.samples), 3)
+        self.assertGreater(stack.samples[0][1], 0.0)
+
+        levels = st.text.token_coherence_levels(
+            embeddings,
+            [1.0, 2.0, 3.0],
+            0.25,
+            [0.25, 0.5, 0.75],
+        )
+        self.assertEqual(len(levels), 3)
+        self.assertEqual(levels[0], 1.0)
+
+        row_stack = st.text.token_scale_stack(
+            [
+                [1.0, 0.0],
+                [1.0, 0.0],
+                [0.0, 1.0],
+                [0.0, 1.0],
+            ],
+            [1.0, 2.0],
+            0.1,
+            metric="cosine",
+        )
+        self.assertEqual(row_stack.mode, "semantic::cosine")
+        self.assertIn("token_scale_stack", st.__all__)
+
+    def test_wgpu_kernel_catalog_smoke(self) -> None:
+        self.assertIsInstance(st.wgpu_kernel_reports_available(), bool)
+        if not st.wgpu_kernel_reports_available():
+            with self.assertRaises(NotImplementedError):
+                st.wgpu.wgpu_kernel_catalog()
+            return
+
+        catalog = st.wgpu_kernel_catalog()
+        names = {entry["name"] for entry in catalog}
+        self.assertIn("softmax_workgroup", names)
+        self.assertIn("topk_keepk_workgroup", names)
+        self.assertIn("midk_bottomk_apply_subgroup_v2", names)
+        self.assertIn("fused_attention_online", names)
+
+        descriptor = st.wgpu.wgpu_kernel_descriptor("softmax_workgroup.wgsl")
+        self.assertIsNotNone(descriptor)
+        self.assertEqual(descriptor["name"], "softmax_workgroup")
+        self.assertTrue(descriptor["portable"])
+
+        plan = st.plan("topk", 16, 128, 8, backend="wgpu")
+        report = st.wgpu_kernel_report_from_rank_plan(plan)
+        self.assertEqual(report["request"]["kind"], "topk")
+        self.assertEqual(report["request"]["rows"], 16)
+        self.assertIn(report["primary"]["name"], names)
+        self.assertEqual(report["dispatch"]["workgroups"][0], 16)
+
+        bottom = st.wgpu.wgpu_rank_kernel_report(
+            "bottomk",
+            8,
+            1024,
+            32,
+            subgroup=True,
+            use_two_stage=True,
+            fft_tile=2048,
+            fft_radix=4,
+            fft_segments=2,
+        )
+        self.assertEqual(bottom["primary"]["name"], "midk_bottomk_apply_subgroup_v2")
+        self.assertEqual(bottom["dispatch"]["workgroups"], (4, 8, 1))
+        self.assertEqual(bottom["fft"]["tile_cols"], 2048)
+
+        softmax = st.wgpu_softmax_kernel_report(
+            4,
+            16,
+            subgroup=True,
+            hardmax=True,
+            mask=True,
+        )
+        self.assertEqual(softmax["primary"]["name"], "softmax_subgroup")
+        self.assertEqual(softmax["fallback"]["name"], "softmax_workgroup")
+        self.assertEqual(softmax["flags"], 6)
+
+    def test_vision_transform_pipeline_smoke(self) -> None:
+        datasets = st.vision_dataset_catalog()
+        self.assertTrue(any(item["name"] == "CIFAR10" for item in datasets))
+        self.assertEqual(
+            st.vision.vision_dataset_descriptor("cifar10")["task"],
+            "classification",
+        )
+        models = st.vision_model_catalog()
+        self.assertTrue(any(item["name"] == "resnet18" for item in models))
+        self.assertEqual(
+            st.vision.vision_model_descriptor("ResNet18")["default_image_size"],
+            (224, 224),
+        )
+
+        image = st.ImageTensor(
+            1,
+            2,
+            3,
+            [
+                1.0,
+                2.0,
+                3.0,
+                4.0,
+                5.0,
+                6.0,
+            ],
+        )
+        self.assertEqual(image.shape(), (1, 2, 3))
+        self.assertEqual(image.pixel(0, 1, 2), 6.0)
+        image.set_pixel(0, 0, 0, -1.0)
+        image.relu_inplace()
+        self.assertEqual(image.pixel(0, 0, 0), 0.0)
+
+        tensor = image.to_tensor()
+        self.assertEqual(tensor.shape(), (1, 6))
+        roundtrip = st.vision.ImageTensor.from_tensor(tensor, 1, 2, 3)
+        self.assertEqual(roundtrip.flatten(), image.flatten())
+
+        pipeline = st.TransformPipeline(seed=7)
+        pipeline.add_resize(4, 6)
+        pipeline.add_center_crop(2, 2)
+        pipeline.add_horizontal_flip(1.0)
+        pipeline.add_normalize([1.0], [2.0])
+        self.assertEqual(
+            pipeline.operations(),
+            ["Resize", "CenterCrop", "RandomHorizontalFlip", "Normalize"],
+        )
+        transformed = pipeline.apply(roundtrip)
+        self.assertEqual(transformed.shape(), (1, 2, 2))
+        self.assertEqual(len(transformed.flatten()), 4)
+
+        audit = pipeline.audit()
+        self.assertEqual(audit["summary"]["total_stages"], 4)
+        self.assertGreaterEqual(audit["summary"]["gpu_supported"], 3)
+        transform_catalog = st.vision_transform_audit_catalog()
+        self.assertTrue(any(item["name"] == "ColorJitter" for item in transform_catalog))
+
+        standard = st.vision_standard_classification_pipeline(8, seed=7)
+        self.assertIn("Normalize", standard.operations())
+        self.assertFalse(standard.has_gpu_dispatcher())
+
+        dataset = st.TensorVisionDataset("CIFAR10")
+        dataset.push(roundtrip, target=st.Tensor(1, 2, [1.0, 0.0]), label="left")
+        dataset.push(roundtrip, target=st.Tensor(1, 2, [0.0, 1.0]), label="right")
+        self.assertEqual(len(dataset), 2)
+        self.assertEqual(dataset.descriptor()["name"], "CIFAR10")
+        self.assertEqual(dataset.get(0).label, "left")
+
+        loader = dataset.dataloader(2, seed=5, pipeline=pipeline)
+        batch = loader.next_batch()
+        self.assertIsNotNone(batch)
+        self.assertEqual(batch.labels(), ["left", "right"])
+        self.assertEqual(batch.stack().shape(), (2, 4))
+        self.assertIsNone(loader.next_batch())
+        loader.reset()
+        self.assertIsNotNone(loader.next_batch())
+
+        model = st.vision_create_classification_model(
+            "mobilenet_v3_small",
+            3,
+            seed=11,
+        )
+        metadata = model.metadata()
+        self.assertEqual(metadata["name"], "mobilenet_v3_small")
+        self.assertEqual(metadata["num_classes"], 3)
+        logits = model.forward([st.ImageTensor.zeros(3, 224, 224)])
+        self.assertEqual(logits.shape(), (1, 3))
+        self.assertIn("VisionModel", st.__all__)
 
     def test_state_dict_io(self) -> None:
         model = st.nn.Linear("l1", 2, 1)

@@ -19,6 +19,7 @@ mod inference;
 mod introspect;
 mod json;
 mod julia_bridge;
+mod kv;
 mod nn;
 mod ops;
 mod planner;
@@ -30,6 +31,7 @@ mod qr;
 mod rec;
 #[cfg(feature = "robotics")]
 mod robotics;
+mod safety;
 mod scale_stack;
 mod selfsup;
 mod sot;
@@ -41,6 +43,7 @@ mod text;
 mod theory;
 mod trainer;
 mod vision;
+mod wgpu;
 mod zspace;
 
 #[cfg(not(feature = "nn"))]
@@ -277,6 +280,9 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
     nn::register(py, m)?;
     spiral_rl::register(py, m)?;
     rec::register(py, m)?;
+    safety::register(py, m)?;
+    kv::register(py, m)?;
+    wgpu::register(py, m)?;
     telemetry::register(py, m)?;
     plugin::register(py, m)?;
     ops::register_module(py, m)?;
@@ -361,6 +367,9 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
         "linalg",
         "spiral_rl",
         "rec",
+        "safety",
+        "kv",
+        "wgpu",
         "telemetry",
         "plugin",
         "ops",
@@ -371,6 +380,13 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
         "LinearModel",
         "ModuleTrainer",
         "mean_squared_error",
+        "ImageTensor",
+        "TransformPipeline",
+        "VisionSample",
+        "TensorVisionDataset",
+        "VisionBatch",
+        "VisionDataLoader",
+        "VisionModel",
         "CanvasTransformer",
         "CanvasSnapshot",
         "CanvasProjector",
@@ -378,6 +394,13 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
         "ZSpaceStreamFrame",
         "StreamedVolume",
         "apply_vision_update",
+        "vision_dataset_catalog",
+        "vision_dataset_descriptor",
+        "vision_model_catalog",
+        "vision_model_descriptor",
+        "vision_transform_audit_catalog",
+        "vision_standard_classification_pipeline",
+        "vision_create_classification_model",
         "ScaleStack",
         "scalar_scale_stack",
         "semantic_scale_stack",
@@ -394,6 +417,37 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
         "describe_wgpu_softmax_variants",
         "gl_coeffs_adaptive",
         "fracdiff_gl_1d",
+        "fft_radix2",
+        "fft_radix4",
+        "fft_complex32",
+        "fft_real",
+        "drl_default_thresholds",
+        "drl_analyse_word",
+        "drl_analyze_word",
+        "drl_existence_load",
+        "drl_safe_radii",
+        "drl_frame_hazard",
+        "drl_trainer_penalty",
+        "drl_aggregate_penalty",
+        "drl_frame_summary",
+        "kv_redis_available",
+        "kv_choice_schema_fields",
+        "kv_rank_choice_key",
+        "kv_choice_key_from_rank_plan",
+        "kv_choice_from_rank_plan",
+        "kv_json_set_options",
+        "kv_redis_set_json",
+        "kv_redis_get_json",
+        "kv_redis_set_choice",
+        "kv_redis_get_choice",
+        "kv_redis_push_choice",
+        "kv_redis_lrange_choice",
+        "wgpu_kernel_reports_available",
+        "wgpu_kernel_catalog",
+        "wgpu_kernel_descriptor",
+        "wgpu_rank_kernel_report",
+        "wgpu_kernel_report_from_rank_plan",
+        "wgpu_softmax_kernel_report",
         "zspace_eval",
         "zspace_snapshot",
         "softlogic_feedback",
@@ -404,6 +458,8 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
         "MaxwellSpiralKHint",
         "ContextualLagrangianGate",
         "ContextualPulseFrame",
+        "token_scale_stack",
+        "token_coherence_levels",
     ];
 
     #[cfg(feature = "robotics")]
