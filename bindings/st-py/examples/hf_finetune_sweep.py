@@ -22,7 +22,7 @@ DEFAULT_OUT_DIR = Path("runs/hf-finetune-sweep")
 DEFAULT_RUN_PREFIX = "hf-ft"
 DEFAULT_RUN_CARD_FILENAME = "spiraltorch-hf-finetune-run-card.json"
 DEFAULT_TRAINER_TRACE_FILENAME = "spiraltorch-hf-finetune-trainer-trace.jsonl"
-DEFAULT_MODEL_PROFILE = "causal-lm-local-smoke"
+DEFAULT_MODEL_PROFILE = st.HF_FINETUNE_DEFAULT_MODEL_PROFILE
 
 
 def _argv_has_option(raw_argv: list[str], *names: str) -> bool:

@@ -23,6 +23,7 @@ from hf_gpt2_ft_generation_curve import *  # noqa: F401,F403,E402
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
     parser.add_argument(
         "sweeps",
         nargs="+",
@@ -30,6 +31,23 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Generation-control sweep JSON artifacts to join into the curve.",
     )
     parser.add_argument("--label", action="append", default=[])
+    parser.add_argument(
+        "--model-configs",
+        type=Path,
+        default=None,
+        help=(
+            "Optional JSON config with Hugging Face model profiles. "
+            "Useful for trace-only curves while a run card is still live."
+        ),
+    )
+    parser.add_argument(
+        "--model-profile",
+        default=None,
+        help=(
+            "Model profile id used to fill model/dataset metadata unless "
+            "--model-name/--dataset-* override it."
+        ),
+    )
     parser.add_argument(
         "--run-card",
         type=Path,
@@ -55,6 +73,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--lines-out", type=Path, default=None)
     parser.add_argument("--top-n", type=int, default=3)
     args = parser.parse_args(argv)
+    _apply_model_profile_defaults(args, parser=parser, raw_argv=raw_argv)
     if args.top_n < 0:
         parser.error("--top-n must be non-negative")
     if args.label and len(args.label) != len(args.sweeps):
@@ -76,27 +95,92 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return args
 
 
+def _argv_has_option(raw_argv: list[str], *names: str) -> bool:
+    prefixes = tuple(f"{name}=" for name in names)
+    return any(arg in names or arg.startswith(prefixes) for arg in raw_argv)
+
+
+def _profile_section(profile: dict[str, Any], section: str) -> dict[str, Any]:
+    value = profile.get(section)
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _apply_model_profile_defaults(
+    args: argparse.Namespace,
+    *,
+    parser: argparse.ArgumentParser,
+    raw_argv: list[str],
+) -> None:
+    args._hf_finetune_model_profile = None
+    if args.model_configs is None and args.model_profile is None:
+        return
+    try:
+        profile = st.resolve_hf_finetune_model_profile(
+            args.model_configs,
+            profile=args.model_profile,
+        )
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        parser.error(f"failed to resolve model profile: {exc}")
+    args._hf_finetune_model_profile = profile
+    dataset = _profile_section(profile, "dataset")
+    if args.model_name is None and not _argv_has_option(raw_argv, "--model-name"):
+        args.model_name = profile.get("model_name")
+    if args.dataset_name is None and not _argv_has_option(raw_argv, "--dataset-name"):
+        args.dataset_name = dataset.get("name")
+    if args.dataset_config is None and not _argv_has_option(
+        raw_argv,
+        "--dataset-config",
+    ):
+        args.dataset_config = dataset.get("config")
+
+
+def _resolved_model_profile(args: argparse.Namespace) -> dict[str, Any] | None:
+    profile = getattr(args, "_hf_finetune_model_profile", None)
+    return dict(profile) if isinstance(profile, dict) else None
+
+
+def _apply_profile_metadata(
+    payload: dict[str, Any],
+    args: argparse.Namespace,
+) -> dict[str, Any]:
+    profile = _resolved_model_profile(args)
+    if profile is None:
+        return payload
+    payload.setdefault("model_profile_id", profile.get("profile_id"))
+    payload.setdefault("model_profile_extends", profile.get("extends"))
+    payload.setdefault("model_profile", profile)
+    payload.setdefault("model_name", profile.get("model_name"))
+    dataset = _profile_section(profile, "dataset")
+    payload.setdefault("dataset_name", dataset.get("name"))
+    payload.setdefault("dataset_config", dataset.get("config"))
+    return payload
+
+
 def _trace_only_card(args: argparse.Namespace) -> dict[str, Any]:
     trace_path = args.trainer_trace_jsonl
     if trace_path is None:
         raise TypeError("trace-only card requires --trainer-trace-jsonl")
     run_dir = args.run_dir or trace_path.parent
-    return {
-        "row_type": "hf_finetune_run_card",
-        "model_name": args.model_name,
-        "dataset_name": args.dataset_name,
-        "dataset_config": args.dataset_config,
-        "output_dir": str(run_dir),
-        "run_dir": str(run_dir),
-        "trainer_trace_jsonl": str(trace_path),
-    }
+    return _apply_profile_metadata(
+        {
+            "row_type": "hf_finetune_run_card",
+            "model_name": args.model_name,
+            "dataset_name": args.dataset_name,
+            "dataset_config": args.dataset_config,
+            "output_dir": str(run_dir),
+            "run_dir": str(run_dir),
+            "trainer_trace_jsonl": str(trace_path),
+        },
+        args,
+    )
 
 
 def _card_source(args: argparse.Namespace) -> str | Path | dict[str, Any]:
     if args.run_card is None:
         return _trace_only_card(args)
     if args.trainer_trace_jsonl is None and args.run_dir is None:
-        return args.run_card
+        payload = st.load_hf_finetune_run_card(args.run_card)
+        return _apply_profile_metadata(payload, args)
     payload = st.load_hf_finetune_run_card(args.run_card)
     if args.trainer_trace_jsonl is not None:
         payload["trainer_trace_jsonl"] = str(args.trainer_trace_jsonl)
@@ -109,7 +193,7 @@ def _card_source(args: argparse.Namespace) -> str | Path | dict[str, Any]:
         payload["dataset_name"] = args.dataset_name
     if args.dataset_config is not None:
         payload["dataset_config"] = args.dataset_config
-    return payload
+    return _apply_profile_metadata(payload, args)
 
 
 def build_report(args: argparse.Namespace) -> dict[str, Any]:

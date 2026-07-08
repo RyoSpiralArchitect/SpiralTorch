@@ -24,6 +24,7 @@ from .runtime_imports import (
 
 __all__ = [
     "HF_FINETUNE_DEFAULT_DEVICE_BACKENDS",
+    "HF_FINETUNE_DEFAULT_MODEL_PROFILE",
     "HF_FINETUNE_DEFAULT_MODEL_CONFIGS",
     "HF_FINETUNE_MODEL_CONFIG_SCHEMA",
     "HF_FINETUNE_RUN_CARD_FILENAME",
@@ -204,6 +205,7 @@ HF_GPT2_FT_REQUIRED_RUST_SURFACES = [
     },
 ]
 HF_FINETUNE_MODEL_CONFIG_SCHEMA = "spiraltorch.hf_finetune_model_configs.v1"
+HF_FINETUNE_DEFAULT_MODEL_PROFILE = "causal-lm-local-smoke"
 HF_FINETUNE_MODEL_PROFILE_PREFLIGHT_PRESETS: dict[str, str] = {
     "finetune": "hf-finetune",
     "full": "hf-full-finetune",
@@ -279,7 +281,7 @@ def _genericize_hf_finetune_lines(lines: Sequence[object]) -> list[str]:
     return [_genericize_hf_finetune_line(str(line)) for line in lines]
 HF_FINETUNE_DEFAULT_MODEL_CONFIGS: dict[str, object] = {
     "schema": HF_FINETUNE_MODEL_CONFIG_SCHEMA,
-    "default_profile": "causal-lm-local-smoke",
+    "default_profile": HF_FINETUNE_DEFAULT_MODEL_PROFILE,
     "profiles": [
         {
             "id": "causal-lm-local-smoke",
@@ -5683,6 +5685,9 @@ def summarize_hf_gpt2_finetune_run_card(
         "row_type": "hf_gpt2_finetune_run_card_summary",
         "run_label": _run_label(card, source_path=source_path, run_label=run_label),
         "run_card_path": source_path,
+        "model_profile_id": card.get("model_profile_id"),
+        "model_profile_extends": _hf_finetune_profile_extends_from_payload(card),
+        "model_profile": card.get("model_profile"),
         "model_name": card.get("model_name"),
         "dataset_name": card.get("dataset_name"),
         "dataset_config": card.get("dataset_config"),
@@ -7172,6 +7177,9 @@ def hf_gpt2_finetune_generation_curve_report(
         "row_type": "hf_gpt2_finetune_generation_curve",
         "status": "complete",
         "run_card_path": source_path,
+        "model_profile_id": card.get("model_profile_id"),
+        "model_profile_extends": _hf_finetune_profile_extends_from_payload(card),
+        "model_profile": card.get("model_profile"),
         "model_name": card.get("model_name"),
         "dataset_name": card.get("dataset_name"),
         "dataset_config": card.get("dataset_config"),

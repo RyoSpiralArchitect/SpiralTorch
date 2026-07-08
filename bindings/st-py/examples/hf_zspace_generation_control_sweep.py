@@ -14,10 +14,11 @@ if str(EXAMPLES_ROOT) not in sys.path:
 
 import hf_gpt2_zspace_generation_control_sweep as _legacy  # noqa: E402
 from hf_gpt2_zspace_generation_control_sweep import *  # noqa: F401,F403,E402
+import spiraltorch as st  # noqa: E402
 
 
 DEFAULT_OUT = Path("runs/hf-zspace-generation-control-sweep.json")
-DEFAULT_MODEL_PROFILE = "causal-lm-local-smoke"
+DEFAULT_MODEL_PROFILE = st.HF_FINETUNE_DEFAULT_MODEL_PROFILE
 
 
 def _generic_row_type(value):

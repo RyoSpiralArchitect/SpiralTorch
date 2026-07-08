@@ -1274,8 +1274,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                         str(trace_jsonl),
                         "--run-dir",
                         str(run_dir),
-                        "--model-name",
-                        "EleutherAI/pythia-70m-deduped",
+                        "--model-configs",
+                        str(MODEL_CONFIGS_PATH),
+                        "--model-profile",
+                        "pythia-70m-local-smoke",
                         "--out",
                         str(out),
                         "--lines-out",
@@ -1292,6 +1294,13 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             self.assertNotIn("hf_gpt2_ft_generation_curve", stdout_text)
             self.assertEqual(payload["row_type"], "hf_finetune_generation_curve")
             self.assertEqual(payload["model_name"], "EleutherAI/pythia-70m-deduped")
+            self.assertEqual(payload["dataset_name"], "wikitext")
+            self.assertEqual(payload["dataset_config"], "wikitext-2-raw-v1")
+            self.assertEqual(payload["model_profile_id"], "pythia-70m-local-smoke")
+            self.assertEqual(
+                payload["model_profile"]["profile_id"],
+                "pythia-70m-local-smoke",
+            )
             self.assertNotIn("hf_gpt2", json.dumps(payload))
             self.assertEqual(payload["recommended_step"], 2048)
             self.assertEqual(payload["recommended_eval_loss"], 3.4)
@@ -10289,6 +10298,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             "spiraltorch.hf_finetune_model_configs.v1",
         )
         self.assertEqual(
+            st.HF_FINETUNE_DEFAULT_MODEL_PROFILE,
+            "causal-lm-local-smoke",
+        )
+        self.assertEqual(
             st.HF_FINETUNE_RUN_CARD_FILENAME,
             "spiraltorch-hf-finetune-run-card.json",
         )
@@ -10305,6 +10318,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             "spiraltorch-hf-gpt2-ft-trainer-trace.jsonl",
         )
         profile_exports = [
+            "HF_FINETUNE_DEFAULT_MODEL_PROFILE",
             "HF_FINETUNE_DEFAULT_MODEL_CONFIGS",
             "HF_FINETUNE_MODEL_CONFIG_SCHEMA",
             "HF_FINETUNE_RUN_CARD_FILENAME",

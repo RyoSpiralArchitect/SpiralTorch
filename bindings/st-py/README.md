@@ -692,6 +692,22 @@ PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_checkpoint_generatio
   --dry-run
 ```
 
+When a long FT run is still live, `spiral-hf-generation-curve` can join
+checkpoint generation-control sweeps with a trainer trace before the final run
+card exists. Pass the same `--model-configs/--model-profile` to stamp model and
+dataset metadata into the curve artifact instead of hand-writing `--model-name`:
+
+```bash
+spiral-hf-generation-curve \
+  runs/local-causal-lm-zspace-ft/prompt-spiral-checkpoint-2048-generation-control-sweep.json \
+  --trainer-trace-jsonl runs/local-causal-lm-zspace-ft/spiraltorch-hf-finetune-trainer-trace.jsonl \
+  --run-dir runs/local-causal-lm-zspace-ft \
+  --model-configs bindings/st-py/examples/hf_finetune_model_configs.example.json \
+  --model-profile local-causal-lm-template \
+  --out runs/local-causal-lm-zspace-ft/generation-curve.json \
+  --lines-out runs/local-causal-lm-zspace-ft/generation-curve.lines
+```
+
 It writes `sweep-plan.json` before launching runs and `sweep-report.json` after
 the run cards are available, plus `scale-up-command.json` with the
 distortion-adjusted next-run command when a completed candidate is available,
