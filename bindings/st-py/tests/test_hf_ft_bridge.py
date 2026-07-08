@@ -8375,6 +8375,61 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             local_contract["token_estimator"]["source"],
             "profile_runtime_default",
         )
+        recovered_contract = st.hf_finetune_model_profile_runtime_contract_from_artifact(
+            {
+                "row_type": "zspace_inference_distortion_runtime_plan",
+                "model_profile_runtime_contract": contract,
+            }
+        )
+        self.assertEqual(recovered_contract["profile_id"], "qwen2-0.5b-local-smoke")
+        self.assertEqual(
+            recovered_contract["source_artifact_row_type"],
+            "zspace_inference_distortion_runtime_plan",
+        )
+        self.assertEqual(
+            recovered_contract["source_artifact_contract_path"],
+            "model_profile_runtime_contract",
+        )
+        self.assertEqual(
+            recovered_contract["source_artifact_contract_basis"],
+            "embedded_contract",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_path = Path(tmp) / "checkpoint-control.json"
+            artifact_path.write_text(
+                json.dumps(
+                    {
+                        "row_type": "hf_checkpoint_generation_control",
+                        "model_profile": contract["model_profile"],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            recovered_from_profile = (
+                st.hf_finetune_model_profile_runtime_contract_from_artifact(
+                    artifact_path
+                )
+            )
+        self.assertEqual(
+            recovered_from_profile["profile_id"],
+            "qwen2-0.5b-local-smoke",
+        )
+        self.assertEqual(
+            recovered_from_profile["source_artifact_path"],
+            str(artifact_path),
+        )
+        self.assertEqual(
+            recovered_from_profile["source_artifact_contract_basis"],
+            "model_profile",
+        )
+        self.assertIn(
+            "--generation-zspace-top-k",
+            recovered_from_profile["generation_control_bridge_cli_args"],
+        )
+        with self.assertRaisesRegex(ValueError, "does not contain"):
+            st.hf_finetune_model_profile_runtime_contract_from_artifact(
+                {"row_type": "empty"}
+            )
 
     def test_generic_hf_finetune_model_profile_catalog_summarizes_profiles(
         self,
@@ -10732,6 +10787,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             "hf_finetune_model_profile_lines",
             "hf_finetune_model_profile_preflight_lines",
             "hf_finetune_model_profile_preflight_report",
+            "hf_finetune_model_profile_runtime_contract_from_artifact",
             "hf_finetune_model_profile_runtime_contract",
             "hf_finetune_model_profile_runtime_contract_lines",
             "load_hf_finetune_model_profile_launch_plan",
@@ -10956,6 +11012,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("hf_finetune_model_profile_launch_script", st.__all__)
         self.assertIn("hf_finetune_model_profile_preflight_lines", st.__all__)
         self.assertIn("hf_finetune_model_profile_preflight_report", st.__all__)
+        self.assertIn(
+            "hf_finetune_model_profile_runtime_contract_from_artifact",
+            st.__all__,
+        )
         self.assertIn("hf_finetune_model_profile_runtime_contract", st.__all__)
         self.assertIn("hf_finetune_model_profile_runtime_contract_lines", st.__all__)
         self.assertIn("compare_hf_gpt2_finetune_run_cards", st.__all__)
@@ -11023,6 +11083,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIs(
             st.hf_finetune_model_profile_runtime_contract,
             hf_ft.hf_finetune_model_profile_runtime_contract,
+        )
+        self.assertIs(
+            st.hf_finetune_model_profile_runtime_contract_from_artifact,
+            hf_ft.hf_finetune_model_profile_runtime_contract_from_artifact,
         )
         self.assertIs(
             st.hf_finetune_model_profile_runtime_contract_lines,

@@ -68,6 +68,7 @@ __all__ = [
     "hf_finetune_model_profile_lines",
     "hf_finetune_model_profile_preflight_lines",
     "hf_finetune_model_profile_preflight_report",
+    "hf_finetune_model_profile_runtime_contract_from_artifact",
     "hf_finetune_model_profile_runtime_contract",
     "hf_finetune_model_profile_runtime_contract_lines",
     "hf_finetune_model_profiles",
@@ -2257,6 +2258,91 @@ def hf_finetune_model_profile_runtime_contract(
         "model_profile": resolved,
         "model_profile_lines": hf_finetune_model_profile_lines(resolved),
     }
+
+
+def _hf_finetune_embedded_runtime_contract(
+    value: object,
+    *,
+    key_path: tuple[str, ...] = (),
+) -> tuple[dict[str, object], tuple[str, ...], str] | None:
+    if isinstance(value, Mapping):
+        payload = dict(value)
+        if payload.get("row_type") == "hf_finetune_model_profile_runtime_contract":
+            return payload, key_path, "embedded_contract"
+        nested = payload.get("model_profile_runtime_contract")
+        if isinstance(nested, Mapping):
+            found = _hf_finetune_embedded_runtime_contract(
+                nested,
+                key_path=(*key_path, "model_profile_runtime_contract"),
+            )
+            if found is not None:
+                return found
+        profile = payload.get("model_profile")
+        if isinstance(profile, Mapping):
+            profile_payload = dict(profile)
+            if (
+                profile_payload.get("row_type") == "hf_finetune_model_profile"
+                or "model_name" in profile_payload
+            ):
+                return (
+                    hf_finetune_model_profile_runtime_contract(profile_payload),
+                    (*key_path, "model_profile"),
+                    "model_profile",
+                )
+        for key, item in payload.items():
+            if key in {"model_profile", "model_profile_runtime_contract"}:
+                continue
+            found = _hf_finetune_embedded_runtime_contract(
+                item,
+                key_path=(*key_path, str(key)),
+            )
+            if found is not None:
+                return found
+    elif isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        for index, item in enumerate(value):
+            found = _hf_finetune_embedded_runtime_contract(
+                item,
+                key_path=(*key_path, f"[{index}]"),
+            )
+            if found is not None:
+                return found
+    return None
+
+
+def hf_finetune_model_profile_runtime_contract_from_artifact(
+    artifact: Mapping[str, object] | str | Path,
+    *,
+    mode: str = "inference",
+) -> dict[str, object]:
+    """Recover a replayable model-profile runtime contract from an artifact."""
+
+    source_path = None
+    if isinstance(artifact, Mapping):
+        payload = dict(artifact)
+    else:
+        path = Path(artifact)
+        payload = _load_json_or_last_jsonl_mapping(path)
+        source_path = str(path)
+    found = _hf_finetune_embedded_runtime_contract(payload)
+    if found is None:
+        if "profiles" in payload:
+            contract = hf_finetune_model_profile_runtime_contract(payload, mode=mode)
+            key_path: tuple[str, ...] = ()
+            basis = "model_config"
+        else:
+            row_type = payload.get("row_type")
+            raise ValueError(
+                "artifact does not contain a HF model-profile runtime contract "
+                f"or model_profile: row_type={row_type!r}"
+            )
+    else:
+        contract, key_path, basis = found
+    recovered = dict(contract)
+    recovered["source_artifact_path"] = source_path
+    recovered["source_artifact_row_type"] = payload.get("row_type")
+    recovered["source_artifact_contract_path"] = ".".join(key_path)
+    recovered["source_artifact_contract_basis"] = basis
+    return recovered
 
 
 def hf_finetune_model_profile_runtime_contract_lines(

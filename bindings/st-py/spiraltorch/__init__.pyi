@@ -566,6 +566,7 @@ hf_finetune_model_profile_launch_script: Callable[..., str]
 hf_finetune_model_profile_lines: Callable[..., List[str]]
 hf_finetune_model_profile_preflight_report: Callable[..., Dict[str, Any]]
 hf_finetune_model_profile_preflight_lines: Callable[..., List[str]]
+hf_finetune_model_profile_runtime_contract_from_artifact: Callable[..., Dict[str, Any]]
 hf_finetune_model_profile_runtime_contract: Callable[..., Dict[str, Any]]
 hf_finetune_model_profile_runtime_contract_lines: Callable[..., List[str]]
 load_hf_finetune_model_profile_launch_plan: Callable[..., Dict[str, Any]]
@@ -9130,6 +9131,7 @@ __all__ = [
     "hf_finetune_model_profile_lines",
     "hf_finetune_model_profile_preflight_lines",
     "hf_finetune_model_profile_preflight_report",
+    "hf_finetune_model_profile_runtime_contract_from_artifact",
     "hf_finetune_model_profile_runtime_contract",
     "hf_finetune_model_profile_runtime_contract_lines",
     "hf_finetune_model_profiles",

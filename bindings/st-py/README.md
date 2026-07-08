@@ -462,7 +462,10 @@ knobs, runtime preset, rough token-estimate policy, focused generation-control
 CLI args, and expanded local-inference runtime CLI args. The same contract is
 embedded into profile-backed inference-distortion runtime plans and checkpoint
 generation-control reports, so downstream artifacts can be replayed or audited
-without re-resolving the model config. Add
+without re-resolving the model config. Use
+`st.hf_finetune_model_profile_runtime_contract_from_artifact(...)` to recover
+that contract from a saved run card/report JSON when you are stitching a later
+FT, local-HF inference probe, or Z-Space generation-control run back together. Add
 `--preflight` to probe the selected profile's inference, finetune, PEFT, or
 TRL-SFT runtime preset before launching a long run; add `--require` when that
 probe should act as a CI/local gate instead of an observational report. Add
