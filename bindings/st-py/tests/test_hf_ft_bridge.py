@@ -938,6 +938,20 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(handoff["runtime_ready_backends"], ["wgpu"])
         self.assertEqual(handoff["geometry_status"], "ok")
         self.assertEqual(handoff["geometry_derivative_l2"], 12.5)
+        self.assertEqual(
+            handoff["recommended_runtime_adapter_kind"],
+            "spiraltorch.zspace_inference_distortion_adapter",
+        )
+        self.assertEqual(
+            handoff["recommended_runtime_adapter_context_origin"],
+            "zspace:inference_distortion",
+        )
+        self.assertEqual(handoff["recommended_runtime_adapter_context_weight"], 1.0)
+        self.assertEqual(
+            handoff["recommended_runtime_adapter"]["kind"],
+            "spiraltorch.zspace_inference_distortion_adapter",
+        )
+        self.assertIn("temperature", handoff["recommended_runtime_adapter_request"])
         self.assertEqual(handoff["recommended_api_compatibility_score"], 0.84)
         self.assertEqual(handoff["desire_pressure"], 0.8)
         self.assertEqual(handoff["psi_total"], 0.7)
@@ -954,6 +968,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("api_compat=0.84", handoff_lines[0])
         self.assertIn("runtime=ok", handoff_lines[0])
         self.assertIn("geom=12.5", handoff_lines[0])
+        self.assertIn(
+            "adapter=spiraltorch.zspace_inference_distortion_adapter",
+            handoff_lines[0],
+        )
         self.assertIn("retry_dropped=1", handoff_lines[0])
 
     def test_inference_distortion_handoff_report_accepts_probe_artifact(self) -> None:
@@ -1053,6 +1071,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(handoff["runtime_preflight_status"], "ok")
         self.assertTrue(handoff["runtime_ready"])
         self.assertEqual(handoff["geometry_derivative_l2"], 13.5)
+        self.assertEqual(
+            handoff["recommended_runtime_adapter_kind"],
+            "spiraltorch.zspace_inference_distortion_adapter",
+        )
+        self.assertEqual(
+            handoff["recommended_runtime_adapter"]["context_partial"]["origin"],
+            "zspace:inference_distortion",
+        )
         self.assertEqual(
             handoff["source_row_type"],
             "zspace_inference_distortion_probe",
@@ -1169,6 +1195,27 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             "coherence": 0.5,
             "api_provider": "fake",
             "api_model": "fake-distorted-api",
+            "recommended_runtime_adapter": {
+                "kind": "spiraltorch.zspace_inference_distortion_adapter",
+                "request": {"temperature": 1.05, "top_p": 0.82},
+                "context_partial": {
+                    "origin": "zspace:inference_distortion",
+                    "weight": 1.0,
+                    "metrics": {"speed": 0.7, "memory": 0.4, "stability": 0.5},
+                    "telemetry": {"zspace.distortion.energy": 0.4},
+                },
+            },
+            "recommended_runtime_adapter_kind": (
+                "spiraltorch.zspace_inference_distortion_adapter"
+            ),
+            "recommended_runtime_adapter_request": {
+                "temperature": 1.05,
+                "top_p": 0.82,
+            },
+            "recommended_runtime_adapter_context_origin": (
+                "zspace:inference_distortion"
+            ),
+            "recommended_runtime_adapter_context_weight": 1.0,
             "runtime_preflight_status": "ok",
             "runtime_ready": True,
             "runtime_ready_backends": ["wgpu"],
@@ -1453,6 +1500,18 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(summary["inference_distortion_desire_pressure"], 0.8)
         self.assertEqual(summary["inference_distortion_psi_total"], 0.7)
         self.assertEqual(summary["inference_distortion_api_provider"], "fake")
+        self.assertEqual(
+            summary["inference_distortion_runtime_adapter_kind"],
+            "spiraltorch.zspace_inference_distortion_adapter",
+        )
+        self.assertEqual(
+            summary["inference_distortion_runtime_adapter_context_origin"],
+            "zspace:inference_distortion",
+        )
+        self.assertEqual(
+            summary["inference_distortion_runtime_adapter_request_temperature"],
+            1.05,
+        )
         self.assertEqual(summary["inference_distortion_runtime_preflight_status"], "ok")
         self.assertTrue(summary["inference_distortion_runtime_ready"])
         self.assertEqual(summary["inference_distortion_runtime_ready_backends"], "wgpu")
@@ -1567,6 +1626,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(
             sweep_summary["inference_distortion_runtime_preflight_status"],
             "ok",
+        )
+        self.assertEqual(
+            sweep_summary["inference_distortion_runtime_adapter_kind"],
+            "spiraltorch.zspace_inference_distortion_adapter",
+        )
+        self.assertEqual(
+            sweep_summary["inference_distortion_runtime_adapter_request_temperature"],
+            1.05,
         )
         self.assertEqual(
             sweep_summary["inference_distortion_geometry_derivative_l2"],
@@ -4190,6 +4257,19 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 "include_penalties": True,
                 "api_request_dropped_key_count": 2,
                 "api_request_retry_dropped_key_count": 1,
+                "recommended_runtime_adapter": {
+                    "kind": "spiraltorch.zspace_inference_distortion_adapter",
+                    "request": {"temperature": 1.05, "top_p": 0.82},
+                    "context_partial": {
+                        "origin": "zspace:inference_distortion",
+                        "weight": 1.0,
+                        "metrics": {"speed": 0.7},
+                    },
+                },
+                "recommended_runtime_adapter_request": {
+                    "temperature": 1.05,
+                    "top_p": 0.82,
+                },
                 "recommended_processor_kwargs": {
                     "repression_strength": 1.7,
                     "ngram_repression_strength": 0.9,
@@ -4231,6 +4311,20 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(
             telemetry["hf_ft.inference_distortion.api_request_dropped_key_count"],
             2,
+        )
+        self.assertEqual(
+            telemetry["hf_ft.inference_distortion.runtime_adapter_present"],
+            1.0,
+        )
+        self.assertEqual(
+            telemetry[
+                "hf_ft.inference_distortion.runtime_adapter_request_temperature"
+            ],
+            1.05,
+        )
+        self.assertEqual(
+            telemetry["hf_ft.inference_distortion.runtime_adapter_request_top_p"],
+            0.82,
         )
         self.assertEqual(
             telemetry["hf_ft.inference_distortion.logits_repression_strength"],

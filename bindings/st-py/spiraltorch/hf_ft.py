@@ -513,6 +513,72 @@ def hf_gpt2_finetune_generation_report(
     }
 
 
+_INFERENCE_DISTORTION_ADAPTER_CONFIG_KEYS = frozenset(
+    {
+        "desire_pressure",
+        "desire_stability",
+        "psi_total",
+        "coherence",
+        "distortion_strength",
+        "bundle_weight",
+        "origin",
+        "telemetry_prefix",
+        "gradient_dim",
+        "base_temperature",
+        "base_top_p",
+        "min_temperature",
+        "max_temperature",
+        "min_top_p",
+        "max_top_p",
+        "include_temperature",
+        "include_top_p",
+        "include_penalties",
+        "base_frequency_penalty",
+        "base_presence_penalty",
+        "top_k",
+        "curvature",
+        "entropy_target",
+        "entropy_gain",
+        "repression_window",
+        "base_repression_strength",
+        "base_last_token_repression",
+        "ngram_size",
+        "ngram_window",
+        "base_ngram_repression_strength",
+        "ngram_decay",
+        "use_native_zspace",
+    }
+)
+
+
+def _inference_distortion_runtime_adapter_from_config(
+    config: Mapping[str, object],
+    *,
+    runtime: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    """Rebuild a serializable API/HF runtime adapter from handoff config."""
+
+    if not config:
+        return {}
+    from .api_llm_runtime import api_llm_zspace_inference_distortion_adapter
+
+    kwargs = {
+        key: config.get(key)
+        for key in sorted(_INFERENCE_DISTORTION_ADAPTER_CONFIG_KEYS)
+        if config.get(key) is not None
+    }
+    runtime_mapping = dict(runtime or {})
+    for key in ("activation_name_contains", "activation_module_names"):
+        values = _unique(config.get(key) or runtime_mapping.get(key))
+        if values:
+            kwargs[key] = values
+    try:
+        adapter = api_llm_zspace_inference_distortion_adapter(**kwargs)
+    except Exception:
+        return {}
+    return _json_safe(adapter) if isinstance(adapter, Mapping) else {}
+
+
 def hf_gpt2_finetune_inference_distortion_handoff_report(
     report_or_path: str | Path | Mapping[str, object],
     *,
@@ -582,6 +648,13 @@ def hf_gpt2_finetune_inference_distortion_handoff_report(
     request_filter = _mapping_item(summary, "recommended_request_filter")
     processor_kwargs = _mapping_item(summary, "recommended_processor_kwargs")
     activation_hook = _mapping_item(summary, "recommended_activation_hook")
+    runtime_adapter = (
+        _inference_distortion_runtime_adapter_from_config(config, runtime=runtime)
+        if config
+        else {}
+    )
+    runtime_adapter_request = _mapping_item(runtime_adapter, "request")
+    runtime_adapter_context = _mapping_item(runtime_adapter, "context_partial")
     top_probes = summary.get("top_probes")
     best_probe = (
         dict(top_probes[0])
@@ -642,6 +715,15 @@ def hf_gpt2_finetune_inference_distortion_handoff_report(
         "recommended_config": config or None,
         "recommended_request": request or None,
         "recommended_request_filter": request_filter or None,
+        "recommended_runtime_adapter": runtime_adapter or None,
+        "recommended_runtime_adapter_kind": runtime_adapter.get("kind"),
+        "recommended_runtime_adapter_request": runtime_adapter_request or None,
+        "recommended_runtime_adapter_context_origin": runtime_adapter_context.get(
+            "origin"
+        ),
+        "recommended_runtime_adapter_context_weight": _safe_number(
+            runtime_adapter_context.get("weight")
+        ),
         "recommended_processor_kwargs": processor_kwargs or None,
         "recommended_bridge_cli_args": bridge_cli_args,
         "recommended_bridge_cli_display": _shell_join_args(bridge_cli_args),
@@ -751,6 +833,7 @@ def hf_gpt2_finetune_inference_distortion_handoff_lines(
             f"runtime={handoff.get('runtime_preflight_status')} "
             f"runtime_ready={handoff.get('runtime_ready')} "
             f"geom={handoff.get('geometry_derivative_l2')} "
+            f"adapter={handoff.get('recommended_runtime_adapter_kind')} "
             f"dropped={handoff.get('api_request_dropped_key_count')}"
             f" retry_dropped={handoff.get('api_request_retry_dropped_key_count')}"
         )
@@ -1172,6 +1255,13 @@ def _inference_distortion_telemetry_values(
         return {}
     config = _mapping_item(handoff, "recommended_config")
     request = _mapping_item(handoff, "recommended_request")
+    runtime_adapter = _mapping_item(handoff, "recommended_runtime_adapter")
+    runtime_adapter_request = _mapping_item(
+        handoff,
+        "recommended_runtime_adapter_request",
+    )
+    if not runtime_adapter_request:
+        runtime_adapter_request = _mapping_item(runtime_adapter, "request")
     processor = _mapping_item(handoff, "recommended_processor_kwargs")
     include_penalties = handoff.get("include_penalties")
     if include_penalties is None:
@@ -1213,6 +1303,15 @@ def _inference_distortion_telemetry_values(
         ),
         "inference_distortion.request_temperature": request.get("temperature"),
         "inference_distortion.request_top_p": request.get("top_p"),
+        "inference_distortion.runtime_adapter_present": (
+            1.0 if runtime_adapter else 0.0
+        ),
+        "inference_distortion.runtime_adapter_request_temperature": (
+            runtime_adapter_request.get("temperature")
+        ),
+        "inference_distortion.runtime_adapter_request_top_p": (
+            runtime_adapter_request.get("top_p")
+        ),
         "inference_distortion.api_request_dropped_key_count": handoff.get(
             "api_request_dropped_key_count"
         ),
@@ -2930,6 +3029,10 @@ def summarize_hf_gpt2_finetune_run_card(
     trainer_trace = _trainer_trace_summary_for_card(card)
     corpus_scan = _mapping_item(card, "corpus_scan_report")
     inference_handoff = _mapping_item(card, "inference_distortion_handoff")
+    inference_runtime_adapter_request = _mapping_item(
+        inference_handoff,
+        "recommended_runtime_adapter_request",
+    )
     inference_handoff_lines = _inference_handoff_lines_from_payload(
         card,
         inference_handoff,
@@ -3125,6 +3228,24 @@ def summarize_hf_gpt2_finetune_run_card(
         ),
         "inference_distortion_api_provider": inference_handoff.get("api_provider"),
         "inference_distortion_api_model": inference_handoff.get("api_model"),
+        "inference_distortion_runtime_adapter_kind": inference_handoff.get(
+            "recommended_runtime_adapter_kind"
+        ),
+        "inference_distortion_runtime_adapter_context_origin": inference_handoff.get(
+            "recommended_runtime_adapter_context_origin"
+        ),
+        "inference_distortion_runtime_adapter_context_weight": _metric_number(
+            inference_handoff,
+            "recommended_runtime_adapter_context_weight",
+        ),
+        "inference_distortion_runtime_adapter_request_temperature": _metric_number(
+            inference_runtime_adapter_request,
+            "temperature",
+        ),
+        "inference_distortion_runtime_adapter_request_top_p": _metric_number(
+            inference_runtime_adapter_request,
+            "top_p",
+        ),
         "inference_distortion_runtime_preflight_status": inference_handoff.get(
             "runtime_preflight_status"
         ),
@@ -3731,6 +3852,10 @@ def summarize_hf_gpt2_finetune_sweep_report(
     comparison = _mapping_item(report, "comparison")
     summaries = _sweep_summary_rows(comparison)
     inference_handoff = _mapping_item(report, "inference_distortion_handoff")
+    inference_runtime_adapter_request = _mapping_item(
+        inference_handoff,
+        "recommended_runtime_adapter_request",
+    )
     inference_handoff_lines = _inference_handoff_lines_from_payload(
         report,
         inference_handoff,
@@ -3966,6 +4091,24 @@ def summarize_hf_gpt2_finetune_sweep_report(
             "psi_total",
         ),
         "inference_distortion_api_provider": inference_handoff.get("api_provider"),
+        "inference_distortion_runtime_adapter_kind": inference_handoff.get(
+            "recommended_runtime_adapter_kind"
+        ),
+        "inference_distortion_runtime_adapter_context_origin": inference_handoff.get(
+            "recommended_runtime_adapter_context_origin"
+        ),
+        "inference_distortion_runtime_adapter_context_weight": _metric_number(
+            inference_handoff,
+            "recommended_runtime_adapter_context_weight",
+        ),
+        "inference_distortion_runtime_adapter_request_temperature": _metric_number(
+            inference_runtime_adapter_request,
+            "temperature",
+        ),
+        "inference_distortion_runtime_adapter_request_top_p": _metric_number(
+            inference_runtime_adapter_request,
+            "top_p",
+        ),
         "inference_distortion_runtime_preflight_status": inference_handoff.get(
             "runtime_preflight_status"
         ),
@@ -4116,6 +4259,7 @@ def summarize_hf_gpt2_finetune_sweep_report_lines(
             f"runtime={summary.get('inference_distortion_runtime_preflight_status')} "
             f"runtime_ready={summary.get('inference_distortion_runtime_ready')} "
             f"geom={summary.get('inference_distortion_geometry_derivative_l2')} "
+            f"adapter={summary.get('inference_distortion_runtime_adapter_kind')} "
             "api_dropped="
             f"{summary.get('inference_distortion_api_request_dropped_key_count')}"
             " api_retry_dropped="
