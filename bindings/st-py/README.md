@@ -79,6 +79,9 @@ PY
   checkpoint presets.
 - `LanguageWaveEncoder` + `Hypergrad` so Python callers can stream Z-space
   text, accumulate gradients, and project back into the Poincaré ball.
+- `spiraltorch.text` for contextual Lagrangian gates plus token-level semantic
+  scale stacks via `token_scale_stack` and `token_coherence_levels`, useful for
+  FT/runtime probes over local-HF embeddings.
 - `spiraltorch.frac` for Rust-backed fractional/Mellin/Z-space probes, including
   `fft_real`, `fft_complex32`, `fft_radix2`, and `fft_radix4` from
   `st-frac::fft` for lightweight spectrum checks during WASM, telemetry, and
@@ -135,8 +138,9 @@ value:
    `st.ImageTensor`, `st.TransformPipeline`, `st.vision_dataset_catalog`,
    `st.vision_model_catalog`, and `st.vision_transform_audit_catalog` for
    FT/WASM/runtime probes without dropping into Rust.
-6. Remaining `st-text` semantic helpers that are useful to WASM demos and
-   local-HF inference probes.
+6. `st-text::semantics` token helpers, now exposed as `st.token_scale_stack`
+   and `st.token_coherence_levels` so local-HF embeddings can be inspected with
+   the same semantic scale-stack implementation as Rust.
 - Hosted/API-model LLM runtime bridge via `ApiLLMZSpaceRuntime` so an
   OpenAI-compatible response mapping, SDK response object, or arbitrary API
   callable can be converted into Z-space metrics, usage/latency telemetry, and

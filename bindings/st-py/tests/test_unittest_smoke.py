@@ -1599,6 +1599,54 @@ class SpiralTorchSmokeTest(unittest.TestCase):
             with self.assertRaises(NotImplementedError):
                 st.kv.kv_redis_get_json("redis://127.0.0.1/", "spiral:test")
 
+    def test_text_token_scale_stack_smoke(self) -> None:
+        embeddings = st.Tensor(
+            4,
+            2,
+            [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                1.0,
+                1.0,
+                1.0,
+            ],
+        )
+        stack = st.token_scale_stack(
+            embeddings,
+            [1.0, 2.0, 3.0],
+            0.25,
+            metric="euclidean",
+        )
+        self.assertEqual(stack.mode, "semantic::euclidean")
+        self.assertEqual(len(stack.samples), 3)
+        self.assertGreater(stack.samples[0][1], 0.0)
+
+        levels = st.text.token_coherence_levels(
+            embeddings,
+            [1.0, 2.0, 3.0],
+            0.25,
+            [0.25, 0.5, 0.75],
+        )
+        self.assertEqual(len(levels), 3)
+        self.assertEqual(levels[0], 1.0)
+
+        row_stack = st.text.token_scale_stack(
+            [
+                [1.0, 0.0],
+                [1.0, 0.0],
+                [0.0, 1.0],
+                [0.0, 1.0],
+            ],
+            [1.0, 2.0],
+            0.1,
+            metric="cosine",
+        )
+        self.assertEqual(row_stack.mode, "semantic::cosine")
+        self.assertIn("token_scale_stack", st.__all__)
+
     def test_wgpu_kernel_catalog_smoke(self) -> None:
         self.assertIsInstance(st.wgpu_kernel_reports_available(), bool)
         if not st.wgpu_kernel_reports_available():

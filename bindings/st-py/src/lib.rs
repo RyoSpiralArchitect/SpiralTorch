@@ -452,6 +452,8 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
         "MaxwellSpiralKHint",
         "ContextualLagrangianGate",
         "ContextualPulseFrame",
+        "token_scale_stack",
+        "token_coherence_levels",
     ];
 
     #[cfg(feature = "robotics")]

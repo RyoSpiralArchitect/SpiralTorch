@@ -6283,6 +6283,15 @@ _mirror_into_module(
     reexport=False,
 )
 _mirror_into_module(
+    "text",
+    {
+        "ContextualLagrangianGate": ("text.ContextualLagrangianGate",),
+        "ContextualPulseFrame": ("text.ContextualPulseFrame",),
+        "token_scale_stack": ("text.token_scale_stack",),
+        "token_coherence_levels": ("text.token_coherence_levels",),
+    },
+)
+_mirror_into_module(
     "safety",
     {
         "drl_default_thresholds": ("safety.drl_default_thresholds",),
@@ -7829,6 +7838,7 @@ _CORE_EXPORTS = [
     "wgpu_kernel_reports_available","wgpu_kernel_catalog","wgpu_kernel_descriptor",
     "wgpu_rank_kernel_report","wgpu_kernel_report_from_rank_plan",
     "wgpu_softmax_kernel_report",
+    "token_scale_stack","token_coherence_levels",
     "init_backend","mps_probe","probe_gpu_path",
 ]
 for _name in _CORE_EXPORTS:

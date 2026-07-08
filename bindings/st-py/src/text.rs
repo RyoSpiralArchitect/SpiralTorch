@@ -1,20 +1,30 @@
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
+#[cfg(feature = "text")]
+use pyo3::wrap_pyfunction;
 use pyo3::Bound;
 
 #[cfg(feature = "text")]
 use pyo3::exceptions::PyValueError;
 
 #[cfg(feature = "text")]
-use crate::{psi_synchro::PyZPulse, tensor::tensor_err_to_py};
+use crate::{
+    psi_synchro::PyZPulse,
+    scale_stack::PyScaleStack,
+    tensor::{tensor_err_to_py, PyTensor},
+};
 
 #[cfg(feature = "text")]
 use st_core::theory::zpulse::ZScale;
+#[cfg(feature = "text")]
+use st_frac::scale_stack::{ScaleStackError, SemanticMetric};
 #[cfg(feature = "text")]
 use st_logic::contextual_observation::{
     Arrangement, Label, LagrangianGate, LagrangianGateConfig, MeaningProjection, OrientationGauge,
     PureAtom,
 };
+#[cfg(feature = "text")]
+use st_tensor::Tensor;
 #[cfg(feature = "text")]
 use st_text::{ResonanceNarrative, TextResonator};
 
@@ -27,6 +37,49 @@ fn parse_gauge(value: &str) -> PyResult<OrientationGauge> {
             "unknown gauge '{other}' (expected 'preserve' or 'swap')"
         ))),
     }
+}
+
+#[cfg(feature = "text")]
+fn parse_semantic_metric(value: &str) -> PyResult<SemanticMetric> {
+    match value.to_ascii_lowercase().as_str() {
+        "euclidean" | "l2" => Ok(SemanticMetric::Euclidean),
+        "cosine" | "cos" => Ok(SemanticMetric::Cosine),
+        other => Err(PyValueError::new_err(format!(
+            "unknown semantic metric '{other}', expected 'euclidean' or 'cosine'"
+        ))),
+    }
+}
+
+#[cfg(feature = "text")]
+fn scale_stack_err_to_py(err: ScaleStackError) -> PyErr {
+    PyValueError::new_err(err.to_string())
+}
+
+#[cfg(feature = "text")]
+fn embeddings_to_tensor(py: Python<'_>, embeddings: &Bound<'_, PyAny>) -> PyResult<Tensor> {
+    if let Ok(tensor) = embeddings.extract::<Py<PyTensor>>() {
+        return Ok(tensor.borrow(py).inner.clone());
+    }
+
+    let rows: Vec<Vec<f32>> = embeddings.extract().map_err(|_| {
+        PyValueError::new_err("embeddings must be a Tensor or sequence of token embedding rows")
+    })?;
+    let dims = rows.first().map(Vec::len).unwrap_or(0);
+    if dims == 0 {
+        return Err(PyValueError::new_err(
+            "token embeddings must include at least one feature dimension",
+        ));
+    }
+    if rows.iter().any(|row| row.len() != dims) {
+        return Err(PyValueError::new_err(
+            "token embedding rows must share the same feature dimension",
+        ));
+    }
+    let mut flat = Vec::with_capacity(rows.len() * dims);
+    for row in rows {
+        flat.extend_from_slice(&row);
+    }
+    Tensor::from_vec(flat.len() / dims, dims, flat).map_err(tensor_err_to_py)
 }
 
 #[cfg(feature = "text")]
@@ -66,6 +119,40 @@ fn build_arrangement(
         Some(edge_list) => Arrangement::new(placements, edge_list),
         None => Arrangement::from_line(placements),
     })
+}
+
+#[cfg(feature = "text")]
+#[pyfunction]
+#[pyo3(signature = (embeddings, scales, threshold, metric="euclidean"))]
+fn token_scale_stack(
+    py: Python<'_>,
+    embeddings: &Bound<'_, PyAny>,
+    scales: Vec<f64>,
+    threshold: f32,
+    metric: &str,
+) -> PyResult<PyScaleStack> {
+    let tensor = embeddings_to_tensor(py, embeddings)?;
+    let metric = parse_semantic_metric(metric)?;
+    let stack = st_text::semantics::token_scale_stack(&tensor, &scales, threshold, metric)
+        .map_err(scale_stack_err_to_py)?;
+    Ok(PyScaleStack::from_inner(stack))
+}
+
+#[cfg(feature = "text")]
+#[pyfunction]
+#[pyo3(signature = (embeddings, scales, threshold, levels, metric="euclidean"))]
+fn token_coherence_levels(
+    py: Python<'_>,
+    embeddings: &Bound<'_, PyAny>,
+    scales: Vec<f64>,
+    threshold: f32,
+    levels: Vec<f64>,
+    metric: &str,
+) -> PyResult<Vec<Option<f64>>> {
+    let tensor = embeddings_to_tensor(py, embeddings)?;
+    let metric = parse_semantic_metric(metric)?;
+    st_text::semantics::token_coherence_levels(&tensor, &scales, threshold, metric, &levels)
+        .map_err(scale_stack_err_to_py)
 }
 
 #[cfg(feature = "text")]
@@ -259,13 +346,22 @@ fn register_impl(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     )?;
     module.add_class::<PyContextualLagrangianGate>()?;
     module.add_class::<PyContextualPulseFrame>()?;
+    module.add_function(wrap_pyfunction!(token_scale_stack, &module)?)?;
+    module.add_function(wrap_pyfunction!(token_coherence_levels, &module)?)?;
     module.add(
         "__all__",
-        vec!["ContextualLagrangianGate", "ContextualPulseFrame"],
+        vec![
+            "ContextualLagrangianGate",
+            "ContextualPulseFrame",
+            "token_scale_stack",
+            "token_coherence_levels",
+        ],
     )?;
     let module_obj = module.to_object(py);
     parent.add_submodule(&module)?;
     parent.add("text", module_obj.clone_ref(py))?;
+    parent.add_function(wrap_pyfunction!(token_scale_stack, parent)?)?;
+    parent.add_function(wrap_pyfunction!(token_coherence_levels, parent)?)?;
     parent.add(
         "ContextualLagrangianGate",
         module.getattr("ContextualLagrangianGate")?,

@@ -7509,6 +7509,21 @@ class ContextualLagrangianGate:
     @property
     def gauge(self) -> str: ...
 
+def token_scale_stack(
+    embeddings: Tensor | Sequence[Sequence[float]],
+    scales: Sequence[float],
+    threshold: float,
+    metric: str = ...,
+) -> ScaleStack: ...
+
+def token_coherence_levels(
+    embeddings: Tensor | Sequence[Sequence[float]],
+    scales: Sequence[float],
+    threshold: float,
+    levels: Sequence[float],
+    metric: str = ...,
+) -> List[Optional[float]]: ...
+
 
 class ArnoldTonguePeak:
     @property
@@ -8347,6 +8362,29 @@ model_zoo: _ModelZooModule
 spiral_rl: ModuleType
 
 rec: ModuleType
+
+class _TextModule(ModuleType):
+    ContextualLagrangianGate: type[ContextualLagrangianGate]
+    ContextualPulseFrame: type[ContextualPulseFrame]
+
+    def token_scale_stack(
+        self,
+        embeddings: Tensor | Sequence[Sequence[float]],
+        scales: Sequence[float],
+        threshold: float,
+        metric: str = ...,
+    ) -> ScaleStack: ...
+
+    def token_coherence_levels(
+        self,
+        embeddings: Tensor | Sequence[Sequence[float]],
+        scales: Sequence[float],
+        threshold: float,
+        levels: Sequence[float],
+        metric: str = ...,
+    ) -> List[Optional[float]]: ...
+
+text: _TextModule
 
 class _SafetyModule(ModuleType):
     def drl_default_thresholds() -> Dict[str, Dict[str, float]]: ...
@@ -9874,6 +9912,8 @@ __all__ = [
     "RecEpochReport",
     "ContextualLagrangianGate",
     "ContextualPulseFrame",
+    "token_scale_stack",
+    "token_coherence_levels",
     "Recommender",
     "Agent",
     "AgentConfig",

@@ -27,7 +27,7 @@ pub struct PyScaleStack {
 }
 
 impl PyScaleStack {
-    fn from_inner(inner: ScaleStack) -> Self {
+    pub(crate) fn from_inner(inner: ScaleStack) -> Self {
         Self { inner }
     }
 }
