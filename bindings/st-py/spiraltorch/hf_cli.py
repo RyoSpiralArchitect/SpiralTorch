@@ -15,6 +15,8 @@ from .hf_ft import (
     hf_finetune_model_profile_catalog_lines,
     hf_finetune_model_profile_cli_args,
     hf_finetune_model_profile_lines,
+    hf_finetune_model_profile_preflight_lines,
+    hf_finetune_model_profile_preflight_report,
     resolve_hf_finetune_model_profile,
 )
 from .hf_generation import (
@@ -78,6 +80,42 @@ def profile_main(argv: Sequence[str] | None = None) -> int:
         action="store_true",
         help="List all available profiles in the selected config.",
     )
+    parser.add_argument(
+        "--preflight",
+        action="store_true",
+        help="Resolve the profile and run import/device preflight for a mode.",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=(
+            "runtime",
+            "inference",
+            "finetune",
+            "full-finetune",
+            "gpt2-ft",
+            "peft",
+            "trl-sft",
+        ),
+        default="finetune",
+        help="Runtime preset mode used with --preflight.",
+    )
+    parser.add_argument(
+        "--require",
+        action="store_true",
+        help="With --preflight, require the selected mode's runtime import preset.",
+    )
+    parser.add_argument("--runtime-device-backend", action="append", default=[])
+    parser.add_argument(
+        "--require-runtime-device-backend",
+        action="append",
+        default=[],
+    )
+    parser.add_argument(
+        "--require-runtime-device-ready-backend",
+        action="append",
+        default=[],
+    )
+    parser.add_argument("--require-wgpu-ready", action="store_true")
     parser.add_argument("--json", action="store_true")
     parser.add_argument(
         "--cli-args",
@@ -90,6 +128,10 @@ def profile_main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--no-generation", action="store_true")
     parser.add_argument("--no-runtime", action="store_true")
     args = parser.parse_args(argv)
+    if args.list and args.preflight:
+        parser.error("--list and --preflight are mutually exclusive")
+    if args.cli_args and args.preflight:
+        parser.error("--cli-args and --preflight are mutually exclusive")
     if args.list:
         catalog = hf_finetune_model_profile_catalog(args.model_configs)
         if args.json:
@@ -98,6 +140,25 @@ def profile_main(argv: Sequence[str] | None = None) -> int:
         for line in hf_finetune_model_profile_catalog_lines(catalog):
             print(line)
         return 0
+    if args.preflight:
+        required_ready_backends = list(args.require_runtime_device_ready_backend)
+        if args.require_wgpu_ready and "wgpu" not in required_ready_backends:
+            required_ready_backends.append("wgpu")
+        report = hf_finetune_model_profile_preflight_report(
+            args.model_configs,
+            profile=args.model_profile,
+            mode=args.mode,
+            require=args.require,
+            runtime_device_backends=args.runtime_device_backend,
+            required_runtime_device_backends=args.require_runtime_device_backend,
+            required_runtime_device_ready_backends=required_ready_backends,
+        )
+        if args.json:
+            print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+            return 0 if report["runtime_import_preflight_passed"] else 1
+        for line in hf_finetune_model_profile_preflight_lines(report):
+            print(line)
+        return 0 if report["runtime_import_preflight_passed"] else 1
     profile = resolve_hf_finetune_model_profile(
         args.model_configs,
         profile=args.model_profile,

@@ -553,8 +553,12 @@ HF_FINETUNE_REQUIRED_RUST_SURFACES: List[Dict[str, str]]
 load_hf_finetune_model_configs: Callable[..., Dict[str, Any]]
 hf_finetune_model_profiles: Callable[..., Dict[str, Dict[str, Any]]]
 resolve_hf_finetune_model_profile: Callable[..., Dict[str, Any]]
+hf_finetune_model_profile_catalog: Callable[..., Dict[str, Any]]
+hf_finetune_model_profile_catalog_lines: Callable[..., List[str]]
 hf_finetune_model_profile_cli_args: Callable[..., List[str]]
 hf_finetune_model_profile_lines: Callable[..., List[str]]
+hf_finetune_model_profile_preflight_report: Callable[..., Dict[str, Any]]
+hf_finetune_model_profile_preflight_lines: Callable[..., List[str]]
 hf_finetune_rust_dependency_report: Callable[..., Dict[str, Any]]
 hf_finetune_corpus_file_report: Callable[..., Dict[str, Any]]
 hf_finetune_corpus_scan_report: Callable[..., Dict[str, Any]]
@@ -9091,8 +9095,12 @@ __all__ = [
     "hf_finetune_inference_distortion_runtime_plan",
     "hf_finetune_milestone_lines",
     "hf_finetune_milestone_report",
+    "hf_finetune_model_profile_catalog",
+    "hf_finetune_model_profile_catalog_lines",
     "hf_finetune_model_profile_cli_args",
     "hf_finetune_model_profile_lines",
+    "hf_finetune_model_profile_preflight_lines",
+    "hf_finetune_model_profile_preflight_report",
     "hf_finetune_model_profiles",
     "hf_finetune_preflight_report",
     "hf_finetune_rust_dependency_report",

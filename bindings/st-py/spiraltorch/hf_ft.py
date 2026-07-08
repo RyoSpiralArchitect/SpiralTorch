@@ -16,6 +16,7 @@ from typing import Any
 from .hf_generation import zspace_generation_control_bridge_cli_args
 from .runtime_imports import (
     csv_label,
+    csv_values,
     runtime_import_preflight_report,
     runtime_import_preflight_summary_lines,
     write_runtime_import_preflight_report,
@@ -54,6 +55,8 @@ __all__ = [
     "hf_finetune_model_profile_catalog_lines",
     "hf_finetune_model_profile_cli_args",
     "hf_finetune_model_profile_lines",
+    "hf_finetune_model_profile_preflight_lines",
+    "hf_finetune_model_profile_preflight_report",
     "hf_finetune_model_profiles",
     "hf_finetune_rust_dependency_report",
     "hf_finetune_scale_up_command",
@@ -191,6 +194,15 @@ HF_GPT2_FT_REQUIRED_RUST_SURFACES = [
     },
 ]
 HF_FINETUNE_MODEL_CONFIG_SCHEMA = "spiraltorch.hf_finetune_model_configs.v1"
+HF_FINETUNE_MODEL_PROFILE_PREFLIGHT_PRESETS: dict[str, str] = {
+    "runtime": "hf-runtime",
+    "inference": "hf-runtime",
+    "finetune": "hf-finetune",
+    "full-finetune": "hf-gpt2-ft",
+    "gpt2-ft": "hf-gpt2-ft",
+    "peft": "hf-peft",
+    "trl-sft": "hf-trl-sft",
+}
 HF_FINETUNE_DEFAULT_MODEL_CONFIGS: dict[str, object] = {
     "schema": HF_FINETUNE_MODEL_CONFIG_SCHEMA,
     "default_profile": "gpt2-local-smoke",
@@ -764,6 +776,140 @@ def hf_finetune_model_profile_catalog_lines(
             f"allow_remote={row.get('allow_remote')} "
             f"trust_remote_code={row.get('trust_remote_code')}"
         )
+    return lines
+
+
+def _hf_finetune_profile_preflight_preset(mode: str) -> str:
+    key = str(mode or "").strip().lower()
+    preset = HF_FINETUNE_MODEL_PROFILE_PREFLIGHT_PRESETS.get(key)
+    if preset is None:
+        choices = ",".join(sorted(HF_FINETUNE_MODEL_PROFILE_PREFLIGHT_PRESETS))
+        raise ValueError(f"unknown profile preflight mode {mode!r}; choices={choices}")
+    return preset
+
+
+def hf_finetune_model_profile_preflight_report(
+    config: Mapping[str, object] | str | Path | None = None,
+    *,
+    profile: str | None = None,
+    mode: str = "finetune",
+    require: bool = False,
+    runtime_device_backends: object = None,
+    required_runtime_device_backends: object = None,
+    required_runtime_device_ready_backends: object = None,
+) -> dict[str, object]:
+    """Resolve one HF model profile and probe the matching runtime imports."""
+
+    resolved = resolve_hf_finetune_model_profile(config, profile=profile)
+    preset = _hf_finetune_profile_preflight_preset(mode)
+    runtime_report = runtime_import_preflight_report(
+        runtime_import_presets=[preset],
+        required_runtime_import_presets=[preset] if require else [],
+        runtime_device_backends=runtime_device_backends,
+        required_runtime_device_backends=required_runtime_device_backends,
+        required_runtime_device_ready_backends=required_runtime_device_ready_backends,
+    )
+    cli_args = hf_finetune_model_profile_cli_args(resolved)
+    passed = bool(runtime_report.get("runtime_import_preflight_passed"))
+    missing_runtime = bool(
+        csv_values(runtime_report.get("runtime_import_presets_failed"))
+    )
+    status = (
+        "ready"
+        if passed and not missing_runtime
+        else "blocked" if not passed else "needs_runtime"
+    )
+    return {
+        "row_type": "hf_finetune_model_profile_preflight",
+        "status": status,
+        "mode": str(mode),
+        "runtime_import_preset": preset,
+        "require_runtime_import_preset": bool(require),
+        "profile_id": resolved.get("profile_id"),
+        "model_name": resolved.get("model_name"),
+        "tokenizer_name": resolved.get("tokenizer_name"),
+        "architecture": resolved.get("architecture"),
+        "model_profile": resolved,
+        "model_profile_lines": hf_finetune_model_profile_lines(resolved),
+        "profile_cli_args": cli_args,
+        "profile_cli_args_display": shlex.join(cli_args),
+        "runtime_import_preflight": runtime_report,
+        "runtime_import_preflight_lines": runtime_import_preflight_summary_lines(
+            runtime_report
+        ),
+        "runtime_import_preflight_passed": passed,
+        "runtime_import_preflight_failures": runtime_report.get(
+            "runtime_import_preflight_failures"
+        ),
+        "runtime_import_presets": runtime_report.get("runtime_import_presets"),
+        "runtime_import_presets_satisfied": runtime_report.get(
+            "runtime_import_presets_satisfied"
+        ),
+        "runtime_import_presets_failed": runtime_report.get(
+            "runtime_import_presets_failed"
+        ),
+        "runtime_import_preset_missing_modules": runtime_report.get(
+            "runtime_import_preset_missing_modules"
+        ),
+        "runtime_import_failed_install_hints": runtime_report.get(
+            "runtime_import_failed_install_hints"
+        ),
+    }
+
+
+def hf_finetune_model_profile_preflight_lines(
+    report_or_config: Mapping[str, object] | str | Path | None = None,
+    *,
+    profile: str | None = None,
+    mode: str = "finetune",
+    require: bool = False,
+    runtime_device_backends: object = None,
+    required_runtime_device_backends: object = None,
+    required_runtime_device_ready_backends: object = None,
+) -> list[str]:
+    """Render compact lines for an HF model profile runtime preflight."""
+
+    report = (
+        dict(report_or_config)
+        if isinstance(report_or_config, Mapping)
+        and report_or_config.get("row_type") == "hf_finetune_model_profile_preflight"
+        else hf_finetune_model_profile_preflight_report(
+            report_or_config,
+            profile=profile,
+            mode=mode,
+            require=require,
+            runtime_device_backends=runtime_device_backends,
+            required_runtime_device_backends=required_runtime_device_backends,
+            required_runtime_device_ready_backends=required_runtime_device_ready_backends,
+        )
+    )
+    lines = [
+        (
+            "hf_ft_model_profile_preflight "
+            f"status={report.get('status')} "
+            f"profile={report.get('profile_id')} "
+            f"mode={report.get('mode')} "
+            f"preset={report.get('runtime_import_preset')} "
+            f"required={report.get('require_runtime_import_preset')} "
+            f"passed={report.get('runtime_import_preflight_passed')} "
+            f"failures={report.get('runtime_import_preflight_failures')}"
+        )
+    ]
+    profile_lines = report.get("model_profile_lines")
+    if isinstance(profile_lines, Sequence) and not isinstance(
+        profile_lines,
+        (str, bytes),
+    ):
+        lines.extend(str(line) for line in profile_lines)
+    runtime_lines = report.get("runtime_import_preflight_lines")
+    if isinstance(runtime_lines, Sequence) and not isinstance(
+        runtime_lines,
+        (str, bytes),
+    ):
+        lines.extend(str(line) for line in runtime_lines)
+    display = report.get("profile_cli_args_display")
+    if display:
+        lines.append(f"hf_ft_model_profile_cli_args {display}")
     return lines
 
 

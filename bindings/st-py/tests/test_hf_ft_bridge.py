@@ -7587,6 +7587,42 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             )
         )
 
+    def test_generic_hf_finetune_model_profile_preflight_reports_runtime_mode(
+        self,
+    ) -> None:
+        report = st.hf_finetune_model_profile_preflight_report(
+            MODEL_CONFIGS_PATH,
+            profile="qwen2-0.5b-local-smoke",
+            mode="inference",
+        )
+        lines = st.hf_finetune_model_profile_preflight_lines(report)
+        peft_report = st.hf_finetune_model_profile_preflight_report(
+            MODEL_CONFIGS_PATH,
+            profile="qwen2-0.5b-local-smoke",
+            mode="peft",
+            require=True,
+        )
+
+        self.assertEqual(report["row_type"], "hf_finetune_model_profile_preflight")
+        self.assertEqual(report["profile_id"], "qwen2-0.5b-local-smoke")
+        self.assertEqual(report["model_name"], "Qwen/Qwen2-0.5B")
+        self.assertEqual(report["mode"], "inference")
+        self.assertEqual(report["runtime_import_preset"], "hf-runtime")
+        self.assertFalse(report["require_runtime_import_preset"])
+        self.assertTrue(report["runtime_import_preflight_passed"])
+        self.assertIn(report["status"], {"ready", "needs_runtime"})
+        self.assertIn("Qwen/Qwen2-0.5B", report["profile_cli_args"])
+        self.assertIn("--generation-zspace-top-k", report["profile_cli_args"])
+        self.assertIn("hf_ft_model_profile_preflight ", lines[0])
+        self.assertTrue(
+            any(line.startswith("runtime_import_preflight ") for line in lines)
+        )
+        self.assertTrue(
+            any(line.startswith("hf_ft_model_profile_cli_args ") for line in lines)
+        )
+        self.assertEqual(peft_report["runtime_import_preset"], "hf-peft")
+        self.assertTrue(peft_report["require_runtime_import_preset"])
+
     def test_bridge_model_profile_defaults_and_explicit_overrides(self) -> None:
         module = load_bridge_example()
         args = module.parse_args(
@@ -7840,6 +7876,56 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             "hf_finetune_model_profile_catalog",
         )
         self.assertIn("qwen2-0.5b-local-smoke", list_payload["available_profiles"])
+
+        preflight_stdout = io.StringIO()
+        with redirect_stdout(preflight_stdout):
+            preflight_code = hf_cli.profile_main(
+                [
+                    "--model-configs",
+                    str(MODEL_CONFIGS_PATH),
+                    "--model-profile",
+                    "tiny-gpt2-ci",
+                    "--preflight",
+                    "--mode",
+                    "inference",
+                ]
+            )
+        preflight_lines = preflight_stdout.getvalue().splitlines()
+        self.assertEqual(preflight_code, 0)
+        self.assertTrue(
+            preflight_lines[0].startswith("hf_ft_model_profile_preflight ")
+        )
+        self.assertTrue(
+            any(
+                line.startswith("runtime_import_preflight ")
+                for line in preflight_lines
+            )
+        )
+
+        preflight_json_stdout = io.StringIO()
+        with redirect_stdout(preflight_json_stdout):
+            preflight_json_code = hf_cli.profile_main(
+                [
+                    "--model-configs",
+                    str(MODEL_CONFIGS_PATH),
+                    "--model-profile",
+                    "tiny-gpt2-ci",
+                    "--preflight",
+                    "--mode",
+                    "inference",
+                    "--json",
+                ]
+            )
+        preflight_payload = json.loads(preflight_json_stdout.getvalue())
+        self.assertEqual(preflight_json_code, 0)
+        self.assertEqual(
+            preflight_payload["row_type"],
+            "hf_finetune_model_profile_preflight",
+        )
+        self.assertEqual(preflight_payload["profile_id"], "tiny-gpt2-ci")
+        self.assertEqual(preflight_payload["mode"], "inference")
+        self.assertEqual(preflight_payload["runtime_import_preset"], "hf-runtime")
+        self.assertIn("sshleifer/tiny-gpt2", preflight_payload["profile_cli_args"])
 
     def test_installed_hf_finetune_sweep_cli_reaches_generic_wrapper(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -8891,6 +8977,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("hf_gpt2_finetune_trainer_trace_callback", st.__all__)
         self.assertIn("hf_finetune_model_profile_catalog", st.__all__)
         self.assertIn("hf_finetune_model_profile_catalog_lines", st.__all__)
+        self.assertIn("hf_finetune_model_profile_preflight_lines", st.__all__)
+        self.assertIn("hf_finetune_model_profile_preflight_report", st.__all__)
         self.assertIn("compare_hf_gpt2_finetune_run_cards", st.__all__)
         self.assertIn("load_hf_gpt2_finetune_run_card", st.__all__)
         self.assertIn("load_hf_gpt2_finetune_sweep_report", st.__all__)
@@ -8924,6 +9012,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIs(
             st.hf_finetune_model_profile_catalog_lines,
             hf_ft.hf_finetune_model_profile_catalog_lines,
+        )
+        self.assertIs(
+            st.hf_finetune_model_profile_preflight_lines,
+            hf_ft.hf_finetune_model_profile_preflight_lines,
+        )
+        self.assertIs(
+            st.hf_finetune_model_profile_preflight_report,
+            hf_ft.hf_finetune_model_profile_preflight_report,
         )
         self.assertIs(
             st.hf_gpt2_finetune_generation_curve_report,

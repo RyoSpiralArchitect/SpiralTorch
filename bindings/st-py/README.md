@@ -395,6 +395,19 @@ spiral-hf-profile \
   --model-profile qwen2-0.5b-local-smoke \
   --cli-args
 
+spiral-hf-profile \
+  --model-configs bindings/st-py/examples/hf_finetune_model_configs.example.json \
+  --model-profile qwen2-0.5b-local-smoke \
+  --preflight \
+  --mode inference
+
+spiral-hf-profile \
+  --model-configs bindings/st-py/examples/hf_finetune_model_configs.example.json \
+  --model-profile qwen2-0.5b-local-smoke \
+  --preflight \
+  --mode finetune \
+  --require
+
 PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_finetune_bridge.py \
   --model-configs bindings/st-py/examples/hf_finetune_model_configs.example.json \
   --model-profile gpt2-local-smoke \
@@ -406,7 +419,10 @@ PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_finetune_bridge.py \
 
 Use `spiral-hf-profile --list --json` or
 `st.hf_finetune_model_profile_catalog(...)` when automation needs the same
-profile catalog as structured data before choosing a model/run shape.
+profile catalog as structured data before choosing a model/run shape. Add
+`--preflight` to probe the selected profile's inference, finetune, PEFT, or
+TRL-SFT runtime preset before launching a long run; add `--require` when that
+probe should act as a CI/local gate instead of an observational report.
 
 After installing from a wheel, use the installed console entrypoint instead of
 the repo path:
