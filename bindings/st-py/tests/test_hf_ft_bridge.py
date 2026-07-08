@@ -5953,6 +5953,177 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(ready["milestone_eval_loss"], 3.2)
         self.assertTrue(ready["milestone_checkpoint_ready"])
 
+    def test_package_monitor_report_summarizes_watchers_and_milestone(self) -> None:
+        base_status = {
+            "row_type": "hf_gpt2_finetune_run_status",
+            "process_status": "alive",
+            "final_checkpoint_ready": False,
+            "checkpoint_count": 1,
+            "save_total_limit": 1,
+            "runtime_settings": {
+                "max_steps": 8192,
+                "eval_steps": 512,
+                "save_steps": 2048,
+                "save_total_limit": 1,
+                "min_free_disk_gb": 4.0,
+                "process_command_available": True,
+            },
+            "checkpoint_headroom": {
+                "resume_checkpoint_gb": 0.75,
+                "estimated_peak_checkpoint_gb": 1.5,
+                "free_after_estimated_peak_gb": 8.0,
+            },
+            "disk_free_gb": 9.5,
+            "disk_margin_gb": 5.5,
+            "disk_status": "ok",
+            "trace": {
+                "trace_last_loss": 3.4,
+                "trace_last_eval_loss": 3.27533,
+                "trace_last_eval_loss_step": 5632,
+                "trace_best_eval_loss_step": 5632,
+                "trace_eval_loss_projected_final_loss": 3.198825,
+                "trace_eval_loss_points": [
+                    {"step": 5632, "eval_loss": 3.27533}
+                ],
+                "training_loss_guard_count": 0,
+            },
+            "log_progress": {
+                "log_latest_step": 5800,
+                "log_max_steps": 8192,
+                "log_remaining_seconds": 390.0,
+            },
+            "eval_progress": {
+                "next_eval_step": 6144,
+                "log_steps_until_next_eval": 344,
+                "latest_due_eval_step": 5632,
+                "latest_due_eval_ready": True,
+                "pending_eval_step": None,
+                "log_steps_since_pending_eval": None,
+            },
+            "checkpoint_progress": {
+                "next_checkpoint_step": 6144,
+                "log_steps_until_next_checkpoint": 344,
+            },
+            "latest_checkpoint": {"name": "checkpoint-4096"},
+        }
+        direct_rows = [
+            {
+                **base_status,
+                "time_unix_s": 100.0,
+                "log_progress": {
+                    **base_status["log_progress"],
+                    "log_latest_step": 5700,
+                },
+            },
+            {**base_status, "time_unix_s": 200.0},
+        ]
+        eval_rows = [
+            {
+                **base_status,
+                "time_unix_s": 180.0,
+                "watch_stop_eval_step": 6144,
+                "watch_stop_eval_ready": False,
+            }
+        ]
+        wait_rows = [
+            {
+                "time_unix_s": 205.0,
+                "status": "waiting_for_process",
+                "process_alive": True,
+                "checkpoint_ready": False,
+                "launch_disk_guard": {
+                    "status": "ok",
+                    "min_free_gb": 4.0,
+                    "estimated_peak_checkpoint_gb": 2.8,
+                    "free_after_estimated_peak_gb": 5.6,
+                },
+            }
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            history_path = Path(tmp) / "direct-run-status-history.jsonl"
+            history_path.write_text(
+                "\n".join(json.dumps(row) for row in direct_rows) + "\n",
+                encoding="utf-8",
+            )
+            snapshot = st.hf_gpt2_finetune_monitor_report(
+                direct=history_path,
+                eval_watch=eval_rows,
+                checkpoint_watch=[],
+                final_watch=[],
+                wait_launch=wait_rows,
+                milestone_step=6144,
+                label="long-ft",
+                run_dir=Path(tmp) / "run",
+            )
+
+        lines = st.hf_gpt2_finetune_monitor_lines(snapshot)
+
+        self.assertEqual(snapshot["row_type"], "hf_gpt2_finetune_monitor_report")
+        self.assertEqual(snapshot["primary_watch"], "direct")
+        self.assertEqual(snapshot["process_status"], "alive")
+        self.assertEqual(snapshot["log_latest_step"], 5800)
+        self.assertEqual(snapshot["runtime_eval_steps"], 512)
+        self.assertTrue(snapshot["direct_status_available"])
+        self.assertEqual(snapshot["last_eval_loss_step"], 5632)
+        self.assertEqual(snapshot["last_eval_loss"], 3.27533)
+        self.assertEqual(snapshot["next_eval_step"], 6144)
+        self.assertEqual(snapshot["next_checkpoint_step"], 6144)
+        self.assertEqual(snapshot["wait_launch_status"], "waiting_for_process")
+        self.assertFalse(snapshot["wait_launch_launched"])
+        self.assertEqual(snapshot["wait_launch_disk_status"], "ok")
+        self.assertEqual(snapshot["wait_launch_disk_free_after_gb"], 5.6)
+        self.assertEqual(snapshot["milestone_status"], "waiting_for_step")
+        self.assertFalse(snapshot["milestone_ready"])
+        self.assertFalse(snapshot["milestone_eval_ready"])
+        self.assertFalse(snapshot["milestone_checkpoint_ready"])
+        self.assertIn("hf_gpt2_ft_monitor ", lines[0])
+        self.assertIn("label=long-ft", lines[0])
+        self.assertIn("primary=direct", lines[0])
+        self.assertIn("milestone_status=waiting_for_step", lines[0])
+        self.assertIn("wait_status=waiting_for_process", lines[0])
+        self.assertIn("name=direct", lines[1])
+        self.assertIn("rows=2", lines[1])
+        self.assertIn("name=eval", lines[2])
+        self.assertIn("rows=1", lines[2])
+        self.assertIn("hf_gpt2_ft_monitor_wait_launch", lines[-1])
+
+        ready_direct = {
+            **base_status,
+            "time_unix_s": 240.0,
+            "trace": {
+                **base_status["trace"],
+                "trace_last_eval_loss": 3.2,
+                "trace_last_eval_loss_step": 6144,
+                "trace_eval_loss_points": [
+                    *base_status["trace"]["trace_eval_loss_points"],
+                    {"step": 6144, "eval_loss": 3.2},
+                ],
+            },
+            "log_progress": {
+                **base_status["log_progress"],
+                "log_latest_step": 6144,
+            },
+        }
+        ready_snapshot = st.hf_gpt2_finetune_monitor_report(
+            direct=[ready_direct],
+            eval_watch=[ready_direct],
+            checkpoint_watch=[
+                {
+                    **ready_direct,
+                    "checkpoint_names": ["checkpoint-6144"],
+                    "latest_checkpoint": {"name": "checkpoint-6144"},
+                }
+            ],
+            milestone_step=6144,
+            label="ready-ft",
+        )
+
+        self.assertEqual(ready_snapshot["milestone_status"], "ready")
+        self.assertTrue(ready_snapshot["milestone_ready"])
+        self.assertTrue(ready_snapshot["milestone_eval_ready"])
+        self.assertTrue(ready_snapshot["milestone_checkpoint_ready"])
+        self.assertEqual(ready_snapshot["milestone_eval_loss"], 3.2)
+
     def test_package_milestone_report_tracks_run_status_readiness(self) -> None:
         waiting_status = {
             "row_type": "hf_gpt2_finetune_run_status",
@@ -6589,6 +6760,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         )
         self.assertIn("hf_gpt2_finetune_milestone_lines", st.__all__)
         self.assertIn("hf_gpt2_finetune_milestone_report", st.__all__)
+        self.assertIn("hf_gpt2_finetune_monitor_lines", st.__all__)
+        self.assertIn("hf_gpt2_finetune_monitor_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_preflight_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_scale_up_command", st.__all__)
         self.assertIn("hf_gpt2_finetune_scale_up_preflight_lines", st.__all__)
@@ -6644,6 +6817,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIs(
             st.hf_gpt2_finetune_milestone_report,
             hf_ft.hf_gpt2_finetune_milestone_report,
+        )
+        self.assertIs(
+            st.hf_gpt2_finetune_monitor_lines,
+            st.hf_ft_status.hf_gpt2_finetune_monitor_lines,
+        )
+        self.assertIs(
+            st.hf_gpt2_finetune_monitor_report,
+            st.hf_ft_status.hf_gpt2_finetune_monitor_report,
         )
         self.assertIs(
             st.hf_gpt2_finetune_training_telemetry_frame,

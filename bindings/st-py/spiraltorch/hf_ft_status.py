@@ -5,10 +5,13 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
 __all__ = [
+    "hf_gpt2_finetune_monitor_lines",
+    "hf_gpt2_finetune_monitor_report",
     "hf_gpt2_finetune_status_history_lines",
     "load_hf_gpt2_finetune_status_history",
     "main",
@@ -90,12 +93,59 @@ def _latest_checkpoint_name(row: dict[str, Any]) -> Any:
     checkpoint = row.get("latest_checkpoint")
     if isinstance(checkpoint, dict):
         return checkpoint.get("name")
+    if isinstance(checkpoint, str):
+        return Path(checkpoint).name
     return None
+
+
+def _checkpoint_name(value: Any) -> str | None:
+    if isinstance(value, Mapping):
+        name = value.get("name")
+        if isinstance(name, str) and name:
+            return name
+        path = value.get("path")
+        if isinstance(path, (str, Path)) and str(path):
+            return Path(path).name
+    if isinstance(value, (str, Path)) and str(value):
+        return Path(value).name
+    return None
+
+
+def _checkpoint_names(row: dict[str, Any]) -> list[str]:
+    names: list[str] = []
+    raw_names = row.get("checkpoint_names")
+    if isinstance(raw_names, Sequence) and not isinstance(raw_names, (str, bytes)):
+        names.extend(str(name) for name in raw_names if isinstance(name, str))
+    checkpoints = row.get("checkpoints")
+    if isinstance(checkpoints, Sequence) and not isinstance(checkpoints, (str, bytes)):
+        for checkpoint in checkpoints:
+            name = _checkpoint_name(checkpoint)
+            if name is not None:
+                names.append(name)
+    latest = _latest_checkpoint_name(row)
+    if isinstance(latest, str) and latest:
+        names.append(latest)
+    final_checkpoint = row.get("final_checkpoint")
+    if row.get("final_checkpoint_ready") is True and isinstance(final_checkpoint, str):
+        names.append(final_checkpoint)
+    return list(dict.fromkeys(names))
 
 
 def _checkpoint_headroom(row: dict[str, Any]) -> dict[str, Any]:
     headroom = row.get("checkpoint_headroom")
     return headroom if isinstance(headroom, dict) else {}
+
+
+def _launch_disk_guard(row: dict[str, Any]) -> dict[str, Any]:
+    guard = row.get("launch_disk_guard")
+    if isinstance(guard, dict):
+        return guard
+    return {
+        "status": row.get("launch_disk_status"),
+        "min_free_gb": row.get("launch_disk_min_free_gb"),
+        "estimated_peak_checkpoint_gb": row.get("launch_disk_peak_gb"),
+        "free_after_estimated_peak_gb": row.get("launch_disk_free_after_gb"),
+    }
 
 
 def _runtime_settings(row: dict[str, Any]) -> dict[str, Any]:
@@ -117,6 +167,28 @@ def _runtime_setting(row: dict[str, Any], field: str) -> Any:
     if field == "min_free_disk_gb":
         return row.get("min_free_disk_gb")
     return None
+
+
+def _coerce_status_rows(source: Any) -> tuple[list[dict[str, Any]], Path | None]:
+    if source is None:
+        return [], None
+    if isinstance(source, (str, Path)):
+        path = Path(source)
+        text = path.read_text(encoding="utf-8")
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError:
+            payload = None
+        if isinstance(payload, Mapping):
+            return [dict(payload)], path
+        if isinstance(payload, Sequence) and not isinstance(payload, (str, bytes)):
+            return [dict(row) for row in payload if isinstance(row, Mapping)], path
+        return load_hf_gpt2_finetune_status_history(path), path
+    if isinstance(source, Mapping):
+        return [dict(source)], None
+    if isinstance(source, Sequence) and not isinstance(source, (str, bytes)):
+        return [dict(row) for row in source if isinstance(row, Mapping)], None
+    raise TypeError("status source must be a path, mapping, sequence, or None")
 
 
 def _first_log_row(rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -183,6 +255,504 @@ def _eval_loss_points(row: dict[str, Any]) -> list[dict[str, Any]]:
             }
         )
     return rows
+
+
+def _duration_seconds(rows: list[dict[str, Any]]) -> float | None:
+    if not rows:
+        return None
+    first_time = rows[0].get("time_unix_s")
+    last_time = rows[-1].get("time_unix_s")
+    if isinstance(first_time, (int, float)) and isinstance(last_time, (int, float)):
+        return float(last_time) - float(first_time)
+    return None
+
+
+def _delta_log_step(rows: list[dict[str, Any]]) -> int | None:
+    if not rows:
+        return None
+    first_step = _nested(rows[0], "log_progress", "log_latest_step")
+    last_step = _nested(rows[-1], "log_progress", "log_latest_step")
+    if isinstance(first_step, int) and isinstance(last_step, int):
+        return last_step - first_step
+    return None
+
+
+def _log_steps_per_second(rows: list[dict[str, Any]]) -> float | None:
+    duration = _duration_seconds(rows)
+    delta = _delta_log_step(rows)
+    if duration is not None and duration > 0.0 and isinstance(delta, int):
+        return float(delta) / duration
+    return None
+
+
+def _estimated_seconds_with_fallback(
+    steps: Any,
+    rows: list[dict[str, Any]],
+    *,
+    total_steps: Any,
+    total_seconds: Any,
+) -> float | None:
+    rate = _log_steps_per_second(rows)
+    if isinstance(steps, int) and rate is not None and rate > 0.0:
+        return float(steps) / rate
+    if (
+        isinstance(steps, int)
+        and isinstance(total_steps, int)
+        and total_steps > 0
+        and isinstance(total_seconds, (int, float))
+    ):
+        return float(steps) * float(total_seconds) / float(total_steps)
+    return None
+
+
+def _monitor_watch_summary(
+    rows: list[dict[str, Any]],
+    *,
+    name: str,
+    source_path: Path | None,
+) -> dict[str, Any]:
+    last = rows[-1] if rows else {}
+    losses = [
+        _nested(row, "trace", "trace_last_loss")
+        for row in rows
+        if isinstance(_nested(row, "trace", "trace_last_loss"), (int, float))
+    ]
+    eval_losses = [
+        _nested(row, "trace", "trace_last_eval_loss")
+        for row in rows
+        if isinstance(_nested(row, "trace", "trace_last_eval_loss"), (int, float))
+    ]
+    log_step = _nested(last, "log_progress", "log_latest_step")
+    max_steps = _nested(last, "log_progress", "log_max_steps")
+    steps_until_final = (
+        max(int(max_steps) - int(log_step), 0)
+        if isinstance(max_steps, int) and isinstance(log_step, int)
+        else None
+    )
+    log_remaining_seconds = _nested(last, "log_progress", "log_remaining_seconds")
+    steps_until_next_eval = _nested(
+        last, "eval_progress", "log_steps_until_next_eval"
+    )
+    steps_until_next_checkpoint = _nested(
+        last, "checkpoint_progress", "log_steps_until_next_checkpoint"
+    )
+    checkpoint_headroom = _checkpoint_headroom(last)
+    return {
+        "name": name,
+        "source_path": str(source_path) if source_path is not None else None,
+        "row_count": len(rows),
+        "last_time_unix_s": last.get("time_unix_s"),
+        "duration_seconds": _duration_seconds(rows),
+        "delta_log_step": _delta_log_step(rows),
+        "log_steps_per_second": _log_steps_per_second(rows),
+        "process_status": last.get("process_status"),
+        "runtime_max_steps": _runtime_setting(last, "max_steps"),
+        "runtime_eval_steps": _runtime_setting(last, "eval_steps"),
+        "runtime_save_steps": _runtime_setting(last, "save_steps"),
+        "runtime_save_total_limit": _runtime_setting(last, "save_total_limit"),
+        "runtime_min_free_disk_gb": _runtime_setting(last, "min_free_disk_gb"),
+        "runtime_process_command_available": _runtime_setting(
+            last, "process_command_available"
+        ),
+        "log_latest_step": log_step,
+        "log_max_steps": max_steps,
+        "log_remaining_seconds": log_remaining_seconds,
+        "steps_until_final": steps_until_final,
+        "estimated_seconds_until_final": _estimated_seconds_with_fallback(
+            steps_until_final,
+            rows,
+            total_steps=steps_until_final,
+            total_seconds=log_remaining_seconds,
+        ),
+        "next_eval_step": _nested(last, "eval_progress", "next_eval_step"),
+        "steps_until_next_eval": steps_until_next_eval,
+        "estimated_seconds_until_next_eval": _estimated_seconds_with_fallback(
+            steps_until_next_eval,
+            rows,
+            total_steps=steps_until_final,
+            total_seconds=log_remaining_seconds,
+        ),
+        "latest_due_eval_step": _nested(
+            last, "eval_progress", "latest_due_eval_step"
+        ),
+        "latest_due_eval_ready": _nested(
+            last, "eval_progress", "latest_due_eval_ready"
+        ),
+        "pending_eval_step": _nested(last, "eval_progress", "pending_eval_step"),
+        "log_steps_since_pending_eval": _nested(
+            last, "eval_progress", "log_steps_since_pending_eval"
+        ),
+        "next_checkpoint_step": _nested(
+            last, "checkpoint_progress", "next_checkpoint_step"
+        ),
+        "steps_until_next_checkpoint": steps_until_next_checkpoint,
+        "estimated_seconds_until_next_checkpoint": _estimated_seconds_with_fallback(
+            steps_until_next_checkpoint,
+            rows,
+            total_steps=steps_until_final,
+            total_seconds=log_remaining_seconds,
+        ),
+        "last_loss": losses[-1] if losses else None,
+        "min_loss": min(losses) if losses else None,
+        "last_eval_loss": _nested(last, "trace", "trace_last_eval_loss"),
+        "last_eval_loss_step": _last_eval_loss_step(last),
+        "eval_loss_points": _eval_loss_points(last),
+        "min_eval_loss": min(eval_losses) if eval_losses else None,
+        "best_eval_loss_step": _nested(last, "trace", "trace_best_eval_loss_step"),
+        "eval_loss_improvement": _nested(
+            last, "trace", "trace_eval_loss_improvement"
+        ),
+        "eval_loss_last_delta": _nested(last, "trace", "trace_eval_loss_last_delta"),
+        "eval_loss_last_improvement_per_step": _nested(
+            last, "trace", "trace_eval_loss_last_improvement_per_step"
+        ),
+        "eval_loss_projected_final_loss": _nested(
+            last, "trace", "trace_eval_loss_projected_final_loss"
+        ),
+        "eval_loss_monotonic_nonincreasing": _nested(
+            last, "trace", "trace_eval_loss_monotonic_nonincreasing"
+        ),
+        "training_loss_guard_count": _nested(
+            last, "trace", "training_loss_guard_count"
+        ),
+        "final_checkpoint_ready": last.get("final_checkpoint_ready"),
+        "checkpoint_count": last.get("checkpoint_count"),
+        "latest_checkpoint": _latest_checkpoint_name(last),
+        "checkpoint_names": _checkpoint_names(last),
+        "save_total_limit": last.get("save_total_limit"),
+        "checkpoint_headroom_checkpoint_gb": checkpoint_headroom.get(
+            "resume_checkpoint_gb"
+        ),
+        "checkpoint_headroom_peak_gb": checkpoint_headroom.get(
+            "estimated_peak_checkpoint_gb"
+        ),
+        "checkpoint_headroom_free_after_gb": checkpoint_headroom.get(
+            "free_after_estimated_peak_gb"
+        ),
+        "disk_free_gb": last.get("disk_free_gb"),
+        "disk_margin_gb": last.get("disk_margin_gb"),
+        "disk_status": last.get("disk_status"),
+        "watch_stop_eval_step": last.get("watch_stop_eval_step"),
+        "watch_stop_eval_ready": last.get("watch_stop_eval_ready"),
+        "watch_stop_reason": last.get("watch_stop_reason"),
+    }
+
+
+def _wait_launch_summary(
+    rows: list[dict[str, Any]],
+    *,
+    source_path: Path | None,
+) -> dict[str, Any]:
+    last = rows[-1] if rows else {}
+    launch_disk_guard = _launch_disk_guard(last)
+    launched_rows = [
+        row
+        for row in rows
+        if row.get("launched_pid") is not None
+        or row.get("status") in {"launching", "launched", "finished", "launch_error"}
+    ]
+    return {
+        "source_path": str(source_path) if source_path is not None else None,
+        "row_count": len(rows),
+        "last_time_unix_s": last.get("time_unix_s"),
+        "duration_seconds": _duration_seconds(rows),
+        "status": last.get("status"),
+        "process_alive": last.get("process_alive"),
+        "checkpoint_ready": last.get("checkpoint_ready"),
+        "status_card_status": last.get("status_card_status"),
+        "launched": bool(launched_rows),
+        "launched_pid": last.get("launched_pid"),
+        "returncode": last.get("returncode"),
+        "launch_error": last.get("launch_error"),
+        "launch_disk_status": launch_disk_guard.get("status"),
+        "launch_disk_min_free_gb": launch_disk_guard.get("min_free_gb"),
+        "launch_disk_peak_gb": launch_disk_guard.get(
+            "estimated_peak_checkpoint_gb"
+        ),
+        "launch_disk_free_after_gb": launch_disk_guard.get(
+            "free_after_estimated_peak_gb"
+        ),
+    }
+
+
+def _latest_status_watch(watches: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    candidates = [
+        watch
+        for watch in watches.values()
+        if isinstance(watch.get("row_count"), int)
+        and int(watch.get("row_count") or 0) > 0
+    ]
+    if not candidates:
+        return {}
+    return max(
+        candidates,
+        key=lambda watch: (
+            watch.get("last_time_unix_s")
+            if isinstance(watch.get("last_time_unix_s"), (int, float))
+            else -1.0,
+            watch.get("name") or "",
+        ),
+    )
+
+
+def _watch_field_with_direct_fallback(
+    primary: dict[str, Any],
+    direct: dict[str, Any],
+    field: str,
+) -> Any:
+    value = primary.get(field)
+    return direct.get(field) if value is None else value
+
+
+def _watch_nullable_field_with_direct_fallback(
+    primary: dict[str, Any],
+    direct: dict[str, Any],
+    field: str,
+) -> Any:
+    if int(primary.get("row_count") or 0) > 0 and field in primary:
+        return primary.get(field)
+    return direct.get(field)
+
+
+def hf_gpt2_finetune_monitor_report(
+    *,
+    direct: Any = None,
+    eval_watch: Any = None,
+    checkpoint_watch: Any = None,
+    final_watch: Any = None,
+    wait_launch: Any = None,
+    milestone_step: int | None = None,
+    label: str | None = None,
+    run_dir: str | Path | None = None,
+    next_run_dir: str | Path | None = None,
+) -> dict[str, Any]:
+    """Build an importable monitor snapshot from FT status/watch artifacts."""
+
+    sources = {
+        "direct": _coerce_status_rows(direct),
+        "eval": _coerce_status_rows(eval_watch),
+        "checkpoint": _coerce_status_rows(checkpoint_watch),
+        "final": _coerce_status_rows(final_watch),
+    }
+    watches = {
+        name: _monitor_watch_summary(rows, name=name, source_path=source_path)
+        for name, (rows, source_path) in sources.items()
+    }
+    wait_rows, wait_source = _coerce_status_rows(wait_launch)
+    wait_summary = _wait_launch_summary(wait_rows, source_path=wait_source)
+    primary = _latest_status_watch(watches)
+    direct_watch = watches["direct"]
+    all_times = [
+        value
+        for value in [
+            *(watch.get("last_time_unix_s") for watch in watches.values()),
+            wait_summary.get("last_time_unix_s"),
+        ]
+        if isinstance(value, (int, float))
+    ]
+    snapshot = {
+        "row_type": "hf_gpt2_finetune_monitor_report",
+        "label": label,
+        "run_dir": None if run_dir is None else str(run_dir),
+        "next_run_dir": None if next_run_dir is None else str(next_run_dir),
+        "time_unix_s": max(all_times) if all_times else None,
+        "primary_watch": primary.get("name"),
+        "process_status": primary.get("process_status"),
+        "runtime_max_steps": _watch_field_with_direct_fallback(
+            primary, direct_watch, "runtime_max_steps"
+        ),
+        "runtime_eval_steps": _watch_field_with_direct_fallback(
+            primary, direct_watch, "runtime_eval_steps"
+        ),
+        "runtime_save_steps": _watch_field_with_direct_fallback(
+            primary, direct_watch, "runtime_save_steps"
+        ),
+        "runtime_save_total_limit": _watch_field_with_direct_fallback(
+            primary, direct_watch, "runtime_save_total_limit"
+        ),
+        "runtime_min_free_disk_gb": _watch_field_with_direct_fallback(
+            primary, direct_watch, "runtime_min_free_disk_gb"
+        ),
+        "runtime_process_command_available": _watch_field_with_direct_fallback(
+            primary, direct_watch, "runtime_process_command_available"
+        ),
+        "log_latest_step": primary.get("log_latest_step"),
+        "log_max_steps": primary.get("log_max_steps"),
+        "log_remaining_seconds": primary.get("log_remaining_seconds"),
+        "steps_until_final": primary.get("steps_until_final"),
+        "estimated_seconds_until_final": primary.get(
+            "estimated_seconds_until_final"
+        ),
+        "last_loss": primary.get("last_loss"),
+        "min_loss": primary.get("min_loss"),
+        "last_eval_loss": primary.get("last_eval_loss"),
+        "last_eval_loss_step": primary.get("last_eval_loss_step"),
+        "min_eval_loss": primary.get("min_eval_loss"),
+        "best_eval_loss_step": primary.get("best_eval_loss_step"),
+        "eval_loss_improvement": primary.get("eval_loss_improvement"),
+        "eval_loss_last_delta": primary.get("eval_loss_last_delta"),
+        "eval_loss_last_improvement_per_step": primary.get(
+            "eval_loss_last_improvement_per_step"
+        ),
+        "eval_loss_projected_final_loss": primary.get(
+            "eval_loss_projected_final_loss"
+        ),
+        "eval_loss_monotonic_nonincreasing": primary.get(
+            "eval_loss_monotonic_nonincreasing"
+        ),
+        "next_eval_step": primary.get("next_eval_step"),
+        "steps_until_next_eval": primary.get("steps_until_next_eval"),
+        "estimated_seconds_until_next_eval": primary.get(
+            "estimated_seconds_until_next_eval"
+        ),
+        "latest_due_eval_step": _watch_field_with_direct_fallback(
+            primary, direct_watch, "latest_due_eval_step"
+        ),
+        "latest_due_eval_ready": _watch_field_with_direct_fallback(
+            primary, direct_watch, "latest_due_eval_ready"
+        ),
+        "pending_eval_step": _watch_nullable_field_with_direct_fallback(
+            primary, direct_watch, "pending_eval_step"
+        ),
+        "log_steps_since_pending_eval": _watch_nullable_field_with_direct_fallback(
+            primary, direct_watch, "log_steps_since_pending_eval"
+        ),
+        "next_checkpoint_step": primary.get("next_checkpoint_step"),
+        "steps_until_next_checkpoint": primary.get("steps_until_next_checkpoint"),
+        "estimated_seconds_until_next_checkpoint": primary.get(
+            "estimated_seconds_until_next_checkpoint"
+        ),
+        "training_loss_guard_count": primary.get("training_loss_guard_count"),
+        "final_checkpoint_ready": primary.get("final_checkpoint_ready"),
+        "checkpoint_count": primary.get("checkpoint_count"),
+        "latest_checkpoint": primary.get("latest_checkpoint"),
+        "save_total_limit": _watch_field_with_direct_fallback(
+            primary, direct_watch, "save_total_limit"
+        ),
+        "checkpoint_headroom_checkpoint_gb": _watch_field_with_direct_fallback(
+            primary, direct_watch, "checkpoint_headroom_checkpoint_gb"
+        ),
+        "checkpoint_headroom_peak_gb": _watch_field_with_direct_fallback(
+            primary, direct_watch, "checkpoint_headroom_peak_gb"
+        ),
+        "checkpoint_headroom_free_after_gb": _watch_field_with_direct_fallback(
+            primary, direct_watch, "checkpoint_headroom_free_after_gb"
+        ),
+        "disk_free_gb": primary.get("disk_free_gb"),
+        "disk_margin_gb": primary.get("disk_margin_gb"),
+        "disk_status": primary.get("disk_status"),
+        "direct_status_available": bool(direct_watch.get("row_count")),
+        "eval_watch_ready": watches["eval"].get("watch_stop_eval_ready"),
+        "eval_watch_step": watches["eval"].get("watch_stop_eval_step"),
+        "checkpoint_watch_reason": watches["checkpoint"].get("watch_stop_reason"),
+        "checkpoint_watch_final_ready": watches["checkpoint"].get(
+            "final_checkpoint_ready"
+        ),
+        "final_watch_reason": watches["final"].get("watch_stop_reason"),
+        "final_watch_ready": watches["final"].get("final_checkpoint_ready"),
+        "wait_launch_status": wait_summary.get("status"),
+        "wait_launch_checkpoint_ready": wait_summary.get("checkpoint_ready"),
+        "wait_launch_launched": wait_summary.get("launched"),
+        "wait_launch_launched_pid": wait_summary.get("launched_pid"),
+        "wait_launch_disk_status": wait_summary.get("launch_disk_status"),
+        "wait_launch_disk_free_after_gb": wait_summary.get(
+            "launch_disk_free_after_gb"
+        ),
+        "watches": watches,
+        "wait_launch": wait_summary,
+    }
+    if milestone_step is not None:
+        from .hf_ft import hf_gpt2_finetune_milestone_report
+
+        milestone = hf_gpt2_finetune_milestone_report(
+            {
+                **primary,
+                "watches": watches,
+                "row_type": "hf_gpt2_finetune_monitor_primary",
+            },
+            milestone_step=milestone_step,
+            label=label,
+        )
+        snapshot.update(
+            {key: value for key, value in milestone.items() if key.startswith("milestone_")}
+        )
+    return snapshot
+
+
+def hf_gpt2_finetune_monitor_lines(snapshot: dict[str, Any]) -> list[str]:
+    """Render compact lines from an FT monitor report."""
+
+    label = snapshot.get("label") or "monitor"
+    lines = [
+        (
+            "hf_gpt2_ft_monitor "
+            f"label={label} "
+            f"primary={_number_text(snapshot.get('primary_watch'))} "
+            f"process={_number_text(snapshot.get('process_status'))} "
+            f"log_step={_number_text(snapshot.get('log_latest_step'))} "
+            f"max_steps={_number_text(snapshot.get('log_max_steps'))} "
+            f"runtime_max_steps={_number_text(snapshot.get('runtime_max_steps'))} "
+            f"runtime_eval_steps={_number_text(snapshot.get('runtime_eval_steps'))} "
+            f"runtime_save_steps={_number_text(snapshot.get('runtime_save_steps'))} "
+            f"log_remaining_seconds={_number_text(snapshot.get('log_remaining_seconds'))} "
+            f"estimated_seconds_until_final={_number_text(snapshot.get('estimated_seconds_until_final'))} "
+            f"last_eval_step={_number_text(snapshot.get('last_eval_loss_step'))} "
+            f"last_eval_loss={_number_text(snapshot.get('last_eval_loss'))} "
+            f"eval_loss_projected_final={_number_text(snapshot.get('eval_loss_projected_final_loss'))} "
+            f"next_eval_step={_number_text(snapshot.get('next_eval_step'))} "
+            f"latest_due_eval_ready={_number_text(snapshot.get('latest_due_eval_ready'))} "
+            f"pending_eval_step={_number_text(snapshot.get('pending_eval_step'))} "
+            f"next_checkpoint_step={_number_text(snapshot.get('next_checkpoint_step'))} "
+            f"final_ready={_number_text(snapshot.get('final_checkpoint_ready'))} "
+            f"latest_checkpoint={_number_text(snapshot.get('latest_checkpoint'))} "
+            f"disk_status={_number_text(snapshot.get('disk_status'))} "
+            f"disk_margin_gb={_number_text(snapshot.get('disk_margin_gb'))} "
+            f"milestone_step={_number_text(snapshot.get('milestone_step'))} "
+            f"milestone_status={_number_text(snapshot.get('milestone_status'))} "
+            f"milestone_ready={_number_text(snapshot.get('milestone_ready'))} "
+            f"milestone_eval_ready={_number_text(snapshot.get('milestone_eval_ready'))} "
+            f"milestone_checkpoint_ready={_number_text(snapshot.get('milestone_checkpoint_ready'))} "
+            f"wait_status={_number_text(snapshot.get('wait_launch_status'))} "
+            f"wait_launched={_number_text(snapshot.get('wait_launch_launched'))}"
+        )
+    ]
+    watches = snapshot.get("watches")
+    if isinstance(watches, dict):
+        for name in ("direct", "eval", "checkpoint", "final"):
+            watch = watches.get(name)
+            if not isinstance(watch, dict):
+                continue
+            lines.append(
+                (
+                    "hf_gpt2_ft_monitor_watch "
+                    f"name={name} "
+                    f"rows={_number_text(watch.get('row_count'))} "
+                    f"log_step={_number_text(watch.get('log_latest_step'))} "
+                    f"last_eval_step={_number_text(watch.get('last_eval_loss_step'))} "
+                    f"last_eval_loss={_number_text(watch.get('last_eval_loss'))} "
+                    f"next_eval_step={_number_text(watch.get('next_eval_step'))} "
+                    f"next_checkpoint_step={_number_text(watch.get('next_checkpoint_step'))} "
+                    f"final_ready={_number_text(watch.get('final_checkpoint_ready'))} "
+                    f"watch_stop_eval_ready={_number_text(watch.get('watch_stop_eval_ready'))} "
+                    f"watch_stop_reason={_number_text(watch.get('watch_stop_reason'))}"
+                )
+            )
+    wait_launch = snapshot.get("wait_launch")
+    if isinstance(wait_launch, dict):
+        lines.append(
+            (
+                "hf_gpt2_ft_monitor_wait_launch "
+                f"rows={_number_text(wait_launch.get('row_count'))} "
+                f"status={_number_text(wait_launch.get('status'))} "
+                f"process_alive={_number_text(wait_launch.get('process_alive'))} "
+                f"checkpoint_ready={_number_text(wait_launch.get('checkpoint_ready'))} "
+                f"launch_disk_status={_number_text(wait_launch.get('launch_disk_status'))} "
+                f"launch_disk_free_after_gb={_number_text(wait_launch.get('launch_disk_free_after_gb'))} "
+                f"launched={_number_text(wait_launch.get('launched'))} "
+                f"launched_pid={_number_text(wait_launch.get('launched_pid'))}"
+            )
+        )
+    return lines
 
 
 def summarize_hf_gpt2_finetune_status_history(

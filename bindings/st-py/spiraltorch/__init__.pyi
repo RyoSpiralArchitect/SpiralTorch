@@ -58,6 +58,23 @@ def hf_gpt2_finetune_status_history_lines(
     tail_evals: int = ...,
 ) -> List[str]: ...
 
+def hf_gpt2_finetune_monitor_report(
+    *,
+    direct: Any = ...,
+    eval_watch: Any = ...,
+    checkpoint_watch: Any = ...,
+    final_watch: Any = ...,
+    wait_launch: Any = ...,
+    milestone_step: int | None = ...,
+    label: str | None = ...,
+    run_dir: str | PathLike[str] | None = ...,
+    next_run_dir: str | PathLike[str] | None = ...,
+) -> Dict[str, Any]: ...
+
+def hf_gpt2_finetune_monitor_lines(
+    snapshot: Dict[str, Any],
+) -> List[str]: ...
+
 def summarize_transformers_trainer_runtime_bridge(
     transformers_trace_jsonl: str,
     trainer_trace_jsonl: str,
@@ -8633,6 +8650,8 @@ __all__ = [
     "hf_gpt2_finetune_milestone_report",
     "hf_gpt2_finetune_preflight_report",
     "hf_gpt2_finetune_rust_dependency_report",
+    "hf_gpt2_finetune_monitor_lines",
+    "hf_gpt2_finetune_monitor_report",
     "hf_gpt2_finetune_status_history_lines",
     "hf_gpt2_finetune_scale_up_command",
     "hf_gpt2_finetune_scale_up_preflight_lines",

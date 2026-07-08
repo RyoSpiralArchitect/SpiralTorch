@@ -819,6 +819,8 @@ from .hf_ft import (
 
 from . import hf_ft_status as hf_ft_status
 from .hf_ft_status import (
+    hf_gpt2_finetune_monitor_lines,
+    hf_gpt2_finetune_monitor_report,
     hf_gpt2_finetune_status_history_lines,
     load_hf_gpt2_finetune_status_history,
     summarize_hf_gpt2_finetune_status_history,
@@ -1012,6 +1014,8 @@ _EXTRAS = [
     "hf_gpt2_finetune_milestone_report",
     "hf_gpt2_finetune_preflight_report",
     "hf_gpt2_finetune_rust_dependency_report",
+    "hf_gpt2_finetune_monitor_lines",
+    "hf_gpt2_finetune_monitor_report",
     "hf_gpt2_finetune_status_history_lines",
     "hf_gpt2_finetune_scale_up_command",
     "hf_gpt2_finetune_scale_up_preflight_lines",
