@@ -3757,6 +3757,60 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertTrue(any("launch_disk_status=ok" in line for line in lines))
         self.assertTrue(any("launch_disk_free_after_gb=10" in line for line in lines))
 
+    def test_wait_launch_summary_reconstructs_legacy_disk_guard(self) -> None:
+        module = load_wait_launch_summary_example()
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source_checkpoint = tmp_path / "checkpoint-6144"
+            source_checkpoint.mkdir()
+            (source_checkpoint / "model.safetensors").write_text(
+                "ready",
+                encoding="utf-8",
+            )
+            checkpoint = tmp_path / "checkpoint-8192"
+            output_dir = tmp_path / "next-run"
+            history = tmp_path / "wait-launch-history.jsonl"
+            row = {
+                "row_type": "hf_gpt2_finetune_wait_launch",
+                "status": "waiting_for_process",
+                "time_unix_s": 10.0,
+                "process_alive": True,
+                "checkpoint": str(checkpoint),
+                "checkpoint_ready": False,
+                "command": [
+                    sys.executable,
+                    "bindings/st-py/examples/hf_gpt2_finetune_bridge.py",
+                    "--resume-from-checkpoint",
+                    str(checkpoint),
+                    "--output-dir",
+                    str(output_dir),
+                    "--save-total-limit",
+                    "1",
+                    "--min-free-disk-gb",
+                    "0",
+                ],
+            }
+            history.write_text(json.dumps(row) + "\n", encoding="utf-8")
+            loaded = module._load_history(history)
+            summary = module.summarize_history(
+                loaded,
+                label="legacy",
+                history_jsonl=history,
+            )
+            lines = module.history_lines(summary, loaded, tail=1)
+            guard = module._launch_disk_guard(loaded[0])
+
+        self.assertEqual(summary["last_launch_disk_status"], "reconstructed_ok")
+        self.assertEqual(summary["last_launch_disk_min_free_gb"], 0.0)
+        self.assertGreater(summary["last_launch_disk_free_after_gb"], 0.0)
+        self.assertEqual(guard["resume_checkpoint_bytes"], 5)
+        self.assertEqual(
+            guard["resume_checkpoint_estimate_source"],
+            str(source_checkpoint),
+        )
+        self.assertIn("launch_disk_status=reconstructed_ok", lines[0])
+        self.assertIn("launch_disk_status=reconstructed_ok", lines[1])
+
     def test_wait_launch_summary_example_require_launched_fails_before_launch(self) -> None:
         module = load_wait_launch_summary_example()
         with tempfile.TemporaryDirectory() as tmp:
@@ -5366,6 +5420,53 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertTrue(ready["milestone_step_reached"])
         self.assertEqual(ready["milestone_eval_loss"], 3.2)
         self.assertTrue(ready["milestone_checkpoint_ready"])
+
+    def test_monitor_snapshot_reconstructs_legacy_wait_launch_disk_guard(
+        self,
+    ) -> None:
+        module = load_monitor_snapshot_example()
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source_checkpoint = tmp_path / "checkpoint-6144"
+            source_checkpoint.mkdir()
+            (source_checkpoint / "model.safetensors").write_text(
+                "ready",
+                encoding="utf-8",
+            )
+            checkpoint = tmp_path / "checkpoint-8192"
+            output_dir = tmp_path / "next-run"
+            rows = [
+                {
+                    "row_type": "hf_gpt2_finetune_wait_launch",
+                    "status": "waiting_for_process",
+                    "time_unix_s": 10.0,
+                    "process_alive": True,
+                    "checkpoint": str(checkpoint),
+                    "checkpoint_ready": False,
+                    "command": [
+                        sys.executable,
+                        "bindings/st-py/examples/hf_gpt2_finetune_bridge.py",
+                        "--resume-from-checkpoint",
+                        str(checkpoint),
+                        "--output-dir",
+                        str(output_dir),
+                        "--save-total-limit",
+                        "1",
+                        "--min-free-disk-gb",
+                        "0",
+                    ],
+                }
+            ]
+            summary = module._wait_launch_summary(rows, history_jsonl=None)
+            guard = module._launch_disk_guard(rows[0])
+
+        self.assertEqual(summary["launch_disk_status"], "reconstructed_ok")
+        self.assertGreater(summary["launch_disk_free_after_gb"], 0.0)
+        self.assertEqual(guard["resume_checkpoint_bytes"], 5)
+        self.assertEqual(
+            guard["resume_checkpoint_estimate_source"],
+            str(source_checkpoint),
+        )
 
     def test_milestone_capture_example_refreshes_status_and_monitor(self) -> None:
         module = load_milestone_capture_example()

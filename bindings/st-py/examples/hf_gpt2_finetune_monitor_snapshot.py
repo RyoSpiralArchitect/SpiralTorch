@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import sys
 from pathlib import Path
 from typing import Any
@@ -145,7 +146,196 @@ def _checkpoint_headroom(row: dict[str, Any]) -> dict[str, Any]:
 
 def _launch_disk_guard(row: dict[str, Any]) -> dict[str, Any]:
     guard = row.get("launch_disk_guard")
-    return guard if isinstance(guard, dict) else {}
+    if isinstance(guard, dict):
+        return guard
+    return _reconstructed_launch_disk_guard(row)
+
+
+def _command_flag_value(command: Any, flag: str) -> str | None:
+    if not isinstance(command, list):
+        return None
+    values = [str(item) for item in command]
+    for index, item in enumerate(values):
+        if item == flag and index + 1 < len(values):
+            return values[index + 1]
+        if item.startswith(f"{flag}="):
+            return item.split("=", 1)[1]
+    return None
+
+
+def _positive_int_flag(command: Any, flag: str) -> int | None:
+    value = _command_flag_value(command, flag)
+    if value is None:
+        return None
+    try:
+        parsed = int(float(value))
+    except ValueError:
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _nonnegative_float_flag(command: Any, flag: str) -> float | None:
+    value = _command_flag_value(command, flag)
+    if value is None:
+        return None
+    try:
+        parsed = float(value)
+    except ValueError:
+        return None
+    return parsed if parsed >= 0.0 else None
+
+
+def _path_size_bytes(path: Path) -> int | None:
+    if not path.exists():
+        return None
+    if path.is_file():
+        try:
+            return int(path.stat().st_size)
+        except OSError:
+            return None
+    total = 0
+    try:
+        for child in path.rglob("*"):
+            if not child.is_file():
+                continue
+            try:
+                total += int(child.stat().st_size)
+            except OSError:
+                continue
+    except OSError:
+        return None
+    return total
+
+
+def _nearest_existing_parent(path: Path) -> Path | None:
+    current = path
+    while not current.exists() and current.parent != current:
+        current = current.parent
+    return current if current.exists() else None
+
+
+def _disk_free_bytes(path: Path) -> int | None:
+    parent = _nearest_existing_parent(path)
+    if parent is None:
+        return None
+    try:
+        return int(shutil.disk_usage(parent).free)
+    except OSError:
+        return None
+
+
+def _checkpoint_step(path: Path) -> int | None:
+    token = path.name.removeprefix("checkpoint-")
+    try:
+        return int(token)
+    except ValueError:
+        return None
+
+
+def _checkpoint_size_estimate(path: Path) -> tuple[int | None, str | None]:
+    exact = _path_size_bytes(path)
+    if exact is not None:
+        return exact, str(path)
+    target_step = _checkpoint_step(path)
+    if target_step is None or not path.parent.is_dir():
+        return None, None
+    candidates: list[tuple[int, Path]] = []
+    for candidate in path.parent.glob("checkpoint-*"):
+        if not candidate.is_dir():
+            continue
+        step = _checkpoint_step(candidate)
+        if step is None or step > target_step:
+            continue
+        if not (candidate / "model.safetensors").is_file():
+            continue
+        candidates.append((step, candidate))
+    if not candidates:
+        return None, None
+    _, source = max(candidates, key=lambda item: item[0])
+    return _path_size_bytes(source), str(source)
+
+
+def _reconstructed_launch_disk_guard(row: dict[str, Any]) -> dict[str, Any]:
+    command = row.get("command")
+    output_dir_value = _command_flag_value(command, "--output-dir")
+    resume_value = _command_flag_value(command, "--resume-from-checkpoint")
+    checkpoint_value = row.get("checkpoint")
+    output_dir = Path(output_dir_value) if output_dir_value else None
+    resume_checkpoint = (
+        Path(resume_value)
+        if resume_value is not None
+        else Path(checkpoint_value)
+        if isinstance(checkpoint_value, str)
+        else None
+    )
+    if output_dir is None and resume_checkpoint is None:
+        return {}
+    gib = 1024.0**3
+    min_free_gb = _nonnegative_float_flag(command, "--min-free-disk-gb")
+    save_total_limit = _positive_int_flag(command, "--save-total-limit") or 1
+    checkpoint_bytes, checkpoint_estimate_source = (
+        (None, None)
+        if resume_checkpoint is None
+        else _checkpoint_size_estimate(resume_checkpoint)
+    )
+    estimated_peak_checkpoint_count = max(save_total_limit + 1, 1)
+    estimated_peak_checkpoint_bytes = (
+        None
+        if checkpoint_bytes is None
+        else int(checkpoint_bytes) * estimated_peak_checkpoint_count
+    )
+    disk_anchor = output_dir or resume_checkpoint
+    free_bytes = None if disk_anchor is None else _disk_free_bytes(disk_anchor)
+    free_after_estimated_peak_bytes = (
+        None
+        if free_bytes is None or estimated_peak_checkpoint_bytes is None
+        else int(free_bytes) - int(estimated_peak_checkpoint_bytes)
+    )
+    checked_free_gb = (
+        None
+        if free_after_estimated_peak_bytes is None
+        else float(free_after_estimated_peak_bytes) / gib
+    )
+    if min_free_gb is None:
+        status = "reconstructed_unchecked"
+        meets_min_free = None
+    elif checked_free_gb is not None:
+        meets_min_free = checked_free_gb >= float(min_free_gb)
+        status = "reconstructed_ok" if meets_min_free else "reconstructed_blocked"
+    elif free_bytes is not None:
+        free_gb = float(free_bytes) / gib
+        meets_min_free = free_gb >= float(min_free_gb)
+        status = "reconstructed_ok" if meets_min_free else "reconstructed_blocked"
+    else:
+        status = "reconstructed_unknown"
+        meets_min_free = None
+    return {
+        "row_type": "hf_gpt2_ft_wait_launch_disk_guard",
+        "status": status,
+        "output_dir": None if output_dir is None else str(output_dir),
+        "resume_from_checkpoint": (
+            None if resume_checkpoint is None else str(resume_checkpoint)
+        ),
+        "min_free_gb": min_free_gb,
+        "meets_min_free": meets_min_free,
+        "save_total_limit": save_total_limit,
+        "resume_checkpoint_bytes": checkpoint_bytes,
+        "resume_checkpoint_estimate_source": checkpoint_estimate_source,
+        "resume_checkpoint_gb": (
+            None if checkpoint_bytes is None else float(checkpoint_bytes) / gib
+        ),
+        "estimated_peak_checkpoint_count": estimated_peak_checkpoint_count,
+        "estimated_peak_checkpoint_bytes": estimated_peak_checkpoint_bytes,
+        "estimated_peak_checkpoint_gb": (
+            None
+            if estimated_peak_checkpoint_bytes is None
+            else float(estimated_peak_checkpoint_bytes) / gib
+        ),
+        "free_bytes": free_bytes,
+        "free_gb": None if free_bytes is None else float(free_bytes) / gib,
+        "free_after_estimated_peak_bytes": free_after_estimated_peak_bytes,
+        "free_after_estimated_peak_gb": checked_free_gb,
+    }
 
 
 def _eval_loss_points(row: dict[str, Any]) -> list[dict[str, Any]]:
