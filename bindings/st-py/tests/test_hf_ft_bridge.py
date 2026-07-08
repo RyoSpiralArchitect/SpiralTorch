@@ -609,6 +609,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             "import_module",
             side_effect=fake_import,
         ):
+            required_default_report = hf_ft.hf_finetune_preflight_report(
+                runtime_device_backends=[],
+                describe_runtime_devices=lambda backends, **_: {"reports": []},
+            )
             default_report = hf_ft.hf_finetune_preflight_report(
                 runtime_device_backends=[],
                 require_hf_finetune=False,
@@ -621,7 +625,21 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 describe_runtime_devices=lambda backends, **_: {"reports": []},
             )
 
+        self.assertEqual(
+            required_default_report["runtime_import_presets"],
+            "hf-full-finetune",
+        )
+        self.assertEqual(
+            required_default_report["required_runtime_import_presets"],
+            "hf-full-finetune",
+        )
+        self.assertNotIn(
+            "hf-gpt2-ft",
+            required_default_report["runtime_import_presets"],
+        )
         self.assertEqual(default_report["row_type"], "hf_finetune_preflight")
+        self.assertEqual(default_report["runtime_import_presets"], "hf-full-finetune")
+        self.assertEqual(default_report["required_runtime_import_presets"], "none")
         self.assertEqual(
             default_report["model_profile_id"],
             st.HF_FINETUNE_DEFAULT_MODEL_PROFILE,
@@ -642,6 +660,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         )
         self.assertTrue(report["runtime_import_preflight_passed"])
         self.assertEqual(report["required_runtime_import_presets"], "none")
+        self.assertEqual(report["runtime_import_presets"], "hf-full-finetune")
         self.assertEqual(report["row_type"], "hf_finetune_preflight")
         self.assertEqual(report["hf_model_name"], "EleutherAI/pythia-70m-deduped")
         self.assertNotIn("model_profile_id", report)

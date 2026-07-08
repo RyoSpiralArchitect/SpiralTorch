@@ -3578,25 +3578,48 @@ def hf_finetune_preflight_report(
         if required_runtime_device_ready_backends is not None
         else runtime_defaults.get("required_runtime_device_ready_backends")
     )
-    report = hf_gpt2_finetune_preflight_report(
-        model_name=resolved_model_name,
-        dataset_name=resolved_dataset_name,
-        dataset_config=(
-            None if resolved_dataset_config is None else str(resolved_dataset_config)
-        ),
-        dataset_revision=resolved_dataset_revision,
-        dataset_streaming=resolved_dataset_streaming,
-        streaming_shuffle_buffer_size=resolved_streaming_shuffle_buffer_size,
-        streaming_validation_samples=resolved_streaming_validation_samples,
-        train_split=str(resolved_train_split),
-        eval_split=resolved_eval_split,
-        text_column=str(resolved_text_column),
-        runtime_device_backends=resolved_runtime_device_backends,
+    requested_backends = _unique(resolved_runtime_device_backends)
+    if not requested_backends:
+        requested_backends = list(HF_FINETUNE_DEFAULT_DEVICE_BACKENDS)
+    required_presets = ["hf-full-finetune"] if require_full_stack else []
+    report = runtime_import_preflight_report(
+        runtime_import_presets=["hf-full-finetune"],
+        required_runtime_import_presets=required_presets,
+        runtime_device_backends=requested_backends,
         required_runtime_device_ready_backends=resolved_required_ready_backends,
-        require_hf_gpt2_ft=require_full_stack,
         describe_runtime_devices=describe_runtime_devices,
     )
-    dependency_report = report.get("hf_gpt2_ft_rust_dependency_report")
+    dependency_report = hf_finetune_rust_dependency_report()
+    legacy_dependency_report = hf_gpt2_finetune_rust_dependency_report()
+    report.update(
+        {
+            "row_type": "hf_finetune_preflight",
+            "hf_model_name": resolved_model_name,
+            "hf_dataset_name": resolved_dataset_name,
+            "hf_dataset_config": (
+                None
+                if resolved_dataset_config is None
+                else str(resolved_dataset_config)
+            ),
+            "hf_dataset_revision": resolved_dataset_revision,
+            "hf_dataset_streaming": resolved_dataset_streaming,
+            "hf_streaming_shuffle_buffer_size": resolved_streaming_shuffle_buffer_size,
+            "hf_streaming_validation_samples": resolved_streaming_validation_samples,
+            "hf_train_split": str(resolved_train_split),
+            "hf_eval_split": resolved_eval_split,
+            "hf_text_column": str(resolved_text_column),
+            # Keep legacy field names present so old summary/run-card helpers can
+            # still consume model-neutral preflight reports.
+            "hf_gpt2_ft_required": require_full_stack,
+            "hf_gpt2_ft_python_packages": legacy_dependency_report[
+                "python_package_label"
+            ],
+            "hf_gpt2_ft_rust_surfaces": legacy_dependency_report[
+                "rust_surface_crates"
+            ],
+            "hf_gpt2_ft_rust_dependency_report": legacy_dependency_report,
+        }
+    )
     if profile_report is not None:
         report.update(
             {
@@ -3614,12 +3637,12 @@ def hf_finetune_preflight_report(
     report.update(
         {
             "hf_finetune_required": require_full_stack,
-            "hf_finetune_python_packages": report.get("hf_gpt2_ft_python_packages"),
-            "hf_finetune_rust_surfaces": report.get("hf_gpt2_ft_rust_surfaces"),
+            "hf_finetune_python_packages": dependency_report["python_package_label"],
+            "hf_finetune_rust_surfaces": dependency_report["rust_surface_crates"],
             "hf_finetune_rust_dependency_report": dependency_report,
         }
     )
-    return dict(_genericize_hf_finetune_payload(report))
+    return report
 
 
 def hf_gpt2_finetune_summary_lines(report: Mapping[str, object]) -> list[str]:
