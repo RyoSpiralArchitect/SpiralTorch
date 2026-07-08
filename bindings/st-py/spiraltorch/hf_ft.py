@@ -13,7 +13,11 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from .hf_generation import zspace_generation_control_bridge_cli_args
+from .hf_generation import (
+    zspace_generation_control_bridge_cli_args,
+    zspace_generation_control_processor_kwargs,
+    zspace_generation_control_sweep_cli_args,
+)
 from .runtime_imports import (
     csv_label,
     csv_values,
@@ -2114,6 +2118,29 @@ def _hf_finetune_token_estimator_contract(
     }
 
 
+def _hf_finetune_runtime_contract_explicit_cli_args(
+    *,
+    model_name: object,
+    tokenizer_name: object,
+    generation: Mapping[str, object],
+    runtime: Mapping[str, object],
+) -> list[str]:
+    args: list[str] = []
+    _append_value_flag(args, "--local-model", model_name)
+    if tokenizer_name != model_name:
+        _append_value_flag(args, "--tokenizer-name", tokenizer_name)
+    _append_value_flag(args, "--max-new-tokens", generation.get("max_new_tokens"))
+    if runtime.get("allow_remote") is True:
+        args.append("--allow-remote")
+    if runtime.get("trust_remote_code") is True:
+        args.append("--trust-remote-code")
+    for name in _unique(runtime.get("activation_module_name")):
+        args.extend(["--activation-module-name", name])
+    for needle in _unique(runtime.get("activation_name_contains")):
+        args.extend(["--activation-name-contains", needle])
+    return args
+
+
 def hf_finetune_model_profile_runtime_contract(
     config: Mapping[str, object] | str | Path | None = None,
     *,
@@ -2158,9 +2185,26 @@ def hf_finetune_model_profile_runtime_contract(
         if resolved.get("tokenizer_name") == resolved.get("model_name")
         else "profile_override"
     )
+    generation_control_kwargs = zspace_generation_control_processor_kwargs(
+        {"generation": generation}
+    )
+    generation_control_sweep_args = zspace_generation_control_sweep_cli_args(
+        generation_control_kwargs
+    )
+    generation_control_bridge_args = zspace_generation_control_bridge_cli_args(
+        generation_control_kwargs
+    )
+    explicit_inference_runtime_args = _hf_finetune_runtime_contract_explicit_cli_args(
+        model_name=resolved.get("model_name"),
+        tokenizer_name=resolved.get("tokenizer_name"),
+        generation=generation,
+        runtime=runtime,
+    )
     return {
         "row_type": "hf_finetune_model_profile_runtime_contract",
         "status": "ready",
+        "source_path": resolved.get("source_path"),
+        "default_profile": resolved.get("default_profile"),
         "mode": resolved_mode,
         "runtime_import_preset": _hf_finetune_profile_preflight_preset(resolved_mode),
         "profile_id": resolved.get("profile_id"),
@@ -2197,6 +2241,19 @@ def hf_finetune_model_profile_runtime_contract(
         "rough_token_estimate_bytes_per_token": token_estimator.get(
             "bytes_per_token"
         ),
+        "generation_control_processor_kwargs": generation_control_kwargs,
+        "generation_control_sweep_cli_args": generation_control_sweep_args,
+        "generation_control_sweep_cli_display": shlex.join(
+            generation_control_sweep_args
+        ),
+        "generation_control_bridge_cli_args": generation_control_bridge_args,
+        "generation_control_bridge_cli_display": shlex.join(
+            generation_control_bridge_args
+        ),
+        "explicit_inference_runtime_cli_args": explicit_inference_runtime_args,
+        "explicit_inference_runtime_cli_display": shlex.join(
+            explicit_inference_runtime_args
+        ),
         "model_profile": resolved,
         "model_profile_lines": hf_finetune_model_profile_lines(resolved),
     }
@@ -2223,6 +2280,20 @@ def hf_finetune_model_profile_runtime_contract_lines(
             overrides=overrides,
         )
     )
+    explicit_runtime_args = report.get("explicit_inference_runtime_cli_args")
+    generation_bridge_args = report.get("generation_control_bridge_cli_args")
+    explicit_runtime_arg_count = (
+        len(explicit_runtime_args)
+        if isinstance(explicit_runtime_args, Sequence)
+        and not isinstance(explicit_runtime_args, (str, bytes))
+        else 0
+    )
+    generation_bridge_arg_count = (
+        len(generation_bridge_args)
+        if isinstance(generation_bridge_args, Sequence)
+        and not isinstance(generation_bridge_args, (str, bytes))
+        else 0
+    )
     lines = [
         (
             "hf_ft_model_profile_runtime_contract "
@@ -2240,6 +2311,8 @@ def hf_finetune_model_profile_runtime_contract_lines(
             f"activation_hooks={csv_label(report.get('activation_name_contains'))} "
             f"token_estimator={report.get('rough_token_estimate_mode')} "
             f"bytes_per_token={report.get('rough_token_estimate_bytes_per_token')} "
+            f"explicit_runtime_args={explicit_runtime_arg_count} "
+            f"generation_bridge_args={generation_bridge_arg_count} "
             f"allow_remote={report.get('allow_remote')} "
             f"trust_remote_code={report.get('trust_remote_code')}"
         )

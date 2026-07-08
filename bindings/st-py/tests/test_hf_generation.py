@@ -585,6 +585,24 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
             profile_runtime["model_profile_runtime_contract"]["profile_id"],
             "qwen2-0.5b-local-smoke",
         )
+        self.assertEqual(
+            profile_runtime["model_profile_runtime_contract"][
+                "generation_control_processor_kwargs"
+            ]["top_k"],
+            96,
+        )
+        self.assertIn(
+            "--local-model",
+            profile_runtime["model_profile_runtime_contract"][
+                "explicit_inference_runtime_cli_args"
+            ],
+        )
+        self.assertIn(
+            "Qwen/Qwen2-0.5B",
+            profile_runtime["model_profile_runtime_contract"][
+                "explicit_inference_runtime_cli_args"
+            ],
+        )
         self.assertEqual(profile_runtime["runtime_import_preset"], "hf-runtime")
         self.assertTrue(
             profile_runtime["model_profile_runtime_contract_lines"][0].startswith(

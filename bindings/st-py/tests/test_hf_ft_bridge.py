@@ -8324,6 +8324,36 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(contract["activation_hook_policy"], "name_contains_any")
         self.assertEqual(contract["activation_name_contains"], ["model.layers.0"])
         self.assertEqual(contract["zspace_generation"]["zspace_top_k"], 96)
+        self.assertEqual(contract["source_path"], str(MODEL_CONFIGS_PATH))
+        self.assertEqual(contract["generation_control_processor_kwargs"]["top_k"], 96)
+        self.assertIn(
+            "--generation-zspace-top-k",
+            contract["generation_control_bridge_cli_args"],
+        )
+        self.assertIn(
+            "--generation-zspace-top-k",
+            contract["generation_control_bridge_cli_display"],
+        )
+        self.assertIn(
+            "--zspace-top-k-values",
+            contract["generation_control_sweep_cli_args"],
+        )
+        self.assertIn(
+            "--zspace-top-k-values",
+            contract["generation_control_sweep_cli_display"],
+        )
+        self.assertIn(
+            "--local-model",
+            contract["explicit_inference_runtime_cli_args"],
+        )
+        self.assertIn(
+            "Qwen/Qwen2-0.5B",
+            contract["explicit_inference_runtime_cli_args"],
+        )
+        self.assertIn(
+            "--activation-name-contains",
+            contract["explicit_inference_runtime_cli_args"],
+        )
         self.assertEqual(
             contract["rough_token_estimate_mode"],
             "bytes_per_token_heuristic",
@@ -8332,6 +8362,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertTrue(
             contract_lines[0].startswith("hf_ft_model_profile_runtime_contract ")
         )
+        self.assertIn("explicit_runtime_args=", contract_lines[0])
+        self.assertIn("generation_bridge_args=", contract_lines[0])
         self.assertTrue(
             any(
                 line.startswith("hf_ft_model_profile_zspace_contract ")
@@ -9187,6 +9219,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             "token_estimator=bytes_per_token_heuristic",
             runtime_contract_lines[0],
         )
+        self.assertIn("explicit_runtime_args=", runtime_contract_lines[0])
+        self.assertIn("generation_bridge_args=", runtime_contract_lines[0])
         self.assertTrue(
             any(
                 line.startswith("hf_ft_model_profile_zspace_contract ")
