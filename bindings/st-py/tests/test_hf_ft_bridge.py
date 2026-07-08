@@ -7396,6 +7396,22 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 json.dumps({"milestone_step": 6144, "milestone_ready": True}) + "\n",
                 encoding="utf-8",
             )
+            (run_dir / "spiraltorch-hf-finetune-run-card.json").write_text(
+                json.dumps(
+                    {
+                        "row_type": "hf_finetune_run_card",
+                        "model_name": "EleutherAI/pythia-70m-deduped",
+                        "tokenizer_name": "EleutherAI/pythia-70m-deduped",
+                        "model_profile_id": "causal-lm-local-smoke",
+                        "model_profile": {
+                            "profile_id": "causal-lm-local-smoke",
+                            "extends": "pythia-70m-local-smoke",
+                        },
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
             package_calls = []
 
             def fake_package_runner(**kwargs):
@@ -7507,9 +7523,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(ops["checkpoint"], "checkpoint-6144")
         self.assertEqual(ops["source_count"], 3)
         self.assertEqual(ops["checkpoint_count"], 1)
+        self.assertEqual(ops["model_profile_id"], "causal-lm-local-smoke")
+        self.assertEqual(ops["model_profile_extends"], "pythia-70m-local-smoke")
+        self.assertEqual(ops["model_name"], "EleutherAI/pythia-70m-deduped")
         self.assertEqual(ops_written["row_type"], "hf_finetune_run_ops_snapshot")
         self.assertEqual(ops_written["recommended_action"], "run_milestone_handoff")
         self.assertIn("hf_ft_run_ops ", ops_lines[0])
+        self.assertIn("profile=causal-lm-local-smoke", ops_lines[0])
+        self.assertIn("extends=pythia-70m-local-smoke", ops_lines[0])
         self.assertNotIn("hf_gpt2", "\n".join(ops_lines))
         self.assertIn("status=handoff_ready", ops_written_lines[0])
         self.assertNotIn("hf_gpt2", "\n".join(ops_written_lines))
@@ -7595,7 +7616,19 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                     {"row_type": "compare"},
                 ),
                 ("hf-gpt2-ft-generation-curve.json", {"row_type": "curve"}),
-                ("spiraltorch-hf-finetune-run-card.json", {"row_type": "generic-card"}),
+                (
+                    "spiraltorch-hf-finetune-run-card.json",
+                    {
+                        "row_type": "generic-card",
+                        "model_name": "EleutherAI/pythia-70m-deduped",
+                        "tokenizer_name": "EleutherAI/pythia-70m-deduped",
+                        "model_profile_id": "causal-lm-local-smoke",
+                        "model_profile": {
+                            "profile_id": "causal-lm-local-smoke",
+                            "extends": "pythia-70m-local-smoke",
+                        },
+                    },
+                ),
             ):
                 (run_dir / name).write_text(json.dumps(payload) + "\n", encoding="utf-8")
             (run_dir / "milestone-6144-runtime.txt").write_text(
@@ -7718,6 +7751,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(manifest["checkpoint_count"], 2)
         self.assertEqual(manifest["latest_milestone_step"], 6144)
         self.assertEqual(manifest["latest_checkpoint_step"], 6144)
+        self.assertEqual(manifest["model_profile_id"], "causal-lm-local-smoke")
+        self.assertEqual(manifest["model_profile_extends"], "pythia-70m-local-smoke")
+        self.assertEqual(manifest["model_name"], "EleutherAI/pythia-70m-deduped")
+        self.assertEqual(manifest["tokenizer_name"], "EleutherAI/pythia-70m-deduped")
         self.assertEqual(
             manifest["latest_artifacts"]["latest.milestone_capture"]["path"],
             str(run_dir / "milestone-6144-capture.json"),
@@ -7770,7 +7807,13 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             generic_archived_json["row_type"],
             "hf_finetune_run_artifact_manifest",
         )
+        self.assertEqual(
+            generic_archived_json["model_profile_id"],
+            "causal-lm-local-smoke",
+        )
         self.assertIn("hf_ft_run_artifacts ", generic_archived_lines[0])
+        self.assertIn("profile=causal-lm-local-smoke", generic_archived_lines[0])
+        self.assertIn("extends=pythia-70m-local-smoke", generic_archived_lines[0])
         self.assertNotIn("hf_gpt2", "\n".join(generic_archived_lines))
         self.assertEqual(archived_json["artifact_count"], manifest["artifact_count"])
         self.assertIn("hf_gpt2_ft_run_artifacts ", archived_lines[0])
@@ -7785,6 +7828,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         )
         self.assertEqual(generic_cli_json["generation_sweep_count"], 1)
         self.assertIn("hf_ft_run_artifacts ", generic_cli_line_rows[0])
+        self.assertIn("profile=causal-lm-local-smoke", generic_cli_line_rows[0])
         self.assertNotIn("hf_gpt2", "\n".join(generic_cli_line_rows))
         self.assertEqual(installed_artifacts_status, 0)
         self.assertEqual(installed_ops_status, 0)

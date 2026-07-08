@@ -1736,6 +1736,52 @@ def _runtime_artifact_record(
     return record
 
 
+def _run_card_model_metadata(path: str | Path | None) -> dict[str, Any]:
+    """Best-effort model/profile metadata from a run card artifact."""
+
+    empty = {
+        "model_profile_id": None,
+        "model_profile_extends": None,
+        "model_name": None,
+        "tokenizer_name": None,
+        "run_card_row_type": None,
+    }
+    if path is None:
+        return dict(empty)
+    try:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return dict(empty)
+    if not isinstance(payload, Mapping):
+        return dict(empty)
+    profile = payload.get("model_profile")
+    profile_mapping = profile if isinstance(profile, Mapping) else {}
+    profile_id = (
+        payload.get("model_profile_id")
+        or payload.get("profile_id")
+        or profile_mapping.get("profile_id")
+        or profile_mapping.get("id")
+    )
+    profile_extends = (
+        payload.get("model_profile_extends")
+        or payload.get("profile_extends")
+        or profile_mapping.get("extends")
+    )
+    model_name = payload.get("model_name") or profile_mapping.get("model_name")
+    tokenizer_name = payload.get("tokenizer_name") or profile_mapping.get(
+        "tokenizer_name"
+    )
+    return {
+        "model_profile_id": None if profile_id is None else str(profile_id),
+        "model_profile_extends": None
+        if profile_extends is None
+        else str(profile_extends),
+        "model_name": None if model_name is None else str(model_name),
+        "tokenizer_name": None if tokenizer_name is None else str(tokenizer_name),
+        "run_card_row_type": payload.get("row_type"),
+    }
+
+
 def _checkpoint_step_from_path(path: Path) -> int | None:
     if not path.name.startswith("checkpoint-"):
         return None
@@ -1937,6 +1983,7 @@ def hf_gpt2_finetune_run_artifact_manifest(
             ["*trainer-trace*.jsonl"],
         ],
     )
+    run_card_model = _run_card_model_metadata(run_card_path)
     compare_path = _latest_runtime_path(
         run_root,
         ["generation-control-compare*.json", "*generation-control-comparison*.json"],
@@ -2021,6 +2068,11 @@ def hf_gpt2_finetune_run_artifact_manifest(
         "latest_checkpoint_step": None
         if latest_checkpoint is None
         else latest_checkpoint.get("step"),
+        "model_profile_id": run_card_model.get("model_profile_id"),
+        "model_profile_extends": run_card_model.get("model_profile_extends"),
+        "model_name": run_card_model.get("model_name"),
+        "tokenizer_name": run_card_model.get("tokenizer_name"),
+        "run_card_row_type": run_card_model.get("run_card_row_type"),
         "sources": sources,
         "source_artifacts": _runtime_records_by_kind(source_records),
         "latest_artifacts": _runtime_records_by_kind(latest_records),
@@ -2071,6 +2123,10 @@ def hf_gpt2_finetune_run_artifact_manifest_lines(
             f"latest_step={_number_text(report.get('latest_milestone_step'))} "
             f"latest_checkpoint_step={_number_text(report.get('latest_checkpoint_step'))} "
             f"latest_checkpoint={_number_text(latest_checkpoint_name)} "
+            f"profile={_number_text(report.get('model_profile_id'))} "
+            f"extends={_number_text(report.get('model_profile_extends'))} "
+            f"model={_number_text(report.get('model_name'))} "
+            f"tokenizer={_number_text(report.get('tokenizer_name'))} "
             f"run_dir={_number_text(report.get('run_dir'))}"
         )
     ]
@@ -2302,6 +2358,11 @@ def hf_gpt2_finetune_run_ops_snapshot_report(
         "checkpoint_count": manifest.get("checkpoint_count"),
         "latest_milestone_step": manifest.get("latest_milestone_step"),
         "latest_checkpoint_step": manifest.get("latest_checkpoint_step"),
+        "model_profile_id": manifest.get("model_profile_id"),
+        "model_profile_extends": manifest.get("model_profile_extends"),
+        "model_name": manifest.get("model_name"),
+        "tokenizer_name": manifest.get("tokenizer_name"),
+        "run_card_row_type": manifest.get("run_card_row_type"),
         "runtime_status": None if runtime is None else runtime.get("status"),
         "runtime_execution_status": None
         if runtime is None
@@ -2357,6 +2418,9 @@ def hf_gpt2_finetune_run_ops_snapshot_lines(
             f"handoff_status={_number_text(report.get('runtime_handoff_status'))} "
             f"execution_status={_number_text(report.get('runtime_execution_status'))} "
             f"checkpoint={_number_text(report.get('checkpoint'))} "
+            f"profile={_number_text(report.get('model_profile_id'))} "
+            f"extends={_number_text(report.get('model_profile_extends'))} "
+            f"model={_number_text(report.get('model_name'))} "
             f"run_dir={_number_text(report.get('run_dir'))}"
         )
     ]
