@@ -761,6 +761,11 @@ def _apply_model_profile_defaults(
         ("logging_steps", "logging_steps", "--logging-steps"),
         ("save_steps", "save_steps", "--save-steps"),
         ("eval_steps", "eval_steps", "--eval-steps"),
+        (
+            "eval_accumulation_steps",
+            "eval_accumulation_steps",
+            "--eval-accumulation-steps",
+        ),
         ("save_total_limit", "save_total_limit", "--save-total-limit"),
     ):
         _set_profile_default(
@@ -913,6 +918,11 @@ def _apply_model_profile_defaults(
         ("trust_remote_code", "trust_remote_code", "--trust-remote-code"),
         ("model_train_dtype", "model_train_dtype", "--model-train-dtype"),
         ("dataloader_pin_memory", "dataloader_pin_memory", "--dataloader-pin-memory"),
+        (
+            "dataloader_num_workers",
+            "dataloader_num_workers",
+            "--dataloader-num-workers",
+        ),
         ("min_free_disk_gb", "min_free_disk_gb", "--min-free-disk-gb"),
         ("require_wgpu_ready", "require_wgpu_ready", "--require-wgpu-ready"),
         (

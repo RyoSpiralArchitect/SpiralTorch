@@ -538,6 +538,11 @@ def _apply_model_profile_defaults(
         ("save_steps", "save_steps", "--save-steps"),
         ("save_total_limit", "save_total_limit", "--save-total-limit"),
         ("eval_steps", "eval_steps", "--eval-steps"),
+        (
+            "eval_accumulation_steps",
+            "eval_accumulation_steps",
+            "--eval-accumulation-steps",
+        ),
     ):
         value = _profile_value(profile, "training", key)
         if value is not None and attr in {"learning_rate_values", "max_step_values"}:
@@ -686,6 +691,11 @@ def _apply_model_profile_defaults(
         ("trust_remote_code", "trust_remote_code", "--trust-remote-code"),
         ("min_free_disk_gb", "min_free_disk_gb", "--min-free-disk-gb"),
         ("dataloader_pin_memory", "dataloader_pin_memory", "--dataloader-pin-memory"),
+        (
+            "dataloader_num_workers",
+            "dataloader_num_workers",
+            "--dataloader-num-workers",
+        ),
         ("require_wgpu_ready", "require_wgpu_ready", "--require-wgpu-ready"),
         (
             "no_require_hf_gpt2_ft",

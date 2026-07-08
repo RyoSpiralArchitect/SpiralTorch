@@ -289,7 +289,8 @@
       "training": {
         "block_size": 256,
         "max_train_samples": 8192,
-        "max_eval_samples": 1024
+        "max_eval_samples": 1024,
+        "eval_accumulation_steps": 0
       },
       "dataset": {
         "name": "wikitext",
@@ -320,6 +321,7 @@
         "allow_remote": false,
         "trust_remote_code": false,
         "dataloader_pin_memory": "auto",
+        "dataloader_num_workers": 0,
         "no_require_hf_finetune": true
       },
       "notes": "Copy this profile for a local AutoModelForCausalLM directory; the relaxed runtime gate is useful while iterating on local model paths before installing the full FT stack."

@@ -575,6 +575,7 @@ HF_FINETUNE_DEFAULT_MODEL_CONFIGS: dict[str, object] = {
                 "block_size": 256,
                 "max_train_samples": 8192,
                 "max_eval_samples": 1024,
+                "eval_accumulation_steps": 0,
             },
             "dataset": {
                 "name": "wikitext",
@@ -605,6 +606,7 @@ HF_FINETUNE_DEFAULT_MODEL_CONFIGS: dict[str, object] = {
                 "allow_remote": False,
                 "trust_remote_code": False,
                 "dataloader_pin_memory": "auto",
+                "dataloader_num_workers": 0,
                 "no_require_hf_finetune": True,
             },
             "notes": (
@@ -1861,6 +1863,7 @@ def hf_finetune_model_profile_cli_args(
             ("logging_steps", "--logging-steps"),
             ("save_steps", "--save-steps"),
             ("eval_steps", "--eval-steps"),
+            ("eval_accumulation_steps", "--eval-accumulation-steps"),
             ("save_total_limit", "--save-total-limit"),
         ):
             _append_value_flag(args, flag, training.get(key))
@@ -1937,6 +1940,7 @@ def hf_finetune_model_profile_cli_args(
         for key, flag in (
             ("model_train_dtype", "--model-train-dtype"),
             ("dataloader_pin_memory", "--dataloader-pin-memory"),
+            ("dataloader_num_workers", "--dataloader-num-workers"),
             ("min_free_disk_gb", "--min-free-disk-gb"),
         ):
             _append_value_flag(args, flag, runtime.get(key))

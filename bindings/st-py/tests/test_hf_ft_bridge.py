@@ -8194,6 +8194,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         )
         local_template_cli_args = st.hf_finetune_model_profile_cli_args(local_template)
         self.assertTrue(local_template["runtime"]["no_require_hf_finetune"])
+        self.assertEqual(local_template["training"]["eval_accumulation_steps"], 0)
+        self.assertEqual(local_template["runtime"]["dataloader_num_workers"], 0)
+        self.assertIn("--eval-accumulation-steps", local_template_cli_args)
+        self.assertIn("--dataloader-num-workers", local_template_cli_args)
         self.assertIn("--no-require-hf-finetune", local_template_cli_args)
         self.assertNotIn("--no-require-hf-gpt2-ft", local_template_cli_args)
 
@@ -8600,6 +8604,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                                     "block_size": 96,
                                     "max_train_samples": 77,
                                     "max_eval_samples": 22,
+                                    "eval_accumulation_steps": 4,
                                     "save_total_limit": 1,
                                 },
                                 "dataset": {
@@ -8622,6 +8627,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                                     "trust_remote_code": True,
                                     "model_train_dtype": "float32",
                                     "dataloader_pin_memory": "false",
+                                    "dataloader_num_workers": 2,
                                     "min_free_disk_gb": 3.5,
                                     "runtime_device_backends": ["cpu"],
                                     "required_runtime_device_ready_backends": ["cpu"],
@@ -8674,6 +8680,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(args.text_column, "story")
         self.assertEqual(args.max_train_samples, 77)
         self.assertEqual(args.max_eval_samples, 22)
+        self.assertEqual(args.eval_accumulation_steps, 4)
         self.assertEqual(args.save_total_limit, 1)
         self.assertEqual(args.generation_max_new_tokens, 33)
         self.assertTrue(args.generation_do_sample)
@@ -8681,6 +8688,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertTrue(args.trust_remote_code)
         self.assertEqual(args.model_train_dtype, "float32")
         self.assertEqual(args.dataloader_pin_memory, "false")
+        self.assertEqual(args.dataloader_num_workers, 2)
         self.assertEqual(args.min_free_disk_gb, 3.5)
         self.assertEqual(args.runtime_device_backend, ["cpu"])
         self.assertEqual(args.require_runtime_device_ready_backend, ["cpu"])
@@ -9208,6 +9216,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                                     "max_eval_samples": 25,
                                     "max_steps": 7,
                                     "learning_rate": 0.0002,
+                                    "eval_accumulation_steps": 3,
                                     "save_total_limit": 1,
                                 },
                                 "dataset": {
@@ -9231,6 +9240,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                                     "trust_remote_code": True,
                                     "min_free_disk_gb": 4.0,
                                     "dataloader_pin_memory": "false",
+                                    "dataloader_num_workers": 2,
                                     "runtime_device_backends": ["cpu"],
                                     "required_runtime_device_ready_backends": ["cpu"],
                                     "no_require_hf_finetune": True,
@@ -9274,6 +9284,11 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("--trust-remote-code", command)
         self.assertEqual(command[command.index("--min-free-disk-gb") + 1], "4.0")
         self.assertEqual(command[command.index("--dataloader-pin-memory") + 1], "false")
+        self.assertEqual(command[command.index("--dataloader-num-workers") + 1], "2")
+        self.assertEqual(
+            command[command.index("--eval-accumulation-steps") + 1],
+            "3",
+        )
         self.assertEqual(command[command.index("--runtime-device-backend") + 1], "cpu")
         self.assertEqual(
             command[command.index("--require-runtime-device-ready-backend") + 1],
