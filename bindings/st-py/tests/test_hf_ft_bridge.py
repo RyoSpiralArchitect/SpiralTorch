@@ -6525,6 +6525,92 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             )
         )
 
+    def test_package_run_artifact_manifest_inventory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "run"
+            run_dir.mkdir()
+            direct_history = run_dir / "direct-run-status-history.jsonl"
+            eval_history = run_dir / "watch-6144-eval-history.jsonl"
+            checkpoint_history = run_dir / "watch-6144-checkpoint-history.jsonl"
+            direct_history.write_text(
+                json.dumps({"trace": {"trace_last_eval_loss_step": 6144}}) + "\n",
+                encoding="utf-8",
+            )
+            eval_history.write_text(
+                json.dumps({"status": "ready"}) + "\n",
+                encoding="utf-8",
+            )
+            checkpoint_history.write_text(
+                json.dumps({"checkpoint_names": ["checkpoint-6144"]}) + "\n",
+                encoding="utf-8",
+            )
+            for name, payload in (
+                ("milestone-6144-capture.json", {"milestone_step": 6144}),
+                ("milestone-6144-runtime.json", {"milestone_step": 6144}),
+                ("spiraltorch-hf-gpt2-ft-run-card.json", {"row_type": "card"}),
+                (
+                    "prompt-spiral-checkpoint-6144-generation-control-sweep.json",
+                    {"row_type": "sweep", "label": "spiral"},
+                ),
+                (
+                    "prompt-tokenless-ft-checkpoint-6144-generation-control-sweep.json",
+                    {"row_type": "sweep", "label": "tokenless"},
+                ),
+                (
+                    "generation-control-compare-3prompt-6144.json",
+                    {"row_type": "compare"},
+                ),
+                ("hf-gpt2-ft-generation-curve.json", {"row_type": "curve"}),
+            ):
+                (run_dir / name).write_text(json.dumps(payload) + "\n", encoding="utf-8")
+            (run_dir / "milestone-6144-runtime.txt").write_text(
+                "hf_gpt2_ft_milestone_runtime status=executed\n",
+                encoding="utf-8",
+            )
+            (run_dir / "spiraltorch-hf-gpt2-ft-trainer-trace.jsonl").write_text(
+                json.dumps({"event": "train_begin"}) + "\n",
+                encoding="utf-8",
+            )
+            (run_dir / "checkpoint-4096").mkdir()
+            (run_dir / "checkpoint-6144").mkdir()
+            out = run_dir / "artifact-manifest.json"
+            lines_out = run_dir / "artifact-manifest.txt"
+
+            manifest = st.hf_gpt2_finetune_run_artifact_manifest(
+                run_dir,
+                generation_limit=1,
+                checkpoint_limit=2,
+                out=out,
+                lines_out=lines_out,
+            )
+            lines = st.hf_gpt2_finetune_run_artifact_manifest_lines(manifest)
+            written = json.loads(out.read_text(encoding="utf-8"))
+            written_lines = lines_out.read_text(encoding="utf-8").splitlines()
+
+        self.assertEqual(manifest["row_type"], "hf_gpt2_finetune_run_artifact_manifest")
+        self.assertEqual(manifest["status"], "ready")
+        self.assertEqual(manifest["source_count"], 3)
+        self.assertEqual(manifest["missing_latest_count"], 0)
+        self.assertEqual(manifest["generation_sweep_count"], 1)
+        self.assertEqual(manifest["checkpoint_count"], 2)
+        self.assertEqual(manifest["latest_milestone_step"], 6144)
+        self.assertEqual(manifest["latest_checkpoint_step"], 6144)
+        self.assertEqual(
+            manifest["latest_artifacts"]["latest.milestone_capture"]["path"],
+            str(run_dir / "milestone-6144-capture.json"),
+        )
+        self.assertEqual(
+            manifest["source_artifacts"]["source.direct"]["path"],
+            str(direct_history),
+        )
+        self.assertEqual(written["artifact_count"], manifest["artifact_count"])
+        self.assertIn("hf_gpt2_ft_run_artifacts ", lines[0])
+        self.assertIn("latest_step=6144", lines[0])
+        self.assertIn("generation_sweeps=1", written_lines[0])
+        self.assertTrue(
+            any("hf_gpt2_ft_run_artifact_checkpoint" in line for line in lines)
+        )
+
     def test_package_milestone_report_tracks_run_status_readiness(self) -> None:
         waiting_status = {
             "row_type": "hf_gpt2_finetune_run_status",
@@ -7192,6 +7278,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("hf_gpt2_finetune_milestone_runtime_lines", st.__all__)
         self.assertIn("hf_gpt2_finetune_milestone_runtime_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_milestone_runtime_sources", st.__all__)
+        self.assertIn("hf_gpt2_finetune_run_artifact_manifest", st.__all__)
+        self.assertIn("hf_gpt2_finetune_run_artifact_manifest_lines", st.__all__)
         self.assertIn("hf_gpt2_finetune_preflight_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_scale_up_command", st.__all__)
         self.assertIn("hf_gpt2_finetune_scale_up_preflight_lines", st.__all__)
@@ -7307,6 +7395,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIs(
             st.hf_gpt2_finetune_milestone_runtime_sources,
             st.hf_ft_status.hf_gpt2_finetune_milestone_runtime_sources,
+        )
+        self.assertIs(
+            st.hf_gpt2_finetune_run_artifact_manifest,
+            st.hf_ft_status.hf_gpt2_finetune_run_artifact_manifest,
+        )
+        self.assertIs(
+            st.hf_gpt2_finetune_run_artifact_manifest_lines,
+            st.hf_ft_status.hf_gpt2_finetune_run_artifact_manifest_lines,
         )
         self.assertIs(
             st.write_hf_gpt2_finetune_milestone_runtime_report,

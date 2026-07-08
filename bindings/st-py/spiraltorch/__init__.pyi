@@ -236,6 +236,22 @@ def hf_gpt2_finetune_milestone_runtime_from_run_dir_archive(
     **runtime_kwargs: Any,
 ) -> Dict[str, Any]: ...
 
+def hf_gpt2_finetune_run_artifact_manifest(
+    run_dir: str | PathLike[str],
+    *,
+    next_run_dir: str | PathLike[str] | None = ...,
+    generation_limit: int = ...,
+    checkpoint_limit: int = ...,
+    out: str | PathLike[str] | None = ...,
+    lines_out: str | PathLike[str] | None = ...,
+) -> Dict[str, Any]: ...
+
+def hf_gpt2_finetune_run_artifact_manifest_lines(
+    report: Mapping[str, Any],
+    *,
+    top_n: int = ...,
+) -> List[str]: ...
+
 def summarize_transformers_trainer_runtime_bridge(
     transformers_trace_jsonl: str,
     trainer_trace_jsonl: str,
@@ -8958,6 +8974,8 @@ __all__ = [
     "hf_gpt2_finetune_milestone_runtime_lines",
     "hf_gpt2_finetune_milestone_runtime_report",
     "hf_gpt2_finetune_milestone_runtime_sources",
+    "hf_gpt2_finetune_run_artifact_manifest",
+    "hf_gpt2_finetune_run_artifact_manifest_lines",
     "hf_gpt2_finetune_status_history_lines",
     "hf_gpt2_finetune_scale_up_command",
     "hf_gpt2_finetune_scale_up_preflight_lines",

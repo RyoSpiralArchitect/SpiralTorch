@@ -28,6 +28,8 @@ __all__ = [
     "hf_gpt2_finetune_milestone_runtime_lines",
     "hf_gpt2_finetune_milestone_runtime_report",
     "hf_gpt2_finetune_milestone_runtime_sources",
+    "hf_gpt2_finetune_run_artifact_manifest",
+    "hf_gpt2_finetune_run_artifact_manifest_lines",
     "hf_gpt2_finetune_status_history_lines",
     "load_hf_gpt2_finetune_status_history",
     "main",
@@ -1515,6 +1517,78 @@ def _latest_runtime_path(root: str | Path | None, patterns: Sequence[str]) -> Pa
     return max(candidates, key=lambda path: (path.stat().st_mtime, str(path)))
 
 
+def _recent_runtime_paths(
+    root: str | Path | None,
+    patterns: Sequence[str],
+    *,
+    limit: int | None = None,
+    files_only: bool = True,
+) -> list[Path]:
+    if root is None:
+        return []
+    root_path = Path(root)
+    if not root_path.is_dir():
+        return []
+    paths: dict[str, Path] = {}
+    for pattern in patterns:
+        for path in root_path.glob(pattern):
+            if files_only and not path.is_file():
+                continue
+            if not files_only and not path.exists():
+                continue
+            paths[str(path)] = path
+    ranked = sorted(
+        paths.values(),
+        key=lambda path: (path.stat().st_mtime, str(path)),
+        reverse=True,
+    )
+    return ranked if limit is None else ranked[: max(0, limit)]
+
+
+def _runtime_artifact_record(
+    kind: str,
+    path: str | Path | None,
+    *,
+    step: int | None = None,
+) -> dict[str, Any]:
+    record: dict[str, Any] = {
+        "kind": kind,
+        "path": None if path is None else str(path),
+        "exists": False,
+    }
+    if step is not None:
+        record["step"] = step
+    if path is None:
+        return record
+    artifact_path = Path(path)
+    record["name"] = artifact_path.name
+    if not artifact_path.exists():
+        return record
+    record["exists"] = True
+    record["is_dir"] = artifact_path.is_dir()
+    try:
+        stat = artifact_path.stat()
+    except OSError:
+        return record
+    record["mtime_unix_s"] = float(stat.st_mtime)
+    if artifact_path.is_file():
+        record["size_bytes"] = int(stat.st_size)
+    return record
+
+
+def _checkpoint_step_from_path(path: Path) -> int | None:
+    if not path.name.startswith("checkpoint-"):
+        return None
+    try:
+        return int(path.name.removeprefix("checkpoint-"))
+    except ValueError:
+        return None
+
+
+def _runtime_records_by_kind(records: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    return {str(record.get("kind")): dict(record) for record in records}
+
+
 def hf_gpt2_finetune_milestone_runtime_sources(
     run_dir: str | Path,
     *,
@@ -1585,7 +1659,10 @@ def _milestone_step_from_filename(path: Path) -> int | None:
     parts = path.name.split("-")
     for index, part in enumerate(parts):
         if part == "milestone" and index + 1 < len(parts):
-            return _int_value(parts[index + 1])
+            try:
+                return int(parts[index + 1])
+            except ValueError:
+                return None
     return None
 
 
@@ -1654,6 +1731,223 @@ def _infer_runtime_milestone_step(
     if eval_step is not None:
         return eval_step, "direct_eval_history"
     return None, None
+
+
+def hf_gpt2_finetune_run_artifact_manifest(
+    run_dir: str | Path,
+    *,
+    next_run_dir: str | Path | None = None,
+    generation_limit: int = 12,
+    checkpoint_limit: int = 12,
+    out: str | Path | None = None,
+    lines_out: str | Path | None = None,
+) -> dict[str, Any]:
+    """Inventory standard artifacts produced by a long GPT-2 FT run directory."""
+
+    run_root = Path(run_dir)
+    sources = hf_gpt2_finetune_milestone_runtime_sources(
+        run_root,
+        next_run_dir=next_run_dir,
+    )
+    source_records = [
+        _runtime_artifact_record(f"source.{name}", path)
+        for name, path in sources.items()
+    ]
+    capture_path = _latest_runtime_path(run_root, ["milestone-*-capture.json"])
+    capture_step = (
+        _milestone_step_from_capture_file(capture_path)
+        if capture_path is not None
+        else None
+    )
+    runtime_path = _latest_runtime_path(run_root, ["milestone-*-runtime.json"])
+    runtime_lines_path = _latest_runtime_path(run_root, ["milestone-*-runtime.txt"])
+    run_card_path = _latest_runtime_path(
+        run_root,
+        ["spiraltorch-hf-gpt2-ft-run-card.json", "*run-card*.json"],
+    )
+    trainer_trace_path = _latest_runtime_path(
+        run_root,
+        [
+            "spiraltorch-hf-gpt2-ft-trainer-trace.jsonl",
+            "*trainer-trace*.jsonl",
+        ],
+    )
+    compare_path = _latest_runtime_path(
+        run_root,
+        ["generation-control-compare*.json", "*generation-control-comparison*.json"],
+    )
+    curve_path = _latest_runtime_path(
+        run_root,
+        ["*generation-curve*.json", "*generation-control-curve*.json"],
+    )
+    latest_records = [
+        _runtime_artifact_record(
+            "latest.milestone_capture",
+            capture_path,
+            step=capture_step,
+        ),
+        _runtime_artifact_record("latest.milestone_runtime", runtime_path),
+        _runtime_artifact_record("latest.milestone_runtime_lines", runtime_lines_path),
+        _runtime_artifact_record("latest.run_card", run_card_path),
+        _runtime_artifact_record("latest.trainer_trace", trainer_trace_path),
+        _runtime_artifact_record("latest.generation_compare", compare_path),
+        _runtime_artifact_record("latest.generation_curve", curve_path),
+    ]
+    generation_sweeps = [
+        _runtime_artifact_record("generation_sweep", path)
+        for path in _recent_runtime_paths(
+            run_root,
+            ["*generation-control-sweep.json"],
+            limit=generation_limit,
+        )
+    ]
+    checkpoint_paths = _recent_runtime_paths(
+        run_root,
+        ["checkpoint-*"],
+        limit=None,
+        files_only=False,
+    )
+    checkpoint_records = [
+        _runtime_artifact_record(
+            "checkpoint",
+            path,
+            step=_checkpoint_step_from_path(path),
+        )
+        for path in checkpoint_paths
+        if path.is_dir()
+    ]
+    checkpoint_records.sort(
+        key=lambda record: (
+            _int_value(record.get("step")) or -1,
+            float(record.get("mtime_unix_s") or 0.0),
+            str(record.get("path") or ""),
+        ),
+        reverse=True,
+    )
+    if checkpoint_limit >= 0:
+        checkpoint_records = checkpoint_records[:checkpoint_limit]
+    all_records = [
+        *source_records,
+        *latest_records,
+        *generation_sweeps,
+        *checkpoint_records,
+    ]
+    latest_checkpoint = checkpoint_records[0] if checkpoint_records else None
+    artifact_count = sum(1 for record in all_records if record.get("exists") is True)
+    source_count = sum(1 for record in source_records if record.get("exists") is True)
+    report: dict[str, Any] = {
+        "row_type": "hf_gpt2_finetune_run_artifact_manifest",
+        "status": "ready" if run_root.is_dir() else "missing_run_dir",
+        "run_dir": str(run_root),
+        "next_run_dir": None if next_run_dir is None else str(next_run_dir),
+        "artifact_count": artifact_count,
+        "source_count": source_count,
+        "missing_latest_count": sum(
+            1 for record in latest_records if record.get("exists") is not True
+        ),
+        "generation_sweep_count": sum(
+            1 for record in generation_sweeps if record.get("exists") is True
+        ),
+        "checkpoint_count": sum(
+            1 for record in checkpoint_records if record.get("exists") is True
+        ),
+        "latest_milestone_step": capture_step,
+        "latest_checkpoint": latest_checkpoint,
+        "latest_checkpoint_step": None
+        if latest_checkpoint is None
+        else latest_checkpoint.get("step"),
+        "sources": sources,
+        "source_artifacts": _runtime_records_by_kind(source_records),
+        "latest_artifacts": _runtime_records_by_kind(latest_records),
+        "generation_sweeps": generation_sweeps,
+        "checkpoints": checkpoint_records,
+    }
+    if out is not None:
+        out_path = Path(out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        report["out"] = str(out_path)
+        out_path.write_text(
+            json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+    if lines_out is not None:
+        lines_path = Path(lines_out)
+        lines_path.parent.mkdir(parents=True, exist_ok=True)
+        report["lines_out"] = str(lines_path)
+        lines_path.write_text(
+            "\n".join(hf_gpt2_finetune_run_artifact_manifest_lines(report)) + "\n",
+            encoding="utf-8",
+        )
+    return report
+
+
+def hf_gpt2_finetune_run_artifact_manifest_lines(
+    report: Mapping[str, Any],
+    *,
+    top_n: int = 5,
+) -> list[str]:
+    """Render compact lines for a GPT-2 FT run artifact manifest."""
+
+    latest_checkpoint = report.get("latest_checkpoint")
+    latest_checkpoint_name = (
+        latest_checkpoint.get("name")
+        if isinstance(latest_checkpoint, Mapping)
+        else None
+    )
+    lines = [
+        (
+            "hf_gpt2_ft_run_artifacts "
+            f"status={_number_text(report.get('status'))} "
+            f"artifacts={_number_text(report.get('artifact_count'))} "
+            f"sources={_number_text(report.get('source_count'))} "
+            f"missing_latest={_number_text(report.get('missing_latest_count'))} "
+            f"generation_sweeps={_number_text(report.get('generation_sweep_count'))} "
+            f"checkpoints={_number_text(report.get('checkpoint_count'))} "
+            f"latest_step={_number_text(report.get('latest_milestone_step'))} "
+            f"latest_checkpoint_step={_number_text(report.get('latest_checkpoint_step'))} "
+            f"latest_checkpoint={_number_text(latest_checkpoint_name)} "
+            f"run_dir={_number_text(report.get('run_dir'))}"
+        )
+    ]
+
+    def append_records(prefix: str, records: Sequence[Mapping[str, Any]]) -> None:
+        for record in records[: max(0, top_n)]:
+            lines.append(
+                (
+                    f"hf_gpt2_ft_run_artifact_{prefix} "
+                    f"kind={_number_text(record.get('kind'))} "
+                    f"exists={_number_text(record.get('exists'))} "
+                    f"step={_number_text(record.get('step'))} "
+                    f"size_bytes={_number_text(record.get('size_bytes'))} "
+                    f"path={_number_text(record.get('path'))}"
+                )
+            )
+
+    latest_values = report.get("latest_artifacts")
+    if isinstance(latest_values, Mapping):
+        append_records(
+            "latest",
+            [value for value in latest_values.values() if isinstance(value, Mapping)],
+        )
+    source_values = report.get("source_artifacts")
+    if isinstance(source_values, Mapping):
+        append_records(
+            "source",
+            [value for value in source_values.values() if isinstance(value, Mapping)],
+        )
+    sweeps = report.get("generation_sweeps")
+    if isinstance(sweeps, Sequence) and not isinstance(sweeps, (str, bytes)):
+        append_records(
+            "generation",
+            [value for value in sweeps if isinstance(value, Mapping)],
+        )
+    checkpoints = report.get("checkpoints")
+    if isinstance(checkpoints, Sequence) and not isinstance(checkpoints, (str, bytes)):
+        append_records(
+            "checkpoint",
+            [value for value in checkpoints if isinstance(value, Mapping)],
+        )
+    return lines
 
 
 def _runtime_milestone_step_token(value: Any) -> str:
