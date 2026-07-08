@@ -1155,6 +1155,119 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         )
         self.assertEqual(handoff["api_request_dropped_keys"], ["presence_penalty"])
 
+    def test_inference_distortion_runtime_plan_accepts_nested_artifacts(self) -> None:
+        handoff = {
+            "row_type": "hf_gpt2_finetune_inference_distortion_handoff",
+            "status": "ok",
+            "source_kind": "probe",
+            "recommended_probe": "distort-002",
+            "recommended_runtime_adapter": {
+                "kind": "spiraltorch.zspace_inference_distortion_adapter",
+                "request": {"temperature": 1.05, "top_p": 0.82},
+                "context_partial": {
+                    "origin": "zspace:inference_distortion",
+                    "weight": 1.0,
+                    "metrics": {"speed": 0.7, "memory": 0.4, "stability": 0.5},
+                    "telemetry": {"zspace.distortion.energy": 0.4},
+                },
+            },
+            "recommended_runtime_adapter_kind": (
+                "spiraltorch.zspace_inference_distortion_adapter"
+            ),
+            "recommended_runtime_adapter_request": {
+                "temperature": 1.05,
+                "top_p": 0.82,
+            },
+            "recommended_request": {"temperature": 0.9, "top_p": 0.95},
+        }
+
+        plan = hf_ft.hf_gpt2_finetune_inference_distortion_runtime_plan(
+            handoff,
+            request={"model": "fake-api", "temperature": 0.1},
+        )
+        adapter = hf_ft.hf_gpt2_finetune_inference_distortion_runtime_adapter(
+            handoff,
+        )
+        request_kwargs = hf_ft.hf_gpt2_finetune_inference_distortion_request_kwargs(
+            handoff,
+            request={"model": "fake-api"},
+        )
+
+        self.assertEqual(
+            plan["kind"],
+            "spiraltorch.hf_gpt2_finetune_inference_distortion_runtime_plan",
+        )
+        self.assertEqual(plan["status"], "ok")
+        self.assertEqual(plan["request"]["model"], "fake-api")
+        self.assertEqual(plan["request"]["temperature"], 1.05)
+        self.assertEqual(plan["request_overrides"]["top_p"], 0.82)
+        self.assertEqual(
+            plan["runtime_adapter"]["context_partial"]["origin"],
+            "zspace:inference_distortion",
+        )
+        self.assertEqual(
+            adapter["kind"],
+            "spiraltorch.zspace_inference_distortion_adapter",
+        )
+        self.assertEqual(request_kwargs["temperature"], 1.05)
+        calls: list[tuple[str, dict[str, object]]] = []
+        runtime = st.ApiLLMZSpaceRuntime([0.1, -0.2, 0.3, -0.4])
+
+        def fake_api(prompt: str, **request_kwargs: object) -> dict[str, object]:
+            calls.append((prompt, dict(request_kwargs)))
+            return {
+                "model": "fake-api",
+                "output_text": "FT handoff runtime plan reached API inference.",
+                "usage": {"total_tokens": 9},
+            }
+
+        trace = runtime.call(
+            fake_api,
+            "Route the FT handoff.",
+            runtime_adapter=plan,
+            context_prompt=True,
+        )
+
+        self.assertEqual(calls[0][1]["temperature"], 1.05)
+        self.assertIn("origin=zspace:inference_distortion", calls[0][0])
+        self.assertEqual(trace.telemetry["api_llm.total_tokens"], 9.0)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            run_card_path = Path(tmp) / "run-card.json"
+            sweep_path = Path(tmp) / "sweep-report.json"
+            run_card_path.write_text(
+                json.dumps(
+                    {
+                        "row_type": "hf_gpt2_finetune_run_card",
+                        "inference_distortion_handoff": handoff,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            sweep_path.write_text(
+                json.dumps(
+                    {
+                        "row_type": "hf_gpt2_finetune_sweep_report",
+                        "inference_distortion_handoff": handoff,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            from_run_card = hf_ft.hf_gpt2_finetune_inference_distortion_runtime_plan(
+                run_card_path,
+            )
+            from_sweep = hf_ft.hf_gpt2_finetune_inference_distortion_request_kwargs(
+                sweep_path,
+            )
+
+        self.assertEqual(from_run_card["recommended_probe"], "distort-002")
+        self.assertEqual(
+            from_run_card["runtime_adapter_kind"],
+            "spiraltorch.zspace_inference_distortion_adapter",
+        )
+        self.assertEqual(from_sweep["temperature"], 1.05)
+
     def test_eval_report_records_loss_perplexity_and_status(self) -> None:
         report = hf_ft.hf_gpt2_finetune_eval_report(
             stage="after_train",
@@ -6339,6 +6452,18 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             "hf_gpt2_finetune_inference_distortion_handoff_lines",
             st.__all__,
         )
+        self.assertIn(
+            "hf_gpt2_finetune_inference_distortion_runtime_plan",
+            st.__all__,
+        )
+        self.assertIn(
+            "hf_gpt2_finetune_inference_distortion_runtime_adapter",
+            st.__all__,
+        )
+        self.assertIn(
+            "hf_gpt2_finetune_inference_distortion_request_kwargs",
+            st.__all__,
+        )
         self.assertIn("hf_gpt2_finetune_preflight_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_scale_up_command", st.__all__)
         self.assertIn("hf_gpt2_finetune_scale_up_preflight_lines", st.__all__)
@@ -6374,6 +6499,18 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIs(
             st.hf_gpt2_finetune_inference_distortion_handoff_lines,
             hf_ft.hf_gpt2_finetune_inference_distortion_handoff_lines,
+        )
+        self.assertIs(
+            st.hf_gpt2_finetune_inference_distortion_runtime_plan,
+            hf_ft.hf_gpt2_finetune_inference_distortion_runtime_plan,
+        )
+        self.assertIs(
+            st.hf_gpt2_finetune_inference_distortion_runtime_adapter,
+            hf_ft.hf_gpt2_finetune_inference_distortion_runtime_adapter,
+        )
+        self.assertIs(
+            st.hf_gpt2_finetune_inference_distortion_request_kwargs,
+            hf_ft.hf_gpt2_finetune_inference_distortion_request_kwargs,
         )
         self.assertIs(
             st.hf_gpt2_finetune_training_telemetry_frame,

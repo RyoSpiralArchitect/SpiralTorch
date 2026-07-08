@@ -36,6 +36,9 @@ __all__ = [
     "hf_gpt2_finetune_generation_report",
     "hf_gpt2_finetune_inference_distortion_handoff_report",
     "hf_gpt2_finetune_inference_distortion_handoff_lines",
+    "hf_gpt2_finetune_inference_distortion_request_kwargs",
+    "hf_gpt2_finetune_inference_distortion_runtime_adapter",
+    "hf_gpt2_finetune_inference_distortion_runtime_plan",
     "hf_gpt2_finetune_rust_dependency_report",
     "hf_gpt2_finetune_scale_up_command",
     "hf_gpt2_finetune_scale_up_preflight_lines",
@@ -787,6 +790,133 @@ def hf_gpt2_finetune_inference_distortion_handoff_report(
         "base_top_p": _safe_number(config.get("base_top_p")),
         "include_penalties": config.get("include_penalties"),
     }
+
+
+def _inference_distortion_handoff_payload(
+    report_or_path: str | Path | Mapping[str, object],
+    *,
+    top_n: int = 3,
+) -> dict[str, object]:
+    if (
+        isinstance(report_or_path, Mapping)
+        and report_or_path.get("row_type")
+        == "hf_gpt2_finetune_inference_distortion_handoff"
+    ):
+        return dict(report_or_path)
+    if isinstance(report_or_path, Mapping):
+        nested = _mapping_item(report_or_path, "inference_distortion_handoff")
+        if nested:
+            return nested
+    if isinstance(report_or_path, (str, Path)):
+        try:
+            payload = json.loads(Path(report_or_path).read_text(encoding="utf-8"))
+        except Exception:
+            payload = None
+        if isinstance(payload, Mapping):
+            if (
+                payload.get("row_type")
+                == "hf_gpt2_finetune_inference_distortion_handoff"
+            ):
+                return dict(payload)
+            nested = _mapping_item(payload, "inference_distortion_handoff")
+            if nested:
+                return nested
+    return hf_gpt2_finetune_inference_distortion_handoff_report(
+        report_or_path,
+        top_n=top_n,
+    )
+
+
+def _inference_distortion_runtime_adapter_from_handoff(
+    handoff: Mapping[str, object],
+) -> dict[str, object]:
+    adapter = _mapping_item(handoff, "recommended_runtime_adapter")
+    if adapter:
+        return adapter
+    config = _mapping_item(handoff, "recommended_config")
+    runtime = _mapping_item(handoff, "runtime")
+    return _inference_distortion_runtime_adapter_from_config(config, runtime=runtime)
+
+
+def _inference_distortion_request_from_handoff(
+    handoff: Mapping[str, object],
+    *,
+    adapter: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    request = _mapping_item(handoff, "recommended_runtime_adapter_request")
+    if request:
+        return request
+    adapter_request = _mapping_item(adapter or {}, "request")
+    if adapter_request:
+        return adapter_request
+    return _mapping_item(handoff, "recommended_request")
+
+
+def hf_gpt2_finetune_inference_distortion_runtime_plan(
+    report_or_path: str | Path | Mapping[str, object],
+    *,
+    top_n: int = 3,
+    request: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    """Build API-runtime request kwargs and adapter from an FT handoff artifact."""
+
+    handoff = _inference_distortion_handoff_payload(report_or_path, top_n=top_n)
+    adapter = _inference_distortion_runtime_adapter_from_handoff(handoff)
+    overrides = _inference_distortion_request_from_handoff(handoff, adapter=adapter)
+    base_request = dict(request or {})
+    merged_request = dict(base_request)
+    merged_request.update(overrides)
+    status = "ok" if adapter or overrides else "missing_runtime_adapter"
+    return {
+        "kind": "spiraltorch.hf_gpt2_finetune_inference_distortion_runtime_plan",
+        "status": status,
+        "source_kind": handoff.get("source_kind"),
+        "recommended_probe": handoff.get("recommended_probe"),
+        "base_request": base_request,
+        "request_overrides": overrides,
+        "request": merged_request,
+        "context_partial": _mapping_item(adapter, "context_partial") or None,
+        "adapter": adapter or None,
+        "runtime_adapter": adapter or None,
+        "runtime_adapter_kind": adapter.get("kind"),
+        "handoff": handoff,
+        "handoff_lines": hf_gpt2_finetune_inference_distortion_handoff_lines(
+            handoff,
+            top_n=top_n,
+        ),
+    }
+
+
+def hf_gpt2_finetune_inference_distortion_runtime_adapter(
+    report_or_path: str | Path | Mapping[str, object],
+    *,
+    top_n: int = 3,
+) -> dict[str, object]:
+    """Return the runtime adapter recommended by an FT inference handoff."""
+
+    plan = hf_gpt2_finetune_inference_distortion_runtime_plan(
+        report_or_path,
+        top_n=top_n,
+    )
+    adapter = plan.get("runtime_adapter")
+    return dict(adapter) if isinstance(adapter, Mapping) else {}
+
+
+def hf_gpt2_finetune_inference_distortion_request_kwargs(
+    report_or_path: str | Path | Mapping[str, object],
+    *,
+    top_n: int = 3,
+    request: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    """Return merged hosted-LLM request kwargs from an FT inference handoff."""
+
+    return dict(
+        hf_gpt2_finetune_inference_distortion_runtime_plan(
+            report_or_path,
+            top_n=top_n,
+            request=request,
+        )["request"]
+    )
 
 
 def hf_gpt2_finetune_inference_distortion_handoff_lines(

@@ -362,6 +362,26 @@ def hf_gpt2_finetune_inference_distortion_handoff_lines(
     replay_arg_limit: int = ...,
 ) -> List[str]: ...
 
+def hf_gpt2_finetune_inference_distortion_runtime_plan(
+    report_or_path: str | PathLike[str] | Mapping[str, object],
+    *,
+    top_n: int = ...,
+    request: Mapping[str, object] | None = ...,
+) -> Dict[str, object]: ...
+
+def hf_gpt2_finetune_inference_distortion_runtime_adapter(
+    report_or_path: str | PathLike[str] | Mapping[str, object],
+    *,
+    top_n: int = ...,
+) -> Dict[str, object]: ...
+
+def hf_gpt2_finetune_inference_distortion_request_kwargs(
+    report_or_path: str | PathLike[str] | Mapping[str, object],
+    *,
+    top_n: int = ...,
+    request: Mapping[str, object] | None = ...,
+) -> Dict[str, object]: ...
+
 class ZSpaceActivationProbeHook:
     def __init__(
         self,
@@ -8592,6 +8612,9 @@ __all__ = [
     "hf_gpt2_finetune_generation_report",
     "hf_gpt2_finetune_inference_distortion_handoff_report",
     "hf_gpt2_finetune_inference_distortion_handoff_lines",
+    "hf_gpt2_finetune_inference_distortion_request_kwargs",
+    "hf_gpt2_finetune_inference_distortion_runtime_adapter",
+    "hf_gpt2_finetune_inference_distortion_runtime_plan",
     "hf_gpt2_finetune_preflight_report",
     "hf_gpt2_finetune_rust_dependency_report",
     "hf_gpt2_finetune_status_history_lines",
