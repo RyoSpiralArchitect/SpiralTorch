@@ -3141,6 +3141,32 @@ def topos_runtime_adapter(
     **signal_options: Any,
 ) -> Dict[str, Any]: ...
 
+def topos_api_llm_request_plan(
+    topos: Any | None = ...,
+    *,
+    request: Mapping[str, Any] | None = ...,
+    request_options: Mapping[str, Any] | None = ...,
+    bundle_weight: float = ...,
+    training_gain: float = ...,
+    origin: str | None = ...,
+    telemetry_prefix: str = ...,
+    gradient_dim: int = ...,
+    **signal_options: Any,
+) -> Dict[str, Any]: ...
+
+def topos_api_llm_request_kwargs(
+    topos: Any | None = ...,
+    *,
+    request: Mapping[str, Any] | None = ...,
+    request_options: Mapping[str, Any] | None = ...,
+    bundle_weight: float = ...,
+    training_gain: float = ...,
+    origin: str | None = ...,
+    telemetry_prefix: str = ...,
+    gradient_dim: int = ...,
+    **signal_options: Any,
+) -> Dict[str, Any]: ...
+
 
 def make_anthropic_messages_invoke(
     *,
@@ -8667,6 +8693,8 @@ __all__ = [
     "summarize_api_llm_trace_events",
     "api_llm_topos_sweep_report",
     "train_stagent_topos_route_policy",
+    "topos_api_llm_request_kwargs",
+    "topos_api_llm_request_plan",
     "topos_runtime_adapter",
     "topos_runtime_request",
     "write_api_llm_trace_jsonl",

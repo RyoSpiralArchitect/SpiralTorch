@@ -56,6 +56,8 @@ __all__ = [
     "summarize_api_llm_trace_events",
     "api_llm_topos_sweep_report",
     "train_stagent_topos_route_policy",
+    "topos_api_llm_request_kwargs",
+    "topos_api_llm_request_plan",
     "topos_runtime_adapter",
     "topos_runtime_request",
     "topos_runtime_route",
@@ -380,6 +382,77 @@ def topos_runtime_adapter(
             "telemetry": telemetry,
         },
     }
+
+
+def topos_api_llm_request_plan(
+    topos: Any | None = None,
+    *,
+    request: Mapping[str, Any] | None = None,
+    request_options: Mapping[str, Any] | None = None,
+    bundle_weight: float = 1.0,
+    training_gain: float = 1.0,
+    origin: str | None = "topos:runtime",
+    telemetry_prefix: str = "topos",
+    gradient_dim: int = 6,
+    **signal_options: Any,
+) -> dict[str, Any]:
+    """Build merged hosted-LLM request kwargs plus the traced topos adapter."""
+
+    base_request = dict(request or {})
+    adapter = topos_runtime_adapter(
+        topos,
+        bundle_weight=bundle_weight,
+        training_gain=training_gain,
+        origin=origin,
+        telemetry_prefix=telemetry_prefix,
+        gradient_dim=gradient_dim,
+        request_options=request_options,
+        **signal_options,
+    )
+    request_overrides = dict(adapter.get("request") or {})
+    merged_request = dict(base_request)
+    merged_request.update(request_overrides)
+    return {
+        "kind": "spiraltorch.topos_api_llm_request_plan",
+        "base_request": base_request,
+        "request_overrides": request_overrides,
+        "request": merged_request,
+        "adapter": adapter,
+        "signal": adapter.get("signal"),
+        "inference_plan": adapter.get("inference_plan"),
+        "runtime_profile": adapter.get("runtime_profile"),
+        "runtime_route": adapter.get("runtime_route"),
+        "context_partial": adapter.get("context_partial"),
+    }
+
+
+def topos_api_llm_request_kwargs(
+    topos: Any | None = None,
+    *,
+    request: Mapping[str, Any] | None = None,
+    request_options: Mapping[str, Any] | None = None,
+    bundle_weight: float = 1.0,
+    training_gain: float = 1.0,
+    origin: str | None = "topos:runtime",
+    telemetry_prefix: str = "topos",
+    gradient_dim: int = 6,
+    **signal_options: Any,
+) -> dict[str, Any]:
+    """Return only merged hosted-LLM request kwargs from a topos plan."""
+
+    return dict(
+        topos_api_llm_request_plan(
+            topos,
+            request=request,
+            request_options=request_options,
+            bundle_weight=bundle_weight,
+            training_gain=training_gain,
+            origin=origin,
+            telemetry_prefix=telemetry_prefix,
+            gradient_dim=gradient_dim,
+            **signal_options,
+        )["request"]
+    )
 
 
 def api_llm_zspace_inference_distortion_adapter(

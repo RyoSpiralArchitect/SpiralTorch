@@ -30,6 +30,8 @@ def test_api_llm_runtime_exports_from_top_level() -> None:
     assert "run_api_llm_topos_sweep" in st.__all__
     assert "summarize_api_llm_trace_events" in st.__all__
     assert "train_stagent_topos_route_policy" in st.__all__
+    assert "topos_api_llm_request_kwargs" in st.__all__
+    assert "topos_api_llm_request_plan" in st.__all__
     assert "topos_runtime_adapter" in st.__all__
     assert "topos_runtime_request" in st.__all__
     assert "topos_runtime_route" in st.__all__
@@ -519,6 +521,72 @@ def test_topos_runtime_adapter_can_be_used_directly_as_prompt_context() -> None:
     assert "origin=topos:runtime" in prompt
     assert "topos.learning_rate_scale=0.891988" in prompt
     assert "User prompt: Route through the topos adapter." in prompt
+
+
+def test_topos_api_llm_request_plan_merges_kwargs_and_adapter() -> None:
+    plan = st.topos_api_llm_request_plan(
+        {"porosity": 0.25, "max_depth": 10, "max_volume": 100},
+        request={"model": "gpt-test", "temperature": 1.4, "max_tokens": 64},
+        request_options={"base_temperature": 0.8, "include_penalties": True},
+        observed_depth=4,
+        visited_volume=25,
+    )
+
+    assert plan["kind"] == "spiraltorch.topos_api_llm_request_plan"
+    assert plan["base_request"]["temperature"] == pytest.approx(1.4)
+    assert plan["request"]["model"] == "gpt-test"
+    assert plan["request"]["max_tokens"] == 64
+    assert plan["request"]["temperature"] == pytest.approx(0.68265)
+    assert plan["request_overrides"]["temperature"] == pytest.approx(0.68265)
+    assert plan["adapter"]["kind"] == "spiraltorch.topos_runtime_adapter"
+    assert plan["runtime_route"]["mode"] == "contextual"
+    assert plan["context_partial"]["origin"] == "topos:runtime"
+
+
+def test_topos_api_llm_request_plan_can_drive_runtime_adapter_request() -> None:
+    calls: list[tuple[str, dict[str, object]]] = []
+    plan = st.topos_api_llm_request_plan(
+        {"porosity": 0.25, "max_depth": 10, "max_volume": 100},
+        request_options={"base_temperature": 0.8},
+        observed_depth=4,
+        visited_volume=25,
+    )
+    runtime = st.ApiLLMZSpaceRuntime([0.1, -0.2, 0.3, -0.4])
+
+    def fake_api(prompt: str, **request_kwargs: object) -> dict[str, object]:
+        calls.append((prompt, dict(request_kwargs)))
+        return {
+            "model": "topos-plan-test",
+            "output_text": "Topos request plan reached the API runtime.",
+            "usage": {"total_tokens": 8},
+        }
+
+    trace = runtime.call(
+        fake_api,
+        "Route with the request plan.",
+        runtime_adapter=plan,
+        context_prompt=True,
+    )
+
+    assert calls
+    assert calls[0][1]["temperature"] == pytest.approx(0.68265)
+    assert "origin=topos:runtime" in calls[0][0]
+    assert trace.telemetry["api_llm.total_tokens"] == pytest.approx(8.0)
+    assert trace.inference is not None
+
+
+def test_topos_api_llm_request_kwargs_returns_merged_request_only() -> None:
+    request = st.topos_api_llm_request_kwargs(
+        {"porosity": 0.25, "max_depth": 10, "max_volume": 100},
+        request={"model": "gpt-test", "temperature": 1.4},
+        request_options={"base_temperature": 0.8, "include_top_p": False},
+        observed_depth=4,
+        visited_volume=25,
+    )
+
+    assert request["model"] == "gpt-test"
+    assert request["temperature"] == pytest.approx(0.68265)
+    assert "top_p" not in request
 
 
 def test_zspace_inference_distortion_adapter_drives_api_runtime() -> None:
