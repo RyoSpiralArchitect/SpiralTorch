@@ -67,6 +67,11 @@ GENERATION_CURVE_PATH = (
     / "examples"
     / "hf_gpt2_ft_generation_curve.py"
 )
+CHECKPOINT_GENERATION_CONTROL_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "examples"
+    / "hf_gpt2_ft_checkpoint_generation_control.py"
+)
 
 
 def load_bridge_example():
@@ -164,6 +169,18 @@ def load_generation_curve_example():
     )
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_checkpoint_generation_control_example():
+    spec = importlib.util.spec_from_file_location(
+        "hf_gpt2_ft_checkpoint_generation_control_test",
+        CHECKPOINT_GENERATION_CONTROL_PATH,
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -785,6 +802,59 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             self.assertEqual(payload["recommended_step"], 6144)
             self.assertEqual(payload["recommended_eval_loss"], 3.2)
             self.assertIn("eval_loss_series=0=4.0,6144=3.2", lines_out.read_text())
+
+    def test_checkpoint_generation_control_can_plan_curve_output(self) -> None:
+        module = load_checkpoint_generation_control_example()
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            run_dir = tmp_path / "runs" / "live-ft"
+            run_dir.mkdir(parents=True)
+            previous_sweep = run_dir / "checkpoint-6144-sweep.json"
+            previous_sweep.write_text("{}", encoding="utf-8")
+            trace_jsonl = run_dir / "trainer-trace.jsonl"
+            trace_jsonl.write_text("{}", encoding="utf-8")
+            curve_out = run_dir / "curve.json"
+            curve_lines = run_dir / "curve.txt"
+            args = module.parse_args(
+                [
+                    "--run-dir",
+                    str(run_dir),
+                    "--checkpoint",
+                    "checkpoint-8192",
+                    "--label-prefix",
+                    "finewebedu-final",
+                    "--compare-with-sweep",
+                    str(previous_sweep),
+                    "--compare-with-label",
+                    "finewebedu-6144",
+                    "--curve-trainer-trace-jsonl",
+                    str(trace_jsonl),
+                    "--curve-out",
+                    str(curve_out),
+                    "--curve-lines-out",
+                    str(curve_lines),
+                    "--dry-run",
+                ]
+            )
+
+            report = module.run_checkpoint_generation_control(args)
+
+            self.assertEqual(report["status"], "planned")
+            self.assertIn("curve", report)
+            curve = report["curve"]
+            self.assertEqual(curve["status"], "planned")
+            command = [str(part) for part in curve["command"]]
+            self.assertIn(str(previous_sweep), command)
+            self.assertIn(str(trace_jsonl), command)
+            self.assertIn(str(curve_out), command)
+            self.assertIn(str(curve_lines), command)
+            self.assertIn("finewebedu-6144", command)
+            self.assertTrue(
+                any(
+                    part.endswith("checkpoint-8192-generation-control-sweep.json")
+                    for part in command
+                )
+            )
 
     def test_inference_distortion_handoff_report_flattens_recommendation(self) -> None:
         sweep_report = {

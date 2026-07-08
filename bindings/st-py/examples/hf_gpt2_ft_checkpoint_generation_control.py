@@ -21,6 +21,7 @@ if str(PACKAGE_ROOT) not in sys.path:
 EXAMPLES_ROOT = Path(__file__).resolve().parent
 SWEEP_SCRIPT = EXAMPLES_ROOT / "hf_gpt2_zspace_generation_control_sweep.py"
 COMPARE_SCRIPT = EXAMPLES_ROOT / "hf_gpt2_zspace_generation_control_compare.py"
+CURVE_SCRIPT = EXAMPLES_ROOT / "hf_gpt2_ft_generation_curve.py"
 
 DEFAULT_PROMPTS: tuple[tuple[str, str, str], ...] = (
     (
@@ -116,6 +117,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--python", default=sys.executable)
     parser.add_argument("--sweep-script", type=Path, default=SWEEP_SCRIPT)
     parser.add_argument("--compare-script", type=Path, default=COMPARE_SCRIPT)
+    parser.add_argument("--curve-script", type=Path, default=CURVE_SCRIPT)
     parser.add_argument("--allow-remote", action="store_true")
     parser.add_argument("--trust-remote-code", action="store_true")
     parser.add_argument("--max-new-tokens", type=int, default=None)
@@ -127,6 +129,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--top-n", type=int, default=3)
     parser.add_argument("--compare-out", type=Path, default=None)
     parser.add_argument("--compare-lines-out", type=Path, default=None)
+    parser.add_argument("--curve-out", type=Path, default=None)
+    parser.add_argument("--curve-lines-out", type=Path, default=None)
+    parser.add_argument("--curve-run-card", type=Path, default=None)
+    parser.add_argument("--curve-trainer-trace-jsonl", type=Path, default=None)
+    parser.add_argument("--curve-model-name", default=None)
+    parser.add_argument("--curve-dataset-name", default=None)
+    parser.add_argument("--curve-dataset-config", default=None)
     parser.add_argument(
         "--compare-with-sweep",
         action="append",
@@ -204,6 +213,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         args.compare_with_sweep
     ):
         parser.error("--compare-with-label must match --compare-with-sweep count")
+    if (
+        (args.curve_run_card is not None or args.curve_trainer_trace_jsonl is not None)
+        and args.curve_out is None
+        and args.curve_lines_out is None
+    ):
+        parser.error("curve source options require --curve-out or --curve-lines-out")
     return args
 
 
@@ -306,6 +321,69 @@ def build_compare_command(
             str(args.top_n),
         ]
     )
+    return command
+
+
+def _curve_requested(args: argparse.Namespace) -> bool:
+    return args.curve_out is not None or args.curve_lines_out is not None
+
+
+def _default_curve_run_card(args: argparse.Namespace) -> Path | None:
+    candidates = [
+        args.curve_run_card,
+        args.run_dir / "spiraltorch-hf-gpt2-ft-run-card.json",
+    ]
+    for path in candidates:
+        if path is not None and path.is_file():
+            return path
+    return None
+
+
+def _default_curve_trainer_trace(args: argparse.Namespace) -> Path | None:
+    candidates = [
+        args.curve_trainer_trace_jsonl,
+        args.run_dir / "spiraltorch-hf-gpt2-ft-trainer-trace.jsonl",
+    ]
+    for path in candidates:
+        if path is not None and path.is_file():
+            return path
+    return None
+
+
+def build_curve_command(
+    args: argparse.Namespace,
+    jobs: Sequence[SweepJob],
+) -> list[str]:
+    paths = [str(path) for path in args.compare_with_sweep]
+    labels = list(args.compare_with_label)
+    for job in jobs:
+        paths.append(str(job.out))
+        labels.append(job.label)
+    command = [
+        str(args.python),
+        str(args.curve_script),
+        *paths,
+    ]
+    for label in labels:
+        command.extend(["--label", label])
+    run_card = _default_curve_run_card(args)
+    trainer_trace = _default_curve_trainer_trace(args)
+    if run_card is not None:
+        command.extend(["--run-card", str(run_card)])
+    if trainer_trace is not None:
+        command.extend(["--trainer-trace-jsonl", str(trainer_trace)])
+    command.extend(["--run-dir", str(args.run_dir)])
+    if args.curve_model_name is not None:
+        command.extend(["--model-name", str(args.curve_model_name)])
+    if args.curve_dataset_name is not None:
+        command.extend(["--dataset-name", str(args.curve_dataset_name)])
+    if args.curve_dataset_config is not None:
+        command.extend(["--dataset-config", str(args.curve_dataset_config)])
+    if args.curve_out is not None:
+        command.extend(["--out", str(args.curve_out)])
+    if args.curve_lines_out is not None:
+        command.extend(["--lines-out", str(args.curve_lines_out)])
+    command.extend(["--top-n", str(args.top_n)])
     return command
 
 
@@ -514,6 +592,23 @@ def run_checkpoint_generation_control(
             runner(compare_command)
             compare_row["status"] = "complete"
 
+    curve_row: dict[str, Any] | None = None
+    if _curve_requested(args):
+        curve_command = build_curve_command(args, runnable_compare_jobs)
+        curve_row = {
+            "out": None if args.curve_out is None else str(args.curve_out),
+            "lines_out": (
+                None if args.curve_lines_out is None else str(args.curve_lines_out)
+            ),
+            "command": list(curve_command),
+        }
+        if args.dry_run:
+            curve_row["status"] = "planned"
+        else:
+            print("checkpoint_generation_control_curve", _command_row(curve_command))
+            runner(curve_command)
+            curve_row["status"] = "complete"
+
     status = "planned" if args.dry_run else "complete"
     if (
         not args.dry_run
@@ -533,6 +628,8 @@ def run_checkpoint_generation_control(
     }
     if compare_row is not None:
         report["compare"] = compare_row
+    if curve_row is not None:
+        report["curve"] = curve_row
     if process_wait is not None:
         report["process_wait"] = process_wait
     if args.run_card is not None:
