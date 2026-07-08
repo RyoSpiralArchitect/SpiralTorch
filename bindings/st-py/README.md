@@ -296,8 +296,14 @@ st.write_runtime_import_preflight_report(report, "ft-runtime.json")
 ft_report = st.hf_finetune_preflight_report(
     runtime_device_backends=["wgpu", "cpu"],
 )
+print(ft_report["model_profile_id"], ft_report["hf_model_name"])
 print(ft_report["hf_finetune_rust_surfaces"])
 ```
+
+With no explicit `model_name`, the generic HF preflight resolves the default
+model profile (`causal-lm-local-smoke`) and records its model/tokenizer/family
+metadata. Pass `model_name=...` for a one-off override, or `model_configs=` plus
+`model_profile=` to pin another config-driven route.
 
 ## Building wheels
 

@@ -609,6 +609,11 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             "import_module",
             side_effect=fake_import,
         ):
+            default_report = hf_ft.hf_finetune_preflight_report(
+                runtime_device_backends=[],
+                require_hf_finetune=False,
+                describe_runtime_devices=lambda backends, **_: {"reports": []},
+            )
             report = hf_ft.hf_finetune_preflight_report(
                 model_name="EleutherAI/pythia-70m-deduped",
                 runtime_device_backends=[],
@@ -616,10 +621,30 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 describe_runtime_devices=lambda backends, **_: {"reports": []},
             )
 
+        self.assertEqual(default_report["row_type"], "hf_finetune_preflight")
+        self.assertEqual(
+            default_report["model_profile_id"],
+            st.HF_FINETUNE_DEFAULT_MODEL_PROFILE,
+        )
+        self.assertEqual(
+            default_report["hf_model_name"],
+            "EleutherAI/pythia-70m-deduped",
+        )
+        self.assertEqual(
+            default_report["hf_tokenizer_name"],
+            "EleutherAI/pythia-70m-deduped",
+        )
+        self.assertEqual(default_report["hf_model_family"], "gpt_neox")
+        self.assertEqual(default_report["hf_parameter_scale"], "70m")
+        self.assertIn(
+            "profile=causal-lm-local-smoke",
+            default_report["model_profile_lines"][0],
+        )
         self.assertTrue(report["runtime_import_preflight_passed"])
         self.assertEqual(report["required_runtime_import_presets"], "none")
         self.assertEqual(report["row_type"], "hf_finetune_preflight")
         self.assertEqual(report["hf_model_name"], "EleutherAI/pythia-70m-deduped")
+        self.assertNotIn("model_profile_id", report)
         self.assertFalse(report["hf_finetune_required"])
         self.assertIn("datasets", report["runtime_imports_failed"])
         self.assertIn("peft", report["hf_finetune_python_packages"])

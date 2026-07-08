@@ -3473,16 +3473,18 @@ def hf_gpt2_finetune_preflight_report(
 
 def hf_finetune_preflight_report(
     *,
-    model_name: str = "gpt2",
-    dataset_name: str | None = "wikitext",
-    dataset_config: str | None = "wikitext-2-raw-v1",
+    model_name: str | None = None,
+    model_configs: Mapping[str, object] | str | Path | None = None,
+    model_profile: str | None = None,
+    dataset_name: str | None = None,
+    dataset_config: str | None = None,
     dataset_revision: str | None = None,
-    dataset_streaming: bool = False,
-    streaming_shuffle_buffer_size: int = 0,
-    streaming_validation_samples: int = 0,
-    train_split: str = "train",
+    dataset_streaming: bool | None = None,
+    streaming_shuffle_buffer_size: int | None = None,
+    streaming_validation_samples: int | None = None,
+    train_split: str | None = None,
     eval_split: str | None = "validation",
-    text_column: str = "text",
+    text_column: str | None = None,
     runtime_device_backends: object = None,
     required_runtime_device_ready_backends: object = None,
     require_hf_finetune: bool = True,
@@ -3500,23 +3502,115 @@ def hf_finetune_preflight_report(
         if require_hf_gpt2_ft is None
         else bool(require_hf_gpt2_ft)
     )
+    profile_report: dict[str, object] | None = None
+    if model_name is None or model_configs is not None or model_profile is not None:
+        profile_report = resolve_hf_finetune_model_profile(
+            model_configs,
+            profile=model_profile,
+        )
+    dataset_defaults = (
+        _mapping_or_empty(profile_report.get("dataset"), label="profile.dataset")
+        if profile_report is not None
+        else {}
+    )
+    runtime_defaults = (
+        _mapping_or_empty(profile_report.get("runtime"), label="profile.runtime")
+        if profile_report is not None
+        else {}
+    )
+    resolved_model_name = (
+        str(model_name)
+        if model_name is not None
+        else str(profile_report.get("model_name") if profile_report else "gpt2")
+    )
+    resolved_dataset_name = (
+        dataset_name
+        if dataset_name is not None
+        else _string_or_none(dataset_defaults.get("name")) or "wikitext"
+    )
+    resolved_dataset_config = (
+        dataset_config
+        if dataset_config is not None
+        else dataset_defaults.get("config", "wikitext-2-raw-v1")
+    )
+    resolved_dataset_revision = (
+        dataset_revision
+        if dataset_revision is not None
+        else _string_or_none(dataset_defaults.get("revision"))
+    )
+    resolved_dataset_streaming = (
+        bool(dataset_streaming)
+        if dataset_streaming is not None
+        else bool(dataset_defaults.get("streaming", False))
+    )
+    resolved_streaming_shuffle_buffer_size = (
+        int(streaming_shuffle_buffer_size)
+        if streaming_shuffle_buffer_size is not None
+        else int(dataset_defaults.get("streaming_shuffle_buffer_size") or 0)
+    )
+    resolved_streaming_validation_samples = (
+        int(streaming_validation_samples)
+        if streaming_validation_samples is not None
+        else int(dataset_defaults.get("streaming_validation_samples") or 0)
+    )
+    resolved_train_split = (
+        train_split
+        if train_split is not None
+        else _string_or_none(dataset_defaults.get("train_split")) or "train"
+    )
+    resolved_eval_split = (
+        eval_split
+        if eval_split is not None
+        else _string_or_none(dataset_defaults.get("eval_split"))
+    )
+    resolved_text_column = (
+        text_column
+        if text_column is not None
+        else _string_or_none(dataset_defaults.get("text_column")) or "text"
+    )
+    resolved_runtime_device_backends = (
+        runtime_device_backends
+        if runtime_device_backends is not None
+        else runtime_defaults.get("runtime_device_backends")
+    )
+    resolved_required_ready_backends = (
+        required_runtime_device_ready_backends
+        if required_runtime_device_ready_backends is not None
+        else runtime_defaults.get("required_runtime_device_ready_backends")
+    )
     report = hf_gpt2_finetune_preflight_report(
-        model_name=model_name,
-        dataset_name=dataset_name,
-        dataset_config=dataset_config,
-        dataset_revision=dataset_revision,
-        dataset_streaming=dataset_streaming,
-        streaming_shuffle_buffer_size=streaming_shuffle_buffer_size,
-        streaming_validation_samples=streaming_validation_samples,
-        train_split=train_split,
-        eval_split=eval_split,
-        text_column=text_column,
-        runtime_device_backends=runtime_device_backends,
-        required_runtime_device_ready_backends=required_runtime_device_ready_backends,
+        model_name=resolved_model_name,
+        dataset_name=resolved_dataset_name,
+        dataset_config=(
+            None if resolved_dataset_config is None else str(resolved_dataset_config)
+        ),
+        dataset_revision=resolved_dataset_revision,
+        dataset_streaming=resolved_dataset_streaming,
+        streaming_shuffle_buffer_size=resolved_streaming_shuffle_buffer_size,
+        streaming_validation_samples=resolved_streaming_validation_samples,
+        train_split=str(resolved_train_split),
+        eval_split=resolved_eval_split,
+        text_column=str(resolved_text_column),
+        runtime_device_backends=resolved_runtime_device_backends,
+        required_runtime_device_ready_backends=resolved_required_ready_backends,
         require_hf_gpt2_ft=require_full_stack,
         describe_runtime_devices=describe_runtime_devices,
     )
     dependency_report = report.get("hf_gpt2_ft_rust_dependency_report")
+    if profile_report is not None:
+        report.update(
+            {
+                "model_profile_id": profile_report.get("profile_id"),
+                "model_profile_extends": profile_report.get("extends"),
+                "model_profile": profile_report,
+                "model_profile_lines": hf_finetune_model_profile_lines(
+                    profile_report
+                ),
+                "hf_tokenizer_name": profile_report.get("tokenizer_name"),
+                "hf_model_family": profile_report.get("model_family"),
+                "hf_parameter_scale": profile_report.get("parameter_scale"),
+            }
+        )
     report.update(
         {
             "hf_finetune_required": require_full_stack,
