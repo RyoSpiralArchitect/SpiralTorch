@@ -27,6 +27,7 @@ from spiraltorch.hf_ft import (
     hf_gpt2_finetune_corpus_file_report,
     hf_gpt2_finetune_corpus_scan_report,
     hf_gpt2_finetune_dataset_fit_report,
+    hf_gpt2_finetune_disk_headroom_plan,
     hf_gpt2_finetune_eval_report,
     hf_gpt2_finetune_generation_report,
     hf_gpt2_finetune_inference_distortion_handoff_report,
@@ -1664,6 +1665,7 @@ def _base_run_card(
         "row_type": "hf_gpt2_finetune_run_card",
         "preflight": preflight,
         "disk_report": dict(preflight.get("disk_report") or {}),
+        "disk_headroom_plan": dict(preflight.get("disk_headroom_plan") or {}),
         "spiraltorch_version": getattr(st, "__version__", None),
         "transformers_version": getattr(transformers, "__version__", None),
         "torch_version": getattr(torch, "__version__", None),
@@ -1880,6 +1882,11 @@ def _main_with_runtime_access(
     preflight["disk_report"] = _disk_report(
         args.output_dir,
         min_free_gb=args.min_free_disk_gb,
+    )
+    preflight["disk_headroom_plan"] = hf_gpt2_finetune_disk_headroom_plan(
+        args.output_dir,
+        resume_from_checkpoint=args.resume_from_checkpoint,
+        save_total_limit=args.save_total_limit,
     )
     _attach_local_corpus_reports(
         preflight,

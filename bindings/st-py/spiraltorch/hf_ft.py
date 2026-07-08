@@ -29,6 +29,7 @@ __all__ = [
     "hf_gpt2_finetune_corpus_file_report",
     "hf_gpt2_finetune_corpus_scan_report",
     "hf_gpt2_finetune_dataset_fit_report",
+    "hf_gpt2_finetune_disk_headroom_plan",
     "hf_gpt2_finetune_eval_report",
     "hf_gpt2_finetune_generation_curve_lines",
     "hf_gpt2_finetune_generation_curve_report",
@@ -868,6 +869,17 @@ def hf_gpt2_finetune_summary_lines(report: Mapping[str, object]) -> list[str]:
             f"enabled={report.get('trainer_telemetry_enabled')} "
             f"auto={report.get('trainer_telemetry_auto_reason')} "
             f"prefix={report.get('trainer_telemetry_prefix')}"
+        )
+    disk_headroom = report.get("disk_headroom_plan")
+    if isinstance(disk_headroom, Mapping):
+        lines.append(
+            "hf_gpt2_ft_disk_headroom "
+            f"output_dir={disk_headroom.get('output_dir')} "
+            f"resume_checkpoint_gb={disk_headroom.get('resume_checkpoint_gb')} "
+            f"save_total_limit={disk_headroom.get('save_total_limit')} "
+            f"estimated_peak_checkpoint_gb={disk_headroom.get('estimated_peak_checkpoint_gb')} "
+            f"free_gb={disk_headroom.get('free_gb')} "
+            f"free_after_estimated_peak_gb={disk_headroom.get('free_after_estimated_peak_gb')}"
         )
     lines.extend(runtime_import_preflight_summary_lines(report))
     return lines
@@ -2350,32 +2362,40 @@ def _disk_free_bytes(path: Path) -> int | None:
         return None
 
 
-def _scale_up_disk_plan(command: Sequence[object]) -> dict[str, object]:
+def hf_gpt2_finetune_disk_headroom_plan(
+    output_dir: str | Path | None,
+    *,
+    resume_from_checkpoint: str | Path | None = None,
+    save_total_limit: int | None = 1,
+) -> dict[str, object]:
+    """Estimate local checkpoint disk headroom before starting a long FT run."""
+
     gib = 1024.0**3
-    output_value = _command_flag_value(command, "--output-dir")
-    resume_value = _command_flag_value(command, "--resume-from-checkpoint")
-    output_dir = Path(output_value) if output_value else None
-    resume_checkpoint = Path(resume_value) if resume_value else None
+    output_path = Path(output_dir) if output_dir else None
+    resume_checkpoint = (
+        Path(resume_from_checkpoint) if resume_from_checkpoint is not None else None
+    )
     checkpoint_bytes = (
         None if resume_checkpoint is None else _path_size_bytes(resume_checkpoint)
     )
-    save_total_limit = _positive_int_flag(command, "--save-total-limit") or 1
+    retained_limit = int(save_total_limit) if save_total_limit else 1
+    retained_limit = max(retained_limit, 1)
     # Trainer may briefly hold the current best/new checkpoint plus the retained set.
-    estimated_peak_checkpoint_count = max(save_total_limit + 1, 1)
+    estimated_peak_checkpoint_count = max(retained_limit + 1, 1)
     estimated_peak_checkpoint_bytes = (
         None
         if checkpoint_bytes is None
         else int(checkpoint_bytes) * estimated_peak_checkpoint_count
     )
-    free_bytes = None if output_dir is None else _disk_free_bytes(output_dir)
+    free_bytes = None if output_path is None else _disk_free_bytes(output_path)
     free_after_estimated_peak_bytes = (
         None
         if free_bytes is None or estimated_peak_checkpoint_bytes is None
         else int(free_bytes) - int(estimated_peak_checkpoint_bytes)
     )
     return {
-        "row_type": "hf_gpt2_finetune_scale_up_disk_plan",
-        "output_dir": None if output_dir is None else str(output_dir),
+        "row_type": "hf_gpt2_finetune_disk_headroom_plan",
+        "output_dir": None if output_path is None else str(output_path),
         "resume_from_checkpoint": (
             None if resume_checkpoint is None else str(resume_checkpoint)
         ),
@@ -2383,7 +2403,7 @@ def _scale_up_disk_plan(command: Sequence[object]) -> dict[str, object]:
         "resume_checkpoint_gb": (
             None if checkpoint_bytes is None else float(checkpoint_bytes) / gib
         ),
-        "save_total_limit": save_total_limit,
+        "save_total_limit": retained_limit,
         "estimated_peak_checkpoint_count": estimated_peak_checkpoint_count,
         "estimated_peak_checkpoint_bytes": estimated_peak_checkpoint_bytes,
         "estimated_peak_checkpoint_gb": (
@@ -2400,6 +2420,16 @@ def _scale_up_disk_plan(command: Sequence[object]) -> dict[str, object]:
             else float(free_after_estimated_peak_bytes) / gib
         ),
     }
+
+
+def _scale_up_disk_plan(command: Sequence[object]) -> dict[str, object]:
+    plan = hf_gpt2_finetune_disk_headroom_plan(
+        _command_flag_value(command, "--output-dir"),
+        resume_from_checkpoint=_command_flag_value(command, "--resume-from-checkpoint"),
+        save_total_limit=_positive_int_flag(command, "--save-total-limit") or 1,
+    )
+    plan["row_type"] = "hf_gpt2_finetune_scale_up_disk_plan"
+    return plan
 
 
 def hf_gpt2_finetune_scale_up_command(

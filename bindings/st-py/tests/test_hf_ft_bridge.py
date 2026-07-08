@@ -3190,8 +3190,26 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         module = load_bridge_example()
         with tempfile.TemporaryDirectory() as tmp:
             output_dir = Path(tmp) / "future-run"
+            checkpoint = Path(tmp) / "checkpoint-1"
+            checkpoint.mkdir()
+            (checkpoint / "model.safetensors").write_bytes(b"x" * 2048)
             ok_report = module._disk_report(output_dir, min_free_gb=0.0)
             blocked_report = module._disk_report(output_dir, min_free_gb=10**9)
+            headroom = hf_ft.hf_gpt2_finetune_disk_headroom_plan(
+                output_dir,
+                resume_from_checkpoint=checkpoint,
+                save_total_limit=2,
+            )
+            headroom_lines = hf_ft.hf_gpt2_finetune_summary_lines(
+                {
+                    "hf_model_name": "gpt2",
+                    "hf_dataset_name": "local-files",
+                    "hf_dataset_config": "text",
+                    "hf_train_split": "train",
+                    "hf_text_column": "text",
+                    "disk_headroom_plan": headroom,
+                }
+            )
 
         self.assertEqual(ok_report["row_type"], "hf_gpt2_ft_disk_report")
         self.assertEqual(ok_report["path"], str(output_dir))
@@ -3200,6 +3218,17 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertTrue(ok_report["meets_min_free"])
         self.assertEqual(blocked_report["status"], "blocked")
         self.assertFalse(blocked_report["meets_min_free"])
+        self.assertEqual(
+            headroom["row_type"],
+            "hf_gpt2_finetune_disk_headroom_plan",
+        )
+        self.assertEqual(headroom["resume_checkpoint_bytes"], 2048)
+        self.assertEqual(headroom["save_total_limit"], 2)
+        self.assertEqual(headroom["estimated_peak_checkpoint_count"], 3)
+        self.assertEqual(headroom["estimated_peak_checkpoint_bytes"], 6144)
+        self.assertTrue(
+            any("hf_gpt2_ft_disk_headroom" in line for line in headroom_lines)
+        )
 
     def test_example_dataloader_pin_memory_auto_prefers_cuda_only(self) -> None:
         module = load_bridge_example()
@@ -5549,10 +5578,15 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             st.hf_gpt2_finetune_dataset_fit_report,
             hf_ft.hf_gpt2_finetune_dataset_fit_report,
         )
+        self.assertIs(
+            st.hf_gpt2_finetune_disk_headroom_plan,
+            hf_ft.hf_gpt2_finetune_disk_headroom_plan,
+        )
         self.assertIn("hf_ft", st.__all__)
         self.assertIn("hf_gpt2_finetune_corpus_file_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_corpus_scan_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_dataset_fit_report", st.__all__)
+        self.assertIn("hf_gpt2_finetune_disk_headroom_plan", st.__all__)
         self.assertIn("hf_gpt2_finetune_eval_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_generation_curve_lines", st.__all__)
         self.assertIn("hf_gpt2_finetune_generation_curve_report", st.__all__)
