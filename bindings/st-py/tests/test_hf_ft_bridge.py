@@ -7803,6 +7803,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             for profile in config["profiles"]
             if isinstance(profile, dict) and "id" in profile
         }
+        resolved_profiles = st.hf_finetune_model_profiles(config)
 
         self.assertEqual(
             config["schema"],
@@ -7811,10 +7812,16 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(config["default_profile"], "causal-lm-local-smoke")
         self.assertIn(config["default_profile"], profiles)
         self.assertEqual(
-            profiles["causal-lm-local-smoke"]["model_name"],
+            profiles["causal-lm-local-smoke"]["extends"],
+            "pythia-70m-local-smoke",
+        )
+        self.assertEqual(
+            resolved_profiles["causal-lm-local-smoke"]["model_name"],
             "EleutherAI/pythia-70m-deduped",
         )
-        self.assertTrue(profiles["causal-lm-local-smoke"]["generation"]["do_sample"])
+        self.assertTrue(
+            resolved_profiles["causal-lm-local-smoke"]["generation"]["do_sample"]
+        )
         self.assertEqual(profiles["gpt2-local-smoke"]["model_name"], "gpt2")
         self.assertEqual(
             profiles["gpt2-local-smoke"]["training"]["block_size"],
@@ -7853,7 +7860,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertTrue(
             all(
                 profile["architecture"] == "causal_lm"
-                for profile in profiles.values()
+                for profile in resolved_profiles.values()
             )
         )
 
@@ -7913,6 +7920,57 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("50", pythia_cli_args)
         self.assertIn("--generation-zspace-top-k", pythia_cli_args)
         self.assertIn("64", pythia_cli_args)
+
+        alias_profile = st.resolve_hf_finetune_model_profile(
+            {
+                "schema": "spiraltorch.hf_finetune_model_configs.v1",
+                "default_profile": "alias-causal",
+                "profiles": [
+                    {
+                        "id": "base-causal",
+                        "model_name": "org/base-causal",
+                        "tokenizer_name": "org/base-tokenizer",
+                        "architecture": "causal_lm",
+                        "max_length": 128,
+                        "training": {"block_size": 128, "max_train_samples": 16},
+                        "dataset": {"name": "text", "text_column": "body"},
+                        "generation": {
+                            "max_new_tokens": 32,
+                            "do_sample": False,
+                            "zspace_top_k": 24,
+                        },
+                        "runtime": {"allow_remote": False},
+                    },
+                    {
+                        "id": "alias-causal",
+                        "extends": "base-causal",
+                        "generation": {"do_sample": True, "temperature": 0.7},
+                        "runtime": {"allow_remote": True},
+                    },
+                ],
+            }
+        )
+        self.assertEqual(alias_profile["profile_id"], "alias-causal")
+        self.assertEqual(alias_profile["model_name"], "org/base-causal")
+        self.assertEqual(alias_profile["tokenizer_name"], "org/base-tokenizer")
+        self.assertEqual(alias_profile["generation"]["max_new_tokens"], 32)
+        self.assertTrue(alias_profile["generation"]["do_sample"])
+        self.assertEqual(alias_profile["generation"]["zspace_top_k"], 24)
+        self.assertEqual(alias_profile["generation"]["temperature"], 0.7)
+        self.assertTrue(alias_profile["runtime"]["allow_remote"])
+        with self.assertRaisesRegex(ValueError, "extends unknown profile"):
+            st.hf_finetune_model_profiles(
+                {"profiles": [{"id": "broken", "extends": "missing"}]}
+            )
+        with self.assertRaisesRegex(ValueError, "extends cycle"):
+            st.hf_finetune_model_profiles(
+                {
+                    "profiles": [
+                        {"id": "left", "extends": "right"},
+                        {"id": "right", "extends": "left"},
+                    ]
+                }
+            )
 
         local_template = st.resolve_hf_finetune_model_profile(
             MODEL_CONFIGS_PATH,

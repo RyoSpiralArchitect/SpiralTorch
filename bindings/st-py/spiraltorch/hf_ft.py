@@ -283,49 +283,11 @@ HF_FINETUNE_DEFAULT_MODEL_CONFIGS: dict[str, object] = {
     "profiles": [
         {
             "id": "causal-lm-local-smoke",
-            "model_name": "EleutherAI/pythia-70m-deduped",
-            "tokenizer_name": "EleutherAI/pythia-70m-deduped",
-            "architecture": "causal_lm",
-            "checkpoint_prefix": "checkpoint-",
-            "max_length": 128,
-            "training": {
-                "block_size": 128,
-                "max_train_samples": 4096,
-                "max_eval_samples": 512,
-            },
-            "dataset": {
-                "name": "wikitext",
-                "config": "wikitext-2-raw-v1",
-                "train_split": "train",
-                "eval_split": "validation",
-                "text_column": "text",
-            },
-            "generation": {
-                "max_new_tokens": 96,
-                "do_sample": True,
-                "temperature": 0.8,
-                "top_k": 50,
-                "zspace_top_k": 64,
-                "zspace_curvature": -0.04,
-                "zspace_temperature": 1.0,
-                "zspace_entropy_target": 3.0,
-                "zspace_entropy_gain": 0.5,
-                "repression_window": 16,
-                "repression_strength": 0.8,
-                "last_token_repression": 0.7,
-                "ngram_size": 3,
-                "ngram_window": 32,
-                "ngram_repression_strength": 0.45,
-                "ngram_decay": 0.85,
-            },
-            "runtime": {
-                "allow_remote": False,
-                "trust_remote_code": False,
-                "dataloader_pin_memory": "auto",
-            },
+            "extends": "pythia-70m-local-smoke",
             "notes": (
-                "Model-neutral default causal-LM smoke profile; pick another "
-                "profile or edit model_name/tokenizer_name for local checkpoints."
+                "Model-neutral alias for the default causal-LM smoke route; "
+                "pick another profile or edit model_name/tokenizer_name for "
+                "local checkpoints."
             ),
         },
         {
@@ -599,6 +561,23 @@ def _string_or_none(value: object) -> str | None:
     return text or None
 
 
+def _deep_merge_hf_profile(
+    base: Mapping[str, object],
+    override: Mapping[str, object],
+) -> dict[str, object]:
+    merged = _deepcopy_jsonable(base)
+    if not isinstance(merged, Mapping):
+        raise ValueError("base model profile must be an object")
+    payload = dict(merged)
+    for key, value in override.items():
+        existing = payload.get(str(key))
+        if isinstance(existing, Mapping) and isinstance(value, Mapping):
+            payload[str(key)] = _deep_merge_hf_profile(existing, value)
+        else:
+            payload[str(key)] = _deepcopy_jsonable(value)
+    return payload
+
+
 def load_hf_finetune_model_configs(
     path: str | Path | None = None,
 ) -> dict[str, object]:
@@ -631,7 +610,8 @@ def hf_finetune_model_profiles(
     raw_profiles = payload.get("profiles")
     if not isinstance(raw_profiles, Sequence) or isinstance(raw_profiles, (str, bytes)):
         raise ValueError("model config profiles must be a list")
-    profiles: dict[str, dict[str, object]] = {}
+    raw_by_id: dict[str, dict[str, object]] = {}
+    profile_order: list[str] = []
     for index, raw_profile in enumerate(raw_profiles):
         if not isinstance(raw_profile, Mapping):
             raise ValueError(f"model profile #{index + 1} must be an object")
@@ -639,8 +619,44 @@ def hf_finetune_model_profiles(
         profile_id = _string_or_none(profile.get("id"))
         if profile_id is None:
             raise ValueError(f"model profile #{index + 1} missing id")
-        if profile_id in profiles:
+        if profile_id in raw_by_id:
             raise ValueError(f"duplicate model profile id: {profile_id}")
+        profile["id"] = profile_id
+        raw_by_id[profile_id] = profile
+        profile_order.append(profile_id)
+
+    resolved_raw: dict[str, dict[str, object]] = {}
+
+    def resolve_raw_profile(profile_id: str, stack: tuple[str, ...]) -> dict[str, object]:
+        if profile_id in resolved_raw:
+            return resolved_raw[profile_id]
+        if profile_id in stack:
+            cycle = " -> ".join((*stack, profile_id))
+            raise ValueError(f"model profile extends cycle: {cycle}")
+        raw_profile = raw_by_id[profile_id]
+        parent_id = _string_or_none(
+            raw_profile.get("extends") or raw_profile.get("base_profile")
+        )
+        if parent_id is not None:
+            if parent_id not in raw_by_id:
+                raise ValueError(
+                    f"model profile {profile_id} extends unknown profile {parent_id!r}"
+                )
+            parent = resolve_raw_profile(parent_id, (*stack, profile_id))
+            profile = _deep_merge_hf_profile(parent, raw_profile)
+            profile["extends"] = parent_id
+        else:
+            copied = _deepcopy_jsonable(raw_profile)
+            if not isinstance(copied, Mapping):
+                raise ValueError(f"model profile {profile_id} must be an object")
+            profile = dict(copied)
+        profile["id"] = profile_id
+        resolved_raw[profile_id] = profile
+        return profile
+
+    profiles: dict[str, dict[str, object]] = {}
+    for profile_id in profile_order:
+        profile = dict(resolve_raw_profile(profile_id, ()))
         model_name = _string_or_none(profile.get("model_name"))
         if model_name is None:
             raise ValueError(f"model profile {profile_id} missing model_name")

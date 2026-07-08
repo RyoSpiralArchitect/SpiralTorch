@@ -381,7 +381,9 @@ model-specific settings in
 config file rather than baking them into the script name. Profiles can carry
 model/tokenizer names, training shape, dataset/revision/streaming defaults,
 generation/Z-Space softmax knobs, and local runtime policy such as remote-code
-trust, disk guards, dataloader pinning, or required SpiralTorch backends:
+trust, disk guards, dataloader pinning, or required SpiralTorch backends.
+Profiles may also use `extends` to create model-neutral aliases or override only
+one nested section without duplicating model-specific settings:
 
 ```bash
 spiral-hf-profile --list

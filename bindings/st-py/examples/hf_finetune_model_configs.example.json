@@ -4,47 +4,8 @@
   "profiles": [
     {
       "id": "causal-lm-local-smoke",
-      "model_name": "EleutherAI/pythia-70m-deduped",
-      "tokenizer_name": "EleutherAI/pythia-70m-deduped",
-      "architecture": "causal_lm",
-      "checkpoint_prefix": "checkpoint-",
-      "max_length": 128,
-      "training": {
-        "block_size": 128,
-        "max_train_samples": 4096,
-        "max_eval_samples": 512
-      },
-      "dataset": {
-        "name": "wikitext",
-        "config": "wikitext-2-raw-v1",
-        "train_split": "train",
-        "eval_split": "validation",
-        "text_column": "text"
-      },
-      "generation": {
-        "max_new_tokens": 96,
-        "do_sample": true,
-        "temperature": 0.8,
-        "top_k": 50,
-        "zspace_top_k": 64,
-        "zspace_curvature": -0.04,
-        "zspace_temperature": 1.0,
-        "zspace_entropy_target": 3.0,
-        "zspace_entropy_gain": 0.5,
-        "repression_window": 16,
-        "repression_strength": 0.8,
-        "last_token_repression": 0.7,
-        "ngram_size": 3,
-        "ngram_window": 32,
-        "ngram_repression_strength": 0.45,
-        "ngram_decay": 0.85
-      },
-      "runtime": {
-        "allow_remote": false,
-        "trust_remote_code": false,
-        "dataloader_pin_memory": "auto"
-      },
-      "notes": "Model-neutral default causal-LM smoke profile; pick another profile or edit model_name/tokenizer_name for local checkpoints."
+      "extends": "pythia-70m-local-smoke",
+      "notes": "Model-neutral alias for the default causal-LM smoke route; pick another profile or edit model_name/tokenizer_name for local checkpoints."
     },
     {
       "id": "gpt2-local-smoke",
