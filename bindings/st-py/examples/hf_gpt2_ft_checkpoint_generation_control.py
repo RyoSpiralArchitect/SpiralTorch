@@ -18,6 +18,16 @@ PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 if str(PACKAGE_ROOT) not in sys.path:
     sys.path.insert(0, str(PACKAGE_ROOT))
 
+from spiraltorch.hf_generation import (  # noqa: E402
+    default_zspace_checkpoint_generation_prompts,
+    zspace_checkpoint_generation_control_compare_command,
+    zspace_checkpoint_generation_control_compare_output_paths,
+    zspace_checkpoint_generation_control_curve_command,
+    zspace_checkpoint_generation_control_jobs,
+    zspace_checkpoint_generation_control_report,
+    zspace_checkpoint_generation_control_sweep_command,
+)
+
 EXAMPLES_ROOT = Path(__file__).resolve().parent
 SWEEP_SCRIPT = EXAMPLES_ROOT / "hf_gpt2_zspace_generation_control_sweep.py"
 COMPARE_SCRIPT = EXAMPLES_ROOT / "hf_gpt2_zspace_generation_control_compare.py"
@@ -92,8 +102,12 @@ def _prompt_spec(value: str) -> PromptSpec:
 
 def default_prompt_specs() -> list[PromptSpec]:
     return [
-        PromptSpec(label=label, prompt=prompt, filename_prefix=filename_prefix)
-        for label, prompt, filename_prefix in DEFAULT_PROMPTS
+        PromptSpec(
+            label=spec.label,
+            prompt=spec.prompt,
+            filename_prefix=spec.filename_prefix,
+        )
+        for spec in default_zspace_checkpoint_generation_prompts()
     ]
 
 
@@ -236,47 +250,26 @@ def _job_label(args: argparse.Namespace, checkpoint: str, prompt: PromptSpec) ->
 
 
 def build_sweep_jobs(args: argparse.Namespace) -> list[SweepJob]:
-    run_dir = args.run_dir
-    jobs: list[SweepJob] = []
-    for checkpoint in args.checkpoint:
-        model_dir = run_dir / checkpoint
-        for prompt in prompt_specs(args):
-            jobs.append(
-                SweepJob(
-                    checkpoint=checkpoint,
-                    prompt=prompt,
-                    model_dir=model_dir,
-                    out=_sweep_out_path(run_dir, checkpoint, prompt),
-                    label=_job_label(args, checkpoint, prompt),
-                )
-            )
-    return jobs
+    return zspace_checkpoint_generation_control_jobs(
+        run_dir=args.run_dir,
+        checkpoint=args.checkpoint,
+        prompt=prompt_specs(args),
+        label_prefix=args.label_prefix,
+    )
 
 
 def build_sweep_command(args: argparse.Namespace, job: SweepJob) -> list[str]:
-    command = [
-        str(args.python),
-        str(args.sweep_script),
-        "--model-name",
-        str(job.model_dir),
-        "--prompt",
-        job.prompt.prompt,
-        "--out",
-        str(job.out),
-    ]
-    if args.allow_remote:
-        command.append("--allow-remote")
-    if args.trust_remote_code:
-        command.append("--trust-remote-code")
-    if args.max_new_tokens is not None:
-        command.extend(["--max-new-tokens", str(args.max_new_tokens)])
-    if args.do_sample:
-        command.append("--do-sample")
-    if args.sample_temperature is not None:
-        command.extend(["--sample-temperature", str(args.sample_temperature)])
-    if args.sample_top_k is not None:
-        command.extend(["--sample-top-k", str(args.sample_top_k)])
-    return command
+    return zspace_checkpoint_generation_control_sweep_command(
+        job,
+        python=args.python,
+        sweep_script=args.sweep_script,
+        allow_remote=args.allow_remote,
+        trust_remote_code=args.trust_remote_code,
+        max_new_tokens=args.max_new_tokens,
+        do_sample=args.do_sample,
+        sample_temperature=args.sample_temperature,
+        sample_top_k=args.sample_top_k,
+    )
 
 
 def _default_compare_stem(checkpoints: Sequence[str]) -> str:
@@ -288,40 +281,30 @@ def _default_compare_stem(checkpoints: Sequence[str]) -> str:
 
 
 def compare_output_paths(args: argparse.Namespace) -> tuple[Path, Path]:
-    stem = _default_compare_stem(args.checkpoint)
-    out = args.compare_out or args.run_dir / f"{stem}.json"
-    lines_out = args.compare_lines_out or args.run_dir / f"{stem}.txt"
-    return out, lines_out
+    return zspace_checkpoint_generation_control_compare_output_paths(
+        run_dir=args.run_dir,
+        checkpoint=args.checkpoint,
+        compare_out=args.compare_out,
+        compare_lines_out=args.compare_lines_out,
+    )
 
 
 def build_compare_command(
     args: argparse.Namespace,
     jobs: Sequence[SweepJob],
 ) -> list[str]:
-    compare_out, compare_lines_out = compare_output_paths(args)
-    paths = [str(path) for path in args.compare_with_sweep]
-    labels = list(args.compare_with_label)
-    for job in jobs:
-        paths.append(str(job.out))
-        labels.append(job.label)
-    command = [
-        str(args.python),
-        str(args.compare_script),
-        *paths,
-    ]
-    for label in labels:
-        command.extend(["--label", label])
-    command.extend(
-        [
-            "--out",
-            str(compare_out),
-            "--lines-out",
-            str(compare_lines_out),
-            "--top-n",
-            str(args.top_n),
-        ]
+    return zspace_checkpoint_generation_control_compare_command(
+        jobs,
+        run_dir=args.run_dir,
+        checkpoint=args.checkpoint,
+        python=args.python,
+        compare_script=args.compare_script,
+        compare_with_sweep=args.compare_with_sweep,
+        compare_with_label=args.compare_with_label,
+        compare_out=args.compare_out,
+        compare_lines_out=args.compare_lines_out,
+        top_n=args.top_n,
     )
-    return command
 
 
 def _curve_requested(args: argparse.Namespace) -> bool:
@@ -354,37 +337,23 @@ def build_curve_command(
     args: argparse.Namespace,
     jobs: Sequence[SweepJob],
 ) -> list[str]:
-    paths = [str(path) for path in args.compare_with_sweep]
-    labels = list(args.compare_with_label)
-    for job in jobs:
-        paths.append(str(job.out))
-        labels.append(job.label)
-    command = [
-        str(args.python),
-        str(args.curve_script),
-        *paths,
-    ]
-    for label in labels:
-        command.extend(["--label", label])
-    run_card = _default_curve_run_card(args)
-    trainer_trace = _default_curve_trainer_trace(args)
-    if run_card is not None:
-        command.extend(["--run-card", str(run_card)])
-    if trainer_trace is not None:
-        command.extend(["--trainer-trace-jsonl", str(trainer_trace)])
-    command.extend(["--run-dir", str(args.run_dir)])
-    if args.curve_model_name is not None:
-        command.extend(["--model-name", str(args.curve_model_name)])
-    if args.curve_dataset_name is not None:
-        command.extend(["--dataset-name", str(args.curve_dataset_name)])
-    if args.curve_dataset_config is not None:
-        command.extend(["--dataset-config", str(args.curve_dataset_config)])
-    if args.curve_out is not None:
-        command.extend(["--out", str(args.curve_out)])
-    if args.curve_lines_out is not None:
-        command.extend(["--lines-out", str(args.curve_lines_out)])
-    command.extend(["--top-n", str(args.top_n)])
-    return command
+    return zspace_checkpoint_generation_control_curve_command(
+        jobs,
+        run_dir=args.run_dir,
+        checkpoint=args.checkpoint,
+        python=args.python,
+        curve_script=args.curve_script,
+        curve_out=args.curve_out,
+        curve_lines_out=args.curve_lines_out,
+        curve_run_card=args.curve_run_card,
+        curve_trainer_trace_jsonl=args.curve_trainer_trace_jsonl,
+        curve_model_name=args.curve_model_name,
+        curve_dataset_name=args.curve_dataset_name,
+        curve_dataset_config=args.curve_dataset_config,
+        compare_with_sweep=args.compare_with_sweep,
+        compare_with_label=args.compare_with_label,
+        top_n=args.top_n,
+    )
 
 
 def _command_row(command: Sequence[str]) -> str:
@@ -545,101 +514,47 @@ def run_checkpoint_generation_control(
     *,
     runner: Runner | None = None,
 ) -> dict[str, Any]:
-    runner = runner or _run_command
-    process_wait = _wait_for_process_exit(args)
-    jobs = build_sweep_jobs(args)
-    rows: list[dict[str, Any]] = []
-    runnable_compare_jobs: list[SweepJob] = []
-    for job in jobs:
-        command = build_sweep_command(args, job)
-        row: dict[str, Any] = {
-            "checkpoint": job.checkpoint,
-            "label": job.label,
-            "prompt_label": job.prompt.label,
-            "prompt": job.prompt.prompt,
-            "model_name": str(job.model_dir),
-            "out": str(job.out),
-            "command": list(command),
-        }
-        if job.out.is_file() and not args.overwrite:
-            row["status"] = "skipped_existing"
-            runnable_compare_jobs.append(job)
-        elif args.dry_run:
-            row["status"] = "planned"
-            runnable_compare_jobs.append(job)
-        else:
-            _wait_for_model_dir(args, job)
-            job.out.parent.mkdir(parents=True, exist_ok=True)
-            print("checkpoint_generation_control_sweep", _command_row(command))
-            runner(command)
-            row["status"] = "complete"
-            runnable_compare_jobs.append(job)
-        rows.append(row)
-
-    compare_row: dict[str, Any] | None = None
-    if not args.no_compare:
-        compare_command = build_compare_command(args, runnable_compare_jobs)
-        compare_out, compare_lines_out = compare_output_paths(args)
-        compare_row = {
-            "out": str(compare_out),
-            "lines_out": str(compare_lines_out),
-            "command": list(compare_command),
-        }
-        if args.dry_run:
-            compare_row["status"] = "planned"
-        else:
-            print("checkpoint_generation_control_compare", _command_row(compare_command))
-            runner(compare_command)
-            compare_row["status"] = "complete"
-
-    curve_row: dict[str, Any] | None = None
-    if _curve_requested(args):
-        curve_command = build_curve_command(args, runnable_compare_jobs)
-        curve_row = {
-            "out": None if args.curve_out is None else str(args.curve_out),
-            "lines_out": (
-                None if args.curve_lines_out is None else str(args.curve_lines_out)
-            ),
-            "command": list(curve_command),
-        }
-        if args.dry_run:
-            curve_row["status"] = "planned"
-        else:
-            print("checkpoint_generation_control_curve", _command_row(curve_command))
-            runner(curve_command)
-            curve_row["status"] = "complete"
-
-    status = "planned" if args.dry_run else "complete"
-    if (
-        not args.dry_run
-        and rows
-        and all(row["status"] == "skipped_existing" for row in rows)
-    ):
-        status = "complete_with_existing_sweeps" if compare_row else "skipped_existing"
-    report: dict[str, Any] = {
-        "row_type": "hf_gpt2_ft_checkpoint_generation_control",
-        "status": status,
-        "dry_run": bool(args.dry_run),
-        "run_dir": str(args.run_dir),
-        "checkpoint_count": len(args.checkpoint),
-        "prompt_count": len(prompt_specs(args)),
-        "sweep_count": len(rows),
-        "sweeps": rows,
-    }
-    if compare_row is not None:
-        report["compare"] = compare_row
-    if curve_row is not None:
-        report["curve"] = curve_row
-    if process_wait is not None:
-        report["process_wait"] = process_wait
-    if args.run_card is not None:
-        args.run_card.parent.mkdir(parents=True, exist_ok=True)
-        args.run_card.write_text(
-            json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-        print(f"checkpoint_generation_control_run_card {args.run_card}")
-    return report
+    return zspace_checkpoint_generation_control_report(
+        run_dir=args.run_dir,
+        checkpoint=args.checkpoint,
+        prompt=prompt_specs(args),
+        label_prefix=args.label_prefix,
+        python=args.python,
+        sweep_script=args.sweep_script,
+        compare_script=args.compare_script,
+        curve_script=args.curve_script,
+        allow_remote=args.allow_remote,
+        trust_remote_code=args.trust_remote_code,
+        max_new_tokens=args.max_new_tokens,
+        do_sample=args.do_sample,
+        sample_temperature=args.sample_temperature,
+        sample_top_k=args.sample_top_k,
+        overwrite=args.overwrite,
+        no_compare=args.no_compare,
+        top_n=args.top_n,
+        compare_out=args.compare_out,
+        compare_lines_out=args.compare_lines_out,
+        curve_out=args.curve_out,
+        curve_lines_out=args.curve_lines_out,
+        curve_run_card=args.curve_run_card,
+        curve_trainer_trace_jsonl=args.curve_trainer_trace_jsonl,
+        curve_model_name=args.curve_model_name,
+        curve_dataset_name=args.curve_dataset_name,
+        curve_dataset_config=args.curve_dataset_config,
+        compare_with_sweep=args.compare_with_sweep,
+        compare_with_label=args.compare_with_label,
+        run_card=args.run_card,
+        dry_run=args.dry_run,
+        wait_for_process_pid_file=args.wait_for_process_pid_file,
+        wait=args.wait,
+        ready_file=args.ready_file,
+        no_ready_file_check=args.no_ready_file_check,
+        poll_seconds=args.poll_seconds,
+        process_poll_seconds=args.process_poll_seconds,
+        timeout_seconds=args.timeout_seconds,
+        process_timeout_seconds=args.process_timeout_seconds,
+        runner=runner,
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:

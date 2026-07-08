@@ -13,10 +13,13 @@ import spiraltorch as st
 from spiraltorch import hf_ft
 from spiraltorch.hf_generation import (
     ZSpaceActivationProbeHook,
+    ZSpaceCheckpointPromptSpec,
+    ZSpaceCheckpointSweepJob,
     ZSpaceRepressionLogitsProcessor,
     build_zspace_activation_probe_hook,
     compare_zspace_inference_distortion_probes,
     compare_zspace_generation_control_sweeps,
+    default_zspace_checkpoint_generation_prompts,
     load_zspace_inference_distortion_probe,
     load_zspace_inference_distortion_sweep,
     load_zspace_generation_control_sweep,
@@ -39,6 +42,9 @@ from spiraltorch.hf_generation import (
     zspace_generation_control_bridge_cli_args,
     zspace_generation_control_processor_kwargs,
     zspace_generation_control_sweep_cli_args,
+    zspace_checkpoint_generation_control_compare_command,
+    zspace_checkpoint_generation_control_jobs,
+    zspace_checkpoint_generation_control_report,
     zspace_inference_distortion_sweep_report_from_probes,
 )
 
@@ -299,10 +305,13 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
     def test_top_level_exports_generation_processor(self) -> None:
         self.assertIn("ZSpaceRepressionLogitsProcessor", st.__all__)
         self.assertIn("ZSpaceActivationProbeHook", st.__all__)
+        self.assertIn("ZSpaceCheckpointPromptSpec", st.__all__)
+        self.assertIn("ZSpaceCheckpointSweepJob", st.__all__)
         self.assertIn("build_zspace_activation_probe_hook", st.__all__)
         self.assertIn("compare_zspace_inference_distortion_probes", st.__all__)
         self.assertIn("build_zspace_repression_logits_processor", st.__all__)
         self.assertIn("build_zspace_softmax_logits_processor", st.__all__)
+        self.assertIn("default_zspace_checkpoint_generation_prompts", st.__all__)
         self.assertIn(
             "zspace_inference_distortion_sweep_report_from_probes",
             st.__all__,
@@ -310,6 +319,12 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         self.assertIn("zspace_generation_control_bridge_cli_args", st.__all__)
         self.assertIn("zspace_generation_control_processor_kwargs", st.__all__)
         self.assertIn("zspace_generation_control_sweep_cli_args", st.__all__)
+        self.assertIn("zspace_checkpoint_generation_control_jobs", st.__all__)
+        self.assertIn("zspace_checkpoint_generation_control_report", st.__all__)
+        self.assertIn(
+            "zspace_checkpoint_generation_control_compare_command",
+            st.__all__,
+        )
         self.assertIn("load_zspace_generation_control_sweep", st.__all__)
         self.assertIn("summarize_zspace_generation_control_sweep", st.__all__)
         self.assertIn("compare_zspace_generation_control_sweeps", st.__all__)
@@ -332,13 +347,31 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         self.assertIn("zspace_inference_distortion_runtime_preflight", st.__all__)
         self.assertIs(st.ZSpaceRepressionLogitsProcessor, ZSpaceRepressionLogitsProcessor)
         self.assertIs(st.ZSpaceActivationProbeHook, ZSpaceActivationProbeHook)
+        self.assertIs(st.ZSpaceCheckpointPromptSpec, ZSpaceCheckpointPromptSpec)
+        self.assertIs(st.ZSpaceCheckpointSweepJob, ZSpaceCheckpointSweepJob)
         self.assertIs(
             st.build_zspace_activation_probe_hook,
             build_zspace_activation_probe_hook,
         )
         self.assertIs(
+            st.default_zspace_checkpoint_generation_prompts,
+            default_zspace_checkpoint_generation_prompts,
+        )
+        self.assertIs(
             st.zspace_generation_control_bridge_cli_args,
             zspace_generation_control_bridge_cli_args,
+        )
+        self.assertIs(
+            st.zspace_checkpoint_generation_control_jobs,
+            zspace_checkpoint_generation_control_jobs,
+        )
+        self.assertIs(
+            st.zspace_checkpoint_generation_control_report,
+            zspace_checkpoint_generation_control_report,
+        )
+        self.assertIs(
+            st.zspace_checkpoint_generation_control_compare_command,
+            zspace_checkpoint_generation_control_compare_command,
         )
         self.assertIs(
             st.zspace_inference_distortion_processor_kwargs,
@@ -1829,6 +1862,83 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
         self.assertEqual(report["status"], "planned")
         self.assertEqual(report["sweep_count"], 3)
         self.assertEqual(report["compare"]["status"], "planned")
+
+    def test_package_checkpoint_generation_control_plans_and_runs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = root / "run"
+            checkpoint_dir = run_dir / "checkpoint-2048"
+            checkpoint_dir.mkdir(parents=True)
+            (checkpoint_dir / "model.safetensors").write_text(
+                "ready",
+                encoding="utf-8",
+            )
+            run_card = root / "checkpoint-generation-control.json"
+            prompts = default_zspace_checkpoint_generation_prompts()
+            jobs = zspace_checkpoint_generation_control_jobs(
+                run_dir=run_dir,
+                checkpoint="checkpoint-2048",
+                prompt=prompts,
+                label_prefix="pkg",
+            )
+            compare_command = zspace_checkpoint_generation_control_compare_command(
+                jobs,
+                run_dir=run_dir,
+                checkpoint="checkpoint-2048",
+                top_n=2,
+            )
+            planned = zspace_checkpoint_generation_control_report(
+                run_dir=run_dir,
+                checkpoint="checkpoint-2048",
+                prompt=prompts,
+                label_prefix="pkg",
+                dry_run=True,
+                curve_out=run_dir / "curve.json",
+                curve_lines_out=run_dir / "curve.txt",
+                top_n=2,
+            )
+            executed: list[list[str]] = []
+
+            def fake_runner(command):
+                executed.append(list(command))
+                if "hf_gpt2_zspace_generation_control_sweep.py" in command[1]:
+                    out = Path(command[command.index("--out") + 1])
+                    out.write_text(
+                        json.dumps(
+                            {
+                                "row_type": "hf_gpt2_zspace_generation_control_sweep",
+                                "status": "complete",
+                            }
+                        ),
+                        encoding="utf-8",
+                    )
+                if "hf_gpt2_zspace_generation_control_compare.py" in command[1]:
+                    out = Path(command[command.index("--out") + 1])
+                    lines_out = Path(command[command.index("--lines-out") + 1])
+                    out.write_text('{"status":"complete"}\n', encoding="utf-8")
+                    lines_out.write_text("ok\n", encoding="utf-8")
+                return None
+
+            report = zspace_checkpoint_generation_control_report(
+                run_dir=run_dir,
+                checkpoint="checkpoint-2048",
+                prompt=prompts,
+                label_prefix="pkg",
+                dry_run=False,
+                run_card=run_card,
+                top_n=2,
+                runner=fake_runner,
+            )
+            stored = json.loads(run_card.read_text(encoding="utf-8"))
+
+        self.assertEqual(len(jobs), 3)
+        self.assertEqual(jobs[0].out.name, "checkpoint-2048-generation-control-sweep.json")
+        self.assertIn("pkg-spiral-checkpoint-2048", compare_command)
+        self.assertEqual(planned["status"], "planned")
+        self.assertEqual(planned["curve"]["status"], "planned")
+        self.assertEqual(report["status"], "complete")
+        self.assertEqual(stored["sweep_count"], 3)
+        self.assertEqual(len(executed), 4)
 
     def test_checkpoint_generation_control_runs_sweeps_and_compare_with_runner(
         self,

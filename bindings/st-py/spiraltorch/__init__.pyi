@@ -639,6 +639,139 @@ def zspace_generation_control_bridge_cli_args(
     include_enable_flag: bool = ...,
 ) -> List[str]: ...
 
+class ZSpaceCheckpointPromptSpec:
+    label: str
+    prompt: str
+    filename_prefix: str
+    def __init__(
+        self,
+        label: str,
+        prompt: str,
+        filename_prefix: str,
+    ) -> None: ...
+
+class ZSpaceCheckpointSweepJob:
+    checkpoint: str
+    prompt: ZSpaceCheckpointPromptSpec
+    model_dir: PathLike[str]
+    out: PathLike[str]
+    label: str
+    def __init__(
+        self,
+        checkpoint: str,
+        prompt: ZSpaceCheckpointPromptSpec,
+        model_dir: str | PathLike[str],
+        out: str | PathLike[str],
+        label: str,
+    ) -> None: ...
+
+def default_zspace_checkpoint_generation_prompts() -> List[ZSpaceCheckpointPromptSpec]: ...
+
+def zspace_checkpoint_generation_control_jobs(
+    *,
+    run_dir: str | PathLike[str],
+    checkpoint: Sequence[str] | str,
+    prompt: Sequence[Any] | Any | None = ...,
+    label_prefix: str = ...,
+) -> List[ZSpaceCheckpointSweepJob]: ...
+
+def zspace_checkpoint_generation_control_sweep_command(
+    job: ZSpaceCheckpointSweepJob,
+    *,
+    python: str | None = ...,
+    sweep_script: str | PathLike[str] | None = ...,
+    allow_remote: bool = ...,
+    trust_remote_code: bool = ...,
+    max_new_tokens: int | None = ...,
+    do_sample: bool = ...,
+    sample_temperature: float | None = ...,
+    sample_top_k: int | None = ...,
+) -> List[str]: ...
+
+def zspace_checkpoint_generation_control_compare_output_paths(
+    *,
+    run_dir: str | PathLike[str],
+    checkpoint: Sequence[str] | str,
+    compare_out: str | PathLike[str] | None = ...,
+    compare_lines_out: str | PathLike[str] | None = ...,
+) -> Tuple[PathLike[str], PathLike[str]]: ...
+
+def zspace_checkpoint_generation_control_compare_command(
+    jobs: Sequence[ZSpaceCheckpointSweepJob],
+    *,
+    run_dir: str | PathLike[str],
+    checkpoint: Sequence[str] | str,
+    python: str | None = ...,
+    compare_script: str | PathLike[str] | None = ...,
+    compare_with_sweep: Sequence[str | PathLike[str]] | str | PathLike[str] | None = ...,
+    compare_with_label: Sequence[str] | str | None = ...,
+    compare_out: str | PathLike[str] | None = ...,
+    compare_lines_out: str | PathLike[str] | None = ...,
+    top_n: int = ...,
+) -> List[str]: ...
+
+def zspace_checkpoint_generation_control_curve_command(
+    jobs: Sequence[ZSpaceCheckpointSweepJob],
+    *,
+    run_dir: str | PathLike[str],
+    checkpoint: Sequence[str] | str,
+    python: str | None = ...,
+    curve_script: str | PathLike[str] | None = ...,
+    curve_out: str | PathLike[str] | None = ...,
+    curve_lines_out: str | PathLike[str] | None = ...,
+    curve_run_card: str | PathLike[str] | None = ...,
+    curve_trainer_trace_jsonl: str | PathLike[str] | None = ...,
+    curve_model_name: str | None = ...,
+    curve_dataset_name: str | None = ...,
+    curve_dataset_config: str | None = ...,
+    compare_with_sweep: Sequence[str | PathLike[str]] | str | PathLike[str] | None = ...,
+    compare_with_label: Sequence[str] | str | None = ...,
+    top_n: int = ...,
+) -> List[str]: ...
+
+def zspace_checkpoint_generation_control_report(
+    *,
+    run_dir: str | PathLike[str],
+    checkpoint: Sequence[str] | str,
+    prompt: Sequence[Any] | Any | None = ...,
+    label_prefix: str = ...,
+    python: str | None = ...,
+    sweep_script: str | PathLike[str] | None = ...,
+    compare_script: str | PathLike[str] | None = ...,
+    curve_script: str | PathLike[str] | None = ...,
+    allow_remote: bool = ...,
+    trust_remote_code: bool = ...,
+    max_new_tokens: int | None = ...,
+    do_sample: bool = ...,
+    sample_temperature: float | None = ...,
+    sample_top_k: int | None = ...,
+    overwrite: bool = ...,
+    no_compare: bool = ...,
+    top_n: int = ...,
+    compare_out: str | PathLike[str] | None = ...,
+    compare_lines_out: str | PathLike[str] | None = ...,
+    curve_out: str | PathLike[str] | None = ...,
+    curve_lines_out: str | PathLike[str] | None = ...,
+    curve_run_card: str | PathLike[str] | None = ...,
+    curve_trainer_trace_jsonl: str | PathLike[str] | None = ...,
+    curve_model_name: str | None = ...,
+    curve_dataset_name: str | None = ...,
+    curve_dataset_config: str | None = ...,
+    compare_with_sweep: Sequence[str | PathLike[str]] | str | PathLike[str] | None = ...,
+    compare_with_label: Sequence[str] | str | None = ...,
+    run_card: str | PathLike[str] | None = ...,
+    dry_run: bool = ...,
+    wait_for_process_pid_file: str | PathLike[str] | None = ...,
+    wait: bool = ...,
+    ready_file: Sequence[str] | str | None = ...,
+    no_ready_file_check: bool = ...,
+    poll_seconds: float = ...,
+    process_poll_seconds: float | None = ...,
+    timeout_seconds: float = ...,
+    process_timeout_seconds: float = ...,
+    runner: Callable[[Sequence[str]], Any] | None = ...,
+) -> Dict[str, Any]: ...
+
 def load_zspace_inference_distortion_probe(
     path: str | PathLike[str],
 ) -> Dict[str, object]: ...
@@ -8741,11 +8874,14 @@ __all__ = [
     "write_hf_gpt2_finetune_run_card",
     "write_hf_gpt2_finetune_trainer_trace_event",
     "ZSpaceActivationProbeHook",
+    "ZSpaceCheckpointPromptSpec",
+    "ZSpaceCheckpointSweepJob",
     "ZSpaceRepressionLogitsProcessor",
     "build_zspace_activation_probe_hook",
     "build_zspace_repression_logits_processor",
     "build_zspace_softmax_logits_processor",
     "compare_zspace_inference_distortion_probes",
+    "default_zspace_checkpoint_generation_prompts",
     "zspace_inference_distortion_sweep_report_from_probes",
     "zspace_inference_distortion_geometry_probe",
     "zspace_inference_distortion_probe_cli_args",
@@ -8757,6 +8893,12 @@ __all__ = [
     "zspace_generation_control_bridge_cli_args",
     "zspace_generation_control_processor_kwargs",
     "zspace_generation_control_sweep_cli_args",
+    "zspace_checkpoint_generation_control_compare_command",
+    "zspace_checkpoint_generation_control_compare_output_paths",
+    "zspace_checkpoint_generation_control_curve_command",
+    "zspace_checkpoint_generation_control_jobs",
+    "zspace_checkpoint_generation_control_report",
+    "zspace_checkpoint_generation_control_sweep_command",
     "load_zspace_inference_distortion_probe",
     "load_zspace_inference_distortion_sweep",
     "load_zspace_generation_control_sweep",

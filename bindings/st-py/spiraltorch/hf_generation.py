@@ -5,18 +5,26 @@ from __future__ import annotations
 import importlib
 import json
 import math
+import os
+import subprocess
+import sys
+import time
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 __all__ = [
     "ZSpaceActivationProbeHook",
+    "ZSpaceCheckpointPromptSpec",
+    "ZSpaceCheckpointSweepJob",
     "ZSpaceRepressionLogitsProcessor",
     "build_zspace_activation_probe_hook",
     "build_zspace_repression_logits_processor",
     "build_zspace_softmax_logits_processor",
     "compare_zspace_inference_distortion_probes",
     "compare_zspace_generation_control_sweeps",
+    "default_zspace_checkpoint_generation_prompts",
     "zspace_inference_distortion_sweep_report_from_probes",
     "zspace_inference_distortion_probe_cli_args",
     "zspace_inference_distortion_geometry_probe",
@@ -28,6 +36,12 @@ __all__ = [
     "zspace_generation_control_bridge_cli_args",
     "zspace_generation_control_processor_kwargs",
     "zspace_generation_control_sweep_cli_args",
+    "zspace_checkpoint_generation_control_compare_command",
+    "zspace_checkpoint_generation_control_compare_output_paths",
+    "zspace_checkpoint_generation_control_curve_command",
+    "zspace_checkpoint_generation_control_jobs",
+    "zspace_checkpoint_generation_control_report",
+    "zspace_checkpoint_generation_control_sweep_command",
     "load_zspace_inference_distortion_probe",
     "load_zspace_inference_distortion_sweep",
     "load_zspace_generation_control_sweep",
@@ -47,6 +61,1008 @@ __all__ = [
 ADJUST_MIN = 0.25
 ADJUST_MAX = 4.0
 EPSILON = 1.0e-12
+_PACKAGE_ROOT = Path(__file__).resolve().parents[1]
+_EXAMPLES_ROOT = _PACKAGE_ROOT / "examples"
+DEFAULT_ZSPACE_CHECKPOINT_SWEEP_SCRIPT = (
+    _EXAMPLES_ROOT / "hf_gpt2_zspace_generation_control_sweep.py"
+)
+DEFAULT_ZSPACE_CHECKPOINT_COMPARE_SCRIPT = (
+    _EXAMPLES_ROOT / "hf_gpt2_zspace_generation_control_compare.py"
+)
+DEFAULT_ZSPACE_CHECKPOINT_CURVE_SCRIPT = (
+    _EXAMPLES_ROOT / "hf_gpt2_ft_generation_curve.py"
+)
+_DEFAULT_CHECKPOINT_PROMPTS: tuple[tuple[str, str, str], ...] = (
+    (
+        "spiral",
+        "SpiralTorch is a geometry-aware learning system that",
+        "",
+    ),
+    (
+        "desire-coherence",
+        "In Z-space, desire and coherence shape language by",
+        "prompt-desire-coherence-",
+    ),
+    (
+        "tokenless-ft",
+        "A tokenless fine-tuning stack should preserve meaning while",
+        "prompt-tokenless-ft-",
+    ),
+)
+
+
+@dataclass(frozen=True)
+class ZSpaceCheckpointPromptSpec:
+    """Prompt specification used by checkpoint generation-control sweeps."""
+
+    label: str
+    prompt: str
+    filename_prefix: str
+
+
+@dataclass(frozen=True)
+class ZSpaceCheckpointSweepJob:
+    """One generated checkpoint/prompt sweep job."""
+
+    checkpoint: str
+    prompt: ZSpaceCheckpointPromptSpec
+    model_dir: Path
+    out: Path
+    label: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "model_dir", Path(self.model_dir))
+        object.__setattr__(self, "out", Path(self.out))
+
+
+CheckpointGenerationRunner = Callable[
+    [Sequence[str]],
+    subprocess.CompletedProcess[str] | None,
+]
+
+
+def _checkpoint_control_slugify(value: str) -> str:
+    slug = "".join(ch.lower() if ch.isalnum() else "-" for ch in value.strip())
+    return "-".join(part for part in slug.split("-") if part) or "prompt"
+
+
+def _checkpoint_control_token(checkpoint: str) -> str:
+    if checkpoint.startswith("checkpoint-"):
+        return _checkpoint_control_slugify(checkpoint[len("checkpoint-") :])
+    return _checkpoint_control_slugify(checkpoint.replace("checkpoint-", "ckpt-"))
+
+
+def _as_list(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        return list(value)
+    return [value]
+
+
+def _checkpoint_prompt_spec(value: Any) -> ZSpaceCheckpointPromptSpec:
+    if isinstance(value, ZSpaceCheckpointPromptSpec):
+        return value
+    label_attr = getattr(value, "label", None)
+    prompt_attr = getattr(value, "prompt", None)
+    if label_attr is not None and prompt_attr is not None:
+        label = _checkpoint_control_slugify(str(label_attr))
+        prompt = str(prompt_attr).strip()
+        if not prompt:
+            raise ValueError("prompt spec must include non-empty prompt")
+        filename_attr = getattr(value, "filename_prefix", None)
+        filename_prefix = (
+            str(filename_attr)
+            if filename_attr is not None
+            else f"prompt-{label}-"
+        )
+        return ZSpaceCheckpointPromptSpec(
+            label=label,
+            prompt=prompt,
+            filename_prefix=filename_prefix,
+        )
+    if isinstance(value, Mapping):
+        label = _checkpoint_control_slugify(str(value.get("label") or "prompt"))
+        prompt = str(value.get("prompt") or "").strip()
+        if not prompt:
+            raise ValueError("prompt mapping must include non-empty 'prompt'")
+        filename_prefix = (
+            str(value["filename_prefix"])
+            if "filename_prefix" in value
+            else f"prompt-{label}-"
+        )
+        return ZSpaceCheckpointPromptSpec(
+            label=label,
+            prompt=prompt,
+            filename_prefix=filename_prefix,
+        )
+    if isinstance(value, str):
+        if "::" not in value:
+            raise ValueError("prompt string must use LABEL::TEXT")
+        label, prompt = value.split("::", 1)
+        label = _checkpoint_control_slugify(label)
+        prompt = prompt.strip()
+        if not prompt:
+            raise ValueError("prompt text must not be empty")
+        return ZSpaceCheckpointPromptSpec(
+            label=label,
+            prompt=prompt,
+            filename_prefix=f"prompt-{label}-",
+        )
+    raise TypeError("prompt must be a mapping, LABEL::TEXT string, or prompt spec")
+
+
+def default_zspace_checkpoint_generation_prompts() -> list[ZSpaceCheckpointPromptSpec]:
+    """Return SpiralTorch's default checkpoint generation-control prompt set."""
+
+    return [
+        ZSpaceCheckpointPromptSpec(
+            label=label,
+            prompt=prompt,
+            filename_prefix=filename_prefix,
+        )
+        for label, prompt, filename_prefix in _DEFAULT_CHECKPOINT_PROMPTS
+    ]
+
+
+@dataclass
+class _CheckpointGenerationControlConfig:
+    run_dir: Path
+    checkpoint: list[str]
+    prompt: list[ZSpaceCheckpointPromptSpec]
+    label_prefix: str
+    python: str
+    sweep_script: Path
+    compare_script: Path
+    curve_script: Path
+    allow_remote: bool
+    trust_remote_code: bool
+    max_new_tokens: int | None
+    do_sample: bool
+    sample_temperature: float | None
+    sample_top_k: int | None
+    overwrite: bool
+    no_compare: bool
+    top_n: int
+    compare_out: Path | None
+    compare_lines_out: Path | None
+    curve_out: Path | None
+    curve_lines_out: Path | None
+    curve_run_card: Path | None
+    curve_trainer_trace_jsonl: Path | None
+    curve_model_name: str | None
+    curve_dataset_name: str | None
+    curve_dataset_config: str | None
+    compare_with_sweep: list[Path]
+    compare_with_label: list[str]
+    run_card: Path | None
+    dry_run: bool
+    wait_for_process_pid_file: Path | None
+    wait: bool
+    ready_file: list[str]
+    poll_seconds: float
+    process_poll_seconds: float | None
+    timeout_seconds: float
+    process_timeout_seconds: float
+
+
+def _checkpoint_control_config(
+    *,
+    run_dir: str | Path,
+    checkpoint: Sequence[str] | str,
+    prompt: Sequence[Any] | Any | None = None,
+    label_prefix: str = "",
+    python: str | None = None,
+    sweep_script: str | Path | None = None,
+    compare_script: str | Path | None = None,
+    curve_script: str | Path | None = None,
+    allow_remote: bool = False,
+    trust_remote_code: bool = False,
+    max_new_tokens: int | None = None,
+    do_sample: bool = False,
+    sample_temperature: float | None = None,
+    sample_top_k: int | None = None,
+    overwrite: bool = False,
+    no_compare: bool = False,
+    top_n: int = 3,
+    compare_out: str | Path | None = None,
+    compare_lines_out: str | Path | None = None,
+    curve_out: str | Path | None = None,
+    curve_lines_out: str | Path | None = None,
+    curve_run_card: str | Path | None = None,
+    curve_trainer_trace_jsonl: str | Path | None = None,
+    curve_model_name: str | None = None,
+    curve_dataset_name: str | None = None,
+    curve_dataset_config: str | None = None,
+    compare_with_sweep: Sequence[str | Path] | str | Path | None = None,
+    compare_with_label: Sequence[str] | str | None = None,
+    run_card: str | Path | None = None,
+    dry_run: bool = True,
+    wait_for_process_pid_file: str | Path | None = None,
+    wait: bool = False,
+    ready_file: Sequence[str] | str | None = None,
+    no_ready_file_check: bool = False,
+    poll_seconds: float = 30.0,
+    process_poll_seconds: float | None = None,
+    timeout_seconds: float = 0.0,
+    process_timeout_seconds: float = 0.0,
+) -> _CheckpointGenerationControlConfig:
+    checkpoints = [str(item) for item in _as_list(checkpoint) if str(item)]
+    if not checkpoints:
+        raise ValueError("checkpoint must be provided at least once")
+    prompts = (
+        default_zspace_checkpoint_generation_prompts()
+        if prompt is None
+        else [_checkpoint_prompt_spec(item) for item in _as_list(prompt)]
+    )
+    if not prompts:
+        raise ValueError("prompt must include at least one prompt")
+    if max_new_tokens is not None and max_new_tokens <= 0:
+        raise ValueError("max_new_tokens must be positive")
+    if sample_temperature is not None and sample_temperature <= 0.0:
+        raise ValueError("sample_temperature must be positive")
+    if sample_top_k is not None and sample_top_k < 0:
+        raise ValueError("sample_top_k must be non-negative")
+    if top_n < 0:
+        raise ValueError("top_n must be non-negative")
+    if poll_seconds <= 0.0:
+        raise ValueError("poll_seconds must be positive")
+    if process_poll_seconds is not None and process_poll_seconds <= 0.0:
+        raise ValueError("process_poll_seconds must be positive")
+    if timeout_seconds < 0.0:
+        raise ValueError("timeout_seconds must be non-negative")
+    if process_timeout_seconds < 0.0:
+        raise ValueError("process_timeout_seconds must be non-negative")
+    compare_paths = [Path(path) for path in _as_list(compare_with_sweep)]
+    compare_labels = [str(label) for label in _as_list(compare_with_label)]
+    if compare_labels and len(compare_labels) != len(compare_paths):
+        raise ValueError("compare_with_label must match compare_with_sweep count")
+    if (
+        (curve_run_card is not None or curve_trainer_trace_jsonl is not None)
+        and curve_out is None
+        and curve_lines_out is None
+    ):
+        raise ValueError("curve source options require curve_out or curve_lines_out")
+    ready_files = (
+        []
+        if no_ready_file_check
+        else [str(item) for item in _as_list(ready_file or ["model.safetensors"])]
+    )
+    return _CheckpointGenerationControlConfig(
+        run_dir=Path(run_dir),
+        checkpoint=checkpoints,
+        prompt=prompts,
+        label_prefix=str(label_prefix or ""),
+        python=str(python or sys.executable or "python3"),
+        sweep_script=Path(sweep_script or DEFAULT_ZSPACE_CHECKPOINT_SWEEP_SCRIPT),
+        compare_script=Path(compare_script or DEFAULT_ZSPACE_CHECKPOINT_COMPARE_SCRIPT),
+        curve_script=Path(curve_script or DEFAULT_ZSPACE_CHECKPOINT_CURVE_SCRIPT),
+        allow_remote=bool(allow_remote),
+        trust_remote_code=bool(trust_remote_code),
+        max_new_tokens=max_new_tokens,
+        do_sample=bool(do_sample),
+        sample_temperature=sample_temperature,
+        sample_top_k=sample_top_k,
+        overwrite=bool(overwrite),
+        no_compare=bool(no_compare),
+        top_n=int(top_n),
+        compare_out=None if compare_out is None else Path(compare_out),
+        compare_lines_out=None
+        if compare_lines_out is None
+        else Path(compare_lines_out),
+        curve_out=None if curve_out is None else Path(curve_out),
+        curve_lines_out=None if curve_lines_out is None else Path(curve_lines_out),
+        curve_run_card=None if curve_run_card is None else Path(curve_run_card),
+        curve_trainer_trace_jsonl=None
+        if curve_trainer_trace_jsonl is None
+        else Path(curve_trainer_trace_jsonl),
+        curve_model_name=curve_model_name,
+        curve_dataset_name=curve_dataset_name,
+        curve_dataset_config=curve_dataset_config,
+        compare_with_sweep=compare_paths,
+        compare_with_label=compare_labels,
+        run_card=None if run_card is None else Path(run_card),
+        dry_run=bool(dry_run),
+        wait_for_process_pid_file=None
+        if wait_for_process_pid_file is None
+        else Path(wait_for_process_pid_file),
+        wait=bool(wait),
+        ready_file=ready_files,
+        poll_seconds=float(poll_seconds),
+        process_poll_seconds=None
+        if process_poll_seconds is None
+        else float(process_poll_seconds),
+        timeout_seconds=float(timeout_seconds),
+        process_timeout_seconds=float(process_timeout_seconds),
+    )
+
+
+def _checkpoint_sweep_out_path(
+    run_dir: Path,
+    checkpoint: str,
+    prompt: ZSpaceCheckpointPromptSpec,
+) -> Path:
+    return run_dir / f"{prompt.filename_prefix}{checkpoint}-generation-control-sweep.json"
+
+
+def _checkpoint_job_label(
+    label_prefix: str,
+    checkpoint: str,
+    prompt: ZSpaceCheckpointPromptSpec,
+) -> str:
+    parts = [part for part in (label_prefix, prompt.label, checkpoint) if part]
+    return "-".join(_checkpoint_control_slugify(part) for part in parts)
+
+
+def zspace_checkpoint_generation_control_jobs(
+    *,
+    run_dir: str | Path,
+    checkpoint: Sequence[str] | str,
+    prompt: Sequence[Any] | Any | None = None,
+    label_prefix: str = "",
+) -> list[ZSpaceCheckpointSweepJob]:
+    """Build the checkpoint/prompt sweep jobs without running model inference."""
+
+    config = _checkpoint_control_config(
+        run_dir=run_dir,
+        checkpoint=checkpoint,
+        prompt=prompt,
+        label_prefix=label_prefix,
+    )
+    jobs: list[ZSpaceCheckpointSweepJob] = []
+    for checkpoint_name in config.checkpoint:
+        model_dir = config.run_dir / checkpoint_name
+        for prompt_spec in config.prompt:
+            jobs.append(
+                ZSpaceCheckpointSweepJob(
+                    checkpoint=checkpoint_name,
+                    prompt=prompt_spec,
+                    model_dir=model_dir,
+                    out=_checkpoint_sweep_out_path(
+                        config.run_dir,
+                        checkpoint_name,
+                        prompt_spec,
+                    ),
+                    label=_checkpoint_job_label(
+                        config.label_prefix,
+                        checkpoint_name,
+                        prompt_spec,
+                    ),
+                )
+            )
+    return jobs
+
+
+def zspace_checkpoint_generation_control_sweep_command(
+    job: ZSpaceCheckpointSweepJob,
+    *,
+    python: str | None = None,
+    sweep_script: str | Path | None = None,
+    allow_remote: bool = False,
+    trust_remote_code: bool = False,
+    max_new_tokens: int | None = None,
+    do_sample: bool = False,
+    sample_temperature: float | None = None,
+    sample_top_k: int | None = None,
+) -> list[str]:
+    """Build one checkpoint generation-control sweep command."""
+
+    config = _checkpoint_control_config(
+        run_dir=job.out.parent,
+        checkpoint=job.checkpoint,
+        python=python,
+        sweep_script=sweep_script,
+        allow_remote=allow_remote,
+        trust_remote_code=trust_remote_code,
+        max_new_tokens=max_new_tokens,
+        do_sample=do_sample,
+        sample_temperature=sample_temperature,
+        sample_top_k=sample_top_k,
+    )
+    command = [
+        config.python,
+        str(config.sweep_script),
+        "--model-name",
+        str(job.model_dir),
+        "--prompt",
+        job.prompt.prompt,
+        "--out",
+        str(job.out),
+    ]
+    if config.allow_remote:
+        command.append("--allow-remote")
+    if config.trust_remote_code:
+        command.append("--trust-remote-code")
+    if config.max_new_tokens is not None:
+        command.extend(["--max-new-tokens", str(config.max_new_tokens)])
+    if config.do_sample:
+        command.append("--do-sample")
+    if config.sample_temperature is not None:
+        command.extend(["--sample-temperature", str(config.sample_temperature)])
+    if config.sample_top_k is not None:
+        command.extend(["--sample-top-k", str(config.sample_top_k)])
+    return command
+
+
+def _default_checkpoint_compare_stem(checkpoints: Sequence[str]) -> str:
+    if len(checkpoints) == 1:
+        return f"generation-control-compare-3prompt-{_checkpoint_control_token(checkpoints[0])}"
+    first = _checkpoint_control_token(checkpoints[0])
+    last = _checkpoint_control_token(checkpoints[-1])
+    return f"generation-control-compare-3prompt-{first}-to-{last}"
+
+
+def zspace_checkpoint_generation_control_compare_output_paths(
+    *,
+    run_dir: str | Path,
+    checkpoint: Sequence[str] | str,
+    compare_out: str | Path | None = None,
+    compare_lines_out: str | Path | None = None,
+) -> tuple[Path, Path]:
+    """Return default JSON/text comparison paths for checkpoint sweeps."""
+
+    checkpoints = [str(item) for item in _as_list(checkpoint) if str(item)]
+    if not checkpoints:
+        raise ValueError("checkpoint must be provided at least once")
+    stem = _default_checkpoint_compare_stem(checkpoints)
+    root = Path(run_dir)
+    return (
+        Path(compare_out) if compare_out is not None else root / f"{stem}.json",
+        Path(compare_lines_out)
+        if compare_lines_out is not None
+        else root / f"{stem}.txt",
+    )
+
+
+def zspace_checkpoint_generation_control_compare_command(
+    jobs: Sequence[ZSpaceCheckpointSweepJob],
+    *,
+    run_dir: str | Path,
+    checkpoint: Sequence[str] | str,
+    python: str | None = None,
+    compare_script: str | Path | None = None,
+    compare_with_sweep: Sequence[str | Path] | str | Path | None = None,
+    compare_with_label: Sequence[str] | str | None = None,
+    compare_out: str | Path | None = None,
+    compare_lines_out: str | Path | None = None,
+    top_n: int = 3,
+) -> list[str]:
+    """Build the comparison command for checkpoint generation-control sweeps."""
+
+    config = _checkpoint_control_config(
+        run_dir=run_dir,
+        checkpoint=checkpoint,
+        python=python,
+        compare_script=compare_script,
+        compare_with_sweep=compare_with_sweep,
+        compare_with_label=compare_with_label,
+        compare_out=compare_out,
+        compare_lines_out=compare_lines_out,
+        top_n=top_n,
+    )
+    out, lines_out = zspace_checkpoint_generation_control_compare_output_paths(
+        run_dir=config.run_dir,
+        checkpoint=config.checkpoint,
+        compare_out=config.compare_out,
+        compare_lines_out=config.compare_lines_out,
+    )
+    paths = [str(path) for path in config.compare_with_sweep]
+    labels = list(config.compare_with_label)
+    for job in jobs:
+        paths.append(str(job.out))
+        labels.append(job.label)
+    command = [config.python, str(config.compare_script), *paths]
+    for label in labels:
+        command.extend(["--label", label])
+    command.extend(
+        [
+            "--out",
+            str(out),
+            "--lines-out",
+            str(lines_out),
+            "--top-n",
+            str(config.top_n),
+        ]
+    )
+    return command
+
+
+def _default_checkpoint_curve_run_card(
+    config: _CheckpointGenerationControlConfig,
+) -> Path | None:
+    candidates = [
+        config.curve_run_card,
+        config.run_dir / "spiraltorch-hf-gpt2-ft-run-card.json",
+    ]
+    for path in candidates:
+        if path is not None and path.is_file():
+            return path
+    return None
+
+
+def _default_checkpoint_curve_trainer_trace(
+    config: _CheckpointGenerationControlConfig,
+) -> Path | None:
+    candidates = [
+        config.curve_trainer_trace_jsonl,
+        config.run_dir / "spiraltorch-hf-gpt2-ft-trainer-trace.jsonl",
+    ]
+    for path in candidates:
+        if path is not None and path.is_file():
+            return path
+    return None
+
+
+def zspace_checkpoint_generation_control_curve_command(
+    jobs: Sequence[ZSpaceCheckpointSweepJob],
+    *,
+    run_dir: str | Path,
+    checkpoint: Sequence[str] | str,
+    python: str | None = None,
+    curve_script: str | Path | None = None,
+    curve_out: str | Path | None = None,
+    curve_lines_out: str | Path | None = None,
+    curve_run_card: str | Path | None = None,
+    curve_trainer_trace_jsonl: str | Path | None = None,
+    curve_model_name: str | None = None,
+    curve_dataset_name: str | None = None,
+    curve_dataset_config: str | None = None,
+    compare_with_sweep: Sequence[str | Path] | str | Path | None = None,
+    compare_with_label: Sequence[str] | str | None = None,
+    top_n: int = 3,
+) -> list[str]:
+    """Build a generation-curve command from checkpoint sweep outputs."""
+
+    config = _checkpoint_control_config(
+        run_dir=run_dir,
+        checkpoint=checkpoint,
+        python=python,
+        curve_script=curve_script,
+        curve_out=curve_out,
+        curve_lines_out=curve_lines_out,
+        curve_run_card=curve_run_card,
+        curve_trainer_trace_jsonl=curve_trainer_trace_jsonl,
+        curve_model_name=curve_model_name,
+        curve_dataset_name=curve_dataset_name,
+        curve_dataset_config=curve_dataset_config,
+        compare_with_sweep=compare_with_sweep,
+        compare_with_label=compare_with_label,
+        top_n=top_n,
+    )
+    paths = [str(path) for path in config.compare_with_sweep]
+    labels = list(config.compare_with_label)
+    for job in jobs:
+        paths.append(str(job.out))
+        labels.append(job.label)
+    command = [config.python, str(config.curve_script), *paths]
+    for label in labels:
+        command.extend(["--label", label])
+    run_card = _default_checkpoint_curve_run_card(config)
+    trainer_trace = _default_checkpoint_curve_trainer_trace(config)
+    if run_card is not None:
+        command.extend(["--run-card", str(run_card)])
+    if trainer_trace is not None:
+        command.extend(["--trainer-trace-jsonl", str(trainer_trace)])
+    command.extend(["--run-dir", str(config.run_dir)])
+    if config.curve_model_name is not None:
+        command.extend(["--model-name", str(config.curve_model_name)])
+    if config.curve_dataset_name is not None:
+        command.extend(["--dataset-name", str(config.curve_dataset_name)])
+    if config.curve_dataset_config is not None:
+        command.extend(["--dataset-config", str(config.curve_dataset_config)])
+    if config.curve_out is not None:
+        command.extend(["--out", str(config.curve_out)])
+    if config.curve_lines_out is not None:
+        command.extend(["--lines-out", str(config.curve_lines_out)])
+    command.extend(["--top-n", str(config.top_n)])
+    return command
+
+
+def _checkpoint_command_row(command: Sequence[str]) -> str:
+    return " ".join(str(item) for item in command)
+
+
+def _write_checkpoint_status_card(
+    config: _CheckpointGenerationControlConfig,
+    status: str,
+    **extra: Any,
+) -> None:
+    if config.run_card is None:
+        return
+    report: dict[str, Any] = {
+        "row_type": "hf_gpt2_ft_checkpoint_generation_control",
+        "status": status,
+        "dry_run": bool(config.dry_run),
+        "run_dir": str(config.run_dir),
+        "checkpoint_count": len(config.checkpoint),
+        "prompt_count": len(config.prompt),
+        "time_unix_s": time.time(),
+    }
+    report.update(extra)
+    config.run_card.parent.mkdir(parents=True, exist_ok=True)
+    config.run_card.write_text(
+        json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _checkpoint_read_pid_file(path: Path) -> int:
+    text = path.read_text(encoding="utf-8").strip()
+    try:
+        pid = int(text)
+    except ValueError as exc:
+        raise ValueError(f"PID file does not contain an integer: {path}") from exc
+    if pid <= 0:
+        raise ValueError(f"PID file must contain a positive PID: {path}")
+    return pid
+
+
+def _checkpoint_process_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _wait_for_checkpoint_process_exit(
+    config: _CheckpointGenerationControlConfig,
+) -> dict[str, Any] | None:
+    pid_file = config.wait_for_process_pid_file
+    if pid_file is None:
+        return None
+    row: dict[str, Any] = {"pid_file": str(pid_file)}
+    if config.dry_run:
+        row["status"] = "planned"
+        return row
+    pid = _checkpoint_read_pid_file(pid_file)
+    row["pid"] = pid
+    if not _checkpoint_process_alive(pid):
+        row["status"] = "already_exited"
+        _write_checkpoint_status_card(config, "process_already_exited", process_wait=row)
+        return row
+    started = time.monotonic()
+    row["status"] = "waiting"
+    row["started_unix_s"] = time.time()
+    deadline = None
+    if config.process_timeout_seconds > 0.0:
+        deadline = time.monotonic() + config.process_timeout_seconds
+    poll_seconds = (
+        config.process_poll_seconds
+        if config.process_poll_seconds is not None
+        else config.poll_seconds
+    )
+    print(f"checkpoint_generation_control_wait_process pid={pid} pid_file={pid_file}")
+    _write_checkpoint_status_card(config, "waiting_for_process", process_wait=row)
+    while _checkpoint_process_alive(pid):
+        row["waited_seconds"] = time.monotonic() - started
+        row["last_heartbeat_unix_s"] = time.time()
+        _write_checkpoint_status_card(config, "waiting_for_process", process_wait=row)
+        if deadline is not None and time.monotonic() >= deadline:
+            raise TimeoutError(f"timed out waiting for process {pid} from {pid_file}")
+        time.sleep(poll_seconds)
+    row["status"] = "complete"
+    row["waited_seconds"] = time.monotonic() - started
+    row["completed_unix_s"] = time.time()
+    _write_checkpoint_status_card(config, "process_exited", process_wait=row)
+    return row
+
+
+def _missing_checkpoint_ready_files(
+    config: _CheckpointGenerationControlConfig,
+    job: ZSpaceCheckpointSweepJob,
+) -> list[Path]:
+    if not job.model_dir.is_dir():
+        return [job.model_dir]
+    return [
+        job.model_dir / str(ready_file)
+        for ready_file in config.ready_file
+        if not (job.model_dir / str(ready_file)).is_file()
+    ]
+
+
+def _checkpoint_ready(
+    config: _CheckpointGenerationControlConfig,
+    job: ZSpaceCheckpointSweepJob,
+) -> bool:
+    return not _missing_checkpoint_ready_files(config, job)
+
+
+def _checkpoint_not_ready_message(
+    config: _CheckpointGenerationControlConfig,
+    job: ZSpaceCheckpointSweepJob,
+) -> str:
+    missing = ", ".join(
+        str(path) for path in _missing_checkpoint_ready_files(config, job)
+    )
+    return f"checkpoint is not ready: {job.model_dir}; missing {missing}"
+
+
+def _wait_for_checkpoint_model_dir(
+    config: _CheckpointGenerationControlConfig,
+    job: ZSpaceCheckpointSweepJob,
+) -> None:
+    if config.dry_run or _checkpoint_ready(config, job):
+        return
+    if not config.wait:
+        raise FileNotFoundError(_checkpoint_not_ready_message(config, job))
+    deadline = None
+    if config.timeout_seconds > 0.0:
+        deadline = time.monotonic() + config.timeout_seconds
+    started = time.monotonic()
+    while not _checkpoint_ready(config, job):
+        wait_row = {
+            "checkpoint": job.checkpoint,
+            "model_name": str(job.model_dir),
+            "missing": [
+                str(path) for path in _missing_checkpoint_ready_files(config, job)
+            ],
+            "waited_seconds": time.monotonic() - started,
+            "last_heartbeat_unix_s": time.time(),
+        }
+        _write_checkpoint_status_card(
+            config,
+            "waiting_for_checkpoint",
+            checkpoint_wait=wait_row,
+        )
+        if deadline is not None and time.monotonic() >= deadline:
+            raise TimeoutError(_checkpoint_not_ready_message(config, job))
+        time.sleep(config.poll_seconds)
+    _write_checkpoint_status_card(
+        config,
+        "checkpoint_ready",
+        checkpoint_wait={
+            "checkpoint": job.checkpoint,
+            "model_name": str(job.model_dir),
+            "waited_seconds": time.monotonic() - started,
+            "completed_unix_s": time.time(),
+        },
+    )
+
+
+def _run_checkpoint_command(
+    command: Sequence[str],
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(list(command), check=True, text=True)
+
+
+def _checkpoint_curve_requested(config: _CheckpointGenerationControlConfig) -> bool:
+    return config.curve_out is not None or config.curve_lines_out is not None
+
+
+def zspace_checkpoint_generation_control_report(
+    *,
+    run_dir: str | Path,
+    checkpoint: Sequence[str] | str,
+    prompt: Sequence[Any] | Any | None = None,
+    label_prefix: str = "",
+    python: str | None = None,
+    sweep_script: str | Path | None = None,
+    compare_script: str | Path | None = None,
+    curve_script: str | Path | None = None,
+    allow_remote: bool = False,
+    trust_remote_code: bool = False,
+    max_new_tokens: int | None = None,
+    do_sample: bool = False,
+    sample_temperature: float | None = None,
+    sample_top_k: int | None = None,
+    overwrite: bool = False,
+    no_compare: bool = False,
+    top_n: int = 3,
+    compare_out: str | Path | None = None,
+    compare_lines_out: str | Path | None = None,
+    curve_out: str | Path | None = None,
+    curve_lines_out: str | Path | None = None,
+    curve_run_card: str | Path | None = None,
+    curve_trainer_trace_jsonl: str | Path | None = None,
+    curve_model_name: str | None = None,
+    curve_dataset_name: str | None = None,
+    curve_dataset_config: str | None = None,
+    compare_with_sweep: Sequence[str | Path] | str | Path | None = None,
+    compare_with_label: Sequence[str] | str | None = None,
+    run_card: str | Path | None = None,
+    dry_run: bool = True,
+    wait_for_process_pid_file: str | Path | None = None,
+    wait: bool = False,
+    ready_file: Sequence[str] | str | None = None,
+    no_ready_file_check: bool = False,
+    poll_seconds: float = 30.0,
+    process_poll_seconds: float | None = None,
+    timeout_seconds: float = 0.0,
+    process_timeout_seconds: float = 0.0,
+    runner: CheckpointGenerationRunner | None = None,
+) -> dict[str, Any]:
+    """Plan or run checkpoint generation-control sweeps from package code."""
+
+    config = _checkpoint_control_config(
+        run_dir=run_dir,
+        checkpoint=checkpoint,
+        prompt=prompt,
+        label_prefix=label_prefix,
+        python=python,
+        sweep_script=sweep_script,
+        compare_script=compare_script,
+        curve_script=curve_script,
+        allow_remote=allow_remote,
+        trust_remote_code=trust_remote_code,
+        max_new_tokens=max_new_tokens,
+        do_sample=do_sample,
+        sample_temperature=sample_temperature,
+        sample_top_k=sample_top_k,
+        overwrite=overwrite,
+        no_compare=no_compare,
+        top_n=top_n,
+        compare_out=compare_out,
+        compare_lines_out=compare_lines_out,
+        curve_out=curve_out,
+        curve_lines_out=curve_lines_out,
+        curve_run_card=curve_run_card,
+        curve_trainer_trace_jsonl=curve_trainer_trace_jsonl,
+        curve_model_name=curve_model_name,
+        curve_dataset_name=curve_dataset_name,
+        curve_dataset_config=curve_dataset_config,
+        compare_with_sweep=compare_with_sweep,
+        compare_with_label=compare_with_label,
+        run_card=run_card,
+        dry_run=dry_run,
+        wait_for_process_pid_file=wait_for_process_pid_file,
+        wait=wait,
+        ready_file=ready_file,
+        no_ready_file_check=no_ready_file_check,
+        poll_seconds=poll_seconds,
+        process_poll_seconds=process_poll_seconds,
+        timeout_seconds=timeout_seconds,
+        process_timeout_seconds=process_timeout_seconds,
+    )
+    run_command = runner or _run_checkpoint_command
+    process_wait = _wait_for_checkpoint_process_exit(config)
+    jobs = zspace_checkpoint_generation_control_jobs(
+        run_dir=config.run_dir,
+        checkpoint=config.checkpoint,
+        prompt=config.prompt,
+        label_prefix=config.label_prefix,
+    )
+    rows: list[dict[str, Any]] = []
+    runnable_compare_jobs: list[ZSpaceCheckpointSweepJob] = []
+    for job in jobs:
+        command = zspace_checkpoint_generation_control_sweep_command(
+            job,
+            python=config.python,
+            sweep_script=config.sweep_script,
+            allow_remote=config.allow_remote,
+            trust_remote_code=config.trust_remote_code,
+            max_new_tokens=config.max_new_tokens,
+            do_sample=config.do_sample,
+            sample_temperature=config.sample_temperature,
+            sample_top_k=config.sample_top_k,
+        )
+        row: dict[str, Any] = {
+            "checkpoint": job.checkpoint,
+            "label": job.label,
+            "prompt_label": job.prompt.label,
+            "prompt": job.prompt.prompt,
+            "model_name": str(job.model_dir),
+            "out": str(job.out),
+            "command": list(command),
+        }
+        if job.out.is_file() and not config.overwrite:
+            row["status"] = "skipped_existing"
+            runnable_compare_jobs.append(job)
+        elif config.dry_run:
+            row["status"] = "planned"
+            runnable_compare_jobs.append(job)
+        else:
+            _wait_for_checkpoint_model_dir(config, job)
+            job.out.parent.mkdir(parents=True, exist_ok=True)
+            print("checkpoint_generation_control_sweep", _checkpoint_command_row(command))
+            run_command(command)
+            row["status"] = "complete"
+            runnable_compare_jobs.append(job)
+        rows.append(row)
+
+    compare_row: dict[str, Any] | None = None
+    if not config.no_compare:
+        compare_command = zspace_checkpoint_generation_control_compare_command(
+            runnable_compare_jobs,
+            run_dir=config.run_dir,
+            checkpoint=config.checkpoint,
+            python=config.python,
+            compare_script=config.compare_script,
+            compare_with_sweep=config.compare_with_sweep,
+            compare_with_label=config.compare_with_label,
+            compare_out=config.compare_out,
+            compare_lines_out=config.compare_lines_out,
+            top_n=config.top_n,
+        )
+        compare_out_path, compare_lines_path = (
+            zspace_checkpoint_generation_control_compare_output_paths(
+                run_dir=config.run_dir,
+                checkpoint=config.checkpoint,
+                compare_out=config.compare_out,
+                compare_lines_out=config.compare_lines_out,
+            )
+        )
+        compare_row = {
+            "out": str(compare_out_path),
+            "lines_out": str(compare_lines_path),
+            "command": list(compare_command),
+        }
+        if config.dry_run:
+            compare_row["status"] = "planned"
+        else:
+            print(
+                "checkpoint_generation_control_compare",
+                _checkpoint_command_row(compare_command),
+            )
+            run_command(compare_command)
+            compare_row["status"] = "complete"
+
+    curve_row: dict[str, Any] | None = None
+    if _checkpoint_curve_requested(config):
+        curve_command = zspace_checkpoint_generation_control_curve_command(
+            runnable_compare_jobs,
+            run_dir=config.run_dir,
+            checkpoint=config.checkpoint,
+            python=config.python,
+            curve_script=config.curve_script,
+            curve_out=config.curve_out,
+            curve_lines_out=config.curve_lines_out,
+            curve_run_card=config.curve_run_card,
+            curve_trainer_trace_jsonl=config.curve_trainer_trace_jsonl,
+            curve_model_name=config.curve_model_name,
+            curve_dataset_name=config.curve_dataset_name,
+            curve_dataset_config=config.curve_dataset_config,
+            compare_with_sweep=config.compare_with_sweep,
+            compare_with_label=config.compare_with_label,
+            top_n=config.top_n,
+        )
+        curve_row = {
+            "out": None if config.curve_out is None else str(config.curve_out),
+            "lines_out": (
+                None if config.curve_lines_out is None else str(config.curve_lines_out)
+            ),
+            "command": list(curve_command),
+        }
+        if config.dry_run:
+            curve_row["status"] = "planned"
+        else:
+            print("checkpoint_generation_control_curve", _checkpoint_command_row(curve_command))
+            run_command(curve_command)
+            curve_row["status"] = "complete"
+
+    status = "planned" if config.dry_run else "complete"
+    if (
+        not config.dry_run
+        and rows
+        and all(row["status"] == "skipped_existing" for row in rows)
+    ):
+        status = "complete_with_existing_sweeps" if compare_row else "skipped_existing"
+    report: dict[str, Any] = {
+        "row_type": "hf_gpt2_ft_checkpoint_generation_control",
+        "status": status,
+        "dry_run": bool(config.dry_run),
+        "run_dir": str(config.run_dir),
+        "checkpoint_count": len(config.checkpoint),
+        "prompt_count": len(config.prompt),
+        "sweep_count": len(rows),
+        "sweeps": rows,
+    }
+    if compare_row is not None:
+        report["compare"] = compare_row
+    if curve_row is not None:
+        report["curve"] = curve_row
+    if process_wait is not None:
+        report["process_wait"] = process_wait
+    if config.run_card is not None:
+        config.run_card.parent.mkdir(parents=True, exist_ok=True)
+        config.run_card.write_text(
+            json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        print(f"checkpoint_generation_control_run_card {config.run_card}")
+    return report
 
 
 def _finite_float(value: object, *, label: str) -> float:
