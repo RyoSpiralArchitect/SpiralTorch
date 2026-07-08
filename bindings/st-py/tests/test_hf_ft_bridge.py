@@ -63,6 +63,11 @@ STATUS_HISTORY_SUMMARY_PATH = (
     / "examples"
     / "hf_gpt2_finetune_status_history_summary.py"
 )
+GENERIC_STATUS_HISTORY_SUMMARY_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "examples"
+    / "hf_finetune_status_history_summary.py"
+)
 WAIT_LAUNCH_PATH = (
     Path(__file__).resolve().parents[1]
     / "examples"
@@ -72,6 +77,11 @@ WAIT_LAUNCH_SUMMARY_PATH = (
     Path(__file__).resolve().parents[1]
     / "examples"
     / "hf_gpt2_finetune_wait_launch_summary.py"
+)
+GENERIC_WAIT_LAUNCH_SUMMARY_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "examples"
+    / "hf_finetune_wait_launch_summary.py"
 )
 MONITOR_SNAPSHOT_PATH = (
     Path(__file__).resolve().parents[1]
@@ -207,6 +217,17 @@ def load_status_history_summary_example():
     return module
 
 
+def load_generic_status_history_summary_example():
+    spec = importlib.util.spec_from_file_location(
+        "hf_finetune_status_history_summary_test",
+        GENERIC_STATUS_HISTORY_SUMMARY_PATH,
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
 def load_wait_launch_example():
     spec = importlib.util.spec_from_file_location(
         "hf_gpt2_finetune_wait_launch_test",
@@ -222,6 +243,17 @@ def load_wait_launch_summary_example():
     spec = importlib.util.spec_from_file_location(
         "hf_gpt2_finetune_wait_launch_summary_test",
         WAIT_LAUNCH_SUMMARY_PATH,
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_generic_wait_launch_summary_example():
+    spec = importlib.util.spec_from_file_location(
+        "hf_finetune_wait_launch_summary_test",
+        GENERIC_WAIT_LAUNCH_SUMMARY_PATH,
     )
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -9183,6 +9215,127 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIsNotNone(summary["trace_last_desire_pressure"])
         self.assertIsNotNone(summary["trace_last_psi_total"])
         self.assertEqual(callback.event_count, 3)
+
+    def test_generic_status_history_summary_wrapper_uses_hf_ft_prefixes(self) -> None:
+        module = load_generic_status_history_summary_example()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            history = root / "status-history.jsonl"
+            out = root / "summary.json"
+            lines_out = root / "summary.lines"
+            cli_out = root / "cli-summary.json"
+            rows = [
+                {
+                    "time_unix_s": 10.0,
+                    "process_status": "alive",
+                    "log_progress": {"log_latest_step": 4, "log_max_steps": 10},
+                    "trace": {"trace_last_loss": 2.0},
+                },
+                {
+                    "time_unix_s": 20.0,
+                    "process_status": "alive",
+                    "log_progress": {"log_latest_step": 8, "log_max_steps": 10},
+                    "trace": {"trace_last_loss": 1.5},
+                },
+            ]
+            history.write_text(
+                "\n".join(json.dumps(row) for row in rows) + "\n",
+                encoding="utf-8",
+            )
+            with redirect_stdout(io.StringIO()):
+                code = module.main(
+                    [
+                        str(history),
+                        "--label",
+                        "generic",
+                        "--out",
+                        str(out),
+                        "--lines-out",
+                        str(lines_out),
+                    ]
+                )
+                cli_code = hf_cli.finetune_status_history_main(
+                    [
+                        str(history),
+                        "--label",
+                        "generic",
+                        "--out",
+                        str(cli_out),
+                    ]
+                )
+            payload = json.loads(out.read_text(encoding="utf-8"))
+            cli_payload = json.loads(cli_out.read_text(encoding="utf-8"))
+            lines = lines_out.read_text(encoding="utf-8").splitlines()
+
+        self.assertEqual(code, 0)
+        self.assertEqual(cli_code, 0)
+        self.assertEqual(payload["row_type"], "hf_ft_status_history_summary")
+        self.assertEqual(cli_payload["row_type"], "hf_ft_status_history_summary")
+        self.assertTrue(lines[0].startswith("hf_ft_status_history "))
+        self.assertNotIn("hf_gpt2", "\n".join(lines))
+
+    def test_generic_wait_launch_summary_wrapper_uses_hf_ft_prefixes(self) -> None:
+        module = load_generic_wait_launch_summary_example()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            history = root / "wait-launch-history.jsonl"
+            out = root / "summary.json"
+            lines_out = root / "summary.lines"
+            cli_out = root / "cli-summary.json"
+            rows = [
+                {
+                    "row_type": "hf_gpt2_finetune_wait_launch",
+                    "status": "waiting_for_process",
+                    "time_unix_s": 10.0,
+                    "process_alive": True,
+                    "checkpoint_ready": False,
+                },
+                {
+                    "row_type": "hf_gpt2_finetune_wait_launch",
+                    "status": "launched",
+                    "time_unix_s": 15.0,
+                    "process_alive": False,
+                    "checkpoint_ready": True,
+                    "launched_pid": 123,
+                    "returncode": 0,
+                },
+            ]
+            history.write_text(
+                "\n".join(json.dumps(row) for row in rows) + "\n",
+                encoding="utf-8",
+            )
+            with redirect_stdout(io.StringIO()):
+                code = module.main(
+                    [
+                        str(history),
+                        "--label",
+                        "generic-wait",
+                        "--out",
+                        str(out),
+                        "--lines-out",
+                        str(lines_out),
+                    ]
+                )
+                cli_code = hf_cli.finetune_wait_launch_summary_main(
+                    [
+                        str(history),
+                        "--label",
+                        "generic-wait",
+                        "--out",
+                        str(cli_out),
+                    ]
+                )
+            payload = json.loads(out.read_text(encoding="utf-8"))
+            cli_payload = json.loads(cli_out.read_text(encoding="utf-8"))
+            lines = lines_out.read_text(encoding="utf-8").splitlines()
+
+        self.assertEqual(code, 0)
+        self.assertEqual(cli_code, 0)
+        self.assertEqual(payload["row_type"], "hf_ft_wait_launch_history_summary")
+        self.assertEqual(cli_payload["row_type"], "hf_ft_wait_launch_history_summary")
+        self.assertTrue(lines[0].startswith("hf_ft_wait_launch_history "))
+        self.assertTrue(lines[1].startswith("hf_ft_wait_launch_history_point "))
+        self.assertNotIn("hf_gpt2", "\n".join(lines))
 
     def test_top_level_exports_hf_ft_helpers(self) -> None:
         self.assertIs(

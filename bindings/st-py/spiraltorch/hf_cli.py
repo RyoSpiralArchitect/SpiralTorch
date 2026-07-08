@@ -382,6 +382,14 @@ def finetune_monitor_snapshot_main(argv: Sequence[str] | None = None) -> int:
     return _run_example("hf_finetune_monitor_snapshot.py", argv)
 
 
+def finetune_status_history_main(argv: Sequence[str] | None = None) -> int:
+    return _run_example("hf_finetune_status_history_summary.py", argv)
+
+
+def finetune_wait_launch_summary_main(argv: Sequence[str] | None = None) -> int:
+    return _run_example("hf_finetune_wait_launch_summary.py", argv)
+
+
 def _path_values(values: Sequence[Path] | None) -> list[Path]:
     return [] if values is None else list(values)
 
