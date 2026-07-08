@@ -98,6 +98,7 @@ __all__ = [
     "load_hf_finetune_model_configs",
     "compare_hf_gpt2_finetune_run_cards",
     "load_hf_finetune_run_card",
+    "load_hf_finetune_model_profile_launch_plan",
     "load_hf_finetune_sweep_report",
     "load_hf_finetune_trainer_trace",
     "load_hf_gpt2_finetune_run_card",
@@ -111,6 +112,7 @@ __all__ = [
     "summarize_hf_gpt2_finetune_sweep_report",
     "summarize_hf_gpt2_finetune_sweep_report_lines",
     "summarize_hf_gpt2_finetune_trainer_trace",
+    "write_hf_finetune_model_profile_launch_plan",
     "write_hf_finetune_run_card",
     "write_hf_finetune_trainer_trace_event",
     "write_hf_gpt2_finetune_run_card",
@@ -1140,6 +1142,57 @@ def hf_finetune_model_profile_launch_plan_lines(
     ):
         lines.extend(str(line) for line in preflight_lines)
     return lines
+
+
+def load_hf_finetune_model_profile_launch_plan(path: str | Path) -> dict[str, object]:
+    """Load a previously written HF model-profile launch plan artifact."""
+
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(payload, Mapping):
+        raise ValueError("HF model profile launch plan must be a JSON object")
+    if payload.get("row_type") != "hf_finetune_model_profile_launch_plan":
+        raise ValueError(
+            "HF model profile launch plan has unexpected row_type: "
+            f"{payload.get('row_type')!r}"
+        )
+    return dict(payload)
+
+
+def write_hf_finetune_model_profile_launch_plan(
+    plan_or_config: Mapping[str, object] | str | Path | None,
+    path: str | Path,
+    *,
+    lines_path: str | Path | None = None,
+    **kwargs,
+) -> dict[str, object]:
+    """Write a model-profile launch plan JSON artifact and optional line report."""
+
+    plan = (
+        dict(plan_or_config)
+        if isinstance(plan_or_config, Mapping)
+        and plan_or_config.get("row_type") == "hf_finetune_model_profile_launch_plan"
+        else hf_finetune_model_profile_launch_plan(plan_or_config, **kwargs)
+    )
+    output_path = Path(path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        json.dumps(plan, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    written: dict[str, object] = {
+        "row_type": "hf_finetune_model_profile_launch_plan_write",
+        "status": "written",
+        "path": str(output_path),
+        "plan": plan,
+    }
+    if lines_path is not None:
+        line_output_path = Path(lines_path)
+        line_output_path.parent.mkdir(parents=True, exist_ok=True)
+        lines = hf_finetune_model_profile_launch_plan_lines(plan)
+        line_output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        written["lines_path"] = str(line_output_path)
+        written["lines"] = lines
+    return written
 
 
 def _profile_flag_value(value: object) -> str:

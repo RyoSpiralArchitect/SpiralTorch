@@ -7685,6 +7685,29 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("org/embedded-causal", embedded_plan["command"])
         self.assertNotIn("--model-profile", embedded_plan["command"])
 
+        with tempfile.TemporaryDirectory() as tmp:
+            plan_path = Path(tmp) / "launch-plan.json"
+            lines_path = Path(tmp) / "launch-plan.lines"
+            written = st.write_hf_finetune_model_profile_launch_plan(
+                plan,
+                plan_path,
+                lines_path=lines_path,
+            )
+            loaded = st.load_hf_finetune_model_profile_launch_plan(plan_path)
+
+        self.assertEqual(written["status"], "written")
+        self.assertEqual(written["path"], str(plan_path))
+        self.assertEqual(written["lines_path"], str(lines_path))
+        self.assertEqual(loaded["row_type"], "hf_finetune_model_profile_launch_plan")
+        self.assertEqual(loaded["profile_id"], "qwen2-0.5b-local-smoke")
+        self.assertEqual(loaded["command"], plan["command"])
+        self.assertTrue(
+            any(
+                line.startswith("hf_ft_model_profile_launch_plan ")
+                for line in written["lines"]
+            )
+        )
+
     def test_bridge_model_profile_defaults_and_explicit_overrides(self) -> None:
         module = load_bridge_example()
         args = module.parse_args(
@@ -8042,6 +8065,43 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("--model-profile", launch_payload["command"])
         self.assertIn("tiny-gpt2-ci", launch_payload["command"])
         self.assertIn("sshleifer/tiny-gpt2", launch_payload["expanded_command"])
+
+        with tempfile.TemporaryDirectory() as tmp:
+            launch_out = Path(tmp) / "profile-launch-plan.json"
+            launch_lines_out = Path(tmp) / "profile-launch-plan.lines"
+            launch_out_stdout = io.StringIO()
+            with redirect_stdout(launch_out_stdout):
+                launch_out_code = hf_cli.profile_main(
+                    [
+                        "--model-configs",
+                        str(MODEL_CONFIGS_PATH),
+                        "--model-profile",
+                        "tiny-gpt2-ci",
+                        "--launch-plan",
+                        "--mode",
+                        "inference",
+                        "--out",
+                        str(launch_out),
+                        "--lines-out",
+                        str(launch_lines_out),
+                    ]
+                )
+            written_plan = json.loads(launch_out.read_text(encoding="utf-8"))
+            written_lines = launch_lines_out.read_text(encoding="utf-8").splitlines()
+
+        self.assertEqual(launch_out_code, 0)
+        self.assertIn(
+            f"hf_ft_model_profile_launch_plan_out {launch_out}",
+            launch_out_stdout.getvalue(),
+        )
+        self.assertEqual(
+            written_plan["row_type"],
+            "hf_finetune_model_profile_launch_plan",
+        )
+        self.assertEqual(written_plan["profile_id"], "tiny-gpt2-ci")
+        self.assertTrue(
+            written_lines[0].startswith("hf_ft_model_profile_launch_plan ")
+        )
 
     def test_installed_hf_finetune_sweep_cli_reaches_generic_wrapper(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -8903,6 +8963,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             "hf_finetune_model_profile_lines",
             "hf_finetune_model_profile_preflight_lines",
             "hf_finetune_model_profile_preflight_report",
+            "load_hf_finetune_model_profile_launch_plan",
+            "write_hf_finetune_model_profile_launch_plan",
         ]
         for name in profile_exports:
             self.assertIn(name, st.__all__)

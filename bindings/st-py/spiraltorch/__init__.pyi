@@ -561,6 +561,8 @@ hf_finetune_model_profile_launch_plan_lines: Callable[..., List[str]]
 hf_finetune_model_profile_lines: Callable[..., List[str]]
 hf_finetune_model_profile_preflight_report: Callable[..., Dict[str, Any]]
 hf_finetune_model_profile_preflight_lines: Callable[..., List[str]]
+load_hf_finetune_model_profile_launch_plan: Callable[..., Dict[str, Any]]
+write_hf_finetune_model_profile_launch_plan: Callable[..., Dict[str, Any]]
 hf_finetune_rust_dependency_report: Callable[..., Dict[str, Any]]
 hf_finetune_corpus_file_report: Callable[..., Dict[str, Any]]
 hf_finetune_corpus_scan_report: Callable[..., Dict[str, Any]]
@@ -9106,6 +9108,8 @@ __all__ = [
     "hf_finetune_model_profile_preflight_lines",
     "hf_finetune_model_profile_preflight_report",
     "hf_finetune_model_profiles",
+    "load_hf_finetune_model_profile_launch_plan",
+    "write_hf_finetune_model_profile_launch_plan",
     "hf_finetune_preflight_report",
     "hf_finetune_rust_dependency_report",
     "hf_finetune_monitor_lines",
