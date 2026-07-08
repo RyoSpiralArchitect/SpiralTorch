@@ -62,6 +62,11 @@ MILESTONE_CAPTURE_PATH = (
     / "examples"
     / "hf_gpt2_finetune_milestone_capture.py"
 )
+GENERATION_CURVE_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "examples"
+    / "hf_gpt2_ft_generation_curve.py"
+)
 
 
 def load_bridge_example():
@@ -145,6 +150,17 @@ def load_milestone_capture_example():
     spec = importlib.util.spec_from_file_location(
         "hf_gpt2_finetune_milestone_capture_test",
         MILESTONE_CAPTURE_PATH,
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_generation_curve_example():
+    spec = importlib.util.spec_from_file_location(
+        "hf_gpt2_ft_generation_curve_test",
+        GENERATION_CURVE_PATH,
     )
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -653,6 +669,122 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("model=runs/latest-ft/checkpoint-384", " ".join(lines))
         self.assertIn("zspace_generation_control_compare", " ".join(lines))
         self.assertIn("hf_gpt2_ft_generation_curve", direct_lines[0])
+
+    def test_generation_curve_example_accepts_live_trace_without_run_card(self) -> None:
+        module = load_generation_curve_example()
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            run_dir = tmp_path / "runs" / "live-ft"
+            run_dir.mkdir(parents=True)
+            trace_jsonl = run_dir / "trainer-trace.jsonl"
+            trace_rows = [
+                {
+                    "event": "evaluate",
+                    "global_step": 0,
+                    "metrics": {"eval_loss": 4.0, "eval_runtime": 1.0},
+                    "time_unix_s": 1.0,
+                },
+                {
+                    "event": "evaluate",
+                    "global_step": 6144,
+                    "metrics": {"eval_loss": 3.2, "eval_runtime": 1.2},
+                    "time_unix_s": 2.0,
+                },
+            ]
+            trace_jsonl.write_text(
+                "\n".join(json.dumps(row) for row in trace_rows) + "\n",
+                encoding="utf-8",
+            )
+            prompt = "A tokenless fine-tuning stack should"
+            sweep = {
+                "row_type": "hf_gpt2_zspace_generation_control_sweep",
+                "status": "complete",
+                "dry_run": False,
+                "model_name": str(run_dir / "checkpoint-6144"),
+                "prompt": prompt,
+                "run_count": 2,
+                "runs": [
+                    {
+                        "name": "baseline-sample",
+                        "kind": "baseline",
+                        "status": "ok",
+                        "config": {},
+                        "generation": hf_ft.hf_gpt2_finetune_generation_report(
+                            stage="baseline",
+                            prompt=prompt,
+                            generated_text=f"{prompt} loop loop loop",
+                            generated_continuation_text=" loop loop loop",
+                        ),
+                        "repetition": {"loop_score": 2.0},
+                    },
+                    {
+                        "name": "zt3-rs1-lr1-k64",
+                        "kind": "zspace_repression_softmax",
+                        "status": "ok",
+                        "config": {
+                            "top_k": 64,
+                            "curvature": -0.04,
+                            "temperature": 1.0,
+                            "entropy_target": 3.0,
+                            "entropy_tolerance": 1.0e-4,
+                            "entropy_gain": 0.5,
+                            "min_temperature": 0.7,
+                            "max_temperature": 2.4,
+                            "repression_window": 16,
+                            "repression_strength": 1.0,
+                            "last_token_repression": 1.0,
+                            "ngram_size": 0,
+                            "ngram_window": 0,
+                            "ngram_repression_strength": 0.0,
+                            "ngram_decay": 1.0,
+                            "mask_non_top_k": True,
+                            "use_native_zspace": True,
+                        },
+                        "generation": hf_ft.hf_gpt2_finetune_generation_report(
+                            stage="controlled",
+                            prompt=prompt,
+                            generated_text=f"{prompt} clean geometry",
+                            generated_continuation_text=" clean geometry",
+                            generation_control={
+                                "status": "ok",
+                                "calls": 4,
+                                "backend": "spiraltorch_zspace_softmax",
+                                "top_token_changed_count": 7,
+                            },
+                        ),
+                        "repetition": {"loop_score": 0.0},
+                    },
+                ],
+            }
+            sweep_path = run_dir / "prompt-tokenless-ft-checkpoint-6144-sweep.json"
+            sweep_path.write_text(json.dumps(sweep), encoding="utf-8")
+            out = run_dir / "generation-curve.json"
+            lines_out = run_dir / "generation-curve.txt"
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                result = module.main(
+                    [
+                        str(sweep_path),
+                        "--label",
+                        "tokenless-6144",
+                        "--trainer-trace-jsonl",
+                        str(trace_jsonl),
+                        "--run-dir",
+                        str(run_dir),
+                        "--out",
+                        str(out),
+                        "--lines-out",
+                        str(lines_out),
+                    ]
+                )
+
+            self.assertEqual(result, 0)
+            self.assertIn("hf_gpt2_ft_generation_curve_json", stdout.getvalue())
+            payload = json.loads(out.read_text(encoding="utf-8"))
+            self.assertEqual(payload["row_type"], "hf_gpt2_finetune_generation_curve")
+            self.assertEqual(payload["recommended_step"], 6144)
+            self.assertEqual(payload["recommended_eval_loss"], 3.2)
+            self.assertIn("eval_loss_series=0=4.0,6144=3.2", lines_out.read_text())
 
     def test_inference_distortion_handoff_report_flattens_recommendation(self) -> None:
         sweep_report = {
