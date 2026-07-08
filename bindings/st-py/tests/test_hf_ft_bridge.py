@@ -8817,6 +8817,9 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(payload["profile_id"], "tiny-gpt2-ci")
         self.assertEqual(payload["model_name"], "sshleifer/tiny-gpt2")
+        self.assertEqual(payload["model_family"], "gpt2")
+        self.assertEqual(payload["parameter_scale"], "tiny")
+        self.assertEqual(payload["requires_remote_code"], False)
 
         cli_stdout = io.StringIO()
         with redirect_stdout(cli_stdout):
@@ -8861,6 +8864,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(
             control_payload["model_profile"]["profile_id"],
             "pythia-70m-local-smoke",
+        )
+        self.assertEqual(
+            control_payload["model_profile"]["model_family"],
+            "gpt_neox",
         )
         self.assertEqual(control_payload["recommended_config"]["top_k"], 64)
         self.assertEqual(
@@ -8933,6 +8940,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             any(
                 "profile=pythia-70m-local-smoke" in line
                 and "model=EleutherAI/pythia-70m-deduped" in line
+                and "family=gpt_neox" in line
+                and "activation_hooks=gpt_neox.layers.0" in line
                 for line in list_lines
             )
         )
@@ -8954,6 +8963,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             "hf_finetune_model_profile_catalog",
         )
         self.assertIn("qwen2-0.5b-local-smoke", list_payload["available_profiles"])
+        qwen_row = next(
+            row
+            for row in list_payload["profiles"]
+            if row["profile_id"] == "qwen2-0.5b-local-smoke"
+        )
+        self.assertEqual(qwen_row["model_family"], "qwen2")
+        self.assertEqual(qwen_row["parameter_scale"], "0.5b")
+        self.assertEqual(qwen_row["activation_name_contains"], ["model.layers.0"])
 
         preflight_stdout = io.StringIO()
         with redirect_stdout(preflight_stdout):
@@ -8971,7 +8988,18 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         preflight_lines = preflight_stdout.getvalue().splitlines()
         self.assertEqual(preflight_code, 0)
         self.assertTrue(
-            preflight_lines[0].startswith("hf_ft_model_profile_preflight ")
+            any(
+                line.startswith("hf_ft_model_profile_preflight ")
+                for line in preflight_lines
+            )
+        )
+        self.assertTrue(
+            any(
+                line.startswith("hf_ft_model_profile ")
+                and "family=gpt2" in line
+                and "activation_hooks=transformer.h.0" in line
+                for line in preflight_lines
+            )
         )
         self.assertTrue(
             any(
@@ -9002,6 +9030,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         )
         self.assertEqual(preflight_payload["profile_id"], "tiny-gpt2-ci")
         self.assertEqual(preflight_payload["mode"], "inference")
+        self.assertEqual(preflight_payload["model_family"], "gpt2")
         self.assertEqual(preflight_payload["runtime_import_preset"], "hf-runtime")
         self.assertIn("sshleifer/tiny-gpt2", preflight_payload["profile_cli_args"])
 

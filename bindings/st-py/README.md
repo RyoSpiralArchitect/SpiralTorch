@@ -384,9 +384,10 @@ config file rather than baking them into the script name. The generic
 `causal-lm-local-smoke` profile when no `--model-name`, `--model-profile`, or
 `--model-configs` is supplied; pass any of those flags to pin a specific model
 explicitly. Profiles can carry
-model/tokenizer names, training shape, dataset/revision/streaming defaults,
-generation/Z-Space softmax knobs, and local runtime policy such as remote-code
-trust, disk guards, dataloader pinning, or required SpiralTorch backends.
+model/tokenizer names, model family and parameter-scale labels, training shape,
+dataset/revision/streaming defaults, generation/Z-Space softmax knobs, activation
+hook selectors, and local runtime policy such as remote-code trust, disk guards,
+dataloader pinning, or required SpiralTorch backends.
 Profiles may also use `extends` to create model-neutral aliases or override only
 one nested section without duplicating model-specific settings:
 

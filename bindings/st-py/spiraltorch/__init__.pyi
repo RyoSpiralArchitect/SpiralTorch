@@ -545,6 +545,7 @@ HF_GPT2_FT_REQUIRED_PYTHON_PACKAGES: List[str]
 HF_GPT2_FT_REQUIRED_RUST_SURFACES: List[Dict[str, str]]
 HF_FINETUNE_DEFAULT_DEVICE_BACKENDS: List[str]
 HF_FINETUNE_DEFAULT_MODEL_CONFIGS: Dict[str, Any]
+HF_FINETUNE_DEFAULT_MODEL_PROFILE: str
 HF_FINETUNE_MODEL_CONFIG_SCHEMA: str
 HF_FINETUNE_RUN_CARD_FILENAME: str
 HF_FINETUNE_TRAINER_TRACE_FILENAME: str
@@ -593,6 +594,7 @@ summarize_hf_finetune_trainer_trace: Callable[..., Dict[str, Any]]
 load_hf_finetune_run_card: Callable[..., Dict[str, Any]]
 load_hf_finetune_sweep_report: Callable[..., Dict[str, Any]]
 hf_finetune_disk_headroom_plan: Callable[..., Dict[str, Any]]
+hf_gpt2_finetune_disk_headroom_plan: Callable[..., Dict[str, Any]]
 hf_finetune_scale_up_command: Callable[..., Dict[str, Any]]
 hf_finetune_scale_up_preflight_report: Callable[..., Dict[str, Any]]
 hf_finetune_scale_up_preflight_lines: Callable[..., List[str]]

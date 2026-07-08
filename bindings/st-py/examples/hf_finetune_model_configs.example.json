@@ -12,6 +12,8 @@
       "model_name": "gpt2",
       "tokenizer_name": "gpt2",
       "architecture": "causal_lm",
+      "model_family": "gpt2",
+      "parameter_scale": "124m",
       "checkpoint_prefix": "checkpoint-",
       "max_length": 128,
       "training": {
@@ -45,6 +47,8 @@
       "model_name": "distilgpt2",
       "tokenizer_name": "distilgpt2",
       "architecture": "causal_lm",
+      "model_family": "gpt2",
+      "parameter_scale": "82m",
       "checkpoint_prefix": "checkpoint-",
       "max_length": 128,
       "training": {
@@ -78,6 +82,8 @@
       "model_name": "sshleifer/tiny-gpt2",
       "tokenizer_name": "sshleifer/tiny-gpt2",
       "architecture": "causal_lm",
+      "model_family": "gpt2",
+      "parameter_scale": "tiny",
       "checkpoint_prefix": "checkpoint-",
       "max_length": 64,
       "training": {
@@ -111,6 +117,8 @@
       "model_name": "EleutherAI/pythia-70m-deduped",
       "tokenizer_name": "EleutherAI/pythia-70m-deduped",
       "architecture": "causal_lm",
+      "model_family": "gpt_neox",
+      "parameter_scale": "70m",
       "checkpoint_prefix": "checkpoint-",
       "max_length": 128,
       "training": {
@@ -158,6 +166,8 @@
       "model_name": "Qwen/Qwen2-0.5B",
       "tokenizer_name": "Qwen/Qwen2-0.5B",
       "architecture": "causal_lm",
+      "model_family": "qwen2",
+      "parameter_scale": "0.5b",
       "checkpoint_prefix": "checkpoint-",
       "max_length": 256,
       "training": {
@@ -207,6 +217,8 @@
       "model_name": "facebook/opt-125m",
       "tokenizer_name": "facebook/opt-125m",
       "architecture": "causal_lm",
+      "model_family": "opt",
+      "parameter_scale": "125m",
       "checkpoint_prefix": "checkpoint-",
       "max_length": 256,
       "training": {
@@ -256,6 +268,8 @@
       "model_name": "HuggingFaceTB/SmolLM2-135M",
       "tokenizer_name": "HuggingFaceTB/SmolLM2-135M",
       "architecture": "causal_lm",
+      "model_family": "smollm2",
+      "parameter_scale": "135m",
       "checkpoint_prefix": "checkpoint-",
       "max_length": 256,
       "training": {
@@ -305,6 +319,8 @@
       "model_name": "models/my-causal-lm",
       "tokenizer_name": "models/my-causal-lm",
       "architecture": "causal_lm",
+      "model_family": "custom-causal-lm",
+      "parameter_scale": "custom",
       "checkpoint_prefix": "checkpoint-",
       "max_length": 256,
       "training": {

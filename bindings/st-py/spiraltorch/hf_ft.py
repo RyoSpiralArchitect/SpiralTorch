@@ -297,6 +297,8 @@ HF_FINETUNE_DEFAULT_MODEL_CONFIGS: dict[str, object] = {
             "model_name": "gpt2",
             "tokenizer_name": "gpt2",
             "architecture": "causal_lm",
+            "model_family": "gpt2",
+            "parameter_scale": "124m",
             "checkpoint_prefix": "checkpoint-",
             "max_length": 128,
             "training": {
@@ -328,6 +330,8 @@ HF_FINETUNE_DEFAULT_MODEL_CONFIGS: dict[str, object] = {
             "model_name": "distilgpt2",
             "tokenizer_name": "distilgpt2",
             "architecture": "causal_lm",
+            "model_family": "gpt2",
+            "parameter_scale": "82m",
             "checkpoint_prefix": "checkpoint-",
             "max_length": 128,
             "training": {
@@ -359,6 +363,8 @@ HF_FINETUNE_DEFAULT_MODEL_CONFIGS: dict[str, object] = {
             "model_name": "sshleifer/tiny-gpt2",
             "tokenizer_name": "sshleifer/tiny-gpt2",
             "architecture": "causal_lm",
+            "model_family": "gpt2",
+            "parameter_scale": "tiny",
             "checkpoint_prefix": "checkpoint-",
             "max_length": 64,
             "training": {
@@ -390,6 +396,8 @@ HF_FINETUNE_DEFAULT_MODEL_CONFIGS: dict[str, object] = {
             "model_name": "EleutherAI/pythia-70m-deduped",
             "tokenizer_name": "EleutherAI/pythia-70m-deduped",
             "architecture": "causal_lm",
+            "model_family": "gpt_neox",
+            "parameter_scale": "70m",
             "checkpoint_prefix": "checkpoint-",
             "max_length": 128,
             "training": {
@@ -435,6 +443,8 @@ HF_FINETUNE_DEFAULT_MODEL_CONFIGS: dict[str, object] = {
             "model_name": "Qwen/Qwen2-0.5B",
             "tokenizer_name": "Qwen/Qwen2-0.5B",
             "architecture": "causal_lm",
+            "model_family": "qwen2",
+            "parameter_scale": "0.5b",
             "checkpoint_prefix": "checkpoint-",
             "max_length": 256,
             "training": {
@@ -482,6 +492,8 @@ HF_FINETUNE_DEFAULT_MODEL_CONFIGS: dict[str, object] = {
             "model_name": "facebook/opt-125m",
             "tokenizer_name": "facebook/opt-125m",
             "architecture": "causal_lm",
+            "model_family": "opt",
+            "parameter_scale": "125m",
             "checkpoint_prefix": "checkpoint-",
             "max_length": 256,
             "training": {
@@ -529,6 +541,8 @@ HF_FINETUNE_DEFAULT_MODEL_CONFIGS: dict[str, object] = {
             "model_name": "HuggingFaceTB/SmolLM2-135M",
             "tokenizer_name": "HuggingFaceTB/SmolLM2-135M",
             "architecture": "causal_lm",
+            "model_family": "smollm2",
+            "parameter_scale": "135m",
             "checkpoint_prefix": "checkpoint-",
             "max_length": 256,
             "training": {
@@ -576,6 +590,8 @@ HF_FINETUNE_DEFAULT_MODEL_CONFIGS: dict[str, object] = {
             "model_name": "models/my-causal-lm",
             "tokenizer_name": "models/my-causal-lm",
             "architecture": "causal_lm",
+            "model_family": "custom-causal-lm",
+            "parameter_scale": "custom",
             "checkpoint_prefix": "checkpoint-",
             "max_length": 256,
             "training": {
@@ -867,6 +883,18 @@ def resolve_hf_finetune_model_profile(
     selected["architecture"] = (
         _string_or_none(selected.get("architecture")) or "causal_lm"
     )
+    selected["model_family"] = (
+        _string_or_none(selected.get("model_family"))
+        or _string_or_none(selected.get("family"))
+        or str(selected["architecture"])
+    )
+    selected["parameter_scale"] = (
+        _string_or_none(selected.get("parameter_scale"))
+        or _string_or_none(selected.get("scale"))
+    )
+    selected["requires_remote_code"] = bool(
+        selected.get("requires_remote_code") or runtime.get("trust_remote_code")
+    )
     return {
         "row_type": "hf_finetune_model_profile",
         "status": "ready",
@@ -878,6 +906,9 @@ def resolve_hf_finetune_model_profile(
         "model_name": selected["model_name"],
         "tokenizer_name": selected["tokenizer_name"],
         "architecture": selected["architecture"],
+        "model_family": selected["model_family"],
+        "parameter_scale": selected["parameter_scale"],
+        "requires_remote_code": selected["requires_remote_code"],
         "checkpoint_prefix": selected.get("checkpoint_prefix") or "checkpoint-",
         "max_length": selected.get("max_length"),
         "training": training,
@@ -932,6 +963,9 @@ def hf_finetune_model_profile_catalog(
                 "model_name": resolved.get("model_name"),
                 "tokenizer_name": resolved.get("tokenizer_name"),
                 "architecture": resolved.get("architecture"),
+                "model_family": resolved.get("model_family"),
+                "parameter_scale": resolved.get("parameter_scale"),
+                "requires_remote_code": bool(resolved.get("requires_remote_code")),
                 "checkpoint_prefix": resolved.get("checkpoint_prefix"),
                 "max_length": resolved.get("max_length"),
                 "dataset_name": dataset.get("name"),
@@ -966,6 +1000,9 @@ def hf_finetune_model_profile_catalog(
                 "trust_remote_code": bool(runtime.get("trust_remote_code")),
                 "min_free_disk_gb": runtime.get("min_free_disk_gb"),
                 "runtime_device_backends": runtime.get("runtime_device_backends"),
+                "activation_name_contains": _unique(
+                    runtime.get("activation_name_contains")
+                ),
                 "notes": selected.get("notes"),
             }
         )
@@ -1015,6 +1052,8 @@ def hf_finetune_model_profile_catalog_lines(
             f"extends={row.get('extends')} "
             f"model={row.get('model_name')} "
             f"tokenizer={row.get('tokenizer_name')} "
+            f"family={row.get('model_family')} "
+            f"scale={row.get('parameter_scale')} "
             f"dataset={row.get('dataset_name')} "
             f"dataset_config={row.get('dataset_config')} "
             f"block_size={row.get('block_size')} "
@@ -1022,6 +1061,7 @@ def hf_finetune_model_profile_catalog_lines(
             f"max_new_tokens={row.get('max_new_tokens')} "
             f"do_sample={row.get('do_sample')} "
             f"zspace_top_k={row.get('zspace_top_k')} "
+            f"activation_hooks={csv_label(row.get('activation_name_contains'))} "
             f"allow_remote={row.get('allow_remote')} "
             f"trust_remote_code={row.get('trust_remote_code')}"
         )
@@ -1102,6 +1142,9 @@ def hf_finetune_model_profile_preflight_report(
         "model_name": resolved.get("model_name"),
         "tokenizer_name": resolved.get("tokenizer_name"),
         "architecture": resolved.get("architecture"),
+        "model_family": resolved.get("model_family"),
+        "parameter_scale": resolved.get("parameter_scale"),
+        "requires_remote_code": bool(resolved.get("requires_remote_code")),
         "model_profile": resolved,
         "model_profile_lines": hf_finetune_model_profile_lines(resolved),
         "profile_cli_args": cli_args,
@@ -2001,11 +2044,14 @@ def hf_finetune_model_profile_lines(
             f"model={profile.get('model_name')} "
             f"tokenizer={profile.get('tokenizer_name')} "
             f"architecture={profile.get('architecture')} "
+            f"family={profile.get('model_family')} "
+            f"scale={profile.get('parameter_scale')} "
             f"dataset={dataset.get('name')} "
             f"dataset_config={dataset.get('config')} "
             f"block_size={training.get('block_size')} "
             f"max_new_tokens={generation.get('max_new_tokens')} "
             f"do_sample={generation.get('do_sample')} "
+            f"activation_hooks={csv_label(runtime.get('activation_name_contains'))} "
             f"allow_remote={runtime.get('allow_remote')} "
             f"source={profile.get('source_path')}"
         )
