@@ -70,6 +70,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default="append",
         help="Append to or replace --launched-log-file. Defaults to append.",
     )
+    parser.add_argument(
+        "--detach",
+        action="store_true",
+        help=(
+            "Return after spawning the launched command instead of waiting for it. "
+            "Useful for multi-hour chained FT runs that have their own monitors."
+        ),
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
@@ -148,8 +156,12 @@ def _write_manifest(
     *,
     returncode: int | None = None,
     launch_error: str | None = None,
+    launched_pid: int | None = None,
 ) -> dict[str, Any]:
     pid = _resolved_pid(args)
+    launched_pid = (
+        launched_pid if launched_pid is not None else _read_pid(args.launched_pid_file)
+    )
     payload: dict[str, Any] = {
         "row_type": "hf_gpt2_finetune_wait_launch",
         "status": status,
@@ -165,12 +177,13 @@ def _write_manifest(
         "launched_pid_file": (
             None if args.launched_pid_file is None else str(args.launched_pid_file)
         ),
-        "launched_pid": _read_pid(args.launched_pid_file),
+        "launched_pid": launched_pid,
         "launched_log_file": (
             None if args.launched_log_file is None else str(args.launched_log_file)
         ),
         "launched_log_mode": args.launched_log_mode,
         "command": [str(item) for item in args.command],
+        "detach": bool(args.detach),
         "dry_run": bool(args.dry_run),
         "returncode": returncode,
         "launch_error": launch_error,
@@ -215,7 +228,7 @@ def _wait_until(
     return True
 
 
-def _run_command(args: argparse.Namespace) -> tuple[int, str | None]:
+def _run_command(args: argparse.Namespace) -> tuple[int, str | None, int | None]:
     command = [str(item) for item in args.command]
     log_handle = None
     try:
@@ -234,9 +247,12 @@ def _run_command(args: argparse.Namespace) -> tuple[int, str | None]:
                 f"{int(process.pid)}\n",
                 encoding="utf-8",
             )
-        return int(process.wait()), None
+        launched_pid = int(process.pid)
+        if args.detach:
+            return 0, None, launched_pid
+        return int(process.wait()), None, launched_pid
     except OSError as exc:
-        return 2, f"{exc.__class__.__name__}: {exc}"
+        return 2, f"{exc.__class__.__name__}: {exc}", None
     finally:
         if log_handle is not None:
             log_handle.close()
@@ -270,12 +286,20 @@ def run_wait_launch(args: argparse.Namespace) -> dict[str, Any]:
         return _write_manifest(args, "dry_run", returncode=0)
 
     _write_manifest(args, "launching")
-    returncode, launch_error = _run_command(args)
+    returncode, launch_error, launched_pid = _run_command(args)
+    if args.detach and launch_error is None:
+        return _write_manifest(
+            args,
+            "launched",
+            returncode=returncode,
+            launched_pid=launched_pid,
+        )
     return _write_manifest(
         args,
         "finished" if launch_error is None else "launch_error",
         returncode=returncode,
         launch_error=launch_error,
+        launched_pid=launched_pid,
     )
 
 

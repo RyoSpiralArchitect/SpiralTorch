@@ -3484,6 +3484,58 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(stored["launched_log_file"], str(launched_log))
         self.assertIn("next-run-ready", launched_log_text)
 
+    def test_wait_launch_example_detaches_after_launch(self) -> None:
+        module = load_wait_launch_example()
+        launched_pid_value = None
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            checkpoint = tmp_path / "checkpoint-4096"
+            checkpoint.mkdir()
+            (checkpoint / "model.safetensors").write_text("ready", encoding="utf-8")
+            manifest = tmp_path / "wait-launch.json"
+            history = tmp_path / "wait-launch-history.jsonl"
+            launched_pid = tmp_path / "next.pid"
+            args = module.parse_args(
+                [
+                    "--checkpoint",
+                    str(checkpoint),
+                    "--manifest",
+                    str(manifest),
+                    "--jsonl-out",
+                    str(history),
+                    "--launched-pid-file",
+                    str(launched_pid),
+                    "--detach",
+                    "--",
+                    sys.executable,
+                    "-c",
+                    "import time; time.sleep(0.2)",
+                ]
+            )
+            payload = module.run_wait_launch(args)
+            stored = json.loads(manifest.read_text())
+            history_rows = [
+                json.loads(line)
+                for line in history.read_text().splitlines()
+                if line.strip()
+            ]
+            launched_pid_value = int(launched_pid.read_text().strip())
+
+        try:
+            os.waitpid(launched_pid_value, 0)
+        except ChildProcessError:
+            pass
+        self.assertEqual(payload["status"], "launched")
+        self.assertEqual(payload["returncode"], 0)
+        self.assertTrue(payload["detach"])
+        self.assertEqual(payload["launched_pid"], launched_pid_value)
+        self.assertEqual(stored["status"], "launched")
+        self.assertEqual(stored["launched_pid"], launched_pid_value)
+        self.assertEqual(
+            [row["status"] for row in history_rows],
+            ["launching", "launched"],
+        )
+
     def test_wait_launch_summary_example_summarizes_history(self) -> None:
         module = load_wait_launch_summary_example()
         with tempfile.TemporaryDirectory() as tmp:

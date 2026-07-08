@@ -66,7 +66,7 @@ def summarize_history(
         row
         for row in rows
         if row.get("launched_pid") is not None
-        or row.get("status") in {"launching", "finished", "launch_error"}
+        or row.get("status") in {"launching", "launched", "finished", "launch_error"}
     ]
     return {
         "row_type": "hf_gpt2_ft_wait_launch_history_summary",

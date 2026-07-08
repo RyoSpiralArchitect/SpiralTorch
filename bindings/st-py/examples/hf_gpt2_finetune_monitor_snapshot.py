@@ -349,7 +349,7 @@ def _wait_launch_summary(
         row
         for row in rows
         if row.get("launched_pid") is not None
-        or row.get("status") in {"launching", "finished", "launch_error"}
+        or row.get("status") in {"launching", "launched", "finished", "launch_error"}
     ]
     return {
         "history_jsonl": str(history_jsonl) if history_jsonl is not None else None,
