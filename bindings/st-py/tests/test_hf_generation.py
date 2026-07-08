@@ -492,6 +492,7 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
     def test_inference_distortion_runtime_plan_and_cli_args_are_importable(self) -> None:
         runtime = zspace_inference_distortion_runtime_plan(
             local_model=Path("models/gpt2-zspace"),
+            tokenizer_name="models/gpt2-tokenizer",
             allow_remote=True,
             trust_remote_code=True,
             max_new_tokens=24,
@@ -505,6 +506,7 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         )
 
         self.assertEqual(runtime["local_model"], "models/gpt2-zspace")
+        self.assertEqual(runtime["tokenizer_name"], "models/gpt2-tokenizer")
         self.assertEqual(runtime["max_new_tokens"], 24)
         self.assertEqual(runtime["activation_module_name"], ["transformer.h.0.attn"])
         self.assertEqual(runtime["activation_name_contains"], ["mlp"])
@@ -518,6 +520,8 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
 
         self.assertIn("--local-model", probe_args)
         self.assertIn("models/gpt2-zspace", probe_args)
+        self.assertIn("--tokenizer-name", probe_args)
+        self.assertIn("models/gpt2-tokenizer", probe_args)
         self.assertIn("--allow-remote", probe_args)
         self.assertIn("--trust-remote-code", probe_args)
         self.assertIn("--activation-module-name", probe_args)
@@ -538,6 +542,48 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
             zspace_inference_distortion_runtime_cli_args(None, sweep=True),
             ["--resume-existing"],
         )
+
+    def test_inference_distortion_probe_accepts_model_profile_defaults(self) -> None:
+        module = load_distortion_probe_example()
+        args = module.parse_args(
+            [
+                "--model-configs",
+                str(MODEL_CONFIGS_PATH),
+                "--model-profile",
+                "pythia-70m-local-smoke",
+                "--prompt",
+                "SpiralTorch profile probe",
+            ]
+        )
+        overridden = module.parse_args(
+            [
+                "--model-configs",
+                str(MODEL_CONFIGS_PATH),
+                "--model-profile",
+                "pythia-70m-local-smoke",
+                "--local-model",
+                "models/local-causal-lm",
+                "--tokenizer-name",
+                "models/local-tokenizer",
+                "--max-new-tokens",
+                "7",
+            ]
+        )
+
+        self.assertEqual(args.local_model, Path("EleutherAI/pythia-70m-deduped"))
+        self.assertEqual(args.tokenizer_name, "EleutherAI/pythia-70m-deduped")
+        self.assertEqual(args.max_new_tokens, 96)
+        self.assertEqual(
+            args._hf_finetune_model_profile["profile_id"],
+            "pythia-70m-local-smoke",
+        )
+        self.assertIn(
+            "profile=pythia-70m-local-smoke",
+            args._hf_finetune_model_profile_lines[0],
+        )
+        self.assertEqual(overridden.local_model, Path("models/local-causal-lm"))
+        self.assertEqual(overridden.tokenizer_name, "models/local-tokenizer")
+        self.assertEqual(overridden.max_new_tokens, 7)
 
     def test_inference_distortion_geometry_probe_uses_zspace_evaluator(self) -> None:
         adapter = st.api_llm_zspace_inference_distortion_adapter(
@@ -1033,6 +1079,34 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         self.assertEqual(report["attempted_run_count"], 0)
         self.assertEqual(report["completed_run_count"], 0)
         self.assertEqual(report["skipped_run_count"], 2)
+
+    def test_inference_distortion_sweep_accepts_model_profile_defaults(self) -> None:
+        module = load_distortion_sweep_example()
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "sweep"
+            args = module.parse_args(
+                [
+                    "--dry-run",
+                    "--model-configs",
+                    str(MODEL_CONFIGS_PATH),
+                    "--model-profile",
+                    "qwen2-0.5b-local-smoke",
+                    "--out-dir",
+                    str(out_dir),
+                    "--prompt",
+                    "SpiralTorch profile sweep",
+                ]
+            )
+            runtime = module._runtime_plan(args)
+            report = module.run_sweep(args)
+
+        self.assertEqual(args.local_model, Path("Qwen/Qwen2-0.5B"))
+        self.assertEqual(args.tokenizer_name, "Qwen/Qwen2-0.5B")
+        self.assertEqual(args.max_new_tokens, 128)
+        self.assertEqual(runtime["local_model"], "Qwen/Qwen2-0.5B")
+        self.assertEqual(runtime["tokenizer_name"], "Qwen/Qwen2-0.5B")
+        self.assertEqual(report["runtime"]["local_model"], "Qwen/Qwen2-0.5B")
+        self.assertEqual(report["runtime"]["tokenizer_name"], "Qwen/Qwen2-0.5B")
 
     def test_inference_distortion_probe_generate_compat_drops_batch_size(self) -> None:
         module = load_distortion_probe_example()

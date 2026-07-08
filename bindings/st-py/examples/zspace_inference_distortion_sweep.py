@@ -89,7 +89,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Only rebuild sweep-report.json from existing probe artifacts; never call local/API models.",
     )
+    parser.add_argument(
+        "--model-configs",
+        type=Path,
+        default=None,
+        help="Optional JSON config with Hugging Face model profiles.",
+    )
+    parser.add_argument(
+        "--model-profile",
+        default=None,
+        help="Model profile id used to default --local-model/--tokenizer-name/runtime flags.",
+    )
     parser.add_argument("--local-model", type=Path, default=None)
+    parser.add_argument("--tokenizer-name", default=None)
     parser.add_argument("--allow-remote", action="store_true")
     parser.add_argument("--trust-remote-code", action="store_true")
     parser.add_argument("--max-new-tokens", type=int, default=48)
@@ -142,6 +154,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     if args.from_probe:
         args.report_only = True
     try:
+        probe._apply_model_profile_defaults(args, provided_flags)
+    except Exception as exc:
+        parser.error(f"failed to resolve model profile: {exc}")
+    try:
         args.desire_pressure_grid = _float_values(
             args.desire_pressure_values,
             name="--desire-pressure-values",
@@ -191,6 +207,7 @@ def _write_text(path: Path, text: str) -> None:
 def _runtime_plan(args: argparse.Namespace) -> MappingLike:
     return st.zspace_inference_distortion_runtime_plan(
         local_model=args.local_model,
+        tokenizer_name=args.tokenizer_name,
         allow_remote=args.allow_remote,
         trust_remote_code=args.trust_remote_code,
         max_new_tokens=args.max_new_tokens,

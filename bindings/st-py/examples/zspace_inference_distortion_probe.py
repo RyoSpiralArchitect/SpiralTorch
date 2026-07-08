@@ -33,7 +33,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Load the recommended prompt/runtime/distortion config from a sweep-report.json.",
     )
+    parser.add_argument(
+        "--model-configs",
+        type=Path,
+        default=None,
+        help="Optional JSON config with Hugging Face model profiles.",
+    )
+    parser.add_argument(
+        "--model-profile",
+        default=None,
+        help="Model profile id used to default --local-model/--tokenizer-name/runtime flags.",
+    )
     parser.add_argument("--local-model", type=Path, default=None)
+    parser.add_argument("--tokenizer-name", default=None)
     parser.add_argument("--allow-remote", action="store_true")
     parser.add_argument("--trust-remote-code", action="store_true")
     parser.add_argument("--max-new-tokens", type=int, default=48)
@@ -72,6 +84,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             _apply_sweep_handoff(args, provided_flags)
         except Exception as exc:
             parser.error(str(exc))
+    try:
+        _apply_model_profile_defaults(args, provided_flags)
+    except Exception as exc:
+        parser.error(f"failed to resolve model profile: {exc}")
     return args
 
 
@@ -136,6 +152,13 @@ def _apply_sweep_handoff(args: argparse.Namespace, flags: set[str]) -> None:
         "--local-model",
         "local_model",
         Path(str(runtime["local_model"])) if runtime.get("local_model") else None,
+    )
+    _set_if_not_provided(
+        args,
+        flags,
+        "--tokenizer-name",
+        "tokenizer_name",
+        runtime.get("tokenizer_name"),
     )
     if runtime.get("allow_remote") and not _flag_was_provided(flags, "--allow-remote"):
         args.allow_remote = True
@@ -230,6 +253,64 @@ def _apply_sweep_handoff(args: argparse.Namespace, flags: set[str]) -> None:
         "--include-penalties",
     ):
         args.include_penalties = True
+
+
+def _apply_model_profile_defaults(args: argparse.Namespace, flags: set[str]) -> None:
+    args._hf_finetune_model_profile = None
+    args._hf_finetune_model_profile_lines = []
+    if args.model_configs is None and args.model_profile is None:
+        return
+    profile = st.resolve_hf_finetune_model_profile(
+        args.model_configs,
+        profile=args.model_profile,
+    )
+    args._hf_finetune_model_profile = profile
+    args._hf_finetune_model_profile_lines = st.hf_finetune_model_profile_lines(profile)
+    generation = profile.get("generation")
+    generation = generation if isinstance(generation, Mapping) else {}
+    runtime = profile.get("runtime")
+    runtime = runtime if isinstance(runtime, Mapping) else {}
+
+    if (
+        not _flag_was_provided(flags, "--local-model")
+        and args.local_model is None
+        and profile.get("model_name") is not None
+    ):
+        args.local_model = Path(str(profile["model_name"]))
+    if (
+        not _flag_was_provided(flags, "--tokenizer-name")
+        and args.tokenizer_name is None
+        and profile.get("tokenizer_name") is not None
+    ):
+        args.tokenizer_name = str(profile["tokenizer_name"])
+    if runtime.get("allow_remote") and not _flag_was_provided(flags, "--allow-remote"):
+        args.allow_remote = True
+    if runtime.get("trust_remote_code") and not _flag_was_provided(
+        flags,
+        "--trust-remote-code",
+    ):
+        args.trust_remote_code = True
+    _set_if_not_provided(
+        args,
+        flags,
+        "--max-new-tokens",
+        "max_new_tokens",
+        generation.get("max_new_tokens"),
+    )
+    _extend_if_not_provided(
+        args,
+        flags,
+        "--activation-module-name",
+        "activation_module_name",
+        runtime.get("activation_module_name"),
+    )
+    _extend_if_not_provided(
+        args,
+        flags,
+        "--activation-name-contains",
+        "activation_name_contains",
+        runtime.get("activation_name_contains"),
+    )
 
 
 def _text_from_tokens(tokenizer: Any, token_ids: Any) -> str:
@@ -420,8 +501,12 @@ def _run_local_hf(args: argparse.Namespace, adapter: dict[str, Any]) -> dict[str
         "trust_remote_code": bool(args.trust_remote_code),
     }
     model_path = str(args.local_model)
+    tokenizer_path = str(args.tokenizer_name or args.local_model)
     try:
-        tokenizer = transformers.AutoTokenizer.from_pretrained(model_path, **load_kwargs)
+        tokenizer = transformers.AutoTokenizer.from_pretrained(
+            tokenizer_path,
+            **load_kwargs,
+        )
         model = transformers.AutoModelForCausalLM.from_pretrained(
             model_path,
             **load_kwargs,
@@ -470,6 +555,7 @@ def _run_local_hf(args: argparse.Namespace, adapter: dict[str, Any]) -> dict[str
         return {
             "status": "ok",
             "model": model_path,
+            "tokenizer": tokenizer_path,
             "baseline_text": baseline_text,
             "distorted_text": distorted_text,
             "changed": bool(baseline_text != distorted_text),
@@ -569,6 +655,7 @@ def _probe_config(args: argparse.Namespace) -> dict[str, Any]:
 def _probe_runtime(args: argparse.Namespace) -> dict[str, Any]:
     return st.zspace_inference_distortion_runtime_plan(
         local_model=args.local_model,
+        tokenizer_name=args.tokenizer_name,
         allow_remote=args.allow_remote,
         trust_remote_code=args.trust_remote_code,
         max_new_tokens=args.max_new_tokens,

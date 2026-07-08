@@ -3018,6 +3018,7 @@ def _text_sequence(value: object) -> list[str]:
 def zspace_inference_distortion_runtime_plan(
     *,
     local_model: str | Path | None = None,
+    tokenizer_name: str | Path | None = None,
     allow_remote: bool = False,
     trust_remote_code: bool = False,
     max_new_tokens: int = 48,
@@ -3033,6 +3034,7 @@ def zspace_inference_distortion_runtime_plan(
 
     return {
         "local_model": str(local_model) if local_model is not None else None,
+        "tokenizer_name": str(tokenizer_name) if tokenizer_name is not None else None,
         "allow_remote": bool(allow_remote),
         "trust_remote_code": bool(trust_remote_code),
         "max_new_tokens": int(max_new_tokens),
@@ -3058,6 +3060,8 @@ def zspace_inference_distortion_runtime_cli_args(
     args: list[str] = []
     if runtime.get("local_model"):
         args.extend(["--local-model", _cli_value(runtime["local_model"])])
+    if runtime.get("tokenizer_name"):
+        args.extend(["--tokenizer-name", _cli_value(runtime["tokenizer_name"])])
     if runtime.get("allow_remote"):
         args.append("--allow-remote")
     if runtime.get("trust_remote_code"):
