@@ -17,6 +17,7 @@ from unittest import mock
 import spiraltorch as st
 import spiraltorch.runtime_imports as runtime_imports
 from spiraltorch import hf_ft
+from spiraltorch import hf_cli
 
 
 EXAMPLE_PATH = (
@@ -6929,6 +6930,47 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(args.tokenizer_name, "sshleifer/tiny-gpt2")
         self.assertEqual(args.block_size, 64)
         self.assertEqual(args.generation_max_new_tokens, 32)
+
+    def test_installed_hf_profile_cli_resolves_profiles(self) -> None:
+        stdout = io.StringIO()
+        with redirect_stdout(stdout):
+            code = hf_cli.profile_main(
+                [
+                    "--model-configs",
+                    str(MODEL_CONFIGS_PATH),
+                    "--model-profile",
+                    "tiny-gpt2-ci",
+                    "--json",
+                ]
+            )
+        payload = json.loads(stdout.getvalue())
+
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["profile_id"], "tiny-gpt2-ci")
+        self.assertEqual(payload["model_name"], "sshleifer/tiny-gpt2")
+
+    def test_installed_hf_finetune_sweep_cli_reaches_generic_wrapper(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "sweep"
+            code = hf_cli.finetune_sweep_main(
+                [
+                    "--dry-run",
+                    "--out-dir",
+                    str(out_dir),
+                    "--model-configs",
+                    str(MODEL_CONFIGS_PATH),
+                    "--model-profile",
+                    "tiny-gpt2-ci",
+                    "--generation-prompt",
+                    "SpiralTorch is",
+                ]
+            )
+            report = json.loads((out_dir / "sweep-report.json").read_text())
+
+        command = report["runs"][0]["command"]
+        self.assertEqual(code, 0)
+        self.assertEqual(Path(command[1]).name, "hf_finetune_bridge.py")
+        self.assertEqual(report["model_profile"]["profile_id"], "tiny-gpt2-ci")
 
     def test_sweep_model_profile_defaults_flow_to_bridge_commands(self) -> None:
         module = load_sweep_example()

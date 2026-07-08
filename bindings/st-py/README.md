@@ -374,8 +374,23 @@ historical `hf_gpt2_*` scripts still work, but new runs should prefer the
 DistilGPT-2, tiny CI models, or another local `AutoModelForCausalLM` profile:
 
 ```bash
+spiral-hf-profile \
+  --model-profile gpt2-local-smoke
+
 PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_finetune_bridge.py \
   --model-configs bindings/st-py/examples/hf_finetune_model_configs.example.json \
+  --model-profile gpt2-local-smoke \
+  --metadata-only \
+  --allow-remote \
+  --zspace-probe \
+  --run-card ft-run-card.json
+```
+
+After installing from a wheel, use the installed console entrypoint instead of
+the repo path:
+
+```bash
+spiral-hf-finetune \
   --model-profile gpt2-local-smoke \
   --metadata-only \
   --allow-remote \
@@ -576,6 +591,12 @@ wrapper so the fine-tuned checkpoint stays the model path while the profile can
 provide tokenizer and decode defaults:
 
 ```bash
+spiral-hf-checkpoint-generation-control \
+  --run-dir runs/gpt2-small-zspace-ft \
+  --checkpoint checkpoint-2048 \
+  --model-profile gpt2-local-smoke \
+  --dry-run
+
 PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_checkpoint_generation_control.py \
   --run-dir runs/gpt2-small-zspace-ft \
   --checkpoint checkpoint-2048 \

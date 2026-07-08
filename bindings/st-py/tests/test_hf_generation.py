@@ -11,6 +11,7 @@ from pathlib import Path
 
 import spiraltorch as st
 from spiraltorch import hf_ft
+from spiraltorch import hf_cli
 from spiraltorch.hf_generation import (
     ZSpaceActivationProbeHook,
     ZSpaceCheckpointPromptSpec,
@@ -1958,7 +1959,11 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
 
             def fake_runner(command):
                 executed.append(list(command))
-                if "hf_gpt2_zspace_generation_control_sweep.py" in command[1]:
+                command_script = Path(command[1]).name
+                if command_script in {
+                    "hf_gpt2_zspace_generation_control_sweep.py",
+                    "hf_zspace_generation_control_sweep.py",
+                }:
                     out = Path(command[command.index("--out") + 1])
                     out.write_text(
                         json.dumps(
@@ -1969,7 +1974,10 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
                         ),
                         encoding="utf-8",
                     )
-                if "hf_gpt2_zspace_generation_control_compare.py" in command[1]:
+                if command_script in {
+                    "hf_gpt2_zspace_generation_control_compare.py",
+                    "hf_zspace_generation_control_compare.py",
+                }:
                     out = Path(command[command.index("--out") + 1])
                     lines_out = Path(command[command.index("--lines-out") + 1])
                     out.write_text('{"status":"complete"}\n', encoding="utf-8")
@@ -2044,7 +2052,11 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
 
             def fake_runner(command):
                 executed.append(list(command))
-                if "hf_gpt2_zspace_generation_control_sweep.py" in command[1]:
+                command_script = Path(command[1]).name
+                if command_script in {
+                    "hf_gpt2_zspace_generation_control_sweep.py",
+                    "hf_zspace_generation_control_sweep.py",
+                }:
                     out = Path(command[command.index("--out") + 1])
                     out.write_text(
                         json.dumps(
@@ -2055,7 +2067,10 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
                         ),
                         encoding="utf-8",
                     )
-                if "hf_gpt2_zspace_generation_control_compare.py" in command[1]:
+                if command_script in {
+                    "hf_gpt2_zspace_generation_control_compare.py",
+                    "hf_zspace_generation_control_compare.py",
+                }:
                     out = Path(command[command.index("--out") + 1])
                     lines_out = Path(command[command.index("--lines-out") + 1])
                     out.write_text('{"status":"complete"}\n', encoding="utf-8")
@@ -2349,6 +2364,71 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
         self.assertEqual(report["tokenizer_name"], "sshleifer/tiny-gpt2")
         self.assertEqual(compare_args.label, ["generic"])
         self.assertEqual(compare_args.sweeps, [out_path])
+
+    def test_installed_hf_generation_control_cli_dry_run_and_compare(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            out_path = root / "control-sweep.json"
+            compare_path = root / "compare.json"
+            code = hf_cli.zspace_generation_control_sweep_main(
+                [
+                    "--dry-run",
+                    "--model-name",
+                    str(root / "checkpoint-local"),
+                    "--tokenizer-name",
+                    "sshleifer/tiny-gpt2",
+                    "--prompt",
+                    "SpiralTorch is",
+                    "--out",
+                    str(out_path),
+                ]
+            )
+            compare_code = hf_cli.zspace_generation_control_compare_main(
+                [
+                    str(out_path),
+                    "--label",
+                    "installed",
+                    "--out",
+                    str(compare_path),
+                ]
+            )
+            report = json.loads(out_path.read_text())
+            comparison = json.loads(compare_path.read_text())
+
+        self.assertEqual(code, 0)
+        self.assertEqual(compare_code, 0)
+        self.assertEqual(report["tokenizer_name"], "sshleifer/tiny-gpt2")
+        self.assertEqual(
+            comparison["row_type"],
+            "zspace_generation_control_sweep_comparison",
+        )
+        self.assertEqual(comparison["model_count"], 1)
+
+    def test_installed_hf_checkpoint_control_cli_uses_generic_scripts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            code = hf_cli.checkpoint_generation_control_main(
+                [
+                    "--dry-run",
+                    "--no-compare",
+                    "--run-dir",
+                    str(root / "run"),
+                    "--checkpoint",
+                    "checkpoint-2048",
+                    "--model-configs",
+                    str(MODEL_CONFIGS_PATH),
+                    "--model-profile",
+                    "tiny-gpt2-ci",
+                    "--run-card",
+                    str(root / "checkpoint-control.json"),
+                ]
+            )
+            report = json.loads((root / "checkpoint-control.json").read_text())
+
+        command = report["sweeps"][0]["command"]
+        self.assertEqual(code, 0)
+        self.assertEqual(Path(command[1]).name, "hf_zspace_generation_control_sweep.py")
+        self.assertEqual(report["tokenizer_name"], "sshleifer/tiny-gpt2")
 
     def test_repetition_report_scores_repeated_ngrams(self) -> None:
         module = load_generation_control_sweep_example()

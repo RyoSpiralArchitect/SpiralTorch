@@ -64,13 +64,13 @@ EPSILON = 1.0e-12
 _PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 _EXAMPLES_ROOT = _PACKAGE_ROOT / "examples"
 DEFAULT_ZSPACE_CHECKPOINT_SWEEP_SCRIPT = (
-    _EXAMPLES_ROOT / "hf_gpt2_zspace_generation_control_sweep.py"
+    _EXAMPLES_ROOT / "hf_zspace_generation_control_sweep.py"
 )
 DEFAULT_ZSPACE_CHECKPOINT_COMPARE_SCRIPT = (
-    _EXAMPLES_ROOT / "hf_gpt2_zspace_generation_control_compare.py"
+    _EXAMPLES_ROOT / "hf_zspace_generation_control_compare.py"
 )
 DEFAULT_ZSPACE_CHECKPOINT_CURVE_SCRIPT = (
-    _EXAMPLES_ROOT / "hf_gpt2_ft_generation_curve.py"
+    _EXAMPLES_ROOT / "hf_finetune_generation_curve.py"
 )
 _DEFAULT_CHECKPOINT_PROMPTS: tuple[tuple[str, str, str], ...] = (
     (
