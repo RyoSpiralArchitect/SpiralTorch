@@ -4587,6 +4587,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 "long-ft",
                 "--run-status-history-jsonl",
                 str(run_status_history),
+                "--milestone-step",
+                "6144",
                 "--out",
                 str(out_path),
                 "--lines-out",
@@ -4596,6 +4598,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             snapshot = module.build_monitor_snapshot(args)
             lines = module.snapshot_lines(snapshot)
             self.assertEqual(module.main(argv), 0)
+            quiet_stderr = io.StringIO()
+            with mock.patch("sys.stderr", quiet_stderr):
+                self.assertEqual(module.main(argv + ["--require-milestone-ready"]), 4)
+            self.assertIn("milestone is not ready yet", quiet_stderr.getvalue())
             written = json.loads(out_path.read_text(encoding="utf-8"))
             written_lines = lines_path.read_text(encoding="utf-8").splitlines()
 
@@ -4621,6 +4627,15 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(snapshot["disk_status"], "ok")
         self.assertEqual(snapshot["disk_margin_gb"], 5.5)
         self.assertTrue(snapshot["direct_status_available"])
+        self.assertEqual(snapshot["milestone_step"], 6144)
+        self.assertEqual(snapshot["milestone_status"], "waiting_for_step")
+        self.assertFalse(snapshot["milestone_ready"])
+        self.assertFalse(snapshot["milestone_step_reached"])
+        self.assertEqual(snapshot["milestone_steps_until"], 344)
+        self.assertFalse(snapshot["milestone_eval_ready"])
+        self.assertIsNone(snapshot["milestone_eval_loss"])
+        self.assertFalse(snapshot["milestone_checkpoint_ready"])
+        self.assertEqual(snapshot["milestone_checkpoint"], "checkpoint-6144")
         self.assertFalse(snapshot["eval_watch_ready"])
         self.assertEqual(snapshot["eval_watch_step"], 6144)
         self.assertFalse(snapshot["wait_launch_checkpoint_ready"])
@@ -4638,6 +4653,11 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("steps_until_next_checkpoint=344", lines[0])
         self.assertIn("disk_margin_gb=5.5", lines[0])
         self.assertIn("direct_status_available=true", lines[0])
+        self.assertIn("milestone_step=6144", lines[0])
+        self.assertIn("milestone_status=waiting_for_step", lines[0])
+        self.assertIn("milestone_ready=false", lines[0])
+        self.assertIn("milestone_eval_ready=false", lines[0])
+        self.assertIn("milestone_checkpoint_ready=false", lines[0])
         self.assertIn("eval_watch_ready=false", lines[0])
         self.assertIn("wait_status=waiting_for_process", lines[0])
         self.assertIn("name=direct", lines[1])
@@ -4648,6 +4668,26 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("name=final", lines[4])
         self.assertIn("status=waiting_for_process", lines[5])
         self.assertEqual(written_lines, lines)
+        ready_watches = {
+            "direct": {
+                "log_latest_step": 6144,
+                "eval_loss_points": [{"step": 6144, "eval_loss": 3.2}],
+                "checkpoint_names": ["checkpoint-6144"],
+            },
+            "eval": {},
+            "checkpoint": {},
+            "final": {},
+        }
+        ready = module._milestone_summary(
+            milestone_step=6144,
+            primary=ready_watches["direct"],
+            watches=ready_watches,
+        )
+        self.assertEqual(ready["milestone_status"], "ready")
+        self.assertTrue(ready["milestone_ready"])
+        self.assertTrue(ready["milestone_step_reached"])
+        self.assertEqual(ready["milestone_eval_loss"], 3.2)
+        self.assertTrue(ready["milestone_checkpoint_ready"])
 
     def test_run_card_summary_supplements_trace_telemetry_from_jsonl(self) -> None:
         card = {

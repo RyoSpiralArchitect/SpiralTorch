@@ -21,9 +21,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--checkpoint-history-jsonl", type=Path, default=None)
     parser.add_argument("--final-history-jsonl", type=Path, default=None)
     parser.add_argument("--wait-launch-history-jsonl", type=Path, default=None)
+    parser.add_argument("--milestone-step", type=int, default=None)
     parser.add_argument("--out", type=Path, default=None)
     parser.add_argument("--lines-out", type=Path, default=None)
     parser.add_argument("--require-final-ready", action="store_true")
+    parser.add_argument("--require-milestone-ready", action="store_true")
     parser.add_argument("--require-wait-launched", action="store_true")
     args = parser.parse_args(argv)
     provided = [
@@ -40,6 +42,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error(f"run_dir does not exist: {args.run_dir}")
     if args.next_run_dir is not None and not args.next_run_dir.is_dir():
         parser.error(f"next_run_dir does not exist: {args.next_run_dir}")
+    if args.milestone_step is not None and args.milestone_step < 0:
+        parser.error("--milestone-step must be non-negative")
     for path in provided:
         if path is not None and not path.is_file():
             parser.error(f"monitor input does not exist: {path}")
@@ -116,6 +120,45 @@ def _checkpoint_name(row: dict[str, Any]) -> Any:
     if isinstance(checkpoint, dict):
         return checkpoint.get("name")
     return None
+
+
+def _checkpoint_names(row: dict[str, Any]) -> list[str]:
+    names: list[str] = []
+    latest = _checkpoint_name(row)
+    if isinstance(latest, str):
+        names.append(latest)
+    checkpoints = row.get("checkpoints")
+    if isinstance(checkpoints, list):
+        for checkpoint in checkpoints:
+            if not isinstance(checkpoint, dict):
+                continue
+            name = checkpoint.get("name")
+            if isinstance(name, str):
+                names.append(name)
+    return list(dict.fromkeys(names))
+
+
+def _eval_loss_points(row: dict[str, Any]) -> list[dict[str, Any]]:
+    points = _nested(row, "trace", "trace_eval_loss_points")
+    if not isinstance(points, list):
+        return []
+    clean: list[dict[str, Any]] = []
+    for point in points:
+        if not isinstance(point, dict):
+            continue
+        step = point.get("step")
+        eval_loss = point.get("eval_loss")
+        if not isinstance(step, int) or not isinstance(eval_loss, (int, float)):
+            continue
+        clean.append(
+            {
+                "step": step,
+                "eval_loss": float(eval_loss),
+                "eval_runtime": point.get("eval_runtime"),
+                "time_unix_s": point.get("time_unix_s"),
+            }
+        )
+    return clean
 
 
 def _duration_seconds(rows: list[dict[str, Any]]) -> float | None:
@@ -204,6 +247,7 @@ def _status_watch_summary(
         else None
     )
     log_remaining_seconds = _nested(last, "log_progress", "log_remaining_seconds")
+    eval_loss_points = _eval_loss_points(last)
     return {
         "name": name,
         "history_jsonl": str(history_jsonl) if history_jsonl is not None else None,
@@ -245,6 +289,7 @@ def _status_watch_summary(
         "min_loss": min(losses) if losses else None,
         "last_eval_loss": _nested(last, "trace", "trace_last_eval_loss"),
         "last_eval_loss_step": _last_eval_loss_step(last),
+        "eval_loss_points": eval_loss_points,
         "min_eval_loss": min(eval_losses) if eval_losses else None,
         "best_eval_loss_step": _nested(last, "trace", "trace_best_eval_loss_step"),
         "training_loss_guard_count": _nested(
@@ -253,6 +298,7 @@ def _status_watch_summary(
         "final_checkpoint_ready": last.get("final_checkpoint_ready"),
         "checkpoint_count": last.get("checkpoint_count"),
         "latest_checkpoint": _checkpoint_name(last),
+        "checkpoint_names": _checkpoint_names(last),
         "disk_free_gb": last.get("disk_free_gb"),
         "disk_margin_gb": last.get("disk_margin_gb"),
         "disk_status": last.get("disk_status"),
@@ -306,6 +352,83 @@ def _latest_status_watch(watches: dict[str, dict[str, Any]]) -> dict[str, Any]:
             watch.get("name") or "",
         ),
     )
+
+
+def _eval_point_for_step(
+    watches: dict[str, dict[str, Any]], milestone_step: int
+) -> dict[str, Any] | None:
+    for watch_name in ("direct", "eval", "checkpoint", "final"):
+        watch = watches.get(watch_name)
+        if not isinstance(watch, dict):
+            continue
+        points = watch.get("eval_loss_points")
+        if not isinstance(points, list):
+            continue
+        for point in points:
+            if not isinstance(point, dict):
+                continue
+            if point.get("step") == milestone_step:
+                return {**point, "watch": watch_name}
+    return None
+
+
+def _has_checkpoint_for_step(
+    watches: dict[str, dict[str, Any]], milestone_step: int
+) -> bool:
+    checkpoint_name = f"checkpoint-{milestone_step}"
+    for watch in watches.values():
+        if not isinstance(watch, dict):
+            continue
+        names = watch.get("checkpoint_names")
+        if isinstance(names, list) and checkpoint_name in names:
+            return True
+        if watch.get("latest_checkpoint") == checkpoint_name:
+            return True
+    return False
+
+
+def _milestone_summary(
+    *,
+    milestone_step: int | None,
+    primary: dict[str, Any],
+    watches: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    if milestone_step is None:
+        return {}
+    log_step = primary.get("log_latest_step")
+    step_reached = isinstance(log_step, int) and log_step >= milestone_step
+    steps_until = (
+        max(milestone_step - log_step, 0) if isinstance(log_step, int) else None
+    )
+    eval_point = _eval_point_for_step(watches, milestone_step)
+    eval_ready = eval_point is not None
+    checkpoint_ready = _has_checkpoint_for_step(watches, milestone_step)
+    if eval_ready and checkpoint_ready:
+        status = "ready"
+    elif not step_reached:
+        status = "waiting_for_step"
+    elif not eval_ready:
+        status = "waiting_for_eval"
+    elif not checkpoint_ready:
+        status = "waiting_for_checkpoint"
+    else:
+        status = "unknown"
+    return {
+        "milestone_step": milestone_step,
+        "milestone_status": status,
+        "milestone_ready": eval_ready and checkpoint_ready,
+        "milestone_step_reached": step_reached,
+        "milestone_steps_until": steps_until,
+        "milestone_eval_ready": eval_ready,
+        "milestone_eval_loss": eval_point.get("eval_loss")
+        if eval_point is not None
+        else None,
+        "milestone_eval_watch": eval_point.get("watch")
+        if eval_point is not None
+        else None,
+        "milestone_checkpoint_ready": checkpoint_ready,
+        "milestone_checkpoint": f"checkpoint-{milestone_step}",
+    }
 
 
 def _resolve_sources(args: argparse.Namespace) -> dict[str, Path | None]:
@@ -383,7 +506,7 @@ def build_monitor_snapshot(args: argparse.Namespace) -> dict[str, Any]:
     checkpoint_watch = watches["checkpoint"]
     final_watch = watches["final"]
     direct_watch = watches["direct"]
-    return {
+    snapshot = {
         "row_type": "hf_gpt2_ft_monitor_snapshot",
         "label": args.label,
         "run_dir": str(args.run_dir) if args.run_dir is not None else None,
@@ -439,6 +562,14 @@ def build_monitor_snapshot(args: argparse.Namespace) -> dict[str, Any]:
         "watches": watches,
         "wait_launch": wait_launch,
     }
+    snapshot.update(
+        _milestone_summary(
+            milestone_step=args.milestone_step,
+            primary=primary,
+            watches=watches,
+        )
+    )
+    return snapshot
 
 
 def snapshot_lines(snapshot: dict[str, Any]) -> list[str]:
@@ -472,6 +603,13 @@ def snapshot_lines(snapshot: dict[str, Any]) -> list[str]:
             f"direct_status_available={_number_text(snapshot.get('direct_status_available'))} "
             f"eval_watch_step={_number_text(snapshot.get('eval_watch_step'))} "
             f"eval_watch_ready={_number_text(snapshot.get('eval_watch_ready'))} "
+            f"milestone_step={_number_text(snapshot.get('milestone_step'))} "
+            f"milestone_status={_number_text(snapshot.get('milestone_status'))} "
+            f"milestone_ready={_number_text(snapshot.get('milestone_ready'))} "
+            f"milestone_steps_until={_number_text(snapshot.get('milestone_steps_until'))} "
+            f"milestone_eval_ready={_number_text(snapshot.get('milestone_eval_ready'))} "
+            f"milestone_eval_loss={_number_text(snapshot.get('milestone_eval_loss'))} "
+            f"milestone_checkpoint_ready={_number_text(snapshot.get('milestone_checkpoint_ready'))} "
             f"checkpoint_watch_reason={_number_text(snapshot.get('checkpoint_watch_reason'))} "
             f"final_watch_reason={_number_text(snapshot.get('final_watch_reason'))} "
             f"wait_status={_number_text(snapshot.get('wait_launch_status'))} "
@@ -528,6 +666,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.require_final_ready and not snapshot.get("final_checkpoint_ready"):
         print("final checkpoint is not ready yet", file=sys.stderr)
         return 2
+    if args.require_milestone_ready and not snapshot.get("milestone_ready"):
+        print("milestone is not ready yet", file=sys.stderr)
+        return 4
     if args.require_wait_launched and not snapshot.get("wait_launch_launched"):
         print("wait-launch has not launched a command yet", file=sys.stderr)
         return 3
