@@ -542,6 +542,53 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
             zspace_inference_distortion_runtime_cli_args(None, sweep=True),
             ["--resume-existing"],
         )
+        profile_runtime = zspace_inference_distortion_runtime_plan(
+            model_configs=MODEL_CONFIGS_PATH,
+            model_profile="qwen2-0.5b-local-smoke",
+            api_provider="fake",
+        )
+        profile_args = zspace_inference_distortion_runtime_cli_args(profile_runtime)
+        overridden_profile_runtime = zspace_inference_distortion_runtime_plan(
+            model_configs=MODEL_CONFIGS_PATH,
+            model_profile="pythia-70m-local-smoke",
+            local_model=Path("models/local-causal-lm"),
+            tokenizer_name="models/local-tokenizer",
+            max_new_tokens=7,
+            activation_name_contains=["custom.block"],
+            api_provider="fake",
+        )
+
+        self.assertEqual(profile_runtime["local_model"], "Qwen/Qwen2-0.5B")
+        self.assertEqual(profile_runtime["tokenizer_name"], "Qwen/Qwen2-0.5B")
+        self.assertEqual(profile_runtime["max_new_tokens"], 128)
+        self.assertEqual(
+            profile_runtime["activation_name_contains"],
+            ["model.layers.0"],
+        )
+        self.assertEqual(
+            profile_runtime["model_profile"]["profile_id"],
+            "qwen2-0.5b-local-smoke",
+        )
+        self.assertIn(
+            "profile=qwen2-0.5b-local-smoke",
+            profile_runtime["model_profile_lines"][0],
+        )
+        self.assertIn("Qwen/Qwen2-0.5B", profile_args)
+        self.assertIn("model.layers.0", profile_args)
+        self.assertNotIn("--model-profile", profile_args)
+        self.assertEqual(
+            overridden_profile_runtime["local_model"],
+            "models/local-causal-lm",
+        )
+        self.assertEqual(
+            overridden_profile_runtime["tokenizer_name"],
+            "models/local-tokenizer",
+        )
+        self.assertEqual(overridden_profile_runtime["max_new_tokens"], 7)
+        self.assertEqual(
+            overridden_profile_runtime["activation_name_contains"],
+            ["custom.block"],
+        )
 
     def test_inference_distortion_probe_accepts_model_profile_defaults(self) -> None:
         module = load_distortion_probe_example()

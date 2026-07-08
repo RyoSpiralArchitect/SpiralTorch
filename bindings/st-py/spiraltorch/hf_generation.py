@@ -3032,11 +3032,13 @@ def _text_sequence(value: object) -> list[str]:
 
 def zspace_inference_distortion_runtime_plan(
     *,
+    model_configs: Mapping[str, object] | str | Path | None = None,
+    model_profile: str | None = None,
     local_model: str | Path | None = None,
     tokenizer_name: str | Path | None = None,
     allow_remote: bool = False,
     trust_remote_code: bool = False,
-    max_new_tokens: int = 48,
+    max_new_tokens: int | None = None,
     activation_module_name: Sequence[object] | object | None = None,
     activation_name_contains: Sequence[object] | object | None = None,
     api_provider: str | None = "fake",
@@ -3047,9 +3049,64 @@ def zspace_inference_distortion_runtime_plan(
 ) -> dict[str, object]:
     """Return a serializable runtime plan for inference-distortion probes."""
 
+    profile_report: dict[str, object] | None = None
+    if model_configs is not None or model_profile is not None:
+        from .hf_ft import (
+            hf_finetune_model_profile_lines,
+            resolve_hf_finetune_model_profile,
+        )
+
+        profile_report = resolve_hf_finetune_model_profile(
+            model_configs,
+            profile=model_profile,
+        )
+        generation_profile = _mapping_item(profile_report, "generation")
+        runtime_profile = _mapping_item(profile_report, "runtime")
+        if local_model is None and profile_report.get("model_name") is not None:
+            local_model = str(profile_report["model_name"])
+        if tokenizer_name is None and profile_report.get("tokenizer_name") is not None:
+            tokenizer_name = str(profile_report["tokenizer_name"])
+        if (
+            max_new_tokens is None
+            and generation_profile.get("max_new_tokens") is not None
+        ):
+            max_new_tokens = _positive_int(
+                generation_profile["max_new_tokens"],
+                label="profile.generation.max_new_tokens",
+            )
+        if not allow_remote and runtime_profile.get("allow_remote") is True:
+            allow_remote = True
+        if not trust_remote_code and runtime_profile.get("trust_remote_code") is True:
+            trust_remote_code = True
+        if (
+            activation_module_name is None
+            and runtime_profile.get("activation_module_name") is not None
+        ):
+            activation_module_name = runtime_profile["activation_module_name"]
+        if (
+            activation_name_contains is None
+            and runtime_profile.get("activation_name_contains") is not None
+        ):
+            activation_name_contains = runtime_profile["activation_name_contains"]
+        model_profile_lines = hf_finetune_model_profile_lines(profile_report)
+    else:
+        model_profile_lines = []
+    if max_new_tokens is None:
+        max_new_tokens = 48
+    if model_configs is None:
+        model_configs_ref = None
+    elif isinstance(model_configs, Mapping):
+        model_configs_ref = (
+            profile_report.get("source_path") if profile_report is not None else None
+        )
+    else:
+        model_configs_ref = str(model_configs)
     return {
         "local_model": str(local_model) if local_model is not None else None,
         "tokenizer_name": str(tokenizer_name) if tokenizer_name is not None else None,
+        "model_configs": model_configs_ref,
+        "model_profile": profile_report,
+        "model_profile_lines": model_profile_lines,
         "allow_remote": bool(allow_remote),
         "trust_remote_code": bool(trust_remote_code),
         "max_new_tokens": int(max_new_tokens),

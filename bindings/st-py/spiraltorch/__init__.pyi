@@ -846,10 +846,13 @@ def zspace_inference_distortion_probe_report(
 
 def zspace_inference_distortion_runtime_plan(
     *,
+    model_configs: Mapping[str, object] | str | PathLike[str] | None = ...,
+    model_profile: str | None = ...,
     local_model: str | PathLike[str] | None = ...,
+    tokenizer_name: str | PathLike[str] | None = ...,
     allow_remote: bool = ...,
     trust_remote_code: bool = ...,
-    max_new_tokens: int = ...,
+    max_new_tokens: int | None = ...,
     activation_module_name: Sequence[object] | object | None = ...,
     activation_name_contains: Sequence[object] | object | None = ...,
     api_provider: str | None = ...,
