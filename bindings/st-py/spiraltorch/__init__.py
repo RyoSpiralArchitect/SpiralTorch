@@ -810,6 +810,13 @@ from .hf_ft import (
     write_hf_gpt2_finetune_trainer_trace_event,
 )
 
+from . import hf_ft_status as hf_ft_status
+from .hf_ft_status import (
+    hf_gpt2_finetune_status_history_lines,
+    load_hf_gpt2_finetune_status_history,
+    summarize_hf_gpt2_finetune_status_history,
+)
+
 from .hf_generation import (
     ZSpaceActivationProbeHook,
     ZSpaceRepressionLogitsProcessor,
@@ -988,6 +995,7 @@ _EXTRAS = [
     "hf_gpt2_finetune_inference_distortion_handoff_lines",
     "hf_gpt2_finetune_preflight_report",
     "hf_gpt2_finetune_rust_dependency_report",
+    "hf_gpt2_finetune_status_history_lines",
     "hf_gpt2_finetune_scale_up_command",
     "hf_gpt2_finetune_scale_up_preflight_lines",
     "hf_gpt2_finetune_scale_up_preflight_report",
@@ -999,10 +1007,12 @@ _EXTRAS = [
     "compare_hf_gpt2_finetune_run_cards",
     "load_hf_gpt2_finetune_run_card",
     "load_hf_gpt2_finetune_sweep_report",
+    "load_hf_gpt2_finetune_status_history",
     "load_hf_gpt2_finetune_trainer_trace",
     "summarize_hf_gpt2_finetune_run_card",
     "summarize_hf_gpt2_finetune_sweep_report",
     "summarize_hf_gpt2_finetune_sweep_report_lines",
+    "summarize_hf_gpt2_finetune_status_history",
     "summarize_hf_gpt2_finetune_trainer_trace",
     "write_hf_gpt2_finetune_run_card",
     "write_hf_gpt2_finetune_trainer_trace_event",
@@ -8160,6 +8170,7 @@ for _name in [
     "plugin",
     "ecosystem",
     "hf_ft",
+    "hf_ft_status",
     "hf_generation",
     "selfsup",
     "export",

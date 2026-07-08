@@ -1,0 +1,539 @@
+"""Reusable status-history helpers for SpiralTorch Hugging Face FT runs."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+from typing import Any
+
+__all__ = [
+    "hf_gpt2_finetune_status_history_lines",
+    "load_hf_gpt2_finetune_status_history",
+    "main",
+    "parse_args",
+    "summarize_hf_gpt2_finetune_status_history",
+]
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Summarize SpiralTorch GPT-2 fine-tuning run status JSONL history."
+    )
+    parser.add_argument("history_jsonl", type=Path)
+    parser.add_argument("--label", default=None)
+    parser.add_argument("--tail", type=int, default=3)
+    parser.add_argument(
+        "--tail-evals",
+        type=int,
+        default=0,
+        help="print the last N eval-loss points from the latest status row",
+    )
+    parser.add_argument("--out", type=Path, default=None)
+    parser.add_argument("--lines-out", type=Path, default=None)
+    args = parser.parse_args(argv)
+    if not args.history_jsonl.is_file():
+        parser.error(f"history_jsonl does not exist: {args.history_jsonl}")
+    if args.tail < 0:
+        parser.error("--tail must be non-negative")
+    if args.tail_evals < 0:
+        parser.error("--tail-evals must be non-negative")
+    return args
+
+
+def _number_text(value: Any) -> str:
+    if value is None:
+        return "none"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        return f"{value:.6g}"
+    return str(value)
+
+
+def load_hf_gpt2_finetune_status_history(path: str | Path) -> list[dict[str, Any]]:
+    history_path = Path(path)
+    rows: list[dict[str, Any]] = []
+    for line_number, line in enumerate(
+        history_path.read_text(encoding="utf-8").splitlines(), 1
+    ):
+        if not line.strip():
+            continue
+        payload = json.loads(line)
+        if not isinstance(payload, dict):
+            raise ValueError(f"history row {line_number} is not an object")
+        rows.append(payload)
+    return rows
+
+
+def _nested(row: dict[str, Any], section: str, field: str) -> Any:
+    value = row.get(section)
+    if not isinstance(value, dict):
+        return None
+    return value.get(field)
+
+
+def _int_value(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return None
+
+
+def _latest_checkpoint_name(row: dict[str, Any]) -> Any:
+    checkpoint = row.get("latest_checkpoint")
+    if isinstance(checkpoint, dict):
+        return checkpoint.get("name")
+    return None
+
+
+def _checkpoint_headroom(row: dict[str, Any]) -> dict[str, Any]:
+    headroom = row.get("checkpoint_headroom")
+    return headroom if isinstance(headroom, dict) else {}
+
+
+def _runtime_settings(row: dict[str, Any]) -> dict[str, Any]:
+    runtime = row.get("runtime_settings")
+    return runtime if isinstance(runtime, dict) else {}
+
+
+def _runtime_setting(row: dict[str, Any], field: str) -> Any:
+    runtime = _runtime_settings(row)
+    value = runtime.get(field)
+    if value is not None:
+        return value
+    if field == "max_steps":
+        return _nested(row, "trace", "max_steps") or _nested(
+            row, "log_progress", "log_max_steps"
+        )
+    if field == "save_total_limit":
+        return row.get("save_total_limit")
+    if field == "min_free_disk_gb":
+        return row.get("min_free_disk_gb")
+    return None
+
+
+def _first_log_row(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    for row in rows:
+        if isinstance(_nested(row, "log_progress", "log_latest_step"), int):
+            return row
+    return rows[0] if rows else {}
+
+
+def _last_log_row(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    for row in reversed(rows):
+        if isinstance(_nested(row, "log_progress", "log_latest_step"), int):
+            return row
+    return rows[-1] if rows else {}
+
+
+def _last_eval_loss_step(row: dict[str, Any]) -> Any:
+    effective = _nested(row, "trace", "trace_effective_last_eval_loss_step")
+    if effective is not None:
+        return effective
+    explicit = _nested(row, "trace", "trace_last_eval_loss_step")
+    if explicit is not None:
+        return explicit
+    eval_points = _nested(row, "trace", "trace_eval_loss_points")
+    if not isinstance(eval_points, list):
+        return None
+    for point in reversed(eval_points):
+        if not isinstance(point, dict):
+            continue
+        step = point.get("step")
+        if isinstance(step, int):
+            return step
+    return None
+
+
+def _eval_loss_points(row: dict[str, Any]) -> list[dict[str, Any]]:
+    trace = row.get("trace")
+    if not isinstance(trace, dict):
+        return []
+    points = trace.get("trace_eval_loss_points")
+    if not isinstance(points, list):
+        return []
+    resume_baseline_eval_step = _int_value(
+        trace.get("trace_resume_baseline_eval_step")
+    )
+    rows: list[dict[str, Any]] = []
+    for index, point in enumerate(points):
+        if not isinstance(point, dict):
+            continue
+        raw_step = _int_value(point.get("step"))
+        step = (
+            resume_baseline_eval_step
+            if raw_step == 0 and resume_baseline_eval_step is not None
+            else raw_step
+        )
+        rows.append(
+            {
+                "index": index,
+                "step": step,
+                "raw_step": raw_step if step != raw_step else None,
+                "eval_loss": point.get("eval_loss"),
+                "eval_runtime": point.get("eval_runtime"),
+                "time_unix_s": point.get("time_unix_s"),
+            }
+        )
+    return rows
+
+
+def summarize_hf_gpt2_finetune_status_history(
+    rows: list[dict[str, Any]], *, label: str | None = None, history_jsonl: str | Path
+) -> dict[str, Any]:
+    first = rows[0] if rows else {}
+    last = rows[-1] if rows else {}
+    first_log = _first_log_row(rows)
+    last_log = _last_log_row(rows)
+    first_log_step = _nested(first_log, "log_progress", "log_latest_step")
+    last_log_step = _nested(last_log, "log_progress", "log_latest_step")
+    first_trace_step = _nested(first, "trace", "trace_max_global_step")
+    last_trace_step = _nested(last, "trace", "trace_max_global_step")
+    first_time = first.get("time_unix_s")
+    last_time = last.get("time_unix_s")
+    first_log_time = first_log.get("time_unix_s")
+    last_log_time = last_log.get("time_unix_s")
+    duration_seconds = (
+        float(last_time) - float(first_time)
+        if isinstance(first_time, (int, float)) and isinstance(last_time, (int, float))
+        else None
+    )
+    log_duration_seconds = (
+        float(last_log_time) - float(first_log_time)
+        if isinstance(first_log_time, (int, float))
+        and isinstance(last_log_time, (int, float))
+        else None
+    )
+    delta_log_step = (
+        int(last_log_step) - int(first_log_step)
+        if isinstance(first_log_step, int) and isinstance(last_log_step, int)
+        else None
+    )
+    delta_trace_step = (
+        int(last_trace_step) - int(first_trace_step)
+        if isinstance(first_trace_step, int) and isinstance(last_trace_step, int)
+        else None
+    )
+    log_steps_per_second = (
+        float(delta_log_step) / log_duration_seconds
+        if isinstance(delta_log_step, int)
+        and log_duration_seconds is not None
+        and log_duration_seconds > 0.0
+        else None
+    )
+    log_steps_until_next_eval = _nested(
+        last, "eval_progress", "log_steps_until_next_eval"
+    )
+    log_steps_until_next_checkpoint = _nested(
+        last, "checkpoint_progress", "log_steps_until_next_checkpoint"
+    )
+    last_log_max_steps = _nested(last, "log_progress", "log_max_steps")
+    log_steps_until_final = (
+        max(int(last_log_max_steps) - int(last_log_step), 0)
+        if isinstance(last_log_max_steps, int) and isinstance(last_log_step, int)
+        else None
+    )
+    estimated_seconds_until_next_eval = (
+        float(log_steps_until_next_eval) / log_steps_per_second
+        if isinstance(log_steps_until_next_eval, int)
+        and log_steps_per_second is not None
+        and log_steps_per_second > 0.0
+        else None
+    )
+    estimated_seconds_until_next_checkpoint = (
+        float(log_steps_until_next_checkpoint) / log_steps_per_second
+        if isinstance(log_steps_until_next_checkpoint, int)
+        and log_steps_per_second is not None
+        and log_steps_per_second > 0.0
+        else None
+    )
+    estimated_seconds_until_final = (
+        float(log_steps_until_final) / log_steps_per_second
+        if isinstance(log_steps_until_final, int)
+        and log_steps_per_second is not None
+        and log_steps_per_second > 0.0
+        else None
+    )
+    eval_losses = [
+        _nested(row, "trace", "trace_last_eval_loss")
+        for row in rows
+        if isinstance(_nested(row, "trace", "trace_last_eval_loss"), (int, float))
+    ]
+    losses = [
+        _nested(row, "trace", "trace_last_loss")
+        for row in rows
+        if isinstance(_nested(row, "trace", "trace_last_loss"), (int, float))
+    ]
+    disk_values = [
+        row.get("disk_free_gb")
+        for row in rows
+        if isinstance(row.get("disk_free_gb"), (int, float))
+    ]
+    disk_margin_values = [
+        row.get("disk_margin_gb")
+        for row in rows
+        if isinstance(row.get("disk_margin_gb"), (int, float))
+    ]
+    checkpoint_headroom = _checkpoint_headroom(last)
+    return {
+        "row_type": "hf_gpt2_ft_status_history_summary",
+        "label": label,
+        "history_jsonl": str(history_jsonl),
+        "row_count": len(rows),
+        "first_time_unix_s": first_time,
+        "last_time_unix_s": last_time,
+        "duration_seconds": duration_seconds,
+        "log_duration_seconds": log_duration_seconds,
+        "first_log_step": first_log_step,
+        "last_log_step": last_log_step,
+        "delta_log_step": delta_log_step,
+        "log_steps_per_second": log_steps_per_second,
+        "first_trace_step": first_trace_step,
+        "last_trace_step": last_trace_step,
+        "delta_trace_step": delta_trace_step,
+        "last_runtime_max_steps": _runtime_setting(last, "max_steps"),
+        "last_runtime_eval_steps": _runtime_setting(last, "eval_steps"),
+        "last_runtime_save_steps": _runtime_setting(last, "save_steps"),
+        "last_runtime_save_total_limit": _runtime_setting(last, "save_total_limit"),
+        "last_runtime_min_free_disk_gb": _runtime_setting(last, "min_free_disk_gb"),
+        "last_runtime_process_command_available": _runtime_setting(
+            last, "process_command_available"
+        ),
+        "last_log_max_steps": last_log_max_steps,
+        "last_log_remaining_seconds": _nested(
+            last, "log_progress", "log_remaining_seconds"
+        ),
+        "last_log_steps_until_final": log_steps_until_final,
+        "estimated_seconds_until_final": estimated_seconds_until_final,
+        "last_next_eval_step": _nested(last, "eval_progress", "next_eval_step"),
+        "last_log_steps_until_next_eval": log_steps_until_next_eval,
+        "estimated_seconds_until_next_eval": estimated_seconds_until_next_eval,
+        "last_latest_due_eval_step": _nested(
+            last, "eval_progress", "latest_due_eval_step"
+        ),
+        "last_latest_due_eval_ready": _nested(
+            last, "eval_progress", "latest_due_eval_ready"
+        ),
+        "last_pending_eval_step": _nested(last, "eval_progress", "pending_eval_step"),
+        "last_log_steps_since_pending_eval": _nested(
+            last, "eval_progress", "log_steps_since_pending_eval"
+        ),
+        "last_next_checkpoint_step": _nested(
+            last, "checkpoint_progress", "next_checkpoint_step"
+        ),
+        "last_log_steps_until_next_checkpoint": log_steps_until_next_checkpoint,
+        "estimated_seconds_until_next_checkpoint": (
+            estimated_seconds_until_next_checkpoint
+        ),
+        "last_best_eval_loss_step": _nested(last, "trace", "trace_best_eval_loss_step"),
+        "last_eval_loss_step": _last_eval_loss_step(last),
+        "first_loss": losses[0] if losses else None,
+        "last_loss": losses[-1] if losses else None,
+        "min_loss": min(losses) if losses else None,
+        "loss_delta": (losses[-1] - losses[0]) if len(losses) >= 2 else None,
+        "last_eval_loss": _nested(last, "trace", "trace_last_eval_loss"),
+        "min_eval_loss": min(eval_losses) if eval_losses else None,
+        "last_guard_count": _nested(last, "trace", "training_loss_guard_count"),
+        "last_process_status": last.get("process_status"),
+        "last_final_checkpoint_ready": last.get("final_checkpoint_ready"),
+        "last_checkpoint_count": last.get("checkpoint_count"),
+        "last_latest_checkpoint": _latest_checkpoint_name(last),
+        "last_save_total_limit": last.get("save_total_limit"),
+        "last_checkpoint_headroom_checkpoint_gb": checkpoint_headroom.get(
+            "resume_checkpoint_gb"
+        ),
+        "last_checkpoint_headroom_peak_gb": checkpoint_headroom.get(
+            "estimated_peak_checkpoint_gb"
+        ),
+        "last_checkpoint_headroom_free_after_gb": checkpoint_headroom.get(
+            "free_after_estimated_peak_gb"
+        ),
+        "min_disk_free_gb": min(disk_values) if disk_values else None,
+        "last_disk_free_gb": last.get("disk_free_gb"),
+        "min_disk_margin_gb": min(disk_margin_values) if disk_margin_values else None,
+        "last_disk_margin_gb": last.get("disk_margin_gb"),
+        "last_disk_status": last.get("disk_status"),
+        "last_watch_stop_eval_step": last.get("watch_stop_eval_step"),
+        "last_watch_stop_eval_ready": last.get("watch_stop_eval_ready"),
+        "last_watch_stop_reason": last.get("watch_stop_reason"),
+    }
+
+
+def hf_gpt2_finetune_status_history_lines(
+    summary: dict[str, Any],
+    rows: list[dict[str, Any]],
+    *,
+    tail: int,
+    tail_evals: int = 0,
+) -> list[str]:
+    label_text = summary.get("label") or "history"
+    lines = [
+        (
+            "hf_gpt2_ft_status_history "
+            f"label={label_text} "
+            f"rows={_number_text(summary.get('row_count'))} "
+            f"first_log_step={_number_text(summary.get('first_log_step'))} "
+            f"last_log_step={_number_text(summary.get('last_log_step'))} "
+            f"delta_log_step={_number_text(summary.get('delta_log_step'))} "
+            f"duration_seconds={_number_text(summary.get('duration_seconds'))} "
+            f"log_duration_seconds={_number_text(summary.get('log_duration_seconds'))} "
+            f"log_steps_per_second={_number_text(summary.get('log_steps_per_second'))} "
+            f"runtime_max_steps={_number_text(summary.get('last_runtime_max_steps'))} "
+            f"runtime_eval_steps={_number_text(summary.get('last_runtime_eval_steps'))} "
+            f"runtime_save_steps={_number_text(summary.get('last_runtime_save_steps'))} "
+            f"runtime_save_total_limit={_number_text(summary.get('last_runtime_save_total_limit'))} "
+            f"runtime_min_free_disk_gb={_number_text(summary.get('last_runtime_min_free_disk_gb'))} "
+            f"runtime_process_command={_number_text(summary.get('last_runtime_process_command_available'))} "
+            f"last_log_max_steps={_number_text(summary.get('last_log_max_steps'))} "
+            f"last_log_remaining_seconds={_number_text(summary.get('last_log_remaining_seconds'))} "
+            f"last_steps_until_final={_number_text(summary.get('last_log_steps_until_final'))} "
+            f"estimated_seconds_until_final={_number_text(summary.get('estimated_seconds_until_final'))} "
+            f"last_next_eval_step={_number_text(summary.get('last_next_eval_step'))} "
+            f"last_steps_until_next_eval={_number_text(summary.get('last_log_steps_until_next_eval'))} "
+            f"last_latest_due_eval_step={_number_text(summary.get('last_latest_due_eval_step'))} "
+            f"last_latest_due_eval_ready={_number_text(summary.get('last_latest_due_eval_ready'))} "
+            f"last_pending_eval_step={_number_text(summary.get('last_pending_eval_step'))} "
+            f"last_steps_since_pending_eval={_number_text(summary.get('last_log_steps_since_pending_eval'))} "
+            f"last_next_checkpoint_step={_number_text(summary.get('last_next_checkpoint_step'))} "
+            f"last_steps_until_next_checkpoint={_number_text(summary.get('last_log_steps_until_next_checkpoint'))} "
+            f"estimated_seconds_until_next_eval={_number_text(summary.get('estimated_seconds_until_next_eval'))} "
+            f"estimated_seconds_until_next_checkpoint={_number_text(summary.get('estimated_seconds_until_next_checkpoint'))} "
+            f"last_loss={_number_text(summary.get('last_loss'))} "
+            f"min_loss={_number_text(summary.get('min_loss'))} "
+            f"loss_delta={_number_text(summary.get('loss_delta'))} "
+            f"last_eval_loss={_number_text(summary.get('last_eval_loss'))} "
+            f"last_eval_step={_number_text(summary.get('last_eval_loss_step'))} "
+            f"min_eval_loss={_number_text(summary.get('min_eval_loss'))} "
+            f"best_eval_loss_step={_number_text(summary.get('last_best_eval_loss_step'))} "
+            f"guard_count={_number_text(summary.get('last_guard_count'))} "
+            f"process={_number_text(summary.get('last_process_status'))} "
+            f"final_ready={_number_text(summary.get('last_final_checkpoint_ready'))} "
+            f"last_save_total_limit={_number_text(summary.get('last_save_total_limit'))} "
+            f"last_checkpoint_headroom_checkpoint_gb={_number_text(summary.get('last_checkpoint_headroom_checkpoint_gb'))} "
+            f"last_checkpoint_headroom_peak_gb={_number_text(summary.get('last_checkpoint_headroom_peak_gb'))} "
+            f"last_checkpoint_headroom_free_after_gb={_number_text(summary.get('last_checkpoint_headroom_free_after_gb'))} "
+            f"last_disk_free_gb={_number_text(summary.get('last_disk_free_gb'))} "
+            f"min_disk_free_gb={_number_text(summary.get('min_disk_free_gb'))} "
+            f"last_disk_margin_gb={_number_text(summary.get('last_disk_margin_gb'))} "
+            f"min_disk_margin_gb={_number_text(summary.get('min_disk_margin_gb'))} "
+            f"disk_status={_number_text(summary.get('last_disk_status'))} "
+            f"watch_stop_eval_step={_number_text(summary.get('last_watch_stop_eval_step'))} "
+            f"watch_stop_eval_ready={_number_text(summary.get('last_watch_stop_eval_ready'))} "
+            f"watch_stop_reason={_number_text(summary.get('last_watch_stop_reason'))}"
+        )
+    ]
+    if tail > 0:
+        start_index = max(len(rows) - tail, 0)
+        for index, row in enumerate(rows[start_index:], start_index):
+            lines.append(
+                (
+                    "hf_gpt2_ft_status_history_point "
+                    f"index={index} "
+                    f"log_step={_number_text(_nested(row, 'log_progress', 'log_latest_step'))} "
+                    f"runtime_max_steps={_number_text(_runtime_setting(row, 'max_steps'))} "
+                    f"runtime_eval_steps={_number_text(_runtime_setting(row, 'eval_steps'))} "
+                    f"runtime_save_steps={_number_text(_runtime_setting(row, 'save_steps'))} "
+                    f"runtime_save_total_limit={_number_text(_runtime_setting(row, 'save_total_limit'))} "
+                    f"runtime_min_free_disk_gb={_number_text(_runtime_setting(row, 'min_free_disk_gb'))} "
+                    f"runtime_process_command={_number_text(_runtime_setting(row, 'process_command_available'))} "
+                    f"log_remaining_seconds={_number_text(_nested(row, 'log_progress', 'log_remaining_seconds'))} "
+                    f"next_eval_step={_number_text(_nested(row, 'eval_progress', 'next_eval_step'))} "
+                    f"steps_until_next_eval={_number_text(_nested(row, 'eval_progress', 'log_steps_until_next_eval'))} "
+                    f"pending_eval_step={_number_text(_nested(row, 'eval_progress', 'pending_eval_step'))} "
+                    f"next_checkpoint_step={_number_text(_nested(row, 'checkpoint_progress', 'next_checkpoint_step'))} "
+                    f"steps_until_next_checkpoint={_number_text(_nested(row, 'checkpoint_progress', 'log_steps_until_next_checkpoint'))} "
+                    f"last_loss={_number_text(_nested(row, 'trace', 'trace_last_loss'))} "
+                    f"last_eval_loss={_number_text(_nested(row, 'trace', 'trace_last_eval_loss'))} "
+                    f"last_eval_step={_number_text(_last_eval_loss_step(row))} "
+                    f"best_eval_loss_step={_number_text(_nested(row, 'trace', 'trace_best_eval_loss_step'))} "
+                    f"final_ready={_number_text(row.get('final_checkpoint_ready'))} "
+                    f"save_total_limit={_number_text(row.get('save_total_limit'))} "
+                    f"checkpoint_headroom_peak_gb={_number_text(_checkpoint_headroom(row).get('estimated_peak_checkpoint_gb'))} "
+                    f"checkpoint_headroom_free_after_gb={_number_text(_checkpoint_headroom(row).get('free_after_estimated_peak_gb'))} "
+                    f"disk_free_gb={_number_text(row.get('disk_free_gb'))} "
+                    f"disk_margin_gb={_number_text(row.get('disk_margin_gb'))} "
+                    f"disk_status={_number_text(row.get('disk_status'))} "
+                    f"watch_stop_eval_step={_number_text(row.get('watch_stop_eval_step'))} "
+                    f"watch_stop_eval_ready={_number_text(row.get('watch_stop_eval_ready'))} "
+                    f"watch_stop_reason={_number_text(row.get('watch_stop_reason'))}"
+                )
+            )
+    if tail_evals > 0 and rows:
+        eval_points = _eval_loss_points(rows[-1])
+        eval_start_index = max(len(eval_points) - tail_evals, 0)
+        for point in eval_points[eval_start_index:]:
+            raw_step_text = (
+                f" raw_step={_number_text(point.get('raw_step'))}"
+                if point.get("raw_step") is not None
+                else ""
+            )
+            lines.append(
+                (
+                    "hf_gpt2_ft_status_history_eval "
+                    f"index={_number_text(point.get('index'))} "
+                    f"step={_number_text(point.get('step'))}"
+                    f"{raw_step_text} "
+                    f"eval_loss={_number_text(point.get('eval_loss'))} "
+                    f"eval_runtime={_number_text(point.get('eval_runtime'))} "
+                    f"time_unix_s={_number_text(point.get('time_unix_s'))}"
+                )
+            )
+    return lines
+
+
+def _load_history(path: Path) -> list[dict[str, Any]]:
+    return load_hf_gpt2_finetune_status_history(path)
+
+
+def summarize_history(
+    rows: list[dict[str, Any]], *, label: str | None, history_jsonl: Path
+) -> dict[str, Any]:
+    return summarize_hf_gpt2_finetune_status_history(
+        rows, label=label, history_jsonl=history_jsonl
+    )
+
+
+def history_lines(
+    summary: dict[str, Any],
+    rows: list[dict[str, Any]],
+    *,
+    tail: int,
+    tail_evals: int = 0,
+) -> list[str]:
+    return hf_gpt2_finetune_status_history_lines(
+        summary, rows, tail=tail, tail_evals=tail_evals
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    try:
+        rows = load_hf_gpt2_finetune_status_history(args.history_jsonl)
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        print(f"failed to load status history: {exc}", file=sys.stderr)
+        return 1
+    summary = summarize_hf_gpt2_finetune_status_history(
+        rows, label=args.label, history_jsonl=args.history_jsonl
+    )
+    lines = hf_gpt2_finetune_status_history_lines(
+        summary, rows, tail=args.tail, tail_evals=args.tail_evals
+    )
+    payload = json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    if args.out is not None:
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.write_text(payload, encoding="utf-8")
+        print(f"hf_gpt2_ft_status_history_summary_json {args.out}")
+    if args.lines_out is not None:
+        args.lines_out.parent.mkdir(parents=True, exist_ok=True)
+        args.lines_out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        print(f"hf_gpt2_ft_status_history_summary_lines {args.lines_out}")
+    if args.out is None and args.lines_out is None:
+        print("\n".join(lines))
+    return 0

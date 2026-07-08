@@ -5123,8 +5123,12 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             ]
             args = module.parse_args(argv)
             loaded_rows = module._load_history(args.history_jsonl)
+            package_rows = st.load_hf_gpt2_finetune_status_history(history_path)
             summary = module.summarize_history(
                 loaded_rows, label=args.label, history_jsonl=args.history_jsonl
+            )
+            package_summary = st.summarize_hf_gpt2_finetune_status_history(
+                package_rows, label=args.label, history_jsonl=args.history_jsonl
             )
             lines = module.history_lines(
                 summary,
@@ -5132,10 +5136,23 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 tail=args.tail,
                 tail_evals=args.tail_evals,
             )
+            package_lines = st.hf_gpt2_finetune_status_history_lines(
+                package_summary,
+                package_rows,
+                tail=args.tail,
+                tail_evals=args.tail_evals,
+            )
             self.assertEqual(module.main(argv), 0)
             written = json.loads(out_path.read_text(encoding="utf-8"))
             written_lines = lines_path.read_text(encoding="utf-8").splitlines()
 
+        self.assertIs(
+            st.hf_ft_status.load_hf_gpt2_finetune_status_history,
+            st.load_hf_gpt2_finetune_status_history,
+        )
+        self.assertEqual(package_rows, loaded_rows)
+        self.assertEqual(package_summary, summary)
+        self.assertEqual(package_lines, lines)
         self.assertEqual(summary["row_count"], 2)
         self.assertEqual(summary["duration_seconds"], 40.0)
         self.assertEqual(summary["log_duration_seconds"], 40.0)

@@ -10,6 +10,7 @@ from .optim import Amegagrad, amegagrad
 
 export: ModuleType
 hf_ft: ModuleType
+hf_ft_status: ModuleType
 hf_generation: ModuleType
 hpo: ModuleType
 inference: ModuleType
@@ -37,6 +38,25 @@ def summarize_trainer_trace_events(
     event_type: str = ...,
     keys: Iterable[str] | None = ...,
 ) -> Dict[str, Any]: ...
+
+def load_hf_gpt2_finetune_status_history(
+    path: str | PathLike[str],
+) -> List[Dict[str, Any]]: ...
+
+def summarize_hf_gpt2_finetune_status_history(
+    rows: List[Dict[str, Any]],
+    *,
+    label: str | None = ...,
+    history_jsonl: str | PathLike[str],
+) -> Dict[str, Any]: ...
+
+def hf_gpt2_finetune_status_history_lines(
+    summary: Dict[str, Any],
+    rows: List[Dict[str, Any]],
+    *,
+    tail: int,
+    tail_evals: int = ...,
+) -> List[str]: ...
 
 def summarize_transformers_trainer_runtime_bridge(
     transformers_trace_jsonl: str,
@@ -8481,6 +8501,7 @@ __all__ = [
     "write_wgpu_first_runtime_matrix",
     "hf_ft",
     "hf_generation",
+    "hf_ft_status",
     "HF_GPT2_FT_DEFAULT_DEVICE_BACKENDS",
     "HF_GPT2_FT_REQUIRED_PYTHON_PACKAGES",
     "HF_GPT2_FT_REQUIRED_RUST_SURFACES",
@@ -8495,6 +8516,7 @@ __all__ = [
     "hf_gpt2_finetune_inference_distortion_handoff_lines",
     "hf_gpt2_finetune_preflight_report",
     "hf_gpt2_finetune_rust_dependency_report",
+    "hf_gpt2_finetune_status_history_lines",
     "hf_gpt2_finetune_scale_up_command",
     "hf_gpt2_finetune_scale_up_preflight_lines",
     "hf_gpt2_finetune_scale_up_preflight_report",
@@ -8506,10 +8528,12 @@ __all__ = [
     "compare_hf_gpt2_finetune_run_cards",
     "load_hf_gpt2_finetune_run_card",
     "load_hf_gpt2_finetune_sweep_report",
+    "load_hf_gpt2_finetune_status_history",
     "load_hf_gpt2_finetune_trainer_trace",
     "summarize_hf_gpt2_finetune_run_card",
     "summarize_hf_gpt2_finetune_sweep_report",
     "summarize_hf_gpt2_finetune_sweep_report_lines",
+    "summarize_hf_gpt2_finetune_status_history",
     "summarize_hf_gpt2_finetune_trainer_trace",
     "write_hf_gpt2_finetune_run_card",
     "write_hf_gpt2_finetune_trainer_trace_event",
