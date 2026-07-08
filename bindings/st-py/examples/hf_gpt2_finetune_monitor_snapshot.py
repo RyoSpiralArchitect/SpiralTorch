@@ -101,6 +101,9 @@ def _latest_path(directory: Path | None, patterns: list[str]) -> Path | None:
 
 
 def _last_eval_loss_step(row: dict[str, Any]) -> Any:
+    effective = _nested(row, "trace", "trace_effective_last_eval_loss_step")
+    if effective is not None:
+        return effective
     explicit = _nested(row, "trace", "trace_last_eval_loss_step")
     if explicit is not None:
         return explicit
@@ -653,6 +656,16 @@ def _watch_field_with_direct_fallback(
     return direct.get(field) if value is None else value
 
 
+def _watch_nullable_field_with_direct_fallback(
+    primary: dict[str, Any],
+    direct: dict[str, Any],
+    field: str,
+) -> Any:
+    if int(primary.get("row_count") or 0) > 0 and field in primary:
+        return primary.get(field)
+    return direct.get(field)
+
+
 def _eval_point_for_step(
     watches: dict[str, dict[str, Any]], milestone_step: int
 ) -> dict[str, Any] | None:
@@ -882,10 +895,10 @@ def build_monitor_snapshot(args: argparse.Namespace) -> dict[str, Any]:
         "latest_due_eval_ready": _watch_field_with_direct_fallback(
             primary, direct_watch, "latest_due_eval_ready"
         ),
-        "pending_eval_step": _watch_field_with_direct_fallback(
+        "pending_eval_step": _watch_nullable_field_with_direct_fallback(
             primary, direct_watch, "pending_eval_step"
         ),
-        "log_steps_since_pending_eval": _watch_field_with_direct_fallback(
+        "log_steps_since_pending_eval": _watch_nullable_field_with_direct_fallback(
             primary, direct_watch, "log_steps_since_pending_eval"
         ),
         "next_checkpoint_step": primary.get("next_checkpoint_step"),

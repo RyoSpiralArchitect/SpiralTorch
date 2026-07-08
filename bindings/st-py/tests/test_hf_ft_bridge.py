@@ -4927,6 +4927,65 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("latest_due_eval_ready=false", lines[0])
         self.assertIn("pending_eval_step=6656", lines[0])
 
+    def test_run_status_example_maps_resume_baseline_eval_to_resume_step(
+        self,
+    ) -> None:
+        module = load_run_status_example()
+        rows = [
+            {
+                "event": "log",
+                "global_step": 0,
+                "max_steps": 0,
+                "time_unix_s": 100.0,
+                "metrics": {"eval_loss": 3.25},
+            },
+            {
+                "event": "evaluate",
+                "global_step": 0,
+                "max_steps": 0,
+                "time_unix_s": 100.1,
+                "metrics": {"eval_loss": 3.25},
+            },
+            {
+                "event": "train_begin",
+                "global_step": 8192,
+                "max_steps": 16384,
+                "time_unix_s": 101.0,
+                "metrics": {},
+            },
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "run"
+            run_dir.mkdir()
+            trace_path = run_dir / "spiraltorch-hf-gpt2-ft-trainer-trace.jsonl"
+            for row in rows:
+                hf_ft.write_hf_gpt2_finetune_trainer_trace_event(row, trace_path)
+            (run_dir / "ft.log").write_text(
+                " 50%|#####     | 8253/16384 [00:01<07:31, 18.0it/s]\n",
+                encoding="utf-8",
+            )
+            args = module.parse_args([str(run_dir), "--eval-steps", "512"])
+            status = module.summarize_run(args)
+            lines = module.status_lines(status, tail_evals=1)
+
+        self.assertEqual(status["trace"]["trace_max_global_step"], 8192)
+        self.assertEqual(status["trace"]["trace_last_eval_loss_step"], 0)
+        self.assertEqual(
+            status["trace"]["trace_effective_last_eval_loss_step"], 8192
+        )
+        self.assertEqual(status["trace"]["trace_resume_baseline_eval_step"], 8192)
+        self.assertEqual(status["eval_progress"]["latest_due_eval_step"], 8192)
+        self.assertTrue(status["eval_progress"]["latest_due_eval_ready"])
+        self.assertIsNone(status["eval_progress"]["pending_eval_step"])
+        self.assertIsNone(status["eval_progress"]["log_steps_since_pending_eval"])
+        self.assertEqual(status["eval_progress"]["next_eval_step"], 8704)
+        self.assertEqual(status["eval_progress"]["log_steps_until_next_eval"], 451)
+        self.assertIn("last_eval_step=8192", lines[0])
+        self.assertIn("latest_due_eval_step=8192", lines[0])
+        self.assertIn("latest_due_eval_ready=true", lines[0])
+        self.assertIn("pending_eval_step=none", lines[0])
+        self.assertIn("hf_gpt2_ft_run_eval step=8192 raw_step=0", lines[-1])
+
     def test_status_history_summary_example_summarizes_jsonl_progress(self) -> None:
         module = load_status_history_summary_example()
         rows = [
@@ -5553,6 +5612,96 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertTrue(ready["milestone_step_reached"])
         self.assertEqual(ready["milestone_eval_loss"], 3.2)
         self.assertTrue(ready["milestone_checkpoint_ready"])
+
+    def test_monitor_snapshot_keeps_resume_eval_ready_when_direct_is_stale(
+        self,
+    ) -> None:
+        module = load_monitor_snapshot_example()
+        stale_direct = {
+            "time_unix_s": 100.0,
+            "process_status": "alive",
+            "final_checkpoint_ready": False,
+            "trace": {
+                "trace_last_eval_loss": 3.2568,
+                "trace_last_eval_loss_step": 0,
+                "trace_eval_loss_points": [{"step": 0, "eval_loss": 3.2568}],
+            },
+            "log_progress": {
+                "log_latest_step": 8238,
+                "log_max_steps": 16384,
+                "log_remaining_seconds": 30000.0,
+            },
+            "eval_progress": {
+                "next_eval_step": 8704,
+                "log_steps_until_next_eval": 466,
+                "latest_due_eval_step": 8192,
+                "latest_due_eval_ready": False,
+                "pending_eval_step": 8192,
+                "log_steps_since_pending_eval": 46,
+            },
+            "checkpoint_progress": {
+                "next_checkpoint_step": 10240,
+                "log_steps_until_next_checkpoint": 2002,
+            },
+        }
+        fixed_final = {
+            "time_unix_s": 120.0,
+            "process_status": "alive",
+            "final_checkpoint_ready": False,
+            "trace": {
+                "trace_last_eval_loss": 3.2568,
+                "trace_last_eval_loss_step": 0,
+                "trace_effective_last_eval_loss_step": 8192,
+                "trace_eval_loss_points": [{"step": 0, "eval_loss": 3.2568}],
+            },
+            "log_progress": {
+                "log_latest_step": 8302,
+                "log_max_steps": 16384,
+                "log_remaining_seconds": 31000.0,
+            },
+            "eval_progress": {
+                "next_eval_step": 8704,
+                "log_steps_until_next_eval": 402,
+                "latest_due_eval_step": 8192,
+                "latest_due_eval_ready": True,
+                "pending_eval_step": None,
+                "log_steps_since_pending_eval": None,
+            },
+            "checkpoint_progress": {
+                "next_checkpoint_step": 10240,
+                "log_steps_until_next_checkpoint": 1938,
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "run"
+            run_dir.mkdir()
+            direct_history = run_dir / "direct-run-status-history.jsonl"
+            final_history = run_dir / "watch-16384-final-v2-history.jsonl"
+            direct_history.write_text(json.dumps(stale_direct) + "\n", encoding="utf-8")
+            final_history.write_text(json.dumps(fixed_final) + "\n", encoding="utf-8")
+            args = module.parse_args(
+                [
+                    str(run_dir),
+                    "--run-status-history-jsonl",
+                    str(direct_history),
+                    "--final-history-jsonl",
+                    str(final_history),
+                    "--milestone-step",
+                    "16384",
+                ]
+            )
+            snapshot = module.build_monitor_snapshot(args)
+            lines = module.snapshot_lines(snapshot)
+
+        self.assertEqual(snapshot["primary_watch"], "final")
+        self.assertEqual(snapshot["last_eval_loss_step"], 8192)
+        self.assertEqual(snapshot["latest_due_eval_step"], 8192)
+        self.assertTrue(snapshot["latest_due_eval_ready"])
+        self.assertIsNone(snapshot["pending_eval_step"])
+        self.assertIsNone(snapshot["log_steps_since_pending_eval"])
+        self.assertIn("last_eval_step=8192", lines[0])
+        self.assertIn("latest_due_eval_ready=true", lines[0])
+        self.assertIn("pending_eval_step=none", lines[0])
 
     def test_monitor_snapshot_reconstructs_legacy_wait_launch_disk_guard(
         self,

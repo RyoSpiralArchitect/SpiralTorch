@@ -306,9 +306,40 @@ def _last_eval_loss_step(trace: dict[str, Any]) -> int | None:
     return None
 
 
+def _effective_last_eval_loss_step(trace: dict[str, Any]) -> int | None:
+    effective = _int_value(trace.get("trace_effective_last_eval_loss_step"))
+    if effective is not None:
+        return effective
+    return _last_eval_loss_step(trace)
+
+
 def _eval_step_reached(trace: dict[str, Any], target_step: int) -> bool:
-    latest = _last_eval_loss_step(trace)
+    latest = _effective_last_eval_loss_step(trace)
     return latest is not None and latest >= target_step
+
+
+def _resume_baseline_eval_step(rows: list[dict[str, Any]]) -> int | None:
+    train_begin_index = None
+    train_begin_step = None
+    for index, row in enumerate(rows):
+        if row.get("event") != "train_begin":
+            continue
+        step = _int_value(row.get("global_step"))
+        if step is None or step <= 0:
+            continue
+        train_begin_index = index
+        train_begin_step = step
+        break
+    if train_begin_index is None or train_begin_step is None:
+        return None
+    for row in rows[:train_begin_index]:
+        metrics = row.get("metrics")
+        if not isinstance(metrics, dict) or "eval_loss" not in metrics:
+            continue
+        step = _int_value(row.get("global_step"))
+        if step == 0:
+            return train_begin_step
+    return None
 
 
 def _trace_summary(trace_jsonl: Path, max_steps: int | None) -> dict[str, Any]:
@@ -323,7 +354,16 @@ def _trace_summary(trace_jsonl: Path, max_steps: int | None) -> dict[str, Any]:
         }
     rows = st.load_hf_gpt2_finetune_trainer_trace(trace_jsonl)
     summary = st.summarize_hf_gpt2_finetune_trainer_trace(rows, max_steps=max_steps)
-    summary["trace_last_eval_loss_step"] = _last_eval_loss_step(summary)
+    raw_last_eval_loss_step = _last_eval_loss_step(summary)
+    resume_baseline_eval_step = _resume_baseline_eval_step(rows)
+    effective_last_eval_loss_step = (
+        resume_baseline_eval_step
+        if raw_last_eval_loss_step == 0 and resume_baseline_eval_step is not None
+        else raw_last_eval_loss_step
+    )
+    summary["trace_last_eval_loss_step"] = raw_last_eval_loss_step
+    summary["trace_effective_last_eval_loss_step"] = effective_last_eval_loss_step
+    summary["trace_resume_baseline_eval_step"] = resume_baseline_eval_step
     resolved_max_steps = _resolved_max_steps(summary, max_steps)
     step = summary.get("trace_max_global_step")
     progress = None
@@ -391,7 +431,7 @@ def _eval_progress(
                 next_eval_step = min(next_eval_step, max_steps)
                 if latest_due_eval_step is not None:
                     latest_due_eval_step = min(latest_due_eval_step, max_steps)
-            last_eval_step = _last_eval_loss_step(trace)
+            last_eval_step = _effective_last_eval_loss_step(trace)
             if latest_due_eval_step is not None:
                 latest_due_eval_ready = (
                     last_eval_step is not None and last_eval_step >= latest_due_eval_step
@@ -643,7 +683,7 @@ def status_lines(status: dict[str, Any], *, tail_evals: int) -> list[str]:
             f"log_steps_until_next_checkpoint={_number_text((status.get('checkpoint_progress') or {}).get('log_steps_until_next_checkpoint'))} "
             f"last_loss={_number_text(trace.get('trace_last_loss'))} "
             f"last_eval_loss={_number_text(trace.get('trace_last_eval_loss'))} "
-            f"last_eval_step={_number_text(trace.get('trace_last_eval_loss_step'))} "
+            f"last_eval_step={_number_text(_effective_last_eval_loss_step(trace))} "
             f"min_eval_loss={_number_text(trace.get('trace_min_eval_loss'))} "
             f"best_eval_loss_step={_number_text(trace.get('trace_best_eval_loss_step'))} "
             f"eval_loss_improvement={_number_text(trace.get('trace_eval_loss_improvement'))} "
@@ -671,13 +711,28 @@ def status_lines(status: dict[str, Any], *, tail_evals: int) -> list[str]:
     ]
     eval_points = trace.get("trace_eval_loss_points")
     if isinstance(eval_points, list) and tail_evals > 0:
+        resume_baseline_eval_step = _int_value(
+            trace.get("trace_resume_baseline_eval_step")
+        )
         for point in eval_points[-tail_evals:]:
             if not isinstance(point, dict):
                 continue
+            raw_step = _int_value(point.get("step"))
+            effective_step = (
+                resume_baseline_eval_step
+                if raw_step == 0 and resume_baseline_eval_step is not None
+                else raw_step
+            )
+            raw_step_text = (
+                f" raw_step={_number_text(raw_step)}"
+                if effective_step != raw_step
+                else ""
+            )
             lines.append(
                 (
                     "hf_gpt2_ft_run_eval "
-                    f"step={_number_text(point.get('step'))} "
+                    f"step={_number_text(effective_step)}"
+                    f"{raw_step_text} "
                     f"eval_loss={_number_text(point.get('eval_loss'))} "
                     f"eval_runtime={_number_text(point.get('eval_runtime'))}"
                 )

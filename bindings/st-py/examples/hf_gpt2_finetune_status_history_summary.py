@@ -90,6 +90,9 @@ def _runtime_setting(row: dict[str, Any], field: str) -> Any:
 
 
 def _last_eval_loss_step(row: dict[str, Any]) -> Any:
+    effective = _nested(row, "trace", "trace_effective_last_eval_loss_step")
+    if effective is not None:
+        return effective
     explicit = _nested(row, "trace", "trace_last_eval_loss_step")
     if explicit is not None:
         return explicit
