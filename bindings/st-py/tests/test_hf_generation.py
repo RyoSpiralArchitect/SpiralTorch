@@ -2274,6 +2274,7 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             run_dir = Path(tmp) / "run"
+            run_card = Path(tmp) / "generic-checkpoint-generation-control.json"
             args = module.parse_args(
                 [
                     "--run-dir",
@@ -2284,6 +2285,8 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
                     str(MODEL_CONFIGS_PATH),
                     "--model-profile",
                     "tiny-gpt2-ci",
+                    "--run-card",
+                    str(run_card),
                     "--dry-run",
                     "--no-compare",
                 ]
@@ -2291,6 +2294,7 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
             jobs = module.build_sweep_jobs(args)
             command = module.build_sweep_command(args, jobs[0])
             report = module.run_checkpoint_generation_control(args)
+            stored = json.loads(run_card.read_text(encoding="utf-8"))
 
         self.assertEqual(
             args.sweep_script.name,
@@ -2309,7 +2313,10 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
             command[command.index("--tokenizer-name") + 1],
             "sshleifer/tiny-gpt2",
         )
+        self.assertEqual(report["row_type"], "hf_checkpoint_generation_control")
+        self.assertEqual(stored["row_type"], "hf_checkpoint_generation_control")
         self.assertEqual(report["tokenizer_name"], "sshleifer/tiny-gpt2")
+        self.assertEqual(stored["tokenizer_name"], "sshleifer/tiny-gpt2")
 
     def test_checkpoint_generation_control_requires_ready_file(self) -> None:
         module = load_checkpoint_generation_control_example()

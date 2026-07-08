@@ -25,11 +25,30 @@ COMPARE_SCRIPT = EXAMPLES_ROOT / "hf_zspace_generation_control_compare.py"
 CURVE_SCRIPT = EXAMPLES_ROOT / "hf_finetune_generation_curve.py"
 
 
+ROW_TYPE_MAP = {
+    "hf_gpt2_ft_checkpoint_generation_control": "hf_checkpoint_generation_control",
+    "hf_gpt2_zspace_generation_control_sweep": "hf_zspace_generation_control_sweep",
+    "hf_gpt2_zspace_generation_control_sweep_summary": (
+        "hf_zspace_generation_control_sweep_summary"
+    ),
+    "hf_gpt2_finetune_generation_curve": "hf_finetune_generation_curve",
+}
+
+
+def _map_row_types(value):
+    if isinstance(value, dict):
+        payload = {key: _map_row_types(item) for key, item in value.items()}
+        row_type = payload.get("row_type")
+        if isinstance(row_type, str) and row_type in ROW_TYPE_MAP:
+            payload["row_type"] = ROW_TYPE_MAP[row_type]
+        return payload
+    if isinstance(value, list):
+        return [_map_row_types(item) for item in value]
+    return value
+
+
 def _genericize_report(report):
-    payload = dict(report)
-    if payload.get("row_type") == "hf_gpt2_ft_checkpoint_generation_control":
-        payload["row_type"] = "hf_checkpoint_generation_control"
-    return payload
+    return _map_row_types(dict(report))
 
 
 def _argv_has_option(raw_argv: Sequence[str], *names: str) -> bool:
@@ -50,9 +69,16 @@ def parse_args(argv: Sequence[str] | None = None):
 
 
 def run_checkpoint_generation_control(args, *, runner=None):
-    return _genericize_report(
+    report = _genericize_report(
         _legacy_run_checkpoint_generation_control(args, runner=runner)
     )
+    if args.run_card is not None:
+        args.run_card.parent.mkdir(parents=True, exist_ok=True)
+        args.run_card.write_text(
+            json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+    return report
 
 
 def main(argv: Sequence[str] | None = None) -> int:
