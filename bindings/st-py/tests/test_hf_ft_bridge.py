@@ -7710,9 +7710,19 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 script_path,
                 cd=Path(tmp),
             )
+            bundle_dir = Path(tmp) / "bundle"
+            bundle = st.write_hf_finetune_model_profile_launch_bundle(
+                plan,
+                bundle_dir,
+                script_cd=Path(tmp),
+            )
+            bundle_lines = st.hf_finetune_model_profile_launch_bundle_lines(bundle)
             script_exists = script_path.is_file()
             script_executable = os.access(script_path, os.X_OK)
             script_text = script_path.read_text(encoding="utf-8")
+            bundle_plan_exists = Path(bundle["plan_path"]).is_file()
+            bundle_lines_exists = Path(bundle["lines_path"]).is_file()
+            bundle_script_exists = Path(bundle["script_path"]).is_file()
 
         self.assertEqual(written["status"], "written")
         self.assertEqual(written["path"], str(plan_path))
@@ -7722,6 +7732,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertTrue(script_exists)
         self.assertTrue(script_executable)
         self.assertIn("exec spiral-hf-finetune", script_text)
+        self.assertEqual(bundle["row_type"], "hf_finetune_model_profile_launch_bundle")
+        self.assertEqual(bundle["bundle_dir"], str(bundle_dir))
+        self.assertTrue(bundle_plan_exists)
+        self.assertTrue(bundle_lines_exists)
+        self.assertTrue(bundle_script_exists)
+        self.assertTrue(
+            bundle_lines[0].startswith("hf_ft_model_profile_launch_bundle ")
+        )
         self.assertEqual(loaded["row_type"], "hf_finetune_model_profile_launch_plan")
         self.assertEqual(loaded["profile_id"], "qwen2-0.5b-local-smoke")
         self.assertEqual(loaded["command"], plan["command"])
@@ -8141,6 +8159,45 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("cd ", written_script)
         self.assertIn("exec spiral-hf-finetune", written_script)
         self.assertIn("--model-profile tiny-gpt2-ci", written_script)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle_dir = Path(tmp) / "launch-bundle"
+            bundle_stdout = io.StringIO()
+            with redirect_stdout(bundle_stdout):
+                bundle_code = hf_cli.profile_main(
+                    [
+                        "--model-configs",
+                        str(MODEL_CONFIGS_PATH),
+                        "--model-profile",
+                        "tiny-gpt2-ci",
+                        "--launch-plan",
+                        "--mode",
+                        "inference",
+                        "--bundle-dir",
+                        str(bundle_dir),
+                    ]
+                )
+            bundle_plan = bundle_dir / "profile-launch-plan.json"
+            bundle_lines = bundle_dir / "profile-launch-plan.lines"
+            bundle_script = bundle_dir / "profile-launch-plan.sh"
+            bundle_plan_payload = json.loads(bundle_plan.read_text(encoding="utf-8"))
+            bundle_line_rows = bundle_lines.read_text(encoding="utf-8").splitlines()
+            bundle_script_text = bundle_script.read_text(encoding="utf-8")
+
+        self.assertEqual(bundle_code, 0)
+        self.assertIn(
+            "hf_ft_model_profile_launch_bundle status=written",
+            bundle_stdout.getvalue(),
+        )
+        self.assertEqual(
+            bundle_plan_payload["row_type"],
+            "hf_finetune_model_profile_launch_plan",
+        )
+        self.assertEqual(bundle_plan_payload["profile_id"], "tiny-gpt2-ci")
+        self.assertTrue(
+            bundle_line_rows[0].startswith("hf_ft_model_profile_launch_plan ")
+        )
+        self.assertIn("exec spiral-hf-finetune", bundle_script_text)
 
     def test_installed_hf_finetune_sweep_cli_reaches_generic_wrapper(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -8997,6 +9054,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             "hf_finetune_model_profiles",
             "resolve_hf_finetune_model_profile",
             "hf_finetune_model_profile_cli_args",
+            "hf_finetune_model_profile_launch_bundle_lines",
             "hf_finetune_model_profile_launch_plan",
             "hf_finetune_model_profile_launch_plan_lines",
             "hf_finetune_model_profile_launch_script",
@@ -9004,6 +9062,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             "hf_finetune_model_profile_preflight_lines",
             "hf_finetune_model_profile_preflight_report",
             "load_hf_finetune_model_profile_launch_plan",
+            "write_hf_finetune_model_profile_launch_bundle",
             "write_hf_finetune_model_profile_launch_plan",
             "write_hf_finetune_model_profile_launch_script",
         ]

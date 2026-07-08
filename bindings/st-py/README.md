@@ -415,9 +415,7 @@ spiral-hf-profile \
   --mode finetune \
   --output-dir runs/hf-finetune-qwen2-zspace-ft \
   --zspace-probe \
-  --out runs/hf-finetune-qwen2-zspace-ft/profile-launch-plan.json \
-  --lines-out runs/hf-finetune-qwen2-zspace-ft/profile-launch-plan.lines \
-  --script-out runs/hf-finetune-qwen2-zspace-ft/profile-launch-plan.sh
+  --bundle-dir runs/hf-finetune-qwen2-zspace-ft
 
 PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_finetune_bridge.py \
   --model-configs bindings/st-py/examples/hf_finetune_model_configs.example.json \
@@ -439,7 +437,10 @@ preflight result in one artifact before deciding whether to run metadata-only
 smoke, local inference diagnostics, or a full FT job; pair it with `--out` and
 `--lines-out` to keep a reproducible run manifest next to the eventual run card.
 Add `--script-out` when you also want an executable shell handoff that replays
-the reviewed command without re-resolving the profile.
+the reviewed command without re-resolving the profile. For normal runs,
+`--bundle-dir` writes all three artifacts together:
+`profile-launch-plan.json`, `profile-launch-plan.lines`, and
+`profile-launch-plan.sh`.
 
 After installing from a wheel, use the installed console entrypoint instead of
 the repo path:

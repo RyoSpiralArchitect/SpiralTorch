@@ -14,12 +14,14 @@ from .hf_ft import (
     hf_finetune_model_profile_catalog,
     hf_finetune_model_profile_catalog_lines,
     hf_finetune_model_profile_cli_args,
+    hf_finetune_model_profile_launch_bundle_lines,
     hf_finetune_model_profile_launch_plan,
     hf_finetune_model_profile_launch_plan_lines,
     hf_finetune_model_profile_lines,
     hf_finetune_model_profile_preflight_lines,
     hf_finetune_model_profile_preflight_report,
     resolve_hf_finetune_model_profile,
+    write_hf_finetune_model_profile_launch_bundle,
     write_hf_finetune_model_profile_launch_plan,
     write_hf_finetune_model_profile_launch_script,
 )
@@ -142,6 +144,10 @@ def profile_main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--lines-out", type=Path, default=None)
     parser.add_argument("--script-out", type=Path, default=None)
     parser.add_argument("--script-cd", type=Path, default=None)
+    parser.add_argument("--bundle-dir", type=Path, default=None)
+    parser.add_argument("--bundle-plan-filename", default="profile-launch-plan.json")
+    parser.add_argument("--bundle-lines-filename", default="profile-launch-plan.lines")
+    parser.add_argument("--bundle-script-filename", default="profile-launch-plan.sh")
     parser.add_argument("--json", action="store_true")
     parser.add_argument(
         "--cli-args",
@@ -211,24 +217,38 @@ def profile_main(argv: Sequence[str] | None = None) -> int:
             required_runtime_device_ready_backends=required_ready_backends,
         )
         lines = hf_finetune_model_profile_launch_plan_lines(plan)
+        bundle = None
+        if args.bundle_dir is not None:
+            bundle = write_hf_finetune_model_profile_launch_bundle(
+                plan,
+                args.bundle_dir,
+                plan_filename=args.bundle_plan_filename,
+                lines_filename=args.bundle_lines_filename,
+                script_filename=args.bundle_script_filename,
+                script_cd=args.script_cd,
+            )
         if args.json:
             payload = json.dumps(plan, ensure_ascii=False, indent=2, sort_keys=True)
             print(payload)
-            if args.out is not None:
+            if args.out is not None and bundle is None:
                 write_hf_finetune_model_profile_launch_plan(
                     plan,
                     args.out,
                     lines_path=args.lines_out,
                 )
-            elif args.lines_out is not None:
+            elif args.lines_out is not None and bundle is None:
                 args.lines_out.parent.mkdir(parents=True, exist_ok=True)
                 args.lines_out.write_text("\n".join(lines) + "\n", encoding="utf-8")
-            if args.script_out is not None:
+            if args.script_out is not None and bundle is None:
                 write_hf_finetune_model_profile_launch_script(
                     plan,
                     args.script_out,
                     cd=args.script_cd,
                 )
+            return 0 if plan["runtime_import_preflight_passed"] else 1
+        if bundle is not None:
+            for line in hf_finetune_model_profile_launch_bundle_lines(bundle):
+                print(line)
             return 0 if plan["runtime_import_preflight_passed"] else 1
         if args.out is not None:
             written = write_hf_finetune_model_profile_launch_plan(

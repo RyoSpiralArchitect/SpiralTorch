@@ -55,6 +55,7 @@ __all__ = [
     "hf_finetune_model_profile_catalog_lines",
     "hf_finetune_model_profile_cli_args",
     "hf_finetune_model_profile_launch_plan",
+    "hf_finetune_model_profile_launch_bundle_lines",
     "hf_finetune_model_profile_launch_plan_lines",
     "hf_finetune_model_profile_launch_script",
     "hf_finetune_model_profile_lines",
@@ -114,6 +115,7 @@ __all__ = [
     "summarize_hf_gpt2_finetune_sweep_report_lines",
     "summarize_hf_gpt2_finetune_trainer_trace",
     "write_hf_finetune_model_profile_launch_plan",
+    "write_hf_finetune_model_profile_launch_bundle",
     "write_hf_finetune_model_profile_launch_script",
     "write_hf_finetune_run_card",
     "write_hf_finetune_trainer_trace_event",
@@ -1260,6 +1262,72 @@ def write_hf_finetune_model_profile_launch_plan(
         written["lines_path"] = str(line_output_path)
         written["lines"] = lines
     return written
+
+
+def write_hf_finetune_model_profile_launch_bundle(
+    plan_or_config: Mapping[str, object] | str | Path | None,
+    bundle_dir: str | Path,
+    *,
+    plan_filename: str = "profile-launch-plan.json",
+    lines_filename: str = "profile-launch-plan.lines",
+    script_filename: str = "profile-launch-plan.sh",
+    script_cd: str | Path | None = None,
+    script_executable: bool = True,
+    **kwargs,
+) -> dict[str, object]:
+    """Write JSON, line, and shell artifacts for one launch plan."""
+
+    plan = (
+        dict(plan_or_config)
+        if isinstance(plan_or_config, Mapping)
+        and plan_or_config.get("row_type") == "hf_finetune_model_profile_launch_plan"
+        else hf_finetune_model_profile_launch_plan(plan_or_config, **kwargs)
+    )
+    bundle_path = Path(bundle_dir)
+    bundle_path.mkdir(parents=True, exist_ok=True)
+    plan_path = bundle_path / str(plan_filename)
+    lines_path = bundle_path / str(lines_filename)
+    script_path = bundle_path / str(script_filename)
+    plan_written = write_hf_finetune_model_profile_launch_plan(
+        plan,
+        plan_path,
+        lines_path=lines_path,
+    )
+    script_written = write_hf_finetune_model_profile_launch_script(
+        plan,
+        script_path,
+        cd=script_cd,
+        executable=script_executable,
+    )
+    return {
+        "row_type": "hf_finetune_model_profile_launch_bundle",
+        "status": "written",
+        "bundle_dir": str(bundle_path),
+        "plan_path": str(plan_path),
+        "lines_path": str(lines_path),
+        "script_path": str(script_path),
+        "script_executable": bool(script_executable),
+        "plan": plan,
+        "plan_write": plan_written,
+        "script_write": script_written,
+    }
+
+
+def hf_finetune_model_profile_launch_bundle_lines(
+    bundle: Mapping[str, object],
+) -> list[str]:
+    """Render compact audit lines for a written launch bundle."""
+
+    return [
+        (
+            "hf_ft_model_profile_launch_bundle "
+            f"status={bundle.get('status')} "
+            f"bundle_dir={bundle.get('bundle_dir')} "
+            f"plan={bundle.get('plan_path')} "
+            f"lines={bundle.get('lines_path')} "
+            f"script={bundle.get('script_path')}"
+        )
+    ]
 
 
 def _profile_flag_value(value: object) -> str:
