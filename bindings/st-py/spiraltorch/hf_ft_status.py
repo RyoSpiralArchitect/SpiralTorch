@@ -22,6 +22,8 @@ __all__ = [
     "hf_gpt2_finetune_milestone_handoff_execution_report",
     "hf_gpt2_finetune_milestone_handoff_lines",
     "hf_gpt2_finetune_milestone_handoff_report",
+    "hf_gpt2_finetune_milestone_runtime_lines",
+    "hf_gpt2_finetune_milestone_runtime_report",
     "hf_gpt2_finetune_status_history_lines",
     "load_hf_gpt2_finetune_status_history",
     "main",
@@ -1321,6 +1323,177 @@ def hf_gpt2_finetune_milestone_handoff_execution_lines(
             f"command={_number_text(report.get('command_display'))}"
         )
     ]
+
+
+def hf_gpt2_finetune_milestone_runtime_report(
+    *,
+    direct: Any = None,
+    eval_watch: Any = None,
+    checkpoint_watch: Any = None,
+    final_watch: Any = None,
+    wait_launch: Any = None,
+    milestone_step: int | None = None,
+    label: str | None = None,
+    run_dir: str | Path | None = None,
+    next_run_dir: str | Path | None = None,
+    capture_iteration: int | None = None,
+    capture_commands: Sequence[Mapping[str, Any]] | None = None,
+    checkpoint: str | None = None,
+    label_prefix: str | None = None,
+    python: str = "python3",
+    script: str | Path = "bindings/st-py/examples/hf_gpt2_ft_checkpoint_generation_control.py",
+    compare_with_sweep: Sequence[str | Path] | str | Path | None = None,
+    compare_with_label: Sequence[str] | str | None = None,
+    curve_out: str | Path | None = None,
+    curve_lines_out: str | Path | None = None,
+    trainer_trace_jsonl: str | Path | None = None,
+    run_card: str | Path | None = None,
+    top_n: int = 3,
+    wait: bool = False,
+    dry_run: bool = True,
+    execute: bool = False,
+    use_package_api: bool = True,
+    cwd: str | Path | None = None,
+    env: Mapping[str, Any] | None = None,
+    timeout: float | None = None,
+    capture_output: bool = True,
+    check: bool = False,
+    runner: HandoffRunner | None = None,
+    package_runner: HandoffPackageRunner | None = None,
+    out: str | Path | None = None,
+    lines_out: str | Path | None = None,
+    max_output_chars: int | None = 20_000,
+) -> dict[str, Any]:
+    """Build one importable FT milestone monitor/capture/handoff runtime report."""
+
+    monitor = hf_gpt2_finetune_monitor_report(
+        direct=direct,
+        eval_watch=eval_watch,
+        checkpoint_watch=checkpoint_watch,
+        final_watch=final_watch,
+        wait_launch=wait_launch,
+        milestone_step=milestone_step,
+        label=label,
+        run_dir=run_dir,
+        next_run_dir=next_run_dir,
+    )
+    capture = hf_gpt2_finetune_milestone_capture_report(
+        monitor,
+        iteration=capture_iteration,
+        commands=capture_commands,
+    )
+    resolved_run_dir = run_dir if run_dir is not None else capture.get("monitor", {}).get("run_dir")
+    handoff = hf_gpt2_finetune_milestone_handoff_report(
+        capture,
+        run_dir=resolved_run_dir,
+        checkpoint=checkpoint,
+        label_prefix=label_prefix,
+        python=python,
+        script=script,
+        compare_with_sweep=compare_with_sweep,
+        compare_with_label=compare_with_label,
+        curve_out=curve_out,
+        curve_lines_out=curve_lines_out,
+        trainer_trace_jsonl=trainer_trace_jsonl,
+        run_card=run_card,
+        top_n=top_n,
+        wait=wait,
+        dry_run=dry_run,
+    )
+    execution = hf_gpt2_finetune_milestone_handoff_execution_report(
+        handoff,
+        run=execute,
+        use_package_api=use_package_api,
+        cwd=cwd,
+        env=env,
+        timeout=timeout,
+        capture_output=capture_output,
+        check=check,
+        runner=runner,
+        package_runner=package_runner,
+        max_output_chars=max_output_chars,
+    )
+    execution_status = execution.get("status")
+    status = (
+        "executed"
+        if execute and execution_status == "complete"
+        else "ready"
+        if handoff.get("ready") is True
+        else "watching"
+        if capture.get("should_continue_watch") is True
+        else "inspect_run"
+    )
+    report: dict[str, Any] = {
+        "row_type": "hf_gpt2_finetune_milestone_runtime",
+        "status": status,
+        "label": label or capture.get("label"),
+        "milestone_step": capture.get("milestone_step"),
+        "milestone_ready": capture.get("milestone_ready"),
+        "next_action": capture.get("next_action"),
+        "execute": bool(execute),
+        "execution_backend": execution.get("execution_backend"),
+        "execution_status": execution_status,
+        "handoff_status": handoff.get("status"),
+        "checkpoint": handoff.get("checkpoint"),
+        "run_dir": handoff.get("run_dir") or monitor.get("run_dir"),
+        "monitor": monitor,
+        "capture": capture,
+        "handoff": handoff,
+        "execution": execution,
+    }
+    if out is not None:
+        out_path = Path(out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        report["out"] = str(out_path)
+        out_path.write_text(
+            json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+    if lines_out is not None:
+        lines_path = Path(lines_out)
+        lines_path.parent.mkdir(parents=True, exist_ok=True)
+        report["lines_out"] = str(lines_path)
+        lines_path.write_text(
+            "\n".join(hf_gpt2_finetune_milestone_runtime_lines(report)) + "\n",
+            encoding="utf-8",
+        )
+    return report
+
+
+def hf_gpt2_finetune_milestone_runtime_lines(
+    report: Mapping[str, Any],
+) -> list[str]:
+    """Render compact lines from a milestone runtime report."""
+
+    lines = [
+        (
+            "hf_gpt2_ft_milestone_runtime "
+            f"status={_number_text(report.get('status'))} "
+            f"label={_number_text(report.get('label'))} "
+            f"step={_number_text(report.get('milestone_step'))} "
+            f"milestone_ready={_number_text(report.get('milestone_ready'))} "
+            f"next_action={_number_text(report.get('next_action'))} "
+            f"handoff_status={_number_text(report.get('handoff_status'))} "
+            f"execute={_number_text(report.get('execute'))} "
+            f"execution_backend={_number_text(report.get('execution_backend'))} "
+            f"execution_status={_number_text(report.get('execution_status'))} "
+            f"checkpoint={_number_text(report.get('checkpoint'))} "
+            f"run_dir={_number_text(report.get('run_dir'))}"
+        )
+    ]
+    monitor = report.get("monitor")
+    if isinstance(monitor, dict):
+        lines.extend(hf_gpt2_finetune_monitor_lines(monitor)[:1])
+    capture = report.get("capture")
+    if isinstance(capture, Mapping):
+        lines.extend(hf_gpt2_finetune_milestone_capture_lines(capture))
+    handoff = report.get("handoff")
+    if isinstance(handoff, Mapping):
+        lines.extend(hf_gpt2_finetune_milestone_handoff_lines(handoff))
+    execution = report.get("execution")
+    if isinstance(execution, Mapping):
+        lines.extend(hf_gpt2_finetune_milestone_handoff_execution_lines(execution))
+    return lines
 
 
 def summarize_hf_gpt2_finetune_status_history(

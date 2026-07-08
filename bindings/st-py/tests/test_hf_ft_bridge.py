@@ -6262,6 +6262,47 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertTrue(package_calls[0]["dry_run"])
         self.assertIn("backend=package_api", package_execution_lines[0])
         self.assertIn("command_report_status=planned", package_execution_lines[0])
+        runtime_calls = []
+
+        def fake_runtime_package_runner(**kwargs):
+            runtime_calls.append(dict(kwargs))
+            return {"status": "planned", "sweep_count": 3}
+
+        runtime = st.hf_gpt2_finetune_milestone_runtime_report(
+            direct=[ready_direct],
+            eval_watch=[ready_direct],
+            checkpoint_watch=[
+                {
+                    **ready_direct,
+                    "checkpoint_names": ["checkpoint-6144"],
+                    "latest_checkpoint": {"name": "checkpoint-6144"},
+                }
+            ],
+            milestone_step=6144,
+            label="ready-ft",
+            run_dir="/tmp/spiraltorch-ft",
+            compare_with_sweep="previous-sweep.json",
+            compare_with_label="previous",
+            execute=True,
+            use_package_api=True,
+            package_runner=fake_runtime_package_runner,
+        )
+        runtime_lines = st.hf_gpt2_finetune_milestone_runtime_lines(runtime)
+
+        self.assertEqual(runtime["row_type"], "hf_gpt2_finetune_milestone_runtime")
+        self.assertEqual(runtime["status"], "executed")
+        self.assertEqual(runtime["handoff_status"], "ready")
+        self.assertEqual(runtime["execution_status"], "complete")
+        self.assertEqual(runtime["execution_backend"], "package_api")
+        self.assertEqual(runtime["checkpoint"], "checkpoint-6144")
+        self.assertEqual(runtime_calls[0]["checkpoint"], "checkpoint-6144")
+        self.assertEqual(runtime_calls[0]["run_dir"], "/tmp/spiraltorch-ft")
+        self.assertTrue(runtime_calls[0]["dry_run"])
+        self.assertIn("hf_gpt2_ft_milestone_runtime", runtime_lines[0])
+        self.assertIn("status=executed", runtime_lines[0])
+        self.assertTrue(
+            any("hf_gpt2_ft_milestone_handoff_execution" in line for line in runtime_lines)
+        )
         waiting_handoff = st.hf_gpt2_finetune_milestone_handoff_report(
             capture,
             run_dir="/tmp/spiraltorch-ft",
@@ -6920,6 +6961,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         )
         self.assertIn("hf_gpt2_finetune_milestone_handoff_lines", st.__all__)
         self.assertIn("hf_gpt2_finetune_milestone_handoff_report", st.__all__)
+        self.assertIn("hf_gpt2_finetune_milestone_runtime_lines", st.__all__)
+        self.assertIn("hf_gpt2_finetune_milestone_runtime_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_preflight_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_scale_up_command", st.__all__)
         self.assertIn("hf_gpt2_finetune_scale_up_preflight_lines", st.__all__)
@@ -7007,6 +7050,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIs(
             st.hf_gpt2_finetune_milestone_handoff_execution_report,
             st.hf_ft_status.hf_gpt2_finetune_milestone_handoff_execution_report,
+        )
+        self.assertIs(
+            st.hf_gpt2_finetune_milestone_runtime_lines,
+            st.hf_ft_status.hf_gpt2_finetune_milestone_runtime_lines,
+        )
+        self.assertIs(
+            st.hf_gpt2_finetune_milestone_runtime_report,
+            st.hf_ft_status.hf_gpt2_finetune_milestone_runtime_report,
         )
         self.assertIs(
             st.hf_gpt2_finetune_training_telemetry_frame,
