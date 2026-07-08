@@ -624,10 +624,13 @@ def hf_gpt2_finetune_scale_up_command(
     max_train_samples: int | None = ...,
     max_train_samples_multiplier: float | None = ...,
     max_eval_samples: int | None = ...,
+    max_eval_blocks: int | None = ...,
+    streaming_validation_samples: int | None = ...,
     output_dir: str | PathLike[str] | None = ...,
     output_suffix: str = ...,
     run_card: str | PathLike[str] | None = ...,
     trainer_trace_jsonl: str | PathLike[str] | None = ...,
+    trainer_trace_run_id: str | None = ...,
 ) -> Dict[str, object]: ...
 
 def hf_gpt2_finetune_scale_up_preflight_report(

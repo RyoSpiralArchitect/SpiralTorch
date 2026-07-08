@@ -1687,6 +1687,133 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             "missing_candidate_command",
         )
 
+    def test_scale_up_accepts_command_manifest_for_future_checkpoint_handoff(
+        self,
+    ) -> None:
+        scale_up_module = load_scale_up_example()
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            base_output_dir = tmp_path / "fineweb-8192"
+            base_card = base_output_dir / "spiraltorch-hf-gpt2-ft-run-card.json"
+            base_trace = (
+                base_output_dir / "spiraltorch-hf-gpt2-ft-trainer-trace.jsonl"
+            )
+            manifest = {
+                "row_type": "hf_gpt2_finetune_wait_launch",
+                "next_run": "fineweb-8192",
+                "command": [
+                    sys.executable,
+                    "bindings/st-py/examples/hf_gpt2_finetune_bridge.py",
+                    "--model-name",
+                    "gpt2",
+                    "--dataset-name",
+                    "HuggingFaceFW/fineweb-edu",
+                    "--dataset-config",
+                    "CC-MAIN-2025-26",
+                    "--dataset-streaming",
+                    "--output-dir",
+                    str(base_output_dir),
+                    "--run-card",
+                    str(base_card),
+                    "--trainer-trace-jsonl",
+                    str(base_trace),
+                    "--max-steps",
+                    "8192",
+                    "--max-train-samples",
+                    "32768",
+                    "--max-eval-samples",
+                    "2048",
+                ],
+            }
+            manifest_path = tmp_path / "launch-manifest.json"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            future_checkpoint = base_output_dir / "checkpoint-8192"
+            next_output_dir = tmp_path / "fineweb-16384"
+            command_artifact = tmp_path / "fineweb-16384-command.json"
+
+            direct_command = hf_ft.hf_gpt2_finetune_scale_up_command(
+                manifest,
+                model_name=future_checkpoint,
+                resume_from_checkpoint=future_checkpoint,
+                max_steps=16384,
+                max_train_samples=131072,
+                max_eval_samples=4096,
+                max_eval_blocks=4096,
+                streaming_validation_samples=4096,
+                output_dir=next_output_dir,
+                trainer_trace_run_id="fineweb-16384",
+            )
+            args = scale_up_module.parse_args(
+                [
+                    str(manifest_path),
+                    "--write-command",
+                    str(command_artifact),
+                    "--allow-missing-resume-checkpoint",
+                    "--model-name",
+                    str(future_checkpoint),
+                    "--resume-from-checkpoint",
+                    str(future_checkpoint),
+                    "--max-steps",
+                    "16384",
+                    "--max-train-samples",
+                    "131072",
+                    "--max-eval-samples",
+                    "4096",
+                    "--max-eval-blocks",
+                    "4096",
+                    "--streaming-validation-samples",
+                    "4096",
+                    "--output-dir",
+                    str(next_output_dir),
+                    "--trainer-trace-run-id",
+                    "fineweb-16384",
+                ]
+            )
+            cli_command = scale_up_module.run_scale_up(args)
+            written = json.loads(command_artifact.read_text(encoding="utf-8"))
+
+        self.assertEqual(direct_command["status"], "ok")
+        self.assertEqual(
+            direct_command["scale_up_candidate_label"],
+            "fineweb-8192",
+        )
+        self.assertEqual(
+            direct_command["scale_up_candidate_reason"],
+            "source_command_manifest",
+        )
+        self.assertIn("HuggingFaceFW/fineweb-edu", direct_command["command_display"])
+        self.assertIn("--max-steps 16384", direct_command["command_display"])
+        self.assertIn("--max-train-samples 131072", direct_command["command_display"])
+        self.assertIn("--max-eval-samples 4096", direct_command["command_display"])
+        self.assertIn("--max-eval-blocks 4096", direct_command["command_display"])
+        self.assertIn(
+            "--streaming-validation-samples 4096",
+            direct_command["command_display"],
+        )
+        self.assertIn(
+            "--trainer-trace-run-id fineweb-16384",
+            direct_command["command_display"],
+        )
+        self.assertIn(
+            f"--model-name {future_checkpoint}",
+            direct_command["command_display"],
+        )
+        self.assertIn(
+            f"--resume-from-checkpoint {future_checkpoint}",
+            direct_command["command_display"],
+        )
+        self.assertEqual(cli_command["status"], "ok")
+        self.assertEqual(cli_command["preflight_status"], "blocked")
+        self.assertEqual(cli_command["preflight_error_count"], 1)
+        self.assertEqual(written["status"], "ok")
+        self.assertTrue(
+            any(
+                issue.get("field") == "--resume-from-checkpoint"
+                and issue.get("severity") == "error"
+                for issue in written["preflight"]["issues"]
+            )
+        )
+
     def test_sweep_example_builds_grid_and_writes_dry_run_report(self) -> None:
         module = load_sweep_example()
         with tempfile.TemporaryDirectory() as tmp:

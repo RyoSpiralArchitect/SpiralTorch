@@ -2240,10 +2240,13 @@ def hf_gpt2_finetune_scale_up_command(
     max_train_samples: int | None = None,
     max_train_samples_multiplier: float | None = 2.0,
     max_eval_samples: int | None = None,
+    max_eval_blocks: int | None = None,
+    streaming_validation_samples: int | None = None,
     output_dir: str | Path | None = None,
     output_suffix: str = "scaleup",
     run_card: str | Path | None = None,
     trainer_trace_jsonl: str | Path | None = None,
+    trainer_trace_run_id: str | None = None,
 ) -> dict[str, object]:
     """Build a longer FT command from the distortion-adjusted scale-up candidate."""
 
@@ -2251,6 +2254,36 @@ def hf_gpt2_finetune_scale_up_command(
         "row_type"
     ) == "hf_gpt2_finetune_sweep_report_summary":
         summary = dict(report_or_summary)
+    elif (
+        isinstance(report_or_summary, Mapping)
+        and isinstance(report_or_summary.get("command"), Sequence)
+        and not isinstance(report_or_summary.get("command"), (str, bytes))
+    ):
+        command = [str(item) for item in report_or_summary.get("command") or []]
+        source_label = (
+            report_or_summary.get("next_run")
+            or report_or_summary.get("run_id")
+            or report_or_summary.get("row_type")
+            or "command"
+        )
+        summary = {
+            "row_type": "hf_gpt2_finetune_sweep_report_summary",
+            "scale_up_candidate_label": str(source_label),
+            "scale_up_candidate_reason": "source_command_manifest",
+            "scale_up_candidate_command": command,
+            "scale_up_candidate_output_dir": _command_flag_value(
+                command,
+                "--output-dir",
+            ),
+            "scale_up_candidate_run_card": _command_flag_value(
+                command,
+                "--run-card",
+            ),
+            "scale_up_candidate_trainer_trace_jsonl": _command_flag_value(
+                command,
+                "--trainer-trace-jsonl",
+            ),
+        }
     else:
         summary = summarize_hf_gpt2_finetune_sweep_report(report_or_summary)
     command_value = summary.get("scale_up_candidate_command")
@@ -2315,9 +2348,12 @@ def hf_gpt2_finetune_scale_up_command(
         "--output-dir": resolved_output_dir,
         "--run-card": resolved_run_card,
         "--trainer-trace-jsonl": resolved_trace,
+        "--trainer-trace-run-id": trainer_trace_run_id,
         "--max-steps": resolved_max_steps,
         "--max-train-samples": resolved_max_train_samples,
         "--max-eval-samples": max_eval_samples,
+        "--max-eval-blocks": max_eval_blocks,
+        "--streaming-validation-samples": streaming_validation_samples,
     }
     command = _command_with_overrides(base_command, overrides)
     applied = {key: value for key, value in overrides.items() if value is not None}

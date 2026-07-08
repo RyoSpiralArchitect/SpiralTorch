@@ -47,12 +47,24 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--max-train-samples", type=int, default=None)
     parser.add_argument("--max-train-samples-multiplier", type=float, default=None)
     parser.add_argument("--max-eval-samples", type=int, default=None)
+    parser.add_argument("--max-eval-blocks", type=int, default=None)
+    parser.add_argument("--streaming-validation-samples", type=int, default=None)
     parser.add_argument("--model-name", default=None)
     parser.add_argument("--resume-from-checkpoint", type=Path, default=None)
+    parser.add_argument(
+        "--allow-missing-resume-checkpoint",
+        action="store_true",
+        help=(
+            "Allow writing a future-checkpoint handoff command before the "
+            "--resume-from-checkpoint directory exists. Preflight still reports "
+            "the missing checkpoint until it is ready."
+        ),
+    )
     parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument("--output-suffix", default=None)
     parser.add_argument("--run-card", type=Path, default=None)
     parser.add_argument("--trainer-trace-jsonl", type=Path, default=None)
+    parser.add_argument("--trainer-trace-run-id", default=None)
     args = parser.parse_args(argv)
     if not args.source.is_file():
         parser.error(f"source artifact does not exist: {args.source}")
@@ -69,9 +81,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("--max-train-samples-multiplier must be positive")
     if args.max_eval_samples is not None and args.max_eval_samples < 0:
         parser.error("--max-eval-samples must be non-negative")
+    if args.max_eval_blocks is not None and args.max_eval_blocks < 0:
+        parser.error("--max-eval-blocks must be non-negative")
+    if (
+        args.streaming_validation_samples is not None
+        and args.streaming_validation_samples < 0
+    ):
+        parser.error("--streaming-validation-samples must be non-negative")
     if (
         args.resume_from_checkpoint is not None
         and not args.resume_from_checkpoint.is_dir()
+        and not args.allow_missing_resume_checkpoint
     ):
         parser.error(
             "--resume-from-checkpoint does not exist or is not a directory: "
@@ -191,10 +211,13 @@ def _scale_up_command_from_source(args: argparse.Namespace) -> dict[str, Any]:
         max_train_samples=args.max_train_samples,
         max_train_samples_multiplier=max_train_samples_multiplier,
         max_eval_samples=args.max_eval_samples,
+        max_eval_blocks=args.max_eval_blocks,
+        streaming_validation_samples=args.streaming_validation_samples,
         output_dir=output_dir,
         output_suffix=output_suffix or "scaleup",
         run_card=run_card,
         trainer_trace_jsonl=trainer_trace_jsonl,
+        trainer_trace_run_id=args.trainer_trace_run_id,
     )
     command["source_path"] = str(args.source)
     if args.write_command is not None:
