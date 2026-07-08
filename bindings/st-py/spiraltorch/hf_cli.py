@@ -32,6 +32,7 @@ from .hf_generation import (
     compare_zspace_generation_control_sweeps,
     summarize_zspace_generation_control_sweep_comparison_lines,
     zspace_checkpoint_generation_control_report,
+    zspace_generation_control_profile_config,
 )
 
 _PACKAGE_ROOT = Path(__file__).resolve().parents[1]
@@ -78,6 +79,33 @@ def _run_example(name: str, argv: Sequence[str] | None = None) -> int:
     return int(main(None if argv is None else list(argv)))
 
 
+def _generation_control_profile_config_lines(report: dict) -> list[str]:
+    profile = report.get("model_profile")
+    profile_id = profile.get("profile_id") if isinstance(profile, dict) else None
+    model_name = profile.get("model_name") if isinstance(profile, dict) else None
+    fields = [
+        f"status={report.get('status')}",
+    ]
+    if profile_id is not None:
+        fields.append(f"profile={profile_id}")
+    if model_name is not None:
+        fields.append(f"model={model_name}")
+    lines = ["zspace_generation_control_profile_config " + " ".join(fields)]
+    bridge_cli_args = report.get("bridge_cli_args")
+    if isinstance(bridge_cli_args, list) and bridge_cli_args:
+        lines.append(
+            "zspace_generation_control_bridge_cli_args "
+            + " ".join(str(item) for item in bridge_cli_args)
+        )
+    sweep_cli_args = report.get("sweep_cli_args")
+    if isinstance(sweep_cli_args, list) and sweep_cli_args:
+        lines.append(
+            "zspace_generation_control_sweep_cli_args "
+            + " ".join(str(item) for item in sweep_cli_args)
+        )
+    return lines
+
+
 def profile_main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Resolve a SpiralTorch Hugging Face fine-tune model profile.",
@@ -98,6 +126,15 @@ def profile_main(argv: Sequence[str] | None = None) -> int:
         "--launch-plan",
         action="store_true",
         help="Build a launchable generic HF fine-tune command plan.",
+    )
+    parser.add_argument(
+        "--generation-control-config",
+        "--zspace-generation-control-config",
+        action="store_true",
+        help=(
+            "Resolve the profile's generation section into reusable Z-Space "
+            "generation-control kwargs and CLI args."
+        ),
     )
     parser.add_argument(
         "--mode",
@@ -174,13 +211,14 @@ def profile_main(argv: Sequence[str] | None = None) -> int:
         args.list,
         args.preflight,
         args.launch_plan,
+        args.generation_control_config,
         args.cli_args,
         args.inspect_bundle is not None,
     ]
     if sum(1 for enabled in exclusive_modes if enabled) > 1:
         parser.error(
-            "--list, --preflight, --launch-plan, --cli-args, and "
-            "--inspect-bundle are mutually exclusive"
+            "--list, --preflight, --launch-plan, --generation-control-config, "
+            "--cli-args, and --inspect-bundle are mutually exclusive"
         )
     if args.train and args.metadata_only:
         parser.error("--train and --metadata-only are mutually exclusive")
@@ -333,6 +371,40 @@ def profile_main(argv: Sequence[str] | None = None) -> int:
         for line in lines:
             print(line)
         return 0 if plan["runtime_import_preflight_passed"] else 1
+    if args.generation_control_config:
+        report = zspace_generation_control_profile_config(
+            args.model_configs,
+            model_profile=args.model_profile,
+        )
+        lines = _generation_control_profile_config_lines(report)
+        payload = (
+            json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True)
+            + "\n"
+        )
+        if args.json:
+            print(payload, end="")
+            if args.out is not None:
+                args.out.parent.mkdir(parents=True, exist_ok=True)
+                args.out.write_text(payload, encoding="utf-8")
+            if args.lines_out is not None:
+                args.lines_out.parent.mkdir(parents=True, exist_ok=True)
+                args.lines_out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            return 0
+        if args.out is not None:
+            args.out.parent.mkdir(parents=True, exist_ok=True)
+            args.out.write_text(payload, encoding="utf-8")
+            print(f"zspace_generation_control_profile_config_out {args.out}")
+        else:
+            for line in lines:
+                print(line)
+        if args.lines_out is not None:
+            args.lines_out.parent.mkdir(parents=True, exist_ok=True)
+            args.lines_out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            print(
+                "zspace_generation_control_profile_config_lines_out "
+                f"{args.lines_out}"
+            )
+        return 0
     profile = resolve_hf_finetune_model_profile(
         args.model_configs,
         profile=args.model_profile,

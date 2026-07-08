@@ -8839,6 +8839,84 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertNotIn("--dataset-name", cli_args)
         self.assertNotIn("--allow-remote", cli_args)
 
+        control_stdout = io.StringIO()
+        with redirect_stdout(control_stdout):
+            control_code = hf_cli.profile_main(
+                [
+                    "--model-configs",
+                    str(MODEL_CONFIGS_PATH),
+                    "--model-profile",
+                    "pythia-70m-local-smoke",
+                    "--generation-control-config",
+                    "--json",
+                ]
+            )
+        control_payload = json.loads(control_stdout.getvalue())
+        self.assertEqual(control_code, 0)
+        self.assertEqual(
+            control_payload["row_type"],
+            "zspace_generation_control_profile_config",
+        )
+        self.assertEqual(control_payload["status"], "ready")
+        self.assertEqual(
+            control_payload["model_profile"]["profile_id"],
+            "pythia-70m-local-smoke",
+        )
+        self.assertEqual(control_payload["recommended_config"]["top_k"], 64)
+        self.assertEqual(
+            control_payload["recommended_config"]["repression_strength"],
+            0.8,
+        )
+        self.assertIn(
+            "--generation-zspace-top-k",
+            control_payload["bridge_cli_args"],
+        )
+        self.assertIn("--zspace-top-k-values", control_payload["sweep_cli_args"])
+
+        with tempfile.TemporaryDirectory() as tmp:
+            control_out = Path(tmp) / "generation-control-profile.json"
+            control_lines_out = Path(tmp) / "generation-control-profile.lines"
+            control_file_stdout = io.StringIO()
+            with redirect_stdout(control_file_stdout):
+                control_file_code = hf_cli.profile_main(
+                    [
+                        "--model-configs",
+                        str(MODEL_CONFIGS_PATH),
+                        "--model-profile",
+                        "pythia-70m-local-smoke",
+                        "--generation-control-config",
+                        "--out",
+                        str(control_out),
+                        "--lines-out",
+                        str(control_lines_out),
+                    ]
+                )
+            written_control = json.loads(control_out.read_text(encoding="utf-8"))
+            written_control_lines = control_lines_out.read_text(
+                encoding="utf-8"
+            ).splitlines()
+
+        self.assertEqual(control_file_code, 0)
+        self.assertIn(
+            f"zspace_generation_control_profile_config_out {control_out}",
+            control_file_stdout.getvalue(),
+        )
+        self.assertEqual(
+            written_control["recommended_config"]["entropy_target"],
+            3.0,
+        )
+        self.assertTrue(
+            written_control_lines[0].startswith(
+                "zspace_generation_control_profile_config status=ready "
+            )
+        )
+        self.assertTrue(
+            any(
+                line.startswith("zspace_generation_control_bridge_cli_args ")
+                for line in written_control_lines
+            )
+        )
+
         list_stdout = io.StringIO()
         with redirect_stdout(list_stdout):
             list_code = hf_cli.profile_main(
