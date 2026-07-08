@@ -457,6 +457,12 @@ def zspace_inference_distortion_probe_cli_args(
     config: Mapping[str, object] | None,
 ) -> List[str]: ...
 
+def zspace_inference_distortion_geometry_probe(
+    adapter_or_config: Mapping[str, object] | None,
+    *,
+    zspace_eval_with_derivative_stable: object | None = ...,
+) -> Dict[str, object]: ...
+
 def zspace_inference_distortion_runtime_plan(
     *,
     local_model: str | PathLike[str] | None = ...,
@@ -8574,6 +8580,7 @@ __all__ = [
     "build_zspace_softmax_logits_processor",
     "compare_zspace_inference_distortion_probes",
     "zspace_inference_distortion_sweep_report_from_probes",
+    "zspace_inference_distortion_geometry_probe",
     "zspace_inference_distortion_probe_cli_args",
     "zspace_inference_distortion_runtime_cli_args",
     "zspace_inference_distortion_runtime_plan",

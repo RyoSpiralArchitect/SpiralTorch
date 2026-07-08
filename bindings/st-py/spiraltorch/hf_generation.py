@@ -19,6 +19,7 @@ __all__ = [
     "compare_zspace_generation_control_sweeps",
     "zspace_inference_distortion_sweep_report_from_probes",
     "zspace_inference_distortion_probe_cli_args",
+    "zspace_inference_distortion_geometry_probe",
     "zspace_inference_distortion_runtime_cli_args",
     "zspace_inference_distortion_runtime_plan",
     "zspace_inference_distortion_runtime_preflight",
@@ -964,6 +965,8 @@ def summarize_zspace_inference_distortion_probe(
     telemetry.update(api_telemetry)
     api_inference_telemetry = _nested_mapping(api, "inference", "telemetry", "payload")
     telemetry.update(api_inference_telemetry)
+    runtime_preflight = _nested_mapping(report, "runtime_preflight")
+    geometry = _nested_mapping(report, "geometry_probe")
     baseline_text = local.get("baseline_text")
     distorted_text = local.get("distorted_text")
     summary = {
@@ -1030,6 +1033,20 @@ def summarize_zspace_inference_distortion_probe(
         ),
         "activation_output_l2_min": _safe_number(activation.get("output_l2_min")),
         "activation_output_l2_max": _safe_number(activation.get("output_l2_max")),
+        "runtime_preflight_status": runtime_preflight.get("status"),
+        "runtime_ready": runtime_preflight.get("runtime_ready"),
+        "runtime_ready_backends": list(runtime_preflight.get("ready_backends", []))
+        if isinstance(runtime_preflight.get("ready_backends"), list)
+        else [],
+        "runtime_missing_ready_backends": list(
+            runtime_preflight.get("missing_ready_backends", [])
+        )
+        if isinstance(runtime_preflight.get("missing_ready_backends"), list)
+        else [],
+        "geometry_status": geometry.get("status"),
+        "geometry_backend": geometry.get("backend"),
+        "geometry_value_l2": _safe_number(geometry.get("value_l2")),
+        "geometry_derivative_l2": _safe_number(geometry.get("derivative_l2")),
         "api_provider": api.get("provider"),
         "api_model": api.get("model"),
         "api_finish_reason": api.get("finish_reason"),
@@ -1088,7 +1105,10 @@ def summarize_zspace_inference_distortion_probe_lines(
             f"api_retry_dropped={summary.get('api_request_retry_dropped_key_count')} "
             f"effect={summary.get('effect_score')} "
             f"risk={summary.get('risk_score')} "
+            f"runtime={summary.get('runtime_preflight_status')} "
+            f"runtime_ready={summary.get('runtime_ready')} "
             f"energy={summary.get('distortion_energy')} "
+            f"geom={summary.get('geometry_derivative_l2')} "
             f"temp={summary.get('request_temperature')} "
             f"top_p={summary.get('request_top_p')}"
         )
@@ -1603,6 +1623,184 @@ def zspace_inference_distortion_probe_cli_args(
     if config.get("include_penalties") is True:
         args.append("--include-penalties")
     return args
+
+
+def _finite_numbers(values: object) -> list[float]:
+    if values is None or isinstance(values, (str, bytes, bytearray)):
+        return []
+    if not isinstance(values, Sequence):
+        values = [values]
+    result: list[float] = []
+    for value in values:
+        number = _safe_number(value)
+        if number is not None:
+            result.append(float(number))
+    return result
+
+
+def _complex_pairs(values: object) -> list[tuple[float, float]]:
+    if values is None or isinstance(values, (str, bytes, bytearray)):
+        return []
+    if not isinstance(values, Sequence):
+        return []
+    pairs: list[tuple[float, float]] = []
+    for value in values:
+        if (
+            isinstance(value, Sequence)
+            and not isinstance(value, (str, bytes, bytearray))
+            and len(value) >= 2
+        ):
+            re = _safe_number(value[0])
+            im = _safe_number(value[1])
+            if re is not None and im is not None:
+                pairs.append((float(re), float(im)))
+    return pairs
+
+
+def _complex_l2(pairs: Sequence[tuple[float, float]]) -> float:
+    return math.sqrt(sum(re * re + im * im for re, im in pairs))
+
+
+def _complex_max_abs(pairs: Sequence[tuple[float, float]]) -> float:
+    if not pairs:
+        return 0.0
+    return max(math.sqrt(re * re + im * im) for re, im in pairs)
+
+
+def _math_weighted_series_with_derivative(
+    real: Sequence[float],
+    imag: Sequence[float],
+    z_re: Sequence[float],
+    z_im: Sequence[float],
+) -> tuple[list[tuple[float, float]], list[tuple[float, float]]]:
+    samples = [complex(re, im) for re, im in zip(real, imag)]
+    values: list[tuple[float, float]] = []
+    derivatives: list[tuple[float, float]] = []
+    for re, im in zip(z_re, z_im):
+        z = complex(re, im)
+        value = 0j
+        derivative = 0j
+        power = 1 + 0j
+        for index, sample in enumerate(samples):
+            value += sample * power
+            if index > 0:
+                derivative += index * sample * (z ** (index - 1))
+            power *= z
+        values.append((float(value.real), float(value.imag)))
+        derivatives.append((float(derivative.real), float(derivative.imag)))
+    return values, derivatives
+
+
+def zspace_inference_distortion_geometry_probe(
+    adapter_or_config: Mapping[str, object] | None,
+    *,
+    zspace_eval_with_derivative_stable: object | None = None,
+) -> dict[str, object]:
+    """Evaluate one distortion adapter through SpiralTorch Z-space geometry."""
+
+    source = dict(adapter_or_config or {})
+    metrics = _nested_mapping(source, "context_partial", "metrics")
+    telemetry = _nested_mapping(source, "context_partial", "telemetry")
+    logits = _nested_mapping(source, "logits_processor_kwargs")
+    request = _nested_mapping(source, "request")
+    desire = _nested_mapping(source, "desire")
+    psi = _nested_mapping(source, "psi")
+    gradient = _finite_numbers(metrics.get("gradient", []))[:8]
+    features = gradient or _finite_numbers(
+        [
+            telemetry.get("zspace.desire.pressure"),
+            desire.get("pressure"),
+            telemetry.get("zspace.psi.total"),
+            psi.get("total"),
+            telemetry.get("zspace.coherence"),
+            source.get("coherence"),
+            telemetry.get("zspace.desire.stability"),
+            desire.get("stability"),
+            telemetry.get("zspace.distortion.energy"),
+            source.get("distortion_energy"),
+            request.get("temperature"),
+            request.get("top_p"),
+            logits.get("repression_strength"),
+            logits.get("ngram_repression_strength"),
+        ]
+    )
+    if len(features) < 2:
+        return {
+            "row_type": "zspace_inference_distortion_geometry_probe",
+            "status": "skipped",
+            "reason": "not enough numeric distortion features",
+            "backend": None,
+            "sample_count": len(features),
+        }
+    mean = sum(features) / len(features)
+    real = [float(value) for value in features]
+    imag = [float(value - mean) for value in features]
+    pressure = (
+        _first_number(telemetry.get("zspace.desire.pressure"), desire.get("pressure"))
+        or 0.0
+    )
+    coherence = (
+        _first_number(telemetry.get("zspace.coherence"), source.get("coherence"))
+        or 0.0
+    )
+    psi_total = (
+        _first_number(telemetry.get("zspace.psi.total"), psi.get("total")) or 0.0
+    )
+    temperature = (
+        _first_number(request.get("temperature"), logits.get("temperature")) or 1.0
+    )
+    top_p = _first_number(request.get("top_p"), 1.0) or 1.0
+    energy = _first_number(
+        telemetry.get("zspace.distortion.energy"),
+        source.get("distortion_energy"),
+    ) or 0.0
+    z_re = [float(temperature), float(top_p), 1.0 + 0.25 * float(energy)]
+    z_im = [float(coherence), float(pressure), float(psi_total)]
+    evaluator = zspace_eval_with_derivative_stable
+    backend = "math_weighted_series_fallback"
+    if evaluator is None:
+        try:
+            module = importlib.import_module("spiraltorch")
+            evaluator = getattr(module, "zspace_eval_with_derivative_stable", None)
+        except Exception:
+            evaluator = None
+    try:
+        if callable(evaluator):
+            values_raw, derivatives_raw = evaluator(real, imag, z_re, z_im)
+            values = _complex_pairs(values_raw)
+            derivatives = _complex_pairs(derivatives_raw)
+            backend = "native_zspace_eval_with_derivative_stable"
+        else:
+            values, derivatives = _math_weighted_series_with_derivative(
+                real,
+                imag,
+                z_re,
+                z_im,
+            )
+    except Exception as exc:
+        return {
+            "row_type": "zspace_inference_distortion_geometry_probe",
+            "status": "error",
+            "backend": backend,
+            "sample_count": len(real),
+            "eval_point_count": len(z_re),
+            "error": f"{exc.__class__.__name__}: {exc}",
+        }
+    return {
+        "row_type": "zspace_inference_distortion_geometry_probe",
+        "status": "ok",
+        "backend": backend,
+        "sample_count": len(real),
+        "eval_point_count": len(z_re),
+        "feature_mean": mean,
+        "value_l2": _complex_l2(values),
+        "value_max_abs": _complex_max_abs(values),
+        "derivative_l2": _complex_l2(derivatives),
+        "derivative_max_abs": _complex_max_abs(derivatives),
+        "eval_points": [(re, im) for re, im in zip(z_re, z_im)],
+        "values": values,
+        "derivatives": derivatives,
+    }
 
 
 def _text_sequence(value: object) -> list[str]:

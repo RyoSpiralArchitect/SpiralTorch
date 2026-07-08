@@ -567,19 +567,19 @@ def _probe_config(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def _probe_runtime(args: argparse.Namespace) -> dict[str, Any]:
-    return {
-        "local_model": str(args.local_model) if args.local_model is not None else None,
-        "allow_remote": bool(args.allow_remote),
-        "trust_remote_code": bool(args.trust_remote_code),
-        "max_new_tokens": int(args.max_new_tokens),
-        "activation_module_name": list(args.activation_module_name),
-        "activation_name_contains": list(args.activation_name_contains),
-        "api_provider": args.api_provider,
-        "api_model": args.api_model,
-        "api_max_tokens": int(args.api_max_tokens),
-        "api_reasoning_effort": args.api_reasoning_effort,
-        "api_text_verbosity": args.api_text_verbosity,
-    }
+    return st.zspace_inference_distortion_runtime_plan(
+        local_model=args.local_model,
+        allow_remote=args.allow_remote,
+        trust_remote_code=args.trust_remote_code,
+        max_new_tokens=args.max_new_tokens,
+        activation_module_name=args.activation_module_name,
+        activation_name_contains=args.activation_name_contains,
+        api_provider=args.api_provider,
+        api_model=args.api_model,
+        api_max_tokens=args.api_max_tokens,
+        api_reasoning_effort=args.api_reasoning_effort,
+        api_text_verbosity=args.api_text_verbosity,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -596,11 +596,14 @@ def main(argv: list[str] | None = None) -> int:
         activation_module_names=args.activation_module_name,
         activation_name_contains=args.activation_name_contains,
     )
+    runtime = _probe_runtime(args)
     report = {
         "row_type": "zspace_inference_distortion_probe",
         "prompt": args.prompt,
         "config": _probe_config(args),
-        "runtime": _probe_runtime(args),
+        "runtime": runtime,
+        "runtime_preflight": st.zspace_inference_distortion_runtime_preflight(runtime),
+        "geometry_probe": st.zspace_inference_distortion_geometry_probe(adapter),
         "handoff": getattr(args, "sweep_handoff", None),
         "adapter": adapter,
         "local_hf": _run_local_hf(args, adapter),

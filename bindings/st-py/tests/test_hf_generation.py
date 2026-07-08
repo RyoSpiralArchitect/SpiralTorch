@@ -28,6 +28,7 @@ from spiraltorch.hf_generation import (
     summarize_zspace_generation_control_sweep,
     summarize_zspace_generation_control_sweep_comparison_lines,
     summarize_zspace_generation_control_sweep_lines,
+    zspace_inference_distortion_geometry_probe,
     zspace_inference_distortion_probe_cli_args,
     zspace_inference_distortion_processor_kwargs,
     zspace_inference_distortion_runtime_cli_args,
@@ -323,6 +324,7 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
             st.__all__,
         )
         self.assertIn("summarize_zspace_inference_distortion_probe_lines", st.__all__)
+        self.assertIn("zspace_inference_distortion_geometry_probe", st.__all__)
         self.assertIn("zspace_inference_distortion_runtime_plan", st.__all__)
         self.assertIn("zspace_inference_distortion_runtime_cli_args", st.__all__)
         self.assertIn("zspace_inference_distortion_runtime_preflight", st.__all__)
@@ -359,6 +361,10 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         self.assertIs(
             st.summarize_zspace_inference_distortion_probe_comparison_lines,
             summarize_zspace_inference_distortion_probe_comparison_lines,
+        )
+        self.assertIs(
+            st.zspace_inference_distortion_geometry_probe,
+            zspace_inference_distortion_geometry_probe,
         )
         self.assertIs(
             st.summarize_zspace_generation_control_sweep,
@@ -434,6 +440,36 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
             zspace_inference_distortion_runtime_cli_args(None, sweep=True),
             ["--resume-existing"],
         )
+
+    def test_inference_distortion_geometry_probe_uses_zspace_evaluator(self) -> None:
+        adapter = st.api_llm_zspace_inference_distortion_adapter(
+            desire_pressure=0.8,
+            desire_stability=0.45,
+            psi_total=0.7,
+            coherence=0.5,
+            distortion_strength=1.1,
+        )
+        calls = []
+
+        def fake_eval(real, imag, z_re, z_im):
+            calls.append((list(real), list(imag), list(z_re), list(z_im)))
+            return (
+                [(1.0, 2.0), (0.5, 0.25), (0.0, 1.0)],
+                [(2.0, 0.0), (0.0, 3.0), (1.0, 1.0)],
+            )
+
+        probe = zspace_inference_distortion_geometry_probe(
+            adapter,
+            zspace_eval_with_derivative_stable=fake_eval,
+        )
+
+        self.assertEqual(probe["status"], "ok")
+        self.assertEqual(probe["backend"], "native_zspace_eval_with_derivative_stable")
+        self.assertEqual(probe["sample_count"], 6)
+        self.assertEqual(probe["eval_point_count"], 3)
+        self.assertGreater(probe["value_l2"], 0.0)
+        self.assertAlmostEqual(probe["derivative_l2"], (15.0**0.5))
+        self.assertEqual(len(calls), 1)
 
     def test_inference_distortion_runtime_preflight_uses_device_reporter(self) -> None:
         runtime = zspace_inference_distortion_runtime_plan(
@@ -540,6 +576,12 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         report = {
             "row_type": "zspace_inference_distortion_probe",
             "prompt": "SpiralTorch is",
+            "runtime_preflight": {
+                "status": "ok",
+                "runtime_ready": True,
+                "ready_backends": ["wgpu"],
+                "missing_ready_backends": [],
+            },
             "adapter": {
                 "distortion_energy": 0.62,
                 "request": {"temperature": 0.98, "top_p": 0.77},
@@ -555,6 +597,12 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
                         "zspace.coherence": 0.45,
                     }
                 },
+            },
+            "geometry_probe": {
+                "status": "ok",
+                "backend": "native_zspace_eval_with_derivative_stable",
+                "value_l2": 2.5,
+                "derivative_l2": 3.5,
             },
             "local_hf": {
                 "status": "ok",
@@ -612,6 +660,15 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         self.assertEqual(summary["generation_control_backend"], "spiraltorch_zspace_softmax")
         self.assertEqual(summary["generation_control_top_token_changed_count"], 5)
         self.assertEqual(summary["activation_event_count"], 64)
+        self.assertEqual(summary["runtime_preflight_status"], "ok")
+        self.assertTrue(summary["runtime_ready"])
+        self.assertEqual(summary["runtime_ready_backends"], ["wgpu"])
+        self.assertEqual(summary["geometry_status"], "ok")
+        self.assertEqual(
+            summary["geometry_backend"],
+            "native_zspace_eval_with_derivative_stable",
+        )
+        self.assertEqual(summary["geometry_derivative_l2"], 3.5)
         self.assertEqual(summary["api_provider"], "fake")
         self.assertEqual(summary["api_total_tokens"], 56.0)
         self.assertEqual(summary["api_request_dropped_key_count"], 2)
@@ -628,6 +685,8 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         self.assertIn("zspace_inference_distortion_probe", lines[0])
         self.assertIn("top_changes=5", lines[0])
         self.assertIn("api_dropped=2", lines[0])
+        self.assertIn("runtime=ok", lines[0])
+        self.assertIn("geom=3.5", lines[0])
         self.assertIn("effect=", lines[0])
         self.assertIn("risk=", lines[0])
 
@@ -884,6 +943,9 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
             report = module.run_sweep(args)
             stored_report = json.loads((out_dir / "sweep-report.json").read_text())
             first_probe_exists = Path(stored_report["runs"][0]["probe_path"]).exists()
+            first_probe_payload = json.loads(
+                Path(stored_report["runs"][0]["probe_path"]).read_text()
+            )
             markdown = (out_dir / "sweep-report.md").read_text()
             loaded_sweep = load_zspace_inference_distortion_sweep(
                 out_dir / "sweep-report.json"
@@ -937,6 +999,15 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         self.assertIn("markdown_path", stored_report)
         self.assertIn("summary_lines", stored_report)
         self.assertTrue(first_probe_exists)
+        self.assertEqual(
+            first_probe_payload["geometry_probe"]["row_type"],
+            "zspace_inference_distortion_geometry_probe",
+        )
+        self.assertEqual(first_probe_payload["geometry_probe"]["status"], "ok")
+        self.assertEqual(
+            first_probe_payload["runtime_preflight"]["row_type"],
+            "zspace_inference_distortion_runtime_preflight",
+        )
         self.assertTrue(stored_report["runs"][0]["summary"]["probe_path"])
         self.assertEqual(
             stored_report["comparison"]["top_probes"][0]["api_provider"],
@@ -989,6 +1060,15 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         self.assertEqual(replay_report["runtime"]["api_provider"], "fake")
         self.assertEqual(replay_report["runtime"]["api_reasoning_effort"], "minimal")
         self.assertEqual(replay_report["runtime"]["api_text_verbosity"], "low")
+        self.assertEqual(
+            replay_report["runtime_preflight"]["row_type"],
+            "zspace_inference_distortion_runtime_preflight",
+        )
+        self.assertEqual(
+            replay_report["geometry_probe"]["row_type"],
+            "zspace_inference_distortion_geometry_probe",
+        )
+        self.assertEqual(replay_report["geometry_probe"]["status"], "ok")
 
     def test_inference_distortion_sweep_reuses_existing_probe(self) -> None:
         module = load_distortion_sweep_example()

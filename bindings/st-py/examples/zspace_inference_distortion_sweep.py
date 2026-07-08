@@ -476,6 +476,7 @@ def _load_existing_probe_run(
 
 def _run_probe(args: argparse.Namespace, run: MappingLike) -> MappingLike:
     config = dict(run["config"])
+    runtime = _runtime_plan(args)
     adapter = st.api_llm_zspace_inference_distortion_adapter(
         desire_pressure=config["desire_pressure"],
         desire_stability=config["desire_stability"],
@@ -494,7 +495,9 @@ def _run_probe(args: argparse.Namespace, run: MappingLike) -> MappingLike:
         "probe_path": str(run["probe_path"]),
         "config": config,
         "prompt": args.prompt,
-        "runtime": _runtime_plan(args),
+        "runtime": runtime,
+        "runtime_preflight": _runtime_preflight(runtime),
+        "geometry_probe": st.zspace_inference_distortion_geometry_probe(adapter),
         "adapter": adapter,
         "local_hf": probe._run_local_hf(args, adapter),
         "api": probe._run_api(args, adapter),
