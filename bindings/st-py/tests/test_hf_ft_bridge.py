@@ -866,6 +866,12 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 "api_model": "fake-distorted-api",
                 "local_model": "runs/gpt2-small-zspace-ft",
             },
+            "runtime_preflight": {
+                "status": "ok",
+                "runtime_ready": True,
+                "ready_backends": ["wgpu"],
+                "missing_ready_backends": [],
+            },
             "runs": [
                 {
                     "name": "strong",
@@ -894,6 +900,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                         "risk_score": 0.22,
                         "api_compatibility_score": 0.84,
                         "api_provider": "fake",
+                        "runtime_preflight_status": "ok",
+                        "runtime_ready": True,
+                        "runtime_ready_backends": ["wgpu"],
+                        "runtime_missing_ready_backends": [],
+                        "geometry_status": "ok",
+                        "geometry_backend": "native_zspace_eval_with_derivative_stable",
+                        "geometry_value_l2": 7.5,
+                        "geometry_derivative_l2": 12.5,
                         "api_request_dropped_key_count": 2,
                         "api_request_dropped_keys": [
                             "frequency_penalty",
@@ -919,6 +933,11 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(handoff["recommended_probe"], "strong")
         self.assertEqual(handoff["api_provider"], "fake")
         self.assertEqual(handoff["api_model"], "fake-distorted-api")
+        self.assertEqual(handoff["runtime_preflight_status"], "ok")
+        self.assertTrue(handoff["runtime_ready"])
+        self.assertEqual(handoff["runtime_ready_backends"], ["wgpu"])
+        self.assertEqual(handoff["geometry_status"], "ok")
+        self.assertEqual(handoff["geometry_derivative_l2"], 12.5)
         self.assertEqual(handoff["recommended_api_compatibility_score"], 0.84)
         self.assertEqual(handoff["desire_pressure"], 0.8)
         self.assertEqual(handoff["psi_total"], 0.7)
@@ -933,6 +952,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(handoff["api_request_sent_keys"], ["temperature", "top_p"])
         self.assertIn("--desire-pressure", handoff["recommended_probe_cli_args"])
         self.assertIn("api_compat=0.84", handoff_lines[0])
+        self.assertIn("runtime=ok", handoff_lines[0])
+        self.assertIn("geom=12.5", handoff_lines[0])
         self.assertIn("retry_dropped=1", handoff_lines[0])
 
     def test_inference_distortion_handoff_report_accepts_probe_artifact(self) -> None:
@@ -943,6 +964,12 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 "api_provider": "fake",
                 "api_model": "fake-distorted-api",
                 "local_model": "runs/gpt2-small-zspace-ft",
+            },
+            "runtime_preflight": {
+                "status": "ok",
+                "runtime_ready": True,
+                "ready_backends": ["wgpu"],
+                "missing_ready_backends": [],
             },
             "config": {
                 "desire_pressure": 0.83,
@@ -964,6 +991,12 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                     "name_contains": ["attn", "mlp"],
                     "intervention_scale": 0.91,
                 },
+            },
+            "geometry_probe": {
+                "status": "ok",
+                "backend": "native_zspace_eval_with_derivative_stable",
+                "value_l2": 8.5,
+                "derivative_l2": 13.5,
             },
             "local_hf": {
                 "status": "ok",
@@ -1017,6 +1050,9 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
 
         self.assertEqual(handoff["status"], "ok")
         self.assertEqual(handoff["source_kind"], "probe")
+        self.assertEqual(handoff["runtime_preflight_status"], "ok")
+        self.assertTrue(handoff["runtime_ready"])
+        self.assertEqual(handoff["geometry_derivative_l2"], 13.5)
         self.assertEqual(
             handoff["source_row_type"],
             "zspace_inference_distortion_probe",
@@ -1133,6 +1169,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             "coherence": 0.5,
             "api_provider": "fake",
             "api_model": "fake-distorted-api",
+            "runtime_preflight_status": "ok",
+            "runtime_ready": True,
+            "runtime_ready_backends": ["wgpu"],
+            "runtime_missing_ready_backends": [],
+            "geometry_status": "ok",
+            "geometry_backend": "native_zspace_eval_with_derivative_stable",
+            "geometry_value_l2": 7.5,
+            "geometry_derivative_l2": 12.5,
             "api_request_dropped_key_count": 2,
             "api_request_dropped_keys": ["frequency_penalty", "presence_penalty"],
             "api_request_retry_dropped_key_count": 1,
@@ -1409,6 +1453,11 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(summary["inference_distortion_desire_pressure"], 0.8)
         self.assertEqual(summary["inference_distortion_psi_total"], 0.7)
         self.assertEqual(summary["inference_distortion_api_provider"], "fake")
+        self.assertEqual(summary["inference_distortion_runtime_preflight_status"], "ok")
+        self.assertTrue(summary["inference_distortion_runtime_ready"])
+        self.assertEqual(summary["inference_distortion_runtime_ready_backends"], "wgpu")
+        self.assertEqual(summary["inference_distortion_geometry_status"], "ok")
+        self.assertEqual(summary["inference_distortion_geometry_derivative_l2"], 12.5)
         self.assertEqual(
             summary["inference_distortion_api_request_dropped_key_count"],
             2,
@@ -1514,6 +1563,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(
             sweep_summary["inference_distortion_api_request_dropped_key_count"],
             2,
+        )
+        self.assertEqual(
+            sweep_summary["inference_distortion_runtime_preflight_status"],
+            "ok",
+        )
+        self.assertEqual(
+            sweep_summary["inference_distortion_geometry_derivative_l2"],
+            12.5,
         )
         self.assertIn(
             "--generation-repression-strength",

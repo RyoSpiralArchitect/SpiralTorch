@@ -582,6 +582,15 @@ def hf_gpt2_finetune_inference_distortion_handoff_report(
     request_filter = _mapping_item(summary, "recommended_request_filter")
     processor_kwargs = _mapping_item(summary, "recommended_processor_kwargs")
     activation_hook = _mapping_item(summary, "recommended_activation_hook")
+    top_probes = summary.get("top_probes")
+    best_probe = (
+        dict(top_probes[0])
+        if isinstance(top_probes, Sequence)
+        and not isinstance(top_probes, (str, bytes))
+        and top_probes
+        and isinstance(top_probes[0], Mapping)
+        else {}
+    )
     dropped_keys = _unique(summary.get("recommended_api_request_dropped_keys"))
     retry_dropped_keys = _unique(
         summary.get("recommended_api_request_retry_dropped_keys")
@@ -656,9 +665,28 @@ def hf_gpt2_finetune_inference_distortion_handoff_report(
             summary.get("recommended_sweep_cli_args") or []
         ),
         "runtime": runtime or None,
+        "runtime_preflight_status": summary.get("runtime_preflight_status")
+        or best_probe.get("runtime_preflight_status"),
+        "runtime_ready": summary.get("runtime_ready")
+        if summary.get("runtime_ready") is not None
+        else best_probe.get("runtime_ready"),
+        "runtime_ready_backends": _unique(
+            summary.get("runtime_ready_backends")
+            or best_probe.get("runtime_ready_backends")
+        ),
+        "runtime_missing_ready_backends": _unique(
+            summary.get("runtime_missing_ready_backends")
+            or best_probe.get("runtime_missing_ready_backends")
+        ),
         "local_model": runtime.get("local_model"),
         "api_provider": runtime.get("api_provider"),
         "api_model": runtime.get("api_model"),
+        "geometry_status": best_probe.get("geometry_status"),
+        "geometry_backend": best_probe.get("geometry_backend"),
+        "geometry_value_l2": _safe_number(best_probe.get("geometry_value_l2")),
+        "geometry_derivative_l2": _safe_number(
+            best_probe.get("geometry_derivative_l2")
+        ),
         "api_request_dropped_key_count": _safe_number(
             summary.get("recommended_api_request_dropped_key_count")
         ),
@@ -720,6 +748,9 @@ def hf_gpt2_finetune_inference_distortion_handoff_lines(
             f"desire={handoff.get('desire_pressure')} "
             f"psi={handoff.get('psi_total')} "
             f"api={handoff.get('api_provider')} "
+            f"runtime={handoff.get('runtime_preflight_status')} "
+            f"runtime_ready={handoff.get('runtime_ready')} "
+            f"geom={handoff.get('geometry_derivative_l2')} "
             f"dropped={handoff.get('api_request_dropped_key_count')}"
             f" retry_dropped={handoff.get('api_request_retry_dropped_key_count')}"
         )
@@ -3094,6 +3125,30 @@ def summarize_hf_gpt2_finetune_run_card(
         ),
         "inference_distortion_api_provider": inference_handoff.get("api_provider"),
         "inference_distortion_api_model": inference_handoff.get("api_model"),
+        "inference_distortion_runtime_preflight_status": inference_handoff.get(
+            "runtime_preflight_status"
+        ),
+        "inference_distortion_runtime_ready": inference_handoff.get("runtime_ready"),
+        "inference_distortion_runtime_ready_backends": csv_label(
+            _unique(inference_handoff.get("runtime_ready_backends"))
+        ),
+        "inference_distortion_runtime_missing_ready_backends": csv_label(
+            _unique(inference_handoff.get("runtime_missing_ready_backends"))
+        ),
+        "inference_distortion_geometry_status": inference_handoff.get(
+            "geometry_status"
+        ),
+        "inference_distortion_geometry_backend": inference_handoff.get(
+            "geometry_backend"
+        ),
+        "inference_distortion_geometry_value_l2": _metric_number(
+            inference_handoff,
+            "geometry_value_l2",
+        ),
+        "inference_distortion_geometry_derivative_l2": _metric_number(
+            inference_handoff,
+            "geometry_derivative_l2",
+        ),
         "inference_distortion_api_request_dropped_key_count": _metric_number(
             inference_handoff,
             "api_request_dropped_key_count",
@@ -3911,6 +3966,30 @@ def summarize_hf_gpt2_finetune_sweep_report(
             "psi_total",
         ),
         "inference_distortion_api_provider": inference_handoff.get("api_provider"),
+        "inference_distortion_runtime_preflight_status": inference_handoff.get(
+            "runtime_preflight_status"
+        ),
+        "inference_distortion_runtime_ready": inference_handoff.get("runtime_ready"),
+        "inference_distortion_runtime_ready_backends": csv_label(
+            _unique(inference_handoff.get("runtime_ready_backends"))
+        ),
+        "inference_distortion_runtime_missing_ready_backends": csv_label(
+            _unique(inference_handoff.get("runtime_missing_ready_backends"))
+        ),
+        "inference_distortion_geometry_status": inference_handoff.get(
+            "geometry_status"
+        ),
+        "inference_distortion_geometry_backend": inference_handoff.get(
+            "geometry_backend"
+        ),
+        "inference_distortion_geometry_value_l2": _metric_number(
+            inference_handoff,
+            "geometry_value_l2",
+        ),
+        "inference_distortion_geometry_derivative_l2": _metric_number(
+            inference_handoff,
+            "geometry_derivative_l2",
+        ),
         "inference_distortion_api_request_dropped_key_count": _metric_number(
             inference_handoff,
             "api_request_dropped_key_count",
@@ -4034,6 +4113,9 @@ def summarize_hf_gpt2_finetune_sweep_report_lines(
             f"desire={summary.get('inference_distortion_desire_pressure')} "
             f"psi={summary.get('inference_distortion_psi_total')} "
             f"api={summary.get('inference_distortion_api_provider')} "
+            f"runtime={summary.get('inference_distortion_runtime_preflight_status')} "
+            f"runtime_ready={summary.get('inference_distortion_runtime_ready')} "
+            f"geom={summary.get('inference_distortion_geometry_derivative_l2')} "
             "api_dropped="
             f"{summary.get('inference_distortion_api_request_dropped_key_count')}"
             " api_retry_dropped="
@@ -4092,6 +4174,8 @@ def summarize_hf_gpt2_finetune_sweep_report_lines(
                 f"infer_probe={row.get('inference_distortion_recommended_probe')} "
                 f"infer_effect={row.get('inference_distortion_effect_score')} "
                 f"infer_api_compat={row.get('inference_distortion_api_compatibility_score')} "
+                f"infer_runtime={row.get('inference_distortion_runtime_preflight_status')} "
+                f"infer_geom={row.get('inference_distortion_geometry_derivative_l2')} "
             )
         if row.get("trace_inference_distortion_telemetry_count") is not None:
             inference_fragment += (
