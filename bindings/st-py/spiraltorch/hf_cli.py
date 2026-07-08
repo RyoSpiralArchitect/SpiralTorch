@@ -93,6 +93,9 @@ def _generation_control_profile_config_lines(report: dict) -> list[str]:
     if model_name is not None:
         fields.append(f"model={model_name}")
     lines = ["zspace_generation_control_profile_config " + " ".join(fields)]
+    contract_lines = report.get("model_profile_runtime_contract_lines")
+    if isinstance(contract_lines, list):
+        lines.extend(str(line) for line in contract_lines)
     bridge_cli_args = report.get("bridge_cli_args")
     if isinstance(bridge_cli_args, list) and bridge_cli_args:
         lines.append(

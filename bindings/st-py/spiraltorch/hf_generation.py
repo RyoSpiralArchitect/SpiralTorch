@@ -1022,8 +1022,25 @@ def zspace_checkpoint_generation_control_report(
         prompt=config.prompt,
         label_prefix=config.label_prefix,
     )
+    if config.model_profile_report is not None:
+        from .hf_ft import (
+            hf_finetune_model_profile_runtime_contract,
+            hf_finetune_model_profile_runtime_contract_lines,
+        )
+
+        model_profile_runtime_contract = hf_finetune_model_profile_runtime_contract(
+            config.model_profile_report,
+        )
+        model_profile_runtime_contract_lines = (
+            hf_finetune_model_profile_runtime_contract_lines(
+                model_profile_runtime_contract,
+            )
+        )
+    else:
+        model_profile_runtime_contract = None
+        model_profile_runtime_contract_lines = []
     generation_control_profile_config = zspace_generation_control_processor_kwargs(
-        config.model_profile_report,
+        model_profile_runtime_contract or config.model_profile_report,
     )
     generation_control_sweep_cli_args = zspace_generation_control_sweep_cli_args(
         generation_control_profile_config,
@@ -1163,6 +1180,8 @@ def zspace_checkpoint_generation_control_report(
         ),
         "model_profile": config.model_profile_report,
         "model_profile_lines": list(config.model_profile_lines),
+        "model_profile_runtime_contract": model_profile_runtime_contract,
+        "model_profile_runtime_contract_lines": model_profile_runtime_contract_lines,
         "allow_remote": bool(config.allow_remote),
         "trust_remote_code": bool(config.trust_remote_code),
         "generation_control_profile_config": generation_control_profile_config,
@@ -3064,15 +3083,28 @@ def zspace_inference_distortion_runtime_plan(
     """Return a serializable runtime plan for inference-distortion probes."""
 
     profile_report: dict[str, object] | None = None
+    profile_runtime_contract: dict[str, object] | None = None
+    profile_runtime_contract_lines: list[str] = []
     if model_configs is not None or model_profile is not None:
         from .hf_ft import (
             hf_finetune_model_profile_lines,
-            resolve_hf_finetune_model_profile,
+            hf_finetune_model_profile_runtime_contract,
+            hf_finetune_model_profile_runtime_contract_lines,
         )
 
-        profile_report = resolve_hf_finetune_model_profile(
+        profile_runtime_contract = hf_finetune_model_profile_runtime_contract(
             model_configs,
             profile=model_profile,
+            mode="inference",
+        )
+        profile_runtime_contract_lines = (
+            hf_finetune_model_profile_runtime_contract_lines(
+                profile_runtime_contract,
+            )
+        )
+        raw_profile_report = profile_runtime_contract.get("model_profile")
+        profile_report = (
+            dict(raw_profile_report) if isinstance(raw_profile_report, Mapping) else {}
         )
         generation_profile = _mapping_item(profile_report, "generation")
         runtime_profile = _mapping_item(profile_report, "runtime")
@@ -3105,6 +3137,9 @@ def zspace_inference_distortion_runtime_plan(
         model_profile_lines = hf_finetune_model_profile_lines(profile_report)
     else:
         model_profile_lines = []
+    generation_control_profile_config = zspace_generation_control_processor_kwargs(
+        profile_runtime_contract or profile_report,
+    )
     if max_new_tokens is None:
         max_new_tokens = 48
     if model_configs is None:
@@ -3121,6 +3156,20 @@ def zspace_inference_distortion_runtime_plan(
         "model_configs": model_configs_ref,
         "model_profile": profile_report,
         "model_profile_lines": model_profile_lines,
+        "model_profile_runtime_contract": profile_runtime_contract,
+        "model_profile_runtime_contract_lines": profile_runtime_contract_lines,
+        "runtime_import_preset": (
+            None
+            if profile_runtime_contract is None
+            else profile_runtime_contract.get("runtime_import_preset")
+        ),
+        "generation_control_profile_config": generation_control_profile_config,
+        "generation_control_sweep_cli_args": zspace_generation_control_sweep_cli_args(
+            generation_control_profile_config,
+        ),
+        "generation_control_bridge_cli_args": zspace_generation_control_bridge_cli_args(
+            generation_control_profile_config,
+        ),
         "allow_remote": bool(allow_remote),
         "trust_remote_code": bool(trust_remote_code),
         "max_new_tokens": int(max_new_tokens),
@@ -4059,17 +4108,29 @@ def zspace_generation_control_profile_config(
 
     from .hf_ft import (
         hf_finetune_model_profile_lines,
-        resolve_hf_finetune_model_profile,
+        hf_finetune_model_profile_runtime_contract,
+        hf_finetune_model_profile_runtime_contract_lines,
     )
 
-    profile = resolve_hf_finetune_model_profile(model_configs, profile=model_profile)
-    recommended_config = zspace_generation_control_processor_kwargs(profile)
+    runtime_contract = hf_finetune_model_profile_runtime_contract(
+        model_configs,
+        profile=model_profile,
+        mode="inference",
+    )
+    raw_profile = runtime_contract.get("model_profile")
+    profile = dict(raw_profile) if isinstance(raw_profile, Mapping) else {}
+    recommended_config = zspace_generation_control_processor_kwargs(runtime_contract)
     status = "ready" if recommended_config else "empty"
     return {
         "row_type": "zspace_generation_control_profile_config",
         "status": status,
         "model_profile": profile,
         "model_profile_lines": hf_finetune_model_profile_lines(profile),
+        "model_profile_runtime_contract": runtime_contract,
+        "model_profile_runtime_contract_lines": (
+            hf_finetune_model_profile_runtime_contract_lines(runtime_contract)
+        ),
+        "runtime_import_preset": runtime_contract.get("runtime_import_preset"),
         "recommended_config": recommended_config,
         "processor_kwargs": dict(recommended_config),
         "sweep_cli_args": zspace_generation_control_sweep_cli_args(recommended_config),

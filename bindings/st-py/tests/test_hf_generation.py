@@ -520,6 +520,8 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         self.assertEqual(runtime["api_model"], "gpt-5-nano")
         self.assertEqual(runtime["api_reasoning_effort"], "minimal")
         self.assertEqual(runtime["api_text_verbosity"], "low")
+        self.assertIsNone(runtime["model_profile_runtime_contract"])
+        self.assertEqual(runtime["generation_control_profile_config"], {})
 
         probe_args = zspace_inference_distortion_runtime_cli_args(runtime)
         sweep_args = zspace_inference_distortion_runtime_cli_args(runtime, sweep=True)
@@ -578,6 +580,24 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         self.assertIn(
             "profile=qwen2-0.5b-local-smoke",
             profile_runtime["model_profile_lines"][0],
+        )
+        self.assertEqual(
+            profile_runtime["model_profile_runtime_contract"]["profile_id"],
+            "qwen2-0.5b-local-smoke",
+        )
+        self.assertEqual(profile_runtime["runtime_import_preset"], "hf-runtime")
+        self.assertTrue(
+            profile_runtime["model_profile_runtime_contract_lines"][0].startswith(
+                "hf_ft_model_profile_runtime_contract "
+            )
+        )
+        self.assertEqual(
+            profile_runtime["generation_control_profile_config"]["top_k"],
+            96,
+        )
+        self.assertIn(
+            "--generation-zspace-top-k",
+            profile_runtime["generation_control_bridge_cli_args"],
         )
         self.assertIn("--model-configs", profile_args)
         self.assertIn(str(MODEL_CONFIGS_PATH), profile_args)
@@ -1862,8 +1882,27 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
             pythia_profile_config["model_profile"]["profile_id"],
             "pythia-70m-local-smoke",
         )
+        self.assertEqual(
+            pythia_profile_config["model_profile_runtime_contract"]["profile_id"],
+            "pythia-70m-local-smoke",
+        )
+        self.assertEqual(
+            pythia_profile_config["runtime_import_preset"],
+            "hf-runtime",
+        )
+        self.assertTrue(
+            pythia_profile_config["model_profile_runtime_contract_lines"][
+                0
+            ].startswith("hf_ft_model_profile_runtime_contract ")
+        )
         self.assertEqual(pythia_profile_config["recommended_config"], pythia_kwargs)
         self.assertEqual(pythia_profile_config["processor_kwargs"], pythia_kwargs)
+        self.assertEqual(
+            zspace_generation_control_processor_kwargs(
+                pythia_profile_config["model_profile_runtime_contract"]
+            ),
+            pythia_kwargs,
+        )
         self.assertEqual(pythia_kwargs["curvature"], -0.04)
         self.assertEqual(pythia_kwargs["entropy_target"], 3.0)
         self.assertEqual(pythia_kwargs["repression_strength"], 0.8)
@@ -2330,6 +2369,15 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
         self.assertEqual(planned["row_type"], "hf_checkpoint_generation_control")
         self.assertEqual(planned["tokenizer_name"], "sshleifer/tiny-gpt2")
         self.assertEqual(planned["model_profile"]["profile_id"], "tiny-gpt2-ci")
+        self.assertEqual(
+            planned["model_profile_runtime_contract"]["profile_id"],
+            "tiny-gpt2-ci",
+        )
+        self.assertTrue(
+            planned["model_profile_runtime_contract_lines"][0].startswith(
+                "hf_ft_model_profile_runtime_contract "
+            )
+        )
         self.assertIn("profile=tiny-gpt2-ci", planned["model_profile_lines"][0])
         self.assertEqual(planned["sweeps"][0]["tokenizer_name"], "sshleifer/tiny-gpt2")
         self.assertEqual(planned["generation_control_profile_config"], {})
@@ -2359,6 +2407,10 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
         )
         self.assertEqual(
             pythia_planned["model_profile"]["profile_id"],
+            "pythia-70m-local-smoke",
+        )
+        self.assertEqual(
+            pythia_planned["model_profile_runtime_contract"]["profile_id"],
             "pythia-70m-local-smoke",
         )
         self.assertEqual(

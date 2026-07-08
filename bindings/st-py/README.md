@@ -458,7 +458,10 @@ profile catalog as structured data before choosing a model/run shape. Use
 `st.hf_finetune_model_profile_runtime_contract(...)` when FT, local inference,
 or Z-Space generation code needs a single profile-derived contract containing
 the selected model/tokenizer, activation hook selectors, Z-Space generation
-knobs, runtime preset, and rough token-estimate policy. Add
+knobs, runtime preset, and rough token-estimate policy. The same contract is
+embedded into profile-backed inference-distortion runtime plans and checkpoint
+generation-control reports, so downstream artifacts can be audited without
+re-resolving the model config. Add
 `--preflight` to probe the selected profile's inference, finetune, PEFT, or
 TRL-SFT runtime preset before launching a long run; add `--require` when that
 probe should act as a CI/local gate instead of an observational report. Add

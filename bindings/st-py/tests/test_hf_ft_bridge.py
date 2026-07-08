@@ -8986,6 +8986,11 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             control_payload["model_profile"]["model_family"],
             "gpt_neox",
         )
+        self.assertEqual(
+            control_payload["model_profile_runtime_contract"]["profile_id"],
+            "pythia-70m-local-smoke",
+        )
+        self.assertEqual(control_payload["runtime_import_preset"], "hf-runtime")
         self.assertEqual(control_payload["recommended_config"]["top_k"], 64)
         self.assertEqual(
             control_payload["recommended_config"]["repression_strength"],
@@ -9032,6 +9037,12 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertTrue(
             written_control_lines[0].startswith(
                 "zspace_generation_control_profile_config status=ready "
+            )
+        )
+        self.assertTrue(
+            any(
+                line.startswith("hf_ft_model_profile_runtime_contract ")
+                for line in written_control_lines
             )
         )
         self.assertTrue(
