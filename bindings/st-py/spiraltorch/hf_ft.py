@@ -23,6 +23,8 @@ from .runtime_imports import (
 
 __all__ = [
     "HF_FINETUNE_DEFAULT_DEVICE_BACKENDS",
+    "HF_FINETUNE_DEFAULT_MODEL_CONFIGS",
+    "HF_FINETUNE_MODEL_CONFIG_SCHEMA",
     "HF_FINETUNE_REQUIRED_PYTHON_PACKAGES",
     "HF_FINETUNE_REQUIRED_RUST_SURFACES",
     "HF_GPT2_FT_DEFAULT_DEVICE_BACKENDS",
@@ -44,6 +46,9 @@ __all__ = [
     "hf_finetune_inference_distortion_runtime_plan",
     "hf_finetune_milestone_lines",
     "hf_finetune_milestone_report",
+    "hf_finetune_model_profile_cli_args",
+    "hf_finetune_model_profile_lines",
+    "hf_finetune_model_profiles",
     "hf_finetune_rust_dependency_report",
     "hf_finetune_scale_up_command",
     "hf_finetune_scale_up_preflight_lines",
@@ -79,6 +84,7 @@ __all__ = [
     "hf_gpt2_finetune_trainer_trace_event",
     "hf_gpt2_finetune_zspace_probe",
     "compare_hf_finetune_run_cards",
+    "load_hf_finetune_model_configs",
     "compare_hf_gpt2_finetune_run_cards",
     "load_hf_finetune_run_card",
     "load_hf_finetune_sweep_report",
@@ -98,6 +104,7 @@ __all__ = [
     "write_hf_finetune_trainer_trace_event",
     "write_hf_gpt2_finetune_run_card",
     "write_hf_gpt2_finetune_trainer_trace_event",
+    "resolve_hf_finetune_model_profile",
 ]
 
 
@@ -173,6 +180,373 @@ HF_GPT2_FT_REQUIRED_RUST_SURFACES = [
         ),
     },
 ]
+HF_FINETUNE_MODEL_CONFIG_SCHEMA = "spiraltorch.hf_finetune_model_configs.v1"
+HF_FINETUNE_DEFAULT_MODEL_CONFIGS: dict[str, object] = {
+    "schema": HF_FINETUNE_MODEL_CONFIG_SCHEMA,
+    "default_profile": "gpt2-local-smoke",
+    "profiles": [
+        {
+            "id": "gpt2-local-smoke",
+            "model_name": "gpt2",
+            "tokenizer_name": "gpt2",
+            "architecture": "causal_lm",
+            "checkpoint_prefix": "checkpoint-",
+            "max_length": 128,
+            "training": {
+                "block_size": 128,
+                "max_train_samples": 4096,
+                "max_eval_samples": 512,
+            },
+            "generation": {
+                "max_new_tokens": 80,
+                "do_sample": False,
+            },
+            "notes": "Baseline profile matching the historical GPT-2 examples.",
+        },
+        {
+            "id": "distilgpt2-local-smoke",
+            "model_name": "distilgpt2",
+            "tokenizer_name": "distilgpt2",
+            "architecture": "causal_lm",
+            "checkpoint_prefix": "checkpoint-",
+            "max_length": 128,
+            "training": {
+                "block_size": 128,
+                "max_train_samples": 4096,
+                "max_eval_samples": 512,
+            },
+            "generation": {
+                "max_new_tokens": 80,
+                "do_sample": False,
+            },
+            "notes": "Smaller GPT-2-family profile for local smoke runs.",
+        },
+        {
+            "id": "tiny-gpt2-ci",
+            "model_name": "sshleifer/tiny-gpt2",
+            "tokenizer_name": "sshleifer/tiny-gpt2",
+            "architecture": "causal_lm",
+            "checkpoint_prefix": "checkpoint-",
+            "max_length": 64,
+            "training": {
+                "block_size": 64,
+                "max_train_samples": 128,
+                "max_eval_samples": 32,
+            },
+            "generation": {
+                "max_new_tokens": 32,
+                "do_sample": False,
+            },
+            "notes": "Fast config for tests and docs; requires remote downloads when not cached.",
+        },
+    ],
+}
+
+
+def _deepcopy_jsonable(value: object) -> object:
+    return json.loads(json.dumps(value))
+
+
+def _mapping_or_empty(value: object, *, label: str) -> dict[str, object]:
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{label} must be an object")
+    return dict(value)
+
+
+def _positive_int_or_none(value: object, *, label: str) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise ValueError(f"{label} must be a positive integer")
+    if isinstance(value, int):
+        number = value
+    elif isinstance(value, float) and value.is_integer():
+        number = int(value)
+    else:
+        try:
+            number = int(str(value))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{label} must be a positive integer") from exc
+    if number <= 0:
+        raise ValueError(f"{label} must be positive")
+    return number
+
+
+def _string_or_none(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def load_hf_finetune_model_configs(
+    path: str | Path | None = None,
+) -> dict[str, object]:
+    """Load model-profile configs for generic Hugging Face fine-tuning."""
+
+    if path is None:
+        copied = _deepcopy_jsonable(HF_FINETUNE_DEFAULT_MODEL_CONFIGS)
+        if not isinstance(copied, Mapping):
+            raise ValueError("default model configs must be an object")
+        return dict(copied)
+    config_path = Path(path)
+    payload = json.loads(config_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, Mapping):
+        raise ValueError(f"model config must be an object: {config_path}")
+    config = dict(payload)
+    config.setdefault("source_path", str(config_path))
+    return config
+
+
+def hf_finetune_model_profiles(
+    config: Mapping[str, object] | str | Path | None = None,
+) -> dict[str, dict[str, object]]:
+    """Return model profiles keyed by profile id."""
+
+    payload = (
+        load_hf_finetune_model_configs(config)
+        if not isinstance(config, Mapping)
+        else dict(config)
+    )
+    raw_profiles = payload.get("profiles")
+    if not isinstance(raw_profiles, Sequence) or isinstance(raw_profiles, (str, bytes)):
+        raise ValueError("model config profiles must be a list")
+    profiles: dict[str, dict[str, object]] = {}
+    for index, raw_profile in enumerate(raw_profiles):
+        if not isinstance(raw_profile, Mapping):
+            raise ValueError(f"model profile #{index + 1} must be an object")
+        profile = dict(raw_profile)
+        profile_id = _string_or_none(profile.get("id"))
+        if profile_id is None:
+            raise ValueError(f"model profile #{index + 1} missing id")
+        if profile_id in profiles:
+            raise ValueError(f"duplicate model profile id: {profile_id}")
+        model_name = _string_or_none(profile.get("model_name"))
+        if model_name is None:
+            raise ValueError(f"model profile {profile_id} missing model_name")
+        profile["id"] = profile_id
+        profile["model_name"] = model_name
+        profile["tokenizer_name"] = (
+            _string_or_none(profile.get("tokenizer_name")) or model_name
+        )
+        profile["architecture"] = (
+            _string_or_none(profile.get("architecture")) or "causal_lm"
+        )
+        max_length = _positive_int_or_none(
+            profile.get("max_length"),
+            label=f"{profile_id}.max_length",
+        )
+        if max_length is not None:
+            profile["max_length"] = max_length
+        profile["training"] = _mapping_or_empty(
+            profile.get("training"),
+            label=f"{profile_id}.training",
+        )
+        profile["generation"] = _mapping_or_empty(
+            profile.get("generation"),
+            label=f"{profile_id}.generation",
+        )
+        profiles[profile_id] = profile
+    return profiles
+
+
+def resolve_hf_finetune_model_profile(
+    config: Mapping[str, object] | str | Path | None = None,
+    *,
+    profile: str | None = None,
+    overrides: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    """Resolve one model profile with light validation and optional overrides."""
+
+    payload = (
+        load_hf_finetune_model_configs(config)
+        if not isinstance(config, Mapping)
+        else dict(config)
+    )
+    profiles = hf_finetune_model_profiles(payload)
+    profile_id = profile or _string_or_none(payload.get("default_profile"))
+    if profile_id is None:
+        if len(profiles) != 1:
+            raise ValueError("model profile is required when no default_profile is set")
+        profile_id = next(iter(profiles))
+    if profile_id not in profiles:
+        available = ",".join(sorted(profiles))
+        raise ValueError(f"unknown model profile {profile_id!r}; available={available}")
+    copied = _deepcopy_jsonable(profiles[profile_id])
+    if not isinstance(copied, Mapping):
+        raise ValueError(f"model profile {profile_id} must be an object")
+    selected = dict(copied)
+    for key, value in (overrides or {}).items():
+        if value is not None:
+            selected[str(key)] = value
+    training = _mapping_or_empty(
+        selected.get("training"),
+        label=f"{profile_id}.training",
+    )
+    generation = _mapping_or_empty(
+        selected.get("generation"),
+        label=f"{profile_id}.generation",
+    )
+    block_size = _positive_int_or_none(
+        training.get("block_size") or selected.get("max_length"),
+        label=f"{profile_id}.training.block_size",
+    )
+    if block_size is not None:
+        training["block_size"] = block_size
+    max_length = _positive_int_or_none(
+        selected.get("max_length") or block_size,
+        label=f"{profile_id}.max_length",
+    )
+    selected["max_length"] = max_length
+    selected["training"] = training
+    selected["generation"] = generation
+    selected["id"] = profile_id
+    selected["model_name"] = _string_or_none(selected.get("model_name")) or profile_id
+    selected["tokenizer_name"] = (
+        _string_or_none(selected.get("tokenizer_name"))
+        or str(selected["model_name"])
+    )
+    selected["architecture"] = (
+        _string_or_none(selected.get("architecture")) or "causal_lm"
+    )
+    return {
+        "row_type": "hf_finetune_model_profile",
+        "status": "ready",
+        "schema": payload.get("schema") or HF_FINETUNE_MODEL_CONFIG_SCHEMA,
+        "source_path": payload.get("source_path"),
+        "default_profile": payload.get("default_profile"),
+        "profile_id": profile_id,
+        "model_name": selected["model_name"],
+        "tokenizer_name": selected["tokenizer_name"],
+        "architecture": selected["architecture"],
+        "checkpoint_prefix": selected.get("checkpoint_prefix") or "checkpoint-",
+        "max_length": selected.get("max_length"),
+        "training": training,
+        "generation": generation,
+        "profile": selected,
+        "available_profiles": sorted(profiles),
+    }
+
+
+def _profile_flag_value(value: object) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
+
+
+def _append_value_flag(
+    args: list[str],
+    flag: str,
+    value: object,
+    *,
+    skip_false: bool = False,
+) -> None:
+    if value is None:
+        return
+    if isinstance(value, bool):
+        if skip_false and not value:
+            return
+        if value and flag.startswith("--"):
+            args.append(flag)
+            return
+    args.extend([flag, _profile_flag_value(value)])
+
+
+def hf_finetune_model_profile_cli_args(
+    profile: Mapping[str, object],
+    *,
+    include_model: bool = True,
+    include_training: bool = True,
+    include_generation: bool = True,
+) -> list[str]:
+    """Convert a resolved model profile into existing HF FT bridge CLI flags."""
+
+    report = (
+        dict(profile)
+        if profile.get("row_type") == "hf_finetune_model_profile"
+        else resolve_hf_finetune_model_profile({"profiles": [dict(profile)]})
+    )
+    args: list[str] = []
+    if include_model:
+        _append_value_flag(args, "--model-name", report.get("model_name"))
+        if report.get("tokenizer_name") != report.get("model_name"):
+            _append_value_flag(args, "--tokenizer-name", report.get("tokenizer_name"))
+    training = _mapping_or_empty(report.get("training"), label="profile.training")
+    if include_training:
+        for key, flag in (
+            ("block_size", "--block-size"),
+            ("max_train_samples", "--max-train-samples"),
+            ("max_eval_samples", "--max-eval-samples"),
+            ("per_device_train_batch_size", "--per-device-train-batch-size"),
+            ("per_device_eval_batch_size", "--per-device-eval-batch-size"),
+            ("gradient_accumulation_steps", "--gradient-accumulation-steps"),
+            ("learning_rate", "--learning-rate"),
+            ("num_train_epochs", "--num-train-epochs"),
+            ("max_steps", "--max-steps"),
+            ("logging_steps", "--logging-steps"),
+            ("save_steps", "--save-steps"),
+            ("eval_steps", "--eval-steps"),
+            ("save_total_limit", "--save-total-limit"),
+        ):
+            _append_value_flag(args, flag, training.get(key))
+    generation = _mapping_or_empty(report.get("generation"), label="profile.generation")
+    if include_generation:
+        for key, flag in (
+            ("max_new_tokens", "--generation-max-new-tokens"),
+            ("temperature", "--generation-temperature"),
+            ("top_k", "--generation-top-k"),
+            ("zspace_top_k", "--generation-zspace-top-k"),
+            ("zspace_curvature", "--generation-zspace-curvature"),
+            ("zspace_temperature", "--generation-zspace-temperature"),
+            ("zspace_entropy_target", "--generation-zspace-entropy-target"),
+            ("zspace_entropy_gain", "--generation-zspace-entropy-gain"),
+            ("zspace_entropy_tolerance", "--generation-zspace-entropy-tolerance"),
+            ("zspace_min_temperature", "--generation-zspace-min-temperature"),
+            ("zspace_max_temperature", "--generation-zspace-max-temperature"),
+            ("repression_window", "--generation-repression-window"),
+            ("repression_strength", "--generation-repression-strength"),
+            ("last_token_repression", "--generation-last-token-repression"),
+            ("ngram_size", "--generation-ngram-size"),
+            ("ngram_window", "--generation-ngram-window"),
+            ("ngram_repression_strength", "--generation-ngram-repression-strength"),
+            ("ngram_decay", "--generation-ngram-decay"),
+            ("zspace_report_limit", "--generation-zspace-report-limit"),
+        ):
+            _append_value_flag(args, flag, generation.get(key))
+        bool_flags = (
+            ("do_sample", "--generation-do-sample"),
+            ("zspace_softmax", "--generation-zspace-softmax"),
+            ("zspace_keep_non_top_k", "--generation-zspace-keep-non-top-k"),
+            ("zspace_no_native", "--generation-zspace-no-native"),
+        )
+        for key, flag in bool_flags:
+            _append_value_flag(args, flag, generation.get(key), skip_false=True)
+    return args
+
+
+def hf_finetune_model_profile_lines(
+    profile: Mapping[str, object],
+) -> list[str]:
+    """Render compact audit lines for a resolved HF fine-tune model profile."""
+
+    training = _mapping_or_empty(profile.get("training"), label="profile.training")
+    generation = _mapping_or_empty(profile.get("generation"), label="profile.generation")
+    return [
+        (
+            "hf_ft_model_profile "
+            f"status={profile.get('status', 'ready')} "
+            f"profile={profile.get('profile_id')} "
+            f"model={profile.get('model_name')} "
+            f"tokenizer={profile.get('tokenizer_name')} "
+            f"architecture={profile.get('architecture')} "
+            f"block_size={training.get('block_size')} "
+            f"max_new_tokens={generation.get('max_new_tokens')} "
+            f"do_sample={generation.get('do_sample')} "
+            f"source={profile.get('source_path')}"
+        )
+    ]
 
 
 def _path_values(values: object) -> list[Path]:

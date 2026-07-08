@@ -6797,6 +6797,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn(config["default_profile"], profiles)
         self.assertEqual(profiles["gpt2-local-smoke"]["model_name"], "gpt2")
         self.assertEqual(
+            profiles["gpt2-local-smoke"]["training"]["block_size"],
+            128,
+        )
+        self.assertEqual(
             profiles["distilgpt2-local-smoke"]["tokenizer_name"],
             "distilgpt2",
         )
@@ -6810,6 +6814,76 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 for profile in profiles.values()
             )
         )
+
+    def test_generic_hf_finetune_model_profile_resolves_cli_defaults(self) -> None:
+        config = st.load_hf_finetune_model_configs(MODEL_CONFIGS_PATH)
+        profiles = st.hf_finetune_model_profiles(config)
+        profile = st.resolve_hf_finetune_model_profile(
+            MODEL_CONFIGS_PATH,
+            profile="distilgpt2-local-smoke",
+        )
+        default_profile = st.resolve_hf_finetune_model_profile()
+        cli_args = st.hf_finetune_model_profile_cli_args(profile)
+        lines = st.hf_finetune_model_profile_lines(profile)
+
+        self.assertIn("distilgpt2-local-smoke", profiles)
+        self.assertEqual(default_profile["profile_id"], "gpt2-local-smoke")
+        self.assertEqual(profile["row_type"], "hf_finetune_model_profile")
+        self.assertEqual(profile["model_name"], "distilgpt2")
+        self.assertEqual(profile["tokenizer_name"], "distilgpt2")
+        self.assertEqual(profile["training"]["block_size"], 128)
+        self.assertEqual(profile["generation"]["max_new_tokens"], 80)
+        self.assertIn("--model-name", cli_args)
+        self.assertIn("distilgpt2", cli_args)
+        self.assertIn("--block-size", cli_args)
+        self.assertIn("128", cli_args)
+        self.assertIn("--generation-max-new-tokens", cli_args)
+        self.assertIn("80", cli_args)
+        self.assertNotIn("--generation-do-sample", cli_args)
+        self.assertIn("profile=distilgpt2-local-smoke", lines[0])
+
+    def test_bridge_model_profile_defaults_and_explicit_overrides(self) -> None:
+        module = load_bridge_example()
+        args = module.parse_args(
+            [
+                "--model-configs",
+                str(MODEL_CONFIGS_PATH),
+                "--model-profile",
+                "tiny-gpt2-ci",
+                "--metadata-only",
+                "--allow-remote",
+            ]
+        )
+        overridden = module.parse_args(
+            [
+                "--model-configs",
+                str(MODEL_CONFIGS_PATH),
+                "--model-profile",
+                "tiny-gpt2-ci",
+                "--model-name",
+                "gpt2",
+                "--block-size",
+                "96",
+                "--generation-max-new-tokens",
+                "11",
+                "--metadata-only",
+            ]
+        )
+
+        self.assertEqual(args.model_name, "sshleifer/tiny-gpt2")
+        self.assertEqual(module._tokenizer_name(args), "sshleifer/tiny-gpt2")
+        self.assertEqual(args.block_size, 64)
+        self.assertEqual(args.max_train_samples, 128)
+        self.assertEqual(args.max_eval_samples, 32)
+        self.assertEqual(args.generation_max_new_tokens, 32)
+        self.assertEqual(
+            args._hf_finetune_model_profile["profile_id"],
+            "tiny-gpt2-ci",
+        )
+        self.assertEqual(overridden.model_name, "gpt2")
+        self.assertEqual(overridden.block_size, 96)
+        self.assertEqual(overridden.generation_max_new_tokens, 11)
+        self.assertEqual(module._tokenizer_name(overridden), "gpt2")
 
     def test_package_milestone_report_tracks_run_status_readiness(self) -> None:
         waiting_status = {
@@ -7410,6 +7484,22 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             st.HF_FINETUNE_REQUIRED_RUST_SURFACES,
             hf_ft.HF_GPT2_FT_REQUIRED_RUST_SURFACES,
         )
+        self.assertEqual(
+            st.HF_FINETUNE_MODEL_CONFIG_SCHEMA,
+            "spiraltorch.hf_finetune_model_configs.v1",
+        )
+        profile_exports = [
+            "HF_FINETUNE_DEFAULT_MODEL_CONFIGS",
+            "HF_FINETUNE_MODEL_CONFIG_SCHEMA",
+            "load_hf_finetune_model_configs",
+            "hf_finetune_model_profiles",
+            "resolve_hf_finetune_model_profile",
+            "hf_finetune_model_profile_cli_args",
+            "hf_finetune_model_profile_lines",
+        ]
+        for name in profile_exports:
+            self.assertIn(name, st.__all__)
+            self.assertIs(getattr(st, name), getattr(hf_ft, name))
         generic_hf_ft_aliases = {
             "hf_finetune_preflight_report": "hf_gpt2_finetune_preflight_report",
             "hf_finetune_rust_dependency_report": (

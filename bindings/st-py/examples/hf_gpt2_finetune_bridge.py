@@ -36,6 +36,8 @@ from spiraltorch.hf_ft import (
     hf_gpt2_finetune_summary_lines,
     hf_gpt2_finetune_trainer_trace_callback,
     hf_gpt2_finetune_zspace_probe,
+    hf_finetune_model_profile_lines,
+    resolve_hf_finetune_model_profile,
     summarize_hf_gpt2_finetune_trainer_trace,
     write_hf_gpt2_finetune_run_card,
 )
@@ -54,7 +56,34 @@ HF_OFFLINE_ENV_VARS = (
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    parser.add_argument(
+        "--model-configs",
+        type=Path,
+        default=None,
+        help=(
+            "Optional JSON config with Hugging Face model profiles. "
+            "Omit to use SpiralTorch's built-in local smoke profiles."
+        ),
+    )
+    parser.add_argument(
+        "--model-profile",
+        default=None,
+        help=(
+            "Model profile id from --model-configs. The profile supplies model, "
+            "tokenizer, block-size, and generation defaults unless explicit CLI "
+            "flags override them."
+        ),
+    )
     parser.add_argument("--model-name", default=DEFAULT_MODEL)
+    parser.add_argument(
+        "--tokenizer-name",
+        default=None,
+        help=(
+            "Optional tokenizer id/path. Defaults to the selected model profile's "
+            "tokenizer_name, or --model-name when no profile tokenizer is active."
+        ),
+    )
     parser.add_argument("--dataset-name", default=DEFAULT_DATASET)
     parser.add_argument("--dataset-config", default=DEFAULT_DATASET_CONFIG)
     parser.add_argument(
@@ -404,6 +433,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--zspace-frequency", type=float, default=0.65)
     parser.add_argument("--zspace-strength", type=float, default=1.0)
     args = parser.parse_args(argv)
+    _apply_model_profile_defaults(args, parser=parser, raw_argv=raw_argv)
     if args.max_train_samples is not None and args.max_train_samples < 0:
         parser.error("--max-train-samples must be non-negative")
     if args.max_eval_samples is not None and args.max_eval_samples < 0:
@@ -593,6 +623,202 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             f"{args.resume_from_checkpoint}"
         )
     return args
+
+
+def _argv_has_option(raw_argv: Sequence[str], *names: str) -> bool:
+    prefixes = tuple(f"{name}=" for name in names)
+    return any(arg in names or arg.startswith(prefixes) for arg in raw_argv)
+
+
+def _profile_value(profile: Mapping[str, Any], section: str, key: str) -> Any:
+    payload = profile.get(section)
+    if isinstance(payload, Mapping):
+        return payload.get(key)
+    return None
+
+
+def _set_profile_default(
+    args: argparse.Namespace,
+    raw_argv: Sequence[str],
+    attr: str,
+    value: Any,
+    *flags: str,
+) -> None:
+    if value is None or _argv_has_option(raw_argv, *flags):
+        return
+    setattr(args, attr, value)
+
+
+def _apply_model_profile_defaults(
+    args: argparse.Namespace,
+    *,
+    parser: argparse.ArgumentParser,
+    raw_argv: Sequence[str],
+) -> None:
+    args._hf_finetune_model_profile = None
+    if args.model_configs is None and args.model_profile is None:
+        return
+    try:
+        profile = resolve_hf_finetune_model_profile(
+            args.model_configs,
+            profile=args.model_profile,
+        )
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        parser.error(f"failed to resolve model profile: {exc}")
+    args._hf_finetune_model_profile = profile
+    _set_profile_default(
+        args,
+        raw_argv,
+        "model_name",
+        profile.get("model_name"),
+        "--model-name",
+    )
+    if _argv_has_option(raw_argv, "--model-name") and not _argv_has_option(
+        raw_argv,
+        "--tokenizer-name",
+    ):
+        args.tokenizer_name = args.model_name
+    else:
+        _set_profile_default(
+            args,
+            raw_argv,
+            "tokenizer_name",
+            profile.get("tokenizer_name"),
+            "--tokenizer-name",
+        )
+    _set_profile_default(
+        args,
+        raw_argv,
+        "block_size",
+        _profile_value(profile, "training", "block_size") or profile.get("max_length"),
+        "--block-size",
+    )
+    for attr, key, flag in (
+        ("max_train_samples", "max_train_samples", "--max-train-samples"),
+        ("max_eval_samples", "max_eval_samples", "--max-eval-samples"),
+        (
+            "per_device_train_batch_size",
+            "per_device_train_batch_size",
+            "--per-device-train-batch-size",
+        ),
+        (
+            "per_device_eval_batch_size",
+            "per_device_eval_batch_size",
+            "--per-device-eval-batch-size",
+        ),
+        (
+            "gradient_accumulation_steps",
+            "gradient_accumulation_steps",
+            "--gradient-accumulation-steps",
+        ),
+        ("learning_rate", "learning_rate", "--learning-rate"),
+        ("num_train_epochs", "num_train_epochs", "--num-train-epochs"),
+        ("max_steps", "max_steps", "--max-steps"),
+        ("logging_steps", "logging_steps", "--logging-steps"),
+        ("save_steps", "save_steps", "--save-steps"),
+        ("eval_steps", "eval_steps", "--eval-steps"),
+        ("save_total_limit", "save_total_limit", "--save-total-limit"),
+    ):
+        _set_profile_default(
+            args,
+            raw_argv,
+            attr,
+            _profile_value(profile, "training", key),
+            flag,
+        )
+    for attr, key, flag in (
+        ("generation_max_new_tokens", "max_new_tokens", "--generation-max-new-tokens"),
+        ("generation_temperature", "temperature", "--generation-temperature"),
+        ("generation_top_k", "top_k", "--generation-top-k"),
+        ("generation_zspace_top_k", "zspace_top_k", "--generation-zspace-top-k"),
+        (
+            "generation_zspace_curvature",
+            "zspace_curvature",
+            "--generation-zspace-curvature",
+        ),
+        (
+            "generation_zspace_temperature",
+            "zspace_temperature",
+            "--generation-zspace-temperature",
+        ),
+        (
+            "generation_zspace_entropy_target",
+            "zspace_entropy_target",
+            "--generation-zspace-entropy-target",
+        ),
+        (
+            "generation_zspace_entropy_gain",
+            "zspace_entropy_gain",
+            "--generation-zspace-entropy-gain",
+        ),
+        (
+            "generation_zspace_entropy_tolerance",
+            "zspace_entropy_tolerance",
+            "--generation-zspace-entropy-tolerance",
+        ),
+        (
+            "generation_zspace_min_temperature",
+            "zspace_min_temperature",
+            "--generation-zspace-min-temperature",
+        ),
+        (
+            "generation_zspace_max_temperature",
+            "zspace_max_temperature",
+            "--generation-zspace-max-temperature",
+        ),
+        (
+            "generation_repression_window",
+            "repression_window",
+            "--generation-repression-window",
+        ),
+        (
+            "generation_repression_strength",
+            "repression_strength",
+            "--generation-repression-strength",
+        ),
+        (
+            "generation_last_token_repression",
+            "last_token_repression",
+            "--generation-last-token-repression",
+        ),
+        ("generation_ngram_size", "ngram_size", "--generation-ngram-size"),
+        ("generation_ngram_window", "ngram_window", "--generation-ngram-window"),
+        (
+            "generation_ngram_repression_strength",
+            "ngram_repression_strength",
+            "--generation-ngram-repression-strength",
+        ),
+        ("generation_ngram_decay", "ngram_decay", "--generation-ngram-decay"),
+        (
+            "generation_zspace_report_limit",
+            "zspace_report_limit",
+            "--generation-zspace-report-limit",
+        ),
+    ):
+        _set_profile_default(
+            args,
+            raw_argv,
+            attr,
+            _profile_value(profile, "generation", key),
+            flag,
+        )
+    for attr, key, flag in (
+        ("generation_do_sample", "do_sample", "--generation-do-sample"),
+        ("generation_zspace_softmax", "zspace_softmax", "--generation-zspace-softmax"),
+        (
+            "generation_zspace_keep_non_top_k",
+            "zspace_keep_non_top_k",
+            "--generation-zspace-keep-non-top-k",
+        ),
+        (
+            "generation_zspace_no_native",
+            "zspace_no_native",
+            "--generation-zspace-no-native",
+        ),
+    ):
+        value = _profile_value(profile, "generation", key)
+        if value is True and not _argv_has_option(raw_argv, flag):
+            setattr(args, attr, True)
 
 
 def _module(name: str) -> Any:
@@ -1586,6 +1812,23 @@ def _trainer_eval_report(
         )
 
 
+def _resolved_model_profile(args: argparse.Namespace) -> Mapping[str, Any] | None:
+    profile = getattr(args, "_hf_finetune_model_profile", None)
+    return profile if isinstance(profile, Mapping) else None
+
+
+def _tokenizer_name(args: argparse.Namespace) -> str:
+    tokenizer_name = getattr(args, "tokenizer_name", None)
+    if isinstance(tokenizer_name, str) and tokenizer_name.strip():
+        return tokenizer_name
+    profile = _resolved_model_profile(args)
+    if profile is not None:
+        profile_tokenizer = profile.get("tokenizer_name")
+        if isinstance(profile_tokenizer, str) and profile_tokenizer.strip():
+            return profile_tokenizer
+    return str(args.model_name)
+
+
 def _runtime_backends(args: argparse.Namespace) -> list[str]:
     return args.runtime_device_backend or list(HF_GPT2_FT_DEFAULT_DEVICE_BACKENDS)
 
@@ -1671,6 +1914,18 @@ def _base_run_card(
         "torch_version": getattr(torch, "__version__", None),
         "datasets_version": getattr(datasets, "__version__", None),
         "model_name": args.model_name,
+        "tokenizer_name": _tokenizer_name(args),
+        "model_configs": None if args.model_configs is None else str(args.model_configs),
+        "model_profile_id": (
+            None
+            if _resolved_model_profile(args) is None
+            else _resolved_model_profile(args).get("profile_id")
+        ),
+        "model_profile": (
+            None
+            if _resolved_model_profile(args) is None
+            else dict(_resolved_model_profile(args))
+        ),
         "model_train_dtype": args.model_train_dtype,
         "model_dtype_report": None,
         "resume_from_checkpoint": (
@@ -1831,6 +2086,15 @@ def _main_with_runtime_access(
         require_hf_gpt2_ft=not args.no_require_hf_gpt2_ft,
     )
     preflight["hf_remote_access"] = dict(remote_access_report)
+    preflight["model_configs"] = (
+        None if args.model_configs is None else str(args.model_configs)
+    )
+    preflight["model_profile"] = (
+        None
+        if _resolved_model_profile(args) is None
+        else dict(_resolved_model_profile(args))
+    )
+    preflight["tokenizer_name"] = _tokenizer_name(args)
     preflight["resume_from_checkpoint"] = (
         None
         if args.resume_from_checkpoint is None
@@ -1894,6 +2158,10 @@ def _main_with_runtime_access(
         corpus_file_report=corpus_file_report,
         corpus_scan_report=corpus_scan_report,
     )
+    profile = _resolved_model_profile(args)
+    if profile is not None:
+        for line in hf_finetune_model_profile_lines(profile):
+            print(line)
     for line in hf_gpt2_finetune_summary_lines(preflight):
         print(line)
     if not preflight["runtime_import_preflight_passed"]:
@@ -1924,7 +2192,7 @@ def _main_with_runtime_access(
     )
     try:
         tokenizer = transformers.AutoTokenizer.from_pretrained(
-            args.model_name,
+            _tokenizer_name(args),
             **_loader_kwargs(args),
         )
         if getattr(tokenizer, "pad_token", None) is None:

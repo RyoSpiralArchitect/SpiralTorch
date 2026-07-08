@@ -542,8 +542,15 @@ HF_GPT2_FT_DEFAULT_DEVICE_BACKENDS: List[str]
 HF_GPT2_FT_REQUIRED_PYTHON_PACKAGES: List[str]
 HF_GPT2_FT_REQUIRED_RUST_SURFACES: List[Dict[str, str]]
 HF_FINETUNE_DEFAULT_DEVICE_BACKENDS: List[str]
+HF_FINETUNE_DEFAULT_MODEL_CONFIGS: Dict[str, Any]
+HF_FINETUNE_MODEL_CONFIG_SCHEMA: str
 HF_FINETUNE_REQUIRED_PYTHON_PACKAGES: List[str]
 HF_FINETUNE_REQUIRED_RUST_SURFACES: List[Dict[str, str]]
+load_hf_finetune_model_configs: Callable[..., Dict[str, Any]]
+hf_finetune_model_profiles: Callable[..., Dict[str, Dict[str, Any]]]
+resolve_hf_finetune_model_profile: Callable[..., Dict[str, Any]]
+hf_finetune_model_profile_cli_args: Callable[..., List[str]]
+hf_finetune_model_profile_lines: Callable[..., List[str]]
 hf_finetune_rust_dependency_report: Callable[..., Dict[str, Any]]
 hf_finetune_corpus_file_report: Callable[..., Dict[str, Any]]
 hf_finetune_corpus_scan_report: Callable[..., Dict[str, Any]]
@@ -9054,6 +9061,8 @@ __all__ = [
     "hf_generation",
     "hf_ft_status",
     "HF_FINETUNE_DEFAULT_DEVICE_BACKENDS",
+    "HF_FINETUNE_DEFAULT_MODEL_CONFIGS",
+    "HF_FINETUNE_MODEL_CONFIG_SCHEMA",
     "HF_FINETUNE_REQUIRED_PYTHON_PACKAGES",
     "HF_FINETUNE_REQUIRED_RUST_SURFACES",
     "HF_GPT2_FT_DEFAULT_DEVICE_BACKENDS",
@@ -9074,6 +9083,9 @@ __all__ = [
     "hf_finetune_inference_distortion_runtime_plan",
     "hf_finetune_milestone_lines",
     "hf_finetune_milestone_report",
+    "hf_finetune_model_profile_cli_args",
+    "hf_finetune_model_profile_lines",
+    "hf_finetune_model_profiles",
     "hf_finetune_preflight_report",
     "hf_finetune_rust_dependency_report",
     "hf_finetune_monitor_lines",
@@ -9106,6 +9118,7 @@ __all__ = [
     "hf_finetune_trainer_trace_event",
     "hf_finetune_zspace_probe",
     "compare_hf_finetune_run_cards",
+    "load_hf_finetune_model_configs",
     "load_hf_finetune_run_card",
     "load_hf_finetune_sweep_report",
     "load_hf_finetune_status_history",
@@ -9115,6 +9128,7 @@ __all__ = [
     "summarize_hf_finetune_sweep_report_lines",
     "summarize_hf_finetune_status_history",
     "summarize_hf_finetune_trainer_trace",
+    "resolve_hf_finetune_model_profile",
     "write_hf_finetune_run_artifact_manifest",
     "write_hf_finetune_run_ops_snapshot",
     "write_hf_finetune_milestone_runtime_report",

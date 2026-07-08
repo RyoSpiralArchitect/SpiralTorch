@@ -9,6 +9,11 @@
       "architecture": "causal_lm",
       "checkpoint_prefix": "checkpoint-",
       "max_length": 128,
+      "training": {
+        "block_size": 128,
+        "max_train_samples": 4096,
+        "max_eval_samples": 512
+      },
       "generation": {
         "max_new_tokens": 80,
         "do_sample": false
@@ -22,6 +27,11 @@
       "architecture": "causal_lm",
       "checkpoint_prefix": "checkpoint-",
       "max_length": 128,
+      "training": {
+        "block_size": 128,
+        "max_train_samples": 4096,
+        "max_eval_samples": 512
+      },
       "generation": {
         "max_new_tokens": 80,
         "do_sample": false
@@ -35,6 +45,11 @@
       "architecture": "causal_lm",
       "checkpoint_prefix": "checkpoint-",
       "max_length": 64,
+      "training": {
+        "block_size": 64,
+        "max_train_samples": 128,
+        "max_eval_samples": 32
+      },
       "generation": {
         "max_new_tokens": 32,
         "do_sample": false
