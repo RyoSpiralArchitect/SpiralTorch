@@ -835,9 +835,11 @@ from .hf_ft_status import (
     hf_gpt2_finetune_milestone_runtime_sources,
     hf_gpt2_finetune_run_artifact_manifest,
     hf_gpt2_finetune_run_artifact_manifest_lines,
+    hf_gpt2_finetune_run_artifact_manifest_paths,
     hf_gpt2_finetune_status_history_lines,
     load_hf_gpt2_finetune_status_history,
     summarize_hf_gpt2_finetune_status_history,
+    write_hf_gpt2_finetune_run_artifact_manifest,
     write_hf_gpt2_finetune_milestone_runtime_report,
 )
 
@@ -1054,6 +1056,7 @@ _EXTRAS = [
     "hf_gpt2_finetune_milestone_runtime_sources",
     "hf_gpt2_finetune_run_artifact_manifest",
     "hf_gpt2_finetune_run_artifact_manifest_lines",
+    "hf_gpt2_finetune_run_artifact_manifest_paths",
     "hf_gpt2_finetune_status_history_lines",
     "hf_gpt2_finetune_scale_up_command",
     "hf_gpt2_finetune_scale_up_preflight_lines",
@@ -1073,6 +1076,7 @@ _EXTRAS = [
     "summarize_hf_gpt2_finetune_sweep_report_lines",
     "summarize_hf_gpt2_finetune_status_history",
     "summarize_hf_gpt2_finetune_trainer_trace",
+    "write_hf_gpt2_finetune_run_artifact_manifest",
     "write_hf_gpt2_finetune_milestone_runtime_report",
     "write_hf_gpt2_finetune_run_card",
     "write_hf_gpt2_finetune_trainer_trace_event",

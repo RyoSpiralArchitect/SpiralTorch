@@ -68,6 +68,11 @@ MILESTONE_RUNTIME_PATH = (
     / "examples"
     / "hf_gpt2_finetune_milestone_runtime.py"
 )
+RUN_ARTIFACTS_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "examples"
+    / "hf_gpt2_finetune_run_artifacts.py"
+)
 GENERATION_CURVE_PATH = (
     Path(__file__).resolve().parents[1]
     / "examples"
@@ -172,6 +177,17 @@ def load_milestone_runtime_example():
     spec = importlib.util.spec_from_file_location(
         "hf_gpt2_finetune_milestone_runtime_test",
         MILESTONE_RUNTIME_PATH,
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_run_artifacts_example():
+    spec = importlib.util.spec_from_file_location(
+        "hf_gpt2_finetune_run_artifacts_test",
+        RUN_ARTIFACTS_PATH,
     )
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -6526,6 +6542,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         )
 
     def test_package_run_artifact_manifest_inventory(self) -> None:
+        module = load_run_artifacts_example()
         with tempfile.TemporaryDirectory() as tmp:
             run_dir = Path(tmp) / "run"
             run_dir.mkdir()
@@ -6586,6 +6603,34 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             lines = st.hf_gpt2_finetune_run_artifact_manifest_lines(manifest)
             written = json.loads(out.read_text(encoding="utf-8"))
             written_lines = lines_out.read_text(encoding="utf-8").splitlines()
+            manifest_paths = st.hf_gpt2_finetune_run_artifact_manifest_paths(run_dir)
+            archived = st.write_hf_gpt2_finetune_run_artifact_manifest(
+                manifest,
+                run_dir=run_dir,
+                top_n=2,
+            )
+            archived_json = json.loads(
+                Path(archived["out"]).read_text(encoding="utf-8")
+            )
+            archived_lines = Path(archived["lines_out"]).read_text(
+                encoding="utf-8"
+            ).splitlines()
+            args = module.parse_args(
+                [
+                    "--run-dir",
+                    str(run_dir),
+                    "--generation-limit",
+                    "1",
+                    "--checkpoint-limit",
+                    "2",
+                    "--top-n",
+                    "2",
+                ]
+            )
+            cli_report = module.build_report(args)
+            cli_out, cli_lines = module.write_report(cli_report, args)
+            cli_json = json.loads(cli_out.read_text(encoding="utf-8"))
+            cli_line_rows = cli_lines.read_text(encoding="utf-8").splitlines()
 
         self.assertEqual(manifest["row_type"], "hf_gpt2_finetune_run_artifact_manifest")
         self.assertEqual(manifest["status"], "ready")
@@ -6604,6 +6649,22 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             str(direct_history),
         )
         self.assertEqual(written["artifact_count"], manifest["artifact_count"])
+        self.assertEqual(
+            manifest_paths["out"],
+            str(run_dir / "hf-gpt2-ft-run-artifact-manifest.json"),
+        )
+        self.assertEqual(
+            manifest_paths["lines_out"],
+            str(run_dir / "hf-gpt2-ft-run-artifact-manifest.txt"),
+        )
+        self.assertEqual(archived["out"], manifest_paths["out"])
+        self.assertEqual(archived["lines_out"], manifest_paths["lines_out"])
+        self.assertEqual(archived_json["artifact_count"], manifest["artifact_count"])
+        self.assertIn("hf_gpt2_ft_run_artifacts ", archived_lines[0])
+        self.assertEqual(cli_out, Path(manifest_paths["out"]))
+        self.assertEqual(cli_lines, Path(manifest_paths["lines_out"]))
+        self.assertEqual(cli_json["generation_sweep_count"], 1)
+        self.assertIn("checkpoints=2", cli_line_rows[0])
         self.assertIn("hf_gpt2_ft_run_artifacts ", lines[0])
         self.assertIn("latest_step=6144", lines[0])
         self.assertIn("generation_sweeps=1", written_lines[0])
@@ -7280,6 +7341,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("hf_gpt2_finetune_milestone_runtime_sources", st.__all__)
         self.assertIn("hf_gpt2_finetune_run_artifact_manifest", st.__all__)
         self.assertIn("hf_gpt2_finetune_run_artifact_manifest_lines", st.__all__)
+        self.assertIn("hf_gpt2_finetune_run_artifact_manifest_paths", st.__all__)
         self.assertIn("hf_gpt2_finetune_preflight_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_scale_up_command", st.__all__)
         self.assertIn("hf_gpt2_finetune_scale_up_preflight_lines", st.__all__)
@@ -7294,6 +7356,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("summarize_hf_gpt2_finetune_sweep_report_lines", st.__all__)
         self.assertIn(
             "write_hf_gpt2_finetune_milestone_runtime_report",
+            st.__all__,
+        )
+        self.assertIn(
+            "write_hf_gpt2_finetune_run_artifact_manifest",
             st.__all__,
         )
         self.assertIs(
@@ -7405,8 +7471,16 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             st.hf_ft_status.hf_gpt2_finetune_run_artifact_manifest_lines,
         )
         self.assertIs(
+            st.hf_gpt2_finetune_run_artifact_manifest_paths,
+            st.hf_ft_status.hf_gpt2_finetune_run_artifact_manifest_paths,
+        )
+        self.assertIs(
             st.write_hf_gpt2_finetune_milestone_runtime_report,
             st.hf_ft_status.write_hf_gpt2_finetune_milestone_runtime_report,
+        )
+        self.assertIs(
+            st.write_hf_gpt2_finetune_run_artifact_manifest,
+            st.hf_ft_status.write_hf_gpt2_finetune_run_artifact_manifest,
         )
         self.assertIs(
             st.hf_gpt2_finetune_training_telemetry_frame,

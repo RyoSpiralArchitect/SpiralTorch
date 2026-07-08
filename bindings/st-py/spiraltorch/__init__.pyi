@@ -252,6 +252,19 @@ def hf_gpt2_finetune_run_artifact_manifest_lines(
     top_n: int = ...,
 ) -> List[str]: ...
 
+def hf_gpt2_finetune_run_artifact_manifest_paths(
+    run_dir: str | PathLike[str],
+) -> Dict[str, str]: ...
+
+def write_hf_gpt2_finetune_run_artifact_manifest(
+    report: Mapping[str, Any],
+    *,
+    run_dir: str | PathLike[str] | None = ...,
+    out: str | PathLike[str] | None = ...,
+    lines_out: str | PathLike[str] | None = ...,
+    top_n: int = ...,
+) -> Dict[str, Any]: ...
+
 def summarize_transformers_trainer_runtime_bridge(
     transformers_trace_jsonl: str,
     trainer_trace_jsonl: str,
@@ -8976,6 +8989,7 @@ __all__ = [
     "hf_gpt2_finetune_milestone_runtime_sources",
     "hf_gpt2_finetune_run_artifact_manifest",
     "hf_gpt2_finetune_run_artifact_manifest_lines",
+    "hf_gpt2_finetune_run_artifact_manifest_paths",
     "hf_gpt2_finetune_status_history_lines",
     "hf_gpt2_finetune_scale_up_command",
     "hf_gpt2_finetune_scale_up_preflight_lines",
@@ -8995,6 +9009,7 @@ __all__ = [
     "summarize_hf_gpt2_finetune_sweep_report_lines",
     "summarize_hf_gpt2_finetune_status_history",
     "summarize_hf_gpt2_finetune_trainer_trace",
+    "write_hf_gpt2_finetune_run_artifact_manifest",
     "write_hf_gpt2_finetune_milestone_runtime_report",
     "write_hf_gpt2_finetune_run_card",
     "write_hf_gpt2_finetune_trainer_trace_event",

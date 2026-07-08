@@ -30,11 +30,13 @@ __all__ = [
     "hf_gpt2_finetune_milestone_runtime_sources",
     "hf_gpt2_finetune_run_artifact_manifest",
     "hf_gpt2_finetune_run_artifact_manifest_lines",
+    "hf_gpt2_finetune_run_artifact_manifest_paths",
     "hf_gpt2_finetune_status_history_lines",
     "load_hf_gpt2_finetune_status_history",
     "main",
     "parse_args",
     "summarize_hf_gpt2_finetune_status_history",
+    "write_hf_gpt2_finetune_run_artifact_manifest",
     "write_hf_gpt2_finetune_milestone_runtime_report",
 ]
 
@@ -1948,6 +1950,49 @@ def hf_gpt2_finetune_run_artifact_manifest_lines(
             [value for value in checkpoints if isinstance(value, Mapping)],
         )
     return lines
+
+
+def hf_gpt2_finetune_run_artifact_manifest_paths(
+    run_dir: str | Path,
+) -> dict[str, str]:
+    """Return standard JSON/TXT archive paths for a run artifact manifest."""
+
+    root = Path(run_dir)
+    return {
+        "out": str(root / "hf-gpt2-ft-run-artifact-manifest.json"),
+        "lines_out": str(root / "hf-gpt2-ft-run-artifact-manifest.txt"),
+    }
+
+
+def write_hf_gpt2_finetune_run_artifact_manifest(
+    report: Mapping[str, Any],
+    *,
+    run_dir: str | Path | None = None,
+    out: str | Path | None = None,
+    lines_out: str | Path | None = None,
+    top_n: int = 5,
+) -> dict[str, Any]:
+    """Write a run artifact manifest using explicit or standard archive paths."""
+
+    archived = dict(report)
+    root = Path(run_dir or archived.get("run_dir") or ".")
+    defaults = hf_gpt2_finetune_run_artifact_manifest_paths(root)
+    out_path = Path(out or defaults["out"])
+    lines_path = Path(lines_out or defaults["lines_out"])
+    archived["out"] = str(out_path)
+    archived["lines_out"] = str(lines_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    lines_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(
+        json.dumps(archived, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    lines_path.write_text(
+        "\n".join(hf_gpt2_finetune_run_artifact_manifest_lines(archived, top_n=top_n))
+        + "\n",
+        encoding="utf-8",
+    )
+    return archived
 
 
 def _runtime_milestone_step_token(value: Any) -> str:
