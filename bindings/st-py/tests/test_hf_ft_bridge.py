@@ -6303,6 +6303,53 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertTrue(
             any("hf_gpt2_ft_milestone_handoff_execution" in line for line in runtime_lines)
         )
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "run"
+            run_dir.mkdir()
+            direct_history = run_dir / "direct-run-status-history.jsonl"
+            eval_history = run_dir / "watch-6144-eval-confirm-history.jsonl"
+            checkpoint_history = run_dir / "watch-6144-checkpoint-confirm-history.jsonl"
+            for path, row in (
+                (direct_history, ready_direct),
+                (eval_history, ready_direct),
+                (
+                    checkpoint_history,
+                    {
+                        **ready_direct,
+                        "checkpoint_names": ["checkpoint-6144"],
+                        "latest_checkpoint": {"name": "checkpoint-6144"},
+                    },
+                ),
+            ):
+                path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+            source_calls = []
+
+            def fake_source_package_runner(**kwargs):
+                source_calls.append(dict(kwargs))
+                return {"status": "planned", "sweep_count": 3}
+
+            sources = st.hf_gpt2_finetune_milestone_runtime_sources(run_dir)
+            source_runtime = (
+                st.hf_gpt2_finetune_milestone_runtime_from_run_dir_report(
+                    run_dir,
+                    milestone_step=6144,
+                    label="source-ft",
+                    execute=True,
+                    use_package_api=True,
+                    package_runner=fake_source_package_runner,
+                )
+            )
+
+        self.assertEqual(sources["direct"], str(direct_history))
+        self.assertEqual(sources["eval"], str(eval_history))
+        self.assertEqual(sources["checkpoint"], str(checkpoint_history))
+        self.assertEqual(source_runtime["status"], "executed")
+        self.assertEqual(source_runtime["source_count"], 3)
+        self.assertEqual(source_runtime["sources"]["direct"], str(direct_history))
+        self.assertEqual(source_runtime["checkpoint"], "checkpoint-6144")
+        self.assertEqual(source_calls[0]["run_dir"], str(run_dir))
+        self.assertEqual(source_calls[0]["checkpoint"], "checkpoint-6144")
+        self.assertTrue(source_calls[0]["dry_run"])
         waiting_handoff = st.hf_gpt2_finetune_milestone_handoff_report(
             capture,
             run_dir="/tmp/spiraltorch-ft",
@@ -6961,8 +7008,13 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         )
         self.assertIn("hf_gpt2_finetune_milestone_handoff_lines", st.__all__)
         self.assertIn("hf_gpt2_finetune_milestone_handoff_report", st.__all__)
+        self.assertIn(
+            "hf_gpt2_finetune_milestone_runtime_from_run_dir_report",
+            st.__all__,
+        )
         self.assertIn("hf_gpt2_finetune_milestone_runtime_lines", st.__all__)
         self.assertIn("hf_gpt2_finetune_milestone_runtime_report", st.__all__)
+        self.assertIn("hf_gpt2_finetune_milestone_runtime_sources", st.__all__)
         self.assertIn("hf_gpt2_finetune_preflight_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_scale_up_command", st.__all__)
         self.assertIn("hf_gpt2_finetune_scale_up_preflight_lines", st.__all__)
@@ -7058,6 +7110,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIs(
             st.hf_gpt2_finetune_milestone_runtime_report,
             st.hf_ft_status.hf_gpt2_finetune_milestone_runtime_report,
+        )
+        self.assertIs(
+            st.hf_gpt2_finetune_milestone_runtime_from_run_dir_report,
+            st.hf_ft_status.hf_gpt2_finetune_milestone_runtime_from_run_dir_report,
+        )
+        self.assertIs(
+            st.hf_gpt2_finetune_milestone_runtime_sources,
+            st.hf_ft_status.hf_gpt2_finetune_milestone_runtime_sources,
         )
         self.assertIs(
             st.hf_gpt2_finetune_training_telemetry_frame,

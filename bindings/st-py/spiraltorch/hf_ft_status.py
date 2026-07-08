@@ -22,8 +22,10 @@ __all__ = [
     "hf_gpt2_finetune_milestone_handoff_execution_report",
     "hf_gpt2_finetune_milestone_handoff_lines",
     "hf_gpt2_finetune_milestone_handoff_report",
+    "hf_gpt2_finetune_milestone_runtime_from_run_dir_report",
     "hf_gpt2_finetune_milestone_runtime_lines",
     "hf_gpt2_finetune_milestone_runtime_report",
+    "hf_gpt2_finetune_milestone_runtime_sources",
     "hf_gpt2_finetune_status_history_lines",
     "load_hf_gpt2_finetune_status_history",
     "main",
@@ -1494,6 +1496,145 @@ def hf_gpt2_finetune_milestone_runtime_lines(
     if isinstance(execution, Mapping):
         lines.extend(hf_gpt2_finetune_milestone_handoff_execution_lines(execution))
     return lines
+
+
+def _latest_runtime_path(root: str | Path | None, patterns: Sequence[str]) -> Path | None:
+    if root is None:
+        return None
+    root_path = Path(root)
+    if not root_path.is_dir():
+        return None
+    candidates: list[Path] = []
+    for pattern in patterns:
+        candidates.extend(path for path in root_path.glob(pattern) if path.is_file())
+    if not candidates:
+        return None
+    return max(candidates, key=lambda path: (path.stat().st_mtime, str(path)))
+
+
+def hf_gpt2_finetune_milestone_runtime_sources(
+    run_dir: str | Path,
+    *,
+    next_run_dir: str | Path | None = None,
+    direct: str | Path | None = None,
+    eval_watch: str | Path | None = None,
+    checkpoint_watch: str | Path | None = None,
+    final_watch: str | Path | None = None,
+    wait_launch: str | Path | None = None,
+) -> dict[str, str | None]:
+    """Resolve standard status/watch artifacts for one FT run directory."""
+
+    run_root = Path(run_dir)
+    next_root = Path(next_run_dir) if next_run_dir is not None else None
+    sources = {
+        "direct": Path(direct)
+        if direct is not None
+        else _latest_runtime_path(
+            run_root,
+            [
+                "direct-run-status-history.jsonl",
+                "*run-status-history.jsonl",
+                "run-status-history.jsonl",
+                "direct-run-status.json",
+                "*run-status.json",
+                "run-status.json",
+                "status.json",
+            ],
+        ),
+        "eval": Path(eval_watch)
+        if eval_watch is not None
+        else _latest_runtime_path(
+            run_root,
+            ["watch-*-eval*-history.jsonl", "*eval*-history.jsonl"],
+        ),
+        "checkpoint": Path(checkpoint_watch)
+        if checkpoint_watch is not None
+        else _latest_runtime_path(
+            run_root,
+            ["watch-*-checkpoint*-history.jsonl", "*checkpoint*-history.jsonl"],
+        ),
+        "final": Path(final_watch)
+        if final_watch is not None
+        else _latest_runtime_path(
+            run_root,
+            ["watch-*-final*-history.jsonl", "*final*-history.jsonl"],
+        ),
+        "wait_launch": Path(wait_launch)
+        if wait_launch is not None
+        else (
+            _latest_runtime_path(
+                next_root,
+                ["*-wait-launch-history.jsonl", "*wait*launch*history.jsonl"],
+            )
+            or _latest_runtime_path(
+                run_root,
+                ["*-wait-launch-history.jsonl", "*wait*launch*history.jsonl"],
+            )
+        ),
+    }
+    return {
+        name: str(path) if isinstance(path, Path) else None
+        for name, path in sources.items()
+    }
+
+
+def hf_gpt2_finetune_milestone_runtime_from_run_dir_report(
+    run_dir: str | Path,
+    *,
+    next_run_dir: str | Path | None = None,
+    direct: Any = None,
+    eval_watch: Any = None,
+    checkpoint_watch: Any = None,
+    final_watch: Any = None,
+    wait_launch: Any = None,
+    out: str | Path | None = None,
+    lines_out: str | Path | None = None,
+    **runtime_kwargs: Any,
+) -> dict[str, Any]:
+    """Build a milestone runtime report by resolving standard artifacts from a run dir."""
+
+    sources = hf_gpt2_finetune_milestone_runtime_sources(
+        run_dir,
+        next_run_dir=next_run_dir,
+        direct=direct if isinstance(direct, (str, Path)) else None,
+        eval_watch=eval_watch if isinstance(eval_watch, (str, Path)) else None,
+        checkpoint_watch=checkpoint_watch
+        if isinstance(checkpoint_watch, (str, Path))
+        else None,
+        final_watch=final_watch if isinstance(final_watch, (str, Path)) else None,
+        wait_launch=wait_launch if isinstance(wait_launch, (str, Path)) else None,
+    )
+    report = hf_gpt2_finetune_milestone_runtime_report(
+        direct=direct if direct is not None else sources["direct"],
+        eval_watch=eval_watch if eval_watch is not None else sources["eval"],
+        checkpoint_watch=(
+            checkpoint_watch if checkpoint_watch is not None else sources["checkpoint"]
+        ),
+        final_watch=final_watch if final_watch is not None else sources["final"],
+        wait_launch=wait_launch if wait_launch is not None else sources["wait_launch"],
+        run_dir=run_dir,
+        next_run_dir=next_run_dir,
+        **runtime_kwargs,
+    )
+    report["sources"] = sources
+    report["source_count"] = sum(1 for value in sources.values() if value is not None)
+    if out is not None:
+        out_path = Path(out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        report["out"] = str(out_path)
+        out_path.write_text(
+            json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+    if lines_out is not None:
+        lines_path = Path(lines_out)
+        lines_path.parent.mkdir(parents=True, exist_ok=True)
+        report["lines_out"] = str(lines_path)
+        lines_path.write_text(
+            "\n".join(hf_gpt2_finetune_milestone_runtime_lines(report)) + "\n",
+            encoding="utf-8",
+        )
+    return report
 
 
 def summarize_hf_gpt2_finetune_status_history(

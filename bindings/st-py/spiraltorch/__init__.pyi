@@ -182,6 +182,31 @@ def hf_gpt2_finetune_milestone_runtime_lines(
     report: Mapping[str, Any],
 ) -> List[str]: ...
 
+def hf_gpt2_finetune_milestone_runtime_sources(
+    run_dir: str | PathLike[str],
+    *,
+    next_run_dir: str | PathLike[str] | None = ...,
+    direct: str | PathLike[str] | None = ...,
+    eval_watch: str | PathLike[str] | None = ...,
+    checkpoint_watch: str | PathLike[str] | None = ...,
+    final_watch: str | PathLike[str] | None = ...,
+    wait_launch: str | PathLike[str] | None = ...,
+) -> Dict[str, str | None]: ...
+
+def hf_gpt2_finetune_milestone_runtime_from_run_dir_report(
+    run_dir: str | PathLike[str],
+    *,
+    next_run_dir: str | PathLike[str] | None = ...,
+    direct: Any = ...,
+    eval_watch: Any = ...,
+    checkpoint_watch: Any = ...,
+    final_watch: Any = ...,
+    wait_launch: Any = ...,
+    out: str | PathLike[str] | None = ...,
+    lines_out: str | PathLike[str] | None = ...,
+    **runtime_kwargs: Any,
+) -> Dict[str, Any]: ...
+
 def summarize_transformers_trainer_runtime_bridge(
     transformers_trace_jsonl: str,
     trainer_trace_jsonl: str,
@@ -8898,8 +8923,10 @@ __all__ = [
     "hf_gpt2_finetune_milestone_handoff_execution_report",
     "hf_gpt2_finetune_milestone_handoff_lines",
     "hf_gpt2_finetune_milestone_handoff_report",
+    "hf_gpt2_finetune_milestone_runtime_from_run_dir_report",
     "hf_gpt2_finetune_milestone_runtime_lines",
     "hf_gpt2_finetune_milestone_runtime_report",
+    "hf_gpt2_finetune_milestone_runtime_sources",
     "hf_gpt2_finetune_status_history_lines",
     "hf_gpt2_finetune_scale_up_command",
     "hf_gpt2_finetune_scale_up_preflight_lines",
