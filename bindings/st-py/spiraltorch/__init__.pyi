@@ -382,6 +382,20 @@ def hf_gpt2_finetune_inference_distortion_request_kwargs(
     request: Mapping[str, object] | None = ...,
 ) -> Dict[str, object]: ...
 
+def hf_gpt2_finetune_milestone_report(
+    status_or_path: str | PathLike[str] | Mapping[str, object],
+    *,
+    milestone_step: int,
+    label: str | None = ...,
+) -> Dict[str, object]: ...
+
+def hf_gpt2_finetune_milestone_lines(
+    report_or_status: str | PathLike[str] | Mapping[str, object],
+    *,
+    milestone_step: int | None = ...,
+    label: str | None = ...,
+) -> List[str]: ...
+
 class ZSpaceActivationProbeHook:
     def __init__(
         self,
@@ -8615,6 +8629,8 @@ __all__ = [
     "hf_gpt2_finetune_inference_distortion_request_kwargs",
     "hf_gpt2_finetune_inference_distortion_runtime_adapter",
     "hf_gpt2_finetune_inference_distortion_runtime_plan",
+    "hf_gpt2_finetune_milestone_lines",
+    "hf_gpt2_finetune_milestone_report",
     "hf_gpt2_finetune_preflight_report",
     "hf_gpt2_finetune_rust_dependency_report",
     "hf_gpt2_finetune_status_history_lines",

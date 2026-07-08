@@ -39,6 +39,8 @@ __all__ = [
     "hf_gpt2_finetune_inference_distortion_request_kwargs",
     "hf_gpt2_finetune_inference_distortion_runtime_adapter",
     "hf_gpt2_finetune_inference_distortion_runtime_plan",
+    "hf_gpt2_finetune_milestone_lines",
+    "hf_gpt2_finetune_milestone_report",
     "hf_gpt2_finetune_rust_dependency_report",
     "hf_gpt2_finetune_scale_up_command",
     "hf_gpt2_finetune_scale_up_preflight_lines",
@@ -981,6 +983,498 @@ def hf_gpt2_finetune_inference_distortion_handoff_lines(
             f"args={generation_preview}"
         )
     return lines
+
+
+def _load_json_or_last_jsonl_mapping(path: Path) -> dict[str, object]:
+    text = path.read_text(encoding="utf-8")
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        payload = None
+    if isinstance(payload, Mapping):
+        return dict(payload)
+    if isinstance(payload, Sequence) and not isinstance(payload, (str, bytes)):
+        for item in reversed(payload):
+            if isinstance(item, Mapping):
+                return dict(item)
+    for line_number, line in reversed(list(enumerate(text.splitlines(), 1))):
+        if not line.strip():
+            continue
+        payload = json.loads(line)
+        if not isinstance(payload, Mapping):
+            raise ValueError(f"JSONL row {line_number} is not an object")
+        return dict(payload)
+    raise ValueError(f"{path} did not contain a JSON object")
+
+
+def _ft_payload(
+    status_or_path: str | Path | Mapping[str, object],
+) -> tuple[dict[str, object], str | None]:
+    if isinstance(status_or_path, (str, Path)):
+        path = Path(status_or_path)
+        return _load_json_or_last_jsonl_mapping(path), str(path)
+    if isinstance(status_or_path, Mapping):
+        return dict(status_or_path), None
+    raise TypeError("FT status must be a Mapping or path")
+
+
+def _ft_int_value(value: object) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value) if value.is_integer() else None
+    if isinstance(value, str):
+        try:
+            as_float = float(value)
+        except ValueError:
+            return None
+        return int(as_float) if as_float.is_integer() else None
+    return None
+
+
+def _ft_first_int(*values: object) -> int | None:
+    for value in values:
+        number = _ft_int_value(value)
+        if number is not None:
+            return number
+    return None
+
+
+def _ft_bool_value(value: object) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"true", "1", "yes", "y"}:
+            return True
+        if lowered in {"false", "0", "no", "n"}:
+            return False
+    return None
+
+
+def _ft_line_value(value: object) -> str:
+    if value is None:
+        return "none"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, float):
+        return f"{value:.6g}"
+    return str(value)
+
+
+def _ft_nested(row: Mapping[str, object], section: str, key: str) -> object:
+    value = row.get(section)
+    if not isinstance(value, Mapping):
+        return None
+    return value.get(key)
+
+
+def _ft_runtime_setting(row: Mapping[str, object], key: str) -> object:
+    runtime = row.get("runtime_settings")
+    if isinstance(runtime, Mapping) and key in runtime:
+        return runtime.get(key)
+    top_key = f"runtime_{key}"
+    if top_key in row:
+        return row.get(top_key)
+    if key == "min_free_disk_gb":
+        return row.get("min_free_disk_gb")
+    return None
+
+
+def _ft_log_latest_step(row: Mapping[str, object]) -> int | None:
+    return _ft_first_int(
+        row.get("log_latest_step"),
+        _ft_nested(row, "log_progress", "log_latest_step"),
+        _ft_nested(row, "trace", "trace_max_global_step"),
+    )
+
+
+def _ft_log_max_steps(row: Mapping[str, object]) -> int | None:
+    return _ft_first_int(
+        row.get("log_max_steps"),
+        _ft_nested(row, "log_progress", "log_max_steps"),
+        _ft_runtime_setting(row, "max_steps"),
+        _ft_nested(row, "trace", "max_steps"),
+    )
+
+
+def _ft_checkpoint_name(value: object) -> str | None:
+    if isinstance(value, Mapping):
+        name = value.get("name")
+        if isinstance(name, str) and name:
+            return name
+        path = value.get("path")
+        if isinstance(path, (str, Path)) and str(path):
+            return Path(path).name
+        return None
+    if isinstance(value, (str, Path)) and str(value):
+        return Path(value).name
+    return None
+
+
+def _ft_latest_checkpoint_name(row: Mapping[str, object]) -> str | None:
+    return _ft_checkpoint_name(row.get("latest_checkpoint"))
+
+
+def _ft_eval_points(
+    row: Mapping[str, object],
+    *,
+    watch_name: str | None = None,
+) -> list[dict[str, object]]:
+    points: list[dict[str, object]] = []
+    trace = row.get("trace")
+    if isinstance(trace, Mapping):
+        raw_points = trace.get("trace_eval_loss_points")
+        if isinstance(raw_points, Sequence) and not isinstance(raw_points, (str, bytes)):
+            for point in raw_points:
+                if isinstance(point, Mapping):
+                    item = dict(point)
+                    if watch_name is not None:
+                        item.setdefault("watch", watch_name)
+                    points.append(item)
+    raw_points = row.get("eval_loss_points")
+    if isinstance(raw_points, Sequence) and not isinstance(raw_points, (str, bytes)):
+        for point in raw_points:
+            if isinstance(point, Mapping):
+                item = dict(point)
+                if watch_name is not None:
+                    item.setdefault("watch", watch_name)
+                points.append(item)
+    return points
+
+
+def _ft_eval_point_for_step(
+    row: Mapping[str, object],
+    milestone_step: int,
+) -> dict[str, object] | None:
+    watches = row.get("watches")
+    if isinstance(watches, Mapping):
+        for watch_name in ("direct", "eval", "checkpoint", "final"):
+            watch = watches.get(watch_name)
+            if not isinstance(watch, Mapping):
+                continue
+            for point in _ft_eval_points(watch, watch_name=watch_name):
+                if _ft_int_value(point.get("step")) == milestone_step:
+                    return point
+    for point in _ft_eval_points(row, watch_name=None):
+        if _ft_int_value(point.get("step")) == milestone_step:
+            return point
+    return None
+
+
+def _ft_checkpoint_names(row: Mapping[str, object]) -> list[str]:
+    names: list[str] = []
+    raw_names = row.get("checkpoint_names")
+    if isinstance(raw_names, Sequence) and not isinstance(raw_names, (str, bytes)):
+        names.extend(str(name) for name in raw_names if isinstance(name, str))
+    checkpoints = row.get("checkpoints")
+    if isinstance(checkpoints, Sequence) and not isinstance(checkpoints, (str, bytes)):
+        for checkpoint in checkpoints:
+            name = _ft_checkpoint_name(checkpoint)
+            if name:
+                names.append(name)
+    latest = _ft_latest_checkpoint_name(row)
+    if latest:
+        names.append(latest)
+    final_checkpoint = row.get("final_checkpoint")
+    if _ft_bool_value(row.get("final_checkpoint_ready")) and isinstance(
+        final_checkpoint, str
+    ):
+        names.append(final_checkpoint)
+    return _unique(names)
+
+
+def _ft_has_checkpoint_for_step(
+    row: Mapping[str, object],
+    milestone_step: int,
+) -> bool:
+    checkpoint_name = f"checkpoint-{milestone_step}"
+    if checkpoint_name in _ft_checkpoint_names(row):
+        return True
+    watches = row.get("watches")
+    if isinstance(watches, Mapping):
+        for watch in watches.values():
+            if isinstance(watch, Mapping) and checkpoint_name in _ft_checkpoint_names(watch):
+                return True
+    return False
+
+
+def _ft_step_progress(
+    row: Mapping[str, object],
+    section: str,
+    key: str,
+    top_key: str,
+) -> object:
+    if top_key in row:
+        return row.get(top_key)
+    return _ft_nested(row, section, key)
+
+
+def hf_gpt2_finetune_milestone_report(
+    status_or_path: str | Path | Mapping[str, object],
+    *,
+    milestone_step: int,
+    label: str | None = None,
+) -> dict[str, object]:
+    """Summarize whether a long GPT-2 FT run has reached a durable milestone."""
+
+    if milestone_step < 0:
+        raise ValueError("milestone_step must be non-negative")
+    payload, source_path = _ft_payload(status_or_path)
+    source_row_type = payload.get("row_type")
+    existing_step = _ft_int_value(payload.get("milestone_step"))
+    has_existing_milestone = existing_step == milestone_step
+    log_step = _ft_log_latest_step(payload)
+    step_reached = (
+        _ft_bool_value(payload.get("milestone_step_reached"))
+        if has_existing_milestone
+        else None
+    )
+    if step_reached is None:
+        step_reached = log_step is not None and log_step >= milestone_step
+    steps_until = (
+        max(milestone_step - log_step, 0) if log_step is not None else None
+    )
+    eval_point = _ft_eval_point_for_step(payload, milestone_step)
+    eval_ready = (
+        _ft_bool_value(payload.get("milestone_eval_ready"))
+        if has_existing_milestone
+        else None
+    )
+    if eval_ready is None:
+        eval_ready = eval_point is not None
+    checkpoint_ready = (
+        _ft_bool_value(payload.get("milestone_checkpoint_ready"))
+        if has_existing_milestone
+        else None
+    )
+    if checkpoint_ready is None:
+        checkpoint_ready = _ft_has_checkpoint_for_step(payload, milestone_step)
+    milestone_ready = (
+        _ft_bool_value(payload.get("milestone_ready"))
+        if has_existing_milestone
+        else None
+    )
+    if milestone_ready is None:
+        milestone_ready = eval_ready and checkpoint_ready
+    status = (
+        str(payload.get("milestone_status"))
+        if has_existing_milestone and payload.get("milestone_status") is not None
+        else None
+    )
+    if status is None:
+        if eval_ready and checkpoint_ready:
+            status = "ready"
+        elif not step_reached:
+            status = "waiting_for_step"
+        elif not eval_ready:
+            status = "waiting_for_eval"
+        elif not checkpoint_ready:
+            status = "waiting_for_checkpoint"
+        else:
+            status = "unknown"
+    trace = _mapping_item(payload, "trace")
+    log_progress = _mapping_item(payload, "log_progress")
+    checkpoint_headroom = _mapping_item(payload, "checkpoint_headroom")
+    eval_loss = (
+        _safe_number(payload.get("milestone_eval_loss"))
+        if has_existing_milestone
+        else None
+    )
+    if eval_loss is None and eval_point is not None:
+        eval_loss = _safe_number(eval_point.get("eval_loss"))
+    eval_watch = (
+        payload.get("milestone_eval_watch")
+        if has_existing_milestone
+        else None
+    )
+    if eval_watch is None and eval_point is not None:
+        eval_watch = eval_point.get("watch")
+    report = {
+        "row_type": "hf_gpt2_finetune_milestone_report",
+        "label": label or payload.get("label") or f"milestone-{milestone_step}",
+        "source_path": source_path,
+        "source_row_type": source_row_type,
+        "status": status,
+        "milestone_status": status,
+        "milestone_step": milestone_step,
+        "milestone_ready": bool(milestone_ready),
+        "milestone_step_reached": bool(step_reached),
+        "milestone_steps_until": steps_until,
+        "milestone_eval_ready": bool(eval_ready),
+        "milestone_eval_loss": eval_loss,
+        "milestone_eval_step": milestone_step if eval_ready else None,
+        "milestone_eval_watch": eval_watch,
+        "milestone_checkpoint_ready": bool(checkpoint_ready),
+        "milestone_checkpoint": f"checkpoint-{milestone_step}",
+        "process_status": payload.get("process_status"),
+        "run_dir": payload.get("run_dir"),
+        "time_unix_s": _safe_number(payload.get("time_unix_s")),
+        "log_latest_step": log_step,
+        "log_max_steps": _ft_log_max_steps(payload),
+        "log_progress": _safe_number(
+            payload.get("log_progress")
+            if not isinstance(payload.get("log_progress"), Mapping)
+            else log_progress.get("log_progress")
+        ),
+        "log_remaining_seconds": _first_safe_number(
+            payload.get("log_remaining_seconds"),
+            log_progress.get("log_remaining_seconds"),
+        ),
+        "runtime_max_steps": _ft_runtime_setting(payload, "max_steps"),
+        "runtime_eval_steps": _ft_runtime_setting(payload, "eval_steps"),
+        "runtime_save_steps": _ft_runtime_setting(payload, "save_steps"),
+        "runtime_save_total_limit": _ft_runtime_setting(payload, "save_total_limit"),
+        "runtime_min_free_disk_gb": _ft_runtime_setting(payload, "min_free_disk_gb"),
+        "next_eval_step": _ft_step_progress(
+            payload, "eval_progress", "next_eval_step", "next_eval_step"
+        ),
+        "steps_until_next_eval": _ft_step_progress(
+            payload,
+            "eval_progress",
+            "log_steps_until_next_eval",
+            "steps_until_next_eval",
+        ),
+        "latest_due_eval_step": _ft_step_progress(
+            payload,
+            "eval_progress",
+            "latest_due_eval_step",
+            "latest_due_eval_step",
+        ),
+        "latest_due_eval_ready": _ft_step_progress(
+            payload,
+            "eval_progress",
+            "latest_due_eval_ready",
+            "latest_due_eval_ready",
+        ),
+        "pending_eval_step": _ft_step_progress(
+            payload, "eval_progress", "pending_eval_step", "pending_eval_step"
+        ),
+        "next_checkpoint_step": _ft_step_progress(
+            payload,
+            "checkpoint_progress",
+            "next_checkpoint_step",
+            "next_checkpoint_step",
+        ),
+        "steps_until_next_checkpoint": _ft_step_progress(
+            payload,
+            "checkpoint_progress",
+            "log_steps_until_next_checkpoint",
+            "steps_until_next_checkpoint",
+        ),
+        "last_eval_loss": _first_safe_number(
+            payload.get("last_eval_loss"),
+            trace.get("trace_last_eval_loss"),
+        ),
+        "last_eval_loss_step": _ft_first_int(
+            payload.get("last_eval_loss_step"),
+            trace.get("trace_effective_last_eval_loss_step"),
+            trace.get("trace_last_eval_loss_step"),
+        ),
+        "min_eval_loss": _first_safe_number(
+            payload.get("min_eval_loss"),
+            trace.get("trace_min_eval_loss"),
+        ),
+        "best_eval_loss_step": _ft_first_int(
+            payload.get("best_eval_loss_step"),
+            trace.get("trace_best_eval_loss_step"),
+        ),
+        "eval_loss_last_delta": _first_safe_number(
+            payload.get("eval_loss_last_delta"),
+            trace.get("trace_eval_loss_last_delta"),
+        ),
+        "eval_loss_projected_final_loss": _first_safe_number(
+            payload.get("eval_loss_projected_final_loss"),
+            trace.get("trace_eval_loss_projected_final_loss"),
+        ),
+        "eval_loss_monotonic_nonincreasing": payload.get(
+            "eval_loss_monotonic_nonincreasing"
+        )
+        if "eval_loss_monotonic_nonincreasing" in payload
+        else trace.get("trace_eval_loss_monotonic_nonincreasing"),
+        "checkpoint_count": payload.get("checkpoint_count"),
+        "latest_checkpoint": _ft_latest_checkpoint_name(payload),
+        "final_checkpoint_ready": payload.get("final_checkpoint_ready"),
+        "save_total_limit": payload.get("save_total_limit"),
+        "checkpoint_headroom_checkpoint_gb": _first_safe_number(
+            payload.get("checkpoint_headroom_checkpoint_gb"),
+            checkpoint_headroom.get("resume_checkpoint_gb"),
+        ),
+        "checkpoint_headroom_peak_gb": _first_safe_number(
+            payload.get("checkpoint_headroom_peak_gb"),
+            checkpoint_headroom.get("estimated_peak_checkpoint_gb"),
+        ),
+        "checkpoint_headroom_free_after_gb": _first_safe_number(
+            payload.get("checkpoint_headroom_free_after_gb"),
+            checkpoint_headroom.get("free_after_estimated_peak_gb"),
+        ),
+        "disk_free_gb": _safe_number(payload.get("disk_free_gb")),
+        "disk_margin_gb": _safe_number(payload.get("disk_margin_gb")),
+        "disk_status": payload.get("disk_status"),
+    }
+    return _json_safe(report)  # type: ignore[return-value]
+
+
+def hf_gpt2_finetune_milestone_lines(
+    report_or_status: str | Path | Mapping[str, object],
+    *,
+    milestone_step: int | None = None,
+    label: str | None = None,
+) -> list[str]:
+    """Render compact lines for an FT milestone report."""
+
+    if (
+        isinstance(report_or_status, Mapping)
+        and report_or_status.get("row_type") == "hf_gpt2_finetune_milestone_report"
+        and milestone_step is None
+        and label is None
+    ):
+        report = dict(report_or_status)
+    else:
+        if milestone_step is None:
+            payload, _ = _ft_payload(report_or_status)
+            milestone_step = _ft_int_value(payload.get("milestone_step"))
+            if milestone_step is None:
+                raise ValueError("milestone_step is required for non-report inputs")
+        report = hf_gpt2_finetune_milestone_report(
+            report_or_status,
+            milestone_step=milestone_step,
+            label=label,
+        )
+    return [
+        (
+            "hf_gpt2_ft_milestone "
+            f"label={_ft_line_value(report.get('label'))} "
+            f"status={_ft_line_value(report.get('milestone_status'))} "
+            f"ready={_ft_line_value(report.get('milestone_ready'))} "
+            f"step={_ft_line_value(report.get('milestone_step'))} "
+            f"reached={_ft_line_value(report.get('milestone_step_reached'))} "
+            f"steps_until={_ft_line_value(report.get('milestone_steps_until'))} "
+            f"eval_ready={_ft_line_value(report.get('milestone_eval_ready'))} "
+            f"eval_loss={_ft_line_value(report.get('milestone_eval_loss'))} "
+            f"eval_watch={_ft_line_value(report.get('milestone_eval_watch'))} "
+            f"checkpoint_ready={_ft_line_value(report.get('milestone_checkpoint_ready'))} "
+            f"checkpoint={_ft_line_value(report.get('milestone_checkpoint'))} "
+            f"process={_ft_line_value(report.get('process_status'))} "
+            f"log_step={_ft_line_value(report.get('log_latest_step'))} "
+            f"next_eval_step={_ft_line_value(report.get('next_eval_step'))} "
+            f"next_checkpoint_step={_ft_line_value(report.get('next_checkpoint_step'))} "
+            f"disk_status={_ft_line_value(report.get('disk_status'))}"
+        ),
+        (
+            "hf_gpt2_ft_milestone_eval "
+            f"label={_ft_line_value(report.get('label'))} "
+            f"last_step={_ft_line_value(report.get('last_eval_loss_step'))} "
+            f"last_loss={_ft_line_value(report.get('last_eval_loss'))} "
+            f"min_loss={_ft_line_value(report.get('min_eval_loss'))} "
+            f"best_step={_ft_line_value(report.get('best_eval_loss_step'))} "
+            f"last_delta={_ft_line_value(report.get('eval_loss_last_delta'))} "
+            f"projected_final={_ft_line_value(report.get('eval_loss_projected_final_loss'))} "
+            f"latest_due_eval_ready={_ft_line_value(report.get('latest_due_eval_ready'))}"
+        ),
+    ]
 
 
 def hf_gpt2_finetune_rust_dependency_report() -> dict[str, object]:
