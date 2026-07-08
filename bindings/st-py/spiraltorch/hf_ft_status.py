@@ -998,6 +998,7 @@ def hf_gpt2_finetune_milestone_capture_report(
         "should_continue_watch": next_action == "keep_watching",
         "monitor": snapshot,
     }
+    _copy_model_metadata(snapshot, state)
     if iteration is not None:
         state["iteration"] = iteration
     if commands is not None:
@@ -1026,6 +1027,10 @@ def hf_gpt2_finetune_milestone_capture_lines(
             "hf_gpt2_ft_milestone_capture "
             f"label={_number_text(state.get('label'))} "
             f"status={_number_text(state.get('status'))} "
+            f"profile={_number_text(state.get('model_profile_id'))} "
+            f"extends={_number_text(state.get('model_profile_extends'))} "
+            f"model={_number_text(state.get('model_name'))} "
+            f"tokenizer={_number_text(state.get('tokenizer_name'))} "
             f"milestone_ready={_number_text(state.get('milestone_ready'))} "
             f"milestone_step={_number_text(state.get('milestone_step'))} "
             f"steps_until={_number_text(state.get('milestone_steps_until'))} "
@@ -1190,7 +1195,7 @@ def hf_gpt2_finetune_milestone_handoff_report(
         command.append("--wait")
     if dry_run:
         command.append("--dry-run")
-    return {
+    report = {
         "row_type": "hf_gpt2_finetune_milestone_handoff",
         "status": status,
         "ready": status == "ready",
@@ -1212,6 +1217,13 @@ def hf_gpt2_finetune_milestone_handoff_report(
         "command_display": shlex.join(command),
         "capture": capture,
     }
+    _copy_model_metadata(capture, report)
+    _copy_model_metadata(
+        _run_card_model_metadata(resolved_curve_run_card),
+        report,
+        overwrite=False,
+    )
+    return report
 
 
 def hf_gpt2_finetune_milestone_handoff_lines(
@@ -1234,6 +1246,10 @@ def hf_gpt2_finetune_milestone_handoff_lines(
             f"ready={_number_text(report.get('ready'))} "
             f"action={_number_text(report.get('action'))} "
             f"label={_number_text(report.get('label'))} "
+            f"profile={_number_text(report.get('model_profile_id'))} "
+            f"extends={_number_text(report.get('model_profile_extends'))} "
+            f"model={_number_text(report.get('model_name'))} "
+            f"tokenizer={_number_text(report.get('tokenizer_name'))} "
             f"step={_number_text(report.get('milestone_step'))} "
             f"eval_loss={_number_text(report.get('milestone_eval_loss'))} "
             f"checkpoint={_number_text(report.get('checkpoint'))} "
@@ -1353,6 +1369,7 @@ def hf_gpt2_finetune_milestone_handoff_execution_report(
         "started_unix_s": started_unix_s,
         "handoff": handoff,
     }
+    _copy_model_metadata(handoff, report)
     if use_package_api and not package_kwargs:
         report["status"] = "missing_package_plan"
         report["error"] = "handoff report did not include package kwargs"
@@ -1485,6 +1502,10 @@ def hf_gpt2_finetune_milestone_handoff_execution_lines(
             f"ready={_number_text(report.get('ready'))} "
             f"handoff_status={_number_text(report.get('handoff_status'))} "
             f"action={_number_text(report.get('action'))} "
+            f"profile={_number_text(report.get('model_profile_id'))} "
+            f"extends={_number_text(report.get('model_profile_extends'))} "
+            f"model={_number_text(report.get('model_name'))} "
+            f"tokenizer={_number_text(report.get('tokenizer_name'))} "
             f"step={_number_text(report.get('milestone_step'))} "
             f"eval_loss={_number_text(report.get('milestone_eval_loss'))} "
             f"checkpoint={_number_text(report.get('checkpoint'))} "
@@ -1612,6 +1633,8 @@ def hf_gpt2_finetune_milestone_runtime_report(
         "handoff": handoff,
         "execution": execution,
     }
+    for metadata_source in (monitor, capture, handoff, execution):
+        _copy_model_metadata(metadata_source, report, overwrite=False)
     if out is not None:
         out_path = Path(out)
         out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1641,6 +1664,10 @@ def hf_gpt2_finetune_milestone_runtime_lines(
             "hf_gpt2_ft_milestone_runtime "
             f"status={_number_text(report.get('status'))} "
             f"label={_number_text(report.get('label'))} "
+            f"profile={_number_text(report.get('model_profile_id'))} "
+            f"extends={_number_text(report.get('model_profile_extends'))} "
+            f"model={_number_text(report.get('model_name'))} "
+            f"tokenizer={_number_text(report.get('tokenizer_name'))} "
             f"step={_number_text(report.get('milestone_step'))} "
             f"milestone_ready={_number_text(report.get('milestone_ready'))} "
             f"next_action={_number_text(report.get('next_action'))} "
@@ -1760,6 +1787,34 @@ def _empty_model_metadata() -> dict[str, Any]:
         "metadata_row_type": None,
         "run_card_row_type": None,
     }
+
+
+def _copy_model_metadata(
+    source: Mapping[str, Any] | None,
+    target: dict[str, Any],
+    *,
+    overwrite: bool = True,
+) -> None:
+    """Copy model/profile metadata without forcing callers to know its source."""
+
+    if not isinstance(source, Mapping):
+        return
+    for key in (
+        "model_profile_id",
+        "model_profile_extends",
+        "model_name",
+        "tokenizer_name",
+        "model_metadata_source_index",
+        "run_card_row_type",
+    ):
+        value = source.get(key)
+        if value is not None and (overwrite or target.get(key) is None):
+            target[key] = value
+    row_type = source.get("model_metadata_row_type") or source.get("metadata_row_type")
+    if row_type is not None and (
+        overwrite or target.get("model_metadata_row_type") is None
+    ):
+        target["model_metadata_row_type"] = row_type
 
 
 def _payload_model_metadata(payload: Mapping[str, Any] | None) -> dict[str, Any]:

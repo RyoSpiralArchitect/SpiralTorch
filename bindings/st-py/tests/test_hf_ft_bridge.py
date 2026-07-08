@@ -7107,6 +7107,12 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(capture["commands"][0]["returncode"], 0)
         self.assertEqual(capture["next_action"], "keep_watching")
         self.assertTrue(capture["should_continue_watch"])
+        self.assertEqual(capture["model_profile_id"], "causal-lm-local-smoke")
+        self.assertEqual(capture["model_profile_extends"], "pythia-70m-local-smoke")
+        self.assertEqual(capture["model_name"], "EleutherAI/pythia-70m-deduped")
+        self.assertEqual(capture["tokenizer_name"], "EleutherAI/pythia-70m-deduped")
+        self.assertIn("profile=causal-lm-local-smoke", capture_lines[0])
+        self.assertIn("extends=pythia-70m-local-smoke", capture_lines[0])
         self.assertIn("next_action=keep_watching", capture_lines[0])
 
         ready_direct = {
@@ -7161,6 +7167,9 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(handoff["status"], "ready")
         self.assertTrue(handoff["ready"])
         self.assertEqual(handoff["action"], "checkpoint_generation_control")
+        self.assertEqual(handoff["model_profile_id"], "causal-lm-local-smoke")
+        self.assertEqual(handoff["model_profile_extends"], "pythia-70m-local-smoke")
+        self.assertEqual(handoff["model_name"], "EleutherAI/pythia-70m-deduped")
         self.assertEqual(handoff["checkpoint"], "checkpoint-6144")
         self.assertEqual(handoff["checkpoint_path"], "/tmp/spiraltorch-ft/checkpoint-6144")
         self.assertEqual(
@@ -7181,6 +7190,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(handoff["package_kwargs"]["compare_with_sweep"], ["previous-sweep.json"])
         self.assertEqual(handoff["package_kwargs"]["compare_with_label"], ["previous"])
         self.assertTrue(handoff["package_kwargs"]["dry_run"])
+        self.assertIn("profile=causal-lm-local-smoke", handoff_lines[0])
+        self.assertIn("model=EleutherAI/pythia-70m-deduped", handoff_lines[0])
         self.assertIn("checkpoint=checkpoint-6144", handoff_lines[0])
         execution_plan = st.hf_gpt2_finetune_milestone_handoff_execution_report(
             handoff
@@ -7198,9 +7209,11 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(execution_plan["checkpoint"], "checkpoint-6144")
         self.assertEqual(execution_plan["command"], handoff["command"])
         self.assertEqual(execution_plan["execution_backend"], "command")
+        self.assertEqual(execution_plan["model_profile_id"], "causal-lm-local-smoke")
         self.assertIn("status=planned", execution_plan_lines[0])
         self.assertIn("run=false", execution_plan_lines[0])
         self.assertIn("backend=command", execution_plan_lines[0])
+        self.assertIn("profile=causal-lm-local-smoke", execution_plan_lines[0])
 
         runner_calls = []
 
@@ -7244,7 +7257,9 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(runner_calls[0]["env"]["SPIRALTORCH_TEST_FLAG"], "1")
         self.assertTrue(runner_calls[0]["capture_output"])
         self.assertEqual(runner_calls[0]["timeout"], 12.5)
+        self.assertEqual(execution["model_profile_id"], "causal-lm-local-smoke")
         self.assertIn("status=complete", execution_lines[0])
+        self.assertIn("profile=causal-lm-local-smoke", execution_lines[0])
         self.assertIn("command_report_status=planned", execution_lines[0])
         package_calls = []
 
@@ -7269,7 +7284,9 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(package_calls[0]["checkpoint"], "checkpoint-6144")
         self.assertEqual(package_calls[0]["run_dir"], "/tmp/spiraltorch-ft")
         self.assertTrue(package_calls[0]["dry_run"])
+        self.assertEqual(package_execution["model_profile_id"], "causal-lm-local-smoke")
         self.assertIn("backend=package_api", package_execution_lines[0])
+        self.assertIn("profile=causal-lm-local-smoke", package_execution_lines[0])
         self.assertIn("command_report_status=planned", package_execution_lines[0])
         runtime_calls = []
 
@@ -7304,11 +7321,15 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(runtime["execution_status"], "complete")
         self.assertEqual(runtime["execution_backend"], "package_api")
         self.assertEqual(runtime["checkpoint"], "checkpoint-6144")
+        self.assertEqual(runtime["model_profile_id"], "causal-lm-local-smoke")
+        self.assertEqual(runtime["model_profile_extends"], "pythia-70m-local-smoke")
+        self.assertEqual(runtime["model_name"], "EleutherAI/pythia-70m-deduped")
         self.assertEqual(runtime_calls[0]["checkpoint"], "checkpoint-6144")
         self.assertEqual(runtime_calls[0]["run_dir"], "/tmp/spiraltorch-ft")
         self.assertTrue(runtime_calls[0]["dry_run"])
         self.assertIn("hf_gpt2_ft_milestone_runtime", runtime_lines[0])
         self.assertIn("status=executed", runtime_lines[0])
+        self.assertIn("profile=causal-lm-local-smoke", runtime_lines[0])
         self.assertTrue(
             any("hf_gpt2_ft_milestone_handoff_execution" in line for line in runtime_lines)
         )
@@ -7586,6 +7607,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(written["milestone_step_source"], str(capture_json))
         self.assertEqual(written["execution_backend"], "package_api")
         self.assertEqual(written["checkpoint"], "checkpoint-6144")
+        self.assertEqual(written["model_profile_id"], "causal-lm-local-smoke")
+        self.assertEqual(written["model_profile_extends"], "pythia-70m-local-smoke")
+        self.assertEqual(written["model_name"], "EleutherAI/pythia-70m-deduped")
+        self.assertEqual(written["tokenizer_name"], "EleutherAI/pythia-70m-deduped")
         self.assertEqual(written["out"], str(out_path))
         self.assertEqual(written["lines_out"], str(lines_path))
         self.assertEqual(package_calls[0]["run_dir"], str(run_dir))
@@ -7595,10 +7620,13 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(package_paths["lines_out"], str(lines_path))
         self.assertEqual(archived["label"], "archive-ft")
         self.assertEqual(archived["milestone_step"], 6144)
+        self.assertEqual(archived["model_profile_id"], "causal-lm-local-smoke")
         self.assertEqual(archived_json["label"], "archive-ft")
+        self.assertEqual(archived_json["model_profile_id"], "causal-lm-local-smoke")
         self.assertEqual(archive_calls[0]["checkpoint"], "checkpoint-6144")
         self.assertTrue(archive_calls[0]["dry_run"])
         self.assertIn("status=executed", archived_lines[0])
+        self.assertIn("profile=causal-lm-local-smoke", archived_lines[0])
         self.assertEqual(ops["row_type"], "hf_finetune_run_ops_snapshot")
         self.assertEqual(ops["status"], "handoff_ready")
         self.assertEqual(ops["recommended_action"], "run_milestone_handoff")
@@ -7654,6 +7682,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("hf_gpt2_ft_run_ops ", legacy_lines[0])
         self.assertIn("hf_gpt2_ft_milestone_runtime ", written_lines[0])
         self.assertIn("status=executed", written_lines[0])
+        self.assertIn("profile=causal-lm-local-smoke", written_lines[0])
         self.assertTrue(
             any(
                 "hf_gpt2_ft_milestone_handoff_execution" in line
