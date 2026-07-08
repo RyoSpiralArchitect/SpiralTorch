@@ -8,6 +8,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -40,7 +41,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--max-steps", type=int, default=None)
     parser.add_argument("--eval-steps", type=int, default=None)
     parser.add_argument("--save-steps", type=int, default=None)
-    parser.add_argument("--save-total-limit", type=int, default=1)
+    parser.add_argument("--save-total-limit", type=int, default=None)
     parser.add_argument("--min-free-disk-gb", type=float, default=None)
     parser.add_argument("--final-checkpoint", default=None)
     parser.add_argument("--tail-evals", type=int, default=6)
@@ -139,6 +140,55 @@ def _process_status(pid: int | None) -> str:
     except PermissionError:
         return "alive"
     return "alive"
+
+
+def _process_command_args(pid: int | None) -> list[str]:
+    if pid is None:
+        return []
+    try:
+        result = subprocess.run(
+            ["ps", "-p", str(int(pid)), "-o", "command="],
+            capture_output=True,
+            check=False,
+            text=True,
+        )
+    except (OSError, ValueError):
+        return []
+    if result.returncode != 0:
+        return []
+    command = result.stdout.strip()
+    return command.split() if command else []
+
+
+def _command_flag_value(command: list[str], flag: str) -> str | None:
+    for index, item in enumerate(command):
+        if item == flag and index + 1 < len(command):
+            return command[index + 1]
+        if item.startswith(f"{flag}="):
+            return item.split("=", 1)[1]
+    return None
+
+
+def _positive_int_flag(command: list[str], flag: str) -> int | None:
+    value = _command_flag_value(command, flag)
+    if value is None:
+        return None
+    try:
+        parsed = int(float(value))
+    except ValueError:
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _nonnegative_float_flag(command: list[str], flag: str) -> float | None:
+    value = _command_flag_value(command, flag)
+    if value is None:
+        return None
+    try:
+        parsed = float(value)
+    except ValueError:
+        return None
+    return parsed if parsed >= 0.0 else None
 
 
 def _read_tail(path: Path, max_bytes: int) -> str:
@@ -425,8 +475,28 @@ def _checkpoint_rows(run_dir: Path) -> list[dict[str, Any]]:
 
 
 def summarize_run(args: argparse.Namespace) -> dict[str, Any]:
-    trace = _trace_summary(args.trace_jsonl, args.max_steps)
-    max_steps = _resolved_max_steps(trace, args.max_steps)
+    pid = _read_pid(args.pid_file)
+    process_command = _process_command_args(pid)
+    command_max_steps = _positive_int_flag(process_command, "--max-steps")
+    command_eval_steps = _positive_int_flag(process_command, "--eval-steps")
+    command_save_steps = _positive_int_flag(process_command, "--save-steps")
+    command_save_total_limit = _positive_int_flag(
+        process_command, "--save-total-limit"
+    )
+    command_min_free_disk_gb = _nonnegative_float_flag(
+        process_command, "--min-free-disk-gb"
+    )
+    initial_max_steps = args.max_steps or command_max_steps
+    trace = _trace_summary(args.trace_jsonl, initial_max_steps)
+    max_steps = _resolved_max_steps(trace, initial_max_steps)
+    eval_steps = args.eval_steps or command_eval_steps
+    save_steps = args.save_steps or command_save_steps
+    save_total_limit = args.save_total_limit or command_save_total_limit or 1
+    min_free_disk_gb = (
+        args.min_free_disk_gb
+        if args.min_free_disk_gb is not None
+        else command_min_free_disk_gb
+    )
     log_progress = _log_progress(
         args.log_file,
         int(args.log_tail_bytes),
@@ -440,11 +510,11 @@ def summarize_run(args: argparse.Namespace) -> dict[str, Any]:
     eval_progress = _eval_progress(
         trace,
         log_progress,
-        args.eval_steps,
+        eval_steps,
         max_steps,
     )
     checkpoint_progress = _step_interval_progress(
-        interval=args.save_steps,
+        interval=save_steps,
         log_progress=log_progress,
         trace=trace,
         max_steps=max_steps,
@@ -452,7 +522,6 @@ def summarize_run(args: argparse.Namespace) -> dict[str, Any]:
     )
     run_card = _load_json(args.run_card)
     checkpoint_card = _load_json(args.checkpoint_card)
-    pid = _read_pid(args.pid_file)
     checkpoints = _checkpoint_rows(args.run_dir)
     final_checkpoint_path = None
     final_checkpoint_ready = None
@@ -466,12 +535,12 @@ def summarize_run(args: argparse.Namespace) -> dict[str, Any]:
     disk_free_gb = disk.free / (1024.0**3)
     disk_margin_gb = (
         None
-        if args.min_free_disk_gb is None
-        else disk_free_gb - float(args.min_free_disk_gb)
+        if min_free_disk_gb is None
+        else disk_free_gb - float(min_free_disk_gb)
     )
     disk_status = (
         "unchecked"
-        if args.min_free_disk_gb is None
+        if min_free_disk_gb is None
         else "ok"
         if disk_margin_gb is not None and disk_margin_gb >= 0.0
         else "low"
@@ -483,7 +552,7 @@ def summarize_run(args: argparse.Namespace) -> dict[str, Any]:
     checkpoint_headroom = st.hf_gpt2_finetune_disk_headroom_plan(
         args.run_dir,
         resume_from_checkpoint=latest_checkpoint_path,
-        save_total_limit=args.save_total_limit,
+        save_total_limit=save_total_limit,
     )
     return {
         "row_type": "hf_gpt2_finetune_run_status",
@@ -495,6 +564,14 @@ def summarize_run(args: argparse.Namespace) -> dict[str, Any]:
         "checkpoint_progress": checkpoint_progress,
         "run_card_path": str(args.run_card),
         "run_card_status": (run_card or {}).get("status"),
+        "runtime_settings": {
+            "max_steps": max_steps,
+            "eval_steps": eval_steps,
+            "save_steps": save_steps,
+            "save_total_limit": save_total_limit,
+            "min_free_disk_gb": min_free_disk_gb,
+            "process_command_available": bool(process_command),
+        },
         "pid_file": str(args.pid_file),
         "pid": pid,
         "process_status": _process_status(pid),
@@ -506,14 +583,14 @@ def summarize_run(args: argparse.Namespace) -> dict[str, Any]:
         "checkpoint_count": len(checkpoints),
         "checkpoints": checkpoints,
         "latest_checkpoint": latest_checkpoint,
-        "save_total_limit": args.save_total_limit,
+        "save_total_limit": save_total_limit,
         "checkpoint_headroom": checkpoint_headroom,
         "final_checkpoint": final_checkpoint,
         "final_checkpoint_path": str(final_checkpoint_path)
         if final_checkpoint_path is not None
         else None,
         "final_checkpoint_ready": final_checkpoint_ready,
-        "min_free_disk_gb": args.min_free_disk_gb,
+        "min_free_disk_gb": min_free_disk_gb,
         "disk_free_gb": disk_free_gb,
         "disk_margin_gb": disk_margin_gb,
         "disk_status": disk_status,
@@ -527,6 +604,11 @@ def summarize_run(args: argparse.Namespace) -> dict[str, Any]:
 
 def status_lines(status: dict[str, Any], *, tail_evals: int) -> list[str]:
     trace = status.get("trace") if isinstance(status.get("trace"), dict) else {}
+    runtime_settings = (
+        status.get("runtime_settings")
+        if isinstance(status.get("runtime_settings"), dict)
+        else {}
+    )
     latest_checkpoint = status.get("latest_checkpoint")
     checkpoint_headroom = (
         status.get("checkpoint_headroom")
@@ -545,6 +627,9 @@ def status_lines(status: dict[str, Any], *, tail_evals: int) -> list[str]:
             f"latest_step={_number_text(trace.get('trace_max_global_step'))} "
             f"max_steps={_number_text(trace.get('max_steps'))} "
             f"progress={_number_text(trace.get('progress'))} "
+            f"runtime_eval_steps={_number_text(runtime_settings.get('eval_steps'))} "
+            f"runtime_save_steps={_number_text(runtime_settings.get('save_steps'))} "
+            f"runtime_process_command={_number_text(runtime_settings.get('process_command_available'))} "
             f"log_latest_step={_number_text((status.get('log_progress') or {}).get('log_latest_step'))} "
             f"log_progress={_number_text((status.get('log_progress') or {}).get('log_progress'))} "
             f"log_remaining_seconds={_number_text((status.get('log_progress') or {}).get('log_remaining_seconds'))} "

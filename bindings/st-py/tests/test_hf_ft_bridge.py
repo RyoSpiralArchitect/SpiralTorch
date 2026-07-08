@@ -4792,7 +4792,78 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         )
         self.assertEqual(watch_disk_low_written["watch_stop_reason"], "disk_low")
         self.assertEqual(watch_disk_low_written["disk_status"], "low")
-        self.assertEqual(written_lines, lines)
+        self.assertEqual(written_lines, module.status_lines(written, tail_evals=1))
+
+    def test_run_status_example_uses_live_process_training_flags(self) -> None:
+        module = load_run_status_example()
+        rows = [
+            {
+                "event": "log",
+                "global_step": 20,
+                "time_unix_s": 100.0,
+                "metrics": {"loss": 2.0},
+            },
+            {
+                "event": "evaluate",
+                "global_step": 20,
+                "time_unix_s": 110.0,
+                "metrics": {"eval_loss": 1.8},
+            },
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "run"
+            run_dir.mkdir()
+            trace_path = run_dir / "spiraltorch-hf-gpt2-ft-trainer-trace.jsonl"
+            for row in rows:
+                hf_ft.write_hf_gpt2_finetune_trainer_trace_event(row, trace_path)
+            (run_dir / "ft.log").write_text(
+                " 30%|###       | 24/80 [00:24<00:56,  1.00s/it]\n",
+                encoding="utf-8",
+            )
+            pid_file = run_dir / "ft.pid"
+            pid_file.write_text("12345\n", encoding="utf-8")
+            checkpoint = run_dir / "checkpoint-20"
+            checkpoint.mkdir()
+            (checkpoint / "model.safetensors").write_text("ready", encoding="utf-8")
+            args = module.parse_args([str(run_dir)])
+            with mock.patch.object(
+                module,
+                "_process_command_args",
+                return_value=[
+                    sys.executable,
+                    "bindings/st-py/examples/hf_gpt2_finetune_bridge.py",
+                    "--max-steps",
+                    "80",
+                    "--eval-steps",
+                    "20",
+                    "--save-steps",
+                    "40",
+                    "--save-total-limit",
+                    "2",
+                    "--min-free-disk-gb",
+                    "0",
+                ],
+            ):
+                status = module.summarize_run(args)
+                lines = module.status_lines(status, tail_evals=0)
+
+        self.assertEqual(status["trace"]["max_steps"], 80)
+        self.assertEqual(status["log_progress"]["log_latest_step"], 24)
+        self.assertEqual(status["log_progress"]["log_max_steps"], 80)
+        self.assertEqual(status["eval_progress"]["eval_steps"], 20)
+        self.assertEqual(status["eval_progress"]["next_eval_step"], 40)
+        self.assertEqual(status["checkpoint_progress"]["checkpoint_steps"], 40)
+        self.assertEqual(status["checkpoint_progress"]["next_checkpoint_step"], 40)
+        self.assertEqual(status["save_total_limit"], 2)
+        self.assertEqual(status["min_free_disk_gb"], 0.0)
+        self.assertEqual(status["disk_status"], "ok")
+        self.assertEqual(
+            status["checkpoint_headroom"]["estimated_peak_checkpoint_bytes"], 15
+        )
+        self.assertTrue(status["runtime_settings"]["process_command_available"])
+        self.assertIn("runtime_eval_steps=20", lines[0])
+        self.assertIn("runtime_save_steps=40", lines[0])
+        self.assertIn("save_total_limit=2", lines[0])
 
     def test_run_status_example_marks_due_eval_pending_during_eval_progress(self) -> None:
         module = load_run_status_example()
