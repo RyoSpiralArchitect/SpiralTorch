@@ -1448,6 +1448,19 @@ class SpiralTorchSmokeTest(unittest.TestCase):
                 pass
 
     def test_mellin_windowed_and_stable_eval_smoke(self) -> None:
+        fft = st.frac.fft_real([1.0, 0.0, 0.0, 0.0])
+        self.assertEqual(len(fft), 4)
+        self.assertTrue(all(abs(re - 1.0) < 1e-6 and abs(im) < 1e-6 for re, im in fft))
+        recovered = st.fft_complex32(fft, inverse=True)
+        self.assertAlmostEqual(recovered[0][0], 1.0, delta=1e-6)
+        self.assertAlmostEqual(recovered[0][1], 0.0, delta=1e-6)
+        self.assertTrue(
+            all(abs(re) < 1e-6 and abs(im) < 1e-6 for re, im in recovered[1:])
+        )
+        top, bottom = st.frac.fft_radix2((1.0, 0.0), (0.5, 0.0), (1.0, 0.0))
+        self.assertEqual(top, (1.5, 0.0))
+        self.assertEqual(bottom, (0.5, 0.0))
+
         for window in ("hann", "tukey", "blackman"):
             grid = st.frac.MellinLogGrid.exp_decay(
                 -3.0,

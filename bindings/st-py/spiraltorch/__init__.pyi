@@ -4334,6 +4334,24 @@ def fracdiff_gl_1d(
     pad_constant: Optional[float] = ...,
 ) -> List[float]: ...
 
+def fft_radix2(
+    a: Tuple[float, float],
+    b: Tuple[float, float],
+    twiddle: Tuple[float, float],
+) -> Tuple[Tuple[float, float], Tuple[float, float]]: ...
+
+def fft_radix4(
+    values: Sequence[Tuple[float, float]],
+    twiddles: Sequence[Tuple[float, float]],
+) -> List[Tuple[float, float]]: ...
+
+def fft_complex32(
+    signal: Sequence[Tuple[float, float]],
+    inverse: bool = ...,
+) -> List[Tuple[float, float]]: ...
+
+def fft_real(signal: Sequence[float], inverse: bool = ...) -> List[Tuple[float, float]]: ...
+
 def mean_squared_error(predictions: Tensor, targets: Tensor) -> float: ...
 
 def info_nce(
@@ -7751,6 +7769,27 @@ class _FracModule(ModuleType):
         pad_constant: Optional[float] = ...,
     ) -> List[float]: ...
 
+    def fft_radix2(
+        a: Tuple[float, float],
+        b: Tuple[float, float],
+        twiddle: Tuple[float, float],
+    ) -> Tuple[Tuple[float, float], Tuple[float, float]]: ...
+
+    def fft_radix4(
+        values: Sequence[Tuple[float, float]],
+        twiddles: Sequence[Tuple[float, float]],
+    ) -> List[Tuple[float, float]]: ...
+
+    def fft_complex32(
+        signal: Sequence[Tuple[float, float]],
+        inverse: bool = ...,
+    ) -> List[Tuple[float, float]]: ...
+
+    def fft_real(
+        signal: Sequence[float],
+        inverse: bool = ...,
+    ) -> List[Tuple[float, float]]: ...
+
     def fractal_field_probe(
         generator: Any,
         log_start: float,
@@ -9428,6 +9467,10 @@ __all__ = [
     "masked_mse",
     "gl_coeffs_adaptive",
     "fracdiff_gl_1d",
+    "fft_radix2",
+    "fft_radix4",
+    "fft_complex32",
+    "fft_real",
     "zspace_eval",
     "zspace_snapshot",
     "softlogic_feedback",

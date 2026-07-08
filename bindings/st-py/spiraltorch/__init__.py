@@ -6241,6 +6241,10 @@ _mirror_into_module(
     {
         "gl_coeffs_adaptive": ("frac.gl_coeffs_adaptive",),
         "fracdiff_gl_1d": ("frac.fracdiff_gl_1d",),
+        "fft_radix2": ("frac.fft_radix2",),
+        "fft_radix4": ("frac.fft_radix4",),
+        "fft_complex32": ("frac.fft_complex32",),
+        "fft_real": ("frac.fft_real",),
         "fractal_field_partial": (),
         "fractal_field_probe": (),
         "fractal_field_probe_to_zspace_partial": (),
@@ -7756,6 +7760,7 @@ _CORE_EXPORTS = [
     "CanvasTransformer","CanvasSnapshot","apply_vision_update",
     "ZMetrics","SliceProfile","step_many","stream_zspace_training",
     "info_nce","masked_mse","mean_squared_error",
+    "fft_radix2","fft_radix4","fft_complex32","fft_real",
     "init_backend","mps_probe","probe_gpu_path",
 ]
 for _name in _CORE_EXPORTS:

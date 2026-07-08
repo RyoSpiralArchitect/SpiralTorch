@@ -79,6 +79,10 @@ PY
   checkpoint presets.
 - `LanguageWaveEncoder` + `Hypergrad` so Python callers can stream Z-space
   text, accumulate gradients, and project back into the Poincaré ball.
+- `spiraltorch.frac` for Rust-backed fractional/Mellin/Z-space probes, including
+  `fft_real`, `fft_complex32`, `fft_radix2`, and `fft_radix4` from
+  `st-frac::fft` for lightweight spectrum checks during WASM, telemetry, and
+  local-HF inference experiments.
 - `TensorBiome` to cultivate open-topos rewrites, weight shoots, stack the
   harvest, and guard tensors that can be re-imported into Z-space.
 - Unified planning helpers (`plan`, `plan_topk`, `describe_device`,
@@ -94,6 +98,22 @@ PY
 - Lightweight runtime orchestration via `SpiralSession` so callers can record
   backend intent, inspect device preflight evidence, and reuse the same
   `RankPlan` helpers as the Rust executors.
+
+### Rust-to-Python exposure queue
+
+The next native surfaces to lift are intentionally ordered by immediate
+experiment value:
+
+1. `st-frac::fft` spectrum helpers, now exposed as `st.frac.fft_real`,
+   `st.frac.fft_complex32`, `st.frac.fft_radix2`, and `st.frac.fft_radix4`.
+2. `spiral-safety::drift_response` DRL metrics for FT telemetry penalties,
+   prompt/runtime drift reports, and safety-aware training traces.
+3. `st-kv` JSON/choice persistence so Python experiments can reuse the same
+   Redis-backed rank/choice stores as Rust workers.
+4. `st-backend-wgpu` kernel descriptor/report helpers for WGPU-first runtime
+   selection without requiring direct Rust inspection.
+5. Remaining `st-vision` volume/transform and `st-text` semantic helpers that
+   are useful to WASM demos and local-HF inference probes.
 - Hosted/API-model LLM runtime bridge via `ApiLLMZSpaceRuntime` so an
   OpenAI-compatible response mapping, SDK response object, or arbitrary API
   callable can be converted into Z-space metrics, usage/latency telemetry, and

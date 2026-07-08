@@ -7,6 +7,10 @@ use st_frac::cosmology::{
     assemble_pzeta as rust_assemble_pzeta, log_lattice_z_points as rust_log_lattice_z_points,
     LogZSeries, SeriesOptions, WeightNormalisation, WindowFunction,
 };
+use st_frac::fft::{
+    fft_inplace as rust_fft_inplace, radix2 as rust_radix2, radix4 as rust_radix4, Complex32,
+    FftError,
+};
 use st_frac::fractal_field::FractalFieldGenerator;
 use st_frac::mellin::{
     sample_log_uniform_exp_decay, sample_log_uniform_exp_decay_scaled, MellinEvalPlan,
@@ -78,6 +82,26 @@ fn fractal_err_to_py(err: st_frac::fractal_field::FractalFieldError) -> PyErr {
     PyValueError::new_err(err.to_string())
 }
 
+fn fft_err_to_py(err: FftError) -> PyErr {
+    PyValueError::new_err(err.to_string())
+}
+
+fn tuple_to_complex32(value: (f32, f32)) -> Complex32 {
+    Complex32::new(value.0, value.1)
+}
+
+fn complex32_to_tuple(value: Complex32) -> (f32, f32) {
+    (value.re, value.im)
+}
+
+fn tuples_to_complex32(values: Vec<(f32, f32)>) -> Vec<Complex32> {
+    values.into_iter().map(tuple_to_complex32).collect()
+}
+
+fn complex32_to_tuples(values: Vec<Complex32>) -> Vec<(f32, f32)> {
+    values.into_iter().map(complex32_to_tuple).collect()
+}
+
 fn parse_window(window: &str) -> PyResult<WindowFunction> {
     match window.to_ascii_lowercase().as_str() {
         "rect" | "rectangular" | "none" => Ok(WindowFunction::Rectangular),
@@ -124,6 +148,59 @@ fn normalisation_name(norm: WeightNormalisation) -> &'static str {
         WeightNormalisation::L1 => "l1",
         WeightNormalisation::L2 => "l2",
     }
+}
+
+#[pyfunction]
+fn fft_radix2(a: (f32, f32), b: (f32, f32), twiddle: (f32, f32)) -> ((f32, f32), (f32, f32)) {
+    let (top, bottom) = rust_radix2(
+        tuple_to_complex32(a),
+        tuple_to_complex32(b),
+        tuple_to_complex32(twiddle),
+    );
+    (complex32_to_tuple(top), complex32_to_tuple(bottom))
+}
+
+#[pyfunction]
+fn fft_radix4(values: Vec<(f32, f32)>, twiddles: Vec<(f32, f32)>) -> PyResult<Vec<(f32, f32)>> {
+    let values: [(f32, f32); 4] = values
+        .try_into()
+        .map_err(|_| PyValueError::new_err("values must contain exactly four complex tuples"))?;
+    let twiddles: [(f32, f32); 3] = twiddles
+        .try_into()
+        .map_err(|_| PyValueError::new_err("twiddles must contain exactly three complex tuples"))?;
+    let out = rust_radix4(
+        [
+            tuple_to_complex32(values[0]),
+            tuple_to_complex32(values[1]),
+            tuple_to_complex32(values[2]),
+            tuple_to_complex32(values[3]),
+        ],
+        [
+            tuple_to_complex32(twiddles[0]),
+            tuple_to_complex32(twiddles[1]),
+            tuple_to_complex32(twiddles[2]),
+        ],
+    );
+    Ok(out.into_iter().map(complex32_to_tuple).collect())
+}
+
+#[pyfunction]
+#[pyo3(signature = (signal, inverse=false))]
+fn fft_complex32(signal: Vec<(f32, f32)>, inverse: bool) -> PyResult<Vec<(f32, f32)>> {
+    let mut values = tuples_to_complex32(signal);
+    rust_fft_inplace(&mut values, inverse).map_err(fft_err_to_py)?;
+    Ok(complex32_to_tuples(values))
+}
+
+#[pyfunction]
+#[pyo3(signature = (signal, inverse=false))]
+fn fft_real(signal: Vec<f32>, inverse: bool) -> PyResult<Vec<(f32, f32)>> {
+    let mut values: Vec<Complex32> = signal
+        .into_iter()
+        .map(|value| Complex32::new(value, 0.0))
+        .collect();
+    rust_fft_inplace(&mut values, inverse).map_err(fft_err_to_py)?;
+    Ok(complex32_to_tuples(values))
 }
 
 #[pyclass(module = "spiraltorch.frac", name = "FractalFieldGenerator")]
@@ -744,6 +821,10 @@ pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()>
     let module = PyModule::new(py, "frac")?;
     module.add_function(wrap_pyfunction!(gl_coeffs_adaptive, &module)?)?;
     module.add_function(wrap_pyfunction!(fracdiff_gl_1d, &module)?)?;
+    module.add_function(wrap_pyfunction!(fft_radix2, &module)?)?;
+    module.add_function(wrap_pyfunction!(fft_radix4, &module)?)?;
+    module.add_function(wrap_pyfunction!(fft_complex32, &module)?)?;
+    module.add_function(wrap_pyfunction!(fft_real, &module)?)?;
     module.add_function(wrap_pyfunction!(mellin_exp_decay_samples, &module)?)?;
     module.add_function(wrap_pyfunction!(mellin_exp_decay_samples_scaled, &module)?)?;
     module.add_function(wrap_pyfunction!(log_lattice_z_points, &module)?)?;
@@ -763,6 +844,10 @@ pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()>
             "log_lattice_z_points",
             "gl_coeffs_adaptive",
             "fracdiff_gl_1d",
+            "fft_radix2",
+            "fft_radix4",
+            "fft_complex32",
+            "fft_real",
             "mellin_exp_decay_samples",
             "mellin_exp_decay_samples_scaled",
             "FractalFieldGenerator",
@@ -772,5 +857,11 @@ pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()>
         ],
     )?;
     parent.add_submodule(&module)?;
+    parent.add_function(wrap_pyfunction!(gl_coeffs_adaptive, parent)?)?;
+    parent.add_function(wrap_pyfunction!(fracdiff_gl_1d, parent)?)?;
+    parent.add_function(wrap_pyfunction!(fft_radix2, parent)?)?;
+    parent.add_function(wrap_pyfunction!(fft_radix4, parent)?)?;
+    parent.add_function(wrap_pyfunction!(fft_complex32, parent)?)?;
+    parent.add_function(wrap_pyfunction!(fft_real, parent)?)?;
     Ok(())
 }
