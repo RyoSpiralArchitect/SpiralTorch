@@ -4513,17 +4513,36 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 "returncode": None,
             }
         ]
+        direct_status = {
+            **eval_rows[-1],
+            "time_unix_s": 200.0,
+            "log_progress": {
+                "log_latest_step": 5800,
+                "log_max_steps": 8192,
+                "log_remaining_seconds": 390.0,
+            },
+            "eval_progress": {
+                "next_eval_step": 6144,
+                "log_steps_until_next_eval": 344,
+            },
+            "checkpoint_progress": {
+                "next_checkpoint_step": 6144,
+                "log_steps_until_next_checkpoint": 344,
+            },
+        }
         with tempfile.TemporaryDirectory() as tmp:
             run_dir = Path(tmp) / "run"
             next_run_dir = Path(tmp) / "next"
             run_dir.mkdir()
             next_run_dir.mkdir()
+            run_status = run_dir / "direct-run-status.json"
             eval_history = run_dir / "watch-6144-eval-confirm-history.jsonl"
             checkpoint_history = (
                 run_dir / "watch-6144-checkpoint-confirm-history.jsonl"
             )
             final_history = run_dir / "watch-8192-final-history.jsonl"
             wait_history = next_run_dir / "finewebedu-16384-wait-launch-history.jsonl"
+            run_status.write_text(json.dumps(direct_status), encoding="utf-8")
             for path, rows in [
                 (eval_history, eval_rows),
                 (checkpoint_history, checkpoint_rows),
@@ -4542,6 +4561,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 str(next_run_dir),
                 "--label",
                 "long-ft",
+                "--run-status-json",
+                str(run_status),
                 "--out",
                 str(out_path),
                 "--lines-out",
@@ -4555,41 +4576,53 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             written_lines = lines_path.read_text(encoding="utf-8").splitlines()
 
         self.assertEqual(snapshot["row_type"], "hf_gpt2_ft_monitor_snapshot")
-        self.assertEqual(snapshot["primary_watch"], "eval")
+        self.assertEqual(snapshot["primary_watch"], "direct")
         self.assertEqual(snapshot["process_status"], "alive")
-        self.assertEqual(snapshot["log_latest_step"], 5716)
+        self.assertEqual(snapshot["log_latest_step"], 5800)
         self.assertEqual(snapshot["log_max_steps"], 8192)
+        self.assertEqual(snapshot["log_remaining_seconds"], 390.0)
+        self.assertEqual(snapshot["estimated_seconds_until_final"], 390.0)
         self.assertEqual(snapshot["last_eval_loss_step"], 5632)
         self.assertEqual(snapshot["last_eval_loss"], 3.27533)
         self.assertEqual(snapshot["min_eval_loss"], 3.27533)
         self.assertEqual(snapshot["best_eval_loss_step"], 5632)
         self.assertEqual(snapshot["next_eval_step"], 6144)
-        self.assertEqual(snapshot["steps_until_next_eval"], 428)
+        self.assertEqual(snapshot["steps_until_next_eval"], 344)
+        self.assertAlmostEqual(
+            snapshot["estimated_seconds_until_next_eval"],
+            344.0 * 390.0 / 2392.0,
+        )
         self.assertEqual(snapshot["next_checkpoint_step"], 6144)
-        self.assertEqual(snapshot["steps_until_next_checkpoint"], 428)
+        self.assertEqual(snapshot["steps_until_next_checkpoint"], 344)
         self.assertEqual(snapshot["disk_status"], "ok")
         self.assertEqual(snapshot["disk_margin_gb"], 5.5)
+        self.assertTrue(snapshot["direct_status_available"])
         self.assertFalse(snapshot["eval_watch_ready"])
         self.assertEqual(snapshot["eval_watch_step"], 6144)
         self.assertFalse(snapshot["wait_launch_checkpoint_ready"])
         self.assertFalse(snapshot["wait_launch_launched"])
         self.assertEqual(snapshot["wait_launch_status"], "waiting_for_process")
-        self.assertEqual(written["log_latest_step"], 5716)
+        self.assertEqual(written["log_latest_step"], 5800)
         self.assertIn("label=long-ft", lines[0])
-        self.assertIn("primary=eval", lines[0])
-        self.assertIn("log_step=5716", lines[0])
+        self.assertIn("primary=direct", lines[0])
+        self.assertIn("log_step=5800", lines[0])
+        self.assertIn("log_remaining_seconds=390", lines[0])
+        self.assertIn("estimated_seconds_until_final=390", lines[0])
         self.assertIn("last_eval_step=5632", lines[0])
         self.assertIn("last_eval_loss=3.27533", lines[0])
         self.assertIn("next_eval_step=6144", lines[0])
-        self.assertIn("steps_until_next_checkpoint=428", lines[0])
+        self.assertIn("steps_until_next_checkpoint=344", lines[0])
         self.assertIn("disk_margin_gb=5.5", lines[0])
+        self.assertIn("direct_status_available=true", lines[0])
         self.assertIn("eval_watch_ready=false", lines[0])
         self.assertIn("wait_status=waiting_for_process", lines[0])
-        self.assertIn("name=eval", lines[1])
-        self.assertIn("rows=2", lines[1])
-        self.assertIn("name=checkpoint", lines[2])
-        self.assertIn("name=final", lines[3])
-        self.assertIn("status=waiting_for_process", lines[4])
+        self.assertIn("name=direct", lines[1])
+        self.assertIn("rows=1", lines[1])
+        self.assertIn("name=eval", lines[2])
+        self.assertIn("rows=2", lines[2])
+        self.assertIn("name=checkpoint", lines[3])
+        self.assertIn("name=final", lines[4])
+        self.assertIn("status=waiting_for_process", lines[5])
         self.assertEqual(written_lines, lines)
 
     def test_run_card_summary_supplements_trace_telemetry_from_jsonl(self) -> None:

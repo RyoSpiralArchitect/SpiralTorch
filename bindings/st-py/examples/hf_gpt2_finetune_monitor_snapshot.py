@@ -15,6 +15,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("run_dir", nargs="?", type=Path)
     parser.add_argument("--next-run-dir", type=Path, default=None)
     parser.add_argument("--label", default=None)
+    parser.add_argument("--run-status-json", type=Path, default=None)
     parser.add_argument("--eval-history-jsonl", type=Path, default=None)
     parser.add_argument("--checkpoint-history-jsonl", type=Path, default=None)
     parser.add_argument("--final-history-jsonl", type=Path, default=None)
@@ -25,6 +26,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--require-wait-launched", action="store_true")
     args = parser.parse_args(argv)
     provided = [
+        args.run_status_json,
         args.eval_history_jsonl,
         args.checkpoint_history_jsonl,
         args.final_history_jsonl,
@@ -38,7 +40,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error(f"next_run_dir does not exist: {args.next_run_dir}")
     for path in provided:
         if path is not None and not path.is_file():
-            parser.error(f"history JSONL does not exist: {path}")
+            parser.error(f"monitor input does not exist: {path}")
     return args
 
 
@@ -71,6 +73,13 @@ def _load_history(path: Path) -> list[dict[str, Any]]:
             raise ValueError(f"history row {line_number} is not an object")
         rows.append(payload)
     return rows
+
+
+def _load_status_json(path: Path) -> dict[str, Any]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("run status JSON is not an object")
+    return payload
 
 
 def _latest_path(directory: Path | None, patterns: list[str]) -> Path | None:
@@ -142,6 +151,26 @@ def _estimated_seconds(steps: Any, rows: list[dict[str, Any]]) -> float | None:
     return None
 
 
+def _estimated_seconds_with_fallback(
+    steps: Any,
+    rows: list[dict[str, Any]],
+    *,
+    total_steps: Any,
+    total_seconds: Any,
+) -> float | None:
+    estimated = _estimated_seconds(steps, rows)
+    if estimated is not None:
+        return estimated
+    if (
+        isinstance(steps, int)
+        and isinstance(total_steps, int)
+        and total_steps > 0
+        and isinstance(total_seconds, (int, float))
+    ):
+        return float(steps) * float(total_seconds) / float(total_steps)
+    return None
+
+
 def _status_watch_summary(
     rows: list[dict[str, Any]],
     *,
@@ -172,6 +201,7 @@ def _status_watch_summary(
         if isinstance(max_steps, int) and isinstance(log_step, int)
         else None
     )
+    log_remaining_seconds = _nested(last, "log_progress", "log_remaining_seconds")
     return {
         "name": name,
         "history_jsonl": str(history_jsonl) if history_jsonl is not None else None,
@@ -183,22 +213,31 @@ def _status_watch_summary(
         "process_status": last.get("process_status"),
         "log_latest_step": log_step,
         "log_max_steps": max_steps,
-        "log_remaining_seconds": _nested(
-            last, "log_progress", "log_remaining_seconds"
-        ),
+        "log_remaining_seconds": log_remaining_seconds,
         "steps_until_final": steps_until_final,
-        "estimated_seconds_until_final": _estimated_seconds(steps_until_final, rows),
+        "estimated_seconds_until_final": _estimated_seconds_with_fallback(
+            steps_until_final,
+            rows,
+            total_steps=steps_until_final,
+            total_seconds=log_remaining_seconds,
+        ),
         "next_eval_step": _nested(last, "eval_progress", "next_eval_step"),
         "steps_until_next_eval": steps_until_next_eval,
-        "estimated_seconds_until_next_eval": _estimated_seconds(
-            steps_until_next_eval, rows
+        "estimated_seconds_until_next_eval": _estimated_seconds_with_fallback(
+            steps_until_next_eval,
+            rows,
+            total_steps=steps_until_final,
+            total_seconds=log_remaining_seconds,
         ),
         "next_checkpoint_step": _nested(
             last, "checkpoint_progress", "next_checkpoint_step"
         ),
         "steps_until_next_checkpoint": steps_until_next_checkpoint,
-        "estimated_seconds_until_next_checkpoint": _estimated_seconds(
-            steps_until_next_checkpoint, rows
+        "estimated_seconds_until_next_checkpoint": _estimated_seconds_with_fallback(
+            steps_until_next_checkpoint,
+            rows,
+            total_steps=steps_until_final,
+            total_seconds=log_remaining_seconds,
         ),
         "last_loss": losses[-1] if losses else None,
         "min_loss": min(losses) if losses else None,
@@ -269,6 +308,11 @@ def _latest_status_watch(watches: dict[str, dict[str, Any]]) -> dict[str, Any]:
 
 def _resolve_sources(args: argparse.Namespace) -> dict[str, Path | None]:
     return {
+        "direct": args.run_status_json
+        or _latest_path(
+            args.run_dir,
+            ["*run-status.json", "run-status.json", "status.json"],
+        ),
         "eval": args.eval_history_jsonl
         or _latest_path(
             args.run_dir,
@@ -300,14 +344,19 @@ def build_monitor_snapshot(args: argparse.Namespace) -> dict[str, Any]:
     paths = _resolve_sources(args)
     loaded: dict[str, list[dict[str, Any]]] = {}
     for name, path in paths.items():
-        loaded[name] = _load_history(path) if path is not None else []
+        if path is None:
+            loaded[name] = []
+        elif name == "direct":
+            loaded[name] = [_load_status_json(path)]
+        else:
+            loaded[name] = _load_history(path)
     watches = {
         name: _status_watch_summary(
             loaded[name],
             name=name,
             history_jsonl=paths[name],
         )
-        for name in ("eval", "checkpoint", "final")
+        for name in ("direct", "eval", "checkpoint", "final")
     }
     wait_launch = _wait_launch_summary(
         loaded["wait_launch"], history_jsonl=paths["wait_launch"]
@@ -324,6 +373,7 @@ def build_monitor_snapshot(args: argparse.Namespace) -> dict[str, Any]:
     eval_watch = watches["eval"]
     checkpoint_watch = watches["checkpoint"]
     final_watch = watches["final"]
+    direct_watch = watches["direct"]
     return {
         "row_type": "hf_gpt2_ft_monitor_snapshot",
         "label": args.label,
@@ -364,6 +414,7 @@ def build_monitor_snapshot(args: argparse.Namespace) -> dict[str, Any]:
         "disk_free_gb": primary.get("disk_free_gb"),
         "disk_margin_gb": primary.get("disk_margin_gb"),
         "disk_status": primary.get("disk_status"),
+        "direct_status_available": bool(direct_watch.get("row_count")),
         "eval_watch_ready": eval_watch.get("watch_stop_eval_ready"),
         "eval_watch_step": eval_watch.get("watch_stop_eval_step"),
         "checkpoint_watch_reason": checkpoint_watch.get("watch_stop_reason"),
@@ -391,6 +442,7 @@ def snapshot_lines(snapshot: dict[str, Any]) -> list[str]:
             f"process={_number_text(snapshot.get('process_status'))} "
             f"log_step={_number_text(snapshot.get('log_latest_step'))} "
             f"max_steps={_number_text(snapshot.get('log_max_steps'))} "
+            f"log_remaining_seconds={_number_text(snapshot.get('log_remaining_seconds'))} "
             f"steps_until_final={_number_text(snapshot.get('steps_until_final'))} "
             f"estimated_seconds_until_final={_number_text(snapshot.get('estimated_seconds_until_final'))} "
             f"last_loss={_number_text(snapshot.get('last_loss'))} "
@@ -408,6 +460,7 @@ def snapshot_lines(snapshot: dict[str, Any]) -> list[str]:
             f"disk_status={_number_text(snapshot.get('disk_status'))} "
             f"disk_margin_gb={_number_text(snapshot.get('disk_margin_gb'))} "
             f"guard_count={_number_text(snapshot.get('training_loss_guard_count'))} "
+            f"direct_status_available={_number_text(snapshot.get('direct_status_available'))} "
             f"eval_watch_step={_number_text(snapshot.get('eval_watch_step'))} "
             f"eval_watch_ready={_number_text(snapshot.get('eval_watch_ready'))} "
             f"checkpoint_watch_reason={_number_text(snapshot.get('checkpoint_watch_reason'))} "
@@ -419,7 +472,7 @@ def snapshot_lines(snapshot: dict[str, Any]) -> list[str]:
     ]
     watches = snapshot.get("watches")
     if isinstance(watches, dict):
-        for name in ("eval", "checkpoint", "final"):
+        for name in ("direct", "eval", "checkpoint", "final"):
             watch = watches.get(name)
             if not isinstance(watch, dict):
                 continue
