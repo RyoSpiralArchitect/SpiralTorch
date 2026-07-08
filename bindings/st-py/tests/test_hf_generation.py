@@ -2295,6 +2295,39 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             run_dir = Path(tmp) / "run"
+            default_run_card = (
+                Path(tmp) / "generic-checkpoint-generation-control-default.json"
+            )
+            default_args = module.parse_args(
+                [
+                    "--run-dir",
+                    str(run_dir),
+                    "--checkpoint",
+                    "checkpoint-2048",
+                    "--run-card",
+                    str(default_run_card),
+                    "--dry-run",
+                    "--no-compare",
+                ]
+            )
+            default_jobs = module.build_sweep_jobs(default_args)
+            default_command = module.build_sweep_command(
+                default_args,
+                default_jobs[0],
+            )
+            default_report = module.run_checkpoint_generation_control(default_args)
+            explicit_tokenizer_args = module.parse_args(
+                [
+                    "--run-dir",
+                    str(run_dir),
+                    "--checkpoint",
+                    "checkpoint-2048",
+                    "--tokenizer-name",
+                    "custom/tokenizer",
+                    "--dry-run",
+                    "--no-compare",
+                ]
+            )
             run_card = Path(tmp) / "generic-checkpoint-generation-control.json"
             args = module.parse_args(
                 [
@@ -2317,6 +2350,22 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
             report = module.run_checkpoint_generation_control(args)
             stored = json.loads(run_card.read_text(encoding="utf-8"))
 
+        self.assertEqual(
+            default_args.model_profile,
+            st.HF_FINETUNE_DEFAULT_MODEL_PROFILE,
+        )
+        self.assertEqual(default_args.tokenizer_name, "EleutherAI/pythia-70m-deduped")
+        self.assertEqual(default_args.max_new_tokens, 96)
+        self.assertEqual(
+            default_command[default_command.index("--model-profile") + 1],
+            st.HF_FINETUNE_DEFAULT_MODEL_PROFILE,
+        )
+        self.assertEqual(
+            default_report["model_profile"]["profile_id"],
+            st.HF_FINETUNE_DEFAULT_MODEL_PROFILE,
+        )
+        self.assertIsNone(explicit_tokenizer_args.model_profile)
+        self.assertEqual(explicit_tokenizer_args.tokenizer_name, "custom/tokenizer")
         self.assertEqual(
             args.sweep_script.name,
             "hf_zspace_generation_control_sweep.py",
@@ -2716,6 +2765,18 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             with mock.patch.object(hf_cli, "_run_example") as run_example:
+                default_code = hf_cli.checkpoint_generation_control_main(
+                    [
+                        "--dry-run",
+                        "--no-compare",
+                        "--run-dir",
+                        str(root / "default-run"),
+                        "--checkpoint",
+                        "checkpoint-2048",
+                        "--run-card",
+                        str(root / "checkpoint-control-default.json"),
+                    ]
+                )
                 code = hf_cli.checkpoint_generation_control_main(
                     [
                         "--dry-run",
@@ -2733,9 +2794,26 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
                     ]
                 )
                 run_example.assert_not_called()
+            default_report = json.loads(
+                (root / "checkpoint-control-default.json").read_text()
+            )
             report = json.loads((root / "checkpoint-control.json").read_text())
 
+        default_command = default_report["sweeps"][0]["command"]
         command = report["sweeps"][0]["command"]
+        self.assertEqual(default_code, 0)
+        self.assertEqual(
+            default_report["model_profile"]["profile_id"],
+            st.HF_FINETUNE_DEFAULT_MODEL_PROFILE,
+        )
+        self.assertEqual(
+            default_report["tokenizer_name"],
+            "EleutherAI/pythia-70m-deduped",
+        )
+        self.assertEqual(
+            default_command[default_command.index("--model-profile") + 1],
+            st.HF_FINETUNE_DEFAULT_MODEL_PROFILE,
+        )
         self.assertEqual(code, 0)
         self.assertEqual(Path(command[1]).name, "hf_zspace_generation_control_sweep.py")
         self.assertEqual(report["row_type"], "hf_checkpoint_generation_control")

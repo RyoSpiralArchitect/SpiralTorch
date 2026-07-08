@@ -19,10 +19,12 @@ from hf_gpt2_ft_checkpoint_generation_control import (  # noqa: E402
 from hf_gpt2_ft_checkpoint_generation_control import (  # noqa: E402
     run_checkpoint_generation_control as _legacy_run_checkpoint_generation_control,
 )
+import spiraltorch as st  # noqa: E402
 
 SWEEP_SCRIPT = EXAMPLES_ROOT / "hf_zspace_generation_control_sweep.py"
 COMPARE_SCRIPT = EXAMPLES_ROOT / "hf_zspace_generation_control_compare.py"
 CURVE_SCRIPT = EXAMPLES_ROOT / "hf_finetune_generation_curve.py"
+DEFAULT_MODEL_PROFILE = st.HF_FINETUNE_DEFAULT_MODEL_PROFILE
 
 
 ROW_TYPE_MAP = {
@@ -56,9 +58,22 @@ def _argv_has_option(raw_argv: Sequence[str], *names: str) -> bool:
     return any(arg in names or arg.startswith(prefixes) for arg in raw_argv)
 
 
+def _with_default_model_profile(raw_argv: list[str]) -> list[str]:
+    if _argv_has_option(raw_argv, "-h", "--help"):
+        return raw_argv
+    if _argv_has_option(
+        raw_argv,
+        "--model-configs",
+        "--model-profile",
+        "--tokenizer-name",
+    ):
+        return raw_argv
+    return ["--model-profile", DEFAULT_MODEL_PROFILE, *raw_argv]
+
+
 def parse_args(argv: Sequence[str] | None = None):
     raw_argv = list(sys.argv[1:] if argv is None else argv)
-    args = _legacy_parse_args(argv)
+    args = _legacy_parse_args(_with_default_model_profile(raw_argv))
     if not _argv_has_option(raw_argv, "--sweep-script"):
         args.sweep_script = SWEEP_SCRIPT
     if not _argv_has_option(raw_argv, "--compare-script"):

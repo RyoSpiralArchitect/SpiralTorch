@@ -11,6 +11,7 @@ from types import ModuleType
 from typing import Sequence
 
 from .hf_ft import (
+    HF_FINETUNE_DEFAULT_MODEL_PROFILE,
     hf_finetune_model_profile_catalog,
     hf_finetune_model_profile_catalog_lines,
     hf_finetune_model_profile_cli_args,
@@ -496,6 +497,13 @@ def checkpoint_generation_control_main(argv: Sequence[str] | None = None) -> int
         and args.curve_lines_out is None
     ):
         parser.error("curve source options require --curve-out or --curve-lines-out")
+    model_profile = args.model_profile
+    if (
+        args.model_configs is None
+        and model_profile is None
+        and args.tokenizer_name is None
+    ):
+        model_profile = HF_FINETUNE_DEFAULT_MODEL_PROFILE
     report = zspace_checkpoint_generation_control_report(
         run_dir=args.run_dir,
         checkpoint=args.checkpoint,
@@ -507,7 +515,7 @@ def checkpoint_generation_control_main(argv: Sequence[str] | None = None) -> int
         curve_script=args.curve_script,
         tokenizer_name=args.tokenizer_name,
         model_configs=args.model_configs,
-        model_profile=args.model_profile,
+        model_profile=model_profile,
         allow_remote=args.allow_remote,
         trust_remote_code=args.trust_remote_code,
         max_new_tokens=args.max_new_tokens,
