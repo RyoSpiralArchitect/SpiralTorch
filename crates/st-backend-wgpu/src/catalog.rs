@@ -34,7 +34,11 @@ const ATTENTION_BINDINGS: &[&str] = &[
     "params:uniform",
 ];
 const TRANSFORM_BINDINGS: &[&str] = &["image:storage", "params:uniform"];
-const NERF_BINDINGS: &[&str] = &["rays:read_storage", "volume:read_storage", "output:write_storage"];
+const NERF_BINDINGS: &[&str] = &[
+    "rays:read_storage",
+    "volume:read_storage",
+    "output:write_storage",
+];
 const REDUCE_BINDINGS: &[&str] = &["input:read_storage", "output:write_storage"];
 
 const STAGE_SOFTMAX: &[&str] = &["reduce_and_normalize"];
@@ -585,15 +589,15 @@ pub fn rank_kernel_report(request: RankKernelRequest) -> RankKernelReport {
         }
         RankKernelKind::TopK if request.subgroup => descriptor("topk_keepk_subgroup_1ce"),
         RankKernelKind::TopK => descriptor("topk_keepk_workgroup"),
-        RankKernelKind::MidK | RankKernelKind::BottomK if request.subgroup && request.use_two_stage => {
+        RankKernelKind::MidK | RankKernelKind::BottomK
+            if request.subgroup && request.use_two_stage =>
+        {
             descriptor("midk_bottomk_apply_subgroup_v2")
         }
         RankKernelKind::MidK | RankKernelKind::BottomK if request.subgroup => {
             descriptor("midk_bottomk_apply_subgroup")
         }
-        RankKernelKind::MidK | RankKernelKind::BottomK => {
-            descriptor("midk_bottomk_apply_fallback")
-        }
+        RankKernelKind::MidK | RankKernelKind::BottomK => descriptor("midk_bottomk_apply_fallback"),
     };
 
     let tiles_x = tiles_for_cols(request.cols);
