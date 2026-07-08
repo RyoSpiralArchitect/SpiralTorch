@@ -22,6 +22,8 @@ __all__ = [
     "hf_gpt2_finetune_milestone_handoff_execution_report",
     "hf_gpt2_finetune_milestone_handoff_lines",
     "hf_gpt2_finetune_milestone_handoff_report",
+    "hf_gpt2_finetune_milestone_runtime_artifact_paths",
+    "hf_gpt2_finetune_milestone_runtime_from_run_dir_archive",
     "hf_gpt2_finetune_milestone_runtime_from_run_dir_report",
     "hf_gpt2_finetune_milestone_runtime_lines",
     "hf_gpt2_finetune_milestone_runtime_report",
@@ -31,6 +33,7 @@ __all__ = [
     "main",
     "parse_args",
     "summarize_hf_gpt2_finetune_status_history",
+    "write_hf_gpt2_finetune_milestone_runtime_report",
 ]
 
 
@@ -1653,6 +1656,70 @@ def _infer_runtime_milestone_step(
     return None, None
 
 
+def _runtime_milestone_step_token(value: Any) -> str:
+    parsed = _int_value(value)
+    if parsed is not None:
+        return str(parsed)
+    if isinstance(value, str) and value.strip():
+        token = "".join(
+            ch if ch.isalnum() or ch in {"-", "_", "."} else "-"
+            for ch in value.strip()
+        )
+        return token.strip("-") or "latest"
+    return "latest"
+
+
+def hf_gpt2_finetune_milestone_runtime_artifact_paths(
+    run_dir: str | Path,
+    *,
+    milestone_step: int | str | None = None,
+    report: Mapping[str, Any] | None = None,
+) -> dict[str, str]:
+    """Return standard JSON/TXT artifact paths for a milestone runtime report."""
+
+    step = milestone_step
+    if step is None and report is not None:
+        step = report.get("milestone_step")
+    token = _runtime_milestone_step_token(step)
+    root = Path(run_dir)
+    return {
+        "out": str(root / f"milestone-{token}-runtime.json"),
+        "lines_out": str(root / f"milestone-{token}-runtime.txt"),
+    }
+
+
+def write_hf_gpt2_finetune_milestone_runtime_report(
+    report: Mapping[str, Any],
+    *,
+    run_dir: str | Path | None = None,
+    out: str | Path | None = None,
+    lines_out: str | Path | None = None,
+) -> dict[str, Any]:
+    """Write a milestone runtime report using explicit or standard artifact paths."""
+
+    archived = dict(report)
+    root = Path(run_dir or archived.get("run_dir") or ".")
+    defaults = hf_gpt2_finetune_milestone_runtime_artifact_paths(
+        root,
+        report=archived,
+    )
+    out_path = Path(out or defaults["out"])
+    lines_path = Path(lines_out or defaults["lines_out"])
+    archived["out"] = str(out_path)
+    archived["lines_out"] = str(lines_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    lines_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(
+        json.dumps(archived, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    lines_path.write_text(
+        "\n".join(hf_gpt2_finetune_milestone_runtime_lines(archived)) + "\n",
+        encoding="utf-8",
+    )
+    return archived
+
+
 def hf_gpt2_finetune_milestone_runtime_from_run_dir_report(
     run_dir: str | Path,
     *,
@@ -1720,6 +1787,39 @@ def hf_gpt2_finetune_milestone_runtime_from_run_dir_report(
             encoding="utf-8",
         )
     return report
+
+
+def hf_gpt2_finetune_milestone_runtime_from_run_dir_archive(
+    run_dir: str | Path,
+    *,
+    next_run_dir: str | Path | None = None,
+    direct: Any = None,
+    eval_watch: Any = None,
+    checkpoint_watch: Any = None,
+    final_watch: Any = None,
+    wait_launch: Any = None,
+    out: str | Path | None = None,
+    lines_out: str | Path | None = None,
+    **runtime_kwargs: Any,
+) -> dict[str, Any]:
+    """Build and write a run-dir milestone runtime report with standard paths."""
+
+    report = hf_gpt2_finetune_milestone_runtime_from_run_dir_report(
+        run_dir,
+        next_run_dir=next_run_dir,
+        direct=direct,
+        eval_watch=eval_watch,
+        checkpoint_watch=checkpoint_watch,
+        final_watch=final_watch,
+        wait_launch=wait_launch,
+        **runtime_kwargs,
+    )
+    return write_hf_gpt2_finetune_milestone_runtime_report(
+        report,
+        run_dir=run_dir,
+        out=out,
+        lines_out=lines_out,
+    )
 
 
 def summarize_hf_gpt2_finetune_status_history(

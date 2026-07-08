@@ -6472,6 +6472,29 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             self.assertTrue(lines_path.is_file())
             written = json.loads(out_path.read_text(encoding="utf-8"))
             written_lines = lines_path.read_text(encoding="utf-8").splitlines()
+            package_paths = st.hf_gpt2_finetune_milestone_runtime_artifact_paths(
+                run_dir,
+                report=report,
+            )
+            archive_calls = []
+
+            def fake_archive_package_runner(**kwargs):
+                archive_calls.append(dict(kwargs))
+                return {"status": "planned", "sweep_count": 4}
+
+            archived = st.hf_gpt2_finetune_milestone_runtime_from_run_dir_archive(
+                run_dir,
+                label="archive-ft",
+                execute=True,
+                use_package_api=True,
+                package_runner=fake_archive_package_runner,
+            )
+            archived_json = json.loads(
+                Path(archived["out"]).read_text(encoding="utf-8")
+            )
+            archived_lines = Path(archived["lines_out"]).read_text(
+                encoding="utf-8"
+            ).splitlines()
 
         self.assertEqual(written["row_type"], "hf_gpt2_finetune_milestone_runtime")
         self.assertEqual(written["status"], "executed")
@@ -6485,6 +6508,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(package_calls[0]["run_dir"], str(run_dir))
         self.assertEqual(package_calls[0]["checkpoint"], "checkpoint-6144")
         self.assertTrue(package_calls[0]["dry_run"])
+        self.assertEqual(package_paths["out"], str(out_path))
+        self.assertEqual(package_paths["lines_out"], str(lines_path))
+        self.assertEqual(archived["label"], "archive-ft")
+        self.assertEqual(archived["milestone_step"], 6144)
+        self.assertEqual(archived_json["label"], "archive-ft")
+        self.assertEqual(archive_calls[0]["checkpoint"], "checkpoint-6144")
+        self.assertTrue(archive_calls[0]["dry_run"])
+        self.assertIn("status=executed", archived_lines[0])
         self.assertIn("hf_gpt2_ft_milestone_runtime ", written_lines[0])
         self.assertIn("status=executed", written_lines[0])
         self.assertTrue(
@@ -7147,6 +7178,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("hf_gpt2_finetune_milestone_handoff_lines", st.__all__)
         self.assertIn("hf_gpt2_finetune_milestone_handoff_report", st.__all__)
         self.assertIn(
+            "hf_gpt2_finetune_milestone_runtime_artifact_paths",
+            st.__all__,
+        )
+        self.assertIn(
+            "hf_gpt2_finetune_milestone_runtime_from_run_dir_archive",
+            st.__all__,
+        )
+        self.assertIn(
             "hf_gpt2_finetune_milestone_runtime_from_run_dir_report",
             st.__all__,
         )
@@ -7165,6 +7204,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("summarize_hf_gpt2_finetune_run_card", st.__all__)
         self.assertIn("summarize_hf_gpt2_finetune_sweep_report", st.__all__)
         self.assertIn("summarize_hf_gpt2_finetune_sweep_report_lines", st.__all__)
+        self.assertIn(
+            "write_hf_gpt2_finetune_milestone_runtime_report",
+            st.__all__,
+        )
         self.assertIs(
             st.hf_gpt2_finetune_eval_report,
             hf_ft.hf_gpt2_finetune_eval_report,
@@ -7250,12 +7293,24 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             st.hf_ft_status.hf_gpt2_finetune_milestone_runtime_report,
         )
         self.assertIs(
+            st.hf_gpt2_finetune_milestone_runtime_artifact_paths,
+            st.hf_ft_status.hf_gpt2_finetune_milestone_runtime_artifact_paths,
+        )
+        self.assertIs(
+            st.hf_gpt2_finetune_milestone_runtime_from_run_dir_archive,
+            st.hf_ft_status.hf_gpt2_finetune_milestone_runtime_from_run_dir_archive,
+        )
+        self.assertIs(
             st.hf_gpt2_finetune_milestone_runtime_from_run_dir_report,
             st.hf_ft_status.hf_gpt2_finetune_milestone_runtime_from_run_dir_report,
         )
         self.assertIs(
             st.hf_gpt2_finetune_milestone_runtime_sources,
             st.hf_ft_status.hf_gpt2_finetune_milestone_runtime_sources,
+        )
+        self.assertIs(
+            st.write_hf_gpt2_finetune_milestone_runtime_report,
+            st.hf_ft_status.write_hf_gpt2_finetune_milestone_runtime_report,
         )
         self.assertIs(
             st.hf_gpt2_finetune_training_telemetry_frame,

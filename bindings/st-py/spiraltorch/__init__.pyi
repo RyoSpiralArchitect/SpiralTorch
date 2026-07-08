@@ -193,7 +193,36 @@ def hf_gpt2_finetune_milestone_runtime_sources(
     wait_launch: str | PathLike[str] | None = ...,
 ) -> Dict[str, str | None]: ...
 
+def hf_gpt2_finetune_milestone_runtime_artifact_paths(
+    run_dir: str | PathLike[str],
+    *,
+    milestone_step: int | str | None = ...,
+    report: Mapping[str, Any] | None = ...,
+) -> Dict[str, str]: ...
+
+def write_hf_gpt2_finetune_milestone_runtime_report(
+    report: Mapping[str, Any],
+    *,
+    run_dir: str | PathLike[str] | None = ...,
+    out: str | PathLike[str] | None = ...,
+    lines_out: str | PathLike[str] | None = ...,
+) -> Dict[str, Any]: ...
+
 def hf_gpt2_finetune_milestone_runtime_from_run_dir_report(
+    run_dir: str | PathLike[str],
+    *,
+    next_run_dir: str | PathLike[str] | None = ...,
+    direct: Any = ...,
+    eval_watch: Any = ...,
+    checkpoint_watch: Any = ...,
+    final_watch: Any = ...,
+    wait_launch: Any = ...,
+    out: str | PathLike[str] | None = ...,
+    lines_out: str | PathLike[str] | None = ...,
+    **runtime_kwargs: Any,
+) -> Dict[str, Any]: ...
+
+def hf_gpt2_finetune_milestone_runtime_from_run_dir_archive(
     run_dir: str | PathLike[str],
     *,
     next_run_dir: str | PathLike[str] | None = ...,
@@ -8923,6 +8952,8 @@ __all__ = [
     "hf_gpt2_finetune_milestone_handoff_execution_report",
     "hf_gpt2_finetune_milestone_handoff_lines",
     "hf_gpt2_finetune_milestone_handoff_report",
+    "hf_gpt2_finetune_milestone_runtime_artifact_paths",
+    "hf_gpt2_finetune_milestone_runtime_from_run_dir_archive",
     "hf_gpt2_finetune_milestone_runtime_from_run_dir_report",
     "hf_gpt2_finetune_milestone_runtime_lines",
     "hf_gpt2_finetune_milestone_runtime_report",
@@ -8946,6 +8977,7 @@ __all__ = [
     "summarize_hf_gpt2_finetune_sweep_report_lines",
     "summarize_hf_gpt2_finetune_status_history",
     "summarize_hf_gpt2_finetune_trainer_trace",
+    "write_hf_gpt2_finetune_milestone_runtime_report",
     "write_hf_gpt2_finetune_run_card",
     "write_hf_gpt2_finetune_trainer_trace_event",
     "ZSpaceActivationProbeHook",

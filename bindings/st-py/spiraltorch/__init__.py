@@ -827,6 +827,8 @@ from .hf_ft_status import (
     hf_gpt2_finetune_milestone_handoff_execution_report,
     hf_gpt2_finetune_milestone_handoff_lines,
     hf_gpt2_finetune_milestone_handoff_report,
+    hf_gpt2_finetune_milestone_runtime_artifact_paths,
+    hf_gpt2_finetune_milestone_runtime_from_run_dir_archive,
     hf_gpt2_finetune_milestone_runtime_from_run_dir_report,
     hf_gpt2_finetune_milestone_runtime_lines,
     hf_gpt2_finetune_milestone_runtime_report,
@@ -834,6 +836,7 @@ from .hf_ft_status import (
     hf_gpt2_finetune_status_history_lines,
     load_hf_gpt2_finetune_status_history,
     summarize_hf_gpt2_finetune_status_history,
+    write_hf_gpt2_finetune_milestone_runtime_report,
 )
 
 from .hf_generation import (
@@ -1041,6 +1044,8 @@ _EXTRAS = [
     "hf_gpt2_finetune_milestone_handoff_execution_report",
     "hf_gpt2_finetune_milestone_handoff_lines",
     "hf_gpt2_finetune_milestone_handoff_report",
+    "hf_gpt2_finetune_milestone_runtime_artifact_paths",
+    "hf_gpt2_finetune_milestone_runtime_from_run_dir_archive",
     "hf_gpt2_finetune_milestone_runtime_from_run_dir_report",
     "hf_gpt2_finetune_milestone_runtime_lines",
     "hf_gpt2_finetune_milestone_runtime_report",
@@ -1064,6 +1069,7 @@ _EXTRAS = [
     "summarize_hf_gpt2_finetune_sweep_report_lines",
     "summarize_hf_gpt2_finetune_status_history",
     "summarize_hf_gpt2_finetune_trainer_trace",
+    "write_hf_gpt2_finetune_milestone_runtime_report",
     "write_hf_gpt2_finetune_run_card",
     "write_hf_gpt2_finetune_trainer_trace_event",
     "ZSpaceActivationProbeHook",

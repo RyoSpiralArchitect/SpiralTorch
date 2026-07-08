@@ -11,7 +11,6 @@ inference.
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
 from typing import Any, Callable
@@ -158,42 +157,20 @@ def build_report(
     )
 
 
-def _step_token(report: dict[str, Any]) -> str:
-    step = report.get("milestone_step")
-    if isinstance(step, int):
-        return str(step)
-    if isinstance(step, str) and step:
-        return step
-    return "latest"
-
-
-def default_artifact_paths(report: dict[str, Any], run_dir: Path) -> tuple[Path, Path]:
-    token = _step_token(report)
-    return (
-        run_dir / f"milestone-{token}-runtime.json",
-        run_dir / f"milestone-{token}-runtime.txt",
-    )
-
-
 def write_report(
     report: dict[str, Any],
     args: argparse.Namespace,
 ) -> tuple[Path, Path]:
-    default_out, default_lines_out = default_artifact_paths(report, args.run_dir)
-    out_path = args.out or default_out
-    lines_path = args.lines_out or default_lines_out
-    report["out"] = str(out_path)
-    report["lines_out"] = str(lines_path)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    lines_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(
-        json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
+    archived = st.write_hf_gpt2_finetune_milestone_runtime_report(
+        report,
+        run_dir=args.run_dir,
+        out=args.out,
+        lines_out=args.lines_out,
     )
-    lines_path.write_text(
-        "\n".join(st.hf_gpt2_finetune_milestone_runtime_lines(report)) + "\n",
-        encoding="utf-8",
-    )
+    report.clear()
+    report.update(archived)
+    out_path = Path(archived["out"])
+    lines_path = Path(archived["lines_out"])
     return out_path, lines_path
 
 
