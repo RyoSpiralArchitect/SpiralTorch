@@ -3829,33 +3829,94 @@ def _cli_value(value: object) -> str:
     return str(value)
 
 
+_GENERATION_CONTROL_KEYS = {
+    "top_k",
+    "curvature",
+    "temperature",
+    "entropy_target",
+    "entropy_tolerance",
+    "entropy_gain",
+    "min_temperature",
+    "max_temperature",
+    "repression_window",
+    "repression_strength",
+    "last_token_repression",
+    "ngram_size",
+    "ngram_window",
+    "ngram_repression_strength",
+    "ngram_decay",
+    "mask_non_top_k",
+    "use_native_zspace",
+}
+
+
+def _profile_generation_control_config(
+    generation: Mapping[str, object],
+) -> dict[str, object]:
+    fields = {
+        "top_k": generation.get("zspace_top_k"),
+        "curvature": generation.get("zspace_curvature"),
+        "temperature": generation.get("zspace_temperature"),
+        "entropy_target": generation.get("zspace_entropy_target"),
+        "entropy_tolerance": generation.get("zspace_entropy_tolerance"),
+        "entropy_gain": generation.get("zspace_entropy_gain"),
+        "min_temperature": generation.get("zspace_min_temperature"),
+        "max_temperature": generation.get("zspace_max_temperature"),
+        "repression_window": generation.get("repression_window"),
+        "repression_strength": generation.get("repression_strength"),
+        "last_token_repression": generation.get("last_token_repression"),
+        "ngram_size": generation.get("ngram_size"),
+        "ngram_window": generation.get("ngram_window"),
+        "ngram_repression_strength": generation.get("ngram_repression_strength"),
+        "ngram_decay": generation.get("ngram_decay"),
+    }
+    if "zspace_keep_non_top_k" in generation:
+        fields["mask_non_top_k"] = not bool(generation["zspace_keep_non_top_k"])
+    if "zspace_no_native" in generation:
+        fields["use_native_zspace"] = not bool(generation["zspace_no_native"])
+    return {key: value for key, value in fields.items() if value is not None}
+
+
+def _generation_control_config_source(
+    config: Mapping[str, object] | None,
+) -> dict[str, object]:
+    if not config:
+        return {}
+    if isinstance(config.get("recommended_config"), Mapping):
+        return _generation_control_config_source(
+            config["recommended_config"],  # type: ignore[arg-type]
+        )
+    if isinstance(config.get("logits_processor_kwargs"), Mapping):
+        return _generation_control_config_source(
+            config["logits_processor_kwargs"],  # type: ignore[arg-type]
+        )
+    profile = config.get("model_profile")
+    source: dict[str, object] = {}
+    if isinstance(profile, Mapping):
+        source.update(_generation_control_config_source(profile))
+    generation = config.get("generation")
+    if isinstance(generation, Mapping):
+        source.update(_profile_generation_control_config(generation))
+    source.update(
+        {key: value for key, value in config.items() if key in _GENERATION_CONTROL_KEYS}
+    )
+    return source
+
+
 def zspace_generation_control_processor_kwargs(
     config: Mapping[str, object] | None,
 ) -> dict[str, object]:
-    """Return kwargs suitable for ``build_zspace_repression_logits_processor``."""
+    """Return kwargs for ``build_zspace_repression_logits_processor``.
 
-    if not config:
-        return {}
-    allowed = {
-        "top_k",
-        "curvature",
-        "temperature",
-        "entropy_target",
-        "entropy_tolerance",
-        "entropy_gain",
-        "min_temperature",
-        "max_temperature",
-        "repression_window",
-        "repression_strength",
-        "last_token_repression",
-        "ngram_size",
-        "ngram_window",
-        "ngram_repression_strength",
-        "ngram_decay",
-        "mask_non_top_k",
-        "use_native_zspace",
+    ``config`` may be a sweep recommendation, a resolved HF model profile, a
+    runtime plan containing ``model_profile``, or a raw profile ``generation``
+    section.
+    """
+
+    source = _generation_control_config_source(config)
+    return {
+        key: value for key, value in source.items() if key in _GENERATION_CONTROL_KEYS
     }
-    return {key: value for key, value in config.items() if key in allowed}
 
 
 def zspace_generation_control_sweep_cli_args(
@@ -3863,6 +3924,7 @@ def zspace_generation_control_sweep_cli_args(
 ) -> list[str]:
     """Return focused sweep CLI args for a recommended generation config."""
 
+    config = _generation_control_config_source(config)
     if not config:
         return []
     flag_map = [
@@ -3901,6 +3963,7 @@ def zspace_generation_control_bridge_cli_args(
 ) -> list[str]:
     """Return bridge/sweep CLI args for using one recommended config."""
 
+    config = _generation_control_config_source(config)
     if not config:
         return []
     flag_map = [

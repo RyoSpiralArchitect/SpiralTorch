@@ -1746,6 +1746,31 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
             zspace_generation_control_bridge_cli_args(summary["recommended_config"]),
             summary["recommended_bridge_cli_args"],
         )
+        pythia_profile = st.resolve_hf_finetune_model_profile(
+            MODEL_CONFIGS_PATH,
+            profile="pythia-70m-local-smoke",
+        )
+        pythia_kwargs = zspace_generation_control_processor_kwargs(pythia_profile)
+        pythia_bridge_args = zspace_generation_control_bridge_cli_args(pythia_profile)
+        qwen_runtime = zspace_inference_distortion_runtime_plan(
+            model_configs=MODEL_CONFIGS_PATH,
+            model_profile="qwen2-0.5b-local-smoke",
+        )
+        qwen_sweep_args = zspace_generation_control_sweep_cli_args(qwen_runtime)
+
+        self.assertEqual(pythia_kwargs["top_k"], 64)
+        self.assertEqual(pythia_kwargs["curvature"], -0.04)
+        self.assertEqual(pythia_kwargs["entropy_target"], 3.0)
+        self.assertEqual(pythia_kwargs["repression_strength"], 0.8)
+        self.assertEqual(pythia_kwargs["ngram_decay"], 0.85)
+        self.assertIn("--generation-zspace-top-k", pythia_bridge_args)
+        self.assertIn("64", pythia_bridge_args)
+        self.assertIn("--generation-repression-strength", pythia_bridge_args)
+        self.assertIn("0.8", pythia_bridge_args)
+        self.assertIn("--zspace-top-k-values", qwen_sweep_args)
+        self.assertIn("96", qwen_sweep_args)
+        self.assertIn("--repression-strength-values", qwen_sweep_args)
+        self.assertIn("0.65", qwen_sweep_args)
         self.assertEqual(summary["best_loop_score_delta_from_baseline"], -3.0)
         self.assertEqual(summary["best_loop_score_reduction_ratio"], 1.0)
         self.assertEqual(summary["max_control_calls"], 2.0)
