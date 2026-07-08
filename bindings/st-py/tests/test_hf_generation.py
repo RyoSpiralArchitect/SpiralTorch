@@ -89,6 +89,11 @@ DISTORTION_GPT5NANO_SAMPLE_PATH = (
     / "examples"
     / "zspace_inference_distortion_local_gpt2_gpt5nano_sample.json"
 )
+MODEL_CONFIGS_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "examples"
+    / "hf_finetune_model_configs.example.json"
+)
 
 
 def load_generation_control_sweep_example():
@@ -1940,6 +1945,35 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
         self.assertEqual(stored["sweep_count"], 3)
         self.assertEqual(len(executed), 4)
 
+    def test_package_checkpoint_generation_control_uses_model_profile_defaults(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "run"
+            planned = zspace_checkpoint_generation_control_report(
+                run_dir=run_dir,
+                checkpoint="checkpoint-2048",
+                model_configs=MODEL_CONFIGS_PATH,
+                model_profile="tiny-gpt2-ci",
+                dry_run=True,
+                no_compare=True,
+            )
+
+        command = planned["sweeps"][0]["command"]
+        self.assertEqual(planned["tokenizer_name"], "sshleifer/tiny-gpt2")
+        self.assertEqual(planned["model_profile"]["profile_id"], "tiny-gpt2-ci")
+        self.assertIn("profile=tiny-gpt2-ci", planned["model_profile_lines"][0])
+        self.assertEqual(planned["sweeps"][0]["tokenizer_name"], "sshleifer/tiny-gpt2")
+        self.assertEqual(
+            command[command.index("--model-name") + 1],
+            str(run_dir / "checkpoint-2048"),
+        )
+        self.assertEqual(
+            command[command.index("--tokenizer-name") + 1],
+            "sshleifer/tiny-gpt2",
+        )
+        self.assertEqual(command[command.index("--max-new-tokens") + 1], "32")
+
     def test_checkpoint_generation_control_runs_sweeps_and_compare_with_runner(
         self,
     ) -> None:
@@ -1998,6 +2032,46 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
         self.assertEqual(stored["sweep_count"], 3)
         self.assertEqual(len(executed), 4)
         self.assertTrue(lines_exists)
+
+    def test_checkpoint_generation_control_model_profile_flows_to_sweep_commands(
+        self,
+    ) -> None:
+        module = load_checkpoint_generation_control_example()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "run"
+            args = module.parse_args(
+                [
+                    "--run-dir",
+                    str(run_dir),
+                    "--checkpoint",
+                    "checkpoint-2048",
+                    "--model-configs",
+                    str(MODEL_CONFIGS_PATH),
+                    "--model-profile",
+                    "tiny-gpt2-ci",
+                    "--dry-run",
+                    "--no-compare",
+                ]
+            )
+            jobs = module.build_sweep_jobs(args)
+            command = module.build_sweep_command(args, jobs[0])
+            report = module.run_checkpoint_generation_control(args)
+
+        self.assertEqual(args.tokenizer_name, "sshleifer/tiny-gpt2")
+        self.assertEqual(args.max_new_tokens, 32)
+        self.assertEqual(args.curve_model_name, "sshleifer/tiny-gpt2")
+        self.assertEqual(
+            args._hf_finetune_model_profile["profile_id"],
+            "tiny-gpt2-ci",
+        )
+        self.assertEqual(
+            command[command.index("--tokenizer-name") + 1],
+            "sshleifer/tiny-gpt2",
+        )
+        self.assertEqual(command[command.index("--max-new-tokens") + 1], "32")
+        self.assertEqual(report["model_profile"]["profile_id"], "tiny-gpt2-ci")
+        self.assertEqual(report["tokenizer_name"], "sshleifer/tiny-gpt2")
 
     def test_checkpoint_generation_control_requires_ready_file(self) -> None:
         module = load_checkpoint_generation_control_example()
@@ -2116,6 +2190,10 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
             args = module.parse_args(
                 [
                     "--dry-run",
+                    "--model-name",
+                    str(Path(tmp) / "checkpoint-local"),
+                    "--tokenizer-name",
+                    "sshleifer/tiny-gpt2",
                     "--prompt",
                     "SpiralTorch is",
                     "--out",
@@ -2136,6 +2214,8 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
         self.assertEqual(len(runs), 5)
         self.assertEqual(runs[0]["kind"], "baseline")
         self.assertEqual(report["status"], "planned")
+        self.assertEqual(report["model_name"], str(Path(tmp) / "checkpoint-local"))
+        self.assertEqual(report["tokenizer_name"], "sshleifer/tiny-gpt2")
         self.assertEqual(report["run_count"], 5)
         self.assertEqual(report["summary"]["completed_run_count"], 0)
         self.assertTrue(any(str(row["name"]).startswith("zt3") for row in runs))

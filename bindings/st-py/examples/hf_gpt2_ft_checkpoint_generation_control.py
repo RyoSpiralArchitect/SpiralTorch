@@ -9,7 +9,7 @@ import os
 import subprocess
 import sys
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -18,6 +18,7 @@ PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 if str(PACKAGE_ROOT) not in sys.path:
     sys.path.insert(0, str(PACKAGE_ROOT))
 
+import spiraltorch as st  # noqa: E402
 from spiraltorch.hf_generation import (  # noqa: E402
     default_zspace_checkpoint_generation_prompts,
     zspace_checkpoint_generation_control_compare_command,
@@ -113,6 +114,7 @@ def default_prompt_specs() -> list[PromptSpec]:
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
     parser.add_argument("--run-dir", type=Path, required=True)
     parser.add_argument(
         "--checkpoint",
@@ -132,6 +134,28 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--sweep-script", type=Path, default=SWEEP_SCRIPT)
     parser.add_argument("--compare-script", type=Path, default=COMPARE_SCRIPT)
     parser.add_argument("--curve-script", type=Path, default=CURVE_SCRIPT)
+    parser.add_argument(
+        "--model-configs",
+        type=Path,
+        default=None,
+        help=(
+            "Optional JSON config with Hugging Face model profiles. The selected "
+            "profile can provide tokenizer and generation defaults."
+        ),
+    )
+    parser.add_argument(
+        "--model-profile",
+        default=None,
+        help="Model profile id to use for tokenizer and generation defaults.",
+    )
+    parser.add_argument(
+        "--tokenizer-name",
+        default=None,
+        help=(
+            "Tokenizer id/path passed to checkpoint generation sweeps. Defaults "
+            "to the selected model profile tokenizer when available."
+        ),
+    )
     parser.add_argument("--allow-remote", action="store_true")
     parser.add_argument("--trust-remote-code", action="store_true")
     parser.add_argument("--max-new-tokens", type=int, default=None)
@@ -200,6 +224,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         ),
     )
     args = parser.parse_args(argv)
+    _apply_model_profile_defaults(args, parser=parser, raw_argv=raw_argv)
     args.checkpoint = list(args.checkpoint or [])
     args.prompt = list(args.prompt or [])
     args.compare_with_sweep = list(args.compare_with_sweep or [])
@@ -236,6 +261,85 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return args
 
 
+def _argv_has_option(raw_argv: Sequence[str], *names: str) -> bool:
+    prefixes = tuple(f"{name}=" for name in names)
+    return any(arg in names or arg.startswith(prefixes) for arg in raw_argv)
+
+
+def _profile_value(profile: Mapping[str, Any], section: str, key: str) -> Any:
+    payload = profile.get(section)
+    if isinstance(payload, Mapping):
+        return payload.get(key)
+    return None
+
+
+def _set_profile_default(
+    args: argparse.Namespace,
+    raw_argv: Sequence[str],
+    attr: str,
+    value: Any,
+    *flags: str,
+) -> None:
+    if value is None or _argv_has_option(raw_argv, *flags):
+        return
+    setattr(args, attr, value)
+
+
+def _apply_model_profile_defaults(
+    args: argparse.Namespace,
+    *,
+    parser: argparse.ArgumentParser,
+    raw_argv: Sequence[str],
+) -> None:
+    args._hf_finetune_model_profile = None
+    if args.model_configs is None and args.model_profile is None:
+        return
+    try:
+        profile = st.resolve_hf_finetune_model_profile(
+            args.model_configs,
+            profile=args.model_profile,
+        )
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        parser.error(f"failed to resolve model profile: {exc}")
+    args._hf_finetune_model_profile = profile
+    _set_profile_default(
+        args,
+        raw_argv,
+        "tokenizer_name",
+        profile.get("tokenizer_name"),
+        "--tokenizer-name",
+    )
+    for attr, key, flag in (
+        ("max_new_tokens", "max_new_tokens", "--max-new-tokens"),
+        ("sample_temperature", "temperature", "--sample-temperature"),
+        ("sample_top_k", "top_k", "--sample-top-k"),
+    ):
+        _set_profile_default(
+            args,
+            raw_argv,
+            attr,
+            _profile_value(profile, "generation", key),
+            flag,
+        )
+    if (
+        _profile_value(profile, "generation", "do_sample") is True
+        and not _argv_has_option(raw_argv, "--do-sample")
+    ):
+        args.do_sample = True
+    _set_profile_default(
+        args,
+        raw_argv,
+        "curve_model_name",
+        profile.get("model_name"),
+        "--curve-model-name",
+    )
+
+
+def _resolved_model_profile(args: argparse.Namespace) -> dict[str, Any] | None:
+    profile = getattr(args, "_hf_finetune_model_profile", None)
+    return dict(profile) if isinstance(profile, Mapping) else None
+
+
 def prompt_specs(args: argparse.Namespace) -> list[PromptSpec]:
     return list(args.prompt) if args.prompt else default_prompt_specs()
 
@@ -263,6 +367,9 @@ def build_sweep_command(args: argparse.Namespace, job: SweepJob) -> list[str]:
         job,
         python=args.python,
         sweep_script=args.sweep_script,
+        tokenizer_name=args.tokenizer_name,
+        model_configs=args.model_configs,
+        model_profile=args.model_profile,
         allow_remote=args.allow_remote,
         trust_remote_code=args.trust_remote_code,
         max_new_tokens=args.max_new_tokens,
@@ -372,6 +479,11 @@ def _write_status_card(
         "status": status,
         "dry_run": bool(args.dry_run),
         "run_dir": str(args.run_dir),
+        "tokenizer_name": args.tokenizer_name,
+        "model_configs": (
+            None if args.model_configs is None else str(args.model_configs)
+        ),
+        "model_profile": _resolved_model_profile(args),
         "checkpoint_count": len(args.checkpoint),
         "prompt_count": len(prompt_specs(args)),
         "time_unix_s": time.time(),
@@ -523,6 +635,9 @@ def run_checkpoint_generation_control(
         sweep_script=args.sweep_script,
         compare_script=args.compare_script,
         curve_script=args.curve_script,
+        tokenizer_name=args.tokenizer_name,
+        model_configs=args.model_configs,
+        model_profile=args.model_profile,
         allow_remote=args.allow_remote,
         trust_remote_code=args.trust_remote_code,
         max_new_tokens=args.max_new_tokens,

@@ -111,6 +111,15 @@ def _label_number(value: float | int | None) -> str:
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model-name", default=DEFAULT_MODEL)
+    parser.add_argument(
+        "--tokenizer-name",
+        default=None,
+        help=(
+            "Optional tokenizer id/path. Defaults to --model-name; useful when "
+            "--model-name is a fine-tuned checkpoint that does not carry "
+            "tokenizer files."
+        ),
+    )
     parser.add_argument("--prompt", required=True)
     parser.add_argument("--out", type=Path, default=Path("runs/hf-gpt2-zspace-generation-control-sweep.json"))
     parser.add_argument("--allow-remote", action="store_true")
@@ -573,6 +582,7 @@ def run_sweep(args: argparse.Namespace) -> dict[str, object]:
         "row_type": "hf_gpt2_zspace_generation_control_sweep",
         "status": "planned" if args.dry_run else "running",
         "model_name": args.model_name,
+        "tokenizer_name": args.tokenizer_name or args.model_name,
         "prompt": args.prompt,
         "max_new_tokens": args.max_new_tokens,
         "do_sample": bool(args.do_sample),
@@ -591,7 +601,7 @@ def run_sweep(args: argparse.Namespace) -> dict[str, object]:
 
     with _hf_remote_access(args.allow_remote):
         tokenizer = transformers.AutoTokenizer.from_pretrained(
-            args.model_name,
+            args.tokenizer_name or args.model_name,
             **_loader_kwargs(args),
         )
         if getattr(tokenizer, "pad_token", None) is None:

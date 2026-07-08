@@ -205,6 +205,28 @@ def default_zspace_checkpoint_generation_prompts() -> list[ZSpaceCheckpointPromp
     ]
 
 
+def _checkpoint_model_profile(
+    *,
+    model_configs: str | Path | None,
+    model_profile: str | None,
+) -> dict[str, object] | None:
+    if model_configs is None and model_profile is None:
+        return None
+    from .hf_ft import resolve_hf_finetune_model_profile
+
+    return resolve_hf_finetune_model_profile(model_configs, profile=model_profile)
+
+
+def _checkpoint_model_profile_lines(
+    profile: Mapping[str, object] | None,
+) -> list[str]:
+    if profile is None:
+        return []
+    from .hf_ft import hf_finetune_model_profile_lines
+
+    return hf_finetune_model_profile_lines(profile)
+
+
 @dataclass
 class _CheckpointGenerationControlConfig:
     run_dir: Path
@@ -215,6 +237,11 @@ class _CheckpointGenerationControlConfig:
     sweep_script: Path
     compare_script: Path
     curve_script: Path
+    tokenizer_name: str | None
+    model_configs: Path | None
+    model_profile: str | None
+    model_profile_report: dict[str, object] | None
+    model_profile_lines: list[str]
     allow_remote: bool
     trust_remote_code: bool
     max_new_tokens: int | None
@@ -256,6 +283,9 @@ def _checkpoint_control_config(
     sweep_script: str | Path | None = None,
     compare_script: str | Path | None = None,
     curve_script: str | Path | None = None,
+    tokenizer_name: str | None = None,
+    model_configs: str | Path | None = None,
+    model_profile: str | None = None,
     allow_remote: bool = False,
     trust_remote_code: bool = False,
     max_new_tokens: int | None = None,
@@ -297,6 +327,33 @@ def _checkpoint_control_config(
     )
     if not prompts:
         raise ValueError("prompt must include at least one prompt")
+    profile_report = _checkpoint_model_profile(
+        model_configs=model_configs,
+        model_profile=model_profile,
+    )
+    generation_profile = _mapping_item(profile_report or {}, "generation")
+    resolved_tokenizer_name = tokenizer_name
+    if resolved_tokenizer_name is None and profile_report is not None:
+        profile_tokenizer = profile_report.get("tokenizer_name")
+        if profile_tokenizer is not None:
+            resolved_tokenizer_name = str(profile_tokenizer)
+    if max_new_tokens is None and generation_profile.get("max_new_tokens") is not None:
+        max_new_tokens = _positive_int(
+            generation_profile["max_new_tokens"],
+            label="profile.generation.max_new_tokens",
+        )
+    if not do_sample and generation_profile.get("do_sample") is True:
+        do_sample = True
+    if sample_temperature is None and generation_profile.get("temperature") is not None:
+        sample_temperature = _positive_float(
+            generation_profile["temperature"],
+            label="profile.generation.temperature",
+        )
+    if sample_top_k is None and generation_profile.get("top_k") is not None:
+        sample_top_k = _non_negative_int(
+            generation_profile["top_k"],
+            label="profile.generation.top_k",
+        )
     if max_new_tokens is not None and max_new_tokens <= 0:
         raise ValueError("max_new_tokens must be positive")
     if sample_temperature is not None and sample_temperature <= 0.0:
@@ -337,6 +394,11 @@ def _checkpoint_control_config(
         sweep_script=Path(sweep_script or DEFAULT_ZSPACE_CHECKPOINT_SWEEP_SCRIPT),
         compare_script=Path(compare_script or DEFAULT_ZSPACE_CHECKPOINT_COMPARE_SCRIPT),
         curve_script=Path(curve_script or DEFAULT_ZSPACE_CHECKPOINT_CURVE_SCRIPT),
+        tokenizer_name=resolved_tokenizer_name,
+        model_configs=None if model_configs is None else Path(model_configs),
+        model_profile=model_profile,
+        model_profile_report=profile_report,
+        model_profile_lines=_checkpoint_model_profile_lines(profile_report),
         allow_remote=bool(allow_remote),
         trust_remote_code=bool(trust_remote_code),
         max_new_tokens=max_new_tokens,
@@ -438,6 +500,9 @@ def zspace_checkpoint_generation_control_sweep_command(
     *,
     python: str | None = None,
     sweep_script: str | Path | None = None,
+    tokenizer_name: str | None = None,
+    model_configs: str | Path | None = None,
+    model_profile: str | None = None,
     allow_remote: bool = False,
     trust_remote_code: bool = False,
     max_new_tokens: int | None = None,
@@ -452,6 +517,9 @@ def zspace_checkpoint_generation_control_sweep_command(
         checkpoint=job.checkpoint,
         python=python,
         sweep_script=sweep_script,
+        tokenizer_name=tokenizer_name,
+        model_configs=model_configs,
+        model_profile=model_profile,
         allow_remote=allow_remote,
         trust_remote_code=trust_remote_code,
         max_new_tokens=max_new_tokens,
@@ -469,6 +537,8 @@ def zspace_checkpoint_generation_control_sweep_command(
         "--out",
         str(job.out),
     ]
+    if config.tokenizer_name is not None:
+        command.extend(["--tokenizer-name", str(config.tokenizer_name)])
     if config.allow_remote:
         command.append("--allow-remote")
     if config.trust_remote_code:
@@ -842,6 +912,9 @@ def zspace_checkpoint_generation_control_report(
     sweep_script: str | Path | None = None,
     compare_script: str | Path | None = None,
     curve_script: str | Path | None = None,
+    tokenizer_name: str | None = None,
+    model_configs: str | Path | None = None,
+    model_profile: str | None = None,
     allow_remote: bool = False,
     trust_remote_code: bool = False,
     max_new_tokens: int | None = None,
@@ -885,6 +958,9 @@ def zspace_checkpoint_generation_control_report(
         sweep_script=sweep_script,
         compare_script=compare_script,
         curve_script=curve_script,
+        tokenizer_name=tokenizer_name,
+        model_configs=model_configs,
+        model_profile=model_profile,
         allow_remote=allow_remote,
         trust_remote_code=trust_remote_code,
         max_new_tokens=max_new_tokens,
@@ -931,6 +1007,9 @@ def zspace_checkpoint_generation_control_report(
             job,
             python=config.python,
             sweep_script=config.sweep_script,
+            tokenizer_name=config.tokenizer_name,
+            model_configs=config.model_configs,
+            model_profile=config.model_profile,
             allow_remote=config.allow_remote,
             trust_remote_code=config.trust_remote_code,
             max_new_tokens=config.max_new_tokens,
@@ -944,6 +1023,7 @@ def zspace_checkpoint_generation_control_report(
             "prompt_label": job.prompt.label,
             "prompt": job.prompt.prompt,
             "model_name": str(job.model_dir),
+            "tokenizer_name": config.tokenizer_name,
             "out": str(job.out),
             "command": list(command),
         }
@@ -1044,6 +1124,12 @@ def zspace_checkpoint_generation_control_report(
         "status": status,
         "dry_run": bool(config.dry_run),
         "run_dir": str(config.run_dir),
+        "tokenizer_name": config.tokenizer_name,
+        "model_configs": (
+            None if config.model_configs is None else str(config.model_configs)
+        ),
+        "model_profile": config.model_profile_report,
+        "model_profile_lines": list(config.model_profile_lines),
         "checkpoint_count": len(config.checkpoint),
         "prompt_count": len(config.prompt),
         "sweep_count": len(rows),
