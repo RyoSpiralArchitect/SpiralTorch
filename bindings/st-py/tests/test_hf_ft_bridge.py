@@ -63,6 +63,11 @@ MILESTONE_CAPTURE_PATH = (
     / "examples"
     / "hf_gpt2_finetune_milestone_capture.py"
 )
+MILESTONE_RUNTIME_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "examples"
+    / "hf_gpt2_finetune_milestone_runtime.py"
+)
 GENERATION_CURVE_PATH = (
     Path(__file__).resolve().parents[1]
     / "examples"
@@ -156,6 +161,17 @@ def load_milestone_capture_example():
     spec = importlib.util.spec_from_file_location(
         "hf_gpt2_finetune_milestone_capture_test",
         MILESTONE_CAPTURE_PATH,
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_milestone_runtime_example():
+    spec = importlib.util.spec_from_file_location(
+        "hf_gpt2_finetune_milestone_runtime_test",
+        MILESTONE_RUNTIME_PATH,
     )
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -6361,6 +6377,122 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             run_dir="/tmp/spiraltorch-ft",
         )
         self.assertEqual(waiting_handoff["status"], "waiting_for_milestone")
+
+    def test_milestone_runtime_example_writes_inferred_artifacts(self) -> None:
+        module = load_milestone_runtime_example()
+        ready_direct = {
+            "row_type": "hf_gpt2_finetune_run_status",
+            "process_status": "alive",
+            "final_checkpoint_ready": False,
+            "checkpoint_count": 2,
+            "runtime_settings": {
+                "max_steps": 8192,
+                "eval_steps": 512,
+                "save_steps": 2048,
+                "save_total_limit": 2,
+                "min_free_disk_gb": 4.0,
+                "process_command_available": True,
+            },
+            "checkpoint_headroom": {
+                "resume_checkpoint_gb": 0.75,
+                "estimated_peak_checkpoint_gb": 1.5,
+                "free_after_estimated_peak_gb": 8.0,
+            },
+            "disk_free_gb": 9.5,
+            "disk_margin_gb": 5.5,
+            "disk_status": "ok",
+            "trace": {
+                "trace_last_loss": 3.35,
+                "trace_last_eval_loss": 3.2,
+                "trace_last_eval_loss_step": 6144,
+                "trace_best_eval_loss_step": 6144,
+                "trace_eval_loss_projected_final_loss": 3.12,
+                "trace_eval_loss_points": [{"step": 6144, "eval_loss": 3.2}],
+                "training_loss_guard_count": 0,
+            },
+            "log_progress": {
+                "log_latest_step": 6144,
+                "log_max_steps": 8192,
+                "log_remaining_seconds": 120.0,
+            },
+            "eval_progress": {
+                "next_eval_step": 6656,
+                "log_steps_until_next_eval": 512,
+                "latest_due_eval_step": 6144,
+                "latest_due_eval_ready": True,
+                "pending_eval_step": None,
+                "log_steps_since_pending_eval": None,
+            },
+            "checkpoint_progress": {
+                "next_checkpoint_step": 8192,
+                "log_steps_until_next_checkpoint": 2048,
+            },
+            "latest_checkpoint": {"name": "checkpoint-6144"},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "run"
+            run_dir.mkdir()
+            (run_dir / "checkpoint-6144").mkdir()
+            direct_history = run_dir / "direct-run-status-history.jsonl"
+            eval_history = run_dir / "watch-6144-eval-confirm-history.jsonl"
+            checkpoint_history = (
+                run_dir / "watch-6144-checkpoint-confirm-history.jsonl"
+            )
+            capture_json = run_dir / "milestone-6144-capture.json"
+            checkpoint_row = {
+                **ready_direct,
+                "checkpoint_names": ["checkpoint-6144"],
+                "latest_checkpoint": {"name": "checkpoint-6144"},
+            }
+            for path, row in (
+                (direct_history, ready_direct),
+                (eval_history, ready_direct),
+                (checkpoint_history, checkpoint_row),
+            ):
+                path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+            capture_json.write_text(
+                json.dumps({"milestone_step": 6144, "milestone_ready": True}) + "\n",
+                encoding="utf-8",
+            )
+            package_calls = []
+
+            def fake_package_runner(**kwargs):
+                package_calls.append(dict(kwargs))
+                return {"status": "planned", "sweep_count": 3}
+
+            args = module.parse_args(
+                ["--run-dir", str(run_dir), "--label", "runtime-ft", "--execute"]
+            )
+            report = module.build_report(args, package_runner=fake_package_runner)
+            out_path, lines_path = module.write_report(report, args)
+
+            self.assertEqual(out_path, run_dir / "milestone-6144-runtime.json")
+            self.assertEqual(lines_path, run_dir / "milestone-6144-runtime.txt")
+            self.assertTrue(out_path.is_file())
+            self.assertTrue(lines_path.is_file())
+            written = json.loads(out_path.read_text(encoding="utf-8"))
+            written_lines = lines_path.read_text(encoding="utf-8").splitlines()
+
+        self.assertEqual(written["row_type"], "hf_gpt2_finetune_milestone_runtime")
+        self.assertEqual(written["status"], "executed")
+        self.assertEqual(written["label"], "runtime-ft")
+        self.assertEqual(written["milestone_step"], 6144)
+        self.assertEqual(written["milestone_step_source"], str(capture_json))
+        self.assertEqual(written["execution_backend"], "package_api")
+        self.assertEqual(written["checkpoint"], "checkpoint-6144")
+        self.assertEqual(written["out"], str(out_path))
+        self.assertEqual(written["lines_out"], str(lines_path))
+        self.assertEqual(package_calls[0]["run_dir"], str(run_dir))
+        self.assertEqual(package_calls[0]["checkpoint"], "checkpoint-6144")
+        self.assertTrue(package_calls[0]["dry_run"])
+        self.assertIn("hf_gpt2_ft_milestone_runtime ", written_lines[0])
+        self.assertIn("status=executed", written_lines[0])
+        self.assertTrue(
+            any(
+                "hf_gpt2_ft_milestone_handoff_execution" in line
+                for line in written_lines
+            )
+        )
 
     def test_package_milestone_report_tracks_run_status_readiness(self) -> None:
         waiting_status = {
