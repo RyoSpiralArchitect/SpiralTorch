@@ -68,6 +68,27 @@ def _checkpoint_headroom(row: dict[str, Any]) -> dict[str, Any]:
     return headroom if isinstance(headroom, dict) else {}
 
 
+def _runtime_settings(row: dict[str, Any]) -> dict[str, Any]:
+    runtime = row.get("runtime_settings")
+    return runtime if isinstance(runtime, dict) else {}
+
+
+def _runtime_setting(row: dict[str, Any], field: str) -> Any:
+    runtime = _runtime_settings(row)
+    value = runtime.get(field)
+    if value is not None:
+        return value
+    if field == "max_steps":
+        return _nested(row, "trace", "max_steps") or _nested(
+            row, "log_progress", "log_max_steps"
+        )
+    if field == "save_total_limit":
+        return row.get("save_total_limit")
+    if field == "min_free_disk_gb":
+        return row.get("min_free_disk_gb")
+    return None
+
+
 def _last_eval_loss_step(row: dict[str, Any]) -> Any:
     explicit = _nested(row, "trace", "trace_last_eval_loss_step")
     if explicit is not None:
@@ -186,6 +207,18 @@ def summarize_history(
         "first_trace_step": first_trace_step,
         "last_trace_step": last_trace_step,
         "delta_trace_step": delta_trace_step,
+        "last_runtime_max_steps": _runtime_setting(last, "max_steps"),
+        "last_runtime_eval_steps": _runtime_setting(last, "eval_steps"),
+        "last_runtime_save_steps": _runtime_setting(last, "save_steps"),
+        "last_runtime_save_total_limit": _runtime_setting(
+            last, "save_total_limit"
+        ),
+        "last_runtime_min_free_disk_gb": _runtime_setting(
+            last, "min_free_disk_gb"
+        ),
+        "last_runtime_process_command_available": _runtime_setting(
+            last, "process_command_available"
+        ),
         "last_log_max_steps": last_log_max_steps,
         "last_log_remaining_seconds": _nested(
             last, "log_progress", "log_remaining_seconds"
@@ -264,6 +297,12 @@ def history_lines(
             f"delta_log_step={_number_text(summary.get('delta_log_step'))} "
             f"duration_seconds={_number_text(summary.get('duration_seconds'))} "
             f"log_steps_per_second={_number_text(summary.get('log_steps_per_second'))} "
+            f"runtime_max_steps={_number_text(summary.get('last_runtime_max_steps'))} "
+            f"runtime_eval_steps={_number_text(summary.get('last_runtime_eval_steps'))} "
+            f"runtime_save_steps={_number_text(summary.get('last_runtime_save_steps'))} "
+            f"runtime_save_total_limit={_number_text(summary.get('last_runtime_save_total_limit'))} "
+            f"runtime_min_free_disk_gb={_number_text(summary.get('last_runtime_min_free_disk_gb'))} "
+            f"runtime_process_command={_number_text(summary.get('last_runtime_process_command_available'))} "
             f"last_log_max_steps={_number_text(summary.get('last_log_max_steps'))} "
             f"last_log_remaining_seconds={_number_text(summary.get('last_log_remaining_seconds'))} "
             f"last_steps_until_final={_number_text(summary.get('last_log_steps_until_final'))} "
@@ -311,6 +350,12 @@ def history_lines(
                 "hf_gpt2_ft_status_history_point "
                 f"index={index} "
                 f"log_step={_number_text(_nested(row, 'log_progress', 'log_latest_step'))} "
+                f"runtime_max_steps={_number_text(_runtime_setting(row, 'max_steps'))} "
+                f"runtime_eval_steps={_number_text(_runtime_setting(row, 'eval_steps'))} "
+                f"runtime_save_steps={_number_text(_runtime_setting(row, 'save_steps'))} "
+                f"runtime_save_total_limit={_number_text(_runtime_setting(row, 'save_total_limit'))} "
+                f"runtime_min_free_disk_gb={_number_text(_runtime_setting(row, 'min_free_disk_gb'))} "
+                f"runtime_process_command={_number_text(_runtime_setting(row, 'process_command_available'))} "
                 f"log_remaining_seconds={_number_text(_nested(row, 'log_progress', 'log_remaining_seconds'))} "
                 f"next_eval_step={_number_text(_nested(row, 'eval_progress', 'next_eval_step'))} "
                 f"steps_until_next_eval={_number_text(_nested(row, 'eval_progress', 'log_steps_until_next_eval'))} "

@@ -4937,6 +4937,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 "checkpoint_count": 1,
                 "latest_checkpoint": {"name": "checkpoint-20"},
                 "save_total_limit": 1,
+                "runtime_settings": {
+                    "max_steps": 40,
+                    "eval_steps": 10,
+                    "save_steps": 20,
+                    "save_total_limit": 1,
+                    "min_free_disk_gb": 4.0,
+                    "process_command_available": True,
+                },
                 "checkpoint_headroom": {
                     "resume_checkpoint_gb": 0.5,
                     "estimated_peak_checkpoint_gb": 1.0,
@@ -4985,6 +4993,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 "checkpoint_count": 1,
                 "latest_checkpoint": {"name": "checkpoint-20"},
                 "save_total_limit": 1,
+                "runtime_settings": {
+                    "max_steps": 40,
+                    "eval_steps": 10,
+                    "save_steps": 20,
+                    "save_total_limit": 1,
+                    "min_free_disk_gb": 4.0,
+                    "process_command_available": True,
+                },
                 "checkpoint_headroom": {
                     "resume_checkpoint_gb": 0.5,
                     "estimated_peak_checkpoint_gb": 1.0,
@@ -5059,6 +5075,12 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(summary["delta_log_step"], 10)
         self.assertEqual(summary["log_steps_per_second"], 0.25)
         self.assertEqual(summary["delta_trace_step"], 10)
+        self.assertEqual(summary["last_runtime_max_steps"], 40)
+        self.assertEqual(summary["last_runtime_eval_steps"], 10)
+        self.assertEqual(summary["last_runtime_save_steps"], 20)
+        self.assertEqual(summary["last_runtime_save_total_limit"], 1)
+        self.assertEqual(summary["last_runtime_min_free_disk_gb"], 4.0)
+        self.assertTrue(summary["last_runtime_process_command_available"])
         self.assertEqual(summary["last_log_max_steps"], 40)
         self.assertEqual(summary["last_log_remaining_seconds"], 90.0)
         self.assertEqual(summary["last_log_steps_until_final"], 6)
@@ -5095,6 +5117,12 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("label=demo", lines[0])
         self.assertIn("last_log_step=34", lines[0])
         self.assertIn("log_steps_per_second=0.25", lines[0])
+        self.assertIn("runtime_max_steps=40", lines[0])
+        self.assertIn("runtime_eval_steps=10", lines[0])
+        self.assertIn("runtime_save_steps=20", lines[0])
+        self.assertIn("runtime_save_total_limit=1", lines[0])
+        self.assertIn("runtime_min_free_disk_gb=4", lines[0])
+        self.assertIn("runtime_process_command=true", lines[0])
         self.assertIn("last_log_remaining_seconds=90", lines[0])
         self.assertIn("last_steps_until_final=6", lines[0])
         self.assertIn("estimated_seconds_until_final=24", lines[0])
@@ -5123,6 +5151,9 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("watch_stop_eval_ready=false", lines[0])
         self.assertIn("watch_stop_reason=checkpoint_ready", lines[0])
         self.assertIn("index=1", lines[1])
+        self.assertIn("runtime_eval_steps=10", lines[1])
+        self.assertIn("runtime_save_steps=20", lines[1])
+        self.assertIn("runtime_process_command=true", lines[1])
         self.assertIn("log_remaining_seconds=90", lines[1])
         self.assertIn("next_checkpoint_step=40", lines[1])
         self.assertIn("steps_until_next_checkpoint=6", lines[1])
@@ -5150,6 +5181,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 "final_checkpoint_ready": False,
                 "checkpoint_count": 0,
                 "save_total_limit": 1,
+                "runtime_settings": {
+                    "max_steps": 8192,
+                    "eval_steps": 512,
+                    "save_steps": 2048,
+                    "save_total_limit": 1,
+                    "min_free_disk_gb": 4.0,
+                    "process_command_available": True,
+                },
                 "checkpoint_headroom": {
                     "resume_checkpoint_gb": 0.75,
                     "estimated_peak_checkpoint_gb": 1.5,
@@ -5191,6 +5230,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 "final_checkpoint_ready": False,
                 "checkpoint_count": 0,
                 "save_total_limit": 1,
+                "runtime_settings": {
+                    "max_steps": 8192,
+                    "eval_steps": 512,
+                    "save_steps": 2048,
+                    "save_total_limit": 1,
+                    "min_free_disk_gb": 4.0,
+                    "process_command_available": True,
+                },
                 "checkpoint_headroom": {
                     "resume_checkpoint_gb": 0.75,
                     "estimated_peak_checkpoint_gb": 1.5,
@@ -5374,6 +5421,12 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(snapshot["process_status"], "alive")
         self.assertEqual(snapshot["log_latest_step"], 5800)
         self.assertEqual(snapshot["log_max_steps"], 8192)
+        self.assertEqual(snapshot["runtime_max_steps"], 8192)
+        self.assertEqual(snapshot["runtime_eval_steps"], 512)
+        self.assertEqual(snapshot["runtime_save_steps"], 2048)
+        self.assertEqual(snapshot["runtime_save_total_limit"], 1)
+        self.assertEqual(snapshot["runtime_min_free_disk_gb"], 4.0)
+        self.assertTrue(snapshot["runtime_process_command_available"])
         self.assertEqual(snapshot["log_remaining_seconds"], 390.0)
         self.assertEqual(snapshot["estimated_seconds_until_final"], 2392.0)
         self.assertEqual(snapshot["last_eval_loss_step"], 5632)
@@ -5431,6 +5484,12 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("label=long-ft", lines[0])
         self.assertIn("primary=direct", lines[0])
         self.assertIn("log_step=5800", lines[0])
+        self.assertIn("runtime_max_steps=8192", lines[0])
+        self.assertIn("runtime_eval_steps=512", lines[0])
+        self.assertIn("runtime_save_steps=2048", lines[0])
+        self.assertIn("runtime_save_total_limit=1", lines[0])
+        self.assertIn("runtime_min_free_disk_gb=4", lines[0])
+        self.assertIn("runtime_process_command=true", lines[0])
         self.assertIn("log_remaining_seconds=390", lines[0])
         self.assertIn("estimated_seconds_until_final=2392", lines[0])
         self.assertIn("last_eval_step=5632", lines[0])
@@ -5460,6 +5519,9 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("wait_disk_free_after_gb=5.6", lines[0])
         self.assertIn("name=direct", lines[1])
         self.assertIn("rows=2", lines[1])
+        self.assertIn("runtime_eval_steps=512", lines[1])
+        self.assertIn("runtime_save_steps=2048", lines[1])
+        self.assertIn("runtime_process_command=true", lines[1])
         self.assertIn("eval_loss_projected_final=3.19882", lines[1])
         self.assertIn("pending_eval_step=none", lines[1])
         self.assertIn("checkpoint_headroom_peak_gb=1.5", lines[1])

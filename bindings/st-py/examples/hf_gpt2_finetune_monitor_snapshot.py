@@ -144,6 +144,27 @@ def _checkpoint_headroom(row: dict[str, Any]) -> dict[str, Any]:
     return headroom if isinstance(headroom, dict) else {}
 
 
+def _runtime_settings(row: dict[str, Any]) -> dict[str, Any]:
+    runtime = row.get("runtime_settings")
+    return runtime if isinstance(runtime, dict) else {}
+
+
+def _runtime_setting(row: dict[str, Any], field: str) -> Any:
+    runtime = _runtime_settings(row)
+    value = runtime.get(field)
+    if value is not None:
+        return value
+    if field == "max_steps":
+        return _nested(row, "trace", "max_steps") or _nested(
+            row, "log_progress", "log_max_steps"
+        )
+    if field == "save_total_limit":
+        return row.get("save_total_limit")
+    if field == "min_free_disk_gb":
+        return row.get("min_free_disk_gb")
+    return None
+
+
 def _launch_disk_guard(row: dict[str, Any]) -> dict[str, Any]:
     guard = row.get("launch_disk_guard")
     if isinstance(guard, dict):
@@ -458,6 +479,14 @@ def _status_watch_summary(
         "delta_log_step": _delta_log_step(rows),
         "log_steps_per_second": _log_steps_per_second(rows),
         "process_status": last.get("process_status"),
+        "runtime_max_steps": _runtime_setting(last, "max_steps"),
+        "runtime_eval_steps": _runtime_setting(last, "eval_steps"),
+        "runtime_save_steps": _runtime_setting(last, "save_steps"),
+        "runtime_save_total_limit": _runtime_setting(last, "save_total_limit"),
+        "runtime_min_free_disk_gb": _runtime_setting(last, "min_free_disk_gb"),
+        "runtime_process_command_available": _runtime_setting(
+            last, "process_command_available"
+        ),
         "log_latest_step": log_step,
         "log_max_steps": max_steps,
         "log_remaining_seconds": log_remaining_seconds,
@@ -786,6 +815,24 @@ def build_monitor_snapshot(args: argparse.Namespace) -> dict[str, Any]:
         "time_unix_s": max(all_times) if all_times else None,
         "primary_watch": primary.get("name"),
         "process_status": primary.get("process_status"),
+        "runtime_max_steps": _watch_field_with_direct_fallback(
+            primary, direct_watch, "runtime_max_steps"
+        ),
+        "runtime_eval_steps": _watch_field_with_direct_fallback(
+            primary, direct_watch, "runtime_eval_steps"
+        ),
+        "runtime_save_steps": _watch_field_with_direct_fallback(
+            primary, direct_watch, "runtime_save_steps"
+        ),
+        "runtime_save_total_limit": _watch_field_with_direct_fallback(
+            primary, direct_watch, "runtime_save_total_limit"
+        ),
+        "runtime_min_free_disk_gb": _watch_field_with_direct_fallback(
+            primary, direct_watch, "runtime_min_free_disk_gb"
+        ),
+        "runtime_process_command_available": _watch_field_with_direct_fallback(
+            primary, direct_watch, "runtime_process_command_available"
+        ),
         "log_latest_step": primary.get("log_latest_step"),
         "log_max_steps": primary.get("log_max_steps"),
         "log_remaining_seconds": primary.get("log_remaining_seconds"),
@@ -905,6 +952,12 @@ def snapshot_lines(snapshot: dict[str, Any]) -> list[str]:
             f"process={_number_text(snapshot.get('process_status'))} "
             f"log_step={_number_text(snapshot.get('log_latest_step'))} "
             f"max_steps={_number_text(snapshot.get('log_max_steps'))} "
+            f"runtime_max_steps={_number_text(snapshot.get('runtime_max_steps'))} "
+            f"runtime_eval_steps={_number_text(snapshot.get('runtime_eval_steps'))} "
+            f"runtime_save_steps={_number_text(snapshot.get('runtime_save_steps'))} "
+            f"runtime_save_total_limit={_number_text(snapshot.get('runtime_save_total_limit'))} "
+            f"runtime_min_free_disk_gb={_number_text(snapshot.get('runtime_min_free_disk_gb'))} "
+            f"runtime_process_command={_number_text(snapshot.get('runtime_process_command_available'))} "
             f"log_remaining_seconds={_number_text(snapshot.get('log_remaining_seconds'))} "
             f"steps_until_final={_number_text(snapshot.get('steps_until_final'))} "
             f"estimated_seconds_until_final={_number_text(snapshot.get('estimated_seconds_until_final'))} "
@@ -966,6 +1019,12 @@ def snapshot_lines(snapshot: dict[str, Any]) -> list[str]:
                     f"name={name} "
                     f"rows={_number_text(watch.get('row_count'))} "
                     f"log_step={_number_text(watch.get('log_latest_step'))} "
+                    f"runtime_max_steps={_number_text(watch.get('runtime_max_steps'))} "
+                    f"runtime_eval_steps={_number_text(watch.get('runtime_eval_steps'))} "
+                    f"runtime_save_steps={_number_text(watch.get('runtime_save_steps'))} "
+                    f"runtime_save_total_limit={_number_text(watch.get('runtime_save_total_limit'))} "
+                    f"runtime_min_free_disk_gb={_number_text(watch.get('runtime_min_free_disk_gb'))} "
+                    f"runtime_process_command={_number_text(watch.get('runtime_process_command_available'))} "
                     f"last_eval_step={_number_text(watch.get('last_eval_loss_step'))} "
                     f"last_eval_loss={_number_text(watch.get('last_eval_loss'))} "
                     f"eval_loss_projected_final={_number_text(watch.get('eval_loss_projected_final_loss'))} "
