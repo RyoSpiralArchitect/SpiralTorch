@@ -32,6 +32,7 @@ from spiraltorch.hf_generation import (
     zspace_inference_distortion_processor_kwargs,
     zspace_inference_distortion_runtime_cli_args,
     zspace_inference_distortion_runtime_plan,
+    zspace_inference_distortion_runtime_preflight,
     zspace_inference_distortion_sweep_cli_args,
     zspace_generation_control_bridge_cli_args,
     zspace_generation_control_processor_kwargs,
@@ -324,6 +325,7 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         self.assertIn("summarize_zspace_inference_distortion_probe_lines", st.__all__)
         self.assertIn("zspace_inference_distortion_runtime_plan", st.__all__)
         self.assertIn("zspace_inference_distortion_runtime_cli_args", st.__all__)
+        self.assertIn("zspace_inference_distortion_runtime_preflight", st.__all__)
         self.assertIs(st.ZSpaceRepressionLogitsProcessor, ZSpaceRepressionLogitsProcessor)
         self.assertIs(st.ZSpaceActivationProbeHook, ZSpaceActivationProbeHook)
         self.assertIs(
@@ -378,6 +380,10 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
             st.zspace_inference_distortion_runtime_cli_args,
             zspace_inference_distortion_runtime_cli_args,
         )
+        self.assertIs(
+            st.zspace_inference_distortion_runtime_preflight,
+            zspace_inference_distortion_runtime_preflight,
+        )
 
     def test_inference_distortion_runtime_plan_and_cli_args_are_importable(self) -> None:
         runtime = zspace_inference_distortion_runtime_plan(
@@ -428,6 +434,58 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
             zspace_inference_distortion_runtime_cli_args(None, sweep=True),
             ["--resume-existing"],
         )
+
+    def test_inference_distortion_runtime_preflight_uses_device_reporter(self) -> None:
+        runtime = zspace_inference_distortion_runtime_plan(
+            local_model="models/gpt2-zspace",
+            api_provider="fake",
+        )
+        calls = []
+
+        def fake_describe(backends, *, continue_on_error=True, **kwargs):
+            calls.append((list(backends), continue_on_error, dict(kwargs)))
+            return {
+                "backends": list(backends),
+                "ready_backends": ["wgpu"],
+                "not_ready_backends": ["cpu", "mps"],
+                "status_by_backend": {
+                    "wgpu": "kernel_wired",
+                    "cpu": "cpu",
+                    "mps": "placeholder",
+                },
+                "all_ready": False,
+                "has_errors": False,
+            }
+
+        preflight = zspace_inference_distortion_runtime_preflight(
+            runtime,
+            backends=["wgpu", "cpu", "mps", "wgpu"],
+            required_ready_backends=["wgpu", "mps"],
+            describe_runtime_devices=fake_describe,
+            device_kwargs={"workgroup": 128},
+        )
+
+        self.assertEqual(preflight["status"], "ok")
+        self.assertEqual(preflight["runtime"], runtime)
+        self.assertEqual(preflight["backends"], ["wgpu", "cpu", "mps"])
+        self.assertEqual(preflight["ready_backends"], ["wgpu"])
+        self.assertEqual(preflight["missing_ready_backends"], ["mps"])
+        self.assertFalse(preflight["runtime_ready"])
+        self.assertEqual(
+            preflight["status_by_backend"]["mps"],
+            "placeholder",
+        )
+        self.assertEqual(calls, [(["wgpu", "cpu", "mps"], True, {"workgroup": 128})])
+
+    def test_inference_distortion_runtime_preflight_handles_missing_reporter(self) -> None:
+        preflight = zspace_inference_distortion_runtime_preflight(
+            {"api_provider": "fake"},
+            describe_runtime_devices=False,
+        )
+
+        self.assertEqual(preflight["status"], "unavailable")
+        self.assertEqual(preflight["row_type"], "zspace_inference_distortion_runtime_preflight")
+        self.assertFalse(preflight["runtime_ready"])
 
     def test_local_gpt2_openai_distortion_sample_is_sanitized(self) -> None:
         sample_text = DISTORTION_OPENAI_SAMPLE_PATH.read_text(encoding="utf-8")
@@ -767,7 +825,15 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         self.assertIn("dp0p4", runs[0]["name"])
         self.assertIn("dp0p8", runs[1]["name"])
         self.assertEqual(plan["runtime"]["api_provider"], "fake")
+        self.assertEqual(
+            plan["runtime_preflight"]["row_type"],
+            "zspace_inference_distortion_runtime_preflight",
+        )
         self.assertEqual(plan["execution"]["resume_existing"], False)
+        self.assertEqual(
+            report["runtime_preflight"]["row_type"],
+            "zspace_inference_distortion_runtime_preflight",
+        )
         self.assertEqual(report["attempted_run_count"], 0)
         self.assertEqual(report["completed_run_count"], 0)
         self.assertEqual(report["skipped_run_count"], 2)
@@ -860,6 +926,10 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         self.assertEqual(report["status"], "complete")
         self.assertEqual(report["completed_run_count"], 2)
         self.assertEqual(stored_report["comparison"]["probe_count"], 2)
+        self.assertEqual(
+            stored_report["runtime_preflight"]["row_type"],
+            "zspace_inference_distortion_runtime_preflight",
+        )
         self.assertEqual(len(stored_report["comparison"]["top_probes"]), 2)
         self.assertIn("summary", stored_report)
         self.assertIn("recommendation", stored_report)
@@ -874,6 +944,11 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         )
         self.assertEqual(sweep_summary["row_type"], "zspace_inference_distortion_sweep_summary")
         self.assertEqual(sweep_summary["completed_run_count"], 2)
+        self.assertIn(
+            sweep_summary["runtime_preflight_status"],
+            {"ok", "unavailable", "error"},
+        )
+        self.assertIsInstance(sweep_summary["runtime_ready_backends"], list)
         self.assertIn("--desire-pressure", sweep_summary["recommended_probe_cli_args"])
         self.assertIn("--desire-pressure-values", sweep_summary["recommended_sweep_cli_args"])
         self.assertEqual(

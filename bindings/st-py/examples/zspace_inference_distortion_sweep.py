@@ -218,6 +218,10 @@ def _runtime_cli_args(runtime: MappingLike, *, sweep: bool) -> list[object]:
     return st.zspace_inference_distortion_runtime_cli_args(runtime, sweep=sweep)
 
 
+def _runtime_preflight(runtime: MappingLike) -> MappingLike:
+    return st.zspace_inference_distortion_runtime_preflight(runtime)
+
+
 def _recommended_commands(report: MappingLike) -> MappingLike:
     summary = report.get("summary")
     runtime = report.get("runtime")
@@ -279,6 +283,8 @@ def _markdown_table_value(value: object) -> str:
 def _markdown_report(report: MappingLike) -> str:
     summary = report.get("summary")
     summary = summary if isinstance(summary, dict) else {}
+    preflight = report.get("runtime_preflight")
+    preflight = preflight if isinstance(preflight, dict) else {}
     commands = report.get("recommended_commands")
     commands = commands if isinstance(commands, dict) else {}
     lines = [
@@ -291,6 +297,11 @@ def _markdown_report(report: MappingLike) -> str:
         f"- prompt: `{report.get('prompt')}`",
         f"- recommended: `{summary.get('recommended_probe')}`",
         f"- effect/risk: `{summary.get('recommended_effect_score')}` / `{summary.get('recommended_risk_score')}`",
+        (
+            f"- runtime: `{preflight.get('status')}` "
+            f"ready=`{preflight.get('ready_backends')}` "
+            f"missing=`{preflight.get('missing_ready_backends')}`"
+        ),
         "",
         "## Recommendation",
         "",
@@ -514,6 +525,7 @@ def _build_report(
     dry_run: bool = False,
     prompt: object | None = None,
     runtime: MappingLike | None = None,
+    runtime_preflight: MappingLike | None = None,
 ) -> MappingLike:
     comparison = (
         st.compare_zspace_inference_distortion_probes(
@@ -535,12 +547,19 @@ def _build_report(
         status = "reported"
     else:
         status = "complete"
+    runtime_value = _runtime_plan(args) if runtime is None else dict(runtime)
+    preflight_value = (
+        _runtime_preflight(runtime_value)
+        if runtime_preflight is None
+        else dict(runtime_preflight)
+    )
     report: MappingLike = {
         "row_type": "zspace_inference_distortion_sweep",
         "status": status,
         "dry_run": bool(dry_run),
         "prompt": args.prompt if prompt is None else prompt,
-        "runtime": _runtime_plan(args) if runtime is None else dict(runtime),
+        "runtime": runtime_value,
+        "runtime_preflight": preflight_value,
         "execution": _execution_plan(args),
         "run_count": len(runs),
         "attempted_run_count": int(attempted_run_count),
@@ -674,11 +693,14 @@ def _run_from_probe_report(args: argparse.Namespace) -> MappingLike:
     if "--prompt" not in flags and first_report.get("prompt") is not None:
         prompt = first_report.get("prompt")
     runtime = _probe_runtime(first_report) if first_report else None
+    runtime_value = _runtime_plan(args) if runtime is None else dict(runtime)
+    runtime_preflight = _runtime_preflight(runtime_value)
     plan: MappingLike = {
         "row_type": "zspace_inference_distortion_sweep_plan",
         "dry_run": False,
         "prompt": prompt,
-        "runtime": _runtime_plan(args) if runtime is None else dict(runtime),
+        "runtime": runtime_value,
+        "runtime_preflight": runtime_preflight,
         "execution": _execution_plan(args),
         "run_count": len(completed),
         "runs": completed,
@@ -695,7 +717,8 @@ def _run_from_probe_report(args: argparse.Namespace) -> MappingLike:
             1 for run in completed if run.get("status") == "reported"
         ),
         prompt=prompt,
-        runtime=runtime,
+        runtime=runtime_value,
+        runtime_preflight=runtime_preflight,
     )
     report["source_probe_paths"] = [str(path) for path in args.from_probe]
     _write_report_outputs(args, report)
@@ -715,11 +738,14 @@ def run_sweep(args: argparse.Namespace) -> MappingLike:
     if args.from_probe:
         return _run_from_probe_report(args)
     runs = build_sweep_runs(args)
+    runtime = _runtime_plan(args)
+    runtime_preflight = _runtime_preflight(runtime)
     plan: MappingLike = {
         "row_type": "zspace_inference_distortion_sweep_plan",
         "dry_run": bool(args.dry_run),
         "prompt": args.prompt,
-        "runtime": _runtime_plan(args),
+        "runtime": runtime,
+        "runtime_preflight": runtime_preflight,
         "execution": _execution_plan(args),
         "run_count": len(runs),
         "runs": runs,
@@ -734,6 +760,8 @@ def run_sweep(args: argparse.Namespace) -> MappingLike:
             reused_run_count=0,
             reported_run_count=0,
             dry_run=True,
+            runtime=runtime,
+            runtime_preflight=runtime_preflight,
         )
         _write_report_outputs(args, report)
         return report
@@ -791,6 +819,8 @@ def run_sweep(args: argparse.Namespace) -> MappingLike:
         attempted_run_count=attempted_run_count,
         reused_run_count=reused_run_count,
         reported_run_count=reported_run_count,
+        runtime=runtime,
+        runtime_preflight=runtime_preflight,
     )
     _write_report_outputs(args, report)
     return report

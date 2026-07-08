@@ -21,6 +21,7 @@ __all__ = [
     "zspace_inference_distortion_probe_cli_args",
     "zspace_inference_distortion_runtime_cli_args",
     "zspace_inference_distortion_runtime_plan",
+    "zspace_inference_distortion_runtime_preflight",
     "zspace_inference_distortion_sweep_cli_args",
     "zspace_generation_control_bridge_cli_args",
     "zspace_generation_control_processor_kwargs",
@@ -1686,6 +1687,109 @@ def zspace_inference_distortion_runtime_cli_args(
     return args
 
 
+def _runtime_device_backends(value: object) -> list[str]:
+    labels = _text_sequence(value)
+    return list(dict.fromkeys(label for label in labels if label))
+
+
+def _runtime_device_summary_mapping(value: object) -> dict[str, object]:
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def zspace_inference_distortion_runtime_preflight(
+    runtime: Mapping[str, object] | None = None,
+    *,
+    backends: Sequence[object] | object | None = None,
+    required_ready_backends: Sequence[object] | object | None = None,
+    describe_runtime_devices: object | None = None,
+    device_kwargs: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    """Attach backend readiness metadata to one inference-distortion runtime."""
+
+    runtime_payload = dict(runtime) if isinstance(runtime, Mapping) else {}
+    backend_labels = _runtime_device_backends(backends or ["wgpu", "cpu", "mps"])
+    required_labels = _runtime_device_backends(required_ready_backends)
+    kwargs = dict(device_kwargs or {})
+    describe = describe_runtime_devices
+    if describe is None:
+        try:
+            module = importlib.import_module("spiraltorch")
+            describe = getattr(module, "describe_runtime_devices", None)
+        except Exception:
+            describe = None
+    if not callable(describe):
+        return {
+            "row_type": "zspace_inference_distortion_runtime_preflight",
+            "status": "unavailable",
+            "runtime": runtime_payload,
+            "backends": backend_labels,
+            "required_ready_backends": required_labels,
+            "ready_backends": [],
+            "not_ready_backends": backend_labels,
+            "missing_ready_backends": required_labels,
+            "runtime_ready": False,
+            "all_ready": False,
+            "has_errors": True,
+            "device_kwargs": kwargs,
+            "device_summary": {},
+            "status_by_backend": {},
+            "recommendation": "spiraltorch.describe_runtime_devices is unavailable",
+        }
+    try:
+        summary = _runtime_device_summary_mapping(
+            describe(backend_labels, continue_on_error=True, **kwargs)
+        )
+    except Exception as exc:
+        return {
+            "row_type": "zspace_inference_distortion_runtime_preflight",
+            "status": "error",
+            "runtime": runtime_payload,
+            "backends": backend_labels,
+            "required_ready_backends": required_labels,
+            "ready_backends": [],
+            "not_ready_backends": backend_labels,
+            "missing_ready_backends": required_labels,
+            "runtime_ready": False,
+            "all_ready": False,
+            "has_errors": True,
+            "device_kwargs": kwargs,
+            "device_summary": {},
+            "status_by_backend": {},
+            "error": f"{exc.__class__.__name__}: {exc}",
+            "recommendation": "runtime device readiness probe failed",
+        }
+    ready_backends = _runtime_device_backends(summary.get("ready_backends"))
+    not_ready_backends = _runtime_device_backends(summary.get("not_ready_backends"))
+    status_by_backend = _runtime_device_summary_mapping(summary.get("status_by_backend"))
+    missing_ready = [
+        backend for backend in required_labels if backend not in set(ready_backends)
+    ]
+    runtime_ready = not missing_ready if required_labels else bool(ready_backends)
+    if missing_ready:
+        recommendation = "enable ready runtime backends: " + ", ".join(missing_ready)
+    elif ready_backends:
+        recommendation = "ready runtime backends: " + ", ".join(ready_backends)
+    else:
+        recommendation = "no ready runtime backend reported"
+    return {
+        "row_type": "zspace_inference_distortion_runtime_preflight",
+        "status": "ok",
+        "runtime": runtime_payload,
+        "backends": backend_labels,
+        "required_ready_backends": required_labels,
+        "ready_backends": ready_backends,
+        "not_ready_backends": not_ready_backends,
+        "missing_ready_backends": missing_ready,
+        "runtime_ready": runtime_ready,
+        "all_ready": bool(summary.get("all_ready")),
+        "has_errors": bool(summary.get("has_errors")),
+        "device_kwargs": kwargs,
+        "device_summary": summary,
+        "status_by_backend": status_by_backend,
+        "recommendation": recommendation,
+    }
+
+
 def zspace_inference_distortion_sweep_cli_args(
     config: Mapping[str, object] | None,
 ) -> list[str]:
@@ -1898,6 +2002,7 @@ def summarize_zspace_inference_distortion_sweep(
     best = top_probes[0] if top_probes else None
     recommended_probe = None if best is None else best.get("label")
     selected_run = _distortion_selected_run(runs, recommended_probe)
+    runtime_preflight = _nested_mapping(report, "runtime_preflight")
     (
         config,
         request,
@@ -1924,6 +2029,21 @@ def summarize_zspace_inference_distortion_sweep(
         "failed_run_count": _safe_number(report.get("failed_run_count")),
         "missing_run_count": _safe_number(report.get("missing_run_count")),
         "stale_run_count": _safe_number(report.get("stale_run_count")),
+        "runtime_preflight_status": runtime_preflight.get("status"),
+        "runtime_ready": runtime_preflight.get("runtime_ready"),
+        "runtime_ready_backends": list(runtime_preflight.get("ready_backends", []))
+        if isinstance(runtime_preflight.get("ready_backends"), list)
+        else [],
+        "runtime_missing_ready_backends": list(
+            runtime_preflight.get("missing_ready_backends", [])
+        )
+        if isinstance(runtime_preflight.get("missing_ready_backends"), list)
+        else [],
+        "runtime_status_by_backend": dict(
+            runtime_preflight.get("status_by_backend", {})
+        )
+        if isinstance(runtime_preflight.get("status_by_backend"), Mapping)
+        else {},
         "recommended_probe": recommended_probe,
         "recommendation_reason": comparison.get("recommended_reason"),
         "recommended_effect_score": None if best is None else best.get("effect_score"),
@@ -1994,7 +2114,9 @@ def summarize_zspace_inference_distortion_sweep_lines(
             f"recommend={summary.get('recommended_probe')} "
             f"effect={summary.get('recommended_effect_score')} "
             f"risk={summary.get('recommended_risk_score')} "
-            f"stale={summary.get('stale_run_count')}"
+            f"stale={summary.get('stale_run_count')} "
+            f"runtime={summary.get('runtime_preflight_status')} "
+            f"runtime_ready={summary.get('runtime_ready')}"
         )
     ]
     for row in summary.get("top_probes", []):

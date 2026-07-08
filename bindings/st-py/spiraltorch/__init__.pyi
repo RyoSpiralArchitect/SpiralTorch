@@ -478,6 +478,15 @@ def zspace_inference_distortion_runtime_cli_args(
     sweep: bool = ...,
 ) -> List[str]: ...
 
+def zspace_inference_distortion_runtime_preflight(
+    runtime: Mapping[str, object] | None = ...,
+    *,
+    backends: Sequence[object] | object | None = ...,
+    required_ready_backends: Sequence[object] | object | None = ...,
+    describe_runtime_devices: object | None = ...,
+    device_kwargs: Mapping[str, object] | None = ...,
+) -> Dict[str, object]: ...
+
 def zspace_inference_distortion_sweep_cli_args(
     config: Mapping[str, object] | None,
 ) -> List[str]: ...
@@ -8568,6 +8577,7 @@ __all__ = [
     "zspace_inference_distortion_probe_cli_args",
     "zspace_inference_distortion_runtime_cli_args",
     "zspace_inference_distortion_runtime_plan",
+    "zspace_inference_distortion_runtime_preflight",
     "zspace_inference_distortion_sweep_cli_args",
     "zspace_generation_control_bridge_cli_args",
     "zspace_generation_control_processor_kwargs",
