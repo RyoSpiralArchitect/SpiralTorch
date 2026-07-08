@@ -30,6 +30,7 @@ from spiraltorch.hf_generation import (
     summarize_zspace_generation_control_sweep_lines,
     zspace_inference_distortion_geometry_probe,
     zspace_inference_distortion_probe_cli_args,
+    zspace_inference_distortion_probe_report,
     zspace_inference_distortion_processor_kwargs,
     zspace_inference_distortion_runtime_cli_args,
     zspace_inference_distortion_runtime_plan,
@@ -325,6 +326,7 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         )
         self.assertIn("summarize_zspace_inference_distortion_probe_lines", st.__all__)
         self.assertIn("zspace_inference_distortion_geometry_probe", st.__all__)
+        self.assertIn("zspace_inference_distortion_probe_report", st.__all__)
         self.assertIn("zspace_inference_distortion_runtime_plan", st.__all__)
         self.assertIn("zspace_inference_distortion_runtime_cli_args", st.__all__)
         self.assertIn("zspace_inference_distortion_runtime_preflight", st.__all__)
@@ -365,6 +367,10 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         self.assertIs(
             st.zspace_inference_distortion_geometry_probe,
             zspace_inference_distortion_geometry_probe,
+        )
+        self.assertIs(
+            st.zspace_inference_distortion_probe_report,
+            zspace_inference_distortion_probe_report,
         )
         self.assertIs(
             st.summarize_zspace_generation_control_sweep,
@@ -470,6 +476,45 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         self.assertGreater(probe["value_l2"], 0.0)
         self.assertAlmostEqual(probe["derivative_l2"], (15.0**0.5))
         self.assertEqual(len(calls), 1)
+
+    def test_inference_distortion_probe_report_builds_package_artifact(self) -> None:
+        runtime = zspace_inference_distortion_runtime_plan(api_provider="fake")
+        report = zspace_inference_distortion_probe_report(
+            name="package-probe",
+            prompt="SpiralTorch package probe",
+            probe_path=Path("runs/package-probe.json"),
+            config={
+                "desire_pressure": 0.8,
+                "desire_stability": 0.45,
+                "psi_total": 0.7,
+                "coherence": 0.5,
+                "distortion_strength": 1.1,
+                "base_temperature": 0.7,
+                "base_top_p": 0.95,
+            },
+            runtime=runtime,
+            runtime_preflight={
+                "row_type": "zspace_inference_distortion_runtime_preflight",
+                "status": "ok",
+                "runtime_ready": True,
+                "ready_backends": ["wgpu"],
+                "missing_ready_backends": [],
+            },
+            local_hf={"status": "skipped"},
+            api={"provider": "fake", "text": "fake"},
+        )
+
+        self.assertEqual(report["row_type"], "zspace_inference_distortion_probe")
+        self.assertEqual(report["name"], "package-probe")
+        self.assertEqual(report["runtime"], runtime)
+        self.assertEqual(
+            report["adapter"]["kind"],
+            "spiraltorch.zspace_inference_distortion_adapter",
+        )
+        self.assertEqual(report["geometry_probe"]["status"], "ok")
+        self.assertEqual(report["summary"]["runtime_preflight_status"], "ok")
+        self.assertEqual(report["summary"]["geometry_status"], "ok")
+        self.assertIn("summary_lines", report)
 
     def test_inference_distortion_runtime_preflight_uses_device_reporter(self) -> None:
         runtime = zspace_inference_distortion_runtime_plan(

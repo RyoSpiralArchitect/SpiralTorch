@@ -597,23 +597,15 @@ def main(argv: list[str] | None = None) -> int:
         activation_name_contains=args.activation_name_contains,
     )
     runtime = _probe_runtime(args)
-    report = {
-        "row_type": "zspace_inference_distortion_probe",
-        "prompt": args.prompt,
-        "config": _probe_config(args),
-        "runtime": runtime,
-        "runtime_preflight": st.zspace_inference_distortion_runtime_preflight(runtime),
-        "geometry_probe": st.zspace_inference_distortion_geometry_probe(adapter),
-        "handoff": getattr(args, "sweep_handoff", None),
-        "adapter": adapter,
-        "local_hf": _run_local_hf(args, adapter),
-        "api": _run_api(args, adapter),
-    }
-    if args.out is not None:
-        report["probe_path"] = str(args.out)
-    report["summary"] = st.summarize_zspace_inference_distortion_probe(report)
-    report["summary_lines"] = st.summarize_zspace_inference_distortion_probe_lines(
-        report
+    report = st.zspace_inference_distortion_probe_report(
+        prompt=args.prompt,
+        config=_probe_config(args),
+        runtime=runtime,
+        adapter=adapter,
+        handoff=getattr(args, "sweep_handoff", None),
+        local_hf=_run_local_hf(args, adapter),
+        api=_run_api(args, adapter),
+        probe_path=args.out,
     )
     payload = json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True)
     if args.out is not None:

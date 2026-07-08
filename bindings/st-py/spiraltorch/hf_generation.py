@@ -23,6 +23,7 @@ __all__ = [
     "zspace_inference_distortion_runtime_cli_args",
     "zspace_inference_distortion_runtime_plan",
     "zspace_inference_distortion_runtime_preflight",
+    "zspace_inference_distortion_probe_report",
     "zspace_inference_distortion_sweep_cli_args",
     "zspace_generation_control_bridge_cli_args",
     "zspace_generation_control_processor_kwargs",
@@ -1801,6 +1802,96 @@ def zspace_inference_distortion_geometry_probe(
         "values": values,
         "derivatives": derivatives,
     }
+
+
+_DISTORTION_ADAPTER_CONFIG_KEYS = {
+    "desire_pressure",
+    "desire_stability",
+    "psi_total",
+    "coherence",
+    "distortion_strength",
+    "base_temperature",
+    "base_top_p",
+    "include_penalties",
+}
+
+
+def _distortion_adapter_from_config(config: Mapping[str, object]) -> dict[str, object]:
+    kwargs = {
+        key: config[key]
+        for key in _DISTORTION_ADAPTER_CONFIG_KEYS
+        if key in config and config[key] is not None
+    }
+    if not kwargs:
+        return {}
+    try:
+        module = importlib.import_module("spiraltorch")
+        builder = getattr(module, "api_llm_zspace_inference_distortion_adapter", None)
+    except Exception:
+        builder = None
+    if not callable(builder):
+        return {}
+    try:
+        adapter = builder(**kwargs)
+    except Exception:
+        return {}
+    return dict(adapter) if isinstance(adapter, Mapping) else {}
+
+
+def zspace_inference_distortion_probe_report(
+    *,
+    prompt: object,
+    config: Mapping[str, object] | None = None,
+    runtime: Mapping[str, object] | None = None,
+    adapter: Mapping[str, object] | None = None,
+    local_hf: Mapping[str, object] | None = None,
+    api: Mapping[str, object] | None = None,
+    handoff: Mapping[str, object] | None = None,
+    name: object | None = None,
+    probe_path: str | Path | None = None,
+    runtime_preflight: Mapping[str, object] | None = None,
+    geometry_probe: Mapping[str, object] | None = None,
+    include_summary: bool = True,
+) -> dict[str, object]:
+    """Build a reusable inference-distortion probe artifact."""
+
+    config_payload = dict(config or {})
+    runtime_payload = (
+        dict(runtime)
+        if isinstance(runtime, Mapping)
+        else zspace_inference_distortion_runtime_plan()
+    )
+    adapter_payload = (
+        dict(adapter)
+        if isinstance(adapter, Mapping)
+        else _distortion_adapter_from_config(config_payload)
+    )
+    report: dict[str, object] = {
+        "row_type": "zspace_inference_distortion_probe",
+        "prompt": prompt,
+        "config": config_payload,
+        "runtime": runtime_payload,
+        "runtime_preflight": dict(runtime_preflight)
+        if isinstance(runtime_preflight, Mapping)
+        else zspace_inference_distortion_runtime_preflight(runtime_payload),
+        "geometry_probe": dict(geometry_probe)
+        if isinstance(geometry_probe, Mapping)
+        else zspace_inference_distortion_geometry_probe(adapter_payload),
+        "handoff": dict(handoff) if isinstance(handoff, Mapping) else None,
+        "adapter": adapter_payload,
+        "local_hf": dict(local_hf or {}),
+        "api": dict(api or {}),
+    }
+    if name is not None:
+        report["name"] = str(name)
+    if probe_path is not None:
+        report["probe_path"] = str(probe_path)
+    if include_summary:
+        report["summary"] = summarize_zspace_inference_distortion_probe(report)
+        report["summary_lines"] = summarize_zspace_inference_distortion_probe_lines(
+            report
+        )
+    return report
 
 
 def _text_sequence(value: object) -> list[str]:

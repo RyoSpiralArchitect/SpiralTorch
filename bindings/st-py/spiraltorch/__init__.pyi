@@ -463,6 +463,22 @@ def zspace_inference_distortion_geometry_probe(
     zspace_eval_with_derivative_stable: object | None = ...,
 ) -> Dict[str, object]: ...
 
+def zspace_inference_distortion_probe_report(
+    *,
+    prompt: object,
+    config: Mapping[str, object] | None = ...,
+    runtime: Mapping[str, object] | None = ...,
+    adapter: Mapping[str, object] | None = ...,
+    local_hf: Mapping[str, object] | None = ...,
+    api: Mapping[str, object] | None = ...,
+    handoff: Mapping[str, object] | None = ...,
+    name: object | None = ...,
+    probe_path: str | PathLike[str] | None = ...,
+    runtime_preflight: Mapping[str, object] | None = ...,
+    geometry_probe: Mapping[str, object] | None = ...,
+    include_summary: bool = ...,
+) -> Dict[str, object]: ...
+
 def zspace_inference_distortion_runtime_plan(
     *,
     local_model: str | PathLike[str] | None = ...,
@@ -8582,6 +8598,7 @@ __all__ = [
     "zspace_inference_distortion_sweep_report_from_probes",
     "zspace_inference_distortion_geometry_probe",
     "zspace_inference_distortion_probe_cli_args",
+    "zspace_inference_distortion_probe_report",
     "zspace_inference_distortion_runtime_cli_args",
     "zspace_inference_distortion_runtime_plan",
     "zspace_inference_distortion_runtime_preflight",

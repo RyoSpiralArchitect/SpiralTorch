@@ -489,24 +489,17 @@ def _run_probe(args: argparse.Namespace, run: MappingLike) -> MappingLike:
         activation_module_names=args.activation_module_name,
         activation_name_contains=args.activation_name_contains,
     )
-    report: MappingLike = {
-        "row_type": "zspace_inference_distortion_probe",
-        "name": run["name"],
-        "probe_path": str(run["probe_path"]),
-        "config": config,
-        "prompt": args.prompt,
-        "runtime": runtime,
-        "runtime_preflight": _runtime_preflight(runtime),
-        "geometry_probe": st.zspace_inference_distortion_geometry_probe(adapter),
-        "adapter": adapter,
-        "local_hf": probe._run_local_hf(args, adapter),
-        "api": probe._run_api(args, adapter),
-    }
-    report["summary"] = st.summarize_zspace_inference_distortion_probe(report)
-    report["summary_lines"] = st.summarize_zspace_inference_distortion_probe_lines(
-        report
+    return st.zspace_inference_distortion_probe_report(
+        name=run["name"],
+        probe_path=str(run["probe_path"]),
+        config=config,
+        prompt=args.prompt,
+        runtime=runtime,
+        runtime_preflight=_runtime_preflight(runtime),
+        adapter=adapter,
+        local_hf=probe._run_local_hf(args, adapter),
+        api=probe._run_api(args, adapter),
     )
-    return report
 
 
 def _comparison_inputs(rows: list[MappingLike]) -> dict[str, str]:
