@@ -183,6 +183,7 @@ def summarize_history(
         "last_best_eval_loss_step": _nested(
             last, "trace", "trace_best_eval_loss_step"
         ),
+        "last_eval_loss_step": _nested(last, "trace", "trace_last_eval_loss_step"),
         "first_loss": losses[0] if losses else None,
         "last_loss": losses[-1] if losses else None,
         "min_loss": min(losses) if losses else None,
@@ -201,6 +202,8 @@ def summarize_history(
         else None,
         "last_disk_margin_gb": last.get("disk_margin_gb"),
         "last_disk_status": last.get("disk_status"),
+        "last_watch_stop_eval_step": last.get("watch_stop_eval_step"),
+        "last_watch_stop_eval_ready": last.get("watch_stop_eval_ready"),
         "last_watch_stop_reason": last.get("watch_stop_reason"),
     }
 
@@ -233,6 +236,7 @@ def history_lines(
             f"min_loss={_number_text(summary.get('min_loss'))} "
             f"loss_delta={_number_text(summary.get('loss_delta'))} "
             f"last_eval_loss={_number_text(summary.get('last_eval_loss'))} "
+            f"last_eval_step={_number_text(summary.get('last_eval_loss_step'))} "
             f"min_eval_loss={_number_text(summary.get('min_eval_loss'))} "
             f"best_eval_loss_step={_number_text(summary.get('last_best_eval_loss_step'))} "
             f"guard_count={_number_text(summary.get('last_guard_count'))} "
@@ -243,6 +247,8 @@ def history_lines(
             f"last_disk_margin_gb={_number_text(summary.get('last_disk_margin_gb'))} "
             f"min_disk_margin_gb={_number_text(summary.get('min_disk_margin_gb'))} "
             f"disk_status={_number_text(summary.get('last_disk_status'))} "
+            f"watch_stop_eval_step={_number_text(summary.get('last_watch_stop_eval_step'))} "
+            f"watch_stop_eval_ready={_number_text(summary.get('last_watch_stop_eval_ready'))} "
             f"watch_stop_reason={_number_text(summary.get('last_watch_stop_reason'))}"
         )
     ]
@@ -262,11 +268,14 @@ def history_lines(
                 f"steps_until_next_checkpoint={_number_text(_nested(row, 'checkpoint_progress', 'log_steps_until_next_checkpoint'))} "
                 f"last_loss={_number_text(_nested(row, 'trace', 'trace_last_loss'))} "
                 f"last_eval_loss={_number_text(_nested(row, 'trace', 'trace_last_eval_loss'))} "
+                f"last_eval_step={_number_text(_nested(row, 'trace', 'trace_last_eval_loss_step'))} "
                 f"best_eval_loss_step={_number_text(_nested(row, 'trace', 'trace_best_eval_loss_step'))} "
                 f"final_ready={_number_text(row.get('final_checkpoint_ready'))} "
                 f"disk_free_gb={_number_text(row.get('disk_free_gb'))} "
                 f"disk_margin_gb={_number_text(row.get('disk_margin_gb'))} "
                 f"disk_status={_number_text(row.get('disk_status'))} "
+                f"watch_stop_eval_step={_number_text(row.get('watch_stop_eval_step'))} "
+                f"watch_stop_eval_ready={_number_text(row.get('watch_stop_eval_ready'))} "
                 f"watch_stop_reason={_number_text(row.get('watch_stop_reason'))}"
             )
         )

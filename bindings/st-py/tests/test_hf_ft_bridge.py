@@ -4246,6 +4246,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                     "trace_max_global_step": 20,
                     "trace_last_loss": 2.1,
                     "trace_last_eval_loss": 1.8,
+                    "trace_last_eval_loss_step": 20,
                     "trace_best_eval_loss_step": 20,
                     "training_loss_guard_count": 0,
                 },
@@ -4262,6 +4263,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                     "next_checkpoint_step": 40,
                     "log_steps_until_next_checkpoint": 16,
                 },
+                "watch_stop_eval_step": 30,
+                "watch_stop_eval_ready": False,
             },
             {
                 "time_unix_s": 140.0,
@@ -4277,6 +4280,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                     "trace_max_global_step": 30,
                     "trace_last_loss": 1.9,
                     "trace_last_eval_loss": 1.7,
+                    "trace_last_eval_loss_step": 30,
                     "trace_best_eval_loss_step": 30,
                     "training_loss_guard_count": 0,
                 },
@@ -4293,6 +4297,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                     "next_checkpoint_step": 40,
                     "log_steps_until_next_checkpoint": 6,
                 },
+                "watch_stop_eval_step": 40,
+                "watch_stop_eval_ready": False,
             },
         ]
         with tempfile.TemporaryDirectory() as tmp:
@@ -4340,6 +4346,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(summary["last_log_steps_until_next_checkpoint"], 6)
         self.assertEqual(summary["estimated_seconds_until_next_checkpoint"], 24.0)
         self.assertEqual(summary["last_best_eval_loss_step"], 30)
+        self.assertEqual(summary["last_eval_loss_step"], 30)
         self.assertEqual(summary["first_loss"], 2.1)
         self.assertEqual(summary["last_loss"], 1.9)
         self.assertEqual(summary["min_loss"], 1.9)
@@ -4349,6 +4356,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(summary["last_disk_margin_gb"], 7.5)
         self.assertEqual(summary["min_disk_margin_gb"], 7.5)
         self.assertEqual(summary["last_disk_status"], "ok")
+        self.assertEqual(summary["last_watch_stop_eval_step"], 40)
+        self.assertFalse(summary["last_watch_stop_eval_ready"])
         self.assertEqual(summary["last_watch_stop_reason"], "checkpoint_ready")
         self.assertEqual(written["delta_log_step"], 10)
         self.assertIn("label=demo", lines[0])
@@ -4361,6 +4370,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("last_next_checkpoint_step=40", lines[0])
         self.assertIn("last_steps_until_next_checkpoint=6", lines[0])
         self.assertIn("estimated_seconds_until_next_checkpoint=24", lines[0])
+        self.assertIn("last_eval_step=30", lines[0])
         self.assertIn("best_eval_loss_step=30", lines[0])
         self.assertIn("last_loss=1.9", lines[0])
         self.assertIn("min_loss=1.9", lines[0])
@@ -4371,16 +4381,21 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("last_disk_margin_gb=7.5", lines[0])
         self.assertIn("min_disk_margin_gb=7.5", lines[0])
         self.assertIn("disk_status=ok", lines[0])
+        self.assertIn("watch_stop_eval_step=40", lines[0])
+        self.assertIn("watch_stop_eval_ready=false", lines[0])
         self.assertIn("watch_stop_reason=checkpoint_ready", lines[0])
         self.assertIn("index=1", lines[1])
         self.assertIn("log_remaining_seconds=90", lines[1])
         self.assertIn("next_checkpoint_step=40", lines[1])
         self.assertIn("steps_until_next_checkpoint=6", lines[1])
+        self.assertIn("last_eval_step=30", lines[1])
         self.assertIn("best_eval_loss_step=30", lines[1])
         self.assertIn("last_loss=1.9", lines[1])
         self.assertIn("disk_free_gb=11.5", lines[1])
         self.assertIn("disk_margin_gb=7.5", lines[1])
         self.assertIn("disk_status=ok", lines[1])
+        self.assertIn("watch_stop_eval_step=40", lines[1])
+        self.assertIn("watch_stop_eval_ready=false", lines[1])
         self.assertIn("watch_stop_reason=checkpoint_ready", lines[1])
         self.assertEqual(written_lines, lines)
 
