@@ -7828,7 +7828,14 @@ def hf_finetune_milestone_report(*args: object, **kwargs: object) -> dict[str, o
 
 
 def hf_finetune_rust_dependency_report() -> dict[str, object]:
-    return dict(_genericize_hf_finetune_payload(hf_gpt2_finetune_rust_dependency_report()))
+    report = dict(_genericize_hf_finetune_payload(hf_gpt2_finetune_rust_dependency_report()))
+    report["position"] = (
+        "For local AutoModelForCausalLM fine-tuning, SpiralTorch should keep "
+        "the Rust wheel focused on tensor/nn/text/logic/frac/rl/wgpu surfaces, "
+        "while Python explicitly brings the Hugging Face model, data, adapter, "
+        "and evaluation stack selected by the active model profile."
+    )
+    return report
 
 
 def _prefer_hf_finetune_scale_up_artifacts(

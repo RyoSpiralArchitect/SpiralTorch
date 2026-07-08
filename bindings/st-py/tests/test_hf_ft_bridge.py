@@ -525,6 +525,7 @@ class FakeDatasets:
 class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
     def test_rust_dependency_report_names_required_surfaces(self) -> None:
         report = hf_ft.hf_gpt2_finetune_rust_dependency_report()
+        generic_report = hf_ft.hf_finetune_rust_dependency_report()
 
         self.assertEqual(
             report["row_type"],
@@ -535,6 +536,13 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("st-backend-wgpu", report["rust_surface_crates"])
         self.assertIn("transformers", report["python_package_label"])
         self.assertIn("pyarrow", report["python_package_label"])
+        self.assertEqual(
+            generic_report["row_type"],
+            "hf_finetune_rust_dependency_report",
+        )
+        self.assertNotIn("GPT-2", generic_report["position"])
+        self.assertIn("AutoModelForCausalLM", generic_report["position"])
+        self.assertIn("active model profile", generic_report["position"])
 
     def test_preflight_defaults_require_hf_gpt2_ft_and_report_backends(self) -> None:
         available = set(hf_ft.HF_GPT2_FT_REQUIRED_PYTHON_PACKAGES)
