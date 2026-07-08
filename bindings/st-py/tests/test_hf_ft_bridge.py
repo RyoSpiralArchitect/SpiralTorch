@@ -602,10 +602,82 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
 
         self.assertTrue(report["runtime_import_preflight_passed"])
         self.assertEqual(report["required_runtime_import_presets"], "none")
+        self.assertEqual(report["row_type"], "hf_finetune_preflight")
         self.assertEqual(report["hf_model_name"], "EleutherAI/pythia-70m-deduped")
         self.assertFalse(report["hf_finetune_required"])
         self.assertIn("datasets", report["runtime_imports_failed"])
         self.assertIn("peft", report["hf_finetune_python_packages"])
+
+    def test_generic_hf_ft_core_helpers_emit_model_neutral_rows(self) -> None:
+        generation = hf_ft.hf_finetune_generation_report(
+            stage="after",
+            prompt="SpiralTorch is",
+            generated_text="SpiralTorch is a geometry runtime",
+            generated_continuation_text=" a geometry runtime",
+            input_token_count=3,
+            output_token_count=7,
+        )
+        evaluation = hf_ft.hf_finetune_eval_report(
+            stage="after",
+            metrics={"eval_loss": 2.5},
+        )
+        trace_row = hf_ft.hf_finetune_trainer_trace_event(
+            "log",
+            logs={"loss": 2.7, "learning_rate": 1e-4},
+        )
+        telemetry = hf_ft.hf_finetune_training_telemetry_frame(
+            "log",
+            logs={"loss": 2.7, "learning_rate": 1e-4},
+        )
+        dependency = hf_ft.hf_finetune_rust_dependency_report()
+        scale_preflight = hf_ft.hf_finetune_scale_up_preflight_report(["python3"])
+        scale_lines = hf_ft.hf_finetune_scale_up_preflight_lines(scale_preflight)
+        card = {
+            "row_type": "hf_gpt2_finetune_run_card",
+            "model_name": "EleutherAI/pythia-70m-deduped",
+            "generation_after_train": generation,
+            "eval_after_train": evaluation,
+        }
+        summary = hf_ft.summarize_hf_finetune_run_card(card)
+        comparison = hf_ft.compare_hf_finetune_run_cards([card], run_labels=["pythia"])
+
+        with tempfile.TemporaryDirectory() as tmp:
+            run_card_path = Path(tmp) / "run-card.json"
+            trace_path = Path(tmp) / "trace.jsonl"
+            hf_ft.write_hf_finetune_run_card(card, run_card_path)
+            hf_ft.write_hf_finetune_trainer_trace_event(trace_row, trace_path)
+            loaded_card = hf_ft.load_hf_finetune_run_card(run_card_path)
+            loaded_trace = hf_ft.load_hf_finetune_trainer_trace(trace_path)
+            trace_summary = hf_ft.summarize_hf_finetune_trainer_trace(loaded_trace)
+
+        self.assertEqual(generation["row_type"], "hf_finetune_generation_report")
+        self.assertEqual(evaluation["row_type"], "hf_finetune_eval_report")
+        self.assertEqual(trace_row["row_type"], "hf_finetune_trainer_trace")
+        self.assertEqual(telemetry["row_type"], "hf_finetune_training_telemetry")
+        self.assertEqual(
+            dependency["row_type"],
+            "hf_finetune_rust_dependency_report",
+        )
+        self.assertEqual(
+            scale_preflight["row_type"],
+            "hf_finetune_scale_up_preflight",
+        )
+        self.assertTrue(scale_lines[0].startswith("hf_ft_scale_up_preflight "))
+        self.assertEqual(summary["row_type"], "hf_finetune_run_card_summary")
+        self.assertEqual(
+            comparison["row_type"],
+            "hf_finetune_run_card_comparison",
+        )
+        self.assertEqual(
+            comparison["summaries"][0]["row_type"],
+            "hf_finetune_run_card_summary",
+        )
+        self.assertEqual(loaded_card["row_type"], "hf_finetune_run_card")
+        self.assertEqual(loaded_trace[0]["row_type"], "hf_finetune_trainer_trace")
+        self.assertEqual(
+            trace_summary["row_type"],
+            "hf_finetune_trainer_trace_summary",
+        )
 
     def test_empty_token_probe_is_honest_without_native_runtime(self) -> None:
         probe = hf_ft.hf_gpt2_finetune_zspace_probe([])
@@ -9654,7 +9726,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             st.hf_finetune_preflight_report,
             hf_ft.hf_gpt2_finetune_preflight_report,
         )
-        generic_hf_ft_aliases = {
+        generic_hf_ft_wrappers = {
             "hf_finetune_rust_dependency_report": (
                 "hf_gpt2_finetune_rust_dependency_report"
             ),
@@ -9665,9 +9737,6 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             "hf_finetune_eval_report": "hf_gpt2_finetune_eval_report",
             "hf_finetune_training_telemetry_frame": (
                 "hf_gpt2_finetune_training_telemetry_frame"
-            ),
-            "hf_finetune_trainer_trace_callback": (
-                "hf_gpt2_finetune_trainer_trace_callback"
             ),
             "hf_finetune_generation_curve_report": (
                 "hf_gpt2_finetune_generation_curve_report"
@@ -9689,10 +9758,19 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             ),
             "write_hf_finetune_run_card": "write_hf_gpt2_finetune_run_card",
         }
-        for generic_name, legacy_name in generic_hf_ft_aliases.items():
+        for generic_name, legacy_name in generic_hf_ft_wrappers.items():
             self.assertIn(generic_name, st.__all__)
             self.assertIs(getattr(st, generic_name), getattr(hf_ft, generic_name))
-            self.assertIs(getattr(st, generic_name), getattr(hf_ft, legacy_name))
+            self.assertIsNot(getattr(st, generic_name), getattr(hf_ft, legacy_name))
+        self.assertIn("hf_finetune_trainer_trace_callback", st.__all__)
+        self.assertIs(
+            st.hf_finetune_trainer_trace_callback,
+            hf_ft.hf_finetune_trainer_trace_callback,
+        )
+        self.assertIs(
+            st.hf_finetune_trainer_trace_callback,
+            hf_ft.hf_gpt2_finetune_trainer_trace_callback,
+        )
 
         generic_status_wrappers = {
             "hf_finetune_monitor_report": "hf_gpt2_finetune_monitor_report",

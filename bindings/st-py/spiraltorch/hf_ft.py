@@ -9,7 +9,7 @@ import os
 import shlex
 import shutil
 import time
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -215,6 +215,68 @@ HF_FINETUNE_MODEL_PROFILE_PREFLIGHT_PRESETS: dict[str, str] = {
     "runtime": "hf-runtime",
     "trl-sft": "hf-trl-sft",
 }
+
+
+def _generic_hf_finetune_row_type(value: object) -> object:
+    if not isinstance(value, str):
+        return value
+    if value.startswith("hf_gpt2_finetune_"):
+        return "hf_finetune_" + value.removeprefix("hf_gpt2_finetune_")
+    if value.startswith("hf_gpt2_ft_"):
+        return "hf_ft_" + value.removeprefix("hf_gpt2_ft_")
+    return value
+
+
+def _legacy_hf_finetune_row_type(value: object) -> object:
+    if not isinstance(value, str):
+        return value
+    if value.startswith("hf_finetune_"):
+        return "hf_gpt2_finetune_" + value.removeprefix("hf_finetune_")
+    if value.startswith("hf_ft_"):
+        return "hf_gpt2_ft_" + value.removeprefix("hf_ft_")
+    return value
+
+
+def _map_hf_finetune_row_types(
+    value: object,
+    row_type_mapper: Callable[[object], object],
+) -> object:
+    if isinstance(value, Mapping):
+        return {
+            str(key): (
+                row_type_mapper(item)
+                if key == "row_type"
+                else _map_hf_finetune_row_types(item, row_type_mapper)
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_map_hf_finetune_row_types(item, row_type_mapper) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_map_hf_finetune_row_types(item, row_type_mapper) for item in value)
+    return value
+
+
+def _genericize_hf_finetune_payload(value: object) -> object:
+    return _map_hf_finetune_row_types(value, _generic_hf_finetune_row_type)
+
+
+def _legacyize_hf_finetune_payload(value: object) -> object:
+    return _map_hf_finetune_row_types(value, _legacy_hf_finetune_row_type)
+
+
+def _genericize_hf_finetune_line(line: str) -> str:
+    if line.startswith("hf_gpt2_ft_"):
+        return "hf_ft_" + line.removeprefix("hf_gpt2_ft_")
+    if line.startswith("hf_gpt2_finetune"):
+        return "hf_finetune" + line.removeprefix("hf_gpt2_finetune")
+    if line.startswith("hf_gpt2_corpus_"):
+        return "hf_ft_corpus_" + line.removeprefix("hf_gpt2_corpus_")
+    return line
+
+
+def _genericize_hf_finetune_lines(lines: Sequence[object]) -> list[str]:
+    return [_genericize_hf_finetune_line(str(line)) for line in lines]
 HF_FINETUNE_DEFAULT_MODEL_CONFIGS: dict[str, object] = {
     "schema": HF_FINETUNE_MODEL_CONFIG_SCHEMA,
     "default_profile": "gpt2-local-smoke",
@@ -3218,7 +3280,7 @@ def hf_finetune_preflight_report(
             "hf_finetune_rust_dependency_report": dependency_report,
         }
     )
-    return report
+    return dict(_genericize_hf_finetune_payload(report))
 
 
 def hf_gpt2_finetune_summary_lines(report: Mapping[str, object]) -> list[str]:
@@ -7258,54 +7320,280 @@ def write_hf_gpt2_finetune_run_card(
     return str(output_path)
 
 
-# Generic HF fine-tune aliases. The underlying row schemas keep their historical
-# GPT-2 names for compatibility while import sites can move to model-neutral APIs.
+# Generic HF fine-tune wrappers. Legacy GPT-2 helpers stay stable for old
+# artifacts; model-neutral entrypoints normalize row_type and line prefixes.
 HF_FINETUNE_DEFAULT_DEVICE_BACKENDS = HF_GPT2_FT_DEFAULT_DEVICE_BACKENDS
 HF_FINETUNE_REQUIRED_PYTHON_PACKAGES = HF_GPT2_FT_REQUIRED_PYTHON_PACKAGES
 HF_FINETUNE_REQUIRED_RUST_SURFACES = HF_GPT2_FT_REQUIRED_RUST_SURFACES
-hf_finetune_corpus_file_report = hf_gpt2_finetune_corpus_file_report
-hf_finetune_corpus_scan_report = hf_gpt2_finetune_corpus_scan_report
-hf_finetune_dataset_fit_report = hf_gpt2_finetune_dataset_fit_report
-hf_finetune_disk_headroom_plan = hf_gpt2_finetune_disk_headroom_plan
-hf_finetune_eval_report = hf_gpt2_finetune_eval_report
-hf_finetune_generation_curve_lines = hf_gpt2_finetune_generation_curve_lines
-hf_finetune_generation_curve_report = hf_gpt2_finetune_generation_curve_report
-hf_finetune_generation_report = hf_gpt2_finetune_generation_report
-hf_finetune_inference_distortion_handoff_lines = (
-    hf_gpt2_finetune_inference_distortion_handoff_lines
-)
-hf_finetune_inference_distortion_handoff_report = (
-    hf_gpt2_finetune_inference_distortion_handoff_report
-)
-hf_finetune_inference_distortion_request_kwargs = (
-    hf_gpt2_finetune_inference_distortion_request_kwargs
-)
-hf_finetune_inference_distortion_runtime_adapter = (
-    hf_gpt2_finetune_inference_distortion_runtime_adapter
-)
-hf_finetune_inference_distortion_runtime_plan = (
-    hf_gpt2_finetune_inference_distortion_runtime_plan
-)
-hf_finetune_milestone_lines = hf_gpt2_finetune_milestone_lines
-hf_finetune_milestone_report = hf_gpt2_finetune_milestone_report
-hf_finetune_rust_dependency_report = hf_gpt2_finetune_rust_dependency_report
-hf_finetune_scale_up_command = hf_gpt2_finetune_scale_up_command
-hf_finetune_scale_up_preflight_lines = hf_gpt2_finetune_scale_up_preflight_lines
-hf_finetune_scale_up_preflight_report = hf_gpt2_finetune_scale_up_preflight_report
-hf_finetune_summary_lines = hf_gpt2_finetune_summary_lines
-hf_finetune_training_telemetry_frame = hf_gpt2_finetune_training_telemetry_frame
+
+
+def _legacyized_args(args: Sequence[object]) -> tuple[object, ...]:
+    return tuple(_legacyize_hf_finetune_payload(arg) for arg in args)
+
+
+def _legacyized_kwargs(kwargs: Mapping[str, object]) -> dict[str, object]:
+    return {
+        str(key): _legacyize_hf_finetune_payload(value)
+        for key, value in kwargs.items()
+    }
+
+
+def _generic_report_from(
+    fn: Callable[..., object],
+    *args: object,
+    **kwargs: object,
+) -> dict[str, object]:
+    report = fn(*_legacyized_args(args), **_legacyized_kwargs(kwargs))
+    return dict(_genericize_hf_finetune_payload(report))
+
+
+def _generic_lines_from(
+    fn: Callable[..., Sequence[object]],
+    *args: object,
+    **kwargs: object,
+) -> list[str]:
+    return _genericize_hf_finetune_lines(
+        fn(*_legacyized_args(args), **_legacyized_kwargs(kwargs))
+    )
+
+
+def hf_finetune_corpus_file_report(*args: object, **kwargs: object) -> dict[str, object]:
+    return _generic_report_from(hf_gpt2_finetune_corpus_file_report, *args, **kwargs)
+
+
+def hf_finetune_corpus_scan_report(*args: object, **kwargs: object) -> dict[str, object]:
+    return _generic_report_from(hf_gpt2_finetune_corpus_scan_report, *args, **kwargs)
+
+
+def hf_finetune_dataset_fit_report(*args: object, **kwargs: object) -> dict[str, object]:
+    return _generic_report_from(hf_gpt2_finetune_dataset_fit_report, *args, **kwargs)
+
+
+def hf_finetune_disk_headroom_plan(*args: object, **kwargs: object) -> dict[str, object]:
+    return _generic_report_from(hf_gpt2_finetune_disk_headroom_plan, *args, **kwargs)
+
+
+def hf_finetune_eval_report(*args: object, **kwargs: object) -> dict[str, object]:
+    return _generic_report_from(hf_gpt2_finetune_eval_report, *args, **kwargs)
+
+
+def hf_finetune_generation_curve_lines(
+    *args: object,
+    **kwargs: object,
+) -> list[str]:
+    return _generic_lines_from(hf_gpt2_finetune_generation_curve_lines, *args, **kwargs)
+
+
+def hf_finetune_generation_curve_report(
+    *args: object,
+    **kwargs: object,
+) -> dict[str, object]:
+    return _generic_report_from(hf_gpt2_finetune_generation_curve_report, *args, **kwargs)
+
+
+def hf_finetune_generation_report(*args: object, **kwargs: object) -> dict[str, object]:
+    return _generic_report_from(hf_gpt2_finetune_generation_report, *args, **kwargs)
+
+
+def hf_finetune_inference_distortion_handoff_lines(
+    *args: object,
+    **kwargs: object,
+) -> list[str]:
+    return _generic_lines_from(
+        hf_gpt2_finetune_inference_distortion_handoff_lines,
+        *args,
+        **kwargs,
+    )
+
+
+def hf_finetune_inference_distortion_handoff_report(
+    *args: object,
+    **kwargs: object,
+) -> dict[str, object]:
+    return _generic_report_from(
+        hf_gpt2_finetune_inference_distortion_handoff_report,
+        *args,
+        **kwargs,
+    )
+
+
+def hf_finetune_inference_distortion_request_kwargs(
+    *args: object,
+    **kwargs: object,
+) -> dict[str, object]:
+    return dict(
+        hf_gpt2_finetune_inference_distortion_request_kwargs(
+            *_legacyized_args(args),
+            **_legacyized_kwargs(kwargs),
+        )
+    )
+
+
+def hf_finetune_inference_distortion_runtime_adapter(
+    *args: object,
+    **kwargs: object,
+) -> dict[str, object]:
+    return _generic_report_from(
+        hf_gpt2_finetune_inference_distortion_runtime_adapter,
+        *args,
+        **kwargs,
+    )
+
+
+def hf_finetune_inference_distortion_runtime_plan(
+    *args: object,
+    **kwargs: object,
+) -> dict[str, object]:
+    return _generic_report_from(
+        hf_gpt2_finetune_inference_distortion_runtime_plan,
+        *args,
+        **kwargs,
+    )
+
+
+def hf_finetune_milestone_lines(*args: object, **kwargs: object) -> list[str]:
+    return _generic_lines_from(hf_gpt2_finetune_milestone_lines, *args, **kwargs)
+
+
+def hf_finetune_milestone_report(*args: object, **kwargs: object) -> dict[str, object]:
+    return _generic_report_from(hf_gpt2_finetune_milestone_report, *args, **kwargs)
+
+
+def hf_finetune_rust_dependency_report() -> dict[str, object]:
+    return dict(_genericize_hf_finetune_payload(hf_gpt2_finetune_rust_dependency_report()))
+
+
+def hf_finetune_scale_up_command(*args: object, **kwargs: object) -> dict[str, object]:
+    return _generic_report_from(hf_gpt2_finetune_scale_up_command, *args, **kwargs)
+
+
+def hf_finetune_scale_up_preflight_lines(
+    *args: object,
+    **kwargs: object,
+) -> list[str]:
+    return _generic_lines_from(
+        hf_gpt2_finetune_scale_up_preflight_lines,
+        *args,
+        **kwargs,
+    )
+
+
+def hf_finetune_scale_up_preflight_report(
+    *args: object,
+    **kwargs: object,
+) -> dict[str, object]:
+    return _generic_report_from(hf_gpt2_finetune_scale_up_preflight_report, *args, **kwargs)
+
+
+def hf_finetune_summary_lines(*args: object, **kwargs: object) -> list[str]:
+    return _generic_lines_from(hf_gpt2_finetune_summary_lines, *args, **kwargs)
+
+
+def hf_finetune_training_telemetry_frame(
+    *args: object,
+    **kwargs: object,
+) -> dict[str, object]:
+    return _generic_report_from(
+        hf_gpt2_finetune_training_telemetry_frame,
+        *args,
+        **kwargs,
+    )
+
+
 hf_finetune_trainer_trace_callback = hf_gpt2_finetune_trainer_trace_callback
-hf_finetune_trainer_trace_event = hf_gpt2_finetune_trainer_trace_event
-hf_finetune_zspace_probe = hf_gpt2_finetune_zspace_probe
-compare_hf_finetune_run_cards = compare_hf_gpt2_finetune_run_cards
-load_hf_finetune_run_card = load_hf_gpt2_finetune_run_card
-load_hf_finetune_sweep_report = load_hf_gpt2_finetune_sweep_report
-load_hf_finetune_trainer_trace = load_hf_gpt2_finetune_trainer_trace
-summarize_hf_finetune_run_card = summarize_hf_gpt2_finetune_run_card
-summarize_hf_finetune_sweep_report = summarize_hf_gpt2_finetune_sweep_report
-summarize_hf_finetune_sweep_report_lines = (
-    summarize_hf_gpt2_finetune_sweep_report_lines
-)
-summarize_hf_finetune_trainer_trace = summarize_hf_gpt2_finetune_trainer_trace
-write_hf_finetune_run_card = write_hf_gpt2_finetune_run_card
-write_hf_finetune_trainer_trace_event = write_hf_gpt2_finetune_trainer_trace_event
+
+
+def hf_finetune_trainer_trace_event(
+    *args: object,
+    **kwargs: object,
+) -> dict[str, object]:
+    return _generic_report_from(hf_gpt2_finetune_trainer_trace_event, *args, **kwargs)
+
+
+def hf_finetune_zspace_probe(*args: object, **kwargs: object) -> dict[str, object]:
+    return _generic_report_from(hf_gpt2_finetune_zspace_probe, *args, **kwargs)
+
+
+def compare_hf_finetune_run_cards(
+    *args: object,
+    **kwargs: object,
+) -> dict[str, object]:
+    return _generic_report_from(compare_hf_gpt2_finetune_run_cards, *args, **kwargs)
+
+
+def load_hf_finetune_run_card(path: str | Path) -> dict[str, object]:
+    return dict(_genericize_hf_finetune_payload(load_hf_gpt2_finetune_run_card(path)))
+
+
+def load_hf_finetune_sweep_report(path: str | Path) -> dict[str, object]:
+    return dict(_genericize_hf_finetune_payload(load_hf_gpt2_finetune_sweep_report(path)))
+
+
+def load_hf_finetune_trainer_trace(path: str | Path) -> list[dict[str, object]]:
+    rows = load_hf_gpt2_finetune_trainer_trace(path)
+    return [dict(_genericize_hf_finetune_payload(row)) for row in rows]
+
+
+def summarize_hf_finetune_run_card(
+    *args: object,
+    **kwargs: object,
+) -> dict[str, object]:
+    return _generic_report_from(summarize_hf_gpt2_finetune_run_card, *args, **kwargs)
+
+
+def summarize_hf_finetune_sweep_report(
+    *args: object,
+    **kwargs: object,
+) -> dict[str, object]:
+    return _generic_report_from(summarize_hf_gpt2_finetune_sweep_report, *args, **kwargs)
+
+
+def summarize_hf_finetune_sweep_report_lines(
+    *args: object,
+    **kwargs: object,
+) -> list[str]:
+    return _generic_lines_from(
+        summarize_hf_gpt2_finetune_sweep_report_lines,
+        *args,
+        **kwargs,
+    )
+
+
+def summarize_hf_finetune_trainer_trace(
+    *args: object,
+    **kwargs: object,
+) -> dict[str, object]:
+    return _generic_report_from(
+        summarize_hf_gpt2_finetune_trainer_trace,
+        *args,
+        **kwargs,
+    )
+
+
+def write_hf_finetune_run_card(
+    report: Mapping[str, object],
+    path: str | Path,
+) -> str:
+    output_path = Path(path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        json.dumps(
+            dict(_genericize_hf_finetune_payload(report)),
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return str(output_path)
+
+
+def write_hf_finetune_trainer_trace_event(
+    row: Mapping[str, object],
+    path: str | Path,
+) -> str:
+    return write_hf_gpt2_finetune_trainer_trace_event(
+        dict(_genericize_hf_finetune_payload(row)),
+        path,
+    )
