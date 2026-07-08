@@ -1134,6 +1134,64 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         self.assertEqual(report["completed_run_count"], 0)
         self.assertEqual(report["skipped_run_count"], 2)
 
+    def test_installed_inference_distortion_clis_plan_and_probe(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sweep_dir = root / "installed-sweep"
+            probe_out = root / "installed-probe.json"
+            sweep_stdout = io.StringIO()
+            with contextlib.redirect_stdout(sweep_stdout):
+                sweep_code = hf_cli.zspace_inference_distortion_sweep_main(
+                    [
+                        "--dry-run",
+                        "--out-dir",
+                        str(sweep_dir),
+                        "--prompt",
+                        "SpiralTorch installed sweep",
+                        "--model-configs",
+                        str(MODEL_CONFIGS_PATH),
+                        "--model-profile",
+                        "qwen2-0.5b-local-smoke",
+                        "--desire-pressure-values",
+                        "0.4",
+                        "--psi-total-values",
+                        "0.5",
+                    ]
+                )
+            probe_stdout = io.StringIO()
+            with contextlib.redirect_stdout(probe_stdout):
+                probe_code = hf_cli.zspace_inference_distortion_probe_main(
+                    [
+                        "--prompt",
+                        "SpiralTorch installed probe",
+                        "--api-provider",
+                        "fake",
+                        "--out",
+                        str(probe_out),
+                    ]
+                )
+            sweep_report = json.loads((sweep_dir / "sweep-report.json").read_text())
+            probe_report = json.loads(probe_out.read_text())
+
+        self.assertEqual(sweep_code, 0)
+        self.assertEqual(probe_code, 0)
+        self.assertEqual(
+            sweep_report["row_type"],
+            "zspace_inference_distortion_sweep",
+        )
+        self.assertEqual(
+            sweep_report["runtime"]["model_profile"]["profile_id"],
+            "qwen2-0.5b-local-smoke",
+        )
+        self.assertEqual(sweep_report["runtime"]["local_model"], "Qwen/Qwen2-0.5B")
+        self.assertIn("zspace_inference_distortion_sweep", sweep_stdout.getvalue())
+        self.assertEqual(
+            probe_report["row_type"],
+            "zspace_inference_distortion_probe",
+        )
+        self.assertEqual(probe_report["api"]["provider"], "fake")
+        self.assertIn("zspace_inference_distortion_probe", probe_stdout.getvalue())
+
     def test_inference_distortion_sweep_accepts_model_profile_defaults(self) -> None:
         module = load_distortion_sweep_example()
         with tempfile.TemporaryDirectory() as tmp:
@@ -1305,10 +1363,20 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
             ),
             sweep_summary["recommended_sweep_cli_args"],
         )
+        self.assertIn(
+            "spiral-zspace-inference-distortion-probe",
+            stored_report["recommended_commands"]["installed_probe"],
+        )
+        self.assertIn(
+            "spiral-zspace-inference-distortion-sweep",
+            stored_report["recommended_commands"]["installed_sweep"],
+        )
         self.assertIn("zspace_inference_distortion_sweep", sweep_lines[0])
         self.assertIn("Z-Space Inference Distortion Sweep", markdown)
         self.assertIn("Single-probe replay", markdown)
         self.assertIn("Focused sweep replay", markdown)
+        self.assertIn("Installed single-probe replay", markdown)
+        self.assertIn("Installed focused sweep replay", markdown)
         self.assertIn("--api-reasoning-effort minimal", stored_report["recommended_commands"]["probe"])
         self.assertIn("--api-text-verbosity low", stored_report["recommended_commands"]["sweep"])
         self.assertEqual(replay_args.prompt, "SpiralTorch sweep")

@@ -654,6 +654,8 @@ def _probe_config(args: argparse.Namespace) -> dict[str, Any]:
 
 def _probe_runtime(args: argparse.Namespace) -> dict[str, Any]:
     return st.zspace_inference_distortion_runtime_plan(
+        model_configs=args.model_configs,
+        model_profile=args.model_profile,
         local_model=args.local_model,
         tokenizer_name=args.tokenizer_name,
         allow_remote=args.allow_remote,

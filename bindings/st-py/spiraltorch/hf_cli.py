@@ -685,6 +685,14 @@ def zspace_generation_control_compare_main(argv: Sequence[str] | None = None) ->
     return 0
 
 
+def zspace_inference_distortion_probe_main(argv: Sequence[str] | None = None) -> int:
+    return _run_example("zspace_inference_distortion_probe.py", argv)
+
+
+def zspace_inference_distortion_sweep_main(argv: Sequence[str] | None = None) -> int:
+    return _run_example("zspace_inference_distortion_sweep.py", argv)
+
+
 def finetune_generation_curve_main(argv: Sequence[str] | None = None) -> int:
     return _run_example("hf_finetune_generation_curve.py", argv)
 

@@ -206,6 +206,8 @@ def _write_text(path: Path, text: str) -> None:
 
 def _runtime_plan(args: argparse.Namespace) -> MappingLike:
     return st.zspace_inference_distortion_runtime_plan(
+        model_configs=args.model_configs,
+        model_profile=args.model_profile,
         local_model=args.local_model,
         tokenizer_name=args.tokenizer_name,
         allow_remote=args.allow_remote,
@@ -267,9 +269,27 @@ def _recommended_commands(report: MappingLike) -> MappingLike:
     ]
     sweep_args.extend(_runtime_cli_args(runtime, sweep=True))
     sweep_args.extend(summary.get("recommended_sweep_cli_args") or [])
+    installed_probe_args = [
+        "spiral-zspace-inference-distortion-probe",
+        "--prompt",
+        prompt,
+    ]
+    installed_probe_args.extend(_runtime_cli_args(runtime, sweep=False))
+    installed_probe_args.extend(summary.get("recommended_probe_cli_args") or [])
+    installed_sweep_args = [
+        "spiral-zspace-inference-distortion-sweep",
+        "--out-dir",
+        Path(str(report.get("report_path") or ".")).parent,
+        "--prompt",
+        prompt,
+    ]
+    installed_sweep_args.extend(_runtime_cli_args(runtime, sweep=True))
+    installed_sweep_args.extend(summary.get("recommended_sweep_cli_args") or [])
     return {
         "probe": _shell_join(probe_args),
         "sweep": _shell_join(sweep_args),
+        "installed_probe": _shell_join(installed_probe_args),
+        "installed_sweep": _shell_join(installed_sweep_args),
     }
 
 
@@ -341,6 +361,28 @@ def _markdown_report(report: MappingLike) -> str:
         lines.extend(["Single-probe replay:", "", "```bash", str(commands["probe"]), "```", ""])
     if commands.get("sweep"):
         lines.extend(["Focused sweep replay:", "", "```bash", str(commands["sweep"]), "```", ""])
+    if commands.get("installed_probe"):
+        lines.extend(
+            [
+                "Installed single-probe replay:",
+                "",
+                "```bash",
+                str(commands["installed_probe"]),
+                "```",
+                "",
+            ]
+        )
+    if commands.get("installed_sweep"):
+        lines.extend(
+            [
+                "Installed focused sweep replay:",
+                "",
+                "```bash",
+                str(commands["installed_sweep"]),
+                "```",
+                "",
+            ]
+        )
 
     lines.extend(
         [
