@@ -70,6 +70,87 @@ def _nested(row: dict[str, Any], section: str, field: str) -> Any:
     return value.get(field)
 
 
+def _empty_model_metadata() -> dict[str, Any]:
+    return {
+        "model_profile_id": None,
+        "model_profile_extends": None,
+        "model_name": None,
+        "tokenizer_name": None,
+        "model_metadata_row_type": None,
+        "model_metadata_source_index": None,
+    }
+
+
+def _payload_model_metadata(payload: dict[str, Any] | None) -> dict[str, Any]:
+    empty = _empty_model_metadata()
+    if not isinstance(payload, dict):
+        return dict(empty)
+    preflight = payload.get("preflight")
+    preflight_mapping = preflight if isinstance(preflight, dict) else {}
+    profile = payload.get("model_profile") or preflight_mapping.get("model_profile")
+    profile_mapping = profile if isinstance(profile, dict) else {}
+    profile_id = (
+        payload.get("model_profile_id")
+        or payload.get("profile_id")
+        or preflight_mapping.get("model_profile_id")
+        or preflight_mapping.get("profile_id")
+        or profile_mapping.get("profile_id")
+        or profile_mapping.get("id")
+    )
+    profile_extends = (
+        payload.get("model_profile_extends")
+        or payload.get("profile_extends")
+        or preflight_mapping.get("model_profile_extends")
+        or preflight_mapping.get("profile_extends")
+        or profile_mapping.get("extends")
+    )
+    model_name = (
+        payload.get("model_name")
+        or payload.get("hf_model_name")
+        or preflight_mapping.get("model_name")
+        or preflight_mapping.get("hf_model_name")
+        or profile_mapping.get("model_name")
+    )
+    tokenizer_name = (
+        payload.get("tokenizer_name")
+        or preflight_mapping.get("tokenizer_name")
+        or profile_mapping.get("tokenizer_name")
+    )
+    return {
+        "model_profile_id": None if profile_id is None else str(profile_id),
+        "model_profile_extends": None
+        if profile_extends is None
+        else str(profile_extends),
+        "model_name": None if model_name is None else str(model_name),
+        "tokenizer_name": None if tokenizer_name is None else str(tokenizer_name),
+        "model_metadata_row_type": payload.get("row_type"),
+        "model_metadata_source_index": None,
+    }
+
+
+def _snapshot_model_metadata(
+    rows_by_source: dict[str, list[dict[str, Any]]],
+) -> dict[str, Any]:
+    metadata = _empty_model_metadata()
+    source_index = 0
+    metadata_source_index: int | None = None
+    for rows in rows_by_source.values():
+        for row in rows:
+            row_metadata = _payload_model_metadata(row)
+            updated = False
+            for key, value in row_metadata.items():
+                if key == "model_metadata_source_index":
+                    continue
+                if value is not None:
+                    metadata[key] = value
+                    updated = True
+            if updated:
+                metadata_source_index = source_index
+            source_index += 1
+    metadata["model_metadata_source_index"] = metadata_source_index
+    return metadata
+
+
 def _load_history(path: Path) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
@@ -805,6 +886,7 @@ def build_monitor_snapshot(args: argparse.Namespace) -> dict[str, Any]:
     wait_launch = _wait_launch_summary(
         loaded["wait_launch"], history_jsonl=paths["wait_launch"]
     )
+    model_metadata = _snapshot_model_metadata(loaded)
     primary = _latest_status_watch(watches)
     all_times = [
         value
@@ -828,6 +910,12 @@ def build_monitor_snapshot(args: argparse.Namespace) -> dict[str, Any]:
         "time_unix_s": max(all_times) if all_times else None,
         "primary_watch": primary.get("name"),
         "process_status": primary.get("process_status"),
+        "model_profile_id": model_metadata.get("model_profile_id"),
+        "model_profile_extends": model_metadata.get("model_profile_extends"),
+        "model_name": model_metadata.get("model_name"),
+        "tokenizer_name": model_metadata.get("tokenizer_name"),
+        "model_metadata_source_index": model_metadata.get("model_metadata_source_index"),
+        "model_metadata_row_type": model_metadata.get("model_metadata_row_type"),
         "runtime_max_steps": _watch_field_with_direct_fallback(
             primary, direct_watch, "runtime_max_steps"
         ),
@@ -963,6 +1051,10 @@ def snapshot_lines(snapshot: dict[str, Any]) -> list[str]:
             f"label={label} "
             f"primary={_number_text(snapshot.get('primary_watch'))} "
             f"process={_number_text(snapshot.get('process_status'))} "
+            f"profile={_number_text(snapshot.get('model_profile_id'))} "
+            f"extends={_number_text(snapshot.get('model_profile_extends'))} "
+            f"model={_number_text(snapshot.get('model_name'))} "
+            f"tokenizer={_number_text(snapshot.get('tokenizer_name'))} "
             f"log_step={_number_text(snapshot.get('log_latest_step'))} "
             f"max_steps={_number_text(snapshot.get('log_max_steps'))} "
             f"runtime_max_steps={_number_text(snapshot.get('runtime_max_steps'))} "

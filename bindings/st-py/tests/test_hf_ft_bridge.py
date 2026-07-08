@@ -6768,6 +6768,13 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 "row_type": "hf_finetune_run_status",
                 "time_unix_s": 200.0,
                 "process_status": "alive",
+                "model_name": "EleutherAI/pythia-70m-deduped",
+                "tokenizer_name": "EleutherAI/pythia-70m-deduped",
+                "model_profile_id": "causal-lm-local-smoke",
+                "model_profile": {
+                    "profile_id": "causal-lm-local-smoke",
+                    "extends": "pythia-70m-local-smoke",
+                },
                 "final_checkpoint_ready": True,
                 "checkpoint_count": 1,
                 "save_total_limit": 1,
@@ -6885,11 +6892,17 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(snapshot["row_type"], "hf_finetune_monitor_snapshot")
         self.assertEqual(snapshot["label"], "pythia")
         self.assertEqual(snapshot["primary_watch"], "direct")
+        self.assertEqual(snapshot["model_profile_id"], "causal-lm-local-smoke")
+        self.assertEqual(snapshot["model_profile_extends"], "pythia-70m-local-smoke")
+        self.assertEqual(snapshot["model_name"], "EleutherAI/pythia-70m-deduped")
         self.assertTrue(snapshot["final_checkpoint_ready"])
         self.assertTrue(snapshot["milestone_ready"])
         self.assertTrue(snapshot["wait_launch_launched"])
         self.assertEqual(snapshot["wait_launch_disk_status"], "ok")
         self.assertTrue(lines[0].startswith("hf_ft_monitor_snapshot "))
+        self.assertIn("profile=causal-lm-local-smoke", lines[0])
+        self.assertIn("extends=pythia-70m-local-smoke", lines[0])
+        self.assertIn("model=EleutherAI/pythia-70m-deduped", lines[0])
         self.assertTrue(
             any(line.startswith("hf_ft_monitor_watch ") for line in lines)
         )
@@ -6904,6 +6917,13 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         base_status = {
             "row_type": "hf_gpt2_finetune_run_status",
             "process_status": "alive",
+            "model_name": "EleutherAI/pythia-70m-deduped",
+            "tokenizer_name": "EleutherAI/pythia-70m-deduped",
+            "model_profile_id": "causal-lm-local-smoke",
+            "model_profile": {
+                "profile_id": "causal-lm-local-smoke",
+                "extends": "pythia-70m-local-smoke",
+            },
             "final_checkpoint_ready": False,
             "checkpoint_count": 1,
             "save_total_limit": 1,
@@ -7004,10 +7024,24 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             )
 
         lines = st.hf_gpt2_finetune_monitor_lines(snapshot)
+        generic_snapshot = st.hf_finetune_monitor_report(
+            direct=direct_rows,
+            eval_watch=eval_rows,
+            checkpoint_watch=[],
+            final_watch=[],
+            wait_launch=wait_rows,
+            milestone_step=6144,
+            label="long-ft",
+        )
+        generic_lines = st.hf_finetune_monitor_lines(generic_snapshot)
 
         self.assertEqual(snapshot["row_type"], "hf_gpt2_finetune_monitor_report")
         self.assertEqual(snapshot["primary_watch"], "direct")
         self.assertEqual(snapshot["process_status"], "alive")
+        self.assertEqual(snapshot["model_profile_id"], "causal-lm-local-smoke")
+        self.assertEqual(snapshot["model_profile_extends"], "pythia-70m-local-smoke")
+        self.assertEqual(snapshot["model_name"], "EleutherAI/pythia-70m-deduped")
+        self.assertEqual(snapshot["tokenizer_name"], "EleutherAI/pythia-70m-deduped")
         self.assertEqual(snapshot["log_latest_step"], 5800)
         self.assertEqual(snapshot["runtime_eval_steps"], 512)
         self.assertTrue(snapshot["direct_status_available"])
@@ -7026,8 +7060,17 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("hf_gpt2_ft_monitor ", lines[0])
         self.assertIn("label=long-ft", lines[0])
         self.assertIn("primary=direct", lines[0])
+        self.assertIn("profile=causal-lm-local-smoke", lines[0])
+        self.assertIn("extends=pythia-70m-local-smoke", lines[0])
+        self.assertIn("model=EleutherAI/pythia-70m-deduped", lines[0])
+        self.assertIn("tokenizer=EleutherAI/pythia-70m-deduped", lines[0])
         self.assertIn("milestone_status=waiting_for_step", lines[0])
         self.assertIn("wait_status=waiting_for_process", lines[0])
+        self.assertEqual(generic_snapshot["row_type"], "hf_finetune_monitor_report")
+        self.assertEqual(generic_snapshot["model_profile_id"], "causal-lm-local-smoke")
+        self.assertIn("hf_ft_monitor ", generic_lines[0])
+        self.assertIn("profile=causal-lm-local-smoke", generic_lines[0])
+        self.assertNotIn("hf_gpt2", "\n".join(generic_lines))
         self.assertIn("name=direct", lines[1])
         self.assertIn("rows=2", lines[1])
         self.assertIn("name=eval", lines[2])

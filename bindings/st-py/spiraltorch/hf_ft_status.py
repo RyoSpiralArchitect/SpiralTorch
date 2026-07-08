@@ -700,6 +700,11 @@ def hf_gpt2_finetune_monitor_report(
     }
     wait_rows, wait_source = _coerce_status_rows(wait_launch)
     wait_summary = _wait_launch_summary(wait_rows, source_path=wait_source)
+    model_metadata_rows: list[Mapping[str, Any]] = []
+    for rows, _source_path in sources.values():
+        model_metadata_rows.extend(rows)
+    model_metadata_rows.extend(wait_rows)
+    model_metadata = _status_history_model_metadata(model_metadata_rows)
     primary = _latest_status_watch(watches)
     direct_watch = watches["direct"]
     all_times = [
@@ -718,6 +723,12 @@ def hf_gpt2_finetune_monitor_report(
         "time_unix_s": max(all_times) if all_times else None,
         "primary_watch": primary.get("name"),
         "process_status": primary.get("process_status"),
+        "model_profile_id": model_metadata.get("model_profile_id"),
+        "model_profile_extends": model_metadata.get("model_profile_extends"),
+        "model_name": model_metadata.get("model_name"),
+        "tokenizer_name": model_metadata.get("tokenizer_name"),
+        "model_metadata_source_index": model_metadata.get("model_metadata_source_index"),
+        "model_metadata_row_type": model_metadata.get("metadata_row_type"),
         "runtime_max_steps": _watch_field_with_direct_fallback(
             primary, direct_watch, "runtime_max_steps"
         ),
@@ -849,6 +860,10 @@ def hf_gpt2_finetune_monitor_lines(snapshot: dict[str, Any]) -> list[str]:
             f"label={label} "
             f"primary={_number_text(snapshot.get('primary_watch'))} "
             f"process={_number_text(snapshot.get('process_status'))} "
+            f"profile={_number_text(snapshot.get('model_profile_id'))} "
+            f"extends={_number_text(snapshot.get('model_profile_extends'))} "
+            f"model={_number_text(snapshot.get('model_name'))} "
+            f"tokenizer={_number_text(snapshot.get('tokenizer_name'))} "
             f"log_step={_number_text(snapshot.get('log_latest_step'))} "
             f"max_steps={_number_text(snapshot.get('log_max_steps'))} "
             f"runtime_max_steps={_number_text(snapshot.get('runtime_max_steps'))} "
