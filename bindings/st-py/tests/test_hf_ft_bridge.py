@@ -2696,6 +2696,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             rewritten_artifact_path = out_dir / "scale-up-command-long.json"
             resume_checkpoint = out_dir / "checkpoint-1"
             resume_checkpoint.mkdir()
+            (resume_checkpoint / "model.safetensors").write_bytes(b"x" * 1024)
             scale_up_args = scale_up_module.parse_args(
                 [
                     str(sweep_report_path),
@@ -2845,11 +2846,23 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(rewritten["preflight_status"], "ready")
         self.assertEqual(direct_preflight["status"], "ready")
         self.assertEqual(direct_preflight["error_count"], 0)
+        self.assertEqual(
+            direct_preflight["disk_plan"]["resume_checkpoint_bytes"],
+            1024,
+        )
+        self.assertEqual(
+            direct_preflight["disk_plan"]["estimated_peak_checkpoint_bytes"],
+            2048,
+        )
+        self.assertEqual(direct_preflight["disk_plan"]["save_total_limit"], 1)
         self.assertTrue(
             any(
                 "hf_gpt2_ft_scale_up_preflight status=ready" in line
                 for line in direct_preflight_lines
             )
+        )
+        self.assertTrue(
+            any("hf_gpt2_ft_scale_up_disk_plan" in line for line in direct_preflight_lines)
         )
         self.assertIn("seed13", scale_up["scale_up_candidate_label"])
         self.assertIn("--max-steps 64", scale_up["command_display"])

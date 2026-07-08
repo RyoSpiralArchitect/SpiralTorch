@@ -2311,6 +2311,97 @@ def _nearest_existing_parent(path: Path) -> Path | None:
     return current if current.exists() else None
 
 
+def _path_size_bytes(path: Path) -> int | None:
+    if not path.exists():
+        return None
+    if path.is_file():
+        try:
+            return int(path.stat().st_size)
+        except OSError:
+            return None
+    total = 0
+    try:
+        for child in path.rglob("*"):
+            if not child.is_file():
+                continue
+            try:
+                total += int(child.stat().st_size)
+            except OSError:
+                continue
+    except OSError:
+        return None
+    return total
+
+
+def _positive_int_flag(command: Sequence[object], flag: str) -> int | None:
+    value = _safe_number(_command_flag_value(command, flag))
+    if value is None or float(value) <= 0.0:
+        return None
+    return int(value)
+
+
+def _disk_free_bytes(path: Path) -> int | None:
+    parent = _nearest_existing_parent(path)
+    if parent is None:
+        return None
+    try:
+        return int(shutil.disk_usage(parent).free)
+    except OSError:
+        return None
+
+
+def _scale_up_disk_plan(command: Sequence[object]) -> dict[str, object]:
+    gib = 1024.0**3
+    output_value = _command_flag_value(command, "--output-dir")
+    resume_value = _command_flag_value(command, "--resume-from-checkpoint")
+    output_dir = Path(output_value) if output_value else None
+    resume_checkpoint = Path(resume_value) if resume_value else None
+    checkpoint_bytes = (
+        None if resume_checkpoint is None else _path_size_bytes(resume_checkpoint)
+    )
+    save_total_limit = _positive_int_flag(command, "--save-total-limit") or 1
+    # Trainer may briefly hold the current best/new checkpoint plus the retained set.
+    estimated_peak_checkpoint_count = max(save_total_limit + 1, 1)
+    estimated_peak_checkpoint_bytes = (
+        None
+        if checkpoint_bytes is None
+        else int(checkpoint_bytes) * estimated_peak_checkpoint_count
+    )
+    free_bytes = None if output_dir is None else _disk_free_bytes(output_dir)
+    free_after_estimated_peak_bytes = (
+        None
+        if free_bytes is None or estimated_peak_checkpoint_bytes is None
+        else int(free_bytes) - int(estimated_peak_checkpoint_bytes)
+    )
+    return {
+        "row_type": "hf_gpt2_finetune_scale_up_disk_plan",
+        "output_dir": None if output_dir is None else str(output_dir),
+        "resume_from_checkpoint": (
+            None if resume_checkpoint is None else str(resume_checkpoint)
+        ),
+        "resume_checkpoint_bytes": checkpoint_bytes,
+        "resume_checkpoint_gb": (
+            None if checkpoint_bytes is None else float(checkpoint_bytes) / gib
+        ),
+        "save_total_limit": save_total_limit,
+        "estimated_peak_checkpoint_count": estimated_peak_checkpoint_count,
+        "estimated_peak_checkpoint_bytes": estimated_peak_checkpoint_bytes,
+        "estimated_peak_checkpoint_gb": (
+            None
+            if estimated_peak_checkpoint_bytes is None
+            else float(estimated_peak_checkpoint_bytes) / gib
+        ),
+        "free_bytes": free_bytes,
+        "free_gb": None if free_bytes is None else float(free_bytes) / gib,
+        "free_after_estimated_peak_bytes": free_after_estimated_peak_bytes,
+        "free_after_estimated_peak_gb": (
+            None
+            if free_after_estimated_peak_bytes is None
+            else float(free_after_estimated_peak_bytes) / gib
+        ),
+    }
+
+
 def hf_gpt2_finetune_scale_up_command(
     report_or_summary: str | Path | Mapping[str, object],
     *,
@@ -2651,6 +2742,37 @@ def hf_gpt2_finetune_scale_up_preflight_report(
                 }
             )
 
+    disk_plan = _scale_up_disk_plan(command)
+    if (
+        isinstance(disk_plan.get("free_after_estimated_peak_bytes"), int)
+        and disk_plan["free_after_estimated_peak_bytes"] < 0
+    ):
+        issues.append(
+            {
+                "severity": "warning",
+                "field": "disk_plan",
+                "path": disk_plan.get("output_dir"),
+                "message": "estimated peak checkpoint bytes exceed current free disk",
+            }
+        )
+    elif (
+        isinstance(disk_plan.get("free_after_estimated_peak_bytes"), int)
+        and isinstance(disk_plan.get("resume_checkpoint_bytes"), int)
+        and disk_plan["free_after_estimated_peak_bytes"]
+        < disk_plan["resume_checkpoint_bytes"]
+    ):
+        issues.append(
+            {
+                "severity": "warning",
+                "field": "disk_plan",
+                "path": disk_plan.get("output_dir"),
+                "message": (
+                    "estimated free disk after peak checkpoint reserve is less "
+                    "than one checkpoint"
+                ),
+            }
+        )
+
     error_count = sum(1 for issue in issues if issue.get("severity") == "error")
     warning_count = sum(1 for issue in issues if issue.get("severity") == "warning")
     return {
@@ -2668,6 +2790,7 @@ def hf_gpt2_finetune_scale_up_preflight_report(
         "bridge_script": bridge_script,
         "inputs": inputs,
         "outputs": outputs,
+        "disk_plan": disk_plan,
         "issues": issues,
     }
 
@@ -2692,6 +2815,17 @@ def hf_gpt2_finetune_scale_up_preflight_lines(
             f"executable={report.get('executable_resolved') or report.get('executable')}"
         )
     ]
+    disk_plan = report.get("disk_plan")
+    if isinstance(disk_plan, Mapping):
+        lines.append(
+            "hf_gpt2_ft_scale_up_disk_plan "
+            f"output_dir={disk_plan.get('output_dir')} "
+            f"resume_checkpoint_gb={disk_plan.get('resume_checkpoint_gb')} "
+            f"save_total_limit={disk_plan.get('save_total_limit')} "
+            f"estimated_peak_checkpoint_gb={disk_plan.get('estimated_peak_checkpoint_gb')} "
+            f"free_gb={disk_plan.get('free_gb')} "
+            f"free_after_estimated_peak_gb={disk_plan.get('free_after_estimated_peak_gb')}"
+        )
     for issue in report.get("issues", []):
         if not isinstance(issue, Mapping):
             continue
