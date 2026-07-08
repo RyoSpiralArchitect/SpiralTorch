@@ -117,6 +117,14 @@ def finetune_scale_up_main(argv: Sequence[str] | None = None) -> int:
     return _run_example("hf_finetune_scale_up.py", argv)
 
 
+def finetune_trace_summary_main(argv: Sequence[str] | None = None) -> int:
+    return _run_example("hf_finetune_trace_summary.py", argv)
+
+
+def finetune_run_status_main(argv: Sequence[str] | None = None) -> int:
+    return _run_example("hf_finetune_run_status.py", argv)
+
+
 def _path_values(values: Sequence[Path] | None) -> list[Path]:
     return [] if values is None else list(values)
 

@@ -43,10 +43,20 @@ TRACE_SUMMARY_PATH = (
     / "examples"
     / "hf_gpt2_finetune_trace_summary.py"
 )
+GENERIC_TRACE_SUMMARY_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "examples"
+    / "hf_finetune_trace_summary.py"
+)
 RUN_STATUS_PATH = (
     Path(__file__).resolve().parents[1]
     / "examples"
     / "hf_gpt2_finetune_run_status.py"
+)
+GENERIC_RUN_STATUS_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "examples"
+    / "hf_finetune_run_status.py"
 )
 STATUS_HISTORY_SUMMARY_PATH = (
     Path(__file__).resolve().parents[1]
@@ -148,10 +158,32 @@ def load_trace_summary_example():
     return module
 
 
+def load_generic_trace_summary_example():
+    spec = importlib.util.spec_from_file_location(
+        "hf_finetune_trace_summary_test",
+        GENERIC_TRACE_SUMMARY_PATH,
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
 def load_run_status_example():
     spec = importlib.util.spec_from_file_location(
         "hf_gpt2_finetune_run_status_test",
         RUN_STATUS_PATH,
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_generic_run_status_example():
+    spec = importlib.util.spec_from_file_location(
+        "hf_finetune_run_status_test",
+        GENERIC_RUN_STATUS_PATH,
     )
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -4882,6 +4914,71 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         )
         self.assertEqual(written_lines, lines)
 
+    def test_generic_trace_summary_example_renders_generic_lines(self) -> None:
+        module = load_generic_trace_summary_example()
+        rows = [
+            {
+                "event": "log",
+                "global_step": 4,
+                "time_unix_s": 100.0,
+                "metrics": {"loss": 2.2},
+            },
+            {
+                "event": "evaluate",
+                "global_step": 4,
+                "time_unix_s": 110.0,
+                "metrics": {"eval_loss": 2.0, "eval_runtime": 3.0},
+            },
+            {
+                "event": "log",
+                "global_step": 8,
+                "time_unix_s": 120.0,
+                "metrics": {"loss": 1.9},
+            },
+            {
+                "event": "evaluate",
+                "global_step": 8,
+                "time_unix_s": 130.0,
+                "metrics": {"eval_loss": 1.7, "eval_runtime": 3.5},
+            },
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            trace_path = Path(tmp) / st.HF_FINETUNE_TRAINER_TRACE_FILENAME
+            out_path = Path(tmp) / "summary.json"
+            lines_path = Path(tmp) / "summary.txt"
+            for row in rows:
+                hf_ft.write_hf_finetune_trainer_trace_event(row, trace_path)
+            argv = [
+                str(trace_path),
+                "--label",
+                "pythia",
+                "--max-steps",
+                "16",
+                "--tail-evals",
+                "1",
+                "--out",
+                str(out_path),
+                "--lines-out",
+                str(lines_path),
+            ]
+            args = module.parse_args(argv)
+            summary = module.summarize_trace(args)
+            lines = module.summary_lines(summary, tail_evals=1)
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                self.assertEqual(hf_cli.finetune_trace_summary_main(argv), 0)
+            written = json.loads(out_path.read_text(encoding="utf-8"))
+            written_lines = lines_path.read_text(encoding="utf-8").splitlines()
+
+        self.assertEqual(summary["row_type"], "hf_finetune_trainer_trace_summary")
+        self.assertEqual(summary["trace_max_global_step"], 8)
+        self.assertEqual(summary["progress"], 0.5)
+        self.assertTrue(lines[0].startswith("hf_ft_trace_summary "))
+        self.assertTrue(lines[1].startswith("hf_ft_trace_eval "))
+        self.assertEqual(written["row_type"], "hf_finetune_trainer_trace_summary")
+        self.assertEqual(written_lines, lines)
+        self.assertIn("hf_ft_trace_summary_json", stdout.getvalue())
+
     def test_run_status_example_summarizes_live_ft_run_directory(self) -> None:
         module = load_run_status_example()
         rows = [
@@ -5311,6 +5408,95 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(watch_disk_low_written["watch_stop_reason"], "disk_low")
         self.assertEqual(watch_disk_low_written["disk_status"], "low")
         self.assertEqual(written_lines, module.status_lines(written, tail_evals=1))
+
+    def test_generic_run_status_example_prefers_generic_artifacts(self) -> None:
+        module = load_generic_run_status_example()
+        rows = [
+            {
+                "event": "log",
+                "global_step": 5,
+                "time_unix_s": 100.0,
+                "metrics": {"loss": 2.0},
+            },
+            {
+                "event": "evaluate",
+                "global_step": 5,
+                "time_unix_s": 110.0,
+                "metrics": {"eval_loss": 1.9, "eval_runtime": 2.0},
+            },
+            {
+                "event": "log",
+                "global_step": 10,
+                "time_unix_s": 120.0,
+                "metrics": {"loss": 1.8},
+            },
+            {
+                "event": "evaluate",
+                "global_step": 10,
+                "time_unix_s": 130.0,
+                "metrics": {"eval_loss": 1.6, "eval_runtime": 2.5},
+            },
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "run"
+            run_dir.mkdir()
+            trace_path = run_dir / st.HF_FINETUNE_TRAINER_TRACE_FILENAME
+            for row in rows:
+                hf_ft.write_hf_finetune_trainer_trace_event(row, trace_path)
+            (run_dir / st.HF_FINETUNE_RUN_CARD_FILENAME).write_text(
+                json.dumps({"status": "running", "model_name": "pythia"}),
+                encoding="utf-8",
+            )
+            (run_dir / "ft.log").write_text(
+                " 50%|#####     | 10/20 [00:10<00:10,  1.00s/it]\n",
+                encoding="utf-8",
+            )
+            out_path = run_dir / "status.json"
+            lines_path = run_dir / "status.txt"
+            jsonl_path = run_dir / "status.jsonl"
+            argv = [
+                str(run_dir),
+                "--max-steps",
+                "20",
+                "--eval-steps",
+                "5",
+                "--save-steps",
+                "10",
+                "--tail-evals",
+                "1",
+                "--out",
+                str(out_path),
+                "--lines-out",
+                str(lines_path),
+                "--jsonl-out",
+                str(jsonl_path),
+            ]
+            args = module.parse_args(argv)
+            status = module.summarize_run(args)
+            lines = module.status_lines(status, tail_evals=1)
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                self.assertEqual(hf_cli.finetune_run_status_main(argv), 0)
+            written = json.loads(out_path.read_text(encoding="utf-8"))
+            written_lines = lines_path.read_text(encoding="utf-8").splitlines()
+            written_jsonl = [
+                json.loads(line)
+                for line in jsonl_path.read_text(encoding="utf-8").splitlines()
+            ]
+
+        self.assertEqual(args.trace_jsonl.name, st.HF_FINETUNE_TRAINER_TRACE_FILENAME)
+        self.assertEqual(args.run_card.name, st.HF_FINETUNE_RUN_CARD_FILENAME)
+        self.assertEqual(status["row_type"], "hf_finetune_run_status")
+        self.assertEqual(
+            status["trace"]["row_type"],
+            "hf_finetune_trainer_trace_summary",
+        )
+        self.assertTrue(lines[0].startswith("hf_ft_run_status "))
+        self.assertTrue(lines[1].startswith("hf_ft_run_eval "))
+        self.assertEqual(written["row_type"], "hf_finetune_run_status")
+        self.assertEqual(written_lines, lines)
+        self.assertEqual(written_jsonl[-1]["row_type"], "hf_finetune_run_status")
+        self.assertIn("hf_ft_run_status_json", stdout.getvalue())
 
     def test_run_status_example_uses_live_process_training_flags(self) -> None:
         module = load_run_status_example()
