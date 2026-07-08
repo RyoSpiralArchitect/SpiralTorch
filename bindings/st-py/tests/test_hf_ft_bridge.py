@@ -78,6 +78,11 @@ MONITOR_SNAPSHOT_PATH = (
     / "examples"
     / "hf_gpt2_finetune_monitor_snapshot.py"
 )
+GENERIC_MONITOR_SNAPSHOT_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "examples"
+    / "hf_finetune_monitor_snapshot.py"
+)
 MILESTONE_CAPTURE_PATH = (
     Path(__file__).resolve().parents[1]
     / "examples"
@@ -228,6 +233,17 @@ def load_monitor_snapshot_example():
     spec = importlib.util.spec_from_file_location(
         "hf_gpt2_finetune_monitor_snapshot_test",
         MONITOR_SNAPSHOT_PATH,
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_generic_monitor_snapshot_example():
+    spec = importlib.util.spec_from_file_location(
+        "hf_finetune_monitor_snapshot_test",
+        GENERIC_MONITOR_SNAPSHOT_PATH,
     )
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -6392,6 +6408,151 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertTrue(ready["milestone_step_reached"])
         self.assertEqual(ready["milestone_eval_loss"], 3.2)
         self.assertTrue(ready["milestone_checkpoint_ready"])
+
+    def test_generic_monitor_snapshot_example_summarizes_status_histories(self) -> None:
+        module = load_generic_monitor_snapshot_example()
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "run"
+            next_run_dir = Path(tmp) / "next"
+            run_dir.mkdir()
+            next_run_dir.mkdir()
+            status_history = run_dir / "status.jsonl"
+            wait_history = next_run_dir / "wait-launch-history.jsonl"
+            status_row = {
+                "row_type": "hf_finetune_run_status",
+                "time_unix_s": 200.0,
+                "process_status": "alive",
+                "final_checkpoint_ready": True,
+                "checkpoint_count": 1,
+                "save_total_limit": 1,
+                "latest_checkpoint": {
+                    "name": "checkpoint-20",
+                    "step": 20,
+                    "model_safetensors_ready": True,
+                },
+                "checkpoints": [
+                    {
+                        "name": "checkpoint-20",
+                        "step": 20,
+                        "model_safetensors_ready": True,
+                    }
+                ],
+                "runtime_settings": {
+                    "max_steps": 20,
+                    "eval_steps": 5,
+                    "save_steps": 10,
+                    "save_total_limit": 1,
+                    "min_free_disk_gb": 2.0,
+                    "process_command_available": True,
+                },
+                "checkpoint_headroom": {
+                    "resume_checkpoint_gb": 0.5,
+                    "estimated_peak_checkpoint_gb": 1.0,
+                    "free_after_estimated_peak_gb": 8.0,
+                },
+                "disk_free_gb": 9.0,
+                "disk_margin_gb": 7.0,
+                "disk_status": "ok",
+                "trace": {
+                    "trace_last_loss": 1.8,
+                    "trace_last_eval_loss": 1.6,
+                    "trace_last_eval_loss_step": 20,
+                    "trace_best_eval_loss_step": 20,
+                    "trace_eval_loss_improvement": 0.3,
+                    "trace_eval_loss_last_delta": -0.3,
+                    "trace_eval_loss_last_improvement_per_step": 0.06,
+                    "trace_eval_loss_projected_final_loss": 1.6,
+                    "trace_eval_loss_monotonic_nonincreasing": True,
+                    "training_loss_guard_count": 0,
+                    "trace_eval_loss_points": [
+                        {"step": 5, "eval_loss": 1.9},
+                        {"step": 20, "eval_loss": 1.6},
+                    ],
+                },
+                "log_progress": {
+                    "log_latest_step": 20,
+                    "log_max_steps": 20,
+                    "log_remaining_seconds": 0.0,
+                },
+                "eval_progress": {
+                    "next_eval_step": 20,
+                    "log_steps_until_next_eval": 0,
+                    "latest_due_eval_step": 20,
+                    "latest_due_eval_ready": True,
+                    "pending_eval_step": None,
+                    "log_steps_since_pending_eval": None,
+                },
+                "checkpoint_progress": {
+                    "next_checkpoint_step": 20,
+                    "log_steps_until_next_checkpoint": 0,
+                },
+            }
+            wait_row = {
+                "time_unix_s": 205.0,
+                "status": "launched",
+                "process_alive": False,
+                "checkpoint_ready": True,
+                "status_card_status": "complete",
+                "launched_pid": 1234,
+                "returncode": 0,
+                "launch_disk_guard": {
+                    "row_type": "hf_ft_wait_launch_disk_guard",
+                    "status": "ok",
+                    "min_free_gb": 2.0,
+                    "estimated_peak_checkpoint_gb": 1.0,
+                    "free_after_estimated_peak_gb": 8.0,
+                },
+            }
+            status_history.write_text(
+                json.dumps(status_row) + "\n",
+                encoding="utf-8",
+            )
+            wait_history.write_text(json.dumps(wait_row) + "\n", encoding="utf-8")
+            out_path = run_dir / "monitor.json"
+            lines_path = run_dir / "monitor.txt"
+            argv = [
+                str(run_dir),
+                "--next-run-dir",
+                str(next_run_dir),
+                "--label",
+                "pythia",
+                "--run-status-history-jsonl",
+                str(status_history),
+                "--wait-launch-history-jsonl",
+                str(wait_history),
+                "--milestone-step",
+                "20",
+                "--out",
+                str(out_path),
+                "--lines-out",
+                str(lines_path),
+            ]
+            args = module.parse_args(argv)
+            snapshot = module.build_monitor_snapshot(args)
+            lines = module.snapshot_lines(snapshot)
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                self.assertEqual(hf_cli.finetune_monitor_snapshot_main(argv), 0)
+            written = json.loads(out_path.read_text(encoding="utf-8"))
+            written_lines = lines_path.read_text(encoding="utf-8").splitlines()
+
+        self.assertEqual(snapshot["row_type"], "hf_finetune_monitor_snapshot")
+        self.assertEqual(snapshot["label"], "pythia")
+        self.assertEqual(snapshot["primary_watch"], "direct")
+        self.assertTrue(snapshot["final_checkpoint_ready"])
+        self.assertTrue(snapshot["milestone_ready"])
+        self.assertTrue(snapshot["wait_launch_launched"])
+        self.assertEqual(snapshot["wait_launch_disk_status"], "ok")
+        self.assertTrue(lines[0].startswith("hf_ft_monitor_snapshot "))
+        self.assertTrue(
+            any(line.startswith("hf_ft_monitor_watch ") for line in lines)
+        )
+        self.assertTrue(
+            any(line.startswith("hf_ft_monitor_wait_launch ") for line in lines)
+        )
+        self.assertEqual(written["row_type"], "hf_finetune_monitor_snapshot")
+        self.assertEqual(written_lines, lines)
+        self.assertIn("hf_ft_monitor_snapshot_json", stdout.getvalue())
 
     def test_package_monitor_report_summarizes_watchers_and_milestone(self) -> None:
         base_status = {

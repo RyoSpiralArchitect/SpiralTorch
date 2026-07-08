@@ -125,6 +125,10 @@ def finetune_run_status_main(argv: Sequence[str] | None = None) -> int:
     return _run_example("hf_finetune_run_status.py", argv)
 
 
+def finetune_monitor_snapshot_main(argv: Sequence[str] | None = None) -> int:
+    return _run_example("hf_finetune_monitor_snapshot.py", argv)
+
+
 def _path_values(values: Sequence[Path] | None) -> list[Path]:
     return [] if values is None else list(values)
 

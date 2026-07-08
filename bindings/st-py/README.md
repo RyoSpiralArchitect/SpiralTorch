@@ -737,13 +737,18 @@ spiral-hf-run-status --run-dir runs/hf-finetune-qwen2-zspace-ft --max-steps 2000
 spiral-hf-trace-summary \
   runs/hf-finetune-qwen2-zspace-ft/spiraltorch-hf-finetune-trainer-trace.jsonl \
   --max-steps 2000
+spiral-hf-monitor-snapshot \
+  --run-dir runs/hf-finetune-qwen2-zspace-ft \
+  --run-status-history-jsonl runs/hf-finetune-qwen2-zspace-ft/status.jsonl
 spiral-hf-run-artifacts --run-dir runs/hf-finetune-qwen2-zspace-ft
 spiral-hf-run-ops --run-dir runs/hf-finetune-qwen2-zspace-ft --dry-run
 ```
 
 `spiral-hf-run-status` watches the generic run card/trainer trace names by
-default, falling back to legacy GPT-2 filenames when only those exist. The
-archive commands write `hf-finetune-run-artifact-manifest.json` and
+default, falling back to legacy GPT-2 filenames when only those exist.
+`spiral-hf-monitor-snapshot` folds live status/watch histories into one compact
+readout for handoffs and CI logs. The archive commands write
+`hf-finetune-run-artifact-manifest.json` and
 `hf-finetune-run-ops-snapshot.json` by default. They still read legacy
 `spiraltorch-hf-gpt2-ft-*` run cards/traces, but prefer the generic
 `spiraltorch-hf-finetune-*` artifacts when both exist.
