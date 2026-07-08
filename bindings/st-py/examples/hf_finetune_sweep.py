@@ -15,6 +15,10 @@ from hf_gpt2_finetune_sweep import parse_args as _legacy_parse_args  # noqa: E40
 from hf_gpt2_finetune_sweep import run_sweep  # noqa: E402
 
 DEFAULT_BRIDGE = Path(__file__).resolve().with_name("hf_finetune_bridge.py")
+DEFAULT_OUT_DIR = Path("runs/hf-finetune-sweep")
+DEFAULT_RUN_PREFIX = "hf-ft"
+DEFAULT_RUN_CARD_FILENAME = "spiraltorch-hf-finetune-run-card.json"
+DEFAULT_TRAINER_TRACE_FILENAME = "spiraltorch-hf-finetune-trainer-trace.jsonl"
 
 
 def _argv_has_option(raw_argv: list[str], *names: str) -> bool:
@@ -27,6 +31,12 @@ def parse_args(argv: list[str] | None = None):
     args = _legacy_parse_args(argv)
     if not _argv_has_option(raw_argv, "--bridge-script"):
         args.bridge_script = DEFAULT_BRIDGE
+    if not _argv_has_option(raw_argv, "--out-dir"):
+        args.out_dir = DEFAULT_OUT_DIR
+    if not _argv_has_option(raw_argv, "--run-prefix"):
+        args.run_prefix = DEFAULT_RUN_PREFIX
+    args.run_card_filename = DEFAULT_RUN_CARD_FILENAME
+    args.trainer_trace_filename = DEFAULT_TRAINER_TRACE_FILENAME
     return args
 
 

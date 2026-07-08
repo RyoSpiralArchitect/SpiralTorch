@@ -25,9 +25,13 @@ __all__ = [
     "HF_FINETUNE_DEFAULT_DEVICE_BACKENDS",
     "HF_FINETUNE_DEFAULT_MODEL_CONFIGS",
     "HF_FINETUNE_MODEL_CONFIG_SCHEMA",
+    "HF_FINETUNE_RUN_CARD_FILENAME",
+    "HF_FINETUNE_TRAINER_TRACE_FILENAME",
     "HF_FINETUNE_REQUIRED_PYTHON_PACKAGES",
     "HF_FINETUNE_REQUIRED_RUST_SURFACES",
     "HF_GPT2_FT_DEFAULT_DEVICE_BACKENDS",
+    "HF_GPT2_FT_RUN_CARD_FILENAME",
+    "HF_GPT2_FT_TRAINER_TRACE_FILENAME",
     "HF_GPT2_FT_REQUIRED_PYTHON_PACKAGES",
     "HF_GPT2_FT_REQUIRED_RUST_SURFACES",
     "hf_finetune_preflight_report",
@@ -109,6 +113,10 @@ __all__ = [
 
 
 HF_GPT2_FT_DEFAULT_DEVICE_BACKENDS = ["wgpu", "cpu"]
+HF_GPT2_FT_RUN_CARD_FILENAME = "spiraltorch-hf-gpt2-ft-run-card.json"
+HF_GPT2_FT_TRAINER_TRACE_FILENAME = "spiraltorch-hf-gpt2-ft-trainer-trace.jsonl"
+HF_FINETUNE_RUN_CARD_FILENAME = "spiraltorch-hf-finetune-run-card.json"
+HF_FINETUNE_TRAINER_TRACE_FILENAME = "spiraltorch-hf-finetune-trainer-trace.jsonl"
 HF_GPT2_FT_DISTORTION_EVAL_PENALTY_WEIGHT = 0.1
 HF_GPT2_FT_REQUIRED_PYTHON_PACKAGES = [
     "transformers",
@@ -238,6 +246,68 @@ HF_FINETUNE_DEFAULT_MODEL_CONFIGS: dict[str, object] = {
                 "do_sample": False,
             },
             "notes": "Fast config for tests and docs; requires remote downloads when not cached.",
+        },
+        {
+            "id": "pythia-70m-local-smoke",
+            "model_name": "EleutherAI/pythia-70m-deduped",
+            "tokenizer_name": "EleutherAI/pythia-70m-deduped",
+            "architecture": "causal_lm",
+            "checkpoint_prefix": "checkpoint-",
+            "max_length": 128,
+            "training": {
+                "block_size": 128,
+                "max_train_samples": 4096,
+                "max_eval_samples": 512,
+            },
+            "generation": {
+                "max_new_tokens": 96,
+                "do_sample": True,
+                "temperature": 0.8,
+                "top_k": 50,
+            },
+            "notes": "Non-GPT-2 causal-LM smoke profile for widening local FT coverage.",
+        },
+        {
+            "id": "qwen2-0.5b-local-smoke",
+            "model_name": "Qwen/Qwen2-0.5B",
+            "tokenizer_name": "Qwen/Qwen2-0.5B",
+            "architecture": "causal_lm",
+            "checkpoint_prefix": "checkpoint-",
+            "max_length": 256,
+            "training": {
+                "block_size": 256,
+                "max_train_samples": 4096,
+                "max_eval_samples": 512,
+                "per_device_train_batch_size": 1,
+                "gradient_accumulation_steps": 8,
+            },
+            "generation": {
+                "max_new_tokens": 128,
+                "do_sample": True,
+                "temperature": 0.7,
+                "top_k": 40,
+            },
+            "notes": "Modern small causal-LM profile for local/API-adjacent Z-Space trials.",
+        },
+        {
+            "id": "local-causal-lm-template",
+            "model_name": "models/my-causal-lm",
+            "tokenizer_name": "models/my-causal-lm",
+            "architecture": "causal_lm",
+            "checkpoint_prefix": "checkpoint-",
+            "max_length": 256,
+            "training": {
+                "block_size": 256,
+                "max_train_samples": 8192,
+                "max_eval_samples": 1024,
+            },
+            "generation": {
+                "max_new_tokens": 128,
+                "do_sample": True,
+                "temperature": 0.8,
+                "top_k": 50,
+            },
+            "notes": "Copy this profile for a local AutoModelForCausalLM directory.",
         },
     ],
 }
@@ -3665,6 +3735,25 @@ def hf_gpt2_finetune_scale_up_command(
             "scale_up_candidate_label": summary.get("scale_up_candidate_label"),
         }
     base_command = [str(item) for item in command_value]
+    source_run_card = summary.get("scale_up_candidate_run_card") or _command_flag_value(
+        base_command,
+        "--run-card",
+    )
+    source_trace = summary.get(
+        "scale_up_candidate_trainer_trace_jsonl"
+    ) or _command_flag_value(base_command, "--trainer-trace-jsonl")
+    run_card_filename = (
+        HF_FINETUNE_RUN_CARD_FILENAME
+        if source_run_card is not None
+        and Path(str(source_run_card)).name == HF_FINETUNE_RUN_CARD_FILENAME
+        else HF_GPT2_FT_RUN_CARD_FILENAME
+    )
+    trainer_trace_filename = (
+        HF_FINETUNE_TRAINER_TRACE_FILENAME
+        if source_trace is not None
+        and Path(str(source_trace)).name == HF_FINETUNE_TRAINER_TRACE_FILENAME
+        else HF_GPT2_FT_TRAINER_TRACE_FILENAME
+    )
     resolved_output_dir = (
         str(output_dir)
         if output_dir is not None
@@ -3679,7 +3768,7 @@ def hf_gpt2_finetune_scale_up_command(
         str(run_card)
         if run_card is not None
         else (
-            str(Path(resolved_output_dir) / "spiraltorch-hf-gpt2-ft-run-card.json")
+            str(Path(resolved_output_dir) / run_card_filename)
             if resolved_output_dir
             else None
         )
@@ -3688,10 +3777,7 @@ def hf_gpt2_finetune_scale_up_command(
         str(trainer_trace_jsonl)
         if trainer_trace_jsonl is not None
         else (
-            str(
-                Path(resolved_output_dir)
-                / "spiraltorch-hf-gpt2-ft-trainer-trace.jsonl"
-            )
+            str(Path(resolved_output_dir) / trainer_trace_filename)
             if resolved_output_dir
             else None
         )

@@ -351,14 +351,15 @@ spiral-runtime-preflight \
 spiral-runtime-preflight --preset hf-peft --require --json
 ```
 
-Install the stronger local GPT-2 fine-tuning dependency surface with
+Install the stronger local Hugging Face fine-tuning dependency surface with
+`pip install "spiraltorch[hf-finetune,hf-peft]"` or the legacy-compatible
 `pip install "spiraltorch[hf-gpt2-ft]"`. Use `hf-runtime` for inference-only
 `transformers`/`torch`/`tokenizers` checks, `hf-finetune` for the lighter
 `datasets`/`accelerate`/`safetensors` contract, `hf-peft` for PEFT adapter
 workflows, and `hf-trl-sft` when a TRL SFT loop should be importable in the
 same environment.
 
-For a real local GPT-2-small FT run with a larger dataset, treat this as a hard
+For a real local causal-LM FT run with a larger dataset, treat this as a hard
 dependency boundary rather than a suggestion: the Rust wheel already exposes the
 default `nn`, `text`, `logic`, `spiral_rl`, and WGPU-backed tensor/runtime
 surface, while Python must bring the HF data/model stack. In practice,
@@ -371,11 +372,18 @@ surface, while Python must bring the HF data/model stack. In practice,
 The generic HF bridge turns that boundary into an executable run card. The
 historical `hf_gpt2_*` scripts still work, but new runs should prefer the
 `hf_*` entrypoints plus a model profile so the same path can target GPT-2,
-DistilGPT-2, tiny CI models, or another local `AutoModelForCausalLM` profile:
+DistilGPT-2, Pythia, Qwen, tiny CI models, or another local
+`AutoModelForCausalLM` profile. Keep model-specific settings in
+`bindings/st-py/examples/hf_finetune_model_configs.example.json` or a copied
+config file rather than baking them into the script name:
 
 ```bash
 spiral-hf-profile \
   --model-profile gpt2-local-smoke
+
+spiral-hf-profile \
+  --model-configs bindings/st-py/examples/hf_finetune_model_configs.example.json \
+  --model-profile pythia-70m-local-smoke
 
 PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_finetune_bridge.py \
   --model-configs bindings/st-py/examples/hf_finetune_model_configs.example.json \
@@ -401,7 +409,9 @@ spiral-hf-finetune \
 After the contract passes, add `--train --max-train-samples 50000 --block-size
 128 --output-dir runs/gpt2-small-zspace-ft` to run a real local
 `AutoModelForCausalLM` / `Trainer` fine-tune. Train runs write
-`spiraltorch-hf-gpt2-ft-trainer-trace.jsonl` by default, capturing
+`spiraltorch-hf-finetune-run-card.json` and
+`spiraltorch-hf-finetune-trainer-trace.jsonl` by default when launched through
+the generic `hf_*` wrappers, capturing
 train/log/evaluate/save/end events and summarizing loss/eval-loss telemetry
 back into the run card; add `--trainer-telemetry --trainer-desire-gain 1.0
 --trainer-psi-gain 1.0` to inject bounded desire/psi frames into those events
@@ -417,7 +427,9 @@ when the SpiralTorch WGPU surface must be available before the run starts.
 For a larger local corpus, bypass Hub datasets and feed files directly:
 
 ```bash
-PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_gpt2_finetune_bridge.py \
+PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_finetune_bridge.py \
+  --model-configs bindings/st-py/examples/hf_finetune_model_configs.example.json \
+  --model-profile qwen2-0.5b-local-smoke \
   --corpus-scan \
   --train \
   --train-file data/corpus-000.txt \
@@ -426,7 +438,7 @@ PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_gpt2_finetune_bridge
   --dataset-format text \
   --max-train-samples 50000 \
   --block-size 128 \
-  --output-dir runs/gpt2-small-zspace-ft
+  --output-dir runs/hf-finetune-qwen2-zspace-ft
 ```
 
 The run card stores `corpus_file_report` with file counts, total bytes, missing

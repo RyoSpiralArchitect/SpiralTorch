@@ -642,6 +642,7 @@ def _default_checkpoint_curve_run_card(
 ) -> Path | None:
     candidates = [
         config.curve_run_card,
+        config.run_dir / "spiraltorch-hf-finetune-run-card.json",
         config.run_dir / "spiraltorch-hf-gpt2-ft-run-card.json",
     ]
     for path in candidates:
@@ -655,6 +656,7 @@ def _default_checkpoint_curve_trainer_trace(
 ) -> Path | None:
     candidates = [
         config.curve_trainer_trace_jsonl,
+        config.run_dir / "spiraltorch-hf-finetune-trainer-trace.jsonl",
         config.run_dir / "spiraltorch-hf-gpt2-ft-trainer-trace.jsonl",
     ]
     for path in candidates:

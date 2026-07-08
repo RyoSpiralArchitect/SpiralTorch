@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import spiraltorch as st
 from spiraltorch import hf_ft
@@ -2383,15 +2384,17 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
                     str(out_path),
                 ]
             )
-            compare_code = hf_cli.zspace_generation_control_compare_main(
-                [
-                    str(out_path),
-                    "--label",
-                    "installed",
-                    "--out",
-                    str(compare_path),
-                ]
-            )
+            with mock.patch.object(hf_cli, "_run_example") as run_example:
+                compare_code = hf_cli.zspace_generation_control_compare_main(
+                    [
+                        str(out_path),
+                        "--label",
+                        "installed",
+                        "--out",
+                        str(compare_path),
+                    ]
+                )
+                run_example.assert_not_called()
             report = json.loads(out_path.read_text())
             comparison = json.loads(compare_path.read_text())
 
@@ -2407,28 +2410,64 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
     def test_installed_hf_checkpoint_control_cli_uses_generic_scripts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            code = hf_cli.checkpoint_generation_control_main(
-                [
-                    "--dry-run",
-                    "--no-compare",
-                    "--run-dir",
-                    str(root / "run"),
-                    "--checkpoint",
-                    "checkpoint-2048",
-                    "--model-configs",
-                    str(MODEL_CONFIGS_PATH),
-                    "--model-profile",
-                    "tiny-gpt2-ci",
-                    "--run-card",
-                    str(root / "checkpoint-control.json"),
-                ]
-            )
+            with mock.patch.object(hf_cli, "_run_example") as run_example:
+                code = hf_cli.checkpoint_generation_control_main(
+                    [
+                        "--dry-run",
+                        "--no-compare",
+                        "--run-dir",
+                        str(root / "run"),
+                        "--checkpoint",
+                        "checkpoint-2048",
+                        "--model-configs",
+                        str(MODEL_CONFIGS_PATH),
+                        "--model-profile",
+                        "tiny-gpt2-ci",
+                        "--run-card",
+                        str(root / "checkpoint-control.json"),
+                    ]
+                )
+                run_example.assert_not_called()
             report = json.loads((root / "checkpoint-control.json").read_text())
 
         command = report["sweeps"][0]["command"]
         self.assertEqual(code, 0)
         self.assertEqual(Path(command[1]).name, "hf_zspace_generation_control_sweep.py")
         self.assertEqual(report["tokenizer_name"], "sshleifer/tiny-gpt2")
+
+    def test_installed_hf_checkpoint_control_cli_accepts_script_overrides(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            custom_sweep = root / "custom_sweep.py"
+            custom_compare = root / "custom_compare.py"
+            custom_curve = root / "custom_curve.py"
+            with mock.patch.object(hf_cli, "_run_example") as run_example:
+                code = hf_cli.checkpoint_generation_control_main(
+                    [
+                        "--dry-run",
+                        "--run-dir",
+                        str(root / "run"),
+                        "--checkpoint",
+                        "checkpoint-2048",
+                        "--sweep-script",
+                        str(custom_sweep),
+                        "--compare-script",
+                        str(custom_compare),
+                        "--curve-script",
+                        str(custom_curve),
+                        "--curve-out",
+                        str(root / "curve.json"),
+                        "--run-card",
+                        str(root / "checkpoint-control.json"),
+                    ]
+                )
+                run_example.assert_not_called()
+            report = json.loads((root / "checkpoint-control.json").read_text())
+
+        self.assertEqual(code, 0)
+        self.assertEqual(report["sweeps"][0]["command"][1], str(custom_sweep))
+        self.assertEqual(report["compare"]["command"][1], str(custom_compare))
+        self.assertEqual(report["curve"]["command"][1], str(custom_curve))
 
     def test_repetition_report_scores_repeated_ngrams(self) -> None:
         module = load_generation_control_sweep_example()

@@ -858,8 +858,16 @@ def build_sweep_runs(args: argparse.Namespace) -> list[dict[str, Any]]:
             seed=seed,
         )
         run_dir = args.out_dir / name
-        run_card = run_dir / "spiraltorch-hf-gpt2-ft-run-card.json"
-        trainer_trace = run_dir / "spiraltorch-hf-gpt2-ft-trainer-trace.jsonl"
+        run_card = run_dir / str(
+            getattr(args, "run_card_filename", st.HF_GPT2_FT_RUN_CARD_FILENAME)
+        )
+        trainer_trace = run_dir / str(
+            getattr(
+                args,
+                "trainer_trace_filename",
+                st.HF_GPT2_FT_TRAINER_TRACE_FILENAME,
+            )
+        )
         command = _bridge_command(
             args,
             run_dir=run_dir,

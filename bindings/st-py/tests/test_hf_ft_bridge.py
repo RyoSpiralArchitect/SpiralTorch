@@ -955,6 +955,34 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 )
             )
 
+    def test_checkpoint_generation_control_prefers_generic_curve_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "runs" / "hf-finetune"
+            run_dir.mkdir(parents=True)
+            generic_run_card = run_dir / st.HF_FINETUNE_RUN_CARD_FILENAME
+            generic_trace = run_dir / st.HF_FINETUNE_TRAINER_TRACE_FILENAME
+            legacy_run_card = run_dir / st.HF_GPT2_FT_RUN_CARD_FILENAME
+            legacy_trace = run_dir / st.HF_GPT2_FT_TRAINER_TRACE_FILENAME
+            generic_run_card.write_text('{"row_type":"generic"}\n', encoding="utf-8")
+            generic_trace.write_text('{"event":"train_begin"}\n', encoding="utf-8")
+            legacy_run_card.write_text('{"row_type":"legacy"}\n', encoding="utf-8")
+            legacy_trace.write_text('{"event":"legacy"}\n', encoding="utf-8")
+
+            report = st.zspace_checkpoint_generation_control_report(
+                run_dir=run_dir,
+                checkpoint="checkpoint-8192",
+                curve_out=run_dir / "curve.json",
+                curve_lines_out=run_dir / "curve.txt",
+                dry_run=True,
+                no_compare=True,
+            )
+
+        command = [str(part) for part in report["curve"]["command"]]
+        self.assertIn(str(generic_run_card), command)
+        self.assertIn(str(generic_trace), command)
+        self.assertNotIn(str(legacy_run_card), command)
+        self.assertNotIn(str(legacy_trace), command)
+
     def test_inference_distortion_handoff_report_flattens_recommendation(self) -> None:
         sweep_report = {
             "row_type": "zspace_inference_distortion_sweep",
@@ -6837,6 +6865,20 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             profiles["tiny-gpt2-ci"]["model_name"],
             "sshleifer/tiny-gpt2",
         )
+        self.assertEqual(
+            profiles["pythia-70m-local-smoke"]["model_name"],
+            "EleutherAI/pythia-70m-deduped",
+        )
+        self.assertEqual(
+            profiles["qwen2-0.5b-local-smoke"]["training"][
+                "gradient_accumulation_steps"
+            ],
+            8,
+        )
+        self.assertEqual(
+            profiles["local-causal-lm-template"]["model_name"],
+            "models/my-causal-lm",
+        )
         self.assertTrue(
             all(
                 profile["architecture"] == "causal_lm"
@@ -6870,6 +6912,21 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("80", cli_args)
         self.assertNotIn("--generation-do-sample", cli_args)
         self.assertIn("profile=distilgpt2-local-smoke", lines[0])
+
+        pythia_profile = st.resolve_hf_finetune_model_profile(
+            MODEL_CONFIGS_PATH,
+            profile="pythia-70m-local-smoke",
+        )
+        pythia_cli_args = st.hf_finetune_model_profile_cli_args(pythia_profile)
+        self.assertEqual(
+            pythia_profile["model_name"],
+            "EleutherAI/pythia-70m-deduped",
+        )
+        self.assertIn("--generation-do-sample", pythia_cli_args)
+        self.assertIn("--generation-temperature", pythia_cli_args)
+        self.assertIn("0.8", pythia_cli_args)
+        self.assertIn("--generation-top-k", pythia_cli_args)
+        self.assertIn("50", pythia_cli_args)
 
     def test_bridge_model_profile_defaults_and_explicit_overrides(self) -> None:
         module = load_bridge_example()
@@ -6930,6 +6987,12 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(args.tokenizer_name, "sshleifer/tiny-gpt2")
         self.assertEqual(args.block_size, 64)
         self.assertEqual(args.generation_max_new_tokens, 32)
+        self.assertEqual(args.output_dir, Path("runs/hf-finetune"))
+        self.assertEqual(args.run_card.name, st.HF_FINETUNE_RUN_CARD_FILENAME)
+        self.assertEqual(
+            args.trainer_trace_jsonl.name,
+            st.HF_FINETUNE_TRAINER_TRACE_FILENAME,
+        )
 
     def test_installed_hf_profile_cli_resolves_profiles(self) -> None:
         stdout = io.StringIO()
@@ -6971,6 +7034,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(Path(command[1]).name, "hf_finetune_bridge.py")
         self.assertEqual(report["model_profile"]["profile_id"], "tiny-gpt2-ci")
+        self.assertEqual(
+            Path(command[command.index("--run-card") + 1]).name,
+            st.HF_FINETUNE_RUN_CARD_FILENAME,
+        )
+        self.assertEqual(
+            Path(command[command.index("--trainer-trace-jsonl") + 1]).name,
+            st.HF_FINETUNE_TRAINER_TRACE_FILENAME,
+        )
 
     def test_sweep_model_profile_defaults_flow_to_bridge_commands(self) -> None:
         module = load_sweep_example()
@@ -7049,6 +7120,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         command = runs[0]["command"]
         self.assertEqual(args.bridge_script.name, "hf_finetune_bridge.py")
         self.assertEqual(Path(command[1]).name, "hf_finetune_bridge.py")
+        self.assertEqual(
+            runs[0]["run_card"].split("/")[-1],
+            st.HF_FINETUNE_RUN_CARD_FILENAME,
+        )
+        self.assertEqual(
+            runs[0]["trainer_trace_jsonl"].split("/")[-1],
+            st.HF_FINETUNE_TRAINER_TRACE_FILENAME,
+        )
         self.assertEqual(
             command[command.index("--model-name") + 1],
             "sshleifer/tiny-gpt2",
@@ -7661,9 +7740,29 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             st.HF_FINETUNE_MODEL_CONFIG_SCHEMA,
             "spiraltorch.hf_finetune_model_configs.v1",
         )
+        self.assertEqual(
+            st.HF_FINETUNE_RUN_CARD_FILENAME,
+            "spiraltorch-hf-finetune-run-card.json",
+        )
+        self.assertEqual(
+            st.HF_FINETUNE_TRAINER_TRACE_FILENAME,
+            "spiraltorch-hf-finetune-trainer-trace.jsonl",
+        )
+        self.assertEqual(
+            st.HF_GPT2_FT_RUN_CARD_FILENAME,
+            "spiraltorch-hf-gpt2-ft-run-card.json",
+        )
+        self.assertEqual(
+            st.HF_GPT2_FT_TRAINER_TRACE_FILENAME,
+            "spiraltorch-hf-gpt2-ft-trainer-trace.jsonl",
+        )
         profile_exports = [
             "HF_FINETUNE_DEFAULT_MODEL_CONFIGS",
             "HF_FINETUNE_MODEL_CONFIG_SCHEMA",
+            "HF_FINETUNE_RUN_CARD_FILENAME",
+            "HF_FINETUNE_TRAINER_TRACE_FILENAME",
+            "HF_GPT2_FT_RUN_CARD_FILENAME",
+            "HF_GPT2_FT_TRAINER_TRACE_FILENAME",
             "load_hf_finetune_model_configs",
             "hf_finetune_model_profiles",
             "resolve_hf_finetune_model_profile",

@@ -2030,7 +2030,7 @@ def _base_run_card(
 
 
 def _write_card(card: Mapping[str, Any], args: argparse.Namespace) -> None:
-    path = args.run_card or (args.output_dir / "spiraltorch-hf-gpt2-ft-run-card.json")
+    path = args.run_card or (args.output_dir / st.HF_GPT2_FT_RUN_CARD_FILENAME)
     write_hf_gpt2_finetune_run_card(card, path)
     print(f"run_card {path}")
 
@@ -2039,7 +2039,7 @@ def _trainer_trace_path(args: argparse.Namespace) -> Path | None:
     if args.no_trainer_trace:
         return None
     return args.trainer_trace_jsonl or (
-        args.output_dir / "spiraltorch-hf-gpt2-ft-trainer-trace.jsonl"
+        args.output_dir / st.HF_GPT2_FT_TRAINER_TRACE_FILENAME
     )
 
 

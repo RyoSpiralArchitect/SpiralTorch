@@ -55,6 +55,68 @@
         "do_sample": false
       },
       "notes": "Fast config for tests and docs; requires remote downloads when not cached."
+    },
+    {
+      "id": "pythia-70m-local-smoke",
+      "model_name": "EleutherAI/pythia-70m-deduped",
+      "tokenizer_name": "EleutherAI/pythia-70m-deduped",
+      "architecture": "causal_lm",
+      "checkpoint_prefix": "checkpoint-",
+      "max_length": 128,
+      "training": {
+        "block_size": 128,
+        "max_train_samples": 4096,
+        "max_eval_samples": 512
+      },
+      "generation": {
+        "max_new_tokens": 96,
+        "do_sample": true,
+        "temperature": 0.8,
+        "top_k": 50
+      },
+      "notes": "Non-GPT-2 causal-LM smoke profile for widening local FT coverage."
+    },
+    {
+      "id": "qwen2-0.5b-local-smoke",
+      "model_name": "Qwen/Qwen2-0.5B",
+      "tokenizer_name": "Qwen/Qwen2-0.5B",
+      "architecture": "causal_lm",
+      "checkpoint_prefix": "checkpoint-",
+      "max_length": 256,
+      "training": {
+        "block_size": 256,
+        "max_train_samples": 4096,
+        "max_eval_samples": 512,
+        "per_device_train_batch_size": 1,
+        "gradient_accumulation_steps": 8
+      },
+      "generation": {
+        "max_new_tokens": 128,
+        "do_sample": true,
+        "temperature": 0.7,
+        "top_k": 40
+      },
+      "notes": "Modern small causal-LM profile for local/API-adjacent Z-Space trials."
+    },
+    {
+      "id": "local-causal-lm-template",
+      "model_name": "models/my-causal-lm",
+      "tokenizer_name": "models/my-causal-lm",
+      "architecture": "causal_lm",
+      "checkpoint_prefix": "checkpoint-",
+      "max_length": 256,
+      "training": {
+        "block_size": 256,
+        "max_train_samples": 8192,
+        "max_eval_samples": 1024
+      },
+      "generation": {
+        "max_new_tokens": 128,
+        "do_sample": true,
+        "temperature": 0.8,
+        "top_k": 50
+      },
+      "notes": "Copy this profile for a local AutoModelForCausalLM directory."
     }
   ]
 }
