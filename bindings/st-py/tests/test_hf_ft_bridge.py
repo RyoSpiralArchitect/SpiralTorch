@@ -8055,6 +8055,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             profile="qwen2-0.5b-local-smoke",
             mode="full-finetune",
         )
+        inherited_report = st.hf_finetune_model_profile_preflight_report(
+            MODEL_CONFIGS_PATH,
+            profile="causal-lm-local-smoke",
+            mode="inference",
+        )
+        inherited_lines = st.hf_finetune_model_profile_preflight_lines(
+            inherited_report
+        )
 
         self.assertEqual(report["row_type"], "hf_finetune_model_profile_preflight")
         self.assertEqual(report["profile_id"], "qwen2-0.5b-local-smoke")
@@ -8082,6 +8090,11 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             ],
             runtime_imports.TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS["hf-gpt2-ft"],
         )
+        self.assertEqual(inherited_report["profile_id"], "causal-lm-local-smoke")
+        self.assertEqual(inherited_report["profile_extends"], "pythia-70m-local-smoke")
+        self.assertTrue(
+            any("extends=pythia-70m-local-smoke" in line for line in inherited_lines)
+        )
 
     def test_generic_hf_finetune_model_profile_launch_plan_builds_commands(
         self,
@@ -8108,6 +8121,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             },
             profile="embedded-causal",
             train=True,
+        )
+        inherited_plan = st.hf_finetune_model_profile_launch_plan(
+            MODEL_CONFIGS_PATH,
+            profile="causal-lm-local-smoke",
+            mode="inference",
+        )
+        inherited_lines = st.hf_finetune_model_profile_launch_plan_lines(
+            inherited_plan
         )
 
         self.assertEqual(plan["row_type"], "hf_finetune_model_profile_launch_plan")
@@ -8150,6 +8171,15 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("--model-name", embedded_plan["command"])
         self.assertIn("org/embedded-causal", embedded_plan["command"])
         self.assertNotIn("--model-profile", embedded_plan["command"])
+        self.assertEqual(inherited_plan["profile_id"], "causal-lm-local-smoke")
+        self.assertEqual(inherited_plan["profile_extends"], "pythia-70m-local-smoke")
+        self.assertEqual(
+            inherited_plan["model_profile"]["extends"],
+            "pythia-70m-local-smoke",
+        )
+        self.assertTrue(
+            any("extends=pythia-70m-local-smoke" in line for line in inherited_lines)
+        )
         script = st.hf_finetune_model_profile_launch_script(
             plan,
             cd="/tmp/spiraltorch-work",
@@ -8192,6 +8222,25 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             bundle_report = st.hf_finetune_model_profile_launch_bundle_report(
                 bundle_dir
             )
+            inherited_bundle_dir = Path(tmp) / "inherited-bundle"
+            inherited_bundle = st.write_hf_finetune_model_profile_launch_bundle(
+                inherited_plan,
+                inherited_bundle_dir,
+                script_cd=Path(tmp),
+            )
+            inherited_bundle_lines = st.hf_finetune_model_profile_launch_bundle_lines(
+                inherited_bundle
+            )
+            inherited_bundle_report = (
+                st.hf_finetune_model_profile_launch_bundle_report(
+                    inherited_bundle_dir
+                )
+            )
+            inherited_bundle_report_lines = (
+                st.hf_finetune_model_profile_launch_bundle_report_lines(
+                    inherited_bundle_report
+                )
+            )
             refreshed_bundle_report = (
                 st.hf_finetune_model_profile_launch_bundle_report(
                     bundle_dir,
@@ -8222,6 +8271,15 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertTrue(bundle_script_exists)
         self.assertTrue(
             bundle_lines[0].startswith("hf_ft_model_profile_launch_bundle ")
+        )
+        self.assertIn("extends=pythia-70m-local-smoke", inherited_bundle_lines[0])
+        self.assertEqual(
+            inherited_bundle_report["profile_extends"],
+            "pythia-70m-local-smoke",
+        )
+        self.assertIn(
+            "extends=pythia-70m-local-smoke",
+            inherited_bundle_report_lines[0],
         )
         self.assertEqual(
             bundle_report["row_type"],

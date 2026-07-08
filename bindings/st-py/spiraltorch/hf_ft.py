@@ -940,6 +940,20 @@ def _hf_finetune_profile_preflight_preset(mode: str) -> str:
     return preset
 
 
+def _hf_finetune_profile_extends_from_payload(
+    payload: Mapping[str, object] | None,
+) -> str | None:
+    if not isinstance(payload, Mapping):
+        return None
+    extends = _string_or_none(payload.get("profile_extends") or payload.get("extends"))
+    if extends is not None:
+        return extends
+    model_profile = payload.get("model_profile")
+    if isinstance(model_profile, Mapping):
+        return _string_or_none(model_profile.get("extends"))
+    return None
+
+
 def hf_finetune_model_profile_preflight_report(
     config: Mapping[str, object] | str | Path | None = None,
     *,
@@ -980,6 +994,7 @@ def hf_finetune_model_profile_preflight_report(
         "runtime_import_preset": preset,
         "require_runtime_import_preset": bool(require),
         "profile_id": resolved.get("profile_id"),
+        "profile_extends": resolved.get("extends"),
         "model_name": resolved.get("model_name"),
         "tokenizer_name": resolved.get("tokenizer_name"),
         "architecture": resolved.get("architecture"),
@@ -1042,6 +1057,7 @@ def hf_finetune_model_profile_preflight_lines(
             "hf_ft_model_profile_preflight "
             f"status={report.get('status')} "
             f"profile={report.get('profile_id')} "
+            f"extends={_hf_finetune_profile_extends_from_payload(report)} "
             f"mode={report.get('mode')} "
             f"preset={report.get('runtime_import_preset')} "
             f"required={report.get('require_runtime_import_preset')} "
@@ -1185,6 +1201,7 @@ def hf_finetune_model_profile_launch_plan(
         "mode": resolved_mode,
         "requested_mode": str(mode),
         "profile_id": resolved.get("profile_id"),
+        "profile_extends": resolved.get("extends"),
         "model_name": resolved.get("model_name"),
         "tokenizer_name": resolved.get("tokenizer_name"),
         "architecture": resolved.get("architecture"),
@@ -1273,6 +1290,7 @@ def hf_finetune_model_profile_launch_plan_lines(
             "hf_ft_model_profile_launch_plan "
             f"status={plan.get('status')} "
             f"profile={plan.get('profile_id')} "
+            f"extends={_hf_finetune_profile_extends_from_payload(plan)} "
             f"mode={plan.get('mode')} "
             f"source={plan.get('command_source')} "
             f"train={plan.get('launch_train')} "
@@ -1340,6 +1358,7 @@ def hf_finetune_model_profile_launch_script(
         "",
         "# SpiralTorch HF model-profile launch plan",
         f"# profile={plan.get('profile_id')}",
+        f"# extends={_hf_finetune_profile_extends_from_payload(plan)}",
         f"# model={plan.get('model_name')}",
         f"# mode={plan.get('mode')}",
         f"# status={plan.get('status')}",
@@ -1466,10 +1485,15 @@ def hf_finetune_model_profile_launch_bundle_lines(
 ) -> list[str]:
     """Render compact audit lines for a written launch bundle."""
 
+    plan = bundle.get("plan")
+    plan_profile = plan.get("profile_id") if isinstance(plan, Mapping) else None
+    plan_extends = _hf_finetune_profile_extends_from_payload(plan)
     return [
         (
             "hf_ft_model_profile_launch_bundle "
             f"status={bundle.get('status')} "
+            f"profile={plan_profile} "
+            f"extends={plan_extends} "
             f"bundle_dir={bundle.get('bundle_dir')} "
             f"plan={bundle.get('plan_path')} "
             f"lines={bundle.get('lines_path')} "
@@ -1624,6 +1648,7 @@ def hf_finetune_model_profile_launch_bundle_report(
         "errors": csv_label(errors),
         "plan_loaded": plan is not None,
         "profile_id": None if plan is None else plan.get("profile_id"),
+        "profile_extends": _hf_finetune_profile_extends_from_payload(plan),
         "mode": None if plan is None else plan.get("mode"),
         "model_name": None if plan is None else plan.get("model_name"),
         "plan_command_display": plan_command_display,
@@ -1670,6 +1695,7 @@ def hf_finetune_model_profile_launch_bundle_report_lines(
             f"status={report.get('status')} "
             f"bundle_dir={report.get('bundle_dir')} "
             f"profile={report.get('profile_id')} "
+            f"extends={report.get('profile_extends')} "
             f"mode={report.get('mode')} "
             f"missing={report.get('missing_artifacts')} "
             f"errors={report.get('errors')} "
