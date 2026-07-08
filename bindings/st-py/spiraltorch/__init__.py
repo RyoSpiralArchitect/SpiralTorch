@@ -254,6 +254,7 @@ _PREDECLARED_SUBMODULES: list[tuple[str, str]] = [
     ("rec", "Reconstruction / signal processing"),
     ("safety", "Safety and drift-response linguistics helpers"),
     ("kv", "Key-value persistence helpers"),
+    ("wgpu", "WGPU kernel catalog and reports"),
     ("telemetry", "Telemetry / dashboards / metrics"),
     ("plugin", "Plugin/event observability"),
     ("ecosystem", "Integrations & ecosystem glue"),
@@ -6313,6 +6314,17 @@ _mirror_into_module(
     },
 )
 _mirror_into_module(
+    "wgpu",
+    {
+        "wgpu_kernel_reports_available": ("wgpu.wgpu_kernel_reports_available",),
+        "wgpu_kernel_catalog": ("wgpu.wgpu_kernel_catalog",),
+        "wgpu_kernel_descriptor": ("wgpu.wgpu_kernel_descriptor",),
+        "wgpu_rank_kernel_report": ("wgpu.wgpu_rank_kernel_report",),
+        "wgpu_kernel_report_from_rank_plan": ("wgpu.wgpu_kernel_report_from_rank_plan",),
+        "wgpu_softmax_kernel_report": ("wgpu.wgpu_softmax_kernel_report",),
+    },
+)
+_mirror_into_module(
     "spiral_rl",
     {
         "stAgent": ("PyDqnAgent", "DqnAgent", "StAgent"),
@@ -7802,6 +7814,9 @@ _CORE_EXPORTS = [
     "kv_json_set_options","kv_redis_set_json","kv_redis_get_json",
     "kv_redis_set_choice","kv_redis_get_choice","kv_redis_push_choice",
     "kv_redis_lrange_choice",
+    "wgpu_kernel_reports_available","wgpu_kernel_catalog","wgpu_kernel_descriptor",
+    "wgpu_rank_kernel_report","wgpu_kernel_report_from_rank_plan",
+    "wgpu_softmax_kernel_report",
     "init_backend","mps_probe","probe_gpu_path",
 ]
 for _name in _CORE_EXPORTS:

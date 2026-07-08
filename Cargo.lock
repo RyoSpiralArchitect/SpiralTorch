@@ -3305,6 +3305,7 @@ dependencies = [
  "spiral-safety",
  "spiral-selfsup",
  "st-backend-hip",
+ "st-backend-wgpu",
  "st-core",
  "st-frac",
  "st-kdsl",

@@ -90,6 +90,9 @@ PY
 - `spiraltorch.kv` for planner-choice persistence helpers, including
   `kv_choice_from_rank_plan`, Redis-compatible choice keys, validated JSON SET
   option payloads, and `kv_redis_*` calls when built with `--features kv-redis`.
+- `spiraltorch.wgpu` for GPU-free WGPU kernel catalog and selection reports,
+  including `wgpu_kernel_catalog`, `wgpu_kernel_report_from_rank_plan`, and
+  softmax/rank-k dispatch descriptors for runtime trace cards.
 - `TensorBiome` to cultivate open-topos rewrites, weight shoots, stack the
   harvest, and guard tensors that can be re-imported into Z-space.
 - Unified planning helpers (`plan`, `plan_topk`, `describe_device`,
@@ -121,8 +124,10 @@ value:
    `st.kv_rank_choice_key`, `st.kv_json_set_options`, and `kv_redis_*` helpers
    when the binding is built with `--features kv-redis`, so Python experiments
    can reuse the same Redis-backed rank/choice stores as Rust workers.
-4. `st-backend-wgpu` kernel descriptor/report helpers for WGPU-first runtime
-   selection without requiring direct Rust inspection.
+4. `st-backend-wgpu` kernel descriptor/report helpers, now exposed as
+   `st.wgpu_kernel_catalog`, `st.wgpu_kernel_report_from_rank_plan`, and
+   `st.wgpu_softmax_kernel_report` for WGPU-first runtime selection without
+   requiring direct Rust inspection or a live GPU device.
 5. Remaining `st-vision` volume/transform and `st-text` semantic helpers that
    are useful to WASM demos and local-HF inference probes.
 - Hosted/API-model LLM runtime bridge via `ApiLLMZSpaceRuntime` so an

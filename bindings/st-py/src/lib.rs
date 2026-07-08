@@ -43,6 +43,7 @@ mod text;
 mod theory;
 mod trainer;
 mod vision;
+mod wgpu;
 mod zspace;
 
 #[cfg(not(feature = "nn"))]
@@ -281,6 +282,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
     rec::register(py, m)?;
     safety::register(py, m)?;
     kv::register(py, m)?;
+    wgpu::register(py, m)?;
     telemetry::register(py, m)?;
     plugin::register(py, m)?;
     ops::register_module(py, m)?;
@@ -367,6 +369,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
         "rec",
         "safety",
         "kv",
+        "wgpu",
         "telemetry",
         "plugin",
         "ops",
@@ -425,6 +428,12 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
         "kv_redis_get_choice",
         "kv_redis_push_choice",
         "kv_redis_lrange_choice",
+        "wgpu_kernel_reports_available",
+        "wgpu_kernel_catalog",
+        "wgpu_kernel_descriptor",
+        "wgpu_rank_kernel_report",
+        "wgpu_kernel_report_from_rank_plan",
+        "wgpu_softmax_kernel_report",
         "zspace_eval",
         "zspace_snapshot",
         "softlogic_feedback",

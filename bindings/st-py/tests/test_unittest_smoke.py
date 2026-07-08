@@ -1599,6 +1599,58 @@ class SpiralTorchSmokeTest(unittest.TestCase):
             with self.assertRaises(NotImplementedError):
                 st.kv.kv_redis_get_json("redis://127.0.0.1/", "spiral:test")
 
+    def test_wgpu_kernel_catalog_smoke(self) -> None:
+        self.assertIsInstance(st.wgpu_kernel_reports_available(), bool)
+        if not st.wgpu_kernel_reports_available():
+            with self.assertRaises(NotImplementedError):
+                st.wgpu.wgpu_kernel_catalog()
+            return
+
+        catalog = st.wgpu_kernel_catalog()
+        names = {entry["name"] for entry in catalog}
+        self.assertIn("softmax_workgroup", names)
+        self.assertIn("topk_keepk_workgroup", names)
+        self.assertIn("midk_bottomk_apply_subgroup_v2", names)
+        self.assertIn("fused_attention_online", names)
+
+        descriptor = st.wgpu.wgpu_kernel_descriptor("softmax_workgroup.wgsl")
+        self.assertIsNotNone(descriptor)
+        self.assertEqual(descriptor["name"], "softmax_workgroup")
+        self.assertTrue(descriptor["portable"])
+
+        plan = st.plan("topk", 16, 128, 8, backend="wgpu")
+        report = st.wgpu_kernel_report_from_rank_plan(plan)
+        self.assertEqual(report["request"]["kind"], "topk")
+        self.assertEqual(report["request"]["rows"], 16)
+        self.assertIn(report["primary"]["name"], names)
+        self.assertEqual(report["dispatch"]["workgroups"][0], 16)
+
+        bottom = st.wgpu.wgpu_rank_kernel_report(
+            "bottomk",
+            8,
+            1024,
+            32,
+            subgroup=True,
+            use_two_stage=True,
+            fft_tile=2048,
+            fft_radix=4,
+            fft_segments=2,
+        )
+        self.assertEqual(bottom["primary"]["name"], "midk_bottomk_apply_subgroup_v2")
+        self.assertEqual(bottom["dispatch"]["workgroups"], (4, 8, 1))
+        self.assertEqual(bottom["fft"]["tile_cols"], 2048)
+
+        softmax = st.wgpu_softmax_kernel_report(
+            4,
+            16,
+            subgroup=True,
+            hardmax=True,
+            mask=True,
+        )
+        self.assertEqual(softmax["primary"]["name"], "softmax_subgroup")
+        self.assertEqual(softmax["fallback"]["name"], "softmax_workgroup")
+        self.assertEqual(softmax["flags"], 6)
+
     def test_state_dict_io(self) -> None:
         model = st.nn.Linear("l1", 2, 1)
         with _temp_dir("tmp_state") as tmp:

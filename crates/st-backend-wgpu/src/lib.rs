@@ -3,6 +3,7 @@
 //! construct the compute pipelines that power higher level tensor operators.
 
 pub mod attention;
+pub mod catalog;
 pub mod compaction;
 pub mod compaction2ce;
 pub mod compaction_2ce;
@@ -55,6 +56,15 @@ pub use attention::{
     fused_attention, AccumulatorPrecision as FusedAttentionAccumulatorPrecision,
     Kernel as FusedAttentionKernel, Params as FusedAttentionParams, Plan as FusedAttentionPlan,
     PlanError as FusedAttentionPlanError, FLAG_USE_ATTN_BIAS, FLAG_USE_Z_BIAS,
+};
+
+pub use catalog::{
+    kernel_catalog, kernel_descriptor, rank_kernel_report, softmax_kernel_report,
+    DispatchGeometry as WgpuDispatchGeometry, FftKernelHints as WgpuFftKernelHints,
+    KernelDescriptor as WgpuKernelDescriptor, RankKernelKind as WgpuRankKernelKind,
+    RankKernelReport as WgpuRankKernelReport, RankKernelRequest as WgpuRankKernelRequest,
+    SoftmaxKernelReport as WgpuSoftmaxKernelReport,
+    SoftmaxKernelRequest as WgpuSoftmaxKernelRequest,
 };
 
 pub use softmax::{

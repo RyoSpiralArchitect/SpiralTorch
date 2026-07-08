@@ -4452,6 +4452,37 @@ def kv_redis_lrange_choice(
     stop: int = ...,
 ) -> List[Dict[str, Any]]: ...
 
+def wgpu_kernel_reports_available() -> bool: ...
+
+def wgpu_kernel_catalog() -> List[Dict[str, Any]]: ...
+
+def wgpu_kernel_descriptor(name: str) -> Dict[str, Any] | None: ...
+
+def wgpu_rank_kernel_report(
+    kind: Literal["topk", "midk", "bottomk"],
+    rows: int,
+    cols: int,
+    k: int,
+    *,
+    subgroup: bool = ...,
+    use_two_stage: bool = ...,
+    fft_tile: int = ...,
+    fft_radix: int = ...,
+    fft_segments: int = ...,
+    compaction_tile: int = ...,
+) -> Dict[str, Any]: ...
+
+def wgpu_kernel_report_from_rank_plan(plan: RankPlan) -> Dict[str, Any]: ...
+
+def wgpu_softmax_kernel_report(
+    rows: int,
+    cols: int,
+    *,
+    subgroup: bool = ...,
+    hardmax: bool = ...,
+    mask: bool = ...,
+) -> Dict[str, Any]: ...
+
 def mean_squared_error(predictions: Tensor, targets: Tensor) -> float: ...
 
 def info_nce(
@@ -8357,6 +8388,40 @@ class _KvModule(ModuleType):
 
 kv: _KvModule
 
+class _WgpuModule(ModuleType):
+    def wgpu_kernel_reports_available() -> bool: ...
+
+    def wgpu_kernel_catalog() -> List[Dict[str, Any]]: ...
+
+    def wgpu_kernel_descriptor(name: str) -> Dict[str, Any] | None: ...
+
+    def wgpu_rank_kernel_report(
+        kind: Literal["topk", "midk", "bottomk"],
+        rows: int,
+        cols: int,
+        k: int,
+        *,
+        subgroup: bool = ...,
+        use_two_stage: bool = ...,
+        fft_tile: int = ...,
+        fft_radix: int = ...,
+        fft_segments: int = ...,
+        compaction_tile: int = ...,
+    ) -> Dict[str, Any]: ...
+
+    def wgpu_kernel_report_from_rank_plan(plan: RankPlan) -> Dict[str, Any]: ...
+
+    def wgpu_softmax_kernel_report(
+        rows: int,
+        cols: int,
+        *,
+        subgroup: bool = ...,
+        hardmax: bool = ...,
+        mask: bool = ...,
+    ) -> Dict[str, Any]: ...
+
+wgpu: _WgpuModule
+
 class _TelemetryModule(ModuleType):
     DashboardMetric: type[DashboardMetric]
     DashboardEvent: type[DashboardEvent]
@@ -9646,6 +9711,7 @@ __all__ = [
     "rec",
     "safety",
     "kv",
+    "wgpu",
     "telemetry",
     "ecosystem",
     "selfsup",
@@ -9700,6 +9766,12 @@ __all__ = [
     "kv_redis_get_choice",
     "kv_redis_push_choice",
     "kv_redis_lrange_choice",
+    "wgpu_kernel_reports_available",
+    "wgpu_kernel_catalog",
+    "wgpu_kernel_descriptor",
+    "wgpu_rank_kernel_report",
+    "wgpu_kernel_report_from_rank_plan",
+    "wgpu_softmax_kernel_report",
     "zspace_eval",
     "zspace_snapshot",
     "softlogic_feedback",
