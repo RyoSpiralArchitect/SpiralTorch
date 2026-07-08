@@ -713,6 +713,19 @@ automatic generation handoff args with `--generation-from-inference-distortion`,
 and explicit Z-Space generation bridge args when you want to replay the same
 processor settings without relying on the automatic override; shell-safe display
 strings are included alongside the structured arg lists.
+After a longer run is producing checkpoint/status artifacts, use the generic
+installed ops CLIs to archive what happened without remembering GPT-2-specific
+filenames:
+
+```bash
+spiral-hf-run-artifacts --run-dir runs/hf-finetune-qwen2-zspace-ft
+spiral-hf-run-ops --run-dir runs/hf-finetune-qwen2-zspace-ft --dry-run
+```
+
+These write `hf-finetune-run-artifact-manifest.json` and
+`hf-finetune-run-ops-snapshot.json` by default. They still read legacy
+`spiraltorch-hf-gpt2-ft-*` run cards/traces, but prefer the generic
+`spiraltorch-hf-finetune-*` artifacts when both exist.
 
 ## Minimal usage
 

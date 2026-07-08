@@ -13,6 +13,13 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Callable
 
+from .hf_ft import (
+    HF_FINETUNE_RUN_CARD_FILENAME,
+    HF_FINETUNE_TRAINER_TRACE_FILENAME,
+    HF_GPT2_FT_RUN_CARD_FILENAME,
+    HF_GPT2_FT_TRAINER_TRACE_FILENAME,
+)
+
 __all__ = [
     "hf_finetune_monitor_lines",
     "hf_finetune_monitor_report",
@@ -69,6 +76,21 @@ __all__ = [
     "write_hf_gpt2_finetune_run_ops_snapshot",
     "write_hf_gpt2_finetune_milestone_runtime_report",
 ]
+
+HF_FINETUNE_CHECKPOINT_GENERATION_CONTROL_SCRIPT = (
+    "bindings/st-py/examples/hf_checkpoint_generation_control.py"
+)
+HF_GPT2_FT_CHECKPOINT_GENERATION_CONTROL_SCRIPT = (
+    "bindings/st-py/examples/hf_gpt2_ft_checkpoint_generation_control.py"
+)
+HF_FINETUNE_RUN_ARTIFACT_MANIFEST_JSON = "hf-finetune-run-artifact-manifest.json"
+HF_FINETUNE_RUN_ARTIFACT_MANIFEST_TXT = "hf-finetune-run-artifact-manifest.txt"
+HF_GPT2_FT_RUN_ARTIFACT_MANIFEST_JSON = "hf-gpt2-ft-run-artifact-manifest.json"
+HF_GPT2_FT_RUN_ARTIFACT_MANIFEST_TXT = "hf-gpt2-ft-run-artifact-manifest.txt"
+HF_FINETUNE_RUN_OPS_SNAPSHOT_JSON = "hf-finetune-run-ops-snapshot.json"
+HF_FINETUNE_RUN_OPS_SNAPSHOT_TXT = "hf-finetune-run-ops-snapshot.txt"
+HF_GPT2_FT_RUN_OPS_SNAPSHOT_JSON = "hf-gpt2-ft-run-ops-snapshot.json"
+HF_GPT2_FT_RUN_OPS_SNAPSHOT_TXT = "hf-gpt2-ft-run-ops-snapshot.txt"
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -947,7 +969,7 @@ def hf_gpt2_finetune_milestone_handoff_report(
     checkpoint: str | None = None,
     label_prefix: str | None = None,
     python: str = "python3",
-    script: str | Path = "bindings/st-py/examples/hf_gpt2_ft_checkpoint_generation_control.py",
+    script: str | Path = HF_FINETUNE_CHECKPOINT_GENERATION_CONTROL_SCRIPT,
     compare_with_sweep: Sequence[str | Path] | str | Path | None = None,
     compare_with_label: Sequence[str] | str | None = None,
     curve_out: str | Path | None = None,
@@ -1005,14 +1027,22 @@ def hf_gpt2_finetune_milestone_handoff_report(
         Path(trainer_trace_jsonl) if trainer_trace_jsonl is not None else None
     )
     if resolved_trainer_trace is None and resolved_run_dir is not None:
-        default_trace = resolved_run_dir / "spiraltorch-hf-gpt2-ft-trainer-trace.jsonl"
-        if default_trace.is_file():
-            resolved_trainer_trace = default_trace
+        for default_trace in (
+            resolved_run_dir / HF_FINETUNE_TRAINER_TRACE_FILENAME,
+            resolved_run_dir / HF_GPT2_FT_TRAINER_TRACE_FILENAME,
+        ):
+            if default_trace.is_file():
+                resolved_trainer_trace = default_trace
+                break
     resolved_curve_run_card = Path(run_card) if run_card is not None else None
     if resolved_curve_run_card is None and resolved_run_dir is not None:
-        default_run_card = resolved_run_dir / "spiraltorch-hf-gpt2-ft-run-card.json"
-        if default_run_card.is_file():
-            resolved_curve_run_card = default_run_card
+        for default_run_card in (
+            resolved_run_dir / HF_FINETUNE_RUN_CARD_FILENAME,
+            resolved_run_dir / HF_GPT2_FT_RUN_CARD_FILENAME,
+        ):
+            if default_run_card.is_file():
+                resolved_curve_run_card = default_run_card
+                break
     package_kwargs: dict[str, Any] = {
         "compare_with_sweep": compare_paths,
         "compare_with_label": compare_labels,
@@ -1380,7 +1410,7 @@ def hf_gpt2_finetune_milestone_runtime_report(
     checkpoint: str | None = None,
     label_prefix: str | None = None,
     python: str = "python3",
-    script: str | Path = "bindings/st-py/examples/hf_gpt2_ft_checkpoint_generation_control.py",
+    script: str | Path = HF_FINETUNE_CHECKPOINT_GENERATION_CONTROL_SCRIPT,
     compare_with_sweep: Sequence[str | Path] | str | Path | None = None,
     compare_with_label: Sequence[str] | str | None = None,
     curve_out: str | Path | None = None,
@@ -1547,6 +1577,17 @@ def _latest_runtime_path(root: str | Path | None, patterns: Sequence[str]) -> Pa
     if not candidates:
         return None
     return max(candidates, key=lambda path: (path.stat().st_mtime, str(path)))
+
+
+def _latest_preferred_runtime_path(
+    root: str | Path | None,
+    pattern_groups: Sequence[Sequence[str]],
+) -> Path | None:
+    for patterns in pattern_groups:
+        path = _latest_runtime_path(root, patterns)
+        if path is not None:
+            return path
+    return None
 
 
 def _recent_runtime_paths(
@@ -1793,15 +1834,20 @@ def hf_gpt2_finetune_run_artifact_manifest(
     )
     runtime_path = _latest_runtime_path(run_root, ["milestone-*-runtime.json"])
     runtime_lines_path = _latest_runtime_path(run_root, ["milestone-*-runtime.txt"])
-    run_card_path = _latest_runtime_path(
-        run_root,
-        ["spiraltorch-hf-gpt2-ft-run-card.json", "*run-card*.json"],
-    )
-    trainer_trace_path = _latest_runtime_path(
+    run_card_path = _latest_preferred_runtime_path(
         run_root,
         [
-            "spiraltorch-hf-gpt2-ft-trainer-trace.jsonl",
-            "*trainer-trace*.jsonl",
+            [HF_FINETUNE_RUN_CARD_FILENAME],
+            [HF_GPT2_FT_RUN_CARD_FILENAME],
+            ["*run-card*.json"],
+        ],
+    )
+    trainer_trace_path = _latest_preferred_runtime_path(
+        run_root,
+        [
+            [HF_FINETUNE_TRAINER_TRACE_FILENAME],
+            [HF_GPT2_FT_TRAINER_TRACE_FILENAME],
+            ["*trainer-trace*.jsonl"],
         ],
     )
     compare_path = _latest_runtime_path(
@@ -1989,8 +2035,8 @@ def hf_gpt2_finetune_run_artifact_manifest_paths(
 
     root = Path(run_dir)
     return {
-        "out": str(root / "hf-gpt2-ft-run-artifact-manifest.json"),
-        "lines_out": str(root / "hf-gpt2-ft-run-artifact-manifest.txt"),
+        "out": str(root / HF_GPT2_FT_RUN_ARTIFACT_MANIFEST_JSON),
+        "lines_out": str(root / HF_GPT2_FT_RUN_ARTIFACT_MANIFEST_TXT),
     }
 
 
@@ -2007,6 +2053,49 @@ def write_hf_gpt2_finetune_run_artifact_manifest(
     archived = dict(report)
     root = Path(run_dir or archived.get("run_dir") or ".")
     defaults = hf_gpt2_finetune_run_artifact_manifest_paths(root)
+    out_path = Path(out or defaults["out"])
+    lines_path = Path(lines_out or defaults["lines_out"])
+    archived["out"] = str(out_path)
+    archived["lines_out"] = str(lines_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    lines_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(
+        json.dumps(archived, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    lines_path.write_text(
+        "\n".join(hf_gpt2_finetune_run_artifact_manifest_lines(archived, top_n=top_n))
+        + "\n",
+        encoding="utf-8",
+    )
+    return archived
+
+
+def hf_finetune_run_artifact_manifest_paths(
+    run_dir: str | Path,
+) -> dict[str, str]:
+    """Return generic JSON/TXT archive paths for a Hugging Face FT run manifest."""
+
+    root = Path(run_dir)
+    return {
+        "out": str(root / HF_FINETUNE_RUN_ARTIFACT_MANIFEST_JSON),
+        "lines_out": str(root / HF_FINETUNE_RUN_ARTIFACT_MANIFEST_TXT),
+    }
+
+
+def write_hf_finetune_run_artifact_manifest(
+    report: Mapping[str, Any],
+    *,
+    run_dir: str | Path | None = None,
+    out: str | Path | None = None,
+    lines_out: str | Path | None = None,
+    top_n: int = 5,
+) -> dict[str, Any]:
+    """Write a generic HF run artifact manifest with model-neutral filenames."""
+
+    archived = dict(report)
+    root = Path(run_dir or archived.get("run_dir") or ".")
+    defaults = hf_finetune_run_artifact_manifest_paths(root)
     out_path = Path(out or defaults["out"])
     lines_path = Path(lines_out or defaults["lines_out"])
     archived["out"] = str(out_path)
@@ -2200,8 +2289,8 @@ def hf_gpt2_finetune_run_ops_snapshot_paths(
 
     root = Path(run_dir)
     return {
-        "out": str(root / "hf-gpt2-ft-run-ops-snapshot.json"),
-        "lines_out": str(root / "hf-gpt2-ft-run-ops-snapshot.txt"),
+        "out": str(root / HF_GPT2_FT_RUN_OPS_SNAPSHOT_JSON),
+        "lines_out": str(root / HF_GPT2_FT_RUN_OPS_SNAPSHOT_TXT),
     }
 
 
@@ -2217,6 +2306,47 @@ def write_hf_gpt2_finetune_run_ops_snapshot(
     archived = dict(report)
     root = Path(run_dir or archived.get("run_dir") or ".")
     defaults = hf_gpt2_finetune_run_ops_snapshot_paths(root)
+    out_path = Path(out or defaults["out"])
+    lines_path = Path(lines_out or defaults["lines_out"])
+    archived["out"] = str(out_path)
+    archived["lines_out"] = str(lines_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    lines_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(
+        json.dumps(archived, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    lines_path.write_text(
+        "\n".join(hf_gpt2_finetune_run_ops_snapshot_lines(archived)) + "\n",
+        encoding="utf-8",
+    )
+    return archived
+
+
+def hf_finetune_run_ops_snapshot_paths(
+    run_dir: str | Path,
+) -> dict[str, str]:
+    """Return generic JSON/TXT archive paths for a Hugging Face FT ops snapshot."""
+
+    root = Path(run_dir)
+    return {
+        "out": str(root / HF_FINETUNE_RUN_OPS_SNAPSHOT_JSON),
+        "lines_out": str(root / HF_FINETUNE_RUN_OPS_SNAPSHOT_TXT),
+    }
+
+
+def write_hf_finetune_run_ops_snapshot(
+    report: Mapping[str, Any],
+    *,
+    run_dir: str | Path | None = None,
+    out: str | Path | None = None,
+    lines_out: str | Path | None = None,
+) -> dict[str, Any]:
+    """Write a generic HF run ops snapshot with model-neutral filenames."""
+
+    archived = dict(report)
+    root = Path(run_dir or archived.get("run_dir") or ".")
+    defaults = hf_finetune_run_ops_snapshot_paths(root)
     out_path = Path(out or defaults["out"])
     lines_path = Path(lines_out or defaults["lines_out"])
     archived["out"] = str(out_path)
@@ -2784,17 +2914,11 @@ hf_finetune_run_artifact_manifest = hf_gpt2_finetune_run_artifact_manifest
 hf_finetune_run_artifact_manifest_lines = (
     hf_gpt2_finetune_run_artifact_manifest_lines
 )
-hf_finetune_run_artifact_manifest_paths = (
-    hf_gpt2_finetune_run_artifact_manifest_paths
-)
 hf_finetune_run_ops_snapshot_lines = hf_gpt2_finetune_run_ops_snapshot_lines
-hf_finetune_run_ops_snapshot_paths = hf_gpt2_finetune_run_ops_snapshot_paths
 hf_finetune_run_ops_snapshot_report = hf_gpt2_finetune_run_ops_snapshot_report
 hf_finetune_status_history_lines = hf_gpt2_finetune_status_history_lines
 load_hf_finetune_status_history = load_hf_gpt2_finetune_status_history
 summarize_hf_finetune_status_history = summarize_hf_gpt2_finetune_status_history
-write_hf_finetune_run_artifact_manifest = write_hf_gpt2_finetune_run_artifact_manifest
-write_hf_finetune_run_ops_snapshot = write_hf_gpt2_finetune_run_ops_snapshot
 write_hf_finetune_milestone_runtime_report = (
     write_hf_gpt2_finetune_milestone_runtime_report
 )

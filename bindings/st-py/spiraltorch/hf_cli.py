@@ -304,3 +304,11 @@ def zspace_generation_control_compare_main(argv: Sequence[str] | None = None) ->
 
 def finetune_generation_curve_main(argv: Sequence[str] | None = None) -> int:
     return _run_example("hf_finetune_generation_curve.py", argv)
+
+
+def finetune_run_artifacts_main(argv: Sequence[str] | None = None) -> int:
+    return _run_example("hf_finetune_run_artifacts.py", argv)
+
+
+def finetune_run_ops_main(argv: Sequence[str] | None = None) -> int:
+    return _run_example("hf_finetune_run_ops.py", argv)
