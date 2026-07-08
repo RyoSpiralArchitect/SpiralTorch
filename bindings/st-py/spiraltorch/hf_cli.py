@@ -390,6 +390,18 @@ def finetune_wait_launch_summary_main(argv: Sequence[str] | None = None) -> int:
     return _run_example("hf_finetune_wait_launch_summary.py", argv)
 
 
+def finetune_wait_launch_main(argv: Sequence[str] | None = None) -> int:
+    return _run_example("hf_finetune_wait_launch.py", argv)
+
+
+def finetune_milestone_capture_main(argv: Sequence[str] | None = None) -> int:
+    return _run_example("hf_finetune_milestone_capture.py", argv)
+
+
+def finetune_milestone_runtime_main(argv: Sequence[str] | None = None) -> int:
+    return _run_example("hf_finetune_milestone_runtime.py", argv)
+
+
 def _path_values(values: Sequence[Path] | None) -> list[Path]:
     return [] if values is None else list(values)
 

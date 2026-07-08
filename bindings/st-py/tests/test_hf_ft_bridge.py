@@ -73,6 +73,11 @@ WAIT_LAUNCH_PATH = (
     / "examples"
     / "hf_gpt2_finetune_wait_launch.py"
 )
+GENERIC_WAIT_LAUNCH_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "examples"
+    / "hf_finetune_wait_launch.py"
+)
 WAIT_LAUNCH_SUMMARY_PATH = (
     Path(__file__).resolve().parents[1]
     / "examples"
@@ -98,10 +103,20 @@ MILESTONE_CAPTURE_PATH = (
     / "examples"
     / "hf_gpt2_finetune_milestone_capture.py"
 )
+GENERIC_MILESTONE_CAPTURE_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "examples"
+    / "hf_finetune_milestone_capture.py"
+)
 MILESTONE_RUNTIME_PATH = (
     Path(__file__).resolve().parents[1]
     / "examples"
     / "hf_gpt2_finetune_milestone_runtime.py"
+)
+GENERIC_MILESTONE_RUNTIME_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "examples"
+    / "hf_finetune_milestone_runtime.py"
 )
 RUN_ARTIFACTS_PATH = (
     Path(__file__).resolve().parents[1]
@@ -239,6 +254,17 @@ def load_wait_launch_example():
     return module
 
 
+def load_generic_wait_launch_example():
+    spec = importlib.util.spec_from_file_location(
+        "hf_finetune_wait_launch_test",
+        GENERIC_WAIT_LAUNCH_PATH,
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
 def load_wait_launch_summary_example():
     spec = importlib.util.spec_from_file_location(
         "hf_gpt2_finetune_wait_launch_summary_test",
@@ -294,10 +320,32 @@ def load_milestone_capture_example():
     return module
 
 
+def load_generic_milestone_capture_example():
+    spec = importlib.util.spec_from_file_location(
+        "hf_finetune_milestone_capture_test",
+        GENERIC_MILESTONE_CAPTURE_PATH,
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
 def load_milestone_runtime_example():
     spec = importlib.util.spec_from_file_location(
         "hf_gpt2_finetune_milestone_runtime_test",
         MILESTONE_RUNTIME_PATH,
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_generic_milestone_runtime_example():
+    spec = importlib.util.spec_from_file_location(
+        "hf_finetune_milestone_runtime_test",
+        GENERIC_MILESTONE_RUNTIME_PATH,
     )
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -9215,6 +9263,182 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIsNotNone(summary["trace_last_desire_pressure"])
         self.assertIsNotNone(summary["trace_last_psi_total"])
         self.assertEqual(callback.event_count, 3)
+
+    def test_generic_wait_launch_wrapper_writes_hf_ft_manifest(self) -> None:
+        module = load_generic_wait_launch_example()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            manifest = root / "wait-launch.json"
+            history = root / "wait-launch-history.jsonl"
+            with redirect_stdout(io.StringIO()) as stdout:
+                code = module.main(
+                    [
+                        "--manifest",
+                        str(manifest),
+                        "--jsonl-out",
+                        str(history),
+                        "--dry-run",
+                        "--",
+                        sys.executable,
+                        "-c",
+                        "print('next')",
+                    ]
+                )
+                cli_code = hf_cli.finetune_wait_launch_main(
+                    [
+                        "--manifest",
+                        str(root / "cli-wait-launch.json"),
+                        "--dry-run",
+                        "--",
+                        sys.executable,
+                        "-c",
+                        "print('next')",
+                    ]
+                )
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            history_rows = [
+                json.loads(line)
+                for line in history.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+
+        self.assertEqual(code, 0)
+        self.assertEqual(cli_code, 0)
+        self.assertEqual(payload["row_type"], "hf_finetune_wait_launch")
+        self.assertEqual(payload["status"], "dry_run")
+        self.assertEqual(
+            payload["launch_disk_guard"]["row_type"],
+            "hf_ft_wait_launch_disk_guard",
+        )
+        self.assertEqual(history_rows[0]["row_type"], "hf_finetune_wait_launch")
+        self.assertIn("hf_ft_wait_launch status=dry_run", stdout.getvalue())
+        self.assertNotIn("hf_gpt2_ft_wait_launch", stdout.getvalue())
+
+    def test_generic_milestone_capture_wrapper_builds_generic_commands(self) -> None:
+        module = load_generic_milestone_capture_example()
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "run"
+            run_dir.mkdir()
+            args = module.parse_args(
+                [
+                    str(run_dir),
+                    "--milestone-step",
+                    "128",
+                    "--label",
+                    "generic-capture",
+                ]
+            )
+            repo = Path("/repo")
+            status_command = module.build_run_status_command(args, repo=repo)
+            monitor_command = module.build_monitor_command(args, repo=repo)
+            state = {
+                "row_type": "hf_finetune_milestone_capture",
+                "label": "generic-capture",
+                "status": "ready",
+                "milestone_ready": True,
+                "milestone_step": 128,
+                "next_action": "handoff_ready",
+            }
+            line = module.state_line(state)
+
+        self.assertIn(
+            "bindings/st-py/examples/hf_finetune_run_status.py",
+            status_command,
+        )
+        self.assertIn(
+            "bindings/st-py/examples/hf_finetune_monitor_snapshot.py",
+            monitor_command,
+        )
+        self.assertTrue(line.startswith("hf_ft_milestone_capture "))
+        self.assertNotIn("hf_gpt2", line)
+
+    def test_generic_milestone_runtime_wrapper_writes_hf_ft_artifacts(self) -> None:
+        module = load_generic_milestone_runtime_example()
+        ready_direct = {
+            "row_type": "hf_finetune_run_status",
+            "process_status": "alive",
+            "final_checkpoint_ready": False,
+            "checkpoint_count": 1,
+            "runtime_settings": {
+                "max_steps": 256,
+                "eval_steps": 64,
+                "save_steps": 128,
+                "save_total_limit": 1,
+                "min_free_disk_gb": 0.0,
+                "process_command_available": True,
+            },
+            "trace": {
+                "trace_last_loss": 2.0,
+                "trace_last_eval_loss": 1.8,
+                "trace_last_eval_loss_step": 128,
+                "trace_best_eval_loss_step": 128,
+                "trace_eval_loss_points": [{"step": 128, "eval_loss": 1.8}],
+            },
+            "log_progress": {"log_latest_step": 128, "log_max_steps": 256},
+            "eval_progress": {
+                "next_eval_step": 192,
+                "log_steps_until_next_eval": 64,
+                "latest_due_eval_step": 128,
+                "latest_due_eval_ready": True,
+            },
+            "checkpoint_progress": {
+                "next_checkpoint_step": 256,
+                "log_steps_until_next_checkpoint": 128,
+            },
+            "latest_checkpoint": {"name": "checkpoint-128"},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "run"
+            run_dir.mkdir()
+            (run_dir / "checkpoint-128").mkdir()
+            (run_dir / "direct-run-status-history.jsonl").write_text(
+                json.dumps(ready_direct) + "\n",
+                encoding="utf-8",
+            )
+            (run_dir / "milestone-128-capture.json").write_text(
+                json.dumps(
+                    {
+                        "row_type": "hf_finetune_milestone_capture",
+                        "milestone_step": 128,
+                        "milestone_ready": True,
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            package_calls = []
+
+            def fake_package_runner(**kwargs):
+                package_calls.append(dict(kwargs))
+                return {"status": "planned", "sweep_count": 2}
+
+            args = module.parse_args(
+                ["--run-dir", str(run_dir), "--label", "generic-runtime", "--execute"]
+            )
+            report = module.build_report(args, package_runner=fake_package_runner)
+            out_path, lines_path = module.write_report(report, args)
+            with redirect_stdout(io.StringIO()) as stdout:
+                cli_code = hf_cli.finetune_milestone_runtime_main(
+                    [
+                        "--run-dir",
+                        str(run_dir),
+                        "--label",
+                        "generic-runtime-cli",
+                        "--execute",
+                        "--quiet",
+                    ]
+                )
+            written = json.loads(out_path.read_text(encoding="utf-8"))
+            lines = lines_path.read_text(encoding="utf-8").splitlines()
+
+        self.assertEqual(report["row_type"], "hf_finetune_milestone_runtime")
+        self.assertEqual(written["row_type"], "hf_finetune_milestone_runtime")
+        self.assertEqual(written["status"], "executed")
+        self.assertEqual(package_calls[0]["checkpoint"], "checkpoint-128")
+        self.assertTrue(lines[0].startswith("hf_ft_milestone_runtime "))
+        self.assertNotIn("hf_gpt2", "\n".join(lines))
+        self.assertEqual(cli_code, 0)
+        self.assertIn("hf_ft_milestone_runtime_json", stdout.getvalue())
 
     def test_generic_status_history_summary_wrapper_uses_hf_ft_prefixes(self) -> None:
         module = load_generic_status_history_summary_example()
