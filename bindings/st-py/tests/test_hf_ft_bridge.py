@@ -6309,6 +6309,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             direct_history = run_dir / "direct-run-status-history.jsonl"
             eval_history = run_dir / "watch-6144-eval-confirm-history.jsonl"
             checkpoint_history = run_dir / "watch-6144-checkpoint-confirm-history.jsonl"
+            capture_json = run_dir / "milestone-6144-capture.json"
             for path, row in (
                 (direct_history, ready_direct),
                 (eval_history, ready_direct),
@@ -6322,6 +6323,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 ),
             ):
                 path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+            capture_json.write_text(
+                json.dumps({"milestone_step": 6144, "milestone_ready": True}) + "\n",
+                encoding="utf-8",
+            )
             source_calls = []
 
             def fake_source_package_runner(**kwargs):
@@ -6332,7 +6337,6 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             source_runtime = (
                 st.hf_gpt2_finetune_milestone_runtime_from_run_dir_report(
                     run_dir,
-                    milestone_step=6144,
                     label="source-ft",
                     execute=True,
                     use_package_api=True,
@@ -6345,6 +6349,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(sources["checkpoint"], str(checkpoint_history))
         self.assertEqual(source_runtime["status"], "executed")
         self.assertEqual(source_runtime["source_count"], 3)
+        self.assertEqual(source_runtime["milestone_step"], 6144)
+        self.assertEqual(source_runtime["milestone_step_source"], str(capture_json))
         self.assertEqual(source_runtime["sources"]["direct"], str(direct_history))
         self.assertEqual(source_runtime["checkpoint"], "checkpoint-6144")
         self.assertEqual(source_calls[0]["run_dir"], str(run_dir))

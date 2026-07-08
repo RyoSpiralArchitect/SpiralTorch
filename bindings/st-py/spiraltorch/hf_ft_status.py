@@ -1578,6 +1578,81 @@ def hf_gpt2_finetune_milestone_runtime_sources(
     }
 
 
+def _milestone_step_from_filename(path: Path) -> int | None:
+    parts = path.name.split("-")
+    for index, part in enumerate(parts):
+        if part == "milestone" and index + 1 < len(parts):
+            return _int_value(parts[index + 1])
+    return None
+
+
+def _milestone_step_from_capture_file(path: Path) -> int | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, Mapping):
+        return None
+    for key in ("milestone_step", "step"):
+        value = _int_value(payload.get(key))
+        if value is not None:
+            return value
+    return _milestone_step_from_filename(path)
+
+
+def _latest_milestone_capture_step(run_dir: str | Path) -> tuple[int | None, str | None]:
+    root = Path(run_dir)
+    if not root.is_dir():
+        return None, None
+    candidates = sorted(root.glob("milestone-*-capture.json"))
+    if not candidates:
+        candidates = sorted(root.glob("milestone-*"))
+    ranked: list[tuple[float, str, int, Path]] = []
+    for path in candidates:
+        if not path.is_file():
+            continue
+        step = (
+            _milestone_step_from_capture_file(path)
+            if path.suffix == ".json"
+            else _milestone_step_from_filename(path)
+        )
+        if step is None:
+            continue
+        ranked.append((path.stat().st_mtime, str(path), step, path))
+    if not ranked:
+        return None, None
+    _, _, step, path = max(ranked)
+    return step, str(path)
+
+
+def _latest_eval_step_from_source(source: Any) -> int | None:
+    try:
+        rows, _ = _coerce_status_rows(source)
+    except Exception:
+        return None
+    if not rows:
+        return None
+    step = _last_eval_loss_step(rows[-1])
+    return _int_value(step)
+
+
+def _infer_runtime_milestone_step(
+    run_dir: str | Path,
+    *,
+    explicit_step: int | None,
+    direct: Any = None,
+) -> tuple[int | None, str | None]:
+    if explicit_step is not None:
+        return explicit_step, "explicit"
+    capture_step, capture_path = _latest_milestone_capture_step(run_dir)
+    if capture_step is not None:
+        return capture_step, capture_path
+    eval_step = _latest_eval_step_from_source(direct)
+    if eval_step is not None:
+        return eval_step, "direct_eval_history"
+    return None, None
+
+
 def hf_gpt2_finetune_milestone_runtime_from_run_dir_report(
     run_dir: str | Path,
     *,
@@ -1604,6 +1679,15 @@ def hf_gpt2_finetune_milestone_runtime_from_run_dir_report(
         final_watch=final_watch if isinstance(final_watch, (str, Path)) else None,
         wait_launch=wait_launch if isinstance(wait_launch, (str, Path)) else None,
     )
+    milestone_step = _int_value(runtime_kwargs.get("milestone_step"))
+    inferred_step, inferred_source = _infer_runtime_milestone_step(
+        run_dir,
+        explicit_step=milestone_step,
+        direct=direct if direct is not None else sources["direct"],
+    )
+    runtime_kwargs = dict(runtime_kwargs)
+    if inferred_step is not None:
+        runtime_kwargs["milestone_step"] = inferred_step
     report = hf_gpt2_finetune_milestone_runtime_report(
         direct=direct if direct is not None else sources["direct"],
         eval_watch=eval_watch if eval_watch is not None else sources["eval"],
@@ -1618,6 +1702,7 @@ def hf_gpt2_finetune_milestone_runtime_from_run_dir_report(
     )
     report["sources"] = sources
     report["source_count"] = sum(1 for value in sources.values() if value is not None)
+    report["milestone_step_source"] = inferred_source
     if out is not None:
         out_path = Path(out)
         out_path.parent.mkdir(parents=True, exist_ok=True)
