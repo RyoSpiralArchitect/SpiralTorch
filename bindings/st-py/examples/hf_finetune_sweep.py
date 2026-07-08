@@ -22,6 +22,7 @@ DEFAULT_OUT_DIR = Path("runs/hf-finetune-sweep")
 DEFAULT_RUN_PREFIX = "hf-ft"
 DEFAULT_RUN_CARD_FILENAME = "spiraltorch-hf-finetune-run-card.json"
 DEFAULT_TRAINER_TRACE_FILENAME = "spiraltorch-hf-finetune-trainer-trace.jsonl"
+DEFAULT_MODEL_PROFILE = "causal-lm-local-smoke"
 
 
 def _argv_has_option(raw_argv: list[str], *names: str) -> bool:
@@ -29,9 +30,17 @@ def _argv_has_option(raw_argv: list[str], *names: str) -> bool:
     return any(arg in names or arg.startswith(prefixes) for arg in raw_argv)
 
 
+def _with_default_model_profile(raw_argv: list[str]) -> list[str]:
+    if _argv_has_option(raw_argv, "-h", "--help"):
+        return raw_argv
+    if _argv_has_option(raw_argv, "--model-configs", "--model-profile", "--model-name"):
+        return raw_argv
+    return ["--model-profile", DEFAULT_MODEL_PROFILE, *raw_argv]
+
+
 def parse_args(argv: list[str] | None = None):
     raw_argv = list(sys.argv[1:] if argv is None else argv)
-    args = _legacy_parse_args(argv)
+    args = _legacy_parse_args(_with_default_model_profile(raw_argv))
     if not _argv_has_option(raw_argv, "--bridge-script"):
         args.bridge_script = DEFAULT_BRIDGE
     if not _argv_has_option(raw_argv, "--out-dir"):

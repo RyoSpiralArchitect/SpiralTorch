@@ -378,7 +378,12 @@ historical `hf_gpt2_*` scripts still work, but new runs should prefer the
 tiny CI models, or another local `AutoModelForCausalLM` profile. Keep
 model-specific settings in
 `bindings/st-py/examples/hf_finetune_model_configs.example.json` or a copied
-config file rather than baking them into the script name. Profiles can carry
+config file rather than baking them into the script name. The generic
+`spiral-hf-finetune`, `spiral-hf-finetune-sweep`, and
+`spiral-hf-zspace-generation-control-sweep` entrypoints default to the built-in
+`causal-lm-local-smoke` profile when no `--model-name`, `--model-profile`, or
+`--model-configs` is supplied; pass any of those flags to pin a specific model
+explicitly. Profiles can carry
 model/tokenizer names, training shape, dataset/revision/streaming defaults,
 generation/Z-Space softmax knobs, and local runtime policy such as remote-code
 trust, disk guards, dataloader pinning, or required SpiralTorch backends.

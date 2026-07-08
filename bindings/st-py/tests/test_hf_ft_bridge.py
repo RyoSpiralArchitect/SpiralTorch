@@ -8200,7 +8200,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             str(row["profile_id"]): row for row in default_catalog["profiles"]
         }
         self.assertEqual(catalog["row_type"], "hf_finetune_model_profile_catalog")
-        self.assertEqual(catalog["profile_count"], 7)
+        self.assertEqual(catalog["profile_count"], 9)
         self.assertEqual(catalog["default_profile"], "causal-lm-local-smoke")
         self.assertIn("causal-lm-local-smoke", rows)
         self.assertEqual(
@@ -8212,6 +8212,13 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(rows["qwen2-0.5b-local-smoke"]["block_size"], 256)
         self.assertEqual(rows["qwen2-0.5b-local-smoke"]["zspace_top_k"], 96)
         self.assertFalse(rows["qwen2-0.5b-local-smoke"]["allow_remote"])
+        self.assertEqual(rows["opt-125m-local-smoke"]["model_name"], "facebook/opt-125m")
+        self.assertEqual(rows["opt-125m-local-smoke"]["zspace_top_k"], 80)
+        self.assertEqual(
+            rows["smollm2-135m-local-smoke"]["model_name"],
+            "HuggingFaceTB/SmolLM2-135M",
+        )
+        self.assertEqual(rows["smollm2-135m-local-smoke"]["block_size"], 256)
         self.assertEqual(
             rows["pythia-70m-local-smoke"]["dataset_name"],
             "wikitext",
@@ -8220,7 +8227,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             rows["local-causal-lm-template"]["model_name"],
             "models/my-causal-lm",
         )
-        self.assertEqual(default_catalog["profile_count"], 7)
+        self.assertEqual(default_catalog["profile_count"], 9)
         self.assertIn("qwen2-0.5b-local-smoke", default_rows)
         self.assertTrue(lines[0].startswith("hf_ft_model_profile_catalog "))
         self.assertTrue(
@@ -8675,6 +8682,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
 
     def test_generic_bridge_wrapper_preserves_model_profile_defaults(self) -> None:
         module = load_generic_bridge_example()
+        default_args = module.parse_args(["--metadata-only"])
         args = module.parse_args(
             [
                 "--model-configs",
@@ -8684,7 +8692,20 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 "--metadata-only",
             ]
         )
+        explicit_model_args = module.parse_args(
+            [
+                "--model-name",
+                "gpt2",
+                "--metadata-only",
+            ]
+        )
 
+        self.assertEqual(
+            default_args._hf_finetune_model_profile["profile_id"],
+            "causal-lm-local-smoke",
+        )
+        self.assertEqual(default_args.model_name, "EleutherAI/pythia-70m-deduped")
+        self.assertEqual(default_args.tokenizer_name, "EleutherAI/pythia-70m-deduped")
         self.assertEqual(args.model_name, "sshleifer/tiny-gpt2")
         self.assertEqual(args.tokenizer_name, "sshleifer/tiny-gpt2")
         self.assertEqual(args.block_size, 64)
@@ -8695,6 +8716,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             args.trainer_trace_jsonl.name,
             st.HF_FINETUNE_TRAINER_TRACE_FILENAME,
         )
+        self.assertIsNone(explicit_model_args._hf_finetune_model_profile)
+        self.assertEqual(explicit_model_args.model_name, "gpt2")
         with tempfile.TemporaryDirectory() as tmp:
             run_card = Path(tmp) / st.HF_FINETUNE_RUN_CARD_FILENAME
             write_args = types.SimpleNamespace(
@@ -9259,6 +9282,28 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         module = load_generic_sweep_example()
         with tempfile.TemporaryDirectory() as tmp:
             out_dir = Path(tmp) / "sweep"
+            default_out_dir = Path(tmp) / "default-sweep"
+            default_args = module.parse_args(
+                [
+                    "--dry-run",
+                    "--out-dir",
+                    str(default_out_dir),
+                    "--generation-prompt",
+                    "SpiralTorch is",
+                ]
+            )
+            default_runs = module.build_sweep_runs(default_args)
+            explicit_model_args = module.parse_args(
+                [
+                    "--dry-run",
+                    "--out-dir",
+                    str(Path(tmp) / "explicit-model-sweep"),
+                    "--model-name",
+                    "gpt2",
+                    "--generation-prompt",
+                    "SpiralTorch is",
+                ]
+            )
             args = module.parse_args(
                 [
                     "--dry-run",
@@ -9278,7 +9323,20 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             stored_report = json.loads((out_dir / "sweep-report.json").read_text())
             scale_up = json.loads((out_dir / "scale-up-command.json").read_text())
 
+        default_command = default_runs[0]["command"]
         command = runs[0]["command"]
+        self.assertEqual(default_args.model_profile, "causal-lm-local-smoke")
+        self.assertEqual(default_args.model_name, "EleutherAI/pythia-70m-deduped")
+        self.assertEqual(
+            default_command[default_command.index("--model-profile") + 1],
+            "causal-lm-local-smoke",
+        )
+        self.assertEqual(
+            default_command[default_command.index("--model-name") + 1],
+            "EleutherAI/pythia-70m-deduped",
+        )
+        self.assertIsNone(explicit_model_args.model_profile)
+        self.assertEqual(explicit_model_args.model_name, "gpt2")
         self.assertEqual(args.bridge_script.name, "hf_finetune_bridge.py")
         self.assertEqual(Path(command[1]).name, "hf_finetune_bridge.py")
         self.assertEqual(

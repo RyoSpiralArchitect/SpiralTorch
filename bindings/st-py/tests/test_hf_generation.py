@@ -2470,6 +2470,23 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
         compare_module = load_generic_generation_control_compare_example()
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            default_args = sweep_module.parse_args(
+                [
+                    "--dry-run",
+                    "--prompt",
+                    "SpiralTorch is",
+                ]
+            )
+            default_report = sweep_module.run_sweep(default_args)
+            explicit_model_args = sweep_module.parse_args(
+                [
+                    "--dry-run",
+                    "--model-name",
+                    "gpt2",
+                    "--prompt",
+                    "SpiralTorch is",
+                ]
+            )
             args = sweep_module.parse_args(
                 [
                     "--dry-run",
@@ -2517,6 +2534,14 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
             ):
                 nested_report = sweep_module.run_sweep(args)
 
+        self.assertEqual(default_args.model_profile, "causal-lm-local-smoke")
+        self.assertEqual(default_report["model_name"], "EleutherAI/pythia-70m-deduped")
+        self.assertEqual(
+            default_report["model_profile"]["profile_id"],
+            "causal-lm-local-smoke",
+        )
+        self.assertIsNone(explicit_model_args.model_profile)
+        self.assertEqual(explicit_model_args.model_name, "gpt2")
         self.assertEqual(report["status"], "planned")
         self.assertEqual(report["row_type"], "hf_zspace_generation_control_sweep")
         self.assertEqual(

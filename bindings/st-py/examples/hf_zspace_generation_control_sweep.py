@@ -17,6 +17,7 @@ from hf_gpt2_zspace_generation_control_sweep import *  # noqa: F401,F403,E402
 
 
 DEFAULT_OUT = Path("runs/hf-zspace-generation-control-sweep.json")
+DEFAULT_MODEL_PROFILE = "causal-lm-local-smoke"
 
 
 def _generic_row_type(value):
@@ -57,9 +58,17 @@ def _argv_has_option(raw_argv: Sequence[str], *names: str) -> bool:
     return any(arg in names or arg.startswith(prefixes) for arg in raw_argv)
 
 
+def _with_default_model_profile(raw_argv: list[str]) -> list[str]:
+    if _argv_has_option(raw_argv, "-h", "--help"):
+        return raw_argv
+    if _argv_has_option(raw_argv, "--model-configs", "--model-profile", "--model-name"):
+        return raw_argv
+    return ["--model-profile", DEFAULT_MODEL_PROFILE, *raw_argv]
+
+
 def parse_args(argv: Sequence[str] | None = None):
     raw_argv = list(sys.argv[1:] if argv is None else argv)
-    args = _legacy.parse_args(argv)
+    args = _legacy.parse_args(_with_default_model_profile(raw_argv))
     if not _argv_has_option(raw_argv, "--out"):
         args.out = DEFAULT_OUT
     return args
