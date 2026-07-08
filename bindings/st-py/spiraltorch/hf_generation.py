@@ -542,6 +542,10 @@ def zspace_checkpoint_generation_control_sweep_command(
         "--out",
         str(job.out),
     ]
+    if config.model_configs is not None:
+        command.extend(["--model-configs", str(config.model_configs)])
+    if config.model_profile is not None:
+        command.extend(["--model-profile", str(config.model_profile)])
     if config.tokenizer_name is not None:
         command.extend(["--tokenizer-name", str(config.tokenizer_name)])
     if config.allow_remote:
@@ -677,6 +681,8 @@ def zspace_checkpoint_generation_control_curve_command(
     checkpoint: Sequence[str] | str,
     python: str | None = None,
     curve_script: str | Path | None = None,
+    model_configs: str | Path | None = None,
+    model_profile: str | None = None,
     curve_out: str | Path | None = None,
     curve_lines_out: str | Path | None = None,
     curve_run_card: str | Path | None = None,
@@ -695,6 +701,8 @@ def zspace_checkpoint_generation_control_curve_command(
         checkpoint=checkpoint,
         python=python,
         curve_script=curve_script,
+        model_configs=model_configs,
+        model_profile=model_profile,
         curve_out=curve_out,
         curve_lines_out=curve_lines_out,
         curve_run_card=curve_run_card,
@@ -721,6 +729,11 @@ def zspace_checkpoint_generation_control_curve_command(
     if trainer_trace is not None:
         command.extend(["--trainer-trace-jsonl", str(trainer_trace)])
     command.extend(["--run-dir", str(config.run_dir)])
+    if Path(config.curve_script).name == "hf_finetune_generation_curve.py":
+        if config.model_configs is not None:
+            command.extend(["--model-configs", str(config.model_configs)])
+        if config.model_profile is not None:
+            command.extend(["--model-profile", str(config.model_profile)])
     if config.curve_model_name is not None:
         command.extend(["--model-name", str(config.curve_model_name)])
     if config.curve_dataset_name is not None:
@@ -1094,6 +1107,8 @@ def zspace_checkpoint_generation_control_report(
             checkpoint=config.checkpoint,
             python=config.python,
             curve_script=config.curve_script,
+            model_configs=config.model_configs,
+            model_profile=config.model_profile,
             curve_out=config.curve_out,
             curve_lines_out=config.curve_lines_out,
             curve_run_card=config.curve_run_card,

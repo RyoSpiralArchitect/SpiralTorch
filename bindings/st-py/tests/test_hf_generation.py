@@ -2092,13 +2092,21 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
                 model_profile="tiny-gpt2-ci",
                 dry_run=True,
                 no_compare=True,
+                curve_out=run_dir / "curve.json",
+                curve_lines_out=run_dir / "curve.lines",
             )
 
         command = planned["sweeps"][0]["command"]
+        curve_command = planned["curve"]["command"]
         self.assertEqual(planned["tokenizer_name"], "sshleifer/tiny-gpt2")
         self.assertEqual(planned["model_profile"]["profile_id"], "tiny-gpt2-ci")
         self.assertIn("profile=tiny-gpt2-ci", planned["model_profile_lines"][0])
         self.assertEqual(planned["sweeps"][0]["tokenizer_name"], "sshleifer/tiny-gpt2")
+        self.assertEqual(
+            command[command.index("--model-configs") + 1],
+            str(MODEL_CONFIGS_PATH),
+        )
+        self.assertEqual(command[command.index("--model-profile") + 1], "tiny-gpt2-ci")
         self.assertEqual(
             command[command.index("--model-name") + 1],
             str(run_dir / "checkpoint-2048"),
@@ -2108,6 +2116,14 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
             "sshleifer/tiny-gpt2",
         )
         self.assertEqual(command[command.index("--max-new-tokens") + 1], "32")
+        self.assertEqual(
+            curve_command[curve_command.index("--model-configs") + 1],
+            str(MODEL_CONFIGS_PATH),
+        )
+        self.assertEqual(
+            curve_command[curve_command.index("--model-profile") + 1],
+            "tiny-gpt2-ci",
+        )
 
     def test_package_checkpoint_generation_control_uses_profile_runtime_defaults(
         self,
@@ -2263,6 +2279,11 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
             command[command.index("--tokenizer-name") + 1],
             "sshleifer/tiny-gpt2",
         )
+        self.assertEqual(
+            command[command.index("--model-configs") + 1],
+            str(MODEL_CONFIGS_PATH),
+        )
+        self.assertEqual(command[command.index("--model-profile") + 1], "tiny-gpt2-ci")
         self.assertEqual(command[command.index("--max-new-tokens") + 1], "32")
         self.assertEqual(report["model_profile"]["profile_id"], "tiny-gpt2-ci")
         self.assertEqual(report["tokenizer_name"], "sshleifer/tiny-gpt2")
@@ -2719,6 +2740,11 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
         self.assertEqual(Path(command[1]).name, "hf_zspace_generation_control_sweep.py")
         self.assertEqual(report["row_type"], "hf_checkpoint_generation_control")
         self.assertEqual(report["tokenizer_name"], "sshleifer/tiny-gpt2")
+        self.assertEqual(
+            command[command.index("--model-configs") + 1],
+            str(MODEL_CONFIGS_PATH),
+        )
+        self.assertEqual(command[command.index("--model-profile") + 1], "tiny-gpt2-ci")
 
     def test_installed_hf_checkpoint_control_cli_accepts_script_overrides(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

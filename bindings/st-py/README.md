@@ -667,7 +667,9 @@ PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_finetune_sweep.py \
 For checkpoint-level local inference, use the generic generation-control
 wrapper so the fine-tuned checkpoint stays the model path while the profile can
 provide tokenizer, decode defaults, Z-Space softmax grids, and runtime access
-policy such as `allow_remote` / `trust_remote_code`:
+policy such as `allow_remote` / `trust_remote_code`. The same profile reference
+is forwarded into generated sweep and generation-curve commands, so downstream
+artifacts keep model/dataset metadata without retyping it:
 
 ```bash
 spiral-hf-zspace-generation-control-sweep \
