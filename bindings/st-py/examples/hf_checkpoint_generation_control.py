@@ -17,12 +17,19 @@ from hf_gpt2_ft_checkpoint_generation_control import (  # noqa: E402
     parse_args as _legacy_parse_args,
 )
 from hf_gpt2_ft_checkpoint_generation_control import (  # noqa: E402
-    run_checkpoint_generation_control,
+    run_checkpoint_generation_control as _legacy_run_checkpoint_generation_control,
 )
 
 SWEEP_SCRIPT = EXAMPLES_ROOT / "hf_zspace_generation_control_sweep.py"
 COMPARE_SCRIPT = EXAMPLES_ROOT / "hf_zspace_generation_control_compare.py"
 CURVE_SCRIPT = EXAMPLES_ROOT / "hf_finetune_generation_curve.py"
+
+
+def _genericize_report(report):
+    payload = dict(report)
+    if payload.get("row_type") == "hf_gpt2_ft_checkpoint_generation_control":
+        payload["row_type"] = "hf_checkpoint_generation_control"
+    return payload
 
 
 def _argv_has_option(raw_argv: Sequence[str], *names: str) -> bool:
@@ -40,6 +47,12 @@ def parse_args(argv: Sequence[str] | None = None):
     if not _argv_has_option(raw_argv, "--curve-script"):
         args.curve_script = CURVE_SCRIPT
     return args
+
+
+def run_checkpoint_generation_control(args, *, runner=None):
+    return _genericize_report(
+        _legacy_run_checkpoint_generation_control(args, runner=runner)
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:

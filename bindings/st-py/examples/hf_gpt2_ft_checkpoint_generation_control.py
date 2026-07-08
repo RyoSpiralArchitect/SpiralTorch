@@ -326,6 +326,16 @@ def _apply_model_profile_defaults(
         and not _argv_has_option(raw_argv, "--do-sample")
     ):
         args.do_sample = True
+    if (
+        _profile_value(profile, "runtime", "allow_remote") is True
+        and not _argv_has_option(raw_argv, "--allow-remote")
+    ):
+        args.allow_remote = True
+    if (
+        _profile_value(profile, "runtime", "trust_remote_code") is True
+        and not _argv_has_option(raw_argv, "--trust-remote-code")
+    ):
+        args.trust_remote_code = True
     _set_profile_default(
         args,
         raw_argv,

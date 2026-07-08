@@ -332,6 +332,7 @@ def _checkpoint_control_config(
         model_profile=model_profile,
     )
     generation_profile = _mapping_item(profile_report or {}, "generation")
+    runtime_profile = _mapping_item(profile_report or {}, "runtime")
     resolved_tokenizer_name = tokenizer_name
     if resolved_tokenizer_name is None and profile_report is not None:
         profile_tokenizer = profile_report.get("tokenizer_name")
@@ -354,6 +355,10 @@ def _checkpoint_control_config(
             generation_profile["top_k"],
             label="profile.generation.top_k",
         )
+    if not allow_remote and runtime_profile.get("allow_remote") is True:
+        allow_remote = True
+    if not trust_remote_code and runtime_profile.get("trust_remote_code") is True:
+        trust_remote_code = True
     if max_new_tokens is not None and max_new_tokens <= 0:
         raise ValueError("max_new_tokens must be positive")
     if sample_temperature is not None and sample_temperature <= 0.0:
@@ -1132,6 +1137,8 @@ def zspace_checkpoint_generation_control_report(
         ),
         "model_profile": config.model_profile_report,
         "model_profile_lines": list(config.model_profile_lines),
+        "allow_remote": bool(config.allow_remote),
+        "trust_remote_code": bool(config.trust_remote_code),
         "checkpoint_count": len(config.checkpoint),
         "prompt_count": len(config.prompt),
         "sweep_count": len(rows),

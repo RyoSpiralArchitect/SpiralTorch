@@ -2035,6 +2035,58 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
         )
         self.assertEqual(command[command.index("--max-new-tokens") + 1], "32")
 
+    def test_package_checkpoint_generation_control_uses_profile_runtime_defaults(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = root / "run"
+            config_path = root / "profiles.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "schema": "spiraltorch.hf_finetune_model_configs.v1",
+                        "default_profile": "remote-checkpoint",
+                        "profiles": [
+                            {
+                                "id": "remote-checkpoint",
+                                "model_name": "org/remote-base",
+                                "tokenizer_name": "org/remote-tokenizer",
+                                "architecture": "causal_lm",
+                                "generation": {
+                                    "max_new_tokens": 19,
+                                    "do_sample": True,
+                                    "temperature": 0.7,
+                                    "top_k": 30,
+                                },
+                                "runtime": {
+                                    "allow_remote": True,
+                                    "trust_remote_code": True,
+                                },
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            planned = zspace_checkpoint_generation_control_report(
+                run_dir=run_dir,
+                checkpoint="checkpoint-2048",
+                model_configs=config_path,
+                dry_run=True,
+                no_compare=True,
+            )
+
+        command = planned["sweeps"][0]["command"]
+        self.assertTrue(planned["allow_remote"])
+        self.assertTrue(planned["trust_remote_code"])
+        self.assertIn("--allow-remote", command)
+        self.assertIn("--trust-remote-code", command)
+        self.assertEqual(command[command.index("--max-new-tokens") + 1], "19")
+        self.assertIn("--do-sample", command)
+        self.assertEqual(command[command.index("--sample-temperature") + 1], "0.7")
+        self.assertEqual(command[command.index("--sample-top-k") + 1], "30")
+
     def test_checkpoint_generation_control_runs_sweeps_and_compare_with_runner(
         self,
     ) -> None:
@@ -2360,6 +2412,11 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
             )
 
         self.assertEqual(report["status"], "planned")
+        self.assertEqual(report["row_type"], "hf_zspace_generation_control_sweep")
+        self.assertEqual(
+            report["summary"]["row_type"],
+            "hf_zspace_generation_control_sweep_summary",
+        )
         self.assertEqual(args.out, Path("runs/hf-zspace-generation-control-sweep.json"))
         self.assertEqual(report["model_name"], "EleutherAI/pythia-70m-deduped")
         self.assertEqual(report["tokenizer_name"], "EleutherAI/pythia-70m-deduped")
@@ -2381,6 +2438,68 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
         self.assertEqual(zspace_run["config"]["ngram_window"], 32)
         self.assertEqual(compare_args.label, ["generic"])
         self.assertEqual(compare_args.sweeps, [out_path])
+
+    def test_generation_control_profile_runtime_defaults_flow_to_generic_wrapper(
+        self,
+    ) -> None:
+        sweep_module = load_generic_generation_control_sweep_example()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config_path = root / "profiles.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "schema": "spiraltorch.hf_finetune_model_configs.v1",
+                        "default_profile": "remote-causal",
+                        "profiles": [
+                            {
+                                "id": "remote-causal",
+                                "model_name": "org/remote-causal",
+                                "tokenizer_name": "org/remote-tokenizer",
+                                "architecture": "causal_lm",
+                                "generation": {
+                                    "max_new_tokens": 17,
+                                    "do_sample": True,
+                                    "temperature": 0.75,
+                                    "top_k": 24,
+                                    "zspace_top_k": 48,
+                                    "zspace_curvature": -0.03,
+                                    "zspace_temperature": 1.1,
+                                    "zspace_entropy_target": 2.5,
+                                    "repression_window": 12,
+                                    "repression_strength": 0.6,
+                                    "last_token_repression": 0.4,
+                                },
+                                "runtime": {
+                                    "allow_remote": True,
+                                    "trust_remote_code": True,
+                                },
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            args = sweep_module.parse_args(
+                [
+                    "--dry-run",
+                    "--model-configs",
+                    str(config_path),
+                    "--prompt",
+                    "SpiralTorch is",
+                ]
+            )
+            report = sweep_module.run_sweep(args)
+
+        self.assertTrue(args.allow_remote)
+        self.assertTrue(args.trust_remote_code)
+        self.assertEqual(report["row_type"], "hf_zspace_generation_control_sweep")
+        self.assertTrue(report["allow_remote"])
+        self.assertTrue(report["trust_remote_code"])
+        self.assertEqual(report["max_new_tokens"], 17)
+        self.assertTrue(report["do_sample"])
+        self.assertEqual(report["sample_top_k"], 24)
+        self.assertEqual(report["runs"][1]["config"]["top_k"], 48)
 
     def test_installed_hf_generation_control_cli_dry_run_and_compare(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2417,6 +2536,7 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(compare_code, 0)
         self.assertEqual(report["model_name"], "Qwen/Qwen2-0.5B")
+        self.assertEqual(report["row_type"], "hf_zspace_generation_control_sweep")
         self.assertEqual(report["tokenizer_name"], "Qwen/Qwen2-0.5B")
         self.assertEqual(
             report["model_profile"]["profile_id"],
@@ -2456,6 +2576,7 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
         command = report["sweeps"][0]["command"]
         self.assertEqual(code, 0)
         self.assertEqual(Path(command[1]).name, "hf_zspace_generation_control_sweep.py")
+        self.assertEqual(report["row_type"], "hf_checkpoint_generation_control")
         self.assertEqual(report["tokenizer_name"], "sshleifer/tiny-gpt2")
 
     def test_installed_hf_checkpoint_control_cli_accepts_script_overrides(self) -> None:

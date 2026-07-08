@@ -137,6 +137,13 @@ def _path_values(values: Sequence[Path] | None) -> list[Path]:
     return [] if values is None else list(values)
 
 
+def _generic_checkpoint_generation_control_report(report: dict) -> dict:
+    payload = dict(report)
+    if payload.get("row_type") == "hf_gpt2_ft_checkpoint_generation_control":
+        payload["row_type"] = "hf_checkpoint_generation_control"
+    return payload
+
+
 def checkpoint_generation_control_main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
@@ -263,6 +270,13 @@ def checkpoint_generation_control_main(argv: Sequence[str] | None = None) -> int
         timeout_seconds=args.timeout_seconds,
         process_timeout_seconds=args.process_timeout_seconds,
     )
+    report = _generic_checkpoint_generation_control_report(report)
+    if args.run_card is not None:
+        args.run_card.parent.mkdir(parents=True, exist_ok=True)
+        args.run_card.write_text(
+            json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
     if args.dry_run and args.run_card is None:
         print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
     return 0

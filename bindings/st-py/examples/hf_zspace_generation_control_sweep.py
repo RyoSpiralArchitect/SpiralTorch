@@ -19,6 +19,22 @@ from hf_gpt2_zspace_generation_control_sweep import *  # noqa: F401,F403,E402
 DEFAULT_OUT = Path("runs/hf-zspace-generation-control-sweep.json")
 
 
+def _genericize_report(report):
+    payload = dict(report)
+    if payload.get("row_type") == "hf_gpt2_zspace_generation_control_sweep":
+        payload["row_type"] = "hf_zspace_generation_control_sweep"
+    summary = payload.get("summary")
+    if isinstance(summary, dict):
+        summary_payload = dict(summary)
+        if (
+            summary_payload.get("row_type")
+            == "hf_gpt2_zspace_generation_control_sweep_summary"
+        ):
+            summary_payload["row_type"] = "hf_zspace_generation_control_sweep_summary"
+        payload["summary"] = summary_payload
+    return payload
+
+
 def _argv_has_option(raw_argv: Sequence[str], *names: str) -> bool:
     prefixes = tuple(f"{name}=" for name in names)
     return any(arg in names or arg.startswith(prefixes) for arg in raw_argv)
@@ -30,6 +46,10 @@ def parse_args(argv: Sequence[str] | None = None):
     if not _argv_has_option(raw_argv, "--out"):
         args.out = DEFAULT_OUT
     return args
+
+
+def run_sweep(args):
+    return _genericize_report(_legacy.run_sweep(args))
 
 
 def main(argv: Sequence[str] | None = None) -> int:

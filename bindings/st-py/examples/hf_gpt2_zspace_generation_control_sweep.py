@@ -150,6 +150,7 @@ def _apply_model_profile_defaults(
     args._hf_finetune_model_profile = profile
     args._hf_finetune_model_profile_lines = hf_finetune_model_profile_lines(profile)
     generation = _mapping_or_empty(profile.get("generation"))
+    runtime = _mapping_or_empty(profile.get("runtime"))
 
     def set_if_missing(attr: str, value: object, *flags: str) -> None:
         if value is None or _argv_has_option(raw_argv, *flags):
@@ -191,6 +192,13 @@ def _apply_model_profile_defaults(
         str(profile.get("tokenizer_name")),
         "--tokenizer-name",
     )
+    if "allow_remote" in runtime and not _argv_has_option(raw_argv, "--allow-remote"):
+        args.allow_remote = bool(runtime.get("allow_remote"))
+    if "trust_remote_code" in runtime and not _argv_has_option(
+        raw_argv,
+        "--trust-remote-code",
+    ):
+        args.trust_remote_code = bool(runtime.get("trust_remote_code"))
     set_scalar_if_missing(
         "max_new_tokens",
         "max_new_tokens",
@@ -806,6 +814,8 @@ def run_sweep(args: argparse.Namespace) -> dict[str, object]:
         "model_profile_lines": list(
             getattr(args, "_hf_finetune_model_profile_lines", [])
         ),
+        "allow_remote": bool(args.allow_remote),
+        "trust_remote_code": bool(args.trust_remote_code),
         "prompt": args.prompt,
         "max_new_tokens": args.max_new_tokens,
         "do_sample": bool(args.do_sample),
