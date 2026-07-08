@@ -11,7 +11,7 @@ import subprocess
 import sys
 from itertools import product
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping, Sequence
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 if str(PACKAGE_ROOT) not in sys.path:
@@ -57,6 +57,7 @@ def _positive_float_values(value: str) -> list[float]:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
     parser.add_argument("--bridge-script", type=Path, default=DEFAULT_BRIDGE)
     parser.add_argument("--python", default=sys.executable)
     parser.add_argument("--out-dir", type=Path, default=Path("runs/hf-gpt2-ft-sweep"))
@@ -82,7 +83,25 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Rerun all rows even when --resume-existing would find a reusable card.",
     )
+    parser.add_argument(
+        "--model-configs",
+        type=Path,
+        default=None,
+        help=(
+            "Optional JSON config with Hugging Face model profiles. "
+            "Omit to use SpiralTorch's built-in local smoke profiles."
+        ),
+    )
+    parser.add_argument(
+        "--model-profile",
+        default=None,
+        help=(
+            "Model profile id to use as sweep defaults for model/tokenizer, "
+            "block-size, sample limits, and generation settings."
+        ),
+    )
     parser.add_argument("--model-name", default="gpt2")
+    parser.add_argument("--tokenizer-name", default=None)
     parser.add_argument("--dataset-name", default="wikitext")
     parser.add_argument("--dataset-config", default="wikitext-2-raw-v1")
     parser.add_argument("--train-split", default="train")
@@ -198,6 +217,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default="auto",
     )
     args = parser.parse_args(argv)
+    _apply_model_profile_defaults(args, parser=parser, raw_argv=raw_argv)
     if not args.bridge_script.is_file():
         parser.error(f"--bridge-script does not exist: {args.bridge_script}")
     if args.validation_file and not args.train_file:
@@ -355,6 +375,201 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return args
 
 
+def _argv_has_option(raw_argv: Sequence[str], *names: str) -> bool:
+    prefixes = tuple(f"{name}=" for name in names)
+    return any(arg in names or arg.startswith(prefixes) for arg in raw_argv)
+
+
+def _profile_value(profile: Mapping[str, Any], section: str, key: str) -> Any:
+    payload = profile.get(section)
+    if isinstance(payload, Mapping):
+        return payload.get(key)
+    return None
+
+
+def _set_profile_default(
+    args: argparse.Namespace,
+    raw_argv: Sequence[str],
+    attr: str,
+    value: Any,
+    *flags: str,
+) -> None:
+    if value is None or _argv_has_option(raw_argv, *flags):
+        return
+    setattr(args, attr, value)
+
+
+def _apply_model_profile_defaults(
+    args: argparse.Namespace,
+    *,
+    parser: argparse.ArgumentParser,
+    raw_argv: Sequence[str],
+) -> None:
+    args._hf_finetune_model_profile = None
+    if args.model_configs is None and args.model_profile is None:
+        return
+    try:
+        profile = st.resolve_hf_finetune_model_profile(
+            args.model_configs,
+            profile=args.model_profile,
+        )
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        parser.error(f"failed to resolve model profile: {exc}")
+    args._hf_finetune_model_profile = profile
+    _set_profile_default(
+        args,
+        raw_argv,
+        "model_name",
+        profile.get("model_name"),
+        "--model-name",
+    )
+    if _argv_has_option(raw_argv, "--model-name") and not _argv_has_option(
+        raw_argv,
+        "--tokenizer-name",
+    ):
+        args.tokenizer_name = args.model_name
+    else:
+        _set_profile_default(
+            args,
+            raw_argv,
+            "tokenizer_name",
+            profile.get("tokenizer_name"),
+            "--tokenizer-name",
+        )
+    block_size = _profile_value(profile, "training", "block_size") or profile.get(
+        "max_length"
+    )
+    if block_size is not None:
+        _set_profile_default(
+            args,
+            raw_argv,
+            "block_size_values",
+            [block_size],
+            "--block-size-values",
+        )
+    for attr, key, flag in (
+        ("max_train_samples", "max_train_samples", "--max-train-samples"),
+        ("max_eval_samples", "max_eval_samples", "--max-eval-samples"),
+        (
+            "per_device_train_batch_size",
+            "per_device_train_batch_size",
+            "--per-device-train-batch-size",
+        ),
+        (
+            "per_device_eval_batch_size",
+            "per_device_eval_batch_size",
+            "--per-device-eval-batch-size",
+        ),
+        (
+            "gradient_accumulation_steps",
+            "gradient_accumulation_steps",
+            "--gradient-accumulation-steps",
+        ),
+        ("learning_rate_values", "learning_rate", "--learning-rate-values"),
+        ("max_step_values", "max_steps", "--max-step-values"),
+        ("logging_steps", "logging_steps", "--logging-steps"),
+        ("save_steps", "save_steps", "--save-steps"),
+        ("eval_steps", "eval_steps", "--eval-steps"),
+    ):
+        value = _profile_value(profile, "training", key)
+        if value is not None and attr in {"learning_rate_values", "max_step_values"}:
+            value = [value]
+        _set_profile_default(args, raw_argv, attr, value, flag)
+    for attr, key, flag in (
+        ("generation_max_new_tokens", "max_new_tokens", "--generation-max-new-tokens"),
+        ("generation_temperature", "temperature", "--generation-temperature"),
+        ("generation_top_k", "top_k", "--generation-top-k"),
+        ("generation_zspace_top_k", "zspace_top_k", "--generation-zspace-top-k"),
+        (
+            "generation_zspace_curvature",
+            "zspace_curvature",
+            "--generation-zspace-curvature",
+        ),
+        (
+            "generation_zspace_temperature",
+            "zspace_temperature",
+            "--generation-zspace-temperature",
+        ),
+        (
+            "generation_zspace_entropy_target",
+            "zspace_entropy_target",
+            "--generation-zspace-entropy-target",
+        ),
+        (
+            "generation_zspace_entropy_gain",
+            "zspace_entropy_gain",
+            "--generation-zspace-entropy-gain",
+        ),
+        (
+            "generation_zspace_entropy_tolerance",
+            "zspace_entropy_tolerance",
+            "--generation-zspace-entropy-tolerance",
+        ),
+        (
+            "generation_zspace_min_temperature",
+            "zspace_min_temperature",
+            "--generation-zspace-min-temperature",
+        ),
+        (
+            "generation_zspace_max_temperature",
+            "zspace_max_temperature",
+            "--generation-zspace-max-temperature",
+        ),
+        (
+            "generation_repression_window",
+            "repression_window",
+            "--generation-repression-window",
+        ),
+        (
+            "generation_repression_strength",
+            "repression_strength",
+            "--generation-repression-strength",
+        ),
+        (
+            "generation_last_token_repression",
+            "last_token_repression",
+            "--generation-last-token-repression",
+        ),
+        ("generation_ngram_size", "ngram_size", "--generation-ngram-size"),
+        ("generation_ngram_window", "ngram_window", "--generation-ngram-window"),
+        (
+            "generation_ngram_repression_strength",
+            "ngram_repression_strength",
+            "--generation-ngram-repression-strength",
+        ),
+        ("generation_ngram_decay", "ngram_decay", "--generation-ngram-decay"),
+        (
+            "generation_zspace_report_limit",
+            "zspace_report_limit",
+            "--generation-zspace-report-limit",
+        ),
+    ):
+        _set_profile_default(
+            args,
+            raw_argv,
+            attr,
+            _profile_value(profile, "generation", key),
+            flag,
+        )
+    for attr, key, flag in (
+        ("generation_do_sample", "do_sample", "--generation-do-sample"),
+        ("generation_zspace_softmax", "zspace_softmax", "--generation-zspace-softmax"),
+        (
+            "generation_zspace_keep_non_top_k",
+            "zspace_keep_non_top_k",
+            "--generation-zspace-keep-non-top-k",
+        ),
+        (
+            "generation_zspace_no_native",
+            "zspace_no_native",
+            "--generation-zspace-no-native",
+        ),
+    ):
+        value = _profile_value(profile, "generation", key)
+        if value is True and not _argv_has_option(raw_argv, flag):
+            setattr(args, attr, True)
+
+
 def _append_repeated(command: list[str], flag: str, values: list[Path]) -> None:
     for value in values:
         command.extend([flag, str(value)])
@@ -392,6 +607,8 @@ def _bridge_command(
         str(args.bridge_script),
         "--model-name",
         str(args.model_name),
+        "--tokenizer-name",
+        str(args.tokenizer_name or args.model_name),
         "--train",
         "--output-dir",
         str(run_dir),
@@ -434,6 +651,10 @@ def _bridge_command(
         "--dataloader-pin-memory",
         str(args.dataloader_pin_memory),
     ]
+    if args.model_configs is not None:
+        command.extend(["--model-configs", str(args.model_configs)])
+    if args.model_profile is not None:
+        command.extend(["--model-profile", str(args.model_profile)])
     if args.train_file:
         _append_repeated(command, "--train-file", args.train_file)
         _append_repeated(command, "--validation-file", args.validation_file)
@@ -607,6 +828,18 @@ def _bridge_command(
     return command
 
 
+def _resolved_model_profile(args: argparse.Namespace) -> dict[str, Any] | None:
+    profile = getattr(args, "_hf_finetune_model_profile", None)
+    return dict(profile) if isinstance(profile, Mapping) else None
+
+
+def _resolved_model_profile_lines(args: argparse.Namespace) -> list[str]:
+    profile = _resolved_model_profile(args)
+    if profile is None:
+        return []
+    return st.hf_finetune_model_profile_lines(profile)
+
+
 def build_sweep_runs(args: argparse.Namespace) -> list[dict[str, Any]]:
     runs = []
     grid = product(
@@ -645,6 +878,16 @@ def build_sweep_runs(args: argparse.Namespace) -> list[dict[str, Any]]:
                 "learning_rate": learning_rate,
                 "max_steps": max_steps,
                 "seed": seed,
+                "model_name": str(args.model_name),
+                "tokenizer_name": str(args.tokenizer_name or args.model_name),
+                "model_configs": (
+                    None if args.model_configs is None else str(args.model_configs)
+                ),
+                "model_profile_id": (
+                    None
+                    if _resolved_model_profile(args) is None
+                    else _resolved_model_profile(args).get("profile_id")
+                ),
                 "run_dir": str(run_dir),
                 "run_card": str(run_card),
                 "trainer_trace_jsonl": str(trainer_trace),
@@ -802,6 +1045,8 @@ def _generation_from_inference_distortion_plan(
 def run_sweep(args: argparse.Namespace) -> dict[str, Any]:
     runs = build_sweep_runs(args)
     args.out_dir.mkdir(parents=True, exist_ok=True)
+    model_profile = _resolved_model_profile(args)
+    model_profile_lines = _resolved_model_profile_lines(args)
     inference_handoff = _inference_distortion_handoff(args)
     inference_handoff_lines = _inference_distortion_handoff_lines(inference_handoff)
     generation_inference_plan = _generation_from_inference_distortion_plan(
@@ -816,6 +1061,11 @@ def run_sweep(args: argparse.Namespace) -> dict[str, Any]:
     plan = {
         "row_type": "hf_gpt2_finetune_sweep_plan",
         "dry_run": bool(args.dry_run),
+        "model_name": str(args.model_name),
+        "tokenizer_name": str(args.tokenizer_name or args.model_name),
+        "model_configs": None if args.model_configs is None else str(args.model_configs),
+        "model_profile": model_profile,
+        "model_profile_lines": model_profile_lines,
         "inference_distortion_sweep_report": _inference_distortion_report_path(args),
         "inference_distortion_probe": _inference_distortion_probe_path(args),
         "inference_distortion_handoff": inference_handoff,
@@ -843,6 +1093,13 @@ def run_sweep(args: argparse.Namespace) -> dict[str, Any]:
             "skipped_run_count": len(runs),
             "plan_path": str(args.out_dir / "sweep-plan.json"),
             "report_path": str(args.out_dir / "sweep-report.json"),
+            "model_name": str(args.model_name),
+            "tokenizer_name": str(args.tokenizer_name or args.model_name),
+            "model_configs": (
+                None if args.model_configs is None else str(args.model_configs)
+            ),
+            "model_profile": model_profile,
+            "model_profile_lines": model_profile_lines,
             "inference_distortion_sweep_report": _inference_distortion_report_path(args),
             "inference_distortion_probe": _inference_distortion_probe_path(args),
             "inference_distortion_handoff": inference_handoff,
@@ -920,6 +1177,11 @@ def run_sweep(args: argparse.Namespace) -> dict[str, Any]:
         "skipped_run_count": sum(1 for run in runs if run.get("status") == "planned"),
         "plan_path": str(args.out_dir / "sweep-plan.json"),
         "report_path": str(args.out_dir / "sweep-report.json"),
+        "model_name": str(args.model_name),
+        "tokenizer_name": str(args.tokenizer_name or args.model_name),
+        "model_configs": None if args.model_configs is None else str(args.model_configs),
+        "model_profile": model_profile,
+        "model_profile_lines": model_profile_lines,
         "inference_distortion_sweep_report": _inference_distortion_report_path(args),
         "inference_distortion_probe": _inference_distortion_probe_path(args),
         "inference_distortion_handoff": inference_handoff,

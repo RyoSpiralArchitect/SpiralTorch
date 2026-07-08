@@ -6885,6 +6885,61 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(overridden.generation_max_new_tokens, 11)
         self.assertEqual(module._tokenizer_name(overridden), "gpt2")
 
+    def test_sweep_model_profile_defaults_flow_to_bridge_commands(self) -> None:
+        module = load_sweep_example()
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "sweep"
+            args = module.parse_args(
+                [
+                    "--dry-run",
+                    "--out-dir",
+                    str(out_dir),
+                    "--model-configs",
+                    str(MODEL_CONFIGS_PATH),
+                    "--model-profile",
+                    "tiny-gpt2-ci",
+                    "--generation-prompt",
+                    "SpiralTorch is",
+                ]
+            )
+            runs = module.build_sweep_runs(args)
+            report = module.run_sweep(args)
+            stored_plan = json.loads((out_dir / "sweep-plan.json").read_text())
+            stored_report = json.loads((out_dir / "sweep-report.json").read_text())
+
+        command = runs[0]["command"]
+        self.assertEqual(args.model_name, "sshleifer/tiny-gpt2")
+        self.assertEqual(args.tokenizer_name, "sshleifer/tiny-gpt2")
+        self.assertEqual(args.block_size_values, [64])
+        self.assertEqual(args.max_train_samples, 128)
+        self.assertEqual(args.max_eval_samples, 32)
+        self.assertEqual(args.generation_max_new_tokens, 32)
+        self.assertIn("--model-configs", command)
+        self.assertIn(str(MODEL_CONFIGS_PATH), command)
+        self.assertIn("--model-profile", command)
+        self.assertIn("tiny-gpt2-ci", command)
+        self.assertEqual(
+            command[command.index("--model-name") + 1],
+            "sshleifer/tiny-gpt2",
+        )
+        self.assertEqual(
+            command[command.index("--tokenizer-name") + 1],
+            "sshleifer/tiny-gpt2",
+        )
+        self.assertEqual(command[command.index("--block-size") + 1], "64")
+        self.assertEqual(command[command.index("--max-train-samples") + 1], "128")
+        self.assertEqual(command[command.index("--max-eval-samples") + 1], "32")
+        self.assertEqual(
+            command[command.index("--generation-max-new-tokens") + 1],
+            "32",
+        )
+        self.assertEqual(runs[0]["model_profile_id"], "tiny-gpt2-ci")
+        self.assertEqual(stored_plan["model_profile"]["profile_id"], "tiny-gpt2-ci")
+        self.assertEqual(stored_report["model_name"], "sshleifer/tiny-gpt2")
+        self.assertEqual(stored_report["model_profile"]["profile_id"], "tiny-gpt2-ci")
+        self.assertIn("profile=tiny-gpt2-ci", stored_report["model_profile_lines"][0])
+        self.assertEqual(report["run_count"], 1)
+
     def test_package_milestone_report_tracks_run_status_readiness(self) -> None:
         waiting_status = {
             "row_type": "hf_gpt2_finetune_run_status",
