@@ -8165,6 +8165,12 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             profiles["local-causal-lm-template"]["model_name"],
             "models/my-causal-lm",
         )
+        self.assertEqual(
+            profiles["local-causal-lm-template"]["runtime"]["token_estimator"][
+                "mode"
+            ],
+            "bytes_per_token_heuristic",
+        )
         self.assertTrue(
             all(
                 profile["architecture"] == "causal_lm"
@@ -8292,10 +8298,51 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertTrue(local_template["runtime"]["no_require_hf_finetune"])
         self.assertEqual(local_template["training"]["eval_accumulation_steps"], 0)
         self.assertEqual(local_template["runtime"]["dataloader_num_workers"], 0)
+        self.assertEqual(
+            local_template["runtime"]["token_estimator"]["bytes_per_token"],
+            4.0,
+        )
         self.assertIn("--eval-accumulation-steps", local_template_cli_args)
         self.assertIn("--dataloader-num-workers", local_template_cli_args)
         self.assertIn("--no-require-hf-finetune", local_template_cli_args)
         self.assertNotIn("--no-require-hf-gpt2-ft", local_template_cli_args)
+
+        contract = st.hf_finetune_model_profile_runtime_contract(
+            MODEL_CONFIGS_PATH,
+            profile="qwen2-0.5b-local-smoke",
+            mode="inference",
+        )
+        contract_lines = st.hf_finetune_model_profile_runtime_contract_lines(contract)
+        local_contract = st.hf_finetune_model_profile_runtime_contract(local_template)
+        self.assertEqual(
+            contract["row_type"],
+            "hf_finetune_model_profile_runtime_contract",
+        )
+        self.assertEqual(contract["profile_id"], "qwen2-0.5b-local-smoke")
+        self.assertEqual(contract["runtime_import_preset"], "hf-runtime")
+        self.assertEqual(contract["tokenizer_source"], "model")
+        self.assertEqual(contract["activation_hook_policy"], "name_contains_any")
+        self.assertEqual(contract["activation_name_contains"], ["model.layers.0"])
+        self.assertEqual(contract["zspace_generation"]["zspace_top_k"], 96)
+        self.assertEqual(
+            contract["rough_token_estimate_mode"],
+            "bytes_per_token_heuristic",
+        )
+        self.assertEqual(contract["rough_token_estimate_bytes_per_token"], 4.0)
+        self.assertTrue(
+            contract_lines[0].startswith("hf_ft_model_profile_runtime_contract ")
+        )
+        self.assertTrue(
+            any(
+                line.startswith("hf_ft_model_profile_zspace_contract ")
+                for line in contract_lines
+            )
+        )
+        self.assertEqual(local_contract["profile_id"], "local-causal-lm-template")
+        self.assertEqual(
+            local_contract["token_estimator"]["source"],
+            "profile_runtime_default",
+        )
 
     def test_generic_hf_finetune_model_profile_catalog_summarizes_profiles(
         self,
@@ -9103,6 +9150,90 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(preflight_payload["model_family"], "gpt2")
         self.assertEqual(preflight_payload["runtime_import_preset"], "hf-runtime")
         self.assertIn("sshleifer/tiny-gpt2", preflight_payload["profile_cli_args"])
+
+        runtime_contract_stdout = io.StringIO()
+        with redirect_stdout(runtime_contract_stdout):
+            runtime_contract_code = hf_cli.profile_main(
+                [
+                    "--model-configs",
+                    str(MODEL_CONFIGS_PATH),
+                    "--model-profile",
+                    "qwen2-0.5b-local-smoke",
+                    "--runtime-contract",
+                    "--mode",
+                    "inference",
+                ]
+            )
+        runtime_contract_lines = runtime_contract_stdout.getvalue().splitlines()
+        self.assertEqual(runtime_contract_code, 0)
+        self.assertTrue(
+            runtime_contract_lines[0].startswith(
+                "hf_ft_model_profile_runtime_contract "
+            )
+        )
+        self.assertIn("profile=qwen2-0.5b-local-smoke", runtime_contract_lines[0])
+        self.assertIn(
+            "token_estimator=bytes_per_token_heuristic",
+            runtime_contract_lines[0],
+        )
+        self.assertTrue(
+            any(
+                line.startswith("hf_ft_model_profile_zspace_contract ")
+                and "top_k=96" in line
+                for line in runtime_contract_lines
+            )
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            contract_out = Path(tmp) / "runtime-contract.json"
+            contract_lines_out = Path(tmp) / "runtime-contract.lines"
+            runtime_contract_json_stdout = io.StringIO()
+            with redirect_stdout(runtime_contract_json_stdout):
+                runtime_contract_json_code = hf_cli.profile_main(
+                    [
+                        "--model-configs",
+                        str(MODEL_CONFIGS_PATH),
+                        "--model-profile",
+                        "qwen2-0.5b-local-smoke",
+                        "--runtime-contract",
+                        "--mode",
+                        "inference",
+                        "--json",
+                        "--out",
+                        str(contract_out),
+                        "--lines-out",
+                        str(contract_lines_out),
+                    ]
+                )
+            runtime_contract_payload = json.loads(
+                runtime_contract_json_stdout.getvalue()
+            )
+            written_contract_payload = json.loads(
+                contract_out.read_text(encoding="utf-8")
+            )
+            written_contract_lines = contract_lines_out.read_text(
+                encoding="utf-8"
+            ).splitlines()
+
+        self.assertEqual(runtime_contract_json_code, 0)
+        self.assertEqual(
+            runtime_contract_payload["row_type"],
+            "hf_finetune_model_profile_runtime_contract",
+        )
+        self.assertEqual(
+            runtime_contract_payload["profile_id"],
+            "qwen2-0.5b-local-smoke",
+        )
+        self.assertEqual(
+            runtime_contract_payload["runtime_import_preset"],
+            "hf-runtime",
+        )
+        self.assertEqual(runtime_contract_payload, written_contract_payload)
+        self.assertTrue(
+            written_contract_lines[0].startswith(
+                "hf_ft_model_profile_runtime_contract "
+            )
+        )
 
         launch_stdout = io.StringIO()
         with redirect_stdout(launch_stdout):
@@ -10556,6 +10687,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             "hf_finetune_model_profile_lines",
             "hf_finetune_model_profile_preflight_lines",
             "hf_finetune_model_profile_preflight_report",
+            "hf_finetune_model_profile_runtime_contract",
+            "hf_finetune_model_profile_runtime_contract_lines",
             "load_hf_finetune_model_profile_launch_plan",
             "write_hf_finetune_model_profile_launch_bundle",
             "write_hf_finetune_model_profile_launch_plan",
@@ -10778,6 +10911,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("hf_finetune_model_profile_launch_script", st.__all__)
         self.assertIn("hf_finetune_model_profile_preflight_lines", st.__all__)
         self.assertIn("hf_finetune_model_profile_preflight_report", st.__all__)
+        self.assertIn("hf_finetune_model_profile_runtime_contract", st.__all__)
+        self.assertIn("hf_finetune_model_profile_runtime_contract_lines", st.__all__)
         self.assertIn("compare_hf_gpt2_finetune_run_cards", st.__all__)
         self.assertIn("load_hf_gpt2_finetune_run_card", st.__all__)
         self.assertIn("load_hf_gpt2_finetune_sweep_report", st.__all__)
@@ -10839,6 +10974,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIs(
             st.hf_finetune_model_profile_preflight_report,
             hf_ft.hf_finetune_model_profile_preflight_report,
+        )
+        self.assertIs(
+            st.hf_finetune_model_profile_runtime_contract,
+            hf_ft.hf_finetune_model_profile_runtime_contract,
+        )
+        self.assertIs(
+            st.hf_finetune_model_profile_runtime_contract_lines,
+            hf_ft.hf_finetune_model_profile_runtime_contract_lines,
         )
         self.assertIs(
             st.hf_gpt2_finetune_generation_curve_report,

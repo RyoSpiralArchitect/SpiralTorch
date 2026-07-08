@@ -64,6 +64,8 @@ __all__ = [
     "hf_finetune_model_profile_lines",
     "hf_finetune_model_profile_preflight_lines",
     "hf_finetune_model_profile_preflight_report",
+    "hf_finetune_model_profile_runtime_contract",
+    "hf_finetune_model_profile_runtime_contract_lines",
     "hf_finetune_model_profiles",
     "hf_finetune_rust_dependency_report",
     "hf_finetune_scale_up_command",
@@ -631,6 +633,15 @@ HF_FINETUNE_DEFAULT_MODEL_CONFIGS: dict[str, object] = {
                 "dataloader_pin_memory": "auto",
                 "dataloader_num_workers": 0,
                 "activation_name_contains": ["model.layers.0"],
+                "token_estimator": {
+                    "mode": "bytes_per_token_heuristic",
+                    "bytes_per_token": 4.0,
+                    "source": "profile_runtime_default",
+                    "notes": (
+                        "Override this for tokenizer-specific corpus sizing when "
+                        "using a local model directory."
+                    ),
+                },
                 "no_require_hf_finetune": True,
             },
             "notes": (
@@ -2080,6 +2091,174 @@ def _unique(values: object) -> list[str]:
     else:
         raw_values = [str(values)]
     return list(dict.fromkeys(value.strip() for value in raw_values if value.strip()))
+
+
+def _hf_finetune_token_estimator_contract(
+    runtime: Mapping[str, object],
+) -> dict[str, object]:
+    raw_estimator = runtime.get("token_estimator")
+    estimator = dict(raw_estimator) if isinstance(raw_estimator, Mapping) else {}
+    mode = _string_or_none(estimator.get("mode")) or "bytes_per_token_heuristic"
+    bytes_per_token = _safe_number(
+        estimator.get("bytes_per_token")
+        or estimator.get("mean_bytes_per_token")
+        or estimator.get("estimated_bytes_per_token")
+    )
+    if bytes_per_token is None:
+        bytes_per_token = 4.0
+    return {
+        "mode": mode,
+        "bytes_per_token": bytes_per_token,
+        "source": _string_or_none(estimator.get("source")) or "profile_runtime_default",
+        "notes": estimator.get("notes"),
+    }
+
+
+def hf_finetune_model_profile_runtime_contract(
+    config: Mapping[str, object] | str | Path | None = None,
+    *,
+    profile: str | None = None,
+    mode: str = "inference",
+    overrides: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    """Return the runtime-facing contract implied by one HF model profile."""
+
+    resolved = (
+        dict(config)
+        if isinstance(config, Mapping)
+        and config.get("row_type") == "hf_finetune_model_profile"
+        and profile is None
+        and overrides is None
+        else resolve_hf_finetune_model_profile(
+            config,
+            profile=profile,
+            overrides=overrides,
+        )
+    )
+    training = _mapping_or_empty(resolved.get("training"), label="profile.training")
+    dataset = _mapping_or_empty(resolved.get("dataset"), label="profile.dataset")
+    generation = _mapping_or_empty(
+        resolved.get("generation"),
+        label="profile.generation",
+    )
+    runtime = _mapping_or_empty(resolved.get("runtime"), label="profile.runtime")
+    activation_hooks = _unique(runtime.get("activation_name_contains"))
+    zspace_generation = {
+        str(key): value
+        for key, value in generation.items()
+        if str(key).startswith("zspace_")
+        or str(key).startswith("repression_")
+        or str(key).startswith("ngram_")
+        or str(key) == "last_token_repression"
+    }
+    resolved_mode = _hf_finetune_resolved_profile_mode(mode, train=False)
+    token_estimator = _hf_finetune_token_estimator_contract(runtime)
+    tokenizer_source = (
+        "model"
+        if resolved.get("tokenizer_name") == resolved.get("model_name")
+        else "profile_override"
+    )
+    return {
+        "row_type": "hf_finetune_model_profile_runtime_contract",
+        "status": "ready",
+        "mode": resolved_mode,
+        "runtime_import_preset": _hf_finetune_profile_preflight_preset(resolved_mode),
+        "profile_id": resolved.get("profile_id"),
+        "profile_extends": resolved.get("extends"),
+        "model_name": resolved.get("model_name"),
+        "tokenizer_name": resolved.get("tokenizer_name"),
+        "tokenizer_source": tokenizer_source,
+        "architecture": resolved.get("architecture"),
+        "model_family": resolved.get("model_family"),
+        "parameter_scale": resolved.get("parameter_scale"),
+        "checkpoint_prefix": resolved.get("checkpoint_prefix"),
+        "max_length": resolved.get("max_length"),
+        "block_size": training.get("block_size"),
+        "dataset_name": dataset.get("name"),
+        "dataset_config": dataset.get("config"),
+        "text_column": dataset.get("text_column"),
+        "generation": generation,
+        "zspace_generation": zspace_generation,
+        "runtime": runtime,
+        "activation_hook_policy": (
+            "name_contains_any" if activation_hooks else "none"
+        ),
+        "activation_name_contains": activation_hooks,
+        "activation_hook_count": len(activation_hooks),
+        "allow_remote": bool(runtime.get("allow_remote")),
+        "trust_remote_code": bool(runtime.get("trust_remote_code")),
+        "requires_remote_code": bool(resolved.get("requires_remote_code")),
+        "runtime_device_backends": runtime.get("runtime_device_backends"),
+        "required_runtime_device_ready_backends": runtime.get(
+            "required_runtime_device_ready_backends"
+        ),
+        "token_estimator": token_estimator,
+        "rough_token_estimate_mode": token_estimator.get("mode"),
+        "rough_token_estimate_bytes_per_token": token_estimator.get(
+            "bytes_per_token"
+        ),
+        "model_profile": resolved,
+        "model_profile_lines": hf_finetune_model_profile_lines(resolved),
+    }
+
+
+def hf_finetune_model_profile_runtime_contract_lines(
+    report_or_config: Mapping[str, object] | str | Path | None = None,
+    *,
+    profile: str | None = None,
+    mode: str = "inference",
+    overrides: Mapping[str, object] | None = None,
+) -> list[str]:
+    """Render compact audit lines for a model profile runtime contract."""
+
+    report = (
+        dict(report_or_config)
+        if isinstance(report_or_config, Mapping)
+        and report_or_config.get("row_type")
+        == "hf_finetune_model_profile_runtime_contract"
+        else hf_finetune_model_profile_runtime_contract(
+            report_or_config,
+            profile=profile,
+            mode=mode,
+            overrides=overrides,
+        )
+    )
+    lines = [
+        (
+            "hf_ft_model_profile_runtime_contract "
+            f"status={report.get('status')} "
+            f"profile={report.get('profile_id')} "
+            f"extends={report.get('profile_extends')} "
+            f"mode={report.get('mode')} "
+            f"preset={report.get('runtime_import_preset')} "
+            f"model={report.get('model_name')} "
+            f"tokenizer={report.get('tokenizer_name')} "
+            f"tokenizer_source={report.get('tokenizer_source')} "
+            f"family={report.get('model_family')} "
+            f"scale={report.get('parameter_scale')} "
+            f"activation_policy={report.get('activation_hook_policy')} "
+            f"activation_hooks={csv_label(report.get('activation_name_contains'))} "
+            f"token_estimator={report.get('rough_token_estimate_mode')} "
+            f"bytes_per_token={report.get('rough_token_estimate_bytes_per_token')} "
+            f"allow_remote={report.get('allow_remote')} "
+            f"trust_remote_code={report.get('trust_remote_code')}"
+        )
+    ]
+    zspace = report.get("zspace_generation")
+    if isinstance(zspace, Mapping) and zspace:
+        lines.append(
+            "hf_ft_model_profile_zspace_contract "
+            f"profile={report.get('profile_id')} "
+            f"top_k={zspace.get('zspace_top_k')} "
+            f"curvature={zspace.get('zspace_curvature')} "
+            f"temperature={zspace.get('zspace_temperature')} "
+            f"entropy_target={zspace.get('zspace_entropy_target')} "
+            f"repression={zspace.get('repression_strength')} "
+            f"last_token_repression={zspace.get('last_token_repression')} "
+            f"ngram_size={zspace.get('ngram_size')} "
+            f"ngram_window={zspace.get('ngram_window')}"
+        )
+    return lines
 
 
 def hf_gpt2_finetune_corpus_file_report(

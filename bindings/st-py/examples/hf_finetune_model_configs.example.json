@@ -362,6 +362,12 @@
         "activation_name_contains": [
           "model.layers.0"
         ],
+        "token_estimator": {
+          "mode": "bytes_per_token_heuristic",
+          "bytes_per_token": 4.0,
+          "source": "profile_runtime_default",
+          "notes": "Override this for tokenizer-specific corpus sizing when using a local model directory."
+        },
         "no_require_hf_finetune": true
       },
       "notes": "Copy this profile for a local AutoModelForCausalLM directory; the relaxed runtime gate is useful while iterating on local model paths before installing the full FT stack."

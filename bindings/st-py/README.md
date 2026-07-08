@@ -393,7 +393,7 @@ explicitly. Profiles can carry
 model/tokenizer names, model family and parameter-scale labels, training shape,
 dataset/revision/streaming defaults, generation/Z-Space softmax knobs, activation
 hook selectors, and local runtime policy such as remote-code trust, disk guards,
-dataloader pinning, or required SpiralTorch backends.
+dataloader pinning, tokenizer-estimate policy, or required SpiralTorch backends.
 Profiles may also use `extends` to create model-neutral aliases or override only
 one nested section without duplicating model-specific settings:
 
@@ -411,6 +411,11 @@ spiral-hf-profile \
   --model-configs bindings/st-py/examples/hf_finetune_model_configs.example.json \
   --model-profile qwen2-0.5b-local-smoke \
   --cli-args
+
+spiral-hf-profile \
+  --model-configs bindings/st-py/examples/hf_finetune_model_configs.example.json \
+  --model-profile qwen2-0.5b-local-smoke \
+  --runtime-contract
 
 spiral-hf-profile \
   --model-configs bindings/st-py/examples/hf_finetune_model_configs.example.json \
@@ -449,7 +454,11 @@ PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_finetune_bridge.py \
 
 Use `spiral-hf-profile --list --json` or
 `st.hf_finetune_model_profile_catalog(...)` when automation needs the same
-profile catalog as structured data before choosing a model/run shape. Add
+profile catalog as structured data before choosing a model/run shape. Use
+`st.hf_finetune_model_profile_runtime_contract(...)` when FT, local inference,
+or Z-Space generation code needs a single profile-derived contract containing
+the selected model/tokenizer, activation hook selectors, Z-Space generation
+knobs, runtime preset, and rough token-estimate policy. Add
 `--preflight` to probe the selected profile's inference, finetune, PEFT, or
 TRL-SFT runtime preset before launching a long run; add `--require` when that
 probe should act as a CI/local gate instead of an observational report. Add
