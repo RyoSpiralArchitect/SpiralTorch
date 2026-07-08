@@ -7286,15 +7286,16 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(archive_calls[0]["checkpoint"], "checkpoint-6144")
         self.assertTrue(archive_calls[0]["dry_run"])
         self.assertIn("status=executed", archived_lines[0])
-        self.assertEqual(ops["row_type"], "hf_gpt2_finetune_run_ops_snapshot")
+        self.assertEqual(ops["row_type"], "hf_finetune_run_ops_snapshot")
         self.assertEqual(ops["status"], "handoff_ready")
         self.assertEqual(ops["recommended_action"], "run_milestone_handoff")
         self.assertEqual(ops["milestone_step"], 6144)
         self.assertEqual(ops["checkpoint"], "checkpoint-6144")
         self.assertEqual(ops["source_count"], 3)
         self.assertEqual(ops["checkpoint_count"], 1)
+        self.assertEqual(ops_written["row_type"], "hf_finetune_run_ops_snapshot")
         self.assertEqual(ops_written["recommended_action"], "run_milestone_handoff")
-        self.assertIn("hf_gpt2_ft_run_ops ", ops_lines[0])
+        self.assertIn("hf_ft_run_ops ", ops_lines[0])
         self.assertIn("status=handoff_ready", ops_written_lines[0])
         self.assertEqual(
             ops_paths["out"],
@@ -7314,11 +7315,17 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         )
         self.assertEqual(ops_archived["out"], ops_paths["out"])
         self.assertEqual(ops_archived["lines_out"], ops_paths["lines_out"])
+        self.assertEqual(
+            ops_archived_json["row_type"],
+            "hf_finetune_run_ops_snapshot",
+        )
         self.assertEqual(ops_archived_json["recommended_action"], "run_milestone_handoff")
-        self.assertIn("hf_gpt2_ft_run_ops ", ops_archived_lines[0])
+        self.assertIn("hf_ft_run_ops ", ops_archived_lines[0])
         self.assertEqual(cli_out, Path(ops_paths["out"]))
         self.assertEqual(cli_lines, Path(ops_paths["lines_out"]))
+        self.assertEqual(cli_json["row_type"], "hf_finetune_run_ops_snapshot")
         self.assertEqual(cli_json["status"], "handoff_ready")
+        self.assertIn("hf_ft_run_ops ", cli_line_rows[0])
         self.assertIn("recommended_action=run_milestone_handoff", cli_line_rows[0])
         self.assertEqual(legacy_status, 0)
         self.assertEqual(legacy_json["status"], "handoff_ready")
@@ -7420,6 +7427,9 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             generic_archived_json = json.loads(
                 Path(generic_archived["out"]).read_text(encoding="utf-8")
             )
+            generic_archived_lines = Path(generic_archived["lines_out"]).read_text(
+                encoding="utf-8"
+            ).splitlines()
             archived_json = json.loads(
                 Path(archived["out"]).read_text(encoding="utf-8")
             )
@@ -7531,6 +7541,15 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             generic_archived_json["artifact_count"],
             generic_manifest["artifact_count"],
         )
+        self.assertEqual(
+            generic_manifest["row_type"],
+            "hf_finetune_run_artifact_manifest",
+        )
+        self.assertEqual(
+            generic_archived_json["row_type"],
+            "hf_finetune_run_artifact_manifest",
+        )
+        self.assertIn("hf_ft_run_artifacts ", generic_archived_lines[0])
         self.assertEqual(archived_json["artifact_count"], manifest["artifact_count"])
         self.assertIn("hf_gpt2_ft_run_artifacts ", archived_lines[0])
         self.assertEqual(cli_out, Path(manifest_paths["out"]))
@@ -7538,6 +7557,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(cli_json["generation_sweep_count"], 1)
         self.assertEqual(generic_cli_out, Path(generic_manifest_paths["out"]))
         self.assertEqual(generic_cli_lines, Path(generic_manifest_paths["lines_out"]))
+        self.assertEqual(
+            generic_cli_json["row_type"],
+            "hf_finetune_run_artifact_manifest",
+        )
         self.assertEqual(generic_cli_json["generation_sweep_count"], 1)
         self.assertEqual(installed_artifacts_status, 0)
         self.assertEqual(installed_ops_status, 0)
@@ -9671,7 +9694,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             self.assertIs(getattr(st, generic_name), getattr(hf_ft, generic_name))
             self.assertIs(getattr(st, generic_name), getattr(hf_ft, legacy_name))
 
-        generic_status_aliases = {
+        generic_status_wrappers = {
             "hf_finetune_monitor_report": "hf_gpt2_finetune_monitor_report",
             "hf_finetune_milestone_runtime_report": (
                 "hf_gpt2_finetune_milestone_runtime_report"
@@ -9695,13 +9718,13 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 "summarize_hf_gpt2_finetune_status_history"
             ),
         }
-        for generic_name, legacy_name in generic_status_aliases.items():
+        for generic_name, legacy_name in generic_status_wrappers.items():
             self.assertIn(generic_name, st.__all__)
             self.assertIs(
                 getattr(st, generic_name),
                 getattr(st.hf_ft_status, generic_name),
             )
-            self.assertIs(
+            self.assertIsNot(
                 getattr(st, generic_name),
                 getattr(st.hf_ft_status, legacy_name),
             )

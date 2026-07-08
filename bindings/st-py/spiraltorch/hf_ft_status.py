@@ -93,6 +93,93 @@ HF_GPT2_FT_RUN_OPS_SNAPSHOT_JSON = "hf-gpt2-ft-run-ops-snapshot.json"
 HF_GPT2_FT_RUN_OPS_SNAPSHOT_TXT = "hf-gpt2-ft-run-ops-snapshot.txt"
 
 
+def _generic_hf_finetune_row_type(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    if value.startswith("hf_gpt2_finetune_"):
+        return "hf_finetune_" + value.removeprefix("hf_gpt2_finetune_")
+    if value.startswith("hf_gpt2_ft_"):
+        return "hf_ft_" + value.removeprefix("hf_gpt2_ft_")
+    return value
+
+
+def _legacy_hf_finetune_row_type(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    if value.startswith("hf_finetune_"):
+        return "hf_gpt2_finetune_" + value.removeprefix("hf_finetune_")
+    if value.startswith("hf_ft_"):
+        return "hf_gpt2_ft_" + value.removeprefix("hf_ft_")
+    return value
+
+
+def _map_hf_finetune_row_types(
+    value: Any,
+    row_type_mapper: Callable[[Any], Any],
+) -> Any:
+    if isinstance(value, Mapping):
+        return {
+            str(key): (
+                row_type_mapper(item)
+                if key == "row_type"
+                else _map_hf_finetune_row_types(item, row_type_mapper)
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_map_hf_finetune_row_types(item, row_type_mapper) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_map_hf_finetune_row_types(item, row_type_mapper) for item in value)
+    return value
+
+
+def _genericize_hf_finetune_payload(value: Any) -> Any:
+    return _map_hf_finetune_row_types(value, _generic_hf_finetune_row_type)
+
+
+def _legacyize_hf_finetune_payload(value: Any) -> Any:
+    return _map_hf_finetune_row_types(value, _legacy_hf_finetune_row_type)
+
+
+def _genericize_hf_finetune_line(line: str) -> str:
+    if line.startswith("hf_gpt2_ft_"):
+        return "hf_ft_" + line.removeprefix("hf_gpt2_ft_")
+    if line.startswith("hf_gpt2_finetune_"):
+        return "hf_finetune_" + line.removeprefix("hf_gpt2_finetune_")
+    return line
+
+
+def _genericize_hf_finetune_lines(lines: Sequence[str]) -> list[str]:
+    return [_genericize_hf_finetune_line(str(line)) for line in lines]
+
+
+def _write_hf_finetune_report(
+    report: Mapping[str, Any],
+    *,
+    out: str | Path | None = None,
+    lines_out: str | Path | None = None,
+    line_builder: Callable[[Mapping[str, Any]], Sequence[str]],
+) -> dict[str, Any]:
+    archived = dict(_genericize_hf_finetune_payload(report))
+    if out is not None:
+        out_path = Path(out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        archived["out"] = str(out_path)
+        out_path.write_text(
+            json.dumps(archived, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+    if lines_out is not None:
+        lines_path = Path(lines_out)
+        lines_path.parent.mkdir(parents=True, exist_ok=True)
+        archived["lines_out"] = str(lines_path)
+        lines_path.write_text(
+            "\n".join(str(line) for line in line_builder(archived)) + "\n",
+            encoding="utf-8",
+        )
+    return archived
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Summarize SpiralTorch GPT-2 fine-tuning run status JSONL history."
@@ -2093,7 +2180,7 @@ def write_hf_finetune_run_artifact_manifest(
 ) -> dict[str, Any]:
     """Write a generic HF run artifact manifest with model-neutral filenames."""
 
-    archived = dict(report)
+    archived = dict(_genericize_hf_finetune_payload(report))
     root = Path(run_dir or archived.get("run_dir") or ".")
     defaults = hf_finetune_run_artifact_manifest_paths(root)
     out_path = Path(out or defaults["out"])
@@ -2107,7 +2194,7 @@ def write_hf_finetune_run_artifact_manifest(
         encoding="utf-8",
     )
     lines_path.write_text(
-        "\n".join(hf_gpt2_finetune_run_artifact_manifest_lines(archived, top_n=top_n))
+        "\n".join(hf_finetune_run_artifact_manifest_lines(archived, top_n=top_n))
         + "\n",
         encoding="utf-8",
     )
@@ -2344,7 +2431,7 @@ def write_hf_finetune_run_ops_snapshot(
 ) -> dict[str, Any]:
     """Write a generic HF run ops snapshot with model-neutral filenames."""
 
-    archived = dict(report)
+    archived = dict(_genericize_hf_finetune_payload(report))
     root = Path(run_dir or archived.get("run_dir") or ".")
     defaults = hf_finetune_run_ops_snapshot_paths(root)
     out_path = Path(out or defaults["out"])
@@ -2358,7 +2445,7 @@ def write_hf_finetune_run_ops_snapshot(
         encoding="utf-8",
     )
     lines_path.write_text(
-        "\n".join(hf_gpt2_finetune_run_ops_snapshot_lines(archived)) + "\n",
+        "\n".join(hf_finetune_run_ops_snapshot_lines(archived)) + "\n",
         encoding="utf-8",
     )
     return archived
@@ -2884,41 +2971,329 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-# Generic HF fine-tune aliases. The reports intentionally retain their
-# historical GPT-2 row_type values until the artifact schema itself is versioned.
-hf_finetune_monitor_lines = hf_gpt2_finetune_monitor_lines
-hf_finetune_monitor_report = hf_gpt2_finetune_monitor_report
-hf_finetune_milestone_capture_lines = hf_gpt2_finetune_milestone_capture_lines
-hf_finetune_milestone_capture_report = hf_gpt2_finetune_milestone_capture_report
-hf_finetune_milestone_handoff_execution_lines = (
-    hf_gpt2_finetune_milestone_handoff_execution_lines
-)
-hf_finetune_milestone_handoff_execution_report = (
-    hf_gpt2_finetune_milestone_handoff_execution_report
-)
-hf_finetune_milestone_handoff_lines = hf_gpt2_finetune_milestone_handoff_lines
-hf_finetune_milestone_handoff_report = hf_gpt2_finetune_milestone_handoff_report
-hf_finetune_milestone_runtime_artifact_paths = (
-    hf_gpt2_finetune_milestone_runtime_artifact_paths
-)
-hf_finetune_milestone_runtime_from_run_dir_archive = (
-    hf_gpt2_finetune_milestone_runtime_from_run_dir_archive
-)
-hf_finetune_milestone_runtime_from_run_dir_report = (
-    hf_gpt2_finetune_milestone_runtime_from_run_dir_report
-)
-hf_finetune_milestone_runtime_lines = hf_gpt2_finetune_milestone_runtime_lines
-hf_finetune_milestone_runtime_report = hf_gpt2_finetune_milestone_runtime_report
-hf_finetune_milestone_runtime_sources = hf_gpt2_finetune_milestone_runtime_sources
-hf_finetune_run_artifact_manifest = hf_gpt2_finetune_run_artifact_manifest
-hf_finetune_run_artifact_manifest_lines = (
-    hf_gpt2_finetune_run_artifact_manifest_lines
-)
-hf_finetune_run_ops_snapshot_lines = hf_gpt2_finetune_run_ops_snapshot_lines
-hf_finetune_run_ops_snapshot_report = hf_gpt2_finetune_run_ops_snapshot_report
-hf_finetune_status_history_lines = hf_gpt2_finetune_status_history_lines
-load_hf_finetune_status_history = load_hf_gpt2_finetune_status_history
-summarize_hf_finetune_status_history = summarize_hf_gpt2_finetune_status_history
-write_hf_finetune_milestone_runtime_report = (
-    write_hf_gpt2_finetune_milestone_runtime_report
-)
+# Generic HF fine-tune wrappers. Legacy GPT-2 helpers stay available for
+# historical artifacts; the model-neutral entrypoints normalize row_type and
+# text prefixes so new callers can stay profile/model agnostic.
+def load_hf_finetune_status_history(path: str | Path) -> list[dict[str, Any]]:
+    rows = load_hf_gpt2_finetune_status_history(path)
+    return [dict(_genericize_hf_finetune_payload(row)) for row in rows]
+
+
+def summarize_hf_finetune_status_history(
+    rows: list[dict[str, Any]],
+    *,
+    label: str | None = None,
+    history_jsonl: str | Path,
+) -> dict[str, Any]:
+    summary = summarize_hf_gpt2_finetune_status_history(
+        [
+            dict(_legacyize_hf_finetune_payload(row))
+            for row in rows
+        ],
+        label=label,
+        history_jsonl=history_jsonl,
+    )
+    return dict(_genericize_hf_finetune_payload(summary))
+
+
+def hf_finetune_status_history_lines(
+    summary: dict[str, Any],
+    rows: list[dict[str, Any]],
+    *,
+    tail: int,
+    tail_evals: int = 0,
+) -> list[str]:
+    return _genericize_hf_finetune_lines(
+        hf_gpt2_finetune_status_history_lines(
+            dict(_legacyize_hf_finetune_payload(summary)),
+            [
+                dict(_legacyize_hf_finetune_payload(row))
+                for row in rows
+            ],
+            tail=tail,
+            tail_evals=tail_evals,
+        )
+    )
+
+
+def hf_finetune_monitor_report(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    report = hf_gpt2_finetune_monitor_report(
+        *tuple(_legacyize_hf_finetune_payload(arg) for arg in args),
+        **{
+            key: _legacyize_hf_finetune_payload(value)
+            for key, value in kwargs.items()
+        },
+    )
+    return dict(_genericize_hf_finetune_payload(report))
+
+
+def hf_finetune_monitor_lines(snapshot: dict[str, Any]) -> list[str]:
+    return _genericize_hf_finetune_lines(
+        hf_gpt2_finetune_monitor_lines(
+            dict(_legacyize_hf_finetune_payload(snapshot))
+        )
+    )
+
+
+def hf_finetune_milestone_capture_report(
+    monitor_or_status: Any,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    report = hf_gpt2_finetune_milestone_capture_report(
+        _legacyize_hf_finetune_payload(monitor_or_status),
+        **{
+            key: _legacyize_hf_finetune_payload(value)
+            for key, value in kwargs.items()
+        },
+    )
+    return dict(_genericize_hf_finetune_payload(report))
+
+
+def hf_finetune_milestone_capture_lines(
+    report_or_monitor: Mapping[str, Any],
+    **kwargs: Any,
+) -> list[str]:
+    return _genericize_hf_finetune_lines(
+        hf_gpt2_finetune_milestone_capture_lines(
+            dict(_legacyize_hf_finetune_payload(report_or_monitor)),
+            **kwargs,
+        )
+    )
+
+
+def hf_finetune_milestone_handoff_report(
+    capture_or_monitor: Mapping[str, Any],
+    **kwargs: Any,
+) -> dict[str, Any]:
+    report = hf_gpt2_finetune_milestone_handoff_report(
+        dict(_legacyize_hf_finetune_payload(capture_or_monitor)),
+        **{
+            key: _legacyize_hf_finetune_payload(value)
+            for key, value in kwargs.items()
+        },
+    )
+    return dict(_genericize_hf_finetune_payload(report))
+
+
+def hf_finetune_milestone_handoff_lines(
+    report_or_capture: Mapping[str, Any],
+    **kwargs: Any,
+) -> list[str]:
+    return _genericize_hf_finetune_lines(
+        hf_gpt2_finetune_milestone_handoff_lines(
+            dict(_legacyize_hf_finetune_payload(report_or_capture)),
+            **kwargs,
+        )
+    )
+
+
+def hf_finetune_milestone_handoff_execution_report(
+    report_or_capture: Mapping[str, Any],
+    **kwargs: Any,
+) -> dict[str, Any]:
+    out = kwargs.pop("out", None)
+    lines_out = kwargs.pop("lines_out", None)
+    report = hf_gpt2_finetune_milestone_handoff_execution_report(
+        dict(_legacyize_hf_finetune_payload(report_or_capture)),
+        **{
+            key: _legacyize_hf_finetune_payload(value)
+            for key, value in kwargs.items()
+        },
+    )
+    return _write_hf_finetune_report(
+        dict(_genericize_hf_finetune_payload(report)),
+        out=out,
+        lines_out=lines_out,
+        line_builder=hf_finetune_milestone_handoff_execution_lines,
+    )
+
+
+def hf_finetune_milestone_handoff_execution_lines(
+    report_or_handoff: Mapping[str, Any],
+    **kwargs: Any,
+) -> list[str]:
+    return _genericize_hf_finetune_lines(
+        hf_gpt2_finetune_milestone_handoff_execution_lines(
+            dict(_legacyize_hf_finetune_payload(report_or_handoff)),
+            **kwargs,
+        )
+    )
+
+
+def hf_finetune_milestone_runtime_report(
+    *args: Any,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    out = kwargs.pop("out", None)
+    lines_out = kwargs.pop("lines_out", None)
+    report = hf_gpt2_finetune_milestone_runtime_report(
+        *tuple(_legacyize_hf_finetune_payload(arg) for arg in args),
+        **{
+            key: _legacyize_hf_finetune_payload(value)
+            for key, value in kwargs.items()
+        },
+    )
+    return _write_hf_finetune_report(
+        dict(_genericize_hf_finetune_payload(report)),
+        out=out,
+        lines_out=lines_out,
+        line_builder=hf_finetune_milestone_runtime_lines,
+    )
+
+
+def hf_finetune_milestone_runtime_lines(
+    report: Mapping[str, Any],
+) -> list[str]:
+    return _genericize_hf_finetune_lines(
+        hf_gpt2_finetune_milestone_runtime_lines(
+            dict(_legacyize_hf_finetune_payload(report))
+        )
+    )
+
+
+def hf_finetune_milestone_runtime_sources(
+    run_dir: str | Path,
+    **kwargs: Any,
+) -> dict[str, str | None]:
+    return hf_gpt2_finetune_milestone_runtime_sources(run_dir, **kwargs)
+
+
+def hf_finetune_milestone_runtime_artifact_paths(
+    run_dir: str | Path,
+    **kwargs: Any,
+) -> dict[str, str]:
+    return hf_gpt2_finetune_milestone_runtime_artifact_paths(run_dir, **kwargs)
+
+
+def write_hf_finetune_milestone_runtime_report(
+    report: Mapping[str, Any],
+    *,
+    run_dir: str | Path | None = None,
+    out: str | Path | None = None,
+    lines_out: str | Path | None = None,
+) -> dict[str, Any]:
+    archived = dict(_genericize_hf_finetune_payload(report))
+    root = Path(run_dir or archived.get("run_dir") or ".")
+    defaults = hf_finetune_milestone_runtime_artifact_paths(
+        root,
+        report=archived,
+    )
+    out_path = Path(out or defaults["out"])
+    lines_path = Path(lines_out or defaults["lines_out"])
+    archived["out"] = str(out_path)
+    archived["lines_out"] = str(lines_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    lines_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(
+        json.dumps(archived, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    lines_path.write_text(
+        "\n".join(hf_finetune_milestone_runtime_lines(archived)) + "\n",
+        encoding="utf-8",
+    )
+    return archived
+
+
+def hf_finetune_milestone_runtime_from_run_dir_report(
+    run_dir: str | Path,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    out = kwargs.pop("out", None)
+    lines_out = kwargs.pop("lines_out", None)
+    report = hf_gpt2_finetune_milestone_runtime_from_run_dir_report(
+        run_dir,
+        **{
+            key: _legacyize_hf_finetune_payload(value)
+            for key, value in kwargs.items()
+        },
+    )
+    return _write_hf_finetune_report(
+        dict(_genericize_hf_finetune_payload(report)),
+        out=out,
+        lines_out=lines_out,
+        line_builder=hf_finetune_milestone_runtime_lines,
+    )
+
+
+def hf_finetune_milestone_runtime_from_run_dir_archive(
+    run_dir: str | Path,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    out = kwargs.pop("out", None)
+    lines_out = kwargs.pop("lines_out", None)
+    report = hf_finetune_milestone_runtime_from_run_dir_report(run_dir, **kwargs)
+    return write_hf_finetune_milestone_runtime_report(
+        report,
+        run_dir=run_dir,
+        out=out,
+        lines_out=lines_out,
+    )
+
+
+def hf_finetune_run_artifact_manifest(
+    run_dir: str | Path,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    out = kwargs.pop("out", None)
+    lines_out = kwargs.pop("lines_out", None)
+    report = hf_gpt2_finetune_run_artifact_manifest(
+        run_dir,
+        **kwargs,
+    )
+    generic = dict(_genericize_hf_finetune_payload(report))
+    if out is None and lines_out is None:
+        return generic
+    return _write_hf_finetune_report(
+        generic,
+        out=out,
+        lines_out=lines_out,
+        line_builder=hf_finetune_run_artifact_manifest_lines,
+    )
+
+
+def hf_finetune_run_artifact_manifest_lines(
+    report: Mapping[str, Any],
+    *,
+    top_n: int = 5,
+) -> list[str]:
+    return _genericize_hf_finetune_lines(
+        hf_gpt2_finetune_run_artifact_manifest_lines(
+            dict(_legacyize_hf_finetune_payload(report)),
+            top_n=top_n,
+        )
+    )
+
+
+def hf_finetune_run_ops_snapshot_report(
+    run_dir: str | Path,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    out = kwargs.pop("out", None)
+    lines_out = kwargs.pop("lines_out", None)
+    report = hf_gpt2_finetune_run_ops_snapshot_report(
+        run_dir,
+        **{
+            key: _legacyize_hf_finetune_payload(value)
+            for key, value in kwargs.items()
+        },
+    )
+    generic = dict(_genericize_hf_finetune_payload(report))
+    if out is None and lines_out is None:
+        return generic
+    return _write_hf_finetune_report(
+        generic,
+        out=out,
+        lines_out=lines_out,
+        line_builder=hf_finetune_run_ops_snapshot_lines,
+    )
+
+
+def hf_finetune_run_ops_snapshot_lines(
+    report: Mapping[str, Any],
+) -> list[str]:
+    return _genericize_hf_finetune_lines(
+        hf_gpt2_finetune_run_ops_snapshot_lines(
+            dict(_legacyize_hf_finetune_payload(report))
+        )
+    )
