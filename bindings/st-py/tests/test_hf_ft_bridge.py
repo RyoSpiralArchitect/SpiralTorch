@@ -891,6 +891,12 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 text_column="text",
                 sample_line_limit=2,
             )
+            generic_report = hf_ft.hf_finetune_corpus_scan_report(
+                train_files=[train_path],
+                dataset_format="text",
+                text_column="text",
+                sample_line_limit=2,
+            )
 
         self.assertEqual(report["row_type"], "hf_gpt2_finetune_corpus_scan_report")
         self.assertEqual(report["dataset_source"], "local_files")
@@ -904,6 +910,18 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(
             report["files"][0]["sample_texts"],
             ["alpha spiral", "beta zspace"],
+        )
+        self.assertEqual(
+            generic_report["row_type"],
+            "hf_finetune_corpus_scan_report",
+        )
+        self.assertEqual(
+            generic_report["rough_token_estimate"],
+            generic_report["rough_gpt2_token_estimate"],
+        )
+        self.assertEqual(
+            generic_report["files"][0]["rough_token_estimate"],
+            generic_report["files"][0]["rough_gpt2_token_estimate"],
         )
 
     def test_dataset_fit_report_flags_train_and_eval_readiness(self) -> None:

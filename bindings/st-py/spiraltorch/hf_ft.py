@@ -7715,6 +7715,25 @@ def _generic_report_from(
     return dict(_genericize_hf_finetune_payload(report))
 
 
+def _with_hf_finetune_token_estimate_aliases(value: object) -> object:
+    if isinstance(value, Mapping):
+        payload = {
+            str(key): _with_hf_finetune_token_estimate_aliases(item)
+            for key, item in value.items()
+        }
+        if (
+            "rough_gpt2_token_estimate" in payload
+            and "rough_token_estimate" not in payload
+        ):
+            payload["rough_token_estimate"] = payload["rough_gpt2_token_estimate"]
+        return payload
+    if isinstance(value, list):
+        return [_with_hf_finetune_token_estimate_aliases(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_with_hf_finetune_token_estimate_aliases(item) for item in value)
+    return value
+
+
 def _generic_lines_from(
     fn: Callable[..., Sequence[object]],
     *args: object,
@@ -7730,7 +7749,8 @@ def hf_finetune_corpus_file_report(*args: object, **kwargs: object) -> dict[str,
 
 
 def hf_finetune_corpus_scan_report(*args: object, **kwargs: object) -> dict[str, object]:
-    return _generic_report_from(hf_gpt2_finetune_corpus_scan_report, *args, **kwargs)
+    report = _generic_report_from(hf_gpt2_finetune_corpus_scan_report, *args, **kwargs)
+    return dict(_with_hf_finetune_token_estimate_aliases(report))
 
 
 def hf_finetune_dataset_fit_report(*args: object, **kwargs: object) -> dict[str, object]:
