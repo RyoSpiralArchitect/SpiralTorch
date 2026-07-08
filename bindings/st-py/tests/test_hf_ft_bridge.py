@@ -7510,7 +7510,9 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(ops_written["row_type"], "hf_finetune_run_ops_snapshot")
         self.assertEqual(ops_written["recommended_action"], "run_milestone_handoff")
         self.assertIn("hf_ft_run_ops ", ops_lines[0])
+        self.assertNotIn("hf_gpt2", "\n".join(ops_lines))
         self.assertIn("status=handoff_ready", ops_written_lines[0])
+        self.assertNotIn("hf_gpt2", "\n".join(ops_written_lines))
         self.assertEqual(
             ops_paths["out"],
             str(run_dir / "hf-finetune-run-ops-snapshot.json"),
@@ -7535,11 +7537,13 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         )
         self.assertEqual(ops_archived_json["recommended_action"], "run_milestone_handoff")
         self.assertIn("hf_ft_run_ops ", ops_archived_lines[0])
+        self.assertNotIn("hf_gpt2", "\n".join(ops_archived_lines))
         self.assertEqual(cli_out, Path(ops_paths["out"]))
         self.assertEqual(cli_lines, Path(ops_paths["lines_out"]))
         self.assertEqual(cli_json["row_type"], "hf_finetune_run_ops_snapshot")
         self.assertEqual(cli_json["status"], "handoff_ready")
         self.assertIn("hf_ft_run_ops ", cli_line_rows[0])
+        self.assertNotIn("hf_gpt2", "\n".join(cli_line_rows))
         self.assertIn("recommended_action=run_milestone_handoff", cli_line_rows[0])
         self.assertEqual(legacy_status, 0)
         self.assertEqual(legacy_json["status"], "handoff_ready")
@@ -7684,6 +7688,9 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 generic_args,
             )
             generic_cli_json = json.loads(generic_cli_out.read_text(encoding="utf-8"))
+            generic_cli_line_rows = generic_cli_lines.read_text(
+                encoding="utf-8"
+            ).splitlines()
             installed_artifacts_status = hf_cli.finetune_run_artifacts_main(
                 [
                     "--run-dir",
@@ -7764,6 +7771,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             "hf_finetune_run_artifact_manifest",
         )
         self.assertIn("hf_ft_run_artifacts ", generic_archived_lines[0])
+        self.assertNotIn("hf_gpt2", "\n".join(generic_archived_lines))
         self.assertEqual(archived_json["artifact_count"], manifest["artifact_count"])
         self.assertIn("hf_gpt2_ft_run_artifacts ", archived_lines[0])
         self.assertEqual(cli_out, Path(manifest_paths["out"]))
@@ -7776,6 +7784,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             "hf_finetune_run_artifact_manifest",
         )
         self.assertEqual(generic_cli_json["generation_sweep_count"], 1)
+        self.assertIn("hf_ft_run_artifacts ", generic_cli_line_rows[0])
+        self.assertNotIn("hf_gpt2", "\n".join(generic_cli_line_rows))
         self.assertEqual(installed_artifacts_status, 0)
         self.assertEqual(installed_ops_status, 0)
         self.assertIn("checkpoints=2", cli_line_rows[0])

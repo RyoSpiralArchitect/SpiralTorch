@@ -275,7 +275,7 @@ For notebook or CI preflight without a training script, either run the CLI:
 
 ```bash
 spiral-runtime-preflight \
-  --preset hf-gpt2-ft \
+  --preset hf-full-finetune \
   --require \
   --runtime-device-backend wgpu \
   --json-out ft-runtime.json
@@ -287,16 +287,16 @@ or call the same contract from Python:
 import spiraltorch as st
 
 report = st.runtime_import_preflight_report(
-    runtime_import_presets=["hf-gpt2-ft"],
-    required_runtime_import_presets=["hf-gpt2-ft"],
+    runtime_import_presets=["hf-full-finetune"],
+    required_runtime_import_presets=["hf-full-finetune"],
     runtime_device_backends=["wgpu"],
 )
 st.write_runtime_import_preflight_report(report, "ft-runtime.json")
 
-ft_report = st.hf_gpt2_finetune_preflight_report(
+ft_report = st.hf_finetune_preflight_report(
     runtime_device_backends=["wgpu", "cpu"],
 )
-print(ft_report["hf_gpt2_ft_rust_surfaces"])
+print(ft_report["hf_finetune_rust_surfaces"])
 ```
 
 ## Building wheels
@@ -344,7 +344,7 @@ without launching a training job:
 
 ```bash
 spiral-runtime-preflight \
-  --preset hf-gpt2-ft \
+  --preset hf-full-finetune \
   --require \
   --runtime-device-backend wgpu \
   --json-out ft-runtime.json
@@ -352,8 +352,10 @@ spiral-runtime-preflight --preset hf-peft --require --json
 ```
 
 Install the stronger local Hugging Face fine-tuning dependency surface with
-`pip install "spiraltorch[hf-finetune,hf-peft]"` or the legacy-compatible
-`pip install "spiraltorch[hf-gpt2-ft]"`. Use `hf-runtime` for inference-only
+`pip install "spiraltorch[hf-full-finetune]"` or compose a narrower surface with
+`pip install "spiraltorch[hf-finetune,hf-peft]"`. The older
+`spiraltorch[hf-gpt2-ft]` extra remains available as a compatibility alias for
+historical scripts. Use `hf-runtime` for inference-only
 `transformers`/`torch`/`tokenizers` checks, `hf-finetune` for the lighter
 `datasets`/`accelerate`/`safetensors` contract, `hf-peft` for PEFT adapter
 workflows, and `hf-trl-sft` when a TRL SFT loop should be importable in the
@@ -530,7 +532,7 @@ blocks, use `--eval-after-train-policy skip-if-final-step-eval` when
 `--dataloader-pin-memory auto` so MPS/CPU runs avoid unsupported pin-memory
 warnings while CUDA can still opt in.
 After several runs, call
-`st.compare_hf_gpt2_finetune_run_cards([run_a, run_b, ...])` to flatten
+`st.compare_hf_finetune_run_cards([run_a, run_b, ...])` to flatten
 run-card JSON into eval-loss/perplexity deltas, generation-sample changes,
 dataset-fit status, and trainer metrics so tuning choices can be ranked without
 hand-reading each artifact.
@@ -686,7 +688,7 @@ It writes `sweep-plan.json` before launching runs and `sweep-report.json` after
 the run cards are available, plus `scale-up-command.json` with the
 distortion-adjusted next-run command when a completed candidate is available,
 including the same
-`st.compare_hf_gpt2_finetune_run_cards(...)` comparison payload. Add
+`st.compare_hf_finetune_run_cards(...)` comparison payload. Add
 `--inference-distortion-probe` after one local/API inference-distortion probe, or
 `--inference-distortion-sweep-report` after a ranked distortion grid, to stamp
 the recommended prompt/runtime/config into each FT run card and train-begin trace
@@ -761,21 +763,21 @@ Add
 `--dry-run` to inspect commands without loading Transformers, or
 `--require-wgpu-ready` when the SpiralTorch WGPU surface should gate each run.
 The report also embeds a compact `summary`; from notebooks or CI, call
-`st.load_hf_gpt2_finetune_sweep_report(...)`,
-`st.summarize_hf_gpt2_finetune_sweep_report(...)`, or
-`st.summarize_hf_gpt2_finetune_sweep_report_lines(...)` to recover the
+`st.load_hf_finetune_sweep_report(...)`,
+`st.summarize_hf_finetune_sweep_report(...)`, or
+`st.summarize_hf_finetune_sweep_report_lines(...)` to recover the
 selected scale-up candidate plus its command/run-card/trace/output directory,
 top eval-loss rows, failed runs, and
 dry-run/partial/complete status without hand-reading the full artifact. For
 longer local runs, add `--resume-existing` to reuse successful per-run cards and
 continue only missing or failed rows after an interruption; add `--force` with
 that same command when you intentionally want to rerun every row. From Python,
-use `st.hf_gpt2_finetune_inference_distortion_handoff_report(...)` to inspect a
+use `st.hf_finetune_inference_distortion_handoff_report(...)` to inspect a
 probe or sweep recommendation before launching the FT bridge; the handoff and
 run-card/sweep summaries include ready-to-replay generation bridge CLI args and
 the chosen probe's `api_compatibility_score` when the recommendation carries
 logits-processor kwargs. Use
-`st.hf_gpt2_finetune_inference_distortion_handoff_lines(...)` when you want a
+`st.hf_finetune_inference_distortion_handoff_lines(...)` when you want a
 compact, copy-friendly status/replay readout in notebooks or CI logs; bridge
 preflight/run-card artifacts and sweep `sweep-plan.json` / `sweep-report.json`
 preserve those same lines beside the structured handoff payload, and run-card /
