@@ -7723,6 +7723,17 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             bundle_plan_exists = Path(bundle["plan_path"]).is_file()
             bundle_lines_exists = Path(bundle["lines_path"]).is_file()
             bundle_script_exists = Path(bundle["script_path"]).is_file()
+            bundle_report = st.hf_finetune_model_profile_launch_bundle_report(
+                bundle_dir
+            )
+            bundle_report_lines = (
+                st.hf_finetune_model_profile_launch_bundle_report_lines(bundle_report)
+            )
+            broken_bundle_dir = Path(tmp) / "broken-bundle"
+            broken_bundle_dir.mkdir()
+            broken_report = st.hf_finetune_model_profile_launch_bundle_report(
+                broken_bundle_dir
+            )
 
         self.assertEqual(written["status"], "written")
         self.assertEqual(written["path"], str(plan_path))
@@ -7740,6 +7751,21 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertTrue(
             bundle_lines[0].startswith("hf_ft_model_profile_launch_bundle ")
         )
+        self.assertEqual(
+            bundle_report["row_type"],
+            "hf_finetune_model_profile_launch_bundle_report",
+        )
+        self.assertEqual(bundle_report["status"], "ready")
+        self.assertEqual(bundle_report["profile_id"], "qwen2-0.5b-local-smoke")
+        self.assertTrue(bundle_report["script_executable"])
+        self.assertTrue(bundle_report["script_command_matches"])
+        self.assertTrue(
+            bundle_report_lines[0].startswith(
+                "hf_ft_model_profile_launch_bundle_report "
+            )
+        )
+        self.assertEqual(broken_report["status"], "incomplete")
+        self.assertEqual(broken_report["missing_artifacts"], "plan,lines,script")
         self.assertEqual(loaded["row_type"], "hf_finetune_model_profile_launch_plan")
         self.assertEqual(loaded["profile_id"], "qwen2-0.5b-local-smoke")
         self.assertEqual(loaded["command"], plan["command"])
@@ -8183,6 +8209,24 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             bundle_plan_payload = json.loads(bundle_plan.read_text(encoding="utf-8"))
             bundle_line_rows = bundle_lines.read_text(encoding="utf-8").splitlines()
             bundle_script_text = bundle_script.read_text(encoding="utf-8")
+            inspect_stdout = io.StringIO()
+            with redirect_stdout(inspect_stdout):
+                inspect_code = hf_cli.profile_main(
+                    [
+                        "--inspect-bundle",
+                        str(bundle_dir),
+                    ]
+                )
+            inspect_json_stdout = io.StringIO()
+            with redirect_stdout(inspect_json_stdout):
+                inspect_json_code = hf_cli.profile_main(
+                    [
+                        "--inspect-bundle",
+                        str(bundle_dir),
+                        "--json",
+                    ]
+                )
+            inspect_payload = json.loads(inspect_json_stdout.getvalue())
 
         self.assertEqual(bundle_code, 0)
         self.assertIn(
@@ -8198,6 +8242,18 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             bundle_line_rows[0].startswith("hf_ft_model_profile_launch_plan ")
         )
         self.assertIn("exec spiral-hf-finetune", bundle_script_text)
+        self.assertEqual(inspect_code, 0)
+        self.assertIn(
+            "hf_ft_model_profile_launch_bundle_report status=ready",
+            inspect_stdout.getvalue(),
+        )
+        self.assertEqual(inspect_json_code, 0)
+        self.assertEqual(
+            inspect_payload["row_type"],
+            "hf_finetune_model_profile_launch_bundle_report",
+        )
+        self.assertEqual(inspect_payload["status"], "ready")
+        self.assertTrue(inspect_payload["script_command_matches"])
 
     def test_installed_hf_finetune_sweep_cli_reaches_generic_wrapper(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -9055,6 +9111,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             "resolve_hf_finetune_model_profile",
             "hf_finetune_model_profile_cli_args",
             "hf_finetune_model_profile_launch_bundle_lines",
+            "hf_finetune_model_profile_launch_bundle_report",
+            "hf_finetune_model_profile_launch_bundle_report_lines",
             "hf_finetune_model_profile_launch_plan",
             "hf_finetune_model_profile_launch_plan_lines",
             "hf_finetune_model_profile_launch_script",
@@ -9259,6 +9317,11 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("hf_gpt2_finetune_trainer_trace_callback", st.__all__)
         self.assertIn("hf_finetune_model_profile_catalog", st.__all__)
         self.assertIn("hf_finetune_model_profile_catalog_lines", st.__all__)
+        self.assertIn("hf_finetune_model_profile_launch_bundle_report", st.__all__)
+        self.assertIn(
+            "hf_finetune_model_profile_launch_bundle_report_lines",
+            st.__all__,
+        )
         self.assertIn("hf_finetune_model_profile_launch_plan", st.__all__)
         self.assertIn("hf_finetune_model_profile_launch_plan_lines", st.__all__)
         self.assertIn("hf_finetune_model_profile_launch_script", st.__all__)
@@ -9297,6 +9360,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIs(
             st.hf_finetune_model_profile_catalog_lines,
             hf_ft.hf_finetune_model_profile_catalog_lines,
+        )
+        self.assertIs(
+            st.hf_finetune_model_profile_launch_bundle_report,
+            hf_ft.hf_finetune_model_profile_launch_bundle_report,
+        )
+        self.assertIs(
+            st.hf_finetune_model_profile_launch_bundle_report_lines,
+            hf_ft.hf_finetune_model_profile_launch_bundle_report_lines,
         )
         self.assertIs(
             st.hf_finetune_model_profile_launch_plan,

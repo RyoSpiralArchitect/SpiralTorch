@@ -417,6 +417,9 @@ spiral-hf-profile \
   --zspace-probe \
   --bundle-dir runs/hf-finetune-qwen2-zspace-ft
 
+spiral-hf-profile \
+  --inspect-bundle runs/hf-finetune-qwen2-zspace-ft
+
 PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_finetune_bridge.py \
   --model-configs bindings/st-py/examples/hf_finetune_model_configs.example.json \
   --model-profile gpt2-local-smoke \
@@ -440,7 +443,9 @@ Add `--script-out` when you also want an executable shell handoff that replays
 the reviewed command without re-resolving the profile. For normal runs,
 `--bundle-dir` writes all three artifacts together:
 `profile-launch-plan.json`, `profile-launch-plan.lines`, and
-`profile-launch-plan.sh`.
+`profile-launch-plan.sh`. Use `--inspect-bundle` before replaying the shell
+handoff to verify that the bundle is complete, executable, and still matches the
+planned command.
 
 After installing from a wheel, use the installed console entrypoint instead of
 the repo path:

@@ -56,6 +56,8 @@ __all__ = [
     "hf_finetune_model_profile_cli_args",
     "hf_finetune_model_profile_launch_plan",
     "hf_finetune_model_profile_launch_bundle_lines",
+    "hf_finetune_model_profile_launch_bundle_report",
+    "hf_finetune_model_profile_launch_bundle_report_lines",
     "hf_finetune_model_profile_launch_plan_lines",
     "hf_finetune_model_profile_launch_script",
     "hf_finetune_model_profile_lines",
@@ -1326,6 +1328,121 @@ def hf_finetune_model_profile_launch_bundle_lines(
             f"plan={bundle.get('plan_path')} "
             f"lines={bundle.get('lines_path')} "
             f"script={bundle.get('script_path')}"
+        )
+    ]
+
+
+def hf_finetune_model_profile_launch_bundle_report(
+    bundle_dir: str | Path,
+    *,
+    plan_filename: str = "profile-launch-plan.json",
+    lines_filename: str = "profile-launch-plan.lines",
+    script_filename: str = "profile-launch-plan.sh",
+) -> dict[str, object]:
+    """Inspect an existing launch bundle without executing it."""
+
+    bundle_path = Path(bundle_dir)
+    plan_path = bundle_path / str(plan_filename)
+    lines_path = bundle_path / str(lines_filename)
+    script_path = bundle_path / str(script_filename)
+    missing = [
+        label
+        for label, path in (
+            ("plan", plan_path),
+            ("lines", lines_path),
+            ("script", script_path),
+        )
+        if not path.is_file()
+    ]
+    errors: list[str] = []
+    plan: dict[str, object] | None = None
+    plan_command_display: str | None = None
+    try:
+        if plan_path.is_file():
+            plan = load_hf_finetune_model_profile_launch_plan(plan_path)
+            plan_command_display = shlex.join(_command_tokens(plan.get("command")))
+    except Exception as exc:
+        errors.append(f"plan:{exc.__class__.__name__}:{exc}")
+    line_rows: list[str] = []
+    if lines_path.is_file():
+        try:
+            line_rows = lines_path.read_text(encoding="utf-8").splitlines()
+        except Exception as exc:
+            errors.append(f"lines:{exc.__class__.__name__}:{exc}")
+    script_text = ""
+    if script_path.is_file():
+        try:
+            script_text = script_path.read_text(encoding="utf-8")
+        except Exception as exc:
+            errors.append(f"script:{exc.__class__.__name__}:{exc}")
+    script_expected_exec = (
+        f"exec {plan_command_display}" if plan_command_display else None
+    )
+    script_command_matches = bool(
+        script_expected_exec and script_expected_exec in script_text
+    )
+    lines_have_summary = any(
+        line.startswith("hf_ft_model_profile_launch_plan ") for line in line_rows
+    )
+    script_executable = script_path.is_file() and os.access(script_path, os.X_OK)
+    if missing:
+        status = "incomplete"
+    elif errors:
+        status = "invalid"
+    elif not lines_have_summary or not script_command_matches or not script_executable:
+        status = "invalid"
+    else:
+        status = "ready"
+    return {
+        "row_type": "hf_finetune_model_profile_launch_bundle_report",
+        "status": status,
+        "bundle_dir": str(bundle_path),
+        "plan_path": str(plan_path),
+        "lines_path": str(lines_path),
+        "script_path": str(script_path),
+        "missing_artifacts": csv_label(missing),
+        "errors": csv_label(errors),
+        "plan_loaded": plan is not None,
+        "profile_id": None if plan is None else plan.get("profile_id"),
+        "mode": None if plan is None else plan.get("mode"),
+        "model_name": None if plan is None else plan.get("model_name"),
+        "plan_command_display": plan_command_display,
+        "lines_count": len(line_rows),
+        "lines_have_summary": lines_have_summary,
+        "script_executable": script_executable,
+        "script_expected_exec": script_expected_exec,
+        "script_command_matches": script_command_matches,
+        "plan": plan,
+    }
+
+
+def hf_finetune_model_profile_launch_bundle_report_lines(
+    report_or_bundle_dir: Mapping[str, object] | str | Path,
+    **kwargs,
+) -> list[str]:
+    """Render compact lines for a launch bundle inspection report."""
+
+    report = (
+        dict(report_or_bundle_dir)
+        if isinstance(report_or_bundle_dir, Mapping)
+        and report_or_bundle_dir.get("row_type")
+        == "hf_finetune_model_profile_launch_bundle_report"
+        else hf_finetune_model_profile_launch_bundle_report(
+            report_or_bundle_dir,
+            **kwargs,
+        )
+    )
+    return [
+        (
+            "hf_ft_model_profile_launch_bundle_report "
+            f"status={report.get('status')} "
+            f"bundle_dir={report.get('bundle_dir')} "
+            f"profile={report.get('profile_id')} "
+            f"mode={report.get('mode')} "
+            f"missing={report.get('missing_artifacts')} "
+            f"errors={report.get('errors')} "
+            f"script_executable={report.get('script_executable')} "
+            f"script_command_matches={report.get('script_command_matches')}"
         )
     ]
 

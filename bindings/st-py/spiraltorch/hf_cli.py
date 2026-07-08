@@ -15,6 +15,8 @@ from .hf_ft import (
     hf_finetune_model_profile_catalog_lines,
     hf_finetune_model_profile_cli_args,
     hf_finetune_model_profile_launch_bundle_lines,
+    hf_finetune_model_profile_launch_bundle_report,
+    hf_finetune_model_profile_launch_bundle_report_lines,
     hf_finetune_model_profile_launch_plan,
     hf_finetune_model_profile_launch_plan_lines,
     hf_finetune_model_profile_lines,
@@ -148,6 +150,7 @@ def profile_main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--bundle-plan-filename", default="profile-launch-plan.json")
     parser.add_argument("--bundle-lines-filename", default="profile-launch-plan.lines")
     parser.add_argument("--bundle-script-filename", default="profile-launch-plan.sh")
+    parser.add_argument("--inspect-bundle", type=Path, default=None)
     parser.add_argument("--json", action="store_true")
     parser.add_argument(
         "--cli-args",
@@ -160,13 +163,33 @@ def profile_main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--no-generation", action="store_true")
     parser.add_argument("--no-runtime", action="store_true")
     args = parser.parse_args(argv)
-    exclusive_modes = [args.list, args.preflight, args.launch_plan, args.cli_args]
+    exclusive_modes = [
+        args.list,
+        args.preflight,
+        args.launch_plan,
+        args.cli_args,
+        args.inspect_bundle is not None,
+    ]
     if sum(1 for enabled in exclusive_modes if enabled) > 1:
         parser.error(
-            "--list, --preflight, --launch-plan, and --cli-args are mutually exclusive"
+            "--list, --preflight, --launch-plan, --cli-args, and "
+            "--inspect-bundle are mutually exclusive"
         )
     if args.train and args.metadata_only:
         parser.error("--train and --metadata-only are mutually exclusive")
+    if args.inspect_bundle is not None:
+        report = hf_finetune_model_profile_launch_bundle_report(
+            args.inspect_bundle,
+            plan_filename=args.bundle_plan_filename,
+            lines_filename=args.bundle_lines_filename,
+            script_filename=args.bundle_script_filename,
+        )
+        if args.json:
+            print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+            return 0 if report["status"] == "ready" else 1
+        for line in hf_finetune_model_profile_launch_bundle_report_lines(report):
+            print(line)
+        return 0 if report["status"] == "ready" else 1
     if args.list:
         catalog = hf_finetune_model_profile_catalog(args.model_configs)
         if args.json:

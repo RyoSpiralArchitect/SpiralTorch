@@ -557,6 +557,8 @@ hf_finetune_model_profile_catalog: Callable[..., Dict[str, Any]]
 hf_finetune_model_profile_catalog_lines: Callable[..., List[str]]
 hf_finetune_model_profile_cli_args: Callable[..., List[str]]
 hf_finetune_model_profile_launch_bundle_lines: Callable[..., List[str]]
+hf_finetune_model_profile_launch_bundle_report: Callable[..., Dict[str, Any]]
+hf_finetune_model_profile_launch_bundle_report_lines: Callable[..., List[str]]
 hf_finetune_model_profile_launch_plan: Callable[..., Dict[str, Any]]
 hf_finetune_model_profile_launch_plan_lines: Callable[..., List[str]]
 hf_finetune_model_profile_launch_script: Callable[..., str]
@@ -9107,6 +9109,8 @@ __all__ = [
     "hf_finetune_model_profile_catalog_lines",
     "hf_finetune_model_profile_cli_args",
     "hf_finetune_model_profile_launch_bundle_lines",
+    "hf_finetune_model_profile_launch_bundle_report",
+    "hf_finetune_model_profile_launch_bundle_report_lines",
     "hf_finetune_model_profile_launch_plan",
     "hf_finetune_model_profile_launch_plan_lines",
     "hf_finetune_model_profile_launch_script",
