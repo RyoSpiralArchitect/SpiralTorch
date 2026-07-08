@@ -770,6 +770,7 @@ def resolve_hf_finetune_model_profile(
         "source_path": payload.get("source_path"),
         "default_profile": payload.get("default_profile"),
         "profile_id": profile_id,
+        "extends": _string_or_none(selected.get("extends")),
         "model_name": selected["model_name"],
         "tokenizer_name": selected["tokenizer_name"],
         "architecture": selected["architecture"],
@@ -823,6 +824,7 @@ def hf_finetune_model_profile_catalog(
             {
                 "profile_id": profile_id,
                 "is_default": profile_id == default_profile,
+                "extends": resolved.get("extends"),
                 "model_name": resolved.get("model_name"),
                 "tokenizer_name": resolved.get("tokenizer_name"),
                 "architecture": resolved.get("architecture"),
@@ -906,6 +908,7 @@ def hf_finetune_model_profile_catalog_lines(
             "hf_ft_model_profile_entry "
             f"profile={row.get('profile_id')} "
             f"default={row.get('is_default')} "
+            f"extends={row.get('extends')} "
             f"model={row.get('model_name')} "
             f"tokenizer={row.get('tokenizer_name')} "
             f"dataset={row.get('dataset_name')} "
@@ -1862,6 +1865,7 @@ def hf_finetune_model_profile_lines(
             "hf_ft_model_profile "
             f"status={profile.get('status', 'ready')} "
             f"profile={profile.get('profile_id')} "
+            f"extends={profile.get('extends')} "
             f"model={profile.get('model_name')} "
             f"tokenizer={profile.get('tokenizer_name')} "
             f"architecture={profile.get('architecture')} "

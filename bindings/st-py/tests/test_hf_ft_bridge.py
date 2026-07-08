@@ -7874,14 +7874,17 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         default_profile = st.resolve_hf_finetune_model_profile()
         cli_args = st.hf_finetune_model_profile_cli_args(profile)
         lines = st.hf_finetune_model_profile_lines(profile)
+        default_lines = st.hf_finetune_model_profile_lines(default_profile)
 
         self.assertIn("causal-lm-local-smoke", profiles)
         self.assertIn("distilgpt2-local-smoke", profiles)
         self.assertEqual(default_profile["profile_id"], "causal-lm-local-smoke")
+        self.assertEqual(default_profile["extends"], "pythia-70m-local-smoke")
         self.assertEqual(
             default_profile["model_name"],
             "EleutherAI/pythia-70m-deduped",
         )
+        self.assertIn("extends=pythia-70m-local-smoke", default_lines[0])
         self.assertEqual(profile["row_type"], "hf_finetune_model_profile")
         self.assertEqual(profile["model_name"], "distilgpt2")
         self.assertEqual(profile["tokenizer_name"], "distilgpt2")
@@ -7951,6 +7954,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             }
         )
         self.assertEqual(alias_profile["profile_id"], "alias-causal")
+        self.assertEqual(alias_profile["extends"], "base-causal")
         self.assertEqual(alias_profile["model_name"], "org/base-causal")
         self.assertEqual(alias_profile["tokenizer_name"], "org/base-tokenizer")
         self.assertEqual(alias_profile["generation"]["max_new_tokens"], 32)
@@ -7996,6 +8000,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(catalog["profile_count"], 7)
         self.assertEqual(catalog["default_profile"], "causal-lm-local-smoke")
         self.assertIn("causal-lm-local-smoke", rows)
+        self.assertEqual(
+            rows["causal-lm-local-smoke"]["extends"],
+            "pythia-70m-local-smoke",
+        )
         self.assertIn("qwen2-0.5b-local-smoke", rows)
         self.assertEqual(rows["qwen2-0.5b-local-smoke"]["model_name"], "Qwen/Qwen2-0.5B")
         self.assertEqual(rows["qwen2-0.5b-local-smoke"]["block_size"], 256)
@@ -8012,6 +8020,13 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(default_catalog["profile_count"], 7)
         self.assertIn("qwen2-0.5b-local-smoke", default_rows)
         self.assertTrue(lines[0].startswith("hf_ft_model_profile_catalog "))
+        self.assertTrue(
+            any(
+                "profile=causal-lm-local-smoke" in line
+                and "extends=pythia-70m-local-smoke" in line
+                for line in lines
+            )
+        )
         self.assertTrue(
             any(
                 "profile=qwen2-0.5b-local-smoke" in line
