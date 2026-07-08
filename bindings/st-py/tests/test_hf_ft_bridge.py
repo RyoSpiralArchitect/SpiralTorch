@@ -7727,6 +7727,12 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         )
         self.assertEqual(embedded_plan["command_source"], "expanded_profile")
         self.assertFalse(embedded_plan["profile_reference_available"])
+        self.assertEqual(embedded_plan["requested_mode"], "auto")
+        self.assertEqual(embedded_plan["mode"], "full-finetune")
+        self.assertEqual(
+            embedded_plan["preflight"]["runtime_import_preset"],
+            "hf-full-finetune",
+        )
         self.assertTrue(embedded_plan["launch_train"])
         self.assertFalse(embedded_plan["launch_metadata_only"])
         self.assertIn("--train", embedded_plan["command"])
@@ -8212,6 +8218,29 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("--model-profile", launch_payload["command"])
         self.assertIn("tiny-gpt2-ci", launch_payload["command"])
         self.assertIn("sshleifer/tiny-gpt2", launch_payload["expanded_command"])
+
+        train_launch_json_stdout = io.StringIO()
+        with redirect_stdout(train_launch_json_stdout):
+            train_launch_json_code = hf_cli.profile_main(
+                [
+                    "--model-configs",
+                    str(MODEL_CONFIGS_PATH),
+                    "--model-profile",
+                    "tiny-gpt2-ci",
+                    "--launch-plan",
+                    "--train",
+                    "--json",
+                ]
+            )
+        train_launch_payload = json.loads(train_launch_json_stdout.getvalue())
+        self.assertIn(train_launch_json_code, {0, 1})
+        self.assertEqual(train_launch_payload["requested_mode"], "auto")
+        self.assertEqual(train_launch_payload["mode"], "full-finetune")
+        self.assertEqual(
+            train_launch_payload["preflight"]["runtime_import_preset"],
+            "hf-full-finetune",
+        )
+        self.assertIn("--train", train_launch_payload["command"])
 
         with tempfile.TemporaryDirectory() as tmp:
             launch_out = Path(tmp) / "profile-launch-plan.json"

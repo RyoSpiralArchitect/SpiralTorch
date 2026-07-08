@@ -205,14 +205,14 @@ HF_GPT2_FT_REQUIRED_RUST_SURFACES = [
 ]
 HF_FINETUNE_MODEL_CONFIG_SCHEMA = "spiraltorch.hf_finetune_model_configs.v1"
 HF_FINETUNE_MODEL_PROFILE_PREFLIGHT_PRESETS: dict[str, str] = {
-    "runtime": "hf-runtime",
-    "inference": "hf-runtime",
     "finetune": "hf-finetune",
     "full": "hf-full-finetune",
     "full-finetune": "hf-full-finetune",
+    "inference": "hf-runtime",
     "local-full-finetune": "hf-full-finetune",
     "gpt2-ft": "hf-gpt2-ft",
     "peft": "hf-peft",
+    "runtime": "hf-runtime",
     "trl-sft": "hf-trl-sft",
 }
 HF_FINETUNE_DEFAULT_MODEL_CONFIGS: dict[str, object] = {
@@ -796,6 +796,13 @@ def hf_finetune_model_profile_catalog_lines(
     return lines
 
 
+def _hf_finetune_resolved_profile_mode(mode: str | None, *, train: bool) -> str:
+    key = str(mode or "auto").strip().lower()
+    if key == "auto":
+        return "full-finetune" if train else "finetune"
+    return key
+
+
 def _hf_finetune_profile_preflight_preset(mode: str) -> str:
     key = str(mode or "").strip().lower()
     preset = HF_FINETUNE_MODEL_PROFILE_PREFLIGHT_PRESETS.get(key)
@@ -818,7 +825,8 @@ def hf_finetune_model_profile_preflight_report(
     """Resolve one HF model profile and probe the matching runtime imports."""
 
     resolved = resolve_hf_finetune_model_profile(config, profile=profile)
-    preset = _hf_finetune_profile_preflight_preset(mode)
+    resolved_mode = _hf_finetune_resolved_profile_mode(mode, train=False)
+    preset = _hf_finetune_profile_preflight_preset(resolved_mode)
     runtime_report = runtime_import_preflight_report(
         runtime_import_presets=[preset],
         required_runtime_import_presets=[preset] if require else [],
@@ -839,7 +847,8 @@ def hf_finetune_model_profile_preflight_report(
     return {
         "row_type": "hf_finetune_model_profile_preflight",
         "status": status,
-        "mode": str(mode),
+        "mode": resolved_mode,
+        "requested_mode": str(mode),
         "runtime_import_preset": preset,
         "require_runtime_import_preset": bool(require),
         "profile_id": resolved.get("profile_id"),
@@ -980,7 +989,7 @@ def hf_finetune_model_profile_launch_plan(
     config: Mapping[str, object] | str | Path | None = None,
     *,
     profile: str | None = None,
-    mode: str = "finetune",
+    mode: str = "auto",
     require: bool = False,
     command: object = "spiral-hf-finetune",
     train: bool = False,
@@ -1000,10 +1009,11 @@ def hf_finetune_model_profile_launch_plan(
     if train and metadata_only:
         raise ValueError("train and metadata_only cannot both be true")
     resolved = resolve_hf_finetune_model_profile(config, profile=profile)
+    resolved_mode = _hf_finetune_resolved_profile_mode(mode, train=bool(train))
     preflight = hf_finetune_model_profile_preflight_report(
         config,
         profile=str(resolved["profile_id"]),
-        mode=mode,
+        mode=resolved_mode,
         require=require,
         runtime_device_backends=runtime_device_backends,
         required_runtime_device_backends=required_runtime_device_backends,
@@ -1044,7 +1054,8 @@ def hf_finetune_model_profile_launch_plan(
     return {
         "row_type": "hf_finetune_model_profile_launch_plan",
         "status": status,
-        "mode": str(mode),
+        "mode": resolved_mode,
+        "requested_mode": str(mode),
         "profile_id": resolved.get("profile_id"),
         "model_name": resolved.get("model_name"),
         "tokenizer_name": resolved.get("tokenizer_name"),
@@ -1089,7 +1100,7 @@ def hf_finetune_model_profile_launch_plan_lines(
     plan_or_config: Mapping[str, object] | str | Path | None = None,
     *,
     profile: str | None = None,
-    mode: str = "finetune",
+    mode: str = "auto",
     require: bool = False,
     command: object = "spiral-hf-finetune",
     train: bool = False,

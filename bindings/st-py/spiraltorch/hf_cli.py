@@ -101,6 +101,7 @@ def profile_main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--mode",
         choices=(
+            "auto",
             "runtime",
             "inference",
             "finetune",
@@ -109,8 +110,11 @@ def profile_main(argv: Sequence[str] | None = None) -> int:
             "peft",
             "trl-sft",
         ),
-        default="finetune",
-        help="Runtime preset mode used with --preflight.",
+        default="auto",
+        help=(
+            "Runtime preset mode used with --preflight/--launch-plan. auto uses "
+            "finetune for metadata/preflight and full-finetune for train plans."
+        ),
     )
     parser.add_argument(
         "--require",
