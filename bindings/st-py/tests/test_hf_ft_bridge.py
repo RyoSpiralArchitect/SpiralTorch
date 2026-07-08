@@ -22,8 +22,14 @@ from spiraltorch import hf_ft
 EXAMPLE_PATH = (
     Path(__file__).resolve().parents[1] / "examples" / "hf_gpt2_finetune_bridge.py"
 )
+GENERIC_EXAMPLE_PATH = (
+    Path(__file__).resolve().parents[1] / "examples" / "hf_finetune_bridge.py"
+)
 SWEEP_PATH = (
     Path(__file__).resolve().parents[1] / "examples" / "hf_gpt2_finetune_sweep.py"
+)
+GENERIC_SWEEP_PATH = (
+    Path(__file__).resolve().parents[1] / "examples" / "hf_finetune_sweep.py"
 )
 SCALE_UP_PATH = (
     Path(__file__).resolve().parents[1] / "examples" / "hf_gpt2_finetune_scale_up.py"
@@ -104,6 +110,17 @@ def load_bridge_example():
     spec = importlib.util.spec_from_file_location(
         "hf_gpt2_finetune_bridge_test",
         EXAMPLE_PATH,
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_generic_bridge_example():
+    spec = importlib.util.spec_from_file_location(
+        "hf_finetune_bridge_test",
+        GENERIC_EXAMPLE_PATH,
     )
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -259,6 +276,17 @@ def load_sweep_example():
     spec = importlib.util.spec_from_file_location(
         "hf_gpt2_finetune_sweep_test",
         SWEEP_PATH,
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_generic_sweep_example():
+    spec = importlib.util.spec_from_file_location(
+        "hf_finetune_sweep_test",
+        GENERIC_SWEEP_PATH,
     )
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -6885,6 +6913,23 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(overridden.generation_max_new_tokens, 11)
         self.assertEqual(module._tokenizer_name(overridden), "gpt2")
 
+    def test_generic_bridge_wrapper_preserves_model_profile_defaults(self) -> None:
+        module = load_generic_bridge_example()
+        args = module.parse_args(
+            [
+                "--model-configs",
+                str(MODEL_CONFIGS_PATH),
+                "--model-profile",
+                "tiny-gpt2-ci",
+                "--metadata-only",
+            ]
+        )
+
+        self.assertEqual(args.model_name, "sshleifer/tiny-gpt2")
+        self.assertEqual(args.tokenizer_name, "sshleifer/tiny-gpt2")
+        self.assertEqual(args.block_size, 64)
+        self.assertEqual(args.generation_max_new_tokens, 32)
+
     def test_sweep_model_profile_defaults_flow_to_bridge_commands(self) -> None:
         module = load_sweep_example()
         with tempfile.TemporaryDirectory() as tmp:
@@ -6939,6 +6984,37 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(stored_report["model_profile"]["profile_id"], "tiny-gpt2-ci")
         self.assertIn("profile=tiny-gpt2-ci", stored_report["model_profile_lines"][0])
         self.assertEqual(report["run_count"], 1)
+
+    def test_generic_sweep_wrapper_defaults_to_generic_bridge(self) -> None:
+        module = load_generic_sweep_example()
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "sweep"
+            args = module.parse_args(
+                [
+                    "--dry-run",
+                    "--out-dir",
+                    str(out_dir),
+                    "--model-configs",
+                    str(MODEL_CONFIGS_PATH),
+                    "--model-profile",
+                    "tiny-gpt2-ci",
+                    "--generation-prompt",
+                    "SpiralTorch is",
+                ]
+            )
+            runs = module.build_sweep_runs(args)
+
+        command = runs[0]["command"]
+        self.assertEqual(args.bridge_script.name, "hf_finetune_bridge.py")
+        self.assertEqual(Path(command[1]).name, "hf_finetune_bridge.py")
+        self.assertEqual(
+            command[command.index("--model-name") + 1],
+            "sshleifer/tiny-gpt2",
+        )
+        self.assertEqual(
+            command[command.index("--tokenizer-name") + 1],
+            "sshleifer/tiny-gpt2",
+        )
 
     def test_package_milestone_report_tracks_run_status_readiness(self) -> None:
         waiting_status = {

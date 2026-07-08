@@ -59,15 +59,30 @@ SWEEP_EXAMPLE_PATH = (
     / "examples"
     / "hf_gpt2_zspace_generation_control_sweep.py"
 )
+GENERIC_SWEEP_EXAMPLE_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "examples"
+    / "hf_zspace_generation_control_sweep.py"
+)
 SWEEP_COMPARE_EXAMPLE_PATH = (
     Path(__file__).resolve().parents[1]
     / "examples"
     / "hf_gpt2_zspace_generation_control_compare.py"
 )
+GENERIC_SWEEP_COMPARE_EXAMPLE_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "examples"
+    / "hf_zspace_generation_control_compare.py"
+)
 CHECKPOINT_GENERATION_CONTROL_EXAMPLE_PATH = (
     Path(__file__).resolve().parents[1]
     / "examples"
     / "hf_gpt2_ft_checkpoint_generation_control.py"
+)
+GENERIC_CHECKPOINT_GENERATION_CONTROL_EXAMPLE_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "examples"
+    / "hf_checkpoint_generation_control.py"
 )
 DISTORTION_PROBE_EXAMPLE_PATH = (
     Path(__file__).resolve().parents[1]
@@ -107,6 +122,17 @@ def load_generation_control_sweep_example():
     return module
 
 
+def load_generic_generation_control_sweep_example():
+    spec = importlib.util.spec_from_file_location(
+        "hf_zspace_generation_control_sweep_test",
+        GENERIC_SWEEP_EXAMPLE_PATH,
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
 def load_generation_control_compare_example():
     spec = importlib.util.spec_from_file_location(
         "hf_gpt2_zspace_generation_control_compare_test",
@@ -118,10 +144,36 @@ def load_generation_control_compare_example():
     return module
 
 
+def load_generic_generation_control_compare_example():
+    spec = importlib.util.spec_from_file_location(
+        "hf_zspace_generation_control_compare_test",
+        GENERIC_SWEEP_COMPARE_EXAMPLE_PATH,
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
 def load_checkpoint_generation_control_example():
     spec = importlib.util.spec_from_file_location(
         "hf_gpt2_ft_checkpoint_generation_control_test",
         CHECKPOINT_GENERATION_CONTROL_EXAMPLE_PATH,
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.modules.pop(spec.name, None)
+    return module
+
+
+def load_generic_checkpoint_generation_control_example():
+    spec = importlib.util.spec_from_file_location(
+        "hf_checkpoint_generation_control_test",
+        GENERIC_CHECKPOINT_GENERATION_CONTROL_EXAMPLE_PATH,
     )
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -2073,6 +2125,50 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
         self.assertEqual(report["model_profile"]["profile_id"], "tiny-gpt2-ci")
         self.assertEqual(report["tokenizer_name"], "sshleifer/tiny-gpt2")
 
+    def test_generic_checkpoint_generation_control_defaults_to_generic_scripts(
+        self,
+    ) -> None:
+        module = load_generic_checkpoint_generation_control_example()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "run"
+            args = module.parse_args(
+                [
+                    "--run-dir",
+                    str(run_dir),
+                    "--checkpoint",
+                    "checkpoint-2048",
+                    "--model-configs",
+                    str(MODEL_CONFIGS_PATH),
+                    "--model-profile",
+                    "tiny-gpt2-ci",
+                    "--dry-run",
+                    "--no-compare",
+                ]
+            )
+            jobs = module.build_sweep_jobs(args)
+            command = module.build_sweep_command(args, jobs[0])
+            report = module.run_checkpoint_generation_control(args)
+
+        self.assertEqual(
+            args.sweep_script.name,
+            "hf_zspace_generation_control_sweep.py",
+        )
+        self.assertEqual(
+            args.compare_script.name,
+            "hf_zspace_generation_control_compare.py",
+        )
+        self.assertEqual(args.curve_script.name, "hf_finetune_generation_curve.py")
+        self.assertEqual(
+            Path(command[1]).name,
+            "hf_zspace_generation_control_sweep.py",
+        )
+        self.assertEqual(
+            command[command.index("--tokenizer-name") + 1],
+            "sshleifer/tiny-gpt2",
+        )
+        self.assertEqual(report["tokenizer_name"], "sshleifer/tiny-gpt2")
+
     def test_checkpoint_generation_control_requires_ready_file(self) -> None:
         module = load_checkpoint_generation_control_example()
 
@@ -2219,6 +2315,40 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
         self.assertEqual(report["run_count"], 5)
         self.assertEqual(report["summary"]["completed_run_count"], 0)
         self.assertTrue(any(str(row["name"]).startswith("zt3") for row in runs))
+
+    def test_generic_generation_control_wrappers_parse_and_dry_run(self) -> None:
+        sweep_module = load_generic_generation_control_sweep_example()
+        compare_module = load_generic_generation_control_compare_example()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            out_path = root / "control-sweep.json"
+            args = sweep_module.parse_args(
+                [
+                    "--dry-run",
+                    "--model-name",
+                    str(root / "checkpoint-local"),
+                    "--tokenizer-name",
+                    "sshleifer/tiny-gpt2",
+                    "--prompt",
+                    "SpiralTorch is",
+                    "--out",
+                    str(out_path),
+                ]
+            )
+            report = sweep_module.run_sweep(args)
+            out_path.write_text(json.dumps(report), encoding="utf-8")
+            compare_args = compare_module.parse_args(
+                [
+                    str(out_path),
+                    "--label",
+                    "generic",
+                ]
+            )
+
+        self.assertEqual(report["status"], "planned")
+        self.assertEqual(report["tokenizer_name"], "sshleifer/tiny-gpt2")
+        self.assertEqual(compare_args.label, ["generic"])
+        self.assertEqual(compare_args.sweeps, [out_path])
 
     def test_repetition_report_scores_repeated_ngrams(self) -> None:
         module = load_generation_control_sweep_example()

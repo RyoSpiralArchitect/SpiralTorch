@@ -368,10 +368,15 @@ surface, while Python must bring the HF data/model stack. In practice,
 `safetensors`, and adapter/evaluation experiments should have `peft` and
 `evaluate` available before the first long run starts.
 
-The local GPT-2 bridge turns that boundary into an executable run card:
+The generic HF bridge turns that boundary into an executable run card. The
+historical `hf_gpt2_*` scripts still work, but new runs should prefer the
+`hf_*` entrypoints plus a model profile so the same path can target GPT-2,
+DistilGPT-2, tiny CI models, or another local `AutoModelForCausalLM` profile:
 
 ```bash
-PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_gpt2_finetune_bridge.py \
+PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_finetune_bridge.py \
+  --model-configs bindings/st-py/examples/hf_finetune_model_configs.example.json \
+  --model-profile gpt2-local-smoke \
   --metadata-only \
   --allow-remote \
   --zspace-probe \
@@ -548,7 +553,9 @@ For the first real FT pass on a new corpus, use the sweep runner to make that
 comparison reproducible:
 
 ```bash
-PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_gpt2_finetune_sweep.py \
+PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_finetune_sweep.py \
+  --model-configs bindings/st-py/examples/hf_finetune_model_configs.example.json \
+  --model-profile gpt2-local-smoke \
   --train-file data/corpus-000.txt \
   --validation-fraction 0.02 \
   --corpus-scan \
@@ -562,6 +569,19 @@ PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_gpt2_finetune_sweep.
   --learning-rate-values 0.0001,0.00005 \
   --seed-values 7,13 \
   --out-dir runs/gpt2-small-zspace-sweep
+```
+
+For checkpoint-level local inference, use the generic generation-control
+wrapper so the fine-tuned checkpoint stays the model path while the profile can
+provide tokenizer and decode defaults:
+
+```bash
+PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_checkpoint_generation_control.py \
+  --run-dir runs/gpt2-small-zspace-ft \
+  --checkpoint checkpoint-2048 \
+  --model-configs bindings/st-py/examples/hf_finetune_model_configs.example.json \
+  --model-profile gpt2-local-smoke \
+  --dry-run
 ```
 
 It writes `sweep-plan.json` before launching runs and `sweep-report.json` after
