@@ -16,6 +16,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--next-run-dir", type=Path, default=None)
     parser.add_argument("--label", default=None)
     parser.add_argument("--run-status-json", type=Path, default=None)
+    parser.add_argument("--run-status-history-jsonl", type=Path, default=None)
     parser.add_argument("--eval-history-jsonl", type=Path, default=None)
     parser.add_argument("--checkpoint-history-jsonl", type=Path, default=None)
     parser.add_argument("--final-history-jsonl", type=Path, default=None)
@@ -27,6 +28,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     args = parser.parse_args(argv)
     provided = [
         args.run_status_json,
+        args.run_status_history_jsonl,
         args.eval_history_jsonl,
         args.checkpoint_history_jsonl,
         args.final_history_jsonl,
@@ -308,10 +310,17 @@ def _latest_status_watch(watches: dict[str, dict[str, Any]]) -> dict[str, Any]:
 
 def _resolve_sources(args: argparse.Namespace) -> dict[str, Path | None]:
     return {
-        "direct": args.run_status_json
+        "direct": args.run_status_history_jsonl
+        or args.run_status_json
         or _latest_path(
             args.run_dir,
-            ["*run-status.json", "run-status.json", "status.json"],
+            [
+                "*run-status-history.jsonl",
+                "run-status-history.jsonl",
+                "*run-status.json",
+                "run-status.json",
+                "status.json",
+            ],
         ),
         "eval": args.eval_history_jsonl
         or _latest_path(
@@ -346,7 +355,7 @@ def build_monitor_snapshot(args: argparse.Namespace) -> dict[str, Any]:
     for name, path in paths.items():
         if path is None:
             loaded[name] = []
-        elif name == "direct":
+        elif name == "direct" and path.suffix != ".jsonl":
             loaded[name] = [_load_status_json(path)]
         else:
             loaded[name] = _load_history(path)

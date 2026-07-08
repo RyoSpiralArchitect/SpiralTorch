@@ -4513,7 +4513,24 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 "returncode": None,
             }
         ]
-        direct_status = {
+        direct_status_first = {
+            **eval_rows[-1],
+            "time_unix_s": 100.0,
+            "log_progress": {
+                "log_latest_step": 5700,
+                "log_max_steps": 8192,
+                "log_remaining_seconds": 500.0,
+            },
+            "eval_progress": {
+                "next_eval_step": 6144,
+                "log_steps_until_next_eval": 444,
+            },
+            "checkpoint_progress": {
+                "next_checkpoint_step": 6144,
+                "log_steps_until_next_checkpoint": 444,
+            },
+        }
+        direct_status_last = {
             **eval_rows[-1],
             "time_unix_s": 200.0,
             "log_progress": {
@@ -4535,14 +4552,21 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             next_run_dir = Path(tmp) / "next"
             run_dir.mkdir()
             next_run_dir.mkdir()
-            run_status = run_dir / "direct-run-status.json"
+            run_status_history = run_dir / "direct-run-status-history.jsonl"
             eval_history = run_dir / "watch-6144-eval-confirm-history.jsonl"
             checkpoint_history = (
                 run_dir / "watch-6144-checkpoint-confirm-history.jsonl"
             )
             final_history = run_dir / "watch-8192-final-history.jsonl"
             wait_history = next_run_dir / "finewebedu-16384-wait-launch-history.jsonl"
-            run_status.write_text(json.dumps(direct_status), encoding="utf-8")
+            run_status_history.write_text(
+                "\n".join(
+                    json.dumps(row)
+                    for row in [direct_status_first, direct_status_last]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
             for path, rows in [
                 (eval_history, eval_rows),
                 (checkpoint_history, checkpoint_rows),
@@ -4561,8 +4585,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 str(next_run_dir),
                 "--label",
                 "long-ft",
-                "--run-status-json",
-                str(run_status),
+                "--run-status-history-jsonl",
+                str(run_status_history),
                 "--out",
                 str(out_path),
                 "--lines-out",
@@ -4581,7 +4605,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(snapshot["log_latest_step"], 5800)
         self.assertEqual(snapshot["log_max_steps"], 8192)
         self.assertEqual(snapshot["log_remaining_seconds"], 390.0)
-        self.assertEqual(snapshot["estimated_seconds_until_final"], 390.0)
+        self.assertEqual(snapshot["estimated_seconds_until_final"], 2392.0)
         self.assertEqual(snapshot["last_eval_loss_step"], 5632)
         self.assertEqual(snapshot["last_eval_loss"], 3.27533)
         self.assertEqual(snapshot["min_eval_loss"], 3.27533)
@@ -4590,7 +4614,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(snapshot["steps_until_next_eval"], 344)
         self.assertAlmostEqual(
             snapshot["estimated_seconds_until_next_eval"],
-            344.0 * 390.0 / 2392.0,
+            344.0,
         )
         self.assertEqual(snapshot["next_checkpoint_step"], 6144)
         self.assertEqual(snapshot["steps_until_next_checkpoint"], 344)
@@ -4607,7 +4631,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("primary=direct", lines[0])
         self.assertIn("log_step=5800", lines[0])
         self.assertIn("log_remaining_seconds=390", lines[0])
-        self.assertIn("estimated_seconds_until_final=390", lines[0])
+        self.assertIn("estimated_seconds_until_final=2392", lines[0])
         self.assertIn("last_eval_step=5632", lines[0])
         self.assertIn("last_eval_loss=3.27533", lines[0])
         self.assertIn("next_eval_step=6144", lines[0])
@@ -4617,7 +4641,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("eval_watch_ready=false", lines[0])
         self.assertIn("wait_status=waiting_for_process", lines[0])
         self.assertIn("name=direct", lines[1])
-        self.assertIn("rows=1", lines[1])
+        self.assertIn("rows=2", lines[1])
         self.assertIn("name=eval", lines[2])
         self.assertIn("rows=2", lines[2])
         self.assertIn("name=checkpoint", lines[3])
