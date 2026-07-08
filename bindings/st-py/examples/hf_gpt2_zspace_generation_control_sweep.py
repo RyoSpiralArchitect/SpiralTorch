@@ -25,7 +25,12 @@ from spiraltorch.hf_ft import (
     hf_finetune_model_profile_lines,
     resolve_hf_finetune_model_profile,
 )
-from spiraltorch.hf_generation import build_zspace_repression_logits_processor
+from spiraltorch.hf_generation import (
+    build_zspace_repression_logits_processor,
+    zspace_generation_control_bridge_cli_args,
+    zspace_generation_control_processor_kwargs,
+    zspace_generation_control_sweep_cli_args,
+)
 
 
 DEFAULT_MODEL = "gpt2"
@@ -496,6 +501,62 @@ def build_control_runs(args: argparse.Namespace) -> list[dict[str, object]]:
     return runs
 
 
+def _generation_control_grid(args: argparse.Namespace) -> dict[str, object]:
+    return {
+        "top_k_values": list(args.zspace_top_k_values),
+        "curvature_values": list(args.zspace_curvature_values),
+        "temperature_values": list(args.zspace_temperature_values),
+        "entropy_target_values": list(args.zspace_entropy_target_values),
+        "entropy_gain_values": list(args.zspace_entropy_gain_values),
+        "entropy_tolerance": args.zspace_entropy_tolerance,
+        "min_temperature": args.zspace_min_temperature,
+        "max_temperature": args.zspace_max_temperature,
+        "repression_window_values": list(args.repression_window_values),
+        "repression_strength_values": list(args.repression_strength_values),
+        "last_token_repression_values": list(args.last_token_repression_values),
+        "ngram_size_values": list(args.ngram_size_values),
+        "ngram_window_values": list(args.ngram_window_values),
+        "ngram_repression_strength_values": list(
+            args.ngram_repression_strength_values
+        ),
+        "ngram_decay_values": list(args.ngram_decay_values),
+        "mask_non_top_k": not bool(args.keep_non_top_k),
+        "use_native_zspace": not bool(args.zspace_no_native),
+    }
+
+
+def _first_zspace_config(
+    runs: Sequence[Mapping[str, object]],
+) -> dict[str, object] | None:
+    for run in runs:
+        if run.get("kind") == "baseline":
+            continue
+        config = run.get("config")
+        if isinstance(config, Mapping):
+            return dict(config)
+    return None
+
+
+def _generation_control_plan(
+    args: argparse.Namespace,
+    runs: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    profile = getattr(args, "_hf_finetune_model_profile", None)
+    profile_config = (
+        zspace_generation_control_processor_kwargs(profile)
+        if isinstance(profile, Mapping)
+        else {}
+    )
+    resolved_config = _first_zspace_config(runs)
+    return {
+        "profile_recommended_config": profile_config,
+        "resolved_config": resolved_config,
+        "grid": _generation_control_grid(args),
+        "sweep_cli_args": zspace_generation_control_sweep_cli_args(resolved_config),
+        "bridge_cli_args": zspace_generation_control_bridge_cli_args(resolved_config),
+    }
+
+
 def _model_device(model: Any) -> Any | None:
     try:
         return next(model.parameters()).device
@@ -802,6 +863,7 @@ def _summary(runs: Sequence[Mapping[str, object]]) -> dict[str, object]:
 
 def run_sweep(args: argparse.Namespace) -> dict[str, object]:
     runs = build_control_runs(args)
+    generation_control_plan = _generation_control_plan(args, runs)
     report: dict[str, object] = {
         "row_type": "hf_gpt2_zspace_generation_control_sweep",
         "status": "planned" if args.dry_run else "running",
@@ -823,6 +885,19 @@ def run_sweep(args: argparse.Namespace) -> dict[str, object]:
         "sample_top_k": args.sample_top_k,
         "dry_run": bool(args.dry_run),
         "run_count": len(runs),
+        "generation_control_profile_config": generation_control_plan[
+            "profile_recommended_config"
+        ],
+        "generation_control_resolved_config": generation_control_plan[
+            "resolved_config"
+        ],
+        "generation_control_grid": generation_control_plan["grid"],
+        "generation_control_sweep_cli_args": generation_control_plan[
+            "sweep_cli_args"
+        ],
+        "generation_control_bridge_cli_args": generation_control_plan[
+            "bridge_cli_args"
+        ],
         "runs": runs,
     }
     if args.dry_run:

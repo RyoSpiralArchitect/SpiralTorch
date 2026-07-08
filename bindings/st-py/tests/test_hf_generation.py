@@ -2745,6 +2745,20 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
         self.assertEqual(zspace_run["config"]["entropy_target"], 3.0)
         self.assertEqual(zspace_run["config"]["repression_strength"], 0.8)
         self.assertEqual(zspace_run["config"]["ngram_window"], 32)
+        self.assertEqual(report["generation_control_profile_config"]["top_k"], 64)
+        self.assertEqual(
+            report["generation_control_resolved_config"]["repression_strength"],
+            0.8,
+        )
+        self.assertEqual(report["generation_control_grid"]["top_k_values"], [64])
+        self.assertIn(
+            "--generation-zspace-top-k",
+            report["generation_control_bridge_cli_args"],
+        )
+        self.assertIn(
+            "--zspace-top-k-values",
+            report["generation_control_sweep_cli_args"],
+        )
         self.assertEqual(compare_args.label, ["generic"])
         self.assertEqual(compare_args.sweeps, [out_path])
         self.assertEqual(
@@ -2819,6 +2833,12 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
         self.assertTrue(report["do_sample"])
         self.assertEqual(report["sample_top_k"], 24)
         self.assertEqual(report["runs"][1]["config"]["top_k"], 48)
+        self.assertEqual(report["generation_control_profile_config"]["top_k"], 48)
+        self.assertEqual(report["generation_control_grid"]["top_k_values"], [48])
+        self.assertIn(
+            "--generation-zspace-top-k",
+            report["generation_control_bridge_cli_args"],
+        )
 
     def test_installed_hf_generation_control_cli_dry_run_and_compare(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2863,6 +2883,15 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
         )
         self.assertEqual(report["max_new_tokens"], 128)
         self.assertEqual(report["runs"][1]["config"]["top_k"], 96)
+        self.assertEqual(report["generation_control_profile_config"]["top_k"], 96)
+        self.assertEqual(
+            report["generation_control_resolved_config"]["top_k"],
+            96,
+        )
+        self.assertIn(
+            "--zspace-top-k-values",
+            report["generation_control_sweep_cli_args"],
+        )
         self.assertEqual(
             comparison["row_type"],
             "zspace_generation_control_sweep_comparison",
