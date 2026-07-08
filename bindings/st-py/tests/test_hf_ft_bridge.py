@@ -57,6 +57,11 @@ MONITOR_SNAPSHOT_PATH = (
     / "examples"
     / "hf_gpt2_finetune_monitor_snapshot.py"
 )
+MILESTONE_CAPTURE_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "examples"
+    / "hf_gpt2_finetune_milestone_capture.py"
+)
 
 
 def load_bridge_example():
@@ -129,6 +134,17 @@ def load_monitor_snapshot_example():
     spec = importlib.util.spec_from_file_location(
         "hf_gpt2_finetune_monitor_snapshot_test",
         MONITOR_SNAPSHOT_PATH,
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_milestone_capture_example():
+    spec = importlib.util.spec_from_file_location(
+        "hf_gpt2_finetune_milestone_capture_test",
+        MILESTONE_CAPTURE_PATH,
     )
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -4688,6 +4704,102 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertTrue(ready["milestone_step_reached"])
         self.assertEqual(ready["milestone_eval_loss"], 3.2)
         self.assertTrue(ready["milestone_checkpoint_ready"])
+
+    def test_milestone_capture_example_refreshes_status_and_monitor(self) -> None:
+        module = load_milestone_capture_example()
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            run_dir = repo / "run"
+            next_run_dir = repo / "next"
+            run_dir.mkdir()
+            next_run_dir.mkdir()
+            argv = [
+                str(run_dir),
+                "--next-run-dir",
+                str(next_run_dir),
+                "--label",
+                "demo-6144",
+                "--milestone-step",
+                "6144",
+                "--max-steps",
+                "8192",
+                "--eval-steps",
+                "512",
+                "--save-steps",
+                "2048",
+                "--min-free-disk-gb",
+                "4",
+                "--final-checkpoint",
+                "checkpoint-8192",
+                "--watch-count",
+                "1",
+                "--watch-interval-seconds",
+                "0",
+                "--quiet",
+            ]
+            args = module.parse_args(argv)
+            snapshot = {
+                "row_type": "hf_gpt2_ft_monitor_snapshot",
+                "milestone_status": "waiting_for_step",
+                "milestone_ready": False,
+                "milestone_step": 6144,
+                "milestone_steps_until": 128,
+                "milestone_eval_loss": None,
+                "milestone_checkpoint_ready": False,
+                "process_status": "alive",
+                "log_latest_step": 6016,
+            }
+
+            def fake_run(command, cwd, env, text, capture_output, check):
+                self.assertEqual(cwd, repo)
+                self.assertTrue(text)
+                self.assertTrue(capture_output)
+                self.assertFalse(check)
+                if "hf_gpt2_finetune_run_status.py" in command[1]:
+                    out_path = repo / command[command.index("--out") + 1]
+                    lines_path = repo / command[command.index("--lines-out") + 1]
+                    jsonl_path = repo / command[command.index("--jsonl-out") + 1]
+                    out_path.write_text(
+                        json.dumps({"process_status": "alive"}),
+                        encoding="utf-8",
+                    )
+                    lines_path.write_text("status\n", encoding="utf-8")
+                    jsonl_path.write_text(
+                        json.dumps({"process_status": "alive"}) + "\n",
+                        encoding="utf-8",
+                    )
+                if "hf_gpt2_finetune_monitor_snapshot.py" in command[1]:
+                    out_path = repo / command[command.index("--out") + 1]
+                    lines_path = repo / command[command.index("--lines-out") + 1]
+                    out_path.write_text(json.dumps(snapshot), encoding="utf-8")
+                    lines_path.write_text("monitor\n", encoding="utf-8")
+                return types.SimpleNamespace(returncode=0, stdout="ok", stderr="")
+
+            with mock.patch.object(module.subprocess, "run", side_effect=fake_run):
+                state = module.capture_once(args, repo=repo, env={})
+                with mock.patch.object(module, "_repo_root", return_value=repo):
+                    exit_code = module.main(argv)
+            state_written = json.loads(args.state_out.read_text(encoding="utf-8"))
+            history_rows = [
+                json.loads(line)
+                for line in args.history_jsonl_out.read_text(encoding="utf-8").splitlines()
+            ]
+            run_status_command = module.build_run_status_command(args, repo=repo)
+            monitor_command = module.build_monitor_command(args, repo=repo)
+
+        self.assertEqual(state["status"], "waiting_for_step")
+        self.assertFalse(state["milestone_ready"])
+        self.assertEqual(state["milestone_step"], 6144)
+        self.assertEqual(state["milestone_steps_until"], 128)
+        self.assertEqual(state["process_status"], "alive")
+        self.assertEqual(state["log_latest_step"], 6016)
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(state_written["status"], "waiting_for_step")
+        self.assertEqual(history_rows[-1]["iteration"], 1)
+        self.assertIn("--max-steps", run_status_command)
+        self.assertIn("--run-status-history-jsonl", monitor_command)
+        self.assertIn("--milestone-step", monitor_command)
+        self.assertIn("milestone_ready=False", module.state_line(state))
 
     def test_run_card_summary_supplements_trace_telemetry_from_jsonl(self) -> None:
         card = {
