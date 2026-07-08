@@ -13,6 +13,7 @@ if str(EXAMPLES_ROOT) not in sys.path:
 import hf_gpt2_finetune_bridge as _legacy  # noqa: E402
 from hf_gpt2_finetune_bridge import *  # noqa: F401,F403,E402
 from hf_gpt2_finetune_bridge import parse_args as _legacy_parse_args  # noqa: E402
+import spiraltorch as st  # noqa: E402
 
 
 DEFAULT_OUTPUT_DIR = Path("runs/hf-finetune")
@@ -37,8 +38,40 @@ def parse_args(argv: list[str] | None = None):
     return args
 
 
+def _install_generic_bindings() -> None:
+    """Route legacy bridge internals through model-neutral SpiralTorch helpers."""
+
+    bindings = {
+        "hf_gpt2_finetune_corpus_file_report": st.hf_finetune_corpus_file_report,
+        "hf_gpt2_finetune_corpus_scan_report": st.hf_finetune_corpus_scan_report,
+        "hf_gpt2_finetune_dataset_fit_report": st.hf_finetune_dataset_fit_report,
+        "hf_gpt2_finetune_disk_headroom_plan": st.hf_finetune_disk_headroom_plan,
+        "hf_gpt2_finetune_eval_report": st.hf_finetune_eval_report,
+        "hf_gpt2_finetune_generation_report": st.hf_finetune_generation_report,
+        "hf_gpt2_finetune_inference_distortion_handoff_report": (
+            st.hf_finetune_inference_distortion_handoff_report
+        ),
+        "hf_gpt2_finetune_inference_distortion_handoff_lines": (
+            st.hf_finetune_inference_distortion_handoff_lines
+        ),
+        "hf_gpt2_finetune_preflight_report": st.hf_finetune_preflight_report,
+        "hf_gpt2_finetune_summary_lines": st.hf_finetune_summary_lines,
+        "hf_gpt2_finetune_trainer_trace_callback": (
+            st.hf_finetune_trainer_trace_callback
+        ),
+        "hf_gpt2_finetune_zspace_probe": st.hf_finetune_zspace_probe,
+        "summarize_hf_gpt2_finetune_trainer_trace": (
+            st.summarize_hf_finetune_trainer_trace
+        ),
+        "write_hf_gpt2_finetune_run_card": st.write_hf_finetune_run_card,
+    }
+    for name, helper in bindings.items():
+        setattr(_legacy, name, helper)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    _install_generic_bindings()
     remote_access_report = _legacy._hf_remote_access_report(args)
     with _legacy._hf_remote_access(args):
         return _legacy._main_with_runtime_access(args, remote_access_report)

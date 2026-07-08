@@ -8198,6 +8198,30 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             args.trainer_trace_jsonl.name,
             st.HF_FINETUNE_TRAINER_TRACE_FILENAME,
         )
+        with tempfile.TemporaryDirectory() as tmp:
+            run_card = Path(tmp) / st.HF_FINETUNE_RUN_CARD_FILENAME
+            write_args = types.SimpleNamespace(
+                run_card=run_card,
+                output_dir=Path(tmp),
+            )
+            module._install_generic_bindings()
+            with redirect_stdout(io.StringIO()):
+                module._legacy._write_card(
+                    {
+                        "row_type": "hf_gpt2_finetune_run_card",
+                        "generation_after_train": {
+                            "row_type": "hf_gpt2_finetune_generation_report",
+                        },
+                    },
+                    write_args,
+                )
+            written = json.loads(run_card.read_text(encoding="utf-8"))
+
+        self.assertEqual(written["row_type"], "hf_finetune_run_card")
+        self.assertEqual(
+            written["generation_after_train"]["row_type"],
+            "hf_finetune_generation_report",
+        )
         relaxed_args = module.parse_args(
             [
                 "--metadata-only",
@@ -8752,6 +8776,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 ]
             )
             runs = module.build_sweep_runs(args)
+            report = module.run_sweep(args)
+            stored_plan = json.loads((out_dir / "sweep-plan.json").read_text())
+            stored_report = json.loads((out_dir / "sweep-report.json").read_text())
+            scale_up = json.loads((out_dir / "scale-up-command.json").read_text())
 
         command = runs[0]["command"]
         self.assertEqual(args.bridge_script.name, "hf_finetune_bridge.py")
@@ -8772,6 +8800,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             command[command.index("--tokenizer-name") + 1],
             "sshleifer/tiny-gpt2",
         )
+        self.assertEqual(report["row_type"], "hf_finetune_sweep_report")
+        self.assertEqual(stored_plan["row_type"], "hf_finetune_sweep_plan")
+        self.assertEqual(stored_report["row_type"], "hf_finetune_sweep_report")
+        self.assertEqual(
+            stored_report["summary"]["row_type"],
+            "hf_finetune_sweep_report_summary",
+        )
+        self.assertEqual(scale_up["row_type"], "hf_finetune_scale_up_command")
 
     def test_package_milestone_report_tracks_run_status_readiness(self) -> None:
         waiting_status = {
