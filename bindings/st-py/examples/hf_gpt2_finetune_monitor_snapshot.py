@@ -292,6 +292,37 @@ def _status_watch_summary(
         "eval_loss_points": eval_loss_points,
         "min_eval_loss": min(eval_losses) if eval_losses else None,
         "best_eval_loss_step": _nested(last, "trace", "trace_best_eval_loss_step"),
+        "eval_loss_improvement": _nested(
+            last, "trace", "trace_eval_loss_improvement"
+        ),
+        "eval_loss_last_delta": _nested(last, "trace", "trace_eval_loss_last_delta"),
+        "eval_loss_last_improvement": _nested(
+            last, "trace", "trace_eval_loss_last_improvement"
+        ),
+        "eval_loss_last_improvement_per_step": _nested(
+            last, "trace", "trace_eval_loss_last_improvement_per_step"
+        ),
+        "eval_loss_mean_improvement_per_step": _nested(
+            last, "trace", "trace_eval_loss_mean_improvement_per_step"
+        ),
+        "eval_loss_last_improvement_ratio_to_previous": _nested(
+            last, "trace", "trace_eval_loss_last_improvement_ratio_to_previous"
+        ),
+        "eval_loss_projection_step": _nested(
+            last, "trace", "trace_eval_loss_projection_step"
+        ),
+        "eval_loss_projection_remaining_steps": _nested(
+            last, "trace", "trace_eval_loss_projection_remaining_steps"
+        ),
+        "eval_loss_projected_remaining_improvement": _nested(
+            last, "trace", "trace_eval_loss_projected_remaining_improvement"
+        ),
+        "eval_loss_projected_final_loss": _nested(
+            last, "trace", "trace_eval_loss_projected_final_loss"
+        ),
+        "eval_loss_monotonic_nonincreasing": _nested(
+            last, "trace", "trace_eval_loss_monotonic_nonincreasing"
+        ),
         "training_loss_guard_count": _nested(
             last, "trace", "training_loss_guard_count"
         ),
@@ -529,6 +560,31 @@ def build_monitor_snapshot(args: argparse.Namespace) -> dict[str, Any]:
         "last_eval_loss_step": primary.get("last_eval_loss_step"),
         "min_eval_loss": primary.get("min_eval_loss"),
         "best_eval_loss_step": primary.get("best_eval_loss_step"),
+        "eval_loss_improvement": primary.get("eval_loss_improvement"),
+        "eval_loss_last_delta": primary.get("eval_loss_last_delta"),
+        "eval_loss_last_improvement": primary.get("eval_loss_last_improvement"),
+        "eval_loss_last_improvement_per_step": primary.get(
+            "eval_loss_last_improvement_per_step"
+        ),
+        "eval_loss_mean_improvement_per_step": primary.get(
+            "eval_loss_mean_improvement_per_step"
+        ),
+        "eval_loss_last_improvement_ratio_to_previous": primary.get(
+            "eval_loss_last_improvement_ratio_to_previous"
+        ),
+        "eval_loss_projection_step": primary.get("eval_loss_projection_step"),
+        "eval_loss_projection_remaining_steps": primary.get(
+            "eval_loss_projection_remaining_steps"
+        ),
+        "eval_loss_projected_remaining_improvement": primary.get(
+            "eval_loss_projected_remaining_improvement"
+        ),
+        "eval_loss_projected_final_loss": primary.get(
+            "eval_loss_projected_final_loss"
+        ),
+        "eval_loss_monotonic_nonincreasing": primary.get(
+            "eval_loss_monotonic_nonincreasing"
+        ),
         "next_eval_step": primary.get("next_eval_step"),
         "steps_until_next_eval": primary.get("steps_until_next_eval"),
         "estimated_seconds_until_next_eval": primary.get(
@@ -591,6 +647,11 @@ def snapshot_lines(snapshot: dict[str, Any]) -> list[str]:
             f"last_eval_loss={_number_text(snapshot.get('last_eval_loss'))} "
             f"min_eval_loss={_number_text(snapshot.get('min_eval_loss'))} "
             f"best_eval_loss_step={_number_text(snapshot.get('best_eval_loss_step'))} "
+            f"eval_loss_improvement={_number_text(snapshot.get('eval_loss_improvement'))} "
+            f"eval_loss_last_delta={_number_text(snapshot.get('eval_loss_last_delta'))} "
+            f"eval_loss_last_improvement_per_step={_number_text(snapshot.get('eval_loss_last_improvement_per_step'))} "
+            f"eval_loss_projected_final={_number_text(snapshot.get('eval_loss_projected_final_loss'))} "
+            f"eval_loss_monotonic={_number_text(snapshot.get('eval_loss_monotonic_nonincreasing'))} "
             f"next_eval_step={_number_text(snapshot.get('next_eval_step'))} "
             f"steps_until_next_eval={_number_text(snapshot.get('steps_until_next_eval'))} "
             f"next_checkpoint_step={_number_text(snapshot.get('next_checkpoint_step'))} "
@@ -631,6 +692,8 @@ def snapshot_lines(snapshot: dict[str, Any]) -> list[str]:
                     f"log_step={_number_text(watch.get('log_latest_step'))} "
                     f"last_eval_step={_number_text(watch.get('last_eval_loss_step'))} "
                     f"last_eval_loss={_number_text(watch.get('last_eval_loss'))} "
+                    f"eval_loss_projected_final={_number_text(watch.get('eval_loss_projected_final_loss'))} "
+                    f"eval_loss_monotonic={_number_text(watch.get('eval_loss_monotonic_nonincreasing'))} "
                     f"next_eval_step={_number_text(watch.get('next_eval_step'))} "
                     f"next_checkpoint_step={_number_text(watch.get('next_checkpoint_step'))} "
                     f"final_ready={_number_text(watch.get('final_checkpoint_ready'))} "

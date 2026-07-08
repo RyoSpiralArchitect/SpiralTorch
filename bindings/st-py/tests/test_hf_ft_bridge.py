@@ -4732,6 +4732,17 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                     "trace_last_eval_loss": 3.27533,
                     "trace_last_eval_loss_step": 5632,
                     "trace_best_eval_loss_step": 5632,
+                    "trace_eval_loss_improvement": 0.015301,
+                    "trace_eval_loss_last_delta": -0.015301,
+                    "trace_eval_loss_last_improvement": 0.015301,
+                    "trace_eval_loss_last_improvement_per_step": 0.0000298848,
+                    "trace_eval_loss_mean_improvement_per_step": 0.0000298848,
+                    "trace_eval_loss_last_improvement_ratio_to_previous": 0.5,
+                    "trace_eval_loss_projection_step": 8192,
+                    "trace_eval_loss_projection_remaining_steps": 2560.0,
+                    "trace_eval_loss_projected_remaining_improvement": 0.076505,
+                    "trace_eval_loss_projected_final_loss": 3.198825,
+                    "trace_eval_loss_monotonic_nonincreasing": True,
                     "training_loss_guard_count": 0,
                 },
                 "log_progress": {
@@ -4879,6 +4890,18 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(snapshot["last_eval_loss"], 3.27533)
         self.assertEqual(snapshot["min_eval_loss"], 3.27533)
         self.assertEqual(snapshot["best_eval_loss_step"], 5632)
+        self.assertAlmostEqual(snapshot["eval_loss_improvement"], 0.015301)
+        self.assertAlmostEqual(snapshot["eval_loss_last_delta"], -0.015301)
+        self.assertAlmostEqual(
+            snapshot["eval_loss_last_improvement_per_step"],
+            0.0000298848,
+        )
+        self.assertEqual(snapshot["eval_loss_projection_step"], 8192)
+        self.assertAlmostEqual(
+            snapshot["eval_loss_projected_final_loss"],
+            3.198825,
+        )
+        self.assertTrue(snapshot["eval_loss_monotonic_nonincreasing"])
         self.assertEqual(snapshot["next_eval_step"], 6144)
         self.assertEqual(snapshot["steps_until_next_eval"], 344)
         self.assertAlmostEqual(
@@ -4912,6 +4935,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("estimated_seconds_until_final=2392", lines[0])
         self.assertIn("last_eval_step=5632", lines[0])
         self.assertIn("last_eval_loss=3.27533", lines[0])
+        self.assertIn("eval_loss_improvement=0.015301", lines[0])
+        self.assertIn("eval_loss_last_delta=-0.015301", lines[0])
+        self.assertIn("eval_loss_projected_final=3.19882", lines[0])
+        self.assertIn("eval_loss_monotonic=true", lines[0])
         self.assertIn("next_eval_step=6144", lines[0])
         self.assertIn("steps_until_next_checkpoint=344", lines[0])
         self.assertIn("disk_margin_gb=5.5", lines[0])
@@ -4925,6 +4952,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("wait_status=waiting_for_process", lines[0])
         self.assertIn("name=direct", lines[1])
         self.assertIn("rows=2", lines[1])
+        self.assertIn("eval_loss_projected_final=3.19882", lines[1])
         self.assertIn("name=eval", lines[2])
         self.assertIn("rows=2", lines[2])
         self.assertIn("name=checkpoint", lines[3])
