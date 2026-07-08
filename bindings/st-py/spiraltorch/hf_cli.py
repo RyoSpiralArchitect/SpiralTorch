@@ -151,6 +151,8 @@ def profile_main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--bundle-lines-filename", default="profile-launch-plan.lines")
     parser.add_argument("--bundle-script-filename", default="profile-launch-plan.sh")
     parser.add_argument("--inspect-bundle", type=Path, default=None)
+    parser.add_argument("--refresh-preflight", action="store_true")
+    parser.add_argument("--require-refresh-preflight", action="store_true")
     parser.add_argument("--json", action="store_true")
     parser.add_argument(
         "--cli-args",
@@ -183,6 +185,10 @@ def profile_main(argv: Sequence[str] | None = None) -> int:
             plan_filename=args.bundle_plan_filename,
             lines_filename=args.bundle_lines_filename,
             script_filename=args.bundle_script_filename,
+            refresh_preflight=(
+                args.refresh_preflight or args.require_refresh_preflight
+            ),
+            require_refreshed_preflight=args.require_refresh_preflight,
         )
         if args.json:
             print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))

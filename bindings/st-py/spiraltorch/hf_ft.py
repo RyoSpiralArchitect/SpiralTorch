@@ -1338,6 +1338,8 @@ def hf_finetune_model_profile_launch_bundle_report(
     plan_filename: str = "profile-launch-plan.json",
     lines_filename: str = "profile-launch-plan.lines",
     script_filename: str = "profile-launch-plan.sh",
+    refresh_preflight: bool = False,
+    require_refreshed_preflight: bool = False,
 ) -> dict[str, object]:
     """Inspect an existing launch bundle without executing it."""
 
@@ -1386,16 +1388,88 @@ def hf_finetune_model_profile_launch_bundle_report(
     )
     script_executable = script_path.is_file() and os.access(script_path, os.X_OK)
     if missing:
-        status = "incomplete"
+        artifact_status = "incomplete"
     elif errors:
-        status = "invalid"
+        artifact_status = "invalid"
     elif not lines_have_summary or not script_command_matches or not script_executable:
-        status = "invalid"
+        artifact_status = "invalid"
     else:
-        status = "ready"
+        artifact_status = "ready"
+    refreshed_preflight: dict[str, object] | None = None
+    if refresh_preflight and plan is not None:
+        stored_preflight = _mapping_or_empty(
+            plan.get("preflight"),
+            label="launch_plan.preflight",
+        )
+        preset = _string_or_none(stored_preflight.get("runtime_import_preset"))
+        if preset is None:
+            errors.append("refresh_preflight:missing_runtime_import_preset")
+        else:
+            stored_runtime = _mapping_or_empty(
+                stored_preflight.get("runtime_import_preflight"),
+                label="launch_plan.preflight.runtime_import_preflight",
+            )
+            require_preset = bool(
+                stored_preflight.get("require_runtime_import_preset")
+            ) or bool(require_refreshed_preflight)
+            runtime_report = runtime_import_preflight_report(
+                runtime_import_presets=[preset],
+                required_runtime_import_presets=[preset] if require_preset else [],
+                runtime_device_backends=csv_values(
+                    stored_runtime.get("runtime_device_report_backends")
+                ),
+                required_runtime_device_backends=csv_values(
+                    stored_runtime.get("required_runtime_device_backends")
+                ),
+                required_runtime_device_ready_backends=csv_values(
+                    stored_runtime.get("required_runtime_device_ready_backends")
+                ),
+            )
+            refresh_passed = bool(
+                runtime_report.get("runtime_import_preflight_passed")
+            )
+            refresh_missing_runtime = bool(
+                csv_values(runtime_report.get("runtime_import_presets_failed"))
+            )
+            refresh_status = (
+                "ready"
+                if refresh_passed and not refresh_missing_runtime
+                else "blocked" if not refresh_passed else "needs_runtime"
+            )
+            refreshed_preflight = {
+                "row_type": "hf_finetune_model_profile_launch_bundle_preflight_refresh",
+                "status": refresh_status,
+                "mode": plan.get("mode"),
+                "runtime_import_preset": preset,
+                "require_runtime_import_preset": require_preset,
+                "runtime_import_preflight": runtime_report,
+                "runtime_import_preflight_lines": runtime_import_preflight_summary_lines(
+                    runtime_report
+                ),
+                "runtime_import_preflight_passed": refresh_passed,
+                "runtime_import_preflight_failures": runtime_report.get(
+                    "runtime_import_preflight_failures"
+                ),
+                "runtime_import_presets_failed": runtime_report.get(
+                    "runtime_import_presets_failed"
+                ),
+                "runtime_import_preset_missing_modules": runtime_report.get(
+                    "runtime_import_preset_missing_modules"
+                ),
+            }
+    status = artifact_status
+    if (
+        artifact_status == "ready"
+        and require_refreshed_preflight
+        and refreshed_preflight is not None
+    ):
+        status = str(refreshed_preflight.get("status") or artifact_status)
+    elif artifact_status == "ready" and require_refreshed_preflight:
+        status = "invalid"
     return {
         "row_type": "hf_finetune_model_profile_launch_bundle_report",
         "status": status,
+        "artifact_status": artifact_status,
         "bundle_dir": str(bundle_path),
         "plan_path": str(plan_path),
         "lines_path": str(lines_path),
@@ -1412,6 +1486,18 @@ def hf_finetune_model_profile_launch_bundle_report(
         "script_executable": script_executable,
         "script_expected_exec": script_expected_exec,
         "script_command_matches": script_command_matches,
+        "refresh_preflight": bool(refresh_preflight),
+        "require_refreshed_preflight": bool(require_refreshed_preflight),
+        "refreshed_preflight": refreshed_preflight,
+        "refreshed_preflight_status": None
+        if refreshed_preflight is None
+        else refreshed_preflight.get("status"),
+        "refreshed_runtime_import_preflight_passed": None
+        if refreshed_preflight is None
+        else refreshed_preflight.get("runtime_import_preflight_passed"),
+        "refreshed_runtime_import_preflight_failures": None
+        if refreshed_preflight is None
+        else refreshed_preflight.get("runtime_import_preflight_failures"),
         "plan": plan,
     }
 
@@ -1442,7 +1528,9 @@ def hf_finetune_model_profile_launch_bundle_report_lines(
             f"missing={report.get('missing_artifacts')} "
             f"errors={report.get('errors')} "
             f"script_executable={report.get('script_executable')} "
-            f"script_command_matches={report.get('script_command_matches')}"
+            f"script_command_matches={report.get('script_command_matches')} "
+            f"refresh_preflight={report.get('refresh_preflight')} "
+            f"refreshed_status={report.get('refreshed_preflight_status')}"
         )
     ]
 

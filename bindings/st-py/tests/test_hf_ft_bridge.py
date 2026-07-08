@@ -7726,6 +7726,12 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             bundle_report = st.hf_finetune_model_profile_launch_bundle_report(
                 bundle_dir
             )
+            refreshed_bundle_report = (
+                st.hf_finetune_model_profile_launch_bundle_report(
+                    bundle_dir,
+                    refresh_preflight=True,
+                )
+            )
             bundle_report_lines = (
                 st.hf_finetune_model_profile_launch_bundle_report_lines(bundle_report)
             )
@@ -7759,6 +7765,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(bundle_report["profile_id"], "qwen2-0.5b-local-smoke")
         self.assertTrue(bundle_report["script_executable"])
         self.assertTrue(bundle_report["script_command_matches"])
+        self.assertEqual(refreshed_bundle_report["status"], "ready")
+        self.assertTrue(refreshed_bundle_report["refresh_preflight"])
+        self.assertFalse(refreshed_bundle_report["require_refreshed_preflight"])
+        self.assertIn(
+            refreshed_bundle_report["refreshed_preflight_status"],
+            {"ready", "needs_runtime", "blocked"},
+        )
+        self.assertIsNotNone(refreshed_bundle_report["refreshed_preflight"])
         self.assertTrue(
             bundle_report_lines[0].startswith(
                 "hf_ft_model_profile_launch_bundle_report "
@@ -8223,6 +8237,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                     [
                         "--inspect-bundle",
                         str(bundle_dir),
+                        "--refresh-preflight",
                         "--json",
                     ]
                 )
@@ -8254,6 +8269,11 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         )
         self.assertEqual(inspect_payload["status"], "ready")
         self.assertTrue(inspect_payload["script_command_matches"])
+        self.assertTrue(inspect_payload["refresh_preflight"])
+        self.assertIn(
+            inspect_payload["refreshed_preflight_status"],
+            {"ready", "needs_runtime", "blocked"},
+        )
 
     def test_installed_hf_finetune_sweep_cli_reaches_generic_wrapper(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

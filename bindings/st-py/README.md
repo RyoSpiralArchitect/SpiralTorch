@@ -418,7 +418,8 @@ spiral-hf-profile \
   --bundle-dir runs/hf-finetune-qwen2-zspace-ft
 
 spiral-hf-profile \
-  --inspect-bundle runs/hf-finetune-qwen2-zspace-ft
+  --inspect-bundle runs/hf-finetune-qwen2-zspace-ft \
+  --refresh-preflight
 
 PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_finetune_bridge.py \
   --model-configs bindings/st-py/examples/hf_finetune_model_configs.example.json \
@@ -445,7 +446,9 @@ the reviewed command without re-resolving the profile. For normal runs,
 `profile-launch-plan.json`, `profile-launch-plan.lines`, and
 `profile-launch-plan.sh`. Use `--inspect-bundle` before replaying the shell
 handoff to verify that the bundle is complete, executable, and still matches the
-planned command.
+planned command. Add `--refresh-preflight` to re-probe the current runtime
+imports/devices from the stored plan, and `--require-refresh-preflight` when
+that refreshed runtime check should become a hard gate.
 
 After installing from a wheel, use the installed console entrypoint instead of
 the repo path:
