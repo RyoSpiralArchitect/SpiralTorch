@@ -62,6 +62,7 @@ __all__ = [
 ADJUST_MIN = 0.25
 ADJUST_MAX = 4.0
 EPSILON = 1.0e-12
+CHECKPOINT_GENERATION_CONTROL_ROW_TYPE = "hf_checkpoint_generation_control"
 _PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 _EXAMPLES_ROOT = _PACKAGE_ROOT / "examples"
 DEFAULT_ZSPACE_CHECKPOINT_SWEEP_SCRIPT = (
@@ -761,7 +762,7 @@ def _write_checkpoint_status_card(
     if config.run_card is None:
         return
     report: dict[str, Any] = {
-        "row_type": "hf_gpt2_ft_checkpoint_generation_control",
+        "row_type": CHECKPOINT_GENERATION_CONTROL_ROW_TYPE,
         "status": status,
         "dry_run": bool(config.dry_run),
         "run_dir": str(config.run_dir),
@@ -1152,7 +1153,7 @@ def zspace_checkpoint_generation_control_report(
     ):
         status = "complete_with_existing_sweeps" if compare_row else "skipped_existing"
     report: dict[str, Any] = {
-        "row_type": "hf_gpt2_ft_checkpoint_generation_control",
+        "row_type": CHECKPOINT_GENERATION_CONTROL_ROW_TYPE,
         "status": status,
         "dry_run": bool(config.dry_run),
         "run_dir": str(config.run_dir),

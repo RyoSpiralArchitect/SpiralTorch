@@ -2266,11 +2266,39 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
         self.assertEqual(len(jobs), 3)
         self.assertEqual(jobs[0].out.name, "checkpoint-2048-generation-control-sweep.json")
         self.assertIn("pkg-spiral-checkpoint-2048", compare_command)
+        self.assertEqual(planned["row_type"], "hf_checkpoint_generation_control")
         self.assertEqual(planned["status"], "planned")
         self.assertEqual(planned["curve"]["status"], "planned")
+        self.assertEqual(report["row_type"], "hf_checkpoint_generation_control")
         self.assertEqual(report["status"], "complete")
+        self.assertEqual(stored["row_type"], "hf_checkpoint_generation_control")
         self.assertEqual(stored["sweep_count"], 3)
         self.assertEqual(len(executed), 4)
+
+    def test_package_checkpoint_generation_control_wait_card_is_generic(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = root / "run"
+            (run_dir / "checkpoint-4096").mkdir(parents=True)
+            run_card = root / "checkpoint-wait-card.json"
+
+            with self.assertRaises(TimeoutError):
+                zspace_checkpoint_generation_control_report(
+                    run_dir=run_dir,
+                    checkpoint="checkpoint-4096",
+                    run_card=run_card,
+                    wait=True,
+                    poll_seconds=0.01,
+                    timeout_seconds=0.01,
+                    dry_run=False,
+                    no_compare=True,
+                    runner=lambda _: None,
+                )
+            stored = json.loads(run_card.read_text(encoding="utf-8"))
+
+        self.assertEqual(stored["row_type"], "hf_checkpoint_generation_control")
+        self.assertEqual(stored["status"], "waiting_for_checkpoint")
+        self.assertIn("model.safetensors", stored["checkpoint_wait"]["missing"][0])
 
     def test_package_checkpoint_generation_control_uses_model_profile_defaults(
         self,
@@ -2299,6 +2327,7 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
         command = planned["sweeps"][0]["command"]
         curve_command = planned["curve"]["command"]
         pythia_command = pythia_planned["sweeps"][0]["command"]
+        self.assertEqual(planned["row_type"], "hf_checkpoint_generation_control")
         self.assertEqual(planned["tokenizer_name"], "sshleifer/tiny-gpt2")
         self.assertEqual(planned["model_profile"]["profile_id"], "tiny-gpt2-ci")
         self.assertIn("profile=tiny-gpt2-ci", planned["model_profile_lines"][0])
