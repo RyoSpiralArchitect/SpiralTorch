@@ -3298,6 +3298,7 @@ dependencies = [
  "pyo3",
  "pyo3-build-config",
  "pyo3-ffi",
+ "serde",
  "serde_json",
  "spiral-hpo",
  "spiral-opt",

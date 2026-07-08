@@ -80,6 +80,7 @@ spiral-hpo = { path = "../../crates/spiral-hpo" }
 ndarray = { version = "0.15", default-features = false, features = ["std"] }
 num-complex = { version = "0.4" }
 spiral-safety = { path = "../../crates/spiral-safety" }
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tracing = "0.1"
 nalgebra = { version = "0.32", default-features = false, features = ["std"] }

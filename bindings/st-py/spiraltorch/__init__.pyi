@@ -4352,6 +4352,47 @@ def fft_complex32(
 
 def fft_real(signal: Sequence[float], inverse: bool = ...) -> List[Tuple[float, float]]: ...
 
+def drl_default_thresholds() -> Dict[str, Dict[str, float]]: ...
+
+def drl_analyse_word(
+    word: Mapping[str, Any],
+    thresholds: Mapping[str, Mapping[str, float]] | None = ...,
+    *,
+    hazard_cut: float | None = ...,
+    min_radius: float = ...,
+    direction_queries: Mapping[str, Sequence[Mapping[str, Any]]] | None = ...,
+) -> Dict[str, Any]: ...
+
+def drl_analyze_word(
+    word: Mapping[str, Any],
+    thresholds: Mapping[str, Mapping[str, float]] | None = ...,
+    *,
+    hazard_cut: float | None = ...,
+    min_radius: float = ...,
+    direction_queries: Mapping[str, Sequence[Mapping[str, Any]]] | None = ...,
+) -> Dict[str, Any]: ...
+
+def drl_existence_load(word: Mapping[str, Any]) -> float: ...
+
+def drl_safe_radii(
+    word: Mapping[str, Any],
+    thresholds: Mapping[str, Mapping[str, float]] | None = ...,
+) -> Dict[str, float]: ...
+
+def drl_frame_hazard(
+    word: Mapping[str, Any],
+    frame: str | Mapping[str, Any],
+) -> float: ...
+
+def drl_trainer_penalty(metrics: Mapping[str, Any], min_radius: float = ...) -> float: ...
+
+def drl_aggregate_penalty(
+    metrics: Sequence[Mapping[str, Any]],
+    min_radius: float = ...,
+) -> float: ...
+
+def drl_frame_summary(metrics: Mapping[str, Any]) -> Dict[str, float]: ...
+
 def mean_squared_error(predictions: Tensor, targets: Tensor) -> float: ...
 
 def info_nce(
@@ -8151,6 +8192,50 @@ spiral_rl: ModuleType
 
 rec: ModuleType
 
+class _SafetyModule(ModuleType):
+    def drl_default_thresholds() -> Dict[str, Dict[str, float]]: ...
+
+    def drl_analyse_word(
+        word: Mapping[str, Any],
+        thresholds: Mapping[str, Mapping[str, float]] | None = ...,
+        *,
+        hazard_cut: float | None = ...,
+        min_radius: float = ...,
+        direction_queries: Mapping[str, Sequence[Mapping[str, Any]]] | None = ...,
+    ) -> Dict[str, Any]: ...
+
+    def drl_analyze_word(
+        word: Mapping[str, Any],
+        thresholds: Mapping[str, Mapping[str, float]] | None = ...,
+        *,
+        hazard_cut: float | None = ...,
+        min_radius: float = ...,
+        direction_queries: Mapping[str, Sequence[Mapping[str, Any]]] | None = ...,
+    ) -> Dict[str, Any]: ...
+
+    def drl_existence_load(word: Mapping[str, Any]) -> float: ...
+
+    def drl_safe_radii(
+        word: Mapping[str, Any],
+        thresholds: Mapping[str, Mapping[str, float]] | None = ...,
+    ) -> Dict[str, float]: ...
+
+    def drl_frame_hazard(
+        word: Mapping[str, Any],
+        frame: str | Mapping[str, Any],
+    ) -> float: ...
+
+    def drl_trainer_penalty(metrics: Mapping[str, Any], min_radius: float = ...) -> float: ...
+
+    def drl_aggregate_penalty(
+        metrics: Sequence[Mapping[str, Any]],
+        min_radius: float = ...,
+    ) -> float: ...
+
+    def drl_frame_summary(metrics: Mapping[str, Any]) -> Dict[str, float]: ...
+
+safety: _SafetyModule
+
 class _TelemetryModule(ModuleType):
     DashboardMetric: type[DashboardMetric]
     DashboardEvent: type[DashboardEvent]
@@ -9438,6 +9523,7 @@ __all__ = [
     "robotics",
     "spiral_rl",
     "rec",
+    "safety",
     "telemetry",
     "ecosystem",
     "selfsup",
@@ -9471,6 +9557,15 @@ __all__ = [
     "fft_radix4",
     "fft_complex32",
     "fft_real",
+    "drl_default_thresholds",
+    "drl_analyse_word",
+    "drl_analyze_word",
+    "drl_existence_load",
+    "drl_safe_radii",
+    "drl_frame_hazard",
+    "drl_trainer_penalty",
+    "drl_aggregate_penalty",
+    "drl_frame_summary",
     "zspace_eval",
     "zspace_snapshot",
     "softlogic_feedback",

@@ -83,6 +83,10 @@ PY
   `fft_real`, `fft_complex32`, `fft_radix2`, and `fft_radix4` from
   `st-frac::fft` for lightweight spectrum checks during WASM, telemetry, and
   local-HF inference experiments.
+- `spiraltorch.safety` for Rust-backed Drift-Response Linguistics metrics,
+  including `drl_analyse_word`, `drl_trainer_penalty`, and frame summaries that
+  can be injected into FT telemetry, prompt/runtime drift reports, or API-model
+  routing traces.
 - `TensorBiome` to cultivate open-topos rewrites, weight shoots, stack the
   harvest, and guard tensors that can be re-imported into Z-space.
 - Unified planning helpers (`plan`, `plan_topk`, `describe_device`,
@@ -101,13 +105,15 @@ PY
 
 ### Rust-to-Python exposure queue
 
-The next native surfaces to lift are intentionally ordered by immediate
-experiment value:
+The native exposure queue is intentionally ordered by immediate experiment
+value:
 
 1. `st-frac::fft` spectrum helpers, now exposed as `st.frac.fft_real`,
    `st.frac.fft_complex32`, `st.frac.fft_radix2`, and `st.frac.fft_radix4`.
-2. `spiral-safety::drift_response` DRL metrics for FT telemetry penalties,
-   prompt/runtime drift reports, and safety-aware training traces.
+2. `spiral-safety::drift_response` DRL metrics, now exposed as
+   `st.safety.drl_analyse_word`, `st.safety.drl_trainer_penalty`, and related
+   summary helpers for FT telemetry penalties, prompt/runtime drift reports, and
+   safety-aware training traces.
 3. `st-kv` JSON/choice persistence so Python experiments can reuse the same
    Redis-backed rank/choice stores as Rust workers.
 4. `st-backend-wgpu` kernel descriptor/report helpers for WGPU-first runtime

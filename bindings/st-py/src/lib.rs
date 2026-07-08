@@ -30,6 +30,7 @@ mod qr;
 mod rec;
 #[cfg(feature = "robotics")]
 mod robotics;
+mod safety;
 mod scale_stack;
 mod selfsup;
 mod sot;
@@ -277,6 +278,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
     nn::register(py, m)?;
     spiral_rl::register(py, m)?;
     rec::register(py, m)?;
+    safety::register(py, m)?;
     telemetry::register(py, m)?;
     plugin::register(py, m)?;
     ops::register_module(py, m)?;
@@ -361,6 +363,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
         "linalg",
         "spiral_rl",
         "rec",
+        "safety",
         "telemetry",
         "plugin",
         "ops",
@@ -398,6 +401,15 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
         "fft_radix4",
         "fft_complex32",
         "fft_real",
+        "drl_default_thresholds",
+        "drl_analyse_word",
+        "drl_analyze_word",
+        "drl_existence_load",
+        "drl_safe_radii",
+        "drl_frame_hazard",
+        "drl_trainer_penalty",
+        "drl_aggregate_penalty",
+        "drl_frame_summary",
         "zspace_eval",
         "zspace_snapshot",
         "softlogic_feedback",

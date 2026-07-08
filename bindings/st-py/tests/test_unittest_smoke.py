@@ -1490,6 +1490,80 @@ class SpiralTorchSmokeTest(unittest.TestCase):
         self.assertEqual(len(vals2), 1)
         self.assertEqual(len(derivs2), 1)
 
+    def test_drl_safety_metrics_smoke(self) -> None:
+        word = {
+            "name": "AI",
+            "definition_entropy": 0.72,
+            "timing_signal": 1.4,
+            "base_lambda": 1.0,
+            "beta": 1.0,
+            "frames": {
+                "Normative": {
+                    "phi": 0.65,
+                    "c": 0.9,
+                    "S": 0.8,
+                    "a_den": -0.05,
+                    "a_con": 0.2,
+                    "b_den": 0.4,
+                    "b_con": 0.8,
+                    "kappa": 0.35,
+                    "timing_scale": 1.0,
+                    "directional_axes": {
+                        "definition_break": {
+                            "value_components": [-0.2],
+                            "risk_components": [0.9],
+                            "kappa_components": [0.6],
+                            "value_curvature_components": [0.1],
+                            "risk_curvature_components": [0.5],
+                            "kappa_slope_components": [0.05],
+                        }
+                    },
+                }
+            },
+        }
+        queries = {
+            "Normative": [
+                {"axis": "definition_break", "weights": [1.0], "label": "break"}
+            ]
+        }
+
+        thresholds = st.safety.drl_default_thresholds()
+        self.assertIn("Normative", thresholds)
+        metrics = st.safety.drl_analyse_word(word, direction_queries=queries)
+        alias_metrics = st.drl_analyze_word(word)
+        self.assertEqual(metrics["word"]["name"], "AI")
+        self.assertIn("Normative", metrics["frame_hazards"])
+        self.assertIn("Normative", metrics["safe_radii"])
+        self.assertIn("break", metrics["direction_signatures"]["Normative"])
+        self.assertAlmostEqual(
+            st.drl_existence_load(word),
+            metrics["existence_load"],
+            delta=1e-6,
+        )
+        self.assertAlmostEqual(
+            st.drl_frame_hazard(word, "Normative"),
+            metrics["frame_hazards"]["Normative"],
+            delta=1e-6,
+        )
+        self.assertEqual(
+            st.drl_safe_radii(word)["Normative"],
+            metrics["safe_radii"]["Normative"],
+        )
+        penalty = st.safety.drl_trainer_penalty(metrics)
+        self.assertGreater(penalty, 0.0)
+        self.assertAlmostEqual(
+            st.drl_aggregate_penalty([metrics, metrics]),
+            2.0 * penalty,
+            delta=1e-6,
+        )
+        summary = st.safety.drl_frame_summary(metrics)
+        self.assertGreater(summary["Normative"], 0.0)
+        self.assertAlmostEqual(
+            alias_metrics["existence_load"],
+            metrics["existence_load"],
+            delta=1e-6,
+        )
+
     def test_state_dict_io(self) -> None:
         model = st.nn.Linear("l1", 2, 1)
         with _temp_dir("tmp_state") as tmp:

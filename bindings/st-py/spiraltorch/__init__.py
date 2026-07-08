@@ -252,6 +252,7 @@ _PREDECLARED_SUBMODULES: list[tuple[str, str]] = [
     ("robotics", "Robotics & Z-space dynamics"),
     ("spiral_rl", "Reinforcement learning components"),
     ("rec", "Reconstruction / signal processing"),
+    ("safety", "Safety and drift-response linguistics helpers"),
     ("telemetry", "Telemetry / dashboards / metrics"),
     ("plugin", "Plugin/event observability"),
     ("ecosystem", "Integrations & ecosystem glue"),
@@ -6280,6 +6281,20 @@ _mirror_into_module(
     reexport=False,
 )
 _mirror_into_module(
+    "safety",
+    {
+        "drl_default_thresholds": ("safety.drl_default_thresholds",),
+        "drl_analyse_word": ("safety.drl_analyse_word",),
+        "drl_analyze_word": ("safety.drl_analyze_word",),
+        "drl_existence_load": ("safety.drl_existence_load",),
+        "drl_safe_radii": ("safety.drl_safe_radii",),
+        "drl_frame_hazard": ("safety.drl_frame_hazard",),
+        "drl_trainer_penalty": ("safety.drl_trainer_penalty",),
+        "drl_aggregate_penalty": ("safety.drl_aggregate_penalty",),
+        "drl_frame_summary": ("safety.drl_frame_summary",),
+    },
+)
+_mirror_into_module(
     "spiral_rl",
     {
         "stAgent": ("PyDqnAgent", "DqnAgent", "StAgent"),
@@ -7761,6 +7776,9 @@ _CORE_EXPORTS = [
     "ZMetrics","SliceProfile","step_many","stream_zspace_training",
     "info_nce","masked_mse","mean_squared_error",
     "fft_radix2","fft_radix4","fft_complex32","fft_real",
+    "drl_default_thresholds","drl_analyse_word","drl_analyze_word",
+    "drl_existence_load","drl_safe_radii","drl_frame_hazard",
+    "drl_trainer_penalty","drl_aggregate_penalty","drl_frame_summary",
     "init_backend","mps_probe","probe_gpu_path",
 ]
 for _name in _CORE_EXPORTS:
