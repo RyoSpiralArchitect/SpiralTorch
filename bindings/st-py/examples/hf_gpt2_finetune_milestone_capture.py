@@ -12,6 +12,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+import spiraltorch as st
+
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -173,19 +175,12 @@ def capture_once(
             return result
     snapshot = json.loads(args.out.read_text(encoding="utf-8"))
     result.update(
-        {
-            "status": snapshot.get("milestone_status"),
-            "milestone_ready": snapshot.get("milestone_ready"),
-            "milestone_step": snapshot.get("milestone_step"),
-            "milestone_steps_until": snapshot.get("milestone_steps_until"),
-            "milestone_eval_loss": snapshot.get("milestone_eval_loss"),
-            "milestone_checkpoint_ready": snapshot.get(
-                "milestone_checkpoint_ready"
-            ),
-            "process_status": snapshot.get("process_status"),
-            "log_latest_step": snapshot.get("log_latest_step"),
-            "commands": command_results,
-        }
+        st.hf_gpt2_finetune_milestone_capture_report(
+            snapshot,
+            milestone_step=args.milestone_step,
+            label=args.label or f"milestone-{args.milestone_step}",
+            commands=command_results,
+        )
     )
     return result
 
@@ -202,17 +197,7 @@ def _write_state(args: argparse.Namespace, state: dict[str, Any]) -> None:
 
 
 def state_line(state: dict[str, Any]) -> str:
-    return (
-        "hf_gpt2_ft_milestone_capture "
-        f"status={state.get('status')} "
-        f"milestone_ready={state.get('milestone_ready')} "
-        f"milestone_step={state.get('milestone_step')} "
-        f"steps_until={state.get('milestone_steps_until')} "
-        f"eval_loss={state.get('milestone_eval_loss')} "
-        f"checkpoint_ready={state.get('milestone_checkpoint_ready')} "
-        f"process={state.get('process_status')} "
-        f"log_step={state.get('log_latest_step')}"
-    )
+    return st.hf_gpt2_finetune_milestone_capture_lines(state)[0]
 
 
 def main(argv: list[str] | None = None) -> int:

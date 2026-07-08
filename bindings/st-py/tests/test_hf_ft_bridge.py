@@ -6086,6 +6086,22 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("name=eval", lines[2])
         self.assertIn("rows=1", lines[2])
         self.assertIn("hf_gpt2_ft_monitor_wait_launch", lines[-1])
+        capture = st.hf_gpt2_finetune_milestone_capture_report(
+            snapshot,
+            iteration=1,
+            commands=[{"returncode": 0}],
+        )
+        capture_lines = st.hf_gpt2_finetune_milestone_capture_lines(capture)
+
+        self.assertEqual(capture["row_type"], "hf_gpt2_finetune_milestone_capture")
+        self.assertEqual(capture["status"], "waiting_for_step")
+        self.assertFalse(capture["milestone_ready"])
+        self.assertEqual(capture["milestone_step"], 6144)
+        self.assertEqual(capture["iteration"], 1)
+        self.assertEqual(capture["commands"][0]["returncode"], 0)
+        self.assertEqual(capture["next_action"], "keep_watching")
+        self.assertTrue(capture["should_continue_watch"])
+        self.assertIn("next_action=keep_watching", capture_lines[0])
 
         ready_direct = {
             **base_status,
@@ -6123,6 +6139,9 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertTrue(ready_snapshot["milestone_eval_ready"])
         self.assertTrue(ready_snapshot["milestone_checkpoint_ready"])
         self.assertEqual(ready_snapshot["milestone_eval_loss"], 3.2)
+        ready_capture = st.hf_gpt2_finetune_milestone_capture_report(ready_snapshot)
+        self.assertEqual(ready_capture["next_action"], "handoff")
+        self.assertFalse(ready_capture["should_continue_watch"])
 
     def test_package_milestone_report_tracks_run_status_readiness(self) -> None:
         waiting_status = {
@@ -6473,12 +6492,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(state["process_status"], "alive")
         self.assertEqual(state["log_latest_step"], 6016)
         self.assertEqual(exit_code, 0)
+        self.assertEqual(state["row_type"], "hf_gpt2_finetune_milestone_capture")
         self.assertEqual(state_written["status"], "waiting_for_step")
         self.assertEqual(history_rows[-1]["iteration"], 1)
         self.assertIn("--max-steps", run_status_command)
         self.assertIn("--run-status-history-jsonl", monitor_command)
         self.assertIn("--milestone-step", monitor_command)
-        self.assertIn("milestone_ready=False", module.state_line(state))
+        self.assertIn("milestone_ready=false", module.state_line(state))
+        self.assertEqual(state["next_action"], "keep_watching")
 
     def test_run_card_summary_supplements_trace_telemetry_from_jsonl(self) -> None:
         card = {
@@ -6762,6 +6783,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("hf_gpt2_finetune_milestone_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_monitor_lines", st.__all__)
         self.assertIn("hf_gpt2_finetune_monitor_report", st.__all__)
+        self.assertIn("hf_gpt2_finetune_milestone_capture_lines", st.__all__)
+        self.assertIn("hf_gpt2_finetune_milestone_capture_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_preflight_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_scale_up_command", st.__all__)
         self.assertIn("hf_gpt2_finetune_scale_up_preflight_lines", st.__all__)
@@ -6825,6 +6848,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIs(
             st.hf_gpt2_finetune_monitor_report,
             st.hf_ft_status.hf_gpt2_finetune_monitor_report,
+        )
+        self.assertIs(
+            st.hf_gpt2_finetune_milestone_capture_lines,
+            st.hf_ft_status.hf_gpt2_finetune_milestone_capture_lines,
+        )
+        self.assertIs(
+            st.hf_gpt2_finetune_milestone_capture_report,
+            st.hf_ft_status.hf_gpt2_finetune_milestone_capture_report,
         )
         self.assertIs(
             st.hf_gpt2_finetune_training_telemetry_frame,

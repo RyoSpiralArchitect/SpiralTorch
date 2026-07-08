@@ -12,6 +12,8 @@ from typing import Any
 __all__ = [
     "hf_gpt2_finetune_monitor_lines",
     "hf_gpt2_finetune_monitor_report",
+    "hf_gpt2_finetune_milestone_capture_lines",
+    "hf_gpt2_finetune_milestone_capture_report",
     "hf_gpt2_finetune_status_history_lines",
     "load_hf_gpt2_finetune_status_history",
     "main",
@@ -753,6 +755,118 @@ def hf_gpt2_finetune_monitor_lines(snapshot: dict[str, Any]) -> list[str]:
             )
         )
     return lines
+
+
+def _capture_next_action(snapshot: Mapping[str, Any]) -> str:
+    if snapshot.get("milestone_ready") is True:
+        return "handoff"
+    if snapshot.get("process_status") in {None, "alive"}:
+        return "keep_watching"
+    return "inspect_run"
+
+
+def hf_gpt2_finetune_milestone_capture_report(
+    monitor_or_status: Any,
+    *,
+    milestone_step: int | None = None,
+    label: str | None = None,
+    iteration: int | None = None,
+    commands: Sequence[Mapping[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Build the small milestone capture state used by long FT handoffs."""
+
+    if (
+        isinstance(monitor_or_status, Mapping)
+        and monitor_or_status.get("row_type")
+        in {"hf_gpt2_finetune_monitor_report", "hf_gpt2_ft_monitor_snapshot"}
+    ):
+        snapshot = dict(monitor_or_status)
+    else:
+        if milestone_step is None:
+            if isinstance(monitor_or_status, Mapping):
+                milestone_step = _int_value(monitor_or_status.get("milestone_step"))
+            if milestone_step is None:
+                raise ValueError("milestone_step is required for non-monitor inputs")
+        snapshot = hf_gpt2_finetune_monitor_report(
+            direct=monitor_or_status,
+            milestone_step=milestone_step,
+            label=label,
+        )
+    if milestone_step is None:
+        milestone_step = _int_value(snapshot.get("milestone_step"))
+    label_value = label or snapshot.get("label")
+    next_action = _capture_next_action(snapshot)
+    state = {
+        "row_type": "hf_gpt2_finetune_milestone_capture",
+        "label": label_value,
+        "status": snapshot.get("milestone_status"),
+        "milestone_ready": snapshot.get("milestone_ready"),
+        "milestone_step": milestone_step,
+        "milestone_steps_until": snapshot.get("milestone_steps_until"),
+        "milestone_eval_ready": snapshot.get("milestone_eval_ready"),
+        "milestone_eval_loss": snapshot.get("milestone_eval_loss"),
+        "milestone_checkpoint_ready": snapshot.get(
+            "milestone_checkpoint_ready"
+        ),
+        "process_status": snapshot.get("process_status"),
+        "log_latest_step": snapshot.get("log_latest_step"),
+        "last_eval_loss_step": snapshot.get("last_eval_loss_step"),
+        "last_eval_loss": snapshot.get("last_eval_loss"),
+        "next_eval_step": snapshot.get("next_eval_step"),
+        "next_checkpoint_step": snapshot.get("next_checkpoint_step"),
+        "latest_checkpoint": snapshot.get("latest_checkpoint"),
+        "disk_status": snapshot.get("disk_status"),
+        "disk_free_gb": snapshot.get("disk_free_gb"),
+        "disk_margin_gb": snapshot.get("disk_margin_gb"),
+        "wait_launch_status": snapshot.get("wait_launch_status"),
+        "wait_launch_launched": snapshot.get("wait_launch_launched"),
+        "next_action": next_action,
+        "should_continue_watch": next_action == "keep_watching",
+        "monitor": snapshot,
+    }
+    if iteration is not None:
+        state["iteration"] = iteration
+    if commands is not None:
+        state["commands"] = [dict(command) for command in commands]
+    return state
+
+
+def hf_gpt2_finetune_milestone_capture_lines(
+    report_or_monitor: Mapping[str, Any],
+    *,
+    milestone_step: int | None = None,
+    label: str | None = None,
+) -> list[str]:
+    """Render compact lines from an FT milestone capture report."""
+
+    if report_or_monitor.get("row_type") == "hf_gpt2_finetune_milestone_capture":
+        state = dict(report_or_monitor)
+    else:
+        state = hf_gpt2_finetune_milestone_capture_report(
+            report_or_monitor,
+            milestone_step=milestone_step,
+            label=label,
+        )
+    return [
+        (
+            "hf_gpt2_ft_milestone_capture "
+            f"label={_number_text(state.get('label'))} "
+            f"status={_number_text(state.get('status'))} "
+            f"milestone_ready={_number_text(state.get('milestone_ready'))} "
+            f"milestone_step={_number_text(state.get('milestone_step'))} "
+            f"steps_until={_number_text(state.get('milestone_steps_until'))} "
+            f"eval_ready={_number_text(state.get('milestone_eval_ready'))} "
+            f"eval_loss={_number_text(state.get('milestone_eval_loss'))} "
+            f"checkpoint_ready={_number_text(state.get('milestone_checkpoint_ready'))} "
+            f"process={_number_text(state.get('process_status'))} "
+            f"log_step={_number_text(state.get('log_latest_step'))} "
+            f"last_eval_step={_number_text(state.get('last_eval_loss_step'))} "
+            f"next_eval_step={_number_text(state.get('next_eval_step'))} "
+            f"next_checkpoint_step={_number_text(state.get('next_checkpoint_step'))} "
+            f"disk_status={_number_text(state.get('disk_status'))} "
+            f"next_action={_number_text(state.get('next_action'))}"
+        )
+    ]
 
 
 def summarize_hf_gpt2_finetune_status_history(
