@@ -1760,6 +1760,34 @@ class SpiralTorchSmokeTest(unittest.TestCase):
         self.assertIn("Normalize", standard.operations())
         self.assertFalse(standard.has_gpu_dispatcher())
 
+        dataset = st.TensorVisionDataset("CIFAR10")
+        dataset.push(roundtrip, target=st.Tensor(1, 2, [1.0, 0.0]), label="left")
+        dataset.push(roundtrip, target=st.Tensor(1, 2, [0.0, 1.0]), label="right")
+        self.assertEqual(len(dataset), 2)
+        self.assertEqual(dataset.descriptor()["name"], "CIFAR10")
+        self.assertEqual(dataset.get(0).label, "left")
+
+        loader = dataset.dataloader(2, seed=5, pipeline=pipeline)
+        batch = loader.next_batch()
+        self.assertIsNotNone(batch)
+        self.assertEqual(batch.labels(), ["left", "right"])
+        self.assertEqual(batch.stack().shape(), (2, 4))
+        self.assertIsNone(loader.next_batch())
+        loader.reset()
+        self.assertIsNotNone(loader.next_batch())
+
+        model = st.vision_create_classification_model(
+            "mobilenet_v3_small",
+            3,
+            seed=11,
+        )
+        metadata = model.metadata()
+        self.assertEqual(metadata["name"], "mobilenet_v3_small")
+        self.assertEqual(metadata["num_classes"], 3)
+        logits = model.forward([st.ImageTensor.zeros(3, 224, 224)])
+        self.assertEqual(logits.shape(), (1, 3))
+        self.assertIn("VisionModel", st.__all__)
+
     def test_state_dict_io(self) -> None:
         model = st.nn.Linear("l1", 2, 1)
         with _temp_dir("tmp_state") as tmp:

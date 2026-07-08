@@ -4649,6 +4649,75 @@ class TransformPipeline:
     def apply_inplace(self, image: ImageTensor) -> None: ...
     def audit(self) -> Dict[str, object]: ...
 
+class VisionSample:
+    def __init__(
+        self,
+        image: ImageTensor,
+        *,
+        target: Tensor | None = ...,
+        label: str | None = ...,
+        boxes: Sequence[Tuple[float, float, float, float]] | None = ...,
+        masks: Sequence[ImageTensor] | None = ...,
+    ) -> None: ...
+    @property
+    def image(self) -> ImageTensor: ...
+    @property
+    def target(self) -> Tensor | None: ...
+    @property
+    def label(self) -> str | None: ...
+    @property
+    def boxes(self) -> List[Tuple[float, float, float, float]] | None: ...
+    @property
+    def masks(self) -> List[ImageTensor] | None: ...
+    def to_dict(self) -> Dict[str, object]: ...
+
+class TensorVisionDataset:
+    def __init__(self, descriptor: str = ...) -> None: ...
+    def descriptor(self) -> Dict[str, object]: ...
+    def push_sample(self, sample: VisionSample) -> None: ...
+    def push(
+        self,
+        image: ImageTensor,
+        *,
+        target: Tensor | None = ...,
+        label: str | None = ...,
+        boxes: Sequence[Tuple[float, float, float, float]] | None = ...,
+        masks: Sequence[ImageTensor] | None = ...,
+    ) -> None: ...
+    def get(self, index: int) -> VisionSample: ...
+    def __len__(self) -> int: ...
+    def len(self) -> int: ...
+    def is_empty(self) -> bool: ...
+    def dataloader(
+        self,
+        batch_size: int,
+        *,
+        seed: int | None = ...,
+        pipeline: TransformPipeline | None = ...,
+        shuffle: bool = ...,
+    ) -> VisionDataLoader: ...
+
+class VisionBatch:
+    def __len__(self) -> int: ...
+    def len(self) -> int: ...
+    def is_empty(self) -> bool: ...
+    def images(self) -> List[ImageTensor]: ...
+    def targets(self) -> List[Tensor | None]: ...
+    def labels(self) -> List[str | None]: ...
+    def boxes(self) -> List[List[Tuple[float, float, float, float]] | None]: ...
+    def stack(self) -> Tensor: ...
+    def to_dict(self) -> Dict[str, object]: ...
+
+class VisionDataLoader:
+    def reset(self) -> None: ...
+    def enable_shuffle(self, shuffle: bool) -> None: ...
+    def next_batch(self) -> VisionBatch | None: ...
+
+class VisionModel:
+    def metadata(self) -> Dict[str, object]: ...
+    def forward(self, images: Sequence[ImageTensor]) -> Tensor: ...
+    def extract_features(self, stage: str, image: ImageTensor) -> Tensor: ...
+
 class CanvasTransformer:
     def __init__(self, width: int, height: int, *, smoothing: float = ...) -> None: ...
     @property
@@ -5062,6 +5131,13 @@ def vision_standard_classification_pipeline(
     *,
     seed: int | None = ...,
 ) -> TransformPipeline: ...
+
+def vision_create_classification_model(
+    kind: str,
+    num_classes: int = ...,
+    *,
+    seed: int | None = ...,
+) -> VisionModel: ...
 
 def zrelativity_heatmap(
     model: ZRelativityModel,
@@ -8873,6 +8949,11 @@ zspace: _ZSpaceModule
 class _VisionModule(ModuleType):
     ImageTensor: type[ImageTensor]
     TransformPipeline: type[TransformPipeline]
+    VisionSample: type[VisionSample]
+    TensorVisionDataset: type[TensorVisionDataset]
+    VisionBatch: type[VisionBatch]
+    VisionDataLoader: type[VisionDataLoader]
+    VisionModel: type[VisionModel]
     ChronoSnapshot: type[ChronoSnapshot]
     ZSpaceStreamFrame: type[ZSpaceStreamFrame]
     StreamedVolume: type[StreamedVolume]
@@ -8899,6 +8980,14 @@ class _VisionModule(ModuleType):
         *,
         seed: int | None = ...,
     ) -> TransformPipeline: ...
+
+    def vision_create_classification_model(
+        self,
+        kind: str,
+        num_classes: int = ...,
+        *,
+        seed: int | None = ...,
+    ) -> VisionModel: ...
 
     def vision_online_step(
         self,
@@ -9810,12 +9899,18 @@ __all__ = [
     "stream_zspace_training",
     "ImageTensor",
     "TransformPipeline",
+    "VisionSample",
+    "TensorVisionDataset",
+    "VisionBatch",
+    "VisionDataLoader",
+    "VisionModel",
     "vision_dataset_catalog",
     "vision_dataset_descriptor",
     "vision_model_catalog",
     "vision_model_descriptor",
     "vision_transform_audit_catalog",
     "vision_standard_classification_pipeline",
+    "vision_create_classification_model",
     "vision_online_step",
     "stream_vision_training",
     "ZConv",

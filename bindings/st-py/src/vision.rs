@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
@@ -15,11 +16,13 @@ use st_tensor::wasm_canvas::{
 };
 use st_tensor::{Tensor, TensorError};
 use st_vision::{
-    dataset_catalog, find_dataset_descriptor, find_model_descriptor, model_catalog,
-    standard_classification_pipeline, CenterCrop, ChronoSnapshot as PureChronoSnapshot,
-    ColorJitter, ImageTensor as PureImageTensor, Normalize, RandomHorizontalFlip, Resize,
-    StreamedVolume as PureStreamedVolume, TransformOperation,
-    TransformPipeline as PureTransformPipeline, VisionTask, ZSliceProfile as PureZSliceProfile,
+    create_classification_model, dataset_catalog, find_dataset_descriptor, find_model_descriptor,
+    model_catalog, standard_classification_pipeline, CenterCrop,
+    ChronoSnapshot as PureChronoSnapshot, ColorJitter, DataLoader as PureVisionDataLoader,
+    DatasetSample, FeatureStage, ImageTensor as PureImageTensor, ModelKind, ModelMetadata,
+    Normalize, RandomHorizontalFlip, Resize, StreamedVolume as PureStreamedVolume,
+    TensorVisionDataset, TransformOperation, TransformPipeline as PureTransformPipeline,
+    VisionBatch, VisionDataset, VisionModel, VisionTask, ZSliceProfile as PureZSliceProfile,
     ZSpaceStreamFrame as PureZSpaceStreamFrame,
     ZSpaceStreamFrameAggregator as PureZSpaceStreamFrameAggregator,
     ZSpaceTelemetryReport as PureZSpaceTelemetryReport,
@@ -247,6 +250,49 @@ fn model_descriptor_to_dict(
     dict.set_item("default_image_size", descriptor.default_image_size)?;
     dict.set_item("has_pretrained", descriptor.has_pretrained)?;
     Ok(dict.into())
+}
+
+fn model_metadata_to_dict(py: Python<'_>, metadata: &ModelMetadata) -> PyResult<Py<PyDict>> {
+    let dict = PyDict::new(py);
+    dict.set_item("name", metadata.name)?;
+    dict.set_item("kind", format!("{:?}", metadata.kind))?;
+    dict.set_item("task", vision_task_name(metadata.task))?;
+    dict.set_item("input_channels", metadata.input_channels)?;
+    dict.set_item("image_size", metadata.image_size)?;
+    dict.set_item("num_classes", metadata.num_classes)?;
+    dict.set_item("has_pretrained", metadata.has_pretrained)?;
+    Ok(dict.into())
+}
+
+fn parse_model_kind(name: &str) -> PyResult<ModelKind> {
+    find_model_descriptor(name)
+        .map(|descriptor| descriptor.kind)
+        .ok_or_else(|| PyValueError::new_err(format!("unknown vision model '{name}'")))
+}
+
+fn parse_feature_stage(stage: &str) -> PyResult<FeatureStage> {
+    match stage.to_ascii_lowercase().as_str() {
+        "stem" => Ok(FeatureStage::Stem),
+        "head" | "features" | "feature" => Ok(FeatureStage::Head),
+        "logits" | "logit" => Ok(FeatureStage::Logits),
+        other => Err(PyValueError::new_err(format!(
+            "unknown feature stage '{other}' (expected stem, head, or logits)"
+        ))),
+    }
+}
+
+fn box_tuples_to_arrays(boxes: Vec<(f32, f32, f32, f32)>) -> Vec<[f32; 4]> {
+    boxes
+        .into_iter()
+        .map(|(x0, y0, x1, y1)| [x0, y0, x1, y1])
+        .collect()
+}
+
+fn box_arrays_to_tuples(boxes: &[[f32; 4]]) -> Vec<(f32, f32, f32, f32)> {
+    boxes
+        .iter()
+        .map(|bbox| (bbox[0], bbox[1], bbox[2], bbox[3]))
+        .collect()
 }
 
 fn transform_audit_entry_to_dict(
@@ -513,6 +559,353 @@ impl PyTransformPipeline {
 
     fn __repr__(&self) -> String {
         format!("TransformPipeline(operations={:?})", self.operations())
+    }
+}
+
+#[pyclass(module = "spiraltorch.vision", name = "VisionSample")]
+#[derive(Clone)]
+pub(crate) struct PyVisionSample {
+    inner: DatasetSample,
+}
+
+impl PyVisionSample {
+    fn from_inner(inner: DatasetSample) -> Self {
+        Self { inner }
+    }
+}
+
+#[pymethods]
+impl PyVisionSample {
+    #[new]
+    #[pyo3(signature = (image, *, target=None, label=None, boxes=None, masks=None))]
+    fn new(
+        image: &PyImageTensor,
+        target: Option<&PyTensor>,
+        label: Option<String>,
+        boxes: Option<Vec<(f32, f32, f32, f32)>>,
+        masks: Option<Vec<PyImageTensor>>,
+    ) -> Self {
+        let mut inner = DatasetSample::new(image.inner.clone());
+        if let Some(target) = target {
+            inner = inner.with_target(target.inner.clone());
+        }
+        if let Some(label) = label {
+            inner = inner.with_label(label);
+        }
+        if let Some(boxes) = boxes {
+            inner = inner.with_boxes(box_tuples_to_arrays(boxes));
+        }
+        if let Some(masks) = masks {
+            inner = inner.with_masks(masks.into_iter().map(|mask| mask.inner).collect());
+        }
+        Self { inner }
+    }
+
+    #[getter]
+    fn image(&self) -> PyImageTensor {
+        PyImageTensor::from_inner(self.inner.image.clone())
+    }
+
+    #[getter]
+    fn target(&self) -> Option<PyTensor> {
+        self.inner
+            .target
+            .as_ref()
+            .cloned()
+            .map(PyTensor::from_tensor)
+    }
+
+    #[getter]
+    fn label(&self) -> Option<&str> {
+        self.inner.label.as_deref()
+    }
+
+    #[getter]
+    fn boxes(&self) -> Option<Vec<(f32, f32, f32, f32)>> {
+        self.inner.boxes.as_deref().map(box_arrays_to_tuples)
+    }
+
+    #[getter]
+    fn masks(&self) -> Option<Vec<PyImageTensor>> {
+        self.inner.masks.as_ref().map(|masks| {
+            masks
+                .iter()
+                .cloned()
+                .map(PyImageTensor::from_inner)
+                .collect()
+        })
+    }
+
+    fn to_dict(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
+        let dict = PyDict::new(py);
+        dict.set_item("image", self.image().to_dict(py)?)?;
+        dict.set_item("target", self.inner.target.as_ref().map(tensor_to_rows))?;
+        dict.set_item("label", self.inner.label.clone())?;
+        dict.set_item("boxes", self.boxes())?;
+        dict.set_item(
+            "masks",
+            self.masks()
+                .map(|masks| {
+                    masks
+                        .into_iter()
+                        .map(|mask| mask.to_dict(py))
+                        .collect::<PyResult<Vec<_>>>()
+                })
+                .transpose()?,
+        )?;
+        Ok(dict.into())
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "VisionSample(image_shape={:?}, label={:?})",
+            self.inner.image.shape(),
+            self.inner.label
+        )
+    }
+}
+
+#[pyclass(module = "spiraltorch.vision", name = "TensorVisionDataset")]
+#[derive(Clone)]
+pub(crate) struct PyTensorVisionDataset {
+    inner: TensorVisionDataset,
+}
+
+#[pymethods]
+impl PyTensorVisionDataset {
+    #[new]
+    #[pyo3(signature = (descriptor="CIFAR10"))]
+    fn new(descriptor: &str) -> PyResult<Self> {
+        let descriptor = find_dataset_descriptor(descriptor)
+            .cloned()
+            .ok_or_else(|| {
+                PyValueError::new_err(format!("unknown vision dataset '{descriptor}'"))
+            })?;
+        Ok(Self {
+            inner: TensorVisionDataset::new(descriptor),
+        })
+    }
+
+    fn descriptor(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
+        dataset_descriptor_to_dict(py, self.inner.descriptor())
+    }
+
+    fn push_sample(&mut self, sample: &PyVisionSample) -> PyResult<()> {
+        self.inner
+            .push_sample(sample.inner.clone())
+            .map_err(tensor_err_to_py)
+    }
+
+    #[pyo3(signature = (image, *, target=None, label=None, boxes=None, masks=None))]
+    fn push(
+        &mut self,
+        image: &PyImageTensor,
+        target: Option<&PyTensor>,
+        label: Option<String>,
+        boxes: Option<Vec<(f32, f32, f32, f32)>>,
+        masks: Option<Vec<PyImageTensor>>,
+    ) -> PyResult<()> {
+        let sample = PyVisionSample::new(image, target, label, boxes, masks);
+        self.push_sample(&sample)
+    }
+
+    fn get(&self, index: usize) -> PyResult<PyVisionSample> {
+        self.inner
+            .get(index)
+            .map(PyVisionSample::from_inner)
+            .map_err(tensor_err_to_py)
+    }
+
+    fn __len__(&self) -> usize {
+        self.inner.len()
+    }
+
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    #[pyo3(signature = (batch_size, *, seed=None, pipeline=None, shuffle=false))]
+    fn dataloader(
+        &self,
+        batch_size: usize,
+        seed: Option<u64>,
+        pipeline: Option<&PyTransformPipeline>,
+        shuffle: bool,
+    ) -> PyResult<PyVisionDataLoader> {
+        let dataset = Arc::new(self.inner.clone());
+        let mut inner =
+            PureVisionDataLoader::new(dataset, batch_size, seed).map_err(tensor_err_to_py)?;
+        if let Some(pipeline) = pipeline {
+            inner = inner.with_pipeline(pipeline.inner.clone());
+        }
+        inner.enable_shuffle(shuffle);
+        Ok(PyVisionDataLoader { inner })
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "TensorVisionDataset(name={}, len={})",
+            self.inner.descriptor().name,
+            self.inner.len()
+        )
+    }
+}
+
+#[pyclass(module = "spiraltorch.vision", name = "VisionBatch")]
+#[derive(Clone)]
+pub(crate) struct PyVisionBatch {
+    inner: VisionBatch,
+}
+
+impl PyVisionBatch {
+    fn from_inner(inner: VisionBatch) -> Self {
+        Self { inner }
+    }
+}
+
+#[pymethods]
+impl PyVisionBatch {
+    fn __len__(&self) -> usize {
+        self.inner.len()
+    }
+
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    fn images(&self) -> Vec<PyImageTensor> {
+        self.inner
+            .images
+            .iter()
+            .cloned()
+            .map(PyImageTensor::from_inner)
+            .collect()
+    }
+
+    fn targets(&self) -> Vec<Option<PyTensor>> {
+        self.inner
+            .targets
+            .iter()
+            .map(|target| target.as_ref().cloned().map(PyTensor::from_tensor))
+            .collect()
+    }
+
+    fn labels(&self) -> Vec<Option<String>> {
+        self.inner.labels.clone()
+    }
+
+    fn boxes(&self) -> Vec<Option<Vec<(f32, f32, f32, f32)>>> {
+        self.inner
+            .boxes
+            .iter()
+            .map(|boxes| boxes.as_deref().map(box_arrays_to_tuples))
+            .collect()
+    }
+
+    fn stack(&self) -> PyResult<PyTensor> {
+        self.inner
+            .stack()
+            .map(PyTensor::from_tensor)
+            .map_err(tensor_err_to_py)
+    }
+
+    fn to_dict(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
+        let dict = PyDict::new(py);
+        dict.set_item("len", self.inner.len())?;
+        dict.set_item("labels", self.labels())?;
+        dict.set_item("boxes", self.boxes())?;
+        dict.set_item(
+            "image_shapes",
+            self.inner
+                .images
+                .iter()
+                .map(PureImageTensor::shape)
+                .collect::<Vec<_>>(),
+        )?;
+        Ok(dict.into())
+    }
+
+    fn __repr__(&self) -> String {
+        format!("VisionBatch(len={})", self.inner.len())
+    }
+}
+
+#[pyclass(module = "spiraltorch.vision", name = "VisionDataLoader", unsendable)]
+pub(crate) struct PyVisionDataLoader {
+    inner: PureVisionDataLoader<TensorVisionDataset>,
+}
+
+#[pymethods]
+impl PyVisionDataLoader {
+    fn reset(&mut self) {
+        self.inner.reset();
+    }
+
+    fn enable_shuffle(&mut self, shuffle: bool) {
+        self.inner.enable_shuffle(shuffle);
+    }
+
+    fn next_batch(&mut self) -> PyResult<Option<PyVisionBatch>> {
+        self.inner
+            .next_batch()
+            .map(|batch| batch.map(PyVisionBatch::from_inner))
+            .map_err(tensor_err_to_py)
+    }
+
+    fn __repr__(&self) -> String {
+        "VisionDataLoader(...)".to_string()
+    }
+}
+
+#[pyclass(module = "spiraltorch.vision", name = "VisionModel")]
+#[derive(Clone)]
+pub(crate) struct PyVisionModel {
+    inner: Arc<dyn VisionModel>,
+}
+
+impl PyVisionModel {
+    fn from_inner(inner: Arc<dyn VisionModel>) -> Self {
+        Self { inner }
+    }
+}
+
+#[pymethods]
+impl PyVisionModel {
+    fn metadata(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
+        model_metadata_to_dict(py, self.inner.metadata())
+    }
+
+    fn forward(&self, images: Vec<PyImageTensor>) -> PyResult<PyTensor> {
+        let images: Vec<_> = images.into_iter().map(|image| image.inner).collect();
+        self.inner
+            .forward(&images)
+            .map(PyTensor::from_tensor)
+            .map_err(tensor_err_to_py)
+    }
+
+    #[pyo3(signature = (stage, image))]
+    fn extract_features(&self, stage: &str, image: &PyImageTensor) -> PyResult<PyTensor> {
+        let stage = parse_feature_stage(stage)?;
+        self.inner
+            .extract_features(stage, &image.inner)
+            .map(PyTensor::from_tensor)
+            .map_err(tensor_err_to_py)
+    }
+
+    fn __repr__(&self) -> String {
+        let metadata = self.inner.metadata();
+        format!(
+            "VisionModel(name={}, num_classes={})",
+            metadata.name, metadata.num_classes
+        )
     }
 }
 
@@ -2104,6 +2497,18 @@ fn vision_standard_classification_pipeline(
 }
 
 #[pyfunction]
+#[pyo3(signature = (kind, num_classes=10, *, seed=None))]
+fn vision_create_classification_model(
+    kind: &str,
+    num_classes: usize,
+    seed: Option<u64>,
+) -> PyResult<PyVisionModel> {
+    let kind = parse_model_kind(kind)?;
+    let model = create_classification_model(kind, num_classes, seed).map_err(tensor_err_to_py)?;
+    Ok(PyVisionModel::from_inner(model))
+}
+
+#[pyfunction]
 #[pyo3(signature = (model, field="block"))]
 pub fn zrelativity_heatmap(model: &PyZRelativityModel, field: &str) -> PyResult<Vec<Vec<f32>>> {
     let bundle = model.inner.tensor_bundle().map_err(tensor_err_to_py)?;
@@ -2130,6 +2535,11 @@ pub fn zrelativity_heatmap(model: &PyZRelativityModel, field: &str) -> PyResult<
 pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     parent.add_class::<PyImageTensor>()?;
     parent.add_class::<PyTransformPipeline>()?;
+    parent.add_class::<PyVisionSample>()?;
+    parent.add_class::<PyTensorVisionDataset>()?;
+    parent.add_class::<PyVisionBatch>()?;
+    parent.add_class::<PyVisionDataLoader>()?;
+    parent.add_class::<PyVisionModel>()?;
     parent.add_class::<PyChronoSnapshot>()?;
     parent.add_class::<PyZSpaceStreamFrame>()?;
     parent.add_class::<PyStreamedVolume>()?;
@@ -2149,6 +2559,10 @@ pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()>
     parent.add_function(wrap_pyfunction!(vision_transform_audit_catalog, parent)?)?;
     parent.add_function(wrap_pyfunction!(
         vision_standard_classification_pipeline,
+        parent
+    )?)?;
+    parent.add_function(wrap_pyfunction!(
+        vision_create_classification_model,
         parent
     )?)?;
     parent.add_function(wrap_pyfunction!(zrelativity_heatmap, parent)?)?;

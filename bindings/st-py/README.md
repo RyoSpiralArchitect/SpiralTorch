@@ -96,9 +96,10 @@ PY
 - `spiraltorch.wgpu` for GPU-free WGPU kernel catalog and selection reports,
   including `wgpu_kernel_catalog`, `wgpu_kernel_report_from_rank_plan`, and
   softmax/rank-k dispatch descriptors for runtime trace cards.
-- `spiraltorch.vision` for Rust-backed `ImageTensor` and `TransformPipeline`
-  preprocessing, static dataset/model catalogs, and transform GPU-coverage
-  audit reports that can be reused by FT, WASM, and runtime probe scripts.
+- `spiraltorch.vision` for Rust-backed `ImageTensor`, `TransformPipeline`,
+  in-memory vision datasets/dataloaders, lightweight classification models,
+  static dataset/model catalogs, and transform GPU-coverage audit reports that
+  can be reused by FT, WASM, and runtime probe scripts.
 - `TensorBiome` to cultivate open-topos rewrites, weight shoots, stack the
   harvest, and guard tensors that can be re-imported into Z-space.
 - Unified planning helpers (`plan`, `plan_topk`, `describe_device`,
@@ -134,9 +135,10 @@ value:
    `st.wgpu_kernel_catalog`, `st.wgpu_kernel_report_from_rank_plan`, and
    `st.wgpu_softmax_kernel_report` for WGPU-first runtime selection without
    requiring direct Rust inspection or a live GPU device.
-5. `st-vision` image preprocessing and catalog helpers, now exposed as
-   `st.ImageTensor`, `st.TransformPipeline`, `st.vision_dataset_catalog`,
-   `st.vision_model_catalog`, and `st.vision_transform_audit_catalog` for
+5. `st-vision` image preprocessing, dataset, dataloader, and lightweight model
+   helpers, now exposed as `st.ImageTensor`, `st.TransformPipeline`,
+   `st.TensorVisionDataset`, `st.VisionDataLoader`,
+   `st.vision_create_classification_model`, and catalog/audit helpers for
    FT/WASM/runtime probes without dropping into Rust.
 6. `st-text::semantics` token helpers, now exposed as `st.token_scale_stack`
    and `st.token_coherence_levels` so local-HF embeddings can be inspected with
@@ -280,6 +282,10 @@ value:
   `vision.TransformPipeline`: resize, center-crop, deterministic horizontal
   flip, normalize, audit GPU transform coverage, and inspect canonical
   dataset/model catalogs from Python.
+- Vision mini-pipelines via `vision.TensorVisionDataset`,
+  `vision.VisionDataLoader`, and `vision.VisionModel`: build small in-memory
+  batches, apply Rust transforms during loading, stack image batches, and run
+  lightweight classification forward/feature extraction from Python.
 - Online stream-loop helpers `vision.vision_online_step(...)` and
   `vision.stream_vision_training(...)` to wire frame streams into
   `SpiralTorchVision` + `ZSpaceTrainer` loops directly from Python.
