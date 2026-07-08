@@ -7623,6 +7623,68 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(peft_report["runtime_import_preset"], "hf-peft")
         self.assertTrue(peft_report["require_runtime_import_preset"])
 
+    def test_generic_hf_finetune_model_profile_launch_plan_builds_commands(
+        self,
+    ) -> None:
+        plan = st.hf_finetune_model_profile_launch_plan(
+            MODEL_CONFIGS_PATH,
+            profile="qwen2-0.5b-local-smoke",
+            mode="inference",
+            output_dir=Path("runs/qwen2-plan"),
+            zspace_probe=True,
+            extra_args=["--generation-prompt", "SpiralTorch is"],
+        )
+        lines = st.hf_finetune_model_profile_launch_plan_lines(plan)
+        embedded_plan = st.hf_finetune_model_profile_launch_plan(
+            {
+                "schema": "spiraltorch.hf_finetune_model_configs.v1",
+                "profiles": [
+                    {
+                        "id": "embedded-causal",
+                        "model_name": "org/embedded-causal",
+                        "training": {"block_size": 72},
+                    }
+                ],
+            },
+            profile="embedded-causal",
+            train=True,
+        )
+
+        self.assertEqual(plan["row_type"], "hf_finetune_model_profile_launch_plan")
+        self.assertEqual(plan["profile_id"], "qwen2-0.5b-local-smoke")
+        self.assertEqual(plan["command_source"], "profile_reference")
+        self.assertTrue(plan["profile_reference_available"])
+        self.assertEqual(plan["mode"], "inference")
+        self.assertTrue(plan["launch_metadata_only"])
+        self.assertFalse(plan["launch_train"])
+        self.assertIn("--model-configs", plan["command"])
+        self.assertIn(str(MODEL_CONFIGS_PATH), plan["command"])
+        self.assertIn("--model-profile", plan["command"])
+        self.assertIn("qwen2-0.5b-local-smoke", plan["command"])
+        self.assertIn("--metadata-only", plan["command"])
+        self.assertIn("--output-dir", plan["command"])
+        self.assertIn("runs/qwen2-plan", plan["command"])
+        self.assertIn("--zspace-probe", plan["command"])
+        self.assertIn("--generation-prompt", plan["command"])
+        self.assertIn("SpiralTorch is", plan["command"])
+        self.assertIn("--model-name", plan["expanded_command"])
+        self.assertIn("Qwen/Qwen2-0.5B", plan["expanded_command"])
+        self.assertTrue(lines[0].startswith("hf_ft_model_profile_launch_plan "))
+        self.assertTrue(
+            any(
+                line.startswith("hf_ft_model_profile_expanded_command ")
+                for line in lines
+            )
+        )
+        self.assertEqual(embedded_plan["command_source"], "expanded_profile")
+        self.assertFalse(embedded_plan["profile_reference_available"])
+        self.assertTrue(embedded_plan["launch_train"])
+        self.assertFalse(embedded_plan["launch_metadata_only"])
+        self.assertIn("--train", embedded_plan["command"])
+        self.assertIn("--model-name", embedded_plan["command"])
+        self.assertIn("org/embedded-causal", embedded_plan["command"])
+        self.assertNotIn("--model-profile", embedded_plan["command"])
+
     def test_bridge_model_profile_defaults_and_explicit_overrides(self) -> None:
         module = load_bridge_example()
         args = module.parse_args(
@@ -7926,6 +7988,60 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(preflight_payload["mode"], "inference")
         self.assertEqual(preflight_payload["runtime_import_preset"], "hf-runtime")
         self.assertIn("sshleifer/tiny-gpt2", preflight_payload["profile_cli_args"])
+
+        launch_stdout = io.StringIO()
+        with redirect_stdout(launch_stdout):
+            launch_code = hf_cli.profile_main(
+                [
+                    "--model-configs",
+                    str(MODEL_CONFIGS_PATH),
+                    "--model-profile",
+                    "tiny-gpt2-ci",
+                    "--launch-plan",
+                    "--mode",
+                    "inference",
+                    "--output-dir",
+                    "runs/tiny-plan",
+                    "--zspace-probe",
+                ]
+            )
+        launch_lines = launch_stdout.getvalue().splitlines()
+        self.assertEqual(launch_code, 0)
+        self.assertTrue(
+            launch_lines[0].startswith("hf_ft_model_profile_launch_plan ")
+        )
+        self.assertTrue(
+            any(
+                line.startswith("hf_ft_model_profile_launch_command ")
+                for line in launch_lines
+            )
+        )
+
+        launch_json_stdout = io.StringIO()
+        with redirect_stdout(launch_json_stdout):
+            launch_json_code = hf_cli.profile_main(
+                [
+                    "--model-configs",
+                    str(MODEL_CONFIGS_PATH),
+                    "--model-profile",
+                    "tiny-gpt2-ci",
+                    "--launch-plan",
+                    "--mode",
+                    "inference",
+                    "--json",
+                ]
+            )
+        launch_payload = json.loads(launch_json_stdout.getvalue())
+        self.assertEqual(launch_json_code, 0)
+        self.assertEqual(
+            launch_payload["row_type"],
+            "hf_finetune_model_profile_launch_plan",
+        )
+        self.assertEqual(launch_payload["profile_id"], "tiny-gpt2-ci")
+        self.assertEqual(launch_payload["command_source"], "profile_reference")
+        self.assertIn("--model-profile", launch_payload["command"])
+        self.assertIn("tiny-gpt2-ci", launch_payload["command"])
+        self.assertIn("sshleifer/tiny-gpt2", launch_payload["expanded_command"])
 
     def test_installed_hf_finetune_sweep_cli_reaches_generic_wrapper(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -8782,7 +8898,11 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             "hf_finetune_model_profiles",
             "resolve_hf_finetune_model_profile",
             "hf_finetune_model_profile_cli_args",
+            "hf_finetune_model_profile_launch_plan",
+            "hf_finetune_model_profile_launch_plan_lines",
             "hf_finetune_model_profile_lines",
+            "hf_finetune_model_profile_preflight_lines",
+            "hf_finetune_model_profile_preflight_report",
         ]
         for name in profile_exports:
             self.assertIn(name, st.__all__)
@@ -8977,6 +9097,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("hf_gpt2_finetune_trainer_trace_callback", st.__all__)
         self.assertIn("hf_finetune_model_profile_catalog", st.__all__)
         self.assertIn("hf_finetune_model_profile_catalog_lines", st.__all__)
+        self.assertIn("hf_finetune_model_profile_launch_plan", st.__all__)
+        self.assertIn("hf_finetune_model_profile_launch_plan_lines", st.__all__)
         self.assertIn("hf_finetune_model_profile_preflight_lines", st.__all__)
         self.assertIn("hf_finetune_model_profile_preflight_report", st.__all__)
         self.assertIn("compare_hf_gpt2_finetune_run_cards", st.__all__)
@@ -9012,6 +9134,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIs(
             st.hf_finetune_model_profile_catalog_lines,
             hf_ft.hf_finetune_model_profile_catalog_lines,
+        )
+        self.assertIs(
+            st.hf_finetune_model_profile_launch_plan,
+            hf_ft.hf_finetune_model_profile_launch_plan,
+        )
+        self.assertIs(
+            st.hf_finetune_model_profile_launch_plan_lines,
+            hf_ft.hf_finetune_model_profile_launch_plan_lines,
         )
         self.assertIs(
             st.hf_finetune_model_profile_preflight_lines,

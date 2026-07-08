@@ -54,6 +54,8 @@ __all__ = [
     "hf_finetune_model_profile_catalog",
     "hf_finetune_model_profile_catalog_lines",
     "hf_finetune_model_profile_cli_args",
+    "hf_finetune_model_profile_launch_plan",
+    "hf_finetune_model_profile_launch_plan_lines",
     "hf_finetune_model_profile_lines",
     "hf_finetune_model_profile_preflight_lines",
     "hf_finetune_model_profile_preflight_report",
@@ -910,6 +912,233 @@ def hf_finetune_model_profile_preflight_lines(
     display = report.get("profile_cli_args_display")
     if display:
         lines.append(f"hf_ft_model_profile_cli_args {display}")
+    return lines
+
+
+def _command_tokens(value: object) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, (str, Path)):
+        return shlex.split(str(value)) if isinstance(value, str) else [str(value)]
+    if isinstance(value, Iterable):
+        return [str(item) for item in value if str(item)]
+    return [str(value)]
+
+
+def _append_launch_value_flag(
+    args: list[str],
+    flag: str,
+    value: object,
+) -> None:
+    if value is not None:
+        args.extend([flag, str(value)])
+
+
+def _hf_finetune_model_profile_launch_flags(
+    *,
+    train: bool,
+    metadata_only: bool | None,
+    output_dir: str | Path | None,
+    run_card: str | Path | None,
+    trainer_trace_jsonl: str | Path | None,
+    zspace_probe: bool,
+    corpus_scan: bool,
+    extra_args: object,
+) -> list[str]:
+    args: list[str] = []
+    if train:
+        args.append("--train")
+    elif metadata_only is not False:
+        args.append("--metadata-only")
+    _append_launch_value_flag(args, "--output-dir", output_dir)
+    _append_launch_value_flag(args, "--run-card", run_card)
+    _append_launch_value_flag(args, "--trainer-trace-jsonl", trainer_trace_jsonl)
+    if zspace_probe:
+        args.append("--zspace-probe")
+    if corpus_scan:
+        args.append("--corpus-scan")
+    args.extend(_command_tokens(extra_args))
+    return args
+
+
+def hf_finetune_model_profile_launch_plan(
+    config: Mapping[str, object] | str | Path | None = None,
+    *,
+    profile: str | None = None,
+    mode: str = "finetune",
+    require: bool = False,
+    command: object = "spiral-hf-finetune",
+    train: bool = False,
+    metadata_only: bool | None = None,
+    output_dir: str | Path | None = None,
+    run_card: str | Path | None = None,
+    trainer_trace_jsonl: str | Path | None = None,
+    zspace_probe: bool = False,
+    corpus_scan: bool = False,
+    extra_args: object = None,
+    runtime_device_backends: object = None,
+    required_runtime_device_backends: object = None,
+    required_runtime_device_ready_backends: object = None,
+) -> dict[str, object]:
+    """Build a launchable generic HF FT command plan for one model profile."""
+
+    if train and metadata_only:
+        raise ValueError("train and metadata_only cannot both be true")
+    resolved = resolve_hf_finetune_model_profile(config, profile=profile)
+    preflight = hf_finetune_model_profile_preflight_report(
+        config,
+        profile=str(resolved["profile_id"]),
+        mode=mode,
+        require=require,
+        runtime_device_backends=runtime_device_backends,
+        required_runtime_device_backends=required_runtime_device_backends,
+        required_runtime_device_ready_backends=required_runtime_device_ready_backends,
+    )
+    base_command = _command_tokens(command) or ["spiral-hf-finetune"]
+    launch_flags = _hf_finetune_model_profile_launch_flags(
+        train=bool(train),
+        metadata_only=metadata_only,
+        output_dir=output_dir,
+        run_card=run_card,
+        trainer_trace_jsonl=trainer_trace_jsonl,
+        zspace_probe=bool(zspace_probe),
+        corpus_scan=bool(corpus_scan),
+        extra_args=extra_args,
+    )
+    profile_cli_args = hf_finetune_model_profile_cli_args(resolved)
+    expanded_command = [*base_command, *profile_cli_args, *launch_flags]
+    source_path = _string_or_none(resolved.get("source_path"))
+    profile_reference_available = bool(source_path) or config is None
+    profile_reference_args: list[str] = []
+    if profile_reference_available:
+        if source_path:
+            profile_reference_args.extend(["--model-configs", source_path])
+        profile_reference_args.extend(["--model-profile", str(resolved["profile_id"])])
+    profile_reference_command = (
+        [*base_command, *profile_reference_args, *launch_flags]
+        if profile_reference_available
+        else None
+    )
+    selected_command = profile_reference_command or expanded_command
+    preflight_passed = bool(preflight.get("runtime_import_preflight_passed"))
+    status = (
+        "blocked"
+        if not preflight_passed
+        else str(preflight.get("status") or "ready")
+    )
+    return {
+        "row_type": "hf_finetune_model_profile_launch_plan",
+        "status": status,
+        "mode": str(mode),
+        "profile_id": resolved.get("profile_id"),
+        "model_name": resolved.get("model_name"),
+        "tokenizer_name": resolved.get("tokenizer_name"),
+        "architecture": resolved.get("architecture"),
+        "command_source": "profile_reference"
+        if profile_reference_command is not None
+        else "expanded_profile",
+        "command": selected_command,
+        "command_display": shlex.join(selected_command),
+        "profile_reference_available": profile_reference_available,
+        "profile_reference_command": profile_reference_command,
+        "profile_reference_command_display": shlex.join(profile_reference_command)
+        if profile_reference_command is not None
+        else None,
+        "expanded_command": expanded_command,
+        "expanded_command_display": shlex.join(expanded_command),
+        "base_command": base_command,
+        "launch_flags": launch_flags,
+        "launch_train": bool(train),
+        "launch_metadata_only": False if train else metadata_only is not False,
+        "output_dir": str(output_dir) if output_dir is not None else None,
+        "run_card": str(run_card) if run_card is not None else None,
+        "trainer_trace_jsonl": str(trainer_trace_jsonl)
+        if trainer_trace_jsonl is not None
+        else None,
+        "zspace_probe": bool(zspace_probe),
+        "corpus_scan": bool(corpus_scan),
+        "model_profile": resolved,
+        "model_profile_lines": hf_finetune_model_profile_lines(resolved),
+        "profile_cli_args": profile_cli_args,
+        "profile_cli_args_display": shlex.join(profile_cli_args),
+        "preflight": preflight,
+        "preflight_lines": hf_finetune_model_profile_preflight_lines(preflight),
+        "runtime_import_preflight_passed": preflight_passed,
+        "runtime_import_preflight_failures": preflight.get(
+            "runtime_import_preflight_failures"
+        ),
+    }
+
+
+def hf_finetune_model_profile_launch_plan_lines(
+    plan_or_config: Mapping[str, object] | str | Path | None = None,
+    *,
+    profile: str | None = None,
+    mode: str = "finetune",
+    require: bool = False,
+    command: object = "spiral-hf-finetune",
+    train: bool = False,
+    metadata_only: bool | None = None,
+    output_dir: str | Path | None = None,
+    run_card: str | Path | None = None,
+    trainer_trace_jsonl: str | Path | None = None,
+    zspace_probe: bool = False,
+    corpus_scan: bool = False,
+    extra_args: object = None,
+    runtime_device_backends: object = None,
+    required_runtime_device_backends: object = None,
+    required_runtime_device_ready_backends: object = None,
+) -> list[str]:
+    """Render compact audit lines for a model-profile launch plan."""
+
+    plan = (
+        dict(plan_or_config)
+        if isinstance(plan_or_config, Mapping)
+        and plan_or_config.get("row_type") == "hf_finetune_model_profile_launch_plan"
+        else hf_finetune_model_profile_launch_plan(
+            plan_or_config,
+            profile=profile,
+            mode=mode,
+            require=require,
+            command=command,
+            train=train,
+            metadata_only=metadata_only,
+            output_dir=output_dir,
+            run_card=run_card,
+            trainer_trace_jsonl=trainer_trace_jsonl,
+            zspace_probe=zspace_probe,
+            corpus_scan=corpus_scan,
+            extra_args=extra_args,
+            runtime_device_backends=runtime_device_backends,
+            required_runtime_device_backends=required_runtime_device_backends,
+            required_runtime_device_ready_backends=required_runtime_device_ready_backends,
+        )
+    )
+    lines = [
+        (
+            "hf_ft_model_profile_launch_plan "
+            f"status={plan.get('status')} "
+            f"profile={plan.get('profile_id')} "
+            f"mode={plan.get('mode')} "
+            f"source={plan.get('command_source')} "
+            f"train={plan.get('launch_train')} "
+            f"metadata_only={plan.get('launch_metadata_only')} "
+            f"preflight_passed={plan.get('runtime_import_preflight_passed')}"
+        ),
+        f"hf_ft_model_profile_launch_command {plan.get('command_display')}",
+    ]
+    reference_display = plan.get("profile_reference_command_display")
+    if reference_display and reference_display != plan.get("command_display"):
+        lines.append(f"hf_ft_model_profile_reference_command {reference_display}")
+    expanded_display = plan.get("expanded_command_display")
+    if expanded_display and expanded_display != plan.get("command_display"):
+        lines.append(f"hf_ft_model_profile_expanded_command {expanded_display}")
+    preflight_lines = plan.get("preflight_lines")
+    if isinstance(preflight_lines, Sequence) and not isinstance(
+        preflight_lines,
+        (str, bytes),
+    ):
+        lines.extend(str(line) for line in preflight_lines)
     return lines
 
 

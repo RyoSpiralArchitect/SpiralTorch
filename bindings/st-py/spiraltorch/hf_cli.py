@@ -14,6 +14,8 @@ from .hf_ft import (
     hf_finetune_model_profile_catalog,
     hf_finetune_model_profile_catalog_lines,
     hf_finetune_model_profile_cli_args,
+    hf_finetune_model_profile_launch_plan,
+    hf_finetune_model_profile_launch_plan_lines,
     hf_finetune_model_profile_lines,
     hf_finetune_model_profile_preflight_lines,
     hf_finetune_model_profile_preflight_report,
@@ -86,6 +88,11 @@ def profile_main(argv: Sequence[str] | None = None) -> int:
         help="Resolve the profile and run import/device preflight for a mode.",
     )
     parser.add_argument(
+        "--launch-plan",
+        action="store_true",
+        help="Build a launchable generic HF fine-tune command plan.",
+    )
+    parser.add_argument(
         "--mode",
         choices=(
             "runtime",
@@ -116,6 +123,19 @@ def profile_main(argv: Sequence[str] | None = None) -> int:
         default=[],
     )
     parser.add_argument("--require-wgpu-ready", action="store_true")
+    parser.add_argument(
+        "--command",
+        default="spiral-hf-finetune",
+        help="Base command used with --launch-plan.",
+    )
+    parser.add_argument("--train", action="store_true")
+    parser.add_argument("--metadata-only", action="store_true")
+    parser.add_argument("--output-dir", type=Path, default=None)
+    parser.add_argument("--run-card", type=Path, default=None)
+    parser.add_argument("--trainer-trace-jsonl", type=Path, default=None)
+    parser.add_argument("--zspace-probe", action="store_true")
+    parser.add_argument("--corpus-scan", action="store_true")
+    parser.add_argument("--extra-arg", action="append", default=[])
     parser.add_argument("--json", action="store_true")
     parser.add_argument(
         "--cli-args",
@@ -128,10 +148,13 @@ def profile_main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--no-generation", action="store_true")
     parser.add_argument("--no-runtime", action="store_true")
     args = parser.parse_args(argv)
-    if args.list and args.preflight:
-        parser.error("--list and --preflight are mutually exclusive")
-    if args.cli_args and args.preflight:
-        parser.error("--cli-args and --preflight are mutually exclusive")
+    exclusive_modes = [args.list, args.preflight, args.launch_plan, args.cli_args]
+    if sum(1 for enabled in exclusive_modes if enabled) > 1:
+        parser.error(
+            "--list, --preflight, --launch-plan, and --cli-args are mutually exclusive"
+        )
+    if args.train and args.metadata_only:
+        parser.error("--train and --metadata-only are mutually exclusive")
     if args.list:
         catalog = hf_finetune_model_profile_catalog(args.model_configs)
         if args.json:
@@ -159,6 +182,34 @@ def profile_main(argv: Sequence[str] | None = None) -> int:
         for line in hf_finetune_model_profile_preflight_lines(report):
             print(line)
         return 0 if report["runtime_import_preflight_passed"] else 1
+    if args.launch_plan:
+        required_ready_backends = list(args.require_runtime_device_ready_backend)
+        if args.require_wgpu_ready and "wgpu" not in required_ready_backends:
+            required_ready_backends.append("wgpu")
+        plan = hf_finetune_model_profile_launch_plan(
+            args.model_configs,
+            profile=args.model_profile,
+            mode=args.mode,
+            require=args.require,
+            command=args.command,
+            train=args.train,
+            metadata_only=True if args.metadata_only else None,
+            output_dir=args.output_dir,
+            run_card=args.run_card,
+            trainer_trace_jsonl=args.trainer_trace_jsonl,
+            zspace_probe=args.zspace_probe,
+            corpus_scan=args.corpus_scan,
+            extra_args=args.extra_arg,
+            runtime_device_backends=args.runtime_device_backend,
+            required_runtime_device_backends=args.require_runtime_device_backend,
+            required_runtime_device_ready_backends=required_ready_backends,
+        )
+        if args.json:
+            print(json.dumps(plan, ensure_ascii=False, indent=2, sort_keys=True))
+            return 0 if plan["runtime_import_preflight_passed"] else 1
+        for line in hf_finetune_model_profile_launch_plan_lines(plan):
+            print(line)
+        return 0 if plan["runtime_import_preflight_passed"] else 1
     profile = resolve_hf_finetune_model_profile(
         args.model_configs,
         profile=args.model_profile,
