@@ -579,9 +579,12 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
             "profile=qwen2-0.5b-local-smoke",
             profile_runtime["model_profile_lines"][0],
         )
-        self.assertIn("Qwen/Qwen2-0.5B", profile_args)
-        self.assertIn("model.layers.0", profile_args)
-        self.assertNotIn("--model-profile", profile_args)
+        self.assertIn("--model-configs", profile_args)
+        self.assertIn(str(MODEL_CONFIGS_PATH), profile_args)
+        self.assertIn("--model-profile", profile_args)
+        self.assertIn("qwen2-0.5b-local-smoke", profile_args)
+        self.assertNotIn("Qwen/Qwen2-0.5B", profile_args)
+        self.assertNotIn("model.layers.0", profile_args)
         self.assertEqual(
             overridden_profile_runtime["local_model"],
             "models/local-causal-lm",
@@ -595,6 +598,19 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
             overridden_profile_runtime["activation_name_contains"],
             ["custom.block"],
         )
+        overridden_profile_args = zspace_inference_distortion_runtime_cli_args(
+            overridden_profile_runtime,
+        )
+        self.assertIn("--model-profile", overridden_profile_args)
+        self.assertIn("pythia-70m-local-smoke", overridden_profile_args)
+        self.assertIn("--local-model", overridden_profile_args)
+        self.assertIn("models/local-causal-lm", overridden_profile_args)
+        self.assertIn("--tokenizer-name", overridden_profile_args)
+        self.assertIn("models/local-tokenizer", overridden_profile_args)
+        self.assertIn("--max-new-tokens", overridden_profile_args)
+        self.assertIn("7", overridden_profile_args)
+        self.assertIn("--activation-name-contains", overridden_profile_args)
+        self.assertIn("custom.block", overridden_profile_args)
 
     def test_inference_distortion_probe_accepts_model_profile_defaults(self) -> None:
         module = load_distortion_probe_example()

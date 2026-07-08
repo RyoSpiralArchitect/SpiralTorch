@@ -3143,20 +3143,58 @@ def zspace_inference_distortion_runtime_cli_args(
     if not runtime:
         return ["--resume-existing"] if sweep else []
     args: list[str] = []
-    if runtime.get("local_model"):
+    profile = runtime.get("model_profile")
+    profile = profile if isinstance(profile, Mapping) else {}
+    generation_profile = _mapping_item(profile, "generation")
+    runtime_profile = _mapping_item(profile, "runtime")
+    profile_id = profile.get("profile_id")
+    model_configs = runtime.get("model_configs")
+    use_profile_ref = model_configs is not None and profile_id is not None
+    if use_profile_ref:
+        args.extend(["--model-configs", _cli_value(model_configs)])
+        args.extend(["--model-profile", _cli_value(profile_id)])
+
+    profile_local_model = profile.get("model_name")
+    profile_tokenizer_name = profile.get("tokenizer_name")
+    profile_max_new_tokens = generation_profile.get("max_new_tokens", 48)
+    profile_activation_modules = _text_sequence(
+        runtime_profile.get("activation_module_name")
+    )
+    profile_activation_contains = _text_sequence(
+        runtime_profile.get("activation_name_contains")
+    )
+
+    if runtime.get("local_model") and (
+        not use_profile_ref
+        or _cli_value(runtime["local_model"]) != _cli_value(profile_local_model)
+    ):
         args.extend(["--local-model", _cli_value(runtime["local_model"])])
-    if runtime.get("tokenizer_name"):
+    if runtime.get("tokenizer_name") and (
+        not use_profile_ref
+        or _cli_value(runtime["tokenizer_name"]) != _cli_value(profile_tokenizer_name)
+    ):
         args.extend(["--tokenizer-name", _cli_value(runtime["tokenizer_name"])])
-    if runtime.get("allow_remote"):
+    if runtime.get("allow_remote") and (
+        not use_profile_ref or runtime_profile.get("allow_remote") is not True
+    ):
         args.append("--allow-remote")
-    if runtime.get("trust_remote_code"):
+    if runtime.get("trust_remote_code") and (
+        not use_profile_ref or runtime_profile.get("trust_remote_code") is not True
+    ):
         args.append("--trust-remote-code")
-    if runtime.get("max_new_tokens") is not None:
+    if runtime.get("max_new_tokens") is not None and (
+        not use_profile_ref
+        or _cli_value(runtime["max_new_tokens"]) != _cli_value(profile_max_new_tokens)
+    ):
         args.extend(["--max-new-tokens", _cli_value(runtime["max_new_tokens"])])
-    for name in _text_sequence(runtime.get("activation_module_name")):
-        args.extend(["--activation-module-name", name])
-    for needle in _text_sequence(runtime.get("activation_name_contains")):
-        args.extend(["--activation-name-contains", needle])
+    activation_modules = _text_sequence(runtime.get("activation_module_name"))
+    if not use_profile_ref or activation_modules != profile_activation_modules:
+        for name in activation_modules:
+            args.extend(["--activation-module-name", name])
+    activation_contains = _text_sequence(runtime.get("activation_name_contains"))
+    if not use_profile_ref or activation_contains != profile_activation_contains:
+        for needle in activation_contains:
+            args.extend(["--activation-name-contains", needle])
     if runtime.get("api_provider"):
         args.extend(["--api-provider", _cli_value(runtime["api_provider"])])
     if runtime.get("api_model"):
