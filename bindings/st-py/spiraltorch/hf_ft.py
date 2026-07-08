@@ -56,6 +56,7 @@ __all__ = [
     "hf_finetune_model_profile_cli_args",
     "hf_finetune_model_profile_launch_plan",
     "hf_finetune_model_profile_launch_plan_lines",
+    "hf_finetune_model_profile_launch_script",
     "hf_finetune_model_profile_lines",
     "hf_finetune_model_profile_preflight_lines",
     "hf_finetune_model_profile_preflight_report",
@@ -113,6 +114,7 @@ __all__ = [
     "summarize_hf_gpt2_finetune_sweep_report_lines",
     "summarize_hf_gpt2_finetune_trainer_trace",
     "write_hf_finetune_model_profile_launch_plan",
+    "write_hf_finetune_model_profile_launch_script",
     "write_hf_finetune_run_card",
     "write_hf_finetune_trainer_trace_event",
     "write_hf_gpt2_finetune_run_card",
@@ -1156,6 +1158,71 @@ def load_hf_finetune_model_profile_launch_plan(path: str | Path) -> dict[str, ob
             f"{payload.get('row_type')!r}"
         )
     return dict(payload)
+
+
+def _hf_finetune_launch_plan_payload(
+    plan_or_path: Mapping[str, object] | str | Path,
+) -> dict[str, object]:
+    if isinstance(plan_or_path, Mapping):
+        if plan_or_path.get("row_type") != "hf_finetune_model_profile_launch_plan":
+            raise ValueError(
+                "HF model profile launch plan has unexpected row_type: "
+                f"{plan_or_path.get('row_type')!r}"
+            )
+        return dict(plan_or_path)
+    return load_hf_finetune_model_profile_launch_plan(plan_or_path)
+
+
+def hf_finetune_model_profile_launch_script(
+    plan_or_path: Mapping[str, object] | str | Path,
+    *,
+    cd: str | Path | None = None,
+) -> str:
+    """Render a reproducible shell script for one model-profile launch plan."""
+
+    plan = _hf_finetune_launch_plan_payload(plan_or_path)
+    command = _command_tokens(plan.get("command"))
+    if not command:
+        raise ValueError("HF model profile launch plan is missing command")
+    lines = [
+        "#!/usr/bin/env bash",
+        "set -euo pipefail",
+        "",
+        "# SpiralTorch HF model-profile launch plan",
+        f"# profile={plan.get('profile_id')}",
+        f"# model={plan.get('model_name')}",
+        f"# mode={plan.get('mode')}",
+        f"# status={plan.get('status')}",
+        f"# preflight_passed={plan.get('runtime_import_preflight_passed')}",
+    ]
+    if cd is not None:
+        lines.extend(["", f"cd {shlex.quote(str(cd))}"])
+    lines.extend(["", "exec " + shlex.join(command)])
+    return "\n".join(lines) + "\n"
+
+
+def write_hf_finetune_model_profile_launch_script(
+    plan_or_path: Mapping[str, object] | str | Path,
+    path: str | Path,
+    *,
+    cd: str | Path | None = None,
+    executable: bool = True,
+) -> dict[str, object]:
+    """Write an executable shell script for one model-profile launch plan."""
+
+    script = hf_finetune_model_profile_launch_script(plan_or_path, cd=cd)
+    output_path = Path(path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(script, encoding="utf-8")
+    if executable:
+        output_path.chmod(output_path.stat().st_mode | 0o111)
+    return {
+        "row_type": "hf_finetune_model_profile_launch_script_write",
+        "status": "written",
+        "path": str(output_path),
+        "executable": bool(executable),
+        "script": script,
+    }
 
 
 def write_hf_finetune_model_profile_launch_plan(

@@ -21,6 +21,7 @@ from .hf_ft import (
     hf_finetune_model_profile_preflight_report,
     resolve_hf_finetune_model_profile,
     write_hf_finetune_model_profile_launch_plan,
+    write_hf_finetune_model_profile_launch_script,
 )
 from .hf_generation import (
     compare_zspace_generation_control_sweeps,
@@ -139,6 +140,8 @@ def profile_main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--extra-arg", action="append", default=[])
     parser.add_argument("--out", type=Path, default=None)
     parser.add_argument("--lines-out", type=Path, default=None)
+    parser.add_argument("--script-out", type=Path, default=None)
+    parser.add_argument("--script-cd", type=Path, default=None)
     parser.add_argument("--json", action="store_true")
     parser.add_argument(
         "--cli-args",
@@ -220,6 +223,12 @@ def profile_main(argv: Sequence[str] | None = None) -> int:
             elif args.lines_out is not None:
                 args.lines_out.parent.mkdir(parents=True, exist_ok=True)
                 args.lines_out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            if args.script_out is not None:
+                write_hf_finetune_model_profile_launch_script(
+                    plan,
+                    args.script_out,
+                    cd=args.script_cd,
+                )
             return 0 if plan["runtime_import_preflight_passed"] else 1
         if args.out is not None:
             written = write_hf_finetune_model_profile_launch_plan(
@@ -233,11 +242,39 @@ def profile_main(argv: Sequence[str] | None = None) -> int:
                     "hf_ft_model_profile_launch_plan_lines_out "
                     f"{written['lines_path']}"
                 )
+            if args.script_out is not None:
+                script_written = write_hf_finetune_model_profile_launch_script(
+                    plan,
+                    args.script_out,
+                    cd=args.script_cd,
+                )
+                print(
+                    "hf_ft_model_profile_launch_script_out "
+                    f"{script_written['path']}"
+                )
             return 0 if plan["runtime_import_preflight_passed"] else 1
         if args.lines_out is not None:
             args.lines_out.parent.mkdir(parents=True, exist_ok=True)
             args.lines_out.write_text("\n".join(lines) + "\n", encoding="utf-8")
             print(f"hf_ft_model_profile_launch_plan_lines_out {args.lines_out}")
+            if args.script_out is not None:
+                script_written = write_hf_finetune_model_profile_launch_script(
+                    plan,
+                    args.script_out,
+                    cd=args.script_cd,
+                )
+                print(
+                    "hf_ft_model_profile_launch_script_out "
+                    f"{script_written['path']}"
+                )
+            return 0 if plan["runtime_import_preflight_passed"] else 1
+        if args.script_out is not None:
+            script_written = write_hf_finetune_model_profile_launch_script(
+                plan,
+                args.script_out,
+                cd=args.script_cd,
+            )
+            print(f"hf_ft_model_profile_launch_script_out {script_written['path']}")
             return 0 if plan["runtime_import_preflight_passed"] else 1
         for line in lines:
             print(line)

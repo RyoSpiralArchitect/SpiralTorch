@@ -7684,20 +7684,44 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("--model-name", embedded_plan["command"])
         self.assertIn("org/embedded-causal", embedded_plan["command"])
         self.assertNotIn("--model-profile", embedded_plan["command"])
+        script = st.hf_finetune_model_profile_launch_script(
+            plan,
+            cd="/tmp/spiraltorch-work",
+        )
+        self.assertIn("#!/usr/bin/env bash", script)
+        self.assertIn("set -euo pipefail", script)
+        self.assertIn("# profile=qwen2-0.5b-local-smoke", script)
+        self.assertIn("cd /tmp/spiraltorch-work", script)
+        self.assertIn("exec spiral-hf-finetune", script)
+        self.assertIn("--model-profile qwen2-0.5b-local-smoke", script)
 
         with tempfile.TemporaryDirectory() as tmp:
             plan_path = Path(tmp) / "launch-plan.json"
             lines_path = Path(tmp) / "launch-plan.lines"
+            script_path = Path(tmp) / "launch-plan.sh"
             written = st.write_hf_finetune_model_profile_launch_plan(
                 plan,
                 plan_path,
                 lines_path=lines_path,
             )
             loaded = st.load_hf_finetune_model_profile_launch_plan(plan_path)
+            script_written = st.write_hf_finetune_model_profile_launch_script(
+                loaded,
+                script_path,
+                cd=Path(tmp),
+            )
+            script_exists = script_path.is_file()
+            script_executable = os.access(script_path, os.X_OK)
+            script_text = script_path.read_text(encoding="utf-8")
 
         self.assertEqual(written["status"], "written")
         self.assertEqual(written["path"], str(plan_path))
         self.assertEqual(written["lines_path"], str(lines_path))
+        self.assertEqual(script_written["status"], "written")
+        self.assertEqual(script_written["path"], str(script_path))
+        self.assertTrue(script_exists)
+        self.assertTrue(script_executable)
+        self.assertIn("exec spiral-hf-finetune", script_text)
         self.assertEqual(loaded["row_type"], "hf_finetune_model_profile_launch_plan")
         self.assertEqual(loaded["profile_id"], "qwen2-0.5b-local-smoke")
         self.assertEqual(loaded["command"], plan["command"])
@@ -8069,6 +8093,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             launch_out = Path(tmp) / "profile-launch-plan.json"
             launch_lines_out = Path(tmp) / "profile-launch-plan.lines"
+            launch_script_out = Path(tmp) / "profile-launch-plan.sh"
             launch_out_stdout = io.StringIO()
             with redirect_stdout(launch_out_stdout):
                 launch_out_code = hf_cli.profile_main(
@@ -8084,14 +8109,24 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                         str(launch_out),
                         "--lines-out",
                         str(launch_lines_out),
+                        "--script-out",
+                        str(launch_script_out),
+                        "--script-cd",
+                        str(Path(tmp) / "work"),
                     ]
                 )
             written_plan = json.loads(launch_out.read_text(encoding="utf-8"))
             written_lines = launch_lines_out.read_text(encoding="utf-8").splitlines()
+            written_script = launch_script_out.read_text(encoding="utf-8")
+            script_is_executable = os.access(launch_script_out, os.X_OK)
 
         self.assertEqual(launch_out_code, 0)
         self.assertIn(
             f"hf_ft_model_profile_launch_plan_out {launch_out}",
+            launch_out_stdout.getvalue(),
+        )
+        self.assertIn(
+            f"hf_ft_model_profile_launch_script_out {launch_script_out}",
             launch_out_stdout.getvalue(),
         )
         self.assertEqual(
@@ -8102,6 +8137,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertTrue(
             written_lines[0].startswith("hf_ft_model_profile_launch_plan ")
         )
+        self.assertTrue(script_is_executable)
+        self.assertIn("cd ", written_script)
+        self.assertIn("exec spiral-hf-finetune", written_script)
+        self.assertIn("--model-profile tiny-gpt2-ci", written_script)
 
     def test_installed_hf_finetune_sweep_cli_reaches_generic_wrapper(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -8960,11 +8999,13 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             "hf_finetune_model_profile_cli_args",
             "hf_finetune_model_profile_launch_plan",
             "hf_finetune_model_profile_launch_plan_lines",
+            "hf_finetune_model_profile_launch_script",
             "hf_finetune_model_profile_lines",
             "hf_finetune_model_profile_preflight_lines",
             "hf_finetune_model_profile_preflight_report",
             "load_hf_finetune_model_profile_launch_plan",
             "write_hf_finetune_model_profile_launch_plan",
+            "write_hf_finetune_model_profile_launch_script",
         ]
         for name in profile_exports:
             self.assertIn(name, st.__all__)
@@ -9161,6 +9202,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("hf_finetune_model_profile_catalog_lines", st.__all__)
         self.assertIn("hf_finetune_model_profile_launch_plan", st.__all__)
         self.assertIn("hf_finetune_model_profile_launch_plan_lines", st.__all__)
+        self.assertIn("hf_finetune_model_profile_launch_script", st.__all__)
         self.assertIn("hf_finetune_model_profile_preflight_lines", st.__all__)
         self.assertIn("hf_finetune_model_profile_preflight_report", st.__all__)
         self.assertIn("compare_hf_gpt2_finetune_run_cards", st.__all__)
@@ -9204,6 +9246,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIs(
             st.hf_finetune_model_profile_launch_plan_lines,
             hf_ft.hf_finetune_model_profile_launch_plan_lines,
+        )
+        self.assertIs(
+            st.hf_finetune_model_profile_launch_script,
+            hf_ft.hf_finetune_model_profile_launch_script,
         )
         self.assertIs(
             st.hf_finetune_model_profile_preflight_lines,
