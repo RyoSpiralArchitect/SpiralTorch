@@ -226,7 +226,7 @@ def _trace_summary(trace_jsonl: Path, max_steps: int | None) -> dict[str, Any]:
             "training_loss_guard_count": 0,
         }
     rows = st.load_hf_gpt2_finetune_trainer_trace(trace_jsonl)
-    summary = st.summarize_hf_gpt2_finetune_trainer_trace(rows)
+    summary = st.summarize_hf_gpt2_finetune_trainer_trace(rows, max_steps=max_steps)
     summary["trace_last_eval_loss_step"] = _last_eval_loss_step(summary)
     step = summary.get("trace_max_global_step")
     progress = None
@@ -460,6 +460,8 @@ def status_lines(status: dict[str, Any], *, tail_evals: int) -> list[str]:
             f"best_eval_loss_step={_number_text(trace.get('trace_best_eval_loss_step'))} "
             f"eval_loss_improvement={_number_text(trace.get('trace_eval_loss_improvement'))} "
             f"eval_loss_last_delta={_number_text(trace.get('trace_eval_loss_last_delta'))} "
+            f"eval_loss_last_improvement_per_step={_number_text(trace.get('trace_eval_loss_last_improvement_per_step'))} "
+            f"eval_loss_projected_final={_number_text(trace.get('trace_eval_loss_projected_final_loss'))} "
             f"eval_loss_monotonic={_number_text(trace.get('trace_eval_loss_monotonic_nonincreasing'))} "
             f"guard_count={_number_text(trace.get('training_loss_guard_count'))} "
             f"checkpoint_card={_number_text(status.get('checkpoint_card_status'))} "
