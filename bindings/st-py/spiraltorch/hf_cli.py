@@ -113,6 +113,10 @@ def finetune_sweep_main(argv: Sequence[str] | None = None) -> int:
     return _run_example("hf_finetune_sweep.py", argv)
 
 
+def finetune_scale_up_main(argv: Sequence[str] | None = None) -> int:
+    return _run_example("hf_finetune_scale_up.py", argv)
+
+
 def _path_values(values: Sequence[Path] | None) -> list[Path]:
     return [] if values is None else list(values)
 

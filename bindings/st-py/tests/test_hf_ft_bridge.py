@@ -35,6 +35,9 @@ GENERIC_SWEEP_PATH = (
 SCALE_UP_PATH = (
     Path(__file__).resolve().parents[1] / "examples" / "hf_gpt2_finetune_scale_up.py"
 )
+GENERIC_SCALE_UP_PATH = (
+    Path(__file__).resolve().parents[1] / "examples" / "hf_finetune_scale_up.py"
+)
 TRACE_SUMMARY_PATH = (
     Path(__file__).resolve().parents[1]
     / "examples"
@@ -315,6 +318,17 @@ def load_scale_up_example():
     spec = importlib.util.spec_from_file_location(
         "hf_gpt2_finetune_scale_up_test",
         SCALE_UP_PATH,
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_generic_scale_up_example():
+    spec = importlib.util.spec_from_file_location(
+        "hf_finetune_scale_up_test",
+        GENERIC_SCALE_UP_PATH,
     )
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -3304,6 +3318,103 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(run_result["run_returncode"], 0)
         self.assertIn("--max-steps 128", run_result["command_display"])
         run_mock.assert_called_once()
+
+    def test_generic_scale_up_example_preserves_generic_entrypoints(self) -> None:
+        scale_up_module = load_generic_scale_up_example()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            train_path = root / "train.txt"
+            train_path.write_text("alpha spiral\nbeta zspace\n", encoding="utf-8")
+            base_run = root / "pythia-run"
+            source_command = [
+                sys.executable,
+                str(GENERIC_EXAMPLE_PATH),
+                "--model-name",
+                "EleutherAI/pythia-70m-deduped",
+                "--train-file",
+                str(train_path),
+                "--validation-fraction",
+                "0.5",
+                "--output-dir",
+                str(base_run),
+                "--run-card",
+                str(base_run / st.HF_FINETUNE_RUN_CARD_FILENAME),
+                "--trainer-trace-jsonl",
+                str(base_run / st.HF_FINETUNE_TRAINER_TRACE_FILENAME),
+                "--max-steps",
+                "4",
+                "--max-train-samples",
+                "16",
+            ]
+            source_path = root / "source-command.json"
+            source_path.write_text(
+                json.dumps(
+                    {
+                        "row_type": "hf_finetune_command_manifest",
+                        "run_id": "pythia-seed",
+                        "command": source_command,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            out_path = root / "scale-up-command.json"
+            wait_manifest = root / "wait-launch.json"
+            args = scale_up_module.parse_args(
+                [
+                    str(source_path),
+                    "--write-command",
+                    str(out_path),
+                    "--max-steps",
+                    "8",
+                    "--max-train-samples",
+                    "32",
+                    "--wait-launch-manifest",
+                    str(wait_manifest),
+                    "--wait-launch-pid",
+                    "123",
+                ]
+            )
+            result = scale_up_module.run_scale_up(args)
+            written = json.loads(out_path.read_text(encoding="utf-8"))
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                installed_code = hf_cli.finetune_scale_up_main(
+                    [
+                        str(source_path),
+                        "--max-steps",
+                        "8",
+                        "--max-train-samples",
+                        "32",
+                    ]
+                )
+
+        self.assertEqual(args.wait_launch_script.name, "hf_finetune_wait_launch.py")
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["preflight_status"], "ready")
+        self.assertEqual(Path(result["command"][1]).name, "hf_finetune_bridge.py")
+        self.assertIn("EleutherAI/pythia-70m-deduped", result["command_display"])
+        self.assertIn("--max-steps 8", result["command_display"])
+        self.assertIn("--max-train-samples 32", result["command_display"])
+        self.assertEqual(
+            Path(result["command"][result["command"].index("--run-card") + 1]).name,
+            st.HF_FINETUNE_RUN_CARD_FILENAME,
+        )
+        self.assertEqual(
+            Path(
+                result["command"][
+                    result["command"].index("--trainer-trace-jsonl") + 1
+                ]
+            ).name,
+            st.HF_FINETUNE_TRAINER_TRACE_FILENAME,
+        )
+        self.assertIn("-scaleup", result["command_display"])
+        self.assertIn(
+            "hf_finetune_wait_launch.py",
+            result["wait_launch_command_display"],
+        )
+        self.assertEqual(written["wait_launch_command"], result["wait_launch_command"])
+        self.assertEqual(installed_code, 0)
+        self.assertIn("hf_ft_scale_up_command status=ok", stdout.getvalue())
 
     def test_sweep_example_resume_existing_reuses_successful_run_cards(self) -> None:
         module = load_sweep_example()
@@ -7938,6 +8049,13 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             ),
             "hf_finetune_inference_distortion_runtime_plan": (
                 "hf_gpt2_finetune_inference_distortion_runtime_plan"
+            ),
+            "hf_finetune_scale_up_command": "hf_gpt2_finetune_scale_up_command",
+            "hf_finetune_scale_up_preflight_lines": (
+                "hf_gpt2_finetune_scale_up_preflight_lines"
+            ),
+            "hf_finetune_scale_up_preflight_report": (
+                "hf_gpt2_finetune_scale_up_preflight_report"
             ),
             "compare_hf_finetune_run_cards": "compare_hf_gpt2_finetune_run_cards",
             "load_hf_finetune_run_card": "load_hf_gpt2_finetune_run_card",

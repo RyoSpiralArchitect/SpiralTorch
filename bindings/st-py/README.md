@@ -643,24 +643,31 @@ the next longer run prefer near-best eval loss with lower distortion pressure
 instead of blindly following raw eval loss alone; those fields include the
 candidate run card, trace path, output directory, and replay command when the
 sweep report has matching run metadata. From Python,
-`st.hf_gpt2_finetune_scale_up_command(summary_or_report)` turns that candidate
-into a shell-safe longer-run command, defaulting to doubled `--max-steps` and
+`st.hf_finetune_scale_up_command(summary_or_report)` turns that candidate into a
+shell-safe longer-run command, defaulting to doubled `--max-steps` and
 `--max-train-samples` while writing a fresh run card and trainer trace under a
-`-scaleup` output directory; the sweep CLI writes the same payload to
-`scale-up-command.json` and surfaces its status/preview in the embedded
-summary. To inspect or execute that next run without hand-copying shell text:
+`-scaleup` output directory. The GPT-2-specific
+`st.hf_gpt2_finetune_scale_up_command(...)` name remains as a compatibility
+alias, but new code should use the generic Hugging Face FT name. The sweep CLI
+writes the same payload to `scale-up-command.json` and surfaces its
+status/preview in the embedded summary. To inspect or execute that next run
+without hand-copying shell text:
 
 ```bash
-PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_gpt2_finetune_scale_up.py \
-  runs/gpt2-small-zspace-sweep/sweep-report.json \
-  --write-command runs/gpt2-small-zspace-sweep/scale-up-command-long.json \
+spiral-hf-scale-up \
+  runs/hf-finetune-sweep/sweep-report.json \
+  --write-command runs/hf-finetune-sweep/scale-up-command-long.json \
   --max-steps 2000 \
   --max-train-samples 200000
 
-PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_gpt2_finetune_scale_up.py \
-  runs/gpt2-small-zspace-sweep/scale-up-command-long.json \
+spiral-hf-scale-up \
+  runs/hf-finetune-sweep/scale-up-command-long.json \
   --run
 ```
+
+When running from a source checkout without installing the console script, use
+`PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_finetune_scale_up.py`
+with the same arguments.
 
 When the source is a saved `scale-up-command*.json`, the CLI replays that saved
 command as-is unless you pass explicit overrides such as `--max-steps` or
@@ -669,9 +676,9 @@ resolved command's executable, bridge script, input files, and output parents;
 add `--require-ready` to fail before `--run` when an input artifact has gone
 missing. When `--write-command` is combined with `--run`, the written artifact is
 updated after execution so it includes `run_returncode` beside the preflight.
-From Python, use `st.hf_gpt2_finetune_scale_up_preflight_report(...)` or
-`st.hf_gpt2_finetune_scale_up_preflight_lines(...)` on a command artifact,
-sweep report, or command list to run the same check in notebooks and CI.
+From Python, use `st.hf_finetune_scale_up_preflight_report(...)` or
+`st.hf_finetune_scale_up_preflight_lines(...)` on a command artifact, sweep
+report, or command list to run the same check in notebooks and CI.
 
 Add
 `--generation-from-inference-distortion` with a

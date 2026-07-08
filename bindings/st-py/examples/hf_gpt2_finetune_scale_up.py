@@ -74,6 +74,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "resolved scale-up command after a process/checkpoint handoff."
         ),
     )
+    parser.add_argument(
+        "--wait-launch-script",
+        type=Path,
+        default=None,
+        help=(
+            "Override the wait-launch helper script embedded in the wrapper "
+            "command. Defaults to the GPT-2-compatible helper."
+        ),
+    )
     parser.add_argument("--wait-launch-jsonl-out", type=Path, default=None)
     parser.add_argument("--wait-launch-pid", type=int, default=None)
     parser.add_argument("--wait-launch-pid-file", type=Path, default=None)
@@ -133,6 +142,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     if args.wait_launch_checkpoint_timeout_seconds < 0.0:
         parser.error("--wait-launch-checkpoint-timeout-seconds must be non-negative")
     wait_launch_inputs = [
+        args.wait_launch_script,
         args.wait_launch_jsonl_out,
         args.wait_launch_pid,
         args.wait_launch_pid_file,
@@ -280,9 +290,13 @@ def _build_wait_launch_command(
 ) -> list[str] | None:
     if args.wait_launch_manifest is None:
         return None
+    script = (
+        args.wait_launch_script
+        or "bindings/st-py/examples/hf_gpt2_finetune_wait_launch.py"
+    )
     wait_command = [
         sys.executable,
-        "bindings/st-py/examples/hf_gpt2_finetune_wait_launch.py",
+        str(script),
         "--manifest",
         str(args.wait_launch_manifest),
         "--poll-seconds",
