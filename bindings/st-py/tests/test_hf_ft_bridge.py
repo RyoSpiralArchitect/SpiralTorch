@@ -8031,6 +8031,12 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             resolved_profiles["causal-lm-local-smoke"]["model_name"],
             "EleutherAI/pythia-70m-deduped",
         )
+        self.assertEqual(
+            resolved_profiles["causal-lm-local-smoke"]["runtime"][
+                "activation_name_contains"
+            ],
+            ["gpt_neox.layers.0"],
+        )
         self.assertTrue(
             resolved_profiles["causal-lm-local-smoke"]["generation"]["do_sample"]
         )
@@ -8046,6 +8052,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(
             profiles["gpt2-local-smoke"]["runtime"]["dataloader_pin_memory"],
             "auto",
+        )
+        self.assertEqual(
+            profiles["gpt2-local-smoke"]["runtime"]["activation_name_contains"],
+            ["transformer.h.0"],
         )
         self.assertEqual(
             profiles["distilgpt2-local-smoke"]["tokenizer_name"],
@@ -8064,6 +8074,22 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 "gradient_accumulation_steps"
             ],
             8,
+        )
+        self.assertEqual(
+            profiles["qwen2-0.5b-local-smoke"]["runtime"][
+                "activation_name_contains"
+            ],
+            ["model.layers.0"],
+        )
+        self.assertEqual(
+            profiles["opt-125m-local-smoke"]["runtime"]["activation_name_contains"],
+            ["model.decoder.layers.0"],
+        )
+        self.assertEqual(
+            profiles["smollm2-135m-local-smoke"]["runtime"][
+                "activation_name_contains"
+            ],
+            ["model.layers.0"],
         )
         self.assertEqual(
             profiles["local-causal-lm-template"]["model_name"],

@@ -33,7 +33,10 @@
       "runtime": {
         "allow_remote": false,
         "trust_remote_code": false,
-        "dataloader_pin_memory": "auto"
+        "dataloader_pin_memory": "auto",
+        "activation_name_contains": [
+          "transformer.h.0"
+        ]
       },
       "notes": "Baseline profile matching the historical GPT-2 examples."
     },
@@ -63,7 +66,10 @@
       "runtime": {
         "allow_remote": false,
         "trust_remote_code": false,
-        "dataloader_pin_memory": "auto"
+        "dataloader_pin_memory": "auto",
+        "activation_name_contains": [
+          "transformer.h.0"
+        ]
       },
       "notes": "Smaller GPT-2-family profile for local smoke runs."
     },
@@ -93,7 +99,10 @@
       "runtime": {
         "allow_remote": false,
         "trust_remote_code": false,
-        "dataloader_pin_memory": "auto"
+        "dataloader_pin_memory": "auto",
+        "activation_name_contains": [
+          "transformer.h.0"
+        ]
       },
       "notes": "Fast config for tests and docs; requires remote downloads when not cached."
     },
@@ -137,7 +146,10 @@
       "runtime": {
         "allow_remote": false,
         "trust_remote_code": false,
-        "dataloader_pin_memory": "auto"
+        "dataloader_pin_memory": "auto",
+        "activation_name_contains": [
+          "gpt_neox.layers.0"
+        ]
       },
       "notes": "Non-GPT-2 causal-LM smoke profile for widening local FT coverage."
     },
@@ -183,7 +195,10 @@
       "runtime": {
         "allow_remote": false,
         "trust_remote_code": false,
-        "dataloader_pin_memory": "auto"
+        "dataloader_pin_memory": "auto",
+        "activation_name_contains": [
+          "model.layers.0"
+        ]
       },
       "notes": "Modern small causal-LM profile for local/API-adjacent Z-Space trials."
     },
@@ -229,7 +244,10 @@
       "runtime": {
         "allow_remote": false,
         "trust_remote_code": false,
-        "dataloader_pin_memory": "auto"
+        "dataloader_pin_memory": "auto",
+        "activation_name_contains": [
+          "model.decoder.layers.0"
+        ]
       },
       "notes": "OPT-family small causal-LM profile for non-GPT local FT checks."
     },
@@ -275,7 +293,10 @@
       "runtime": {
         "allow_remote": false,
         "trust_remote_code": false,
-        "dataloader_pin_memory": "auto"
+        "dataloader_pin_memory": "auto",
+        "activation_name_contains": [
+          "model.layers.0"
+        ]
       },
       "notes": "Very small modern CausalLM profile for quick non-GPT smoke runs."
     },
@@ -322,6 +343,9 @@
         "trust_remote_code": false,
         "dataloader_pin_memory": "auto",
         "dataloader_num_workers": 0,
+        "activation_name_contains": [
+          "model.layers.0"
+        ],
         "no_require_hf_finetune": true
       },
       "notes": "Copy this profile for a local AutoModelForCausalLM directory; the relaxed runtime gate is useful while iterating on local model paths before installing the full FT stack."

@@ -573,6 +573,7 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         self.assertEqual(args.local_model, Path("EleutherAI/pythia-70m-deduped"))
         self.assertEqual(args.tokenizer_name, "EleutherAI/pythia-70m-deduped")
         self.assertEqual(args.max_new_tokens, 96)
+        self.assertEqual(args.activation_name_contains, ["gpt_neox.layers.0"])
         self.assertEqual(
             args._hf_finetune_model_profile["profile_id"],
             "pythia-70m-local-smoke",
@@ -1103,10 +1104,16 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         self.assertEqual(args.local_model, Path("Qwen/Qwen2-0.5B"))
         self.assertEqual(args.tokenizer_name, "Qwen/Qwen2-0.5B")
         self.assertEqual(args.max_new_tokens, 128)
+        self.assertEqual(args.activation_name_contains, ["model.layers.0"])
         self.assertEqual(runtime["local_model"], "Qwen/Qwen2-0.5B")
         self.assertEqual(runtime["tokenizer_name"], "Qwen/Qwen2-0.5B")
+        self.assertEqual(runtime["activation_name_contains"], ["model.layers.0"])
         self.assertEqual(report["runtime"]["local_model"], "Qwen/Qwen2-0.5B")
         self.assertEqual(report["runtime"]["tokenizer_name"], "Qwen/Qwen2-0.5B")
+        self.assertEqual(
+            report["runtime"]["activation_name_contains"],
+            ["model.layers.0"],
+        )
 
     def test_inference_distortion_probe_generate_compat_drops_batch_size(self) -> None:
         module = load_distortion_probe_example()
