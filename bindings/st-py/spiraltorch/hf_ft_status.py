@@ -946,6 +946,53 @@ def hf_gpt2_finetune_milestone_handoff_report(
     prefix = label_prefix or str(capture.get("label") or "").strip() or None
     compare_paths = [str(path) for path in _as_list(compare_with_sweep)]
     compare_labels = [str(label) for label in _as_list(compare_with_label)]
+    resolved_curve_out = (
+        Path(curve_out)
+        if curve_out is not None
+        else resolved_run_dir / f"{resolved_checkpoint}-generation-curve.json"
+        if resolved_run_dir is not None and resolved_checkpoint is not None
+        else None
+    )
+    resolved_curve_lines_out = (
+        Path(curve_lines_out)
+        if curve_lines_out is not None
+        else resolved_run_dir / f"{resolved_checkpoint}-generation-curve.txt"
+        if resolved_run_dir is not None and resolved_checkpoint is not None
+        else None
+    )
+    resolved_trainer_trace = (
+        Path(trainer_trace_jsonl) if trainer_trace_jsonl is not None else None
+    )
+    if resolved_trainer_trace is None and resolved_run_dir is not None:
+        default_trace = resolved_run_dir / "spiraltorch-hf-gpt2-ft-trainer-trace.jsonl"
+        if default_trace.is_file():
+            resolved_trainer_trace = default_trace
+    resolved_curve_run_card = Path(run_card) if run_card is not None else None
+    if resolved_curve_run_card is None and resolved_run_dir is not None:
+        default_run_card = resolved_run_dir / "spiraltorch-hf-gpt2-ft-run-card.json"
+        if default_run_card.is_file():
+            resolved_curve_run_card = default_run_card
+    package_kwargs: dict[str, Any] = {
+        "compare_with_sweep": compare_paths,
+        "compare_with_label": compare_labels,
+        "top_n": top_n,
+        "wait": wait,
+        "dry_run": dry_run,
+    }
+    if resolved_run_dir is not None:
+        package_kwargs["run_dir"] = str(resolved_run_dir)
+    if resolved_checkpoint is not None:
+        package_kwargs["checkpoint"] = resolved_checkpoint
+    if prefix:
+        package_kwargs["label_prefix"] = prefix
+    if resolved_curve_out is not None:
+        package_kwargs["curve_out"] = str(resolved_curve_out)
+    if resolved_curve_lines_out is not None:
+        package_kwargs["curve_lines_out"] = str(resolved_curve_lines_out)
+    if resolved_trainer_trace is not None:
+        package_kwargs["curve_trainer_trace_jsonl"] = str(resolved_trainer_trace)
+    if resolved_curve_run_card is not None:
+        package_kwargs["curve_run_card"] = str(resolved_curve_run_card)
     command: list[str] = [str(python), str(script)]
     if resolved_run_dir is not None:
         command.extend(["--run-dir", str(resolved_run_dir)])
@@ -957,36 +1004,14 @@ def hf_gpt2_finetune_milestone_handoff_report(
         command.extend(["--compare-with-sweep", path])
     for label in compare_labels:
         command.extend(["--compare-with-label", label])
-    if curve_out is not None:
-        command.extend(["--curve-out", str(curve_out)])
-    elif resolved_run_dir is not None and resolved_checkpoint is not None:
-        command.extend(
-            [
-                "--curve-out",
-                str(resolved_run_dir / f"{resolved_checkpoint}-generation-curve.json"),
-            ]
-        )
-    if curve_lines_out is not None:
-        command.extend(["--curve-lines-out", str(curve_lines_out)])
-    elif resolved_run_dir is not None and resolved_checkpoint is not None:
-        command.extend(
-            [
-                "--curve-lines-out",
-                str(resolved_run_dir / f"{resolved_checkpoint}-generation-curve.txt"),
-            ]
-        )
-    if trainer_trace_jsonl is not None:
-        command.extend(["--curve-trainer-trace-jsonl", str(trainer_trace_jsonl)])
-    elif resolved_run_dir is not None:
-        default_trace = resolved_run_dir / "spiraltorch-hf-gpt2-ft-trainer-trace.jsonl"
-        if default_trace.is_file():
-            command.extend(["--curve-trainer-trace-jsonl", str(default_trace)])
-    if run_card is not None:
-        command.extend(["--curve-run-card", str(run_card)])
-    elif resolved_run_dir is not None:
-        default_run_card = resolved_run_dir / "spiraltorch-hf-gpt2-ft-run-card.json"
-        if default_run_card.is_file():
-            command.extend(["--curve-run-card", str(default_run_card)])
+    if resolved_curve_out is not None:
+        command.extend(["--curve-out", str(resolved_curve_out)])
+    if resolved_curve_lines_out is not None:
+        command.extend(["--curve-lines-out", str(resolved_curve_lines_out)])
+    if resolved_trainer_trace is not None:
+        command.extend(["--curve-trainer-trace-jsonl", str(resolved_trainer_trace)])
+    if resolved_curve_run_card is not None:
+        command.extend(["--curve-run-card", str(resolved_curve_run_card)])
     command.extend(["--top-n", str(top_n)])
     if wait:
         command.append("--wait")
@@ -1008,6 +1033,8 @@ def hf_gpt2_finetune_milestone_handoff_report(
         "run_dir": None if resolved_run_dir is None else str(resolved_run_dir),
         "compare_with_sweep": compare_paths,
         "compare_with_label": compare_labels,
+        "package_function": "spiraltorch.zspace_checkpoint_generation_control_report",
+        "package_kwargs": package_kwargs,
         "command": command,
         "command_display": shlex.join(command),
         "capture": capture,
@@ -1046,6 +1073,7 @@ def hf_gpt2_finetune_milestone_handoff_lines(
 
 
 HandoffRunner = Callable[..., subprocess.CompletedProcess[str] | None]
+HandoffPackageRunner = Callable[..., Mapping[str, Any]]
 
 
 def _handoff_report_from_value(
@@ -1102,12 +1130,14 @@ def hf_gpt2_finetune_milestone_handoff_execution_report(
     report_or_capture: Mapping[str, Any],
     *,
     run: bool = False,
+    use_package_api: bool = False,
     cwd: str | Path | None = None,
     env: Mapping[str, Any] | None = None,
     timeout: float | None = None,
     capture_output: bool = True,
     check: bool = False,
     runner: HandoffRunner | None = None,
+    package_runner: HandoffPackageRunner | None = None,
     out: str | Path | None = None,
     lines_out: str | Path | None = None,
     max_output_chars: int | None = 20_000,
@@ -1122,6 +1152,9 @@ def hf_gpt2_finetune_milestone_handoff_execution_report(
 
     handoff = _handoff_report_from_value(report_or_capture, **handoff_kwargs)
     command = [str(part) for part in handoff.get("command") or []]
+    package_kwargs = dict(handoff.get("package_kwargs") or {})
+    package_function = handoff.get("package_function")
+    execution_backend = "package_api" if use_package_api else "command"
     started_unix_s = time.time()
     report: dict[str, Any] = {
         "row_type": "hf_gpt2_finetune_milestone_handoff_execution",
@@ -1130,6 +1163,7 @@ def hf_gpt2_finetune_milestone_handoff_execution_report(
         ),
         "run": bool(run),
         "ready": handoff.get("ready"),
+        "execution_backend": execution_backend,
         "handoff_status": handoff.get("status"),
         "action": handoff.get("action"),
         "label": handoff.get("label"),
@@ -1141,10 +1175,20 @@ def hf_gpt2_finetune_milestone_handoff_execution_report(
         "cwd": None if cwd is None else str(cwd),
         "command": command,
         "command_display": shlex.join(command),
+        "package_function": package_function,
+        "package_kwargs": package_kwargs,
         "started_unix_s": started_unix_s,
         "handoff": handoff,
     }
-    if not command:
+    if use_package_api and not package_kwargs:
+        report["status"] = "missing_package_plan"
+        report["error"] = "handoff report did not include package kwargs"
+    elif use_package_api and (
+        "run_dir" not in package_kwargs or "checkpoint" not in package_kwargs
+    ):
+        report["status"] = "missing_package_plan"
+        report["error"] = "package kwargs require run_dir and checkpoint"
+    elif not use_package_api and not command:
         report["status"] = "missing_command"
         report["error"] = "handoff report did not include a command"
     elif not run:
@@ -1153,6 +1197,29 @@ def hf_gpt2_finetune_milestone_handoff_execution_report(
         report["status"] = "not_ready"
         report["error"] = f"handoff is not ready: {handoff.get('status')}"
         report["completed_unix_s"] = time.time()
+    elif use_package_api:
+        try:
+            if package_runner is None:
+                from .hf_generation import zspace_checkpoint_generation_control_report
+
+                command_report = zspace_checkpoint_generation_control_report(
+                    **package_kwargs
+                )
+            else:
+                command_report = dict(package_runner(**package_kwargs))
+        except Exception as exc:  # pragma: no cover - exercised by runtime callers
+            report["status"] = "error"
+            report["error"] = f"{exc.__class__.__name__}: {exc}"
+            report["completed_unix_s"] = time.time()
+        else:
+            report.update(
+                {
+                    "status": "complete",
+                    "returncode": 0,
+                    "command_report": command_report,
+                    "completed_unix_s": time.time(),
+                }
+            )
     else:
         process_cwd = None if cwd is None else str(cwd)
         process_env = _merged_env(env)
@@ -1241,6 +1308,7 @@ def hf_gpt2_finetune_milestone_handoff_execution_lines(
             "hf_gpt2_ft_milestone_handoff_execution "
             f"status={_number_text(report.get('status'))} "
             f"run={_number_text(report.get('run'))} "
+            f"backend={_number_text(report.get('execution_backend'))} "
             f"ready={_number_text(report.get('ready'))} "
             f"handoff_status={_number_text(report.get('handoff_status'))} "
             f"action={_number_text(report.get('action'))} "

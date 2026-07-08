@@ -6163,6 +6163,15 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("--compare-with-sweep", handoff["command"])
         self.assertIn("previous-sweep.json", handoff["command"])
         self.assertIn("--dry-run", handoff["command"])
+        self.assertEqual(
+            handoff["package_function"],
+            "spiraltorch.zspace_checkpoint_generation_control_report",
+        )
+        self.assertEqual(handoff["package_kwargs"]["run_dir"], "/tmp/spiraltorch-ft")
+        self.assertEqual(handoff["package_kwargs"]["checkpoint"], "checkpoint-6144")
+        self.assertEqual(handoff["package_kwargs"]["compare_with_sweep"], ["previous-sweep.json"])
+        self.assertEqual(handoff["package_kwargs"]["compare_with_label"], ["previous"])
+        self.assertTrue(handoff["package_kwargs"]["dry_run"])
         self.assertIn("checkpoint=checkpoint-6144", handoff_lines[0])
         execution_plan = st.hf_gpt2_finetune_milestone_handoff_execution_report(
             handoff
@@ -6179,8 +6188,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertFalse(execution_plan["run"])
         self.assertEqual(execution_plan["checkpoint"], "checkpoint-6144")
         self.assertEqual(execution_plan["command"], handoff["command"])
+        self.assertEqual(execution_plan["execution_backend"], "command")
         self.assertIn("status=planned", execution_plan_lines[0])
         self.assertIn("run=false", execution_plan_lines[0])
+        self.assertIn("backend=command", execution_plan_lines[0])
 
         runner_calls = []
 
@@ -6226,6 +6237,31 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(runner_calls[0]["timeout"], 12.5)
         self.assertIn("status=complete", execution_lines[0])
         self.assertIn("command_report_status=planned", execution_lines[0])
+        package_calls = []
+
+        def fake_package_runner(**kwargs):
+            package_calls.append(dict(kwargs))
+            return {"status": "planned", "sweep_count": 3}
+
+        package_execution = st.hf_gpt2_finetune_milestone_handoff_execution_report(
+            handoff,
+            run=True,
+            use_package_api=True,
+            package_runner=fake_package_runner,
+        )
+        package_execution_lines = (
+            st.hf_gpt2_finetune_milestone_handoff_execution_lines(package_execution)
+        )
+
+        self.assertEqual(package_execution["status"], "complete")
+        self.assertEqual(package_execution["execution_backend"], "package_api")
+        self.assertEqual(package_execution["returncode"], 0)
+        self.assertEqual(package_execution["command_report"]["sweep_count"], 3)
+        self.assertEqual(package_calls[0]["checkpoint"], "checkpoint-6144")
+        self.assertEqual(package_calls[0]["run_dir"], "/tmp/spiraltorch-ft")
+        self.assertTrue(package_calls[0]["dry_run"])
+        self.assertIn("backend=package_api", package_execution_lines[0])
+        self.assertIn("command_report_status=planned", package_execution_lines[0])
         waiting_handoff = st.hf_gpt2_finetune_milestone_handoff_report(
             capture,
             run_dir="/tmp/spiraltorch-ft",
