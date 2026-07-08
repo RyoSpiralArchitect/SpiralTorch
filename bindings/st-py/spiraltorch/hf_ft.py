@@ -279,8 +279,55 @@ def _genericize_hf_finetune_lines(lines: Sequence[object]) -> list[str]:
     return [_genericize_hf_finetune_line(str(line)) for line in lines]
 HF_FINETUNE_DEFAULT_MODEL_CONFIGS: dict[str, object] = {
     "schema": HF_FINETUNE_MODEL_CONFIG_SCHEMA,
-    "default_profile": "gpt2-local-smoke",
+    "default_profile": "causal-lm-local-smoke",
     "profiles": [
+        {
+            "id": "causal-lm-local-smoke",
+            "model_name": "EleutherAI/pythia-70m-deduped",
+            "tokenizer_name": "EleutherAI/pythia-70m-deduped",
+            "architecture": "causal_lm",
+            "checkpoint_prefix": "checkpoint-",
+            "max_length": 128,
+            "training": {
+                "block_size": 128,
+                "max_train_samples": 4096,
+                "max_eval_samples": 512,
+            },
+            "dataset": {
+                "name": "wikitext",
+                "config": "wikitext-2-raw-v1",
+                "train_split": "train",
+                "eval_split": "validation",
+                "text_column": "text",
+            },
+            "generation": {
+                "max_new_tokens": 96,
+                "do_sample": True,
+                "temperature": 0.8,
+                "top_k": 50,
+                "zspace_top_k": 64,
+                "zspace_curvature": -0.04,
+                "zspace_temperature": 1.0,
+                "zspace_entropy_target": 3.0,
+                "zspace_entropy_gain": 0.5,
+                "repression_window": 16,
+                "repression_strength": 0.8,
+                "last_token_repression": 0.7,
+                "ngram_size": 3,
+                "ngram_window": 32,
+                "ngram_repression_strength": 0.45,
+                "ngram_decay": 0.85,
+            },
+            "runtime": {
+                "allow_remote": False,
+                "trust_remote_code": False,
+                "dataloader_pin_memory": "auto",
+            },
+            "notes": (
+                "Model-neutral default causal-LM smoke profile; pick another "
+                "profile or edit model_name/tokenizer_name for local checkpoints."
+            ),
+        },
         {
             "id": "gpt2-local-smoke",
             "model_name": "gpt2",

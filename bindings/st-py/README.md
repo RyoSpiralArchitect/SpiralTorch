@@ -373,9 +373,10 @@ surface, while Python must bring the HF data/model stack. In practice,
 
 The generic HF bridge turns that boundary into an executable run card. The
 historical `hf_gpt2_*` scripts still work, but new runs should prefer the
-`hf_*` entrypoints plus a model profile so the same path can target GPT-2,
-DistilGPT-2, Pythia, Qwen, tiny CI models, or another local
-`AutoModelForCausalLM` profile. Keep model-specific settings in
+`hf_*` entrypoints plus a model profile so the same path can target the default
+`causal-lm-local-smoke` profile, GPT-2/DistilGPT-2 baselines, Pythia, Qwen,
+tiny CI models, or another local `AutoModelForCausalLM` profile. Keep
+model-specific settings in
 `bindings/st-py/examples/hf_finetune_model_configs.example.json` or a copied
 config file rather than baking them into the script name. Profiles can carry
 model/tokenizer names, training shape, dataset/revision/streaming defaults,
@@ -386,7 +387,7 @@ trust, disk guards, dataloader pinning, or required SpiralTorch backends:
 spiral-hf-profile --list
 
 spiral-hf-profile \
-  --model-profile gpt2-local-smoke
+  --model-profile causal-lm-local-smoke
 
 spiral-hf-profile \
   --model-configs bindings/st-py/examples/hf_finetune_model_configs.example.json \
@@ -425,7 +426,7 @@ spiral-hf-profile \
 
 PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_finetune_bridge.py \
   --model-configs bindings/st-py/examples/hf_finetune_model_configs.example.json \
-  --model-profile gpt2-local-smoke \
+  --model-profile causal-lm-local-smoke \
   --metadata-only \
   --allow-remote \
   --zspace-probe \
@@ -457,7 +458,7 @@ the repo path:
 
 ```bash
 spiral-hf-finetune \
-  --model-profile gpt2-local-smoke \
+  --model-profile causal-lm-local-smoke \
   --metadata-only \
   --allow-remote \
   --zspace-probe \
@@ -640,7 +641,7 @@ comparison reproducible:
 ```bash
 PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_finetune_sweep.py \
   --model-configs bindings/st-py/examples/hf_finetune_model_configs.example.json \
-  --model-profile gpt2-local-smoke \
+  --model-profile causal-lm-local-smoke \
   --train-file data/corpus-000.txt \
   --validation-fraction 0.02 \
   --corpus-scan \
@@ -653,7 +654,7 @@ PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_finetune_sweep.py \
   --block-size-values 64,128 \
   --learning-rate-values 0.0001,0.00005 \
   --seed-values 7,13 \
-  --out-dir runs/gpt2-small-zspace-sweep
+  --out-dir runs/hf-causal-lm-zspace-sweep
 ```
 
 For checkpoint-level local inference, use the generic generation-control
