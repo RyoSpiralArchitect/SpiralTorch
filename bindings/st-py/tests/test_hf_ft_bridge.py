@@ -6034,6 +6034,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             {
                 "time_unix_s": 100.0,
                 "process_status": "alive",
+                "preflight": {
+                    "hf_model_name": "gpt2",
+                    "tokenizer_name": "gpt2",
+                    "model_profile": {
+                        "profile_id": "gpt2-local-smoke",
+                        "extends": None,
+                    },
+                },
                 "final_checkpoint_ready": False,
                 "checkpoint_count": 1,
                 "latest_checkpoint": {"name": "checkpoint-20"},
@@ -6089,6 +6097,13 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             {
                 "time_unix_s": 140.0,
                 "process_status": "alive",
+                "model_name": "EleutherAI/pythia-70m-deduped",
+                "tokenizer_name": "EleutherAI/pythia-70m-deduped",
+                "model_profile_id": "causal-lm-local-smoke",
+                "model_profile": {
+                    "profile_id": "causal-lm-local-smoke",
+                    "extends": "pythia-70m-local-smoke",
+                },
                 "final_checkpoint_ready": True,
                 "watch_stop_reason": "checkpoint_ready",
                 "checkpoint_count": 1,
@@ -6201,6 +6216,11 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(summary["delta_log_step"], 10)
         self.assertEqual(summary["log_steps_per_second"], 0.25)
         self.assertEqual(summary["delta_trace_step"], 10)
+        self.assertEqual(summary["model_profile_id"], "causal-lm-local-smoke")
+        self.assertEqual(summary["model_profile_extends"], "pythia-70m-local-smoke")
+        self.assertEqual(summary["model_name"], "EleutherAI/pythia-70m-deduped")
+        self.assertEqual(summary["tokenizer_name"], "EleutherAI/pythia-70m-deduped")
+        self.assertEqual(summary["model_metadata_source_index"], 1)
         self.assertEqual(summary["last_runtime_max_steps"], 40)
         self.assertEqual(summary["last_runtime_eval_steps"], 10)
         self.assertEqual(summary["last_runtime_save_steps"], 20)
@@ -6244,6 +6264,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("last_log_step=34", lines[0])
         self.assertIn("log_duration_seconds=40", lines[0])
         self.assertIn("log_steps_per_second=0.25", lines[0])
+        self.assertIn("profile=causal-lm-local-smoke", lines[0])
+        self.assertIn("extends=pythia-70m-local-smoke", lines[0])
+        self.assertIn("model=EleutherAI/pythia-70m-deduped", lines[0])
+        self.assertIn("tokenizer=EleutherAI/pythia-70m-deduped", lines[0])
         self.assertIn("runtime_max_steps=40", lines[0])
         self.assertIn("runtime_eval_steps=10", lines[0])
         self.assertIn("runtime_save_steps=20", lines[0])
@@ -9927,6 +9951,13 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 {
                     "time_unix_s": 20.0,
                     "process_status": "alive",
+                    "model_name": "EleutherAI/pythia-70m-deduped",
+                    "tokenizer_name": "EleutherAI/pythia-70m-deduped",
+                    "model_profile_id": "causal-lm-local-smoke",
+                    "model_profile": {
+                        "profile_id": "causal-lm-local-smoke",
+                        "extends": "pythia-70m-local-smoke",
+                    },
                     "log_progress": {"log_latest_step": 8, "log_max_steps": 10},
                     "trace": {"trace_last_loss": 1.5},
                 },
@@ -9964,7 +9995,12 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(cli_code, 0)
         self.assertEqual(payload["row_type"], "hf_ft_status_history_summary")
         self.assertEqual(cli_payload["row_type"], "hf_ft_status_history_summary")
+        self.assertEqual(payload["model_profile_id"], "causal-lm-local-smoke")
+        self.assertEqual(payload["model_profile_extends"], "pythia-70m-local-smoke")
+        self.assertEqual(cli_payload["model_profile_id"], "causal-lm-local-smoke")
         self.assertTrue(lines[0].startswith("hf_ft_status_history "))
+        self.assertIn("profile=causal-lm-local-smoke", lines[0])
+        self.assertIn("extends=pythia-70m-local-smoke", lines[0])
         self.assertNotIn("hf_gpt2", "\n".join(lines))
 
     def test_generic_wait_launch_summary_wrapper_uses_hf_ft_prefixes(self) -> None:

@@ -1736,40 +1736,53 @@ def _runtime_artifact_record(
     return record
 
 
-def _run_card_model_metadata(path: str | Path | None) -> dict[str, Any]:
-    """Best-effort model/profile metadata from a run card artifact."""
-
-    empty = {
+def _empty_model_metadata() -> dict[str, Any]:
+    return {
         "model_profile_id": None,
         "model_profile_extends": None,
         "model_name": None,
         "tokenizer_name": None,
+        "metadata_row_type": None,
         "run_card_row_type": None,
     }
-    if path is None:
-        return dict(empty)
-    try:
-        payload = json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return dict(empty)
+
+
+def _payload_model_metadata(payload: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Best-effort model/profile metadata from a run-card-like payload."""
+
+    empty = _empty_model_metadata()
     if not isinstance(payload, Mapping):
         return dict(empty)
-    profile = payload.get("model_profile")
+    preflight = payload.get("preflight")
+    preflight_mapping = preflight if isinstance(preflight, Mapping) else {}
+    profile = payload.get("model_profile") or preflight_mapping.get("model_profile")
     profile_mapping = profile if isinstance(profile, Mapping) else {}
     profile_id = (
         payload.get("model_profile_id")
         or payload.get("profile_id")
+        or preflight_mapping.get("model_profile_id")
+        or preflight_mapping.get("profile_id")
         or profile_mapping.get("profile_id")
         or profile_mapping.get("id")
     )
     profile_extends = (
         payload.get("model_profile_extends")
         or payload.get("profile_extends")
+        or preflight_mapping.get("model_profile_extends")
+        or preflight_mapping.get("profile_extends")
         or profile_mapping.get("extends")
     )
-    model_name = payload.get("model_name") or profile_mapping.get("model_name")
-    tokenizer_name = payload.get("tokenizer_name") or profile_mapping.get(
-        "tokenizer_name"
+    model_name = (
+        payload.get("model_name")
+        or payload.get("hf_model_name")
+        or preflight_mapping.get("model_name")
+        or preflight_mapping.get("hf_model_name")
+        or profile_mapping.get("model_name")
+    )
+    tokenizer_name = (
+        payload.get("tokenizer_name")
+        or preflight_mapping.get("tokenizer_name")
+        or profile_mapping.get("tokenizer_name")
     )
     return {
         "model_profile_id": None if profile_id is None else str(profile_id),
@@ -1778,8 +1791,39 @@ def _run_card_model_metadata(path: str | Path | None) -> dict[str, Any]:
         else str(profile_extends),
         "model_name": None if model_name is None else str(model_name),
         "tokenizer_name": None if tokenizer_name is None else str(tokenizer_name),
+        "metadata_row_type": payload.get("row_type"),
         "run_card_row_type": payload.get("row_type"),
     }
+
+
+def _run_card_model_metadata(path: str | Path | None) -> dict[str, Any]:
+    """Best-effort model/profile metadata from a run card artifact."""
+
+    if path is None:
+        return _empty_model_metadata()
+    try:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return _empty_model_metadata()
+    return _payload_model_metadata(payload if isinstance(payload, Mapping) else None)
+
+
+def _status_history_model_metadata(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    metadata = _empty_model_metadata()
+    source_index: int | None = None
+    for index, row in enumerate(rows):
+        row_metadata = _payload_model_metadata(row)
+        updated = False
+        for key, value in row_metadata.items():
+            if key == "run_card_row_type":
+                continue
+            if value is not None:
+                metadata[key] = value
+                updated = True
+        if updated:
+            source_index = index
+    metadata["model_metadata_source_index"] = source_index
+    return metadata
 
 
 def _checkpoint_step_from_path(path: Path) -> int | None:
@@ -2778,6 +2822,7 @@ def summarize_hf_gpt2_finetune_status_history(
         if isinstance(row.get("disk_margin_gb"), (int, float))
     ]
     checkpoint_headroom = _checkpoint_headroom(last)
+    model_metadata = _status_history_model_metadata(rows)
     return {
         "row_type": "hf_gpt2_ft_status_history_summary",
         "label": label,
@@ -2794,6 +2839,13 @@ def summarize_hf_gpt2_finetune_status_history(
         "first_trace_step": first_trace_step,
         "last_trace_step": last_trace_step,
         "delta_trace_step": delta_trace_step,
+        "model_profile_id": model_metadata.get("model_profile_id"),
+        "model_profile_extends": model_metadata.get("model_profile_extends"),
+        "model_name": model_metadata.get("model_name"),
+        "tokenizer_name": model_metadata.get("tokenizer_name"),
+        "model_metadata_source_index": model_metadata.get("model_metadata_source_index"),
+        "model_metadata_row_type": model_metadata.get("metadata_row_type"),
+        "run_card_row_type": model_metadata.get("run_card_row_type"),
         "last_runtime_max_steps": _runtime_setting(last, "max_steps"),
         "last_runtime_eval_steps": _runtime_setting(last, "eval_steps"),
         "last_runtime_save_steps": _runtime_setting(last, "save_steps"),
@@ -2881,6 +2933,10 @@ def hf_gpt2_finetune_status_history_lines(
             f"duration_seconds={_number_text(summary.get('duration_seconds'))} "
             f"log_duration_seconds={_number_text(summary.get('log_duration_seconds'))} "
             f"log_steps_per_second={_number_text(summary.get('log_steps_per_second'))} "
+            f"profile={_number_text(summary.get('model_profile_id'))} "
+            f"extends={_number_text(summary.get('model_profile_extends'))} "
+            f"model={_number_text(summary.get('model_name'))} "
+            f"tokenizer={_number_text(summary.get('tokenizer_name'))} "
             f"runtime_max_steps={_number_text(summary.get('last_runtime_max_steps'))} "
             f"runtime_eval_steps={_number_text(summary.get('last_runtime_eval_steps'))} "
             f"runtime_save_steps={_number_text(summary.get('last_runtime_save_steps'))} "
