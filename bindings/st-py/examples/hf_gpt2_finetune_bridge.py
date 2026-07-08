@@ -423,9 +423,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Shortcut for --require-runtime-device-ready-backend wgpu.",
     )
     parser.add_argument(
+        "--no-require-hf-finetune",
         "--no-require-hf-gpt2-ft",
+        dest="no_require_hf_gpt2_ft",
         action="store_true",
-        help="Report missing HF FT imports without failing the preflight gate.",
+        help="Report missing full HF fine-tune imports without failing preflight.",
     )
     parser.add_argument("--zspace-probe", action="store_true")
     parser.add_argument("--zspace-probe-dim", type=int, default=64)
@@ -913,6 +915,11 @@ def _apply_model_profile_defaults(
         ("dataloader_pin_memory", "dataloader_pin_memory", "--dataloader-pin-memory"),
         ("min_free_disk_gb", "min_free_disk_gb", "--min-free-disk-gb"),
         ("require_wgpu_ready", "require_wgpu_ready", "--require-wgpu-ready"),
+        (
+            "no_require_hf_gpt2_ft",
+            "no_require_hf_finetune",
+            "--no-require-hf-finetune",
+        ),
         (
             "no_require_hf_gpt2_ft",
             "no_require_hf_gpt2_ft",

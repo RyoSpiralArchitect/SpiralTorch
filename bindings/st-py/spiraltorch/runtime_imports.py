@@ -76,6 +76,18 @@ TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS: dict[str, list[str]] = {
         "evaluate",
         "peft",
     ],
+    "hf-full-finetune": [
+        "transformers",
+        "torch",
+        "tokenizers",
+        "datasets",
+        "accelerate",
+        "safetensors",
+        "pyarrow",
+        "tqdm",
+        "evaluate",
+        "peft",
+    ],
     "hf-peft": [
         "transformers",
         "torch",
@@ -1087,9 +1099,10 @@ def _runtime_import_arg_parser() -> argparse.ArgumentParser:
         default=[],
         help=(
             "Named import bundle to probe. Use hf-runtime for Transformers, "
-            "hf-finetune for datasets/accelerate/safetensors, hf-gpt2-ft for "
-            "local GPT-2-scale fine-tuning, hf-peft for adapter workflows, or "
-            "hf-trl-sft for TRL SFT handoffs."
+            "hf-finetune for datasets/accelerate/safetensors, hf-full-finetune "
+            "for local AutoModelForCausalLM Trainer runs, hf-gpt2-ft as the "
+            "legacy alias, hf-peft for adapter workflows, or hf-trl-sft for TRL "
+            "SFT handoffs."
         ),
     )
     parser.add_argument(

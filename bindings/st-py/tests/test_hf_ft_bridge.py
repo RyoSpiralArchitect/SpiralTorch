@@ -502,6 +502,31 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("datasets", report["runtime_imports_failed"])
         self.assertIn("peft", report["runtime_import_failed_install_hints"])
 
+    def test_generic_preflight_accepts_model_neutral_requirement_flag(self) -> None:
+        def fake_import(name: str):
+            if name in {"transformers", "torch", "tokenizers"}:
+                return types.ModuleType(name)
+            raise ModuleNotFoundError(f"No module named {name!r}", name=name)
+
+        with mock.patch.object(
+            runtime_imports.importlib,
+            "import_module",
+            side_effect=fake_import,
+        ):
+            report = hf_ft.hf_finetune_preflight_report(
+                model_name="EleutherAI/pythia-70m-deduped",
+                runtime_device_backends=[],
+                require_hf_finetune=False,
+                describe_runtime_devices=lambda backends, **_: {"reports": []},
+            )
+
+        self.assertTrue(report["runtime_import_preflight_passed"])
+        self.assertEqual(report["required_runtime_import_presets"], "none")
+        self.assertEqual(report["hf_model_name"], "EleutherAI/pythia-70m-deduped")
+        self.assertFalse(report["hf_finetune_required"])
+        self.assertIn("datasets", report["runtime_imports_failed"])
+        self.assertIn("peft", report["hf_finetune_python_packages"])
+
     def test_empty_token_probe_is_honest_without_native_runtime(self) -> None:
         probe = hf_ft.hf_gpt2_finetune_zspace_probe([])
 
@@ -2609,6 +2634,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                     "--runtime-device-backend",
                     "wgpu",
                     "--require-wgpu-ready",
+                    "--no-require-hf-finetune",
                     "--zspace-probe",
                 ]
             )
@@ -2729,6 +2755,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("false", first_command)
         self.assertIn("--runtime-device-backend", first_command)
         self.assertIn("--require-wgpu-ready", first_command)
+        self.assertIn("--no-require-hf-finetune", first_command)
+        self.assertNotIn("--no-require-hf-gpt2-ft", first_command)
         self.assertIn("--zspace-probe", first_command)
         self.assertIn("bs8", runs[0]["name"])
         self.assertIn("seed13", runs[-1]["name"])
@@ -7549,6 +7577,15 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("--generation-zspace-top-k", pythia_cli_args)
         self.assertIn("64", pythia_cli_args)
 
+        local_template = st.resolve_hf_finetune_model_profile(
+            MODEL_CONFIGS_PATH,
+            profile="local-causal-lm-template",
+        )
+        local_template_cli_args = st.hf_finetune_model_profile_cli_args(local_template)
+        self.assertTrue(local_template["runtime"]["no_require_hf_finetune"])
+        self.assertIn("--no-require-hf-finetune", local_template_cli_args)
+        self.assertNotIn("--no-require-hf-gpt2-ft", local_template_cli_args)
+
     def test_generic_hf_finetune_model_profile_catalog_summarizes_profiles(
         self,
     ) -> None:
@@ -7602,6 +7639,11 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             mode="peft",
             require=True,
         )
+        full_report = st.hf_finetune_model_profile_preflight_report(
+            MODEL_CONFIGS_PATH,
+            profile="qwen2-0.5b-local-smoke",
+            mode="full-finetune",
+        )
 
         self.assertEqual(report["row_type"], "hf_finetune_model_profile_preflight")
         self.assertEqual(report["profile_id"], "qwen2-0.5b-local-smoke")
@@ -7622,6 +7664,13 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         )
         self.assertEqual(peft_report["runtime_import_preset"], "hf-peft")
         self.assertTrue(peft_report["require_runtime_import_preset"])
+        self.assertEqual(full_report["runtime_import_preset"], "hf-full-finetune")
+        self.assertEqual(
+            runtime_imports.TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS[
+                "hf-full-finetune"
+            ],
+            runtime_imports.TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS["hf-gpt2-ft"],
+        )
 
     def test_generic_hf_finetune_model_profile_launch_plan_builds_commands(
         self,
@@ -7882,6 +7931,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                                     "min_free_disk_gb": 3.5,
                                     "runtime_device_backends": ["cpu"],
                                     "required_runtime_device_ready_backends": ["cpu"],
+                                    "no_require_hf_finetune": True,
                                 },
                             },
                             {
@@ -7940,6 +7990,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(args.min_free_disk_gb, 3.5)
         self.assertEqual(args.runtime_device_backend, ["cpu"])
         self.assertEqual(args.require_runtime_device_ready_backend, ["cpu"])
+        self.assertTrue(args.no_require_hf_gpt2_ft)
         self.assertEqual(local_args.train_file, [train_path])
         self.assertEqual(local_args.validation_file, [valid_path])
         self.assertEqual(local_args.dataset_format, "text")
@@ -7966,6 +8017,20 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             args.trainer_trace_jsonl.name,
             st.HF_FINETUNE_TRAINER_TRACE_FILENAME,
         )
+        relaxed_args = module.parse_args(
+            [
+                "--metadata-only",
+                "--no-require-hf-finetune",
+            ]
+        )
+        legacy_relaxed_args = module.parse_args(
+            [
+                "--metadata-only",
+                "--no-require-hf-gpt2-ft",
+            ]
+        )
+        self.assertTrue(relaxed_args.no_require_hf_gpt2_ft)
+        self.assertTrue(legacy_relaxed_args.no_require_hf_gpt2_ft)
 
     def test_installed_hf_profile_cli_resolves_profiles(self) -> None:
         stdout = io.StringIO()
@@ -8411,6 +8476,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                                     "dataloader_pin_memory": "false",
                                     "runtime_device_backends": ["cpu"],
                                     "required_runtime_device_ready_backends": ["cpu"],
+                                    "no_require_hf_finetune": True,
                                 },
                             }
                         ],
@@ -8441,6 +8507,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertTrue(args.allow_remote)
         self.assertEqual(args.min_free_disk_gb, 4.0)
         self.assertEqual(args.runtime_device_backend, ["cpu"])
+        self.assertTrue(args.no_require_hf_gpt2_ft)
         self.assertEqual(command[command.index("--dataset-name") + 1], "roneneldan/TinyStories")
         self.assertEqual(command[command.index("--dataset-config") + 1], "")
         self.assertIn("--dataset-streaming", command)
@@ -8455,6 +8522,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             command[command.index("--require-runtime-device-ready-backend") + 1],
             "cpu",
         )
+        self.assertIn("--no-require-hf-finetune", command)
+        self.assertNotIn("--no-require-hf-gpt2-ft", command)
         self.assertEqual(report["dataset_name"], "roneneldan/TinyStories")
         self.assertIsNone(report["dataset_config"])
         self.assertTrue(report["dataset_streaming"])
@@ -9147,8 +9216,16 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         for name in profile_exports:
             self.assertIn(name, st.__all__)
             self.assertIs(getattr(st, name), getattr(hf_ft, name))
+        self.assertIn("hf_finetune_preflight_report", st.__all__)
+        self.assertIs(
+            st.hf_finetune_preflight_report,
+            hf_ft.hf_finetune_preflight_report,
+        )
+        self.assertIsNot(
+            st.hf_finetune_preflight_report,
+            hf_ft.hf_gpt2_finetune_preflight_report,
+        )
         generic_hf_ft_aliases = {
-            "hf_finetune_preflight_report": "hf_gpt2_finetune_preflight_report",
             "hf_finetune_rust_dependency_report": (
                 "hf_gpt2_finetune_rust_dependency_report"
             ),

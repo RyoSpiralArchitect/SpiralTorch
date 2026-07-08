@@ -222,9 +222,10 @@
       "runtime": {
         "allow_remote": false,
         "trust_remote_code": false,
-        "dataloader_pin_memory": "auto"
+        "dataloader_pin_memory": "auto",
+        "no_require_hf_finetune": true
       },
-      "notes": "Copy this profile for a local AutoModelForCausalLM directory."
+      "notes": "Copy this profile for a local AutoModelForCausalLM directory; the relaxed runtime gate is useful while iterating on local model paths before installing the full FT stack."
     }
   ]
 }

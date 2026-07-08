@@ -208,7 +208,9 @@ HF_FINETUNE_MODEL_PROFILE_PREFLIGHT_PRESETS: dict[str, str] = {
     "runtime": "hf-runtime",
     "inference": "hf-runtime",
     "finetune": "hf-finetune",
-    "full-finetune": "hf-gpt2-ft",
+    "full": "hf-full-finetune",
+    "full-finetune": "hf-full-finetune",
+    "local-full-finetune": "hf-full-finetune",
     "gpt2-ft": "hf-gpt2-ft",
     "peft": "hf-peft",
     "trl-sft": "hf-trl-sft",
@@ -438,8 +440,13 @@ HF_FINETUNE_DEFAULT_MODEL_CONFIGS: dict[str, object] = {
                 "allow_remote": False,
                 "trust_remote_code": False,
                 "dataloader_pin_memory": "auto",
+                "no_require_hf_finetune": True,
             },
-            "notes": "Copy this profile for a local AutoModelForCausalLM directory.",
+            "notes": (
+                "Copy this profile for a local AutoModelForCausalLM directory; "
+                "the relaxed runtime gate is useful while iterating on local "
+                "model paths before installing the full FT stack."
+            ),
         },
     ],
 }
@@ -1680,8 +1687,11 @@ def hf_finetune_model_profile_cli_args(
             args.append("--trust-remote-code")
         if runtime.get("require_wgpu_ready") is True:
             args.append("--require-wgpu-ready")
-        if runtime.get("no_require_hf_gpt2_ft") is True:
-            args.append("--no-require-hf-gpt2-ft")
+        if (
+            runtime.get("no_require_hf_finetune") is True
+            or runtime.get("no_require_hf_gpt2_ft") is True
+        ):
+            args.append("--no-require-hf-finetune")
         for key, flag in (
             ("runtime_device_backends", "--runtime-device-backend"),
             (
@@ -3138,6 +3148,63 @@ def hf_gpt2_finetune_preflight_report(
             "hf_gpt2_ft_python_packages": dependency_report["python_package_label"],
             "hf_gpt2_ft_rust_surfaces": dependency_report["rust_surface_crates"],
             "hf_gpt2_ft_rust_dependency_report": dependency_report,
+        }
+    )
+    return report
+
+
+def hf_finetune_preflight_report(
+    *,
+    model_name: str = "gpt2",
+    dataset_name: str | None = "wikitext",
+    dataset_config: str | None = "wikitext-2-raw-v1",
+    dataset_revision: str | None = None,
+    dataset_streaming: bool = False,
+    streaming_shuffle_buffer_size: int = 0,
+    streaming_validation_samples: int = 0,
+    train_split: str = "train",
+    eval_split: str | None = "validation",
+    text_column: str = "text",
+    runtime_device_backends: object = None,
+    required_runtime_device_ready_backends: object = None,
+    require_hf_finetune: bool = True,
+    require_hf_gpt2_ft: bool | None = None,
+    describe_runtime_devices=None,
+) -> dict[str, object]:
+    """Build a model-neutral HF fine-tune preflight report.
+
+    The underlying schema keeps historical GPT-2 field names for compatibility,
+    but generic callers can use ``require_hf_finetune``.
+    """
+
+    require_full_stack = (
+        bool(require_hf_finetune)
+        if require_hf_gpt2_ft is None
+        else bool(require_hf_gpt2_ft)
+    )
+    report = hf_gpt2_finetune_preflight_report(
+        model_name=model_name,
+        dataset_name=dataset_name,
+        dataset_config=dataset_config,
+        dataset_revision=dataset_revision,
+        dataset_streaming=dataset_streaming,
+        streaming_shuffle_buffer_size=streaming_shuffle_buffer_size,
+        streaming_validation_samples=streaming_validation_samples,
+        train_split=train_split,
+        eval_split=eval_split,
+        text_column=text_column,
+        runtime_device_backends=runtime_device_backends,
+        required_runtime_device_ready_backends=required_runtime_device_ready_backends,
+        require_hf_gpt2_ft=require_full_stack,
+        describe_runtime_devices=describe_runtime_devices,
+    )
+    dependency_report = report.get("hf_gpt2_ft_rust_dependency_report")
+    report.update(
+        {
+            "hf_finetune_required": require_full_stack,
+            "hf_finetune_python_packages": report.get("hf_gpt2_ft_python_packages"),
+            "hf_finetune_rust_surfaces": report.get("hf_gpt2_ft_rust_surfaces"),
+            "hf_finetune_rust_dependency_report": dependency_report,
         }
     )
     return report
@@ -7210,7 +7277,6 @@ hf_finetune_inference_distortion_runtime_plan = (
 )
 hf_finetune_milestone_lines = hf_gpt2_finetune_milestone_lines
 hf_finetune_milestone_report = hf_gpt2_finetune_milestone_report
-hf_finetune_preflight_report = hf_gpt2_finetune_preflight_report
 hf_finetune_rust_dependency_report = hf_gpt2_finetune_rust_dependency_report
 hf_finetune_scale_up_command = hf_gpt2_finetune_scale_up_command
 hf_finetune_scale_up_preflight_lines = hf_gpt2_finetune_scale_up_preflight_lines

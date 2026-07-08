@@ -190,7 +190,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=[],
     )
     parser.add_argument("--require-wgpu-ready", action="store_true")
-    parser.add_argument("--no-require-hf-gpt2-ft", action="store_true")
+    parser.add_argument(
+        "--no-require-hf-finetune",
+        "--no-require-hf-gpt2-ft",
+        dest="no_require_hf_gpt2_ft",
+        action="store_true",
+    )
     parser.add_argument("--zspace-probe", action="store_true")
     parser.add_argument("--zspace-probe-dim", type=int, default=64)
     parser.add_argument("--zspace-curvature", type=float, default=-0.04)
@@ -684,6 +689,11 @@ def _apply_model_profile_defaults(
         ("require_wgpu_ready", "require_wgpu_ready", "--require-wgpu-ready"),
         (
             "no_require_hf_gpt2_ft",
+            "no_require_hf_finetune",
+            "--no-require-hf-finetune",
+        ),
+        (
+            "no_require_hf_gpt2_ft",
             "no_require_hf_gpt2_ft",
             "--no-require-hf-gpt2-ft",
         ),
@@ -973,7 +983,7 @@ def _bridge_command(
     if args.require_wgpu_ready:
         command.append("--require-wgpu-ready")
     if args.no_require_hf_gpt2_ft:
-        command.append("--no-require-hf-gpt2-ft")
+        command.append("--no-require-hf-finetune")
     if args.zspace_probe:
         command.append("--zspace-probe")
         command.extend(["--zspace-probe-dim", str(args.zspace_probe_dim)])
