@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import time
 from collections.abc import Mapping, Sequence
@@ -53,6 +54,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--checkpoint-timeout-seconds", type=float, default=1800.0)
     parser.add_argument("--status-card-timeout-seconds", type=float, default=1800.0)
     parser.add_argument(
+        "--min-free-disk-gb",
+        type=float,
+        default=None,
+        help=(
+            "Minimum free disk GiB to preserve before launching. When omitted, "
+            "the wrapped command's --min-free-disk-gb is used if present."
+        ),
+    )
+    parser.add_argument(
         "--launched-pid-file",
         type=Path,
         default=None,
@@ -87,6 +97,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         parser.error("--checkpoint-timeout-seconds must be non-negative")
     if args.status_card_timeout_seconds < 0.0:
         parser.error("--status-card-timeout-seconds must be non-negative")
+    if args.min_free_disk_gb is not None and args.min_free_disk_gb < 0.0:
+        parser.error("--min-free-disk-gb must be non-negative")
     if args.command and args.command[0] == "--":
         args.command = args.command[1:]
     if not args.command:
@@ -150,6 +162,158 @@ def _checkpoint_ready(args: argparse.Namespace) -> bool | None:
     return (args.checkpoint / str(args.checkpoint_ready_file)).is_file()
 
 
+def _command_flag_value(command: Sequence[object], flag: str) -> str | None:
+    values = [str(item) for item in command]
+    for index, item in enumerate(values):
+        if item == flag and index + 1 < len(values):
+            return values[index + 1]
+        if item.startswith(f"{flag}="):
+            return item.split("=", 1)[1]
+    return None
+
+
+def _positive_int_flag(command: Sequence[object], flag: str) -> int | None:
+    value = _command_flag_value(command, flag)
+    if value is None:
+        return None
+    try:
+        parsed = int(float(value))
+    except ValueError:
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _nonnegative_float_flag(command: Sequence[object], flag: str) -> float | None:
+    value = _command_flag_value(command, flag)
+    if value is None:
+        return None
+    try:
+        parsed = float(value)
+    except ValueError:
+        return None
+    return parsed if parsed >= 0.0 else None
+
+
+def _path_size_bytes(path: Path) -> int | None:
+    if not path.exists():
+        return None
+    if path.is_file():
+        try:
+            return int(path.stat().st_size)
+        except OSError:
+            return None
+    total = 0
+    try:
+        for child in path.rglob("*"):
+            if not child.is_file():
+                continue
+            try:
+                total += int(child.stat().st_size)
+            except OSError:
+                continue
+    except OSError:
+        return None
+    return total
+
+
+def _nearest_existing_parent(path: Path) -> Path | None:
+    current = path
+    while not current.exists() and current.parent != current:
+        current = current.parent
+    return current if current.exists() else None
+
+
+def _disk_free_bytes(path: Path) -> int | None:
+    parent = _nearest_existing_parent(path)
+    if parent is None:
+        return None
+    try:
+        return int(shutil.disk_usage(parent).free)
+    except OSError:
+        return None
+
+
+def _launch_disk_guard(args: argparse.Namespace) -> dict[str, Any]:
+    gib = 1024.0**3
+    command = [str(item) for item in args.command]
+    output_dir_value = _command_flag_value(command, "--output-dir")
+    resume_value = _command_flag_value(command, "--resume-from-checkpoint")
+    output_dir = Path(output_dir_value) if output_dir_value else None
+    resume_checkpoint = (
+        Path(resume_value)
+        if resume_value is not None
+        else args.checkpoint
+        if args.checkpoint is not None
+        else None
+    )
+    min_free_gb = (
+        args.min_free_disk_gb
+        if args.min_free_disk_gb is not None
+        else _nonnegative_float_flag(command, "--min-free-disk-gb")
+    )
+    save_total_limit = _positive_int_flag(command, "--save-total-limit") or 1
+    checkpoint_bytes = (
+        None if resume_checkpoint is None else _path_size_bytes(resume_checkpoint)
+    )
+    estimated_peak_checkpoint_count = max(save_total_limit + 1, 1)
+    estimated_peak_checkpoint_bytes = (
+        None
+        if checkpoint_bytes is None
+        else int(checkpoint_bytes) * estimated_peak_checkpoint_count
+    )
+    disk_anchor = output_dir or resume_checkpoint
+    free_bytes = None if disk_anchor is None else _disk_free_bytes(disk_anchor)
+    free_after_estimated_peak_bytes = (
+        None
+        if free_bytes is None or estimated_peak_checkpoint_bytes is None
+        else int(free_bytes) - int(estimated_peak_checkpoint_bytes)
+    )
+    checked_free_gb = (
+        None
+        if free_after_estimated_peak_bytes is None
+        else float(free_after_estimated_peak_bytes) / gib
+    )
+    if min_free_gb is None:
+        status = "unchecked"
+        meets_min_free = None
+    elif checked_free_gb is not None:
+        meets_min_free = checked_free_gb >= float(min_free_gb)
+        status = "ok" if meets_min_free else "blocked"
+    elif free_bytes is not None:
+        free_gb = float(free_bytes) / gib
+        meets_min_free = free_gb >= float(min_free_gb)
+        status = "ok" if meets_min_free else "blocked"
+    else:
+        status = "unknown"
+        meets_min_free = None
+    return {
+        "row_type": "hf_gpt2_ft_wait_launch_disk_guard",
+        "status": status,
+        "output_dir": None if output_dir is None else str(output_dir),
+        "resume_from_checkpoint": (
+            None if resume_checkpoint is None else str(resume_checkpoint)
+        ),
+        "min_free_gb": min_free_gb,
+        "meets_min_free": meets_min_free,
+        "save_total_limit": save_total_limit,
+        "resume_checkpoint_bytes": checkpoint_bytes,
+        "resume_checkpoint_gb": (
+            None if checkpoint_bytes is None else float(checkpoint_bytes) / gib
+        ),
+        "estimated_peak_checkpoint_count": estimated_peak_checkpoint_count,
+        "estimated_peak_checkpoint_bytes": estimated_peak_checkpoint_bytes,
+        "estimated_peak_checkpoint_gb": (
+            None
+            if estimated_peak_checkpoint_bytes is None
+            else float(estimated_peak_checkpoint_bytes) / gib
+        ),
+        "free_bytes": free_bytes,
+        "free_gb": None if free_bytes is None else float(free_bytes) / gib,
+        "free_after_estimated_peak_bytes": free_after_estimated_peak_bytes,
+        "free_after_estimated_peak_gb": checked_free_gb,
+    }
+
+
 def _write_manifest(
     args: argparse.Namespace,
     status: str,
@@ -183,6 +347,7 @@ def _write_manifest(
         ),
         "launched_log_mode": args.launched_log_mode,
         "command": [str(item) for item in args.command],
+        "launch_disk_guard": _launch_disk_guard(args),
         "detach": bool(args.detach),
         "dry_run": bool(args.dry_run),
         "returncode": returncode,
@@ -203,6 +368,8 @@ def _write_manifest(
         f"process_alive={payload['process_alive']} "
         f"checkpoint_ready={payload['checkpoint_ready']} "
         f"status_card_status={payload['status_card_status']} "
+        f"launch_disk_status={payload['launch_disk_guard'].get('status')} "
+        f"launch_disk_free_after_gb={payload['launch_disk_guard'].get('free_after_estimated_peak_gb')} "
         f"launched_pid={payload['launched_pid']} "
         f"returncode={returncode}",
         flush=True,
@@ -284,6 +451,10 @@ def run_wait_launch(args: argparse.Namespace) -> dict[str, Any]:
 
     if args.dry_run:
         return _write_manifest(args, "dry_run", returncode=0)
+
+    disk_guard = _launch_disk_guard(args)
+    if disk_guard.get("status") == "blocked":
+        return _write_manifest(args, "blocked_prelaunch_disk", returncode=2)
 
     _write_manifest(args, "launching")
     returncode, launch_error, launched_pid = _run_command(args)

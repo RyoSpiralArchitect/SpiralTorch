@@ -50,6 +50,11 @@ def _load_history(path: Path) -> list[dict[str, Any]]:
     return rows
 
 
+def _launch_disk_guard(row: dict[str, Any]) -> dict[str, Any]:
+    guard = row.get("launch_disk_guard")
+    return guard if isinstance(guard, dict) else {}
+
+
 def summarize_history(
     rows: list[dict[str, Any]], *, label: str | None, history_jsonl: Path
 ) -> dict[str, Any]:
@@ -68,6 +73,7 @@ def summarize_history(
         if row.get("launched_pid") is not None
         or row.get("status") in {"launching", "launched", "finished", "launch_error"}
     ]
+    launch_disk_guard = _launch_disk_guard(last)
     return {
         "row_type": "hf_gpt2_ft_wait_launch_history_summary",
         "label": label,
@@ -84,6 +90,15 @@ def summarize_history(
         "last_launched_pid": last.get("launched_pid"),
         "last_returncode": last.get("returncode"),
         "last_launch_error": last.get("launch_error"),
+        "last_launch_disk_status": launch_disk_guard.get("status"),
+        "last_launch_disk_min_free_gb": launch_disk_guard.get("min_free_gb"),
+        "last_launch_disk_free_gb": launch_disk_guard.get("free_gb"),
+        "last_launch_disk_peak_gb": launch_disk_guard.get(
+            "estimated_peak_checkpoint_gb"
+        ),
+        "last_launch_disk_free_after_gb": launch_disk_guard.get(
+            "free_after_estimated_peak_gb"
+        ),
         "launched": bool(launched_rows),
         "launched_row_count": len(launched_rows),
         "last_launched_pid_file": last.get("launched_pid_file"),
@@ -109,6 +124,10 @@ def history_lines(
             f"launched={_number_text(summary.get('launched'))} "
             f"launched_pid={_number_text(summary.get('last_launched_pid'))} "
             f"returncode={_number_text(summary.get('last_returncode'))} "
+            f"launch_disk_status={_number_text(summary.get('last_launch_disk_status'))} "
+            f"launch_disk_min_free_gb={_number_text(summary.get('last_launch_disk_min_free_gb'))} "
+            f"launch_disk_peak_gb={_number_text(summary.get('last_launch_disk_peak_gb'))} "
+            f"launch_disk_free_after_gb={_number_text(summary.get('last_launch_disk_free_after_gb'))} "
             f"launch_error={_number_text(summary.get('last_launch_error'))}"
         )
     ]
@@ -124,6 +143,8 @@ def history_lines(
                 f"process_alive={_number_text(row.get('process_alive'))} "
                 f"checkpoint_ready={_number_text(row.get('checkpoint_ready'))} "
                 f"status_card_status={_number_text(row.get('status_card_status'))} "
+                f"launch_disk_status={_number_text(_launch_disk_guard(row).get('status'))} "
+                f"launch_disk_free_after_gb={_number_text(_launch_disk_guard(row).get('free_after_estimated_peak_gb'))} "
                 f"launched_pid={_number_text(row.get('launched_pid'))} "
                 f"returncode={_number_text(row.get('returncode'))}"
             )

@@ -3508,9 +3508,11 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(payload["returncode"], 0)
         self.assertTrue(stored["checkpoint_ready"])
         self.assertEqual(stored["status_card_status"], "ok")
+        self.assertEqual(stored["launch_disk_guard"]["status"], "unchecked")
         self.assertEqual(stored["command"][:2], [sys.executable, "-c"])
         self.assertEqual(len(history_rows), 1)
         self.assertEqual(history_rows[0]["status"], "dry_run")
+        self.assertEqual(history_rows[0]["launch_disk_guard"]["status"], "unchecked")
 
     def test_wait_launch_example_blocks_missing_checkpoint(self) -> None:
         module = load_wait_launch_example()
@@ -3538,6 +3540,49 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(payload["status"], "blocked_missing_checkpoint")
         self.assertEqual(payload["returncode"], 2)
         self.assertFalse(stored["checkpoint_ready"])
+
+    def test_wait_launch_example_blocks_prelaunch_when_disk_headroom_low(
+        self,
+    ) -> None:
+        module = load_wait_launch_example()
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            checkpoint = tmp_path / "checkpoint-4096"
+            checkpoint.mkdir()
+            (checkpoint / "model.safetensors").write_text("ready", encoding="utf-8")
+            output_dir = tmp_path / "next-run"
+            manifest = tmp_path / "wait-launch.json"
+            launched_pid = tmp_path / "next.pid"
+            args = module.parse_args(
+                [
+                    "--checkpoint",
+                    str(checkpoint),
+                    "--manifest",
+                    str(manifest),
+                    "--launched-pid-file",
+                    str(launched_pid),
+                    "--",
+                    sys.executable,
+                    "-c",
+                    "print('should-not-run')",
+                    "--output-dir",
+                    str(output_dir),
+                    "--save-total-limit",
+                    "1",
+                    "--min-free-disk-gb",
+                    "1000000000",
+                ]
+            )
+            payload = module.run_wait_launch(args)
+            stored = json.loads(manifest.read_text())
+
+        self.assertEqual(payload["status"], "blocked_prelaunch_disk")
+        self.assertEqual(payload["returncode"], 2)
+        self.assertFalse(launched_pid.exists())
+        self.assertEqual(stored["launch_disk_guard"]["status"], "blocked")
+        self.assertFalse(stored["launch_disk_guard"]["meets_min_free"])
+        self.assertEqual(stored["launch_disk_guard"]["save_total_limit"], 1)
+        self.assertEqual(stored["launch_disk_guard"]["resume_checkpoint_bytes"], 5)
 
     def test_wait_launch_example_records_launched_pid_and_log(self) -> None:
         module = load_wait_launch_example()
@@ -3656,6 +3701,13 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                     "launched_pid": 123,
                     "launched_pid_file": "next.pid",
                     "launched_log_file": "next.log",
+                    "launch_disk_guard": {
+                        "status": "ok",
+                        "min_free_gb": 4.0,
+                        "free_gb": 12.0,
+                        "estimated_peak_checkpoint_gb": 2.0,
+                        "free_after_estimated_peak_gb": 10.0,
+                    },
                     "returncode": None,
                 },
                 {
@@ -3666,6 +3718,13 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                     "checkpoint_ready": True,
                     "status_card_status": "ok",
                     "launched_pid": 123,
+                    "launch_disk_guard": {
+                        "status": "ok",
+                        "min_free_gb": 4.0,
+                        "free_gb": 12.0,
+                        "estimated_peak_checkpoint_gb": 2.0,
+                        "free_after_estimated_peak_gb": 10.0,
+                    },
                     "returncode": 0,
                 },
             ]
@@ -3689,8 +3748,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertTrue(summary["launched"])
         self.assertEqual(summary["last_launched_pid"], 123)
         self.assertEqual(summary["last_returncode"], 0)
+        self.assertEqual(summary["last_launch_disk_status"], "ok")
+        self.assertEqual(summary["last_launch_disk_min_free_gb"], 4.0)
+        self.assertEqual(summary["last_launch_disk_peak_gb"], 2.0)
+        self.assertEqual(summary["last_launch_disk_free_after_gb"], 10.0)
         self.assertEqual(ok, 0)
         self.assertTrue(any("launched=true" in line for line in lines))
+        self.assertTrue(any("launch_disk_status=ok" in line for line in lines))
+        self.assertTrue(any("launch_disk_free_after_gb=10" in line for line in lines))
 
     def test_wait_launch_summary_example_require_launched_fails_before_launch(self) -> None:
         module = load_wait_launch_summary_example()
@@ -5071,6 +5136,12 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 "status_card_status": None,
                 "launched_pid": None,
                 "returncode": None,
+                "launch_disk_guard": {
+                    "status": "ok",
+                    "min_free_gb": 4.0,
+                    "estimated_peak_checkpoint_gb": 2.8,
+                    "free_after_estimated_peak_gb": 5.6,
+                },
             }
         ]
         direct_status_first = {
@@ -5229,6 +5300,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertFalse(snapshot["wait_launch_checkpoint_ready"])
         self.assertFalse(snapshot["wait_launch_launched"])
         self.assertEqual(snapshot["wait_launch_status"], "waiting_for_process")
+        self.assertEqual(snapshot["wait_launch_disk_status"], "ok")
+        self.assertEqual(snapshot["wait_launch_disk_free_after_gb"], 5.6)
         self.assertEqual(written["log_latest_step"], 5800)
         self.assertIn("label=long-ft", lines[0])
         self.assertIn("primary=direct", lines[0])
@@ -5258,6 +5331,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("milestone_checkpoint_ready=false", lines[0])
         self.assertIn("eval_watch_ready=false", lines[0])
         self.assertIn("wait_status=waiting_for_process", lines[0])
+        self.assertIn("wait_disk_status=ok", lines[0])
+        self.assertIn("wait_disk_free_after_gb=5.6", lines[0])
         self.assertIn("name=direct", lines[1])
         self.assertIn("rows=2", lines[1])
         self.assertIn("eval_loss_projected_final=3.19882", lines[1])
@@ -5268,6 +5343,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("name=checkpoint", lines[3])
         self.assertIn("name=final", lines[4])
         self.assertIn("status=waiting_for_process", lines[5])
+        self.assertIn("launch_disk_status=ok", lines[5])
+        self.assertIn("launch_disk_free_after_gb=5.6", lines[5])
         self.assertEqual(written_lines, lines)
         ready_watches = {
             "direct": {

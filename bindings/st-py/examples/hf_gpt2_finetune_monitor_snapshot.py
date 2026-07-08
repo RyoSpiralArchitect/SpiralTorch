@@ -143,6 +143,11 @@ def _checkpoint_headroom(row: dict[str, Any]) -> dict[str, Any]:
     return headroom if isinstance(headroom, dict) else {}
 
 
+def _launch_disk_guard(row: dict[str, Any]) -> dict[str, Any]:
+    guard = row.get("launch_disk_guard")
+    return guard if isinstance(guard, dict) else {}
+
+
 def _eval_loss_points(row: dict[str, Any]) -> list[dict[str, Any]]:
     points = _nested(row, "trace", "trace_eval_loss_points")
     if not isinstance(points, list):
@@ -371,6 +376,7 @@ def _wait_launch_summary(
     history_jsonl: Path | None,
 ) -> dict[str, Any]:
     last = rows[-1] if rows else {}
+    launch_disk_guard = _launch_disk_guard(last)
     launched_rows = [
         row
         for row in rows
@@ -390,6 +396,14 @@ def _wait_launch_summary(
         "launched_pid": last.get("launched_pid"),
         "returncode": last.get("returncode"),
         "launch_error": last.get("launch_error"),
+        "launch_disk_status": launch_disk_guard.get("status"),
+        "launch_disk_min_free_gb": launch_disk_guard.get("min_free_gb"),
+        "launch_disk_peak_gb": launch_disk_guard.get(
+            "estimated_peak_checkpoint_gb"
+        ),
+        "launch_disk_free_after_gb": launch_disk_guard.get(
+            "free_after_estimated_peak_gb"
+        ),
     }
 
 
@@ -674,6 +688,10 @@ def build_monitor_snapshot(args: argparse.Namespace) -> dict[str, Any]:
         "wait_launch_checkpoint_ready": wait_launch.get("checkpoint_ready"),
         "wait_launch_launched": wait_launch.get("launched"),
         "wait_launch_launched_pid": wait_launch.get("launched_pid"),
+        "wait_launch_disk_status": wait_launch.get("launch_disk_status"),
+        "wait_launch_disk_free_after_gb": wait_launch.get(
+            "launch_disk_free_after_gb"
+        ),
         "watches": watches,
         "wait_launch": wait_launch,
     }
@@ -741,6 +759,8 @@ def snapshot_lines(snapshot: dict[str, Any]) -> list[str]:
             f"final_watch_reason={_number_text(snapshot.get('final_watch_reason'))} "
             f"wait_status={_number_text(snapshot.get('wait_launch_status'))} "
             f"wait_checkpoint_ready={_number_text(snapshot.get('wait_launch_checkpoint_ready'))} "
+            f"wait_disk_status={_number_text(snapshot.get('wait_launch_disk_status'))} "
+            f"wait_disk_free_after_gb={_number_text(snapshot.get('wait_launch_disk_free_after_gb'))} "
             f"wait_launched={_number_text(snapshot.get('wait_launch_launched'))}"
         )
     ]
@@ -780,6 +800,8 @@ def snapshot_lines(snapshot: dict[str, Any]) -> list[str]:
                 f"process_alive={_number_text(wait_launch.get('process_alive'))} "
                 f"checkpoint_ready={_number_text(wait_launch.get('checkpoint_ready'))} "
                 f"status_card_status={_number_text(wait_launch.get('status_card_status'))} "
+                f"launch_disk_status={_number_text(wait_launch.get('launch_disk_status'))} "
+                f"launch_disk_free_after_gb={_number_text(wait_launch.get('launch_disk_free_after_gb'))} "
                 f"launched={_number_text(wait_launch.get('launched'))} "
                 f"launched_pid={_number_text(wait_launch.get('launched_pid'))} "
                 f"returncode={_number_text(wait_launch.get('returncode'))}"
