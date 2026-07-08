@@ -91,6 +91,30 @@ def hf_gpt2_finetune_milestone_capture_lines(
     label: str | None = ...,
 ) -> List[str]: ...
 
+def hf_gpt2_finetune_milestone_handoff_report(
+    capture_or_monitor: Mapping[str, Any],
+    *,
+    run_dir: str | PathLike[str] | None = ...,
+    checkpoint: str | None = ...,
+    label_prefix: str | None = ...,
+    python: str = ...,
+    script: str | PathLike[str] = ...,
+    compare_with_sweep: Sequence[str | PathLike[str]] | str | PathLike[str] | None = ...,
+    compare_with_label: Sequence[str] | str | None = ...,
+    curve_out: str | PathLike[str] | None = ...,
+    curve_lines_out: str | PathLike[str] | None = ...,
+    trainer_trace_jsonl: str | PathLike[str] | None = ...,
+    run_card: str | PathLike[str] | None = ...,
+    top_n: int = ...,
+    wait: bool = ...,
+    dry_run: bool = ...,
+) -> Dict[str, Any]: ...
+
+def hf_gpt2_finetune_milestone_handoff_lines(
+    report_or_capture: Mapping[str, Any],
+    **kwargs: Any,
+) -> List[str]: ...
+
 def summarize_transformers_trainer_runtime_bridge(
     transformers_trace_jsonl: str,
     trainer_trace_jsonl: str,
@@ -8670,6 +8694,8 @@ __all__ = [
     "hf_gpt2_finetune_monitor_report",
     "hf_gpt2_finetune_milestone_capture_lines",
     "hf_gpt2_finetune_milestone_capture_report",
+    "hf_gpt2_finetune_milestone_handoff_lines",
+    "hf_gpt2_finetune_milestone_handoff_report",
     "hf_gpt2_finetune_status_history_lines",
     "hf_gpt2_finetune_scale_up_command",
     "hf_gpt2_finetune_scale_up_preflight_lines",

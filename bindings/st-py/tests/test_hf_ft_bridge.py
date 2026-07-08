@@ -6142,6 +6142,32 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         ready_capture = st.hf_gpt2_finetune_milestone_capture_report(ready_snapshot)
         self.assertEqual(ready_capture["next_action"], "handoff")
         self.assertFalse(ready_capture["should_continue_watch"])
+        handoff = st.hf_gpt2_finetune_milestone_handoff_report(
+            ready_capture,
+            run_dir="/tmp/spiraltorch-ft",
+            compare_with_sweep="previous-sweep.json",
+            compare_with_label="previous",
+            dry_run=True,
+        )
+        handoff_lines = st.hf_gpt2_finetune_milestone_handoff_lines(handoff)
+
+        self.assertEqual(handoff["row_type"], "hf_gpt2_finetune_milestone_handoff")
+        self.assertEqual(handoff["status"], "ready")
+        self.assertTrue(handoff["ready"])
+        self.assertEqual(handoff["action"], "checkpoint_generation_control")
+        self.assertEqual(handoff["checkpoint"], "checkpoint-6144")
+        self.assertEqual(handoff["checkpoint_path"], "/tmp/spiraltorch-ft/checkpoint-6144")
+        self.assertIn("--checkpoint", handoff["command"])
+        self.assertIn("checkpoint-6144", handoff["command"])
+        self.assertIn("--compare-with-sweep", handoff["command"])
+        self.assertIn("previous-sweep.json", handoff["command"])
+        self.assertIn("--dry-run", handoff["command"])
+        self.assertIn("checkpoint=checkpoint-6144", handoff_lines[0])
+        waiting_handoff = st.hf_gpt2_finetune_milestone_handoff_report(
+            capture,
+            run_dir="/tmp/spiraltorch-ft",
+        )
+        self.assertEqual(waiting_handoff["status"], "waiting_for_milestone")
 
     def test_package_milestone_report_tracks_run_status_readiness(self) -> None:
         waiting_status = {
@@ -6785,6 +6811,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("hf_gpt2_finetune_monitor_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_milestone_capture_lines", st.__all__)
         self.assertIn("hf_gpt2_finetune_milestone_capture_report", st.__all__)
+        self.assertIn("hf_gpt2_finetune_milestone_handoff_lines", st.__all__)
+        self.assertIn("hf_gpt2_finetune_milestone_handoff_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_preflight_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_scale_up_command", st.__all__)
         self.assertIn("hf_gpt2_finetune_scale_up_preflight_lines", st.__all__)
@@ -6856,6 +6884,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIs(
             st.hf_gpt2_finetune_milestone_capture_report,
             st.hf_ft_status.hf_gpt2_finetune_milestone_capture_report,
+        )
+        self.assertIs(
+            st.hf_gpt2_finetune_milestone_handoff_lines,
+            st.hf_ft_status.hf_gpt2_finetune_milestone_handoff_lines,
+        )
+        self.assertIs(
+            st.hf_gpt2_finetune_milestone_handoff_report,
+            st.hf_ft_status.hf_gpt2_finetune_milestone_handoff_report,
         )
         self.assertIs(
             st.hf_gpt2_finetune_training_telemetry_frame,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shlex
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -14,6 +15,8 @@ __all__ = [
     "hf_gpt2_finetune_monitor_report",
     "hf_gpt2_finetune_milestone_capture_lines",
     "hf_gpt2_finetune_milestone_capture_report",
+    "hf_gpt2_finetune_milestone_handoff_lines",
+    "hf_gpt2_finetune_milestone_handoff_report",
     "hf_gpt2_finetune_status_history_lines",
     "load_hf_gpt2_finetune_status_history",
     "main",
@@ -808,6 +811,7 @@ def hf_gpt2_finetune_milestone_capture_report(
         "milestone_checkpoint_ready": snapshot.get(
             "milestone_checkpoint_ready"
         ),
+        "milestone_checkpoint": snapshot.get("milestone_checkpoint"),
         "process_status": snapshot.get("process_status"),
         "log_latest_step": snapshot.get("log_latest_step"),
         "last_eval_loss_step": snapshot.get("last_eval_loss_step"),
@@ -865,6 +869,173 @@ def hf_gpt2_finetune_milestone_capture_lines(
             f"next_checkpoint_step={_number_text(state.get('next_checkpoint_step'))} "
             f"disk_status={_number_text(state.get('disk_status'))} "
             f"next_action={_number_text(state.get('next_action'))}"
+        )
+    ]
+
+
+def _as_list(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        return list(value)
+    return [value]
+
+
+def _checkpoint_from_capture(capture: Mapping[str, Any]) -> str | None:
+    checkpoint = capture.get("milestone_checkpoint")
+    if isinstance(checkpoint, str) and checkpoint:
+        return checkpoint
+    step = _int_value(capture.get("milestone_step"))
+    if step is not None:
+        return f"checkpoint-{step}"
+    latest = capture.get("latest_checkpoint")
+    if isinstance(latest, str) and latest:
+        return latest
+    return None
+
+
+def hf_gpt2_finetune_milestone_handoff_report(
+    capture_or_monitor: Mapping[str, Any],
+    *,
+    run_dir: str | Path | None = None,
+    checkpoint: str | None = None,
+    label_prefix: str | None = None,
+    python: str = "python3",
+    script: str | Path = "bindings/st-py/examples/hf_gpt2_ft_checkpoint_generation_control.py",
+    compare_with_sweep: Sequence[str | Path] | str | Path | None = None,
+    compare_with_label: Sequence[str] | str | None = None,
+    curve_out: str | Path | None = None,
+    curve_lines_out: str | Path | None = None,
+    trainer_trace_jsonl: str | Path | None = None,
+    run_card: str | Path | None = None,
+    top_n: int = 3,
+    wait: bool = False,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Plan the checkpoint-generation handoff after a milestone capture is ready."""
+
+    if capture_or_monitor.get("row_type") == "hf_gpt2_finetune_milestone_capture":
+        capture = dict(capture_or_monitor)
+    else:
+        capture = hf_gpt2_finetune_milestone_capture_report(capture_or_monitor)
+    resolved_checkpoint = checkpoint or _checkpoint_from_capture(capture)
+    resolved_run_dir = Path(run_dir) if run_dir is not None else None
+    checkpoint_path = (
+        None
+        if resolved_run_dir is None or resolved_checkpoint is None
+        else resolved_run_dir / resolved_checkpoint
+    )
+    milestone_ready = capture.get("milestone_ready") is True
+    checkpoint_ready = capture.get("milestone_checkpoint_ready") is True
+    if checkpoint_path is not None:
+        checkpoint_ready = checkpoint_ready or (checkpoint_path / "model.safetensors").is_file()
+    status = (
+        "ready"
+        if milestone_ready and checkpoint_ready and resolved_checkpoint is not None
+        else "waiting_for_milestone"
+        if not milestone_ready
+        else "waiting_for_checkpoint"
+        if not checkpoint_ready
+        else "missing_checkpoint"
+    )
+    prefix = label_prefix or str(capture.get("label") or "").strip() or None
+    compare_paths = [str(path) for path in _as_list(compare_with_sweep)]
+    compare_labels = [str(label) for label in _as_list(compare_with_label)]
+    command: list[str] = [str(python), str(script)]
+    if resolved_run_dir is not None:
+        command.extend(["--run-dir", str(resolved_run_dir)])
+    if resolved_checkpoint is not None:
+        command.extend(["--checkpoint", resolved_checkpoint])
+    if prefix:
+        command.extend(["--label-prefix", prefix])
+    for path in compare_paths:
+        command.extend(["--compare-with-sweep", path])
+    for label in compare_labels:
+        command.extend(["--compare-with-label", label])
+    if curve_out is not None:
+        command.extend(["--curve-out", str(curve_out)])
+    elif resolved_run_dir is not None and resolved_checkpoint is not None:
+        command.extend(
+            [
+                "--curve-out",
+                str(resolved_run_dir / f"{resolved_checkpoint}-generation-curve.json"),
+            ]
+        )
+    if curve_lines_out is not None:
+        command.extend(["--curve-lines-out", str(curve_lines_out)])
+    elif resolved_run_dir is not None and resolved_checkpoint is not None:
+        command.extend(
+            [
+                "--curve-lines-out",
+                str(resolved_run_dir / f"{resolved_checkpoint}-generation-curve.txt"),
+            ]
+        )
+    if trainer_trace_jsonl is not None:
+        command.extend(["--curve-trainer-trace-jsonl", str(trainer_trace_jsonl)])
+    elif resolved_run_dir is not None:
+        default_trace = resolved_run_dir / "spiraltorch-hf-gpt2-ft-trainer-trace.jsonl"
+        if default_trace.is_file():
+            command.extend(["--curve-trainer-trace-jsonl", str(default_trace)])
+    if run_card is not None:
+        command.extend(["--curve-run-card", str(run_card)])
+    elif resolved_run_dir is not None:
+        default_run_card = resolved_run_dir / "spiraltorch-hf-gpt2-ft-run-card.json"
+        if default_run_card.is_file():
+            command.extend(["--curve-run-card", str(default_run_card)])
+    command.extend(["--top-n", str(top_n)])
+    if wait:
+        command.append("--wait")
+    if dry_run:
+        command.append("--dry-run")
+    return {
+        "row_type": "hf_gpt2_finetune_milestone_handoff",
+        "status": status,
+        "ready": status == "ready",
+        "action": "checkpoint_generation_control",
+        "label": capture.get("label"),
+        "label_prefix": prefix,
+        "milestone_step": capture.get("milestone_step"),
+        "milestone_ready": capture.get("milestone_ready"),
+        "milestone_eval_loss": capture.get("milestone_eval_loss"),
+        "milestone_checkpoint_ready": capture.get("milestone_checkpoint_ready"),
+        "checkpoint": resolved_checkpoint,
+        "checkpoint_path": None if checkpoint_path is None else str(checkpoint_path),
+        "run_dir": None if resolved_run_dir is None else str(resolved_run_dir),
+        "compare_with_sweep": compare_paths,
+        "compare_with_label": compare_labels,
+        "command": command,
+        "command_display": shlex.join(command),
+        "capture": capture,
+    }
+
+
+def hf_gpt2_finetune_milestone_handoff_lines(
+    report_or_capture: Mapping[str, Any],
+    **kwargs: Any,
+) -> list[str]:
+    """Render compact lines from a milestone handoff plan."""
+
+    if report_or_capture.get("row_type") == "hf_gpt2_finetune_milestone_handoff":
+        report = dict(report_or_capture)
+    else:
+        report = hf_gpt2_finetune_milestone_handoff_report(
+            report_or_capture,
+            **kwargs,
+        )
+    return [
+        (
+            "hf_gpt2_ft_milestone_handoff "
+            f"status={_number_text(report.get('status'))} "
+            f"ready={_number_text(report.get('ready'))} "
+            f"action={_number_text(report.get('action'))} "
+            f"label={_number_text(report.get('label'))} "
+            f"step={_number_text(report.get('milestone_step'))} "
+            f"eval_loss={_number_text(report.get('milestone_eval_loss'))} "
+            f"checkpoint={_number_text(report.get('checkpoint'))} "
+            f"checkpoint_ready={_number_text(report.get('milestone_checkpoint_ready'))} "
+            f"run_dir={_number_text(report.get('run_dir'))} "
+            f"compare_count={len(report.get('compare_with_sweep') or [])} "
+            f"command={_number_text(report.get('command_display'))}"
         )
     ]
 
