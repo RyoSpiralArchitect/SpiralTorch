@@ -3954,7 +3954,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             },
         ]
 
-        summary = hf_ft.summarize_hf_gpt2_finetune_trainer_trace(rows)
+        summary = hf_ft.summarize_hf_gpt2_finetune_trainer_trace(rows, max_steps=50)
 
         self.assertEqual(summary["trace_duration_s"], 45.0)
         self.assertEqual(summary["trace_log_interval_count"], 1)
@@ -3966,6 +3966,30 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(summary["trace_first_eval_loss"], 1.8)
         self.assertAlmostEqual(summary["trace_eval_loss_improvement"], 0.2)
         self.assertAlmostEqual(summary["trace_eval_loss_last_delta"], -0.2)
+        self.assertEqual(summary["trace_max_steps"], 50)
+        self.assertEqual(summary["trace_eval_loss_last_step_delta"], 20.0)
+        self.assertAlmostEqual(summary["trace_eval_loss_last_improvement"], 0.2)
+        self.assertAlmostEqual(
+            summary["trace_eval_loss_last_improvement_per_step"],
+            0.01,
+        )
+        self.assertAlmostEqual(
+            summary["trace_eval_loss_mean_improvement_per_step"],
+            0.01,
+        )
+        self.assertEqual(summary["trace_eval_loss_projection_step"], 50)
+        self.assertEqual(
+            summary["trace_eval_loss_projection_remaining_steps"],
+            20.0,
+        )
+        self.assertAlmostEqual(
+            summary["trace_eval_loss_projected_remaining_improvement"],
+            0.2,
+        )
+        self.assertAlmostEqual(
+            summary["trace_eval_loss_projected_final_loss"],
+            1.4,
+        )
         self.assertTrue(summary["trace_eval_loss_monotonic_nonincreasing"])
         self.assertEqual(summary["trace_best_eval_loss_step"], 30)
         self.assertEqual(summary["trace_eval_runtime_min"], 4.0)
@@ -4051,11 +4075,17 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(summary["training_loss_guard_count"], 1)
         self.assertEqual(summary["progress"], 0.5)
         self.assertEqual(summary["trace_eval_loss_improvement"], 0.19999999999999996)
+        self.assertAlmostEqual(
+            summary["trace_eval_loss_last_improvement_per_step"],
+            0.02,
+        )
+        self.assertAlmostEqual(summary["trace_eval_loss_projected_final_loss"], 1.2)
         self.assertTrue(summary["trace_eval_loss_monotonic_nonincreasing"])
         self.assertEqual(written["training_loss_guard_count"], 1)
         self.assertIn("label=demo", lines[0])
         self.assertIn("latest_step=20", lines[0])
         self.assertIn("guard_count=1", lines[0])
+        self.assertIn("eval_loss_projected_final=1.2", lines[0])
         self.assertIn("eval_loss_monotonic=true", lines[0])
         self.assertIn("step=20 eval_loss=1.6", lines[1])
         self.assertEqual(

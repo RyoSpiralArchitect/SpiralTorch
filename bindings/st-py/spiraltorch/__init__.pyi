@@ -592,6 +592,8 @@ def load_hf_gpt2_finetune_trainer_trace(
 
 def summarize_hf_gpt2_finetune_trainer_trace(
     path_or_rows: str | PathLike[str] | Sequence[Mapping[str, object]],
+    *,
+    max_steps: object = ...,
 ) -> Dict[str, object]: ...
 
 def load_hf_gpt2_finetune_run_card(

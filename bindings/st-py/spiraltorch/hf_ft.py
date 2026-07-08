@@ -1542,6 +1542,8 @@ def _trace_eval_loss_points(
 
 def _trace_eval_loss_trend(
     points: Sequence[Mapping[str, object]],
+    *,
+    max_steps: object = None,
 ) -> dict[str, object]:
     losses = [
         float(loss)
@@ -1554,6 +1556,64 @@ def _trace_eval_loss_trend(
         if _safe_number(point.get("eval_loss")) is not None
     ]
     best_index = min(range(len(losses)), key=losses.__getitem__) if losses else None
+    stepped_points = [
+        (float(step), float(loss))
+        for point in points
+        if (step := _safe_number(point.get("step"))) is not None
+        and (loss := _safe_number(point.get("eval_loss"))) is not None
+    ]
+    interval_rates = []
+    for (left_step, left_loss), (right_step, right_loss) in zip(
+        stepped_points,
+        stepped_points[1:],
+    ):
+        step_delta = right_step - left_step
+        if step_delta <= 0.0:
+            continue
+        improvement = left_loss - right_loss
+        interval_rates.append(
+            {
+                "step_delta": step_delta,
+                "loss_delta": right_loss - left_loss,
+                "improvement": improvement,
+                "improvement_per_step": improvement / step_delta,
+            }
+        )
+    last_interval = interval_rates[-1] if interval_rates else {}
+    previous_interval = interval_rates[-2] if len(interval_rates) >= 2 else {}
+    mean_improvement_per_step = None
+    if len(stepped_points) >= 2:
+        first_step, first_loss = stepped_points[0]
+        last_step, last_loss = stepped_points[-1]
+        step_span = last_step - first_step
+        if step_span > 0.0:
+            mean_improvement_per_step = (first_loss - last_loss) / step_span
+    target_step = _safe_number(max_steps)
+    projected_loss = None
+    projected_improvement = None
+    remaining_steps = None
+    last_step_value = stepped_points[-1][0] if stepped_points else None
+    last_loss_value = losses[-1] if losses else None
+    last_improvement_per_step = last_interval.get("improvement_per_step")
+    if (
+        target_step is not None
+        and last_step_value is not None
+        and last_loss_value is not None
+        and last_improvement_per_step is not None
+    ):
+        remaining_steps = float(target_step) - float(last_step_value)
+        projected_improvement = float(last_improvement_per_step) * remaining_steps
+        projected_loss = float(last_loss_value) - projected_improvement
+    previous_improvement_per_step = previous_interval.get("improvement_per_step")
+    last_improvement_ratio = None
+    if (
+        previous_improvement_per_step is not None
+        and float(previous_improvement_per_step) != 0.0
+        and last_improvement_per_step is not None
+    ):
+        last_improvement_ratio = (
+            float(last_improvement_per_step) / float(previous_improvement_per_step)
+        )
     return {
         "trace_eval_loss_count": len(losses),
         "trace_first_eval_loss": losses[0] if losses else None,
@@ -1573,6 +1633,15 @@ def _trace_eval_loss_trend(
             if best_index is not None and best_index < len(steps)
             else None
         ),
+        "trace_eval_loss_last_step_delta": last_interval.get("step_delta"),
+        "trace_eval_loss_last_improvement": last_interval.get("improvement"),
+        "trace_eval_loss_last_improvement_per_step": last_improvement_per_step,
+        "trace_eval_loss_mean_improvement_per_step": mean_improvement_per_step,
+        "trace_eval_loss_last_improvement_ratio_to_previous": last_improvement_ratio,
+        "trace_eval_loss_projection_step": target_step,
+        "trace_eval_loss_projection_remaining_steps": remaining_steps,
+        "trace_eval_loss_projected_remaining_improvement": projected_improvement,
+        "trace_eval_loss_projected_final_loss": projected_loss,
     }
 
 
@@ -1634,6 +1703,8 @@ def _trace_numeric_telemetry_values(
 
 def summarize_hf_gpt2_finetune_trainer_trace(
     path_or_rows: str | Path | Sequence[Mapping[str, object]],
+    *,
+    max_steps: object = None,
 ) -> dict[str, object]:
     """Summarize HF Trainer trace rows for a GPT-2 fine-tune run card."""
 
@@ -1643,16 +1714,25 @@ def summarize_hf_gpt2_finetune_trainer_trace(
         rows = [dict(row) for row in path_or_rows]
     event_counts: dict[str, int] = {}
     max_step: int | float | None = None
+    trace_max_steps: int | float | None = _safe_number(max_steps)
     for row in rows:
         event = str(row.get("event") or "unknown")
         event_counts[event] = event_counts.get(event, 0) + 1
         step = _safe_number(row.get("global_step"))
         if step is not None and (max_step is None or step > max_step):
             max_step = step
+        total_steps = _safe_number(row.get("max_steps"))
+        if total_steps is not None and (
+            trace_max_steps is None or total_steps > trace_max_steps
+        ):
+            trace_max_steps = total_steps
     first_time, last_time, duration_s = _trace_time_bounds(rows)
     step_rates = _trace_log_step_rates(rows)
     eval_loss_points = _trace_eval_loss_points(rows)
-    eval_loss_trend = _trace_eval_loss_trend(eval_loss_points)
+    eval_loss_trend = _trace_eval_loss_trend(
+        eval_loss_points,
+        max_steps=trace_max_steps,
+    )
     eval_runtimes = [
         float(runtime)
         for point in eval_loss_points
@@ -1723,6 +1803,7 @@ def summarize_hf_gpt2_finetune_trainer_trace(
         "trace_event_counts": event_counts,
         "trace_events": csv_label(sorted(event_counts)),
         "trace_max_global_step": max_step,
+        "trace_max_steps": trace_max_steps,
         "trace_first_time_unix_s": first_time,
         "trace_last_time_unix_s": last_time,
         "trace_duration_s": duration_s,
