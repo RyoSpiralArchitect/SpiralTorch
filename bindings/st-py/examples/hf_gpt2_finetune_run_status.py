@@ -197,6 +197,24 @@ def _log_progress(
     }
 
 
+def _last_eval_loss_step(trace: dict[str, Any]) -> int | None:
+    eval_points = trace.get("trace_eval_loss_points")
+    if not isinstance(eval_points, list):
+        return None
+    for point in reversed(eval_points):
+        if not isinstance(point, dict):
+            continue
+        step = point.get("step")
+        if isinstance(step, int):
+            return step
+    return None
+
+
+def _eval_step_reached(trace: dict[str, Any], target_step: int) -> bool:
+    latest = _last_eval_loss_step(trace)
+    return latest is not None and latest >= target_step
+
+
 def _trace_summary(trace_jsonl: Path, max_steps: int | None) -> dict[str, Any]:
     if not trace_jsonl.is_file():
         return {
@@ -209,6 +227,7 @@ def _trace_summary(trace_jsonl: Path, max_steps: int | None) -> dict[str, Any]:
         }
     rows = st.load_hf_gpt2_finetune_trainer_trace(trace_jsonl)
     summary = st.summarize_hf_gpt2_finetune_trainer_trace(rows)
+    summary["trace_last_eval_loss_step"] = _last_eval_loss_step(summary)
     step = summary.get("trace_max_global_step")
     progress = None
     if max_steps is not None and isinstance(step, (int, float)):
@@ -405,6 +424,10 @@ def summarize_run(args: argparse.Namespace) -> dict[str, Any]:
         "disk_margin_gb": disk_margin_gb,
         "disk_status": disk_status,
         "disk_total_gb": disk.total / (1024.0**3),
+        "watch_stop_eval_step": args.watch_stop_on_eval_step,
+        "watch_stop_eval_ready": None
+        if args.watch_stop_on_eval_step is None
+        else _eval_step_reached(trace, args.watch_stop_on_eval_step),
     }
 
 
@@ -432,6 +455,7 @@ def status_lines(status: dict[str, Any], *, tail_evals: int) -> list[str]:
             f"log_steps_until_next_checkpoint={_number_text((status.get('checkpoint_progress') or {}).get('log_steps_until_next_checkpoint'))} "
             f"last_loss={_number_text(trace.get('trace_last_loss'))} "
             f"last_eval_loss={_number_text(trace.get('trace_last_eval_loss'))} "
+            f"last_eval_step={_number_text(trace.get('trace_last_eval_loss_step'))} "
             f"min_eval_loss={_number_text(trace.get('trace_min_eval_loss'))} "
             f"best_eval_loss_step={_number_text(trace.get('trace_best_eval_loss_step'))} "
             f"eval_loss_improvement={_number_text(trace.get('trace_eval_loss_improvement'))} "
@@ -446,6 +470,8 @@ def status_lines(status: dict[str, Any], *, tail_evals: int) -> list[str]:
             f"min_free_disk_gb={_number_text(status.get('min_free_disk_gb'))} "
             f"disk_margin_gb={_number_text(status.get('disk_margin_gb'))} "
             f"disk_status={_number_text(status.get('disk_status'))} "
+            f"watch_stop_eval_step={_number_text(status.get('watch_stop_eval_step'))} "
+            f"watch_stop_eval_ready={_number_text(status.get('watch_stop_eval_ready'))} "
             f"watch_stop_reason={_number_text(status.get('watch_stop_reason'))}"
         )
     ]
@@ -520,14 +546,8 @@ def _watch_stop_reason(args: argparse.Namespace, status: dict[str, Any]) -> str 
             return "training_loss_guard"
     if args.watch_stop_on_eval_step is not None:
         trace = status.get("trace") if isinstance(status.get("trace"), dict) else {}
-        eval_points = trace.get("trace_eval_loss_points")
-        if isinstance(eval_points, list):
-            for point in eval_points:
-                if not isinstance(point, dict):
-                    continue
-                step = point.get("step")
-                if isinstance(step, int) and step >= args.watch_stop_on_eval_step:
-                    return "eval_step_reached"
+        if _eval_step_reached(trace, args.watch_stop_on_eval_step):
+            return "eval_step_reached"
     return None
 
 

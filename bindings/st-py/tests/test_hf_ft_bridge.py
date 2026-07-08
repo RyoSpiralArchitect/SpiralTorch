@@ -4064,6 +4064,17 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                     watch_eval_args, module.summarize_run(watch_eval_args)
                 )
             )
+            self.assertFalse(
+                module._should_stop_watch(
+                    watch_eval_args,
+                    {
+                        "trace": {
+                            "trace_max_global_step": 10,
+                            "trace_eval_loss_points": [{"step": 0, "eval_loss": 2.0}],
+                        }
+                    },
+                )
+            )
             self.assertEqual(module.main(watch_eval_argv), 0)
             watch_eval_written = json.loads(
                 watch_eval_path.read_text(encoding="utf-8")
@@ -4149,6 +4160,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIsInstance(status["time_unix_s"], float)
         self.assertEqual(status["trace"]["trace_max_global_step"], 20)
         self.assertEqual(status["trace"]["progress"], 0.5)
+        self.assertEqual(status["trace"]["trace_last_eval_loss_step"], 10)
         self.assertEqual(status["log_progress"]["log_latest_step"], 24)
         self.assertEqual(status["log_progress"]["log_progress"], 0.6)
         self.assertEqual(status["log_progress"]["log_elapsed_seconds"], 24.0)
@@ -4173,6 +4185,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("latest_step=20", lines[0])
         self.assertIn("log_latest_step=24", lines[0])
         self.assertIn("log_remaining_seconds=16", lines[0])
+        self.assertIn("last_eval_step=10", lines[0])
         self.assertIn("next_eval_step=30", lines[0])
         self.assertIn("log_steps_until_next_eval=6", lines[0])
         self.assertIn("next_checkpoint_step=40", lines[0])
@@ -4207,6 +4220,9 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(
             watch_eval_written["trace"]["trace_eval_loss_points"][-1]["step"], 10
         )
+        self.assertEqual(watch_eval_written["trace"]["trace_last_eval_loss_step"], 10)
+        self.assertEqual(watch_eval_written["watch_stop_eval_step"], 10)
+        self.assertTrue(watch_eval_written["watch_stop_eval_ready"])
         self.assertEqual(
             watch_checkpoint_written["latest_checkpoint"]["name"], "checkpoint-20"
         )
