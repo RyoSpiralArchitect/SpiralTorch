@@ -42,6 +42,7 @@ from spiraltorch.hf_generation import (
     zspace_inference_distortion_runtime_preflight,
     zspace_inference_distortion_sweep_cli_args,
     zspace_generation_control_bridge_cli_args,
+    zspace_generation_control_profile_config,
     zspace_generation_control_processor_kwargs,
     zspace_generation_control_sweep_cli_args,
     zspace_checkpoint_generation_control_compare_command,
@@ -376,6 +377,7 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
             st.__all__,
         )
         self.assertIn("zspace_generation_control_bridge_cli_args", st.__all__)
+        self.assertIn("zspace_generation_control_profile_config", st.__all__)
         self.assertIn("zspace_generation_control_processor_kwargs", st.__all__)
         self.assertIn("zspace_generation_control_sweep_cli_args", st.__all__)
         self.assertIn("zspace_checkpoint_generation_control_jobs", st.__all__)
@@ -419,6 +421,10 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         self.assertIs(
             st.zspace_generation_control_bridge_cli_args,
             zspace_generation_control_bridge_cli_args,
+        )
+        self.assertIs(
+            st.zspace_generation_control_profile_config,
+            zspace_generation_control_profile_config,
         )
         self.assertIs(
             st.zspace_checkpoint_generation_control_jobs,
@@ -1750,6 +1756,10 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
             MODEL_CONFIGS_PATH,
             profile="pythia-70m-local-smoke",
         )
+        pythia_profile_config = zspace_generation_control_profile_config(
+            MODEL_CONFIGS_PATH,
+            model_profile="pythia-70m-local-smoke",
+        )
         pythia_kwargs = zspace_generation_control_processor_kwargs(pythia_profile)
         pythia_bridge_args = zspace_generation_control_bridge_cli_args(pythia_profile)
         qwen_runtime = zspace_inference_distortion_runtime_plan(
@@ -1759,6 +1769,17 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
         qwen_sweep_args = zspace_generation_control_sweep_cli_args(qwen_runtime)
 
         self.assertEqual(pythia_kwargs["top_k"], 64)
+        self.assertEqual(
+            pythia_profile_config["row_type"],
+            "zspace_generation_control_profile_config",
+        )
+        self.assertEqual(pythia_profile_config["status"], "ready")
+        self.assertEqual(
+            pythia_profile_config["model_profile"]["profile_id"],
+            "pythia-70m-local-smoke",
+        )
+        self.assertEqual(pythia_profile_config["recommended_config"], pythia_kwargs)
+        self.assertEqual(pythia_profile_config["processor_kwargs"], pythia_kwargs)
         self.assertEqual(pythia_kwargs["curvature"], -0.04)
         self.assertEqual(pythia_kwargs["entropy_target"], 3.0)
         self.assertEqual(pythia_kwargs["repression_strength"], 0.8)
@@ -1767,6 +1788,14 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
         self.assertIn("64", pythia_bridge_args)
         self.assertIn("--generation-repression-strength", pythia_bridge_args)
         self.assertIn("0.8", pythia_bridge_args)
+        self.assertEqual(
+            zspace_generation_control_processor_kwargs(pythia_profile_config),
+            pythia_kwargs,
+        )
+        self.assertEqual(
+            zspace_generation_control_bridge_cli_args(pythia_profile_config),
+            pythia_profile_config["bridge_cli_args"],
+        )
         self.assertIn("--zspace-top-k-values", qwen_sweep_args)
         self.assertIn("96", qwen_sweep_args)
         self.assertIn("--repression-strength-values", qwen_sweep_args)

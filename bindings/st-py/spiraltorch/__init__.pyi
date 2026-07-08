@@ -885,6 +885,12 @@ def zspace_generation_control_processor_kwargs(
     config: Mapping[str, object] | None,
 ) -> Dict[str, object]: ...
 
+def zspace_generation_control_profile_config(
+    model_configs: Mapping[str, object] | str | PathLike[str] | None = ...,
+    *,
+    model_profile: str | None = ...,
+) -> Dict[str, object]: ...
+
 def zspace_generation_control_sweep_cli_args(
     config: Mapping[str, object] | None,
 ) -> List[str]: ...
@@ -9251,6 +9257,7 @@ __all__ = [
     "zspace_inference_distortion_runtime_preflight",
     "zspace_inference_distortion_sweep_cli_args",
     "zspace_generation_control_bridge_cli_args",
+    "zspace_generation_control_profile_config",
     "zspace_generation_control_processor_kwargs",
     "zspace_generation_control_sweep_cli_args",
     "zspace_checkpoint_generation_control_compare_command",

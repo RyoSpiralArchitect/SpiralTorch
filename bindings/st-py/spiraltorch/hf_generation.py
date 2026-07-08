@@ -34,6 +34,7 @@ __all__ = [
     "zspace_inference_distortion_probe_report",
     "zspace_inference_distortion_sweep_cli_args",
     "zspace_generation_control_bridge_cli_args",
+    "zspace_generation_control_profile_config",
     "zspace_generation_control_processor_kwargs",
     "zspace_generation_control_sweep_cli_args",
     "zspace_checkpoint_generation_control_compare_command",
@@ -3996,6 +3997,35 @@ def zspace_generation_control_bridge_cli_args(
     if config.get("use_native_zspace") is False:
         args.append("--generation-zspace-no-native")
     return args
+
+
+def zspace_generation_control_profile_config(
+    model_configs: Mapping[str, object] | str | Path | None = None,
+    *,
+    model_profile: str | None = None,
+) -> dict[str, object]:
+    """Resolve one HF profile into reusable Z-Space generation-control settings."""
+
+    from .hf_ft import (
+        hf_finetune_model_profile_lines,
+        resolve_hf_finetune_model_profile,
+    )
+
+    profile = resolve_hf_finetune_model_profile(model_configs, profile=model_profile)
+    recommended_config = zspace_generation_control_processor_kwargs(profile)
+    status = "ready" if recommended_config else "empty"
+    return {
+        "row_type": "zspace_generation_control_profile_config",
+        "status": status,
+        "model_profile": profile,
+        "model_profile_lines": hf_finetune_model_profile_lines(profile),
+        "recommended_config": recommended_config,
+        "processor_kwargs": dict(recommended_config),
+        "sweep_cli_args": zspace_generation_control_sweep_cli_args(recommended_config),
+        "bridge_cli_args": zspace_generation_control_bridge_cli_args(
+            recommended_config,
+        ),
+    }
 
 
 def _recommendation_reason(
