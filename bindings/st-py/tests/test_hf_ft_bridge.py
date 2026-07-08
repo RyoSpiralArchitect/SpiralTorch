@@ -52,6 +52,11 @@ WAIT_LAUNCH_SUMMARY_PATH = (
     / "examples"
     / "hf_gpt2_finetune_wait_launch_summary.py"
 )
+MONITOR_SNAPSHOT_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "examples"
+    / "hf_gpt2_finetune_monitor_snapshot.py"
+)
 
 
 def load_bridge_example():
@@ -113,6 +118,17 @@ def load_wait_launch_summary_example():
     spec = importlib.util.spec_from_file_location(
         "hf_gpt2_finetune_wait_launch_summary_test",
         WAIT_LAUNCH_SUMMARY_PATH,
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_monitor_snapshot_example():
+    spec = importlib.util.spec_from_file_location(
+        "hf_gpt2_finetune_monitor_snapshot_test",
+        MONITOR_SNAPSHOT_PATH,
     )
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -4404,6 +4420,176 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("watch_stop_eval_step=40", lines[1])
         self.assertIn("watch_stop_eval_ready=false", lines[1])
         self.assertIn("watch_stop_reason=checkpoint_ready", lines[1])
+        self.assertEqual(written_lines, lines)
+
+    def test_monitor_snapshot_example_summarizes_long_ft_watchers(self) -> None:
+        module = load_monitor_snapshot_example()
+        eval_rows = [
+            {
+                "time_unix_s": 100.0,
+                "process_status": "alive",
+                "final_checkpoint_ready": False,
+                "checkpoint_count": 0,
+                "disk_free_gb": 10.0,
+                "disk_margin_gb": 6.0,
+                "disk_status": "ok",
+                "trace": {
+                    "trace_last_loss": 3.6,
+                    "trace_last_eval_loss": 3.290631,
+                    "trace_last_eval_loss_step": 5120,
+                    "trace_best_eval_loss_step": 5120,
+                    "training_loss_guard_count": 0,
+                },
+                "log_progress": {
+                    "log_latest_step": 5120,
+                    "log_max_steps": 8192,
+                    "log_remaining_seconds": 900.0,
+                },
+                "eval_progress": {
+                    "next_eval_step": 5632,
+                    "log_steps_until_next_eval": 512,
+                },
+                "checkpoint_progress": {
+                    "next_checkpoint_step": 6144,
+                    "log_steps_until_next_checkpoint": 1024,
+                },
+                "watch_stop_eval_step": 6144,
+                "watch_stop_eval_ready": False,
+            },
+            {
+                "time_unix_s": 180.0,
+                "process_status": "alive",
+                "final_checkpoint_ready": False,
+                "checkpoint_count": 0,
+                "disk_free_gb": 9.5,
+                "disk_margin_gb": 5.5,
+                "disk_status": "ok",
+                "trace": {
+                    "trace_last_loss": 3.4,
+                    "trace_last_eval_loss": 3.27533,
+                    "trace_last_eval_loss_step": 5632,
+                    "trace_best_eval_loss_step": 5632,
+                    "training_loss_guard_count": 0,
+                },
+                "log_progress": {
+                    "log_latest_step": 5716,
+                    "log_max_steps": 8192,
+                    "log_remaining_seconds": 420.0,
+                },
+                "eval_progress": {
+                    "next_eval_step": 6144,
+                    "log_steps_until_next_eval": 428,
+                },
+                "checkpoint_progress": {
+                    "next_checkpoint_step": 6144,
+                    "log_steps_until_next_checkpoint": 428,
+                },
+                "watch_stop_eval_step": 6144,
+                "watch_stop_eval_ready": False,
+            },
+        ]
+        checkpoint_rows = [
+            {
+                **eval_rows[-1],
+                "time_unix_s": 170.0,
+                "watch_stop_reason": None,
+            }
+        ]
+        final_rows = [
+            {
+                **eval_rows[-1],
+                "time_unix_s": 175.0,
+                "watch_stop_reason": None,
+            }
+        ]
+        wait_rows = [
+            {
+                "time_unix_s": 190.0,
+                "status": "waiting_for_process",
+                "process_alive": True,
+                "checkpoint_ready": False,
+                "status_card_status": None,
+                "launched_pid": None,
+                "returncode": None,
+            }
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "run"
+            next_run_dir = Path(tmp) / "next"
+            run_dir.mkdir()
+            next_run_dir.mkdir()
+            eval_history = run_dir / "watch-6144-eval-confirm-history.jsonl"
+            checkpoint_history = (
+                run_dir / "watch-6144-checkpoint-confirm-history.jsonl"
+            )
+            final_history = run_dir / "watch-8192-final-history.jsonl"
+            wait_history = next_run_dir / "finewebedu-16384-wait-launch-history.jsonl"
+            for path, rows in [
+                (eval_history, eval_rows),
+                (checkpoint_history, checkpoint_rows),
+                (final_history, final_rows),
+                (wait_history, wait_rows),
+            ]:
+                path.write_text(
+                    "\n".join(json.dumps(row) for row in rows) + "\n",
+                    encoding="utf-8",
+                )
+            out_path = run_dir / "monitor-snapshot.json"
+            lines_path = run_dir / "monitor-snapshot.txt"
+            argv = [
+                str(run_dir),
+                "--next-run-dir",
+                str(next_run_dir),
+                "--label",
+                "long-ft",
+                "--out",
+                str(out_path),
+                "--lines-out",
+                str(lines_path),
+            ]
+            args = module.parse_args(argv)
+            snapshot = module.build_monitor_snapshot(args)
+            lines = module.snapshot_lines(snapshot)
+            self.assertEqual(module.main(argv), 0)
+            written = json.loads(out_path.read_text(encoding="utf-8"))
+            written_lines = lines_path.read_text(encoding="utf-8").splitlines()
+
+        self.assertEqual(snapshot["row_type"], "hf_gpt2_ft_monitor_snapshot")
+        self.assertEqual(snapshot["primary_watch"], "eval")
+        self.assertEqual(snapshot["process_status"], "alive")
+        self.assertEqual(snapshot["log_latest_step"], 5716)
+        self.assertEqual(snapshot["log_max_steps"], 8192)
+        self.assertEqual(snapshot["last_eval_loss_step"], 5632)
+        self.assertEqual(snapshot["last_eval_loss"], 3.27533)
+        self.assertEqual(snapshot["min_eval_loss"], 3.27533)
+        self.assertEqual(snapshot["best_eval_loss_step"], 5632)
+        self.assertEqual(snapshot["next_eval_step"], 6144)
+        self.assertEqual(snapshot["steps_until_next_eval"], 428)
+        self.assertEqual(snapshot["next_checkpoint_step"], 6144)
+        self.assertEqual(snapshot["steps_until_next_checkpoint"], 428)
+        self.assertEqual(snapshot["disk_status"], "ok")
+        self.assertEqual(snapshot["disk_margin_gb"], 5.5)
+        self.assertFalse(snapshot["eval_watch_ready"])
+        self.assertEqual(snapshot["eval_watch_step"], 6144)
+        self.assertFalse(snapshot["wait_launch_checkpoint_ready"])
+        self.assertFalse(snapshot["wait_launch_launched"])
+        self.assertEqual(snapshot["wait_launch_status"], "waiting_for_process")
+        self.assertEqual(written["log_latest_step"], 5716)
+        self.assertIn("label=long-ft", lines[0])
+        self.assertIn("primary=eval", lines[0])
+        self.assertIn("log_step=5716", lines[0])
+        self.assertIn("last_eval_step=5632", lines[0])
+        self.assertIn("last_eval_loss=3.27533", lines[0])
+        self.assertIn("next_eval_step=6144", lines[0])
+        self.assertIn("steps_until_next_checkpoint=428", lines[0])
+        self.assertIn("disk_margin_gb=5.5", lines[0])
+        self.assertIn("eval_watch_ready=false", lines[0])
+        self.assertIn("wait_status=waiting_for_process", lines[0])
+        self.assertIn("name=eval", lines[1])
+        self.assertIn("rows=2", lines[1])
+        self.assertIn("name=checkpoint", lines[2])
+        self.assertIn("name=final", lines[3])
+        self.assertIn("status=waiting_for_process", lines[4])
         self.assertEqual(written_lines, lines)
 
     def test_run_card_summary_supplements_trace_telemetry_from_jsonl(self) -> None:

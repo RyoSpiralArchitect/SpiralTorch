@@ -1,0 +1,488 @@
+#!/usr/bin/env python3
+"""Build a one-page monitor snapshot for a long SpiralTorch GPT-2 FT run."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+from typing import Any
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("run_dir", nargs="?", type=Path)
+    parser.add_argument("--next-run-dir", type=Path, default=None)
+    parser.add_argument("--label", default=None)
+    parser.add_argument("--eval-history-jsonl", type=Path, default=None)
+    parser.add_argument("--checkpoint-history-jsonl", type=Path, default=None)
+    parser.add_argument("--final-history-jsonl", type=Path, default=None)
+    parser.add_argument("--wait-launch-history-jsonl", type=Path, default=None)
+    parser.add_argument("--out", type=Path, default=None)
+    parser.add_argument("--lines-out", type=Path, default=None)
+    parser.add_argument("--require-final-ready", action="store_true")
+    parser.add_argument("--require-wait-launched", action="store_true")
+    args = parser.parse_args(argv)
+    provided = [
+        args.eval_history_jsonl,
+        args.checkpoint_history_jsonl,
+        args.final_history_jsonl,
+        args.wait_launch_history_jsonl,
+    ]
+    if args.run_dir is None and not any(provided):
+        parser.error("provide run_dir or at least one history JSONL")
+    if args.run_dir is not None and not args.run_dir.is_dir():
+        parser.error(f"run_dir does not exist: {args.run_dir}")
+    if args.next_run_dir is not None and not args.next_run_dir.is_dir():
+        parser.error(f"next_run_dir does not exist: {args.next_run_dir}")
+    for path in provided:
+        if path is not None and not path.is_file():
+            parser.error(f"history JSONL does not exist: {path}")
+    return args
+
+
+def _number_text(value: Any) -> str:
+    if value is None:
+        return "none"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        return f"{value:.6g}"
+    return str(value)
+
+
+def _nested(row: dict[str, Any], section: str, field: str) -> Any:
+    value = row.get(section)
+    if not isinstance(value, dict):
+        return None
+    return value.get(field)
+
+
+def _load_history(path: Path) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if not line.strip():
+            continue
+        payload = json.loads(line)
+        if not isinstance(payload, dict):
+            raise ValueError(f"history row {line_number} is not an object")
+        rows.append(payload)
+    return rows
+
+
+def _latest_path(directory: Path | None, patterns: list[str]) -> Path | None:
+    if directory is None or not directory.is_dir():
+        return None
+    candidates: list[Path] = []
+    for pattern in patterns:
+        candidates.extend(path for path in directory.glob(pattern) if path.is_file())
+    if not candidates:
+        return None
+    return max(candidates, key=lambda path: (path.stat().st_mtime, str(path)))
+
+
+def _last_eval_loss_step(row: dict[str, Any]) -> Any:
+    explicit = _nested(row, "trace", "trace_last_eval_loss_step")
+    if explicit is not None:
+        return explicit
+    eval_points = _nested(row, "trace", "trace_eval_loss_points")
+    if not isinstance(eval_points, list):
+        return None
+    for point in reversed(eval_points):
+        if not isinstance(point, dict):
+            continue
+        step = point.get("step")
+        if isinstance(step, int):
+            return step
+    return None
+
+
+def _checkpoint_name(row: dict[str, Any]) -> Any:
+    checkpoint = row.get("latest_checkpoint")
+    if isinstance(checkpoint, dict):
+        return checkpoint.get("name")
+    return None
+
+
+def _duration_seconds(rows: list[dict[str, Any]]) -> float | None:
+    if not rows:
+        return None
+    first_time = rows[0].get("time_unix_s")
+    last_time = rows[-1].get("time_unix_s")
+    if isinstance(first_time, (int, float)) and isinstance(last_time, (int, float)):
+        return float(last_time) - float(first_time)
+    return None
+
+
+def _delta_log_step(rows: list[dict[str, Any]]) -> int | None:
+    if not rows:
+        return None
+    first_step = _nested(rows[0], "log_progress", "log_latest_step")
+    last_step = _nested(rows[-1], "log_progress", "log_latest_step")
+    if isinstance(first_step, int) and isinstance(last_step, int):
+        return last_step - first_step
+    return None
+
+
+def _log_steps_per_second(rows: list[dict[str, Any]]) -> float | None:
+    duration = _duration_seconds(rows)
+    delta = _delta_log_step(rows)
+    if duration is not None and duration > 0.0 and isinstance(delta, int):
+        return float(delta) / duration
+    return None
+
+
+def _estimated_seconds(steps: Any, rows: list[dict[str, Any]]) -> float | None:
+    rate = _log_steps_per_second(rows)
+    if isinstance(steps, int) and rate is not None and rate > 0.0:
+        return float(steps) / rate
+    return None
+
+
+def _status_watch_summary(
+    rows: list[dict[str, Any]],
+    *,
+    name: str,
+    history_jsonl: Path | None,
+) -> dict[str, Any]:
+    last = rows[-1] if rows else {}
+    eval_losses = [
+        _nested(row, "trace", "trace_last_eval_loss")
+        for row in rows
+        if isinstance(_nested(row, "trace", "trace_last_eval_loss"), (int, float))
+    ]
+    losses = [
+        _nested(row, "trace", "trace_last_loss")
+        for row in rows
+        if isinstance(_nested(row, "trace", "trace_last_loss"), (int, float))
+    ]
+    steps_until_next_eval = _nested(
+        last, "eval_progress", "log_steps_until_next_eval"
+    )
+    steps_until_next_checkpoint = _nested(
+        last, "checkpoint_progress", "log_steps_until_next_checkpoint"
+    )
+    max_steps = _nested(last, "log_progress", "log_max_steps")
+    log_step = _nested(last, "log_progress", "log_latest_step")
+    steps_until_final = (
+        max(int(max_steps) - int(log_step), 0)
+        if isinstance(max_steps, int) and isinstance(log_step, int)
+        else None
+    )
+    return {
+        "name": name,
+        "history_jsonl": str(history_jsonl) if history_jsonl is not None else None,
+        "row_count": len(rows),
+        "last_time_unix_s": last.get("time_unix_s"),
+        "duration_seconds": _duration_seconds(rows),
+        "delta_log_step": _delta_log_step(rows),
+        "log_steps_per_second": _log_steps_per_second(rows),
+        "process_status": last.get("process_status"),
+        "log_latest_step": log_step,
+        "log_max_steps": max_steps,
+        "log_remaining_seconds": _nested(
+            last, "log_progress", "log_remaining_seconds"
+        ),
+        "steps_until_final": steps_until_final,
+        "estimated_seconds_until_final": _estimated_seconds(steps_until_final, rows),
+        "next_eval_step": _nested(last, "eval_progress", "next_eval_step"),
+        "steps_until_next_eval": steps_until_next_eval,
+        "estimated_seconds_until_next_eval": _estimated_seconds(
+            steps_until_next_eval, rows
+        ),
+        "next_checkpoint_step": _nested(
+            last, "checkpoint_progress", "next_checkpoint_step"
+        ),
+        "steps_until_next_checkpoint": steps_until_next_checkpoint,
+        "estimated_seconds_until_next_checkpoint": _estimated_seconds(
+            steps_until_next_checkpoint, rows
+        ),
+        "last_loss": losses[-1] if losses else None,
+        "min_loss": min(losses) if losses else None,
+        "last_eval_loss": _nested(last, "trace", "trace_last_eval_loss"),
+        "last_eval_loss_step": _last_eval_loss_step(last),
+        "min_eval_loss": min(eval_losses) if eval_losses else None,
+        "best_eval_loss_step": _nested(last, "trace", "trace_best_eval_loss_step"),
+        "training_loss_guard_count": _nested(
+            last, "trace", "training_loss_guard_count"
+        ),
+        "final_checkpoint_ready": last.get("final_checkpoint_ready"),
+        "checkpoint_count": last.get("checkpoint_count"),
+        "latest_checkpoint": _checkpoint_name(last),
+        "disk_free_gb": last.get("disk_free_gb"),
+        "disk_margin_gb": last.get("disk_margin_gb"),
+        "disk_status": last.get("disk_status"),
+        "watch_stop_eval_step": last.get("watch_stop_eval_step"),
+        "watch_stop_eval_ready": last.get("watch_stop_eval_ready"),
+        "watch_stop_reason": last.get("watch_stop_reason"),
+    }
+
+
+def _wait_launch_summary(
+    rows: list[dict[str, Any]],
+    *,
+    history_jsonl: Path | None,
+) -> dict[str, Any]:
+    last = rows[-1] if rows else {}
+    launched_rows = [
+        row
+        for row in rows
+        if row.get("launched_pid") is not None
+        or row.get("status") in {"launching", "finished", "launch_error"}
+    ]
+    return {
+        "history_jsonl": str(history_jsonl) if history_jsonl is not None else None,
+        "row_count": len(rows),
+        "last_time_unix_s": last.get("time_unix_s"),
+        "duration_seconds": _duration_seconds(rows),
+        "status": last.get("status"),
+        "process_alive": last.get("process_alive"),
+        "checkpoint_ready": last.get("checkpoint_ready"),
+        "status_card_status": last.get("status_card_status"),
+        "launched": bool(launched_rows),
+        "launched_pid": last.get("launched_pid"),
+        "returncode": last.get("returncode"),
+        "launch_error": last.get("launch_error"),
+    }
+
+
+def _latest_status_watch(watches: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    candidates = [
+        watch for watch in watches.values() if isinstance(watch.get("row_count"), int)
+    ]
+    candidates = [watch for watch in candidates if int(watch.get("row_count") or 0) > 0]
+    if not candidates:
+        return {}
+    return max(
+        candidates,
+        key=lambda watch: (
+            watch.get("last_time_unix_s")
+            if isinstance(watch.get("last_time_unix_s"), (int, float))
+            else -1.0,
+            watch.get("name") or "",
+        ),
+    )
+
+
+def _resolve_sources(args: argparse.Namespace) -> dict[str, Path | None]:
+    return {
+        "eval": args.eval_history_jsonl
+        or _latest_path(
+            args.run_dir,
+            ["watch-*-eval*-history.jsonl", "*eval*-history.jsonl"],
+        ),
+        "checkpoint": args.checkpoint_history_jsonl
+        or _latest_path(
+            args.run_dir,
+            ["watch-*-checkpoint*-history.jsonl", "*checkpoint*-history.jsonl"],
+        ),
+        "final": args.final_history_jsonl
+        or _latest_path(
+            args.run_dir,
+            ["watch-*-final*-history.jsonl", "*final*-history.jsonl"],
+        ),
+        "wait_launch": args.wait_launch_history_jsonl
+        or _latest_path(
+            args.next_run_dir,
+            ["*-wait-launch-history.jsonl", "*wait*launch*history.jsonl"],
+        )
+        or _latest_path(
+            args.run_dir,
+            ["*-wait-launch-history.jsonl", "*wait*launch*history.jsonl"],
+        ),
+    }
+
+
+def build_monitor_snapshot(args: argparse.Namespace) -> dict[str, Any]:
+    paths = _resolve_sources(args)
+    loaded: dict[str, list[dict[str, Any]]] = {}
+    for name, path in paths.items():
+        loaded[name] = _load_history(path) if path is not None else []
+    watches = {
+        name: _status_watch_summary(
+            loaded[name],
+            name=name,
+            history_jsonl=paths[name],
+        )
+        for name in ("eval", "checkpoint", "final")
+    }
+    wait_launch = _wait_launch_summary(
+        loaded["wait_launch"], history_jsonl=paths["wait_launch"]
+    )
+    primary = _latest_status_watch(watches)
+    all_times = [
+        value
+        for value in [
+            *(watch.get("last_time_unix_s") for watch in watches.values()),
+            wait_launch.get("last_time_unix_s"),
+        ]
+        if isinstance(value, (int, float))
+    ]
+    eval_watch = watches["eval"]
+    checkpoint_watch = watches["checkpoint"]
+    final_watch = watches["final"]
+    return {
+        "row_type": "hf_gpt2_ft_monitor_snapshot",
+        "label": args.label,
+        "run_dir": str(args.run_dir) if args.run_dir is not None else None,
+        "next_run_dir": str(args.next_run_dir)
+        if args.next_run_dir is not None
+        else None,
+        "time_unix_s": max(all_times) if all_times else None,
+        "primary_watch": primary.get("name"),
+        "process_status": primary.get("process_status"),
+        "log_latest_step": primary.get("log_latest_step"),
+        "log_max_steps": primary.get("log_max_steps"),
+        "log_remaining_seconds": primary.get("log_remaining_seconds"),
+        "steps_until_final": primary.get("steps_until_final"),
+        "estimated_seconds_until_final": primary.get(
+            "estimated_seconds_until_final"
+        ),
+        "last_loss": primary.get("last_loss"),
+        "min_loss": primary.get("min_loss"),
+        "last_eval_loss": primary.get("last_eval_loss"),
+        "last_eval_loss_step": primary.get("last_eval_loss_step"),
+        "min_eval_loss": primary.get("min_eval_loss"),
+        "best_eval_loss_step": primary.get("best_eval_loss_step"),
+        "next_eval_step": primary.get("next_eval_step"),
+        "steps_until_next_eval": primary.get("steps_until_next_eval"),
+        "estimated_seconds_until_next_eval": primary.get(
+            "estimated_seconds_until_next_eval"
+        ),
+        "next_checkpoint_step": primary.get("next_checkpoint_step"),
+        "steps_until_next_checkpoint": primary.get("steps_until_next_checkpoint"),
+        "estimated_seconds_until_next_checkpoint": primary.get(
+            "estimated_seconds_until_next_checkpoint"
+        ),
+        "training_loss_guard_count": primary.get("training_loss_guard_count"),
+        "final_checkpoint_ready": primary.get("final_checkpoint_ready"),
+        "checkpoint_count": primary.get("checkpoint_count"),
+        "latest_checkpoint": primary.get("latest_checkpoint"),
+        "disk_free_gb": primary.get("disk_free_gb"),
+        "disk_margin_gb": primary.get("disk_margin_gb"),
+        "disk_status": primary.get("disk_status"),
+        "eval_watch_ready": eval_watch.get("watch_stop_eval_ready"),
+        "eval_watch_step": eval_watch.get("watch_stop_eval_step"),
+        "checkpoint_watch_reason": checkpoint_watch.get("watch_stop_reason"),
+        "checkpoint_watch_final_ready": checkpoint_watch.get(
+            "final_checkpoint_ready"
+        ),
+        "final_watch_reason": final_watch.get("watch_stop_reason"),
+        "final_watch_ready": final_watch.get("final_checkpoint_ready"),
+        "wait_launch_status": wait_launch.get("status"),
+        "wait_launch_checkpoint_ready": wait_launch.get("checkpoint_ready"),
+        "wait_launch_launched": wait_launch.get("launched"),
+        "wait_launch_launched_pid": wait_launch.get("launched_pid"),
+        "watches": watches,
+        "wait_launch": wait_launch,
+    }
+
+
+def snapshot_lines(snapshot: dict[str, Any]) -> list[str]:
+    label = snapshot.get("label") or "monitor"
+    lines = [
+        (
+            "hf_gpt2_ft_monitor_snapshot "
+            f"label={label} "
+            f"primary={_number_text(snapshot.get('primary_watch'))} "
+            f"process={_number_text(snapshot.get('process_status'))} "
+            f"log_step={_number_text(snapshot.get('log_latest_step'))} "
+            f"max_steps={_number_text(snapshot.get('log_max_steps'))} "
+            f"steps_until_final={_number_text(snapshot.get('steps_until_final'))} "
+            f"estimated_seconds_until_final={_number_text(snapshot.get('estimated_seconds_until_final'))} "
+            f"last_loss={_number_text(snapshot.get('last_loss'))} "
+            f"min_loss={_number_text(snapshot.get('min_loss'))} "
+            f"last_eval_step={_number_text(snapshot.get('last_eval_loss_step'))} "
+            f"last_eval_loss={_number_text(snapshot.get('last_eval_loss'))} "
+            f"min_eval_loss={_number_text(snapshot.get('min_eval_loss'))} "
+            f"best_eval_loss_step={_number_text(snapshot.get('best_eval_loss_step'))} "
+            f"next_eval_step={_number_text(snapshot.get('next_eval_step'))} "
+            f"steps_until_next_eval={_number_text(snapshot.get('steps_until_next_eval'))} "
+            f"next_checkpoint_step={_number_text(snapshot.get('next_checkpoint_step'))} "
+            f"steps_until_next_checkpoint={_number_text(snapshot.get('steps_until_next_checkpoint'))} "
+            f"final_ready={_number_text(snapshot.get('final_checkpoint_ready'))} "
+            f"latest_checkpoint={_number_text(snapshot.get('latest_checkpoint'))} "
+            f"disk_status={_number_text(snapshot.get('disk_status'))} "
+            f"disk_margin_gb={_number_text(snapshot.get('disk_margin_gb'))} "
+            f"guard_count={_number_text(snapshot.get('training_loss_guard_count'))} "
+            f"eval_watch_step={_number_text(snapshot.get('eval_watch_step'))} "
+            f"eval_watch_ready={_number_text(snapshot.get('eval_watch_ready'))} "
+            f"checkpoint_watch_reason={_number_text(snapshot.get('checkpoint_watch_reason'))} "
+            f"final_watch_reason={_number_text(snapshot.get('final_watch_reason'))} "
+            f"wait_status={_number_text(snapshot.get('wait_launch_status'))} "
+            f"wait_checkpoint_ready={_number_text(snapshot.get('wait_launch_checkpoint_ready'))} "
+            f"wait_launched={_number_text(snapshot.get('wait_launch_launched'))}"
+        )
+    ]
+    watches = snapshot.get("watches")
+    if isinstance(watches, dict):
+        for name in ("eval", "checkpoint", "final"):
+            watch = watches.get(name)
+            if not isinstance(watch, dict):
+                continue
+            lines.append(
+                (
+                    "hf_gpt2_ft_monitor_watch "
+                    f"name={name} "
+                    f"rows={_number_text(watch.get('row_count'))} "
+                    f"log_step={_number_text(watch.get('log_latest_step'))} "
+                    f"last_eval_step={_number_text(watch.get('last_eval_loss_step'))} "
+                    f"last_eval_loss={_number_text(watch.get('last_eval_loss'))} "
+                    f"next_eval_step={_number_text(watch.get('next_eval_step'))} "
+                    f"next_checkpoint_step={_number_text(watch.get('next_checkpoint_step'))} "
+                    f"final_ready={_number_text(watch.get('final_checkpoint_ready'))} "
+                    f"watch_stop_eval_ready={_number_text(watch.get('watch_stop_eval_ready'))} "
+                    f"watch_stop_reason={_number_text(watch.get('watch_stop_reason'))}"
+                )
+            )
+    wait_launch = snapshot.get("wait_launch")
+    if isinstance(wait_launch, dict):
+        lines.append(
+            (
+                "hf_gpt2_ft_monitor_wait_launch "
+                f"rows={_number_text(wait_launch.get('row_count'))} "
+                f"status={_number_text(wait_launch.get('status'))} "
+                f"process_alive={_number_text(wait_launch.get('process_alive'))} "
+                f"checkpoint_ready={_number_text(wait_launch.get('checkpoint_ready'))} "
+                f"status_card_status={_number_text(wait_launch.get('status_card_status'))} "
+                f"launched={_number_text(wait_launch.get('launched'))} "
+                f"launched_pid={_number_text(wait_launch.get('launched_pid'))} "
+                f"returncode={_number_text(wait_launch.get('returncode'))}"
+            )
+        )
+    return lines
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    try:
+        snapshot = build_monitor_snapshot(args)
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        print(f"failed to build monitor snapshot: {exc}", file=sys.stderr)
+        return 1
+    if args.require_final_ready and not snapshot.get("final_checkpoint_ready"):
+        print("final checkpoint is not ready yet", file=sys.stderr)
+        return 2
+    if args.require_wait_launched and not snapshot.get("wait_launch_launched"):
+        print("wait-launch has not launched a command yet", file=sys.stderr)
+        return 3
+    lines = snapshot_lines(snapshot)
+    payload = json.dumps(snapshot, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    if args.out is not None:
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.write_text(payload, encoding="utf-8")
+        print(f"hf_gpt2_ft_monitor_snapshot_json {args.out}")
+    if args.lines_out is not None:
+        args.lines_out.parent.mkdir(parents=True, exist_ok=True)
+        args.lines_out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        print(f"hf_gpt2_ft_monitor_snapshot_lines {args.lines_out}")
+    if args.out is None and args.lines_out is None:
+        print("\n".join(lines))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
