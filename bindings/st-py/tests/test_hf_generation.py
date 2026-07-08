@@ -2203,13 +2203,25 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
                 curve_out=run_dir / "curve.json",
                 curve_lines_out=run_dir / "curve.lines",
             )
+            pythia_planned = zspace_checkpoint_generation_control_report(
+                run_dir=run_dir,
+                checkpoint="checkpoint-4096",
+                model_configs=MODEL_CONFIGS_PATH,
+                model_profile="pythia-70m-local-smoke",
+                dry_run=True,
+                no_compare=True,
+            )
 
         command = planned["sweeps"][0]["command"]
         curve_command = planned["curve"]["command"]
+        pythia_command = pythia_planned["sweeps"][0]["command"]
         self.assertEqual(planned["tokenizer_name"], "sshleifer/tiny-gpt2")
         self.assertEqual(planned["model_profile"]["profile_id"], "tiny-gpt2-ci")
         self.assertIn("profile=tiny-gpt2-ci", planned["model_profile_lines"][0])
         self.assertEqual(planned["sweeps"][0]["tokenizer_name"], "sshleifer/tiny-gpt2")
+        self.assertEqual(planned["generation_control_profile_config"], {})
+        self.assertEqual(planned["generation_control_sweep_cli_args"], [])
+        self.assertEqual(planned["generation_control_bridge_cli_args"], [])
         self.assertEqual(
             command[command.index("--model-configs") + 1],
             str(MODEL_CONFIGS_PATH),
@@ -2231,6 +2243,32 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
         self.assertEqual(
             curve_command[curve_command.index("--model-profile") + 1],
             "tiny-gpt2-ci",
+        )
+        self.assertEqual(
+            pythia_planned["model_profile"]["profile_id"],
+            "pythia-70m-local-smoke",
+        )
+        self.assertEqual(
+            pythia_planned["generation_control_profile_config"]["top_k"],
+            64,
+        )
+        self.assertEqual(
+            pythia_planned["generation_control_profile_config"][
+                "repression_strength"
+            ],
+            0.8,
+        )
+        self.assertIn(
+            "--zspace-top-k-values",
+            pythia_planned["generation_control_sweep_cli_args"],
+        )
+        self.assertIn(
+            "--generation-zspace-top-k",
+            pythia_planned["generation_control_bridge_cli_args"],
+        )
+        self.assertEqual(
+            pythia_command[pythia_command.index("--model-profile") + 1],
+            "pythia-70m-local-smoke",
         )
 
     def test_package_checkpoint_generation_control_uses_profile_runtime_defaults(

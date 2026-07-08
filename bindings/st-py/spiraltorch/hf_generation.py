@@ -1021,6 +1021,15 @@ def zspace_checkpoint_generation_control_report(
         prompt=config.prompt,
         label_prefix=config.label_prefix,
     )
+    generation_control_profile_config = zspace_generation_control_processor_kwargs(
+        config.model_profile_report,
+    )
+    generation_control_sweep_cli_args = zspace_generation_control_sweep_cli_args(
+        generation_control_profile_config,
+    )
+    generation_control_bridge_cli_args = zspace_generation_control_bridge_cli_args(
+        generation_control_profile_config,
+    )
     rows: list[dict[str, Any]] = []
     runnable_compare_jobs: list[ZSpaceCheckpointSweepJob] = []
     for job in jobs:
@@ -1155,6 +1164,9 @@ def zspace_checkpoint_generation_control_report(
         "model_profile_lines": list(config.model_profile_lines),
         "allow_remote": bool(config.allow_remote),
         "trust_remote_code": bool(config.trust_remote_code),
+        "generation_control_profile_config": generation_control_profile_config,
+        "generation_control_sweep_cli_args": generation_control_sweep_cli_args,
+        "generation_control_bridge_cli_args": generation_control_bridge_cli_args,
         "checkpoint_count": len(config.checkpoint),
         "prompt_count": len(config.prompt),
         "sweep_count": len(rows),
