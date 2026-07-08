@@ -4393,6 +4393,65 @@ def drl_aggregate_penalty(
 
 def drl_frame_summary(metrics: Mapping[str, Any]) -> Dict[str, float]: ...
 
+def kv_redis_available() -> bool: ...
+
+def kv_choice_schema_fields() -> List[str]: ...
+
+def kv_rank_choice_key(
+    rows: int,
+    cols: int,
+    k: int,
+    subgroup: bool = ...,
+    namespace: str = ...,
+) -> str: ...
+
+def kv_choice_key_from_rank_plan(plan: RankPlan, namespace: str = ...) -> str: ...
+
+def kv_choice_from_rank_plan(plan: RankPlan) -> Dict[str, Any]: ...
+
+def kv_json_set_options(
+    *,
+    expiry_seconds: int | None = ...,
+    expiry_milliseconds: int | None = ...,
+    expiry_at_seconds: int | None = ...,
+    expiry_at_milliseconds: int | None = ...,
+    keep_ttl: bool = ...,
+    persist: bool = ...,
+    condition: Literal["always", "nx", "xx"] = ...,
+) -> Dict[str, Any]: ...
+
+def kv_redis_set_json(
+    url: str,
+    key: str,
+    value: Any,
+    options: Mapping[str, Any] | None = ...,
+) -> bool: ...
+
+def kv_redis_get_json(url: str, key: str) -> Any: ...
+
+def kv_redis_set_choice(
+    url: str,
+    key: str,
+    choice: Mapping[str, Any],
+    options: Mapping[str, Any] | None = ...,
+) -> bool: ...
+
+def kv_redis_get_choice(url: str, key: str) -> Dict[str, Any] | None: ...
+
+def kv_redis_push_choice(
+    url: str,
+    key: str,
+    choice: Mapping[str, Any],
+    max_len: int | None = ...,
+) -> int: ...
+
+def kv_redis_lrange_choice(
+    url: str,
+    key: str,
+    start: int = ...,
+    stop: int = ...,
+) -> List[Dict[str, Any]]: ...
+
 def mean_squared_error(predictions: Tensor, targets: Tensor) -> float: ...
 
 def info_nce(
@@ -8236,6 +8295,68 @@ class _SafetyModule(ModuleType):
 
 safety: _SafetyModule
 
+class _KvModule(ModuleType):
+    def kv_redis_available() -> bool: ...
+
+    def kv_choice_schema_fields() -> List[str]: ...
+
+    def kv_rank_choice_key(
+        rows: int,
+        cols: int,
+        k: int,
+        subgroup: bool = ...,
+        namespace: str = ...,
+    ) -> str: ...
+
+    def kv_choice_key_from_rank_plan(plan: RankPlan, namespace: str = ...) -> str: ...
+
+    def kv_choice_from_rank_plan(plan: RankPlan) -> Dict[str, Any]: ...
+
+    def kv_json_set_options(
+        *,
+        expiry_seconds: int | None = ...,
+        expiry_milliseconds: int | None = ...,
+        expiry_at_seconds: int | None = ...,
+        expiry_at_milliseconds: int | None = ...,
+        keep_ttl: bool = ...,
+        persist: bool = ...,
+        condition: Literal["always", "nx", "xx"] = ...,
+    ) -> Dict[str, Any]: ...
+
+    def kv_redis_set_json(
+        url: str,
+        key: str,
+        value: Any,
+        options: Mapping[str, Any] | None = ...,
+    ) -> bool: ...
+
+    def kv_redis_get_json(url: str, key: str) -> Any: ...
+
+    def kv_redis_set_choice(
+        url: str,
+        key: str,
+        choice: Mapping[str, Any],
+        options: Mapping[str, Any] | None = ...,
+    ) -> bool: ...
+
+    def kv_redis_get_choice(url: str, key: str) -> Dict[str, Any] | None: ...
+
+    def kv_redis_push_choice(
+        url: str,
+        key: str,
+        choice: Mapping[str, Any],
+        max_len: int | None = ...,
+    ) -> int: ...
+
+    def kv_redis_lrange_choice(
+        url: str,
+        key: str,
+        start: int = ...,
+        stop: int = ...,
+    ) -> List[Dict[str, Any]]: ...
+
+kv: _KvModule
+
 class _TelemetryModule(ModuleType):
     DashboardMetric: type[DashboardMetric]
     DashboardEvent: type[DashboardEvent]
@@ -9524,6 +9645,7 @@ __all__ = [
     "spiral_rl",
     "rec",
     "safety",
+    "kv",
     "telemetry",
     "ecosystem",
     "selfsup",
@@ -9566,6 +9688,18 @@ __all__ = [
     "drl_trainer_penalty",
     "drl_aggregate_penalty",
     "drl_frame_summary",
+    "kv_redis_available",
+    "kv_choice_schema_fields",
+    "kv_rank_choice_key",
+    "kv_choice_key_from_rank_plan",
+    "kv_choice_from_rank_plan",
+    "kv_json_set_options",
+    "kv_redis_set_json",
+    "kv_redis_get_json",
+    "kv_redis_set_choice",
+    "kv_redis_get_choice",
+    "kv_redis_push_choice",
+    "kv_redis_lrange_choice",
     "zspace_eval",
     "zspace_snapshot",
     "softlogic_feedback",

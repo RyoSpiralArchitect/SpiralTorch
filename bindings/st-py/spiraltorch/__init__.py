@@ -253,6 +253,7 @@ _PREDECLARED_SUBMODULES: list[tuple[str, str]] = [
     ("spiral_rl", "Reinforcement learning components"),
     ("rec", "Reconstruction / signal processing"),
     ("safety", "Safety and drift-response linguistics helpers"),
+    ("kv", "Key-value persistence helpers"),
     ("telemetry", "Telemetry / dashboards / metrics"),
     ("plugin", "Plugin/event observability"),
     ("ecosystem", "Integrations & ecosystem glue"),
@@ -6295,6 +6296,23 @@ _mirror_into_module(
     },
 )
 _mirror_into_module(
+    "kv",
+    {
+        "kv_redis_available": ("kv.kv_redis_available",),
+        "kv_choice_schema_fields": ("kv.kv_choice_schema_fields",),
+        "kv_rank_choice_key": ("kv.kv_rank_choice_key",),
+        "kv_choice_key_from_rank_plan": ("kv.kv_choice_key_from_rank_plan",),
+        "kv_choice_from_rank_plan": ("kv.kv_choice_from_rank_plan",),
+        "kv_json_set_options": ("kv.kv_json_set_options",),
+        "kv_redis_set_json": ("kv.kv_redis_set_json",),
+        "kv_redis_get_json": ("kv.kv_redis_get_json",),
+        "kv_redis_set_choice": ("kv.kv_redis_set_choice",),
+        "kv_redis_get_choice": ("kv.kv_redis_get_choice",),
+        "kv_redis_push_choice": ("kv.kv_redis_push_choice",),
+        "kv_redis_lrange_choice": ("kv.kv_redis_lrange_choice",),
+    },
+)
+_mirror_into_module(
     "spiral_rl",
     {
         "stAgent": ("PyDqnAgent", "DqnAgent", "StAgent"),
@@ -7779,6 +7797,11 @@ _CORE_EXPORTS = [
     "drl_default_thresholds","drl_analyse_word","drl_analyze_word",
     "drl_existence_load","drl_safe_radii","drl_frame_hazard",
     "drl_trainer_penalty","drl_aggregate_penalty","drl_frame_summary",
+    "kv_redis_available","kv_choice_schema_fields","kv_rank_choice_key",
+    "kv_choice_key_from_rank_plan","kv_choice_from_rank_plan",
+    "kv_json_set_options","kv_redis_set_json","kv_redis_get_json",
+    "kv_redis_set_choice","kv_redis_get_choice","kv_redis_push_choice",
+    "kv_redis_lrange_choice",
     "init_backend","mps_probe","probe_gpu_path",
 ]
 for _name in _CORE_EXPORTS:

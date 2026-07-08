@@ -51,7 +51,7 @@ hip = ["st-core/hip", "st-tensor/hip"]
 logic = ["st-core/logic"]
 "logic-learn" = ["st-core/logic-learn"]
 kdsl = ["st-core/kdsl", "st-nn/kdsl", "st-spiral-rl/kdsl"]
-"kv-redis" = ["st-core/kv-redis"]
+"kv-redis" = ["st-core/kv-redis", "dep:st-kv", "st-kv/redis"]
 "wgpu-frac" = ["wgpu"]
 
 [build-dependencies]
@@ -69,6 +69,7 @@ st-rec = { path = "../../crates/st-rec", optional = true }
 st-text = { path = "../../crates/st-text", optional = true }
 st-logic = { path = "../../crates/st-logic", optional = true }
 st-kdsl = { path = "../../crates/st-kdsl", optional = true }
+st-kv = { path = "../../crates/st-kv", optional = true }
 st-backend-hip = { path = "../../crates/st-backend-hip", default-features = false }
 st-frac = { path = "../../crates/st-frac" }
 st-vision = { path = "../../crates/st-vision", default-features = false }

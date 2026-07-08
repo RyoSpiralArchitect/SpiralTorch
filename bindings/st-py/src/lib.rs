@@ -19,6 +19,7 @@ mod inference;
 mod introspect;
 mod json;
 mod julia_bridge;
+mod kv;
 mod nn;
 mod ops;
 mod planner;
@@ -279,6 +280,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
     spiral_rl::register(py, m)?;
     rec::register(py, m)?;
     safety::register(py, m)?;
+    kv::register(py, m)?;
     telemetry::register(py, m)?;
     plugin::register(py, m)?;
     ops::register_module(py, m)?;
@@ -364,6 +366,7 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
         "spiral_rl",
         "rec",
         "safety",
+        "kv",
         "telemetry",
         "plugin",
         "ops",
@@ -410,6 +413,18 @@ fn init_spiraltorch_module(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> 
         "drl_trainer_penalty",
         "drl_aggregate_penalty",
         "drl_frame_summary",
+        "kv_redis_available",
+        "kv_choice_schema_fields",
+        "kv_rank_choice_key",
+        "kv_choice_key_from_rank_plan",
+        "kv_choice_from_rank_plan",
+        "kv_json_set_options",
+        "kv_redis_set_json",
+        "kv_redis_get_json",
+        "kv_redis_set_choice",
+        "kv_redis_get_choice",
+        "kv_redis_push_choice",
+        "kv_redis_lrange_choice",
         "zspace_eval",
         "zspace_snapshot",
         "softlogic_feedback",

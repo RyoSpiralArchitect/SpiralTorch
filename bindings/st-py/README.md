@@ -87,6 +87,9 @@ PY
   including `drl_analyse_word`, `drl_trainer_penalty`, and frame summaries that
   can be injected into FT telemetry, prompt/runtime drift reports, or API-model
   routing traces.
+- `spiraltorch.kv` for planner-choice persistence helpers, including
+  `kv_choice_from_rank_plan`, Redis-compatible choice keys, validated JSON SET
+  option payloads, and `kv_redis_*` calls when built with `--features kv-redis`.
 - `TensorBiome` to cultivate open-topos rewrites, weight shoots, stack the
   harvest, and guard tensors that can be re-imported into Z-space.
 - Unified planning helpers (`plan`, `plan_topk`, `describe_device`,
@@ -114,8 +117,10 @@ value:
    `st.safety.drl_analyse_word`, `st.safety.drl_trainer_penalty`, and related
    summary helpers for FT telemetry penalties, prompt/runtime drift reports, and
    safety-aware training traces.
-3. `st-kv` JSON/choice persistence so Python experiments can reuse the same
-   Redis-backed rank/choice stores as Rust workers.
+3. `st-kv` JSON/choice persistence, now exposed as `st.kv_choice_from_rank_plan`,
+   `st.kv_rank_choice_key`, `st.kv_json_set_options`, and `kv_redis_*` helpers
+   when the binding is built with `--features kv-redis`, so Python experiments
+   can reuse the same Redis-backed rank/choice stores as Rust workers.
 4. `st-backend-wgpu` kernel descriptor/report helpers for WGPU-first runtime
    selection without requiring direct Rust inspection.
 5. Remaining `st-vision` volume/transform and `st-text` semantic helpers that

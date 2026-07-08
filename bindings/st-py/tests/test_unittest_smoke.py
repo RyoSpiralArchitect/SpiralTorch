@@ -1564,6 +1564,41 @@ class SpiralTorchSmokeTest(unittest.TestCase):
             delta=1e-6,
         )
 
+    def test_kv_choice_payload_smoke(self) -> None:
+        plan = st.plan("topk", 16, 128, 8, backend="wgpu")
+        choice = st.kv.kv_choice_from_rank_plan(plan)
+        fields = st.kv_choice_schema_fields()
+        self.assertIn("use_2ce", fields)
+        for field in fields:
+            self.assertIn(field, choice)
+        self.assertEqual(choice["rank_kind"], "topk")
+        self.assertEqual(choice["rows"], 16)
+        self.assertEqual(choice["cols"], 128)
+        self.assertEqual(choice["k"], 8)
+        self.assertEqual(choice["wg"], plan.workgroup)
+        self.assertEqual(choice["kl"], plan.lanes)
+        self.assertEqual(choice["ch"], plan.channel_stride)
+
+        key = st.kv_rank_choice_key(16, 128, 8, choice["subgroup"])
+        self.assertEqual(key, st.kv.kv_choice_key_from_rank_plan(plan))
+        self.assertTrue(key.startswith("spiral:heur:v1:sg:"))
+        self.assertIn(":c:7:k:3", key)
+
+        options = st.kv_json_set_options(expiry_seconds=30, condition="nx")
+        self.assertEqual(options["expiry"]["keyword"], "EX")
+        self.assertEqual(options["fragments"], ["EX", 30, "NX"])
+        keep_ttl = st.kv.kv_json_set_options(keep_ttl=True, condition="xx")
+        self.assertEqual(keep_ttl["fragments"], ["KEEPTTL", "XX"])
+        with self.assertRaises(ValueError):
+            st.kv_json_set_options(expiry_seconds=1, keep_ttl=True)
+        with self.assertRaises(ValueError):
+            st.kv_json_set_options(condition="sometimes")
+
+        self.assertIsInstance(st.kv_redis_available(), bool)
+        if not st.kv_redis_available():
+            with self.assertRaises(NotImplementedError):
+                st.kv.kv_redis_get_json("redis://127.0.0.1/", "spiral:test")
+
     def test_state_dict_io(self) -> None:
         model = st.nn.Linear("l1", 2, 1)
         with _temp_dir("tmp_state") as tmp:
