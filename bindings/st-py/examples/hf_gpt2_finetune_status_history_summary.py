@@ -15,6 +15,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("history_jsonl", type=Path)
     parser.add_argument("--label", default=None)
     parser.add_argument("--tail", type=int, default=3)
+    parser.add_argument(
+        "--tail-evals",
+        type=int,
+        default=0,
+        help="print the last N eval-loss points from the latest status row",
+    )
     parser.add_argument("--out", type=Path, default=None)
     parser.add_argument("--lines-out", type=Path, default=None)
     args = parser.parse_args(argv)
@@ -22,6 +28,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error(f"history_jsonl does not exist: {args.history_jsonl}")
     if args.tail < 0:
         parser.error("--tail must be non-negative")
+    if args.tail_evals < 0:
+        parser.error("--tail-evals must be non-negative")
     return args
 
 
@@ -54,6 +62,16 @@ def _nested(row: dict[str, Any], section: str, field: str) -> Any:
     if not isinstance(value, dict):
         return None
     return value.get(field)
+
+
+def _int_value(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return None
 
 
 def _latest_checkpoint_name(row: dict[str, Any]) -> Any:
@@ -89,6 +107,20 @@ def _runtime_setting(row: dict[str, Any], field: str) -> Any:
     return None
 
 
+def _first_log_row(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    for row in rows:
+        if isinstance(_nested(row, "log_progress", "log_latest_step"), int):
+            return row
+    return rows[0] if rows else {}
+
+
+def _last_log_row(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    for row in reversed(rows):
+        if isinstance(_nested(row, "log_progress", "log_latest_step"), int):
+            return row
+    return rows[-1] if rows else {}
+
+
 def _last_eval_loss_step(row: dict[str, Any]) -> Any:
     effective = _nested(row, "trace", "trace_effective_last_eval_loss_step")
     if effective is not None:
@@ -108,20 +140,63 @@ def _last_eval_loss_step(row: dict[str, Any]) -> Any:
     return None
 
 
+def _eval_loss_points(row: dict[str, Any]) -> list[dict[str, Any]]:
+    trace = row.get("trace")
+    if not isinstance(trace, dict):
+        return []
+    points = trace.get("trace_eval_loss_points")
+    if not isinstance(points, list):
+        return []
+    resume_baseline_eval_step = _int_value(
+        trace.get("trace_resume_baseline_eval_step")
+    )
+    rows: list[dict[str, Any]] = []
+    for index, point in enumerate(points):
+        if not isinstance(point, dict):
+            continue
+        raw_step = _int_value(point.get("step"))
+        step = (
+            resume_baseline_eval_step
+            if raw_step == 0 and resume_baseline_eval_step is not None
+            else raw_step
+        )
+        rows.append(
+            {
+                "index": index,
+                "step": step,
+                "raw_step": raw_step if step != raw_step else None,
+                "eval_loss": point.get("eval_loss"),
+                "eval_runtime": point.get("eval_runtime"),
+                "time_unix_s": point.get("time_unix_s"),
+            }
+        )
+    return rows
+
+
 def summarize_history(
     rows: list[dict[str, Any]], *, label: str | None, history_jsonl: Path
 ) -> dict[str, Any]:
     first = rows[0] if rows else {}
     last = rows[-1] if rows else {}
-    first_log_step = _nested(first, "log_progress", "log_latest_step")
-    last_log_step = _nested(last, "log_progress", "log_latest_step")
+    first_log = _first_log_row(rows)
+    last_log = _last_log_row(rows)
+    first_log_step = _nested(first_log, "log_progress", "log_latest_step")
+    last_log_step = _nested(last_log, "log_progress", "log_latest_step")
     first_trace_step = _nested(first, "trace", "trace_max_global_step")
     last_trace_step = _nested(last, "trace", "trace_max_global_step")
     first_time = first.get("time_unix_s")
     last_time = last.get("time_unix_s")
+    first_log_time = first_log.get("time_unix_s")
+    last_log_time = last_log.get("time_unix_s")
     duration_seconds = (
         float(last_time) - float(first_time)
         if isinstance(first_time, (int, float)) and isinstance(last_time, (int, float))
+        else None
+    )
+    log_duration_seconds = (
+        float(last_log_time) - float(first_log_time)
+        if isinstance(first_log_time, (int, float))
+        and isinstance(last_log_time, (int, float))
         else None
     )
     delta_log_step = (
@@ -135,10 +210,10 @@ def summarize_history(
         else None
     )
     log_steps_per_second = (
-        float(delta_log_step) / duration_seconds
+        float(delta_log_step) / log_duration_seconds
         if isinstance(delta_log_step, int)
-        and duration_seconds is not None
-        and duration_seconds > 0.0
+        and log_duration_seconds is not None
+        and log_duration_seconds > 0.0
         else None
     )
     log_steps_until_next_eval = _nested(
@@ -203,6 +278,7 @@ def summarize_history(
         "first_time_unix_s": first_time,
         "last_time_unix_s": last_time,
         "duration_seconds": duration_seconds,
+        "log_duration_seconds": log_duration_seconds,
         "first_log_step": first_log_step,
         "last_log_step": last_log_step,
         "delta_log_step": delta_log_step,
@@ -287,7 +363,11 @@ def summarize_history(
 
 
 def history_lines(
-    summary: dict[str, Any], rows: list[dict[str, Any]], *, tail: int
+    summary: dict[str, Any],
+    rows: list[dict[str, Any]],
+    *,
+    tail: int,
+    tail_evals: int = 0,
 ) -> list[str]:
     label_text = summary.get("label") or "history"
     lines = [
@@ -299,6 +379,7 @@ def history_lines(
             f"last_log_step={_number_text(summary.get('last_log_step'))} "
             f"delta_log_step={_number_text(summary.get('delta_log_step'))} "
             f"duration_seconds={_number_text(summary.get('duration_seconds'))} "
+            f"log_duration_seconds={_number_text(summary.get('log_duration_seconds'))} "
             f"log_steps_per_second={_number_text(summary.get('log_steps_per_second'))} "
             f"runtime_max_steps={_number_text(summary.get('last_runtime_max_steps'))} "
             f"runtime_eval_steps={_number_text(summary.get('last_runtime_eval_steps'))} "
@@ -381,6 +462,26 @@ def history_lines(
                 f"watch_stop_reason={_number_text(row.get('watch_stop_reason'))}"
             )
         )
+    if tail_evals > 0 and rows:
+        eval_points = _eval_loss_points(rows[-1])
+        eval_start_index = max(len(eval_points) - tail_evals, 0)
+        for point in eval_points[eval_start_index:]:
+            raw_step_text = (
+                f" raw_step={_number_text(point.get('raw_step'))}"
+                if point.get("raw_step") is not None
+                else ""
+            )
+            lines.append(
+                (
+                    "hf_gpt2_ft_status_history_eval "
+                    f"index={_number_text(point.get('index'))} "
+                    f"step={_number_text(point.get('step'))}"
+                    f"{raw_step_text} "
+                    f"eval_loss={_number_text(point.get('eval_loss'))} "
+                    f"eval_runtime={_number_text(point.get('eval_runtime'))} "
+                    f"time_unix_s={_number_text(point.get('time_unix_s'))}"
+                )
+            )
     return lines
 
 
@@ -392,7 +493,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"failed to load status history: {exc}", file=sys.stderr)
         return 1
     summary = summarize_history(rows, label=args.label, history_jsonl=args.history_jsonl)
-    lines = history_lines(summary, rows, tail=args.tail)
+    lines = history_lines(summary, rows, tail=args.tail, tail_evals=args.tail_evals)
     payload = json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     if args.out is not None:
         args.out.parent.mkdir(parents=True, exist_ok=True)

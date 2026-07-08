@@ -5114,6 +5114,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 "demo",
                 "--tail",
                 "1",
+                "--tail-evals",
+                "2",
                 "--out",
                 str(out_path),
                 "--lines-out",
@@ -5124,13 +5126,19 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             summary = module.summarize_history(
                 loaded_rows, label=args.label, history_jsonl=args.history_jsonl
             )
-            lines = module.history_lines(summary, loaded_rows, tail=args.tail)
+            lines = module.history_lines(
+                summary,
+                loaded_rows,
+                tail=args.tail,
+                tail_evals=args.tail_evals,
+            )
             self.assertEqual(module.main(argv), 0)
             written = json.loads(out_path.read_text(encoding="utf-8"))
             written_lines = lines_path.read_text(encoding="utf-8").splitlines()
 
         self.assertEqual(summary["row_count"], 2)
         self.assertEqual(summary["duration_seconds"], 40.0)
+        self.assertEqual(summary["log_duration_seconds"], 40.0)
         self.assertEqual(summary["delta_log_step"], 10)
         self.assertEqual(summary["log_steps_per_second"], 0.25)
         self.assertEqual(summary["delta_trace_step"], 10)
@@ -5175,6 +5183,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(written["delta_log_step"], 10)
         self.assertIn("label=demo", lines[0])
         self.assertIn("last_log_step=34", lines[0])
+        self.assertIn("log_duration_seconds=40", lines[0])
         self.assertIn("log_steps_per_second=0.25", lines[0])
         self.assertIn("runtime_max_steps=40", lines[0])
         self.assertIn("runtime_eval_steps=10", lines[0])
@@ -5229,7 +5238,57 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("watch_stop_eval_step=40", lines[1])
         self.assertIn("watch_stop_eval_ready=false", lines[1])
         self.assertIn("watch_stop_reason=checkpoint_ready", lines[1])
+        self.assertIn("hf_gpt2_ft_status_history_eval", lines[2])
+        self.assertIn("index=0", lines[2])
+        self.assertIn("step=20", lines[2])
+        self.assertIn("eval_loss=1.8", lines[2])
+        self.assertIn("hf_gpt2_ft_status_history_eval", lines[3])
+        self.assertIn("index=1", lines[3])
+        self.assertIn("step=30", lines[3])
+        self.assertIn("eval_loss=1.7", lines[3])
         self.assertEqual(written_lines, lines)
+
+    def test_status_history_summary_uses_first_available_log_step_for_rate(
+        self,
+    ) -> None:
+        module = load_status_history_summary_example()
+        rows = [
+            {"time_unix_s": 100.0, "process_status": "alive"},
+            {
+                "time_unix_s": 110.0,
+                "process_status": "alive",
+                "log_progress": {"log_latest_step": 100, "log_max_steps": 200},
+            },
+            {
+                "time_unix_s": 130.0,
+                "process_status": "alive",
+                "log_progress": {"log_latest_step": 150, "log_max_steps": 200},
+                "eval_progress": {"log_steps_until_next_eval": 10},
+            },
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            history_path = Path(tmp) / "history.jsonl"
+            history_path.write_text(
+                "\n".join(json.dumps(row) for row in rows) + "\n",
+                encoding="utf-8",
+            )
+            summary = module.summarize_history(
+                module._load_history(history_path),
+                label="resume",
+                history_jsonl=history_path,
+            )
+            lines = module.history_lines(summary, rows, tail=0)
+
+        self.assertEqual(summary["duration_seconds"], 30.0)
+        self.assertEqual(summary["log_duration_seconds"], 20.0)
+        self.assertEqual(summary["first_log_step"], 100)
+        self.assertEqual(summary["last_log_step"], 150)
+        self.assertEqual(summary["delta_log_step"], 50)
+        self.assertEqual(summary["log_steps_per_second"], 2.5)
+        self.assertEqual(summary["estimated_seconds_until_next_eval"], 4.0)
+        self.assertIn("first_log_step=100", lines[0])
+        self.assertIn("log_duration_seconds=20", lines[0])
+        self.assertIn("log_steps_per_second=2.5", lines[0])
 
     def test_monitor_snapshot_example_summarizes_long_ft_watchers(self) -> None:
         module = load_monitor_snapshot_example()
