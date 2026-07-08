@@ -7556,8 +7556,84 @@ def hf_finetune_rust_dependency_report() -> dict[str, object]:
     return dict(_genericize_hf_finetune_payload(hf_gpt2_finetune_rust_dependency_report()))
 
 
+def _prefer_hf_finetune_scale_up_artifacts(
+    report: dict[str, object],
+    *,
+    run_card: bool,
+    trainer_trace_jsonl: bool,
+) -> dict[str, object]:
+    """Prefer model-neutral artifact filenames for generic scale-up commands."""
+
+    command_value = report.get("command")
+    if not isinstance(command_value, Sequence) or isinstance(
+        command_value,
+        (str, bytes),
+    ):
+        return report
+    command = [str(item) for item in command_value]
+    command_changed = False
+    if len(command) > 1 and Path(command[1]).name == "hf_gpt2_finetune_bridge.py":
+        command[1] = str(Path(command[1]).with_name("hf_finetune_bridge.py"))
+        command_changed = True
+    output_dir = _command_flag_value(command, "--output-dir")
+    if output_dir is None:
+        report["command"] = command
+        report["command_display"] = _shell_join_args(command)
+        report["command_preview"] = _cli_arg_preview(command)
+        return report
+    overrides: dict[str, object] = {}
+    current_run_card = _command_flag_value(command, "--run-card")
+    if run_card and (
+        current_run_card is None
+        or Path(str(current_run_card)).name == HF_GPT2_FT_RUN_CARD_FILENAME
+    ):
+        overrides["--run-card"] = str(Path(output_dir) / HF_FINETUNE_RUN_CARD_FILENAME)
+    current_trace = _command_flag_value(command, "--trainer-trace-jsonl")
+    if trainer_trace_jsonl and (
+        current_trace is None
+        or Path(str(current_trace)).name == HF_GPT2_FT_TRAINER_TRACE_FILENAME
+    ):
+        overrides["--trainer-trace-jsonl"] = str(
+            Path(output_dir) / HF_FINETUNE_TRAINER_TRACE_FILENAME
+        )
+    if not overrides:
+        if command_changed:
+            report["command"] = command
+            report["command_display"] = _shell_join_args(command)
+            report["command_preview"] = _cli_arg_preview(command)
+        return report
+    updated = _command_with_overrides(command, overrides)
+    report["command"] = updated
+    report["command_display"] = _shell_join_args(updated)
+    report["command_preview"] = _cli_arg_preview(updated)
+    applied = report.get("applied_overrides")
+    if isinstance(applied, Mapping):
+        applied = {str(key): value for key, value in applied.items()}
+    else:
+        applied = {}
+    applied.update(overrides)
+    report["applied_overrides"] = applied
+    report["applied_override_count"] = len(applied)
+    return report
+
+
 def hf_finetune_scale_up_command(*args: object, **kwargs: object) -> dict[str, object]:
-    return _generic_report_from(hf_gpt2_finetune_scale_up_command, *args, **kwargs)
+    explicit_run_card = kwargs.get("run_card") is not None
+    explicit_trace = kwargs.get("trainer_trace_jsonl") is not None
+    report = dict(
+        _genericize_hf_finetune_payload(
+            hf_gpt2_finetune_scale_up_command(
+                *_legacyized_args(args),
+                **_legacyized_kwargs(kwargs),
+            )
+        )
+    )
+    return _prefer_hf_finetune_scale_up_artifacts(
+        report,
+        run_card=not explicit_run_card,
+        trainer_trace_jsonl=not explicit_trace,
+    )
+
 
 
 def hf_finetune_scale_up_preflight_lines(

@@ -3757,6 +3757,25 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                         "32",
                     ]
                 )
+            implicit_artifact_command = st.hf_finetune_scale_up_command(
+                {
+                    "row_type": "hf_finetune_command_manifest",
+                    "run_id": "pythia-implicit-artifacts",
+                    "command": [
+                        sys.executable,
+                        str(EXAMPLE_PATH),
+                        "--model-name",
+                        "EleutherAI/pythia-70m-deduped",
+                        "--train-file",
+                        str(train_path),
+                        "--output-dir",
+                        str(root / "implicit-run"),
+                        "--max-steps",
+                        "4",
+                    ],
+                },
+                max_steps=8,
+            )
 
         self.assertEqual(args.wait_launch_script.name, "hf_finetune_wait_launch.py")
         self.assertEqual(result["status"], "ok")
@@ -3785,6 +3804,34 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(written["wait_launch_command"], result["wait_launch_command"])
         self.assertEqual(installed_code, 0)
         self.assertIn("hf_ft_scale_up_command status=ok", stdout.getvalue())
+        self.assertEqual(
+            implicit_artifact_command["row_type"],
+            "hf_finetune_scale_up_command",
+        )
+        self.assertEqual(
+            Path(implicit_artifact_command["command"][1]).name,
+            "hf_finetune_bridge.py",
+        )
+        self.assertEqual(
+            Path(
+                implicit_artifact_command["command"][
+                    implicit_artifact_command["command"].index("--run-card") + 1
+                ]
+            ).name,
+            st.HF_FINETUNE_RUN_CARD_FILENAME,
+        )
+        self.assertEqual(
+            Path(
+                implicit_artifact_command["command"][
+                    implicit_artifact_command["command"].index(
+                        "--trainer-trace-jsonl"
+                    )
+                    + 1
+                ]
+            ).name,
+            st.HF_FINETUNE_TRAINER_TRACE_FILENAME,
+        )
+        self.assertNotIn("hf-gpt2-ft", implicit_artifact_command["command_display"])
 
     def test_sweep_example_resume_existing_reuses_successful_run_cards(self) -> None:
         module = load_sweep_example()
