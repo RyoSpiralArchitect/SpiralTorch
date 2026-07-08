@@ -115,6 +115,27 @@ def hf_gpt2_finetune_milestone_handoff_lines(
     **kwargs: Any,
 ) -> List[str]: ...
 
+def hf_gpt2_finetune_milestone_handoff_execution_report(
+    report_or_capture: Mapping[str, Any],
+    *,
+    run: bool = ...,
+    cwd: str | PathLike[str] | None = ...,
+    env: Mapping[str, Any] | None = ...,
+    timeout: float | None = ...,
+    capture_output: bool = ...,
+    check: bool = ...,
+    runner: Callable[..., Any] | None = ...,
+    out: str | PathLike[str] | None = ...,
+    lines_out: str | PathLike[str] | None = ...,
+    max_output_chars: int | None = ...,
+    **handoff_kwargs: Any,
+) -> Dict[str, Any]: ...
+
+def hf_gpt2_finetune_milestone_handoff_execution_lines(
+    report_or_handoff: Mapping[str, Any],
+    **kwargs: Any,
+) -> List[str]: ...
+
 def summarize_transformers_trainer_runtime_bridge(
     transformers_trace_jsonl: str,
     trainer_trace_jsonl: str,
@@ -8694,6 +8715,8 @@ __all__ = [
     "hf_gpt2_finetune_monitor_report",
     "hf_gpt2_finetune_milestone_capture_lines",
     "hf_gpt2_finetune_milestone_capture_report",
+    "hf_gpt2_finetune_milestone_handoff_execution_lines",
+    "hf_gpt2_finetune_milestone_handoff_execution_report",
     "hf_gpt2_finetune_milestone_handoff_lines",
     "hf_gpt2_finetune_milestone_handoff_report",
     "hf_gpt2_finetune_status_history_lines",

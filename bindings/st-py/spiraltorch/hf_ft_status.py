@@ -4,17 +4,22 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shlex
+import subprocess
 import sys
+import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 __all__ = [
     "hf_gpt2_finetune_monitor_lines",
     "hf_gpt2_finetune_monitor_report",
     "hf_gpt2_finetune_milestone_capture_lines",
     "hf_gpt2_finetune_milestone_capture_report",
+    "hf_gpt2_finetune_milestone_handoff_execution_lines",
+    "hf_gpt2_finetune_milestone_handoff_execution_report",
     "hf_gpt2_finetune_milestone_handoff_lines",
     "hf_gpt2_finetune_milestone_handoff_report",
     "hf_gpt2_finetune_status_history_lines",
@@ -1035,6 +1040,216 @@ def hf_gpt2_finetune_milestone_handoff_lines(
             f"checkpoint_ready={_number_text(report.get('milestone_checkpoint_ready'))} "
             f"run_dir={_number_text(report.get('run_dir'))} "
             f"compare_count={len(report.get('compare_with_sweep') or [])} "
+            f"command={_number_text(report.get('command_display'))}"
+        )
+    ]
+
+
+HandoffRunner = Callable[..., subprocess.CompletedProcess[str] | None]
+
+
+def _handoff_report_from_value(
+    report_or_capture: Mapping[str, Any],
+    **kwargs: Any,
+) -> dict[str, Any]:
+    if report_or_capture.get("row_type") == "hf_gpt2_finetune_milestone_handoff":
+        if not kwargs:
+            return dict(report_or_capture)
+        capture = report_or_capture.get("capture")
+        if isinstance(capture, Mapping):
+            return hf_gpt2_finetune_milestone_handoff_report(capture, **kwargs)
+        raise ValueError(
+            "handoff kwargs require a handoff report with an embedded capture"
+        )
+    return hf_gpt2_finetune_milestone_handoff_report(report_or_capture, **kwargs)
+
+
+def _merged_env(env: Mapping[str, Any] | None) -> dict[str, str] | None:
+    if env is None:
+        return None
+    merged = os.environ.copy()
+    merged.update({str(key): str(value) for key, value in env.items()})
+    return merged
+
+
+def _bounded_text(value: Any, *, max_chars: int | None) -> tuple[str | None, bool]:
+    if value is None:
+        return None, False
+    text = value if isinstance(value, str) else str(value)
+    if max_chars is None or max_chars < 0 or len(text) <= max_chars:
+        return text, False
+    return text[-max_chars:], True
+
+
+def _json_from_text(value: str | None) -> Any:
+    if not value:
+        return None
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        pass
+    start = value.find("{")
+    end = value.rfind("}")
+    if start < 0 or end <= start:
+        return None
+    try:
+        return json.loads(value[start : end + 1])
+    except json.JSONDecodeError:
+        return None
+
+
+def hf_gpt2_finetune_milestone_handoff_execution_report(
+    report_or_capture: Mapping[str, Any],
+    *,
+    run: bool = False,
+    cwd: str | Path | None = None,
+    env: Mapping[str, Any] | None = None,
+    timeout: float | None = None,
+    capture_output: bool = True,
+    check: bool = False,
+    runner: HandoffRunner | None = None,
+    out: str | Path | None = None,
+    lines_out: str | Path | None = None,
+    max_output_chars: int | None = 20_000,
+    **handoff_kwargs: Any,
+) -> dict[str, Any]:
+    """Plan or execute a milestone handoff command through the package API.
+
+    By default this is deliberately non-invasive: it records the command that
+    would run. Pass ``run=True`` to execute the handoff command and capture a
+    small auditable process report.
+    """
+
+    handoff = _handoff_report_from_value(report_or_capture, **handoff_kwargs)
+    command = [str(part) for part in handoff.get("command") or []]
+    started_unix_s = time.time()
+    report: dict[str, Any] = {
+        "row_type": "hf_gpt2_finetune_milestone_handoff_execution",
+        "status": (
+            "planned" if not run and handoff.get("ready") else handoff.get("status")
+        ),
+        "run": bool(run),
+        "ready": handoff.get("ready"),
+        "handoff_status": handoff.get("status"),
+        "action": handoff.get("action"),
+        "label": handoff.get("label"),
+        "milestone_step": handoff.get("milestone_step"),
+        "milestone_eval_loss": handoff.get("milestone_eval_loss"),
+        "checkpoint": handoff.get("checkpoint"),
+        "checkpoint_path": handoff.get("checkpoint_path"),
+        "run_dir": handoff.get("run_dir"),
+        "cwd": None if cwd is None else str(cwd),
+        "command": command,
+        "command_display": shlex.join(command),
+        "started_unix_s": started_unix_s,
+        "handoff": handoff,
+    }
+    if not command:
+        report["status"] = "missing_command"
+        report["error"] = "handoff report did not include a command"
+    elif not run:
+        report["completed_unix_s"] = time.time()
+    elif handoff.get("ready") is not True:
+        report["status"] = "not_ready"
+        report["error"] = f"handoff is not ready: {handoff.get('status')}"
+        report["completed_unix_s"] = time.time()
+    else:
+        process_cwd = None if cwd is None else str(cwd)
+        process_env = _merged_env(env)
+        process_runner = runner or subprocess.run
+        try:
+            result = process_runner(
+                command,
+                cwd=process_cwd,
+                env=process_env,
+                text=True,
+                capture_output=capture_output,
+                check=check,
+                timeout=timeout,
+            )
+        except Exception as exc:  # pragma: no cover - exercised by runtime callers
+            report["status"] = "error"
+            report["error"] = f"{exc.__class__.__name__}: {exc}"
+            report["completed_unix_s"] = time.time()
+        else:
+            returncode = getattr(result, "returncode", 0)
+            stdout, stdout_truncated = _bounded_text(
+                getattr(result, "stdout", None),
+                max_chars=max_output_chars,
+            )
+            stderr, stderr_truncated = _bounded_text(
+                getattr(result, "stderr", None),
+                max_chars=max_output_chars,
+            )
+            command_report = _json_from_text(stdout)
+            report.update(
+                {
+                    "status": "complete" if returncode == 0 else "failed",
+                    "returncode": returncode,
+                    "stdout": stdout,
+                    "stderr": stderr,
+                    "stdout_truncated": stdout_truncated,
+                    "stderr_truncated": stderr_truncated,
+                    "command_report": command_report,
+                    "completed_unix_s": time.time(),
+                }
+            )
+    report["duration_seconds"] = (
+        float(report["completed_unix_s"]) - started_unix_s
+        if isinstance(report.get("completed_unix_s"), (int, float))
+        else None
+    )
+    if out is not None:
+        out_path = Path(out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        report["out"] = str(out_path)
+        out_path.write_text(
+            json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+    if lines_out is not None:
+        lines_path = Path(lines_out)
+        lines_path.parent.mkdir(parents=True, exist_ok=True)
+        report["lines_out"] = str(lines_path)
+        lines = hf_gpt2_finetune_milestone_handoff_execution_lines(report)
+        lines_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return report
+
+
+def hf_gpt2_finetune_milestone_handoff_execution_lines(
+    report_or_handoff: Mapping[str, Any],
+    **kwargs: Any,
+) -> list[str]:
+    """Render compact lines from a milestone handoff execution report."""
+
+    if (
+        report_or_handoff.get("row_type")
+        == "hf_gpt2_finetune_milestone_handoff_execution"
+    ):
+        report = dict(report_or_handoff)
+    else:
+        report = hf_gpt2_finetune_milestone_handoff_execution_report(
+            report_or_handoff,
+            **kwargs,
+        )
+    command_report = report.get("command_report")
+    command_report_status = (
+        command_report.get("status") if isinstance(command_report, Mapping) else None
+    )
+    return [
+        (
+            "hf_gpt2_ft_milestone_handoff_execution "
+            f"status={_number_text(report.get('status'))} "
+            f"run={_number_text(report.get('run'))} "
+            f"ready={_number_text(report.get('ready'))} "
+            f"handoff_status={_number_text(report.get('handoff_status'))} "
+            f"action={_number_text(report.get('action'))} "
+            f"step={_number_text(report.get('milestone_step'))} "
+            f"eval_loss={_number_text(report.get('milestone_eval_loss'))} "
+            f"checkpoint={_number_text(report.get('checkpoint'))} "
+            f"returncode={_number_text(report.get('returncode'))} "
+            f"command_report_status={_number_text(command_report_status)} "
+            f"duration_seconds={_number_text(report.get('duration_seconds'))} "
             f"command={_number_text(report.get('command_display'))}"
         )
     ]

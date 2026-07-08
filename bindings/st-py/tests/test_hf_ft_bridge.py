@@ -5,6 +5,7 @@ import io
 import json
 import math
 import os
+import subprocess
 import sys
 import tempfile
 import types
@@ -6163,6 +6164,68 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("previous-sweep.json", handoff["command"])
         self.assertIn("--dry-run", handoff["command"])
         self.assertIn("checkpoint=checkpoint-6144", handoff_lines[0])
+        execution_plan = st.hf_gpt2_finetune_milestone_handoff_execution_report(
+            handoff
+        )
+        execution_plan_lines = (
+            st.hf_gpt2_finetune_milestone_handoff_execution_lines(execution_plan)
+        )
+
+        self.assertEqual(
+            execution_plan["row_type"],
+            "hf_gpt2_finetune_milestone_handoff_execution",
+        )
+        self.assertEqual(execution_plan["status"], "planned")
+        self.assertFalse(execution_plan["run"])
+        self.assertEqual(execution_plan["checkpoint"], "checkpoint-6144")
+        self.assertEqual(execution_plan["command"], handoff["command"])
+        self.assertIn("status=planned", execution_plan_lines[0])
+        self.assertIn("run=false", execution_plan_lines[0])
+
+        runner_calls = []
+
+        def fake_runner(command, cwd, env, text, capture_output, check, timeout):
+            runner_calls.append(
+                {
+                    "command": list(command),
+                    "cwd": cwd,
+                    "env": env,
+                    "text": text,
+                    "capture_output": capture_output,
+                    "check": check,
+                    "timeout": timeout,
+                }
+            )
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                stdout=json.dumps({"status": "planned", "sweep_count": 3}),
+                stderr="",
+            )
+
+        execution = st.hf_gpt2_finetune_milestone_handoff_execution_report(
+            handoff,
+            run=True,
+            cwd="/tmp/spiraltorch-ft",
+            env={"SPIRALTORCH_TEST_FLAG": "1"},
+            timeout=12.5,
+            runner=fake_runner,
+        )
+        execution_lines = st.hf_gpt2_finetune_milestone_handoff_execution_lines(
+            execution
+        )
+
+        self.assertEqual(execution["status"], "complete")
+        self.assertTrue(execution["run"])
+        self.assertEqual(execution["returncode"], 0)
+        self.assertEqual(execution["command_report"]["sweep_count"], 3)
+        self.assertEqual(runner_calls[0]["command"], handoff["command"])
+        self.assertEqual(runner_calls[0]["cwd"], "/tmp/spiraltorch-ft")
+        self.assertEqual(runner_calls[0]["env"]["SPIRALTORCH_TEST_FLAG"], "1")
+        self.assertTrue(runner_calls[0]["capture_output"])
+        self.assertEqual(runner_calls[0]["timeout"], 12.5)
+        self.assertIn("status=complete", execution_lines[0])
+        self.assertIn("command_report_status=planned", execution_lines[0])
         waiting_handoff = st.hf_gpt2_finetune_milestone_handoff_report(
             capture,
             run_dir="/tmp/spiraltorch-ft",
@@ -6811,6 +6874,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("hf_gpt2_finetune_monitor_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_milestone_capture_lines", st.__all__)
         self.assertIn("hf_gpt2_finetune_milestone_capture_report", st.__all__)
+        self.assertIn(
+            "hf_gpt2_finetune_milestone_handoff_execution_lines",
+            st.__all__,
+        )
+        self.assertIn(
+            "hf_gpt2_finetune_milestone_handoff_execution_report",
+            st.__all__,
+        )
         self.assertIn("hf_gpt2_finetune_milestone_handoff_lines", st.__all__)
         self.assertIn("hf_gpt2_finetune_milestone_handoff_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_preflight_report", st.__all__)
@@ -6892,6 +6963,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIs(
             st.hf_gpt2_finetune_milestone_handoff_report,
             st.hf_ft_status.hf_gpt2_finetune_milestone_handoff_report,
+        )
+        self.assertIs(
+            st.hf_gpt2_finetune_milestone_handoff_execution_lines,
+            st.hf_ft_status.hf_gpt2_finetune_milestone_handoff_execution_lines,
+        )
+        self.assertIs(
+            st.hf_gpt2_finetune_milestone_handoff_execution_report,
+            st.hf_ft_status.hf_gpt2_finetune_milestone_handoff_execution_report,
         )
         self.assertIs(
             st.hf_gpt2_finetune_training_telemetry_frame,
