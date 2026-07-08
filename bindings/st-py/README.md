@@ -418,6 +418,9 @@ spiral-hf-profile \
   --runtime-contract
 
 spiral-hf-profile \
+  --runtime-contract-artifact runs/hf-finetune-qwen2-zspace-ft/runtime-contract.json
+
+spiral-hf-profile \
   --model-configs bindings/st-py/examples/hf_finetune_model_configs.example.json \
   --model-profile qwen2-0.5b-local-smoke \
   --preflight \
@@ -463,9 +466,10 @@ CLI args, and expanded local-inference runtime CLI args. The same contract is
 embedded into profile-backed inference-distortion runtime plans and checkpoint
 generation-control reports, so downstream artifacts can be replayed or audited
 without re-resolving the model config. Use
+`spiral-hf-profile --runtime-contract-artifact ...` or
 `st.hf_finetune_model_profile_runtime_contract_from_artifact(...)` to recover
-that contract from a saved run card/report JSON when you are stitching a later
-FT, local-HF inference probe, or Z-Space generation-control run back together. Add
+that contract from a saved run card/report/contract JSON when you are stitching
+a later FT, local-HF inference probe, or Z-Space generation-control run back together. Add
 `--preflight` to probe the selected profile's inference, finetune, PEFT, or
 TRL-SFT runtime preset before launching a long run; add `--require` when that
 probe should act as a CI/local gate instead of an observational report. Add

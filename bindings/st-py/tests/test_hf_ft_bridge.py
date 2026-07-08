@@ -9314,6 +9314,41 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             written_contract_lines = contract_lines_out.read_text(
                 encoding="utf-8"
             ).splitlines()
+            artifact_contract_out = Path(tmp) / "runtime-contract-artifact.json"
+            artifact_contract_lines_out = (
+                Path(tmp) / "runtime-contract-artifact.lines"
+            )
+            artifact_contract_json_stdout = io.StringIO()
+            with redirect_stdout(artifact_contract_json_stdout):
+                artifact_contract_json_code = hf_cli.profile_main(
+                    [
+                        "--runtime-contract-artifact",
+                        str(contract_out),
+                        "--json",
+                        "--out",
+                        str(artifact_contract_out),
+                        "--lines-out",
+                        str(artifact_contract_lines_out),
+                    ]
+                )
+            artifact_contract_payload = json.loads(
+                artifact_contract_json_stdout.getvalue()
+            )
+            written_artifact_contract_payload = json.loads(
+                artifact_contract_out.read_text(encoding="utf-8")
+            )
+            written_artifact_contract_lines = (
+                artifact_contract_lines_out.read_text(encoding="utf-8").splitlines()
+            )
+            artifact_contract_stdout = io.StringIO()
+            with redirect_stdout(artifact_contract_stdout):
+                artifact_contract_code = hf_cli.profile_main(
+                    [
+                        "--runtime-contract-from-artifact",
+                        str(contract_out),
+                    ]
+                )
+            artifact_contract_lines = artifact_contract_stdout.getvalue().splitlines()
 
         self.assertEqual(runtime_contract_json_code, 0)
         self.assertEqual(
@@ -9334,6 +9369,43 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 "hf_ft_model_profile_runtime_contract "
             )
         )
+        self.assertEqual(artifact_contract_json_code, 0)
+        self.assertEqual(artifact_contract_code, 0)
+        self.assertEqual(
+            artifact_contract_payload["profile_id"],
+            "qwen2-0.5b-local-smoke",
+        )
+        self.assertEqual(
+            artifact_contract_payload["source_artifact_path"],
+            str(contract_out),
+        )
+        self.assertEqual(
+            artifact_contract_payload["source_artifact_row_type"],
+            "hf_finetune_model_profile_runtime_contract",
+        )
+        self.assertEqual(
+            artifact_contract_payload["source_artifact_contract_path"],
+            "",
+        )
+        self.assertEqual(
+            artifact_contract_payload["source_artifact_contract_basis"],
+            "embedded_contract",
+        )
+        self.assertEqual(
+            artifact_contract_payload,
+            written_artifact_contract_payload,
+        )
+        self.assertTrue(
+            written_artifact_contract_lines[0].startswith(
+                "hf_ft_model_profile_runtime_contract "
+            )
+        )
+        self.assertTrue(
+            artifact_contract_lines[0].startswith(
+                "hf_ft_model_profile_runtime_contract "
+            )
+        )
+        self.assertIn("profile=qwen2-0.5b-local-smoke", artifact_contract_lines[0])
 
         launch_stdout = io.StringIO()
         with redirect_stdout(launch_stdout):

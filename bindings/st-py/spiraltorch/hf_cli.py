@@ -24,6 +24,7 @@ from .hf_ft import (
     hf_finetune_model_profile_preflight_lines,
     hf_finetune_model_profile_preflight_report,
     hf_finetune_model_profile_runtime_contract,
+    hf_finetune_model_profile_runtime_contract_from_artifact,
     hf_finetune_model_profile_runtime_contract_lines,
     resolve_hf_finetune_model_profile,
     write_hf_finetune_model_profile_launch_bundle,
@@ -150,6 +151,17 @@ def profile_main(argv: Sequence[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--runtime-contract-artifact",
+        "--runtime-contract-from-artifact",
+        dest="runtime_contract_artifact",
+        type=Path,
+        default=None,
+        help=(
+            "Recover a runtime contract from a saved run card/report/contract "
+            "JSON artifact."
+        ),
+    )
+    parser.add_argument(
         "--mode",
         choices=(
             "auto",
@@ -226,14 +238,15 @@ def profile_main(argv: Sequence[str] | None = None) -> int:
         args.launch_plan,
         args.generation_control_config,
         args.runtime_contract,
+        args.runtime_contract_artifact is not None,
         args.cli_args,
         args.inspect_bundle is not None,
     ]
     if sum(1 for enabled in exclusive_modes if enabled) > 1:
         parser.error(
             "--list, --preflight, --launch-plan, --generation-control-config, "
-            "--runtime-contract, --cli-args, and --inspect-bundle are mutually "
-            "exclusive"
+            "--runtime-contract, --runtime-contract-artifact, --cli-args, and "
+            "--inspect-bundle are mutually exclusive"
         )
     if args.train and args.metadata_only:
         parser.error("--train and --metadata-only are mutually exclusive")
@@ -424,6 +437,40 @@ def profile_main(argv: Sequence[str] | None = None) -> int:
         report = hf_finetune_model_profile_runtime_contract(
             args.model_configs,
             profile=args.model_profile,
+            mode=args.mode,
+        )
+        lines = hf_finetune_model_profile_runtime_contract_lines(report)
+        payload = (
+            json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True)
+            + "\n"
+        )
+        if args.json:
+            print(payload, end="")
+            if args.out is not None:
+                args.out.parent.mkdir(parents=True, exist_ok=True)
+                args.out.write_text(payload, encoding="utf-8")
+            if args.lines_out is not None:
+                args.lines_out.parent.mkdir(parents=True, exist_ok=True)
+                args.lines_out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            return 0
+        if args.out is not None:
+            args.out.parent.mkdir(parents=True, exist_ok=True)
+            args.out.write_text(payload, encoding="utf-8")
+            print(f"hf_ft_model_profile_runtime_contract_out {args.out}")
+        else:
+            for line in lines:
+                print(line)
+        if args.lines_out is not None:
+            args.lines_out.parent.mkdir(parents=True, exist_ok=True)
+            args.lines_out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            print(
+                "hf_ft_model_profile_runtime_contract_lines_out "
+                f"{args.lines_out}"
+            )
+        return 0
+    if args.runtime_contract_artifact is not None:
+        report = hf_finetune_model_profile_runtime_contract_from_artifact(
+            args.runtime_contract_artifact,
             mode=args.mode,
         )
         lines = hf_finetune_model_profile_runtime_contract_lines(report)
