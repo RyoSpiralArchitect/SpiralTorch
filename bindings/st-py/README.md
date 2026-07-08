@@ -93,6 +93,9 @@ PY
 - `spiraltorch.wgpu` for GPU-free WGPU kernel catalog and selection reports,
   including `wgpu_kernel_catalog`, `wgpu_kernel_report_from_rank_plan`, and
   softmax/rank-k dispatch descriptors for runtime trace cards.
+- `spiraltorch.vision` for Rust-backed `ImageTensor` and `TransformPipeline`
+  preprocessing, static dataset/model catalogs, and transform GPU-coverage
+  audit reports that can be reused by FT, WASM, and runtime probe scripts.
 - `TensorBiome` to cultivate open-topos rewrites, weight shoots, stack the
   harvest, and guard tensors that can be re-imported into Z-space.
 - Unified planning helpers (`plan`, `plan_topk`, `describe_device`,
@@ -128,8 +131,12 @@ value:
    `st.wgpu_kernel_catalog`, `st.wgpu_kernel_report_from_rank_plan`, and
    `st.wgpu_softmax_kernel_report` for WGPU-first runtime selection without
    requiring direct Rust inspection or a live GPU device.
-5. Remaining `st-vision` volume/transform and `st-text` semantic helpers that
-   are useful to WASM demos and local-HF inference probes.
+5. `st-vision` image preprocessing and catalog helpers, now exposed as
+   `st.ImageTensor`, `st.TransformPipeline`, `st.vision_dataset_catalog`,
+   `st.vision_model_catalog`, and `st.vision_transform_audit_catalog` for
+   FT/WASM/runtime probes without dropping into Rust.
+6. Remaining `st-text` semantic helpers that are useful to WASM demos and
+   local-HF inference probes.
 - Hosted/API-model LLM runtime bridge via `ApiLLMZSpaceRuntime` so an
   OpenAI-compatible response mapping, SDK response object, or arbitrary API
   callable can be converted into Z-space metrics, usage/latency telemetry, and
@@ -265,6 +272,10 @@ value:
   `vision.ZSpaceStreamFrameAggregator` so Python can attach chrono summaries,
   aggregate live frame streams, and ingest temporal updates without dropping to
   Rust glue code.
+- Vision preprocessing via `vision.ImageTensor` and
+  `vision.TransformPipeline`: resize, center-crop, deterministic horizontal
+  flip, normalize, audit GPU transform coverage, and inspect canonical
+  dataset/model catalogs from Python.
 - Online stream-loop helpers `vision.vision_online_step(...)` and
   `vision.stream_vision_training(...)` to wire frame streams into
   `SpiralTorchVision` + `ZSpaceTrainer` loops directly from Python.

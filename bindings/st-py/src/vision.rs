@@ -15,8 +15,12 @@ use st_tensor::wasm_canvas::{
 };
 use st_tensor::{Tensor, TensorError};
 use st_vision::{
-    ChronoSnapshot as PureChronoSnapshot, StreamedVolume as PureStreamedVolume,
-    ZSliceProfile as PureZSliceProfile, ZSpaceStreamFrame as PureZSpaceStreamFrame,
+    dataset_catalog, find_dataset_descriptor, find_model_descriptor, model_catalog,
+    standard_classification_pipeline, CenterCrop, ChronoSnapshot as PureChronoSnapshot,
+    ColorJitter, ImageTensor as PureImageTensor, Normalize, RandomHorizontalFlip, Resize,
+    StreamedVolume as PureStreamedVolume, TransformOperation,
+    TransformPipeline as PureTransformPipeline, VisionTask, ZSliceProfile as PureZSliceProfile,
+    ZSpaceStreamFrame as PureZSpaceStreamFrame,
     ZSpaceStreamFrameAggregator as PureZSpaceStreamFrameAggregator,
     ZSpaceTelemetryReport as PureZSpaceTelemetryReport,
 };
@@ -192,6 +196,324 @@ fn zspace_telemetry_to_dict(
     dict.set_item("max_energy", report.max_energy())?;
     dict.set_item("energy_entropy", report.energy_entropy())?;
     Ok(dict.into())
+}
+
+fn vision_task_name(task: VisionTask) -> &'static str {
+    match task {
+        VisionTask::Classification => "classification",
+        VisionTask::Segmentation => "segmentation",
+        VisionTask::Detection => "detection",
+        VisionTask::Keypoint => "keypoint",
+        VisionTask::Video => "video",
+        VisionTask::OpticalFlow => "optical_flow",
+        VisionTask::Depth => "depth",
+        VisionTask::MultiLabel => "multi_label",
+    }
+}
+
+fn transform_category_name(
+    category: st_vision::transforms::audit::TransformCategory,
+) -> &'static str {
+    match category {
+        st_vision::transforms::audit::TransformCategory::Photometric => "photometric",
+        st_vision::transforms::audit::TransformCategory::Geometric => "geometric",
+        st_vision::transforms::audit::TransformCategory::Normalisation => "normalisation",
+    }
+}
+
+fn dataset_descriptor_to_dict(
+    py: Python<'_>,
+    descriptor: &st_vision::DatasetDescriptor,
+) -> PyResult<Py<PyDict>> {
+    let dict = PyDict::new(py);
+    dict.set_item("name", descriptor.name)?;
+    dict.set_item("task", vision_task_name(descriptor.task))?;
+    dict.set_item("description", descriptor.description)?;
+    dict.set_item("supports_download", descriptor.supports_download)?;
+    dict.set_item("homepage", descriptor.homepage)?;
+    dict.set_item("paper_url", descriptor.paper_url)?;
+    Ok(dict.into())
+}
+
+fn model_descriptor_to_dict(
+    py: Python<'_>,
+    descriptor: &st_vision::ModelDescriptor,
+) -> PyResult<Py<PyDict>> {
+    let dict = PyDict::new(py);
+    dict.set_item("name", descriptor.name)?;
+    dict.set_item("kind", format!("{:?}", descriptor.kind))?;
+    dict.set_item("task", vision_task_name(descriptor.task))?;
+    dict.set_item("default_input_channels", descriptor.default_input_channels)?;
+    dict.set_item("default_image_size", descriptor.default_image_size)?;
+    dict.set_item("has_pretrained", descriptor.has_pretrained)?;
+    Ok(dict.into())
+}
+
+fn transform_audit_entry_to_dict(
+    py: Python<'_>,
+    entry: &st_vision::transforms::audit::TransformAuditEntry,
+) -> PyResult<Py<PyDict>> {
+    let dict = PyDict::new(py);
+    dict.set_item("name", entry.name)?;
+    dict.set_item("category", transform_category_name(entry.category))?;
+    dict.set_item("gpu_candidate", entry.gpu_candidate)?;
+    dict.set_item("gpu_available", entry.gpu_available)?;
+    dict.set_item("notes", entry.notes)?;
+    Ok(dict.into())
+}
+
+fn transform_coverage_summary_to_dict(
+    py: Python<'_>,
+    summary: &st_vision::transforms::audit::TransformCoverageSummary,
+) -> PyResult<Py<PyDict>> {
+    let dict = PyDict::new(py);
+    let by_category = PyDict::new(py);
+    for (category, count) in &summary.by_category {
+        by_category.set_item(transform_category_name(*category), count)?;
+    }
+    dict.set_item("by_category", by_category)?;
+    dict.set_item("gpu_supported", summary.gpu_supported)?;
+    dict.set_item("gpu_candidates_missing", summary.gpu_candidates_missing)?;
+    dict.set_item("total_stages", summary.total_stages)?;
+    dict.set_item("unknown_operations", summary.unknown_operations)?;
+    Ok(dict.into())
+}
+
+fn transform_pipeline_audit_to_dict(
+    py: Python<'_>,
+    report: &st_vision::transforms::audit::PipelineAuditReport,
+) -> PyResult<Py<PyDict>> {
+    let dict = PyDict::new(py);
+    let stages: PyResult<Vec<_>> = report
+        .stages
+        .iter()
+        .map(|entry| transform_audit_entry_to_dict(py, entry))
+        .collect();
+    dict.set_item("stages", stages?)?;
+    dict.set_item("unknown_operations", report.unknown_operations.clone())?;
+    dict.set_item("has_gpu_dispatcher", report.has_gpu_dispatcher)?;
+    let summary = st_vision::transforms::audit::summarize_pipeline(report);
+    dict.set_item("summary", transform_coverage_summary_to_dict(py, &summary)?)?;
+    Ok(dict.into())
+}
+
+#[pyclass(module = "spiraltorch.vision", name = "ImageTensor")]
+#[derive(Clone)]
+pub(crate) struct PyImageTensor {
+    inner: PureImageTensor,
+}
+
+impl PyImageTensor {
+    fn from_inner(inner: PureImageTensor) -> Self {
+        Self { inner }
+    }
+}
+
+#[pymethods]
+impl PyImageTensor {
+    #[new]
+    fn new(channels: usize, height: usize, width: usize, data: Vec<f32>) -> PyResult<Self> {
+        let inner =
+            PureImageTensor::new(channels, height, width, data).map_err(tensor_err_to_py)?;
+        Ok(Self { inner })
+    }
+
+    #[staticmethod]
+    fn zeros(channels: usize, height: usize, width: usize) -> PyResult<Self> {
+        let inner = PureImageTensor::zeros(channels, height, width).map_err(tensor_err_to_py)?;
+        Ok(Self { inner })
+    }
+
+    #[staticmethod]
+    fn from_tensor(
+        tensor: &PyTensor,
+        channels: usize,
+        height: usize,
+        width: usize,
+    ) -> PyResult<Self> {
+        let inner = PureImageTensor::from_tensor(&tensor.inner, channels, height, width)
+            .map_err(tensor_err_to_py)?;
+        Ok(Self { inner })
+    }
+
+    #[getter]
+    fn channels(&self) -> usize {
+        self.inner.channels()
+    }
+
+    #[getter]
+    fn height(&self) -> usize {
+        self.inner.height()
+    }
+
+    #[getter]
+    fn width(&self) -> usize {
+        self.inner.width()
+    }
+
+    fn shape(&self) -> (usize, usize, usize) {
+        self.inner.shape()
+    }
+
+    fn data(&self) -> Vec<f32> {
+        self.inner.as_slice().to_vec()
+    }
+
+    fn pixel(&self, channel: usize, y: usize, x: usize) -> PyResult<f32> {
+        self.inner.pixel(channel, y, x).map_err(tensor_err_to_py)
+    }
+
+    fn set_pixel(&mut self, channel: usize, y: usize, x: usize, value: f32) -> PyResult<()> {
+        self.inner
+            .set_pixel(channel, y, x, value)
+            .map_err(tensor_err_to_py)
+    }
+
+    fn relu_inplace(&mut self) {
+        self.inner.relu_inplace();
+    }
+
+    fn flatten(&self) -> Vec<f32> {
+        self.inner.flatten()
+    }
+
+    fn to_tensor(&self) -> PyResult<PyTensor> {
+        let tensor = self.inner.into_tensor().map_err(tensor_err_to_py)?;
+        Ok(PyTensor::from_tensor(tensor))
+    }
+
+    fn to_dict(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
+        let dict = PyDict::new(py);
+        dict.set_item("channels", self.inner.channels())?;
+        dict.set_item("height", self.inner.height())?;
+        dict.set_item("width", self.inner.width())?;
+        dict.set_item("shape", self.inner.shape())?;
+        dict.set_item("data", self.inner.as_slice().to_vec())?;
+        Ok(dict.into())
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "ImageTensor(channels={}, height={}, width={})",
+            self.inner.channels(),
+            self.inner.height(),
+            self.inner.width()
+        )
+    }
+}
+
+#[pyclass(module = "spiraltorch.vision", name = "TransformPipeline", unsendable)]
+#[derive(Clone)]
+pub(crate) struct PyTransformPipeline {
+    inner: PureTransformPipeline,
+}
+
+impl PyTransformPipeline {
+    fn from_inner(inner: PureTransformPipeline) -> Self {
+        Self { inner }
+    }
+}
+
+#[pymethods]
+impl PyTransformPipeline {
+    #[new]
+    #[pyo3(signature = (*, seed=None))]
+    fn new(seed: Option<u64>) -> Self {
+        let inner = match seed {
+            Some(value) => PureTransformPipeline::with_seed(value),
+            None => PureTransformPipeline::new(),
+        };
+        Self { inner }
+    }
+
+    #[staticmethod]
+    #[pyo3(signature = (image_size=224, *, seed=None))]
+    fn standard_classification(image_size: usize, seed: Option<u64>) -> PyResult<Self> {
+        let inner = standard_classification_pipeline(image_size, seed).map_err(tensor_err_to_py)?;
+        Ok(Self { inner })
+    }
+
+    fn add_normalize(&mut self, means: Vec<f32>, stds: Vec<f32>) -> PyResult<()> {
+        let op = Normalize::new(means, stds).map_err(tensor_err_to_py)?;
+        self.inner.add(TransformOperation::Normalize(op));
+        Ok(())
+    }
+
+    fn add_resize(&mut self, height: usize, width: usize) -> PyResult<()> {
+        let op = Resize::new(height, width).map_err(tensor_err_to_py)?;
+        self.inner.add(TransformOperation::Resize(op));
+        Ok(())
+    }
+
+    fn add_center_crop(&mut self, height: usize, width: usize) -> PyResult<()> {
+        let op = CenterCrop::new(height, width).map_err(tensor_err_to_py)?;
+        self.inner.add(TransformOperation::CenterCrop(op));
+        Ok(())
+    }
+
+    #[pyo3(signature = (probability=0.5))]
+    fn add_horizontal_flip(&mut self, probability: f32) -> PyResult<()> {
+        let op = RandomHorizontalFlip::new(probability).map_err(tensor_err_to_py)?;
+        self.inner.add(TransformOperation::RandomHorizontalFlip(op));
+        Ok(())
+    }
+
+    #[pyo3(signature = (*, brightness=0.0, contrast=0.0, saturation=0.0, hue=0.0))]
+    fn add_color_jitter(
+        &mut self,
+        brightness: f32,
+        contrast: f32,
+        saturation: f32,
+        hue: f32,
+    ) -> PyResult<()> {
+        let op =
+            ColorJitter::new(brightness, contrast, saturation, hue).map_err(tensor_err_to_py)?;
+        self.inner.add(TransformOperation::ColorJitter(op));
+        Ok(())
+    }
+
+    fn operations(&self) -> Vec<&'static str> {
+        self.inner
+            .operations()
+            .iter()
+            .map(TransformOperation::name)
+            .collect()
+    }
+
+    fn __len__(&self) -> usize {
+        self.inner.len()
+    }
+
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    fn has_gpu_dispatcher(&self) -> bool {
+        self.inner.has_gpu_dispatcher()
+    }
+
+    fn apply(&mut self, image: &PyImageTensor) -> PyResult<PyImageTensor> {
+        let mut inner = image.inner.clone();
+        self.inner.apply(&mut inner).map_err(tensor_err_to_py)?;
+        Ok(PyImageTensor::from_inner(inner))
+    }
+
+    fn apply_inplace(&mut self, mut image: PyRefMut<'_, PyImageTensor>) -> PyResult<()> {
+        self.inner.apply(&mut image.inner).map_err(tensor_err_to_py)
+    }
+
+    fn audit(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
+        let report = st_vision::transforms::audit::audit_pipeline(&self.inner);
+        transform_pipeline_audit_to_dict(py, &report)
+    }
+
+    fn __repr__(&self) -> String {
+        format!("TransformPipeline(operations={:?})", self.operations())
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -1734,6 +2056,54 @@ fn canvas_canonical_palette(name: &str) -> PyResult<&'static str> {
 }
 
 #[pyfunction]
+fn vision_dataset_catalog(py: Python<'_>) -> PyResult<Vec<Py<PyDict>>> {
+    dataset_catalog()
+        .iter()
+        .map(|descriptor| dataset_descriptor_to_dict(py, descriptor))
+        .collect()
+}
+
+#[pyfunction]
+fn vision_dataset_descriptor(py: Python<'_>, name: &str) -> PyResult<Option<Py<PyDict>>> {
+    find_dataset_descriptor(name)
+        .map(|descriptor| dataset_descriptor_to_dict(py, descriptor))
+        .transpose()
+}
+
+#[pyfunction]
+fn vision_model_catalog(py: Python<'_>) -> PyResult<Vec<Py<PyDict>>> {
+    model_catalog()
+        .iter()
+        .map(|descriptor| model_descriptor_to_dict(py, descriptor))
+        .collect()
+}
+
+#[pyfunction]
+fn vision_model_descriptor(py: Python<'_>, name: &str) -> PyResult<Option<Py<PyDict>>> {
+    find_model_descriptor(name)
+        .map(|descriptor| model_descriptor_to_dict(py, descriptor))
+        .transpose()
+}
+
+#[pyfunction]
+fn vision_transform_audit_catalog(py: Python<'_>) -> PyResult<Vec<Py<PyDict>>> {
+    st_vision::transforms::audit::audit_cpu_transforms()
+        .iter()
+        .map(|entry| transform_audit_entry_to_dict(py, entry))
+        .collect()
+}
+
+#[pyfunction]
+#[pyo3(signature = (image_size=224, *, seed=None))]
+fn vision_standard_classification_pipeline(
+    image_size: usize,
+    seed: Option<u64>,
+) -> PyResult<PyTransformPipeline> {
+    let inner = standard_classification_pipeline(image_size, seed).map_err(tensor_err_to_py)?;
+    Ok(PyTransformPipeline::from_inner(inner))
+}
+
+#[pyfunction]
 #[pyo3(signature = (model, field="block"))]
 pub fn zrelativity_heatmap(model: &PyZRelativityModel, field: &str) -> PyResult<Vec<Vec<f32>>> {
     let bundle = model.inner.tensor_bundle().map_err(tensor_err_to_py)?;
@@ -1758,6 +2128,8 @@ pub fn zrelativity_heatmap(model: &PyZRelativityModel, field: &str) -> PyResult<
 }
 
 pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
+    parent.add_class::<PyImageTensor>()?;
+    parent.add_class::<PyTransformPipeline>()?;
     parent.add_class::<PyChronoSnapshot>()?;
     parent.add_class::<PyZSpaceStreamFrame>()?;
     parent.add_class::<PyStreamedVolume>()?;
@@ -1770,6 +2142,15 @@ pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()>
     parent.add_function(wrap_pyfunction!(apply_vision_update, parent)?)?;
     parent.add_function(wrap_pyfunction!(canvas_available_palettes, parent)?)?;
     parent.add_function(wrap_pyfunction!(canvas_canonical_palette, parent)?)?;
+    parent.add_function(wrap_pyfunction!(vision_dataset_catalog, parent)?)?;
+    parent.add_function(wrap_pyfunction!(vision_dataset_descriptor, parent)?)?;
+    parent.add_function(wrap_pyfunction!(vision_model_catalog, parent)?)?;
+    parent.add_function(wrap_pyfunction!(vision_model_descriptor, parent)?)?;
+    parent.add_function(wrap_pyfunction!(vision_transform_audit_catalog, parent)?)?;
+    parent.add_function(wrap_pyfunction!(
+        vision_standard_classification_pipeline,
+        parent
+    )?)?;
     parent.add_function(wrap_pyfunction!(zrelativity_heatmap, parent)?)?;
     parent.add("__doc__", "Canvas transformer utilities")?;
     let _ = py;

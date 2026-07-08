@@ -1651,6 +1651,67 @@ class SpiralTorchSmokeTest(unittest.TestCase):
         self.assertEqual(softmax["fallback"]["name"], "softmax_workgroup")
         self.assertEqual(softmax["flags"], 6)
 
+    def test_vision_transform_pipeline_smoke(self) -> None:
+        datasets = st.vision_dataset_catalog()
+        self.assertTrue(any(item["name"] == "CIFAR10" for item in datasets))
+        self.assertEqual(
+            st.vision.vision_dataset_descriptor("cifar10")["task"],
+            "classification",
+        )
+        models = st.vision_model_catalog()
+        self.assertTrue(any(item["name"] == "resnet18" for item in models))
+        self.assertEqual(
+            st.vision.vision_model_descriptor("ResNet18")["default_image_size"],
+            (224, 224),
+        )
+
+        image = st.ImageTensor(
+            1,
+            2,
+            3,
+            [
+                1.0,
+                2.0,
+                3.0,
+                4.0,
+                5.0,
+                6.0,
+            ],
+        )
+        self.assertEqual(image.shape(), (1, 2, 3))
+        self.assertEqual(image.pixel(0, 1, 2), 6.0)
+        image.set_pixel(0, 0, 0, -1.0)
+        image.relu_inplace()
+        self.assertEqual(image.pixel(0, 0, 0), 0.0)
+
+        tensor = image.to_tensor()
+        self.assertEqual(tensor.shape(), (1, 6))
+        roundtrip = st.vision.ImageTensor.from_tensor(tensor, 1, 2, 3)
+        self.assertEqual(roundtrip.flatten(), image.flatten())
+
+        pipeline = st.TransformPipeline(seed=7)
+        pipeline.add_resize(4, 6)
+        pipeline.add_center_crop(2, 2)
+        pipeline.add_horizontal_flip(1.0)
+        pipeline.add_normalize([1.0], [2.0])
+        self.assertEqual(
+            pipeline.operations(),
+            ["Resize", "CenterCrop", "RandomHorizontalFlip", "Normalize"],
+        )
+        transformed = pipeline.apply(roundtrip)
+        self.assertEqual(transformed.shape(), (1, 2, 2))
+        self.assertEqual(len(transformed.flatten()), 4)
+
+        audit = pipeline.audit()
+        self.assertEqual(audit["summary"]["total_stages"], 4)
+        self.assertGreaterEqual(audit["summary"]["gpu_supported"], 3)
+        transform_catalog = st.vision_transform_audit_catalog()
+        self.assertTrue(any(item["name"] == "ColorJitter" for item in transform_catalog))
+
+        standard = st.vision_standard_classification_pipeline(8, seed=7)
+        self.assertIn("Normalize", standard.operations())
+        self.assertFalse(standard.has_gpu_dispatcher())
+
     def test_state_dict_io(self) -> None:
         model = st.nn.Linear("l1", 2, 1)
         with _temp_dir("tmp_state") as tmp:
