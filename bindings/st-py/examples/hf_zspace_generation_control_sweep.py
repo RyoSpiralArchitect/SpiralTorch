@@ -19,20 +19,37 @@ from hf_gpt2_zspace_generation_control_sweep import *  # noqa: F401,F403,E402
 DEFAULT_OUT = Path("runs/hf-zspace-generation-control-sweep.json")
 
 
+def _generic_row_type(value):
+    if not isinstance(value, str):
+        return value
+    if value == "hf_gpt2_zspace_generation_control_sweep":
+        return "hf_zspace_generation_control_sweep"
+    if value == "hf_gpt2_zspace_generation_control_sweep_summary":
+        return "hf_zspace_generation_control_sweep_summary"
+    if value.startswith("hf_gpt2_finetune_"):
+        return "hf_finetune_" + value.removeprefix("hf_gpt2_finetune_")
+    if value.startswith("hf_gpt2_ft_"):
+        return "hf_ft_" + value.removeprefix("hf_gpt2_ft_")
+    return value
+
+
+def _genericize_payload(value):
+    if isinstance(value, dict):
+        return {
+            key: (
+                _generic_row_type(item)
+                if key == "row_type"
+                else _genericize_payload(item)
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_genericize_payload(item) for item in value]
+    return value
+
+
 def _genericize_report(report):
-    payload = dict(report)
-    if payload.get("row_type") == "hf_gpt2_zspace_generation_control_sweep":
-        payload["row_type"] = "hf_zspace_generation_control_sweep"
-    summary = payload.get("summary")
-    if isinstance(summary, dict):
-        summary_payload = dict(summary)
-        if (
-            summary_payload.get("row_type")
-            == "hf_gpt2_zspace_generation_control_sweep_summary"
-        ):
-            summary_payload["row_type"] = "hf_zspace_generation_control_sweep_summary"
-        payload["summary"] = summary_payload
-    return payload
+    return _genericize_payload(dict(report))
 
 
 def _argv_has_option(raw_argv: Sequence[str], *names: str) -> bool:

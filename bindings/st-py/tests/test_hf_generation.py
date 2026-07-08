@@ -2495,6 +2495,27 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
             comparison_lines = summarize_zspace_generation_control_sweep_comparison_lines(
                 comparison,
             )
+            legacy_nested_report = {
+                "row_type": "hf_gpt2_zspace_generation_control_sweep",
+                "status": "complete",
+                "summary": {
+                    "row_type": "hf_gpt2_zspace_generation_control_sweep_summary",
+                },
+                "runs": [
+                    {
+                        "name": "baseline",
+                        "generation": {
+                            "row_type": "hf_gpt2_finetune_generation_report",
+                        },
+                    }
+                ],
+            }
+            with mock.patch.object(
+                sweep_module._legacy,
+                "run_sweep",
+                return_value=legacy_nested_report,
+            ):
+                nested_report = sweep_module.run_sweep(args)
 
         self.assertEqual(report["status"], "planned")
         self.assertEqual(report["row_type"], "hf_zspace_generation_control_sweep")
@@ -2529,6 +2550,10 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
         )
         self.assertEqual(comparison["labels"], "generic")
         self.assertIn("zspace_generation_control_compare ", comparison_lines[0])
+        self.assertEqual(
+            nested_report["runs"][0]["generation"]["row_type"],
+            "hf_finetune_generation_report",
+        )
 
     def test_generation_control_profile_runtime_defaults_flow_to_generic_wrapper(
         self,
