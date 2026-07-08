@@ -31,6 +31,8 @@ __all__ = [
     "hf_gpt2_finetune_run_artifact_manifest",
     "hf_gpt2_finetune_run_artifact_manifest_lines",
     "hf_gpt2_finetune_run_artifact_manifest_paths",
+    "hf_gpt2_finetune_run_ops_snapshot_lines",
+    "hf_gpt2_finetune_run_ops_snapshot_report",
     "hf_gpt2_finetune_status_history_lines",
     "load_hf_gpt2_finetune_status_history",
     "main",
@@ -1993,6 +1995,174 @@ def write_hf_gpt2_finetune_run_artifact_manifest(
         encoding="utf-8",
     )
     return archived
+
+
+def _hf_gpt2_finetune_ops_recommended_action(
+    *,
+    manifest: Mapping[str, Any],
+    runtime: Mapping[str, Any] | None,
+) -> str:
+    if manifest.get("status") != "ready":
+        return "inspect_run_dir"
+    if runtime is None:
+        return "inspect_runtime"
+    if runtime.get("execution_status") == "complete":
+        return "inspect_generation_control"
+    if (
+        runtime.get("handoff_status") == "ready"
+        or runtime.get("next_action") == "handoff"
+    ):
+        return "run_milestone_handoff"
+    if runtime.get("next_action") == "keep_watching":
+        return "keep_watching"
+    if not manifest.get("source_count"):
+        return "collect_status_sources"
+    if manifest.get("missing_latest_count"):
+        return "archive_latest_artifacts"
+    return "inspect_run"
+
+
+def _hf_gpt2_finetune_ops_status(action: str) -> str:
+    if action == "inspect_run_dir":
+        return "missing_run_dir"
+    if action == "inspect_generation_control":
+        return "handoff_executed"
+    if action == "run_milestone_handoff":
+        return "handoff_ready"
+    if action == "keep_watching":
+        return "watching"
+    if action == "collect_status_sources":
+        return "missing_sources"
+    if action == "archive_latest_artifacts":
+        return "archive_needed"
+    return "inspect_run"
+
+
+def hf_gpt2_finetune_run_ops_snapshot_report(
+    run_dir: str | Path,
+    *,
+    next_run_dir: str | Path | None = None,
+    generation_limit: int = 12,
+    checkpoint_limit: int = 12,
+    milestone_step: int | None = None,
+    label: str | None = None,
+    execute: bool = False,
+    dry_run: bool = True,
+    use_package_api: bool = True,
+    package_runner: HandoffPackageRunner | None = None,
+    runner: HandoffRunner | None = None,
+    out: str | Path | None = None,
+    lines_out: str | Path | None = None,
+    **runtime_kwargs: Any,
+) -> dict[str, Any]:
+    """Combine a run artifact inventory with the current milestone handoff state."""
+
+    manifest = hf_gpt2_finetune_run_artifact_manifest(
+        run_dir,
+        next_run_dir=next_run_dir,
+        generation_limit=generation_limit,
+        checkpoint_limit=checkpoint_limit,
+    )
+    runtime: dict[str, Any] | None = None
+    if manifest.get("status") == "ready":
+        runtime = hf_gpt2_finetune_milestone_runtime_from_run_dir_report(
+            run_dir,
+            next_run_dir=next_run_dir,
+            milestone_step=milestone_step,
+            label=label,
+            execute=execute,
+            dry_run=dry_run,
+            use_package_api=use_package_api,
+            package_runner=package_runner,
+            runner=runner,
+            **runtime_kwargs,
+        )
+    action = _hf_gpt2_finetune_ops_recommended_action(
+        manifest=manifest,
+        runtime=runtime,
+    )
+    report: dict[str, Any] = {
+        "row_type": "hf_gpt2_finetune_run_ops_snapshot",
+        "status": _hf_gpt2_finetune_ops_status(action),
+        "recommended_action": action,
+        "run_dir": str(run_dir),
+        "next_run_dir": None if next_run_dir is None else str(next_run_dir),
+        "execute": bool(execute),
+        "dry_run": bool(dry_run),
+        "use_package_api": bool(use_package_api),
+        "manifest_status": manifest.get("status"),
+        "artifact_count": manifest.get("artifact_count"),
+        "source_count": manifest.get("source_count"),
+        "missing_latest_count": manifest.get("missing_latest_count"),
+        "generation_sweep_count": manifest.get("generation_sweep_count"),
+        "checkpoint_count": manifest.get("checkpoint_count"),
+        "latest_milestone_step": manifest.get("latest_milestone_step"),
+        "latest_checkpoint_step": manifest.get("latest_checkpoint_step"),
+        "runtime_status": None if runtime is None else runtime.get("status"),
+        "runtime_execution_status": None
+        if runtime is None
+        else runtime.get("execution_status"),
+        "runtime_handoff_status": None
+        if runtime is None
+        else runtime.get("handoff_status"),
+        "milestone_step": None if runtime is None else runtime.get("milestone_step"),
+        "milestone_ready": None if runtime is None else runtime.get("milestone_ready"),
+        "next_action": None if runtime is None else runtime.get("next_action"),
+        "checkpoint": None if runtime is None else runtime.get("checkpoint"),
+        "manifest": manifest,
+        "runtime": runtime,
+    }
+    if out is not None:
+        out_path = Path(out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        report["out"] = str(out_path)
+        out_path.write_text(
+            json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+    if lines_out is not None:
+        lines_path = Path(lines_out)
+        lines_path.parent.mkdir(parents=True, exist_ok=True)
+        report["lines_out"] = str(lines_path)
+        lines_path.write_text(
+            "\n".join(hf_gpt2_finetune_run_ops_snapshot_lines(report)) + "\n",
+            encoding="utf-8",
+        )
+    return report
+
+
+def hf_gpt2_finetune_run_ops_snapshot_lines(
+    report: Mapping[str, Any],
+) -> list[str]:
+    """Render compact lines for a GPT-2 FT run ops snapshot."""
+
+    lines = [
+        (
+            "hf_gpt2_ft_run_ops "
+            f"status={_number_text(report.get('status'))} "
+            f"recommended_action={_number_text(report.get('recommended_action'))} "
+            f"artifacts={_number_text(report.get('artifact_count'))} "
+            f"sources={_number_text(report.get('source_count'))} "
+            f"missing_latest={_number_text(report.get('missing_latest_count'))} "
+            f"generation_sweeps={_number_text(report.get('generation_sweep_count'))} "
+            f"checkpoints={_number_text(report.get('checkpoint_count'))} "
+            f"step={_number_text(report.get('milestone_step'))} "
+            f"milestone_ready={_number_text(report.get('milestone_ready'))} "
+            f"next_action={_number_text(report.get('next_action'))} "
+            f"runtime_status={_number_text(report.get('runtime_status'))} "
+            f"handoff_status={_number_text(report.get('runtime_handoff_status'))} "
+            f"execution_status={_number_text(report.get('runtime_execution_status'))} "
+            f"checkpoint={_number_text(report.get('checkpoint'))} "
+            f"run_dir={_number_text(report.get('run_dir'))}"
+        )
+    ]
+    manifest = report.get("manifest")
+    if isinstance(manifest, Mapping):
+        lines.extend(hf_gpt2_finetune_run_artifact_manifest_lines(manifest)[:1])
+    runtime = report.get("runtime")
+    if isinstance(runtime, Mapping):
+        lines.extend(hf_gpt2_finetune_milestone_runtime_lines(runtime)[:1])
+    return lines
 
 
 def _runtime_milestone_step_token(value: Any) -> str:

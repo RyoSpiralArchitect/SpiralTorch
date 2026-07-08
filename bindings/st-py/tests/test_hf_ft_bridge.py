@@ -6511,6 +6511,17 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             archived_lines = Path(archived["lines_out"]).read_text(
                 encoding="utf-8"
             ).splitlines()
+            ops_out = run_dir / "ops-snapshot.json"
+            ops_lines_out = run_dir / "ops-snapshot.txt"
+            ops = st.hf_gpt2_finetune_run_ops_snapshot_report(
+                run_dir,
+                label="ops-ft",
+                out=ops_out,
+                lines_out=ops_lines_out,
+            )
+            ops_lines = st.hf_gpt2_finetune_run_ops_snapshot_lines(ops)
+            ops_written = json.loads(ops_out.read_text(encoding="utf-8"))
+            ops_written_lines = ops_lines_out.read_text(encoding="utf-8").splitlines()
 
         self.assertEqual(written["row_type"], "hf_gpt2_finetune_milestone_runtime")
         self.assertEqual(written["status"], "executed")
@@ -6532,6 +6543,16 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(archive_calls[0]["checkpoint"], "checkpoint-6144")
         self.assertTrue(archive_calls[0]["dry_run"])
         self.assertIn("status=executed", archived_lines[0])
+        self.assertEqual(ops["row_type"], "hf_gpt2_finetune_run_ops_snapshot")
+        self.assertEqual(ops["status"], "handoff_ready")
+        self.assertEqual(ops["recommended_action"], "run_milestone_handoff")
+        self.assertEqual(ops["milestone_step"], 6144)
+        self.assertEqual(ops["checkpoint"], "checkpoint-6144")
+        self.assertEqual(ops["source_count"], 3)
+        self.assertEqual(ops["checkpoint_count"], 1)
+        self.assertEqual(ops_written["recommended_action"], "run_milestone_handoff")
+        self.assertIn("hf_gpt2_ft_run_ops ", ops_lines[0])
+        self.assertIn("status=handoff_ready", ops_written_lines[0])
         self.assertIn("hf_gpt2_ft_milestone_runtime ", written_lines[0])
         self.assertIn("status=executed", written_lines[0])
         self.assertTrue(
@@ -7342,6 +7363,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("hf_gpt2_finetune_run_artifact_manifest", st.__all__)
         self.assertIn("hf_gpt2_finetune_run_artifact_manifest_lines", st.__all__)
         self.assertIn("hf_gpt2_finetune_run_artifact_manifest_paths", st.__all__)
+        self.assertIn("hf_gpt2_finetune_run_ops_snapshot_lines", st.__all__)
+        self.assertIn("hf_gpt2_finetune_run_ops_snapshot_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_preflight_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_scale_up_command", st.__all__)
         self.assertIn("hf_gpt2_finetune_scale_up_preflight_lines", st.__all__)
@@ -7473,6 +7496,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIs(
             st.hf_gpt2_finetune_run_artifact_manifest_paths,
             st.hf_ft_status.hf_gpt2_finetune_run_artifact_manifest_paths,
+        )
+        self.assertIs(
+            st.hf_gpt2_finetune_run_ops_snapshot_lines,
+            st.hf_ft_status.hf_gpt2_finetune_run_ops_snapshot_lines,
+        )
+        self.assertIs(
+            st.hf_gpt2_finetune_run_ops_snapshot_report,
+            st.hf_ft_status.hf_gpt2_finetune_run_ops_snapshot_report,
         )
         self.assertIs(
             st.write_hf_gpt2_finetune_milestone_runtime_report,
