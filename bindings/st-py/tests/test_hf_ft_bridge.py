@@ -4428,6 +4428,12 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                     "print('should-not-run')",
                     "--output-dir",
                     str(output_dir),
+                    "--model-profile",
+                    "causal-lm-local-smoke",
+                    "--model-name",
+                    "EleutherAI/pythia-70m-deduped",
+                    "--tokenizer-name",
+                    "EleutherAI/pythia-70m-deduped",
                     "--save-total-limit",
                     "1",
                     "--min-free-disk-gb",
@@ -4645,6 +4651,12 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                     str(checkpoint),
                     "--output-dir",
                     str(output_dir),
+                    "--model-profile",
+                    "causal-lm-local-smoke",
+                    "--model-name",
+                    "EleutherAI/pythia-70m-deduped",
+                    "--tokenizer-name",
+                    "EleutherAI/pythia-70m-deduped",
                     "--save-total-limit",
                     "1",
                     "--min-free-disk-gb",
@@ -4662,6 +4674,9 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             guard = module._launch_disk_guard(loaded[0])
 
         self.assertEqual(summary["last_launch_disk_status"], "reconstructed_ok")
+        self.assertEqual(summary["model_profile_id"], "causal-lm-local-smoke")
+        self.assertEqual(summary["model_name"], "EleutherAI/pythia-70m-deduped")
+        self.assertEqual(summary["tokenizer_name"], "EleutherAI/pythia-70m-deduped")
         self.assertEqual(summary["last_launch_disk_min_free_gb"], 0.0)
         self.assertGreater(summary["last_launch_disk_free_after_gb"], 0.0)
         self.assertEqual(guard["resume_checkpoint_bytes"], 5)
@@ -4670,6 +4685,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             str(source_checkpoint),
         )
         self.assertIn("launch_disk_status=reconstructed_ok", lines[0])
+        self.assertIn("profile=causal-lm-local-smoke", lines[0])
         self.assertIn("launch_disk_status=reconstructed_ok", lines[1])
 
     def test_wait_launch_summary_example_require_launched_fails_before_launch(self) -> None:
@@ -10068,6 +10084,13 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                     "time_unix_s": 15.0,
                     "process_alive": False,
                     "checkpoint_ready": True,
+                    "model_name": "EleutherAI/pythia-70m-deduped",
+                    "tokenizer_name": "EleutherAI/pythia-70m-deduped",
+                    "model_profile_id": "causal-lm-local-smoke",
+                    "model_profile": {
+                        "profile_id": "causal-lm-local-smoke",
+                        "extends": "pythia-70m-local-smoke",
+                    },
                     "launched_pid": 123,
                     "returncode": 0,
                 },
@@ -10105,7 +10128,12 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(cli_code, 0)
         self.assertEqual(payload["row_type"], "hf_ft_wait_launch_history_summary")
         self.assertEqual(cli_payload["row_type"], "hf_ft_wait_launch_history_summary")
+        self.assertEqual(payload["model_profile_id"], "causal-lm-local-smoke")
+        self.assertEqual(payload["model_profile_extends"], "pythia-70m-local-smoke")
+        self.assertEqual(cli_payload["model_profile_id"], "causal-lm-local-smoke")
         self.assertTrue(lines[0].startswith("hf_ft_wait_launch_history "))
+        self.assertIn("profile=causal-lm-local-smoke", lines[0])
+        self.assertIn("extends=pythia-70m-local-smoke", lines[0])
         self.assertTrue(lines[1].startswith("hf_ft_wait_launch_history_point "))
         self.assertNotIn("hf_gpt2", "\n".join(lines))
 

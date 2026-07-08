@@ -39,6 +39,75 @@ def _number_text(value: Any) -> str:
     return str(value)
 
 
+def _empty_model_metadata() -> dict[str, Any]:
+    return {
+        "model_profile_id": None,
+        "model_profile_extends": None,
+        "model_name": None,
+        "tokenizer_name": None,
+        "model_metadata_row_type": None,
+        "model_metadata_source_index": None,
+    }
+
+
+def _payload_model_metadata(payload: dict[str, Any] | None) -> dict[str, Any]:
+    empty = _empty_model_metadata()
+    if not isinstance(payload, dict):
+        return dict(empty)
+    profile = payload.get("model_profile")
+    profile_mapping = profile if isinstance(profile, dict) else {}
+    command = payload.get("command")
+    profile_id = (
+        payload.get("model_profile_id")
+        or payload.get("profile_id")
+        or profile_mapping.get("profile_id")
+        or profile_mapping.get("id")
+        or _command_flag_value(command, "--model-profile")
+    )
+    profile_extends = (
+        payload.get("model_profile_extends")
+        or payload.get("profile_extends")
+        or profile_mapping.get("extends")
+    )
+    model_name = (
+        payload.get("model_name")
+        or payload.get("hf_model_name")
+        or profile_mapping.get("model_name")
+        or _command_flag_value(command, "--model-name")
+    )
+    tokenizer_name = payload.get("tokenizer_name") or profile_mapping.get(
+        "tokenizer_name"
+    ) or _command_flag_value(command, "--tokenizer-name")
+    return {
+        "model_profile_id": None if profile_id is None else str(profile_id),
+        "model_profile_extends": None
+        if profile_extends is None
+        else str(profile_extends),
+        "model_name": None if model_name is None else str(model_name),
+        "tokenizer_name": None if tokenizer_name is None else str(tokenizer_name),
+        "model_metadata_row_type": payload.get("row_type"),
+        "model_metadata_source_index": None,
+    }
+
+
+def _history_model_metadata(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    metadata = _empty_model_metadata()
+    source_index: int | None = None
+    for index, row in enumerate(rows):
+        row_metadata = _payload_model_metadata(row)
+        updated = False
+        for key, value in row_metadata.items():
+            if key == "model_metadata_source_index":
+                continue
+            if value is not None:
+                metadata[key] = value
+                updated = True
+        if updated:
+            source_index = index
+    metadata["model_metadata_source_index"] = source_index
+    return metadata
+
+
 def _load_history(path: Path) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
@@ -264,6 +333,7 @@ def summarize_history(
         or row.get("status") in {"launching", "launched", "finished", "launch_error"}
     ]
     launch_disk_guard = _launch_disk_guard(last)
+    model_metadata = _history_model_metadata(rows)
     return {
         "row_type": "hf_gpt2_ft_wait_launch_history_summary",
         "label": label,
@@ -272,6 +342,12 @@ def summarize_history(
         "first_time_unix_s": first_time,
         "last_time_unix_s": last_time,
         "duration_seconds": duration_seconds,
+        "model_profile_id": model_metadata.get("model_profile_id"),
+        "model_profile_extends": model_metadata.get("model_profile_extends"),
+        "model_name": model_metadata.get("model_name"),
+        "tokenizer_name": model_metadata.get("tokenizer_name"),
+        "model_metadata_source_index": model_metadata.get("model_metadata_source_index"),
+        "model_metadata_row_type": model_metadata.get("model_metadata_row_type"),
         "first_status": first.get("status"),
         "last_status": last.get("status"),
         "last_process_alive": last.get("process_alive"),
@@ -306,6 +382,10 @@ def history_lines(
             f"label={label} "
             f"rows={_number_text(summary.get('row_count'))} "
             f"duration_seconds={_number_text(summary.get('duration_seconds'))} "
+            f"profile={_number_text(summary.get('model_profile_id'))} "
+            f"extends={_number_text(summary.get('model_profile_extends'))} "
+            f"model={_number_text(summary.get('model_name'))} "
+            f"tokenizer={_number_text(summary.get('tokenizer_name'))} "
             f"first_status={_number_text(summary.get('first_status'))} "
             f"last_status={_number_text(summary.get('last_status'))} "
             f"process_alive={_number_text(summary.get('last_process_alive'))} "
