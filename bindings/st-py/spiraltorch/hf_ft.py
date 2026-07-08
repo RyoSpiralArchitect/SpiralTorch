@@ -50,6 +50,8 @@ __all__ = [
     "hf_finetune_inference_distortion_runtime_plan",
     "hf_finetune_milestone_lines",
     "hf_finetune_milestone_report",
+    "hf_finetune_model_profile_catalog",
+    "hf_finetune_model_profile_catalog_lines",
     "hf_finetune_model_profile_cli_args",
     "hf_finetune_model_profile_lines",
     "hf_finetune_model_profiles",
@@ -626,6 +628,143 @@ def resolve_hf_finetune_model_profile(
         "profile": selected,
         "available_profiles": sorted(profiles),
     }
+
+
+def hf_finetune_model_profile_catalog(
+    config: Mapping[str, object] | str | Path | None = None,
+) -> dict[str, object]:
+    """Return a compact catalog of available HF fine-tune model profiles."""
+
+    payload = (
+        load_hf_finetune_model_configs(config)
+        if not isinstance(config, Mapping)
+        else dict(config)
+    )
+    profiles = hf_finetune_model_profiles(payload)
+    default_profile = _string_or_none(payload.get("default_profile"))
+    rows: list[dict[str, object]] = []
+    for profile_id in sorted(profiles):
+        resolved = resolve_hf_finetune_model_profile(payload, profile=profile_id)
+        selected = _mapping_or_empty(
+            resolved.get("profile"),
+            label=f"{profile_id}.profile",
+        )
+        training = _mapping_or_empty(
+            resolved.get("training"),
+            label=f"{profile_id}.training",
+        )
+        dataset = _mapping_or_empty(
+            resolved.get("dataset"),
+            label=f"{profile_id}.dataset",
+        )
+        generation = _mapping_or_empty(
+            resolved.get("generation"),
+            label=f"{profile_id}.generation",
+        )
+        runtime = _mapping_or_empty(
+            resolved.get("runtime"),
+            label=f"{profile_id}.runtime",
+        )
+        rows.append(
+            {
+                "profile_id": profile_id,
+                "is_default": profile_id == default_profile,
+                "model_name": resolved.get("model_name"),
+                "tokenizer_name": resolved.get("tokenizer_name"),
+                "architecture": resolved.get("architecture"),
+                "checkpoint_prefix": resolved.get("checkpoint_prefix"),
+                "max_length": resolved.get("max_length"),
+                "dataset_name": dataset.get("name"),
+                "dataset_config": dataset.get("config"),
+                "dataset_revision": dataset.get("revision"),
+                "dataset_streaming": bool(dataset.get("streaming")),
+                "train_split": dataset.get("train_split"),
+                "eval_split": dataset.get("eval_split"),
+                "text_column": dataset.get("text_column"),
+                "block_size": training.get("block_size"),
+                "max_train_samples": training.get("max_train_samples"),
+                "max_eval_samples": training.get("max_eval_samples"),
+                "per_device_train_batch_size": training.get(
+                    "per_device_train_batch_size"
+                ),
+                "gradient_accumulation_steps": training.get(
+                    "gradient_accumulation_steps"
+                ),
+                "max_steps": training.get("max_steps"),
+                "learning_rate": training.get("learning_rate"),
+                "save_total_limit": training.get("save_total_limit"),
+                "max_new_tokens": generation.get("max_new_tokens"),
+                "do_sample": generation.get("do_sample"),
+                "temperature": generation.get("temperature"),
+                "top_k": generation.get("top_k"),
+                "zspace_top_k": generation.get("zspace_top_k"),
+                "zspace_curvature": generation.get("zspace_curvature"),
+                "repression_strength": generation.get("repression_strength"),
+                "ngram_size": generation.get("ngram_size"),
+                "ngram_window": generation.get("ngram_window"),
+                "allow_remote": bool(runtime.get("allow_remote")),
+                "trust_remote_code": bool(runtime.get("trust_remote_code")),
+                "min_free_disk_gb": runtime.get("min_free_disk_gb"),
+                "runtime_device_backends": runtime.get("runtime_device_backends"),
+                "notes": selected.get("notes"),
+            }
+        )
+    return {
+        "row_type": "hf_finetune_model_profile_catalog",
+        "status": "ready",
+        "schema": payload.get("schema") or HF_FINETUNE_MODEL_CONFIG_SCHEMA,
+        "source_path": payload.get("source_path"),
+        "default_profile": default_profile,
+        "profile_count": len(rows),
+        "available_profiles": [str(row["profile_id"]) for row in rows],
+        "profiles": rows,
+    }
+
+
+def hf_finetune_model_profile_catalog_lines(
+    catalog_or_config: Mapping[str, object] | str | Path | None = None,
+) -> list[str]:
+    """Render compact lines for an HF fine-tune model profile catalog."""
+
+    catalog = (
+        dict(catalog_or_config)
+        if isinstance(catalog_or_config, Mapping)
+        and catalog_or_config.get("row_type") == "hf_finetune_model_profile_catalog"
+        else hf_finetune_model_profile_catalog(catalog_or_config)
+    )
+    lines = [
+        (
+            "hf_ft_model_profile_catalog "
+            f"status={catalog.get('status', 'ready')} "
+            f"default={catalog.get('default_profile')} "
+            f"count={catalog.get('profile_count')} "
+            f"source={catalog.get('source_path')}"
+        )
+    ]
+    profiles = catalog.get("profiles")
+    if not isinstance(profiles, Sequence) or isinstance(profiles, (str, bytes)):
+        return lines
+    for raw_row in profiles:
+        if not isinstance(raw_row, Mapping):
+            continue
+        row = dict(raw_row)
+        lines.append(
+            "hf_ft_model_profile_entry "
+            f"profile={row.get('profile_id')} "
+            f"default={row.get('is_default')} "
+            f"model={row.get('model_name')} "
+            f"tokenizer={row.get('tokenizer_name')} "
+            f"dataset={row.get('dataset_name')} "
+            f"dataset_config={row.get('dataset_config')} "
+            f"block_size={row.get('block_size')} "
+            f"max_train_samples={row.get('max_train_samples')} "
+            f"max_new_tokens={row.get('max_new_tokens')} "
+            f"do_sample={row.get('do_sample')} "
+            f"zspace_top_k={row.get('zspace_top_k')} "
+            f"allow_remote={row.get('allow_remote')} "
+            f"trust_remote_code={row.get('trust_remote_code')}"
+        )
+    return lines
 
 
 def _profile_flag_value(value: object) -> str:

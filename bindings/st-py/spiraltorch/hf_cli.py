@@ -11,6 +11,8 @@ from types import ModuleType
 from typing import Sequence
 
 from .hf_ft import (
+    hf_finetune_model_profile_catalog,
+    hf_finetune_model_profile_catalog_lines,
     hf_finetune_model_profile_cli_args,
     hf_finetune_model_profile_lines,
     resolve_hf_finetune_model_profile,
@@ -71,6 +73,11 @@ def profile_main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--model-configs", type=Path, default=None)
     parser.add_argument("--model-profile", default=None)
+    parser.add_argument(
+        "--list",
+        action="store_true",
+        help="List all available profiles in the selected config.",
+    )
     parser.add_argument("--json", action="store_true")
     parser.add_argument(
         "--cli-args",
@@ -83,6 +90,14 @@ def profile_main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--no-generation", action="store_true")
     parser.add_argument("--no-runtime", action="store_true")
     args = parser.parse_args(argv)
+    if args.list:
+        catalog = hf_finetune_model_profile_catalog(args.model_configs)
+        if args.json:
+            print(json.dumps(catalog, ensure_ascii=False, indent=2, sort_keys=True))
+            return 0
+        for line in hf_finetune_model_profile_catalog_lines(catalog):
+            print(line)
+        return 0
     profile = resolve_hf_finetune_model_profile(
         args.model_configs,
         profile=args.model_profile,

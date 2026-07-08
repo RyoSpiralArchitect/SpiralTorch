@@ -381,6 +381,8 @@ generation/Z-Space softmax knobs, and local runtime policy such as remote-code
 trust, disk guards, dataloader pinning, or required SpiralTorch backends:
 
 ```bash
+spiral-hf-profile --list
+
 spiral-hf-profile \
   --model-profile gpt2-local-smoke
 
@@ -401,6 +403,10 @@ PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_finetune_bridge.py \
   --zspace-probe \
   --run-card ft-run-card.json
 ```
+
+Use `spiral-hf-profile --list --json` or
+`st.hf_finetune_model_profile_catalog(...)` when automation needs the same
+profile catalog as structured data before choosing a model/run shape.
 
 After installing from a wheel, use the installed console entrypoint instead of
 the repo path:

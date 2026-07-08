@@ -7549,6 +7549,44 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("--generation-zspace-top-k", pythia_cli_args)
         self.assertIn("64", pythia_cli_args)
 
+    def test_generic_hf_finetune_model_profile_catalog_summarizes_profiles(
+        self,
+    ) -> None:
+        catalog = st.hf_finetune_model_profile_catalog(MODEL_CONFIGS_PATH)
+        default_catalog = st.hf_finetune_model_profile_catalog()
+        lines = st.hf_finetune_model_profile_catalog_lines(catalog)
+
+        rows = {str(row["profile_id"]): row for row in catalog["profiles"]}
+        default_rows = {
+            str(row["profile_id"]): row for row in default_catalog["profiles"]
+        }
+        self.assertEqual(catalog["row_type"], "hf_finetune_model_profile_catalog")
+        self.assertEqual(catalog["profile_count"], 6)
+        self.assertEqual(catalog["default_profile"], "gpt2-local-smoke")
+        self.assertIn("qwen2-0.5b-local-smoke", rows)
+        self.assertEqual(rows["qwen2-0.5b-local-smoke"]["model_name"], "Qwen/Qwen2-0.5B")
+        self.assertEqual(rows["qwen2-0.5b-local-smoke"]["block_size"], 256)
+        self.assertEqual(rows["qwen2-0.5b-local-smoke"]["zspace_top_k"], 96)
+        self.assertFalse(rows["qwen2-0.5b-local-smoke"]["allow_remote"])
+        self.assertEqual(
+            rows["pythia-70m-local-smoke"]["dataset_name"],
+            "wikitext",
+        )
+        self.assertEqual(
+            rows["local-causal-lm-template"]["model_name"],
+            "models/my-causal-lm",
+        )
+        self.assertEqual(default_catalog["profile_count"], 6)
+        self.assertIn("qwen2-0.5b-local-smoke", default_rows)
+        self.assertTrue(lines[0].startswith("hf_ft_model_profile_catalog "))
+        self.assertTrue(
+            any(
+                "profile=qwen2-0.5b-local-smoke" in line
+                and "zspace_top_k=96" in line
+                for line in lines
+            )
+        )
+
     def test_bridge_model_profile_defaults_and_explicit_overrides(self) -> None:
         module = load_bridge_example()
         args = module.parse_args(
@@ -7764,6 +7802,44 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("--generation-zspace-top-k", cli_args)
         self.assertNotIn("--dataset-name", cli_args)
         self.assertNotIn("--allow-remote", cli_args)
+
+        list_stdout = io.StringIO()
+        with redirect_stdout(list_stdout):
+            list_code = hf_cli.profile_main(
+                [
+                    "--model-configs",
+                    str(MODEL_CONFIGS_PATH),
+                    "--list",
+                ]
+            )
+        list_lines = list_stdout.getvalue().splitlines()
+        self.assertEqual(list_code, 0)
+        self.assertTrue(list_lines[0].startswith("hf_ft_model_profile_catalog "))
+        self.assertTrue(
+            any(
+                "profile=pythia-70m-local-smoke" in line
+                and "model=EleutherAI/pythia-70m-deduped" in line
+                for line in list_lines
+            )
+        )
+
+        list_json_stdout = io.StringIO()
+        with redirect_stdout(list_json_stdout):
+            list_json_code = hf_cli.profile_main(
+                [
+                    "--model-configs",
+                    str(MODEL_CONFIGS_PATH),
+                    "--list",
+                    "--json",
+                ]
+            )
+        list_payload = json.loads(list_json_stdout.getvalue())
+        self.assertEqual(list_json_code, 0)
+        self.assertEqual(
+            list_payload["row_type"],
+            "hf_finetune_model_profile_catalog",
+        )
+        self.assertIn("qwen2-0.5b-local-smoke", list_payload["available_profiles"])
 
     def test_installed_hf_finetune_sweep_cli_reaches_generic_wrapper(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -8813,6 +8889,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("hf_gpt2_finetune_scale_up_preflight_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_training_telemetry_frame", st.__all__)
         self.assertIn("hf_gpt2_finetune_trainer_trace_callback", st.__all__)
+        self.assertIn("hf_finetune_model_profile_catalog", st.__all__)
+        self.assertIn("hf_finetune_model_profile_catalog_lines", st.__all__)
         self.assertIn("compare_hf_gpt2_finetune_run_cards", st.__all__)
         self.assertIn("load_hf_gpt2_finetune_run_card", st.__all__)
         self.assertIn("load_hf_gpt2_finetune_sweep_report", st.__all__)
@@ -8838,6 +8916,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIs(
             st.hf_gpt2_finetune_generation_report,
             hf_ft.hf_gpt2_finetune_generation_report,
+        )
+        self.assertIs(
+            st.hf_finetune_model_profile_catalog,
+            hf_ft.hf_finetune_model_profile_catalog,
+        )
+        self.assertIs(
+            st.hf_finetune_model_profile_catalog_lines,
+            hf_ft.hf_finetune_model_profile_catalog_lines,
         )
         self.assertIs(
             st.hf_gpt2_finetune_generation_curve_report,
