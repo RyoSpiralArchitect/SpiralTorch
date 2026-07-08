@@ -1,0 +1,45 @@
+{
+  "schema": "spiraltorch.hf_finetune_model_configs.v1",
+  "default_profile": "gpt2-local-smoke",
+  "profiles": [
+    {
+      "id": "gpt2-local-smoke",
+      "model_name": "gpt2",
+      "tokenizer_name": "gpt2",
+      "architecture": "causal_lm",
+      "checkpoint_prefix": "checkpoint-",
+      "max_length": 128,
+      "generation": {
+        "max_new_tokens": 80,
+        "do_sample": false
+      },
+      "notes": "Baseline profile matching the historical GPT-2 examples."
+    },
+    {
+      "id": "distilgpt2-local-smoke",
+      "model_name": "distilgpt2",
+      "tokenizer_name": "distilgpt2",
+      "architecture": "causal_lm",
+      "checkpoint_prefix": "checkpoint-",
+      "max_length": 128,
+      "generation": {
+        "max_new_tokens": 80,
+        "do_sample": false
+      },
+      "notes": "Smaller GPT-2-family profile for local smoke runs."
+    },
+    {
+      "id": "tiny-gpt2-ci",
+      "model_name": "sshleifer/tiny-gpt2",
+      "tokenizer_name": "sshleifer/tiny-gpt2",
+      "architecture": "causal_lm",
+      "checkpoint_prefix": "checkpoint-",
+      "max_length": 64,
+      "generation": {
+        "max_new_tokens": 32,
+        "do_sample": false
+      },
+      "notes": "Fast config for tests and docs; requires remote downloads when not cached."
+    }
+  ]
+}

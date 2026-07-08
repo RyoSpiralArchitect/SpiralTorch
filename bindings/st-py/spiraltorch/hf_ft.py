@@ -22,9 +22,37 @@ from .runtime_imports import (
 )
 
 __all__ = [
+    "HF_FINETUNE_DEFAULT_DEVICE_BACKENDS",
+    "HF_FINETUNE_REQUIRED_PYTHON_PACKAGES",
+    "HF_FINETUNE_REQUIRED_RUST_SURFACES",
     "HF_GPT2_FT_DEFAULT_DEVICE_BACKENDS",
     "HF_GPT2_FT_REQUIRED_PYTHON_PACKAGES",
     "HF_GPT2_FT_REQUIRED_RUST_SURFACES",
+    "hf_finetune_preflight_report",
+    "hf_finetune_corpus_file_report",
+    "hf_finetune_corpus_scan_report",
+    "hf_finetune_dataset_fit_report",
+    "hf_finetune_disk_headroom_plan",
+    "hf_finetune_eval_report",
+    "hf_finetune_generation_curve_lines",
+    "hf_finetune_generation_curve_report",
+    "hf_finetune_generation_report",
+    "hf_finetune_inference_distortion_handoff_report",
+    "hf_finetune_inference_distortion_handoff_lines",
+    "hf_finetune_inference_distortion_request_kwargs",
+    "hf_finetune_inference_distortion_runtime_adapter",
+    "hf_finetune_inference_distortion_runtime_plan",
+    "hf_finetune_milestone_lines",
+    "hf_finetune_milestone_report",
+    "hf_finetune_rust_dependency_report",
+    "hf_finetune_scale_up_command",
+    "hf_finetune_scale_up_preflight_lines",
+    "hf_finetune_scale_up_preflight_report",
+    "hf_finetune_summary_lines",
+    "hf_finetune_training_telemetry_frame",
+    "hf_finetune_trainer_trace_callback",
+    "hf_finetune_trainer_trace_event",
+    "hf_finetune_zspace_probe",
     "hf_gpt2_finetune_preflight_report",
     "hf_gpt2_finetune_corpus_file_report",
     "hf_gpt2_finetune_corpus_scan_report",
@@ -50,14 +78,24 @@ __all__ = [
     "hf_gpt2_finetune_trainer_trace_callback",
     "hf_gpt2_finetune_trainer_trace_event",
     "hf_gpt2_finetune_zspace_probe",
+    "compare_hf_finetune_run_cards",
     "compare_hf_gpt2_finetune_run_cards",
+    "load_hf_finetune_run_card",
+    "load_hf_finetune_sweep_report",
+    "load_hf_finetune_trainer_trace",
     "load_hf_gpt2_finetune_run_card",
     "load_hf_gpt2_finetune_sweep_report",
     "load_hf_gpt2_finetune_trainer_trace",
+    "summarize_hf_finetune_run_card",
+    "summarize_hf_finetune_sweep_report",
+    "summarize_hf_finetune_sweep_report_lines",
+    "summarize_hf_finetune_trainer_trace",
     "summarize_hf_gpt2_finetune_run_card",
     "summarize_hf_gpt2_finetune_sweep_report",
     "summarize_hf_gpt2_finetune_sweep_report_lines",
     "summarize_hf_gpt2_finetune_trainer_trace",
+    "write_hf_finetune_run_card",
+    "write_hf_finetune_trainer_trace_event",
     "write_hf_gpt2_finetune_run_card",
     "write_hf_gpt2_finetune_trainer_trace_event",
 ]
@@ -5569,3 +5607,57 @@ def write_hf_gpt2_finetune_run_card(
         encoding="utf-8",
     )
     return str(output_path)
+
+
+# Generic HF fine-tune aliases. The underlying row schemas keep their historical
+# GPT-2 names for compatibility while import sites can move to model-neutral APIs.
+HF_FINETUNE_DEFAULT_DEVICE_BACKENDS = HF_GPT2_FT_DEFAULT_DEVICE_BACKENDS
+HF_FINETUNE_REQUIRED_PYTHON_PACKAGES = HF_GPT2_FT_REQUIRED_PYTHON_PACKAGES
+HF_FINETUNE_REQUIRED_RUST_SURFACES = HF_GPT2_FT_REQUIRED_RUST_SURFACES
+hf_finetune_corpus_file_report = hf_gpt2_finetune_corpus_file_report
+hf_finetune_corpus_scan_report = hf_gpt2_finetune_corpus_scan_report
+hf_finetune_dataset_fit_report = hf_gpt2_finetune_dataset_fit_report
+hf_finetune_disk_headroom_plan = hf_gpt2_finetune_disk_headroom_plan
+hf_finetune_eval_report = hf_gpt2_finetune_eval_report
+hf_finetune_generation_curve_lines = hf_gpt2_finetune_generation_curve_lines
+hf_finetune_generation_curve_report = hf_gpt2_finetune_generation_curve_report
+hf_finetune_generation_report = hf_gpt2_finetune_generation_report
+hf_finetune_inference_distortion_handoff_lines = (
+    hf_gpt2_finetune_inference_distortion_handoff_lines
+)
+hf_finetune_inference_distortion_handoff_report = (
+    hf_gpt2_finetune_inference_distortion_handoff_report
+)
+hf_finetune_inference_distortion_request_kwargs = (
+    hf_gpt2_finetune_inference_distortion_request_kwargs
+)
+hf_finetune_inference_distortion_runtime_adapter = (
+    hf_gpt2_finetune_inference_distortion_runtime_adapter
+)
+hf_finetune_inference_distortion_runtime_plan = (
+    hf_gpt2_finetune_inference_distortion_runtime_plan
+)
+hf_finetune_milestone_lines = hf_gpt2_finetune_milestone_lines
+hf_finetune_milestone_report = hf_gpt2_finetune_milestone_report
+hf_finetune_preflight_report = hf_gpt2_finetune_preflight_report
+hf_finetune_rust_dependency_report = hf_gpt2_finetune_rust_dependency_report
+hf_finetune_scale_up_command = hf_gpt2_finetune_scale_up_command
+hf_finetune_scale_up_preflight_lines = hf_gpt2_finetune_scale_up_preflight_lines
+hf_finetune_scale_up_preflight_report = hf_gpt2_finetune_scale_up_preflight_report
+hf_finetune_summary_lines = hf_gpt2_finetune_summary_lines
+hf_finetune_training_telemetry_frame = hf_gpt2_finetune_training_telemetry_frame
+hf_finetune_trainer_trace_callback = hf_gpt2_finetune_trainer_trace_callback
+hf_finetune_trainer_trace_event = hf_gpt2_finetune_trainer_trace_event
+hf_finetune_zspace_probe = hf_gpt2_finetune_zspace_probe
+compare_hf_finetune_run_cards = compare_hf_gpt2_finetune_run_cards
+load_hf_finetune_run_card = load_hf_gpt2_finetune_run_card
+load_hf_finetune_sweep_report = load_hf_gpt2_finetune_sweep_report
+load_hf_finetune_trainer_trace = load_hf_gpt2_finetune_trainer_trace
+summarize_hf_finetune_run_card = summarize_hf_gpt2_finetune_run_card
+summarize_hf_finetune_sweep_report = summarize_hf_gpt2_finetune_sweep_report
+summarize_hf_finetune_sweep_report_lines = (
+    summarize_hf_gpt2_finetune_sweep_report_lines
+)
+summarize_hf_finetune_trainer_trace = summarize_hf_gpt2_finetune_trainer_trace
+write_hf_finetune_run_card = write_hf_gpt2_finetune_run_card
+write_hf_finetune_trainer_trace_event = write_hf_gpt2_finetune_trainer_trace_event

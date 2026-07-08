@@ -287,6 +287,45 @@ def hf_gpt2_finetune_run_ops_snapshot_lines(
     report: Mapping[str, Any],
 ) -> List[str]: ...
 
+def hf_gpt2_finetune_run_ops_snapshot_paths(
+    run_dir: str | PathLike[str],
+) -> Dict[str, str]: ...
+
+def write_hf_gpt2_finetune_run_ops_snapshot(
+    report: Mapping[str, Any],
+    *,
+    run_dir: str | PathLike[str] | None = ...,
+    out: str | PathLike[str] | None = ...,
+    lines_out: str | PathLike[str] | None = ...,
+) -> Dict[str, Any]: ...
+
+load_hf_finetune_status_history: Callable[..., List[Dict[str, Any]]]
+summarize_hf_finetune_status_history: Callable[..., Dict[str, Any]]
+hf_finetune_status_history_lines: Callable[..., List[str]]
+hf_finetune_monitor_report: Callable[..., Dict[str, Any]]
+hf_finetune_monitor_lines: Callable[..., List[str]]
+hf_finetune_milestone_capture_report: Callable[..., Dict[str, Any]]
+hf_finetune_milestone_capture_lines: Callable[..., List[str]]
+hf_finetune_milestone_handoff_report: Callable[..., Dict[str, Any]]
+hf_finetune_milestone_handoff_lines: Callable[..., List[str]]
+hf_finetune_milestone_handoff_execution_report: Callable[..., Dict[str, Any]]
+hf_finetune_milestone_handoff_execution_lines: Callable[..., List[str]]
+hf_finetune_milestone_runtime_report: Callable[..., Dict[str, Any]]
+hf_finetune_milestone_runtime_lines: Callable[..., List[str]]
+hf_finetune_milestone_runtime_sources: Callable[..., Dict[str, str | None]]
+hf_finetune_milestone_runtime_artifact_paths: Callable[..., Dict[str, str]]
+write_hf_finetune_milestone_runtime_report: Callable[..., Dict[str, Any]]
+hf_finetune_milestone_runtime_from_run_dir_report: Callable[..., Dict[str, Any]]
+hf_finetune_milestone_runtime_from_run_dir_archive: Callable[..., Dict[str, Any]]
+hf_finetune_run_artifact_manifest: Callable[..., Dict[str, Any]]
+hf_finetune_run_artifact_manifest_lines: Callable[..., List[str]]
+hf_finetune_run_artifact_manifest_paths: Callable[..., Dict[str, str]]
+write_hf_finetune_run_artifact_manifest: Callable[..., Dict[str, Any]]
+hf_finetune_run_ops_snapshot_report: Callable[..., Dict[str, Any]]
+hf_finetune_run_ops_snapshot_lines: Callable[..., List[str]]
+hf_finetune_run_ops_snapshot_paths: Callable[..., Dict[str, str]]
+write_hf_finetune_run_ops_snapshot: Callable[..., Dict[str, Any]]
+
 def summarize_transformers_trainer_runtime_bridge(
     transformers_trace_jsonl: str,
     trainer_trace_jsonl: str,
@@ -502,6 +541,44 @@ def write_runtime_import_preflight_report(
 HF_GPT2_FT_DEFAULT_DEVICE_BACKENDS: List[str]
 HF_GPT2_FT_REQUIRED_PYTHON_PACKAGES: List[str]
 HF_GPT2_FT_REQUIRED_RUST_SURFACES: List[Dict[str, str]]
+HF_FINETUNE_DEFAULT_DEVICE_BACKENDS: List[str]
+HF_FINETUNE_REQUIRED_PYTHON_PACKAGES: List[str]
+HF_FINETUNE_REQUIRED_RUST_SURFACES: List[Dict[str, str]]
+hf_finetune_rust_dependency_report: Callable[..., Dict[str, Any]]
+hf_finetune_corpus_file_report: Callable[..., Dict[str, Any]]
+hf_finetune_corpus_scan_report: Callable[..., Dict[str, Any]]
+hf_finetune_dataset_fit_report: Callable[..., Dict[str, Any]]
+hf_finetune_generation_report: Callable[..., Dict[str, Any]]
+hf_finetune_inference_distortion_handoff_report: Callable[..., Dict[str, Any]]
+hf_finetune_inference_distortion_runtime_plan: Callable[..., Dict[str, Any]]
+hf_finetune_inference_distortion_runtime_adapter: Callable[..., Callable[..., Any]]
+hf_finetune_inference_distortion_request_kwargs: Callable[..., Dict[str, Any]]
+hf_finetune_inference_distortion_handoff_lines: Callable[..., List[str]]
+hf_finetune_milestone_report: Callable[..., Dict[str, Any]]
+hf_finetune_milestone_lines: Callable[..., List[str]]
+hf_finetune_preflight_report: Callable[..., Dict[str, Any]]
+hf_finetune_summary_lines: Callable[..., List[str]]
+hf_finetune_zspace_probe: Callable[..., Dict[str, Any]]
+hf_finetune_training_telemetry_frame: Callable[..., Dict[str, Any]]
+hf_finetune_eval_report: Callable[..., Dict[str, Any]]
+hf_finetune_trainer_trace_event: Callable[..., Dict[str, Any]]
+write_hf_finetune_trainer_trace_event: Callable[..., None]
+load_hf_finetune_trainer_trace: Callable[..., List[Dict[str, Any]]]
+summarize_hf_finetune_trainer_trace: Callable[..., Dict[str, Any]]
+load_hf_finetune_run_card: Callable[..., Dict[str, Any]]
+load_hf_finetune_sweep_report: Callable[..., Dict[str, Any]]
+hf_finetune_disk_headroom_plan: Callable[..., Dict[str, Any]]
+hf_finetune_scale_up_command: Callable[..., Dict[str, Any]]
+hf_finetune_scale_up_preflight_report: Callable[..., Dict[str, Any]]
+hf_finetune_scale_up_preflight_lines: Callable[..., List[str]]
+summarize_hf_finetune_run_card: Callable[..., Dict[str, Any]]
+summarize_hf_finetune_sweep_report: Callable[..., Dict[str, Any]]
+summarize_hf_finetune_sweep_report_lines: Callable[..., List[str]]
+hf_finetune_generation_curve_report: Callable[..., Dict[str, Any]]
+hf_finetune_generation_curve_lines: Callable[..., List[str]]
+compare_hf_finetune_run_cards: Callable[..., Dict[str, Any]]
+hf_finetune_trainer_trace_callback: Callable[..., Any]
+write_hf_finetune_run_card: Callable[..., str]
 
 def hf_gpt2_finetune_rust_dependency_report() -> Dict[str, Any]: ...
 
@@ -8976,9 +9053,73 @@ __all__ = [
     "hf_ft",
     "hf_generation",
     "hf_ft_status",
+    "HF_FINETUNE_DEFAULT_DEVICE_BACKENDS",
+    "HF_FINETUNE_REQUIRED_PYTHON_PACKAGES",
+    "HF_FINETUNE_REQUIRED_RUST_SURFACES",
     "HF_GPT2_FT_DEFAULT_DEVICE_BACKENDS",
     "HF_GPT2_FT_REQUIRED_PYTHON_PACKAGES",
     "HF_GPT2_FT_REQUIRED_RUST_SURFACES",
+    "hf_finetune_corpus_file_report",
+    "hf_finetune_corpus_scan_report",
+    "hf_finetune_dataset_fit_report",
+    "hf_finetune_disk_headroom_plan",
+    "hf_finetune_eval_report",
+    "hf_finetune_generation_curve_lines",
+    "hf_finetune_generation_curve_report",
+    "hf_finetune_generation_report",
+    "hf_finetune_inference_distortion_handoff_report",
+    "hf_finetune_inference_distortion_handoff_lines",
+    "hf_finetune_inference_distortion_request_kwargs",
+    "hf_finetune_inference_distortion_runtime_adapter",
+    "hf_finetune_inference_distortion_runtime_plan",
+    "hf_finetune_milestone_lines",
+    "hf_finetune_milestone_report",
+    "hf_finetune_preflight_report",
+    "hf_finetune_rust_dependency_report",
+    "hf_finetune_monitor_lines",
+    "hf_finetune_monitor_report",
+    "hf_finetune_milestone_capture_lines",
+    "hf_finetune_milestone_capture_report",
+    "hf_finetune_milestone_handoff_execution_lines",
+    "hf_finetune_milestone_handoff_execution_report",
+    "hf_finetune_milestone_handoff_lines",
+    "hf_finetune_milestone_handoff_report",
+    "hf_finetune_milestone_runtime_artifact_paths",
+    "hf_finetune_milestone_runtime_from_run_dir_archive",
+    "hf_finetune_milestone_runtime_from_run_dir_report",
+    "hf_finetune_milestone_runtime_lines",
+    "hf_finetune_milestone_runtime_report",
+    "hf_finetune_milestone_runtime_sources",
+    "hf_finetune_run_artifact_manifest",
+    "hf_finetune_run_artifact_manifest_lines",
+    "hf_finetune_run_artifact_manifest_paths",
+    "hf_finetune_run_ops_snapshot_lines",
+    "hf_finetune_run_ops_snapshot_paths",
+    "hf_finetune_run_ops_snapshot_report",
+    "hf_finetune_status_history_lines",
+    "hf_finetune_scale_up_command",
+    "hf_finetune_scale_up_preflight_lines",
+    "hf_finetune_scale_up_preflight_report",
+    "hf_finetune_summary_lines",
+    "hf_finetune_training_telemetry_frame",
+    "hf_finetune_trainer_trace_callback",
+    "hf_finetune_trainer_trace_event",
+    "hf_finetune_zspace_probe",
+    "compare_hf_finetune_run_cards",
+    "load_hf_finetune_run_card",
+    "load_hf_finetune_sweep_report",
+    "load_hf_finetune_status_history",
+    "load_hf_finetune_trainer_trace",
+    "summarize_hf_finetune_run_card",
+    "summarize_hf_finetune_sweep_report",
+    "summarize_hf_finetune_sweep_report_lines",
+    "summarize_hf_finetune_status_history",
+    "summarize_hf_finetune_trainer_trace",
+    "write_hf_finetune_run_artifact_manifest",
+    "write_hf_finetune_run_ops_snapshot",
+    "write_hf_finetune_milestone_runtime_report",
+    "write_hf_finetune_run_card",
+    "write_hf_finetune_trainer_trace_event",
     "hf_gpt2_finetune_corpus_file_report",
     "hf_gpt2_finetune_corpus_scan_report",
     "hf_gpt2_finetune_dataset_fit_report",
@@ -9013,6 +9154,7 @@ __all__ = [
     "hf_gpt2_finetune_run_artifact_manifest_lines",
     "hf_gpt2_finetune_run_artifact_manifest_paths",
     "hf_gpt2_finetune_run_ops_snapshot_lines",
+    "hf_gpt2_finetune_run_ops_snapshot_paths",
     "hf_gpt2_finetune_run_ops_snapshot_report",
     "hf_gpt2_finetune_status_history_lines",
     "hf_gpt2_finetune_scale_up_command",
@@ -9034,6 +9176,7 @@ __all__ = [
     "summarize_hf_gpt2_finetune_status_history",
     "summarize_hf_gpt2_finetune_trainer_trace",
     "write_hf_gpt2_finetune_run_artifact_manifest",
+    "write_hf_gpt2_finetune_run_ops_snapshot",
     "write_hf_gpt2_finetune_milestone_runtime_report",
     "write_hf_gpt2_finetune_run_card",
     "write_hf_gpt2_finetune_trainer_trace_event",

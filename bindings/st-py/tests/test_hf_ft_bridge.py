@@ -73,6 +73,21 @@ RUN_ARTIFACTS_PATH = (
     / "examples"
     / "hf_gpt2_finetune_run_artifacts.py"
 )
+RUN_OPS_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "examples"
+    / "hf_finetune_run_ops.py"
+)
+GPT2_RUN_OPS_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "examples"
+    / "hf_gpt2_finetune_run_ops.py"
+)
+MODEL_CONFIGS_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "examples"
+    / "hf_finetune_model_configs.example.json"
+)
 GENERATION_CURVE_PATH = (
     Path(__file__).resolve().parents[1]
     / "examples"
@@ -188,6 +203,28 @@ def load_run_artifacts_example():
     spec = importlib.util.spec_from_file_location(
         "hf_gpt2_finetune_run_artifacts_test",
         RUN_ARTIFACTS_PATH,
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_run_ops_example():
+    spec = importlib.util.spec_from_file_location(
+        "hf_finetune_run_ops_test",
+        RUN_OPS_PATH,
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_gpt2_run_ops_example():
+    spec = importlib.util.spec_from_file_location(
+        "hf_gpt2_finetune_run_ops_test",
+        GPT2_RUN_OPS_PATH,
     )
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -6396,6 +6433,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
 
     def test_milestone_runtime_example_writes_inferred_artifacts(self) -> None:
         module = load_milestone_runtime_example()
+        ops_module = load_run_ops_example()
+        gpt2_ops_module = load_gpt2_run_ops_example()
         ready_direct = {
             "row_type": "hf_gpt2_finetune_run_status",
             "process_status": "alive",
@@ -6513,15 +6552,45 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             ).splitlines()
             ops_out = run_dir / "ops-snapshot.json"
             ops_lines_out = run_dir / "ops-snapshot.txt"
-            ops = st.hf_gpt2_finetune_run_ops_snapshot_report(
+            ops = st.hf_finetune_run_ops_snapshot_report(
                 run_dir,
                 label="ops-ft",
                 out=ops_out,
                 lines_out=ops_lines_out,
             )
-            ops_lines = st.hf_gpt2_finetune_run_ops_snapshot_lines(ops)
+            ops_lines = st.hf_finetune_run_ops_snapshot_lines(ops)
             ops_written = json.loads(ops_out.read_text(encoding="utf-8"))
             ops_written_lines = ops_lines_out.read_text(encoding="utf-8").splitlines()
+            ops_paths = st.hf_finetune_run_ops_snapshot_paths(run_dir)
+            ops_archived = st.write_hf_finetune_run_ops_snapshot(
+                ops,
+                run_dir=run_dir,
+            )
+            ops_archived_json = json.loads(
+                Path(ops_archived["out"]).read_text(encoding="utf-8")
+            )
+            ops_archived_lines = Path(ops_archived["lines_out"]).read_text(
+                encoding="utf-8"
+            ).splitlines()
+            cli_args = ops_module.parse_args(["--run-dir", str(run_dir)])
+            cli_ops = ops_module.build_report(cli_args)
+            cli_out, cli_lines = ops_module.write_report(cli_ops, cli_args)
+            cli_json = json.loads(cli_out.read_text(encoding="utf-8"))
+            cli_line_rows = cli_lines.read_text(encoding="utf-8").splitlines()
+            legacy_ops_out = run_dir / "legacy-ops-snapshot.json"
+            legacy_ops_lines_out = run_dir / "legacy-ops-snapshot.txt"
+            legacy_args = [
+                "--run-dir",
+                str(run_dir),
+                "--out",
+                str(legacy_ops_out),
+                "--lines-out",
+                str(legacy_ops_lines_out),
+                "--quiet",
+            ]
+            legacy_status = gpt2_ops_module.main(legacy_args)
+            legacy_json = json.loads(legacy_ops_out.read_text(encoding="utf-8"))
+            legacy_lines = legacy_ops_lines_out.read_text(encoding="utf-8").splitlines()
 
         self.assertEqual(written["row_type"], "hf_gpt2_finetune_milestone_runtime")
         self.assertEqual(written["status"], "executed")
@@ -6553,6 +6622,25 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(ops_written["recommended_action"], "run_milestone_handoff")
         self.assertIn("hf_gpt2_ft_run_ops ", ops_lines[0])
         self.assertIn("status=handoff_ready", ops_written_lines[0])
+        self.assertEqual(
+            ops_paths["out"],
+            str(run_dir / "hf-gpt2-ft-run-ops-snapshot.json"),
+        )
+        self.assertEqual(
+            ops_paths["lines_out"],
+            str(run_dir / "hf-gpt2-ft-run-ops-snapshot.txt"),
+        )
+        self.assertEqual(ops_archived["out"], ops_paths["out"])
+        self.assertEqual(ops_archived["lines_out"], ops_paths["lines_out"])
+        self.assertEqual(ops_archived_json["recommended_action"], "run_milestone_handoff")
+        self.assertIn("hf_gpt2_ft_run_ops ", ops_archived_lines[0])
+        self.assertEqual(cli_out, Path(ops_paths["out"]))
+        self.assertEqual(cli_lines, Path(ops_paths["lines_out"]))
+        self.assertEqual(cli_json["status"], "handoff_ready")
+        self.assertIn("recommended_action=run_milestone_handoff", cli_line_rows[0])
+        self.assertEqual(legacy_status, 0)
+        self.assertEqual(legacy_json["status"], "handoff_ready")
+        self.assertIn("hf_gpt2_ft_run_ops ", legacy_lines[0])
         self.assertIn("hf_gpt2_ft_milestone_runtime ", written_lines[0])
         self.assertIn("status=executed", written_lines[0])
         self.assertTrue(
@@ -6691,6 +6779,36 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("generation_sweeps=1", written_lines[0])
         self.assertTrue(
             any("hf_gpt2_ft_run_artifact_checkpoint" in line for line in lines)
+        )
+
+    def test_generic_hf_finetune_model_config_sample_is_parseable(self) -> None:
+        config = json.loads(MODEL_CONFIGS_PATH.read_text(encoding="utf-8"))
+        profiles = {
+            str(profile["id"]): profile
+            for profile in config["profiles"]
+            if isinstance(profile, dict) and "id" in profile
+        }
+
+        self.assertEqual(
+            config["schema"],
+            "spiraltorch.hf_finetune_model_configs.v1",
+        )
+        self.assertEqual(config["default_profile"], "gpt2-local-smoke")
+        self.assertIn(config["default_profile"], profiles)
+        self.assertEqual(profiles["gpt2-local-smoke"]["model_name"], "gpt2")
+        self.assertEqual(
+            profiles["distilgpt2-local-smoke"]["tokenizer_name"],
+            "distilgpt2",
+        )
+        self.assertEqual(
+            profiles["tiny-gpt2-ci"]["model_name"],
+            "sshleifer/tiny-gpt2",
+        )
+        self.assertTrue(
+            all(
+                profile["architecture"] == "causal_lm"
+                for profile in profiles.values()
+            )
         )
 
     def test_package_milestone_report_tracks_run_status_readiness(self) -> None:
@@ -7281,6 +7399,93 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
 
     def test_top_level_exports_hf_ft_helpers(self) -> None:
         self.assertIs(
+            st.HF_FINETUNE_DEFAULT_DEVICE_BACKENDS,
+            hf_ft.HF_GPT2_FT_DEFAULT_DEVICE_BACKENDS,
+        )
+        self.assertIs(
+            st.HF_FINETUNE_REQUIRED_PYTHON_PACKAGES,
+            hf_ft.HF_GPT2_FT_REQUIRED_PYTHON_PACKAGES,
+        )
+        self.assertIs(
+            st.HF_FINETUNE_REQUIRED_RUST_SURFACES,
+            hf_ft.HF_GPT2_FT_REQUIRED_RUST_SURFACES,
+        )
+        generic_hf_ft_aliases = {
+            "hf_finetune_preflight_report": "hf_gpt2_finetune_preflight_report",
+            "hf_finetune_rust_dependency_report": (
+                "hf_gpt2_finetune_rust_dependency_report"
+            ),
+            "hf_finetune_corpus_file_report": "hf_gpt2_finetune_corpus_file_report",
+            "hf_finetune_corpus_scan_report": "hf_gpt2_finetune_corpus_scan_report",
+            "hf_finetune_dataset_fit_report": "hf_gpt2_finetune_dataset_fit_report",
+            "hf_finetune_generation_report": "hf_gpt2_finetune_generation_report",
+            "hf_finetune_eval_report": "hf_gpt2_finetune_eval_report",
+            "hf_finetune_training_telemetry_frame": (
+                "hf_gpt2_finetune_training_telemetry_frame"
+            ),
+            "hf_finetune_trainer_trace_callback": (
+                "hf_gpt2_finetune_trainer_trace_callback"
+            ),
+            "hf_finetune_generation_curve_report": (
+                "hf_gpt2_finetune_generation_curve_report"
+            ),
+            "hf_finetune_inference_distortion_runtime_plan": (
+                "hf_gpt2_finetune_inference_distortion_runtime_plan"
+            ),
+            "compare_hf_finetune_run_cards": "compare_hf_gpt2_finetune_run_cards",
+            "load_hf_finetune_run_card": "load_hf_gpt2_finetune_run_card",
+            "summarize_hf_finetune_sweep_report": (
+                "summarize_hf_gpt2_finetune_sweep_report"
+            ),
+            "write_hf_finetune_run_card": "write_hf_gpt2_finetune_run_card",
+        }
+        for generic_name, legacy_name in generic_hf_ft_aliases.items():
+            self.assertIn(generic_name, st.__all__)
+            self.assertIs(getattr(st, generic_name), getattr(hf_ft, generic_name))
+            self.assertIs(getattr(st, generic_name), getattr(hf_ft, legacy_name))
+
+        generic_status_aliases = {
+            "hf_finetune_monitor_report": "hf_gpt2_finetune_monitor_report",
+            "hf_finetune_milestone_runtime_report": (
+                "hf_gpt2_finetune_milestone_runtime_report"
+            ),
+            "hf_finetune_milestone_runtime_from_run_dir_archive": (
+                "hf_gpt2_finetune_milestone_runtime_from_run_dir_archive"
+            ),
+            "hf_finetune_run_artifact_manifest": (
+                "hf_gpt2_finetune_run_artifact_manifest"
+            ),
+            "hf_finetune_run_ops_snapshot_report": (
+                "hf_gpt2_finetune_run_ops_snapshot_report"
+            ),
+            "hf_finetune_run_ops_snapshot_lines": (
+                "hf_gpt2_finetune_run_ops_snapshot_lines"
+            ),
+            "hf_finetune_run_ops_snapshot_paths": (
+                "hf_gpt2_finetune_run_ops_snapshot_paths"
+            ),
+            "load_hf_finetune_status_history": (
+                "load_hf_gpt2_finetune_status_history"
+            ),
+            "summarize_hf_finetune_status_history": (
+                "summarize_hf_gpt2_finetune_status_history"
+            ),
+            "write_hf_finetune_run_ops_snapshot": (
+                "write_hf_gpt2_finetune_run_ops_snapshot"
+            ),
+        }
+        for generic_name, legacy_name in generic_status_aliases.items():
+            self.assertIn(generic_name, st.__all__)
+            self.assertIs(
+                getattr(st, generic_name),
+                getattr(st.hf_ft_status, generic_name),
+            )
+            self.assertIs(
+                getattr(st, generic_name),
+                getattr(st.hf_ft_status, legacy_name),
+            )
+
+        self.assertIs(
             st.hf_gpt2_finetune_preflight_report,
             hf_ft.hf_gpt2_finetune_preflight_report,
         )
@@ -7364,6 +7569,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("hf_gpt2_finetune_run_artifact_manifest_lines", st.__all__)
         self.assertIn("hf_gpt2_finetune_run_artifact_manifest_paths", st.__all__)
         self.assertIn("hf_gpt2_finetune_run_ops_snapshot_lines", st.__all__)
+        self.assertIn("hf_gpt2_finetune_run_ops_snapshot_paths", st.__all__)
         self.assertIn("hf_gpt2_finetune_run_ops_snapshot_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_preflight_report", st.__all__)
         self.assertIn("hf_gpt2_finetune_scale_up_command", st.__all__)
@@ -7383,6 +7589,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         )
         self.assertIn(
             "write_hf_gpt2_finetune_run_artifact_manifest",
+            st.__all__,
+        )
+        self.assertIn(
+            "write_hf_gpt2_finetune_run_ops_snapshot",
             st.__all__,
         )
         self.assertIs(
@@ -7502,6 +7712,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             st.hf_ft_status.hf_gpt2_finetune_run_ops_snapshot_lines,
         )
         self.assertIs(
+            st.hf_gpt2_finetune_run_ops_snapshot_paths,
+            st.hf_ft_status.hf_gpt2_finetune_run_ops_snapshot_paths,
+        )
+        self.assertIs(
             st.hf_gpt2_finetune_run_ops_snapshot_report,
             st.hf_ft_status.hf_gpt2_finetune_run_ops_snapshot_report,
         )
@@ -7512,6 +7726,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIs(
             st.write_hf_gpt2_finetune_run_artifact_manifest,
             st.hf_ft_status.write_hf_gpt2_finetune_run_artifact_manifest,
+        )
+        self.assertIs(
+            st.write_hf_gpt2_finetune_run_ops_snapshot,
+            st.hf_ft_status.write_hf_gpt2_finetune_run_ops_snapshot,
         )
         self.assertIs(
             st.hf_gpt2_finetune_training_telemetry_frame,

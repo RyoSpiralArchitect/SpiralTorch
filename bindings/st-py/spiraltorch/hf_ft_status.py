@@ -14,6 +14,27 @@ from pathlib import Path
 from typing import Any, Callable
 
 __all__ = [
+    "hf_finetune_monitor_lines",
+    "hf_finetune_monitor_report",
+    "hf_finetune_milestone_capture_lines",
+    "hf_finetune_milestone_capture_report",
+    "hf_finetune_milestone_handoff_execution_lines",
+    "hf_finetune_milestone_handoff_execution_report",
+    "hf_finetune_milestone_handoff_lines",
+    "hf_finetune_milestone_handoff_report",
+    "hf_finetune_milestone_runtime_artifact_paths",
+    "hf_finetune_milestone_runtime_from_run_dir_archive",
+    "hf_finetune_milestone_runtime_from_run_dir_report",
+    "hf_finetune_milestone_runtime_lines",
+    "hf_finetune_milestone_runtime_report",
+    "hf_finetune_milestone_runtime_sources",
+    "hf_finetune_run_artifact_manifest",
+    "hf_finetune_run_artifact_manifest_lines",
+    "hf_finetune_run_artifact_manifest_paths",
+    "hf_finetune_run_ops_snapshot_lines",
+    "hf_finetune_run_ops_snapshot_paths",
+    "hf_finetune_run_ops_snapshot_report",
+    "hf_finetune_status_history_lines",
     "hf_gpt2_finetune_monitor_lines",
     "hf_gpt2_finetune_monitor_report",
     "hf_gpt2_finetune_milestone_capture_lines",
@@ -32,13 +53,20 @@ __all__ = [
     "hf_gpt2_finetune_run_artifact_manifest_lines",
     "hf_gpt2_finetune_run_artifact_manifest_paths",
     "hf_gpt2_finetune_run_ops_snapshot_lines",
+    "hf_gpt2_finetune_run_ops_snapshot_paths",
     "hf_gpt2_finetune_run_ops_snapshot_report",
     "hf_gpt2_finetune_status_history_lines",
+    "load_hf_finetune_status_history",
     "load_hf_gpt2_finetune_status_history",
     "main",
     "parse_args",
+    "summarize_hf_finetune_status_history",
     "summarize_hf_gpt2_finetune_status_history",
+    "write_hf_finetune_run_artifact_manifest",
+    "write_hf_finetune_run_ops_snapshot",
+    "write_hf_finetune_milestone_runtime_report",
     "write_hf_gpt2_finetune_run_artifact_manifest",
+    "write_hf_gpt2_finetune_run_ops_snapshot",
     "write_hf_gpt2_finetune_milestone_runtime_report",
 ]
 
@@ -2165,6 +2193,47 @@ def hf_gpt2_finetune_run_ops_snapshot_lines(
     return lines
 
 
+def hf_gpt2_finetune_run_ops_snapshot_paths(
+    run_dir: str | Path,
+) -> dict[str, str]:
+    """Return standard JSON/TXT archive paths for a run ops snapshot."""
+
+    root = Path(run_dir)
+    return {
+        "out": str(root / "hf-gpt2-ft-run-ops-snapshot.json"),
+        "lines_out": str(root / "hf-gpt2-ft-run-ops-snapshot.txt"),
+    }
+
+
+def write_hf_gpt2_finetune_run_ops_snapshot(
+    report: Mapping[str, Any],
+    *,
+    run_dir: str | Path | None = None,
+    out: str | Path | None = None,
+    lines_out: str | Path | None = None,
+) -> dict[str, Any]:
+    """Write a run ops snapshot using explicit or standard archive paths."""
+
+    archived = dict(report)
+    root = Path(run_dir or archived.get("run_dir") or ".")
+    defaults = hf_gpt2_finetune_run_ops_snapshot_paths(root)
+    out_path = Path(out or defaults["out"])
+    lines_path = Path(lines_out or defaults["lines_out"])
+    archived["out"] = str(out_path)
+    archived["lines_out"] = str(lines_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    lines_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(
+        json.dumps(archived, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    lines_path.write_text(
+        "\n".join(hf_gpt2_finetune_run_ops_snapshot_lines(archived)) + "\n",
+        encoding="utf-8",
+    )
+    return archived
+
+
 def _runtime_milestone_step_token(value: Any) -> str:
     parsed = _int_value(value)
     if parsed is not None:
@@ -2683,3 +2752,49 @@ def main(argv: list[str] | None = None) -> int:
     if args.out is None and args.lines_out is None:
         print("\n".join(lines))
     return 0
+
+
+# Generic HF fine-tune aliases. The reports intentionally retain their
+# historical GPT-2 row_type values until the artifact schema itself is versioned.
+hf_finetune_monitor_lines = hf_gpt2_finetune_monitor_lines
+hf_finetune_monitor_report = hf_gpt2_finetune_monitor_report
+hf_finetune_milestone_capture_lines = hf_gpt2_finetune_milestone_capture_lines
+hf_finetune_milestone_capture_report = hf_gpt2_finetune_milestone_capture_report
+hf_finetune_milestone_handoff_execution_lines = (
+    hf_gpt2_finetune_milestone_handoff_execution_lines
+)
+hf_finetune_milestone_handoff_execution_report = (
+    hf_gpt2_finetune_milestone_handoff_execution_report
+)
+hf_finetune_milestone_handoff_lines = hf_gpt2_finetune_milestone_handoff_lines
+hf_finetune_milestone_handoff_report = hf_gpt2_finetune_milestone_handoff_report
+hf_finetune_milestone_runtime_artifact_paths = (
+    hf_gpt2_finetune_milestone_runtime_artifact_paths
+)
+hf_finetune_milestone_runtime_from_run_dir_archive = (
+    hf_gpt2_finetune_milestone_runtime_from_run_dir_archive
+)
+hf_finetune_milestone_runtime_from_run_dir_report = (
+    hf_gpt2_finetune_milestone_runtime_from_run_dir_report
+)
+hf_finetune_milestone_runtime_lines = hf_gpt2_finetune_milestone_runtime_lines
+hf_finetune_milestone_runtime_report = hf_gpt2_finetune_milestone_runtime_report
+hf_finetune_milestone_runtime_sources = hf_gpt2_finetune_milestone_runtime_sources
+hf_finetune_run_artifact_manifest = hf_gpt2_finetune_run_artifact_manifest
+hf_finetune_run_artifact_manifest_lines = (
+    hf_gpt2_finetune_run_artifact_manifest_lines
+)
+hf_finetune_run_artifact_manifest_paths = (
+    hf_gpt2_finetune_run_artifact_manifest_paths
+)
+hf_finetune_run_ops_snapshot_lines = hf_gpt2_finetune_run_ops_snapshot_lines
+hf_finetune_run_ops_snapshot_paths = hf_gpt2_finetune_run_ops_snapshot_paths
+hf_finetune_run_ops_snapshot_report = hf_gpt2_finetune_run_ops_snapshot_report
+hf_finetune_status_history_lines = hf_gpt2_finetune_status_history_lines
+load_hf_finetune_status_history = load_hf_gpt2_finetune_status_history
+summarize_hf_finetune_status_history = summarize_hf_gpt2_finetune_status_history
+write_hf_finetune_run_artifact_manifest = write_hf_gpt2_finetune_run_artifact_manifest
+write_hf_finetune_run_ops_snapshot = write_hf_gpt2_finetune_run_ops_snapshot
+write_hf_finetune_milestone_runtime_report = (
+    write_hf_gpt2_finetune_milestone_runtime_report
+)
