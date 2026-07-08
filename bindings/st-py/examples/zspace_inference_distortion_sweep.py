@@ -189,19 +189,19 @@ def _write_text(path: Path, text: str) -> None:
 
 
 def _runtime_plan(args: argparse.Namespace) -> MappingLike:
-    return {
-        "local_model": str(args.local_model) if args.local_model is not None else None,
-        "allow_remote": bool(args.allow_remote),
-        "trust_remote_code": bool(args.trust_remote_code),
-        "max_new_tokens": int(args.max_new_tokens),
-        "activation_module_name": list(args.activation_module_name),
-        "activation_name_contains": list(args.activation_name_contains),
-        "api_provider": args.api_provider,
-        "api_model": args.api_model,
-        "api_max_tokens": int(args.api_max_tokens),
-        "api_reasoning_effort": args.api_reasoning_effort,
-        "api_text_verbosity": args.api_text_verbosity,
-    }
+    return st.zspace_inference_distortion_runtime_plan(
+        local_model=args.local_model,
+        allow_remote=args.allow_remote,
+        trust_remote_code=args.trust_remote_code,
+        max_new_tokens=args.max_new_tokens,
+        activation_module_name=args.activation_module_name,
+        activation_name_contains=args.activation_name_contains,
+        api_provider=args.api_provider,
+        api_model=args.api_model,
+        api_max_tokens=args.api_max_tokens,
+        api_reasoning_effort=args.api_reasoning_effort,
+        api_text_verbosity=args.api_text_verbosity,
+    )
 
 
 def _markdown_path(args: argparse.Namespace) -> Path | None:
@@ -215,32 +215,7 @@ def _shell_join(parts: list[object]) -> str:
 
 
 def _runtime_cli_args(runtime: MappingLike, *, sweep: bool) -> list[object]:
-    args: list[object] = []
-    if runtime.get("local_model"):
-        args.extend(["--local-model", runtime["local_model"]])
-    if runtime.get("allow_remote"):
-        args.append("--allow-remote")
-    if runtime.get("trust_remote_code"):
-        args.append("--trust-remote-code")
-    if runtime.get("max_new_tokens") is not None:
-        args.extend(["--max-new-tokens", runtime["max_new_tokens"]])
-    for name in runtime.get("activation_module_name") or []:
-        args.extend(["--activation-module-name", name])
-    for needle in runtime.get("activation_name_contains") or []:
-        args.extend(["--activation-name-contains", needle])
-    if runtime.get("api_provider"):
-        args.extend(["--api-provider", runtime["api_provider"]])
-    if runtime.get("api_model"):
-        args.extend(["--api-model", runtime["api_model"]])
-    if runtime.get("api_max_tokens") is not None:
-        args.extend(["--api-max-tokens", runtime["api_max_tokens"]])
-    if runtime.get("api_reasoning_effort"):
-        args.extend(["--api-reasoning-effort", runtime["api_reasoning_effort"]])
-    if runtime.get("api_text_verbosity"):
-        args.extend(["--api-text-verbosity", runtime["api_text_verbosity"]])
-    if sweep:
-        args.append("--resume-existing")
-    return args
+    return st.zspace_inference_distortion_runtime_cli_args(runtime, sweep=sweep)
 
 
 def _recommended_commands(report: MappingLike) -> MappingLike:

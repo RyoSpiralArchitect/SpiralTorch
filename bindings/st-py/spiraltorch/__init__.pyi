@@ -457,6 +457,27 @@ def zspace_inference_distortion_probe_cli_args(
     config: Mapping[str, object] | None,
 ) -> List[str]: ...
 
+def zspace_inference_distortion_runtime_plan(
+    *,
+    local_model: str | PathLike[str] | None = ...,
+    allow_remote: bool = ...,
+    trust_remote_code: bool = ...,
+    max_new_tokens: int = ...,
+    activation_module_name: Sequence[object] | object | None = ...,
+    activation_name_contains: Sequence[object] | object | None = ...,
+    api_provider: str | None = ...,
+    api_model: str | None = ...,
+    api_max_tokens: int = ...,
+    api_reasoning_effort: str | None = ...,
+    api_text_verbosity: str | None = ...,
+) -> Dict[str, object]: ...
+
+def zspace_inference_distortion_runtime_cli_args(
+    runtime: Mapping[str, object] | None,
+    *,
+    sweep: bool = ...,
+) -> List[str]: ...
+
 def zspace_inference_distortion_sweep_cli_args(
     config: Mapping[str, object] | None,
 ) -> List[str]: ...
@@ -8545,6 +8566,8 @@ __all__ = [
     "compare_zspace_inference_distortion_probes",
     "zspace_inference_distortion_sweep_report_from_probes",
     "zspace_inference_distortion_probe_cli_args",
+    "zspace_inference_distortion_runtime_cli_args",
+    "zspace_inference_distortion_runtime_plan",
     "zspace_inference_distortion_sweep_cli_args",
     "zspace_generation_control_bridge_cli_args",
     "zspace_generation_control_processor_kwargs",

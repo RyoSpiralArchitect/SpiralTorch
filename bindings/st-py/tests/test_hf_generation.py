@@ -30,6 +30,8 @@ from spiraltorch.hf_generation import (
     summarize_zspace_generation_control_sweep_lines,
     zspace_inference_distortion_probe_cli_args,
     zspace_inference_distortion_processor_kwargs,
+    zspace_inference_distortion_runtime_cli_args,
+    zspace_inference_distortion_runtime_plan,
     zspace_inference_distortion_sweep_cli_args,
     zspace_generation_control_bridge_cli_args,
     zspace_generation_control_processor_kwargs,
@@ -320,6 +322,8 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
             st.__all__,
         )
         self.assertIn("summarize_zspace_inference_distortion_probe_lines", st.__all__)
+        self.assertIn("zspace_inference_distortion_runtime_plan", st.__all__)
+        self.assertIn("zspace_inference_distortion_runtime_cli_args", st.__all__)
         self.assertIs(st.ZSpaceRepressionLogitsProcessor, ZSpaceRepressionLogitsProcessor)
         self.assertIs(st.ZSpaceActivationProbeHook, ZSpaceActivationProbeHook)
         self.assertIs(
@@ -365,6 +369,64 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         self.assertIs(
             st.summarize_zspace_generation_control_sweep_comparison_lines,
             summarize_zspace_generation_control_sweep_comparison_lines,
+        )
+        self.assertIs(
+            st.zspace_inference_distortion_runtime_plan,
+            zspace_inference_distortion_runtime_plan,
+        )
+        self.assertIs(
+            st.zspace_inference_distortion_runtime_cli_args,
+            zspace_inference_distortion_runtime_cli_args,
+        )
+
+    def test_inference_distortion_runtime_plan_and_cli_args_are_importable(self) -> None:
+        runtime = zspace_inference_distortion_runtime_plan(
+            local_model=Path("models/gpt2-zspace"),
+            allow_remote=True,
+            trust_remote_code=True,
+            max_new_tokens=24,
+            activation_module_name=["transformer.h.0.attn"],
+            activation_name_contains="mlp",
+            api_provider="openai-responses",
+            api_model="gpt-5-nano",
+            api_max_tokens=72,
+            api_reasoning_effort="minimal",
+            api_text_verbosity="low",
+        )
+
+        self.assertEqual(runtime["local_model"], "models/gpt2-zspace")
+        self.assertEqual(runtime["max_new_tokens"], 24)
+        self.assertEqual(runtime["activation_module_name"], ["transformer.h.0.attn"])
+        self.assertEqual(runtime["activation_name_contains"], ["mlp"])
+        self.assertEqual(runtime["api_provider"], "openai-responses")
+        self.assertEqual(runtime["api_model"], "gpt-5-nano")
+        self.assertEqual(runtime["api_reasoning_effort"], "minimal")
+        self.assertEqual(runtime["api_text_verbosity"], "low")
+
+        probe_args = zspace_inference_distortion_runtime_cli_args(runtime)
+        sweep_args = zspace_inference_distortion_runtime_cli_args(runtime, sweep=True)
+
+        self.assertIn("--local-model", probe_args)
+        self.assertIn("models/gpt2-zspace", probe_args)
+        self.assertIn("--allow-remote", probe_args)
+        self.assertIn("--trust-remote-code", probe_args)
+        self.assertIn("--activation-module-name", probe_args)
+        self.assertIn("transformer.h.0.attn", probe_args)
+        self.assertIn("--activation-name-contains", probe_args)
+        self.assertIn("mlp", probe_args)
+        self.assertIn("--api-provider", probe_args)
+        self.assertIn("openai-responses", probe_args)
+        self.assertIn("--api-model", probe_args)
+        self.assertIn("gpt-5-nano", probe_args)
+        self.assertIn("--api-reasoning-effort", probe_args)
+        self.assertIn("minimal", probe_args)
+        self.assertIn("--api-text-verbosity", probe_args)
+        self.assertIn("low", probe_args)
+        self.assertNotIn("--resume-existing", probe_args)
+        self.assertIn("--resume-existing", sweep_args)
+        self.assertEqual(
+            zspace_inference_distortion_runtime_cli_args(None, sweep=True),
+            ["--resume-existing"],
         )
 
     def test_local_gpt2_openai_distortion_sample_is_sanitized(self) -> None:

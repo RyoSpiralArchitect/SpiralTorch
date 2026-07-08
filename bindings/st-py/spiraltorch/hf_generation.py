@@ -19,6 +19,8 @@ __all__ = [
     "compare_zspace_generation_control_sweeps",
     "zspace_inference_distortion_sweep_report_from_probes",
     "zspace_inference_distortion_probe_cli_args",
+    "zspace_inference_distortion_runtime_cli_args",
+    "zspace_inference_distortion_runtime_plan",
     "zspace_inference_distortion_sweep_cli_args",
     "zspace_generation_control_bridge_cli_args",
     "zspace_generation_control_processor_kwargs",
@@ -1599,6 +1601,88 @@ def zspace_inference_distortion_probe_cli_args(
             args.extend([flag, _cli_value(config[key])])
     if config.get("include_penalties") is True:
         args.append("--include-penalties")
+    return args
+
+
+def _text_sequence(value: object) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, Sequence) and not isinstance(value, (bytes, bytearray)):
+        return [str(item) for item in value]
+    return [str(value)]
+
+
+def zspace_inference_distortion_runtime_plan(
+    *,
+    local_model: str | Path | None = None,
+    allow_remote: bool = False,
+    trust_remote_code: bool = False,
+    max_new_tokens: int = 48,
+    activation_module_name: Sequence[object] | object | None = None,
+    activation_name_contains: Sequence[object] | object | None = None,
+    api_provider: str | None = "fake",
+    api_model: str | None = None,
+    api_max_tokens: int = 160,
+    api_reasoning_effort: str | None = None,
+    api_text_verbosity: str | None = None,
+) -> dict[str, object]:
+    """Return a serializable runtime plan for inference-distortion probes."""
+
+    return {
+        "local_model": str(local_model) if local_model is not None else None,
+        "allow_remote": bool(allow_remote),
+        "trust_remote_code": bool(trust_remote_code),
+        "max_new_tokens": int(max_new_tokens),
+        "activation_module_name": _text_sequence(activation_module_name),
+        "activation_name_contains": _text_sequence(activation_name_contains),
+        "api_provider": api_provider,
+        "api_model": api_model,
+        "api_max_tokens": int(api_max_tokens),
+        "api_reasoning_effort": api_reasoning_effort,
+        "api_text_verbosity": api_text_verbosity,
+    }
+
+
+def zspace_inference_distortion_runtime_cli_args(
+    runtime: Mapping[str, object] | None,
+    *,
+    sweep: bool = False,
+) -> list[str]:
+    """Return CLI args that replay one inference-distortion runtime plan."""
+
+    if not runtime:
+        return ["--resume-existing"] if sweep else []
+    args: list[str] = []
+    if runtime.get("local_model"):
+        args.extend(["--local-model", _cli_value(runtime["local_model"])])
+    if runtime.get("allow_remote"):
+        args.append("--allow-remote")
+    if runtime.get("trust_remote_code"):
+        args.append("--trust-remote-code")
+    if runtime.get("max_new_tokens") is not None:
+        args.extend(["--max-new-tokens", _cli_value(runtime["max_new_tokens"])])
+    for name in _text_sequence(runtime.get("activation_module_name")):
+        args.extend(["--activation-module-name", name])
+    for needle in _text_sequence(runtime.get("activation_name_contains")):
+        args.extend(["--activation-name-contains", needle])
+    if runtime.get("api_provider"):
+        args.extend(["--api-provider", _cli_value(runtime["api_provider"])])
+    if runtime.get("api_model"):
+        args.extend(["--api-model", _cli_value(runtime["api_model"])])
+    if runtime.get("api_max_tokens") is not None:
+        args.extend(["--api-max-tokens", _cli_value(runtime["api_max_tokens"])])
+    if runtime.get("api_reasoning_effort"):
+        args.extend(
+            ["--api-reasoning-effort", _cli_value(runtime["api_reasoning_effort"])]
+        )
+    if runtime.get("api_text_verbosity"):
+        args.extend(
+            ["--api-text-verbosity", _cli_value(runtime["api_text_verbosity"])]
+        )
+    if sweep:
+        args.append("--resume-existing")
     return args
 
 
