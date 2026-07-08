@@ -14,9 +14,21 @@
         "max_train_samples": 4096,
         "max_eval_samples": 512
       },
+      "dataset": {
+        "name": "wikitext",
+        "config": "wikitext-2-raw-v1",
+        "train_split": "train",
+        "eval_split": "validation",
+        "text_column": "text"
+      },
       "generation": {
         "max_new_tokens": 80,
         "do_sample": false
+      },
+      "runtime": {
+        "allow_remote": false,
+        "trust_remote_code": false,
+        "dataloader_pin_memory": "auto"
       },
       "notes": "Baseline profile matching the historical GPT-2 examples."
     },
@@ -32,9 +44,21 @@
         "max_train_samples": 4096,
         "max_eval_samples": 512
       },
+      "dataset": {
+        "name": "wikitext",
+        "config": "wikitext-2-raw-v1",
+        "train_split": "train",
+        "eval_split": "validation",
+        "text_column": "text"
+      },
       "generation": {
         "max_new_tokens": 80,
         "do_sample": false
+      },
+      "runtime": {
+        "allow_remote": false,
+        "trust_remote_code": false,
+        "dataloader_pin_memory": "auto"
       },
       "notes": "Smaller GPT-2-family profile for local smoke runs."
     },
@@ -50,9 +74,21 @@
         "max_train_samples": 128,
         "max_eval_samples": 32
       },
+      "dataset": {
+        "name": "wikitext",
+        "config": "wikitext-2-raw-v1",
+        "train_split": "train",
+        "eval_split": "validation",
+        "text_column": "text"
+      },
       "generation": {
         "max_new_tokens": 32,
         "do_sample": false
+      },
+      "runtime": {
+        "allow_remote": false,
+        "trust_remote_code": false,
+        "dataloader_pin_memory": "auto"
       },
       "notes": "Fast config for tests and docs; requires remote downloads when not cached."
     },
@@ -67,6 +103,13 @@
         "block_size": 128,
         "max_train_samples": 4096,
         "max_eval_samples": 512
+      },
+      "dataset": {
+        "name": "wikitext",
+        "config": "wikitext-2-raw-v1",
+        "train_split": "train",
+        "eval_split": "validation",
+        "text_column": "text"
       },
       "generation": {
         "max_new_tokens": 96,
@@ -86,6 +129,11 @@
         "ngram_repression_strength": 0.45,
         "ngram_decay": 0.85
       },
+      "runtime": {
+        "allow_remote": false,
+        "trust_remote_code": false,
+        "dataloader_pin_memory": "auto"
+      },
       "notes": "Non-GPT-2 causal-LM smoke profile for widening local FT coverage."
     },
     {
@@ -101,6 +149,13 @@
         "max_eval_samples": 512,
         "per_device_train_batch_size": 1,
         "gradient_accumulation_steps": 8
+      },
+      "dataset": {
+        "name": "wikitext",
+        "config": "wikitext-2-raw-v1",
+        "train_split": "train",
+        "eval_split": "validation",
+        "text_column": "text"
       },
       "generation": {
         "max_new_tokens": 128,
@@ -120,6 +175,11 @@
         "ngram_repression_strength": 0.35,
         "ngram_decay": 0.9
       },
+      "runtime": {
+        "allow_remote": false,
+        "trust_remote_code": false,
+        "dataloader_pin_memory": "auto"
+      },
       "notes": "Modern small causal-LM profile for local/API-adjacent Z-Space trials."
     },
     {
@@ -133,6 +193,13 @@
         "block_size": 256,
         "max_train_samples": 8192,
         "max_eval_samples": 1024
+      },
+      "dataset": {
+        "name": "wikitext",
+        "config": "wikitext-2-raw-v1",
+        "train_split": "train",
+        "eval_split": "validation",
+        "text_column": "text"
       },
       "generation": {
         "max_new_tokens": 128,
@@ -151,6 +218,11 @@
         "ngram_window": 32,
         "ngram_repression_strength": 0.4,
         "ngram_decay": 0.9
+      },
+      "runtime": {
+        "allow_remote": false,
+        "trust_remote_code": false,
+        "dataloader_pin_memory": "auto"
       },
       "notes": "Copy this profile for a local AutoModelForCausalLM directory."
     }

@@ -79,7 +79,9 @@ def profile_main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--no-model", action="store_true")
     parser.add_argument("--no-training", action="store_true")
+    parser.add_argument("--no-dataset", action="store_true")
     parser.add_argument("--no-generation", action="store_true")
+    parser.add_argument("--no-runtime", action="store_true")
     args = parser.parse_args(argv)
     profile = resolve_hf_finetune_model_profile(
         args.model_configs,
@@ -95,7 +97,9 @@ def profile_main(argv: Sequence[str] | None = None) -> int:
                     profile,
                     include_model=not args.no_model,
                     include_training=not args.no_training,
+                    include_dataset=not args.no_dataset,
                     include_generation=not args.no_generation,
+                    include_runtime=not args.no_runtime,
                 )
             )
         )

@@ -637,6 +637,11 @@ def _profile_value(profile: Mapping[str, Any], section: str, key: str) -> Any:
     return None
 
 
+def _profile_section(profile: Mapping[str, Any], section: str) -> Mapping[str, Any]:
+    payload = profile.get(section)
+    return payload if isinstance(payload, Mapping) else {}
+
+
 def _set_profile_default(
     args: argparse.Namespace,
     raw_argv: Sequence[str],
@@ -647,6 +652,43 @@ def _set_profile_default(
     if value is None or _argv_has_option(raw_argv, *flags):
         return
     setattr(args, attr, value)
+
+
+def _set_profile_default_if_present(
+    args: argparse.Namespace,
+    raw_argv: Sequence[str],
+    section: Mapping[str, Any],
+    key: str,
+    attr: str,
+    *flags: str,
+) -> None:
+    if key not in section or _argv_has_option(raw_argv, *flags):
+        return
+    setattr(args, attr, section.get(key))
+
+
+def _profile_path_list(value: Any) -> list[Path]:
+    if value is None:
+        return []
+    if isinstance(value, (str, Path)):
+        raw_values = [value]
+    elif isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        raw_values = list(value)
+    else:
+        raw_values = [value]
+    return [Path(str(item)) for item in raw_values if str(item)]
+
+
+def _profile_string_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        raw_values = value.split(",")
+    elif isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        raw_values = [str(item) for item in value]
+    else:
+        raw_values = [str(value)]
+    return [item.strip() for item in raw_values if item.strip()]
 
 
 def _apply_model_profile_defaults(
@@ -726,6 +768,50 @@ def _apply_model_profile_defaults(
             _profile_value(profile, "training", key),
             flag,
         )
+    dataset = _profile_section(profile, "dataset")
+    for attr, key, flag in (
+        ("dataset_name", "name", "--dataset-name"),
+        ("dataset_revision", "revision", "--dataset-revision"),
+        ("train_split", "train_split", "--train-split"),
+        ("eval_split", "eval_split", "--eval-split"),
+        ("text_column", "text_column", "--text-column"),
+        ("dataset_format", "format", "--dataset-format"),
+        ("validation_fraction", "validation_fraction", "--validation-fraction"),
+        (
+            "streaming_shuffle_buffer_size",
+            "streaming_shuffle_buffer_size",
+            "--streaming-shuffle-buffer-size",
+        ),
+        (
+            "streaming_validation_samples",
+            "streaming_validation_samples",
+            "--streaming-validation-samples",
+        ),
+    ):
+        _set_profile_default_if_present(args, raw_argv, dataset, key, attr, flag)
+    _set_profile_default_if_present(
+        args,
+        raw_argv,
+        dataset,
+        "config",
+        "dataset_config",
+        "--dataset-config",
+    )
+    _set_profile_default_if_present(
+        args,
+        raw_argv,
+        dataset,
+        "streaming",
+        "dataset_streaming",
+        "--dataset-streaming",
+    )
+    if "train_files" in dataset and not _argv_has_option(raw_argv, "--train-file"):
+        args.train_file = _profile_path_list(dataset.get("train_files"))
+    if "validation_files" in dataset and not _argv_has_option(
+        raw_argv,
+        "--validation-file",
+    ):
+        args.validation_file = _profile_path_list(dataset.get("validation_files"))
     for attr, key, flag in (
         ("generation_max_new_tokens", "max_new_tokens", "--generation-max-new-tokens"),
         ("generation_temperature", "temperature", "--generation-temperature"),
@@ -819,6 +905,35 @@ def _apply_model_profile_defaults(
         value = _profile_value(profile, "generation", key)
         if value is True and not _argv_has_option(raw_argv, flag):
             setattr(args, attr, True)
+    runtime = _profile_section(profile, "runtime")
+    for attr, key, flag in (
+        ("allow_remote", "allow_remote", "--allow-remote"),
+        ("trust_remote_code", "trust_remote_code", "--trust-remote-code"),
+        ("model_train_dtype", "model_train_dtype", "--model-train-dtype"),
+        ("dataloader_pin_memory", "dataloader_pin_memory", "--dataloader-pin-memory"),
+        ("min_free_disk_gb", "min_free_disk_gb", "--min-free-disk-gb"),
+        ("require_wgpu_ready", "require_wgpu_ready", "--require-wgpu-ready"),
+        (
+            "no_require_hf_gpt2_ft",
+            "no_require_hf_gpt2_ft",
+            "--no-require-hf-gpt2-ft",
+        ),
+    ):
+        _set_profile_default_if_present(args, raw_argv, runtime, key, attr, flag)
+    if "runtime_device_backends" in runtime and not _argv_has_option(
+        raw_argv,
+        "--runtime-device-backend",
+    ):
+        args.runtime_device_backend = _profile_string_list(
+            runtime.get("runtime_device_backends")
+        )
+    if "required_runtime_device_ready_backends" in runtime and not _argv_has_option(
+        raw_argv,
+        "--require-runtime-device-ready-backend",
+    ):
+        args.require_runtime_device_ready_backend = _profile_string_list(
+            runtime.get("required_runtime_device_ready_backends")
+        )
 
 
 def _module(name: str) -> Any:

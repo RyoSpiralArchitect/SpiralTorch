@@ -7461,6 +7461,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             128,
         )
         self.assertEqual(
+            profiles["gpt2-local-smoke"]["dataset"]["name"],
+            "wikitext",
+        )
+        self.assertEqual(
+            profiles["gpt2-local-smoke"]["runtime"]["dataloader_pin_memory"],
+            "auto",
+        )
+        self.assertEqual(
             profiles["distilgpt2-local-smoke"]["tokenizer_name"],
             "distilgpt2",
         )
@@ -7506,15 +7514,23 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(profile["model_name"], "distilgpt2")
         self.assertEqual(profile["tokenizer_name"], "distilgpt2")
         self.assertEqual(profile["training"]["block_size"], 128)
+        self.assertEqual(profile["dataset"]["name"], "wikitext")
+        self.assertEqual(profile["dataset"]["config"], "wikitext-2-raw-v1")
         self.assertEqual(profile["generation"]["max_new_tokens"], 80)
+        self.assertFalse(profile["runtime"]["allow_remote"])
         self.assertIn("--model-name", cli_args)
         self.assertIn("distilgpt2", cli_args)
+        self.assertIn("--dataset-name", cli_args)
+        self.assertIn("wikitext", cli_args)
+        self.assertIn("--dataset-config", cli_args)
+        self.assertIn("wikitext-2-raw-v1", cli_args)
         self.assertIn("--block-size", cli_args)
         self.assertIn("128", cli_args)
         self.assertIn("--generation-max-new-tokens", cli_args)
         self.assertIn("80", cli_args)
         self.assertNotIn("--generation-do-sample", cli_args)
         self.assertIn("profile=distilgpt2-local-smoke", lines[0])
+        self.assertIn("dataset=wikitext", lines[0])
 
         pythia_profile = st.resolve_hf_finetune_model_profile(
             MODEL_CONFIGS_PATH,
@@ -7530,6 +7546,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("0.8", pythia_cli_args)
         self.assertIn("--generation-top-k", pythia_cli_args)
         self.assertIn("50", pythia_cli_args)
+        self.assertIn("--generation-zspace-top-k", pythia_cli_args)
+        self.assertIn("64", pythia_cli_args)
 
     def test_bridge_model_profile_defaults_and_explicit_overrides(self) -> None:
         module = load_bridge_example()
@@ -7574,6 +7592,117 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(overridden.generation_max_new_tokens, 11)
         self.assertEqual(module._tokenizer_name(overridden), "gpt2")
 
+    def test_bridge_model_profile_dataset_and_runtime_defaults(self) -> None:
+        module = load_bridge_example()
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "profiles.json"
+            train_path = Path(tmp) / "train.txt"
+            valid_path = Path(tmp) / "valid.txt"
+            train_path.write_text("SpiralTorch trains.\n", encoding="utf-8")
+            valid_path.write_text("SpiralTorch validates.\n", encoding="utf-8")
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "schema": "spiraltorch.hf_finetune_model_configs.v1",
+                        "default_profile": "custom-causal",
+                        "profiles": [
+                            {
+                                "id": "custom-causal",
+                                "model_name": "org/custom-causal",
+                                "tokenizer_name": "org/custom-tokenizer",
+                                "architecture": "causal_lm",
+                                "max_length": 96,
+                                "training": {
+                                    "block_size": 96,
+                                    "max_train_samples": 77,
+                                    "max_eval_samples": 22,
+                                    "save_total_limit": 1,
+                                },
+                                "dataset": {
+                                    "name": "roneneldan/TinyStories",
+                                    "config": None,
+                                    "revision": "main",
+                                    "streaming": True,
+                                    "streaming_shuffle_buffer_size": 128,
+                                    "streaming_validation_samples": 16,
+                                    "train_split": "train[:1%]",
+                                    "eval_split": "",
+                                    "text_column": "story",
+                                },
+                                "generation": {
+                                    "max_new_tokens": 33,
+                                    "do_sample": True,
+                                },
+                                "runtime": {
+                                    "allow_remote": True,
+                                    "trust_remote_code": True,
+                                    "model_train_dtype": "float32",
+                                    "dataloader_pin_memory": "false",
+                                    "min_free_disk_gb": 3.5,
+                                    "runtime_device_backends": ["cpu"],
+                                    "required_runtime_device_ready_backends": ["cpu"],
+                                },
+                            },
+                            {
+                                "id": "local-files",
+                                "model_name": "models/local",
+                                "training": {"block_size": 32},
+                                "dataset": {
+                                    "format": "text",
+                                    "train_files": [str(train_path)],
+                                    "validation_files": [str(valid_path)],
+                                },
+                            },
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            args = module.parse_args(
+                [
+                    "--model-configs",
+                    str(config_path),
+                    "--metadata-only",
+                ]
+            )
+            local_args = module.parse_args(
+                [
+                    "--model-configs",
+                    str(config_path),
+                    "--model-profile",
+                    "local-files",
+                    "--metadata-only",
+                ]
+            )
+
+        self.assertEqual(args.model_name, "org/custom-causal")
+        self.assertEqual(args.tokenizer_name, "org/custom-tokenizer")
+        self.assertEqual(args.dataset_name, "roneneldan/TinyStories")
+        self.assertIsNone(args.dataset_config)
+        self.assertEqual(args.dataset_revision, "main")
+        self.assertTrue(args.dataset_streaming)
+        self.assertEqual(args.streaming_shuffle_buffer_size, 128)
+        self.assertEqual(args.streaming_validation_samples, 16)
+        self.assertEqual(args.train_split, "train[:1%]")
+        self.assertEqual(args.eval_split, "")
+        self.assertEqual(args.text_column, "story")
+        self.assertEqual(args.max_train_samples, 77)
+        self.assertEqual(args.max_eval_samples, 22)
+        self.assertEqual(args.save_total_limit, 1)
+        self.assertEqual(args.generation_max_new_tokens, 33)
+        self.assertTrue(args.generation_do_sample)
+        self.assertTrue(args.allow_remote)
+        self.assertTrue(args.trust_remote_code)
+        self.assertEqual(args.model_train_dtype, "float32")
+        self.assertEqual(args.dataloader_pin_memory, "false")
+        self.assertEqual(args.min_free_disk_gb, 3.5)
+        self.assertEqual(args.runtime_device_backend, ["cpu"])
+        self.assertEqual(args.require_runtime_device_ready_backend, ["cpu"])
+        self.assertEqual(local_args.train_file, [train_path])
+        self.assertEqual(local_args.validation_file, [valid_path])
+        self.assertEqual(local_args.dataset_format, "text")
+
     def test_generic_bridge_wrapper_preserves_model_profile_defaults(self) -> None:
         module = load_generic_bridge_example()
         args = module.parse_args(
@@ -7614,6 +7743,27 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(payload["profile_id"], "tiny-gpt2-ci")
         self.assertEqual(payload["model_name"], "sshleifer/tiny-gpt2")
+
+        cli_stdout = io.StringIO()
+        with redirect_stdout(cli_stdout):
+            cli_code = hf_cli.profile_main(
+                [
+                    "--model-configs",
+                    str(MODEL_CONFIGS_PATH),
+                    "--model-profile",
+                    "qwen2-0.5b-local-smoke",
+                    "--cli-args",
+                    "--no-dataset",
+                    "--no-runtime",
+                ]
+            )
+        cli_args = cli_stdout.getvalue().split()
+        self.assertEqual(cli_code, 0)
+        self.assertIn("--model-name", cli_args)
+        self.assertIn("Qwen/Qwen2-0.5B", cli_args)
+        self.assertIn("--generation-zspace-top-k", cli_args)
+        self.assertNotIn("--dataset-name", cli_args)
+        self.assertNotIn("--allow-remote", cli_args)
 
     def test_installed_hf_finetune_sweep_cli_reaches_generic_wrapper(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -7700,6 +7850,106 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(stored_report["model_profile"]["profile_id"], "tiny-gpt2-ci")
         self.assertIn("profile=tiny-gpt2-ci", stored_report["model_profile_lines"][0])
         self.assertEqual(report["run_count"], 1)
+
+    def test_sweep_model_profile_dataset_and_runtime_flow_to_bridge_commands(
+        self,
+    ) -> None:
+        module = load_sweep_example()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config_path = root / "profiles.json"
+            out_dir = root / "sweep"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "schema": "spiraltorch.hf_finetune_model_configs.v1",
+                        "default_profile": "pythia-stream",
+                        "profiles": [
+                            {
+                                "id": "pythia-stream",
+                                "model_name": "EleutherAI/pythia-70m-deduped",
+                                "tokenizer_name": "EleutherAI/pythia-70m-deduped",
+                                "architecture": "causal_lm",
+                                "training": {
+                                    "block_size": 80,
+                                    "max_train_samples": 99,
+                                    "max_eval_samples": 25,
+                                    "max_steps": 7,
+                                    "learning_rate": 0.0002,
+                                    "save_total_limit": 1,
+                                },
+                                "dataset": {
+                                    "name": "roneneldan/TinyStories",
+                                    "config": None,
+                                    "revision": "main",
+                                    "streaming": True,
+                                    "streaming_shuffle_buffer_size": 64,
+                                    "streaming_validation_samples": 8,
+                                    "train_split": "train",
+                                    "eval_split": "",
+                                    "text_column": "story",
+                                },
+                                "generation": {
+                                    "max_new_tokens": 21,
+                                    "do_sample": True,
+                                    "temperature": 0.9,
+                                },
+                                "runtime": {
+                                    "allow_remote": True,
+                                    "trust_remote_code": True,
+                                    "min_free_disk_gb": 4.0,
+                                    "dataloader_pin_memory": "false",
+                                    "runtime_device_backends": ["cpu"],
+                                    "required_runtime_device_ready_backends": ["cpu"],
+                                },
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            args = module.parse_args(
+                [
+                    "--dry-run",
+                    "--out-dir",
+                    str(out_dir),
+                    "--model-configs",
+                    str(config_path),
+                    "--generation-prompt",
+                    "SpiralTorch is",
+                ]
+            )
+            runs = module.build_sweep_runs(args)
+            report = module.run_sweep(args)
+            stored_report = json.loads((out_dir / "sweep-report.json").read_text())
+
+        command = runs[0]["command"]
+        self.assertEqual(args.model_name, "EleutherAI/pythia-70m-deduped")
+        self.assertEqual(args.dataset_name, "roneneldan/TinyStories")
+        self.assertIsNone(args.dataset_config)
+        self.assertTrue(args.dataset_streaming)
+        self.assertTrue(args.allow_remote)
+        self.assertEqual(args.min_free_disk_gb, 4.0)
+        self.assertEqual(args.runtime_device_backend, ["cpu"])
+        self.assertEqual(command[command.index("--dataset-name") + 1], "roneneldan/TinyStories")
+        self.assertEqual(command[command.index("--dataset-config") + 1], "")
+        self.assertIn("--dataset-streaming", command)
+        self.assertEqual(command[command.index("--streaming-shuffle-buffer-size") + 1], "64")
+        self.assertEqual(command[command.index("--streaming-validation-samples") + 1], "8")
+        self.assertIn("--allow-remote", command)
+        self.assertIn("--trust-remote-code", command)
+        self.assertEqual(command[command.index("--min-free-disk-gb") + 1], "4.0")
+        self.assertEqual(command[command.index("--dataloader-pin-memory") + 1], "false")
+        self.assertEqual(command[command.index("--runtime-device-backend") + 1], "cpu")
+        self.assertEqual(
+            command[command.index("--require-runtime-device-ready-backend") + 1],
+            "cpu",
+        )
+        self.assertEqual(report["dataset_name"], "roneneldan/TinyStories")
+        self.assertIsNone(report["dataset_config"])
+        self.assertTrue(report["dataset_streaming"])
+        self.assertEqual(stored_report["runs"][0]["dataset_name"], "roneneldan/TinyStories")
+        self.assertEqual(stored_report["runs"][0]["min_free_disk_gb"], 4.0)
 
     def test_generic_sweep_wrapper_defaults_to_generic_bridge(self) -> None:
         module = load_generic_sweep_example()

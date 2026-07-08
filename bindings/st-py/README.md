@@ -375,7 +375,10 @@ historical `hf_gpt2_*` scripts still work, but new runs should prefer the
 DistilGPT-2, Pythia, Qwen, tiny CI models, or another local
 `AutoModelForCausalLM` profile. Keep model-specific settings in
 `bindings/st-py/examples/hf_finetune_model_configs.example.json` or a copied
-config file rather than baking them into the script name:
+config file rather than baking them into the script name. Profiles can carry
+model/tokenizer names, training shape, dataset/revision/streaming defaults,
+generation/Z-Space softmax knobs, and local runtime policy such as remote-code
+trust, disk guards, dataloader pinning, or required SpiralTorch backends:
 
 ```bash
 spiral-hf-profile \
@@ -384,6 +387,11 @@ spiral-hf-profile \
 spiral-hf-profile \
   --model-configs bindings/st-py/examples/hf_finetune_model_configs.example.json \
   --model-profile pythia-70m-local-smoke
+
+spiral-hf-profile \
+  --model-configs bindings/st-py/examples/hf_finetune_model_configs.example.json \
+  --model-profile qwen2-0.5b-local-smoke \
+  --cli-args
 
 PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_finetune_bridge.py \
   --model-configs bindings/st-py/examples/hf_finetune_model_configs.example.json \

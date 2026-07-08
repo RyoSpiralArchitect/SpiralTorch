@@ -104,6 +104,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--tokenizer-name", default=None)
     parser.add_argument("--dataset-name", default="wikitext")
     parser.add_argument("--dataset-config", default="wikitext-2-raw-v1")
+    parser.add_argument("--dataset-revision", default=None)
+    parser.add_argument("--dataset-streaming", action="store_true")
+    parser.add_argument("--streaming-shuffle-buffer-size", type=int, default=0)
+    parser.add_argument("--streaming-validation-samples", type=int, default=0)
     parser.add_argument("--train-split", default="train")
     parser.add_argument("--eval-split", default="validation")
     parser.add_argument("--text-column", default="text")
@@ -208,7 +212,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--gradient-accumulation-steps", type=int, default=8)
     parser.add_argument("--logging-steps", type=int, default=25)
     parser.add_argument("--save-steps", type=int, default=250)
+    parser.add_argument("--save-total-limit", type=int, default=None)
     parser.add_argument("--eval-steps", type=int, default=250)
+    parser.add_argument("--min-free-disk-gb", type=float, default=0.0)
     parser.add_argument("--eval-accumulation-steps", type=int, default=0)
     parser.add_argument("--dataloader-num-workers", type=int, default=0)
     parser.add_argument(
@@ -228,6 +234,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         )
     if args.validation_fraction < 0.0 or args.validation_fraction >= 1.0:
         parser.error("--validation-fraction must be in [0.0, 1.0)")
+    if args.dataset_streaming and args.train_file:
+        parser.error("--dataset-streaming is only supported for remote HF datasets")
+    if args.dataset_streaming and (
+        args.max_train_samples is None or args.max_train_samples <= 0
+    ):
+        parser.error("--dataset-streaming requires a positive --max-train-samples")
+    if args.streaming_shuffle_buffer_size < 0:
+        parser.error("--streaming-shuffle-buffer-size must be non-negative")
+    if args.streaming_validation_samples < 0:
+        parser.error("--streaming-validation-samples must be non-negative")
     if args.generation_max_new_tokens <= 0:
         parser.error("--generation-max-new-tokens must be positive")
     if args.generation_temperature <= 0.0:
@@ -313,6 +329,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("--max-train-samples and --max-eval-samples must be non-negative")
     if args.max_eval_blocks < 0:
         parser.error("--max-eval-blocks must be non-negative")
+    if args.save_total_limit is not None and args.save_total_limit <= 0:
+        parser.error("--save-total-limit must be positive")
+    if args.min_free_disk_gb < 0.0 or not math.isfinite(args.min_free_disk_gb):
+        parser.error("--min-free-disk-gb must be finite and non-negative")
     if args.eval_accumulation_steps < 0:
         parser.error("--eval-accumulation-steps must be non-negative")
     if args.dataloader_num_workers < 0:
@@ -387,6 +407,11 @@ def _profile_value(profile: Mapping[str, Any], section: str, key: str) -> Any:
     return None
 
 
+def _profile_section(profile: Mapping[str, Any], section: str) -> Mapping[str, Any]:
+    payload = profile.get(section)
+    return payload if isinstance(payload, Mapping) else {}
+
+
 def _set_profile_default(
     args: argparse.Namespace,
     raw_argv: Sequence[str],
@@ -397,6 +422,43 @@ def _set_profile_default(
     if value is None or _argv_has_option(raw_argv, *flags):
         return
     setattr(args, attr, value)
+
+
+def _set_profile_default_if_present(
+    args: argparse.Namespace,
+    raw_argv: Sequence[str],
+    section: Mapping[str, Any],
+    key: str,
+    attr: str,
+    *flags: str,
+) -> None:
+    if key not in section or _argv_has_option(raw_argv, *flags):
+        return
+    setattr(args, attr, section.get(key))
+
+
+def _profile_path_list(value: Any) -> list[Path]:
+    if value is None:
+        return []
+    if isinstance(value, (str, Path)):
+        raw_values = [value]
+    elif isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        raw_values = list(value)
+    else:
+        raw_values = [value]
+    return [Path(str(item)) for item in raw_values if str(item)]
+
+
+def _profile_string_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        raw_values = value.split(",")
+    elif isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        raw_values = [str(item) for item in value]
+    else:
+        raw_values = [str(value)]
+    return [item.strip() for item in raw_values if item.strip()]
 
 
 def _apply_model_profile_defaults(
@@ -469,12 +531,57 @@ def _apply_model_profile_defaults(
         ("max_step_values", "max_steps", "--max-step-values"),
         ("logging_steps", "logging_steps", "--logging-steps"),
         ("save_steps", "save_steps", "--save-steps"),
+        ("save_total_limit", "save_total_limit", "--save-total-limit"),
         ("eval_steps", "eval_steps", "--eval-steps"),
     ):
         value = _profile_value(profile, "training", key)
         if value is not None and attr in {"learning_rate_values", "max_step_values"}:
             value = [value]
         _set_profile_default(args, raw_argv, attr, value, flag)
+    dataset = _profile_section(profile, "dataset")
+    for attr, key, flag in (
+        ("dataset_name", "name", "--dataset-name"),
+        ("dataset_revision", "revision", "--dataset-revision"),
+        ("train_split", "train_split", "--train-split"),
+        ("eval_split", "eval_split", "--eval-split"),
+        ("text_column", "text_column", "--text-column"),
+        ("dataset_format", "format", "--dataset-format"),
+        ("validation_fraction", "validation_fraction", "--validation-fraction"),
+        (
+            "streaming_shuffle_buffer_size",
+            "streaming_shuffle_buffer_size",
+            "--streaming-shuffle-buffer-size",
+        ),
+        (
+            "streaming_validation_samples",
+            "streaming_validation_samples",
+            "--streaming-validation-samples",
+        ),
+    ):
+        _set_profile_default_if_present(args, raw_argv, dataset, key, attr, flag)
+    _set_profile_default_if_present(
+        args,
+        raw_argv,
+        dataset,
+        "config",
+        "dataset_config",
+        "--dataset-config",
+    )
+    _set_profile_default_if_present(
+        args,
+        raw_argv,
+        dataset,
+        "streaming",
+        "dataset_streaming",
+        "--dataset-streaming",
+    )
+    if "train_files" in dataset and not _argv_has_option(raw_argv, "--train-file"):
+        args.train_file = _profile_path_list(dataset.get("train_files"))
+    if "validation_files" in dataset and not _argv_has_option(
+        raw_argv,
+        "--validation-file",
+    ):
+        args.validation_file = _profile_path_list(dataset.get("validation_files"))
     for attr, key, flag in (
         ("generation_max_new_tokens", "max_new_tokens", "--generation-max-new-tokens"),
         ("generation_temperature", "temperature", "--generation-temperature"),
@@ -568,6 +675,34 @@ def _apply_model_profile_defaults(
         value = _profile_value(profile, "generation", key)
         if value is True and not _argv_has_option(raw_argv, flag):
             setattr(args, attr, True)
+    runtime = _profile_section(profile, "runtime")
+    for attr, key, flag in (
+        ("allow_remote", "allow_remote", "--allow-remote"),
+        ("trust_remote_code", "trust_remote_code", "--trust-remote-code"),
+        ("min_free_disk_gb", "min_free_disk_gb", "--min-free-disk-gb"),
+        ("dataloader_pin_memory", "dataloader_pin_memory", "--dataloader-pin-memory"),
+        ("require_wgpu_ready", "require_wgpu_ready", "--require-wgpu-ready"),
+        (
+            "no_require_hf_gpt2_ft",
+            "no_require_hf_gpt2_ft",
+            "--no-require-hf-gpt2-ft",
+        ),
+    ):
+        _set_profile_default_if_present(args, raw_argv, runtime, key, attr, flag)
+    if "runtime_device_backends" in runtime and not _argv_has_option(
+        raw_argv,
+        "--runtime-device-backend",
+    ):
+        args.runtime_device_backend = _profile_string_list(
+            runtime.get("runtime_device_backends")
+        )
+    if "required_runtime_device_ready_backends" in runtime and not _argv_has_option(
+        raw_argv,
+        "--require-runtime-device-ready-backend",
+    ):
+        args.require_runtime_device_ready_backend = _profile_string_list(
+            runtime.get("required_runtime_device_ready_backends")
+        )
 
 
 def _append_repeated(command: list[str], flag: str, values: list[Path]) -> None:
@@ -644,6 +779,8 @@ def _bridge_command(
         str(args.save_steps),
         "--eval-steps",
         str(args.eval_steps),
+        "--min-free-disk-gb",
+        str(args.min_free_disk_gb),
         "--eval-accumulation-steps",
         str(args.eval_accumulation_steps),
         "--dataloader-num-workers",
@@ -651,6 +788,8 @@ def _bridge_command(
         "--dataloader-pin-memory",
         str(args.dataloader_pin_memory),
     ]
+    if args.save_total_limit is not None:
+        command.extend(["--save-total-limit", str(args.save_total_limit)])
     if args.model_configs is not None:
         command.extend(["--model-configs", str(args.model_configs)])
     if args.model_profile is not None:
@@ -666,14 +805,30 @@ def _bridge_command(
             [
                 "--dataset-name",
                 str(args.dataset_name),
-                "--dataset-config",
-                str(args.dataset_config),
                 "--train-split",
                 str(args.train_split),
                 "--eval-split",
                 str(args.eval_split),
             ]
         )
+        command.extend(
+            [
+                "--dataset-config",
+                "" if args.dataset_config is None else str(args.dataset_config),
+            ]
+        )
+        if args.dataset_revision is not None:
+            command.extend(["--dataset-revision", str(args.dataset_revision)])
+        if args.dataset_streaming:
+            command.append("--dataset-streaming")
+            command.extend(
+                [
+                    "--streaming-shuffle-buffer-size",
+                    str(args.streaming_shuffle_buffer_size),
+                    "--streaming-validation-samples",
+                    str(args.streaming_validation_samples),
+                ]
+            )
     if args.allow_remote:
         command.append("--allow-remote")
     if args.trust_remote_code:
@@ -888,6 +1043,13 @@ def build_sweep_runs(args: argparse.Namespace) -> list[dict[str, Any]]:
                 "seed": seed,
                 "model_name": str(args.model_name),
                 "tokenizer_name": str(args.tokenizer_name or args.model_name),
+                "dataset_name": str(args.dataset_name),
+                "dataset_config": args.dataset_config,
+                "dataset_revision": args.dataset_revision,
+                "dataset_streaming": bool(args.dataset_streaming),
+                "streaming_shuffle_buffer_size": args.streaming_shuffle_buffer_size,
+                "streaming_validation_samples": args.streaming_validation_samples,
+                "min_free_disk_gb": args.min_free_disk_gb,
                 "model_configs": (
                     None if args.model_configs is None else str(args.model_configs)
                 ),
@@ -1071,6 +1233,13 @@ def run_sweep(args: argparse.Namespace) -> dict[str, Any]:
         "dry_run": bool(args.dry_run),
         "model_name": str(args.model_name),
         "tokenizer_name": str(args.tokenizer_name or args.model_name),
+        "dataset_name": str(args.dataset_name),
+        "dataset_config": args.dataset_config,
+        "dataset_revision": args.dataset_revision,
+        "dataset_streaming": bool(args.dataset_streaming),
+        "streaming_shuffle_buffer_size": args.streaming_shuffle_buffer_size,
+        "streaming_validation_samples": args.streaming_validation_samples,
+        "min_free_disk_gb": args.min_free_disk_gb,
         "model_configs": None if args.model_configs is None else str(args.model_configs),
         "model_profile": model_profile,
         "model_profile_lines": model_profile_lines,
@@ -1103,6 +1272,13 @@ def run_sweep(args: argparse.Namespace) -> dict[str, Any]:
             "report_path": str(args.out_dir / "sweep-report.json"),
             "model_name": str(args.model_name),
             "tokenizer_name": str(args.tokenizer_name or args.model_name),
+            "dataset_name": str(args.dataset_name),
+            "dataset_config": args.dataset_config,
+            "dataset_revision": args.dataset_revision,
+            "dataset_streaming": bool(args.dataset_streaming),
+            "streaming_shuffle_buffer_size": args.streaming_shuffle_buffer_size,
+            "streaming_validation_samples": args.streaming_validation_samples,
+            "min_free_disk_gb": args.min_free_disk_gb,
             "model_configs": (
                 None if args.model_configs is None else str(args.model_configs)
             ),
@@ -1187,6 +1363,13 @@ def run_sweep(args: argparse.Namespace) -> dict[str, Any]:
         "report_path": str(args.out_dir / "sweep-report.json"),
         "model_name": str(args.model_name),
         "tokenizer_name": str(args.tokenizer_name or args.model_name),
+        "dataset_name": str(args.dataset_name),
+        "dataset_config": args.dataset_config,
+        "dataset_revision": args.dataset_revision,
+        "dataset_streaming": bool(args.dataset_streaming),
+        "streaming_shuffle_buffer_size": args.streaming_shuffle_buffer_size,
+        "streaming_validation_samples": args.streaming_validation_samples,
+        "min_free_disk_gb": args.min_free_disk_gb,
         "model_configs": None if args.model_configs is None else str(args.model_configs),
         "model_profile": model_profile,
         "model_profile_lines": model_profile_lines,

@@ -205,9 +205,21 @@ HF_FINETUNE_DEFAULT_MODEL_CONFIGS: dict[str, object] = {
                 "max_train_samples": 4096,
                 "max_eval_samples": 512,
             },
+            "dataset": {
+                "name": "wikitext",
+                "config": "wikitext-2-raw-v1",
+                "train_split": "train",
+                "eval_split": "validation",
+                "text_column": "text",
+            },
             "generation": {
                 "max_new_tokens": 80,
                 "do_sample": False,
+            },
+            "runtime": {
+                "allow_remote": False,
+                "trust_remote_code": False,
+                "dataloader_pin_memory": "auto",
             },
             "notes": "Baseline profile matching the historical GPT-2 examples.",
         },
@@ -223,9 +235,21 @@ HF_FINETUNE_DEFAULT_MODEL_CONFIGS: dict[str, object] = {
                 "max_train_samples": 4096,
                 "max_eval_samples": 512,
             },
+            "dataset": {
+                "name": "wikitext",
+                "config": "wikitext-2-raw-v1",
+                "train_split": "train",
+                "eval_split": "validation",
+                "text_column": "text",
+            },
             "generation": {
                 "max_new_tokens": 80,
                 "do_sample": False,
+            },
+            "runtime": {
+                "allow_remote": False,
+                "trust_remote_code": False,
+                "dataloader_pin_memory": "auto",
             },
             "notes": "Smaller GPT-2-family profile for local smoke runs.",
         },
@@ -241,9 +265,21 @@ HF_FINETUNE_DEFAULT_MODEL_CONFIGS: dict[str, object] = {
                 "max_train_samples": 128,
                 "max_eval_samples": 32,
             },
+            "dataset": {
+                "name": "wikitext",
+                "config": "wikitext-2-raw-v1",
+                "train_split": "train",
+                "eval_split": "validation",
+                "text_column": "text",
+            },
             "generation": {
                 "max_new_tokens": 32,
                 "do_sample": False,
+            },
+            "runtime": {
+                "allow_remote": False,
+                "trust_remote_code": False,
+                "dataloader_pin_memory": "auto",
             },
             "notes": "Fast config for tests and docs; requires remote downloads when not cached.",
         },
@@ -259,11 +295,35 @@ HF_FINETUNE_DEFAULT_MODEL_CONFIGS: dict[str, object] = {
                 "max_train_samples": 4096,
                 "max_eval_samples": 512,
             },
+            "dataset": {
+                "name": "wikitext",
+                "config": "wikitext-2-raw-v1",
+                "train_split": "train",
+                "eval_split": "validation",
+                "text_column": "text",
+            },
             "generation": {
                 "max_new_tokens": 96,
                 "do_sample": True,
                 "temperature": 0.8,
                 "top_k": 50,
+                "zspace_top_k": 64,
+                "zspace_curvature": -0.04,
+                "zspace_temperature": 1.0,
+                "zspace_entropy_target": 3.0,
+                "zspace_entropy_gain": 0.5,
+                "repression_window": 16,
+                "repression_strength": 0.8,
+                "last_token_repression": 0.7,
+                "ngram_size": 3,
+                "ngram_window": 32,
+                "ngram_repression_strength": 0.45,
+                "ngram_decay": 0.85,
+            },
+            "runtime": {
+                "allow_remote": False,
+                "trust_remote_code": False,
+                "dataloader_pin_memory": "auto",
             },
             "notes": "Non-GPT-2 causal-LM smoke profile for widening local FT coverage.",
         },
@@ -281,11 +341,35 @@ HF_FINETUNE_DEFAULT_MODEL_CONFIGS: dict[str, object] = {
                 "per_device_train_batch_size": 1,
                 "gradient_accumulation_steps": 8,
             },
+            "dataset": {
+                "name": "wikitext",
+                "config": "wikitext-2-raw-v1",
+                "train_split": "train",
+                "eval_split": "validation",
+                "text_column": "text",
+            },
             "generation": {
                 "max_new_tokens": 128,
                 "do_sample": True,
                 "temperature": 0.7,
                 "top_k": 40,
+                "zspace_top_k": 96,
+                "zspace_curvature": -0.035,
+                "zspace_temperature": 1.0,
+                "zspace_entropy_target": 3.2,
+                "zspace_entropy_gain": 0.45,
+                "repression_window": 24,
+                "repression_strength": 0.65,
+                "last_token_repression": 0.55,
+                "ngram_size": 3,
+                "ngram_window": 40,
+                "ngram_repression_strength": 0.35,
+                "ngram_decay": 0.9,
+            },
+            "runtime": {
+                "allow_remote": False,
+                "trust_remote_code": False,
+                "dataloader_pin_memory": "auto",
             },
             "notes": "Modern small causal-LM profile for local/API-adjacent Z-Space trials.",
         },
@@ -301,11 +385,35 @@ HF_FINETUNE_DEFAULT_MODEL_CONFIGS: dict[str, object] = {
                 "max_train_samples": 8192,
                 "max_eval_samples": 1024,
             },
+            "dataset": {
+                "name": "wikitext",
+                "config": "wikitext-2-raw-v1",
+                "train_split": "train",
+                "eval_split": "validation",
+                "text_column": "text",
+            },
             "generation": {
                 "max_new_tokens": 128,
                 "do_sample": True,
                 "temperature": 0.8,
                 "top_k": 50,
+                "zspace_top_k": 64,
+                "zspace_curvature": -0.04,
+                "zspace_temperature": 1.0,
+                "zspace_entropy_target": 3.0,
+                "zspace_entropy_gain": 0.5,
+                "repression_window": 16,
+                "repression_strength": 0.75,
+                "last_token_repression": 0.6,
+                "ngram_size": 3,
+                "ngram_window": 32,
+                "ngram_repression_strength": 0.4,
+                "ngram_decay": 0.9,
+            },
+            "runtime": {
+                "allow_remote": False,
+                "trust_remote_code": False,
+                "dataloader_pin_memory": "auto",
             },
             "notes": "Copy this profile for a local AutoModelForCausalLM directory.",
         },
@@ -414,9 +522,17 @@ def hf_finetune_model_profiles(
             profile.get("training"),
             label=f"{profile_id}.training",
         )
+        profile["dataset"] = _mapping_or_empty(
+            profile.get("dataset"),
+            label=f"{profile_id}.dataset",
+        )
         profile["generation"] = _mapping_or_empty(
             profile.get("generation"),
             label=f"{profile_id}.generation",
+        )
+        profile["runtime"] = _mapping_or_empty(
+            profile.get("runtime"),
+            label=f"{profile_id}.runtime",
         )
         profiles[profile_id] = profile
     return profiles
@@ -459,6 +575,14 @@ def resolve_hf_finetune_model_profile(
         selected.get("generation"),
         label=f"{profile_id}.generation",
     )
+    dataset = _mapping_or_empty(
+        selected.get("dataset"),
+        label=f"{profile_id}.dataset",
+    )
+    runtime = _mapping_or_empty(
+        selected.get("runtime"),
+        label=f"{profile_id}.runtime",
+    )
     block_size = _positive_int_or_none(
         training.get("block_size") or selected.get("max_length"),
         label=f"{profile_id}.training.block_size",
@@ -471,7 +595,9 @@ def resolve_hf_finetune_model_profile(
     )
     selected["max_length"] = max_length
     selected["training"] = training
+    selected["dataset"] = dataset
     selected["generation"] = generation
+    selected["runtime"] = runtime
     selected["id"] = profile_id
     selected["model_name"] = _string_or_none(selected.get("model_name")) or profile_id
     selected["tokenizer_name"] = (
@@ -494,7 +620,9 @@ def resolve_hf_finetune_model_profile(
         "checkpoint_prefix": selected.get("checkpoint_prefix") or "checkpoint-",
         "max_length": selected.get("max_length"),
         "training": training,
+        "dataset": dataset,
         "generation": generation,
+        "runtime": runtime,
         "profile": selected,
         "available_profiles": sorted(profiles),
     }
@@ -529,7 +657,9 @@ def hf_finetune_model_profile_cli_args(
     *,
     include_model: bool = True,
     include_training: bool = True,
+    include_dataset: bool = True,
     include_generation: bool = True,
+    include_runtime: bool = True,
 ) -> list[str]:
     """Convert a resolved model profile into existing HF FT bridge CLI flags."""
 
@@ -561,6 +691,42 @@ def hf_finetune_model_profile_cli_args(
             ("save_total_limit", "--save-total-limit"),
         ):
             _append_value_flag(args, flag, training.get(key))
+    dataset = _mapping_or_empty(report.get("dataset"), label="profile.dataset")
+    if include_dataset:
+        for key, flag in (
+            ("name", "--dataset-name"),
+            ("revision", "--dataset-revision"),
+            ("train_split", "--train-split"),
+            ("eval_split", "--eval-split"),
+            ("text_column", "--text-column"),
+            ("format", "--dataset-format"),
+            ("validation_fraction", "--validation-fraction"),
+            ("streaming_shuffle_buffer_size", "--streaming-shuffle-buffer-size"),
+            ("streaming_validation_samples", "--streaming-validation-samples"),
+        ):
+            _append_value_flag(args, flag, dataset.get(key))
+        if "config" in dataset:
+            args.extend(
+                [
+                    "--dataset-config",
+                    "" if dataset.get("config") is None else str(dataset.get("config")),
+                ]
+            )
+        if dataset.get("streaming") is True:
+            args.append("--dataset-streaming")
+        for key, flag in (
+            ("train_files", "--train-file"),
+            ("validation_files", "--validation-file"),
+        ):
+            values = dataset.get(key)
+            if isinstance(values, (str, Path)):
+                raw_values = [values]
+            elif isinstance(values, Iterable):
+                raw_values = list(values)
+            else:
+                raw_values = []
+            for value in raw_values:
+                _append_value_flag(args, flag, value)
     generation = _mapping_or_empty(report.get("generation"), label="profile.generation")
     if include_generation:
         for key, flag in (
@@ -593,6 +759,39 @@ def hf_finetune_model_profile_cli_args(
         )
         for key, flag in bool_flags:
             _append_value_flag(args, flag, generation.get(key), skip_false=True)
+    runtime = _mapping_or_empty(report.get("runtime"), label="profile.runtime")
+    if include_runtime:
+        for key, flag in (
+            ("model_train_dtype", "--model-train-dtype"),
+            ("dataloader_pin_memory", "--dataloader-pin-memory"),
+            ("min_free_disk_gb", "--min-free-disk-gb"),
+        ):
+            _append_value_flag(args, flag, runtime.get(key))
+        if runtime.get("allow_remote") is True:
+            args.append("--allow-remote")
+        if runtime.get("trust_remote_code") is True:
+            args.append("--trust-remote-code")
+        if runtime.get("require_wgpu_ready") is True:
+            args.append("--require-wgpu-ready")
+        if runtime.get("no_require_hf_gpt2_ft") is True:
+            args.append("--no-require-hf-gpt2-ft")
+        for key, flag in (
+            ("runtime_device_backends", "--runtime-device-backend"),
+            (
+                "required_runtime_device_ready_backends",
+                "--require-runtime-device-ready-backend",
+            ),
+        ):
+            values = runtime.get(key)
+            if isinstance(values, str):
+                raw_values = [value.strip() for value in values.split(",")]
+            elif isinstance(values, Iterable):
+                raw_values = list(values)
+            else:
+                raw_values = []
+            for value in raw_values:
+                if str(value).strip():
+                    _append_value_flag(args, flag, value)
     return args
 
 
@@ -602,7 +801,9 @@ def hf_finetune_model_profile_lines(
     """Render compact audit lines for a resolved HF fine-tune model profile."""
 
     training = _mapping_or_empty(profile.get("training"), label="profile.training")
+    dataset = _mapping_or_empty(profile.get("dataset"), label="profile.dataset")
     generation = _mapping_or_empty(profile.get("generation"), label="profile.generation")
+    runtime = _mapping_or_empty(profile.get("runtime"), label="profile.runtime")
     return [
         (
             "hf_ft_model_profile "
@@ -611,9 +812,12 @@ def hf_finetune_model_profile_lines(
             f"model={profile.get('model_name')} "
             f"tokenizer={profile.get('tokenizer_name')} "
             f"architecture={profile.get('architecture')} "
+            f"dataset={dataset.get('name')} "
+            f"dataset_config={dataset.get('config')} "
             f"block_size={training.get('block_size')} "
             f"max_new_tokens={generation.get('max_new_tokens')} "
             f"do_sample={generation.get('do_sample')} "
+            f"allow_remote={runtime.get('allow_remote')} "
             f"source={profile.get('source_path')}"
         )
     ]
