@@ -583,6 +583,16 @@ PYTHONPATH=bindings/st-py python bindings/st-py/examples/zspace_inference_distor
   --out runs/zspace-inference-distortion-probe.json
 ```
 
+When a previous FT/profile artifact already carries a model-profile runtime
+contract, pass it directly instead of repeating model-specific flags:
+
+```bash
+PYTHONPATH=bindings/st-py python bindings/st-py/examples/zspace_inference_distortion_probe.py \
+  --runtime-contract-artifact runs/hf-finetune-qwen2-zspace-ft/runtime-contract.json \
+  --prompt "SpiralTorch is a tensor and geometry runtime that" \
+  --out runs/zspace-inference-distortion-probe.json
+```
+
 The probe builds one `api_llm_zspace_inference_distortion_adapter(...)` and
 uses it three ways: local HF logits receive `ZSpaceRepressionLogitsProcessor`
 kwargs, matching activation hooks record and can gently intervene in selected
@@ -632,6 +642,11 @@ PYTHONPATH=bindings/st-py python bindings/st-py/examples/zspace_inference_distor
   --coherence-values 0.35,0.55 \
   --out-dir runs/zspace-inference-distortion-sweep
 ```
+
+`--runtime-contract-artifact <run-card-or-contract.json>` works here too; the
+sweep report keeps that artifact reference in its replay commands while still
+letting explicit CLI flags override any recovered local-model/tokenizer/hook
+defaults.
 
 The sweep writes `sweep-plan.json`, one probe artifact per setting,
 `sweep-report.json`, and `sweep-report.md` with comparison rows, a recommended

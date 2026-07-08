@@ -623,6 +623,47 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         self.assertIn("qwen2-0.5b-local-smoke", profile_args)
         self.assertNotIn("Qwen/Qwen2-0.5B", profile_args)
         self.assertNotIn("model.layers.0", profile_args)
+        with tempfile.TemporaryDirectory() as tmp:
+            contract_path = Path(tmp) / "runtime-contract.json"
+            contract_payload = st.hf_finetune_model_profile_runtime_contract(
+                MODEL_CONFIGS_PATH,
+                profile="pythia-70m-local-smoke",
+                mode="inference",
+            )
+            contract_path.write_text(
+                json.dumps(contract_payload, ensure_ascii=False, sort_keys=True),
+                encoding="utf-8",
+            )
+            artifact_runtime = zspace_inference_distortion_runtime_plan(
+                runtime_contract_artifact=contract_path,
+                api_provider="fake",
+            )
+            artifact_args = zspace_inference_distortion_runtime_cli_args(
+                artifact_runtime,
+            )
+
+        self.assertEqual(
+            artifact_runtime["runtime_contract_artifact"],
+            str(contract_path),
+        )
+        self.assertEqual(
+            artifact_runtime["model_profile_runtime_contract"]["profile_id"],
+            "pythia-70m-local-smoke",
+        )
+        self.assertEqual(
+            artifact_runtime["local_model"],
+            "EleutherAI/pythia-70m-deduped",
+        )
+        self.assertEqual(artifact_runtime["max_new_tokens"], 96)
+        self.assertEqual(
+            artifact_runtime["activation_name_contains"],
+            ["gpt_neox.layers.0"],
+        )
+        self.assertIn("--runtime-contract-artifact", artifact_args)
+        self.assertIn(str(contract_path), artifact_args)
+        self.assertNotIn("--model-configs", artifact_args)
+        self.assertNotIn("--model-profile", artifact_args)
+        self.assertNotIn("EleutherAI/pythia-70m-deduped", artifact_args)
         self.assertEqual(
             overridden_profile_runtime["local_model"],
             "models/local-causal-lm",
@@ -692,6 +733,54 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         self.assertEqual(overridden.local_model, Path("models/local-causal-lm"))
         self.assertEqual(overridden.tokenizer_name, "models/local-tokenizer")
         self.assertEqual(overridden.max_new_tokens, 7)
+        with tempfile.TemporaryDirectory() as tmp:
+            contract_path = Path(tmp) / "runtime-contract.json"
+            contract_payload = st.hf_finetune_model_profile_runtime_contract(
+                MODEL_CONFIGS_PATH,
+                profile="pythia-70m-local-smoke",
+                mode="inference",
+            )
+            contract_path.write_text(
+                json.dumps(contract_payload, ensure_ascii=False, sort_keys=True),
+                encoding="utf-8",
+            )
+            artifact_args = module.parse_args(
+                [
+                    "--runtime-contract-artifact",
+                    str(contract_path),
+                    "--prompt",
+                    "SpiralTorch artifact probe",
+                ]
+            )
+            sweep_module = load_distortion_sweep_example()
+            sweep_args = sweep_module.parse_args(
+                [
+                    "--runtime-contract-artifact",
+                    str(contract_path),
+                    "--dry-run",
+                ]
+            )
+
+        self.assertEqual(
+            artifact_args.local_model,
+            Path("EleutherAI/pythia-70m-deduped"),
+        )
+        self.assertEqual(
+            artifact_args.tokenizer_name,
+            "EleutherAI/pythia-70m-deduped",
+        )
+        self.assertEqual(artifact_args.max_new_tokens, 96)
+        self.assertEqual(
+            artifact_args._hf_finetune_model_profile_runtime_contract[
+                "source_artifact_path"
+            ],
+            str(contract_path),
+        )
+        self.assertEqual(
+            sweep_args.local_model,
+            Path("EleutherAI/pythia-70m-deduped"),
+        )
+        self.assertEqual(sweep_args.max_new_tokens, 96)
 
     def test_inference_distortion_geometry_probe_uses_zspace_evaluator(self) -> None:
         adapter = st.api_llm_zspace_inference_distortion_adapter(

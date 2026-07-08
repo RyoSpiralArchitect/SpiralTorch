@@ -3067,6 +3067,7 @@ def zspace_inference_distortion_runtime_plan(
     *,
     model_configs: Mapping[str, object] | str | Path | None = None,
     model_profile: str | None = None,
+    runtime_contract_artifact: Mapping[str, object] | str | Path | None = None,
     local_model: str | Path | None = None,
     tokenizer_name: str | Path | None = None,
     allow_remote: bool = False,
@@ -3085,7 +3086,53 @@ def zspace_inference_distortion_runtime_plan(
     profile_report: dict[str, object] | None = None
     profile_runtime_contract: dict[str, object] | None = None
     profile_runtime_contract_lines: list[str] = []
-    if model_configs is not None or model_profile is not None:
+    model_profile_lines: list[str] = []
+    runtime_contract_artifact_ref = (
+        None
+        if runtime_contract_artifact is None
+        or isinstance(runtime_contract_artifact, Mapping)
+        else str(runtime_contract_artifact)
+    )
+    if runtime_contract_artifact is not None:
+        if model_configs is not None or model_profile is not None:
+            raise ValueError(
+                "runtime_contract_artifact is mutually exclusive with "
+                "model_configs/model_profile"
+            )
+        from .hf_ft import (
+            hf_finetune_model_profile_lines,
+            hf_finetune_model_profile_runtime_contract_from_artifact,
+            hf_finetune_model_profile_runtime_contract_lines,
+        )
+
+        profile_runtime_contract = (
+            hf_finetune_model_profile_runtime_contract_from_artifact(
+                runtime_contract_artifact,
+                mode="inference",
+            )
+        )
+        profile_runtime_contract_lines = (
+            hf_finetune_model_profile_runtime_contract_lines(
+                profile_runtime_contract,
+            )
+        )
+        raw_profile_report = profile_runtime_contract.get("model_profile")
+        profile_report = (
+            dict(raw_profile_report) if isinstance(raw_profile_report, Mapping) else {}
+        )
+        raw_model_profile_lines = profile_runtime_contract.get("model_profile_lines")
+        model_profile_lines = (
+            [str(line) for line in raw_model_profile_lines]
+            if isinstance(raw_model_profile_lines, Sequence)
+            and not isinstance(raw_model_profile_lines, (str, bytes, bytearray))
+            else hf_finetune_model_profile_lines(profile_report)
+        )
+        if runtime_contract_artifact_ref is None:
+            source_path = profile_runtime_contract.get("source_artifact_path")
+            runtime_contract_artifact_ref = (
+                str(source_path) if source_path is not None else None
+            )
+    elif model_configs is not None or model_profile is not None:
         from .hf_ft import (
             hf_finetune_model_profile_lines,
             hf_finetune_model_profile_runtime_contract,
@@ -3106,6 +3153,8 @@ def zspace_inference_distortion_runtime_plan(
         profile_report = (
             dict(raw_profile_report) if isinstance(raw_profile_report, Mapping) else {}
         )
+        model_profile_lines = hf_finetune_model_profile_lines(profile_report)
+    if profile_report is not None:
         generation_profile = _mapping_item(profile_report, "generation")
         runtime_profile = _mapping_item(profile_report, "runtime")
         if local_model is None and profile_report.get("model_name") is not None:
@@ -3134,9 +3183,6 @@ def zspace_inference_distortion_runtime_plan(
             and runtime_profile.get("activation_name_contains") is not None
         ):
             activation_name_contains = runtime_profile["activation_name_contains"]
-        model_profile_lines = hf_finetune_model_profile_lines(profile_report)
-    else:
-        model_profile_lines = []
     generation_control_profile_config = zspace_generation_control_processor_kwargs(
         profile_runtime_contract or profile_report,
     )
@@ -3154,6 +3200,7 @@ def zspace_inference_distortion_runtime_plan(
         "local_model": str(local_model) if local_model is not None else None,
         "tokenizer_name": str(tokenizer_name) if tokenizer_name is not None else None,
         "model_configs": model_configs_ref,
+        "runtime_contract_artifact": runtime_contract_artifact_ref,
         "model_profile": profile_report,
         "model_profile_lines": model_profile_lines,
         "model_profile_runtime_contract": profile_runtime_contract,
@@ -3199,10 +3246,19 @@ def zspace_inference_distortion_runtime_cli_args(
     runtime_profile = _mapping_item(profile, "runtime")
     profile_id = profile.get("profile_id")
     model_configs = runtime.get("model_configs")
-    use_profile_ref = model_configs is not None and profile_id is not None
+    runtime_contract_artifact = runtime.get("runtime_contract_artifact")
+    use_contract_ref = runtime_contract_artifact is not None
+    if use_contract_ref:
+        args.extend(
+            ["--runtime-contract-artifact", _cli_value(runtime_contract_artifact)]
+        )
+    use_profile_ref = (
+        not use_contract_ref and model_configs is not None and profile_id is not None
+    )
     if use_profile_ref:
         args.extend(["--model-configs", _cli_value(model_configs)])
         args.extend(["--model-profile", _cli_value(profile_id)])
+    use_model_default_ref = use_profile_ref or use_contract_ref
 
     profile_local_model = profile.get("model_name")
     profile_tokenizer_name = profile.get("tokenizer_name")
@@ -3215,34 +3271,35 @@ def zspace_inference_distortion_runtime_cli_args(
     )
 
     if runtime.get("local_model") and (
-        not use_profile_ref
+        not use_model_default_ref
         or _cli_value(runtime["local_model"]) != _cli_value(profile_local_model)
     ):
         args.extend(["--local-model", _cli_value(runtime["local_model"])])
     if runtime.get("tokenizer_name") and (
-        not use_profile_ref
+        not use_model_default_ref
         or _cli_value(runtime["tokenizer_name"]) != _cli_value(profile_tokenizer_name)
     ):
         args.extend(["--tokenizer-name", _cli_value(runtime["tokenizer_name"])])
     if runtime.get("allow_remote") and (
-        not use_profile_ref or runtime_profile.get("allow_remote") is not True
+        not use_model_default_ref or runtime_profile.get("allow_remote") is not True
     ):
         args.append("--allow-remote")
     if runtime.get("trust_remote_code") and (
-        not use_profile_ref or runtime_profile.get("trust_remote_code") is not True
+        not use_model_default_ref
+        or runtime_profile.get("trust_remote_code") is not True
     ):
         args.append("--trust-remote-code")
     if runtime.get("max_new_tokens") is not None and (
-        not use_profile_ref
+        not use_model_default_ref
         or _cli_value(runtime["max_new_tokens"]) != _cli_value(profile_max_new_tokens)
     ):
         args.extend(["--max-new-tokens", _cli_value(runtime["max_new_tokens"])])
     activation_modules = _text_sequence(runtime.get("activation_module_name"))
-    if not use_profile_ref or activation_modules != profile_activation_modules:
+    if not use_model_default_ref or activation_modules != profile_activation_modules:
         for name in activation_modules:
             args.extend(["--activation-module-name", name])
     activation_contains = _text_sequence(runtime.get("activation_name_contains"))
-    if not use_profile_ref or activation_contains != profile_activation_contains:
+    if not use_model_default_ref or activation_contains != profile_activation_contains:
         for needle in activation_contains:
             args.extend(["--activation-name-contains", needle])
     if runtime.get("api_provider"):

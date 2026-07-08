@@ -44,6 +44,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Model profile id used to default --local-model/--tokenizer-name/runtime flags.",
     )
+    parser.add_argument(
+        "--runtime-contract-artifact",
+        type=Path,
+        default=None,
+        help=(
+            "Saved HF model-profile runtime contract/run card/report JSON used "
+            "to default --local-model/--tokenizer-name/runtime flags."
+        ),
+    )
     parser.add_argument("--local-model", type=Path, default=None)
     parser.add_argument("--tokenizer-name", default=None)
     parser.add_argument("--allow-remote", action="store_true")
@@ -146,6 +155,15 @@ def _apply_sweep_handoff(args: argparse.Namespace, flags: set[str]) -> None:
         "applied_config": dict(config),
     }
     _set_if_not_provided(args, flags, "--prompt", "prompt", summary.get("prompt"))
+    _set_if_not_provided(
+        args,
+        flags,
+        "--runtime-contract-artifact",
+        "runtime_contract_artifact",
+        Path(str(runtime["runtime_contract_artifact"]))
+        if runtime.get("runtime_contract_artifact")
+        else None,
+    )
     _set_if_not_provided(
         args,
         flags,
@@ -258,6 +276,36 @@ def _apply_sweep_handoff(args: argparse.Namespace, flags: set[str]) -> None:
 def _apply_model_profile_defaults(args: argparse.Namespace, flags: set[str]) -> None:
     args._hf_finetune_model_profile = None
     args._hf_finetune_model_profile_lines = []
+    args._hf_finetune_model_profile_runtime_contract = None
+    args._hf_finetune_model_profile_runtime_contract_lines = []
+    if args.runtime_contract_artifact is not None:
+        if args.model_configs is not None or args.model_profile is not None:
+            raise ValueError(
+                "--runtime-contract-artifact is mutually exclusive with "
+                "--model-configs/--model-profile"
+            )
+        contract = st.hf_finetune_model_profile_runtime_contract_from_artifact(
+            args.runtime_contract_artifact,
+            mode="inference",
+        )
+        profile = contract.get("model_profile")
+        if not isinstance(profile, Mapping):
+            raise ValueError(
+                f"{args.runtime_contract_artifact} did not contain a model_profile"
+            )
+        args._hf_finetune_model_profile = dict(profile)
+        args._hf_finetune_model_profile_runtime_contract = contract
+        args._hf_finetune_model_profile_runtime_contract_lines = (
+            st.hf_finetune_model_profile_runtime_contract_lines(contract)
+        )
+        raw_profile_lines = contract.get("model_profile_lines")
+        args._hf_finetune_model_profile_lines = (
+            [str(line) for line in raw_profile_lines]
+            if isinstance(raw_profile_lines, list)
+            else st.hf_finetune_model_profile_lines(profile)
+        )
+        _apply_profile_default_values(args, flags, profile)
+        return
     if args.model_configs is None and args.model_profile is None:
         return
     profile = st.resolve_hf_finetune_model_profile(
@@ -266,6 +314,22 @@ def _apply_model_profile_defaults(args: argparse.Namespace, flags: set[str]) -> 
     )
     args._hf_finetune_model_profile = profile
     args._hf_finetune_model_profile_lines = st.hf_finetune_model_profile_lines(profile)
+    contract = st.hf_finetune_model_profile_runtime_contract(
+        profile,
+        mode="inference",
+    )
+    args._hf_finetune_model_profile_runtime_contract = contract
+    args._hf_finetune_model_profile_runtime_contract_lines = (
+        st.hf_finetune_model_profile_runtime_contract_lines(contract)
+    )
+    _apply_profile_default_values(args, flags, profile)
+
+
+def _apply_profile_default_values(
+    args: argparse.Namespace,
+    flags: set[str],
+    profile: Mapping[str, Any],
+) -> None:
     generation = profile.get("generation")
     generation = generation if isinstance(generation, Mapping) else {}
     runtime = profile.get("runtime")
@@ -656,6 +720,7 @@ def _probe_runtime(args: argparse.Namespace) -> dict[str, Any]:
     return st.zspace_inference_distortion_runtime_plan(
         model_configs=args.model_configs,
         model_profile=args.model_profile,
+        runtime_contract_artifact=args.runtime_contract_artifact,
         local_model=args.local_model,
         tokenizer_name=args.tokenizer_name,
         allow_remote=args.allow_remote,

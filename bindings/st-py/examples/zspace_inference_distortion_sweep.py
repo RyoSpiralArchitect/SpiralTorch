@@ -100,6 +100,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Model profile id used to default --local-model/--tokenizer-name/runtime flags.",
     )
+    parser.add_argument(
+        "--runtime-contract-artifact",
+        type=Path,
+        default=None,
+        help=(
+            "Saved HF model-profile runtime contract/run card/report JSON used "
+            "to default --local-model/--tokenizer-name/runtime flags."
+        ),
+    )
     parser.add_argument("--local-model", type=Path, default=None)
     parser.add_argument("--tokenizer-name", default=None)
     parser.add_argument("--allow-remote", action="store_true")
@@ -208,6 +217,7 @@ def _runtime_plan(args: argparse.Namespace) -> MappingLike:
     return st.zspace_inference_distortion_runtime_plan(
         model_configs=args.model_configs,
         model_profile=args.model_profile,
+        runtime_contract_artifact=args.runtime_contract_artifact,
         local_model=args.local_model,
         tokenizer_name=args.tokenizer_name,
         allow_remote=args.allow_remote,
