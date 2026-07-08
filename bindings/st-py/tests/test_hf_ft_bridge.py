@@ -4247,6 +4247,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                     "trace_last_loss": 2.1,
                     "trace_last_eval_loss": 1.8,
                     "trace_last_eval_loss_step": 20,
+                    "trace_eval_loss_points": [
+                        {"step": 10, "eval_loss": 1.9},
+                        {"step": 20, "eval_loss": 1.8},
+                    ],
                     "trace_best_eval_loss_step": 20,
                     "training_loss_guard_count": 0,
                 },
@@ -4280,7 +4284,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                     "trace_max_global_step": 30,
                     "trace_last_loss": 1.9,
                     "trace_last_eval_loss": 1.7,
-                    "trace_last_eval_loss_step": 30,
+                    "trace_eval_loss_points": [
+                        {"step": 20, "eval_loss": 1.8},
+                        {"step": 30, "eval_loss": 1.7},
+                    ],
                     "trace_best_eval_loss_step": 30,
                     "training_loss_guard_count": 0,
                 },

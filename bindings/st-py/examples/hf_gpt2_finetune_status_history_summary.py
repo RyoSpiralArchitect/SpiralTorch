@@ -63,6 +63,22 @@ def _latest_checkpoint_name(row: dict[str, Any]) -> Any:
     return None
 
 
+def _last_eval_loss_step(row: dict[str, Any]) -> Any:
+    explicit = _nested(row, "trace", "trace_last_eval_loss_step")
+    if explicit is not None:
+        return explicit
+    eval_points = _nested(row, "trace", "trace_eval_loss_points")
+    if not isinstance(eval_points, list):
+        return None
+    for point in reversed(eval_points):
+        if not isinstance(point, dict):
+            continue
+        step = point.get("step")
+        if isinstance(step, int):
+            return step
+    return None
+
+
 def summarize_history(
     rows: list[dict[str, Any]], *, label: str | None, history_jsonl: Path
 ) -> dict[str, Any]:
@@ -183,7 +199,7 @@ def summarize_history(
         "last_best_eval_loss_step": _nested(
             last, "trace", "trace_best_eval_loss_step"
         ),
-        "last_eval_loss_step": _nested(last, "trace", "trace_last_eval_loss_step"),
+        "last_eval_loss_step": _last_eval_loss_step(last),
         "first_loss": losses[0] if losses else None,
         "last_loss": losses[-1] if losses else None,
         "min_loss": min(losses) if losses else None,
@@ -268,7 +284,7 @@ def history_lines(
                 f"steps_until_next_checkpoint={_number_text(_nested(row, 'checkpoint_progress', 'log_steps_until_next_checkpoint'))} "
                 f"last_loss={_number_text(_nested(row, 'trace', 'trace_last_loss'))} "
                 f"last_eval_loss={_number_text(_nested(row, 'trace', 'trace_last_eval_loss'))} "
-                f"last_eval_step={_number_text(_nested(row, 'trace', 'trace_last_eval_loss_step'))} "
+                f"last_eval_step={_number_text(_last_eval_loss_step(row))} "
                 f"best_eval_loss_step={_number_text(_nested(row, 'trace', 'trace_best_eval_loss_step'))} "
                 f"final_ready={_number_text(row.get('final_checkpoint_ready'))} "
                 f"disk_free_gb={_number_text(row.get('disk_free_gb'))} "
