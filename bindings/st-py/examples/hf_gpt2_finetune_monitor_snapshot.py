@@ -138,6 +138,11 @@ def _checkpoint_names(row: dict[str, Any]) -> list[str]:
     return list(dict.fromkeys(names))
 
 
+def _checkpoint_headroom(row: dict[str, Any]) -> dict[str, Any]:
+    headroom = row.get("checkpoint_headroom")
+    return headroom if isinstance(headroom, dict) else {}
+
+
 def _eval_loss_points(row: dict[str, Any]) -> list[dict[str, Any]]:
     points = _nested(row, "trace", "trace_eval_loss_points")
     if not isinstance(points, list):
@@ -248,6 +253,7 @@ def _status_watch_summary(
     )
     log_remaining_seconds = _nested(last, "log_progress", "log_remaining_seconds")
     eval_loss_points = _eval_loss_points(last)
+    checkpoint_headroom = _checkpoint_headroom(last)
     return {
         "name": name,
         "history_jsonl": str(history_jsonl) if history_jsonl is not None else None,
@@ -340,6 +346,16 @@ def _status_watch_summary(
         "checkpoint_count": last.get("checkpoint_count"),
         "latest_checkpoint": _checkpoint_name(last),
         "checkpoint_names": _checkpoint_names(last),
+        "save_total_limit": last.get("save_total_limit"),
+        "checkpoint_headroom_checkpoint_gb": checkpoint_headroom.get(
+            "resume_checkpoint_gb"
+        ),
+        "checkpoint_headroom_peak_gb": checkpoint_headroom.get(
+            "estimated_peak_checkpoint_gb"
+        ),
+        "checkpoint_headroom_free_after_gb": checkpoint_headroom.get(
+            "free_after_estimated_peak_gb"
+        ),
         "disk_free_gb": last.get("disk_free_gb"),
         "disk_margin_gb": last.get("disk_margin_gb"),
         "disk_status": last.get("disk_status"),
@@ -630,6 +646,18 @@ def build_monitor_snapshot(args: argparse.Namespace) -> dict[str, Any]:
         "final_checkpoint_ready": primary.get("final_checkpoint_ready"),
         "checkpoint_count": primary.get("checkpoint_count"),
         "latest_checkpoint": primary.get("latest_checkpoint"),
+        "save_total_limit": _watch_field_with_direct_fallback(
+            primary, direct_watch, "save_total_limit"
+        ),
+        "checkpoint_headroom_checkpoint_gb": _watch_field_with_direct_fallback(
+            primary, direct_watch, "checkpoint_headroom_checkpoint_gb"
+        ),
+        "checkpoint_headroom_peak_gb": _watch_field_with_direct_fallback(
+            primary, direct_watch, "checkpoint_headroom_peak_gb"
+        ),
+        "checkpoint_headroom_free_after_gb": _watch_field_with_direct_fallback(
+            primary, direct_watch, "checkpoint_headroom_free_after_gb"
+        ),
         "disk_free_gb": primary.get("disk_free_gb"),
         "disk_margin_gb": primary.get("disk_margin_gb"),
         "disk_status": primary.get("disk_status"),
@@ -693,6 +721,9 @@ def snapshot_lines(snapshot: dict[str, Any]) -> list[str]:
             f"steps_until_next_checkpoint={_number_text(snapshot.get('steps_until_next_checkpoint'))} "
             f"final_ready={_number_text(snapshot.get('final_checkpoint_ready'))} "
             f"latest_checkpoint={_number_text(snapshot.get('latest_checkpoint'))} "
+            f"save_total_limit={_number_text(snapshot.get('save_total_limit'))} "
+            f"checkpoint_headroom_peak_gb={_number_text(snapshot.get('checkpoint_headroom_peak_gb'))} "
+            f"checkpoint_headroom_free_after_gb={_number_text(snapshot.get('checkpoint_headroom_free_after_gb'))} "
             f"disk_status={_number_text(snapshot.get('disk_status'))} "
             f"disk_margin_gb={_number_text(snapshot.get('disk_margin_gb'))} "
             f"guard_count={_number_text(snapshot.get('training_loss_guard_count'))} "
@@ -733,6 +764,8 @@ def snapshot_lines(snapshot: dict[str, Any]) -> list[str]:
                     f"pending_eval_step={_number_text(watch.get('pending_eval_step'))} "
                     f"next_checkpoint_step={_number_text(watch.get('next_checkpoint_step'))} "
                     f"final_ready={_number_text(watch.get('final_checkpoint_ready'))} "
+                    f"checkpoint_headroom_peak_gb={_number_text(watch.get('checkpoint_headroom_peak_gb'))} "
+                    f"checkpoint_headroom_free_after_gb={_number_text(watch.get('checkpoint_headroom_free_after_gb'))} "
                     f"watch_stop_eval_ready={_number_text(watch.get('watch_stop_eval_ready'))} "
                     f"watch_stop_reason={_number_text(watch.get('watch_stop_reason'))}"
                 )

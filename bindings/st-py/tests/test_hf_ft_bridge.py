@@ -4319,6 +4319,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 "10",
                 "--save-steps",
                 "20",
+                "--save-total-limit",
+                "1",
                 "--min-free-disk-gb",
                 "1.0",
                 "--final-checkpoint",
@@ -4608,6 +4610,11 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         )
         self.assertEqual(status["disk_status"], "ok")
         self.assertEqual(status["checkpoint_count"], 1)
+        self.assertEqual(status["save_total_limit"], 1)
+        self.assertEqual(status["checkpoint_headroom"]["resume_checkpoint_bytes"], 5)
+        self.assertEqual(
+            status["checkpoint_headroom"]["estimated_peak_checkpoint_bytes"], 10
+        )
         self.assertTrue(status["final_checkpoint_ready"])
         self.assertEqual(status["checkpoint_card_status"], "waiting_for_process")
         self.assertIn("process=alive", lines[0])
@@ -4627,9 +4634,13 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("min_free_disk_gb=1", lines[0])
         self.assertIn("disk_status=ok", lines[0])
         self.assertIn("checkpoint_card=waiting_for_process", lines[0])
+        self.assertIn("save_total_limit=1", lines[0])
+        self.assertIn("checkpoint_headroom_peak_gb=", lines[0])
+        self.assertIn("checkpoint_headroom_free_after_gb=", lines[0])
         self.assertIn("final_ready=true", lines[0])
         self.assertIn("hf_gpt2_ft_run_wait status=waiting", lines[-1])
         self.assertEqual(written["process_status"], "alive")
+        self.assertEqual(written["checkpoint_headroom"]["resume_checkpoint_bytes"], 5)
         self.assertEqual(len(written_jsonl), 1)
         self.assertEqual(written_jsonl[0]["process_status"], "alive")
         self.assertEqual(watch_written["process_status"], "alive")
@@ -4735,6 +4746,12 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 "final_checkpoint_ready": False,
                 "checkpoint_count": 1,
                 "latest_checkpoint": {"name": "checkpoint-20"},
+                "save_total_limit": 1,
+                "checkpoint_headroom": {
+                    "resume_checkpoint_gb": 0.5,
+                    "estimated_peak_checkpoint_gb": 1.0,
+                    "free_after_estimated_peak_gb": 11.0,
+                },
                 "disk_free_gb": 12.0,
                 "disk_margin_gb": 8.0,
                 "disk_status": "ok",
@@ -4777,6 +4794,12 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 "watch_stop_reason": "checkpoint_ready",
                 "checkpoint_count": 1,
                 "latest_checkpoint": {"name": "checkpoint-20"},
+                "save_total_limit": 1,
+                "checkpoint_headroom": {
+                    "resume_checkpoint_gb": 0.5,
+                    "estimated_peak_checkpoint_gb": 1.0,
+                    "free_after_estimated_peak_gb": 10.5,
+                },
                 "disk_free_gb": 11.5,
                 "disk_margin_gb": 7.5,
                 "disk_status": "ok",
@@ -4867,6 +4890,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(summary["min_loss"], 1.9)
         self.assertAlmostEqual(summary["loss_delta"], -0.2)
         self.assertEqual(summary["min_eval_loss"], 1.7)
+        self.assertEqual(summary["last_save_total_limit"], 1)
+        self.assertEqual(summary["last_checkpoint_headroom_checkpoint_gb"], 0.5)
+        self.assertEqual(summary["last_checkpoint_headroom_peak_gb"], 1.0)
+        self.assertEqual(summary["last_checkpoint_headroom_free_after_gb"], 10.5)
         self.assertEqual(summary["min_disk_free_gb"], 11.5)
         self.assertEqual(summary["last_disk_margin_gb"], 7.5)
         self.assertEqual(summary["min_disk_margin_gb"], 7.5)
@@ -4894,6 +4921,9 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("min_loss=1.9", lines[0])
         self.assertIn("loss_delta=-0.2", lines[0])
         self.assertIn("min_eval_loss=1.7", lines[0])
+        self.assertIn("last_save_total_limit=1", lines[0])
+        self.assertIn("last_checkpoint_headroom_peak_gb=1", lines[0])
+        self.assertIn("last_checkpoint_headroom_free_after_gb=10.5", lines[0])
         self.assertIn("last_disk_free_gb=11.5", lines[0])
         self.assertIn("min_disk_free_gb=11.5", lines[0])
         self.assertIn("last_disk_margin_gb=7.5", lines[0])
@@ -4910,6 +4940,9 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("last_eval_step=30", lines[1])
         self.assertIn("best_eval_loss_step=30", lines[1])
         self.assertIn("last_loss=1.9", lines[1])
+        self.assertIn("save_total_limit=1", lines[1])
+        self.assertIn("checkpoint_headroom_peak_gb=1", lines[1])
+        self.assertIn("checkpoint_headroom_free_after_gb=10.5", lines[1])
         self.assertIn("disk_free_gb=11.5", lines[1])
         self.assertIn("disk_margin_gb=7.5", lines[1])
         self.assertIn("disk_status=ok", lines[1])
@@ -4926,6 +4959,12 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 "process_status": "alive",
                 "final_checkpoint_ready": False,
                 "checkpoint_count": 0,
+                "save_total_limit": 1,
+                "checkpoint_headroom": {
+                    "resume_checkpoint_gb": 0.75,
+                    "estimated_peak_checkpoint_gb": 1.5,
+                    "free_after_estimated_peak_gb": 8.5,
+                },
                 "disk_free_gb": 10.0,
                 "disk_margin_gb": 6.0,
                 "disk_status": "ok",
@@ -4961,6 +5000,12 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 "process_status": "alive",
                 "final_checkpoint_ready": False,
                 "checkpoint_count": 0,
+                "save_total_limit": 1,
+                "checkpoint_headroom": {
+                    "resume_checkpoint_gb": 0.75,
+                    "estimated_peak_checkpoint_gb": 1.5,
+                    "free_after_estimated_peak_gb": 8.0,
+                },
                 "disk_free_gb": 9.5,
                 "disk_margin_gb": 5.5,
                 "disk_status": "ok",
@@ -5163,6 +5208,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         )
         self.assertEqual(snapshot["next_checkpoint_step"], 6144)
         self.assertEqual(snapshot["steps_until_next_checkpoint"], 344)
+        self.assertEqual(snapshot["save_total_limit"], 1)
+        self.assertEqual(snapshot["checkpoint_headroom_checkpoint_gb"], 0.75)
+        self.assertEqual(snapshot["checkpoint_headroom_peak_gb"], 1.5)
+        self.assertEqual(snapshot["checkpoint_headroom_free_after_gb"], 8.0)
         self.assertEqual(snapshot["disk_status"], "ok")
         self.assertEqual(snapshot["disk_margin_gb"], 5.5)
         self.assertTrue(snapshot["direct_status_available"])
@@ -5197,6 +5246,9 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("latest_due_eval_ready=true", lines[0])
         self.assertIn("pending_eval_step=none", lines[0])
         self.assertIn("steps_until_next_checkpoint=344", lines[0])
+        self.assertIn("save_total_limit=1", lines[0])
+        self.assertIn("checkpoint_headroom_peak_gb=1.5", lines[0])
+        self.assertIn("checkpoint_headroom_free_after_gb=8", lines[0])
         self.assertIn("disk_margin_gb=5.5", lines[0])
         self.assertIn("direct_status_available=true", lines[0])
         self.assertIn("milestone_step=6144", lines[0])
@@ -5210,6 +5262,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("rows=2", lines[1])
         self.assertIn("eval_loss_projected_final=3.19882", lines[1])
         self.assertIn("pending_eval_step=none", lines[1])
+        self.assertIn("checkpoint_headroom_peak_gb=1.5", lines[1])
         self.assertIn("name=eval", lines[2])
         self.assertIn("rows=2", lines[2])
         self.assertIn("name=checkpoint", lines[3])

@@ -63,6 +63,11 @@ def _latest_checkpoint_name(row: dict[str, Any]) -> Any:
     return None
 
 
+def _checkpoint_headroom(row: dict[str, Any]) -> dict[str, Any]:
+    headroom = row.get("checkpoint_headroom")
+    return headroom if isinstance(headroom, dict) else {}
+
+
 def _last_eval_loss_step(row: dict[str, Any]) -> Any:
     explicit = _nested(row, "trace", "trace_last_eval_loss_step")
     if explicit is not None:
@@ -165,6 +170,7 @@ def summarize_history(
         for row in rows
         if isinstance(row.get("disk_margin_gb"), (int, float))
     ]
+    checkpoint_headroom = _checkpoint_headroom(last)
     return {
         "row_type": "hf_gpt2_ft_status_history_summary",
         "label": label,
@@ -221,6 +227,16 @@ def summarize_history(
         "last_final_checkpoint_ready": last.get("final_checkpoint_ready"),
         "last_checkpoint_count": last.get("checkpoint_count"),
         "last_latest_checkpoint": _latest_checkpoint_name(last),
+        "last_save_total_limit": last.get("save_total_limit"),
+        "last_checkpoint_headroom_checkpoint_gb": checkpoint_headroom.get(
+            "resume_checkpoint_gb"
+        ),
+        "last_checkpoint_headroom_peak_gb": checkpoint_headroom.get(
+            "estimated_peak_checkpoint_gb"
+        ),
+        "last_checkpoint_headroom_free_after_gb": checkpoint_headroom.get(
+            "free_after_estimated_peak_gb"
+        ),
         "min_disk_free_gb": min(disk_values) if disk_values else None,
         "last_disk_free_gb": last.get("disk_free_gb"),
         "min_disk_margin_gb": min(disk_margin_values)
@@ -272,6 +288,10 @@ def history_lines(
             f"guard_count={_number_text(summary.get('last_guard_count'))} "
             f"process={_number_text(summary.get('last_process_status'))} "
             f"final_ready={_number_text(summary.get('last_final_checkpoint_ready'))} "
+            f"last_save_total_limit={_number_text(summary.get('last_save_total_limit'))} "
+            f"last_checkpoint_headroom_checkpoint_gb={_number_text(summary.get('last_checkpoint_headroom_checkpoint_gb'))} "
+            f"last_checkpoint_headroom_peak_gb={_number_text(summary.get('last_checkpoint_headroom_peak_gb'))} "
+            f"last_checkpoint_headroom_free_after_gb={_number_text(summary.get('last_checkpoint_headroom_free_after_gb'))} "
             f"last_disk_free_gb={_number_text(summary.get('last_disk_free_gb'))} "
             f"min_disk_free_gb={_number_text(summary.get('min_disk_free_gb'))} "
             f"last_disk_margin_gb={_number_text(summary.get('last_disk_margin_gb'))} "
@@ -302,6 +322,9 @@ def history_lines(
                 f"last_eval_step={_number_text(_last_eval_loss_step(row))} "
                 f"best_eval_loss_step={_number_text(_nested(row, 'trace', 'trace_best_eval_loss_step'))} "
                 f"final_ready={_number_text(row.get('final_checkpoint_ready'))} "
+                f"save_total_limit={_number_text(row.get('save_total_limit'))} "
+                f"checkpoint_headroom_peak_gb={_number_text(_checkpoint_headroom(row).get('estimated_peak_checkpoint_gb'))} "
+                f"checkpoint_headroom_free_after_gb={_number_text(_checkpoint_headroom(row).get('free_after_estimated_peak_gb'))} "
                 f"disk_free_gb={_number_text(row.get('disk_free_gb'))} "
                 f"disk_margin_gb={_number_text(row.get('disk_margin_gb'))} "
                 f"disk_status={_number_text(row.get('disk_status'))} "

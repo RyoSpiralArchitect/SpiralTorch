@@ -40,6 +40,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--max-steps", type=int, default=None)
     parser.add_argument("--eval-steps", type=int, default=None)
     parser.add_argument("--save-steps", type=int, default=None)
+    parser.add_argument("--save-total-limit", type=int, default=1)
     parser.add_argument("--min-free-disk-gb", type=float, default=None)
     parser.add_argument("--final-checkpoint", default=None)
     parser.add_argument("--tail-evals", type=int, default=6)
@@ -68,6 +69,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("--eval-steps must be positive")
     if args.save_steps is not None and args.save_steps <= 0:
         parser.error("--save-steps must be positive")
+    if args.save_total_limit is not None and args.save_total_limit <= 0:
+        parser.error("--save-total-limit must be positive")
     if args.min_free_disk_gb is not None and args.min_free_disk_gb < 0.0:
         parser.error("--min-free-disk-gb must be non-negative")
     if args.tail_evals < 0:
@@ -474,6 +477,14 @@ def summarize_run(args: argparse.Namespace) -> dict[str, Any]:
         else "low"
     )
     latest_checkpoint = checkpoints[-1] if checkpoints else None
+    latest_checkpoint_path = (
+        latest_checkpoint.get("path") if isinstance(latest_checkpoint, dict) else None
+    )
+    checkpoint_headroom = st.hf_gpt2_finetune_disk_headroom_plan(
+        args.run_dir,
+        resume_from_checkpoint=latest_checkpoint_path,
+        save_total_limit=args.save_total_limit,
+    )
     return {
         "row_type": "hf_gpt2_finetune_run_status",
         "time_unix_s": time.time(),
@@ -495,6 +506,8 @@ def summarize_run(args: argparse.Namespace) -> dict[str, Any]:
         "checkpoint_count": len(checkpoints),
         "checkpoints": checkpoints,
         "latest_checkpoint": latest_checkpoint,
+        "save_total_limit": args.save_total_limit,
+        "checkpoint_headroom": checkpoint_headroom,
         "final_checkpoint": final_checkpoint,
         "final_checkpoint_path": str(final_checkpoint_path)
         if final_checkpoint_path is not None
@@ -515,6 +528,11 @@ def summarize_run(args: argparse.Namespace) -> dict[str, Any]:
 def status_lines(status: dict[str, Any], *, tail_evals: int) -> list[str]:
     trace = status.get("trace") if isinstance(status.get("trace"), dict) else {}
     latest_checkpoint = status.get("latest_checkpoint")
+    checkpoint_headroom = (
+        status.get("checkpoint_headroom")
+        if isinstance(status.get("checkpoint_headroom"), dict)
+        else {}
+    )
     latest_checkpoint_name = (
         latest_checkpoint.get("name") if isinstance(latest_checkpoint, dict) else None
     )
@@ -552,6 +570,10 @@ def status_lines(status: dict[str, Any], *, tail_evals: int) -> list[str]:
             f"checkpoint_card={_number_text(status.get('checkpoint_card_status'))} "
             f"checkpoints={_number_text(status.get('checkpoint_count'))} "
             f"latest_checkpoint={_number_text(latest_checkpoint_name)} "
+            f"save_total_limit={_number_text(status.get('save_total_limit'))} "
+            f"checkpoint_headroom_checkpoint_gb={_number_text(checkpoint_headroom.get('resume_checkpoint_gb'))} "
+            f"checkpoint_headroom_peak_gb={_number_text(checkpoint_headroom.get('estimated_peak_checkpoint_gb'))} "
+            f"checkpoint_headroom_free_after_gb={_number_text(checkpoint_headroom.get('free_after_estimated_peak_gb'))} "
             f"final_ready={_number_text(status.get('final_checkpoint_ready'))} "
             f"disk_free_gb={_number_text(status.get('disk_free_gb'))} "
             f"min_free_disk_gb={_number_text(status.get('min_free_disk_gb'))} "
