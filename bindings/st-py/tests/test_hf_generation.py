@@ -2484,6 +2484,10 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
                     "generic",
                 ]
             )
+            comparison = compare_module.compare_sweeps(compare_args)
+            comparison_lines = summarize_zspace_generation_control_sweep_comparison_lines(
+                comparison,
+            )
 
         self.assertEqual(report["status"], "planned")
         self.assertEqual(report["row_type"], "hf_zspace_generation_control_sweep")
@@ -2512,6 +2516,12 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
         self.assertEqual(zspace_run["config"]["ngram_window"], 32)
         self.assertEqual(compare_args.label, ["generic"])
         self.assertEqual(compare_args.sweeps, [out_path])
+        self.assertEqual(
+            comparison["row_type"],
+            "zspace_generation_control_sweep_comparison",
+        )
+        self.assertEqual(comparison["labels"], "generic")
+        self.assertIn("zspace_generation_control_compare ", comparison_lines[0])
 
     def test_generation_control_profile_runtime_defaults_flow_to_generic_wrapper(
         self,
