@@ -65,6 +65,37 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--run-card", type=Path, default=None)
     parser.add_argument("--trainer-trace-jsonl", type=Path, default=None)
     parser.add_argument("--trainer-trace-run-id", default=None)
+    parser.add_argument(
+        "--wait-launch-manifest",
+        type=Path,
+        default=None,
+        help=(
+            "Also attach a wait-launch wrapper command that launches the "
+            "resolved scale-up command after a process/checkpoint handoff."
+        ),
+    )
+    parser.add_argument("--wait-launch-jsonl-out", type=Path, default=None)
+    parser.add_argument("--wait-launch-pid", type=int, default=None)
+    parser.add_argument("--wait-launch-pid-file", type=Path, default=None)
+    parser.add_argument("--wait-launch-checkpoint", type=Path, default=None)
+    parser.add_argument(
+        "--wait-launch-checkpoint-ready-file",
+        default="model.safetensors",
+    )
+    parser.add_argument("--wait-launch-poll-seconds", type=float, default=60.0)
+    parser.add_argument(
+        "--wait-launch-checkpoint-timeout-seconds",
+        type=float,
+        default=1800.0,
+    )
+    parser.add_argument("--wait-launch-launched-pid-file", type=Path, default=None)
+    parser.add_argument("--wait-launch-launched-log-file", type=Path, default=None)
+    parser.add_argument(
+        "--wait-launch-launched-log-mode",
+        choices=("append", "write"),
+        default="append",
+    )
+    parser.add_argument("--wait-launch-detach", action="store_true")
     args = parser.parse_args(argv)
     if not args.source.is_file():
         parser.error(f"source artifact does not exist: {args.source}")
@@ -97,6 +128,24 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "--resume-from-checkpoint does not exist or is not a directory: "
             f"{args.resume_from_checkpoint}"
         )
+    if args.wait_launch_poll_seconds <= 0.0:
+        parser.error("--wait-launch-poll-seconds must be positive")
+    if args.wait_launch_checkpoint_timeout_seconds < 0.0:
+        parser.error("--wait-launch-checkpoint-timeout-seconds must be non-negative")
+    wait_launch_inputs = [
+        args.wait_launch_jsonl_out,
+        args.wait_launch_pid,
+        args.wait_launch_pid_file,
+        args.wait_launch_checkpoint,
+        args.wait_launch_launched_pid_file,
+        args.wait_launch_launched_log_file,
+    ]
+    if args.wait_launch_detach and args.wait_launch_manifest is None:
+        parser.error("--wait-launch-detach requires --wait-launch-manifest")
+    if any(value is not None for value in wait_launch_inputs) and (
+        args.wait_launch_manifest is None
+    ):
+        parser.error("wait-launch options require --wait-launch-manifest")
     return args
 
 
@@ -225,6 +274,82 @@ def _scale_up_command_from_source(args: argparse.Namespace) -> dict[str, Any]:
     return command
 
 
+def _build_wait_launch_command(
+    args: argparse.Namespace,
+    command_values: Sequence[object],
+) -> list[str] | None:
+    if args.wait_launch_manifest is None:
+        return None
+    wait_command = [
+        sys.executable,
+        "bindings/st-py/examples/hf_gpt2_finetune_wait_launch.py",
+        "--manifest",
+        str(args.wait_launch_manifest),
+        "--poll-seconds",
+        str(args.wait_launch_poll_seconds),
+        "--checkpoint-timeout-seconds",
+        str(args.wait_launch_checkpoint_timeout_seconds),
+    ]
+    for flag, value in [
+        ("--pid", args.wait_launch_pid),
+        ("--pid-file", args.wait_launch_pid_file),
+        ("--checkpoint", args.wait_launch_checkpoint),
+        ("--jsonl-out", args.wait_launch_jsonl_out),
+        ("--launched-pid-file", args.wait_launch_launched_pid_file),
+        ("--launched-log-file", args.wait_launch_launched_log_file),
+    ]:
+        if value is not None:
+            wait_command.extend([flag, str(value)])
+    if args.wait_launch_checkpoint_ready_file != "model.safetensors":
+        wait_command.extend(
+            [
+                "--checkpoint-ready-file",
+                str(args.wait_launch_checkpoint_ready_file),
+            ]
+        )
+    if args.wait_launch_launched_log_mode != "append":
+        wait_command.extend(
+            [
+                "--launched-log-mode",
+                str(args.wait_launch_launched_log_mode),
+            ]
+        )
+    if args.wait_launch_detach:
+        wait_command.append("--detach")
+    wait_command.append("--")
+    wait_command.extend(str(item) for item in command_values)
+    return wait_command
+
+
+def _attach_wait_launch_command(
+    args: argparse.Namespace,
+    command: dict[str, Any],
+) -> None:
+    command_values = command.get("command")
+    if not isinstance(command_values, Sequence) or isinstance(
+        command_values,
+        (str, bytes),
+    ):
+        return
+    wait_command = _build_wait_launch_command(args, command_values)
+    if wait_command is None:
+        return
+    command["wait_launch_command"] = wait_command
+    command["wait_launch_command_display"] = shlex.join(
+        [str(item) for item in wait_command]
+    )
+    command["wait_launch_manifest"] = str(args.wait_launch_manifest)
+    command["wait_launch_jsonl_out"] = (
+        None if args.wait_launch_jsonl_out is None else str(args.wait_launch_jsonl_out)
+    )
+    command["wait_launch_checkpoint"] = (
+        None
+        if args.wait_launch_checkpoint is None
+        else str(args.wait_launch_checkpoint)
+    )
+    command["wait_launch_detach"] = bool(args.wait_launch_detach)
+
+
 def run_scale_up(args: argparse.Namespace) -> dict[str, Any]:
     command = _scale_up_command_from_source(args)
     preflight = st.hf_gpt2_finetune_scale_up_preflight_report(command)
@@ -232,6 +357,7 @@ def run_scale_up(args: argparse.Namespace) -> dict[str, Any]:
     command["preflight_status"] = preflight.get("status")
     command["preflight_error_count"] = preflight.get("error_count")
     command["preflight_warning_count"] = preflight.get("warning_count")
+    _attach_wait_launch_command(args, command)
     if command.get("status") != "ok":
         if args.run or args.require_ready:
             command["run_returncode"] = 2
@@ -244,7 +370,7 @@ def run_scale_up(args: argparse.Namespace) -> dict[str, Any]:
     if not args.run:
         _write_command_artifact(args, command)
         return command
-    command_values = command.get("command")
+    command_values = command.get("wait_launch_command") or command.get("command")
     if not isinstance(command_values, Sequence) or isinstance(
         command_values,
         (str, bytes),
@@ -287,6 +413,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"scale_up_replay {display}")
     elif command.get("command"):
         print(f"scale_up_replay {shlex.join([str(item) for item in command['command']])}")
+    wait_display = command.get("wait_launch_command_display")
+    if wait_display:
+        print(f"scale_up_wait_launch {wait_display}")
     if command.get("run_returncode") is not None:
         print(f"scale_up_run returncode={command.get('run_returncode')}")
         return int(command.get("run_returncode") or 0)

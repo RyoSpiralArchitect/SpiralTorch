@@ -2752,6 +2752,33 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             from_command_artifact = scale_up_module.run_scale_up(
                 from_command_artifact_args
             )
+            wait_launch_artifact_path = out_dir / "scale-up-wait-launch-command.json"
+            wait_launch_manifest = out_dir / "long-run-wait-launch.json"
+            wait_launch_history = out_dir / "long-run-wait-launch-history.jsonl"
+            wait_launch_args = scale_up_module.parse_args(
+                [
+                    str(rewritten_artifact_path),
+                    "--write-command",
+                    str(wait_launch_artifact_path),
+                    "--wait-launch-manifest",
+                    str(wait_launch_manifest),
+                    "--wait-launch-jsonl-out",
+                    str(wait_launch_history),
+                    "--wait-launch-pid",
+                    "123",
+                    "--wait-launch-checkpoint",
+                    str(resume_checkpoint),
+                    "--wait-launch-launched-pid-file",
+                    str(out_dir / "long-run.pid"),
+                    "--wait-launch-launched-log-file",
+                    str(out_dir / "long-run.log"),
+                    "--wait-launch-launched-log-mode",
+                    "write",
+                    "--wait-launch-detach",
+                ]
+            )
+            wait_launch_command = scale_up_module.run_scale_up(wait_launch_args)
+            wait_launch_written = json.loads(wait_launch_artifact_path.read_text())
 
             exact_run_args = scale_up_module.parse_args(
                 [
@@ -2849,6 +2876,32 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(from_command_artifact["preflight_status"], "ready")
         self.assertIn("-longer", from_command_artifact["command_display"])
         self.assertIn("--max-steps 2", from_command_artifact["command_display"])
+        self.assertEqual(wait_launch_command["status"], "ok")
+        self.assertEqual(wait_launch_command["preflight_status"], "ready")
+        self.assertEqual(
+            wait_launch_command["wait_launch_manifest"],
+            str(wait_launch_manifest),
+        )
+        self.assertTrue(wait_launch_command["wait_launch_detach"])
+        self.assertIn("--detach", wait_launch_command["wait_launch_command"])
+        self.assertIn("--checkpoint", wait_launch_command["wait_launch_command"])
+        self.assertIn(
+            str(resume_checkpoint),
+            wait_launch_command["wait_launch_command"],
+        )
+        self.assertIn("--", wait_launch_command["wait_launch_command"])
+        self.assertEqual(
+            wait_launch_written["wait_launch_command"],
+            wait_launch_command["wait_launch_command"],
+        )
+        self.assertIn(
+            "hf_gpt2_finetune_wait_launch.py",
+            wait_launch_command["wait_launch_command_display"],
+        )
+        self.assertIn(
+            "--max-steps 64",
+            wait_launch_command["wait_launch_command_display"],
+        )
         self.assertEqual(exact_executed["preflight_status"], "ready")
         self.assertEqual(exact_executed["run_returncode"], 0)
         exact_run_mock.assert_called_once()
