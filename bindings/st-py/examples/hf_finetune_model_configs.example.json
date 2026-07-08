@@ -72,7 +72,19 @@
         "max_new_tokens": 96,
         "do_sample": true,
         "temperature": 0.8,
-        "top_k": 50
+        "top_k": 50,
+        "zspace_top_k": 64,
+        "zspace_curvature": -0.04,
+        "zspace_temperature": 1.0,
+        "zspace_entropy_target": 3.0,
+        "zspace_entropy_gain": 0.5,
+        "repression_window": 16,
+        "repression_strength": 0.8,
+        "last_token_repression": 0.7,
+        "ngram_size": 3,
+        "ngram_window": 32,
+        "ngram_repression_strength": 0.45,
+        "ngram_decay": 0.85
       },
       "notes": "Non-GPT-2 causal-LM smoke profile for widening local FT coverage."
     },
@@ -94,7 +106,19 @@
         "max_new_tokens": 128,
         "do_sample": true,
         "temperature": 0.7,
-        "top_k": 40
+        "top_k": 40,
+        "zspace_top_k": 96,
+        "zspace_curvature": -0.035,
+        "zspace_temperature": 1.0,
+        "zspace_entropy_target": 3.2,
+        "zspace_entropy_gain": 0.45,
+        "repression_window": 24,
+        "repression_strength": 0.65,
+        "last_token_repression": 0.55,
+        "ngram_size": 3,
+        "ngram_window": 40,
+        "ngram_repression_strength": 0.35,
+        "ngram_decay": 0.9
       },
       "notes": "Modern small causal-LM profile for local/API-adjacent Z-Space trials."
     },
@@ -114,7 +138,19 @@
         "max_new_tokens": 128,
         "do_sample": true,
         "temperature": 0.8,
-        "top_k": 50
+        "top_k": 50,
+        "zspace_top_k": 64,
+        "zspace_curvature": -0.04,
+        "zspace_temperature": 1.0,
+        "zspace_entropy_target": 3.0,
+        "zspace_entropy_gain": 0.5,
+        "repression_window": 16,
+        "repression_strength": 0.75,
+        "last_token_repression": 0.6,
+        "ngram_size": 3,
+        "ngram_window": 32,
+        "ngram_repression_strength": 0.4,
+        "ngram_decay": 0.9
       },
       "notes": "Copy this profile for a local AutoModelForCausalLM directory."
     }

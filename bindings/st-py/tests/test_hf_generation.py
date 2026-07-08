@@ -2337,21 +2337,19 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
         compare_module = load_generic_generation_control_compare_example()
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            out_path = root / "control-sweep.json"
             args = sweep_module.parse_args(
                 [
                     "--dry-run",
-                    "--model-name",
-                    str(root / "checkpoint-local"),
-                    "--tokenizer-name",
-                    "sshleifer/tiny-gpt2",
+                    "--model-configs",
+                    str(MODEL_CONFIGS_PATH),
+                    "--model-profile",
+                    "pythia-70m-local-smoke",
                     "--prompt",
                     "SpiralTorch is",
-                    "--out",
-                    str(out_path),
                 ]
             )
             report = sweep_module.run_sweep(args)
+            out_path = root / "control-sweep.json"
             out_path.write_text(json.dumps(report), encoding="utf-8")
             compare_args = compare_module.parse_args(
                 [
@@ -2362,7 +2360,25 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
             )
 
         self.assertEqual(report["status"], "planned")
-        self.assertEqual(report["tokenizer_name"], "sshleifer/tiny-gpt2")
+        self.assertEqual(args.out, Path("runs/hf-zspace-generation-control-sweep.json"))
+        self.assertEqual(report["model_name"], "EleutherAI/pythia-70m-deduped")
+        self.assertEqual(report["tokenizer_name"], "EleutherAI/pythia-70m-deduped")
+        self.assertEqual(
+            report["model_profile"]["profile_id"],
+            "pythia-70m-local-smoke",
+        )
+        self.assertIn(
+            "profile=pythia-70m-local-smoke",
+            report["model_profile_lines"][0],
+        )
+        self.assertEqual(report["max_new_tokens"], 96)
+        self.assertTrue(report["do_sample"])
+        self.assertEqual(report["run_count"], 2)
+        zspace_run = report["runs"][1]
+        self.assertEqual(zspace_run["config"]["top_k"], 64)
+        self.assertEqual(zspace_run["config"]["entropy_target"], 3.0)
+        self.assertEqual(zspace_run["config"]["repression_strength"], 0.8)
+        self.assertEqual(zspace_run["config"]["ngram_window"], 32)
         self.assertEqual(compare_args.label, ["generic"])
         self.assertEqual(compare_args.sweeps, [out_path])
 
@@ -2374,10 +2390,10 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
             code = hf_cli.zspace_generation_control_sweep_main(
                 [
                     "--dry-run",
-                    "--model-name",
-                    str(root / "checkpoint-local"),
-                    "--tokenizer-name",
-                    "sshleifer/tiny-gpt2",
+                    "--model-configs",
+                    str(MODEL_CONFIGS_PATH),
+                    "--model-profile",
+                    "qwen2-0.5b-local-smoke",
                     "--prompt",
                     "SpiralTorch is",
                     "--out",
@@ -2400,7 +2416,14 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
 
         self.assertEqual(code, 0)
         self.assertEqual(compare_code, 0)
-        self.assertEqual(report["tokenizer_name"], "sshleifer/tiny-gpt2")
+        self.assertEqual(report["model_name"], "Qwen/Qwen2-0.5B")
+        self.assertEqual(report["tokenizer_name"], "Qwen/Qwen2-0.5B")
+        self.assertEqual(
+            report["model_profile"]["profile_id"],
+            "qwen2-0.5b-local-smoke",
+        )
+        self.assertEqual(report["max_new_tokens"], 128)
+        self.assertEqual(report["runs"][1]["config"]["top_k"], 96)
         self.assertEqual(
             comparison["row_type"],
             "zspace_generation_control_sweep_comparison",

@@ -603,17 +603,25 @@ wrapper so the fine-tuned checkpoint stays the model path while the profile can
 provide tokenizer and decode defaults:
 
 ```bash
+spiral-hf-zspace-generation-control-sweep \
+  --dry-run \
+  --model-configs bindings/st-py/examples/hf_finetune_model_configs.example.json \
+  --model-profile pythia-70m-local-smoke \
+  --prompt "SpiralTorch is" \
+  --out runs/pythia-zspace-generation-control-sweep.json
+
 spiral-hf-checkpoint-generation-control \
-  --run-dir runs/gpt2-small-zspace-ft \
+  --run-dir runs/local-causal-lm-zspace-ft \
   --checkpoint checkpoint-2048 \
-  --model-profile gpt2-local-smoke \
+  --model-configs bindings/st-py/examples/hf_finetune_model_configs.example.json \
+  --model-profile local-causal-lm-template \
   --dry-run
 
 PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_checkpoint_generation_control.py \
-  --run-dir runs/gpt2-small-zspace-ft \
+  --run-dir runs/local-causal-lm-zspace-ft \
   --checkpoint checkpoint-2048 \
   --model-configs bindings/st-py/examples/hf_finetune_model_configs.example.json \
-  --model-profile gpt2-local-smoke \
+  --model-profile local-causal-lm-template \
   --dry-run
 ```
 

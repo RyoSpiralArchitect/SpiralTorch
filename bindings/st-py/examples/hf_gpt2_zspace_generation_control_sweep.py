@@ -20,7 +20,11 @@ PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 if str(PACKAGE_ROOT) not in sys.path:
     sys.path.insert(0, str(PACKAGE_ROOT))
 
-from spiraltorch.hf_ft import hf_gpt2_finetune_generation_report
+from spiraltorch.hf_ft import (
+    hf_finetune_generation_report,
+    hf_finetune_model_profile_lines,
+    resolve_hf_finetune_model_profile,
+)
 from spiraltorch.hf_generation import build_zspace_repression_logits_processor
 
 
@@ -108,8 +112,219 @@ def _label_number(value: float | int | None) -> str:
     return text.replace("-", "m").replace(".", "p")
 
 
+def _argv_has_option(raw_argv: Sequence[str], *names: str) -> bool:
+    prefixes = tuple(f"{name}=" for name in names)
+    return any(arg in names or arg.startswith(prefixes) for arg in raw_argv)
+
+
+def _mapping_or_empty(value: object) -> Mapping[str, object]:
+    return value if isinstance(value, Mapping) else {}
+
+
+def _profile_float(value: object) -> float:
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        raise ValueError("profile generation value must be finite")
+    return parsed
+
+
+def _profile_int(value: object) -> int:
+    parsed = int(value)
+    if parsed < 0:
+        raise ValueError("profile generation integer value must be non-negative")
+    return parsed
+
+
+def _apply_model_profile_defaults(
+    args: argparse.Namespace,
+    raw_argv: Sequence[str],
+) -> None:
+    args._hf_finetune_model_profile = None
+    args._hf_finetune_model_profile_lines = []
+    if args.model_configs is None and args.model_profile is None:
+        return
+    profile = resolve_hf_finetune_model_profile(
+        args.model_configs,
+        profile=args.model_profile,
+    )
+    args._hf_finetune_model_profile = profile
+    args._hf_finetune_model_profile_lines = hf_finetune_model_profile_lines(profile)
+    generation = _mapping_or_empty(profile.get("generation"))
+
+    def set_if_missing(attr: str, value: object, *flags: str) -> None:
+        if value is None or _argv_has_option(raw_argv, *flags):
+            return
+        setattr(args, attr, value)
+
+    def set_scalar_if_missing(
+        key: str,
+        attr: str,
+        *flags: str,
+        caster=None,
+    ) -> None:
+        if key not in generation or _argv_has_option(raw_argv, *flags):
+            return
+        value = generation.get(key)
+        if value is None:
+            return
+        setattr(args, attr, value if caster is None else caster(value))
+
+    def set_grid_if_missing(
+        key: str,
+        attr: str,
+        *flags: str,
+        caster=None,
+        allow_none: bool = False,
+    ) -> None:
+        if key not in generation or _argv_has_option(raw_argv, *flags):
+            return
+        value = generation.get(key)
+        if value is None:
+            if allow_none:
+                setattr(args, attr, [None])
+            return
+        setattr(args, attr, [value if caster is None else caster(value)])
+
+    set_if_missing("model_name", str(profile.get("model_name")), "--model-name")
+    set_if_missing(
+        "tokenizer_name",
+        str(profile.get("tokenizer_name")),
+        "--tokenizer-name",
+    )
+    set_scalar_if_missing(
+        "max_new_tokens",
+        "max_new_tokens",
+        "--max-new-tokens",
+        caster=_profile_int,
+    )
+    if "do_sample" in generation and not _argv_has_option(raw_argv, "--do-sample"):
+        args.do_sample = bool(generation.get("do_sample"))
+    set_scalar_if_missing(
+        "temperature",
+        "sample_temperature",
+        "--sample-temperature",
+        caster=_profile_float,
+    )
+    set_scalar_if_missing(
+        "top_k",
+        "sample_top_k",
+        "--sample-top-k",
+        caster=_profile_int,
+    )
+    set_grid_if_missing(
+        "zspace_top_k",
+        "zspace_top_k_values",
+        "--zspace-top-k-values",
+        caster=_profile_int,
+    )
+    set_grid_if_missing(
+        "zspace_curvature",
+        "zspace_curvature_values",
+        "--zspace-curvature-values",
+        caster=_profile_float,
+    )
+    set_grid_if_missing(
+        "zspace_temperature",
+        "zspace_temperature_values",
+        "--zspace-temperature-values",
+        caster=_profile_float,
+    )
+    set_grid_if_missing(
+        "zspace_entropy_target",
+        "zspace_entropy_target_values",
+        "--zspace-entropy-target-values",
+        caster=_profile_float,
+        allow_none=True,
+    )
+    set_grid_if_missing(
+        "zspace_entropy_gain",
+        "zspace_entropy_gain_values",
+        "--zspace-entropy-gain-values",
+        caster=_profile_float,
+    )
+    set_scalar_if_missing(
+        "zspace_entropy_tolerance",
+        "zspace_entropy_tolerance",
+        "--zspace-entropy-tolerance",
+        caster=_profile_float,
+    )
+    set_scalar_if_missing(
+        "zspace_min_temperature",
+        "zspace_min_temperature",
+        "--zspace-min-temperature",
+        caster=_profile_float,
+    )
+    set_scalar_if_missing(
+        "zspace_max_temperature",
+        "zspace_max_temperature",
+        "--zspace-max-temperature",
+        caster=_profile_float,
+    )
+    set_grid_if_missing(
+        "repression_window",
+        "repression_window_values",
+        "--repression-window-values",
+        caster=_profile_int,
+    )
+    set_grid_if_missing(
+        "repression_strength",
+        "repression_strength_values",
+        "--repression-strength-values",
+        caster=_profile_float,
+    )
+    set_grid_if_missing(
+        "last_token_repression",
+        "last_token_repression_values",
+        "--last-token-repression-values",
+        caster=_profile_float,
+    )
+    set_grid_if_missing(
+        "ngram_size",
+        "ngram_size_values",
+        "--ngram-size-values",
+        caster=_profile_int,
+    )
+    set_grid_if_missing(
+        "ngram_window",
+        "ngram_window_values",
+        "--ngram-window-values",
+        caster=_profile_int,
+    )
+    set_grid_if_missing(
+        "ngram_repression_strength",
+        "ngram_repression_strength_values",
+        "--ngram-repression-strength-values",
+        caster=_profile_float,
+    )
+    set_grid_if_missing(
+        "ngram_decay",
+        "ngram_decay_values",
+        "--ngram-decay-values",
+        caster=_profile_float,
+    )
+    if "zspace_keep_non_top_k" in generation and not _argv_has_option(
+        raw_argv,
+        "--keep-non-top-k",
+    ):
+        args.keep_non_top_k = bool(generation.get("zspace_keep_non_top_k"))
+    if "zspace_no_native" in generation and not _argv_has_option(
+        raw_argv,
+        "--zspace-no-native",
+    ):
+        args.zspace_no_native = bool(generation.get("zspace_no_native"))
+    set_scalar_if_missing(
+        "zspace_report_limit",
+        "report_limit",
+        "--report-limit",
+        caster=_profile_int,
+    )
+
+
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--model-configs", type=Path, default=None)
+    parser.add_argument("--model-profile", default=None)
     parser.add_argument("--model-name", default=DEFAULT_MODEL)
     parser.add_argument(
         "--tokenizer-name",
@@ -149,6 +364,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--zspace-no-native", action="store_true")
     parser.add_argument("--report-limit", type=int, default=64)
     args = parser.parse_args(argv)
+    _apply_model_profile_defaults(args, raw_argv)
     if args.max_new_tokens <= 0:
         parser.error("--max-new-tokens must be positive")
     if args.sample_temperature <= 0.0 or not math.isfinite(args.sample_temperature):
@@ -446,7 +662,7 @@ def _generate_one(
     control = None
     if processor is not None:
         control = processor.report(limit=int(args.report_limit))
-    generation = hf_gpt2_finetune_generation_report(
+    generation = hf_finetune_generation_report(
         stage=str(run.get("name") or "generation"),
         prompt=args.prompt,
         generated_text=text,
@@ -583,6 +799,13 @@ def run_sweep(args: argparse.Namespace) -> dict[str, object]:
         "status": "planned" if args.dry_run else "running",
         "model_name": args.model_name,
         "tokenizer_name": args.tokenizer_name or args.model_name,
+        "model_configs": (
+            None if args.model_configs is None else str(args.model_configs)
+        ),
+        "model_profile": getattr(args, "_hf_finetune_model_profile", None),
+        "model_profile_lines": list(
+            getattr(args, "_hf_finetune_model_profile_lines", [])
+        ),
         "prompt": args.prompt,
         "max_new_tokens": args.max_new_tokens,
         "do_sample": bool(args.do_sample),
