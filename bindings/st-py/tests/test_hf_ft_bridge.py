@@ -4550,6 +4550,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(status["log_progress"]["log_remaining_seconds"], 16.0)
         self.assertEqual(status["eval_progress"]["next_eval_step"], 30)
         self.assertEqual(status["eval_progress"]["log_steps_until_next_eval"], 6)
+        self.assertEqual(status["eval_progress"]["latest_due_eval_step"], 20)
+        self.assertTrue(status["eval_progress"]["latest_due_eval_ready"])
+        self.assertIsNone(status["eval_progress"]["pending_eval_step"])
+        self.assertIsNone(status["eval_progress"]["log_steps_since_pending_eval"])
         self.assertEqual(status["trace"]["trace_best_eval_loss_step"], 20)
         self.assertEqual(status["checkpoint_progress"]["next_checkpoint_step"], 40)
         self.assertEqual(
@@ -4572,6 +4576,9 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("eval_loss_projected_final=1.2", lines[0])
         self.assertIn("next_eval_step=30", lines[0])
         self.assertIn("log_steps_until_next_eval=6", lines[0])
+        self.assertIn("latest_due_eval_step=20", lines[0])
+        self.assertIn("latest_due_eval_ready=true", lines[0])
+        self.assertIn("pending_eval_step=none", lines[0])
         self.assertIn("next_checkpoint_step=40", lines[0])
         self.assertIn("log_steps_until_next_checkpoint=16", lines[0])
         self.assertIn("best_eval_loss_step=20", lines[0])
@@ -4586,6 +4593,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(watch_written["process_status"], "alive")
         self.assertEqual(watch_written["log_progress"]["log_latest_step"], 24)
         self.assertEqual(watch_written["eval_progress"]["next_eval_step"], 30)
+        self.assertIsNone(watch_written["eval_progress"]["pending_eval_step"])
         self.assertEqual(
             watch_written["checkpoint_progress"]["next_checkpoint_step"], 40
         )
@@ -4613,6 +4621,68 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(watch_disk_low_written["watch_stop_reason"], "disk_low")
         self.assertEqual(watch_disk_low_written["disk_status"], "low")
         self.assertEqual(written_lines, lines)
+
+    def test_run_status_example_marks_due_eval_pending_during_eval_progress(self) -> None:
+        module = load_run_status_example()
+        rows = [
+            {
+                "event": "evaluate",
+                "global_step": 5632,
+                "max_steps": 8192,
+                "time_unix_s": 100.0,
+                "metrics": {"eval_loss": 3.28},
+            },
+            {
+                "event": "log",
+                "global_step": 6144,
+                "max_steps": 8192,
+                "time_unix_s": 120.0,
+                "metrics": {"loss": 3.36},
+            },
+            {
+                "event": "evaluate",
+                "global_step": 6144,
+                "max_steps": 8192,
+                "time_unix_s": 140.0,
+                "metrics": {"eval_loss": 3.26},
+            },
+            {
+                "event": "log",
+                "global_step": 6656,
+                "max_steps": 8192,
+                "time_unix_s": 180.0,
+                "metrics": {"loss": 3.35},
+            },
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "run"
+            run_dir.mkdir()
+            trace_path = run_dir / "spiraltorch-hf-gpt2-ft-trainer-trace.jsonl"
+            for row in rows:
+                hf_ft.write_hf_gpt2_finetune_trainer_trace_event(row, trace_path)
+            (run_dir / "ft.log").write_text(
+                " 78%|#######8  | 1600/2048 [05:05<01:04,  6.87it/s]\n",
+                encoding="utf-8",
+            )
+            args = module.parse_args([str(run_dir)])
+            status = module.summarize_run(args)
+            lines = module.status_lines(status, tail_evals=1)
+
+        self.assertEqual(status["trace"]["max_steps"], 8192)
+        self.assertEqual(status["trace"]["trace_max_global_step"], 6656)
+        self.assertEqual(status["log_progress"]["log_status"], "fallback_trace")
+        self.assertEqual(status["log_progress"]["log_latest_step"], 6656)
+        self.assertEqual(status["log_progress"]["log_max_steps"], 8192)
+        self.assertEqual(status["eval_progress"]["eval_steps"], 512)
+        self.assertEqual(status["eval_progress"]["latest_due_eval_step"], 6656)
+        self.assertFalse(status["eval_progress"]["latest_due_eval_ready"])
+        self.assertEqual(status["eval_progress"]["pending_eval_step"], 6656)
+        self.assertEqual(status["eval_progress"]["log_steps_since_pending_eval"], 0)
+        self.assertEqual(status["eval_progress"]["next_eval_step"], 7168)
+        self.assertIn("log_latest_step=6656", lines[0])
+        self.assertIn("latest_due_eval_step=6656", lines[0])
+        self.assertIn("latest_due_eval_ready=false", lines[0])
+        self.assertIn("pending_eval_step=6656", lines[0])
 
     def test_status_history_summary_example_summarizes_jsonl_progress(self) -> None:
         module = load_status_history_summary_example()
@@ -4646,6 +4716,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 "eval_progress": {
                     "next_eval_step": 30,
                     "log_steps_until_next_eval": 6,
+                    "latest_due_eval_step": 20,
+                    "latest_due_eval_ready": True,
+                    "pending_eval_step": None,
+                    "log_steps_since_pending_eval": None,
                 },
                 "checkpoint_progress": {
                     "next_checkpoint_step": 40,
@@ -4683,6 +4757,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 "eval_progress": {
                     "next_eval_step": 40,
                     "log_steps_until_next_eval": 6,
+                    "latest_due_eval_step": 30,
+                    "latest_due_eval_ready": True,
+                    "pending_eval_step": None,
+                    "log_steps_since_pending_eval": None,
                 },
                 "checkpoint_progress": {
                     "next_checkpoint_step": 40,
@@ -4733,6 +4811,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(summary["last_next_eval_step"], 40)
         self.assertEqual(summary["last_log_steps_until_next_eval"], 6)
         self.assertEqual(summary["estimated_seconds_until_next_eval"], 24.0)
+        self.assertEqual(summary["last_latest_due_eval_step"], 30)
+        self.assertTrue(summary["last_latest_due_eval_ready"])
+        self.assertIsNone(summary["last_pending_eval_step"])
+        self.assertIsNone(summary["last_log_steps_since_pending_eval"])
         self.assertEqual(summary["last_next_checkpoint_step"], 40)
         self.assertEqual(summary["last_log_steps_until_next_checkpoint"], 6)
         self.assertEqual(summary["estimated_seconds_until_next_checkpoint"], 24.0)
@@ -4758,6 +4840,9 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("last_steps_until_final=6", lines[0])
         self.assertIn("estimated_seconds_until_final=24", lines[0])
         self.assertIn("estimated_seconds_until_next_eval=24", lines[0])
+        self.assertIn("last_latest_due_eval_step=30", lines[0])
+        self.assertIn("last_latest_due_eval_ready=true", lines[0])
+        self.assertIn("last_pending_eval_step=none", lines[0])
         self.assertIn("last_next_checkpoint_step=40", lines[0])
         self.assertIn("last_steps_until_next_checkpoint=6", lines[0])
         self.assertIn("estimated_seconds_until_next_checkpoint=24", lines[0])
@@ -4779,6 +4864,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("log_remaining_seconds=90", lines[1])
         self.assertIn("next_checkpoint_step=40", lines[1])
         self.assertIn("steps_until_next_checkpoint=6", lines[1])
+        self.assertIn("pending_eval_step=none", lines[1])
         self.assertIn("last_eval_step=30", lines[1])
         self.assertIn("best_eval_loss_step=30", lines[1])
         self.assertIn("last_loss=1.9", lines[1])
@@ -4816,6 +4902,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 "eval_progress": {
                     "next_eval_step": 5632,
                     "log_steps_until_next_eval": 512,
+                    "latest_due_eval_step": 5120,
+                    "latest_due_eval_ready": True,
+                    "pending_eval_step": None,
+                    "log_steps_since_pending_eval": None,
                 },
                 "checkpoint_progress": {
                     "next_checkpoint_step": 6144,
@@ -4858,6 +4948,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 "eval_progress": {
                     "next_eval_step": 6144,
                     "log_steps_until_next_eval": 428,
+                    "latest_due_eval_step": 5632,
+                    "latest_due_eval_ready": True,
+                    "pending_eval_step": None,
+                    "log_steps_since_pending_eval": None,
                 },
                 "checkpoint_progress": {
                     "next_checkpoint_step": 6144,
@@ -4903,6 +4997,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             "eval_progress": {
                 "next_eval_step": 6144,
                 "log_steps_until_next_eval": 444,
+                "latest_due_eval_step": 5632,
+                "latest_due_eval_ready": True,
+                "pending_eval_step": None,
+                "log_steps_since_pending_eval": None,
             },
             "checkpoint_progress": {
                 "next_checkpoint_step": 6144,
@@ -4920,6 +5018,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             "eval_progress": {
                 "next_eval_step": 6144,
                 "log_steps_until_next_eval": 344,
+                "latest_due_eval_step": 5632,
+                "latest_due_eval_ready": True,
+                "pending_eval_step": None,
+                "log_steps_since_pending_eval": None,
             },
             "checkpoint_progress": {
                 "next_checkpoint_step": 6144,
@@ -5009,6 +5111,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertTrue(snapshot["eval_loss_monotonic_nonincreasing"])
         self.assertEqual(snapshot["next_eval_step"], 6144)
         self.assertEqual(snapshot["steps_until_next_eval"], 344)
+        self.assertEqual(snapshot["latest_due_eval_step"], 5632)
+        self.assertTrue(snapshot["latest_due_eval_ready"])
+        self.assertIsNone(snapshot["pending_eval_step"])
+        self.assertIsNone(snapshot["log_steps_since_pending_eval"])
         self.assertAlmostEqual(
             snapshot["estimated_seconds_until_next_eval"],
             344.0,
@@ -5045,6 +5151,9 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("eval_loss_projected_final=3.19882", lines[0])
         self.assertIn("eval_loss_monotonic=true", lines[0])
         self.assertIn("next_eval_step=6144", lines[0])
+        self.assertIn("latest_due_eval_step=5632", lines[0])
+        self.assertIn("latest_due_eval_ready=true", lines[0])
+        self.assertIn("pending_eval_step=none", lines[0])
         self.assertIn("steps_until_next_checkpoint=344", lines[0])
         self.assertIn("disk_margin_gb=5.5", lines[0])
         self.assertIn("direct_status_available=true", lines[0])
@@ -5058,6 +5167,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("name=direct", lines[1])
         self.assertIn("rows=2", lines[1])
         self.assertIn("eval_loss_projected_final=3.19882", lines[1])
+        self.assertIn("pending_eval_step=none", lines[1])
         self.assertIn("name=eval", lines[2])
         self.assertIn("rows=2", lines[2])
         self.assertIn("name=checkpoint", lines[3])

@@ -275,6 +275,16 @@ def _status_watch_summary(
             total_steps=steps_until_final,
             total_seconds=log_remaining_seconds,
         ),
+        "latest_due_eval_step": _nested(
+            last, "eval_progress", "latest_due_eval_step"
+        ),
+        "latest_due_eval_ready": _nested(
+            last, "eval_progress", "latest_due_eval_ready"
+        ),
+        "pending_eval_step": _nested(last, "eval_progress", "pending_eval_step"),
+        "log_steps_since_pending_eval": _nested(
+            last, "eval_progress", "log_steps_since_pending_eval"
+        ),
         "next_checkpoint_step": _nested(
             last, "checkpoint_progress", "next_checkpoint_step"
         ),
@@ -383,6 +393,15 @@ def _latest_status_watch(watches: dict[str, dict[str, Any]]) -> dict[str, Any]:
             watch.get("name") or "",
         ),
     )
+
+
+def _watch_field_with_direct_fallback(
+    primary: dict[str, Any],
+    direct: dict[str, Any],
+    field: str,
+) -> Any:
+    value = primary.get(field)
+    return direct.get(field) if value is None else value
 
 
 def _eval_point_for_step(
@@ -590,6 +609,18 @@ def build_monitor_snapshot(args: argparse.Namespace) -> dict[str, Any]:
         "estimated_seconds_until_next_eval": primary.get(
             "estimated_seconds_until_next_eval"
         ),
+        "latest_due_eval_step": _watch_field_with_direct_fallback(
+            primary, direct_watch, "latest_due_eval_step"
+        ),
+        "latest_due_eval_ready": _watch_field_with_direct_fallback(
+            primary, direct_watch, "latest_due_eval_ready"
+        ),
+        "pending_eval_step": _watch_field_with_direct_fallback(
+            primary, direct_watch, "pending_eval_step"
+        ),
+        "log_steps_since_pending_eval": _watch_field_with_direct_fallback(
+            primary, direct_watch, "log_steps_since_pending_eval"
+        ),
         "next_checkpoint_step": primary.get("next_checkpoint_step"),
         "steps_until_next_checkpoint": primary.get("steps_until_next_checkpoint"),
         "estimated_seconds_until_next_checkpoint": primary.get(
@@ -654,6 +685,10 @@ def snapshot_lines(snapshot: dict[str, Any]) -> list[str]:
             f"eval_loss_monotonic={_number_text(snapshot.get('eval_loss_monotonic_nonincreasing'))} "
             f"next_eval_step={_number_text(snapshot.get('next_eval_step'))} "
             f"steps_until_next_eval={_number_text(snapshot.get('steps_until_next_eval'))} "
+            f"latest_due_eval_step={_number_text(snapshot.get('latest_due_eval_step'))} "
+            f"latest_due_eval_ready={_number_text(snapshot.get('latest_due_eval_ready'))} "
+            f"pending_eval_step={_number_text(snapshot.get('pending_eval_step'))} "
+            f"log_steps_since_pending_eval={_number_text(snapshot.get('log_steps_since_pending_eval'))} "
             f"next_checkpoint_step={_number_text(snapshot.get('next_checkpoint_step'))} "
             f"steps_until_next_checkpoint={_number_text(snapshot.get('steps_until_next_checkpoint'))} "
             f"final_ready={_number_text(snapshot.get('final_checkpoint_ready'))} "
@@ -695,6 +730,7 @@ def snapshot_lines(snapshot: dict[str, Any]) -> list[str]:
                     f"eval_loss_projected_final={_number_text(watch.get('eval_loss_projected_final_loss'))} "
                     f"eval_loss_monotonic={_number_text(watch.get('eval_loss_monotonic_nonincreasing'))} "
                     f"next_eval_step={_number_text(watch.get('next_eval_step'))} "
+                    f"pending_eval_step={_number_text(watch.get('pending_eval_step'))} "
                     f"next_checkpoint_step={_number_text(watch.get('next_checkpoint_step'))} "
                     f"final_ready={_number_text(watch.get('final_checkpoint_ready'))} "
                     f"watch_stop_eval_ready={_number_text(watch.get('watch_stop_eval_ready'))} "

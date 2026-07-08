@@ -189,6 +189,16 @@ def summarize_history(
         "last_next_eval_step": _nested(last, "eval_progress", "next_eval_step"),
         "last_log_steps_until_next_eval": log_steps_until_next_eval,
         "estimated_seconds_until_next_eval": estimated_seconds_until_next_eval,
+        "last_latest_due_eval_step": _nested(
+            last, "eval_progress", "latest_due_eval_step"
+        ),
+        "last_latest_due_eval_ready": _nested(
+            last, "eval_progress", "latest_due_eval_ready"
+        ),
+        "last_pending_eval_step": _nested(last, "eval_progress", "pending_eval_step"),
+        "last_log_steps_since_pending_eval": _nested(
+            last, "eval_progress", "log_steps_since_pending_eval"
+        ),
         "last_next_checkpoint_step": _nested(
             last, "checkpoint_progress", "next_checkpoint_step"
         ),
@@ -244,6 +254,10 @@ def history_lines(
             f"estimated_seconds_until_final={_number_text(summary.get('estimated_seconds_until_final'))} "
             f"last_next_eval_step={_number_text(summary.get('last_next_eval_step'))} "
             f"last_steps_until_next_eval={_number_text(summary.get('last_log_steps_until_next_eval'))} "
+            f"last_latest_due_eval_step={_number_text(summary.get('last_latest_due_eval_step'))} "
+            f"last_latest_due_eval_ready={_number_text(summary.get('last_latest_due_eval_ready'))} "
+            f"last_pending_eval_step={_number_text(summary.get('last_pending_eval_step'))} "
+            f"last_steps_since_pending_eval={_number_text(summary.get('last_log_steps_since_pending_eval'))} "
             f"last_next_checkpoint_step={_number_text(summary.get('last_next_checkpoint_step'))} "
             f"last_steps_until_next_checkpoint={_number_text(summary.get('last_log_steps_until_next_checkpoint'))} "
             f"estimated_seconds_until_next_eval={_number_text(summary.get('estimated_seconds_until_next_eval'))} "
@@ -280,6 +294,7 @@ def history_lines(
                 f"log_remaining_seconds={_number_text(_nested(row, 'log_progress', 'log_remaining_seconds'))} "
                 f"next_eval_step={_number_text(_nested(row, 'eval_progress', 'next_eval_step'))} "
                 f"steps_until_next_eval={_number_text(_nested(row, 'eval_progress', 'log_steps_until_next_eval'))} "
+                f"pending_eval_step={_number_text(_nested(row, 'eval_progress', 'pending_eval_step'))} "
                 f"next_checkpoint_step={_number_text(_nested(row, 'checkpoint_progress', 'next_checkpoint_step'))} "
                 f"steps_until_next_checkpoint={_number_text(_nested(row, 'checkpoint_progress', 'log_steps_until_next_checkpoint'))} "
                 f"last_loss={_number_text(_nested(row, 'trace', 'trace_last_loss'))} "

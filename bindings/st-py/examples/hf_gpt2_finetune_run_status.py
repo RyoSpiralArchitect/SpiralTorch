@@ -197,6 +197,49 @@ def _log_progress(
     }
 
 
+def _int_value(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return None
+
+
+def _resolved_max_steps(trace: dict[str, Any], explicit: int | None) -> int | None:
+    if explicit is not None:
+        return explicit
+    inferred = _int_value(trace.get("trace_max_steps"))
+    return inferred if inferred is not None and inferred > 0 else None
+
+
+def _log_progress_with_trace_fallback(
+    log_progress: dict[str, Any],
+    trace: dict[str, Any],
+    max_steps: int | None,
+) -> dict[str, Any]:
+    if log_progress.get("log_latest_step") is not None:
+        return log_progress
+    trace_step = _int_value(trace.get("trace_max_global_step"))
+    if trace_step is None:
+        return log_progress
+    updated = dict(log_progress)
+    updated["log_latest_step"] = trace_step
+    updated["log_max_steps"] = max_steps
+    updated["log_progress"] = (
+        min(max(float(trace_step) / float(max_steps), 0.0), 1.0)
+        if max_steps is not None and max_steps > 0
+        else None
+    )
+    updated["log_status"] = (
+        "fallback_trace"
+        if updated.get("log_status") == "ok"
+        else updated.get("log_status")
+    )
+    return updated
+
+
 def _last_eval_loss_step(trace: dict[str, Any]) -> int | None:
     eval_points = trace.get("trace_eval_loss_points")
     if not isinstance(eval_points, list):
@@ -228,15 +271,16 @@ def _trace_summary(trace_jsonl: Path, max_steps: int | None) -> dict[str, Any]:
     rows = st.load_hf_gpt2_finetune_trainer_trace(trace_jsonl)
     summary = st.summarize_hf_gpt2_finetune_trainer_trace(rows, max_steps=max_steps)
     summary["trace_last_eval_loss_step"] = _last_eval_loss_step(summary)
+    resolved_max_steps = _resolved_max_steps(summary, max_steps)
     step = summary.get("trace_max_global_step")
     progress = None
-    if max_steps is not None and isinstance(step, (int, float)):
-        progress = min(max(float(step) / float(max_steps), 0.0), 1.0)
+    if resolved_max_steps is not None and isinstance(step, (int, float)):
+        progress = min(max(float(step) / float(resolved_max_steps), 0.0), 1.0)
     summary.update(
         {
             "trace_jsonl": str(trace_jsonl),
             "trace_status": "ok",
-            "max_steps": max_steps,
+            "max_steps": resolved_max_steps,
             "progress": progress,
             "training_loss_guard_count": sum(
                 1 for row in rows if row.get("training_loss_guard")
@@ -278,21 +322,49 @@ def _eval_progress(
     next_eval_step = None
     trace_steps_until_next_eval = None
     log_steps_until_next_eval = None
+    latest_due_eval_step = None
+    latest_due_eval_ready = None
+    pending_eval_step = None
+    log_steps_since_pending_eval = None
+    trace_steps_since_pending_eval = None
     if interval is not None:
         basis = log_step if isinstance(log_step, int) else trace_step
         if isinstance(basis, (int, float)):
+            latest_due_eval_step = int(int(basis) // interval) * interval
+            if latest_due_eval_step <= 0:
+                latest_due_eval_step = None
             next_eval_step = int(((int(basis) // interval) + 1) * interval)
             if max_steps is not None:
                 next_eval_step = min(next_eval_step, max_steps)
+                if latest_due_eval_step is not None:
+                    latest_due_eval_step = min(latest_due_eval_step, max_steps)
+            last_eval_step = _last_eval_loss_step(trace)
+            if latest_due_eval_step is not None:
+                latest_due_eval_ready = (
+                    last_eval_step is not None and last_eval_step >= latest_due_eval_step
+                )
+                if not latest_due_eval_ready:
+                    pending_eval_step = latest_due_eval_step
         if next_eval_step is not None and isinstance(trace_step, (int, float)):
             trace_steps_until_next_eval = max(int(next_eval_step) - int(trace_step), 0)
         if next_eval_step is not None and isinstance(log_step, int):
             log_steps_until_next_eval = max(int(next_eval_step) - log_step, 0)
+        if pending_eval_step is not None and isinstance(log_step, int):
+            log_steps_since_pending_eval = max(log_step - int(pending_eval_step), 0)
+        if pending_eval_step is not None and isinstance(trace_step, (int, float)):
+            trace_steps_since_pending_eval = max(
+                int(trace_step) - int(pending_eval_step), 0
+            )
     return {
         "eval_steps": interval,
         "next_eval_step": next_eval_step,
         "trace_steps_until_next_eval": trace_steps_until_next_eval,
         "log_steps_until_next_eval": log_steps_until_next_eval,
+        "latest_due_eval_step": latest_due_eval_step,
+        "latest_due_eval_ready": latest_due_eval_ready,
+        "pending_eval_step": pending_eval_step,
+        "log_steps_since_pending_eval": log_steps_since_pending_eval,
+        "trace_steps_since_pending_eval": trace_steps_since_pending_eval,
     }
 
 
@@ -351,22 +423,28 @@ def _checkpoint_rows(run_dir: Path) -> list[dict[str, Any]]:
 
 def summarize_run(args: argparse.Namespace) -> dict[str, Any]:
     trace = _trace_summary(args.trace_jsonl, args.max_steps)
+    max_steps = _resolved_max_steps(trace, args.max_steps)
     log_progress = _log_progress(
         args.log_file,
         int(args.log_tail_bytes),
-        expected_max_steps=args.max_steps,
+        expected_max_steps=max_steps,
+    )
+    log_progress = _log_progress_with_trace_fallback(
+        log_progress,
+        trace,
+        max_steps,
     )
     eval_progress = _eval_progress(
         trace,
         log_progress,
         args.eval_steps,
-        args.max_steps,
+        max_steps,
     )
     checkpoint_progress = _step_interval_progress(
         interval=args.save_steps,
         log_progress=log_progress,
         trace=trace,
-        max_steps=args.max_steps,
+        max_steps=max_steps,
         label="checkpoint",
     )
     run_card = _load_json(args.run_card)
@@ -375,8 +453,11 @@ def summarize_run(args: argparse.Namespace) -> dict[str, Any]:
     checkpoints = _checkpoint_rows(args.run_dir)
     final_checkpoint_path = None
     final_checkpoint_ready = None
-    if args.final_checkpoint:
-        final_checkpoint_path = args.run_dir / str(args.final_checkpoint)
+    final_checkpoint = args.final_checkpoint
+    if final_checkpoint is None and max_steps is not None:
+        final_checkpoint = f"checkpoint-{max_steps}"
+    if final_checkpoint:
+        final_checkpoint_path = args.run_dir / str(final_checkpoint)
         final_checkpoint_ready = (final_checkpoint_path / "model.safetensors").is_file()
     disk = shutil.disk_usage(args.run_dir)
     disk_free_gb = disk.free / (1024.0**3)
@@ -414,7 +495,7 @@ def summarize_run(args: argparse.Namespace) -> dict[str, Any]:
         "checkpoint_count": len(checkpoints),
         "checkpoints": checkpoints,
         "latest_checkpoint": latest_checkpoint,
-        "final_checkpoint": args.final_checkpoint,
+        "final_checkpoint": final_checkpoint,
         "final_checkpoint_path": str(final_checkpoint_path)
         if final_checkpoint_path is not None
         else None,
@@ -451,6 +532,10 @@ def status_lines(status: dict[str, Any], *, tail_evals: int) -> list[str]:
             f"log_remaining_seconds={_number_text((status.get('log_progress') or {}).get('log_remaining_seconds'))} "
             f"next_eval_step={_number_text((status.get('eval_progress') or {}).get('next_eval_step'))} "
             f"log_steps_until_next_eval={_number_text((status.get('eval_progress') or {}).get('log_steps_until_next_eval'))} "
+            f"latest_due_eval_step={_number_text((status.get('eval_progress') or {}).get('latest_due_eval_step'))} "
+            f"latest_due_eval_ready={_number_text((status.get('eval_progress') or {}).get('latest_due_eval_ready'))} "
+            f"pending_eval_step={_number_text((status.get('eval_progress') or {}).get('pending_eval_step'))} "
+            f"log_steps_since_pending_eval={_number_text((status.get('eval_progress') or {}).get('log_steps_since_pending_eval'))} "
             f"next_checkpoint_step={_number_text((status.get('checkpoint_progress') or {}).get('next_checkpoint_step'))} "
             f"log_steps_until_next_checkpoint={_number_text((status.get('checkpoint_progress') or {}).get('log_steps_until_next_checkpoint'))} "
             f"last_loss={_number_text(trace.get('trace_last_loss'))} "
