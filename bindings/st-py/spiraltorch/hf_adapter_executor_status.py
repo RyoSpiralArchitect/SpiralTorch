@@ -280,6 +280,11 @@ def hf_adapter_continuation_executor_status_report(
         recommended_action = "resolve_executor_block"
     elif observed_status == "output_quarantined":
         recommended_action = "resume_executor"
+    elif (
+        observed_status in {"generation_limit_reached", "stopped"}
+        and state.get("action") == "resume_executor"
+    ):
+        recommended_action = "resume_executor"
     else:
         recommended_action = "none"
 

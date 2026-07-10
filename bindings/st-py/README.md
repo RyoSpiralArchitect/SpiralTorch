@@ -779,9 +779,33 @@ raise `--detach-handoff-timeout-seconds` for a slower environment and inspect
 the launch status before retrying. Use `--launch-state` to place the history at
 another path.
 
-Repeat the same command to resume from the new deepest eligible adapter, or
-raise `--max-generations` explicitly for several synchronous generations in
-one invocation. The executor holds a single-writer lock for the output root,
+Resume the exact detached policy directly from its launch artifact instead of
+reconstructing the original command:
+
+```bash
+spiral-hf-adapter-executor-resume \
+  runs/qwen2-study/executor/spiraltorch-hf-adapter-continuation-executor-launch.json \
+  --plan
+
+spiral-hf-adapter-executor-resume \
+  runs/qwen2-study/executor/spiraltorch-hf-adapter-continuation-executor-launch.json
+```
+
+The read-only plan requires a healthy terminal executor whose durable action is
+`resume_executor`, an absent or stale local executor lock, and the original
+working directory. Every new detached launch stores a SHA-256 replay contract
+binding its exact executor argv, output root, state path, and cwd. Execution
+rechecks the source launch ID and digest under the launch lock before appending
+the next launch, so concurrent or stale plans cannot start a different
+invocation. Existing launch artifacts without the new digest remain replayable
+only when their redundant stored child command exactly matches their argv and
+all bound paths. Policy-stopped, live, remote, unverified, modified, or
+cwd-missing histories fail closed. To intentionally change policy, issue a new
+full `spiral-hf-adapter-executor ... --detach` command instead of replaying.
+
+Alternatively, repeat the full command to change explicit settings, or raise
+`--max-generations` for several synchronous generations in one invocation. The
+executor holds a single-writer lock for the output root,
 flushes `running` state before every subprocess, then records the child PID,
 hostname, working directory, and a unique combined stdout/stderr log under
 `executor-logs/`. Logs are created owner-only (`0600`) on POSIX. Output is also
@@ -894,7 +918,10 @@ or promoted output. Python can drive the same state machine with
 use `st.launch_hf_adapter_continuation_executor(...)`, load launch history with
 `st.load_hf_adapter_continuation_executor_launch(...)`, and combine launcher
 and executor health with
-`st.hf_adapter_continuation_executor_launch_status_report(...)`.
+`st.hf_adapter_continuation_executor_launch_status_report(...)`. Durable replay
+is available through
+`st.hf_adapter_continuation_executor_resume_report(...)` and
+`st.resume_hf_adapter_continuation_executor(...)`.
 
 Use `--resume-from-checkpoint` only for an exact Trainer continuation that
 should restore optimizer, scheduler, and RNG state. SpiralTorch audits
