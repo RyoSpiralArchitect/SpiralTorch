@@ -705,6 +705,32 @@ path). Python can use `st.hf_adapter_promotion_chain_report(...)`,
 `st.load_hf_adapter_promotion_chain(...)`, and then
 `st.hf_finetune_scale_up_command(chain, ...)` for the same flow.
 
+Make the chain stop itself when additional adapter generations no longer earn
+their cost:
+
+```bash
+spiral-hf-adapter-chain runs/qwen2-study \
+  --max-lineage-depth 6 \
+  --target-eval-loss 2.40 \
+  --min-eval-improvement 0.002 \
+  --plateau-patience 2 \
+  --out runs/qwen2-study/promotion-chain.json \
+  --require-continuation-ready
+```
+
+These gates are opt-in. `max lineage depth` stops at the selected depth,
+`target eval loss` stops after reaching the target, and the plateau gate stops
+after the configured number of consecutive generations have
+`eval_before_loss - eval_after_loss` below the minimum. Missing eval evidence
+blocks continuation instead of being treated as improvement. A stopped report
+keeps `chain_ready=True` and `continuation_artifacts_ready=True` for audit, but
+sets `continuation_ready=False`; `spiral-hf-scale-up` then returns
+`promotion_chain_stopped_by_policy` without emitting a launch command. Python
+can inspect or persist the same decision with
+`st.hf_adapter_continuation_policy_report(...)`,
+`st.write_hf_adapter_continuation_policy(...)`, and
+`st.load_hf_adapter_continuation_policy(...)`.
+
 Use `--resume-from-checkpoint` only for an exact Trainer continuation that
 should restore optimizer, scheduler, and RNG state. SpiralTorch audits
 `trainer_state.json` and those state files before loading. A checkpoint saved

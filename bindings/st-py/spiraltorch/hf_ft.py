@@ -6374,6 +6374,15 @@ def hf_gpt2_finetune_scale_up_command(
             "promotion_chain_rejected_node_count": chain.get(
                 "rejected_node_count"
             ),
+            "promotion_chain_continuation_policy_status": chain.get(
+                "continuation_policy_status"
+            ),
+            "promotion_chain_continuation_allowed": chain.get(
+                "continuation_allowed"
+            ),
+            "promotion_chain_continuation_stop_reason_codes": list(
+                chain.get("continuation_stop_reason_codes") or []
+            ),
         }
         if chain.get("schema") != "spiraltorch.hf_adapter_promotion_chain.v1":
             return {
@@ -6382,6 +6391,27 @@ def hf_gpt2_finetune_scale_up_command(
                 "adapter_continuation_policy": continuation_policy,
                 **chain_provenance,
             }
+        chain_policy = chain.get("continuation_policy")
+        if isinstance(chain_policy, Mapping):
+            policy_status = chain_policy.get("status")
+            if policy_status == "stop":
+                return {
+                    "row_type": "hf_gpt2_finetune_scale_up_command",
+                    "status": "promotion_chain_stopped_by_policy",
+                    "adapter_continuation_policy": continuation_policy,
+                    "promotion_chain_continuation_policy": dict(chain_policy),
+                    "promotion_chain_continuation_ready": False,
+                    **chain_provenance,
+                }
+            if policy_status == "needs_evidence":
+                return {
+                    "row_type": "hf_gpt2_finetune_scale_up_command",
+                    "status": "promotion_chain_policy_needs_evidence",
+                    "adapter_continuation_policy": continuation_policy,
+                    "promotion_chain_continuation_policy": dict(chain_policy),
+                    "promotion_chain_continuation_ready": False,
+                    **chain_provenance,
+                }
         if chain.get("continuation_ready") is not True:
             return {
                 "row_type": "hf_gpt2_finetune_scale_up_command",
@@ -6733,8 +6763,9 @@ def hf_gpt2_finetune_scale_up_preflight_report(
             resolved_artifact = hf_gpt2_finetune_scale_up_command(artifact)
         except (OSError, ValueError):
             resolved_artifact = {}
-        if resolved_artifact.get("status") == "ok":
+        if resolved_artifact:
             artifact = resolved_artifact
+        if resolved_artifact.get("status") == "ok":
             resolved_command = resolved_artifact.get("command")
             if isinstance(resolved_command, Sequence) and not isinstance(
                 resolved_command,
@@ -6742,19 +6773,38 @@ def hf_gpt2_finetune_scale_up_preflight_report(
             ):
                 command = [str(item) for item in resolved_command]
     if not command:
+        scale_up_status = artifact.get("status")
+        if scale_up_status == "promotion_chain_stopped_by_policy":
+            issue_field = "continuation_policy"
+            issue_message = "promotion chain policy stopped further scale-up"
+        elif scale_up_status == "promotion_chain_policy_needs_evidence":
+            issue_field = "continuation_policy_evidence"
+            issue_message = (
+                "promotion chain policy requires additional evaluation evidence"
+            )
+        else:
+            issue_field = "command"
+            issue_message = "scale-up artifact does not contain a command list"
         return {
             "row_type": "hf_gpt2_finetune_scale_up_preflight",
             "status": "blocked",
             "ready": False,
             "source_path": source_path,
+            "scale_up_status": scale_up_status,
+            "promotion_chain_continuation_policy_status": artifact.get(
+                "promotion_chain_continuation_policy_status"
+            ),
+            "promotion_chain_continuation_stop_reason_codes": list(
+                artifact.get("promotion_chain_continuation_stop_reason_codes") or []
+            ),
             "command": command,
             "error_count": 1,
             "warning_count": 0,
             "issues": [
                 {
                     "severity": "error",
-                    "field": "command",
-                    "message": "scale-up artifact does not contain a command list",
+                    "field": issue_field,
+                    "message": issue_message,
                 }
             ],
             "inputs": [],

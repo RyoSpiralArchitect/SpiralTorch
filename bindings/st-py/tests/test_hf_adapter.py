@@ -102,10 +102,12 @@ def _write_promoted_child(
     weights: bytes,
     *,
     launch_command: bool = True,
+    before: float = 1.0,
+    after: float = 0.9,
 ) -> tuple[Path, dict, dict]:
     adapter = _write_adapter(child, weights)
     run_card_path = adapter / "spiraltorch-hf-finetune-run-card.json"
-    card = _run_card(parent)
+    card = _run_card(parent, before=before, after=after)
     if launch_command:
         card["launch_command"] = _adapter_launch_command(
             parent,
@@ -504,6 +506,172 @@ def test_adapter_promotion_chain_stops_before_blocked_generation(
     assert any(
         issue["code"] == "promotion_not_ready" for issue in grandchild_node["issues"]
     )
+
+
+def test_adapter_continuation_policy_stops_plateau_and_blocks_scale_up(
+    tmp_path: Path,
+) -> None:
+    root = _write_adapter(tmp_path / "root", b"root")
+    st.write_hf_adapter_lineage(root)
+    child, _, _ = _write_promoted_child(
+        tmp_path / "child",
+        root,
+        b"child",
+        before=1.0,
+        after=0.99,
+    )
+    _, grandchild_lineage, _ = _write_promoted_child(
+        tmp_path / "grandchild",
+        child,
+        b"grandchild",
+        before=0.99,
+        after=0.985,
+    )
+
+    report = st.hf_adapter_promotion_chain_report(
+        tmp_path,
+        min_eval_improvement=0.02,
+        plateau_patience=2,
+    )
+    scale_up = st.hf_finetune_scale_up_command(report)
+    preflight = st.hf_finetune_scale_up_preflight_report(report)
+    policy_path = tmp_path / st.HF_ADAPTER_CONTINUATION_POLICY_FILENAME
+    written = st.write_hf_adapter_continuation_policy(
+        report,
+        policy_path,
+        min_eval_improvement=0.02,
+        plateau_patience=2,
+    )
+    loaded = st.load_hf_adapter_continuation_policy(policy_path)
+
+    assert report["selected_adapter_id"] == grandchild_lineage["adapter_id"]
+    assert report["status"] == "stopped_by_policy"
+    assert report["chain_ready"] is True
+    assert report["continuation_artifacts_ready"] is True
+    assert report["continuation_allowed"] is False
+    assert report["continuation_ready"] is False
+    assert report["continuation_stop_reason_codes"] == [
+        "eval_improvement_plateau"
+    ]
+    policy = report["continuation_policy"]
+    assert policy["status"] == "stop"
+    assert policy["consecutive_below_min_eval_improvement"] == 2
+    assert policy["selected_path_eval_improvement"] == pytest.approx(0.015)
+    assert [row["eval_improvement"] for row in policy["observations"]] == (
+        pytest.approx([0.01, 0.005])
+    )
+    assert scale_up["status"] == "promotion_chain_stopped_by_policy"
+    assert scale_up["promotion_chain_continuation_stop_reason_codes"] == [
+        "eval_improvement_plateau"
+    ]
+    assert preflight["status"] == "blocked"
+    assert preflight["scale_up_status"] == "promotion_chain_stopped_by_policy"
+    assert preflight["issues"][0]["field"] == "continuation_policy"
+    assert preflight["promotion_chain_continuation_stop_reason_codes"] == [
+        "eval_improvement_plateau"
+    ]
+    assert written["report_path"] == str(policy_path.resolve())
+    assert loaded["stop_reason_codes"] == ["eval_improvement_plateau"]
+    assert "status=stop" in st.hf_adapter_continuation_policy_lines(loaded)[0]
+    assert "policy=stop" in st.hf_adapter_promotion_chain_lines(report)[0]
+
+
+def test_adapter_continuation_policy_depth_target_missing_evidence_and_cli(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = _write_adapter(tmp_path / "root", b"root")
+    st.write_hf_adapter_lineage(root)
+    child, _, _ = _write_promoted_child(
+        tmp_path / "child",
+        root,
+        b"child",
+        before=1.0,
+        after=0.9,
+    )
+    _, _, _ = _write_promoted_child(
+        tmp_path / "grandchild",
+        child,
+        b"grandchild",
+        before=0.9,
+        after=0.8,
+    )
+    base = st.hf_adapter_promotion_chain_report(tmp_path)
+
+    depth = st.hf_adapter_continuation_policy_report(base, max_lineage_depth=2)
+    target = st.hf_adapter_continuation_policy_report(base, target_eval_loss=0.8)
+    continuing = st.hf_adapter_continuation_policy_report(
+        base,
+        max_lineage_depth=3,
+        target_eval_loss=0.7,
+        min_eval_improvement=0.05,
+        plateau_patience=2,
+    )
+    missing_chain = json.loads(json.dumps(base))
+    missing_chain["nodes"][-1]["eval_after_loss"] = None
+    missing = st.hf_adapter_continuation_policy_report(
+        missing_chain,
+        target_eval_loss=0.7,
+        min_eval_improvement=0.05,
+    )
+    missing_nodes_chain = json.loads(json.dumps(base))
+    missing_nodes_chain["nodes"] = []
+    missing_nodes = st.hf_adapter_continuation_policy_report(
+        missing_nodes_chain,
+        min_eval_improvement=0.05,
+        plateau_patience=2,
+    )
+    code = hf_cli.adapter_promotion_chain_main(
+        [
+            str(tmp_path),
+            "--max-lineage-depth",
+            "2",
+            "--require-continuation-ready",
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert depth["status"] == "stop"
+    assert depth["stop_reason_codes"] == ["max_lineage_depth_reached"]
+    assert target["status"] == "stop"
+    assert target["stop_reason_codes"] == ["target_eval_loss_reached"]
+    assert continuing["status"] == "continue"
+    assert continuing["continuation_allowed"] is True
+    assert missing["status"] == "needs_evidence"
+    assert missing["continuation_allowed"] is False
+    assert {row["field"] for row in missing["missing_evidence"]} == {
+        "selected_eval_after_loss",
+        "eval_improvement",
+    }
+    assert missing_nodes["status"] == "needs_evidence"
+    assert {row["field"] for row in missing_nodes["missing_evidence"]} == {
+        "selected_path_node",
+        "selected_path_observations",
+    }
+    assert code == 1
+    assert "status=stopped_by_policy" in output
+    assert "code=max_lineage_depth_reached" in output
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"max_lineage_depth": -1},
+        {"target_eval_loss": float("nan")},
+        {"min_eval_improvement": -0.1},
+        {"plateau_patience": 0},
+    ],
+)
+def test_adapter_continuation_policy_rejects_invalid_thresholds(
+    tmp_path: Path,
+    kwargs: dict[str, object],
+) -> None:
+    root = _write_adapter(tmp_path / "root", b"root")
+    st.write_hf_adapter_lineage(root)
+    chain = st.hf_adapter_promotion_chain_report(root)
+
+    with pytest.raises(ValueError):
+        st.hf_adapter_continuation_policy_report(chain, **kwargs)
 
 
 def test_adapter_promotion_chain_requires_explicit_selection_for_equal_forks(
