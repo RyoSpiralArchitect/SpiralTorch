@@ -860,6 +860,16 @@ quarantine revalidates the recorded metadata before returning idempotently.
 FIFO, socket, and device entries fail closed rather than being moved.
 The executor itself also blocks on a pending or inconsistent quarantine intent,
 so bypassing the status CLI cannot resume training inside a half-finished move.
+
+The same command closes an executor-crash interruption when the recorded
+attempt is still `running`. SpiralTorch issues an interruption claim only for a
+local subprocess whose leader PID is absent and whose isolated POSIX process
+group is also absent. The claim is rechecked under the executor lock immediately
+before the move and persisted in the attempt, intent, and final resolution.
+Live/PID-reused processes, surviving process-group members, remote hosts,
+custom runners, and platforms without process-group observation remain
+fail-closed. Status reports `quarantine_interrupted_output` only when this scope
+proof is ready; otherwise it reports the exact inspection/wait action.
 `spiral-hf-adapter-executor-status --require-healthy`
 then reports `output_quarantined` with `resume_executor`, after which the same
 foreground or `--detach` executor command can recreate that generation.

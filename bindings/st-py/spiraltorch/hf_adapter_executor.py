@@ -20,7 +20,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ._process import local_pid_alive
+from ._process import local_pid_alive, local_process_group_alive
 from .hf_adapter import (
     HF_ADAPTER_LINEAGE_FILENAME,
     hf_adapter_promotion_chain_report,
@@ -35,6 +35,7 @@ __all__ = [
     "HF_ADAPTER_CONTINUATION_EXECUTOR_CONTROL_DIRNAME",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_LOCK_FILENAME",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_LOG_DIRNAME",
+    "HF_ADAPTER_CONTINUATION_EXECUTOR_INTERRUPTION_CLAIM_SCHEMA",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_OUTPUT_RESOLUTION_SCHEMA",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_SCHEMA",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_STOP_REQUEST_SCHEMA",
@@ -63,6 +64,9 @@ HF_ADAPTER_CONTINUATION_EXECUTOR_STOP_REQUEST_SCHEMA = (
 )
 HF_ADAPTER_CONTINUATION_EXECUTOR_OUTPUT_RESOLUTION_SCHEMA = (
     "spiraltorch.hf_adapter_continuation_executor_output_resolution.v1"
+)
+HF_ADAPTER_CONTINUATION_EXECUTOR_INTERRUPTION_CLAIM_SCHEMA = (
+    "spiraltorch.hf_adapter_continuation_executor_interruption_claim.v1"
 )
 _PROCESS_PROGRESS_INTERVAL_SECONDS = 5.0
 _PROCESS_STOP_POLL_INTERVAL_SECONDS = 0.2
@@ -923,8 +927,15 @@ def _recover_running_attempts(
             return "running attempt process is still alive; monitor it before recovery"
         if process_observation == "remote_unverified":
             return "running attempt belongs to another host; verify it before recovery"
-        if process_observation == "local_unverified":
+        if process_observation in {"legacy_unverified", "local_unverified"}:
             return "running attempt process liveness is unverified; refusing automatic recovery"
+        interruption_claim = _interruption_claim_report(raw_attempt)
+        raw_attempt["interruption_claim_observation"] = interruption_claim
+        if interruption_claim.get("ready") is not True:
+            return (
+                "running attempt process scope is unverified; refusing automatic "
+                f"recovery: {interruption_claim.get('issue')}"
+            )
         output_value = raw_attempt.get("output_dir")
         if output_value is None:
             return "running attempt is missing output_dir"
@@ -937,12 +948,16 @@ def _recover_running_attempts(
         )
         if postflight.get("ready") is True:
             raw_attempt["status"] = "promoted_recovered"
+            raw_attempt["status_before_interruption"] = "running"
+            raw_attempt["interruption_claim"] = interruption_claim
             raw_attempt["postflight"] = postflight
             raw_attempt["adapter_id"] = postflight.get("adapter_id")
             raw_attempt["completed_at"] = _now()
             continue
         if retry_interrupted and not output_dir.exists():
             raw_attempt["status"] = "interrupted_retry"
+            raw_attempt["status_before_interruption"] = "running"
+            raw_attempt["interruption_claim"] = interruption_claim
             raw_attempt["postflight"] = postflight
             raw_attempt["completed_at"] = _now()
             continue
@@ -962,6 +977,7 @@ def _unresolved_failed_attempt_output(
         if not isinstance(raw_attempt, Mapping) or raw_attempt.get("status") not in {
             "cancelled",
             "failed",
+            "interrupted",
             "postflight_failed",
         }:
             continue
@@ -985,6 +1001,123 @@ def _unresolved_failed_attempt_output(
                 "output_dir": str(output_dir),
             }
     return None
+
+
+def _interruption_claim_report(
+    attempt: Mapping[str, object],
+) -> dict[str, object]:
+    current_hostname = socket.gethostname()
+    recorded_hostname = attempt.get("hostname")
+    pid = attempt.get("pid")
+    runner_kind = attempt.get("runner_kind")
+    process_group_isolated = attempt.get("process_group_isolated")
+    stop_scope = attempt.get("stop_scope")
+    same_host = (
+        recorded_hostname == current_hostname
+        if isinstance(recorded_hostname, str) and recorded_hostname
+        else None
+    )
+    pid_alive = local_pid_alive(pid) if same_host is True else None
+    process_group_alive = (
+        local_process_group_alive(pid)
+        if (
+            pid_alive is False
+            and runner_kind == "subprocess"
+            and process_group_isolated is True
+            and stop_scope == "process_group"
+        )
+        else None
+    )
+    if attempt.get("status") != "running":
+        issue = "attempt_not_running"
+        action = "inspect_attempt_status"
+    elif runner_kind != "subprocess":
+        issue = "runner_scope_unverified"
+        action = "inspect_interrupted_runner"
+    elif same_host is False:
+        issue = "attempt_belongs_to_remote_host"
+        action = "inspect_remote_process"
+    elif same_host is not True:
+        issue = "attempt_host_unverified"
+        action = "inspect_unverified_process"
+    elif pid_alive is True:
+        issue = "attempt_process_alive"
+        action = "wait_for_process_exit"
+    elif pid_alive is not False:
+        issue = "attempt_process_liveness_unverified"
+        action = "inspect_unverified_process"
+    elif process_group_isolated is not True or stop_scope != "process_group":
+        issue = "attempt_process_scope_unverified"
+        action = "inspect_interrupted_process_scope"
+    elif process_group_alive is True:
+        issue = "attempt_process_group_alive"
+        action = "wait_for_process_group_exit"
+    elif process_group_alive is not False:
+        issue = "attempt_process_group_liveness_unverified"
+        action = "inspect_interrupted_process_scope"
+    else:
+        issue = None
+        action = "quarantine_interrupted_output"
+    return {
+        "row_type": "hf_adapter_continuation_executor_interruption_claim",
+        "schema": HF_ADAPTER_CONTINUATION_EXECUTOR_INTERRUPTION_CLAIM_SCHEMA,
+        "observed_at": _now(),
+        "attempt_id": attempt.get("attempt_id"),
+        "attempt_status": attempt.get("status"),
+        "runner_kind": runner_kind,
+        "process_group_isolated": process_group_isolated,
+        "stop_scope": stop_scope,
+        "recorded_hostname": recorded_hostname,
+        "current_hostname": current_hostname,
+        "same_host": same_host,
+        "pid": pid,
+        "pid_alive_observed": pid_alive,
+        "process_group_id": pid if process_group_isolated is True else None,
+        "process_group_alive_observed": process_group_alive,
+        "ready": issue is None,
+        "issue": issue,
+        "action": action,
+    }
+
+
+def _interruption_claim_matches_attempt(
+    value: object,
+    *,
+    attempt: Mapping[str, object],
+) -> bool:
+    if not isinstance(value, Mapping):
+        return False
+    pid = attempt.get("pid")
+    hostname = attempt.get("hostname")
+    return bool(
+        value.get("row_type") == "hf_adapter_continuation_executor_interruption_claim"
+        and value.get("schema")
+        == HF_ADAPTER_CONTINUATION_EXECUTOR_INTERRUPTION_CLAIM_SCHEMA
+        and value.get("attempt_id") == attempt.get("attempt_id")
+        and value.get("attempt_status") == "running"
+        and value.get("runner_kind") == attempt.get("runner_kind") == "subprocess"
+        and value.get("process_group_isolated")
+        is attempt.get("process_group_isolated")
+        is True
+        and value.get("stop_scope") == attempt.get("stop_scope") == "process_group"
+        and isinstance(hostname, str)
+        and bool(hostname)
+        and value.get("recorded_hostname") == hostname
+        and value.get("current_hostname") == hostname
+        and value.get("same_host") is True
+        and not isinstance(pid, bool)
+        and isinstance(pid, int)
+        and pid > 0
+        and value.get("pid") == pid
+        and value.get("pid_alive_observed") is False
+        and value.get("process_group_id") == pid
+        and value.get("process_group_alive_observed") is False
+        and value.get("ready") is True
+        and value.get("issue") is None
+        and value.get("action") == "quarantine_interrupted_output"
+        and isinstance(value.get("observed_at"), str)
+        and bool(value.get("observed_at"))
+    )
 
 
 def _pending_output_resolution_gate(
@@ -1012,6 +1145,31 @@ def _pending_output_resolution_gate(
         "destination_path",
         "quarantine_root",
     )
+    interruption_claim = (
+        pending.get("interruption_claim") if isinstance(pending, Mapping) else None
+    )
+    attempt_interruption_claim = (
+        pending_attempt.get("interruption_claim")
+        if isinstance(pending_attempt, Mapping)
+        else None
+    )
+    if (
+        isinstance(pending_attempt, Mapping)
+        and pending_attempt.get("status") == "interrupted"
+    ):
+        interruption_claim_consistent = bool(
+            isinstance(interruption_claim, Mapping)
+            and isinstance(attempt_interruption_claim, Mapping)
+            and dict(interruption_claim) == dict(attempt_interruption_claim)
+            and _interruption_claim_matches_attempt(
+                interruption_claim,
+                attempt=pending_attempt,
+            )
+        )
+    else:
+        interruption_claim_consistent = (
+            interruption_claim is None and attempt_interruption_claim is None
+        )
     consistent = bool(
         isinstance(pending, Mapping)
         and isinstance(attempt_pending, Mapping)
@@ -1028,6 +1186,7 @@ def _pending_output_resolution_gate(
             for field in required_strings
         )
         and isinstance(pending.get("tree_snapshot"), Mapping)
+        and interruption_claim_consistent
     )
     return {
         "issue": (

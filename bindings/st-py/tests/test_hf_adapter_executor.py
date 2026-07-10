@@ -894,6 +894,8 @@ def test_executor_fails_closed_on_interrupted_attempt_then_explicitly_retries(
             "attempt_id": "interrupted-test",
             "status": "running",
             "runner_kind": "subprocess",
+            "process_group_isolated": True,
+            "stop_scope": "process_group",
             "hostname": socket.gethostname(),
             "pid": 99_999_999,
             "parent_adapter_id": pending["parent_adapter_id"],
@@ -929,6 +931,7 @@ def test_executor_fails_closed_on_interrupted_attempt_then_explicitly_retries(
         "promoted",
     ]
     assert retried["promoted_generation_count"] == 1
+    assert retried["generations"][0]["interruption_claim"]["ready"] is True
     assert len(runner.commands) == 1
 
 
@@ -951,6 +954,8 @@ def test_executor_refuses_retry_while_recorded_child_pid_is_alive(
             "attempt_id": "still-running-test",
             "status": "running",
             "runner_kind": "subprocess",
+            "process_group_isolated": True,
+            "stop_scope": "process_group",
             "hostname": socket.gethostname(),
             "pid": os.getpid(),
             "parent_adapter_id": pending["parent_adapter_id"],
@@ -975,6 +980,64 @@ def test_executor_refuses_retry_while_recorded_child_pid_is_alive(
     assert blocked["action"] == "audit_interrupted_generation"
     assert "still alive" in blocked["reason"]
     assert blocked["generations"][0]["process_liveness_observation"] == "alive"
+    assert runner.commands == []
+
+
+def test_executor_refuses_retry_while_interrupted_process_group_is_alive(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, child = _seed_chain(tmp_path)
+    output_root = tmp_path / "executor-runs"
+    state_path = output_root / "state.json"
+    planned = st.run_hf_adapter_continuation_executor(
+        child,
+        output_root=output_root,
+        state_path=state_path,
+        max_lineage_depth=2,
+    )
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    pending = planned["pending_generation"]
+    state["generations"] = [
+        {
+            "attempt_id": "surviving-group-test",
+            "status": "running",
+            "runner_kind": "subprocess",
+            "process_group_isolated": True,
+            "stop_scope": "process_group",
+            "hostname": socket.gethostname(),
+            "pid": 42_424_242,
+            "parent_adapter_id": pending["parent_adapter_id"],
+            "lineage_depth": pending["lineage_depth"],
+            "output_dir": pending["output_dir"],
+        }
+    ]
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    monkeypatch.setattr(st.hf_adapter_executor, "local_pid_alive", lambda _pid: False)
+    monkeypatch.setattr(
+        st.hf_adapter_executor,
+        "local_process_group_alive",
+        lambda _process_group_id: True,
+    )
+    runner = FakeFineTuneRunner([0.05], weight_prefix="must-not-run")
+
+    blocked = st.run_hf_adapter_continuation_executor(
+        child,
+        output_root=output_root,
+        state_path=state_path,
+        run=True,
+        retry_interrupted=True,
+        max_lineage_depth=2,
+        command_runner=runner,
+    )
+
+    claim = blocked["generations"][0]["interruption_claim_observation"]
+    assert blocked["status"] == "blocked"
+    assert blocked["action"] == "audit_interrupted_generation"
+    assert "attempt_process_group_alive" in blocked["reason"]
+    assert claim["pid_alive_observed"] is False
+    assert claim["process_group_alive_observed"] is True
+    assert claim["ready"] is False
     assert runner.commands == []
 
 
@@ -1009,6 +1072,11 @@ def test_executor_recovers_completed_output_after_explicit_selection_interrupt(
         {
             "attempt_id": "interrupted-after-command",
             "status": "running",
+            "runner_kind": "subprocess",
+            "process_group_isolated": True,
+            "stop_scope": "process_group",
+            "hostname": socket.gethostname(),
+            "pid": 99_999_999,
             "parent_adapter_id": pending["parent_adapter_id"],
             "lineage_depth": pending["lineage_depth"],
             "output_dir": pending["output_dir"],
@@ -1028,4 +1096,5 @@ def test_executor_recovers_completed_output_after_explicit_selection_interrupt(
     assert recovered["selected_lineage_depth"] == 2
     assert recovered["promoted_generation_count"] == 1
     assert recovered["generations"][0]["status"] == "promoted_recovered"
+    assert recovered["generations"][0]["interruption_claim"]["ready"] is True
     assert recovered["generations"][0]["postflight"]["ready"] is True

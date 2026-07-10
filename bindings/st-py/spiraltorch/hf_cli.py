@@ -632,8 +632,8 @@ def adapter_continuation_executor_quarantine_main(
 ) -> int:
     parser = argparse.ArgumentParser(
         description=(
-            "Atomically move one failed executor output into an audited sibling "
-            "quarantine."
+            "Atomically move one failed or safely-claimed interrupted executor "
+            "output into an audited sibling quarantine."
         ),
     )
     parser.add_argument("state", type=Path)
