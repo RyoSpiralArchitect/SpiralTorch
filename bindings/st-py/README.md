@@ -947,6 +947,31 @@ PYTHONPATH=bindings/st-py python bindings/st-py/examples/hf_finetune_sweep.py \
   --out-dir runs/hf-causal-lm-zspace-sweep
 ```
 
+For a LoRA profile or adapter continuation, the sweep can enforce the same
+lineage/eval promotion contract on every row:
+
+```bash
+spiral-hf-finetune-sweep \
+  --model-configs bindings/st-py/examples/hf_finetune_model_configs.example.json \
+  --model-profile qwen2-0.5b-lora-local-smoke \
+  --train-file data/corpus.txt \
+  --validation-fraction 0.02 \
+  --eval-before-train \
+  --adapter-promotion-gate \
+  --adapter-promotion-max-eval-loss-regression 0.02 \
+  --seed-values 7,13 \
+  --out-dir runs/qwen2-lora-promotion-sweep
+```
+
+`sweep-plan.json` records the resolved artifact kind, FT mode, and promotion
+policy before any model is loaded. After execution, run-card summaries expose
+lineage depth, promotion status, eval regression, and failed/missing checks.
+Blocked or evidence-incomplete rows remain in the comparison for audit, but
+only `promotion_ready=True` rows can become the selected run, be reused by
+`--resume-existing`, or seed `scale-up-command.json`. If no row is ready, the
+sweep summary reports `no_promotion_ready_runs`, scale-up reports
+`adapter_promotion_not_ready`, and the non-dry-run CLI exits nonzero.
+
 For checkpoint-level local inference, use the generic generation-control
 wrapper so the fine-tuned checkpoint stays the model path while the profile can
 provide tokenizer, decode defaults, Z-Space softmax grids, and runtime access
@@ -1016,9 +1041,10 @@ strengths beside loss/eval telemetry, so post-run comparisons can distinguish
 "it trained well" from "it trained well under an aggressive decode field."
 `distortion_adjusted_eval_loss` and the sweep `scale_up_candidate_*` fields let
 the next longer run prefer near-best eval loss with lower distortion pressure
-instead of blindly following raw eval loss alone; those fields include the
-candidate run card, trace path, output directory, and replay command when the
-sweep report has matching run metadata. From Python,
+instead of blindly following raw eval loss alone. When adapter promotion is
+required, this ranking runs only after promotion-ready filtering. Those fields
+include the candidate run card, trace path, output directory, and replay command
+when the sweep report has matching run metadata. From Python,
 `st.hf_finetune_scale_up_command(summary_or_report)` turns that candidate into a
 shell-safe longer-run command, defaulting to doubled `--max-steps` and
 `--max-train-samples` while writing a fresh run card and trainer trace under a

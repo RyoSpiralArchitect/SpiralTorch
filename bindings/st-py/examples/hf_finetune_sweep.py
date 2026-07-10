@@ -92,7 +92,11 @@ def _rewrite_json(path: Path) -> None:
     )
 
 
-def _is_reusable_run_card(path: Path) -> bool:
+def _is_reusable_run_card(
+    path: Path,
+    *,
+    require_adapter_promotion: bool = False,
+) -> bool:
     if not path.is_file():
         return False
     try:
@@ -105,6 +109,12 @@ def _is_reusable_run_card(path: Path) -> bool:
     }:
         return False
     if card.get("failure_stage") or card.get("failure_error"):
+        return False
+    promotion = card.get("adapter_promotion")
+    if require_adapter_promotion and (
+        not isinstance(promotion, Mapping)
+        or promotion.get("promotion_ready") is not True
+    ):
         return False
     return True
 
@@ -140,6 +150,14 @@ def main(argv: list[str] | None = None) -> int:
         if command_display:
             print(f"scale_up_replay {command_display}")
     failed = int(report.get("failed_run_count") or 0)
+    summary = report.get("summary")
+    if (
+        args.adapter_promotion_gate
+        and not args.dry_run
+        and isinstance(summary, Mapping)
+        and summary.get("status") == "no_promotion_ready_runs"
+    ):
+        return 1
     return 1 if failed and args.fail_fast else 0
 
 
