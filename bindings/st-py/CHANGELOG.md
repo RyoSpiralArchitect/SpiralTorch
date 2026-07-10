@@ -115,6 +115,9 @@
   sibling commands instead of repository-relative scripts. Adapter continuation
   also accepts an audited lineage-depth-zero seed without a promotion report and
   injects the promotion gate into required child scale-up commands.
+- Release payload gate: reuse the manifest-backed wheel validator in both PyPI
+  upload workflows and smoke every installed HF/Z-Space console command across
+  the Linux, macOS, and Windows release matrix before publication.
 - Trainer resume audit: add `hf_finetune_checkpoint_resume_report(...)` and
   compact lines for optimizer/scheduler/RNG state availability, saved versus
   requested step horizons, and the exhausted-scheduler case where adapter

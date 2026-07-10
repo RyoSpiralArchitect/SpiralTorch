@@ -15,6 +15,11 @@ without uploading.
 - Safe manual PyPI publish helper: `scripts/publish_pypi_wheels.py`
 - Published-wheel digest verifier: `scripts/security/verify_pypi_release.py`
 
+Both PyPI workflows call the same manifest-backed wheel validator before any
+token or trusted-publisher upload. Official release builds also execute all HF
+and Z-Space console entrypoints on Linux, macOS, and Windows after installing
+each wheel, so a platform-specific missing runtime payload blocks publication.
+
 ## Common Variables
 
 ```bash
