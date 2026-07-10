@@ -649,6 +649,7 @@ def prepare_hf_finetune_model(
     modules_to_save: object = ...,
     use_rslora: bool = ...,
     gradient_checkpointing: bool = ...,
+    preloaded_adapter: bool = ...,
     peft_module: Any = ...,
 ) -> Tuple[Any, Dict[str, object]]: ...
 
@@ -677,6 +678,8 @@ write_hf_finetune_model_profile_launch_script: Callable[..., Dict[str, Any]]
 hf_finetune_rust_dependency_report: Callable[..., Dict[str, Any]]
 hf_finetune_corpus_file_report: Callable[..., Dict[str, Any]]
 hf_finetune_corpus_scan_report: Callable[..., Dict[str, Any]]
+hf_finetune_checkpoint_resume_report: Callable[..., Dict[str, Any]]
+hf_finetune_checkpoint_resume_lines: Callable[..., List[str]]
 hf_finetune_dataset_fit_report: Callable[..., Dict[str, Any]]
 hf_finetune_generation_report: Callable[..., Dict[str, Any]]
 hf_finetune_inference_distortion_handoff_report: Callable[..., Dict[str, Any]]
@@ -699,6 +702,8 @@ load_hf_finetune_run_card: Callable[..., Dict[str, Any]]
 load_hf_finetune_sweep_report: Callable[..., Dict[str, Any]]
 hf_finetune_disk_headroom_plan: Callable[..., Dict[str, Any]]
 hf_gpt2_finetune_disk_headroom_plan: Callable[..., Dict[str, Any]]
+hf_gpt2_finetune_checkpoint_resume_report: Callable[..., Dict[str, Any]]
+hf_gpt2_finetune_checkpoint_resume_lines: Callable[..., List[str]]
 hf_finetune_scale_up_command: Callable[..., Dict[str, Any]]
 hf_finetune_scale_up_preflight_report: Callable[..., Dict[str, Any]]
 hf_finetune_scale_up_preflight_lines: Callable[..., List[str]]
@@ -9748,6 +9753,8 @@ __all__ = [
     "hf_finetune_corpus_scan_report",
     "hf_finetune_dataset_fit_report",
     "hf_finetune_disk_headroom_plan",
+    "hf_finetune_checkpoint_resume_lines",
+    "hf_finetune_checkpoint_resume_report",
     "hf_finetune_eval_report",
     "hf_finetune_generation_curve_lines",
     "hf_finetune_generation_curve_report",

@@ -583,6 +583,30 @@ def _runtime_adapter_config(peft_config: Any) -> dict[str, object]:
     return {}
 
 
+def _model_runtime_adapter_config(
+    model: Any,
+) -> tuple[str | None, dict[str, object] | None]:
+    peft_configs = getattr(model, "peft_config", None)
+    if isinstance(peft_configs, Mapping):
+        if not peft_configs:
+            return None, None
+        active = getattr(model, "active_adapter", None)
+        if callable(active):
+            try:
+                active = active()
+            except Exception:
+                active = None
+        if isinstance(active, (list, tuple)):
+            active = active[0] if active else None
+        if active not in peft_configs:
+            active = next(iter(peft_configs))
+        config = peft_configs[active]
+        return str(active), _runtime_adapter_config(config)
+    if peft_configs is None:
+        return None, None
+    return None, _runtime_adapter_config(peft_configs)
+
+
 def _merge_and_unload_adapter(model: Any, *, safe_merge: bool) -> Any:
     merge = getattr(model, "merge_and_unload", None)
     if not callable(merge):
@@ -702,6 +726,7 @@ def load_hf_causal_lm_artifact(
     loaded_parameter_report = None
     adapter_loaded = False
     adapter_merged = False
+    active_adapter = None
     if load_model:
         resolved_model_options.setdefault("config", config)
         model = transformers.AutoModelForCausalLM.from_pretrained(
@@ -727,6 +752,11 @@ def load_hf_causal_lm_artifact(
                 **peft_options,
             )
             adapter_loaded = True
+            active_adapter, attached_runtime_config = _model_runtime_adapter_config(
+                model
+            )
+            if attached_runtime_config is not None:
+                runtime_adapter_config = attached_runtime_config
             if merge_adapter:
                 model = _merge_and_unload_adapter(
                     model,
@@ -755,6 +785,7 @@ def load_hf_causal_lm_artifact(
             ),
             "adapter_loaded": adapter_loaded,
             "adapter_trainable": bool(is_trainable) if adapter_loaded else None,
+            "active_adapter": active_adapter,
             "adapter_merge_requested": bool(merge_adapter),
             "adapter_merged": adapter_merged,
             "safe_merge": bool(safe_merge) if merge_adapter else None,
@@ -962,12 +993,16 @@ def prepare_hf_finetune_model(
     modules_to_save: object = None,
     use_rslora: bool = False,
     gradient_checkpointing: bool = False,
+    preloaded_adapter: bool = False,
     peft_module: Any = None,
 ) -> tuple[Any, dict[str, object]]:
     """Prepare a Transformers causal LM for full FT or attach a PEFT LoRA adapter.
 
     ``peft`` is imported only for LoRA mode, so importing SpiralTorch does not
-    make the optional HF stack an eager runtime dependency.
+    make the optional HF stack an eager runtime dependency. Set
+    ``preloaded_adapter`` when ``model`` is an already reconstructed trainable
+    PEFT artifact; the existing adapter is then reused instead of wrapping the
+    model a second time.
     """
 
     family = _model_family(model, model_family)
@@ -984,6 +1019,21 @@ def prepare_hf_finetune_model(
         gradient_checkpointing=gradient_checkpointing,
     )
     before = hf_finetune_parameter_report(model)
+    active_adapter, runtime_adapter_config = _model_runtime_adapter_config(model)
+    if runtime_adapter_config is not None and config["mode"] == "full":
+        raise ValueError(
+            "full fine-tuning cannot reuse a PEFT-wrapped model; merge the adapter "
+            "first or select LoRA mode"
+        )
+    if preloaded_adapter and config["mode"] != "lora":
+        raise ValueError("preloaded_adapter requires LoRA fine-tuning mode")
+    if preloaded_adapter and runtime_adapter_config is None:
+        raise ValueError("preloaded_adapter requires a model with PEFT configuration")
+    if runtime_adapter_config is not None and not preloaded_adapter:
+        raise ValueError(
+            "model already contains a PEFT adapter; set preloaded_adapter=True "
+            "to continue it without attaching a second adapter"
+        )
     checkpointing = _gradient_checkpointing_report(
         model,
         enabled=bool(config["gradient_checkpointing"]),
@@ -994,13 +1044,48 @@ def prepare_hf_finetune_model(
             "status": "ready",
             "mode": "full",
             "adapter_attached": False,
+            "adapter_attached_now": False,
+            "adapter_preloaded": False,
+            "adapter_origin": None,
+            "active_adapter": None,
             "model_family": family,
             "adapter_config": config,
+            "requested_adapter_config": config,
+            "adapter_config_source": "request",
+            "adapter_config_applied": True,
+            "runtime_adapter_config": None,
             "target_report": None,
             "parameter_report_before": before,
             "parameter_report_after": hf_finetune_parameter_report(model),
             "gradient_checkpointing": checkpointing,
             "peft_version": None,
+        }
+
+    if preloaded_adapter:
+        peft = peft_module or importlib.import_module("peft")
+        after = hf_finetune_parameter_report(model)
+        if after["trainable_parameter_count"] == 0:
+            raise ValueError("preloaded PEFT adapter has no trainable parameters")
+        return model, {
+            "row_type": "hf_finetune_model_prepare_report",
+            "status": "ready",
+            "mode": "lora",
+            "adapter_attached": True,
+            "adapter_attached_now": False,
+            "adapter_preloaded": True,
+            "adapter_origin": "artifact",
+            "active_adapter": active_adapter,
+            "model_family": family,
+            "adapter_config": config,
+            "requested_adapter_config": config,
+            "adapter_config_source": "loaded_artifact",
+            "adapter_config_applied": False,
+            "runtime_adapter_config": runtime_adapter_config,
+            "target_report": None,
+            "parameter_report_before": before,
+            "parameter_report_after": after,
+            "gradient_checkpointing": checkpointing,
+            "peft_version": getattr(peft, "__version__", None),
         }
 
     target_report = hf_finetune_lora_target_report(
@@ -1033,8 +1118,16 @@ def prepare_hf_finetune_model(
         "status": "ready",
         "mode": "lora",
         "adapter_attached": True,
+        "adapter_attached_now": True,
+        "adapter_preloaded": False,
+        "adapter_origin": "new",
+        "active_adapter": None,
         "model_family": family,
         "adapter_config": config,
+        "requested_adapter_config": config,
+        "adapter_config_source": "request",
+        "adapter_config_applied": True,
+        "runtime_adapter_config": None,
         "target_report": target_report,
         "parameter_report_before": before,
         "parameter_report_after": after,

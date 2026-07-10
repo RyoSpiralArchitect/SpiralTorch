@@ -60,6 +60,9 @@ class _FakePeft:
             self.kwargs = kwargs
             _FakePeft.last_config = self
 
+        def to_dict(self):
+            return dict(self.kwargs)
+
     @staticmethod
     def get_peft_model(model, _config):
         for _name, parameter in model.parameters_by_name:
@@ -70,6 +73,8 @@ class _FakePeft:
         model.parameters_by_name.append(
             ("base_model.model.layers.0.self_attn.q_proj.lora_B.weight", _Parameter(8))
         )
+        model.peft_config = {"default": _config}
+        model.active_adapter = "default"
         return model
 
 
@@ -162,6 +167,24 @@ class _ArtifactPeft:
             )
             model.adapter_source = str(source)
             model.adapter_trainable = bool(is_trainable)
+            config = types.SimpleNamespace(
+                to_dict=lambda: {
+                    "base_model_name_or_path": model.source,
+                    "peft_type": "LORA",
+                    "r": 4,
+                    "lora_alpha": 8,
+                }
+            )
+            model.peft_config = {"default": config}
+            model.active_adapter = "default"
+            for _name, parameter in model.parameters_by_name:
+                parameter.requires_grad = False
+            model.parameters_by_name.extend(
+                [
+                    ("base_model.model.q_proj.lora_A.weight", _Parameter(4)),
+                    ("base_model.model.q_proj.lora_B.weight", _Parameter(4)),
+                ]
+            )
             return model
 
 
@@ -241,12 +264,15 @@ def test_artifact_loader_reconstructs_local_trainable_adapter(tmp_path: Path) ->
     assert model.adapter_trainable is True
     assert report["adapter_loaded"] is True
     assert report["adapter_trainable"] is True
+    assert report["active_adapter"] == "default"
+    assert report["runtime_adapter_config"]["r"] == 4
     assert report["resolved_base_model_name_or_path"] == "org/base"
     assert report["resolved_tokenizer_source_kind"] == "adapter_artifact"
     summary = st.summarize_hf_causal_lm_artifact(report)
     assert summary["artifact_kind"] == "peft_adapter"
     assert summary["adapter_loaded"] is True
-    assert summary["parameter_count"] == 100
+    assert summary["parameter_count"] == 108
+    assert summary["trainable_parameter_count"] == 8
     assert _FakeTransformers.config_calls[0][0] == "org/base"
     assert _FakeTransformers.model_calls[0][0] == "org/base"
     assert _ArtifactPeft.model_calls[0][2] == {"local_files_only": True}
@@ -418,3 +444,45 @@ def test_prepare_lora_reports_trainable_adapter_and_resolved_targets() -> None:
     ]
     assert _FakePeft.last_config.kwargs["r"] == 8
     assert _FakePeft.last_config.kwargs["lora_alpha"] == 16.0
+
+
+def test_prepare_preloaded_adapter_reuses_trainable_peft_model() -> None:
+    model = _ArtifactModel("org/base")
+    model = _ArtifactPeft.PeftModel.from_pretrained(
+        model,
+        "org/adapter",
+        is_trainable=True,
+    )
+
+    prepared, report = st.prepare_hf_finetune_model(
+        model,
+        mode="lora",
+        gradient_checkpointing=True,
+        preloaded_adapter=True,
+        peft_module=_ArtifactPeft,
+    )
+
+    assert prepared is model
+    assert report["adapter_preloaded"] is True
+    assert report["adapter_attached_now"] is False
+    assert report["adapter_origin"] == "artifact"
+    assert report["adapter_config_source"] == "loaded_artifact"
+    assert report["adapter_config_applied"] is False
+    assert report["active_adapter"] == "default"
+    assert report["runtime_adapter_config"]["r"] == 4
+    assert report["parameter_report_after"]["trainable_parameter_count"] == 8
+    assert report["gradient_checkpointing"]["enabled"] is True
+
+    with pytest.raises(ValueError, match="already contains a PEFT adapter"):
+        st.prepare_hf_finetune_model(
+            model,
+            mode="lora",
+            peft_module=_ArtifactPeft,
+        )
+    with pytest.raises(ValueError, match="full fine-tuning cannot reuse"):
+        st.prepare_hf_finetune_model(
+            model,
+            mode="full",
+            preloaded_adapter=True,
+            peft_module=_ArtifactPeft,
+        )

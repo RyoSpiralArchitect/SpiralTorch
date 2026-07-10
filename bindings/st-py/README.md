@@ -604,8 +604,50 @@ with `target_modules` to the profile. `--gradient-checkpointing` disables model
 KV caching and lowers activation memory. The run card records the resolved
 target modules, matched layer count, trainable/frozen parameter counts and
 ratio, PEFT version, artifact kind, and whether `adapter_config.json` was
-actually saved. `--resume-from-checkpoint` continues a Trainer adapter
-checkpoint with optimizer/scheduler state.
+actually saved.
+
+An adapter-only output can now be continued as a new Trainer run without
+merging or attaching a second LoRA. This is a weights-only warm start: the
+adapter remains trainable, while optimizer and scheduler state are reset for a
+new corpus or learning-rate schedule:
+
+```bash
+spiral-hf-finetune \
+  --model-name runs/qwen2-lora \
+  --finetune-mode lora \
+  --train \
+  --train-file data/continued-corpus.txt \
+  --output-dir runs/qwen2-lora-continued
+```
+
+Local adapters are auto-detected. For a Hub adapter id, add
+`--model-artifact-kind peft-adapter`; model profiles can persist the same
+choice as `"artifact_kind": "peft-adapter"`. The run card records
+`finetune_start_report.mode=adapter_warm_start`, the resolved base/tokenizer,
+active adapter, runtime PEFT config, and whether a new adapter was attached.
+
+Use `--resume-from-checkpoint` only for an exact Trainer continuation that
+should restore optimizer, scheduler, and RNG state. SpiralTorch audits
+`trainer_state.json` and those state files before loading. A checkpoint saved
+at its original `max_steps` may have an exhausted scheduler; extending that
+exact resume can advance `global_step` while keeping the learning rate at zero.
+Inspect the decision from Python before launching:
+
+```python
+import spiraltorch as st
+
+resume = st.hf_finetune_checkpoint_resume_report(
+    "runs/qwen2-lora/checkpoint-1000",
+    requested_max_steps=2000,
+)
+print(st.hf_finetune_checkpoint_resume_lines(resume)[0])
+print(resume["recommendation"], resume["recommended_args"])
+```
+
+When `scheduler_extension_risk` is true, use that checkpoint as
+`--model-name ... --finetune-mode lora` without
+`--resume-from-checkpoint` to warm-start its adapter weights under a fresh
+optimizer/scheduler.
 
 The same preparation path is importable without eagerly importing PEFT:
 
@@ -622,6 +664,12 @@ model, report = st.prepare_hf_finetune_model(
 )
 print(report["parameter_report_after"]["trainable_parameter_ratio"])
 ```
+
+For an adapter already loaded with
+`load_hf_causal_lm_artifact(..., is_trainable=True)`, pass
+`preloaded_adapter=True` to reuse it safely. The preparation API rejects
+double attachment and rejects full FT on a PEFT-wrapped model until it is
+merged.
 
 Adapter-only outputs are also first-class inference artifacts. Local
 `adapter_config.json` directories are detected automatically; SpiralTorch loads
