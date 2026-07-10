@@ -25,6 +25,10 @@ from .hf_adapter_executor import (
     hf_adapter_continuation_executor_lines,
     run_hf_adapter_continuation_executor,
 )
+from .hf_adapter_executor_status import (
+    hf_adapter_continuation_executor_status_lines,
+    hf_adapter_continuation_executor_status_report,
+)
 from .hf_ft import (
     HF_FINETUNE_DEFAULT_MODEL_PROFILE,
     hf_finetune_model_profile_catalog,
@@ -304,6 +308,11 @@ def adapter_continuation_executor_main(
         action="store_true",
         help="Execute ready generation commands; the default only plans.",
     )
+    parser.add_argument(
+        "--no-tee-output",
+        action="store_true",
+        help="Write subprocess output only to its executor log.",
+    )
     parser.add_argument("--max-generations", type=int, default=1)
     parser.add_argument("--retry-interrupted", action="store_true")
     parser.add_argument("--output-prefix", default="generation")
@@ -380,6 +389,7 @@ def adapter_continuation_executor_main(
             max_eval_samples=args.max_eval_samples,
             max_eval_blocks=args.max_eval_blocks,
             streaming_validation_samples=args.streaming_validation_samples,
+            tee_output=not args.no_tee_output,
         )
     except Exception as exc:
         print(
@@ -405,6 +415,39 @@ def adapter_continuation_executor_main(
         if isinstance(returncode, int) and returncode != 0:
             return returncode
     return 1
+
+
+def adapter_continuation_executor_status_main(
+    argv: Sequence[str] | None = None,
+) -> int:
+    parser = argparse.ArgumentParser(
+        description="Inspect a continuation executor without mutating its state.",
+    )
+    parser.add_argument("state", type=Path)
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument(
+        "--require-healthy",
+        action="store_true",
+        help="Exit nonzero for failed, blocked, interrupted, or unverified state.",
+    )
+    args = parser.parse_args(argv)
+    try:
+        report = hf_adapter_continuation_executor_status_report(args.state)
+    except Exception as exc:
+        print(
+            f"hf_adapter_continuation_executor_status_error "
+            f"{exc.__class__.__name__}: {exc}",
+            file=sys.stderr,
+        )
+        return 2
+    if args.json:
+        print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        for line in hf_adapter_continuation_executor_status_lines(report):
+            print(line)
+    if args.require_healthy and report.get("healthy") is not True:
+        return 1
+    return 0
 
 
 def _generation_control_profile_config_lines(report: dict) -> list[str]:
