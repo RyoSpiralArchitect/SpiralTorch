@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
+import signal
 import shlex
 import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import uuid
 from collections.abc import Callable, Iterator, Mapping, Sequence
@@ -29,11 +32,16 @@ from .hf_ft import (
 
 __all__ = [
     "HF_ADAPTER_CONTINUATION_EXECUTOR_FILENAME",
+    "HF_ADAPTER_CONTINUATION_EXECUTOR_CONTROL_DIRNAME",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_LOCK_FILENAME",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_LOG_DIRNAME",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_SCHEMA",
+    "HF_ADAPTER_CONTINUATION_EXECUTOR_STOP_REQUEST_SCHEMA",
     "hf_adapter_continuation_executor_lines",
+    "hf_adapter_continuation_executor_stop_request_lines",
     "load_hf_adapter_continuation_executor",
+    "load_hf_adapter_continuation_executor_stop_request",
+    "request_hf_adapter_continuation_executor_stop",
     "run_hf_adapter_continuation_executor",
 ]
 
@@ -44,16 +52,24 @@ HF_ADAPTER_CONTINUATION_EXECUTOR_SCHEMA = (
 HF_ADAPTER_CONTINUATION_EXECUTOR_FILENAME = (
     "spiraltorch-hf-adapter-continuation-executor.json"
 )
+HF_ADAPTER_CONTINUATION_EXECUTOR_CONTROL_DIRNAME = "executor-control"
 HF_ADAPTER_CONTINUATION_EXECUTOR_LOCK_FILENAME = (
     ".spiraltorch-hf-adapter-continuation-executor.lock"
 )
 HF_ADAPTER_CONTINUATION_EXECUTOR_LOG_DIRNAME = "executor-logs"
+HF_ADAPTER_CONTINUATION_EXECUTOR_STOP_REQUEST_SCHEMA = (
+    "spiraltorch.hf_adapter_continuation_executor_stop_request.v1"
+)
 _PROCESS_PROGRESS_INTERVAL_SECONDS = 5.0
+_PROCESS_STOP_POLL_INTERVAL_SECONDS = 0.2
+_PROCESS_STOP_GRACE_SECONDS = 5.0
 
 
 CommandRunner = Callable[[Sequence[str]], object]
 ProcessStarted = Callable[[int], None]
 ProcessProgress = Callable[[int], None]
+ProcessStopRequested = Callable[[Mapping[str, object]], None]
+StopRequestLoader = Callable[[], Mapping[str, object] | None]
 
 
 def _now() -> str:
@@ -206,6 +222,225 @@ def load_hf_adapter_continuation_executor(
     return report
 
 
+def _stop_request_path(
+    output_root: Path,
+    *,
+    run_id: str,
+    invocation_count: int,
+) -> Path:
+    identity = hashlib.sha256(
+        f"{run_id}\0{invocation_count}".encode("utf-8")
+    ).hexdigest()[:24]
+    return (
+        output_root
+        / HF_ADAPTER_CONTINUATION_EXECUTOR_CONTROL_DIRNAME
+        / f"stop-{invocation_count:06d}-{identity}.json"
+    )
+
+
+def _state_stop_request_path(state: Mapping[str, object]) -> Path:
+    output_root_value = state.get("output_root")
+    run_id = state.get("run_id")
+    invocation_count = state.get("invocation_count")
+    if output_root_value is None or not isinstance(run_id, str) or not run_id:
+        raise ValueError("executor state is missing stop-request identity")
+    if (
+        isinstance(invocation_count, bool)
+        or not isinstance(invocation_count, int)
+        or invocation_count <= 0
+    ):
+        raise ValueError("executor state has an invalid invocation_count")
+    return _stop_request_path(
+        Path(str(output_root_value)).expanduser().resolve(),
+        run_id=run_id,
+        invocation_count=invocation_count,
+    )
+
+
+def _exclusive_write_json(path: Path, payload: Mapping[str, object]) -> None:
+    control_dir = path.parent
+    if control_dir.is_symlink():
+        raise RuntimeError(
+            f"executor control directory cannot be a symlink: {control_dir}"
+        )
+    control_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=True, indent=2, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+    except BaseException:
+        path.unlink(missing_ok=True)
+        raise
+
+
+def load_hf_adapter_continuation_executor_stop_request(
+    value: str | Path,
+) -> dict[str, object]:
+    """Load and validate one durable executor stop request."""
+
+    path = Path(value).expanduser()
+    if path.is_symlink():
+        raise ValueError(f"executor stop request cannot be a symlink: {path}")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, Mapping):
+        raise ValueError(f"executor stop request must contain a JSON object: {path}")
+    if payload.get("schema") != HF_ADAPTER_CONTINUATION_EXECUTOR_STOP_REQUEST_SCHEMA:
+        raise ValueError(
+            "unsupported HF adapter continuation executor stop-request schema: "
+            f"{payload.get('schema')}"
+        )
+    if payload.get("row_type") != "hf_adapter_continuation_executor_stop_request":
+        raise ValueError(
+            "unsupported HF adapter continuation executor stop-request row type: "
+            f"{payload.get('row_type')}"
+        )
+    report = dict(payload)
+    report["request_path"] = str(path.resolve())
+    return report
+
+
+def _matching_stop_request(
+    path: Path,
+    *,
+    run_id: object,
+    invocation_count: object,
+) -> dict[str, object] | None:
+    try:
+        request = load_hf_adapter_continuation_executor_stop_request(path)
+    except FileNotFoundError:
+        return None
+    if (
+        request.get("run_id") != run_id
+        or request.get("invocation_count") != invocation_count
+    ):
+        raise ValueError("executor stop request targets a different invocation")
+    return request
+
+
+def request_hf_adapter_continuation_executor_stop(
+    report_or_path: Mapping[str, object] | str | Path,
+    *,
+    reason: str = "operator_requested",
+) -> dict[str, object]:
+    """Request a cooperative stop without signalling an unverified PID."""
+
+    state = (
+        dict(report_or_path)
+        if isinstance(report_or_path, Mapping)
+        else load_hf_adapter_continuation_executor(report_or_path)
+    )
+    raw_reason = str(reason)
+    if any(ord(character) < 32 or ord(character) == 127 for character in raw_reason):
+        raise ValueError("stop reason must not contain control characters")
+    normalized_reason = raw_reason.strip()
+    if not normalized_reason:
+        raise ValueError("stop reason must not be empty")
+    if len(normalized_reason) > 512:
+        raise ValueError("stop reason must be at most 512 characters")
+    path = _state_stop_request_path(state)
+    existing = _matching_stop_request(
+        path,
+        run_id=state.get("run_id"),
+        invocation_count=state.get("invocation_count"),
+    )
+    if existing is not None:
+        report = dict(existing)
+        report["created"] = False
+        return report
+    if state.get("status") not in {"auditing", "running"}:
+        raise RuntimeError(
+            "executor is not running; no cooperative stop request was written"
+        )
+    execution = state.get("execution")
+    lock_value = execution.get("lock_path") if isinstance(execution, Mapping) else None
+    lock_path = None if lock_value is None else Path(str(lock_value)).expanduser()
+    lock_owner = None if lock_path is None else _load_executor_lock(lock_path)
+    if lock_owner is None:
+        raise RuntimeError(
+            "executor single-writer lock is absent; inspect interrupted state instead"
+        )
+    if (
+        lock_owner.get("row_type") != "hf_adapter_continuation_executor_lock"
+        or not isinstance(lock_owner.get("lock_id"), str)
+        or not lock_owner.get("lock_id")
+        or not isinstance(lock_owner.get("hostname"), str)
+        or not lock_owner.get("hostname")
+        or isinstance(lock_owner.get("pid"), bool)
+        or not isinstance(lock_owner.get("pid"), int)
+        or int(lock_owner.get("pid")) <= 0
+    ):
+        raise RuntimeError("executor single-writer lock owner is invalid")
+    if (
+        lock_owner.get("hostname") == socket.gethostname()
+        and local_pid_alive(lock_owner.get("pid")) is not True
+    ):
+        raise RuntimeError(
+            "executor single-writer lock owner is not alive; inspect interrupted state"
+        )
+    running = [
+        row
+        for row in state.get("generations") or []
+        if isinstance(row, Mapping) and row.get("status") == "running"
+    ]
+    if len(running) > 1:
+        raise RuntimeError("executor state contains multiple running attempts")
+    active = running[-1] if running else None
+    payload = {
+        "row_type": "hf_adapter_continuation_executor_stop_request",
+        "schema": HF_ADAPTER_CONTINUATION_EXECUTOR_STOP_REQUEST_SCHEMA,
+        "request_id": f"executor-stop-{uuid.uuid4().hex}",
+        "requested_at": _now(),
+        "requested_by_pid": os.getpid(),
+        "requested_by_hostname": socket.gethostname(),
+        "reason": normalized_reason,
+        "run_id": state.get("run_id"),
+        "invocation_count": state.get("invocation_count"),
+        "attempt_id": None if active is None else active.get("attempt_id"),
+        "attempt_pid": None if active is None else active.get("pid"),
+        "attempt_hostname": None if active is None else active.get("hostname"),
+        "state_path": state.get("state_path"),
+    }
+    created = True
+    try:
+        _exclusive_write_json(path, payload)
+    except FileExistsError:
+        existing = _matching_stop_request(
+            path,
+            run_id=state.get("run_id"),
+            invocation_count=state.get("invocation_count"),
+        )
+        if existing is None:
+            raise RuntimeError("executor stop request disappeared during inspection")
+        payload = existing
+        created = False
+    report = dict(payload)
+    report["request_path"] = str(path.resolve())
+    report["created"] = created
+    return report
+
+
+def hf_adapter_continuation_executor_stop_request_lines(
+    report_or_path: Mapping[str, object] | str | Path,
+) -> list[str]:
+    report = (
+        dict(report_or_path)
+        if isinstance(report_or_path, Mapping)
+        else load_hf_adapter_continuation_executor_stop_request(report_or_path)
+    )
+    return [
+        "hf_adapter_continuation_executor_stop_request "
+        f"created={report.get('created')} "
+        f"run={report.get('run_id')} "
+        f"invocation={report.get('invocation_count')} "
+        f"attempt={report.get('attempt_id')} "
+        f"reason={report.get('reason')} "
+        f"request={report.get('request_path')}"
+    ]
+
+
 def _write_state(path: Path, state: dict[str, object]) -> None:
     state["state_path"] = str(path)
     state["updated_at"] = _now()
@@ -280,6 +515,11 @@ def _state_for_invocation(
     state["execution"] = dict(execution)
     state["mode"] = "run" if run else "plan"
     state["max_generations_per_invocation"] = max_generations
+    previous_stop_request = state.pop("stop_request", None)
+    if isinstance(previous_stop_request, Mapping):
+        history = state.setdefault("stop_request_history", [])
+        if isinstance(history, list):
+            history.append(dict(previous_stop_request))
     state["invocation_count"] = int(state.get("invocation_count") or 0) + 1
     state["invocation_started_at"] = _now()
     state["status"] = "auditing"
@@ -442,6 +682,69 @@ def _command_returncode(value: object) -> int:
     raise TypeError("command runner must return an int or object with returncode")
 
 
+def _terminate_owned_process(
+    process: subprocess.Popen[bytes],
+    *,
+    grace_seconds: float,
+) -> None:
+    if process.poll() is not None:
+        return
+
+    def send_signal(*, force: bool) -> None:
+        if os.name == "posix":
+            try:
+                os.killpg(
+                    process.pid,
+                    signal.SIGKILL if force else signal.SIGTERM,
+                )
+                return
+            except OSError:
+                pass
+        elif os.name == "nt":
+            try:
+                subprocess.run(
+                    [
+                        "taskkill",
+                        "/PID",
+                        str(process.pid),
+                        "/T",
+                        *(["/F"] if force else []),
+                    ],
+                    check=False,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            except OSError:
+                pass
+            if process.poll() is not None:
+                return
+        try:
+            process.kill() if force else process.terminate()
+        except OSError:
+            pass
+
+    def owned_scope_alive() -> bool:
+        if os.name != "posix":
+            return process.poll() is None
+        process.poll()
+        try:
+            os.killpg(process.pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        except OSError:
+            return process.poll() is None
+        return True
+
+    send_signal(force=False)
+    deadline = time.monotonic() + grace_seconds
+    while owned_scope_alive() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    if owned_scope_alive():
+        send_signal(force=True)
+
+
 def _execute_command(
     command: Sequence[str],
     *,
@@ -452,6 +755,8 @@ def _execute_command(
     tee_output: bool,
     process_started: ProcessStarted | None,
     process_progress: ProcessProgress | None,
+    stop_request_loader: StopRequestLoader | None = None,
+    process_stop_requested: ProcessStopRequested | None = None,
 ) -> int:
     if command_runner is not None:
         return _command_returncode(command_runner(command))
@@ -475,18 +780,57 @@ def _execute_command(
         log_handle.write(header)
         log_bytes = len(header)
         last_progress_at: float | None = None
+        process_group_options: dict[str, object] = {}
+        if os.name == "posix":
+            process_group_options["start_new_session"] = True
+        elif os.name == "nt":
+            process_group_options["creationflags"] = getattr(
+                subprocess,
+                "CREATE_NEW_PROCESS_GROUP",
+                0,
+            )
         process = subprocess.Popen(
             list(command),
             cwd=None if command_cwd is None else str(command_cwd),
             env=environment,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
+            **process_group_options,
         )
+        stop_watcher_done = threading.Event()
+        stop_watcher: threading.Thread | None = None
         try:
             if process_started is not None:
                 process_started(process.pid)
             if process.stdout is None:
                 raise RuntimeError("subprocess stdout pipe was not created")
+            if stop_request_loader is not None:
+
+                def watch_stop_request() -> None:
+                    while not stop_watcher_done.is_set():
+                        try:
+                            request = stop_request_loader()
+                        except (OSError, RuntimeError, ValueError):
+                            request = None
+                        if request is not None and process.poll() is None:
+                            if process_stop_requested is not None:
+                                try:
+                                    process_stop_requested(dict(request))
+                                except Exception:
+                                    pass
+                            _terminate_owned_process(
+                                process,
+                                grace_seconds=_PROCESS_STOP_GRACE_SECONDS,
+                            )
+                            return
+                        stop_watcher_done.wait(_PROCESS_STOP_POLL_INTERVAL_SECONDS)
+
+                stop_watcher = threading.Thread(
+                    target=watch_stop_request,
+                    name="spiraltorch-adapter-executor-stop",
+                    daemon=True,
+                )
+                stop_watcher.start()
             binary_output = getattr(sys.stdout, "buffer", None) if tee_output else None
             text_output = sys.stdout if tee_output and binary_output is None else None
             tee_failed = False
@@ -523,12 +867,11 @@ def _execute_command(
             return returncode
         except BaseException as exc:
             if process.poll() is None:
-                process.terminate()
-                try:
-                    process.wait(timeout=5.0)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait()
+                _terminate_owned_process(
+                    process,
+                    grace_seconds=_PROCESS_STOP_GRACE_SECONDS,
+                )
+                process.wait()
             try:
                 log_handle.write(
                     (
@@ -539,6 +882,10 @@ def _execute_command(
             except OSError:
                 pass
             raise
+        finally:
+            stop_watcher_done.set()
+            if stop_watcher is not None:
+                stop_watcher.join(timeout=1.0)
 
 
 def _running_attempt_process_observation(attempt: Mapping[str, object]) -> str:
@@ -609,6 +956,7 @@ def _unresolved_failed_attempt_output(
     generations = state.get("generations") or []
     for index, raw_attempt in enumerate(generations):
         if not isinstance(raw_attempt, Mapping) or raw_attempt.get("status") not in {
+            "cancelled",
             "failed",
             "postflight_failed",
         }:
@@ -801,6 +1149,11 @@ def _run_hf_adapter_continuation_executor_unlocked(
         resolved_output_root / HF_ADAPTER_CONTINUATION_EXECUTOR_LOG_DIRNAME
     ):
         raise ValueError("state_path cannot replace the executor log directory")
+    control_dir = (
+        resolved_output_root / HF_ADAPTER_CONTINUATION_EXECUTOR_CONTROL_DIRNAME
+    )
+    if resolved_state_path == control_dir or control_dir in resolved_state_path.parents:
+        raise ValueError("state_path cannot be inside the executor control directory")
     if resolved_state_path in source_paths:
         raise ValueError("state_path cannot overwrite an adapter chain source")
     policy = {
@@ -833,6 +1186,8 @@ def _run_hf_adapter_continuation_executor_unlocked(
         ),
         "log_dir": None if command_runner is not None else str(log_dir),
         "state_progress_interval_seconds": _PROCESS_PROGRESS_INTERVAL_SECONDS,
+        "process_group_isolated": command_runner is None,
+        "stop_scope": "process_group" if command_runner is None else "runner_boundary",
         "tee_output": bool(tee_output),
     }
     state = _state_for_invocation(
@@ -845,10 +1200,30 @@ def _run_hf_adapter_continuation_executor_unlocked(
         run=run,
         max_generations=max_generations,
     )
+    stop_request_path = _state_stop_request_path(state)
+    execution["stop_request_path"] = str(stop_request_path)
+    execution["stop_poll_interval_seconds"] = _PROCESS_STOP_POLL_INTERVAL_SECONDS
+    execution["stop_grace_seconds"] = _PROCESS_STOP_GRACE_SECONDS
+    state["execution"] = dict(execution)
     _write_state(resolved_state_path, state)
     executed = 0
 
     while True:
+        stop_request = _matching_stop_request(
+            stop_request_path,
+            run_id=state.get("run_id"),
+            invocation_count=state.get("invocation_count"),
+        )
+        if stop_request is not None:
+            state["stop_request"] = stop_request
+            state.pop("pending_generation", None)
+            return _finish(
+                state,
+                resolved_state_path,
+                status="stopped",
+                action="resume_executor",
+                reason="stop_requested",
+            )
         unresolved_output = _unresolved_failed_attempt_output(state)
         if unresolved_output is not None:
             state["unresolved_generation"] = unresolved_output
@@ -1079,6 +1454,8 @@ def _run_hf_adapter_continuation_executor_unlocked(
             "status": "running",
             "started_at": _now(),
             "runner_kind": execution["runner_kind"],
+            "process_group_isolated": execution["process_group_isolated"],
+            "stop_scope": execution["stop_scope"],
             "hostname": socket.gethostname(),
             "pid": None,
             "command_cwd": str(resolved_command_cwd),
@@ -1106,6 +1483,7 @@ def _run_hf_adapter_continuation_executor_unlocked(
         _write_state(resolved_state_path, state)
 
         started = time.monotonic()
+        observed_stop_request: dict[str, object] | None = None
 
         def record_process_started(pid: int) -> None:
             attempt["pid"] = pid
@@ -1116,6 +1494,17 @@ def _run_hf_adapter_continuation_executor_unlocked(
             attempt["last_output_at"] = _now()
             attempt["log_bytes_observed"] = log_bytes
             _write_state(resolved_state_path, state)
+
+        def load_current_stop_request() -> dict[str, object] | None:
+            return _matching_stop_request(
+                stop_request_path,
+                run_id=state.get("run_id"),
+                invocation_count=state.get("invocation_count"),
+            )
+
+        def record_process_stop_requested(request: Mapping[str, object]) -> None:
+            nonlocal observed_stop_request
+            observed_stop_request = dict(request)
 
         try:
             returncode = _execute_command(
@@ -1130,6 +1519,14 @@ def _run_hf_adapter_continuation_executor_unlocked(
                 ),
                 process_progress=(
                     None if command_runner is not None else record_process_progress
+                ),
+                stop_request_loader=(
+                    None if command_runner is not None else load_current_stop_request
+                ),
+                process_stop_requested=(
+                    None
+                    if command_runner is not None
+                    else record_process_stop_requested
                 ),
             )
         except Exception as exc:
@@ -1148,6 +1545,25 @@ def _run_hf_adapter_continuation_executor_unlocked(
         attempt["process_exited_at"] = _now()
         attempt["completed_at"] = _now()
         attempt["duration_seconds"] = time.monotonic() - started
+        boundary_stop_request = load_current_stop_request()
+        if (
+            observed_stop_request is None
+            and returncode != 0
+            and boundary_stop_request is not None
+        ):
+            observed_stop_request = boundary_stop_request
+        if observed_stop_request is not None:
+            attempt["status"] = "cancelled"
+            attempt["stop_request"] = observed_stop_request
+            state["stop_request"] = observed_stop_request
+            state.pop("pending_generation", None)
+            return _finish(
+                state,
+                resolved_state_path,
+                status="stopped",
+                action="resume_executor",
+                reason="stop_requested",
+            )
         if returncode != 0:
             attempt["status"] = "failed"
             return _finish(

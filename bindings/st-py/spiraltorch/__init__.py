@@ -939,12 +939,17 @@ from .hf_adapter import (
 
 from . import hf_adapter_executor as hf_adapter_executor
 from .hf_adapter_executor import (
+    HF_ADAPTER_CONTINUATION_EXECUTOR_CONTROL_DIRNAME,
     HF_ADAPTER_CONTINUATION_EXECUTOR_FILENAME,
     HF_ADAPTER_CONTINUATION_EXECUTOR_LOCK_FILENAME,
     HF_ADAPTER_CONTINUATION_EXECUTOR_LOG_DIRNAME,
     HF_ADAPTER_CONTINUATION_EXECUTOR_SCHEMA,
+    HF_ADAPTER_CONTINUATION_EXECUTOR_STOP_REQUEST_SCHEMA,
     hf_adapter_continuation_executor_lines,
+    hf_adapter_continuation_executor_stop_request_lines,
     load_hf_adapter_continuation_executor,
+    load_hf_adapter_continuation_executor_stop_request,
+    request_hf_adapter_continuation_executor_stop,
     run_hf_adapter_continuation_executor,
 )
 from . import hf_adapter_executor_status as hf_adapter_executor_status
@@ -1206,11 +1211,13 @@ _EXTRAS = [
     "HF_ADAPTER_PROMOTION_CHAIN_SCHEMA",
     "HF_ADAPTER_CONTINUATION_POLICY_FILENAME",
     "HF_ADAPTER_CONTINUATION_POLICY_SCHEMA",
+    "HF_ADAPTER_CONTINUATION_EXECUTOR_CONTROL_DIRNAME",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_FILENAME",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_LOCK_FILENAME",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_LOG_DIRNAME",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_SCHEMA",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_STATUS_SCHEMA",
+    "HF_ADAPTER_CONTINUATION_EXECUTOR_STOP_REQUEST_SCHEMA",
     "HF_FINETUNE_MODES",
     "HF_FINETUNE_LORA_TARGET_MODULES",
     "export_hf_merged_causal_lm",
@@ -1220,6 +1227,7 @@ _EXTRAS = [
     "hf_adapter_executor",
     "hf_adapter_executor_status",
     "hf_adapter_continuation_executor_lines",
+    "hf_adapter_continuation_executor_stop_request_lines",
     "hf_adapter_continuation_executor_status_lines",
     "hf_adapter_continuation_executor_status_report",
     "hf_adapter_continuation_policy_lines",
@@ -1233,6 +1241,8 @@ _EXTRAS = [
     "hf_adapter_promotion_report",
     "load_hf_adapter_promotion_chain",
     "load_hf_adapter_continuation_policy",
+    "load_hf_adapter_continuation_executor_stop_request",
+    "request_hf_adapter_continuation_executor_stop",
     "load_hf_adapter_continuation_executor",
     "hf_finetune_adapter_config",
     "hf_finetune_corpus_file_report",

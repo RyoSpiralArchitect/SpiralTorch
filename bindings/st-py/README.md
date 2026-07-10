@@ -783,10 +783,36 @@ spiral-hf-adapter-executor-status \
   --require-healthy
 ```
 
+Stop a live invocation cooperatively instead of signalling its recorded PID:
+
+```bash
+spiral-hf-adapter-executor-stop \
+  runs/qwen2-study/executor/state.json \
+  --reason "operator maintenance"
+```
+
+The stop command writes an owner-only, invocation-scoped request under
+`executor-control/`; it never sends a signal to a PID whose identity it cannot
+prove. The executor launches real training in an isolated process group,
+observes the request even when training is silent, asks the owned group to
+terminate, and escalates after a bounded grace period so Trainer/data-loader
+workers are not left behind. An in-flight generation is recorded as
+`cancelled`. If the request arrives after the command has completed, the
+executor verifies and promotes that finished adapter, then stops before
+launching the next depth.
+Repeated stop commands are idempotent. A cancelled generation that left a
+partial output directory remains fail-closed and is reported as
+`cancelled_output_present` until the operator inspects and moves or removes it.
+Python can issue the same request with
+`st.request_hf_adapter_continuation_executor_stop(...)` and load its durable
+evidence with `st.load_hf_adapter_continuation_executor_stop_request(...)`.
+
 The status surface reports state age, active attempt, local PID liveness,
-single-writer lock presence, output presence, and log size. PID liveness is an
-observation rather than a process-identity guarantee; remote-host and legacy
-attempts are reported as unverified instead of being guessed healthy.
+single-writer lock presence, output presence, log size, and a pending stop
+request. `stopping` is a healthy transition while the owner drains the child.
+PID liveness is an observation rather than a process-identity guarantee;
+remote-host and legacy attempts are reported as unverified instead of being
+guessed healthy.
 `--require-healthy` also rejects a missing active lock, durable subprocess log,
 or promoted output. Python can drive the same state machine with
 `st.run_hf_adapter_continuation_executor(...)` and inspect it with
