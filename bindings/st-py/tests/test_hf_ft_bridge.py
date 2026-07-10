@@ -9063,6 +9063,117 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 ]
             )
 
+    def test_bridge_adapter_promotion_gate_requires_auditable_evidence(
+        self,
+    ) -> None:
+        module = load_bridge_example()
+        args = module.parse_args(
+            [
+                "--train",
+                "--finetune-mode",
+                "lora",
+                "--eval-before-train",
+                "--adapter-promotion-gate",
+                "--adapter-promotion-max-eval-loss-regression",
+                "0.05",
+            ]
+        )
+
+        self.assertTrue(args.adapter_promotion_gate)
+        self.assertEqual(args.adapter_promotion_max_eval_loss_regression, 0.05)
+        invalid_argv = [
+            ["--adapter-promotion-gate"],
+            [
+                "--train",
+                "--finetune-mode",
+                "lora",
+                "--adapter-promotion-gate",
+            ],
+            [
+                "--train",
+                "--finetune-mode",
+                "lora",
+                "--eval-before-train",
+                "--no-eval-after-train",
+                "--adapter-promotion-gate",
+            ],
+            [
+                "--train",
+                "--finetune-mode",
+                "lora",
+                "--eval-before-train",
+                "--adapter-promotion-gate",
+                "--adapter-promotion-require-generation-change",
+            ],
+            [
+                "--adapter-promotion-max-eval-loss-regression",
+                "nan",
+            ],
+        ]
+        for argv in invalid_argv:
+            with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                module.parse_args(argv)
+
+    def test_bridge_rejects_in_place_adapter_continuation(self) -> None:
+        module = load_bridge_example()
+        with tempfile.TemporaryDirectory() as tmp:
+            adapter = Path(tmp) / "adapter"
+            adapter.mkdir()
+            (adapter / "adapter_config.json").write_text(
+                json.dumps(
+                    {
+                        "base_model_name_or_path": "org/base",
+                        "peft_type": "LORA",
+                        "task_type": "CAUSAL_LM",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (adapter / "adapter_model.safetensors").write_bytes(b"adapter")
+            args = module.parse_args(
+                [
+                    "--model-name",
+                    str(adapter),
+                    "--finetune-mode",
+                    "lora",
+                    "--metadata-only",
+                    "--output-dir",
+                    str(adapter),
+                ]
+            )
+            report = module._model_artifact_report(args)
+            sibling_args = module.parse_args(
+                [
+                    "--model-name",
+                    str(adapter),
+                    "--finetune-mode",
+                    "lora",
+                    "--metadata-only",
+                    "--output-dir",
+                    str(Path(tmp) / "continued"),
+                ]
+            )
+            nested_args = module.parse_args(
+                [
+                    "--model-name",
+                    str(adapter),
+                    "--finetune-mode",
+                    "lora",
+                    "--metadata-only",
+                    "--output-dir",
+                    str(adapter / "continued"),
+                ]
+            )
+
+            self.assertTrue(module._adapter_output_collision(args, report))
+            self.assertTrue(
+                module._path_is_within(module._run_card_path(args), adapter)
+            )
+            self.assertFalse(
+                module._adapter_output_collision(sibling_args, report)
+            )
+            self.assertTrue(module._adapter_output_collision(nested_args, report))
+
     def test_adapter_artifact_kind_flows_through_model_profiles(self) -> None:
         profile = st.resolve_hf_finetune_model_profile(
             {

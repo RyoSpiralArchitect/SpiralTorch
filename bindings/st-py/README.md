@@ -626,6 +626,57 @@ choice as `"artifact_kind": "peft-adapter"`. The run card records
 `finetune_start_report.mode=adapter_warm_start`, the resolved base/tokenizer,
 active adapter, runtime PEFT config, and whether a new adapter was attached.
 
+Every successful LoRA save now writes
+`spiraltorch-hf-adapter-lineage.json`. Its path-independent SHA-256 identity is
+derived from `adapter_config.json` plus all adapter weight files, and the node
+records its verified parent, root, depth, start mode, and run-card digest. The
+bridge refuses to continue an adapter in place: input and output directories
+must not overlap so the parent remains immutable.
+
+Require before/after evidence and stop the run from becoming a promotion
+candidate when eval loss regresses:
+
+```bash
+spiral-hf-finetune \
+  --model-name runs/qwen2-lora \
+  --finetune-mode lora \
+  --train \
+  --train-file data/continued-corpus.txt \
+  --eval-before-train \
+  --adapter-promotion-gate \
+  --adapter-promotion-max-eval-loss-regression 0.02 \
+  --output-dir runs/qwen2-lora-candidate
+```
+
+The bound is `eval_after - eval_before`: `0` rejects any regression, while a
+negative value requires improvement. The gate also requires a matching
+lineage/run-card digest, a finite trainer loss, successful adapter save, and a
+content change from a local parent. Add
+`--adapter-promotion-require-generation-change` with `--generation-prompt` when
+changed generation is part of the promotion contract. Reports are written to
+`spiraltorch-hf-adapter-promotion.json`; a blocked or evidence-incomplete gate
+returns a nonzero exit status while preserving both artifacts for inspection.
+
+Existing adapters can use the same contracts without rerunning training:
+
+```bash
+spiral-hf-adapter-lineage \
+  --adapter runs/qwen2-lora-candidate \
+  --parent-adapter runs/qwen2-lora \
+  --run-card runs/qwen2-lora-candidate/spiraltorch-hf-finetune-run-card.json
+
+spiral-hf-adapter-promote \
+  --candidate runs/qwen2-lora-candidate \
+  --parent-adapter runs/qwen2-lora \
+  --run-card runs/qwen2-lora-candidate/spiraltorch-hf-finetune-run-card.json
+```
+
+The importable equivalents are `st.hf_adapter_fingerprint(...)`,
+`st.write_hf_adapter_lineage(...)`, and
+`st.hf_adapter_promotion_report(...)`. A remote parent reference remains
+explicitly unverified until its adapter files are available locally, so it
+cannot silently satisfy the default promotion gate.
+
 Use `--resume-from-checkpoint` only for an exact Trainer continuation that
 should restore optimizer, scheduler, and RNG state. SpiralTorch audits
 `trainer_state.json` and those state files before loading. A checkpoint saved
