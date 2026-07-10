@@ -842,7 +842,7 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
 
         self.assertEqual(
             sample["schema"],
-            "spiraltorch.hf_causal_lm_artifact_probe.sample.v3",
+            "spiraltorch.hf_causal_lm_artifact_probe.sample.v4",
         )
         self.assertEqual(sample["model_family"], "gpt_neox")
         self.assertTrue(sample["artifact_probe"]["adapter_loaded"])
@@ -885,6 +885,47 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         self.assertTrue(sample["continuation"]["continuation_ready"])
         self.assertTrue(sample["continuation"]["probe_provenance_preserved"])
         self.assertTrue(sample["continuation"]["process_provenance_preserved"])
+        multi_generation = sample["multi_generation"]
+        transition = multi_generation["transition"]
+        generation_1 = multi_generation["generation_1_training"]
+        strict_stop = multi_generation["strict_stop_policy"]
+        self.assertEqual(multi_generation["status"], "ready")
+        self.assertEqual(multi_generation["node_count"], 2)
+        self.assertEqual(multi_generation["transition_count"], 1)
+        self.assertEqual(multi_generation["ready_transition_count"], 1)
+        self.assertTrue(multi_generation["selected_path_transitions_ready"])
+        self.assertNotEqual(
+            multi_generation["source_adapter_id"],
+            multi_generation["selected_adapter_id"],
+        )
+        self.assertEqual(
+            transition["parent_adapter_id"],
+            multi_generation["source_adapter_id"],
+        )
+        self.assertEqual(
+            transition["child_adapter_id"],
+            multi_generation["selected_adapter_id"],
+        )
+        self.assertEqual(transition["parent_lineage_depth"], 0)
+        self.assertEqual(transition["child_lineage_depth"], 1)
+        self.assertEqual(transition["depth_step"], 1)
+        self.assertTrue(transition["parent_fingerprint_verified"])
+        self.assertTrue(transition["weights_changed_from_parent"])
+        self.assertEqual(transition["eval_handoff_delta"], 0.0)
+        self.assertLess(transition["child_eval_improvement"], 0.0)
+        self.assertEqual(generation_1["finetune_start_mode"], "adapter_warm_start")
+        self.assertTrue(generation_1["adapter_preloaded"])
+        self.assertFalse(generation_1["adapter_attached_now"])
+        self.assertEqual(
+            transition["artifact_probe_process_pid"],
+            generation_1["artifact_probe_process_pid"],
+        )
+        self.assertEqual(strict_stop["status"], "stop")
+        self.assertEqual(
+            strict_stop["stop_reason_codes"],
+            ["eval_improvement_plateau"],
+        )
+        self.assertFalse(strict_stop["continuation_ready"])
 
     def test_inference_distortion_runtime_plan_and_cli_args_are_importable(self) -> None:
         runtime = zspace_inference_distortion_runtime_plan(

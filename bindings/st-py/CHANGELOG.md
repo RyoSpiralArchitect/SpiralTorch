@@ -37,6 +37,12 @@
   and minimum-improvement/patience policies to promotion chains. Decisions are
   separately inspectable and persistable, missing eval evidence fails closed,
   and scale-up refuses to emit another generation after a policy stop.
+- Adapter generation-transition audit: promotion chains now expose explicit
+  parent-to-child rows for depth/root/base continuity, parent fingerprints,
+  changed weights, eval handoff and improvement, promotion revalidation, and
+  isolated-probe process evidence. Scale-up commands and preflights retain the
+  selected transition. The Pythia 70M sample records a real second generation
+  plus a policy stop after its observed negative eval improvement.
 - Resumable adapter executor: add `spiral-hf-adapter-executor` and an importable
   state machine that closes audit, policy, scale-up, preflight, execution, and
   live postflight promotion verification into one atomic artifact. Successful,

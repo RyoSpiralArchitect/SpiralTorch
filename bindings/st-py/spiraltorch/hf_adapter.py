@@ -1565,6 +1565,94 @@ def _chain_depth(value: object) -> int | None:
     return depth if depth >= 0 and depth == value else None
 
 
+def _adapter_promotion_chain_transition(
+    parent: Mapping[str, object],
+    child: Mapping[str, object],
+    *,
+    selected_path: bool,
+) -> dict[str, object]:
+    parent_depth = _chain_depth(parent.get("lineage_depth"))
+    child_depth = _chain_depth(child.get("lineage_depth"))
+    depth_step = (
+        None
+        if parent_depth is None or child_depth is None
+        else child_depth - parent_depth
+    )
+    parent_eval_after = _finite_number(parent.get("eval_after_loss"))
+    child_eval_before = _finite_number(child.get("eval_before_loss"))
+    child_eval_after = _finite_number(child.get("eval_after_loss"))
+    eval_handoff_delta = (
+        None
+        if parent_eval_after is None or child_eval_before is None
+        else child_eval_before - parent_eval_after
+    )
+    child_eval_improvement = (
+        None
+        if child_eval_before is None or child_eval_after is None
+        else child_eval_before - child_eval_after
+    )
+    root_matches = parent.get("root_adapter_id") == child.get("root_adapter_id")
+    base_model_matches = parent.get("base_model_name_or_path") == child.get(
+        "base_model_name_or_path"
+    )
+    lineage_ready = bool(
+        depth_step == 1
+        and root_matches
+        and base_model_matches
+        and child.get("parent_fingerprint_verified") is True
+        and child.get("weights_changed_from_parent") is True
+    )
+    transition_ready = bool(
+        lineage_ready
+        and parent.get("chain_eligible") is True
+        and child.get("chain_eligible") is True
+    )
+    return {
+        "row_type": "hf_adapter_promotion_chain_transition",
+        "status": "ready" if transition_ready else "rejected",
+        "transition_ready": transition_ready,
+        "selected_path": selected_path,
+        "parent_adapter_id": parent.get("adapter_id"),
+        "parent_adapter_path": parent.get("adapter_path"),
+        "parent_lineage_depth": parent_depth,
+        "parent_chain_eligible": parent.get("chain_eligible") is True,
+        "child_adapter_id": child.get("adapter_id"),
+        "child_adapter_path": child.get("adapter_path"),
+        "child_lineage_depth": child_depth,
+        "child_chain_eligible": child.get("chain_eligible") is True,
+        "depth_step": depth_step,
+        "root_adapter_id": child.get("root_adapter_id"),
+        "root_matches": root_matches,
+        "base_model_name_or_path": child.get("base_model_name_or_path"),
+        "base_model_matches": base_model_matches,
+        "lineage_ready": lineage_ready,
+        "parent_fingerprint_verified": (
+            child.get("parent_fingerprint_verified") is True
+        ),
+        "weights_changed_from_parent": (
+            child.get("weights_changed_from_parent") is True
+        ),
+        "parent_eval_after_loss": parent_eval_after,
+        "child_eval_before_loss": child_eval_before,
+        "child_eval_after_loss": child_eval_after,
+        "eval_handoff_observed": (
+            parent_eval_after is not None and child_eval_before is not None
+        ),
+        "eval_handoff_delta": eval_handoff_delta,
+        "child_eval_improvement": child_eval_improvement,
+        "promotion_ready": child.get("promotion_ready") is True,
+        "promotion_revalidated_ready": (
+            child.get("promotion_revalidated_ready") is True
+        ),
+        "artifact_probe_status": child.get("artifact_probe_status"),
+        "artifact_probe_process_status": child.get("artifact_probe_process_status"),
+        "artifact_probe_process_pid": child.get("artifact_probe_process_pid"),
+        "artifact_probe_process_exit_code": child.get(
+            "artifact_probe_process_exit_code"
+        ),
+    }
+
+
 def _continuation_policy_int(name: str, value: object, *, minimum: int) -> int:
     if isinstance(value, bool):
         raise ValueError(f"{name} must be an integer >= {minimum}")
@@ -2158,6 +2246,39 @@ def hf_adapter_promotion_chain_report(
             unique_nodes.get(str(parent_id)) if parent_id is not None else None
         )
     selected_path_ids.reverse()
+    selected_path_pairs = set(zip(selected_path_ids, selected_path_ids[1:]))
+    transitions = []
+    for child in ordered_nodes:
+        child_id = child.get("adapter_id")
+        parent_id = child.get("parent_adapter_id")
+        if (
+            not isinstance(child_id, str)
+            or not isinstance(parent_id, str)
+            or parent_id not in unique_nodes
+        ):
+            continue
+        transitions.append(
+            _adapter_promotion_chain_transition(
+                unique_nodes[parent_id],
+                child,
+                selected_path=(parent_id, child_id) in selected_path_pairs,
+            )
+        )
+    selected_path_transitions = [
+        transition
+        for transition in transitions
+        if transition.get("selected_path") is True
+    ]
+    selected_path_transition_count = len(selected_path_transitions)
+    expected_selected_path_transition_count = max(len(selected_path_ids) - 1, 0)
+    selected_path_transitions_ready = bool(
+        selected is not None
+        and selected_path_transition_count == expected_selected_path_transition_count
+        and all(
+            transition.get("transition_ready") is True
+            for transition in selected_path_transitions
+        )
+    )
 
     node_issues = [
         issue
@@ -2207,6 +2328,8 @@ def hf_adapter_promotion_chain_report(
         if selected is None
         else selected.get("lineage_depth"),
         "selected_path_adapter_ids": selected_path_ids,
+        "selected_path_transition_count": selected_path_transition_count,
+        "selected_path_transitions_ready": selected_path_transitions_ready,
         "continuation_candidate": candidate,
         "continuation_candidate_command": None
         if selected is None
@@ -2223,6 +2346,13 @@ def hf_adapter_promotion_chain_report(
         "promotion_ready_node_count": sum(
             node.get("promotion_ready") is True for node in ordered_nodes
         ),
+        "transition_count": len(transitions),
+        "ready_transition_count": sum(
+            transition.get("transition_ready") is True for transition in transitions
+        ),
+        "rejected_transition_count": sum(
+            transition.get("transition_ready") is not True for transition in transitions
+        ),
         "rejected_node_count": rejected_count,
         "launch_command_available_count": sum(
             node.get("launch_command") is not None for node in ordered_nodes
@@ -2235,6 +2365,7 @@ def hf_adapter_promotion_chain_report(
         "warning_count": warning_count,
         "issues": report_issues,
         "nodes": ordered_nodes,
+        "transitions": transitions,
     }
     policy = hf_adapter_continuation_policy_report(
         report,
@@ -2418,6 +2549,8 @@ def hf_adapter_promotion_chain_lines(
             f"nodes={report.get('node_count')} "
             f"eligible={report.get('eligible_node_count')} "
             f"rejected={report.get('rejected_node_count')} "
+            f"transitions={report.get('transition_count')} "
+            f"transitions_ready={report.get('ready_transition_count')} "
             f"forks={report.get('fork_count')} "
             f"selection={report.get('selection_status')} "
             f"selected={report.get('selected_adapter_id')} "
@@ -2430,6 +2563,25 @@ def hf_adapter_promotion_chain_lines(
     policy = report.get("continuation_policy")
     if isinstance(policy, Mapping):
         lines.extend(hf_adapter_continuation_policy_lines(policy))
+    for raw_transition in report.get("transitions", []):
+        if not isinstance(raw_transition, Mapping):
+            continue
+        lines.append(
+            "hf_adapter_promotion_chain_transition "
+            f"status={raw_transition.get('status')} "
+            f"depth={raw_transition.get('parent_lineage_depth')}"
+            f"->{raw_transition.get('child_lineage_depth')} "
+            f"parent={raw_transition.get('parent_adapter_id')} "
+            f"child={raw_transition.get('child_adapter_id')} "
+            f"selected={raw_transition.get('selected_path')} "
+            f"parent_verified={raw_transition.get('parent_fingerprint_verified')} "
+            f"weights_changed={raw_transition.get('weights_changed_from_parent')} "
+            f"eval_handoff_delta={raw_transition.get('eval_handoff_delta')} "
+            f"eval_improvement={raw_transition.get('child_eval_improvement')} "
+            f"promotion_ready={raw_transition.get('promotion_ready')} "
+            f"probe_process={raw_transition.get('artifact_probe_process_status')} "
+            f"probe_pid={raw_transition.get('artifact_probe_process_pid')}"
+        )
     for raw_node in report.get("nodes", []):
         if not isinstance(raw_node, Mapping):
             continue
