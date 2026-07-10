@@ -3553,6 +3553,108 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             )
         )
 
+    def test_scale_up_preflight_allows_root_adapter_without_promotion_report(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            adapter_dir = root / "root-adapter"
+            adapter_dir.mkdir()
+            (adapter_dir / "adapter_config.json").write_text(
+                json.dumps({"peft_type": "LORA"}),
+                encoding="utf-8",
+            )
+            (adapter_dir / "adapter_model.safetensors").write_bytes(b"adapter")
+            train_path = root / "train.txt"
+            train_path.write_text("alpha spiral\nbeta zspace\n", encoding="utf-8")
+            lineage_path = adapter_dir / st.HF_ADAPTER_LINEAGE_FILENAME
+            adapter_id = "sha256:root-adapter"
+            lineage_path.write_text(
+                json.dumps(
+                    {
+                        "status": "ready",
+                        "adapter_id": adapter_id,
+                        "parent_adapter_id": None,
+                        "root_adapter_id": adapter_id,
+                        "lineage_depth": 0,
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            base_command = [
+                sys.executable,
+                str(GENERIC_EXAMPLE_PATH),
+                "--model-name",
+                "gpt2",
+                "--finetune-mode",
+                "lora",
+                "--train-file",
+                str(train_path),
+                "--output-dir",
+                str(adapter_dir),
+            ]
+            summary = {
+                "row_type": "hf_finetune_sweep_report_summary",
+                "scale_up_candidate_label": "root-adapter",
+                "scale_up_candidate_command": base_command,
+                "scale_up_candidate_output_dir": str(adapter_dir),
+                "scale_up_candidate_finetune_mode": "lora",
+                "scale_up_candidate_adapter_saved": True,
+                "scale_up_candidate_adapter_promotion_ready": True,
+                "scale_up_candidate_adapter_lineage_status": "ready",
+                "scale_up_candidate_adapter_lineage_adapter_id": adapter_id,
+                "scale_up_candidate_adapter_lineage_parent_adapter_id": None,
+                "scale_up_candidate_adapter_lineage_root_adapter_id": adapter_id,
+                "scale_up_candidate_adapter_lineage_depth": 0,
+                "scale_up_candidate_adapter_lineage_manifest_path": str(
+                    lineage_path
+                ),
+                "scale_up_candidate_adapter_promotion_report_path": None,
+                "adapter_promotion_required": True,
+            }
+            artifact = hf_ft.hf_finetune_scale_up_command(
+                summary,
+                output_dir=root / "child-adapter",
+            )
+
+            root_preflight = hf_ft.hf_finetune_scale_up_preflight_report(artifact)
+            lineage_path.write_text(
+                json.dumps(
+                    {
+                        "status": "ready",
+                        "adapter_id": adapter_id,
+                        "parent_adapter_id": "sha256:parent",
+                        "root_adapter_id": "sha256:parent",
+                        "lineage_depth": 1,
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            child_artifact = {
+                **artifact,
+                "adapter_continuation_source_lineage_depth": 1,
+            }
+            child_preflight = hf_ft.hf_finetune_scale_up_preflight_report(
+                child_artifact
+            )
+
+        self.assertEqual(artifact["status"], "ok")
+        self.assertIn("--adapter-promotion-gate", artifact["command"])
+        self.assertTrue(artifact["applied_overrides"]["--adapter-promotion-gate"])
+        self.assertTrue(root_preflight["ready"])
+        self.assertFalse(child_preflight["ready"])
+        self.assertTrue(
+            any(
+                issue.get("field")
+                == "adapter_continuation_source_promotion_report_path"
+                and issue.get("message")
+                == "promotion-ready continuation report is missing"
+                for issue in child_preflight["issues"]
+            )
+        )
+
     def test_sweep_adapter_promotion_selects_only_ready_runs(self) -> None:
         module = load_sweep_example()
         scale_up_module = load_scale_up_example()
@@ -6494,6 +6596,18 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(written_lines, lines)
         self.assertEqual(written_jsonl[-1]["row_type"], "hf_finetune_run_status")
         self.assertIn("hf_ft_run_status_json", stdout.getvalue())
+
+    def test_generic_run_status_accepts_run_dir_flag(self) -> None:
+        module = load_generic_run_status_example()
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "run"
+            run_dir.mkdir()
+
+            args = module.parse_args(["--run-dir", str(run_dir)])
+
+            self.assertEqual(args.run_dir, run_dir)
+            with self.assertRaises(SystemExit):
+                module.parse_args([str(run_dir), "--run-dir", str(run_dir)])
 
     def test_run_status_example_uses_live_process_training_flags(self) -> None:
         module = load_run_status_example()
@@ -11480,13 +11594,15 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             }
             line = module.state_line(state)
 
-        self.assertIn(
-            "bindings/st-py/examples/hf_finetune_run_status.py",
-            status_command,
+        self.assertEqual(status_command[0], sys.executable)
+        self.assertEqual(
+            Path(status_command[1]),
+            module.EXAMPLES_ROOT / "hf_finetune_run_status.py",
         )
-        self.assertIn(
-            "bindings/st-py/examples/hf_finetune_monitor_snapshot.py",
-            monitor_command,
+        self.assertEqual(monitor_command[0], sys.executable)
+        self.assertEqual(
+            Path(monitor_command[1]),
+            module.EXAMPLES_ROOT / "hf_finetune_monitor_snapshot.py",
         )
         self.assertTrue(line.startswith("hf_ft_milestone_capture "))
         self.assertNotIn("hf_gpt2", line)

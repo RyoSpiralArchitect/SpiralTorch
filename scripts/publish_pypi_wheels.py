@@ -26,10 +26,30 @@ import zipfile
 
 PACKAGE = "spiraltorch"
 PYPI_JSON_URL = f"https://pypi.org/pypi/{PACKAGE}/json"
+ROOT = Path(__file__).resolve().parents[1]
+HF_CLI_PAYLOAD_MANIFEST = (
+    ROOT / "bindings" / "st-py" / "spiraltorch" / "hf_cli_payloads.json"
+)
+
+
+def required_hf_cli_wheel_payloads() -> tuple[str, ...]:
+    payload = json.loads(HF_CLI_PAYLOAD_MANIFEST.read_text(encoding="utf-8"))
+    if payload.get("schema") != "spiraltorch.hf_cli_payloads.v1":
+        raise RuntimeError("unsupported SpiralTorch HF CLI payload manifest")
+    required = payload.get("required_payloads")
+    if not isinstance(required, list) or any(
+        not isinstance(value, str) or not value for value in required
+    ):
+        raise RuntimeError("SpiralTorch HF CLI payload manifest is malformed")
+    return tuple(f"examples/{value}" for value in required)
+
+
 REQUIRED_WHEEL_PAYLOADS = (
     "spiraltorch/__init__.pyi",
+    "spiraltorch/hf_cli_payloads.json",
     "spiraltorch/py.typed",
     "spiraltorch/spiralk.pyi",
+    *required_hf_cli_wheel_payloads(),
 )
 
 
@@ -154,7 +174,7 @@ def twine_check(python: str, wheels: Sequence[Path]) -> None:
 
 
 def validate_wheel_metadata(wheels: Sequence[Path], expected_version: str) -> None:
-    """Validate package metadata and type payloads before upload."""
+    """Validate package metadata and required runtime payloads before upload."""
 
     for wheel in wheels:
         with zipfile.ZipFile(wheel) as archive:
@@ -170,7 +190,7 @@ def validate_wheel_metadata(wheels: Sequence[Path], expected_version: str) -> No
             missing_payloads = sorted(set(REQUIRED_WHEEL_PAYLOADS) - names)
             if missing_payloads:
                 raise PublishError(
-                    f"{wheel.name}: missing required type payloads: "
+                    f"{wheel.name}: missing required wheel payloads: "
                     + ", ".join(missing_payloads)
                 )
             metadata = Parser().parsestr(archive.read(metadata_names[0]).decode("utf-8"))
@@ -182,7 +202,7 @@ def validate_wheel_metadata(wheels: Sequence[Path], expected_version: str) -> No
             )
         log(
             f"wheel_metadata=ok wheel={wheel.name} version={actual_version} "
-            f"type_payloads={len(REQUIRED_WHEEL_PAYLOADS)}"
+            f"required_payloads={len(REQUIRED_WHEEL_PAYLOADS)}"
         )
 
 

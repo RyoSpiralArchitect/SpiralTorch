@@ -6622,6 +6622,12 @@ def hf_gpt2_finetune_scale_up_command(
     }
     command = _command_with_overrides(base_command, overrides)
     applied = {key: value for key, value in overrides.items() if value is not None}
+    if (
+        summary.get("adapter_promotion_required") is True
+        and "--adapter-promotion-gate" not in command
+    ):
+        command.append("--adapter-promotion-gate")
+        applied["--adapter-promotion-gate"] = True
     return {
         "row_type": "hf_gpt2_finetune_scale_up_command",
         "status": "ok",
@@ -7117,10 +7123,20 @@ def hf_gpt2_finetune_scale_up_preflight_report(
                     "message": "adapter continuation lineage manifest is missing",
                 }
             )
+        continuation_depth = _safe_number(
+            artifact.get("adapter_continuation_source_lineage_depth")
+        )
+        continuation_is_verified_root = bool(
+            continuation_depth == 0
+            and artifact.get("adapter_continuation_source_adapter_id") is not None
+            and artifact.get("adapter_continuation_source_lineage_manifest_path")
+            is not None
+        )
         if (
             artifact.get("adapter_continuation_source_promotion_ready") is True
             and artifact.get("adapter_continuation_source_promotion_report_path")
             is None
+            and not continuation_is_verified_root
         ):
             issues.append(
                 {

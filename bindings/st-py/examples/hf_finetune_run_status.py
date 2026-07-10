@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 import time
@@ -34,7 +35,14 @@ def _preferred_run_file(run_dir: Path, generic_name: str, legacy_name: str) -> P
 
 def parse_args(argv: list[str] | None = None):
     raw_argv = list(sys.argv[1:] if argv is None else argv)
-    args = _legacy.parse_args(argv)
+    alias_parser = argparse.ArgumentParser(add_help=False)
+    alias_parser.add_argument("--run-dir", action="append", default=[])
+    aliases, legacy_argv = alias_parser.parse_known_args(raw_argv)
+    if len(aliases.run_dir) > 1:
+        alias_parser.error("--run-dir may be provided only once")
+    if aliases.run_dir:
+        legacy_argv.insert(0, aliases.run_dir[0])
+    args = _legacy.parse_args(legacy_argv)
     if not _argv_has_option(raw_argv, "--trace-jsonl"):
         args.trace_jsonl = _preferred_run_file(
             args.run_dir,
