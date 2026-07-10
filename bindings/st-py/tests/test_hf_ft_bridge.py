@@ -1976,6 +1976,40 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             "tokenized_eval_rows": 2,
             "load_status": "ok",
             "model_saved": True,
+            "finetune_mode": "lora",
+            "model_artifact_kind": "peft_adapter",
+            "adapter_saved": True,
+            "adapter_config": {
+                "mode": "lora",
+                "model_family": "gpt2",
+                "rank": 8,
+                "alpha": 16.0,
+                "dropout": 0.05,
+                "bias": "none",
+                "use_rslora": False,
+            },
+            "model_prepare_report": {
+                "mode": "lora",
+                "adapter_attached": True,
+                "model_family": "gpt2",
+                "peft_version": "0.19.1",
+                "target_report": {
+                    "source": "explicit",
+                    "target_modules": ["c_attn", "c_proj"],
+                    "matched_module_count": 18,
+                },
+                "parameter_report_after": {
+                    "parameter_count": 125000000,
+                    "trainable_parameter_count": 294912,
+                    "frozen_parameter_count": 124705088,
+                    "trainable_parameter_ratio": 0.002359296,
+                },
+                "gradient_checkpointing": {
+                    "requested": True,
+                    "enabled": True,
+                    "use_cache_after": False,
+                },
+            },
             "dataset_fit_report": {
                 "verdict": "train_eval_ready",
                 "warnings": "none",
@@ -2132,9 +2166,21 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(summary["row_type"], "hf_gpt2_finetune_run_card_summary")
         self.assertEqual(summary["run_label"], "strong")
         self.assertEqual(summary["dataset_fit_verdict"], "train_eval_ready")
+        self.assertEqual(summary["finetune_mode"], "lora")
+        self.assertEqual(summary["model_artifact_kind"], "peft_adapter")
+        self.assertTrue(summary["adapter_saved"])
+        self.assertEqual(summary["adapter_peft_version"], "0.19.1")
+        self.assertEqual(summary["adapter_target_modules"], "c_attn,c_proj")
+        self.assertEqual(summary["adapter_matched_module_count"], 18)
+        self.assertEqual(summary["adapter_trainable_parameter_count"], 294912)
+        self.assertAlmostEqual(summary["adapter_trainable_parameter_ratio"], 0.002359296)
+        self.assertTrue(summary["gradient_checkpointing_enabled"])
+        self.assertFalse(summary["model_use_cache_after_prepare"])
         self.assertEqual(summary["eval_loss_delta"], -0.5)
         self.assertTrue(summary["eval_loss_improved"])
         self.assertTrue(summary["generation_continuation_changed"])
+        self.assertEqual(comparison["lora_run_count"], 2)
+        self.assertEqual(comparison["adapter_saved_count"], 2)
         self.assertEqual(summary["generation_after_control_status"], "ok")
         self.assertEqual(summary["generation_after_control_calls"], 7)
         self.assertEqual(
@@ -8146,6 +8192,20 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             8,
         )
         self.assertEqual(
+            profiles["qwen2-0.5b-lora-local-smoke"]["extends"],
+            "qwen2-0.5b-local-smoke",
+        )
+        self.assertEqual(
+            resolved_profiles["qwen2-0.5b-lora-local-smoke"]["training"][
+                "finetune_mode"
+            ],
+            "lora",
+        )
+        self.assertEqual(
+            resolved_profiles["qwen2-0.5b-lora-local-smoke"]["adapter"]["rank"],
+            16,
+        )
+        self.assertEqual(
             profiles["qwen2-0.5b-local-smoke"]["runtime"][
                 "activation_name_contains"
             ],
@@ -8237,6 +8297,19 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("50", pythia_cli_args)
         self.assertIn("--generation-zspace-top-k", pythia_cli_args)
         self.assertIn("64", pythia_cli_args)
+
+        lora_profile = st.resolve_hf_finetune_model_profile(
+            MODEL_CONFIGS_PATH,
+            profile="qwen2-0.5b-lora-local-smoke",
+        )
+        lora_cli_args = st.hf_finetune_model_profile_cli_args(lora_profile)
+        self.assertEqual(lora_profile["training"]["finetune_mode"], "lora")
+        self.assertEqual(lora_profile["adapter"]["rank"], 16)
+        self.assertIn("--finetune-mode", lora_cli_args)
+        self.assertIn("lora", lora_cli_args)
+        self.assertIn("--gradient-checkpointing", lora_cli_args)
+        self.assertIn("--lora-rank", lora_cli_args)
+        self.assertEqual(lora_cli_args.count("--lora-target-module"), 4)
 
         alias_profile = st.resolve_hf_finetune_model_profile(
             {
@@ -8443,7 +8516,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             str(row["profile_id"]): row for row in default_catalog["profiles"]
         }
         self.assertEqual(catalog["row_type"], "hf_finetune_model_profile_catalog")
-        self.assertEqual(catalog["profile_count"], 9)
+        self.assertEqual(catalog["profile_count"], 13)
         self.assertEqual(catalog["default_profile"], "causal-lm-local-smoke")
         self.assertIn("causal-lm-local-smoke", rows)
         self.assertEqual(
@@ -8455,6 +8528,11 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(rows["qwen2-0.5b-local-smoke"]["block_size"], 256)
         self.assertEqual(rows["qwen2-0.5b-local-smoke"]["zspace_top_k"], 96)
         self.assertFalse(rows["qwen2-0.5b-local-smoke"]["allow_remote"])
+        self.assertEqual(
+            rows["qwen2-0.5b-lora-local-smoke"]["finetune_mode"],
+            "lora",
+        )
+        self.assertEqual(rows["qwen2-0.5b-lora-local-smoke"]["lora_rank"], 16)
         self.assertEqual(rows["opt-125m-local-smoke"]["model_name"], "facebook/opt-125m")
         self.assertEqual(rows["opt-125m-local-smoke"]["zspace_top_k"], 80)
         self.assertEqual(
@@ -8470,7 +8548,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             rows["local-causal-lm-template"]["model_name"],
             "models/my-causal-lm",
         )
-        self.assertEqual(default_catalog["profile_count"], 9)
+        self.assertEqual(default_catalog["profile_count"], 13)
         self.assertIn("qwen2-0.5b-local-smoke", default_rows)
         self.assertTrue(lines[0].startswith("hf_ft_model_profile_catalog "))
         self.assertTrue(
@@ -8488,6 +8566,26 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             )
         )
 
+    def test_generic_hf_finetune_profile_adapter_preserves_zero_dropout(
+        self,
+    ) -> None:
+        profile = {
+            "model_family": "gpt2",
+            "training": {"finetune_mode": "lora"},
+            "adapter": {"rank": 8, "alpha": 16, "dropout": 0.0},
+        }
+
+        adapter = hf_ft._hf_finetune_profile_adapter_config(profile)
+
+        self.assertEqual(adapter["dropout"], 0.0)
+        with self.assertRaisesRegex(ValueError, "rank"):
+            hf_ft._hf_finetune_profile_adapter_config(
+                {
+                    **profile,
+                    "adapter": {"rank": 0, "alpha": 16, "dropout": 0.0},
+                }
+            )
+
     def test_generic_hf_finetune_model_profile_preflight_reports_runtime_mode(
         self,
     ) -> None:
@@ -8502,6 +8600,11 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             profile="qwen2-0.5b-local-smoke",
             mode="peft",
             require=True,
+        )
+        auto_lora_report = st.hf_finetune_model_profile_preflight_report(
+            MODEL_CONFIGS_PATH,
+            profile="qwen2-0.5b-lora-local-smoke",
+            mode="auto",
         )
         full_report = st.hf_finetune_model_profile_preflight_report(
             MODEL_CONFIGS_PATH,
@@ -8534,8 +8637,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertTrue(
             any(line.startswith("hf_ft_model_profile_cli_args ") for line in lines)
         )
-        self.assertEqual(peft_report["runtime_import_preset"], "hf-peft")
+        self.assertEqual(peft_report["runtime_import_preset"], "hf-peft-finetune")
         self.assertTrue(peft_report["require_runtime_import_preset"])
+        self.assertEqual(
+            auto_lora_report["runtime_import_preset"],
+            "hf-peft-finetune",
+        )
+        self.assertEqual(auto_lora_report["finetune_mode"], "lora")
+        self.assertEqual(auto_lora_report["adapter_config"]["rank"], 16)
         self.assertEqual(full_report["runtime_import_preset"], "hf-full-finetune")
         self.assertEqual(
             runtime_imports.TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS[
@@ -8579,6 +8688,11 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             MODEL_CONFIGS_PATH,
             profile="causal-lm-local-smoke",
             mode="inference",
+        )
+        lora_plan = st.hf_finetune_model_profile_launch_plan(
+            MODEL_CONFIGS_PATH,
+            profile="qwen2-0.5b-lora-local-smoke",
+            train=True,
         )
         inherited_lines = st.hf_finetune_model_profile_launch_plan_lines(
             inherited_plan
@@ -8624,6 +8738,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("--model-name", embedded_plan["command"])
         self.assertIn("org/embedded-causal", embedded_plan["command"])
         self.assertNotIn("--model-profile", embedded_plan["command"])
+        self.assertEqual(lora_plan["mode"], "peft")
+        self.assertEqual(
+            lora_plan["preflight"]["runtime_import_preset"],
+            "hf-peft-finetune",
+        )
+        self.assertIn("--train", lora_plan["command"])
+        self.assertIn("--finetune-mode", lora_plan["expanded_command"])
+        self.assertIn("lora", lora_plan["expanded_command"])
         self.assertEqual(inherited_plan["profile_id"], "causal-lm-local-smoke")
         self.assertEqual(inherited_plan["profile_extends"], "pythia-70m-local-smoke")
         self.assertEqual(
@@ -8794,6 +8916,15 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 "--metadata-only",
             ]
         )
+        lora_args = module.parse_args(
+            [
+                "--model-configs",
+                str(MODEL_CONFIGS_PATH),
+                "--model-profile",
+                "qwen2-0.5b-lora-local-smoke",
+                "--metadata-only",
+            ]
+        )
 
         self.assertEqual(args.model_name, "sshleifer/tiny-gpt2")
         self.assertEqual(module._tokenizer_name(args), "sshleifer/tiny-gpt2")
@@ -8809,6 +8940,17 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(overridden.block_size, 96)
         self.assertEqual(overridden.generation_max_new_tokens, 11)
         self.assertEqual(module._tokenizer_name(overridden), "gpt2")
+        self.assertEqual(lora_args.finetune_mode, "lora")
+        self.assertTrue(lora_args.gradient_checkpointing)
+        self.assertEqual(lora_args.lora_rank, 16)
+        self.assertEqual(
+            lora_args.lora_target_module,
+            ["q_proj", "k_proj", "v_proj", "o_proj"],
+        )
+        self.assertEqual(
+            lora_args._hf_finetune_adapter_config["mode"],
+            "lora",
+        )
 
     def test_bridge_model_profile_dataset_and_runtime_defaults(self) -> None:
         module = load_bridge_example()
@@ -9660,11 +9802,25 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 ]
             )
             runs = module.build_sweep_runs(args)
+            lora_args = module.parse_args(
+                [
+                    "--dry-run",
+                    "--out-dir",
+                    str(Path(tmp) / "lora-sweep"),
+                    "--model-configs",
+                    str(MODEL_CONFIGS_PATH),
+                    "--model-profile",
+                    "qwen2-0.5b-lora-local-smoke",
+                ]
+            )
+            lora_runs = module.build_sweep_runs(lora_args)
             report = module.run_sweep(args)
             stored_plan = json.loads((out_dir / "sweep-plan.json").read_text())
             stored_report = json.loads((out_dir / "sweep-report.json").read_text())
 
         command = runs[0]["command"]
+        lora_command = lora_runs[0]["command"]
+        lora_bridge_args = load_bridge_example().parse_args(lora_command[2:])
         self.assertEqual(args.model_name, "sshleifer/tiny-gpt2")
         self.assertEqual(args.tokenizer_name, "sshleifer/tiny-gpt2")
         self.assertEqual(args.block_size_values, [64])
@@ -9696,6 +9852,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(stored_report["model_profile"]["profile_id"], "tiny-gpt2-ci")
         self.assertIn("profile=tiny-gpt2-ci", stored_report["model_profile_lines"][0])
         self.assertEqual(report["run_count"], 1)
+        self.assertIn("qwen2-0.5b-lora-local-smoke", lora_command)
+        self.assertEqual(lora_bridge_args.finetune_mode, "lora")
+        self.assertTrue(lora_bridge_args.gradient_checkpointing)
+        self.assertEqual(lora_bridge_args.lora_rank, 16)
+        self.assertEqual(
+            lora_bridge_args.lora_target_module,
+            ["q_proj", "k_proj", "v_proj", "o_proj"],
+        )
 
     def test_sweep_model_profile_dataset_and_runtime_flow_to_bridge_commands(
         self,

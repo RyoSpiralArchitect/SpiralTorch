@@ -173,6 +173,7 @@ print("SPIRALTORCH_SCRIPT_ENTRYPOINTS=" + json.dumps(failures, sort_keys=True))
             "hf-runtime",
             "hf-finetune",
             "hf-peft",
+            "hf-peft-finetune",
             "hf-gpt2-ft",
             "hf-trl-sft",
         ]:

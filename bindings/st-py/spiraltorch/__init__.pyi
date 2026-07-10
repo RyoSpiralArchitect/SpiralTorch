@@ -10,6 +10,7 @@ from .optim import Amegagrad, amegagrad
 
 export: ModuleType
 hf_ft: ModuleType
+hf_peft: ModuleType
 hf_ft_status: ModuleType
 hf_generation: ModuleType
 hpo: ModuleType
@@ -551,6 +552,48 @@ HF_FINETUNE_RUN_CARD_FILENAME: str
 HF_FINETUNE_TRAINER_TRACE_FILENAME: str
 HF_FINETUNE_REQUIRED_PYTHON_PACKAGES: List[str]
 HF_FINETUNE_REQUIRED_RUST_SURFACES: List[Dict[str, str]]
+HF_FINETUNE_MODES: Tuple[str, ...]
+HF_FINETUNE_LORA_TARGET_MODULES: Dict[str, Tuple[str, ...]]
+
+def hf_finetune_adapter_config(
+    *,
+    mode: str = ...,
+    model_family: str | None = ...,
+    rank: int = ...,
+    alpha: float = ...,
+    dropout: float = ...,
+    bias: str = ...,
+    target_modules: object = ...,
+    modules_to_save: object = ...,
+    use_rslora: bool = ...,
+    gradient_checkpointing: bool = ...,
+) -> Dict[str, object]: ...
+
+def hf_finetune_lora_target_report(
+    model: Any,
+    *,
+    model_family: str | None = ...,
+    target_modules: object = ...,
+) -> Dict[str, object]: ...
+
+def hf_finetune_parameter_report(model: Any) -> Dict[str, object]: ...
+
+def prepare_hf_finetune_model(
+    model: Any,
+    *,
+    mode: str = ...,
+    model_family: str | None = ...,
+    rank: int = ...,
+    alpha: float = ...,
+    dropout: float = ...,
+    bias: str = ...,
+    target_modules: object = ...,
+    modules_to_save: object = ...,
+    use_rslora: bool = ...,
+    gradient_checkpointing: bool = ...,
+    peft_module: Any = ...,
+) -> Tuple[Any, Dict[str, object]]: ...
+
 load_hf_finetune_model_configs: Callable[..., Dict[str, Any]]
 hf_finetune_model_profiles: Callable[..., Dict[str, Dict[str, Any]]]
 resolve_hf_finetune_model_profile: Callable[..., Dict[str, Any]]
@@ -1133,6 +1176,7 @@ def hf_gpt2_finetune_preflight_report(
     runtime_device_backends: object = ...,
     required_runtime_device_ready_backends: object = ...,
     require_hf_gpt2_ft: bool = ...,
+    finetune_mode: str = ...,
     describe_runtime_devices: Callable[..., Mapping[str, object]] | None = ...,
 ) -> Dict[str, object]: ...
 
@@ -9612,6 +9656,7 @@ __all__ = [
     "trace_wgpu_first_runtime_matrix",
     "write_wgpu_first_runtime_matrix",
     "hf_ft",
+    "hf_peft",
     "hf_generation",
     "hf_ft_status",
     "HF_FINETUNE_DEFAULT_DEVICE_BACKENDS",
@@ -9621,12 +9666,18 @@ __all__ = [
     "HF_FINETUNE_TRAINER_TRACE_FILENAME",
     "HF_FINETUNE_REQUIRED_PYTHON_PACKAGES",
     "HF_FINETUNE_REQUIRED_RUST_SURFACES",
+    "HF_FINETUNE_MODES",
+    "HF_FINETUNE_LORA_TARGET_MODULES",
     "HF_GPT2_FT_DEFAULT_DEVICE_BACKENDS",
     "HF_GPT2_FT_RUN_CARD_FILENAME",
     "HF_GPT2_FT_TRAINER_TRACE_FILENAME",
     "HF_GPT2_FT_REQUIRED_PYTHON_PACKAGES",
     "HF_GPT2_FT_REQUIRED_RUST_SURFACES",
     "hf_finetune_corpus_file_report",
+    "hf_finetune_adapter_config",
+    "hf_finetune_lora_target_report",
+    "hf_finetune_parameter_report",
+    "prepare_hf_finetune_model",
     "hf_finetune_corpus_scan_report",
     "hf_finetune_dataset_fit_report",
     "hf_finetune_disk_headroom_plan",

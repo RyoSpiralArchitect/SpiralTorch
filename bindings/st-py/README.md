@@ -412,6 +412,7 @@ spiral-runtime-preflight \
   --runtime-device-backend wgpu \
   --json-out ft-runtime.json
 spiral-runtime-preflight --preset hf-peft --require --json
+spiral-runtime-preflight --preset hf-peft-finetune --require --json
 ```
 
 Install the stronger local Hugging Face fine-tuning dependency surface with
@@ -420,9 +421,9 @@ Install the stronger local Hugging Face fine-tuning dependency surface with
 `spiraltorch[hf-gpt2-ft]` extra remains available as a compatibility alias for
 historical scripts. Use `hf-runtime` for inference-only
 `transformers`/`torch`/`tokenizers` checks, `hf-finetune` for the lighter
-`datasets`/`accelerate`/`safetensors` contract, `hf-peft` for PEFT adapter
-workflows, and `hf-trl-sft` when a TRL SFT loop should be importable in the
-same environment.
+`datasets`/`accelerate`/`safetensors` contract, `hf-peft` for adapter-only
+workflows, `hf-peft-finetune` for PEFT plus the dataset/Trainer stack, and
+`hf-trl-sft` when a TRL SFT loop should be importable in the same environment.
 
 For a real local causal-LM FT run with a larger dataset, treat this as a hard
 dependency boundary rather than a suggestion: the Rust wheel already exposes the
@@ -446,11 +447,12 @@ config file rather than baking them into the script name. The generic
 `spiral-hf-zspace-generation-control-sweep` entrypoints default to the built-in
 `causal-lm-local-smoke` profile when no `--model-name`, `--model-profile`, or
 `--model-configs` is supplied; pass any of those flags to pin a specific model
-explicitly. Profiles can carry
-model/tokenizer names, model family and parameter-scale labels, training shape,
-dataset/revision/streaming defaults, generation/Z-Space softmax knobs, activation
-hook selectors, and local runtime policy such as remote-code trust, disk guards,
-dataloader pinning, tokenizer-estimate policy, or required SpiralTorch backends.
+explicitly. Profiles can carry model/tokenizer names, model family and
+parameter-scale labels, training shape, dataset/revision/streaming defaults,
+full-FT or LoRA mode, adapter rank/targets, generation/Z-Space softmax knobs,
+activation hook selectors, and local runtime policy such as remote-code trust,
+disk guards, dataloader pinning, tokenizer-estimate policy, or required
+SpiralTorch backends.
 Profiles may also use `extends` to create model-neutral aliases or override only
 one nested section without duplicating model-specific settings:
 
@@ -573,6 +575,53 @@ if `--trainer-telemetry` was not passed explicitly; the run card records both
 `--no-trainer-trace` only when that audit trail is too noisy. Use
 `--require-runtime-device-ready-backend wgpu`
 when the SpiralTorch WGPU surface must be available before the run starts.
+
+For an adapter run on Apple Silicon or a model that is too expensive to update
+fully, select one of the built-in LoRA profiles. `--mode auto` resolves these
+profiles to the Trainer-ready `hf-peft-finetune` preflight, while the bridge attaches PEFT
+before constructing `Trainer`:
+
+```bash
+spiral-hf-profile \
+  --model-profile qwen2-0.5b-lora-local-smoke \
+  --launch-plan \
+  --train \
+  --bundle-dir runs/qwen2-lora-plan
+
+spiral-hf-finetune \
+  --model-profile qwen2-0.5b-lora-local-smoke \
+  --allow-remote \
+  --train \
+  --train-file data/corpus.txt \
+  --validation-fraction 0.02 \
+  --output-dir runs/qwen2-lora
+```
+
+The sample config also includes `causal-lm-lora-local-smoke`,
+`gpt2-lora-local-smoke`, and `smollm2-135m-lora-local-smoke`. For an unlisted
+family, pass repeated `--lora-target-module` flags or add an `adapter` section
+with `target_modules` to the profile. `--gradient-checkpointing` disables model
+KV caching and lowers activation memory. The run card records the resolved
+target modules, matched layer count, trainable/frozen parameter counts and
+ratio, PEFT version, artifact kind, and whether `adapter_config.json` was
+actually saved. `--resume-from-checkpoint` continues a Trainer adapter
+checkpoint with optimizer/scheduler state.
+
+The same preparation path is importable without eagerly importing PEFT:
+
+```python
+import spiraltorch as st
+
+model, report = st.prepare_hf_finetune_model(
+    model,
+    mode="lora",
+    model_family="qwen2",
+    rank=16,
+    alpha=32,
+    gradient_checkpointing=True,
+)
+print(report["parameter_report_after"]["trainable_parameter_ratio"])
+```
 
 For a larger local corpus, bypass Hub datasets and feed files directly:
 

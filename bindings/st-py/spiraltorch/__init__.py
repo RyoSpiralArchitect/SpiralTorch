@@ -887,6 +887,16 @@ from .hf_ft import (
     write_hf_gpt2_finetune_trainer_trace_event,
 )
 
+from . import hf_peft as hf_peft
+from .hf_peft import (
+    HF_FINETUNE_LORA_TARGET_MODULES,
+    HF_FINETUNE_MODES,
+    hf_finetune_adapter_config,
+    hf_finetune_lora_target_report,
+    hf_finetune_parameter_report,
+    prepare_hf_finetune_model,
+)
+
 from . import hf_ft_status as hf_ft_status
 from .hf_ft_status import (
     hf_finetune_monitor_lines,
@@ -1129,6 +1139,9 @@ _EXTRAS = [
     "HF_FINETUNE_TRAINER_TRACE_FILENAME",
     "HF_FINETUNE_REQUIRED_PYTHON_PACKAGES",
     "HF_FINETUNE_REQUIRED_RUST_SURFACES",
+    "HF_FINETUNE_MODES",
+    "HF_FINETUNE_LORA_TARGET_MODULES",
+    "hf_finetune_adapter_config",
     "hf_finetune_corpus_file_report",
     "hf_finetune_corpus_scan_report",
     "hf_finetune_dataset_fit_report",
@@ -1160,6 +1173,8 @@ _EXTRAS = [
     "hf_finetune_model_profile_runtime_contract",
     "hf_finetune_model_profile_runtime_contract_lines",
     "hf_finetune_model_profiles",
+    "hf_finetune_lora_target_report",
+    "hf_finetune_parameter_report",
     "hf_finetune_preflight_report",
     "hf_finetune_rust_dependency_report",
     "hf_finetune_monitor_lines",
@@ -1204,6 +1219,7 @@ _EXTRAS = [
     "summarize_hf_finetune_status_history",
     "summarize_hf_finetune_trainer_trace",
     "resolve_hf_finetune_model_profile",
+    "prepare_hf_finetune_model",
     "write_hf_finetune_run_artifact_manifest",
     "write_hf_finetune_run_ops_snapshot",
     "write_hf_finetune_milestone_runtime_report",
@@ -8536,6 +8552,7 @@ for _name in [
     "plugin",
     "ecosystem",
     "hf_ft",
+    "hf_peft",
     "hf_ft_status",
     "hf_generation",
     "selfsup",
