@@ -92,6 +92,8 @@ from .hf_ft import (
 )
 from .hf_generation import (
     compare_zspace_generation_control_sweeps,
+    hf_causal_lm_artifact_probe_lines,
+    hf_causal_lm_artifact_probe_report,
     summarize_zspace_generation_control_sweep_comparison_lines,
     zspace_checkpoint_generation_control_report,
     zspace_generation_control_profile_config,
@@ -1631,6 +1633,76 @@ def adapter_export_main(argv: Sequence[str] | None = None) -> int:
         if args.report_out is not None:
             print(f"hf_adapter_export_report_out {args.report_out}")
     return 0 if report.get("status") in {"ready", "exported"} else 1
+
+
+def artifact_probe_main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Load a Hugging Face causal-LM artifact and prove it can generate "
+            "through the installed SpiralTorch runtime."
+        ),
+    )
+    parser.add_argument("artifact")
+    parser.add_argument("--tokenizer", default=None)
+    parser.add_argument(
+        "--artifact-kind",
+        choices=("auto", "full-model", "peft-adapter"),
+        default="auto",
+    )
+    parser.add_argument("--prompt", default="SpiralTorch is")
+    parser.add_argument("--max-new-tokens", type=int, default=16)
+    parser.add_argument("--do-sample", action="store_true")
+    parser.add_argument("--temperature", type=float, default=1.0)
+    parser.add_argument("--top-k", type=int, default=None)
+    parser.add_argument("--device", default="auto")
+    parser.add_argument("--merge-adapter", action="store_true")
+    parser.add_argument("--allow-remote", action="store_true")
+    parser.add_argument("--trust-remote-code", action="store_true")
+    parser.add_argument("--revision", default=None)
+    parser.add_argument("--out", type=Path, default=None)
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("--quiet", action="store_true")
+    args = parser.parse_args(argv)
+
+    loader_kwargs: dict[str, object] = {}
+    if args.revision:
+        loader_kwargs["revision"] = args.revision
+    try:
+        report = hf_causal_lm_artifact_probe_report(
+            args.artifact,
+            tokenizer_name_or_path=args.tokenizer,
+            artifact_kind=args.artifact_kind.replace("-", "_"),
+            prompt=args.prompt,
+            max_new_tokens=args.max_new_tokens,
+            do_sample=args.do_sample,
+            temperature=args.temperature,
+            top_k=args.top_k,
+            device=args.device,
+            merge_adapter=args.merge_adapter,
+            local_files_only=not args.allow_remote,
+            trust_remote_code=args.trust_remote_code,
+            loader_kwargs=loader_kwargs,
+        )
+    except Exception as exc:
+        print(
+            f"hf_artifact_probe_error {exc.__class__.__name__}: {exc}",
+            file=sys.stderr,
+        )
+        return 1
+
+    payload = json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    if args.out is not None:
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.write_text(payload, encoding="utf-8")
+    if not args.quiet:
+        if args.json:
+            print(payload, end="")
+        else:
+            for line in hf_causal_lm_artifact_probe_lines(report):
+                print(line)
+            if args.out is not None:
+                print(f"hf_artifact_probe_out {args.out}")
+    return 0 if report.get("status") == "ready" else 1
 
 
 def finetune_bridge_main(argv: Sequence[str] | None = None) -> int:

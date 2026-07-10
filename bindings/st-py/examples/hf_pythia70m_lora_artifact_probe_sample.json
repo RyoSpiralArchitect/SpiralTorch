@@ -1,0 +1,67 @@
+{
+  "schema": "spiraltorch.hf_causal_lm_artifact_probe.sample.v1",
+  "scope": "one-step non-GPT-2 integration smoke; not a model-quality claim",
+  "model_profile": "pythia-70m-local-smoke",
+  "model_name": "EleutherAI/pythia-70m-deduped",
+  "model_family": "gpt_neox",
+  "environment": {
+    "platform": "macOS arm64",
+    "torch": "2.12.1",
+    "transformers": "5.13.0",
+    "datasets": "4.4.2",
+    "peft": "0.19.1"
+  },
+  "training": {
+    "finetune_mode": "lora",
+    "max_steps": 1,
+    "seed": 29,
+    "block_size": 16,
+    "raw_train_rows": 15,
+    "raw_eval_rows": 6,
+    "tokenized_train_blocks": 6,
+    "tokenized_eval_blocks": 2,
+    "lora_rank": 4,
+    "lora_alpha": 8.0,
+    "target_modules": [
+      "query_key_value",
+      "dense"
+    ],
+    "matched_module_count": 12,
+    "trainable_parameter_count": 73728,
+    "total_parameter_count": 70500352,
+    "trainable_parameter_ratio": 0.0010457820125493841,
+    "train_loss": 6.939014911651611,
+    "eval_before_loss": 7.776280403137207,
+    "eval_after_loss": 7.777690887451172,
+    "eval_loss_regression": 0.0014104843139648438,
+    "adapter_promotion_status": "ready",
+    "adapter_promotion_recommendation": "promote_candidate",
+    "adapter_weight_bytes": 298176,
+    "zspace_probe_status": "ok"
+  },
+  "artifact_probe": {
+    "status": "ready",
+    "artifact_kind": "peft_adapter",
+    "model_class": "PeftModelForCausalLM",
+    "config_class": "GPTNeoXConfig",
+    "tokenizer_class": "GPTNeoXTokenizer",
+    "adapter_loaded": true,
+    "active_adapter": "default",
+    "device": "mps:0",
+    "prompt": "SpiralTorch is",
+    "max_new_tokens": 16,
+    "do_sample": false,
+    "input_token_count": 6,
+    "output_token_count": 22,
+    "new_token_count": 16,
+    "batch_size_compat_installed": false,
+    "local_files_only": true,
+    "load_seconds": 3.462231999990763,
+    "generation_seconds": 0.23999645900039468,
+    "generated_text": "SpiralTorch is a very popular name for the Spiral Torch.\n\nThe S"
+  },
+  "commands": {
+    "train_shape": "spiral-hf-finetune --model-profile pythia-70m-local-smoke --allow-remote --train --finetune-mode lora --lora-rank 4 --lora-alpha 8 --max-steps 1 --block-size 16 --eval-before-train --adapter-promotion-gate ...",
+    "artifact_probe_shape": "spiral-hf-artifact-probe <adapter-dir> --prompt 'SpiralTorch is' --max-new-tokens 16 --allow-remote --device mps --out artifact-probe.json"
+  }
+}

@@ -121,6 +121,11 @@
 - PyPI propagation guard: keep polling after uploaded wheels appear until the
   project latest-version index also exposes the release, avoiding false-red
   publication runs during the short CDN propagation window.
+- Model-neutral HF artifact probe: add `hf_causal_lm_artifact_probe_report(...)`
+  and `spiral-hf-artifact-probe` to reconstruct full models or PEFT adapters,
+  run bounded generation, and archive device/token/timing/runtime evidence. A
+  real Pythia 70M LoRA sample now covers non-GPT-2 train, promotion, reload, and
+  MPS generation.
 - Trainer resume audit: add `hf_finetune_checkpoint_resume_report(...)` and
   compact lines for optimizer/scheduler/RNG state availability, saved versus
   requested step horizons, and the exhausted-scheduler case where adapter

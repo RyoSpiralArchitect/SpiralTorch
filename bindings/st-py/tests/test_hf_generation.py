@@ -14,6 +14,7 @@ from unittest import mock
 import spiraltorch as st
 from spiraltorch import hf_ft
 from spiraltorch import hf_cli
+from spiraltorch import hf_peft
 from spiraltorch.hf_generation import (
     ZSpaceActivationProbeHook,
     ZSpaceCheckpointPromptSpec,
@@ -373,6 +374,8 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         self.assertIn("build_zspace_repression_logits_processor", st.__all__)
         self.assertIn("build_zspace_softmax_logits_processor", st.__all__)
         self.assertIn("default_zspace_checkpoint_generation_prompts", st.__all__)
+        self.assertIn("hf_causal_lm_artifact_probe_lines", st.__all__)
+        self.assertIn("hf_causal_lm_artifact_probe_report", st.__all__)
         self.assertIn(
             "zspace_inference_distortion_sweep_report_from_probes",
             st.__all__,
@@ -495,6 +498,161 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
             st.zspace_inference_distortion_runtime_preflight,
             zspace_inference_distortion_runtime_preflight,
         )
+
+    def test_causal_lm_artifact_probe_loads_and_generates_with_compat(self) -> None:
+        class FakeParameter:
+            device = "cpu"
+
+        class LegacyModel:
+            def __init__(self) -> None:
+                self.generation_kwargs: dict[str, object] = {}
+
+            def parameters(self):
+                return iter([FakeParameter()])
+
+            def to(self, _device: str):
+                return self
+
+            def eval(self) -> None:
+                return None
+
+            def _prepare_special_tokens(self, generation_config, device=None):
+                return {"generation_config": generation_config, "device": device}
+
+            def generate(self, **kwargs):
+                self._prepare_special_tokens("cfg", device="cpu", batch_size=1)
+                self.generation_kwargs = dict(kwargs)
+                return [[11, 12, 13, 14]]
+
+        class FakeTokenizer:
+            pad_token_id = 0
+            eos_token_id = 2
+
+            def __call__(self, _prompt: str, *, return_tensors: str):
+                self.return_tensors = return_tensors
+                return {"input_ids": [[11, 12]]}
+
+            def decode(self, values, *, skip_special_tokens: bool):
+                self.skip_special_tokens = skip_special_tokens
+                return " ".join(str(value) for value in values)
+
+        model = LegacyModel()
+        tokenizer = FakeTokenizer()
+        config = types.SimpleNamespace(model_type="gpt_neox")
+        load_report = {
+            "status": "loaded",
+            "artifact_kind": "peft_adapter",
+            "loaded_artifact_kind": "peft_adapter",
+            "artifact_source": "/tmp/adapter",
+            "artifact_is_local": True,
+            "resolved_base_model_name_or_path": "org/pythia",
+            "resolved_tokenizer_source": "/tmp/adapter",
+            "resolved_tokenizer_source_kind": "adapter_artifact",
+            "model_loaded": True,
+            "model_class": "PeftModelForCausalLM",
+            "config_class": "GPTNeoXConfig",
+            "tokenizer_class": "GPTNeoXTokenizer",
+            "adapter_loaded": True,
+            "adapter_trainable": False,
+            "adapter_merged": False,
+            "peft_version": "0.test",
+            "loaded_parameter_report": {
+                "parameter_count": 100,
+                "trainable_parameter_count": 0,
+                "trainable_parameter_ratio": 0.0,
+            },
+        }
+        torch_runtime = types.SimpleNamespace(
+            inference_mode=contextlib.nullcontext,
+        )
+
+        with mock.patch.object(
+            hf_peft,
+            "load_hf_causal_lm_artifact",
+            return_value=(model, tokenizer, config, load_report),
+        ) as load:
+            report = st.hf_causal_lm_artifact_probe_report(
+                "/tmp/adapter",
+                artifact_kind="peft_adapter",
+                prompt="SpiralTorch is",
+                max_new_tokens=2,
+                do_sample=True,
+                temperature=0.8,
+                top_k=12,
+                device="cpu",
+                local_files_only=True,
+                torch_module=torch_runtime,
+            )
+
+        self.assertEqual(report["status"], "ready")
+        self.assertEqual(report["model_family"], "gpt_neox")
+        self.assertEqual(report["generated_text"], "11 12 13 14")
+        self.assertEqual(report["continuation_text"], "13 14")
+        self.assertEqual(report["input_token_count"], 2)
+        self.assertEqual(report["new_token_count"], 2)
+        self.assertTrue(report["batch_size_compat_installed"])
+        self.assertTrue(report["artifact"]["adapter_loaded"])
+        self.assertEqual(model.generation_kwargs["temperature"], 0.8)
+        self.assertEqual(model.generation_kwargs["top_k"], 12)
+        self.assertEqual(model.generation_kwargs["pad_token_id"], 0)
+        self.assertTrue(load.call_args.kwargs["loader_kwargs"]["local_files_only"])
+        lines = st.hf_causal_lm_artifact_probe_lines(report)
+        self.assertTrue(lines[0].startswith("hf_causal_lm_artifact_probe status=ready"))
+        self.assertIn('continuation="13 14"', lines[1])
+
+    def test_installed_artifact_probe_cli_writes_json(self) -> None:
+        report = {
+            "row_type": "hf_causal_lm_artifact_probe",
+            "status": "ready",
+            "artifact": {
+                "artifact_kind": "peft_adapter",
+                "artifact_source": "/tmp/adapter",
+                "base_model_name_or_path": "org/pythia",
+                "adapter_loaded": True,
+            },
+            "model_family": "gpt_neox",
+            "model_class": "PeftModelForCausalLM",
+            "tokenizer_class": "GPTNeoXTokenizer",
+            "device": "cpu",
+            "prompt": "SpiralTorch is",
+            "continuation_text": " geometry",
+            "input_token_count": 2,
+            "new_token_count": 1,
+            "batch_size_compat_installed": False,
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "probe.json"
+            stdout = io.StringIO()
+            with mock.patch.object(
+                hf_cli,
+                "hf_causal_lm_artifact_probe_report",
+                return_value=report,
+            ) as probe:
+                with contextlib.redirect_stdout(stdout):
+                    code = hf_cli.artifact_probe_main(
+                        [
+                            "/tmp/adapter",
+                            "--artifact-kind",
+                            "peft-adapter",
+                            "--prompt",
+                            "SpiralTorch is",
+                            "--max-new-tokens",
+                            "1",
+                            "--allow-remote",
+                            "--out",
+                            str(out),
+                            "--json",
+                        ]
+                    )
+
+            written = json.loads(out.read_text(encoding="utf-8"))
+
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(stdout.getvalue()), report)
+        self.assertEqual(written, report)
+        self.assertEqual(probe.call_args.args, ("/tmp/adapter",))
+        self.assertEqual(probe.call_args.kwargs["artifact_kind"], "peft_adapter")
+        self.assertFalse(probe.call_args.kwargs["local_files_only"])
 
     def test_inference_distortion_runtime_plan_and_cli_args_are_importable(self) -> None:
         runtime = zspace_inference_distortion_runtime_plan(
