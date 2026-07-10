@@ -45,16 +45,29 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("if: inputs.publish_method != 'dry-run'", workflow)
         self.assertIn("--dist release-dist", workflow)
 
-    def test_publish_from_release_validates_type_payloads(self) -> None:
+    def test_publish_from_release_uses_canonical_wheel_payload_gate(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "publish_pypi_from_release.yml").read_text(
             encoding="utf-8"
         )
 
-        self.assertIn("required_payloads", workflow)
-        self.assertIn("spiraltorch/__init__.pyi", workflow)
-        self.assertIn("spiraltorch/py.typed", workflow)
-        self.assertIn("spiraltorch/spiralk.pyi", workflow)
-        self.assertIn("missing required type payloads", workflow)
+        self.assertIn(
+            "from scripts.publish_pypi_wheels import validate_wheel_metadata",
+            workflow,
+        )
+        self.assertIn("validate_wheel_metadata(wheels, expected)", workflow)
+        self.assertNotIn("required_payloads = {", workflow)
+
+    def test_release_wheels_smoke_hf_clis_and_gate_direct_publish(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "release_wheels.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("python -P ../../tools/smoke_hf_console_scripts.py", workflow)
+        self.assertIn(
+            "from scripts.publish_pypi_wheels import validate_wheel_metadata",
+            workflow,
+        )
+        self.assertIn("validate_wheel_metadata(wheels, expected)", workflow)
 
     def test_pypi_publish_verification_requires_latest_release(self) -> None:
         publish_from_release = (

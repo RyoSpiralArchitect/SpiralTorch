@@ -172,6 +172,7 @@ jobs:
 
           print("smoke ok")
           PY
+          python -P ../../tools/smoke_hf_console_scripts.py
       - name: Upload wheels (artifact)
         uses: actions/upload-artifact@v7
         with:
@@ -195,6 +196,12 @@ jobs:
       contents: read
       id-token: write
     steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
       - uses: actions/download-artifact@v7
         with:
           path: dist
@@ -227,6 +234,23 @@ jobs:
               exit 1
               ;;
           esac
+      - name: Validate wheel metadata
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip twine
+          python -m twine check pypi_dist/*.whl
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          from scripts.publish_pypi_wheels import validate_wheel_metadata
+
+          expected = os.environ["RELEASE_TAG"].lstrip("v")
+          wheels = sorted(Path("pypi_dist").glob("*.whl"))
+          if not wheels:
+              raise SystemExit("pypi_dist does not contain any wheels")
+          validate_wheel_metadata(wheels, expected)
+          PY
       - name: Publish to PyPI (token)
         if: inputs.pypi_publish_method == 'token'
         uses: pypa/gh-action-pypi-publish@release/v1
