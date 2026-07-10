@@ -466,7 +466,7 @@ def test_quarantine_refuses_surviving_interrupted_process_group(
         "print(child.pid, flush=True)"
     )
     leader = subprocess.Popen(
-        [sys.executable, "-c", leader_script],
+        [sys.executable, "-S", "-c", leader_script],
         stdout=subprocess.PIPE,
         text=True,
         start_new_session=True,

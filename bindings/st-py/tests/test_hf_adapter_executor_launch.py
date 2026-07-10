@@ -121,6 +121,7 @@ finally:
 """
     return [
         sys.executable,
+        "-S",
         "-u",
         "-c",
         script,
@@ -346,12 +347,116 @@ def test_stale_executor_state_does_not_count_as_handoff(
     )
     latest = report["latest_launch"]
     try:
+        deadline = time.monotonic() + 3.0
+        while not lock_path.is_file() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert lock_path.is_file()
+        status = st.hf_adapter_continuation_executor_launch_status_report(
+            report["launch_state_path"]
+        )
         assert report["request_status"] == "handoff_timeout"
         assert latest["status"] == "handoff_timeout"
         assert latest["executor_baseline"]["invocation_count"] == 1
         assert "handoff_at" not in latest
+        assert status["status"] == "starting"
+        assert status["executor_handoff_established"] is False
+        assert status["executor_handoff_observation"] == "baseline_not_advanced"
     finally:
         _terminate_launcher(latest["pid"])
+
+    exited = st.hf_adapter_continuation_executor_launch_status_report(
+        report["launch_state_path"]
+    )
+    assert exited["status"] == "handoff_unverified"
+    assert exited["recommended_action"] == "inspect_executor_handoff"
+
+
+def test_handoff_timeout_does_not_trust_live_pid_without_executor_lock(
+    tmp_path: Path,
+) -> None:
+    output_root = tmp_path / "executor"
+    output_root.mkdir()
+    state_path = _write_executor_state(
+        output_root / "state.json",
+        invocation_count=1,
+    )
+    log_path = output_root / "launcher.log"
+    log_path.write_text("handoff timed out\n", encoding="utf-8")
+    launch_path = _write_launch_state(
+        output_root / "launch.json",
+        output_root=output_root,
+        executor_state_path=state_path,
+        latest={
+            "launch_id": "timed-out-reused-pid",
+            "status": "handoff_timeout",
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "hostname": socket.gethostname(),
+            "pid": os.getpid(),
+            "executor_baseline": {
+                "run_id": "launch-test-run",
+                "invocation_count": 1,
+            },
+            "log_path": str(log_path.resolve()),
+        },
+    )
+
+    status = st.hf_adapter_continuation_executor_launch_status_report(launch_path)
+
+    assert status["status"] == "running_unverified"
+    assert status["healthy"] is False
+    assert status["recommended_action"] == "inspect_unverified_launcher"
+    assert status["launcher_pid_alive_observed"] is True
+    assert status["launcher_executor_lock_owner_verified"] is False
+    assert status["executor_handoff_observation"] == "baseline_not_advanced"
+
+
+def test_launch_status_treats_pre_spawn_local_artifact_as_starting(
+    tmp_path: Path,
+) -> None:
+    output_root = tmp_path / "executor"
+    output_root.mkdir()
+    state_path = output_root / "state.json"
+    launch_lock_path = (
+        output_root / st.HF_ADAPTER_CONTINUATION_EXECUTOR_LAUNCH_LOCK_FILENAME
+    )
+    launch_lock_path.write_text(
+        json.dumps(
+            {
+                "row_type": "hf_adapter_continuation_executor_launch_lock",
+                "lock_id": "pre-spawn-launch-lock",
+                "pid": os.getpid(),
+                "hostname": socket.gethostname(),
+            }
+        ),
+        encoding="utf-8",
+    )
+    launch_path = _write_launch_state(
+        output_root / "launch.json",
+        output_root=output_root,
+        executor_state_path=state_path,
+        latest={
+            "launch_id": "launching-before-spawn",
+            "status": "launching",
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "hostname": socket.gethostname(),
+            "pid": None,
+            "log_path": str(output_root / "pending.log"),
+            "executor_baseline": None,
+        },
+    )
+
+    report = st.hf_adapter_continuation_executor_launch_status_report(launch_path)
+
+    assert report["status"] == "starting"
+    assert report["healthy"] is True
+    assert report["recommended_action"] == "wait_for_executor_handoff"
+    assert report["launcher_launch_lock_owner_verified"] is True
+
+    launch_lock_path.unlink()
+    stale = st.hf_adapter_continuation_executor_launch_status_report(launch_path)
+    assert stale["status"] == "running_unverified"
+    assert stale["healthy"] is False
+    assert stale["recommended_action"] == "inspect_unverified_launcher"
 
 
 def test_failed_launcher_can_be_replaced_without_losing_history(
@@ -371,6 +476,9 @@ def test_failed_launcher_can_be_replaced_without_losing_history(
         output_root=output_root,
         executor_state_path=state_path,
         handoff_timeout_seconds=1.0,
+    )
+    failed_status = st.hf_adapter_continuation_executor_launch_status_report(
+        failed["launch_state_path"]
     )
 
     monkeypatch.setattr(
@@ -394,6 +502,8 @@ def test_failed_launcher_can_be_replaced_without_losing_history(
         )
         assert failed["request_status"] == "launch_failed"
         assert failed["latest_launch"]["returncode_observed"] == 7
+        assert failed_status["status"] == "launch_failed"
+        assert failed_status["executor_handoff_observation"] == "failed"
         assert resumed["request_status"] == "handed_off"
         assert resumed["launch_count"] == 2
         assert resumed["launches"][0]["status"] == "launch_failed"
@@ -745,6 +855,34 @@ def test_resume_plan_validates_legacy_contract_and_rejects_tampering(
     assert identity["ready"] is False
     assert identity["issue"] == "executor_identity_changed"
     assert identity["action"] == "inspect_executor_invocation"
+
+    missing_handoff_path, _, _ = _write_replayable_launch_state(
+        tmp_path / "missing-handoff"
+    )
+    missing_handoff_payload = json.loads(
+        missing_handoff_path.read_text(encoding="utf-8")
+    )
+    missing_handoff_payload["launches"][0].pop("executor_run_id")
+    missing_handoff_payload["launches"][0].pop("executor_invocation_count")
+    missing_handoff_path.write_text(
+        json.dumps(missing_handoff_payload), encoding="utf-8"
+    )
+    missing_handoff = st.hf_adapter_continuation_executor_resume_report(
+        missing_handoff_path
+    )
+    assert missing_handoff["ready"] is False
+    assert missing_handoff["launcher_status"] == "handoff_unverified"
+    assert missing_handoff["executor_identity_source"] == "recorded_handoff_missing"
+
+    baseline_path, _, _ = _write_replayable_launch_state(tmp_path / "baseline")
+    baseline_payload = json.loads(baseline_path.read_text(encoding="utf-8"))
+    baseline_payload["launches"][0].pop("executor_run_id")
+    baseline_payload["launches"][0].pop("executor_invocation_count")
+    baseline_payload["launches"][0]["executor_baseline"] = None
+    baseline_path.write_text(json.dumps(baseline_payload), encoding="utf-8")
+    baseline = st.hf_adapter_continuation_executor_resume_report(baseline_path)
+    assert baseline["ready"] is True
+    assert baseline["executor_identity_source"] == "baseline_reconstructed"
 
     missing_log_path, _, _ = _write_replayable_launch_state(tmp_path / "missing-log")
     missing_log_payload = json.loads(missing_log_path.read_text(encoding="utf-8"))

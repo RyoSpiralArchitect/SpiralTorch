@@ -803,6 +803,37 @@ all bound paths. Policy-stopped, live, remote, unverified, modified, or
 cwd-missing histories fail closed. To intentionally change policy, issue a new
 full `spiral-hf-adapter-executor ... --detach` command instead of replaying.
 
+For bounded unattended continuation, inspect one supervision decision and then
+run the foreground supervisor over the same launch artifact:
+
+```bash
+spiral-hf-adapter-executor-supervise \
+  runs/qwen2-study/executor/spiraltorch-hf-adapter-continuation-executor-launch.json \
+  --plan
+
+spiral-hf-adapter-executor-supervise \
+  runs/qwen2-study/executor/spiraltorch-hf-adapter-continuation-executor-launch.json \
+  --max-resumes 5 \
+  --poll-interval-seconds 5 \
+  --timeout-seconds 0
+```
+
+The supervisor waits while a healthy detached owner is running and automatically
+replays only an executor whose exact durable reason is
+`max_generations_per_invocation_reached`. A clean `stop_requested` exits as a
+healthy operator pause (cancelled partial output still blocks for quarantine),
+continuation-policy stop exits completed, and quarantined recovery requires an
+explicit manual resume. Failed/unhealthy launches, remote or unverified owners,
+invalid handoff identity, and changed replay contracts fail closed.
+`--max-resumes` bounds launches per supervisor invocation (default `1`), while
+`--timeout-seconds 0` means no wall-clock timeout. A separate
+single-owner supervisor lock prevents duplicate controllers, and atomic state
+plus transition/resume history is written by default to
+`spiraltorch-hf-adapter-continuation-executor-supervisor.json` under the output
+root; use `--state` to place it elsewhere. Restarting a supervisor marks its
+unfinished prior run interrupted, then derives the next action from current
+launch/executor artifacts rather than replaying stale in-memory intent.
+
 Alternatively, repeat the full command to change explicit settings, or raise
 `--max-generations` for several synchronous generations in one invocation. The
 executor holds a single-writer lock for the output root,
@@ -921,7 +952,11 @@ and executor health with
 `st.hf_adapter_continuation_executor_launch_status_report(...)`. Durable replay
 is available through
 `st.hf_adapter_continuation_executor_resume_report(...)` and
-`st.resume_hf_adapter_continuation_executor(...)`.
+`st.resume_hf_adapter_continuation_executor(...)`. Bounded supervision is
+available through
+`st.hf_adapter_continuation_executor_supervision_report(...)` and
+`st.supervise_hf_adapter_continuation_executor(...)`; load its durable history
+with `st.load_hf_adapter_continuation_executor_supervisor(...)`.
 
 Use `--resume-from-checkpoint` only for an exact Trainer continuation that
 should restore optimizer, scheduler, and RNG state. SpiralTorch audits

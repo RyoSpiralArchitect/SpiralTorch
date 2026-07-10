@@ -232,6 +232,38 @@ def _process_observation(record: Mapping[str, object]) -> str:
     return "unverified"
 
 
+def _launch_lock_observation(output_root: Path) -> dict[str, object]:
+    path = output_root / HF_ADAPTER_CONTINUATION_EXECUTOR_LAUNCH_LOCK_FILENAME
+    try:
+        owner = _load_launch_lock(path)
+    except RuntimeError as exc:
+        return {
+            "path": str(path),
+            "status": "invalid",
+            "owner": None,
+            "error": f"{exc.__class__.__name__}: {exc}",
+        }
+    if owner is None:
+        return {"path": str(path), "status": "absent", "owner": None, "error": None}
+    if (
+        owner.get("row_type") != "hf_adapter_continuation_executor_launch_lock"
+        or not isinstance(owner.get("lock_id"), str)
+        or not owner.get("lock_id")
+    ):
+        return {
+            "path": str(path),
+            "status": "invalid",
+            "owner": owner,
+            "error": "executor launch lock owner identity is invalid",
+        }
+    return {
+        "path": str(path),
+        "status": _process_observation(owner),
+        "owner": owner,
+        "error": None,
+    }
+
+
 def _executor_lock_observation(output_root: Path) -> dict[str, object]:
     path = output_root / HF_ADAPTER_CONTINUATION_EXECUTOR_LOCK_FILENAME
     try:
@@ -405,6 +437,44 @@ def _executor_lock_matches_pid(
         and owner.get("hostname") == socket.gethostname()
         and owner.get("pid") == pid
     )
+
+
+def _launch_handoff_observation(
+    latest: Mapping[str, object],
+    executor_status: Mapping[str, object] | None,
+) -> str:
+    if latest.get("status") == "launch_failed":
+        return "failed"
+    if executor_status is None:
+        return "executor_state_missing"
+    current = {
+        "run_id": executor_status.get("run_id"),
+        "invocation_count": executor_status.get("invocation_count"),
+    }
+    recorded_run_id = latest.get("executor_run_id")
+    recorded_invocation_count = latest.get("executor_invocation_count")
+    if recorded_run_id is not None or recorded_invocation_count is not None:
+        return (
+            "recorded_match"
+            if recorded_run_id == current["run_id"]
+            and recorded_invocation_count == current["invocation_count"]
+            else "recorded_mismatch"
+        )
+    if "executor_baseline" in latest:
+        baseline = latest.get("executor_baseline")
+        if baseline is not None and not isinstance(baseline, Mapping):
+            return "baseline_invalid"
+        return (
+            "baseline_advanced"
+            if _is_new_executor_invocation(current, baseline)
+            else "baseline_not_advanced"
+        )
+    if (
+        latest.get("resume_contract") is None
+        and latest.get("status") in {"completed", "exited_observed", "handed_off"}
+    ):
+        return "legacy_unverified"
+    return "handoff_unverified"
 
 
 def _argv_contains_option(argv: Sequence[str], name: str) -> bool:
@@ -938,11 +1008,37 @@ def hf_adapter_continuation_executor_launch_status_report(
     executor_healthy = (
         executor_status.get("healthy") if isinstance(executor_status, Mapping) else None
     )
+    handoff_observation = (
+        "missing"
+        if latest is None
+        else _launch_handoff_observation(latest, executor_status)
+    )
+    handoff_established = handoff_observation in {
+        "baseline_advanced",
+        "legacy_unverified",
+        "recorded_match",
+    }
     output_root_value = launch_state.get("output_root")
-    executor_lock = (
-        _executor_lock_observation(Path(str(output_root_value)).expanduser())
+    output_root = (
+        Path(str(output_root_value)).expanduser()
         if output_root_value is not None
-        else {"path": None, "status": "unverified", "owner": None, "error": None}
+        else None
+    )
+    missing_lock = {
+        "path": None,
+        "status": "unverified",
+        "owner": None,
+        "error": None,
+    }
+    launch_lock = (
+        _launch_lock_observation(output_root)
+        if output_root is not None
+        else missing_lock
+    )
+    executor_lock = (
+        _executor_lock_observation(output_root)
+        if output_root is not None
+        else missing_lock
     )
     launcher_owns_executor_lock = bool(
         latest is not None
@@ -950,15 +1046,31 @@ def hf_adapter_continuation_executor_launch_status_report(
     )
     if latest is None:
         status = "empty"
+    elif latest.get("status") == "launch_failed":
+        status = "launch_failed"
+    elif (
+        latest.get("status") == "launching"
+        and latest.get("hostname") == socket.gethostname()
+        and launch_lock.get("status") == "alive"
+    ):
+        status = "starting"
     elif observation == "alive":
-        if executor_lifecycle == "output_quarantined":
+        if not handoff_established:
+            pre_handoff_status = latest.get("status")
+            status = (
+                "running_unverified"
+                if pre_handoff_status == "handoff_timeout"
+                and not launcher_owns_executor_lock
+                else "starting"
+                if pre_handoff_status in {"handoff_timeout", "launched", "launching"}
+                else "running_unverified"
+            )
+        elif executor_lifecycle == "output_quarantined":
             status = "recoverable" if executor_healthy is True else "executor_unhealthy"
         elif executor_lifecycle in {"generation_limit_reached", "ready", "stopped"}:
             status = "completed" if executor_healthy is True else "executor_unhealthy"
         elif executor_lifecycle in {"blocked", "failed", "interrupted"}:
             status = f"executor_{executor_lifecycle}"
-        elif latest.get("status") == "launch_failed":
-            status = "launch_failed"
         elif executor_status is None:
             status = "starting"
         elif executor_healthy is not True:
@@ -971,6 +1083,8 @@ def hf_adapter_continuation_executor_launch_status_report(
         status = "remote_running"
     elif observation == "unverified":
         status = "running_unverified"
+    elif not handoff_established:
+        status = "handoff_unverified"
     elif executor_lifecycle == "output_quarantined":
         status = "recoverable" if executor_healthy is True else "executor_unhealthy"
     elif executor_lifecycle in {"generation_limit_reached", "ready", "stopped"}:
@@ -984,8 +1098,6 @@ def hf_adapter_continuation_executor_launch_status_report(
         "stopping",
     }:
         status = "interrupted"
-    elif latest.get("status") == "launch_failed":
-        status = "launch_failed"
     else:
         status = "exited"
 
@@ -1011,6 +1123,8 @@ def hf_adapter_continuation_executor_launch_status_report(
         recommended_action = "inspect_remote_launcher"
     elif status == "running_unverified":
         recommended_action = "inspect_unverified_launcher"
+    elif status == "handoff_unverified":
+        recommended_action = "inspect_executor_handoff"
     elif status == "executor_blocked":
         recommended_action = "resolve_executor_block"
     elif status in {
@@ -1027,7 +1141,11 @@ def hf_adapter_continuation_executor_launch_status_report(
     else:
         recommended_action = "inspect_launcher_log"
     log = _path_report(None if latest is None else latest.get("log_path"))
-    if latest is not None and log.get("kind_ready") is not True:
+    if (
+        latest is not None
+        and latest.get("status") != "launching"
+        and log.get("kind_ready") is not True
+    ):
         healthy = False
         recommended_action = "inspect_missing_launcher_log"
     return {
@@ -1048,7 +1166,11 @@ def hf_adapter_continuation_executor_launch_status_report(
             if observation == "exited"
             else None
         ),
+        "launcher_launch_lock_owner_verified": launch_lock.get("status") == "alive",
         "launcher_executor_lock_owner_verified": launcher_owns_executor_lock,
+        "launch_lock": launch_lock,
+        "executor_handoff_observation": handoff_observation,
+        "executor_handoff_established": handoff_established,
         "executor_lock": executor_lock,
         "log": log,
         "executor_state": executor_artifact,
@@ -1130,14 +1252,31 @@ def hf_adapter_continuation_executor_resume_report(
         latest.get("executor_invocation_count") if latest is not None else None
     )
     if recorded_run_id is None and recorded_invocation_count is None:
-        executor_identity_source = "current_state_reconstructed"
-        executor_identity_matches = bool(
-            isinstance(executor_run_id, str)
-            and executor_run_id
-            and not isinstance(executor_invocation_count, bool)
-            and isinstance(executor_invocation_count, int)
-            and executor_invocation_count > 0
-        )
+        baseline = latest.get("executor_baseline") if latest is not None else None
+        if replay is not None and replay.get("contract_source") == "legacy_command_reconstructed":
+            executor_identity_source = "legacy_current_state_reconstructed"
+            executor_identity_matches = bool(
+                isinstance(executor_run_id, str)
+                and executor_run_id
+                and not isinstance(executor_invocation_count, bool)
+                and isinstance(executor_invocation_count, int)
+                and executor_invocation_count > 0
+            )
+        elif latest is not None and "executor_baseline" in latest:
+            executor_identity_source = "baseline_reconstructed"
+            executor_identity_matches = bool(
+                (baseline is None or isinstance(baseline, Mapping))
+                and _is_new_executor_invocation(
+                    {
+                        "run_id": executor_run_id,
+                        "invocation_count": executor_invocation_count,
+                    },
+                    baseline,
+                )
+            )
+        else:
+            executor_identity_source = "recorded_handoff_missing"
+            executor_identity_matches = False
     else:
         executor_identity_source = "recorded_handoff"
         executor_identity_matches = bool(
@@ -1155,6 +1294,9 @@ def hf_adapter_continuation_executor_resume_report(
     if replay is None:
         issue = "resume_source_missing"
         action = "create_detached_executor_launch"
+    elif launch_status.get("executor_handoff_observation") == "recorded_mismatch":
+        issue = "executor_identity_changed"
+        action = "inspect_executor_invocation"
     elif launcher_status not in {"completed", "recoverable"}:
         issue = "launcher_not_resumable"
         action = str(launch_status.get("recommended_action") or "inspect_launcher")
