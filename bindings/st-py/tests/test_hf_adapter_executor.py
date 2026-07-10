@@ -284,6 +284,68 @@ def test_executor_single_writer_lock_blocks_live_owner_and_reaps_stale_owner(
     assert not lock_path.exists()
 
 
+def test_executor_blocks_until_pending_output_quarantine_is_finalized(
+    tmp_path: Path,
+) -> None:
+    _, child = _seed_chain(tmp_path)
+    output_root = tmp_path / "executor-runs"
+    state_path = output_root / "state.json"
+    st.run_hf_adapter_continuation_executor(
+        child,
+        output_root=output_root,
+        state_path=state_path,
+        max_lineage_depth=3,
+    )
+    state = st.load_hf_adapter_continuation_executor(state_path)
+    attempt_id = "pending-quarantine-attempt"
+    output_dir = output_root / "generation-002"
+    quarantine_root = output_root.with_name(f"{output_root.name}.executor-quarantine")
+    intent = {
+        "row_type": "hf_adapter_continuation_executor_output_resolution_intent",
+        "schema": st.HF_ADAPTER_CONTINUATION_EXECUTOR_OUTPUT_RESOLUTION_SCHEMA,
+        "resolution_id": "pending-move",
+        "run_id": state["run_id"],
+        "reason": "interrupted quarantine",
+        "attempt_id": attempt_id,
+        "attempt_status": "cancelled",
+        "lineage_depth": 2,
+        "source_path": str(output_dir),
+        "destination_path": str(quarantine_root / "generation-002-pending"),
+        "quarantine_root": str(quarantine_root),
+        "tree_snapshot": {"metadata_sha256": "pending"},
+    }
+    state["pending_output_resolution"] = dict(intent)
+    state["generations"].append(
+        {
+            "attempt_id": attempt_id,
+            "status": "cancelled",
+            "lineage_depth": 2,
+            "output_dir": str(output_dir),
+            "pending_output_resolution": dict(intent),
+        }
+    )
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    runner = FakeFineTuneRunner([0.05])
+
+    blocked = st.run_hf_adapter_continuation_executor(
+        child,
+        output_root=output_root,
+        state_path=state_path,
+        run=True,
+        max_lineage_depth=3,
+        command_runner=runner,
+    )
+
+    assert blocked["status"] == "blocked"
+    assert blocked["action"] == "complete_output_quarantine"
+    assert blocked["reason"] == "output_quarantine_incomplete"
+    assert blocked["output_resolution_gate"]["attempt_ids"] == [
+        "pending-quarantine-attempt"
+    ]
+    assert runner.commands == []
+    assert not (output_root / "generation-002").exists()
+
+
 def test_executor_runs_multiple_generations_until_depth_policy_stops(
     tmp_path: Path,
 ) -> None:
@@ -490,6 +552,29 @@ def test_executor_cooperatively_stops_silent_subprocess_and_blocks_partial_outpu
     assert blocked["action"] == "resolve_failed_generation_output"
     assert blocked["unresolved_generation"]["attempt_status"] == "cancelled"
     assert blocked["stop_request_history"][0]["reason"] == "integration stop"
+
+    quarantine = st.quarantine_hf_adapter_continuation_executor_output(
+        state_path,
+        attempt_id=attempt["attempt_id"],
+        reason="integration quarantine",
+    )
+    recovered_status = st.hf_adapter_continuation_executor_status_report(state_path)
+    resumed_plan = st.run_hf_adapter_continuation_executor(
+        child,
+        output_root=output_root,
+        state_path=state_path,
+        max_lineage_depth=2,
+    )
+
+    assert quarantine["created"] is True
+    assert quarantine["reason"] == "integration quarantine"
+    assert not partial_output.exists()
+    assert Path(quarantine["destination_path"]).joinpath("partial.txt").is_file()
+    assert recovered_status["status"] == "output_quarantined"
+    assert recovered_status["healthy"] is True
+    assert recovered_status["recommended_action"] == "resume_executor"
+    assert resumed_plan["status"] == "ready"
+    assert resumed_plan["action"] == "run_generation"
 
 
 def test_executor_honors_stop_at_generation_boundary_after_promotion(

@@ -11,6 +11,8 @@ from pathlib import Path
 from ._process import local_pid_alive
 from .hf_adapter_executor import (
     HF_ADAPTER_CONTINUATION_EXECUTOR_LOCK_FILENAME,
+    _pending_output_resolution_gate,
+    _unresolved_failed_attempt_output,
     load_hf_adapter_continuation_executor,
     load_hf_adapter_continuation_executor_stop_request,
 )
@@ -163,6 +165,7 @@ def _attempt_summary(attempt: Mapping[str, object] | None) -> dict[str, object] 
         "output_dir": attempt.get("output_dir"),
         "log_path": attempt.get("log_path"),
         "stop_request": attempt.get("stop_request"),
+        "output_resolution": attempt.get("output_resolution"),
     }
 
 
@@ -272,6 +275,8 @@ def hf_adapter_continuation_executor_status_report(
         recommended_action = "inspect_executor_failure"
     elif observed_status == "blocked":
         recommended_action = "resolve_executor_block"
+    elif observed_status == "output_quarantined":
+        recommended_action = "resume_executor"
     else:
         recommended_action = "none"
 
@@ -280,6 +285,7 @@ def hf_adapter_continuation_executor_status_report(
         "generation_limit_reached",
         "ready",
         "running",
+        "output_quarantined",
         "stopping",
         "stopped",
     }
@@ -290,6 +296,9 @@ def hf_adapter_continuation_executor_status_report(
         else max(0.0, (datetime.now(timezone.utc) - updated_at).total_seconds())
     )
     observed_attempt = active or latest
+    unresolved_generation = _unresolved_failed_attempt_output(state)
+    pending_output_resolution = state.get("pending_output_resolution")
+    pending_output_resolution_gate = _pending_output_resolution_gate(state)
     output = _path_report(
         None if observed_attempt is None else observed_attempt.get("output_dir"),
         expect_directory=True,
@@ -299,6 +308,8 @@ def hf_adapter_continuation_executor_status_report(
         expect_directory=False,
     )
     health_issues: list[str] = []
+    if pending_output_resolution_gate is not None:
+        health_issues.append(str(pending_output_resolution_gate["issue"]))
     if stop_request_artifact.get("exists") is True and not stop_request_valid:
         health_issues.append("stop_request_invalid")
     if len(running) > 1:
@@ -329,15 +340,21 @@ def hf_adapter_continuation_executor_status_report(
         and output.get("kind_ready") is not True
     ):
         health_issues.append("promoted_output_missing")
-    if (
-        observed_attempt is not None
-        and observed_attempt.get("status") == "cancelled"
-        and output.get("exists") is True
-    ):
-        health_issues.append("cancelled_output_present")
+    if unresolved_generation is not None:
+        health_issues.append(
+            "cancelled_output_present"
+            if unresolved_generation.get("attempt_status") == "cancelled"
+            else "failed_generation_output_present"
+        )
     healthy = lifecycle_healthy and not health_issues
-    if "cancelled_output_present" in health_issues:
+    if "output_quarantine_intent_invalid" in health_issues:
+        recommended_action = "inspect_output_quarantine_intent"
+    elif "output_quarantine_incomplete" in health_issues:
+        recommended_action = "complete_output_quarantine"
+    elif "cancelled_output_present" in health_issues:
         recommended_action = "resolve_cancelled_output"
+    elif "failed_generation_output_present" in health_issues:
+        recommended_action = "resolve_failed_generation_output"
     if health_issues and recommended_action in {"monitor_running_process", "none"}:
         recommended_action = "inspect_executor_health_issues"
     return {
@@ -363,6 +380,14 @@ def hf_adapter_continuation_executor_status_report(
         "active_attempt_count": len(running),
         "active_attempt": _attempt_summary(active),
         "latest_attempt": _attempt_summary(latest),
+        "last_output_resolution": state.get("last_output_resolution"),
+        "pending_output_resolution": pending_output_resolution,
+        "pending_output_resolution_attempt_ids": (
+            []
+            if pending_output_resolution_gate is None
+            else pending_output_resolution_gate["attempt_ids"]
+        ),
+        "unresolved_generation": unresolved_generation,
         "current_hostname": current_hostname,
         "attempt_hostname": attempt_hostname,
         "same_host": same_host,
@@ -389,6 +414,7 @@ def hf_adapter_continuation_executor_status_lines(
         and report_or_path.get("row_type") == "hf_adapter_continuation_executor_status"
         else hf_adapter_continuation_executor_status_report(report_or_path)
     )
+    unresolved = report.get("unresolved_generation")
     lines = [
         (
             "hf_adapter_continuation_executor_status "
@@ -402,6 +428,8 @@ def hf_adapter_continuation_executor_status_lines(
             f"promoted={report.get('promoted_generation_count')} "
             f"state_age_seconds={report.get('state_age_seconds')} "
             f"stop_requested={report.get('stop_requested')} "
+            "unresolved_attempt="
+            f"{unresolved.get('attempt_id') if isinstance(unresolved, Mapping) else None} "
             f"state={report.get('state_path')}"
         )
     ]
@@ -427,6 +455,8 @@ def hf_adapter_continuation_executor_status_lines(
             f"lock_exists={lock.get('exists') if isinstance(lock, Mapping) else None} "
             "lock_owner_alive="
             f"{lock_owner.get('pid_alive_observed') if isinstance(lock_owner, Mapping) else None} "
+            "output_resolution="
+            f"{attempt.get('output_resolution', {}).get('resolution_id') if isinstance(attempt.get('output_resolution'), Mapping) else None} "
             f"log={attempt.get('log_path')}"
         )
     return lines

@@ -35,6 +35,7 @@ __all__ = [
     "HF_ADAPTER_CONTINUATION_EXECUTOR_CONTROL_DIRNAME",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_LOCK_FILENAME",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_LOG_DIRNAME",
+    "HF_ADAPTER_CONTINUATION_EXECUTOR_OUTPUT_RESOLUTION_SCHEMA",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_SCHEMA",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_STOP_REQUEST_SCHEMA",
     "hf_adapter_continuation_executor_lines",
@@ -59,6 +60,9 @@ HF_ADAPTER_CONTINUATION_EXECUTOR_LOCK_FILENAME = (
 HF_ADAPTER_CONTINUATION_EXECUTOR_LOG_DIRNAME = "executor-logs"
 HF_ADAPTER_CONTINUATION_EXECUTOR_STOP_REQUEST_SCHEMA = (
     "spiraltorch.hf_adapter_continuation_executor_stop_request.v1"
+)
+HF_ADAPTER_CONTINUATION_EXECUTOR_OUTPUT_RESOLUTION_SCHEMA = (
+    "spiraltorch.hf_adapter_continuation_executor_output_resolution.v1"
 )
 _PROCESS_PROGRESS_INTERVAL_SECONDS = 5.0
 _PROCESS_STOP_POLL_INTERVAL_SECONDS = 0.2
@@ -983,6 +987,58 @@ def _unresolved_failed_attempt_output(
     return None
 
 
+def _pending_output_resolution_gate(
+    state: Mapping[str, object],
+) -> dict[str, object] | None:
+    pending = state.get("pending_output_resolution")
+    pending_attempts = [
+        row
+        for row in state.get("generations") or []
+        if isinstance(row, Mapping) and row.get("pending_output_resolution") is not None
+    ]
+    if pending is None and not pending_attempts:
+        return None
+    pending_attempt = pending_attempts[0] if len(pending_attempts) == 1 else None
+    attempt_pending = (
+        pending_attempt.get("pending_output_resolution")
+        if isinstance(pending_attempt, Mapping)
+        else None
+    )
+    required_strings = (
+        "resolution_id",
+        "run_id",
+        "reason",
+        "source_path",
+        "destination_path",
+        "quarantine_root",
+    )
+    consistent = bool(
+        isinstance(pending, Mapping)
+        and isinstance(attempt_pending, Mapping)
+        and dict(attempt_pending) == dict(pending)
+        and pending.get("row_type")
+        == "hf_adapter_continuation_executor_output_resolution_intent"
+        and pending.get("schema")
+        == HF_ADAPTER_CONTINUATION_EXECUTOR_OUTPUT_RESOLUTION_SCHEMA
+        and pending.get("attempt_id") == pending_attempt.get("attempt_id")
+        and pending.get("attempt_status") == pending_attempt.get("status")
+        and pending.get("lineage_depth") == pending_attempt.get("lineage_depth")
+        and all(
+            isinstance(pending.get(field), str) and bool(pending.get(field))
+            for field in required_strings
+        )
+        and isinstance(pending.get("tree_snapshot"), Mapping)
+    )
+    return {
+        "issue": (
+            "output_quarantine_incomplete"
+            if consistent
+            else "output_quarantine_intent_invalid"
+        ),
+        "attempt_ids": [row.get("attempt_id") for row in pending_attempts],
+    }
+
+
 def _selection_for_audit(
     state: Mapping[str, object],
     requested_adapter_id: str | None,
@@ -1224,6 +1280,25 @@ def _run_hf_adapter_continuation_executor_unlocked(
                 action="resume_executor",
                 reason="stop_requested",
             )
+        output_resolution_gate = _pending_output_resolution_gate(state)
+        if output_resolution_gate is not None:
+            state["output_resolution_gate"] = output_resolution_gate
+            intent_invalid = (
+                output_resolution_gate.get("issue")
+                == "output_quarantine_intent_invalid"
+            )
+            return _finish(
+                state,
+                resolved_state_path,
+                status="blocked",
+                action=(
+                    "inspect_output_quarantine_intent"
+                    if intent_invalid
+                    else "complete_output_quarantine"
+                ),
+                reason=str(output_resolution_gate.get("issue")),
+            )
+        state.pop("output_resolution_gate", None)
         unresolved_output = _unresolved_failed_attempt_output(state)
         if unresolved_output is not None:
             state["unresolved_generation"] = unresolved_output

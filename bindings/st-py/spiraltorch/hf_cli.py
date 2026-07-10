@@ -35,6 +35,11 @@ from .hf_adapter_executor_launch import (
     hf_adapter_continuation_executor_launch_status_report,
     launch_hf_adapter_continuation_executor,
 )
+from .hf_adapter_executor_recovery import (
+    hf_adapter_continuation_executor_output_quarantine_report,
+    hf_adapter_continuation_executor_output_resolution_lines,
+    quarantine_hf_adapter_continuation_executor_output,
+)
 from .hf_adapter_executor_status import (
     hf_adapter_continuation_executor_status_lines,
     hf_adapter_continuation_executor_status_report,
@@ -618,6 +623,55 @@ def adapter_continuation_executor_launch_status_main(
         for line in hf_adapter_continuation_executor_launch_status_lines(report):
             print(line)
     if args.require_healthy and report.get("healthy") is not True:
+        return 1
+    return 0
+
+
+def adapter_continuation_executor_quarantine_main(
+    argv: Sequence[str] | None = None,
+) -> int:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Atomically move one failed executor output into an audited sibling "
+            "quarantine."
+        ),
+    )
+    parser.add_argument("state", type=Path)
+    parser.add_argument("--attempt-id", required=True)
+    parser.add_argument("--reason", default="operator_quarantine")
+    parser.add_argument(
+        "--plan",
+        action="store_true",
+        help="Inspect the exact source, destination, and lock gate without moving data.",
+    )
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args(argv)
+    try:
+        report = (
+            hf_adapter_continuation_executor_output_quarantine_report(
+                args.state,
+                attempt_id=args.attempt_id,
+            )
+            if args.plan
+            else quarantine_hf_adapter_continuation_executor_output(
+                args.state,
+                attempt_id=args.attempt_id,
+                reason=args.reason,
+            )
+        )
+    except Exception as exc:
+        print(
+            "hf_adapter_continuation_executor_quarantine_error "
+            f"{exc.__class__.__name__}: {exc}",
+            file=sys.stderr,
+        )
+        return 2
+    if args.json:
+        print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        for line in hf_adapter_continuation_executor_output_resolution_lines(report):
+            print(line)
+    if args.plan and report.get("ready") is not True:
         return 1
     return 0
 

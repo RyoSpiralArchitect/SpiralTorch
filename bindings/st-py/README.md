@@ -833,10 +833,42 @@ executor verifies and promotes that finished adapter, then stops before
 launching the next depth.
 Repeated stop commands are idempotent. A cancelled generation that left a
 partial output directory remains fail-closed and is reported as
-`cancelled_output_present` until the operator inspects and moves or removes it.
+`cancelled_output_present`, including the exact unresolved attempt ID. Plan a
+non-destructive quarantine before resuming:
+
+```bash
+spiral-hf-adapter-executor-quarantine \
+  runs/qwen2-study/executor/state.json \
+  --attempt-id generation-attempt-... \
+  --plan
+
+spiral-hf-adapter-executor-quarantine \
+  runs/qwen2-study/executor/state.json \
+  --attempt-id generation-attempt-... \
+  --reason "operator inspected partial generation"
+```
+
+Quarantine never deletes the partial output. Under the executor's
+single-writer lock it atomically moves the exact attempt output into a sibling
+`<output-root>.executor-quarantine/` directory, outside recursive adapter-chain
+discovery rooted at that executor output directory. The state retains
+source/destination paths, prior attempt status,
+reason, and a SHA-256 tree-metadata digest. Attempt-ID matching prevents stale
+operator commands from moving a different generation; live or unverified lock
+owners fail closed, stale local locks are reaped, and repeating a completed
+quarantine revalidates the recorded metadata before returning idempotently.
+FIFO, socket, and device entries fail closed rather than being moved.
+The executor itself also blocks on a pending or inconsistent quarantine intent,
+so bypassing the status CLI cannot resume training inside a half-finished move.
+`spiral-hf-adapter-executor-status --require-healthy`
+then reports `output_quarantined` with `resume_executor`, after which the same
+foreground or `--detach` executor command can recreate that generation.
 Python can issue the same request with
 `st.request_hf_adapter_continuation_executor_stop(...)` and load its durable
 evidence with `st.load_hf_adapter_continuation_executor_stop_request(...)`.
+Use `st.hf_adapter_continuation_executor_output_quarantine_report(...)` and
+`st.quarantine_hf_adapter_continuation_executor_output(...)` for the equivalent
+recovery flow.
 
 The status surface reports state age, active attempt, local PID liveness,
 single-writer lock presence, output presence, log size, and a pending stop

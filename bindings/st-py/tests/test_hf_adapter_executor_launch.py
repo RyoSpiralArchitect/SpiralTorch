@@ -436,7 +436,7 @@ def test_launch_status_propagates_executor_health_failure(tmp_path: Path) -> Non
     assert report["status"] == "executor_unhealthy"
     assert report["healthy"] is False
     assert report["executor_healthy"] is False
-    assert report["recommended_action"] == "inspect_executor_health"
+    assert report["recommended_action"] == "inspect_executor_health_issues"
     assert "single_writer_lock_missing" in report["executor_status"]["health_issues"]
 
     state["status"] = "stopped"
@@ -454,6 +454,19 @@ def test_launch_status_propagates_executor_health_failure(tmp_path: Path) -> Non
     assert terminal["status"] == "executor_unhealthy"
     assert terminal["healthy"] is False
     assert "cancelled_output_present" in terminal["executor_status"]["health_issues"]
+
+    state["status"] = "output_quarantined"
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    quarantined_but_unresolved = (
+        st.hf_adapter_continuation_executor_launch_status_report(launch_state_path)
+    )
+
+    assert quarantined_but_unresolved["status"] == "executor_unhealthy"
+    assert quarantined_but_unresolved["healthy"] is False
+    assert (
+        quarantined_but_unresolved["recommended_action"]
+        == "resolve_cancelled_output"
+    )
 
 
 def test_detach_cli_replays_executor_arguments_without_recursing(

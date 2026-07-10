@@ -64,6 +64,15 @@
   unverified ownership, PID reuse alone does not block recovery, and
   `spiral-hf-adapter-executor-launch-status` combines launcher and executor
   health without mutating either artifact.
+- Audited executor recovery: add
+  `spiral-hf-adapter-executor-quarantine` plus importable plan/execute helpers
+  for failed, cancelled, and postflight-failed outputs. Recovery CAS-checks the
+  attempt ID, acquires the executor lock, atomically moves data into a sibling
+  quarantine outside that executor root's chain discovery, rejects special
+  filesystem entries, persists and revalidates a tree-metadata digest plus
+  idempotent resolution history, blocks executor re-entry while an intent is
+  unfinished or inconsistent, and returns status to a healthy
+  `output_quarantined` / `resume_executor` handoff.
 - Trainer resume audit: add `hf_finetune_checkpoint_resume_report(...)` and
   compact lines for optimizer/scheduler/RNG state availability, saved versus
   requested step horizons, and the exhausted-scheduler case where adapter

@@ -14,6 +14,7 @@ hf_peft: ModuleType
 hf_adapter: ModuleType
 hf_adapter_executor: ModuleType
 hf_adapter_executor_launch: ModuleType
+hf_adapter_executor_recovery: ModuleType
 hf_adapter_executor_status: ModuleType
 hf_ft_status: ModuleType
 hf_generation: ModuleType
@@ -573,6 +574,8 @@ HF_ADAPTER_CONTINUATION_EXECUTOR_LAUNCH_FILENAME: str
 HF_ADAPTER_CONTINUATION_EXECUTOR_LAUNCH_LOCK_FILENAME: str
 HF_ADAPTER_CONTINUATION_EXECUTOR_LAUNCH_SCHEMA: str
 HF_ADAPTER_CONTINUATION_EXECUTOR_LAUNCH_STATUS_SCHEMA: str
+HF_ADAPTER_CONTINUATION_EXECUTOR_OUTPUT_RESOLUTION_SCHEMA: str
+HF_ADAPTER_CONTINUATION_EXECUTOR_QUARANTINE_SUFFIX: str
 HF_ADAPTER_CONTINUATION_EXECUTOR_SCHEMA: str
 HF_ADAPTER_CONTINUATION_EXECUTOR_STATUS_SCHEMA: str
 HF_ADAPTER_CONTINUATION_EXECUTOR_STOP_REQUEST_SCHEMA: str
@@ -773,6 +776,20 @@ def hf_adapter_continuation_executor_launch_status_report(
 ) -> Dict[str, object]: ...
 def hf_adapter_continuation_executor_launch_status_lines(
     report_or_path: Mapping[str, object] | str | PathLike[str],
+) -> List[str]: ...
+def hf_adapter_continuation_executor_output_quarantine_report(
+    report_or_path: Mapping[str, object] | str | PathLike[str],
+    *,
+    attempt_id: str,
+) -> Dict[str, object]: ...
+def quarantine_hf_adapter_continuation_executor_output(
+    report_or_path: Mapping[str, object] | str | PathLike[str],
+    *,
+    attempt_id: str,
+    reason: str = ...,
+) -> Dict[str, object]: ...
+def hf_adapter_continuation_executor_output_resolution_lines(
+    report: Mapping[str, object],
 ) -> List[str]: ...
 
 def load_hf_causal_lm_artifact(
@@ -9930,6 +9947,7 @@ __all__ = [
     "hf_adapter",
     "hf_adapter_executor",
     "hf_adapter_executor_launch",
+    "hf_adapter_executor_recovery",
     "hf_adapter_executor_status",
     "hf_generation",
     "hf_ft_status",
@@ -9957,6 +9975,8 @@ __all__ = [
     "HF_ADAPTER_CONTINUATION_EXECUTOR_LAUNCH_LOCK_FILENAME",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_LAUNCH_SCHEMA",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_LAUNCH_STATUS_SCHEMA",
+    "HF_ADAPTER_CONTINUATION_EXECUTOR_OUTPUT_RESOLUTION_SCHEMA",
+    "HF_ADAPTER_CONTINUATION_EXECUTOR_QUARANTINE_SUFFIX",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_SCHEMA",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_STATUS_SCHEMA",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_STOP_REQUEST_SCHEMA",
@@ -9975,6 +9995,8 @@ __all__ = [
     "hf_adapter_continuation_executor_launch_lines",
     "hf_adapter_continuation_executor_launch_status_lines",
     "hf_adapter_continuation_executor_launch_status_report",
+    "hf_adapter_continuation_executor_output_quarantine_report",
+    "hf_adapter_continuation_executor_output_resolution_lines",
     "hf_adapter_continuation_executor_stop_request_lines",
     "hf_adapter_continuation_executor_status_lines",
     "hf_adapter_continuation_executor_status_report",
@@ -9991,6 +10013,7 @@ __all__ = [
     "load_hf_adapter_continuation_executor_stop_request",
     "load_hf_adapter_continuation_executor_launch",
     "request_hf_adapter_continuation_executor_stop",
+    "quarantine_hf_adapter_continuation_executor_output",
     "load_hf_adapter_continuation_executor",
     "hf_finetune_corpus_file_report",
     "hf_finetune_adapter_config",
