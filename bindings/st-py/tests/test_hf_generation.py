@@ -14,6 +14,7 @@ from unittest import mock
 import spiraltorch as st
 from spiraltorch import hf_ft
 from spiraltorch import hf_cli
+from spiraltorch import hf_generation
 from spiraltorch import hf_peft
 from spiraltorch.hf_generation import (
     ZSpaceActivationProbeHook,
@@ -377,6 +378,10 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         self.assertIn("hf_causal_lm_artifact_probe_lines", st.__all__)
         self.assertIn("hf_causal_lm_artifact_probe_report", st.__all__)
         self.assertIn(
+            "hf_causal_lm_artifact_subprocess_probe_report",
+            st.__all__,
+        )
+        self.assertIn(
             "zspace_inference_distortion_sweep_report_from_probes",
             st.__all__,
         )
@@ -600,6 +605,175 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         self.assertTrue(lines[0].startswith("hf_causal_lm_artifact_probe status=ready"))
         self.assertIn('continuation="13 14"', lines[1])
 
+    def test_causal_lm_artifact_subprocess_probe_isolates_request_and_pid(
+        self,
+    ) -> None:
+        captured: dict[str, object] = {}
+
+        class FakeProcess:
+            pid = 43210
+            returncode = 0
+
+            def __init__(self, command, **kwargs) -> None:
+                captured["command"] = list(command)
+                captured["env"] = dict(kwargs["env"])
+                request_path = Path(command[command.index("--request") + 1])
+                out_path = Path(command[command.index("--out") + 1])
+                request = json.loads(request_path.read_text(encoding="utf-8"))
+                captured["request"] = request
+                out_path.write_text(
+                    json.dumps(
+                        {
+                            "row_type": "hf_causal_lm_artifact_probe",
+                            "status": "ready",
+                            "artifact": {
+                                "artifact_kind": "peft_adapter",
+                                "artifact_source": "/tmp/adapter",
+                                "adapter_loaded": True,
+                            },
+                            "worker_pid": self.pid,
+                            "prompt": request["prompt"],
+                            "new_token_count": 3,
+                            "generation": {"do_sample": False},
+                            "local_files_only": True,
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+            def communicate(self, *, timeout=None):
+                captured["timeout"] = timeout
+                return ("worker stdout", "")
+
+            def kill(self) -> None:
+                raise AssertionError("successful worker must not be killed")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "qualified.json"
+            with mock.patch.object(
+                hf_generation.subprocess,
+                "Popen",
+                FakeProcess,
+            ):
+                report = st.hf_causal_lm_artifact_subprocess_probe_report(
+                    "/tmp/adapter",
+                    artifact_kind="peft_adapter",
+                    prompt="private qualification prompt",
+                    max_new_tokens=3,
+                    device="cpu",
+                    local_files_only=True,
+                    timeout_seconds=17.0,
+                    report_path=out,
+                )
+            stored = json.loads(out.read_text(encoding="utf-8"))
+
+        process = report["process_isolation"]
+        self.assertEqual(report, stored)
+        self.assertEqual(report["status"], "ready")
+        self.assertEqual(process["status"], "ready")
+        self.assertTrue(process["fresh_process"])
+        self.assertEqual(process["pid"], 43210)
+        self.assertTrue(process["worker_pid_matches"])
+        self.assertNotEqual(process["parent_pid"], process["pid"])
+        self.assertEqual(process["exit_code"], 0)
+        self.assertFalse(process["timed_out"])
+        self.assertEqual(captured["timeout"], 17.0)
+        self.assertEqual(
+            captured["request"]["prompt"],
+            "private qualification prompt",
+        )
+        self.assertNotIn("private qualification prompt", captured["command"])
+        self.assertTrue(
+            captured["env"]["PYTHONPATH"].startswith(
+                str(Path(hf_generation.__file__).resolve().parents[1])
+            )
+        )
+        self.assertIn("process=ready", st.hf_causal_lm_artifact_probe_lines(report)[0])
+
+    def test_causal_lm_artifact_subprocess_probe_times_out_fail_closed(
+        self,
+    ) -> None:
+        class TimedOutProcess:
+            pid = 54321
+
+            def __init__(self, _command, **_kwargs) -> None:
+                self.returncode = None
+                self.communicate_count = 0
+                self.killed = False
+
+            def communicate(self, *, timeout=None):
+                self.communicate_count += 1
+                if self.communicate_count == 1:
+                    raise hf_generation.subprocess.TimeoutExpired(
+                        cmd="worker",
+                        timeout=timeout,
+                    )
+                return ("", "worker stopped")
+
+            def kill(self) -> None:
+                self.killed = True
+                self.returncode = -9
+
+        process = TimedOutProcess([], env={})
+        with mock.patch.object(
+            hf_generation.subprocess,
+            "Popen",
+            return_value=process,
+        ):
+            report = st.hf_causal_lm_artifact_subprocess_probe_report(
+                "/tmp/adapter",
+                artifact_kind="peft_adapter",
+                local_files_only=True,
+                timeout_seconds=0.01,
+            )
+
+        self.assertEqual(report["status"], "error")
+        self.assertTrue(process.killed)
+        self.assertEqual(report["process_isolation"]["status"], "error")
+        self.assertTrue(report["process_isolation"]["timed_out"])
+        self.assertEqual(report["process_isolation"]["exit_code"], -9)
+
+    def test_causal_lm_artifact_subprocess_probe_rejects_worker_pid_mismatch(
+        self,
+    ) -> None:
+        class MismatchedProcess:
+            pid = 6001
+            returncode = 0
+
+            def __init__(self, command, **_kwargs) -> None:
+                out_path = Path(command[command.index("--out") + 1])
+                out_path.write_text(
+                    json.dumps(
+                        {
+                            "row_type": "hf_causal_lm_artifact_probe",
+                            "status": "ready",
+                            "worker_pid": 6002,
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+            def communicate(self, *, timeout=None):
+                return ("", "")
+
+            def kill(self) -> None:
+                raise AssertionError("completed worker must not be killed")
+
+        with mock.patch.object(
+            hf_generation.subprocess,
+            "Popen",
+            MismatchedProcess,
+        ):
+            report = st.hf_causal_lm_artifact_subprocess_probe_report(
+                "/tmp/adapter",
+                timeout_seconds=1.0,
+            )
+
+        self.assertEqual(report["status"], "error")
+        self.assertEqual(report["process_isolation"]["status"], "error")
+        self.assertFalse(report["process_isolation"]["worker_pid_matches"])
+        self.assertIn("pid_matches=False", report["error"])
+
     def test_installed_artifact_probe_cli_writes_json(self) -> None:
         report = {
             "row_type": "hf_causal_lm_artifact_probe",
@@ -625,7 +799,7 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
             stdout = io.StringIO()
             with mock.patch.object(
                 hf_cli,
-                "hf_causal_lm_artifact_probe_report",
+                "hf_causal_lm_artifact_subprocess_probe_report",
                 return_value=report,
             ) as probe:
                 with contextlib.redirect_stdout(stdout):
@@ -653,6 +827,8 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         self.assertEqual(probe.call_args.args, ("/tmp/adapter",))
         self.assertEqual(probe.call_args.kwargs["artifact_kind"], "peft_adapter")
         self.assertFalse(probe.call_args.kwargs["local_files_only"])
+        self.assertEqual(probe.call_args.kwargs["timeout_seconds"], 900.0)
+        self.assertEqual(probe.call_args.kwargs["report_path"], out)
 
     def test_pythia_artifact_probe_sample_records_promotion_qualification(
         self,
@@ -666,7 +842,7 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
 
         self.assertEqual(
             sample["schema"],
-            "spiraltorch.hf_causal_lm_artifact_probe.sample.v2",
+            "spiraltorch.hf_causal_lm_artifact_probe.sample.v3",
         )
         self.assertEqual(sample["model_family"], "gpt_neox")
         self.assertTrue(sample["artifact_probe"]["adapter_loaded"])
@@ -692,9 +868,23 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         self.assertFalse(
             sample["promotion_qualification"]["artifact_probe_do_sample"]
         )
+        process = sample["artifact_probe"]["process_isolation"]
+        self.assertEqual(process["status"], "ready")
+        self.assertTrue(process["fresh_process"])
+        self.assertNotEqual(process["parent_pid"], process["pid"])
+        self.assertEqual(sample["artifact_probe"]["worker_pid"], process["pid"])
+        self.assertEqual(process["exit_code"], 0)
+        self.assertFalse(process["timed_out"])
+        self.assertEqual(
+            sample["promotion_qualification"][
+                "artifact_process_isolation_check"
+            ],
+            "passed",
+        )
         self.assertTrue(sample["continuation"]["promotion_revalidated_ready"])
         self.assertTrue(sample["continuation"]["continuation_ready"])
         self.assertTrue(sample["continuation"]["probe_provenance_preserved"])
+        self.assertTrue(sample["continuation"]["process_provenance_preserved"])
 
     def test_inference_distortion_runtime_plan_and_cli_args_are_importable(self) -> None:
         runtime = zspace_inference_distortion_runtime_plan(

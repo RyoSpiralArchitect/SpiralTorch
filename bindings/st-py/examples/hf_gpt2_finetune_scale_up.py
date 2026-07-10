@@ -277,6 +277,18 @@ def _summary_from_scale_up_artifact(
                 "scale_up_candidate_adapter_artifact_probe_new_token_count": (
                     card_summary.get("adapter_artifact_probe_new_token_count")
                 ),
+                "scale_up_candidate_adapter_artifact_probe_process_status": (
+                    card_summary.get("adapter_artifact_probe_process_status")
+                ),
+                "scale_up_candidate_adapter_artifact_probe_process_pid": (
+                    card_summary.get("adapter_artifact_probe_process_pid")
+                ),
+                "scale_up_candidate_adapter_artifact_probe_process_exit_code": (
+                    card_summary.get("adapter_artifact_probe_process_exit_code")
+                ),
+                "scale_up_candidate_adapter_artifact_probe_process_timed_out": (
+                    card_summary.get("adapter_artifact_probe_process_timed_out")
+                ),
                 "scale_up_candidate_adapter_lineage_status": card_summary.get(
                     "adapter_lineage_status"
                 ),

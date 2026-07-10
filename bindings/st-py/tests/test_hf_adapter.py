@@ -80,10 +80,25 @@ def _artifact_probe(adapter: Path, *, new_token_count: int = 4) -> dict:
             "adapter_loaded": True,
         },
         "device": "cpu",
+        "worker_pid": 2002,
         "new_token_count": new_token_count,
         "generated_text_changed": True,
         "local_files_only": True,
         "generation": {"do_sample": False},
+        "process_isolation": {
+            "schema": "spiraltorch.hf_artifact_probe_process.v1",
+            "status": "ready",
+            "fresh_process": True,
+            "runner_kind": "python_module",
+            "worker_module": "spiraltorch.hf_artifact_probe_worker",
+            "parent_pid": 1001,
+            "pid": 2002,
+            "reported_worker_pid": 2002,
+            "worker_pid_matches": True,
+            "exit_code": 0,
+            "timed_out": False,
+            "duration_seconds": 0.25,
+        },
     }
 
 
@@ -308,6 +323,12 @@ def test_adapter_promotion_can_require_fresh_artifact_reload_and_generation(
     assert ready["artifact_probe_new_token_count"] == 4
     assert ready["artifact_probe_local_files_only"] is True
     assert ready["artifact_probe_do_sample"] is False
+    assert ready["artifact_probe_process_status"] == "ready"
+    assert ready["artifact_probe_process_fresh"] is True
+    assert ready["artifact_probe_process_parent_pid"] == 1001
+    assert ready["artifact_probe_process_pid"] == 2002
+    assert ready["artifact_probe_process_exit_code"] == 0
+    assert ready["artifact_probe_process_timed_out"] is False
     assert not ready["failed_checks"]
     assert not ready["missing_checks"]
 
@@ -321,6 +342,8 @@ def test_adapter_promotion_can_require_fresh_artifact_reload_and_generation(
     assert child_node["promotion_revalidated_ready"] is True
     assert child_node["artifact_probe_status"] == "ready"
     assert child_node["artifact_probe_new_token_count"] == 4
+    assert child_node["artifact_probe_process_status"] == "ready"
+    assert child_node["artifact_probe_process_pid"] == 2002
 
 
 def test_adapter_promotion_chain_revalidates_gated_root_probe(
@@ -404,6 +427,7 @@ def test_adapter_promotion_blocks_missing_or_mismatched_artifact_probe(
     assert set(missing["missing_checks"]) == {
         "artifact_reload",
         "artifact_generation",
+        "artifact_process_isolation",
     }
 
     mismatched_child = _write_adapter(tmp_path / "mismatched", b"mismatched")
@@ -459,6 +483,24 @@ def test_adapter_promotion_blocks_missing_or_mismatched_artifact_probe(
         require_artifact_probe=True,
     )
     assert "artifact_generation" in sampled_report["failed_checks"]
+
+    same_process_card = _run_card(parent)
+    same_process_card["adapter_artifact_probe"] = _artifact_probe(mismatched_child)
+    same_process_card["adapter_artifact_probe"]["process_isolation"]["pid"] = 1001
+    same_process_card["adapter_artifact_probe"]["worker_pid"] = 1001
+    same_process_lineage = st.write_hf_adapter_lineage(
+        mismatched_child,
+        parent_adapter=parent,
+        run_card=same_process_card,
+    )
+    same_process_card["adapter_lineage"] = same_process_lineage
+    same_process_report = st.hf_adapter_promotion_report(
+        mismatched_child,
+        same_process_card,
+        parent_adapter=parent,
+        require_artifact_probe=True,
+    )
+    assert "artifact_process_isolation" in same_process_report["failed_checks"]
 
 
 def test_adapter_lineage_records_unverified_remote_parent(tmp_path: Path) -> None:
@@ -569,6 +611,7 @@ def test_adapter_lineage_and_promotion_clis_write_auditable_artifacts(
     assert "depth=1" in lineage_output
     assert "ready=True" in promotion_output
     assert "artifact_probe=ready" in promotion_output
+    assert "probe_process=ready" in promotion_output
     assert (child / st.HF_ADAPTER_LINEAGE_FILENAME).is_file()
     assert (child / st.HF_ADAPTER_PROMOTION_FILENAME).is_file()
 

@@ -54,7 +54,7 @@ from spiraltorch.hf_ft import (
 from spiraltorch.hf_generation import (
     build_zspace_repression_logits_processor,
     hf_causal_lm_artifact_probe_lines,
-    hf_causal_lm_artifact_probe_report,
+    hf_causal_lm_artifact_subprocess_probe_report,
     hf_generation_batch_size_compat,
 )
 from spiraltorch.hf_peft import (
@@ -265,6 +265,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--adapter-promotion-probe-device",
         default="auto",
         help="Device for the fresh artifact probe: auto, cpu, mps, cuda, or cuda:N.",
+    )
+    parser.add_argument(
+        "--adapter-promotion-probe-timeout-seconds",
+        type=float,
+        default=900.0,
+        help="Wall-clock timeout for the isolated artifact-probe worker.",
     )
     parser.add_argument("--no-trainer-trace", action="store_true")
     parser.add_argument("--trainer-telemetry", action="store_true")
@@ -578,6 +584,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         parser.error("--adapter-promotion-probe-max-new-tokens must be positive")
     if not str(args.adapter_promotion_probe_device).strip():
         parser.error("--adapter-promotion-probe-device must not be empty")
+    if (
+        not math.isfinite(args.adapter_promotion_probe_timeout_seconds)
+        or args.adapter_promotion_probe_timeout_seconds <= 0.0
+    ):
+        parser.error("--adapter-promotion-probe-timeout-seconds must be positive")
     if (
         args.adapter_promotion_gate
         and args.adapter_promotion_probe_prompt is not None
@@ -1822,8 +1833,6 @@ def _release_accelerator_cache(torch: Any) -> dict[str, object]:
 
 
 def _run_adapter_artifact_probe(
-    transformers: Any,
-    torch: Any,
     args: argparse.Namespace,
     *,
     tokenizer_source: str | None,
@@ -1831,7 +1840,7 @@ def _run_adapter_artifact_probe(
     probe_path = args.output_dir / HF_ADAPTER_ARTIFACT_PROBE_FILENAME
     prompt = _adapter_promotion_probe_prompt(args)
     try:
-        report = hf_causal_lm_artifact_probe_report(
+        report = hf_causal_lm_artifact_subprocess_probe_report(
             args.output_dir,
             tokenizer_name_or_path=tokenizer_source,
             artifact_kind="peft_adapter",
@@ -1841,8 +1850,8 @@ def _run_adapter_artifact_probe(
             device=args.adapter_promotion_probe_device,
             local_files_only=True,
             trust_remote_code=args.trust_remote_code,
-            transformers_module=transformers,
-            torch_module=torch,
+            timeout_seconds=args.adapter_promotion_probe_timeout_seconds,
+            report_path=probe_path,
         )
     except Exception as exc:
         report = {
@@ -1858,6 +1867,13 @@ def _run_adapter_artifact_probe(
             "new_token_count": None,
             "generated_text_changed": None,
             "local_files_only": True,
+            "process_isolation": {
+                "schema": "spiraltorch.hf_artifact_probe_process.v1",
+                "status": "error",
+                "fresh_process": False,
+                "exit_code": None,
+                "timed_out": False,
+            },
             "error": f"{exc.__class__.__name__}: {exc}",
         }
     report["report_path"] = str(probe_path.resolve())
@@ -2537,6 +2553,9 @@ def _base_run_card(
             args.adapter_promotion_probe_max_new_tokens
         ),
         "adapter_promotion_probe_device": args.adapter_promotion_probe_device,
+        "adapter_promotion_probe_timeout_seconds": (
+            args.adapter_promotion_probe_timeout_seconds
+        ),
         "adapter_saved": None,
         "resume_from_checkpoint": (
             None
@@ -3209,8 +3228,6 @@ def _main_with_runtime_access(
                 _release_accelerator_cache(torch)
             )
             artifact_probe = _run_adapter_artifact_probe(
-                transformers,
-                torch,
                 args,
                 tokenizer_source=_finetune_tokenizer_source(
                     args,
@@ -3273,6 +3290,13 @@ def _main_with_runtime_access(
                         "artifact_probe_candidate_matches",
                         "artifact_probe_local_files_only",
                         "artifact_probe_do_sample",
+                        "artifact_probe_process_status",
+                        "artifact_probe_process_fresh",
+                        "artifact_probe_process_parent_pid",
+                        "artifact_probe_process_pid",
+                        "artifact_probe_process_exit_code",
+                        "artifact_probe_process_timed_out",
+                        "artifact_probe_process_duration_seconds",
                         "failed_checks",
                         "missing_checks",
                         "report_path",

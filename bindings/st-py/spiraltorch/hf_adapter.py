@@ -446,6 +446,13 @@ def _finite_number(value: object) -> float | None:
     return number if math.isfinite(number) else None
 
 
+def _integer_number(value: object) -> int | None:
+    number = _finite_number(value)
+    if number is None or not number.is_integer():
+        return None
+    return int(number)
+
+
 def _check(
     name: str,
     *,
@@ -541,6 +548,10 @@ def hf_adapter_promotion_report(
         if isinstance(raw_probe_generation, Mapping)
         else {}
     )
+    raw_probe_process = artifact_probe.get("process_isolation")
+    probe_process = (
+        dict(raw_probe_process) if isinstance(raw_probe_process, Mapping) else {}
+    )
     artifact_probe_present = bool(artifact_probe)
     artifact_reload_passed = (
         None
@@ -558,6 +569,27 @@ def hf_adapter_promotion_report(
         and probe_new_tokens is not None
         and probe_new_tokens > 0.0
         and probe_generation.get("do_sample") is False
+    )
+    probe_pid = _integer_number(probe_process.get("pid"))
+    probe_parent_pid = _integer_number(probe_process.get("parent_pid"))
+    worker_pid = _integer_number(artifact_probe.get("worker_pid"))
+    artifact_process_isolation_passed = (
+        None
+        if not artifact_probe_present or not probe_process
+        else probe_process.get("status") == "ready"
+        and probe_process.get("fresh_process") is True
+        and probe_process.get("runner_kind") == "python_module"
+        and probe_process.get("worker_module")
+        == "spiraltorch.hf_artifact_probe_worker"
+        and probe_pid is not None
+        and probe_pid > 0.0
+        and probe_parent_pid is not None
+        and probe_parent_pid > 0.0
+        and probe_pid != probe_parent_pid
+        and worker_pid == probe_pid
+        and probe_process.get("worker_pid_matches") is True
+        and _integer_number(probe_process.get("exit_code")) == 0
+        and probe_process.get("timed_out") is False
     )
     checks = [
         _check(
@@ -703,6 +735,34 @@ def hf_adapter_promotion_report(
                 "generation"
             ),
         ),
+        _check(
+            "artifact_process_isolation",
+            passed=artifact_process_isolation_passed,
+            required=require_artifact_probe,
+            observed={
+                "status": probe_process.get("status"),
+                "fresh_process": probe_process.get("fresh_process"),
+                "runner_kind": probe_process.get("runner_kind"),
+                "worker_module": probe_process.get("worker_module"),
+                "parent_pid": probe_parent_pid,
+                "pid": probe_pid,
+                "worker_pid": worker_pid,
+                "worker_pid_matches": probe_process.get("worker_pid_matches"),
+                "exit_code": probe_process.get("exit_code"),
+                "timed_out": probe_process.get("timed_out"),
+            },
+            threshold={
+                "status": "ready",
+                "fresh_process": True,
+                "runner_kind": "python_module",
+                "worker_module": "spiraltorch.hf_artifact_probe_worker",
+                "pid_differs_from_parent": True,
+                "worker_pid_matches": True,
+                "exit_code": 0,
+                "timed_out": False,
+            },
+            message="artifact qualification must complete in a fresh worker process",
+        ),
     ]
     required_checks = [row for row in checks if row["required"]]
     failed = [row for row in required_checks if row["status"] == "failed"]
@@ -719,7 +779,12 @@ def hf_adapter_promotion_report(
         recommendation = (
             "run_artifact_reload_probe"
             if any(
-                row["name"] in {"artifact_reload", "artifact_generation"}
+                row["name"]
+                in {
+                    "artifact_reload",
+                    "artifact_generation",
+                    "artifact_process_isolation",
+                }
                 for row in missing
             )
             else "run_before_after_evaluation"
@@ -753,6 +818,17 @@ def hf_adapter_promotion_report(
         "artifact_probe_candidate_matches": probe_source_matches,
         "artifact_probe_local_files_only": artifact_probe.get("local_files_only"),
         "artifact_probe_do_sample": probe_generation.get("do_sample"),
+        "artifact_probe_process_status": probe_process.get("status"),
+        "artifact_probe_process_fresh": probe_process.get("fresh_process"),
+        "artifact_probe_process_parent_pid": probe_parent_pid,
+        "artifact_probe_process_pid": probe_pid,
+        "artifact_probe_process_exit_code": _integer_number(
+            probe_process.get("exit_code")
+        ),
+        "artifact_probe_process_timed_out": probe_process.get("timed_out"),
+        "artifact_probe_process_duration_seconds": _finite_number(
+            probe_process.get("duration_seconds")
+        ),
         "trainer_train_loss": trainer_loss,
         "require_eval": bool(require_eval),
         "require_generation_changed": bool(require_generation_changed),
@@ -821,6 +897,8 @@ def hf_adapter_promotion_lines(
             f"eval_after={report.get('eval_after_loss')} "
             f"eval_regression={report.get('eval_loss_regression')} "
             f"artifact_probe={report.get('artifact_probe_status')} "
+            f"probe_process={report.get('artifact_probe_process_status')} "
+            f"probe_pid={report.get('artifact_probe_process_pid')} "
             f"recommendation={report.get('recommendation')}"
         )
     ]
@@ -1268,6 +1346,12 @@ def _adapter_promotion_chain_node(manifest_path: Path) -> dict[str, object]:
                 "artifact_probe_tokenizer_source_kind",
                 "artifact_probe_local_files_only",
                 "artifact_probe_do_sample",
+                "artifact_probe_process_status",
+                "artifact_probe_process_fresh",
+                "artifact_probe_process_parent_pid",
+                "artifact_probe_process_pid",
+                "artifact_probe_process_exit_code",
+                "artifact_probe_process_timed_out",
                 "failed_checks",
                 "missing_checks",
             )
@@ -1360,6 +1444,24 @@ def _adapter_promotion_chain_node(manifest_path: Path) -> dict[str, object]:
         "artifact_probe_do_sample": None
         if promotion is None
         else promotion.get("artifact_probe_do_sample"),
+        "artifact_probe_process_status": None
+        if promotion is None
+        else promotion.get("artifact_probe_process_status"),
+        "artifact_probe_process_fresh": None
+        if promotion is None
+        else promotion.get("artifact_probe_process_fresh"),
+        "artifact_probe_process_parent_pid": None
+        if promotion is None
+        else promotion.get("artifact_probe_process_parent_pid"),
+        "artifact_probe_process_pid": None
+        if promotion is None
+        else promotion.get("artifact_probe_process_pid"),
+        "artifact_probe_process_exit_code": None
+        if promotion is None
+        else promotion.get("artifact_probe_process_exit_code"),
+        "artifact_probe_process_timed_out": None
+        if promotion is None
+        else promotion.get("artifact_probe_process_timed_out"),
         "launch_command": launch_command,
         "launch_command_display": None
         if launch_command is None
@@ -2340,6 +2442,8 @@ def hf_adapter_promotion_chain_lines(
             f"promotion_ready={raw_node.get('promotion_ready')} "
             f"artifact_probe={raw_node.get('artifact_probe_status')} "
             f"probe_tokens={raw_node.get('artifact_probe_new_token_count')} "
+            f"probe_process={raw_node.get('artifact_probe_process_status')} "
+            f"probe_pid={raw_node.get('artifact_probe_process_pid')} "
             f"eval_regression={raw_node.get('eval_loss_regression')} "
             f"command={raw_node.get('launch_command_source')} "
             f"path={raw_node.get('adapter_path')}"
