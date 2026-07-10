@@ -93,7 +93,7 @@ from .hf_ft import (
 from .hf_generation import (
     compare_zspace_generation_control_sweeps,
     hf_causal_lm_artifact_probe_lines,
-    hf_causal_lm_artifact_probe_report,
+    hf_causal_lm_artifact_subprocess_probe_report,
     summarize_zspace_generation_control_sweep_comparison_lines,
     zspace_checkpoint_generation_control_report,
     zspace_generation_control_profile_config,
@@ -234,8 +234,8 @@ def adapter_promotion_main(argv: Sequence[str] | None = None) -> int:
         "--require-artifact-probe",
         action="store_true",
         help=(
-            "Require the run card to contain a successful fresh artifact "
-            "reload and bounded generation probe."
+            "Require the run card to contain a successful fresh-process "
+            "artifact reload and bounded generation probe."
         ),
     )
     parser.add_argument("--out", type=Path, default=None)
@@ -1668,16 +1668,24 @@ def artifact_probe_main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--allow-remote", action="store_true")
     parser.add_argument("--trust-remote-code", action="store_true")
     parser.add_argument("--revision", default=None)
+    parser.add_argument(
+        "--timeout-seconds",
+        type=float,
+        default=900.0,
+        help="Fail the isolated worker after this wall-clock duration.",
+    )
+    parser.add_argument(
+        "--python-executable",
+        default=None,
+        help="Python interpreter for the worker; defaults to the current one.",
+    )
     parser.add_argument("--out", type=Path, default=None)
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--quiet", action="store_true")
     args = parser.parse_args(argv)
 
-    loader_kwargs: dict[str, object] = {}
-    if args.revision:
-        loader_kwargs["revision"] = args.revision
     try:
-        report = hf_causal_lm_artifact_probe_report(
+        report = hf_causal_lm_artifact_subprocess_probe_report(
             args.artifact,
             tokenizer_name_or_path=args.tokenizer,
             artifact_kind=args.artifact_kind.replace("-", "_"),
@@ -1690,7 +1698,10 @@ def artifact_probe_main(argv: Sequence[str] | None = None) -> int:
             merge_adapter=args.merge_adapter,
             local_files_only=not args.allow_remote,
             trust_remote_code=args.trust_remote_code,
-            loader_kwargs=loader_kwargs,
+            revision=args.revision,
+            timeout_seconds=args.timeout_seconds,
+            python_executable=args.python_executable,
+            report_path=args.out,
         )
     except Exception as exc:
         print(
@@ -1706,6 +1717,11 @@ def artifact_probe_main(argv: Sequence[str] | None = None) -> int:
     if not args.quiet:
         if args.json:
             print(payload, end="")
+        elif report.get("status") != "ready":
+            print(
+                f"hf_artifact_probe_error {report.get('error')}",
+                file=sys.stderr,
+            )
         else:
             for line in hf_causal_lm_artifact_probe_lines(report):
                 print(line)

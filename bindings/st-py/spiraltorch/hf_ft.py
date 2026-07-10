@@ -6166,6 +6166,18 @@ def _scale_up_adapter_continuation_plan(
         "source_artifact_probe_new_token_count": summary.get(
             "scale_up_candidate_adapter_artifact_probe_new_token_count"
         ),
+        "source_artifact_probe_process_status": summary.get(
+            "scale_up_candidate_adapter_artifact_probe_process_status"
+        ),
+        "source_artifact_probe_process_pid": summary.get(
+            "scale_up_candidate_adapter_artifact_probe_process_pid"
+        ),
+        "source_artifact_probe_process_exit_code": summary.get(
+            "scale_up_candidate_adapter_artifact_probe_process_exit_code"
+        ),
+        "source_artifact_probe_process_timed_out": summary.get(
+            "scale_up_candidate_adapter_artifact_probe_process_timed_out"
+        ),
         "source_promotion_ready": promotion_ready,
         "checkpoint_resume": None if existing_resume is None else str(existing_resume),
     }
@@ -6331,6 +6343,18 @@ def _scale_up_promotion_chain_summary(
         ),
         "scale_up_candidate_adapter_artifact_probe_new_token_count": candidate.get(
             "artifact_probe_new_token_count"
+        ),
+        "scale_up_candidate_adapter_artifact_probe_process_status": candidate.get(
+            "artifact_probe_process_status"
+        ),
+        "scale_up_candidate_adapter_artifact_probe_process_pid": candidate.get(
+            "artifact_probe_process_pid"
+        ),
+        "scale_up_candidate_adapter_artifact_probe_process_exit_code": candidate.get(
+            "artifact_probe_process_exit_code"
+        ),
+        "scale_up_candidate_adapter_artifact_probe_process_timed_out": candidate.get(
+            "artifact_probe_process_timed_out"
         ),
         "scale_up_candidate_adapter_lineage_status": candidate.get(
             "lineage_status"
@@ -6682,6 +6706,18 @@ def hf_gpt2_finetune_scale_up_command(
         "scale_up_candidate_adapter_artifact_probe_new_token_count": summary.get(
             "scale_up_candidate_adapter_artifact_probe_new_token_count"
         ),
+        "scale_up_candidate_adapter_artifact_probe_process_status": summary.get(
+            "scale_up_candidate_adapter_artifact_probe_process_status"
+        ),
+        "scale_up_candidate_adapter_artifact_probe_process_pid": summary.get(
+            "scale_up_candidate_adapter_artifact_probe_process_pid"
+        ),
+        "scale_up_candidate_adapter_artifact_probe_process_exit_code": summary.get(
+            "scale_up_candidate_adapter_artifact_probe_process_exit_code"
+        ),
+        "scale_up_candidate_adapter_artifact_probe_process_timed_out": summary.get(
+            "scale_up_candidate_adapter_artifact_probe_process_timed_out"
+        ),
         "scale_up_candidate_adapter_lineage_depth": summary.get(
             "scale_up_candidate_adapter_lineage_depth"
         ),
@@ -6729,6 +6765,18 @@ def hf_gpt2_finetune_scale_up_command(
         ),
         "adapter_continuation_source_artifact_probe_new_token_count": (
             continuation.get("source_artifact_probe_new_token_count")
+        ),
+        "adapter_continuation_source_artifact_probe_process_status": (
+            continuation.get("source_artifact_probe_process_status")
+        ),
+        "adapter_continuation_source_artifact_probe_process_pid": continuation.get(
+            "source_artifact_probe_process_pid"
+        ),
+        "adapter_continuation_source_artifact_probe_process_exit_code": (
+            continuation.get("source_artifact_probe_process_exit_code")
+        ),
+        "adapter_continuation_source_artifact_probe_process_timed_out": (
+            continuation.get("source_artifact_probe_process_timed_out")
         ),
         "adapter_continuation_checkpoint_resume": continuation.get(
             "checkpoint_resume"
@@ -7407,6 +7455,10 @@ def summarize_hf_gpt2_finetune_run_card(
         adapter_artifact_probe,
         "artifact",
     )
+    adapter_artifact_probe_process = _mapping_item(
+        adapter_artifact_probe,
+        "process_isolation",
+    )
     model_prepare = _mapping_item(card, "model_prepare_report")
     adapter_target = _mapping_item(model_prepare, "target_report")
     adapter_parameters = _mapping_item(
@@ -7563,6 +7615,27 @@ def summarize_hf_gpt2_finetune_run_card(
         "adapter_artifact_probe_adapter_loaded": adapter_artifact_probe_artifact.get(
             "adapter_loaded"
         ),
+        "adapter_artifact_probe_process_status": adapter_artifact_probe_process.get(
+            "status"
+        ),
+        "adapter_artifact_probe_process_fresh": adapter_artifact_probe_process.get(
+            "fresh_process"
+        ),
+        "adapter_artifact_probe_process_parent_pid": _safe_number(
+            adapter_artifact_probe_process.get("parent_pid")
+        ),
+        "adapter_artifact_probe_process_pid": _safe_number(
+            adapter_artifact_probe_process.get("pid")
+        ),
+        "adapter_artifact_probe_process_exit_code": _safe_number(
+            adapter_artifact_probe_process.get("exit_code")
+        ),
+        "adapter_artifact_probe_process_timed_out": (
+            adapter_artifact_probe_process.get("timed_out")
+        ),
+        "adapter_artifact_probe_process_duration_seconds": _safe_number(
+            adapter_artifact_probe_process.get("duration_seconds")
+        ),
         "adapter_lineage_status": adapter_lineage.get("status"),
         "adapter_lineage_adapter_id": adapter_lineage.get("adapter_id"),
         "adapter_lineage_parent_adapter_id": adapter_lineage.get(
@@ -7615,6 +7688,27 @@ def summarize_hf_gpt2_finetune_run_card(
         ),
         "adapter_promotion_artifact_probe_do_sample": adapter_promotion.get(
             "artifact_probe_do_sample"
+        ),
+        "adapter_promotion_artifact_probe_process_status": adapter_promotion.get(
+            "artifact_probe_process_status"
+        ),
+        "adapter_promotion_artifact_probe_process_fresh": adapter_promotion.get(
+            "artifact_probe_process_fresh"
+        ),
+        "adapter_promotion_artifact_probe_process_parent_pid": _safe_number(
+            adapter_promotion.get("artifact_probe_process_parent_pid")
+        ),
+        "adapter_promotion_artifact_probe_process_pid": _safe_number(
+            adapter_promotion.get("artifact_probe_process_pid")
+        ),
+        "adapter_promotion_artifact_probe_process_exit_code": _safe_number(
+            adapter_promotion.get("artifact_probe_process_exit_code")
+        ),
+        "adapter_promotion_artifact_probe_process_timed_out": (
+            adapter_promotion.get("artifact_probe_process_timed_out")
+        ),
+        "adapter_promotion_artifact_probe_process_duration_seconds": _safe_number(
+            adapter_promotion.get("artifact_probe_process_duration_seconds")
         ),
         "adapter_promotion_failed_checks": csv_label(
             _unique(adapter_promotion.get("failed_checks"))
@@ -8718,6 +8812,30 @@ def summarize_hf_gpt2_finetune_sweep_report(
             None
             if scale_up_candidate is None
             else scale_up_candidate.get("adapter_artifact_probe_new_token_count")
+        ),
+        "scale_up_candidate_adapter_artifact_probe_process_status": (
+            None
+            if scale_up_candidate is None
+            else scale_up_candidate.get("adapter_artifact_probe_process_status")
+        ),
+        "scale_up_candidate_adapter_artifact_probe_process_pid": (
+            None
+            if scale_up_candidate is None
+            else _safe_number(
+                scale_up_candidate.get("adapter_artifact_probe_process_pid")
+            )
+        ),
+        "scale_up_candidate_adapter_artifact_probe_process_exit_code": (
+            None
+            if scale_up_candidate is None
+            else _safe_number(
+                scale_up_candidate.get("adapter_artifact_probe_process_exit_code")
+            )
+        ),
+        "scale_up_candidate_adapter_artifact_probe_process_timed_out": (
+            None
+            if scale_up_candidate is None
+            else scale_up_candidate.get("adapter_artifact_probe_process_timed_out")
         ),
         "scale_up_candidate_adapter_saved": (
             None

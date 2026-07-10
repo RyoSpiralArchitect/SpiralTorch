@@ -158,6 +158,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=8,
     )
     parser.add_argument("--adapter-promotion-probe-device", default="auto")
+    parser.add_argument(
+        "--adapter-promotion-probe-timeout-seconds",
+        type=float,
+        default=900.0,
+    )
     parser.add_argument("--no-trainer-trace", action="store_true")
     parser.add_argument("--trainer-telemetry", action="store_true")
     parser.add_argument("--trainer-telemetry-prefix", default="hf_ft")
@@ -305,6 +310,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("--adapter-promotion-probe-max-new-tokens must be positive")
     if not str(args.adapter_promotion_probe_device).strip():
         parser.error("--adapter-promotion-probe-device must not be empty")
+    if (
+        not math.isfinite(args.adapter_promotion_probe_timeout_seconds)
+        or args.adapter_promotion_probe_timeout_seconds <= 0.0
+    ):
+        parser.error("--adapter-promotion-probe-timeout-seconds must be positive")
     if (
         args.adapter_promotion_gate
         and args.adapter_promotion_probe_prompt is not None
@@ -976,6 +986,8 @@ def _bridge_command(
                 str(args.adapter_promotion_probe_max_new_tokens),
                 "--adapter-promotion-probe-device",
                 str(args.adapter_promotion_probe_device),
+                "--adapter-promotion-probe-timeout-seconds",
+                str(args.adapter_promotion_probe_timeout_seconds),
             ]
         )
     if args.no_trainer_trace:
@@ -1198,6 +1210,9 @@ def build_sweep_runs(args: argparse.Namespace) -> list[dict[str, Any]]:
                 "adapter_promotion_probe_device": (
                     args.adapter_promotion_probe_device
                 ),
+                "adapter_promotion_probe_timeout_seconds": (
+                    args.adapter_promotion_probe_timeout_seconds
+                ),
                 "dataset_name": str(args.dataset_name),
                 "dataset_config": args.dataset_config,
                 "dataset_revision": args.dataset_revision,
@@ -1301,6 +1316,12 @@ def _adapter_promotion_evidence(path: Path) -> dict[str, object]:
     artifact_probe_payload = (
         artifact_probe if isinstance(artifact_probe, Mapping) else {}
     )
+    artifact_probe_process = artifact_probe_payload.get("process_isolation")
+    artifact_probe_process_payload = (
+        artifact_probe_process
+        if isinstance(artifact_probe_process, Mapping)
+        else {}
+    )
     tokenizer_save_payload = (
         tokenizer_save if isinstance(tokenizer_save, Mapping) else {}
     )
@@ -1329,6 +1350,27 @@ def _adapter_promotion_evidence(path: Path) -> dict[str, object]:
         "adapter_artifact_probe_device": artifact_probe_payload.get("device"),
         "adapter_artifact_probe_new_token_count": artifact_probe_payload.get(
             "new_token_count"
+        ),
+        "adapter_artifact_probe_process_status": (
+            artifact_probe_process_payload.get("status")
+        ),
+        "adapter_artifact_probe_process_fresh": (
+            artifact_probe_process_payload.get("fresh_process")
+        ),
+        "adapter_artifact_probe_process_parent_pid": (
+            artifact_probe_process_payload.get("parent_pid")
+        ),
+        "adapter_artifact_probe_process_pid": artifact_probe_process_payload.get(
+            "pid"
+        ),
+        "adapter_artifact_probe_process_exit_code": (
+            artifact_probe_process_payload.get("exit_code")
+        ),
+        "adapter_artifact_probe_process_timed_out": (
+            artifact_probe_process_payload.get("timed_out")
+        ),
+        "adapter_artifact_probe_process_duration_seconds": (
+            artifact_probe_process_payload.get("duration_seconds")
         ),
         "tokenizer_save_status": tokenizer_save_payload.get("status"),
         "tokenizer_save_file_count": tokenizer_file_count,
@@ -1374,6 +1416,9 @@ def _adapter_promotion_policy(args: argparse.Namespace) -> dict[str, object]:
             args.adapter_promotion_probe_max_new_tokens
         ),
         "adapter_promotion_probe_device": args.adapter_promotion_probe_device,
+        "adapter_promotion_probe_timeout_seconds": (
+            args.adapter_promotion_probe_timeout_seconds
+        ),
     }
 
 

@@ -1259,6 +1259,27 @@ def hf_causal_lm_artifact_probe_report(
     adapter_kwargs: Mapping[str, object] | None = ...,
 ) -> Dict[str, object]: ...
 
+def hf_causal_lm_artifact_subprocess_probe_report(
+    model_name_or_path: str | PathLike[str],
+    *,
+    tokenizer_name_or_path: str | PathLike[str] | None = ...,
+    artifact_kind: str = ...,
+    prompt: str = ...,
+    max_new_tokens: int = ...,
+    do_sample: bool = ...,
+    temperature: float = ...,
+    top_k: int | None = ...,
+    device: str | None = ...,
+    merge_adapter: bool = ...,
+    local_files_only: bool = ...,
+    trust_remote_code: bool = ...,
+    revision: str | None = ...,
+    timeout_seconds: float = ...,
+    python_executable: str | PathLike[str] | None = ...,
+    report_path: str | PathLike[str] | None = ...,
+    environment: Mapping[str, str] | None = ...,
+) -> Dict[str, object]: ...
+
 def hf_causal_lm_artifact_probe_lines(
     report: Mapping[str, object],
 ) -> List[str]: ...
@@ -10209,6 +10230,7 @@ __all__ = [
     "hf_merged_causal_lm_export_lines",
     "hf_causal_lm_artifact_probe_lines",
     "hf_causal_lm_artifact_probe_report",
+    "hf_causal_lm_artifact_subprocess_probe_report",
     "load_hf_causal_lm_artifact",
     "load_hf_adapter_lineage",
     "load_hf_adapter_promotion",

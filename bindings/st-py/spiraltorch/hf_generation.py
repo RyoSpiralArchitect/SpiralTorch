@@ -10,6 +10,7 @@ import math
 import os
 import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -29,6 +30,7 @@ __all__ = [
     "default_zspace_checkpoint_generation_prompts",
     "hf_causal_lm_artifact_probe_lines",
     "hf_causal_lm_artifact_probe_report",
+    "hf_causal_lm_artifact_subprocess_probe_report",
     "hf_generation_batch_size_compat",
     "zspace_inference_distortion_sweep_report_from_probes",
     "zspace_inference_distortion_probe_cli_args",
@@ -309,6 +311,276 @@ def hf_causal_lm_artifact_probe_report(
     }
 
 
+def _artifact_probe_subprocess_error_report(
+    model_name_or_path: str | Path,
+    *,
+    artifact_kind: str,
+    prompt: str,
+    max_new_tokens: int,
+    do_sample: bool,
+    device: str | None,
+    local_files_only: bool,
+    error: str,
+) -> dict[str, object]:
+    return {
+        "row_type": "hf_causal_lm_artifact_probe",
+        "status": "error",
+        "artifact": {
+            "artifact_kind": artifact_kind,
+            "artifact_source": str(model_name_or_path),
+            "adapter_loaded": False,
+        },
+        "prompt": str(prompt),
+        "device": "auto" if device in {None, ""} else str(device),
+        "new_token_count": None,
+        "generated_text_changed": None,
+        "generation": {
+            "max_new_tokens": int(max_new_tokens),
+            "do_sample": bool(do_sample),
+        },
+        "local_files_only": bool(local_files_only),
+        "error": error,
+    }
+
+
+def _artifact_probe_subprocess_request(
+    model_name_or_path: str | Path,
+    *,
+    tokenizer_name_or_path: str | Path | None,
+    artifact_kind: str,
+    prompt: str,
+    max_new_tokens: int,
+    do_sample: bool,
+    temperature: float,
+    top_k: int | None,
+    device: str | None,
+    merge_adapter: bool,
+    local_files_only: bool,
+    trust_remote_code: bool,
+    revision: str | None,
+) -> dict[str, object]:
+    return {
+        "model_name_or_path": str(model_name_or_path),
+        "tokenizer_name_or_path": (
+            None if tokenizer_name_or_path is None else str(tokenizer_name_or_path)
+        ),
+        "artifact_kind": artifact_kind,
+        "prompt": str(prompt),
+        "max_new_tokens": int(max_new_tokens),
+        "do_sample": bool(do_sample),
+        "temperature": float(temperature),
+        "top_k": None if top_k is None else int(top_k),
+        "device": device,
+        "merge_adapter": bool(merge_adapter),
+        "local_files_only": bool(local_files_only),
+        "trust_remote_code": bool(trust_remote_code),
+        "loader_kwargs": {} if revision is None else {"revision": str(revision)},
+    }
+
+
+def hf_causal_lm_artifact_subprocess_probe_report(
+    model_name_or_path: str | Path,
+    *,
+    tokenizer_name_or_path: str | Path | None = None,
+    artifact_kind: str = "auto",
+    prompt: str = "SpiralTorch is",
+    max_new_tokens: int = 16,
+    do_sample: bool = False,
+    temperature: float = 1.0,
+    top_k: int | None = None,
+    device: str | None = None,
+    merge_adapter: bool = False,
+    local_files_only: bool = False,
+    trust_remote_code: bool = False,
+    revision: str | None = None,
+    timeout_seconds: float = 900.0,
+    python_executable: str | Path | None = None,
+    report_path: str | Path | None = None,
+    environment: Mapping[str, str] | None = None,
+) -> dict[str, object]:
+    """Probe one HF artifact in a fresh Python worker process."""
+
+    normalized_kind = str(artifact_kind).strip().lower().replace("-", "_")
+    if normalized_kind not in {"auto", "full_model", "peft_adapter"}:
+        raise ValueError("artifact_kind must be auto, full_model, or peft_adapter")
+    prompt_text = str(prompt)
+    if not prompt_text:
+        raise ValueError("prompt must not be empty")
+    resolved_max_new_tokens = _positive_int(
+        max_new_tokens,
+        label="max_new_tokens",
+    )
+    resolved_temperature = _positive_float(temperature, label="temperature")
+    resolved_top_k = None if top_k is None else _positive_int(top_k, label="top_k")
+    resolved_timeout = _positive_float(timeout_seconds, label="timeout_seconds")
+    resolved_python = str(python_executable or sys.executable)
+    final_report_path = None if report_path is None else Path(report_path)
+    package_root = Path(__file__).resolve().parents[1]
+    child_env = dict(os.environ)
+    if environment is not None:
+        child_env.update({str(key): str(value) for key, value in environment.items()})
+    existing_pythonpath = child_env.get("PYTHONPATH", "")
+    pythonpath_parts = [str(package_root)]
+    if existing_pythonpath:
+        pythonpath_parts.append(existing_pythonpath)
+    child_env["PYTHONPATH"] = os.pathsep.join(pythonpath_parts)
+    child_env["PYTHONUNBUFFERED"] = "1"
+    request = _artifact_probe_subprocess_request(
+        model_name_or_path,
+        tokenizer_name_or_path=tokenizer_name_or_path,
+        artifact_kind=normalized_kind,
+        prompt=prompt_text,
+        max_new_tokens=resolved_max_new_tokens,
+        do_sample=do_sample,
+        temperature=resolved_temperature,
+        top_k=resolved_top_k,
+        device=device,
+        merge_adapter=merge_adapter,
+        local_files_only=local_files_only,
+        trust_remote_code=trust_remote_code,
+        revision=revision,
+    )
+    started = time.perf_counter()
+    parent_pid = os.getpid()
+    process: subprocess.Popen[str] | None = None
+    stdout = ""
+    stderr = ""
+    timed_out = False
+    report: dict[str, object]
+    with tempfile.TemporaryDirectory(prefix="spiraltorch-hf-probe-") as tmp:
+        temp_root = Path(tmp)
+        request_path = temp_root / "request.json"
+        worker_report_path = temp_root / "report.json"
+        request_path.write_text(
+            json.dumps(request, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        command = [
+            resolved_python,
+            "-m",
+            "spiraltorch.hf_artifact_probe_worker",
+            "--request",
+            str(request_path),
+            "--out",
+            str(worker_report_path),
+        ]
+        spawn_error: str | None = None
+        try:
+            process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                env=child_env,
+            )
+            try:
+                stdout, stderr = process.communicate(timeout=resolved_timeout)
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                process.kill()
+                stdout, stderr = process.communicate()
+        except OSError as exc:
+            spawn_error = f"{exc.__class__.__name__}: {exc}"
+
+        if worker_report_path.is_file():
+            try:
+                loaded = json.loads(worker_report_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                report = _artifact_probe_subprocess_error_report(
+                    model_name_or_path,
+                    artifact_kind=normalized_kind,
+                    prompt=prompt_text,
+                    max_new_tokens=resolved_max_new_tokens,
+                    do_sample=do_sample,
+                    device=device,
+                    local_files_only=local_files_only,
+                    error=f"invalid worker report: {exc.__class__.__name__}: {exc}",
+                )
+            else:
+                report = (
+                    dict(loaded)
+                    if isinstance(loaded, Mapping)
+                    else _artifact_probe_subprocess_error_report(
+                        model_name_or_path,
+                        artifact_kind=normalized_kind,
+                        prompt=prompt_text,
+                        max_new_tokens=resolved_max_new_tokens,
+                        do_sample=do_sample,
+                        device=device,
+                        local_files_only=local_files_only,
+                        error="worker report must be a JSON object",
+                    )
+                )
+        else:
+            if spawn_error is not None:
+                error = f"worker spawn failed: {spawn_error}"
+            elif timed_out:
+                error = f"worker timed out after {resolved_timeout:.3f} seconds"
+            else:
+                return_code = None if process is None else process.returncode
+                error = f"worker exited without a report (exit={return_code})"
+            report = _artifact_probe_subprocess_error_report(
+                model_name_or_path,
+                artifact_kind=normalized_kind,
+                prompt=prompt_text,
+                max_new_tokens=resolved_max_new_tokens,
+                do_sample=do_sample,
+                device=device,
+                local_files_only=local_files_only,
+                error=error,
+            )
+
+    exit_code = None if process is None else process.returncode
+    reported_worker_pid = report.get("worker_pid")
+    worker_pid_matches = (
+        process is not None
+        and isinstance(reported_worker_pid, int)
+        and not isinstance(reported_worker_pid, bool)
+        and reported_worker_pid == process.pid
+    )
+    worker_ready = (
+        process is not None
+        and not timed_out
+        and exit_code == 0
+        and report.get("status") == "ready"
+        and worker_pid_matches
+    )
+    if not worker_ready and report.get("status") == "ready":
+        report["status"] = "error"
+        report["error"] = (
+            f"worker process did not complete cleanly (exit={exit_code}, "
+            f"timed_out={timed_out}, pid_matches={worker_pid_matches})"
+        )
+    process_report = {
+        "schema": "spiraltorch.hf_artifact_probe_process.v1",
+        "status": "ready" if worker_ready else "error",
+        "fresh_process": process is not None,
+        "runner_kind": "python_module",
+        "worker_module": "spiraltorch.hf_artifact_probe_worker",
+        "parent_pid": parent_pid,
+        "pid": None if process is None else process.pid,
+        "reported_worker_pid": reported_worker_pid,
+        "worker_pid_matches": worker_pid_matches,
+        "exit_code": exit_code,
+        "timed_out": timed_out,
+        "timeout_seconds": resolved_timeout,
+        "python_executable": resolved_python,
+        "package_root": str(package_root),
+        "duration_seconds": time.perf_counter() - started,
+        "stdout_tail": stdout[-4000:] or None,
+        "stderr_tail": stderr[-4000:] or None,
+    }
+    report["process_isolation"] = process_report
+    if final_report_path is not None:
+        final_report_path.parent.mkdir(parents=True, exist_ok=True)
+        report["report_path"] = str(final_report_path.resolve())
+        final_report_path.write_text(
+            json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+    return report
+
+
 def hf_causal_lm_artifact_probe_lines(
     report: Mapping[str, object],
 ) -> list[str]:
@@ -316,6 +588,8 @@ def hf_causal_lm_artifact_probe_lines(
 
     artifact = report.get("artifact")
     artifact_row = dict(artifact) if isinstance(artifact, Mapping) else {}
+    process = report.get("process_isolation")
+    process_row = dict(process) if isinstance(process, Mapping) else {}
     return [
         (
             "hf_causal_lm_artifact_probe "
@@ -330,7 +604,9 @@ def hf_causal_lm_artifact_probe_lines(
             f"adapter_loaded={artifact_row.get('adapter_loaded')} "
             f"input_tokens={report.get('input_token_count')} "
             f"new_tokens={report.get('new_token_count')} "
-            f"compat={report.get('batch_size_compat_installed')}"
+            f"compat={report.get('batch_size_compat_installed')} "
+            f"process={process_row.get('status')} "
+            f"pid={process_row.get('pid')}"
         ),
         (
             "hf_causal_lm_artifact_probe_text "

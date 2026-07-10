@@ -3750,6 +3750,18 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                             "generated_text_changed": True,
                             "local_files_only": True,
                             "generation": {"do_sample": False},
+                            "worker_pid": 2002,
+                            "process_isolation": {
+                                "status": "ready",
+                                "fresh_process": True,
+                                "parent_pid": 1001,
+                                "pid": 2002,
+                                "reported_worker_pid": 2002,
+                                "worker_pid_matches": True,
+                                "exit_code": 0,
+                                "timed_out": False,
+                                "duration_seconds": 0.25,
+                            },
                         },
                         "adapter_promotion": {
                             "status": "ready" if ready else "blocked",
@@ -3766,6 +3778,13 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                             "artifact_probe_candidate_matches": True,
                             "artifact_probe_local_files_only": True,
                             "artifact_probe_do_sample": False,
+                            "artifact_probe_process_status": "ready",
+                            "artifact_probe_process_fresh": True,
+                            "artifact_probe_process_parent_pid": 1001,
+                            "artifact_probe_process_pid": 2002,
+                            "artifact_probe_process_exit_code": 0,
+                            "artifact_probe_process_timed_out": False,
+                            "artifact_probe_process_duration_seconds": 0.25,
                             "failed_checks": [] if ready else ["candidate_fingerprint"],
                             "missing_checks": [],
                             "report_path": str(
@@ -3951,6 +3970,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(ready_run["tokenizer_save_file_count"], 1)
         self.assertEqual(ready_run["adapter_artifact_probe_device"], "cpu")
         self.assertEqual(ready_run["adapter_artifact_probe_new_token_count"], 8)
+        self.assertEqual(ready_run["adapter_artifact_probe_process_status"], "ready")
+        self.assertEqual(ready_run["adapter_artifact_probe_process_pid"], 2002)
         self.assertEqual(
             summary["scale_up_candidate_adapter_artifact_probe_status"],
             "ready",
@@ -3958,6 +3979,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(
             summary["scale_up_candidate_adapter_artifact_probe_new_token_count"],
             8,
+        )
+        self.assertEqual(
+            summary["scale_up_candidate_adapter_artifact_probe_process_status"],
+            "ready",
+        )
+        self.assertEqual(
+            summary["scale_up_candidate_adapter_artifact_probe_process_pid"],
+            2002,
         )
         self.assertEqual(report["scale_up_command_status"], "ok")
         self.assertTrue(
@@ -3977,6 +4006,18 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 "adapter_continuation_source_artifact_probe_new_token_count"
             ],
             8,
+        )
+        self.assertEqual(
+            report["scale_up_command"][
+                "adapter_continuation_source_artifact_probe_process_status"
+            ],
+            "ready",
+        )
+        self.assertEqual(
+            report["scale_up_command"][
+                "adapter_continuation_source_artifact_probe_process_pid"
+            ],
+            2002,
         )
         self.assertEqual(
             report["scale_up_command"]["adapter_continuation_status"],
@@ -9684,6 +9725,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(args.adapter_promotion_probe_prompt, None)
         self.assertEqual(args.adapter_promotion_probe_max_new_tokens, 8)
         self.assertEqual(args.adapter_promotion_probe_device, "auto")
+        self.assertEqual(args.adapter_promotion_probe_timeout_seconds, 900.0)
         invalid_argv = [
             ["--adapter-promotion-gate"],
             [
@@ -9714,6 +9756,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             ],
             [
                 "--adapter-promotion-probe-max-new-tokens",
+                "0",
+            ],
+            [
+                "--adapter-promotion-probe-timeout-seconds",
                 "0",
             ],
         ]
@@ -9762,15 +9808,25 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 "new_token_count": 5,
                 "generated_text_changed": True,
                 "local_files_only": True,
+                "generation": {"do_sample": False},
+                "worker_pid": 2002,
+                "process_isolation": {
+                    "status": "ready",
+                    "fresh_process": True,
+                    "parent_pid": 1001,
+                    "pid": 2002,
+                    "reported_worker_pid": 2002,
+                    "worker_pid_matches": True,
+                    "exit_code": 0,
+                    "timed_out": False,
+                },
             }
             with mock.patch.object(
                 module,
-                "hf_causal_lm_artifact_probe_report",
+                "hf_causal_lm_artifact_subprocess_probe_report",
                 return_value=ready,
             ) as probe:
                 report = module._run_adapter_artifact_probe(
-                    types.SimpleNamespace(),
-                    types.SimpleNamespace(),
                     args,
                     tokenizer_source=module._finetune_tokenizer_source(
                         args,
@@ -9796,6 +9852,11 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(probe.call_args.kwargs["device"], "cpu")
         self.assertTrue(probe.call_args.kwargs["local_files_only"])
         self.assertFalse(probe.call_args.kwargs["do_sample"])
+        self.assertEqual(probe.call_args.kwargs["timeout_seconds"], 900.0)
+        self.assertEqual(
+            probe.call_args.kwargs["report_path"],
+            output_dir / module.HF_ADAPTER_ARTIFACT_PROBE_FILENAME,
+        )
 
     def test_bridge_rejects_in_place_adapter_continuation(self) -> None:
         module = load_bridge_example()
@@ -10846,6 +10907,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                     "5",
                     "--adapter-promotion-probe-device",
                     "cpu",
+                    "--adapter-promotion-probe-timeout-seconds",
+                    "37",
                 ]
             )
             runs = module.build_sweep_runs(args)
@@ -10871,6 +10934,12 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             command[command.index("--adapter-promotion-probe-device") + 1],
             "cpu",
         )
+        self.assertEqual(
+            command[
+                command.index("--adapter-promotion-probe-timeout-seconds") + 1
+            ],
+            "37.0",
+        )
         self.assertTrue(bridge_args.adapter_promotion_gate)
         self.assertEqual(
             bridge_args.adapter_promotion_max_eval_loss_regression,
@@ -10883,10 +10952,12 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         )
         self.assertEqual(bridge_args.adapter_promotion_probe_max_new_tokens, 5)
         self.assertEqual(bridge_args.adapter_promotion_probe_device, "cpu")
+        self.assertEqual(bridge_args.adapter_promotion_probe_timeout_seconds, 37.0)
         self.assertTrue(report["adapter_promotion_gate_requested"])
         self.assertTrue(report["adapter_promotion_require_artifact_probe"])
         self.assertEqual(report["adapter_promotion_probe_max_new_tokens"], 5)
         self.assertEqual(report["adapter_promotion_probe_device"], "cpu")
+        self.assertEqual(report["adapter_promotion_probe_timeout_seconds"], 37.0)
         self.assertEqual(report["finetune_mode"], "lora")
         self.assertTrue(report["summary"]["adapter_promotion_required"])
         self.assertEqual(report["summary"]["status"], "planned")

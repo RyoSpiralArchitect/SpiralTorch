@@ -132,6 +132,12 @@
   deterministic bounded generation. Sweep, run-card,
   promotion-chain, and scale-up artifacts preserve and revalidate the probe
   path, device, candidate identity, and generated-token evidence.
+- Isolated artifact qualification: `spiral-hf-artifact-probe`, the importable
+  subprocess probe API, and promotion-gated Trainer runs now reconstruct the
+  saved artifact in a dedicated Python worker. Request JSON avoids repeating
+  prompts in the worker argv, while PID, parent PID, exit code, timeout, and
+  worker-module evidence are revalidated by promotion chains and retained by
+  scale-up handoffs.
 - Trainer resume audit: add `hf_finetune_checkpoint_resume_report(...)` and
   compact lines for optimizer/scheduler/RNG state availability, saved versus
   requested step horizons, and the exhausted-scheduler case where adapter

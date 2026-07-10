@@ -1,6 +1,6 @@
 {
-  "schema": "spiraltorch.hf_causal_lm_artifact_probe.sample.v2",
-  "scope": "one-step non-GPT-2 promotion-qualification smoke; not a model-quality claim",
+  "schema": "spiraltorch.hf_causal_lm_artifact_probe.sample.v3",
+  "scope": "one-step non-GPT-2 isolated-process promotion smoke; not a model-quality claim",
   "model_profile": "pythia-70m-local-smoke",
   "model_name": "EleutherAI/pythia-70m-deduped",
   "model_family": "gpt_neox",
@@ -64,7 +64,7 @@
     "adapter_loaded": true,
     "active_adapter": "default",
     "device": "mps:0",
-    "prompt": "SpiralTorch qualified adapter",
+    "prompt": "SpiralTorch isolated adapter",
     "max_new_tokens": 12,
     "do_sample": false,
     "input_token_count": 7,
@@ -72,9 +72,25 @@
     "new_token_count": 12,
     "batch_size_compat_installed": false,
     "local_files_only": true,
-    "load_seconds": 0.11325524999119807,
-    "generation_seconds": 0.1888482920039678,
-    "generated_text": "SpiralTorch qualified adapter, the\n\nSpiral Torch, the adapter"
+    "load_seconds": 3.4296367499919143,
+    "generation_seconds": 0.18008358300721738,
+    "generated_text": "SpiralTorch isolated adapter, a new, more flexible, and more flexible, a",
+    "worker_pid": 449,
+    "process_isolation": {
+      "schema": "spiraltorch.hf_artifact_probe_process.v1",
+      "status": "ready",
+      "fresh_process": true,
+      "runner_kind": "python_module",
+      "worker_module": "spiraltorch.hf_artifact_probe_worker",
+      "parent_pid": 252,
+      "pid": 449,
+      "reported_worker_pid": 449,
+      "worker_pid_matches": true,
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 120.0,
+      "duration_seconds": 4.880135375002283
+    }
   },
   "promotion_qualification": {
     "status": "ready",
@@ -84,8 +100,15 @@
     "artifact_probe_candidate_matches": true,
     "artifact_probe_local_files_only": true,
     "artifact_probe_do_sample": false,
+    "artifact_probe_process_status": "ready",
+    "artifact_probe_process_fresh": true,
+    "artifact_probe_process_parent_pid": 252,
+    "artifact_probe_process_pid": 449,
+    "artifact_probe_process_exit_code": 0,
+    "artifact_probe_process_timed_out": false,
     "artifact_reload_check": "passed",
     "artifact_generation_check": "passed",
+    "artifact_process_isolation_check": "passed",
     "failed_checks": [],
     "missing_checks": []
   },
@@ -95,10 +118,14 @@
     "continuation_ready": true,
     "scale_up_status": "ok",
     "adapter_continuation_status": "continue",
-    "probe_provenance_preserved": true
+    "probe_provenance_preserved": true,
+    "process_provenance_preserved": true,
+    "source_probe_process_status": "ready",
+    "source_probe_process_pid": 449,
+    "source_probe_process_exit_code": 0
   },
   "commands": {
-    "train_shape": "spiral-hf-finetune --model-profile pythia-70m-local-smoke --allow-remote --train --finetune-mode lora --lora-rank 4 --lora-alpha 8 --max-steps 1 --block-size 16 --eval-before-train --adapter-promotion-gate --adapter-promotion-probe-prompt 'SpiralTorch qualified adapter' --adapter-promotion-probe-max-new-tokens 12 --adapter-promotion-probe-device mps ...",
+    "train_shape": "spiral-hf-finetune --model-profile pythia-70m-local-smoke --allow-remote --train --finetune-mode lora --lora-rank 4 --lora-alpha 8 --max-steps 1 --block-size 16 --eval-before-train --adapter-promotion-gate --adapter-promotion-probe-prompt 'SpiralTorch isolated adapter' --adapter-promotion-probe-max-new-tokens 12 --adapter-promotion-probe-device mps --adapter-promotion-probe-timeout-seconds 120 ...",
     "promotion_chain_shape": "spiral-hf-adapter-chain <adapter-dir> --require-continuation-ready",
     "scale_up_shape": "spiral-hf-scale-up <promotion-chain.json> --require-ready --write-command next-generation.json"
   }
