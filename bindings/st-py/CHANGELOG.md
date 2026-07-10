@@ -50,6 +50,13 @@
   and legacy process identity remains explicitly unverified; recorded live or
   remote child processes and a per-output-root single-writer lock prevent
   duplicate FT launches.
+- Executor stop control: add invocation-scoped, owner-only stop requests plus
+  `spiral-hf-adapter-executor-stop`. The executor that owns the subprocess
+  cooperatively terminates its isolated process group without signalling an
+  unverified external PID, records in-flight work as cancelled, preserves
+  completed promotion at generation boundaries, and fails closed when
+  cancellation leaves partial output. Status reports expose healthy `stopping`
+  transitions and durable request evidence.
 - Trainer resume audit: add `hf_finetune_checkpoint_resume_report(...)` and
   compact lines for optimizer/scheduler/RNG state availability, saved versus
   requested step horizons, and the exhausted-scheduler case where adapter

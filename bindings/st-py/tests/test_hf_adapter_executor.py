@@ -5,8 +5,10 @@ import os
 import shutil
 import socket
 import sys
+import threading
+import time
 from pathlib import Path
-from typing import Sequence
+from typing import Mapping, Sequence
 
 import pytest
 import spiraltorch as st
@@ -359,6 +361,215 @@ def test_executor_flushes_subprocess_pid_and_progress_into_attempt_state(
     assert not lock_path.exists()
 
 
+def test_executor_cooperatively_stops_silent_subprocess_and_blocks_partial_output(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    _, child = _seed_chain(tmp_path)
+    output_root = tmp_path / "executor-runs"
+    state_path = output_root / "state.json"
+    partial_output = output_root / "generation-002"
+    results: list[dict[str, object]] = []
+    failures: list[BaseException] = []
+
+    def scale_up_command(
+        _chain: object,
+        *,
+        output_dir: Path,
+        **_kwargs: object,
+    ) -> dict[str, object]:
+        script = (
+            "from pathlib import Path; import time; "
+            f"p=Path({str(output_dir)!r}); p.mkdir(parents=True); "
+            "(p/'partial.txt').write_text('incomplete', encoding='utf-8'); "
+            "time.sleep(60)"
+        )
+        return {
+            "status": "ok",
+            "command": [sys.executable, "-u", "-c", script],
+        }
+
+    monkeypatch.setattr(
+        st.hf_adapter_executor,
+        "hf_finetune_scale_up_command",
+        scale_up_command,
+    )
+    monkeypatch.setattr(
+        st.hf_adapter_executor,
+        "hf_finetune_scale_up_preflight_report",
+        lambda _command: {"status": "ready", "ready": True},
+    )
+
+    def run_executor() -> None:
+        try:
+            results.append(
+                st.run_hf_adapter_continuation_executor(
+                    child,
+                    output_root=output_root,
+                    state_path=state_path,
+                    run=True,
+                    max_lineage_depth=2,
+                    tee_output=False,
+                )
+            )
+        except BaseException as exc:
+            failures.append(exc)
+
+    thread = threading.Thread(target=run_executor, daemon=True)
+    thread.start()
+    deadline = time.monotonic() + 10.0
+    while time.monotonic() < deadline:
+        if state_path.is_file() and partial_output.is_dir():
+            live = json.loads(state_path.read_text(encoding="utf-8"))
+            generations = live.get("generations") or []
+            if generations and generations[-1].get("pid"):
+                break
+        time.sleep(0.05)
+    else:
+        pytest.fail("executor subprocess did not reach a live partial-output state")
+
+    stop_code = hf_cli.adapter_continuation_executor_stop_main(
+        [str(state_path), "--reason", "integration stop"]
+    )
+    stop_output = capsys.readouterr().out
+    thread.join(timeout=15.0)
+
+    assert not thread.is_alive()
+    assert failures == []
+    assert stop_code == 0
+    assert "reason=integration stop" in stop_output
+    assert len(results) == 1
+    stopped = results[0]
+    attempt = stopped["generations"][0]
+    assert stopped["status"] == "stopped"
+    assert stopped["reason"] == "stop_requested"
+    assert attempt["status"] == "cancelled"
+    assert attempt["process_group_isolated"] is True
+    assert attempt["stop_scope"] == "process_group"
+    assert attempt["stop_request"]["reason"] == "integration stop"
+    assert attempt["returncode"] != 0
+    assert partial_output.joinpath("partial.txt").is_file()
+    assert not (
+        output_root / st.HF_ADAPTER_CONTINUATION_EXECUTOR_LOCK_FILENAME
+    ).exists()
+
+    status = st.hf_adapter_continuation_executor_status_report(state_path)
+    repeated_stop = st.request_hf_adapter_continuation_executor_stop(
+        state_path,
+        reason="ignored after completion",
+    )
+    blocked = st.run_hf_adapter_continuation_executor(
+        child,
+        output_root=output_root,
+        state_path=state_path,
+        max_lineage_depth=2,
+    )
+    blocked_code = hf_cli.adapter_continuation_executor_main(
+        [
+            str(child),
+            "--output-root",
+            str(output_root),
+            "--state",
+            str(state_path),
+            "--max-lineage-depth",
+            "2",
+        ]
+    )
+    capsys.readouterr()
+
+    assert status["status"] == "stopped"
+    assert status["healthy"] is False
+    assert status["recommended_action"] == "resolve_cancelled_output"
+    assert "cancelled_output_present" in status["health_issues"]
+    assert repeated_stop["created"] is False
+    assert repeated_stop["request_id"] == stopped["stop_request"]["request_id"]
+    assert repeated_stop["reason"] == "integration stop"
+    assert blocked["status"] == "blocked"
+    assert blocked_code == 1
+    assert blocked["action"] == "resolve_failed_generation_output"
+    assert blocked["unresolved_generation"]["attempt_status"] == "cancelled"
+    assert blocked["stop_request_history"][0]["reason"] == "integration stop"
+
+
+def test_executor_honors_stop_at_generation_boundary_after_promotion(
+    tmp_path: Path,
+) -> None:
+    _, child = _seed_chain(tmp_path)
+    output_root = tmp_path / "executor-runs"
+    state_path = output_root / "state.json"
+    runner = FakeFineTuneRunner([0.05], weight_prefix="boundary")
+    stop_reports: list[dict[str, object]] = []
+
+    def stop_after_success(command: Sequence[str]) -> int:
+        returncode = runner(command)
+        stop_reports.append(
+            st.request_hf_adapter_continuation_executor_stop(
+                state_path,
+                reason="stop after promoted generation",
+            )
+        )
+        return returncode
+
+    report = st.run_hf_adapter_continuation_executor(
+        child,
+        output_root=output_root,
+        state_path=state_path,
+        run=True,
+        max_generations=2,
+        max_lineage_depth=3,
+        command_runner=stop_after_success,
+    )
+
+    assert report["status"] == "stopped"
+    assert report["reason"] == "stop_requested"
+    assert report["generations_executed_this_invocation"] == 1
+    assert report["promoted_generation_count"] == 1
+    assert report["generations"][0]["status"] == "promoted"
+    assert report["generations"][0]["lineage_depth"] == 2
+    assert report["stop_request"]["reason"] == "stop after promoted generation"
+    assert stop_reports[0]["created"] is True
+    assert not (output_root / "generation-003").exists()
+
+
+def test_executor_honors_stop_during_preflight_without_launching(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _, child = _seed_chain(tmp_path)
+    output_root = tmp_path / "executor-runs"
+    state_path = output_root / "state.json"
+    runner = FakeFineTuneRunner([0.05], weight_prefix="must-not-launch")
+
+    def request_stop(_command: Mapping[str, object]) -> dict[str, object]:
+        st.request_hf_adapter_continuation_executor_stop(
+            state_path,
+            reason="stop during preflight",
+        )
+        return {"status": "ready", "ready": True}
+
+    monkeypatch.setattr(
+        st.hf_adapter_executor,
+        "hf_finetune_scale_up_preflight_report",
+        request_stop,
+    )
+    report = st.run_hf_adapter_continuation_executor(
+        child,
+        output_root=output_root,
+        state_path=state_path,
+        run=True,
+        max_lineage_depth=2,
+        command_runner=runner,
+    )
+
+    assert report["status"] == "stopped"
+    assert report["reason"] == "stop_requested"
+    assert report["stop_request"]["reason"] == "stop during preflight"
+    assert report["generation_attempt_count"] == 0
+    assert runner.commands == []
+    assert not (output_root / "generation-002").exists()
+
+
 def test_executor_stops_after_new_generation_completes_plateau(
     tmp_path: Path,
 ) -> None:
@@ -553,6 +764,7 @@ def test_executor_rejects_invalid_configuration_before_writing_state(
 @pytest.mark.parametrize(
     "reserved_name",
     [
+        st.HF_ADAPTER_CONTINUATION_EXECUTOR_CONTROL_DIRNAME,
         st.HF_ADAPTER_CONTINUATION_EXECUTOR_LOCK_FILENAME,
         st.HF_ADAPTER_CONTINUATION_EXECUTOR_LOG_DIRNAME,
     ],

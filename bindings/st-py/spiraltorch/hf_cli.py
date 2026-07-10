@@ -23,6 +23,8 @@ from .hf_adapter import (
 )
 from .hf_adapter_executor import (
     hf_adapter_continuation_executor_lines,
+    hf_adapter_continuation_executor_stop_request_lines,
+    request_hf_adapter_continuation_executor_stop,
     run_hf_adapter_continuation_executor,
 )
 from .hf_adapter_executor_status import (
@@ -409,11 +411,12 @@ def adapter_continuation_executor_main(
         "generation_limit_reached",
     }:
         return 0
-    generations = report.get("generations") or []
-    if generations and isinstance(generations[-1], Mapping):
-        returncode = generations[-1].get("returncode")
-        if isinstance(returncode, int) and returncode != 0:
-            return returncode
+    if report.get("status") == "failed":
+        generations = report.get("generations") or []
+        if generations and isinstance(generations[-1], Mapping):
+            returncode = generations[-1].get("returncode")
+            if isinstance(returncode, int) and returncode != 0:
+                return returncode
     return 1
 
 
@@ -447,6 +450,39 @@ def adapter_continuation_executor_status_main(
             print(line)
     if args.require_healthy and report.get("healthy") is not True:
         return 1
+    return 0
+
+
+def adapter_continuation_executor_stop_main(
+    argv: Sequence[str] | None = None,
+) -> int:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Request a cooperative stop from the executor that owns the active "
+            "fine-tuning subprocess."
+        ),
+    )
+    parser.add_argument("state", type=Path)
+    parser.add_argument("--reason", default="operator_requested")
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args(argv)
+    try:
+        report = request_hf_adapter_continuation_executor_stop(
+            args.state,
+            reason=args.reason,
+        )
+    except Exception as exc:
+        print(
+            "hf_adapter_continuation_executor_stop_error "
+            f"{exc.__class__.__name__}: {exc}",
+            file=sys.stderr,
+        )
+        return 2
+    if args.json:
+        print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        for line in hf_adapter_continuation_executor_stop_request_lines(report):
+            print(line)
     return 0
 
 
