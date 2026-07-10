@@ -47,6 +47,7 @@ spiral-hf-adapter-executor-quarantine = "spiraltorch.hf_cli:adapter_continuation
 spiral-hf-adapter-executor-resume = "spiraltorch.hf_cli:adapter_continuation_executor_resume_main"
 spiral-hf-adapter-executor-status = "spiraltorch.hf_cli:adapter_continuation_executor_status_main"
 spiral-hf-adapter-executor-stop = "spiraltorch.hf_cli:adapter_continuation_executor_stop_main"
+spiral-hf-adapter-executor-supervise = "spiraltorch.hf_cli:adapter_continuation_executor_supervise_main"
 spiral-hf-finetune = "spiraltorch.hf_cli:finetune_bridge_main"
 spiral-hf-finetune-sweep = "spiraltorch.hf_cli:finetune_sweep_main"
 spiral-hf-scale-up = "spiraltorch.hf_cli:finetune_scale_up_main"

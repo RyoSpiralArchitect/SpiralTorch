@@ -86,6 +86,14 @@
   resume CAS-checks its source launch under the launch lock, requires a healthy
   terminal executor whose durable action is `resume_executor`, and rejects
   modified, stale, live, locked, policy-stopped, or cwd-missing requests.
+- Bounded executor supervision: add
+  `spiral-hf-adapter-executor-supervise` plus importable decision and execution
+  helpers that wait across detached invocations and automatically replay only
+  the exact `max_generations_per_invocation_reached` boundary. Resume budgets,
+  timeout, a stale-reapable single-owner lock, atomic transition history, and
+  launcher/executor handoff identity checks keep unattended continuation
+  bounded; operator stop, policy stop, recovery, failed launch, remote owner,
+  and unhealthy artifacts remain explicit terminal or manual boundaries.
 - Trainer resume audit: add `hf_finetune_checkpoint_resume_report(...)` and
   compact lines for optimizer/scheduler/RNG state availability, saved versus
   requested step horizons, and the exhausted-scheduler case where adapter

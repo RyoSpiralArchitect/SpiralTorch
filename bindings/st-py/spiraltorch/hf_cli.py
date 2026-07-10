@@ -47,6 +47,12 @@ from .hf_adapter_executor_status import (
     hf_adapter_continuation_executor_status_lines,
     hf_adapter_continuation_executor_status_report,
 )
+from .hf_adapter_executor_supervisor import (
+    hf_adapter_continuation_executor_supervision_lines,
+    hf_adapter_continuation_executor_supervision_report,
+    hf_adapter_continuation_executor_supervisor_lines,
+    supervise_hf_adapter_continuation_executor,
+)
 from .hf_ft import (
     HF_FINETUNE_DEFAULT_MODEL_PROFILE,
     hf_finetune_model_profile_catalog,
@@ -675,6 +681,74 @@ def adapter_continuation_executor_resume_main(
         for line in hf_adapter_continuation_executor_resume_lines(report):
             print(line)
     return 0 if report.get("ready") is True else 1
+
+
+def adapter_continuation_executor_supervise_main(
+    argv: Sequence[str] | None = None,
+) -> int:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Supervise bounded exact executor replays while preserving operator and "
+            "policy stop boundaries."
+        ),
+    )
+    parser.add_argument("launch_state", type=Path)
+    parser.add_argument(
+        "--plan",
+        action="store_true",
+        help="Print one read-only supervision decision without waiting or resuming.",
+    )
+    parser.add_argument("--max-resumes", type=int, default=1)
+    parser.add_argument("--poll-interval-seconds", type=float, default=5.0)
+    parser.add_argument("--timeout-seconds", type=float, default=0.0)
+    parser.add_argument("--handoff-timeout-seconds", type=float, default=5.0)
+    parser.add_argument("--state", type=Path, default=None)
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args(argv)
+    if args.max_resumes <= 0:
+        parser.error("--max-resumes must be positive")
+    if (
+        not math.isfinite(args.poll_interval_seconds)
+        or args.poll_interval_seconds <= 0.0
+    ):
+        parser.error("--poll-interval-seconds must be finite and positive")
+    for name, value in (
+        ("--timeout-seconds", args.timeout_seconds),
+        ("--handoff-timeout-seconds", args.handoff_timeout_seconds),
+    ):
+        if not math.isfinite(value) or value < 0.0:
+            parser.error(f"{name} must be finite and non-negative")
+    try:
+        report = (
+            hf_adapter_continuation_executor_supervision_report(args.launch_state)
+            if args.plan
+            else supervise_hf_adapter_continuation_executor(
+                args.launch_state,
+                max_resumes=args.max_resumes,
+                poll_interval_seconds=args.poll_interval_seconds,
+                timeout_seconds=args.timeout_seconds,
+                handoff_timeout_seconds=args.handoff_timeout_seconds,
+                supervisor_state_path=args.state,
+            )
+        )
+    except Exception as exc:
+        print(
+            "hf_adapter_continuation_executor_supervisor_error "
+            f"{exc.__class__.__name__}: {exc}",
+            file=sys.stderr,
+        )
+        return 2
+    if args.json:
+        print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        lines = (
+            hf_adapter_continuation_executor_supervision_lines(report)
+            if args.plan
+            else hf_adapter_continuation_executor_supervisor_lines(report)
+        )
+        for line in lines:
+            print(line)
+    return 0 if report.get("healthy") is True else 1
 
 
 def adapter_continuation_executor_quarantine_main(
