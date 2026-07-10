@@ -6154,6 +6154,18 @@ def _scale_up_adapter_continuation_plan(
         "source_promotion_report_path": summary.get(
             "scale_up_candidate_adapter_promotion_report_path"
         ),
+        "source_artifact_probe_status": summary.get(
+            "scale_up_candidate_adapter_artifact_probe_status"
+        ),
+        "source_artifact_probe_report_path": summary.get(
+            "scale_up_candidate_adapter_artifact_probe_report_path"
+        ),
+        "source_artifact_probe_device": summary.get(
+            "scale_up_candidate_adapter_artifact_probe_device"
+        ),
+        "source_artifact_probe_new_token_count": summary.get(
+            "scale_up_candidate_adapter_artifact_probe_new_token_count"
+        ),
         "source_promotion_ready": promotion_ready,
         "checkpoint_resume": None if existing_resume is None else str(existing_resume),
     }
@@ -6307,6 +6319,18 @@ def _scale_up_promotion_chain_summary(
         or candidate.get("lineage_depth") == 0,
         "scale_up_candidate_adapter_promotion_report_path": candidate.get(
             "promotion_report_path"
+        ),
+        "scale_up_candidate_adapter_artifact_probe_status": candidate.get(
+            "artifact_probe_status"
+        ),
+        "scale_up_candidate_adapter_artifact_probe_report_path": candidate.get(
+            "artifact_probe_report_path"
+        ),
+        "scale_up_candidate_adapter_artifact_probe_device": candidate.get(
+            "artifact_probe_device"
+        ),
+        "scale_up_candidate_adapter_artifact_probe_new_token_count": candidate.get(
+            "artifact_probe_new_token_count"
         ),
         "scale_up_candidate_adapter_lineage_status": candidate.get(
             "lineage_status"
@@ -6646,6 +6670,18 @@ def hf_gpt2_finetune_scale_up_command(
         "scale_up_candidate_adapter_promotion_ready": summary.get(
             "scale_up_candidate_adapter_promotion_ready"
         ),
+        "scale_up_candidate_adapter_artifact_probe_status": summary.get(
+            "scale_up_candidate_adapter_artifact_probe_status"
+        ),
+        "scale_up_candidate_adapter_artifact_probe_report_path": summary.get(
+            "scale_up_candidate_adapter_artifact_probe_report_path"
+        ),
+        "scale_up_candidate_adapter_artifact_probe_device": summary.get(
+            "scale_up_candidate_adapter_artifact_probe_device"
+        ),
+        "scale_up_candidate_adapter_artifact_probe_new_token_count": summary.get(
+            "scale_up_candidate_adapter_artifact_probe_new_token_count"
+        ),
         "scale_up_candidate_adapter_lineage_depth": summary.get(
             "scale_up_candidate_adapter_lineage_depth"
         ),
@@ -6681,6 +6717,18 @@ def hf_gpt2_finetune_scale_up_command(
         ),
         "adapter_continuation_source_promotion_ready": continuation.get(
             "source_promotion_ready"
+        ),
+        "adapter_continuation_source_artifact_probe_status": continuation.get(
+            "source_artifact_probe_status"
+        ),
+        "adapter_continuation_source_artifact_probe_report_path": continuation.get(
+            "source_artifact_probe_report_path"
+        ),
+        "adapter_continuation_source_artifact_probe_device": continuation.get(
+            "source_artifact_probe_device"
+        ),
+        "adapter_continuation_source_artifact_probe_new_token_count": (
+            continuation.get("source_artifact_probe_new_token_count")
         ),
         "adapter_continuation_checkpoint_resume": continuation.get(
             "checkpoint_resume"
@@ -7353,6 +7401,12 @@ def summarize_hf_gpt2_finetune_run_card(
     adapter_config = _mapping_item(card, "adapter_config")
     adapter_lineage = _mapping_item(card, "adapter_lineage")
     adapter_promotion = _mapping_item(card, "adapter_promotion")
+    tokenizer_save = _mapping_item(card, "tokenizer_save_report")
+    adapter_artifact_probe = _mapping_item(card, "adapter_artifact_probe")
+    adapter_artifact_probe_artifact = _mapping_item(
+        adapter_artifact_probe,
+        "artifact",
+    )
     model_prepare = _mapping_item(card, "model_prepare_report")
     adapter_target = _mapping_item(model_prepare, "target_report")
     adapter_parameters = _mapping_item(
@@ -7471,6 +7525,44 @@ def summarize_hf_gpt2_finetune_run_card(
         "finetune_mode": card.get("finetune_mode") or model_prepare.get("mode"),
         "model_artifact_kind": card.get("model_artifact_kind"),
         "adapter_saved": card.get("adapter_saved"),
+        "tokenizer_save_status": tokenizer_save.get("status"),
+        "tokenizer_save_file_count": len(_unique(tokenizer_save.get("files"))),
+        "tokenizer_save_error": tokenizer_save.get("error"),
+        "adapter_artifact_probe_status": adapter_artifact_probe.get("status"),
+        "adapter_artifact_probe_report_path": adapter_artifact_probe.get(
+            "report_path"
+        ),
+        "adapter_artifact_probe_model_family": adapter_artifact_probe.get(
+            "model_family"
+        ),
+        "adapter_artifact_probe_model_class": adapter_artifact_probe.get(
+            "model_class"
+        ),
+        "adapter_artifact_probe_tokenizer_class": adapter_artifact_probe.get(
+            "tokenizer_class"
+        ),
+        "adapter_artifact_probe_tokenizer_source_kind": (
+            adapter_artifact_probe_artifact.get("tokenizer_source_kind")
+        ),
+        "adapter_artifact_probe_device": adapter_artifact_probe.get("device"),
+        "adapter_artifact_probe_new_token_count": _safe_number(
+            adapter_artifact_probe.get("new_token_count")
+        ),
+        "adapter_artifact_probe_generated_text_changed": (
+            adapter_artifact_probe.get("generated_text_changed")
+        ),
+        "adapter_artifact_probe_local_files_only": adapter_artifact_probe.get(
+            "local_files_only"
+        ),
+        "adapter_artifact_probe_artifact_kind": adapter_artifact_probe_artifact.get(
+            "artifact_kind"
+        ),
+        "adapter_artifact_probe_artifact_source": (
+            adapter_artifact_probe_artifact.get("artifact_source")
+        ),
+        "adapter_artifact_probe_adapter_loaded": adapter_artifact_probe_artifact.get(
+            "adapter_loaded"
+        ),
         "adapter_lineage_status": adapter_lineage.get("status"),
         "adapter_lineage_adapter_id": adapter_lineage.get("adapter_id"),
         "adapter_lineage_parent_adapter_id": adapter_lineage.get(
@@ -7499,6 +7591,30 @@ def summarize_hf_gpt2_finetune_run_card(
         ),
         "adapter_promotion_max_eval_loss_regression": _safe_number(
             adapter_promotion.get("max_eval_loss_regression")
+        ),
+        "adapter_promotion_require_artifact_probe": adapter_promotion.get(
+            "require_artifact_probe"
+        ),
+        "adapter_promotion_artifact_probe_status": adapter_promotion.get(
+            "artifact_probe_status"
+        ),
+        "adapter_promotion_artifact_probe_device": adapter_promotion.get(
+            "artifact_probe_device"
+        ),
+        "adapter_promotion_artifact_probe_tokenizer_source_kind": (
+            adapter_promotion.get("artifact_probe_tokenizer_source_kind")
+        ),
+        "adapter_promotion_artifact_probe_new_token_count": _safe_number(
+            adapter_promotion.get("artifact_probe_new_token_count")
+        ),
+        "adapter_promotion_artifact_probe_candidate_matches": (
+            adapter_promotion.get("artifact_probe_candidate_matches")
+        ),
+        "adapter_promotion_artifact_probe_local_files_only": (
+            adapter_promotion.get("artifact_probe_local_files_only")
+        ),
+        "adapter_promotion_artifact_probe_do_sample": adapter_promotion.get(
+            "artifact_probe_do_sample"
         ),
         "adapter_promotion_failed_checks": csv_label(
             _unique(adapter_promotion.get("failed_checks"))
@@ -8582,6 +8698,26 @@ def summarize_hf_gpt2_finetune_sweep_report(
             None
             if scale_up_candidate is None
             else scale_up_candidate.get("adapter_promotion_report_path")
+        ),
+        "scale_up_candidate_adapter_artifact_probe_status": (
+            None
+            if scale_up_candidate is None
+            else scale_up_candidate.get("adapter_artifact_probe_status")
+        ),
+        "scale_up_candidate_adapter_artifact_probe_report_path": (
+            None
+            if scale_up_candidate is None
+            else scale_up_candidate.get("adapter_artifact_probe_report_path")
+        ),
+        "scale_up_candidate_adapter_artifact_probe_device": (
+            None
+            if scale_up_candidate is None
+            else scale_up_candidate.get("adapter_artifact_probe_device")
+        ),
+        "scale_up_candidate_adapter_artifact_probe_new_token_count": (
+            None
+            if scale_up_candidate is None
+            else scale_up_candidate.get("adapter_artifact_probe_new_token_count")
         ),
         "scale_up_candidate_adapter_saved": (
             None

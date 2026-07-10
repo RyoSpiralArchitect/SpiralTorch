@@ -642,6 +642,7 @@ def hf_adapter_promotion_report(
     require_eval: bool = ...,
     require_generation_changed: bool = ...,
     require_weight_change: bool = ...,
+    require_artifact_probe: bool = ...,
 ) -> Dict[str, object]: ...
 def write_hf_adapter_promotion(
     report_or_candidate: Mapping[str, object] | str | PathLike[str],
@@ -652,6 +653,7 @@ def write_hf_adapter_promotion(
     require_eval: bool = ...,
     require_generation_changed: bool = ...,
     require_weight_change: bool = ...,
+    require_artifact_probe: bool = ...,
     out: str | PathLike[str] | None = ...,
 ) -> Dict[str, object]: ...
 def load_hf_adapter_promotion(value: str | PathLike[str]) -> Dict[str, object]: ...

@@ -151,6 +151,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--adapter-promotion-require-generation-change",
         action="store_true",
     )
+    parser.add_argument("--adapter-promotion-probe-prompt", default=None)
+    parser.add_argument(
+        "--adapter-promotion-probe-max-new-tokens",
+        type=int,
+        default=8,
+    )
+    parser.add_argument("--adapter-promotion-probe-device", default="auto")
     parser.add_argument("--no-trainer-trace", action="store_true")
     parser.add_argument("--trainer-telemetry", action="store_true")
     parser.add_argument("--trainer-telemetry-prefix", default="hf_ft")
@@ -294,6 +301,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "--adapter-promotion-require-generation-change requires "
             "--generation-prompt"
         )
+    if args.adapter_promotion_probe_max_new_tokens <= 0:
+        parser.error("--adapter-promotion-probe-max-new-tokens must be positive")
+    if not str(args.adapter_promotion_probe_device).strip():
+        parser.error("--adapter-promotion-probe-device must not be empty")
+    if (
+        args.adapter_promotion_gate
+        and args.adapter_promotion_probe_prompt is not None
+        and not str(args.adapter_promotion_probe_prompt)
+    ):
+        parser.error("--adapter-promotion-probe-prompt must not be empty")
     if args.generation_max_new_tokens <= 0:
         parser.error("--generation-max-new-tokens must be positive")
     if args.generation_temperature <= 0.0:
@@ -946,6 +963,21 @@ def _bridge_command(
         )
         if args.adapter_promotion_require_generation_change:
             command.append("--adapter-promotion-require-generation-change")
+        if args.adapter_promotion_probe_prompt is not None:
+            command.extend(
+                [
+                    "--adapter-promotion-probe-prompt",
+                    str(args.adapter_promotion_probe_prompt),
+                ]
+            )
+        command.extend(
+            [
+                "--adapter-promotion-probe-max-new-tokens",
+                str(args.adapter_promotion_probe_max_new_tokens),
+                "--adapter-promotion-probe-device",
+                str(args.adapter_promotion_probe_device),
+            ]
+        )
     if args.no_trainer_trace:
         command.append("--no-trainer-trace")
     if args.trainer_telemetry:
@@ -1152,6 +1184,20 @@ def build_sweep_runs(args: argparse.Namespace) -> list[dict[str, Any]]:
                 "adapter_promotion_require_generation_change": bool(
                     args.adapter_promotion_require_generation_change
                 ),
+                "adapter_promotion_require_artifact_probe": bool(
+                    args.adapter_promotion_gate
+                ),
+                "adapter_promotion_probe_prompt": (
+                    args.adapter_promotion_probe_prompt
+                    or args.generation_prompt
+                    or "SpiralTorch is"
+                ),
+                "adapter_promotion_probe_max_new_tokens": (
+                    args.adapter_promotion_probe_max_new_tokens
+                ),
+                "adapter_promotion_probe_device": (
+                    args.adapter_promotion_probe_device
+                ),
                 "dataset_name": str(args.dataset_name),
                 "dataset_config": args.dataset_config,
                 "dataset_revision": args.dataset_revision,
@@ -1248,8 +1294,23 @@ def _adapter_promotion_evidence(path: Path) -> dict[str, object]:
         return {}
     promotion = card.get("adapter_promotion")
     lineage = card.get("adapter_lineage")
+    artifact_probe = card.get("adapter_artifact_probe")
+    tokenizer_save = card.get("tokenizer_save_report")
     promotion_payload = promotion if isinstance(promotion, Mapping) else {}
     lineage_payload = lineage if isinstance(lineage, Mapping) else {}
+    artifact_probe_payload = (
+        artifact_probe if isinstance(artifact_probe, Mapping) else {}
+    )
+    tokenizer_save_payload = (
+        tokenizer_save if isinstance(tokenizer_save, Mapping) else {}
+    )
+    tokenizer_files = tokenizer_save_payload.get("files")
+    tokenizer_file_count = (
+        len(tokenizer_files)
+        if isinstance(tokenizer_files, Sequence)
+        and not isinstance(tokenizer_files, (str, bytes))
+        else 0
+    )
     return {
         "adapter_lineage_status": lineage_payload.get("status"),
         "adapter_lineage_depth": lineage_payload.get("lineage_depth"),
@@ -1258,6 +1319,19 @@ def _adapter_promotion_evidence(path: Path) -> dict[str, object]:
         "adapter_promotion_recommendation": promotion_payload.get("recommendation"),
         "adapter_promotion_failed_checks": promotion_payload.get("failed_checks"),
         "adapter_promotion_missing_checks": promotion_payload.get("missing_checks"),
+        "adapter_promotion_require_artifact_probe": promotion_payload.get(
+            "require_artifact_probe"
+        ),
+        "adapter_artifact_probe_status": artifact_probe_payload.get("status"),
+        "adapter_artifact_probe_report_path": artifact_probe_payload.get(
+            "report_path"
+        ),
+        "adapter_artifact_probe_device": artifact_probe_payload.get("device"),
+        "adapter_artifact_probe_new_token_count": artifact_probe_payload.get(
+            "new_token_count"
+        ),
+        "tokenizer_save_status": tokenizer_save_payload.get("status"),
+        "tokenizer_save_file_count": tokenizer_file_count,
     }
 
 
@@ -1288,6 +1362,18 @@ def _adapter_promotion_policy(args: argparse.Namespace) -> dict[str, object]:
         "adapter_promotion_require_generation_change": bool(
             args.adapter_promotion_require_generation_change
         ),
+        "adapter_promotion_require_artifact_probe": bool(
+            args.adapter_promotion_gate
+        ),
+        "adapter_promotion_probe_prompt": (
+            args.adapter_promotion_probe_prompt
+            or args.generation_prompt
+            or "SpiralTorch is"
+        ),
+        "adapter_promotion_probe_max_new_tokens": (
+            args.adapter_promotion_probe_max_new_tokens
+        ),
+        "adapter_promotion_probe_device": args.adapter_promotion_probe_device,
     }
 
 

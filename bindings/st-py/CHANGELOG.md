@@ -126,6 +126,12 @@
   run bounded generation, and archive device/token/timing/runtime evidence. A
   real Pythia 70M LoRA sample now covers non-GPT-2 train, promotion, reload, and
   MPS generation.
+- Promotion-qualified artifact reload: Trainer outputs now retain their
+  tokenizer, while `--adapter-promotion-gate` releases the trained model and
+  accelerator cache, then requires a local-only fresh PEFT reload plus
+  deterministic bounded generation. Sweep, run-card,
+  promotion-chain, and scale-up artifacts preserve and revalidate the probe
+  path, device, candidate identity, and generated-token evidence.
 - Trainer resume audit: add `hf_finetune_checkpoint_resume_report(...)` and
   compact lines for optimizer/scheduler/RNG state availability, saved versus
   requested step horizons, and the exhausted-scheduler case where adapter

@@ -69,6 +69,24 @@ def _run_card(parent: Path, *, before: float = 1.0, after: float = 0.9) -> dict:
     }
 
 
+def _artifact_probe(adapter: Path, *, new_token_count: int = 4) -> dict:
+    return {
+        "row_type": "hf_causal_lm_artifact_probe",
+        "status": "ready",
+        "report_path": str(adapter / "spiraltorch-hf-artifact-probe.json"),
+        "artifact": {
+            "artifact_kind": "peft_adapter",
+            "artifact_source": str(adapter.resolve()),
+            "adapter_loaded": True,
+        },
+        "device": "cpu",
+        "new_token_count": new_token_count,
+        "generated_text_changed": True,
+        "local_files_only": True,
+        "generation": {"do_sample": False},
+    }
+
+
 def _adapter_launch_command(
     parent: Path,
     child: Path,
@@ -261,6 +279,188 @@ def test_adapter_promotion_requires_lineage_weight_change_and_eval(
     assert "candidate_fingerprint" in tampered["failed_checks"]
 
 
+def test_adapter_promotion_can_require_fresh_artifact_reload_and_generation(
+    tmp_path: Path,
+) -> None:
+    parent = _write_adapter(tmp_path / "parent", b"parent")
+    child = _write_adapter(tmp_path / "child", b"child")
+    card = _run_card(parent)
+    card["adapter_artifact_probe"] = _artifact_probe(child)
+    lineage = st.write_hf_adapter_lineage(
+        child,
+        parent_adapter=parent,
+        run_card=card,
+    )
+    card["adapter_lineage"] = lineage
+
+    ready = st.write_hf_adapter_promotion(
+        child,
+        card,
+        parent_adapter=parent,
+        require_artifact_probe=True,
+    )
+
+    assert ready["status"] == "ready"
+    assert ready["promotion_ready"] is True
+    assert ready["require_artifact_probe"] is True
+    assert ready["artifact_probe_status"] == "ready"
+    assert ready["artifact_probe_candidate_matches"] is True
+    assert ready["artifact_probe_new_token_count"] == 4
+    assert ready["artifact_probe_local_files_only"] is True
+    assert ready["artifact_probe_do_sample"] is False
+    assert not ready["failed_checks"]
+    assert not ready["missing_checks"]
+
+    run_card_path = child / "spiraltorch-hf-finetune-run-card.json"
+    card["adapter_promotion"] = ready
+    run_card_path.write_text(json.dumps(card), encoding="utf-8")
+    chain = st.hf_adapter_promotion_chain_report(child)
+    child_node = next(
+        node for node in chain["nodes"] if node["adapter_path"] == str(child)
+    )
+    assert child_node["promotion_revalidated_ready"] is True
+    assert child_node["artifact_probe_status"] == "ready"
+    assert child_node["artifact_probe_new_token_count"] == 4
+
+
+def test_adapter_promotion_chain_revalidates_gated_root_probe(
+    tmp_path: Path,
+) -> None:
+    root = _write_adapter(tmp_path / "root", b"root")
+    run_card_path = root / "spiraltorch-hf-finetune-run-card.json"
+    card = _run_card(Path("org/base"))
+    card.update(
+        {
+            "model_name": "org/base",
+            "model_artifact_kind": "full_model",
+            "finetune_start_report": {
+                "mode": "new_adapter",
+                "adapter_weights_source": None,
+                "weights_only_warm_start": False,
+                "trainer_checkpoint_resume": False,
+            },
+            "adapter_artifact_probe": _artifact_probe(root),
+        }
+    )
+    lineage = st.write_hf_adapter_lineage(
+        root,
+        run_card=card,
+        run_card_path=run_card_path,
+    )
+    card["adapter_lineage"] = lineage
+    promotion = st.write_hf_adapter_promotion(
+        root,
+        card,
+        require_artifact_probe=True,
+    )
+    card["adapter_promotion"] = promotion
+    run_card_path.write_text(json.dumps(card), encoding="utf-8")
+
+    ready = st.hf_adapter_promotion_chain_report(root)
+    root_node = next(node for node in ready["nodes"] if node["lineage_depth"] == 0)
+
+    assert root_node["status"] == "ready"
+    assert root_node["promotion_revalidated_ready"] is True
+    assert root_node["artifact_probe_status"] == "ready"
+
+    promotion_path = root / st.HF_ADAPTER_PROMOTION_FILENAME
+    tampered = json.loads(promotion_path.read_text(encoding="utf-8"))
+    tampered["artifact_probe_new_token_count"] = 999
+    promotion_path.write_text(json.dumps(tampered), encoding="utf-8")
+    rejected = st.hf_adapter_promotion_chain_report(root)
+    rejected_root = next(
+        node for node in rejected["nodes"] if node["lineage_depth"] == 0
+    )
+
+    assert rejected_root["status"] == "rejected"
+    assert any(
+        issue["code"] == "promotion_revalidation_mismatch"
+        for issue in rejected_root["issues"]
+    )
+
+
+def test_adapter_promotion_blocks_missing_or_mismatched_artifact_probe(
+    tmp_path: Path,
+) -> None:
+    parent = _write_adapter(tmp_path / "parent", b"parent")
+    missing_child = _write_adapter(tmp_path / "missing", b"missing")
+    missing_card = _run_card(parent)
+    missing_lineage = st.write_hf_adapter_lineage(
+        missing_child,
+        parent_adapter=parent,
+        run_card=missing_card,
+    )
+    missing_card["adapter_lineage"] = missing_lineage
+
+    missing = st.hf_adapter_promotion_report(
+        missing_child,
+        missing_card,
+        parent_adapter=parent,
+        require_artifact_probe=True,
+    )
+
+    assert missing["status"] == "needs_evidence"
+    assert missing["recommendation"] == "run_artifact_reload_probe"
+    assert set(missing["missing_checks"]) == {
+        "artifact_reload",
+        "artifact_generation",
+    }
+
+    mismatched_child = _write_adapter(tmp_path / "mismatched", b"mismatched")
+    mismatched_card = _run_card(parent)
+    mismatched_card["adapter_artifact_probe"] = _artifact_probe(missing_child)
+    mismatched_lineage = st.write_hf_adapter_lineage(
+        mismatched_child,
+        parent_adapter=parent,
+        run_card=mismatched_card,
+    )
+    mismatched_card["adapter_lineage"] = mismatched_lineage
+    mismatched = st.hf_adapter_promotion_report(
+        mismatched_child,
+        mismatched_card,
+        parent_adapter=parent,
+        require_artifact_probe=True,
+    )
+
+    assert mismatched["status"] == "blocked"
+    assert "artifact_reload" in mismatched["failed_checks"]
+    assert mismatched["artifact_probe_candidate_matches"] is False
+
+    nonlocal_card = _run_card(parent)
+    nonlocal_card["adapter_artifact_probe"] = _artifact_probe(mismatched_child)
+    nonlocal_card["adapter_artifact_probe"]["local_files_only"] = False
+    nonlocal_lineage = st.write_hf_adapter_lineage(
+        mismatched_child,
+        parent_adapter=parent,
+        run_card=nonlocal_card,
+    )
+    nonlocal_card["adapter_lineage"] = nonlocal_lineage
+    nonlocal_report = st.hf_adapter_promotion_report(
+        mismatched_child,
+        nonlocal_card,
+        parent_adapter=parent,
+        require_artifact_probe=True,
+    )
+    assert "artifact_reload" in nonlocal_report["failed_checks"]
+
+    sampled_card = _run_card(parent)
+    sampled_card["adapter_artifact_probe"] = _artifact_probe(mismatched_child)
+    sampled_card["adapter_artifact_probe"]["generation"]["do_sample"] = True
+    sampled_lineage = st.write_hf_adapter_lineage(
+        mismatched_child,
+        parent_adapter=parent,
+        run_card=sampled_card,
+    )
+    sampled_card["adapter_lineage"] = sampled_lineage
+    sampled_report = st.hf_adapter_promotion_report(
+        mismatched_child,
+        sampled_card,
+        parent_adapter=parent,
+        require_artifact_probe=True,
+    )
+    assert "artifact_generation" in sampled_report["failed_checks"]
+
+
 def test_adapter_lineage_records_unverified_remote_parent(tmp_path: Path) -> None:
     child = _write_adapter(tmp_path / "child", b"child")
     card = _run_card(Path("org/remote-adapter"))
@@ -333,8 +533,10 @@ def test_adapter_lineage_and_promotion_clis_write_auditable_artifacts(
     parent = _write_adapter(tmp_path / "parent", b"parent")
     child = _write_adapter(tmp_path / "child", b"child")
     card_path = tmp_path / "run-card.json"
+    card = _run_card(parent)
+    card["adapter_artifact_probe"] = _artifact_probe(child)
     card_path.write_text(
-        json.dumps(_run_card(parent)),
+        json.dumps(card),
         encoding="utf-8",
     )
 
@@ -357,6 +559,7 @@ def test_adapter_lineage_and_promotion_clis_write_auditable_artifacts(
             str(parent),
             "--run-card",
             str(card_path),
+            "--require-artifact-probe",
         ]
     )
     promotion_output = capsys.readouterr().out
@@ -365,6 +568,7 @@ def test_adapter_lineage_and_promotion_clis_write_auditable_artifacts(
     assert promotion_code == 0
     assert "depth=1" in lineage_output
     assert "ready=True" in promotion_output
+    assert "artifact_probe=ready" in promotion_output
     assert (child / st.HF_ADAPTER_LINEAGE_FILENAME).is_file()
     assert (child / st.HF_ADAPTER_PROMOTION_FILENAME).is_file()
 

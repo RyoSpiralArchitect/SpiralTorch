@@ -230,6 +230,14 @@ def adapter_promotion_main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--no-require-eval", action="store_true")
     parser.add_argument("--require-generation-change", action="store_true")
     parser.add_argument("--no-require-weight-change", action="store_true")
+    parser.add_argument(
+        "--require-artifact-probe",
+        action="store_true",
+        help=(
+            "Require the run card to contain a successful fresh artifact "
+            "reload and bounded generation probe."
+        ),
+    )
     parser.add_argument("--out", type=Path, default=None)
     parser.add_argument(
         "--inspect-only",
@@ -248,6 +256,7 @@ def adapter_promotion_main(argv: Sequence[str] | None = None) -> int:
         require_eval=not args.no_require_eval,
         require_generation_changed=args.require_generation_change,
         require_weight_change=not args.no_require_weight_change,
+        require_artifact_probe=args.require_artifact_probe,
     )
     if not args.inspect_only:
         report = write_hf_adapter_promotion(report, out=args.out)

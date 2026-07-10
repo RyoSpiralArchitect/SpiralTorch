@@ -654,6 +654,48 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         self.assertEqual(probe.call_args.kwargs["artifact_kind"], "peft_adapter")
         self.assertFalse(probe.call_args.kwargs["local_files_only"])
 
+    def test_pythia_artifact_probe_sample_records_promotion_qualification(
+        self,
+    ) -> None:
+        sample_path = (
+            Path(__file__).resolve().parents[1]
+            / "examples"
+            / "hf_pythia70m_lora_artifact_probe_sample.json"
+        )
+        sample = json.loads(sample_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(
+            sample["schema"],
+            "spiraltorch.hf_causal_lm_artifact_probe.sample.v2",
+        )
+        self.assertEqual(sample["model_family"], "gpt_neox")
+        self.assertTrue(sample["artifact_probe"]["adapter_loaded"])
+        self.assertTrue(sample["artifact_probe"]["local_files_only"])
+        self.assertFalse(sample["artifact_probe"]["do_sample"])
+        self.assertEqual(
+            sample["artifact_probe"]["tokenizer_source_kind"],
+            "adapter_artifact",
+        )
+        self.assertGreater(sample["artifact_probe"]["new_token_count"], 0)
+        self.assertTrue(
+            sample["training"]["adapter_promotion_artifact_probe_required"]
+        )
+        self.assertTrue(sample["promotion_qualification"]["promotion_ready"])
+        self.assertTrue(
+            sample["promotion_qualification"][
+                "artifact_probe_candidate_matches"
+            ]
+        )
+        self.assertTrue(
+            sample["promotion_qualification"]["artifact_probe_local_files_only"]
+        )
+        self.assertFalse(
+            sample["promotion_qualification"]["artifact_probe_do_sample"]
+        )
+        self.assertTrue(sample["continuation"]["promotion_revalidated_ready"])
+        self.assertTrue(sample["continuation"]["continuation_ready"])
+        self.assertTrue(sample["continuation"]["probe_provenance_preserved"])
+
     def test_inference_distortion_runtime_plan_and_cli_args_are_importable(self) -> None:
         runtime = zspace_inference_distortion_runtime_plan(
             local_model=Path("models/gpt2-zspace"),

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import gc
 import importlib
 import inspect
 import json
@@ -52,6 +53,8 @@ from spiraltorch.hf_ft import (
 )
 from spiraltorch.hf_generation import (
     build_zspace_repression_logits_processor,
+    hf_causal_lm_artifact_probe_lines,
+    hf_causal_lm_artifact_probe_report,
     hf_generation_batch_size_compat,
 )
 from spiraltorch.hf_peft import (
@@ -72,6 +75,7 @@ HF_OFFLINE_ENV_VARS = (
     "TRANSFORMERS_OFFLINE",
     "HF_DATASETS_OFFLINE",
 )
+HF_ADAPTER_ARTIFACT_PROBE_FILENAME = "spiraltorch-hf-artifact-probe.json"
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -242,6 +246,25 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--adapter-promotion-require-generation-change",
         action="store_true",
         help="Also require before/after generation hashes to differ for promotion.",
+    )
+    parser.add_argument(
+        "--adapter-promotion-probe-prompt",
+        default=None,
+        help=(
+            "Prompt for the post-save fresh artifact reload probe. Defaults to "
+            "--generation-prompt or 'SpiralTorch is'."
+        ),
+    )
+    parser.add_argument(
+        "--adapter-promotion-probe-max-new-tokens",
+        type=int,
+        default=8,
+        help="Bounded token budget for the post-save artifact generation probe.",
+    )
+    parser.add_argument(
+        "--adapter-promotion-probe-device",
+        default="auto",
+        help="Device for the fresh artifact probe: auto, cpu, mps, cuda, or cuda:N.",
     )
     parser.add_argument("--no-trainer-trace", action="store_true")
     parser.add_argument("--trainer-telemetry", action="store_true")
@@ -551,6 +574,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "--adapter-promotion-require-generation-change requires "
             "--generation-prompt"
         )
+    if args.adapter_promotion_probe_max_new_tokens <= 0:
+        parser.error("--adapter-promotion-probe-max-new-tokens must be positive")
+    if not str(args.adapter_promotion_probe_device).strip():
+        parser.error("--adapter-promotion-probe-device must not be empty")
+    if (
+        args.adapter_promotion_gate
+        and args.adapter_promotion_probe_prompt is not None
+        and not str(args.adapter_promotion_probe_prompt)
+    ):
+        parser.error("--adapter-promotion-probe-prompt must not be empty")
     if args.max_train_samples is not None and args.max_train_samples < 0:
         parser.error("--max-train-samples must be non-negative")
     if args.max_eval_samples is not None and args.max_eval_samples < 0:
@@ -1679,6 +1712,164 @@ def _model_device(model: Any) -> Any | None:
     return getattr(first_param, "device", None)
 
 
+def _adapter_promotion_probe_prompt(args: argparse.Namespace) -> str:
+    return str(
+        args.adapter_promotion_probe_prompt
+        or args.generation_prompt
+        or "SpiralTorch is"
+    )
+
+
+def _save_finetune_tokenizer(
+    tokenizer: Any,
+    output_dir: Path,
+) -> dict[str, object]:
+    save_pretrained = getattr(tokenizer, "save_pretrained", None)
+    if not callable(save_pretrained):
+        return {
+            "status": "unavailable",
+            "output_dir": str(output_dir),
+            "files": [],
+            "error": "tokenizer does not expose save_pretrained",
+        }
+    try:
+        written = save_pretrained(str(output_dir))
+    except Exception as exc:
+        return {
+            "status": "error",
+            "output_dir": str(output_dir),
+            "files": [],
+            "error": f"{exc.__class__.__name__}: {exc}",
+        }
+    files = (
+        [str(value) for value in written]
+        if isinstance(written, Sequence) and not isinstance(written, (str, bytes))
+        else []
+    )
+    return {
+        "status": "ready",
+        "output_dir": str(output_dir),
+        "files": files,
+        "error": None,
+    }
+
+
+def _finetune_tokenizer_source(
+    args: argparse.Namespace,
+    tokenizer_save_report: Mapping[str, object],
+) -> str | None:
+    tokenizer_files = (
+        "tokenizer.json",
+        "tokenizer.model",
+        "tokenizer_config.json",
+        "vocab.json",
+        "merges.txt",
+        "special_tokens_map.json",
+    )
+    if tokenizer_save_report.get("status") == "ready" and any(
+        (args.output_dir / name).is_file() for name in tokenizer_files
+    ):
+        return None
+    return _tokenizer_name(args)
+
+
+def _release_accelerator_cache(torch: Any) -> dict[str, object]:
+    synchronized: list[str] = []
+    released: list[str] = []
+    errors: list[str] = []
+    runtimes: list[tuple[str, Any]] = []
+    for backend in ("cuda", "mps"):
+        runtime = getattr(torch, backend, None)
+        available = getattr(runtime, "is_available", None)
+        if callable(available):
+            try:
+                if not bool(available()):
+                    continue
+            except Exception as exc:
+                errors.append(
+                    f"{backend}.is_available: {exc.__class__.__name__}: {exc}"
+                )
+                continue
+        runtimes.append((backend, runtime))
+    for backend, runtime in runtimes:
+        synchronize = getattr(runtime, "synchronize", None)
+        if not callable(synchronize):
+            continue
+        try:
+            synchronize()
+        except Exception as exc:
+            errors.append(f"{backend}.synchronize: {exc.__class__.__name__}: {exc}")
+        else:
+            synchronized.append(backend)
+    collected = gc.collect()
+    for backend, runtime in runtimes:
+        empty_cache = getattr(runtime, "empty_cache", None)
+        if not callable(empty_cache):
+            continue
+        try:
+            empty_cache()
+        except Exception as exc:
+            errors.append(f"{backend}: {exc.__class__.__name__}: {exc}")
+        else:
+            released.append(backend)
+    return {
+        "row_type": "hf_finetune_artifact_probe_runtime_release",
+        "gc_collected": collected,
+        "accelerators_synchronized": synchronized,
+        "accelerator_caches_released": released,
+        "errors": errors,
+    }
+
+
+def _run_adapter_artifact_probe(
+    transformers: Any,
+    torch: Any,
+    args: argparse.Namespace,
+    *,
+    tokenizer_source: str | None,
+) -> dict[str, object]:
+    probe_path = args.output_dir / HF_ADAPTER_ARTIFACT_PROBE_FILENAME
+    prompt = _adapter_promotion_probe_prompt(args)
+    try:
+        report = hf_causal_lm_artifact_probe_report(
+            args.output_dir,
+            tokenizer_name_or_path=tokenizer_source,
+            artifact_kind="peft_adapter",
+            prompt=prompt,
+            max_new_tokens=args.adapter_promotion_probe_max_new_tokens,
+            do_sample=False,
+            device=args.adapter_promotion_probe_device,
+            local_files_only=True,
+            trust_remote_code=args.trust_remote_code,
+            transformers_module=transformers,
+            torch_module=torch,
+        )
+    except Exception as exc:
+        report = {
+            "row_type": "hf_causal_lm_artifact_probe",
+            "status": "error",
+            "artifact": {
+                "artifact_kind": "peft_adapter",
+                "artifact_source": str(args.output_dir.resolve()),
+                "adapter_loaded": False,
+            },
+            "prompt": prompt,
+            "device": args.adapter_promotion_probe_device,
+            "new_token_count": None,
+            "generated_text_changed": None,
+            "local_files_only": True,
+            "error": f"{exc.__class__.__name__}: {exc}",
+        }
+    report["report_path"] = str(probe_path.resolve())
+    report["tokenizer_source_requested"] = tokenizer_source
+    probe_path.parent.mkdir(parents=True, exist_ok=True)
+    probe_path.write_text(
+        json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return report
+
+
 def _model_first_parameter_dtype(model: Any) -> str | None:
     parameters = getattr(model, "parameters", None)
     if not callable(parameters):
@@ -2328,13 +2519,24 @@ def _base_run_card(
         "finetune_start_report": _finetune_start_report(args, artifact_report),
         "adapter_lineage": None,
         "adapter_promotion": None,
+        "tokenizer_save_report": None,
+        "adapter_artifact_probe": None,
+        "adapter_artifact_probe_runtime_release": None,
         "adapter_promotion_gate_requested": bool(args.adapter_promotion_gate),
+        "adapter_promotion_require_artifact_probe": bool(
+            args.adapter_promotion_gate
+        ),
         "adapter_promotion_max_eval_loss_regression": (
             args.adapter_promotion_max_eval_loss_regression
         ),
         "adapter_promotion_require_generation_change": bool(
             args.adapter_promotion_require_generation_change
         ),
+        "adapter_promotion_probe_prompt": _adapter_promotion_probe_prompt(args),
+        "adapter_promotion_probe_max_new_tokens": (
+            args.adapter_promotion_probe_max_new_tokens
+        ),
+        "adapter_promotion_probe_device": args.adapter_promotion_probe_device,
         "adapter_saved": None,
         "resume_from_checkpoint": (
             None
@@ -2996,7 +3198,28 @@ def _main_with_runtime_access(
             ),
         }
     )
+    tokenizer_save_report = _save_finetune_tokenizer(tokenizer, args.output_dir)
+    card["tokenizer_save_report"] = tokenizer_save_report
     if card["adapter_saved"] is True:
+        if args.adapter_promotion_gate:
+            del train_result
+            del trainer
+            del model
+            card["adapter_artifact_probe_runtime_release"] = (
+                _release_accelerator_cache(torch)
+            )
+            artifact_probe = _run_adapter_artifact_probe(
+                transformers,
+                torch,
+                args,
+                tokenizer_source=_finetune_tokenizer_source(
+                    args,
+                    tokenizer_save_report,
+                ),
+            )
+            card["adapter_artifact_probe"] = artifact_probe
+            for line in hf_causal_lm_artifact_probe_lines(artifact_probe):
+                print(line)
         parent_adapter = (
             args.model_name
             if model_artifact_report.get("artifact_kind") == "peft_adapter"
@@ -3024,6 +3247,7 @@ def _main_with_runtime_access(
                     require_generation_changed=(
                         args.adapter_promotion_require_generation_change
                     ),
+                    require_artifact_probe=True,
                 )
                 card["adapter_promotion"] = {
                     key: promotion.get(key)
@@ -3040,6 +3264,15 @@ def _main_with_runtime_access(
                         "eval_after_loss",
                         "eval_loss_regression",
                         "max_eval_loss_regression",
+                        "require_artifact_probe",
+                        "artifact_probe_status",
+                        "artifact_probe_report_path",
+                        "artifact_probe_device",
+                        "artifact_probe_tokenizer_source_kind",
+                        "artifact_probe_new_token_count",
+                        "artifact_probe_candidate_matches",
+                        "artifact_probe_local_files_only",
+                        "artifact_probe_do_sample",
                         "failed_checks",
                         "missing_checks",
                         "report_path",

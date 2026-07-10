@@ -3705,6 +3705,13 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                         "adapter_saved": True,
                         "finetune_mode": "lora",
                         "model_artifact_kind": "peft_adapter",
+                        "tokenizer_save_report": {
+                            "status": "ready",
+                            "files": [
+                                str(run_card_path.parent / "tokenizer_config.json")
+                            ],
+                            "error": None,
+                        },
                         "dataset_fit_report": {
                             "verdict": "train_eval_ready",
                             "train_ready": True,
@@ -3724,6 +3731,26 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                             ),
                         },
                         "adapter_promotion_gate_requested": True,
+                        "adapter_artifact_probe": {
+                            "status": "ready",
+                            "report_path": str(
+                                run_card_path.parent
+                                / "spiraltorch-hf-artifact-probe.json"
+                            ),
+                            "artifact": {
+                                "artifact_kind": "peft_adapter",
+                                "artifact_source": str(run_card_path.parent),
+                                "adapter_loaded": True,
+                            },
+                            "model_family": "qwen2",
+                            "model_class": "PeftModelForCausalLM",
+                            "tokenizer_class": "Qwen2Tokenizer",
+                            "device": "cpu",
+                            "new_token_count": 8,
+                            "generated_text_changed": True,
+                            "local_files_only": True,
+                            "generation": {"do_sample": False},
+                        },
                         "adapter_promotion": {
                             "status": "ready" if ready else "blocked",
                             "promotion_ready": ready,
@@ -3732,6 +3759,13 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                             ),
                             "eval_loss_regression": loss - 2.0,
                             "max_eval_loss_regression": 0.0,
+                            "require_artifact_probe": True,
+                            "artifact_probe_status": "ready",
+                            "artifact_probe_device": "cpu",
+                            "artifact_probe_new_token_count": 8,
+                            "artifact_probe_candidate_matches": True,
+                            "artifact_probe_local_files_only": True,
+                            "artifact_probe_do_sample": False,
                             "failed_checks": [] if ready else ["candidate_fingerprint"],
                             "missing_checks": [],
                             "report_path": str(
@@ -3912,6 +3946,19 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         )
         self.assertTrue(summary["scale_up_candidate_adapter_promotion_ready"])
         self.assertEqual(summary["top_runs"][0]["adapter_promotion_status"], "ready")
+        self.assertEqual(ready_run["adapter_artifact_probe_status"], "ready")
+        self.assertEqual(ready_run["tokenizer_save_status"], "ready")
+        self.assertEqual(ready_run["tokenizer_save_file_count"], 1)
+        self.assertEqual(ready_run["adapter_artifact_probe_device"], "cpu")
+        self.assertEqual(ready_run["adapter_artifact_probe_new_token_count"], 8)
+        self.assertEqual(
+            summary["scale_up_candidate_adapter_artifact_probe_status"],
+            "ready",
+        )
+        self.assertEqual(
+            summary["scale_up_candidate_adapter_artifact_probe_new_token_count"],
+            8,
+        )
         self.assertEqual(report["scale_up_command_status"], "ok")
         self.assertTrue(
             report["scale_up_command"][
@@ -3919,6 +3966,18 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             ]
         )
         self.assertTrue(report["scale_up_command"]["adapter_continuation_applied"])
+        self.assertEqual(
+            report["scale_up_command"][
+                "adapter_continuation_source_artifact_probe_status"
+            ],
+            "ready",
+        )
+        self.assertEqual(
+            report["scale_up_command"][
+                "adapter_continuation_source_artifact_probe_new_token_count"
+            ],
+            8,
+        )
         self.assertEqual(
             report["scale_up_command"]["adapter_continuation_status"],
             "continue",
@@ -9622,6 +9681,9 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
 
         self.assertTrue(args.adapter_promotion_gate)
         self.assertEqual(args.adapter_promotion_max_eval_loss_regression, 0.05)
+        self.assertEqual(args.adapter_promotion_probe_prompt, None)
+        self.assertEqual(args.adapter_promotion_probe_max_new_tokens, 8)
+        self.assertEqual(args.adapter_promotion_probe_device, "auto")
         invalid_argv = [
             ["--adapter-promotion-gate"],
             [
@@ -9650,10 +9712,90 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 "--adapter-promotion-max-eval-loss-regression",
                 "nan",
             ],
+            [
+                "--adapter-promotion-probe-max-new-tokens",
+                "0",
+            ],
         ]
         for argv in invalid_argv:
             with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
                 module.parse_args(argv)
+
+    def test_bridge_writes_post_save_adapter_artifact_probe(self) -> None:
+        module = load_bridge_example()
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = Path(tmp) / "adapter"
+            output_dir.mkdir()
+            args = module.parse_args(
+                [
+                    "--metadata-only",
+                    "--output-dir",
+                    str(output_dir),
+                    "--adapter-promotion-probe-prompt",
+                    "SpiralTorch qualified adapter",
+                    "--adapter-promotion-probe-max-new-tokens",
+                    "5",
+                    "--adapter-promotion-probe-device",
+                    "cpu",
+                ]
+            )
+
+            class Tokenizer:
+                def save_pretrained(self, path: str):
+                    tokenizer_path = Path(path) / "tokenizer_config.json"
+                    tokenizer_path.write_text("{}\n", encoding="utf-8")
+                    return [str(tokenizer_path)]
+
+            tokenizer_save = module._save_finetune_tokenizer(
+                Tokenizer(),
+                output_dir,
+            )
+            ready = {
+                "row_type": "hf_causal_lm_artifact_probe",
+                "status": "ready",
+                "artifact": {
+                    "artifact_kind": "peft_adapter",
+                    "artifact_source": str(output_dir.resolve()),
+                    "adapter_loaded": True,
+                },
+                "device": "cpu",
+                "new_token_count": 5,
+                "generated_text_changed": True,
+                "local_files_only": True,
+            }
+            with mock.patch.object(
+                module,
+                "hf_causal_lm_artifact_probe_report",
+                return_value=ready,
+            ) as probe:
+                report = module._run_adapter_artifact_probe(
+                    types.SimpleNamespace(),
+                    types.SimpleNamespace(),
+                    args,
+                    tokenizer_source=module._finetune_tokenizer_source(
+                        args,
+                        tokenizer_save,
+                    ),
+                )
+            stored = json.loads(
+                (output_dir / module.HF_ADAPTER_ARTIFACT_PROBE_FILENAME).read_text(
+                    encoding="utf-8"
+                )
+            )
+
+        self.assertEqual(tokenizer_save["status"], "ready")
+        self.assertEqual(report["status"], "ready")
+        self.assertEqual(stored, report)
+        self.assertEqual(probe.call_args.args, (output_dir,))
+        self.assertEqual(
+            probe.call_args.kwargs["tokenizer_name_or_path"],
+            None,
+        )
+        self.assertEqual(probe.call_args.kwargs["artifact_kind"], "peft_adapter")
+        self.assertEqual(probe.call_args.kwargs["max_new_tokens"], 5)
+        self.assertEqual(probe.call_args.kwargs["device"], "cpu")
+        self.assertTrue(probe.call_args.kwargs["local_files_only"])
+        self.assertFalse(probe.call_args.kwargs["do_sample"])
 
     def test_bridge_rejects_in_place_adapter_continuation(self) -> None:
         module = load_bridge_example()
@@ -10698,6 +10840,12 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                     "--generation-prompt",
                     "SpiralTorch is",
                     "--adapter-promotion-require-generation-change",
+                    "--adapter-promotion-probe-prompt",
+                    "SpiralTorch qualified adapter",
+                    "--adapter-promotion-probe-max-new-tokens",
+                    "5",
+                    "--adapter-promotion-probe-device",
+                    "cpu",
                 ]
             )
             runs = module.build_sweep_runs(args)
@@ -10714,13 +10862,31 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             "--adapter-promotion-require-generation-change",
             command,
         )
+        self.assertIn("--adapter-promotion-probe-prompt", command)
+        self.assertEqual(
+            command[command.index("--adapter-promotion-probe-max-new-tokens") + 1],
+            "5",
+        )
+        self.assertEqual(
+            command[command.index("--adapter-promotion-probe-device") + 1],
+            "cpu",
+        )
         self.assertTrue(bridge_args.adapter_promotion_gate)
         self.assertEqual(
             bridge_args.adapter_promotion_max_eval_loss_regression,
             0.03,
         )
         self.assertTrue(bridge_args.adapter_promotion_require_generation_change)
+        self.assertEqual(
+            bridge_args.adapter_promotion_probe_prompt,
+            "SpiralTorch qualified adapter",
+        )
+        self.assertEqual(bridge_args.adapter_promotion_probe_max_new_tokens, 5)
+        self.assertEqual(bridge_args.adapter_promotion_probe_device, "cpu")
         self.assertTrue(report["adapter_promotion_gate_requested"])
+        self.assertTrue(report["adapter_promotion_require_artifact_probe"])
+        self.assertEqual(report["adapter_promotion_probe_max_new_tokens"], 5)
+        self.assertEqual(report["adapter_promotion_probe_device"], "cpu")
         self.assertEqual(report["finetune_mode"], "lora")
         self.assertTrue(report["summary"]["adapter_promotion_required"])
         self.assertEqual(report["summary"]["status"], "planned")

@@ -1,6 +1,6 @@
 {
-  "schema": "spiraltorch.hf_causal_lm_artifact_probe.sample.v1",
-  "scope": "one-step non-GPT-2 integration smoke; not a model-quality claim",
+  "schema": "spiraltorch.hf_causal_lm_artifact_probe.sample.v2",
+  "scope": "one-step non-GPT-2 promotion-qualification smoke; not a model-quality claim",
   "model_profile": "pythia-70m-local-smoke",
   "model_name": "EleutherAI/pythia-70m-deduped",
   "model_family": "gpt_neox",
@@ -36,8 +36,23 @@
     "eval_loss_regression": 0.0014104843139648438,
     "adapter_promotion_status": "ready",
     "adapter_promotion_recommendation": "promote_candidate",
+    "adapter_promotion_artifact_probe_required": true,
     "adapter_weight_bytes": 298176,
     "zspace_probe_status": "ok"
+  },
+  "post_save_runtime_release": {
+    "accelerators_synchronized": [
+      "mps"
+    ],
+    "accelerator_caches_released": [
+      "mps"
+    ],
+    "gc_collected": 67,
+    "errors": []
+  },
+  "tokenizer_save": {
+    "status": "ready",
+    "file_count": 2
   },
   "artifact_probe": {
     "status": "ready",
@@ -45,23 +60,46 @@
     "model_class": "PeftModelForCausalLM",
     "config_class": "GPTNeoXConfig",
     "tokenizer_class": "GPTNeoXTokenizer",
+    "tokenizer_source_kind": "adapter_artifact",
     "adapter_loaded": true,
     "active_adapter": "default",
     "device": "mps:0",
-    "prompt": "SpiralTorch is",
-    "max_new_tokens": 16,
+    "prompt": "SpiralTorch qualified adapter",
+    "max_new_tokens": 12,
     "do_sample": false,
-    "input_token_count": 6,
-    "output_token_count": 22,
-    "new_token_count": 16,
+    "input_token_count": 7,
+    "output_token_count": 19,
+    "new_token_count": 12,
     "batch_size_compat_installed": false,
     "local_files_only": true,
-    "load_seconds": 3.462231999990763,
-    "generation_seconds": 0.23999645900039468,
-    "generated_text": "SpiralTorch is a very popular name for the Spiral Torch.\n\nThe S"
+    "load_seconds": 0.11325524999119807,
+    "generation_seconds": 0.1888482920039678,
+    "generated_text": "SpiralTorch qualified adapter, the\n\nSpiral Torch, the adapter"
+  },
+  "promotion_qualification": {
+    "status": "ready",
+    "promotion_ready": true,
+    "recommendation": "promote_candidate",
+    "artifact_probe_status": "ready",
+    "artifact_probe_candidate_matches": true,
+    "artifact_probe_local_files_only": true,
+    "artifact_probe_do_sample": false,
+    "artifact_reload_check": "passed",
+    "artifact_generation_check": "passed",
+    "failed_checks": [],
+    "missing_checks": []
+  },
+  "continuation": {
+    "promotion_chain_status": "ready",
+    "promotion_revalidated_ready": true,
+    "continuation_ready": true,
+    "scale_up_status": "ok",
+    "adapter_continuation_status": "continue",
+    "probe_provenance_preserved": true
   },
   "commands": {
-    "train_shape": "spiral-hf-finetune --model-profile pythia-70m-local-smoke --allow-remote --train --finetune-mode lora --lora-rank 4 --lora-alpha 8 --max-steps 1 --block-size 16 --eval-before-train --adapter-promotion-gate ...",
-    "artifact_probe_shape": "spiral-hf-artifact-probe <adapter-dir> --prompt 'SpiralTorch is' --max-new-tokens 16 --allow-remote --device mps --out artifact-probe.json"
+    "train_shape": "spiral-hf-finetune --model-profile pythia-70m-local-smoke --allow-remote --train --finetune-mode lora --lora-rank 4 --lora-alpha 8 --max-steps 1 --block-size 16 --eval-before-train --adapter-promotion-gate --adapter-promotion-probe-prompt 'SpiralTorch qualified adapter' --adapter-promotion-probe-max-new-tokens 12 --adapter-promotion-probe-device mps ...",
+    "promotion_chain_shape": "spiral-hf-adapter-chain <adapter-dir> --require-continuation-ready",
+    "scale_up_shape": "spiral-hf-scale-up <promotion-chain.json> --require-ready --write-command next-generation.json"
   }
 }
