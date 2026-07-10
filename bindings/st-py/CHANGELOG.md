@@ -37,6 +37,11 @@
   and minimum-improvement/patience policies to promotion chains. Decisions are
   separately inspectable and persistable, missing eval evidence fails closed,
   and scale-up refuses to emit another generation after a policy stop.
+- Resumable adapter executor: add `spiral-hf-adapter-executor` and an importable
+  state machine that closes audit, policy, scale-up, preflight, execution, and
+  live postflight promotion verification into one atomic artifact. Successful,
+  failed, interrupted, and resumed generations retain command and lineage
+  evidence, while per-invocation generation limits prevent accidental runaway.
 - Trainer resume audit: add `hf_finetune_checkpoint_resume_report(...)` and
   compact lines for optimizer/scheduler/RNG state availability, saved versus
   requested step horizons, and the exhausted-scheduler case where adapter
