@@ -804,7 +804,7 @@ cwd-missing histories fail closed. To intentionally change policy, issue a new
 full `spiral-hf-adapter-executor ... --detach` command instead of replaying.
 
 For bounded unattended continuation, inspect one supervision decision and then
-run the foreground supervisor over the same launch artifact:
+detach the supervisor over the same launch artifact:
 
 ```bash
 spiral-hf-adapter-executor-supervise \
@@ -813,10 +813,38 @@ spiral-hf-adapter-executor-supervise \
 
 spiral-hf-adapter-executor-supervise \
   runs/qwen2-study/executor/spiraltorch-hf-adapter-continuation-executor-launch.json \
+  --detach \
   --max-resumes 5 \
   --poll-interval-seconds 5 \
   --timeout-seconds 0
 ```
+
+The detach call returns only after a new supervisor run and its single-owner
+lock agree on the child PID. Repeating the command while that owner is verified
+is an idempotent `already_running` no-op. Observe both layers independently:
+
+```bash
+spiral-hf-adapter-executor-supervisor-launch-status \
+  runs/qwen2-study/executor/spiraltorch-hf-adapter-continuation-executor-supervisor-launch.json
+
+spiral-hf-adapter-executor-supervisor-status \
+  runs/qwen2-study/executor/spiraltorch-hf-adapter-continuation-executor-supervisor.json
+```
+
+To stop only the controller while leaving its current detached executor alone,
+write a run-targeted cooperative request:
+
+```bash
+spiral-hf-adapter-executor-supervisor-stop \
+  runs/qwen2-study/executor/spiraltorch-hf-adapter-continuation-executor-supervisor.json \
+  --reason operator_pause
+```
+
+The stop command never signals a recorded PID. It writes a mode-`0600` control
+artifact only when the supervisor state and live lock identify the same run;
+the next poll acknowledges it as a healthy `stopped` boundary. A later detach
+starts a new run ID and cannot consume the old request. Omit `--detach` when a
+foreground controller is preferable.
 
 The supervisor waits while a healthy detached owner is running and automatically
 replays only an executor whose exact durable reason is
@@ -833,6 +861,10 @@ plus transition/resume history is written by default to
 root; use `--state` to place it elsewhere. Restarting a supervisor marks its
 unfinished prior run interrupted, then derives the next action from current
 launch/executor artifacts rather than replaying stale in-memory intent.
+Detached launch history and logs default to
+`spiraltorch-hf-adapter-continuation-executor-supervisor-launch.json` and
+`supervisor-logs/` under the same output root; use `--launch-state` to relocate
+the history artifact.
 
 Alternatively, repeat the full command to change explicit settings, or raise
 `--max-generations` for several synchronous generations in one invocation. The
@@ -956,7 +988,12 @@ is available through
 available through
 `st.hf_adapter_continuation_executor_supervision_report(...)` and
 `st.supervise_hf_adapter_continuation_executor(...)`; load its durable history
-with `st.load_hf_adapter_continuation_executor_supervisor(...)`.
+with `st.load_hf_adapter_continuation_executor_supervisor(...)`. Detach with
+`st.launch_hf_adapter_continuation_executor_supervisor(...)`, inspect ownership
+through `st.hf_adapter_continuation_executor_supervisor_status_report(...)` or
+`st.hf_adapter_continuation_executor_supervisor_launch_status_report(...)`, and
+request a controller-only stop with
+`st.request_hf_adapter_continuation_executor_supervisor_stop(...)`.
 
 Use `--resume-from-checkpoint` only for an exact Trainer continuation that
 should restore optimizer, scheduler, and RNG state. SpiralTorch audits

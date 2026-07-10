@@ -17,6 +17,7 @@ hf_adapter_executor_launch: ModuleType
 hf_adapter_executor_recovery: ModuleType
 hf_adapter_executor_status: ModuleType
 hf_adapter_executor_supervisor: ModuleType
+hf_adapter_executor_supervisor_launch: ModuleType
 hf_ft_status: ModuleType
 hf_generation: ModuleType
 hpo: ModuleType
@@ -578,8 +579,14 @@ HF_ADAPTER_CONTINUATION_EXECUTOR_LAUNCH_STATUS_SCHEMA: str
 HF_ADAPTER_CONTINUATION_EXECUTOR_RESUME_SCHEMA: str
 HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISION_SCHEMA: str
 HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISOR_FILENAME: str
+HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISOR_LAUNCH_FILENAME: str
+HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISOR_LAUNCH_LOCK_FILENAME: str
+HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISOR_LAUNCH_SCHEMA: str
+HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISOR_LAUNCH_STATUS_SCHEMA: str
 HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISOR_LOCK_FILENAME: str
 HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISOR_SCHEMA: str
+HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISOR_STATUS_SCHEMA: str
+HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISOR_STOP_REQUEST_SCHEMA: str
 HF_ADAPTER_CONTINUATION_EXECUTOR_INTERRUPTION_CLAIM_SCHEMA: str
 HF_ADAPTER_CONTINUATION_EXECUTOR_OUTPUT_RESOLUTION_SCHEMA: str
 HF_ADAPTER_CONTINUATION_EXECUTOR_QUARANTINE_SUFFIX: str
@@ -814,6 +821,47 @@ def load_hf_adapter_continuation_executor_supervisor(
     value: str | PathLike[str],
 ) -> Dict[str, object]: ...
 def hf_adapter_continuation_executor_supervisor_lines(
+    report_or_path: Mapping[str, object] | str | PathLike[str],
+) -> List[str]: ...
+def hf_adapter_continuation_executor_supervisor_status_report(
+    report_or_path: Mapping[str, object] | str | PathLike[str],
+) -> Dict[str, object]: ...
+def hf_adapter_continuation_executor_supervisor_status_lines(
+    report_or_path: Mapping[str, object] | str | PathLike[str],
+) -> List[str]: ...
+def request_hf_adapter_continuation_executor_supervisor_stop(
+    report_or_path: Mapping[str, object] | str | PathLike[str],
+    *,
+    reason: str = ...,
+) -> Dict[str, object]: ...
+def load_hf_adapter_continuation_executor_supervisor_stop_request(
+    value: str | PathLike[str],
+) -> Dict[str, object]: ...
+def hf_adapter_continuation_executor_supervisor_stop_request_lines(
+    report_or_path: Mapping[str, object] | str | PathLike[str],
+) -> List[str]: ...
+def launch_hf_adapter_continuation_executor_supervisor(
+    report_or_path: Mapping[str, object] | str | PathLike[str],
+    *,
+    max_resumes: int = ...,
+    poll_interval_seconds: float = ...,
+    timeout_seconds: float = ...,
+    handoff_timeout_seconds: float = ...,
+    launch_handoff_timeout_seconds: float = ...,
+    supervisor_state_path: str | PathLike[str] | None = ...,
+    supervisor_launch_state_path: str | PathLike[str] | None = ...,
+    command_cwd: str | PathLike[str] | None = ...,
+) -> Dict[str, object]: ...
+def load_hf_adapter_continuation_executor_supervisor_launch(
+    value: str | PathLike[str],
+) -> Dict[str, object]: ...
+def hf_adapter_continuation_executor_supervisor_launch_lines(
+    report_or_path: Mapping[str, object] | str | PathLike[str],
+) -> List[str]: ...
+def hf_adapter_continuation_executor_supervisor_launch_status_report(
+    report_or_path: Mapping[str, object] | str | PathLike[str],
+) -> Dict[str, object]: ...
+def hf_adapter_continuation_executor_supervisor_launch_status_lines(
     report_or_path: Mapping[str, object] | str | PathLike[str],
 ) -> List[str]: ...
 def hf_adapter_continuation_executor_output_quarantine_report(
@@ -9989,6 +10037,7 @@ __all__ = [
     "hf_adapter_executor_recovery",
     "hf_adapter_executor_status",
     "hf_adapter_executor_supervisor",
+    "hf_adapter_executor_supervisor_launch",
     "hf_generation",
     "hf_ft_status",
     "HF_FINETUNE_DEFAULT_DEVICE_BACKENDS",
@@ -10018,8 +10067,14 @@ __all__ = [
     "HF_ADAPTER_CONTINUATION_EXECUTOR_RESUME_SCHEMA",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISION_SCHEMA",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISOR_FILENAME",
+    "HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISOR_LAUNCH_FILENAME",
+    "HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISOR_LAUNCH_LOCK_FILENAME",
+    "HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISOR_LAUNCH_SCHEMA",
+    "HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISOR_LAUNCH_STATUS_SCHEMA",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISOR_LOCK_FILENAME",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISOR_SCHEMA",
+    "HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISOR_STATUS_SCHEMA",
+    "HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISOR_STOP_REQUEST_SCHEMA",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_INTERRUPTION_CLAIM_SCHEMA",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_OUTPUT_RESOLUTION_SCHEMA",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_QUARANTINE_SUFFIX",
@@ -10046,6 +10101,12 @@ __all__ = [
     "hf_adapter_continuation_executor_supervision_lines",
     "hf_adapter_continuation_executor_supervision_report",
     "hf_adapter_continuation_executor_supervisor_lines",
+    "hf_adapter_continuation_executor_supervisor_launch_lines",
+    "hf_adapter_continuation_executor_supervisor_launch_status_lines",
+    "hf_adapter_continuation_executor_supervisor_launch_status_report",
+    "hf_adapter_continuation_executor_supervisor_status_lines",
+    "hf_adapter_continuation_executor_supervisor_status_report",
+    "hf_adapter_continuation_executor_supervisor_stop_request_lines",
     "hf_adapter_continuation_executor_output_quarantine_report",
     "hf_adapter_continuation_executor_output_resolution_lines",
     "hf_adapter_continuation_executor_stop_request_lines",
@@ -10064,9 +10125,13 @@ __all__ = [
     "load_hf_adapter_continuation_executor_stop_request",
     "load_hf_adapter_continuation_executor_launch",
     "load_hf_adapter_continuation_executor_supervisor",
+    "load_hf_adapter_continuation_executor_supervisor_launch",
+    "load_hf_adapter_continuation_executor_supervisor_stop_request",
     "request_hf_adapter_continuation_executor_stop",
     "quarantine_hf_adapter_continuation_executor_output",
     "resume_hf_adapter_continuation_executor",
+    "request_hf_adapter_continuation_executor_supervisor_stop",
+    "launch_hf_adapter_continuation_executor_supervisor",
     "supervise_hf_adapter_continuation_executor",
     "load_hf_adapter_continuation_executor",
     "hf_finetune_corpus_file_report",

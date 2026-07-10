@@ -94,6 +94,12 @@
   launcher/executor handoff identity checks keep unattended continuation
   bounded; operator stop, policy stop, recovery, failed launch, remote owner,
   and unhealthy artifacts remain explicit terminal or manual boundaries.
+- Detached supervisor control: extend the supervisor CLI with `--detach`, a
+  durable launch history, PID-plus-lock handoff verification, idempotent
+  duplicate launch handling, and separate launch/runtime status commands. A
+  run-targeted cooperative stop artifact lets operators stop the controller
+  without signalling a PID or terminating the independently owned executor;
+  stale requests cannot cross into a restarted supervisor run.
 - Trainer resume audit: add `hf_finetune_checkpoint_resume_report(...)` and
   compact lines for optimizer/scheduler/RNG state availability, saved versus
   requested step horizons, and the exhausted-scheduler case where adapter

@@ -5,6 +5,8 @@ import os
 import signal
 import socket
 import sys
+import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -473,6 +475,124 @@ def test_supervisor_budget_timeout_and_live_owner_lock_are_bounded(
     supervisor_lock.unlink()
 
 
+def test_supervisor_status_and_cooperative_stop_are_run_targeted(
+    tmp_path: Path,
+) -> None:
+    launch_path, executor_state_path = _write_launch_artifact(
+        tmp_path,
+        executor_status="auditing",
+        executor_action="audit_chain",
+        executor_reason="executor_started",
+        launcher_status="handed_off",
+        launcher_alive=True,
+    )
+    results: list[dict[str, object]] = []
+    errors: list[BaseException] = []
+
+    def run_supervisor() -> None:
+        try:
+            results.append(
+                supervisor.supervise_hf_adapter_continuation_executor(
+                    launch_path,
+                    max_resumes=2,
+                    poll_interval_seconds=0.02,
+                    timeout_seconds=5.0,
+                )
+            )
+        except BaseException as exc:
+            errors.append(exc)
+
+    worker = threading.Thread(target=run_supervisor, daemon=True)
+    worker.start()
+    state_path = (
+        executor_state_path.parent
+        / supervisor.HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISOR_FILENAME
+    )
+    deadline = time.monotonic() + 3.0
+    while not state_path.is_file() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert state_path.is_file()
+
+    running = supervisor.hf_adapter_continuation_executor_supervisor_status_report(
+        state_path
+    )
+    requested = (
+        supervisor.request_hf_adapter_continuation_executor_supervisor_stop(
+            state_path,
+            reason="test_operator_boundary",
+        )
+    )
+    repeated = supervisor.request_hf_adapter_continuation_executor_supervisor_stop(
+        state_path,
+        reason="ignored_after_idempotent_create",
+    )
+    worker.join(timeout=3.0)
+    terminal = supervisor.hf_adapter_continuation_executor_supervisor_status_report(
+        state_path
+    )
+
+    try:
+        assert errors == []
+        assert not worker.is_alive()
+        assert running["status"] == "running"
+        assert running["healthy"] is True
+        assert running["supervisor_lock_owner_verified"] is True
+        assert requested["created"] is True
+        assert requested["reason"] == "test_operator_boundary"
+        assert repeated["created"] is False
+        assert repeated["request_id"] == requested["request_id"]
+        assert results[0]["status"] == "stopped"
+        assert results[0]["reason"] == "stop_requested"
+        assert terminal["status"] == "stopped"
+        assert terminal["healthy"] is True
+        assert terminal["stop_requested"] is True
+        assert terminal["supervisor_lock_owner_verified"] is False
+        assert (
+            supervisor.hf_adapter_continuation_executor_supervisor_status_lines(
+                terminal
+            )[0]
+            .startswith("hf_adapter_continuation_executor_supervisor_status ")
+        )
+        assert "created=True" in (
+            supervisor.hf_adapter_continuation_executor_supervisor_stop_request_lines(
+                requested
+            )[0]
+        )
+        request_path = Path(requested["request_path"])
+        original = json.loads(request_path.read_text(encoding="utf-8"))
+        malformed = dict(original)
+        malformed.pop("reason")
+        request_path.write_text(json.dumps(malformed), encoding="utf-8")
+        with pytest.raises(ValueError, match="identity is invalid"):
+            supervisor.load_hf_adapter_continuation_executor_supervisor_stop_request(
+                request_path
+            )
+        invalid = (
+            supervisor.hf_adapter_continuation_executor_supervisor_status_report(
+                state_path
+            )
+        )
+        assert invalid["healthy"] is False
+        assert "stop_request_invalid" in invalid["health_issues"]
+
+        identity_mismatch = dict(original)
+        identity_mismatch["supervisor_pid"] += 1
+        request_path.write_text(json.dumps(identity_mismatch), encoding="utf-8")
+        mismatched = (
+            supervisor.hf_adapter_continuation_executor_supervisor_status_report(
+                state_path
+            )
+        )
+        assert mismatched["healthy"] is False
+        assert "stop_request_invalid" in mismatched["health_issues"]
+        assert "supervisor_pid" in str(mismatched["stop_request_error"])
+    finally:
+        (
+            executor_state_path.parent
+            / st.HF_ADAPTER_CONTINUATION_EXECUTOR_LOCK_FILENAME
+        ).unlink(missing_ok=True)
+
+
 def test_supervisor_restart_closes_interrupted_run_and_rejects_corrupt_history(
     tmp_path: Path,
 ) -> None:
@@ -755,11 +875,21 @@ def test_supervisor_cli_and_public_exports(
     assert persisted["runs"][-1]["max_resumes"] == 3
     for name in (
         "hf_adapter_executor_supervisor",
+        "hf_adapter_executor_supervisor_launch",
         "hf_adapter_continuation_executor_supervision_report",
         "hf_adapter_continuation_executor_supervision_lines",
         "supervise_hf_adapter_continuation_executor",
         "load_hf_adapter_continuation_executor_supervisor",
         "hf_adapter_continuation_executor_supervisor_lines",
+        "hf_adapter_continuation_executor_supervisor_status_report",
+        "hf_adapter_continuation_executor_supervisor_status_lines",
+        "request_hf_adapter_continuation_executor_supervisor_stop",
+        "load_hf_adapter_continuation_executor_supervisor_stop_request",
+        "launch_hf_adapter_continuation_executor_supervisor",
+        "load_hf_adapter_continuation_executor_supervisor_launch",
+        "hf_adapter_continuation_executor_supervisor_launch_status_report",
         "HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISOR_SCHEMA",
+        "HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISOR_LAUNCH_SCHEMA",
+        "HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISOR_STOP_REQUEST_SCHEMA",
     ):
         assert name in st.__all__
