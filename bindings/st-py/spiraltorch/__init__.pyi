@@ -13,6 +13,7 @@ hf_ft: ModuleType
 hf_peft: ModuleType
 hf_adapter: ModuleType
 hf_adapter_executor: ModuleType
+hf_adapter_executor_launch: ModuleType
 hf_adapter_executor_status: ModuleType
 hf_ft_status: ModuleType
 hf_generation: ModuleType
@@ -568,6 +569,10 @@ HF_ADAPTER_CONTINUATION_EXECUTOR_CONTROL_DIRNAME: str
 HF_ADAPTER_CONTINUATION_EXECUTOR_FILENAME: str
 HF_ADAPTER_CONTINUATION_EXECUTOR_LOCK_FILENAME: str
 HF_ADAPTER_CONTINUATION_EXECUTOR_LOG_DIRNAME: str
+HF_ADAPTER_CONTINUATION_EXECUTOR_LAUNCH_FILENAME: str
+HF_ADAPTER_CONTINUATION_EXECUTOR_LAUNCH_LOCK_FILENAME: str
+HF_ADAPTER_CONTINUATION_EXECUTOR_LAUNCH_SCHEMA: str
+HF_ADAPTER_CONTINUATION_EXECUTOR_LAUNCH_STATUS_SCHEMA: str
 HF_ADAPTER_CONTINUATION_EXECUTOR_SCHEMA: str
 HF_ADAPTER_CONTINUATION_EXECUTOR_STATUS_SCHEMA: str
 HF_ADAPTER_CONTINUATION_EXECUTOR_STOP_REQUEST_SCHEMA: str
@@ -746,6 +751,27 @@ def hf_adapter_continuation_executor_status_report(
     report_or_path: Mapping[str, object] | str | PathLike[str],
 ) -> Dict[str, object]: ...
 def hf_adapter_continuation_executor_status_lines(
+    report_or_path: Mapping[str, object] | str | PathLike[str],
+) -> List[str]: ...
+def launch_hf_adapter_continuation_executor(
+    executor_argv: Sequence[str],
+    *,
+    output_root: str | PathLike[str],
+    executor_state_path: str | PathLike[str],
+    launch_state_path: str | PathLike[str] | None = ...,
+    command_cwd: str | PathLike[str] | None = ...,
+    handoff_timeout_seconds: float = ...,
+) -> Dict[str, object]: ...
+def load_hf_adapter_continuation_executor_launch(
+    value: str | PathLike[str],
+) -> Dict[str, object]: ...
+def hf_adapter_continuation_executor_launch_lines(
+    report_or_path: Mapping[str, object] | str | PathLike[str],
+) -> List[str]: ...
+def hf_adapter_continuation_executor_launch_status_report(
+    report_or_path: Mapping[str, object] | str | PathLike[str],
+) -> Dict[str, object]: ...
+def hf_adapter_continuation_executor_launch_status_lines(
     report_or_path: Mapping[str, object] | str | PathLike[str],
 ) -> List[str]: ...
 
@@ -9903,6 +9929,7 @@ __all__ = [
     "hf_peft",
     "hf_adapter",
     "hf_adapter_executor",
+    "hf_adapter_executor_launch",
     "hf_adapter_executor_status",
     "hf_generation",
     "hf_ft_status",
@@ -9926,6 +9953,10 @@ __all__ = [
     "HF_ADAPTER_CONTINUATION_EXECUTOR_FILENAME",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_LOCK_FILENAME",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_LOG_DIRNAME",
+    "HF_ADAPTER_CONTINUATION_EXECUTOR_LAUNCH_FILENAME",
+    "HF_ADAPTER_CONTINUATION_EXECUTOR_LAUNCH_LOCK_FILENAME",
+    "HF_ADAPTER_CONTINUATION_EXECUTOR_LAUNCH_SCHEMA",
+    "HF_ADAPTER_CONTINUATION_EXECUTOR_LAUNCH_STATUS_SCHEMA",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_SCHEMA",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_STATUS_SCHEMA",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_STOP_REQUEST_SCHEMA",
@@ -9941,6 +9972,9 @@ __all__ = [
     "hf_causal_lm_artifact_report",
     "hf_adapter_fingerprint",
     "hf_adapter_continuation_executor_lines",
+    "hf_adapter_continuation_executor_launch_lines",
+    "hf_adapter_continuation_executor_launch_status_lines",
+    "hf_adapter_continuation_executor_launch_status_report",
     "hf_adapter_continuation_executor_stop_request_lines",
     "hf_adapter_continuation_executor_status_lines",
     "hf_adapter_continuation_executor_status_report",
@@ -9955,6 +9989,7 @@ __all__ = [
     "load_hf_adapter_promotion_chain",
     "load_hf_adapter_continuation_policy",
     "load_hf_adapter_continuation_executor_stop_request",
+    "load_hf_adapter_continuation_executor_launch",
     "request_hf_adapter_continuation_executor_stop",
     "load_hf_adapter_continuation_executor",
     "hf_finetune_corpus_file_report",
@@ -9968,6 +10003,7 @@ __all__ = [
     "summarize_hf_causal_lm_artifact",
     "prepare_hf_finetune_model",
     "run_hf_adapter_continuation_executor",
+    "launch_hf_adapter_continuation_executor",
     "write_hf_adapter_lineage",
     "write_hf_adapter_continuation_policy",
     "write_hf_adapter_promotion_chain",

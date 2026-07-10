@@ -756,6 +756,29 @@ spiral-hf-adapter-executor runs/qwen2-study \
   --run --max-generations 1
 ```
 
+For a long run, use the same executor policy in a detached process:
+
+```bash
+spiral-hf-adapter-executor runs/qwen2-study \
+  --output-root runs/qwen2-study/executor \
+  --state runs/qwen2-study/executor/state.json \
+  --max-lineage-depth 6 \
+  --min-eval-improvement 0.002 \
+  --plateau-patience 2 \
+  --run --max-generations 1 --detach --no-tee-output
+```
+
+The command returns success only after it observes a new executor invocation
+and verifies that the detached PID owns the output root's single-writer lock.
+It writes durable launch history to
+`spiraltorch-hf-adapter-continuation-executor-launch.json` under the output
+root and a separate owner-only launcher log under `executor-logs/`. Repeating
+the command while that owner is live is idempotent. A handoff timeout remains
+visible as a nonzero start result rather than guessing that training began;
+raise `--detach-handoff-timeout-seconds` for a slower environment and inspect
+the launch status before retrying. Use `--launch-state` to place the history at
+another path.
+
 Repeat the same command to resume from the new deepest eligible adapter, or
 raise `--max-generations` explicitly for several synchronous generations in
 one invocation. The executor holds a single-writer lock for the output root,
@@ -780,6 +803,14 @@ Inspect a live or completed executor without changing its state:
 ```bash
 spiral-hf-adapter-executor-status \
   runs/qwen2-study/executor/state.json \
+  --require-healthy
+```
+
+Inspect the detached launcher and its executor together, also read-only:
+
+```bash
+spiral-hf-adapter-executor-launch-status \
+  runs/qwen2-study/executor/spiraltorch-hf-adapter-continuation-executor-launch.json \
   --require-healthy
 ```
 
@@ -817,7 +848,11 @@ guessed healthy.
 or promoted output. Python can drive the same state machine with
 `st.run_hf_adapter_continuation_executor(...)` and inspect it with
 `st.load_hf_adapter_continuation_executor(...)` or
-`st.hf_adapter_continuation_executor_status_report(...)`.
+`st.hf_adapter_continuation_executor_status_report(...)`. Detached callers can
+use `st.launch_hf_adapter_continuation_executor(...)`, load launch history with
+`st.load_hf_adapter_continuation_executor_launch(...)`, and combine launcher
+and executor health with
+`st.hf_adapter_continuation_executor_launch_status_report(...)`.
 
 Use `--resume-from-checkpoint` only for an exact Trainer continuation that
 should restore optimizer, scheduler, and RNG state. SpiralTorch audits
