@@ -375,3 +375,31 @@ def test_status_uses_latest_attempt_for_completed_executor(tmp_path: Path) -> No
         "executor_log_missing",
         "promoted_output_missing",
     }
+
+
+def test_status_fails_closed_on_inconsistent_quarantine_intent(tmp_path: Path) -> None:
+    output_dir = tmp_path / "generation-002"
+    output_dir.mkdir()
+    log_path = tmp_path / "executor.log"
+    log_path.write_text("cancelled", encoding="utf-8")
+    state_path = _write_running_state(
+        tmp_path / "state.json",
+        pid=99_999_999,
+        hostname=socket.gethostname(),
+        output_dir=output_dir,
+        log_path=log_path,
+    )
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["status"] = "stopped"
+    state["generations"][0]["status"] = "cancelled"
+    malformed_intent = {"resolution_id": "matching-but-malformed-intent"}
+    state["pending_output_resolution"] = dict(malformed_intent)
+    state["generations"][0]["pending_output_resolution"] = dict(malformed_intent)
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+
+    report = st.hf_adapter_continuation_executor_status_report(state_path)
+
+    assert report["healthy"] is False
+    assert "output_quarantine_intent_invalid" in report["health_issues"]
+    assert report["recommended_action"] == "inspect_output_quarantine_intent"
+    assert report["pending_output_resolution_attempt_ids"] == ["status-attempt"]

@@ -740,7 +740,11 @@ def hf_adapter_continuation_executor_launch_status_report(
     if latest is None:
         status = "empty"
     elif observation == "alive":
-        if executor_lifecycle in {"generation_limit_reached", "ready", "stopped"}:
+        if executor_lifecycle == "output_quarantined":
+            status = (
+                "recoverable" if executor_healthy is True else "executor_unhealthy"
+            )
+        elif executor_lifecycle in {"generation_limit_reached", "ready", "stopped"}:
             status = "completed" if executor_healthy is True else "executor_unhealthy"
         elif executor_lifecycle in {"blocked", "failed", "interrupted"}:
             status = f"executor_{executor_lifecycle}"
@@ -758,6 +762,8 @@ def hf_adapter_continuation_executor_launch_status_report(
         status = "remote_running"
     elif observation == "unverified":
         status = "running_unverified"
+    elif executor_lifecycle == "output_quarantined":
+        status = "recoverable" if executor_healthy is True else "executor_unhealthy"
     elif executor_lifecycle in {"generation_limit_reached", "ready", "stopped"}:
         status = "completed" if executor_healthy is True else "executor_unhealthy"
     elif executor_lifecycle in {"blocked", "failed", "interrupted"}:
@@ -774,13 +780,15 @@ def hf_adapter_continuation_executor_launch_status_report(
     else:
         status = "exited"
 
-    healthy = status in {"completed", "running", "starting"}
+    healthy = status in {"completed", "recoverable", "running", "starting"}
     if status == "starting":
         recommended_action = "wait_for_executor_handoff"
     elif status == "running":
         recommended_action = "inspect_executor_status"
     elif status == "completed":
         recommended_action = "inspect_executor_result"
+    elif status == "recoverable":
+        recommended_action = "resume_executor"
     elif status == "remote_running":
         recommended_action = "inspect_remote_launcher"
     elif status == "running_unverified":
@@ -792,7 +800,12 @@ def hf_adapter_continuation_executor_launch_status_report(
         "executor_interrupted",
         "executor_unhealthy",
     }:
-        recommended_action = "inspect_executor_health"
+        nested_action = (
+            executor_status.get("recommended_action")
+            if isinstance(executor_status, Mapping)
+            else None
+        )
+        recommended_action = str(nested_action or "inspect_executor_health")
     else:
         recommended_action = "inspect_launcher_log"
     log = _path_report(None if latest is None else latest.get("log_path"))

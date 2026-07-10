@@ -970,6 +970,14 @@ from .hf_adapter_executor_launch import (
     launch_hf_adapter_continuation_executor,
     load_hf_adapter_continuation_executor_launch,
 )
+from . import hf_adapter_executor_recovery as hf_adapter_executor_recovery
+from .hf_adapter_executor_recovery import (
+    HF_ADAPTER_CONTINUATION_EXECUTOR_OUTPUT_RESOLUTION_SCHEMA,
+    HF_ADAPTER_CONTINUATION_EXECUTOR_QUARANTINE_SUFFIX,
+    hf_adapter_continuation_executor_output_quarantine_report,
+    hf_adapter_continuation_executor_output_resolution_lines,
+    quarantine_hf_adapter_continuation_executor_output,
+)
 
 from . import hf_ft_status as hf_ft_status
 from .hf_ft_status import (
@@ -1231,6 +1239,8 @@ _EXTRAS = [
     "HF_ADAPTER_CONTINUATION_EXECUTOR_LAUNCH_LOCK_FILENAME",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_LAUNCH_SCHEMA",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_LAUNCH_STATUS_SCHEMA",
+    "HF_ADAPTER_CONTINUATION_EXECUTOR_OUTPUT_RESOLUTION_SCHEMA",
+    "HF_ADAPTER_CONTINUATION_EXECUTOR_QUARANTINE_SUFFIX",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_SCHEMA",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_STATUS_SCHEMA",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_STOP_REQUEST_SCHEMA",
@@ -1242,10 +1252,13 @@ _EXTRAS = [
     "hf_adapter",
     "hf_adapter_executor",
     "hf_adapter_executor_launch",
+    "hf_adapter_executor_recovery",
     "hf_adapter_executor_status",
     "hf_adapter_continuation_executor_launch_lines",
     "hf_adapter_continuation_executor_launch_status_lines",
     "hf_adapter_continuation_executor_launch_status_report",
+    "hf_adapter_continuation_executor_output_quarantine_report",
+    "hf_adapter_continuation_executor_output_resolution_lines",
     "hf_adapter_continuation_executor_lines",
     "hf_adapter_continuation_executor_stop_request_lines",
     "hf_adapter_continuation_executor_status_lines",
@@ -1264,6 +1277,7 @@ _EXTRAS = [
     "load_hf_adapter_continuation_executor_stop_request",
     "load_hf_adapter_continuation_executor_launch",
     "request_hf_adapter_continuation_executor_stop",
+    "quarantine_hf_adapter_continuation_executor_output",
     "load_hf_adapter_continuation_executor",
     "hf_finetune_adapter_config",
     "hf_finetune_corpus_file_report",
