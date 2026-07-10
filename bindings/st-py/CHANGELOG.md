@@ -79,6 +79,13 @@
   persisted through intent/resolution history, exposed in live status, and
   remains fail-closed for remote, custom, live, or process-scope-unverified
   attempts.
+- Durable executor resume: add `spiral-hf-adapter-executor-resume` and
+  importable plan/execute helpers that replay the exact argv and working
+  directory retained by detached launch history. New launches persist a
+  SHA-256 replay contract binding argv, output root, executor state, and cwd;
+  resume CAS-checks its source launch under the launch lock, requires a healthy
+  terminal executor whose durable action is `resume_executor`, and rejects
+  modified, stale, live, locked, policy-stopped, or cwd-missing requests.
 - Trainer resume audit: add `hf_finetune_checkpoint_resume_report(...)` and
   compact lines for optimizer/scheduler/RNG state availability, saved versus
   requested step horizons, and the exhausted-scheduler case where adapter

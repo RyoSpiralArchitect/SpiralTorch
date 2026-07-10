@@ -180,6 +180,72 @@ def _write_launch_state(
     return path
 
 
+def _write_replayable_launch_state(
+    tmp_path: Path,
+    *,
+    executor_action: str = "resume_executor",
+    include_contract: bool = True,
+) -> tuple[Path, Path, list[str]]:
+    output_root = tmp_path / "executor"
+    output_root.mkdir(parents=True)
+    state_path = output_root / "state.json"
+    state = _executor_state(state_path, invocation_count=1)
+    state["status"] = (
+        "generation_limit_reached"
+        if executor_action == "resume_executor"
+        else "stopped"
+    )
+    state["action"] = executor_action
+    state["reason"] = (
+        "max_generations_per_invocation_reached"
+        if executor_action == "resume_executor"
+        else "continuation_policy_stop"
+    )
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    log_path = output_root / "launcher.log"
+    log_path.write_text("completed\n", encoding="utf-8")
+    command_cwd = tmp_path.resolve()
+    argv = [
+        str((tmp_path / "source").resolve()),
+        "--output-root",
+        str(output_root.resolve()),
+        "--state",
+        str(state_path.resolve()),
+        "--run",
+        "--max-generations",
+        "1",
+    ]
+    latest = {
+        "launch_id": "replay-source-launch",
+        "status": "completed",
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "hostname": socket.gethostname(),
+        "pid": 99_999_999,
+        "command_cwd": str(command_cwd),
+        "command": hf_adapter_executor_launch._executor_child_command(argv),
+        "executor_argv": argv,
+        "executor_state_path": str(state_path.resolve()),
+        "executor_run_id": "launch-test-run",
+        "executor_invocation_count": 1,
+        "log_path": str(log_path.resolve()),
+        "process_group_isolated": True,
+    }
+    if include_contract:
+        latest["resume_contract"] = hf_adapter_executor_launch._resume_contract(
+            argv,
+            output_root=output_root.resolve(),
+            executor_state_path=state_path.resolve(),
+            command_cwd=command_cwd,
+        )
+    launch_state_path = _write_launch_state(
+        output_root / "launch.json",
+        output_root=output_root,
+        executor_state_path=state_path,
+        latest=latest,
+    )
+    return launch_state_path, state_path, argv
+
+
 def test_detached_launch_handoffs_blocks_duplicate_and_reports_status(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -563,6 +629,301 @@ def test_detach_cli_replays_executor_arguments_without_recursing(
     assert "status=handed_off" in output
 
 
+def test_durable_resume_replays_detached_executor_and_advances_invocation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output_root = tmp_path / "executor"
+    state_path = output_root / "state.json"
+    lock_path = output_root / st.HF_ADAPTER_CONTINUATION_EXECUTOR_LOCK_FILENAME
+    invocation = {"value": 1}
+
+    def fake_child(_argv: Sequence[str]) -> list[str]:
+        return _fake_executor_command(
+            state_path,
+            lock_path,
+            invocation_count=invocation["value"],
+        )
+
+    monkeypatch.setattr(
+        hf_adapter_executor_launch,
+        "_executor_child_command",
+        fake_child,
+    )
+    argv = [
+        str((tmp_path / "source").resolve()),
+        "--output-root",
+        str(output_root.resolve()),
+        "--state",
+        str(state_path.resolve()),
+        "--run",
+        "--max-generations",
+        "1",
+    ]
+    first = st.launch_hf_adapter_continuation_executor(
+        argv,
+        output_root=output_root,
+        executor_state_path=state_path,
+        command_cwd=tmp_path,
+        handoff_timeout_seconds=3.0,
+    )
+    first_pid = first["latest_launch"]["pid"]
+    _terminate_launcher(first_pid)
+    terminal = st.load_hf_adapter_continuation_executor(state_path)
+    terminal["status"] = "generation_limit_reached"
+    terminal["action"] = "resume_executor"
+    terminal["reason"] = "max_generations_per_invocation_reached"
+    state_path.write_text(json.dumps(terminal), encoding="utf-8")
+
+    plan = st.hf_adapter_continuation_executor_resume_report(first["launch_state_path"])
+    invocation["value"] = 2
+    resumed = st.resume_hf_adapter_continuation_executor(
+        first["launch_state_path"],
+        handoff_timeout_seconds=3.0,
+    )
+    resumed_payload = json.loads(
+        Path(first["launch_state_path"]).read_text(encoding="utf-8")
+    )
+    second_pid = resumed_payload["launches"][-1]["pid"]
+    try:
+        launch_state = st.load_hf_adapter_continuation_executor_launch(
+            first["launch_state_path"]
+        )
+        latest = launch_state["launches"][-1]
+        launch_status = st.hf_adapter_continuation_executor_launch_status_report(
+            first["launch_state_path"]
+        )
+
+        assert plan["status"] == "resume_ready"
+        assert plan["ready"] is True
+        assert plan["resume_contract_source"] == "recorded"
+        assert plan["executor_identity_source"] == "recorded_handoff"
+        assert plan["executor_invocation_count"] == 1
+        assert resumed["status"] == "handed_off"
+        assert resumed["created"] is True
+        assert resumed["source_launch_id"] == first["latest_launch"]["launch_id"]
+        assert resumed["resumed_executor_invocation_count"] == 2
+        assert launch_state["launch_count"] == 2
+        assert latest["resumed_from_launch_id"] == first["latest_launch"]["launch_id"]
+        assert (
+            latest["resumed_from_contract_sha256"]
+            == plan["resume_contract"]["contract_sha256"]
+        )
+        assert latest["resumed_from_executor_run_id"] == "launch-test-run"
+        assert latest["resumed_from_executor_invocation_count"] == 1
+        assert launch_status["status"] == "running"
+    finally:
+        if isinstance(second_pid, int):
+            _terminate_launcher(second_pid)
+
+
+def test_resume_plan_validates_legacy_contract_and_rejects_tampering(
+    tmp_path: Path,
+) -> None:
+    legacy_path, _, _ = _write_replayable_launch_state(
+        tmp_path / "legacy",
+        include_contract=False,
+    )
+    legacy = st.hf_adapter_continuation_executor_resume_report(legacy_path)
+    assert legacy["ready"] is True
+    assert legacy["resume_contract_source"] == "legacy_command_reconstructed"
+
+    launch_path, _, _ = _write_replayable_launch_state(tmp_path / "tampered")
+    payload = json.loads(launch_path.read_text(encoding="utf-8"))
+    payload["launches"][0]["executor_argv"].extend(["--max-lineage-depth", "99"])
+    launch_path.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="resume contract is invalid"):
+        st.hf_adapter_continuation_executor_resume_report(launch_path)
+
+    identity_path, identity_state_path, _ = _write_replayable_launch_state(
+        tmp_path / "identity"
+    )
+    identity_state = json.loads(identity_state_path.read_text(encoding="utf-8"))
+    identity_state["invocation_count"] = 2
+    identity_state_path.write_text(json.dumps(identity_state), encoding="utf-8")
+    identity = st.hf_adapter_continuation_executor_resume_report(identity_path)
+    assert identity["ready"] is False
+    assert identity["issue"] == "executor_identity_changed"
+    assert identity["action"] == "inspect_executor_invocation"
+
+    missing_log_path, _, _ = _write_replayable_launch_state(tmp_path / "missing-log")
+    missing_log_payload = json.loads(missing_log_path.read_text(encoding="utf-8"))
+    Path(missing_log_payload["launches"][0]["log_path"]).unlink()
+    missing_log = st.hf_adapter_continuation_executor_resume_report(missing_log_path)
+    assert missing_log["ready"] is False
+    assert missing_log["issue"] == "launcher_unhealthy"
+    assert missing_log["action"] == "inspect_missing_launcher_log"
+
+    malformed_path, _, _ = _write_replayable_launch_state(tmp_path / "malformed")
+    malformed = json.loads(malformed_path.read_text(encoding="utf-8"))
+    malformed["launches"].append("not-a-launch")
+    malformed["launch_count"] = 2
+    malformed_path.write_text(json.dumps(malformed), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="invalid launch row"):
+        st.hf_adapter_continuation_executor_resume_report(malformed_path)
+
+
+def test_resume_plan_honors_terminal_action_and_cas_source_launch(
+    tmp_path: Path,
+) -> None:
+    stopped_path, _, _ = _write_replayable_launch_state(
+        tmp_path / "stopped",
+        executor_action="stop_training",
+    )
+    stopped = st.hf_adapter_continuation_executor_resume_report(stopped_path)
+    assert stopped["ready"] is False
+    assert stopped["issue"] == "executor_action_not_resumable"
+    assert stopped["action"] == "stop_training"
+
+    launch_path, state_path, argv = _write_replayable_launch_state(tmp_path / "cas")
+    plan = st.hf_adapter_continuation_executor_resume_report(launch_path)
+    payload = json.loads(launch_path.read_text(encoding="utf-8"))
+    newer = dict(payload["launches"][0])
+    newer["launch_id"] = "newer-launch"
+    payload["launches"].append(newer)
+    payload["launch_count"] = 2
+    launch_path.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="source launch changed"):
+        st.launch_hf_adapter_continuation_executor(
+            argv,
+            output_root=state_path.parent,
+            executor_state_path=state_path,
+            launch_state_path=launch_path,
+            command_cwd=tmp_path / "cas",
+            _resume_expectation={
+                "launch_id": plan["source_launch_id"],
+                "contract_sha256": plan["resume_contract"]["contract_sha256"],
+                "executor_run_id": plan["executor_run_id"],
+                "executor_invocation_count": plan["executor_invocation_count"],
+            },
+        )
+
+    invocation_path, invocation_state_path, invocation_argv = (
+        _write_replayable_launch_state(tmp_path / "invocation-cas")
+    )
+    invocation_plan = st.hf_adapter_continuation_executor_resume_report(invocation_path)
+    advanced = json.loads(invocation_state_path.read_text(encoding="utf-8"))
+    advanced["invocation_count"] = 2
+    invocation_state_path.write_text(json.dumps(advanced), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="invocation changed"):
+        st.launch_hf_adapter_continuation_executor(
+            invocation_argv,
+            output_root=invocation_state_path.parent,
+            executor_state_path=invocation_state_path,
+            launch_state_path=invocation_path,
+            command_cwd=tmp_path / "invocation-cas",
+            _resume_expectation={
+                "launch_id": invocation_plan["source_launch_id"],
+                "contract_sha256": invocation_plan["resume_contract"][
+                    "contract_sha256"
+                ],
+                "executor_run_id": invocation_plan["executor_run_id"],
+                "executor_invocation_count": invocation_plan[
+                    "executor_invocation_count"
+                ],
+            },
+        )
+
+
+def test_resume_plan_rejects_remote_locked_and_missing_cwd_sources(
+    tmp_path: Path,
+) -> None:
+    remote_path, _, _ = _write_replayable_launch_state(tmp_path / "remote")
+    remote_payload = json.loads(remote_path.read_text(encoding="utf-8"))
+    remote_payload["launches"][0]["hostname"] = "remote.example"
+    remote_path.write_text(json.dumps(remote_payload), encoding="utf-8")
+    remote = st.hf_adapter_continuation_executor_resume_report(remote_path)
+    assert remote["ready"] is False
+    assert remote["issue"] == "launcher_not_resumable"
+    assert remote["action"] == "inspect_remote_launcher"
+
+    locked_path, locked_state_path, _ = _write_replayable_launch_state(
+        tmp_path / "locked"
+    )
+    lock_path = (
+        locked_state_path.parent / st.HF_ADAPTER_CONTINUATION_EXECUTOR_LOCK_FILENAME
+    )
+    lock_path.write_text(
+        json.dumps(
+            {
+                "row_type": "hf_adapter_continuation_executor_lock",
+                "lock_id": "active-resume-test-lock",
+                "pid": os.getpid(),
+                "hostname": socket.gethostname(),
+            }
+        ),
+        encoding="utf-8",
+    )
+    locked = st.hf_adapter_continuation_executor_resume_report(locked_path)
+    assert locked["ready"] is False
+    assert locked["issue"] == "executor_lock_unavailable"
+    assert locked["action"] == "inspect_executor_lock"
+
+    missing_cwd_path, missing_cwd_state_path, missing_cwd_argv = (
+        _write_replayable_launch_state(tmp_path / "missing-cwd")
+    )
+    missing_cwd_payload = json.loads(missing_cwd_path.read_text(encoding="utf-8"))
+    missing_cwd = (tmp_path / "removed-command-cwd").resolve()
+    latest = missing_cwd_payload["launches"][0]
+    latest["command_cwd"] = str(missing_cwd)
+    latest["resume_contract"] = hf_adapter_executor_launch._resume_contract(
+        missing_cwd_argv,
+        output_root=missing_cwd_state_path.parent.resolve(),
+        executor_state_path=missing_cwd_state_path.resolve(),
+        command_cwd=missing_cwd,
+    )
+    missing_cwd_path.write_text(json.dumps(missing_cwd_payload), encoding="utf-8")
+    missing = st.hf_adapter_continuation_executor_resume_report(missing_cwd_path)
+    assert missing["ready"] is False
+    assert missing["issue"] == "command_cwd_missing"
+    assert missing["action"] == "restore_command_cwd"
+
+
+def test_resume_cli_supports_read_only_plan_and_execution(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    launch_path, _, _ = _write_replayable_launch_state(tmp_path)
+    plan_code = hf_cli.adapter_continuation_executor_resume_main(
+        [str(launch_path), "--plan"]
+    )
+    plan_output = capsys.readouterr().out
+    captured: dict[str, object] = {}
+
+    def fake_resume(path: Path, *, handoff_timeout_seconds: float) -> dict[str, object]:
+        captured["path"] = path
+        captured["handoff_timeout_seconds"] = handoff_timeout_seconds
+        report = st.hf_adapter_continuation_executor_resume_report(path)
+        report.update(
+            {
+                "status": "handed_off",
+                "ready": True,
+                "created": True,
+                "resumed_launch_id": "resumed-launch",
+                "resumed_executor_invocation_count": 2,
+            }
+        )
+        return report
+
+    monkeypatch.setattr(
+        hf_cli,
+        "resume_hf_adapter_continuation_executor",
+        fake_resume,
+    )
+    resume_code = hf_cli.adapter_continuation_executor_resume_main(
+        [str(launch_path), "--handoff-timeout-seconds", "9.5"]
+    )
+    resume_output = capsys.readouterr().out
+
+    assert plan_code == 0
+    assert "status=resume_ready" in plan_output
+    assert resume_code == 0
+    assert "status=handed_off" in resume_output
+    assert captured["path"] == launch_path
+    assert captured["handoff_timeout_seconds"] == 9.5
+
+
 def test_launch_validation_and_public_surface(tmp_path: Path) -> None:
     output_root = tmp_path / "executor"
     state_path = output_root / "state.json"
@@ -607,7 +968,11 @@ def test_launch_validation_and_public_surface(tmp_path: Path) -> None:
         "hf_adapter_continuation_executor_launch_lines",
         "hf_adapter_continuation_executor_launch_status_report",
         "hf_adapter_continuation_executor_launch_status_lines",
+        "hf_adapter_continuation_executor_resume_report",
+        "resume_hf_adapter_continuation_executor",
+        "hf_adapter_continuation_executor_resume_lines",
         "HF_ADAPTER_CONTINUATION_EXECUTOR_LAUNCH_SCHEMA",
         "HF_ADAPTER_CONTINUATION_EXECUTOR_LAUNCH_STATUS_SCHEMA",
+        "HF_ADAPTER_CONTINUATION_EXECUTOR_RESUME_SCHEMA",
     ):
         assert name in st.__all__

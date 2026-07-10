@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -34,11 +35,15 @@ __all__ = [
     "HF_ADAPTER_CONTINUATION_EXECUTOR_LAUNCH_LOCK_FILENAME",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_LAUNCH_SCHEMA",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_LAUNCH_STATUS_SCHEMA",
+    "HF_ADAPTER_CONTINUATION_EXECUTOR_RESUME_SCHEMA",
     "hf_adapter_continuation_executor_launch_lines",
     "hf_adapter_continuation_executor_launch_status_lines",
     "hf_adapter_continuation_executor_launch_status_report",
+    "hf_adapter_continuation_executor_resume_lines",
+    "hf_adapter_continuation_executor_resume_report",
     "launch_hf_adapter_continuation_executor",
     "load_hf_adapter_continuation_executor_launch",
+    "resume_hf_adapter_continuation_executor",
 ]
 
 
@@ -53,6 +58,9 @@ HF_ADAPTER_CONTINUATION_EXECUTOR_LAUNCH_LOCK_FILENAME = (
 )
 HF_ADAPTER_CONTINUATION_EXECUTOR_LAUNCH_STATUS_SCHEMA = (
     "spiraltorch.hf_adapter_continuation_executor_launch_status.v1"
+)
+HF_ADAPTER_CONTINUATION_EXECUTOR_RESUME_SCHEMA = (
+    "spiraltorch.hf_adapter_continuation_executor_resume.v1"
 )
 
 _LAUNCH_HANDOFF_POLL_SECONDS = 0.05
@@ -403,6 +411,148 @@ def _argv_contains_option(argv: Sequence[str], name: str) -> bool:
     return any(value == name or value.startswith(f"{name}=") for value in argv)
 
 
+def _single_argv_option(argv: Sequence[str], name: str) -> str:
+    values: list[str] = []
+    for index, value in enumerate(argv):
+        if value == name:
+            if index + 1 >= len(argv):
+                raise RuntimeError(f"executor replay option is missing a value: {name}")
+            values.append(str(argv[index + 1]))
+        elif value.startswith(f"{name}="):
+            values.append(value.split("=", 1)[1])
+    if len(values) != 1 or not values[0]:
+        raise RuntimeError(
+            f"executor replay requires exactly one non-empty {name} option"
+        )
+    return values[0]
+
+
+def _resolved_argv_path(value: str, *, command_cwd: Path) -> Path:
+    path = Path(value).expanduser()
+    return (path if path.is_absolute() else command_cwd / path).resolve()
+
+
+def _sha256_json(value: object) -> str:
+    encoded = json.dumps(
+        value,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _resume_contract(
+    executor_argv: Sequence[str],
+    *,
+    output_root: Path,
+    executor_state_path: Path,
+    command_cwd: Path,
+) -> dict[str, object]:
+    argv = [str(value) for value in executor_argv]
+    core = {
+        "row_type": "hf_adapter_continuation_executor_resume_contract",
+        "schema": HF_ADAPTER_CONTINUATION_EXECUTOR_RESUME_SCHEMA,
+        "executor_argv_sha256": _sha256_json(argv),
+        "output_root": str(output_root),
+        "executor_state_path": str(executor_state_path),
+        "command_cwd": str(command_cwd),
+    }
+    return {**core, "contract_sha256": _sha256_json(core)}
+
+
+def _validated_resume_contract(
+    launch_state: Mapping[str, object],
+    latest: Mapping[str, object],
+) -> dict[str, object]:
+    launch_id = latest.get("launch_id")
+    if not isinstance(launch_id, str) or not launch_id:
+        raise RuntimeError("executor replay launch_id is missing")
+    raw_argv = latest.get("executor_argv")
+    if (
+        not isinstance(raw_argv, Sequence)
+        or isinstance(raw_argv, (str, bytes))
+        or not raw_argv
+        or any(not isinstance(value, str) or not value for value in raw_argv)
+    ):
+        raise RuntimeError("executor replay argv is missing or invalid")
+    argv = [str(value) for value in raw_argv]
+    if sum(value == "--run" for value in argv) != 1:
+        raise RuntimeError("executor replay requires exactly one --run flag")
+    for forbidden in ("--detach", "--detach-handoff-timeout-seconds", "--launch-state"):
+        if _argv_contains_option(argv, forbidden):
+            raise RuntimeError(f"executor replay contains launcher option {forbidden}")
+
+    command_cwd_value = latest.get("command_cwd")
+    if not isinstance(command_cwd_value, str) or not command_cwd_value:
+        raise RuntimeError("executor replay command_cwd is missing")
+    command_cwd = Path(command_cwd_value).expanduser().resolve()
+    output_root_value = launch_state.get("output_root")
+    state_path_value = launch_state.get("executor_state_path")
+    if not isinstance(output_root_value, str) or not output_root_value:
+        raise RuntimeError("executor launch output_root is missing")
+    if not isinstance(state_path_value, str) or not state_path_value:
+        raise RuntimeError("executor launch state path is missing")
+    output_root = Path(output_root_value).expanduser().resolve()
+    executor_state_path = Path(state_path_value).expanduser().resolve()
+    latest_state_path = latest.get("executor_state_path")
+    if (
+        not isinstance(latest_state_path, str)
+        or Path(latest_state_path).expanduser().resolve() != executor_state_path
+    ):
+        raise RuntimeError("executor replay state path differs from launch history")
+    if (
+        _resolved_argv_path(
+            _single_argv_option(argv, "--output-root"),
+            command_cwd=command_cwd,
+        )
+        != output_root
+    ):
+        raise RuntimeError("executor replay --output-root differs from launch history")
+    if (
+        _resolved_argv_path(
+            _single_argv_option(argv, "--state"),
+            command_cwd=command_cwd,
+        )
+        != executor_state_path
+    ):
+        raise RuntimeError("executor replay --state differs from launch history")
+
+    expected = _resume_contract(
+        argv,
+        output_root=output_root,
+        executor_state_path=executor_state_path,
+        command_cwd=command_cwd,
+    )
+    recorded = latest.get("resume_contract")
+    if recorded is None:
+        raw_command = latest.get("command")
+        expected_command = _executor_child_command(argv)
+        if (
+            not isinstance(raw_command, Sequence)
+            or isinstance(raw_command, (str, bytes))
+            or list(raw_command)[1:] != expected_command[1:]
+        ):
+            raise RuntimeError(
+                "legacy executor replay command does not match its recorded argv"
+            )
+        contract_source = "legacy_command_reconstructed"
+    elif not isinstance(recorded, Mapping) or dict(recorded) != expected:
+        raise RuntimeError("executor resume contract is invalid")
+    else:
+        contract_source = "recorded"
+    return {
+        "launch_id": launch_id,
+        "executor_argv": argv,
+        "output_root": str(output_root),
+        "executor_state_path": str(executor_state_path),
+        "command_cwd": str(command_cwd),
+        "contract": expected,
+        "contract_source": contract_source,
+        "command_cwd_exists": command_cwd.is_dir(),
+    }
+
+
 def launch_hf_adapter_continuation_executor(
     executor_argv: Sequence[str],
     *,
@@ -411,6 +561,7 @@ def launch_hf_adapter_continuation_executor(
     launch_state_path: str | Path | None = None,
     command_cwd: str | Path | None = None,
     handoff_timeout_seconds: float = 5.0,
+    _resume_expectation: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """Launch an executor in a detached process and persist handoff evidence."""
 
@@ -425,6 +576,26 @@ def launch_hf_adapter_continuation_executor(
         ) from exc
     if not math.isfinite(handoff_timeout) or handoff_timeout < 0.0:
         raise ValueError("handoff_timeout_seconds must be finite and non-negative")
+    resume_expectation = (
+        None if _resume_expectation is None else dict(_resume_expectation)
+    )
+    if resume_expectation is not None:
+        resume_launch_id = resume_expectation.get("launch_id")
+        resume_contract_sha256 = resume_expectation.get("contract_sha256")
+        resume_run_id = resume_expectation.get("executor_run_id")
+        resume_invocation_count = resume_expectation.get("executor_invocation_count")
+        if (
+            not isinstance(resume_launch_id, str)
+            or not resume_launch_id
+            or not isinstance(resume_contract_sha256, str)
+            or not resume_contract_sha256
+            or not isinstance(resume_run_id, str)
+            or not resume_run_id
+            or isinstance(resume_invocation_count, bool)
+            or not isinstance(resume_invocation_count, int)
+            or resume_invocation_count <= 0
+        ):
+            raise ValueError("executor resume expectation is invalid")
     if not _argv_contains_option(argv, "--run"):
         raise ValueError("detached executor launch requires --run")
     forbidden = next(
@@ -472,6 +643,35 @@ def launch_hf_adapter_continuation_executor(
             raise ValueError("executor launch state launches must be a list")
         executor_lock = _executor_lock_observation(resolved_output_root)
         latest = launches[-1] if launches and isinstance(launches[-1], dict) else None
+        if resume_expectation is not None:
+            if latest is None or latest.get("launch_id") != resume_launch_id:
+                raise RuntimeError(
+                    "executor resume source launch changed before relaunch"
+                )
+            resume_contract = _validated_resume_contract(state, latest)
+            contract = resume_contract["contract"]
+            if (
+                not isinstance(contract, Mapping)
+                or contract.get("contract_sha256") != resume_contract_sha256
+            ):
+                raise RuntimeError("executor resume contract changed before relaunch")
+            current_executor = load_hf_adapter_continuation_executor(
+                resolved_executor_state_path
+            )
+            if (
+                current_executor.get("run_id") != resume_run_id
+                or current_executor.get("invocation_count") != resume_invocation_count
+            ):
+                raise RuntimeError("executor resume invocation changed before relaunch")
+            current_status = hf_adapter_continuation_executor_status_report(
+                current_executor
+            )
+            if (
+                current_status.get("healthy") is not True
+                or current_status.get("recommended_action") != "resume_executor"
+                or current_status.get("executor_action") != "resume_executor"
+            ):
+                raise RuntimeError("executor resume action changed before relaunch")
         if latest is not None:
             observation = _process_observation(latest)
             latest["process_liveness_observed_at"] = _now()
@@ -550,12 +750,23 @@ def launch_hf_adapter_continuation_executor(
             "command": command,
             "command_display": shlex.join(command),
             "executor_argv": argv,
+            "resume_contract": _resume_contract(
+                argv,
+                output_root=resolved_output_root,
+                executor_state_path=resolved_executor_state_path,
+                command_cwd=resolved_command_cwd,
+            ),
             "executor_state_path": str(resolved_executor_state_path),
             "executor_baseline": executor_baseline,
             "log_path": str(log_path),
             "log_stream": "combined_stdout_stderr",
             "process_group_isolated": os.name in {"posix", "nt"},
         }
+        if resume_expectation is not None:
+            attempt["resumed_from_launch_id"] = resume_launch_id
+            attempt["resumed_from_contract_sha256"] = resume_contract_sha256
+            attempt["resumed_from_executor_run_id"] = resume_run_id
+            attempt["resumed_from_executor_invocation_count"] = resume_invocation_count
         launches.append(attempt)
         state["status"] = "launching"
         state["latest_launch_id"] = launch_id
@@ -741,9 +952,7 @@ def hf_adapter_continuation_executor_launch_status_report(
         status = "empty"
     elif observation == "alive":
         if executor_lifecycle == "output_quarantined":
-            status = (
-                "recoverable" if executor_healthy is True else "executor_unhealthy"
-            )
+            status = "recoverable" if executor_healthy is True else "executor_unhealthy"
         elif executor_lifecycle in {"generation_limit_reached", "ready", "stopped"}:
             status = "completed" if executor_healthy is True else "executor_unhealthy"
         elif executor_lifecycle in {"blocked", "failed", "interrupted"}:
@@ -786,7 +995,16 @@ def hf_adapter_continuation_executor_launch_status_report(
     elif status == "running":
         recommended_action = "inspect_executor_status"
     elif status == "completed":
-        recommended_action = "inspect_executor_result"
+        nested_action = (
+            executor_status.get("recommended_action")
+            if isinstance(executor_status, Mapping)
+            else None
+        )
+        recommended_action = (
+            "resume_executor"
+            if nested_action == "resume_executor"
+            else "inspect_executor_result"
+        )
     elif status == "recoverable":
         recommended_action = "resume_executor"
     elif status == "remote_running":
@@ -838,6 +1056,275 @@ def hf_adapter_continuation_executor_launch_status_report(
         "executor_healthy": executor_healthy,
         "executor_status_error": executor_error,
     }
+
+
+def _resume_launch_state_path(
+    report_or_path: Mapping[str, object] | str | Path,
+) -> Path:
+    value = (
+        report_or_path.get("launch_state_path")
+        if isinstance(report_or_path, Mapping)
+        else report_or_path
+    )
+    if value is None:
+        raise ValueError("executor launch state path is required for resume")
+    path = Path(str(value)).expanduser()
+    if path.is_symlink():
+        raise ValueError(f"executor launch state cannot be a symbolic link: {path}")
+    if not path.is_file():
+        raise FileNotFoundError(path)
+    return path.resolve()
+
+
+def hf_adapter_continuation_executor_resume_report(
+    report_or_path: Mapping[str, object] | str | Path,
+) -> dict[str, object]:
+    """Plan an exact detached executor replay without launching it."""
+
+    launch_state_path = _resume_launch_state_path(report_or_path)
+    launch_state = load_hf_adapter_continuation_executor_launch(launch_state_path)
+    raw_launches = launch_state.get("launches") or []
+    if any(not isinstance(row, Mapping) for row in raw_launches):
+        raise RuntimeError("executor resume history contains an invalid launch row")
+    launches = [dict(row) for row in raw_launches]
+    if launch_state.get("launch_count") != len(launches):
+        raise RuntimeError("executor resume launch_count is inconsistent")
+    launch_ids = [row.get("launch_id") for row in launches]
+    if any(not isinstance(value, str) or not value for value in launch_ids):
+        raise RuntimeError("executor resume history contains an invalid launch_id")
+    if len(set(launch_ids)) != len(launch_ids):
+        raise RuntimeError("executor resume history contains duplicate launch IDs")
+    latest = launches[-1] if launches else None
+    latest_launch_id = launch_state.get("latest_launch_id")
+    if (
+        latest_launch_id is not None
+        and latest is not None
+        and latest_launch_id != latest.get("launch_id")
+    ):
+        raise RuntimeError("executor resume latest launch ID is inconsistent")
+    launch_status = hf_adapter_continuation_executor_launch_status_report(launch_state)
+    executor_status = launch_status.get("executor_status")
+    executor_lock = launch_status.get("executor_lock")
+    replay = (
+        _validated_resume_contract(launch_state, latest)
+        if isinstance(latest, Mapping)
+        else None
+    )
+    launcher_status = launch_status.get("status")
+    executor_action = (
+        executor_status.get("executor_action")
+        if isinstance(executor_status, Mapping)
+        else None
+    )
+    executor_healthy = launch_status.get("executor_healthy")
+    executor_run_id = (
+        executor_status.get("run_id") if isinstance(executor_status, Mapping) else None
+    )
+    executor_invocation_count = (
+        executor_status.get("invocation_count")
+        if isinstance(executor_status, Mapping)
+        else None
+    )
+    recorded_run_id = latest.get("executor_run_id") if latest is not None else None
+    recorded_invocation_count = (
+        latest.get("executor_invocation_count") if latest is not None else None
+    )
+    if recorded_run_id is None and recorded_invocation_count is None:
+        executor_identity_source = "current_state_reconstructed"
+        executor_identity_matches = bool(
+            isinstance(executor_run_id, str)
+            and executor_run_id
+            and not isinstance(executor_invocation_count, bool)
+            and isinstance(executor_invocation_count, int)
+            and executor_invocation_count > 0
+        )
+    else:
+        executor_identity_source = "recorded_handoff"
+        executor_identity_matches = bool(
+            isinstance(recorded_run_id, str)
+            and recorded_run_id
+            and not isinstance(recorded_invocation_count, bool)
+            and isinstance(recorded_invocation_count, int)
+            and recorded_invocation_count > 0
+            and recorded_run_id == executor_run_id
+            and recorded_invocation_count == executor_invocation_count
+        )
+    lock_status = (
+        executor_lock.get("status") if isinstance(executor_lock, Mapping) else None
+    )
+    if replay is None:
+        issue = "resume_source_missing"
+        action = "create_detached_executor_launch"
+    elif launcher_status not in {"completed", "recoverable"}:
+        issue = "launcher_not_resumable"
+        action = str(launch_status.get("recommended_action") or "inspect_launcher")
+    elif launch_status.get("healthy") is not True:
+        issue = "launcher_unhealthy"
+        action = str(
+            launch_status.get("recommended_action") or "inspect_launcher_health"
+        )
+    elif executor_healthy is not True:
+        issue = "executor_unhealthy"
+        action = str(
+            launch_status.get("recommended_action") or "inspect_executor_health"
+        )
+    elif not executor_identity_matches:
+        issue = "executor_identity_changed"
+        action = "inspect_executor_invocation"
+    elif executor_action != "resume_executor":
+        issue = "executor_action_not_resumable"
+        action = str(executor_action or "inspect_executor_result")
+    elif lock_status not in {"absent", "exited"}:
+        issue = "executor_lock_unavailable"
+        action = "inspect_executor_lock"
+    elif replay.get("command_cwd_exists") is not True:
+        issue = "command_cwd_missing"
+        action = "restore_command_cwd"
+    else:
+        issue = None
+        action = "resume_executor"
+    contract = replay.get("contract") if isinstance(replay, Mapping) else None
+    return {
+        "row_type": "hf_adapter_continuation_executor_resume",
+        "schema": HF_ADAPTER_CONTINUATION_EXECUTOR_RESUME_SCHEMA,
+        "created_at": _now(),
+        "status": "resume_ready" if issue is None else "resume_not_ready",
+        "ready": issue is None,
+        "issue": issue,
+        "action": action,
+        "launch_state_path": str(launch_state_path),
+        "launch_count": len(launches),
+        "source_launch_id": (
+            replay.get("launch_id") if isinstance(replay, Mapping) else None
+        ),
+        "source_launch_status": (
+            latest.get("status") if isinstance(latest, Mapping) else None
+        ),
+        "launcher_status": launcher_status,
+        "launcher_process_observation": launch_status.get(
+            "launcher_process_observation"
+        ),
+        "output_root": (
+            replay.get("output_root") if isinstance(replay, Mapping) else None
+        ),
+        "executor_state_path": (
+            replay.get("executor_state_path") if isinstance(replay, Mapping) else None
+        ),
+        "command_cwd": (
+            replay.get("command_cwd") if isinstance(replay, Mapping) else None
+        ),
+        "command_cwd_exists": (
+            replay.get("command_cwd_exists") if isinstance(replay, Mapping) else None
+        ),
+        "executor_argv": (
+            replay.get("executor_argv") if isinstance(replay, Mapping) else None
+        ),
+        "resume_contract": None
+        if not isinstance(contract, Mapping)
+        else dict(contract),
+        "resume_contract_source": (
+            replay.get("contract_source") if isinstance(replay, Mapping) else None
+        ),
+        "executor_status": (
+            executor_status.get("status")
+            if isinstance(executor_status, Mapping)
+            else None
+        ),
+        "executor_action": executor_action,
+        "executor_healthy": executor_healthy,
+        "executor_run_id": executor_run_id,
+        "executor_invocation_count": executor_invocation_count,
+        "recorded_executor_run_id": recorded_run_id,
+        "recorded_executor_invocation_count": recorded_invocation_count,
+        "executor_identity_source": executor_identity_source,
+        "executor_identity_matches": executor_identity_matches,
+        "executor_lock_status": lock_status,
+    }
+
+
+def resume_hf_adapter_continuation_executor(
+    report_or_path: Mapping[str, object] | str | Path,
+    *,
+    handoff_timeout_seconds: float = 5.0,
+) -> dict[str, object]:
+    """Replay one validated detached executor invocation from launch history."""
+
+    plan = hf_adapter_continuation_executor_resume_report(report_or_path)
+    if plan.get("ready") is not True:
+        raise RuntimeError(
+            f"executor resume is not ready: {plan.get('issue')}: {plan.get('action')}"
+        )
+    contract = plan.get("resume_contract")
+    if not isinstance(contract, Mapping):
+        raise RuntimeError("executor resume contract is unavailable")
+    launch = launch_hf_adapter_continuation_executor(
+        plan["executor_argv"],
+        output_root=str(plan["output_root"]),
+        executor_state_path=str(plan["executor_state_path"]),
+        launch_state_path=str(plan["launch_state_path"]),
+        command_cwd=str(plan["command_cwd"]),
+        handoff_timeout_seconds=handoff_timeout_seconds,
+        _resume_expectation={
+            "launch_id": plan["source_launch_id"],
+            "contract_sha256": contract["contract_sha256"],
+            "executor_run_id": plan["executor_run_id"],
+            "executor_invocation_count": plan["executor_invocation_count"],
+        },
+    )
+    request_status = str(launch.get("request_status") or "unknown")
+    successful = request_status in {"already_running", "completed", "handed_off"}
+    action = (
+        "inspect_executor_status"
+        if request_status in {"already_running", "handed_off"}
+        else "inspect_executor_result"
+        if request_status == "completed"
+        else "inspect_executor_launch_status"
+    )
+    latest = launch.get("latest_launch")
+    result = dict(plan)
+    result.update(
+        {
+            "plan_status": plan.get("status"),
+            "status": request_status,
+            "ready": successful,
+            "issue": None if successful else request_status,
+            "action": action,
+            "created": launch.get("created"),
+            "launch_count": launch.get("launch_count"),
+            "resumed_launch_id": (
+                latest.get("launch_id") if isinstance(latest, Mapping) else None
+            ),
+            "resumed_executor_invocation_count": (
+                latest.get("executor_invocation_count")
+                if isinstance(latest, Mapping)
+                else None
+            ),
+        }
+    )
+    return result
+
+
+def hf_adapter_continuation_executor_resume_lines(
+    report_or_path: Mapping[str, object] | str | Path,
+) -> list[str]:
+    report = (
+        dict(report_or_path)
+        if isinstance(report_or_path, Mapping)
+        and report_or_path.get("row_type") == "hf_adapter_continuation_executor_resume"
+        else hf_adapter_continuation_executor_resume_report(report_or_path)
+    )
+    return [
+        "hf_adapter_continuation_executor_resume "
+        f"status={report.get('status')} "
+        f"ready={report.get('ready')} "
+        f"created={report.get('created')} "
+        f"action={report.get('action')} "
+        f"source_launch={report.get('source_launch_id')} "
+        f"resumed_launch={report.get('resumed_launch_id')} "
+        f"invocation={report.get('resumed_executor_invocation_count', report.get('executor_invocation_count'))} "
+        f"contract={report.get('resume_contract_source')} "
+        f"launch_state={report.get('launch_state_path')}"
+    ]
 
 
 def hf_adapter_continuation_executor_launch_lines(
