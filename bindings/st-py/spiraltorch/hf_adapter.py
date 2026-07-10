@@ -471,6 +471,29 @@ def _check(
     }
 
 
+def _artifact_probe_evidence(
+    card_payload: Mapping[str, object],
+    candidate_path: Path,
+) -> tuple[dict[str, object], dict[str, object], bool | None, float | None]:
+    raw_probe = card_payload.get("adapter_artifact_probe")
+    if not isinstance(raw_probe, Mapping):
+        return {}, {}, None, None
+    probe = dict(raw_probe)
+    raw_artifact = probe.get("artifact")
+    artifact = dict(raw_artifact) if isinstance(raw_artifact, Mapping) else {}
+    source = artifact.get("artifact_source")
+    source_matches = False
+    if source is not None:
+        try:
+            source_matches = (
+                Path(str(source)).expanduser().resolve() == candidate_path.resolve()
+            )
+        except (OSError, RuntimeError, ValueError):
+            source_matches = False
+    new_token_count = _finite_number(probe.get("new_token_count"))
+    return probe, artifact, source_matches, new_token_count
+
+
 def hf_adapter_promotion_report(
     candidate_adapter: str | Path,
     run_card: Mapping[str, object] | str | Path,
@@ -480,6 +503,7 @@ def hf_adapter_promotion_report(
     require_eval: bool = True,
     require_generation_changed: bool = False,
     require_weight_change: bool = True,
+    require_artifact_probe: bool = False,
 ) -> dict[str, object]:
     """Gate adapter promotion on lineage integrity and before/after FT evidence."""
 
@@ -508,6 +532,33 @@ def hf_adapter_promotion_report(
     )
     trainer_loss = _finite_number(summary.get("trainer_train_loss"))
     generation_changed = summary.get("generation_continuation_changed")
+    artifact_probe, probed_artifact, probe_source_matches, probe_new_tokens = (
+        _artifact_probe_evidence(card_payload, candidate_path)
+    )
+    raw_probe_generation = artifact_probe.get("generation")
+    probe_generation = (
+        dict(raw_probe_generation)
+        if isinstance(raw_probe_generation, Mapping)
+        else {}
+    )
+    artifact_probe_present = bool(artifact_probe)
+    artifact_reload_passed = (
+        None
+        if not artifact_probe_present
+        else artifact_probe.get("status") == "ready"
+        and probed_artifact.get("artifact_kind") == "peft_adapter"
+        and probed_artifact.get("adapter_loaded") is True
+        and probe_source_matches is True
+        and artifact_probe.get("local_files_only") is True
+    )
+    artifact_generation_passed = (
+        None
+        if not artifact_probe_present
+        else artifact_probe.get("status") == "ready"
+        and probe_new_tokens is not None
+        and probe_new_tokens > 0.0
+        and probe_generation.get("do_sample") is False
+    )
     checks = [
         _check(
             "lineage_manifest",
@@ -608,6 +659,50 @@ def hf_adapter_promotion_report(
             required=require_generation_changed,
             observed=generation_changed,
         ),
+        _check(
+            "artifact_reload",
+            passed=artifact_reload_passed,
+            required=require_artifact_probe,
+            observed={
+                "status": artifact_probe.get("status"),
+                "artifact_kind": probed_artifact.get("artifact_kind"),
+                "artifact_source": probed_artifact.get("artifact_source"),
+                "adapter_loaded": probed_artifact.get("adapter_loaded"),
+                "tokenizer_source_kind": probed_artifact.get(
+                    "tokenizer_source_kind"
+                ),
+                "candidate_matches": probe_source_matches,
+                "local_files_only": artifact_probe.get("local_files_only"),
+            },
+            threshold={
+                "status": "ready",
+                "artifact_kind": "peft_adapter",
+                "artifact_source": str(candidate_path),
+                "adapter_loaded": True,
+                "local_files_only": True,
+            },
+            message=(
+                "candidate must survive a fresh local-only PEFT artifact reload"
+            ),
+        ),
+        _check(
+            "artifact_generation",
+            passed=artifact_generation_passed,
+            required=require_artifact_probe,
+            observed={
+                "new_token_count": probe_new_tokens,
+                "generated_text_changed": artifact_probe.get(
+                    "generated_text_changed"
+                ),
+                "do_sample": probe_generation.get("do_sample"),
+                "device": artifact_probe.get("device"),
+            },
+            threshold={"new_token_count_min": 1, "do_sample": False},
+            message=(
+                "freshly reloaded candidate must complete deterministic bounded "
+                "generation"
+            ),
+        ),
     ]
     required_checks = [row for row in checks if row["required"]]
     failed = [row for row in required_checks if row["status"] == "failed"]
@@ -621,7 +716,14 @@ def hf_adapter_promotion_report(
         recommendation = "keep_parent"
     else:
         status = "needs_evidence"
-        recommendation = "run_before_after_evaluation"
+        recommendation = (
+            "run_artifact_reload_probe"
+            if any(
+                row["name"] in {"artifact_reload", "artifact_generation"}
+                for row in missing
+            )
+            else "run_before_after_evaluation"
+        )
     return {
         "row_type": "hf_adapter_promotion",
         "schema": HF_ADAPTER_PROMOTION_SCHEMA,
@@ -641,10 +743,21 @@ def hf_adapter_promotion_report(
         "eval_loss_regression": eval_regression,
         "max_eval_loss_regression": regression_limit,
         "generation_changed": generation_changed,
+        "artifact_probe_status": artifact_probe.get("status"),
+        "artifact_probe_report_path": artifact_probe.get("report_path"),
+        "artifact_probe_device": artifact_probe.get("device"),
+        "artifact_probe_tokenizer_source_kind": probed_artifact.get(
+            "tokenizer_source_kind"
+        ),
+        "artifact_probe_new_token_count": probe_new_tokens,
+        "artifact_probe_candidate_matches": probe_source_matches,
+        "artifact_probe_local_files_only": artifact_probe.get("local_files_only"),
+        "artifact_probe_do_sample": probe_generation.get("do_sample"),
         "trainer_train_loss": trainer_loss,
         "require_eval": bool(require_eval),
         "require_generation_changed": bool(require_generation_changed),
         "require_weight_change": bool(require_weight_change),
+        "require_artifact_probe": bool(require_artifact_probe),
         "check_count": len(checks),
         "required_check_count": len(required_checks),
         "passed_check_count": sum(row["status"] == "passed" for row in checks),
@@ -664,6 +777,7 @@ def write_hf_adapter_promotion(
     require_eval: bool = True,
     require_generation_changed: bool = False,
     require_weight_change: bool = True,
+    require_artifact_probe: bool = False,
     out: str | Path | None = None,
 ) -> dict[str, object]:
     if isinstance(report_or_candidate, Mapping):
@@ -679,6 +793,7 @@ def write_hf_adapter_promotion(
             require_eval=require_eval,
             require_generation_changed=require_generation_changed,
             require_weight_change=require_weight_change,
+            require_artifact_probe=require_artifact_probe,
         )
     candidate = Path(str(report["candidate_adapter_path"]))
     path = Path(out) if out is not None else candidate / HF_ADAPTER_PROMOTION_FILENAME
@@ -705,6 +820,7 @@ def hf_adapter_promotion_lines(
             f"eval_before={report.get('eval_before_loss')} "
             f"eval_after={report.get('eval_after_loss')} "
             f"eval_regression={report.get('eval_loss_regression')} "
+            f"artifact_probe={report.get('artifact_probe_status')} "
             f"recommendation={report.get('recommendation')}"
         )
     ]
@@ -1087,7 +1203,7 @@ def _adapter_promotion_chain_node(manifest_path: Path) -> dict[str, object]:
                         adapter_id=adapter_id,
                     )
                 )
-        if depth not in (0, None) and (
+        if depth is not None and (
             promotion.get("status") != "ready"
             or promotion.get("promotion_ready") is not True
         ):
@@ -1100,7 +1216,7 @@ def _adapter_promotion_chain_node(manifest_path: Path) -> dict[str, object]:
                 )
             )
     promotion_revalidation: dict[str, object] | None = None
-    if promotion is not None and run_card is not None and depth not in (0, None):
+    if promotion is not None and run_card is not None and depth is not None:
         parent_path = _chain_reference_path(
             lineage.get("parent_adapter_path"),
             anchor=adapter_path,
@@ -1124,6 +1240,9 @@ def _adapter_promotion_chain_node(manifest_path: Path) -> dict[str, object]:
                 require_weight_change=(
                     promotion.get("require_weight_change") is not False
                 ),
+                require_artifact_probe=(
+                    promotion.get("require_artifact_probe") is True
+                ),
             )
         except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
             issues.append(
@@ -1143,6 +1262,12 @@ def _adapter_promotion_chain_node(manifest_path: Path) -> dict[str, object]:
                 "lineage_depth",
                 "run_card_sha256",
                 "eval_loss_regression",
+                "artifact_probe_status",
+                "artifact_probe_new_token_count",
+                "artifact_probe_candidate_matches",
+                "artifact_probe_tokenizer_source_kind",
+                "artifact_probe_local_files_only",
+                "artifact_probe_do_sample",
                 "failed_checks",
                 "missing_checks",
             )
@@ -1214,6 +1339,27 @@ def _adapter_promotion_chain_node(manifest_path: Path) -> dict[str, object]:
         "eval_loss_regression": None
         if promotion is None
         else promotion.get("eval_loss_regression"),
+        "artifact_probe_status": None
+        if promotion is None
+        else promotion.get("artifact_probe_status"),
+        "artifact_probe_report_path": None
+        if promotion is None
+        else promotion.get("artifact_probe_report_path"),
+        "artifact_probe_device": None
+        if promotion is None
+        else promotion.get("artifact_probe_device"),
+        "artifact_probe_tokenizer_source_kind": None
+        if promotion is None
+        else promotion.get("artifact_probe_tokenizer_source_kind"),
+        "artifact_probe_new_token_count": None
+        if promotion is None
+        else promotion.get("artifact_probe_new_token_count"),
+        "artifact_probe_local_files_only": None
+        if promotion is None
+        else promotion.get("artifact_probe_local_files_only"),
+        "artifact_probe_do_sample": None
+        if promotion is None
+        else promotion.get("artifact_probe_do_sample"),
         "launch_command": launch_command,
         "launch_command_display": None
         if launch_command is None
@@ -2192,6 +2338,8 @@ def hf_adapter_promotion_chain_lines(
             f"adapter={raw_node.get('adapter_id')} "
             f"parent={raw_node.get('parent_adapter_id')} "
             f"promotion_ready={raw_node.get('promotion_ready')} "
+            f"artifact_probe={raw_node.get('artifact_probe_status')} "
+            f"probe_tokens={raw_node.get('artifact_probe_new_token_count')} "
             f"eval_regression={raw_node.get('eval_loss_regression')} "
             f"command={raw_node.get('launch_command_source')} "
             f"path={raw_node.get('adapter_path')}"
