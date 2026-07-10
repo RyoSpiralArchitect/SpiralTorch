@@ -623,6 +623,42 @@ model, report = st.prepare_hf_finetune_model(
 print(report["parameter_report_after"]["trainable_parameter_ratio"])
 ```
 
+Adapter-only outputs are also first-class inference artifacts. Local
+`adapter_config.json` directories are detected automatically; SpiralTorch loads
+the recorded base model, prefers tokenizer files saved beside the adapter, and
+attaches PEFT only for that route:
+
+```python
+model, tokenizer, config, load_report = st.load_hf_causal_lm_artifact(
+    "runs/qwen2-lora",
+    loader_kwargs={"local_files_only": True},
+)
+print(st.summarize_hf_causal_lm_artifact(load_report))
+```
+
+The same loader now backs `byte_lm_transformers_trace.py`, the local branch of
+`spiral-zspace-inference-distortion-probe`, Z-Space generation-control sweeps,
+and Transformers checkpoint audit. Use `--model-artifact-kind peft-adapter`
+for a remote adapter id that cannot be detected from a local directory.
+
+Inspect an adapter without loading Transformers, or merge it atomically into a
+standalone full-model directory for runtimes that do not ship PEFT:
+
+```bash
+spiral-hf-adapter-export \
+  --adapter runs/qwen2-lora \
+  --inspect-only
+
+spiral-hf-adapter-export \
+  --adapter runs/qwen2-lora \
+  --output-dir runs/qwen2-lora-merged
+```
+
+Merge export refuses a non-empty output directory and never overwrites the
+source adapter. The output contains normal model/tokenizer files plus
+`spiraltorch-hf-merged-export.json` with base-model, PEFT, parameter, and merge
+provenance.
+
 For a larger local corpus, bypass Hub datasets and feed files directly:
 
 ```bash

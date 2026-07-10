@@ -12,6 +12,11 @@ from spiraltorch.ecosystem import (
     slice_external_tensor,
     tensor_from_external,
 )
+from spiraltorch.hf_peft import (
+    hf_causal_lm_artifact_report,
+    load_hf_causal_lm_artifact,
+    summarize_hf_causal_lm_artifact,
+)
 from spiraltorch.nn import Linear, LoraLinear, ZSpaceProjector
 from spiraltorch.runtime_imports import (
     TRANSFORMERS_TRACE_RUNTIME_IMPORT_PRESETS,
@@ -258,6 +263,15 @@ def add_transformers_audit_args(parser):
         help=(
             "Local Transformers model/config/tokenizer directory. Defaults to "
             "--hf-state-dict when it is a directory, otherwise the state-dict parent."
+        ),
+    )
+    parser.add_argument(
+        "--transformers-model-artifact-kind",
+        choices=("auto", "full-model", "peft-adapter"),
+        default="auto",
+        help=(
+            "Interpret --transformers-model-path as a full model or PEFT "
+            "adapter. auto detects local adapter_config.json artifacts."
         ),
     )
     parser.add_argument(
@@ -696,6 +710,14 @@ def _base_transformers_audit_fields(args, path, module_shapes):
         "transformers_audit_status": "not_run",
         "transformers_audit_error": None,
         "transformers_model_path": None if path is None else str(path),
+        "transformers_model_artifact_kind_requested": getattr(
+            args,
+            "transformers_model_artifact_kind",
+            "auto",
+        ),
+        "transformers_model_artifact_kind": None,
+        "transformers_model_artifact_report": None,
+        "transformers_model_adapter_loaded": None,
         "transformers_local_files_only": not bool(
             getattr(args, "allow_transformers_remote", False)
         ),
@@ -788,9 +810,61 @@ def transformers_runtime_audit_fields(args, module_shapes):
     fields["transformers_version"] = getattr(transformers, "__version__", None)
     loader_kwargs = _transformers_loader_kwargs(args)
     path_label = str(path)
+    artifact_kind = getattr(args, "transformers_model_artifact_kind", "auto")
+    try:
+        artifact_report = hf_causal_lm_artifact_report(
+            path_label,
+            artifact_kind=artifact_kind,
+        )
+    except Exception as exc:
+        fields.update(
+            {
+                "transformers_audit_status": "artifact_error",
+                "transformers_audit_error": _error_label(exc),
+            }
+        )
+        return fields
+    fields["transformers_model_artifact_report"] = (
+        summarize_hf_causal_lm_artifact(artifact_report)
+    )
+    fields["transformers_model_artifact_kind"] = artifact_report.get(
+        "artifact_kind"
+    )
+    if artifact_report.get("status") != "ready":
+        fields.update(
+            {
+                "transformers_audit_status": "artifact_error",
+                "transformers_audit_error": "; ".join(
+                    str(item) for item in artifact_report.get("errors") or []
+                ),
+            }
+        )
+        return fields
+    config_source = artifact_report.get("base_model_name_or_path") or path_label
+    tokenizer_source = artifact_report.get("tokenizer_source") or config_source
 
     try:
-        config = transformers.AutoConfig.from_pretrained(path_label, **loader_kwargs)
+        if artifact_report.get("runtime_resolution_required"):
+            _model, _tokenizer, config, resolved_artifact = (
+                load_hf_causal_lm_artifact(
+                    path_label,
+                    artifact_kind=artifact_kind,
+                    load_model=False,
+                    load_tokenizer=False,
+                    transformers_module=transformers,
+                    loader_kwargs=loader_kwargs,
+                )
+            )
+            fields["transformers_model_artifact_report"] = (
+                summarize_hf_causal_lm_artifact(resolved_artifact)
+            )
+            config_source = resolved_artifact["resolved_base_model_name_or_path"]
+            tokenizer_source = resolved_artifact["resolved_tokenizer_source"]
+        else:
+            config = transformers.AutoConfig.from_pretrained(
+                str(config_source),
+                **loader_kwargs,
+            )
     except Exception as exc:  # pragma: no cover - exercised through tests with stubs.
         fields.update(
             {
@@ -839,7 +913,7 @@ def transformers_runtime_audit_fields(args, module_shapes):
     if fields["transformers_tokenizer_requested"]:
         try:
             tokenizer = transformers.AutoTokenizer.from_pretrained(
-                path_label,
+                str(tokenizer_source),
                 **loader_kwargs,
             )
             fields.update(
@@ -858,10 +932,23 @@ def transformers_runtime_audit_fields(args, module_shapes):
 
     if fields["transformers_load_model_requested"]:
         try:
-            model = transformers.AutoModelForCausalLM.from_pretrained(
-                path_label,
-                config=config,
-                **loader_kwargs,
+            model, _tokenizer, _config, model_artifact_report = (
+                load_hf_causal_lm_artifact(
+                    path_label,
+                    artifact_kind=artifact_kind,
+                    load_tokenizer=False,
+                    transformers_module=transformers,
+                    loader_kwargs=loader_kwargs,
+                )
+            )
+            fields["transformers_model_artifact_report"] = (
+                summarize_hf_causal_lm_artifact(model_artifact_report)
+            )
+            fields["transformers_model_adapter_loaded"] = (
+                model_artifact_report.get("adapter_loaded")
+            )
+            fields["transformers_model_artifact_kind"] = (
+                model_artifact_report.get("artifact_kind")
             )
             fields.update(
                 {
@@ -885,6 +972,8 @@ def print_transformers_audit(row):
         "transformers_audit "
         f"status={row['transformers_audit_status']} "
         f"path={row['transformers_model_path']} "
+        f"artifact_kind={row['transformers_model_artifact_kind']} "
+        f"adapter_loaded={row['transformers_model_adapter_loaded']} "
         f"available={row['transformers_available']} "
         f"config_loaded={row['transformers_config_loaded']} "
         f"model_type={row['transformers_model_type']} "

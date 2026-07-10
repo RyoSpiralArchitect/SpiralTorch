@@ -552,8 +552,66 @@ HF_FINETUNE_RUN_CARD_FILENAME: str
 HF_FINETUNE_TRAINER_TRACE_FILENAME: str
 HF_FINETUNE_REQUIRED_PYTHON_PACKAGES: List[str]
 HF_FINETUNE_REQUIRED_RUST_SURFACES: List[Dict[str, str]]
+HF_CAUSAL_LM_ARTIFACT_KINDS: Tuple[str, ...]
 HF_FINETUNE_MODES: Tuple[str, ...]
 HF_FINETUNE_LORA_TARGET_MODULES: Dict[str, Tuple[str, ...]]
+
+def hf_causal_lm_artifact_report(
+    model_name_or_path: str | PathLike[str],
+    *,
+    artifact_kind: str = ...,
+    tokenizer_name_or_path: str | PathLike[str] | None = ...,
+) -> Dict[str, object]: ...
+
+def hf_causal_lm_artifact_lines(
+    report_or_source: Mapping[str, object] | str | PathLike[str],
+    *,
+    artifact_kind: str = ...,
+    tokenizer_name_or_path: str | PathLike[str] | None = ...,
+) -> List[str]: ...
+
+def load_hf_causal_lm_artifact(
+    model_name_or_path: str | PathLike[str],
+    *,
+    tokenizer_name_or_path: str | PathLike[str] | None = ...,
+    artifact_kind: str = ...,
+    load_model: bool = ...,
+    load_tokenizer: bool = ...,
+    is_trainable: bool = ...,
+    merge_adapter: bool = ...,
+    safe_merge: bool = ...,
+    transformers_module: Any = ...,
+    peft_module: Any = ...,
+    loader_kwargs: Mapping[str, object] | None = ...,
+    config_kwargs: Mapping[str, object] | None = ...,
+    tokenizer_kwargs: Mapping[str, object] | None = ...,
+    model_kwargs: Mapping[str, object] | None = ...,
+    adapter_kwargs: Mapping[str, object] | None = ...,
+) -> Tuple[Any, Any, Any, Dict[str, object]]: ...
+
+def export_hf_merged_causal_lm(
+    adapter_name_or_path: str | PathLike[str],
+    output_dir: str | PathLike[str],
+    *,
+    tokenizer_name_or_path: str | PathLike[str] | None = ...,
+    safe_merge: bool = ...,
+    safe_serialization: bool = ...,
+    transformers_module: Any = ...,
+    peft_module: Any = ...,
+    loader_kwargs: Mapping[str, object] | None = ...,
+    config_kwargs: Mapping[str, object] | None = ...,
+    tokenizer_kwargs: Mapping[str, object] | None = ...,
+    model_kwargs: Mapping[str, object] | None = ...,
+    adapter_kwargs: Mapping[str, object] | None = ...,
+) -> Dict[str, object]: ...
+
+def hf_merged_causal_lm_export_lines(
+    report: Mapping[str, object],
+) -> List[str]: ...
+
+def summarize_hf_causal_lm_artifact(
+    report: Mapping[str, object],
+) -> Dict[str, object]: ...
 
 def hf_finetune_adapter_config(
     *,
@@ -829,6 +887,8 @@ def build_zspace_softmax_logits_processor(
 def build_zspace_activation_probe_hook(
     **kwargs: object,
 ) -> ZSpaceActivationProbeHook: ...
+
+def hf_generation_batch_size_compat(model: Any) -> ContextManager[bool]: ...
 
 def compare_zspace_inference_distortion_probes(
     probes: (
@@ -9666,6 +9726,7 @@ __all__ = [
     "HF_FINETUNE_TRAINER_TRACE_FILENAME",
     "HF_FINETUNE_REQUIRED_PYTHON_PACKAGES",
     "HF_FINETUNE_REQUIRED_RUST_SURFACES",
+    "HF_CAUSAL_LM_ARTIFACT_KINDS",
     "HF_FINETUNE_MODES",
     "HF_FINETUNE_LORA_TARGET_MODULES",
     "HF_GPT2_FT_DEFAULT_DEVICE_BACKENDS",
@@ -9673,10 +9734,16 @@ __all__ = [
     "HF_GPT2_FT_TRAINER_TRACE_FILENAME",
     "HF_GPT2_FT_REQUIRED_PYTHON_PACKAGES",
     "HF_GPT2_FT_REQUIRED_RUST_SURFACES",
+    "export_hf_merged_causal_lm",
+    "hf_causal_lm_artifact_lines",
+    "hf_causal_lm_artifact_report",
     "hf_finetune_corpus_file_report",
     "hf_finetune_adapter_config",
     "hf_finetune_lora_target_report",
     "hf_finetune_parameter_report",
+    "hf_merged_causal_lm_export_lines",
+    "load_hf_causal_lm_artifact",
+    "summarize_hf_causal_lm_artifact",
     "prepare_hf_finetune_model",
     "hf_finetune_corpus_scan_report",
     "hf_finetune_dataset_fit_report",
@@ -9829,6 +9896,7 @@ __all__ = [
     "build_zspace_softmax_logits_processor",
     "compare_zspace_inference_distortion_probes",
     "default_zspace_checkpoint_generation_prompts",
+    "hf_generation_batch_size_compat",
     "zspace_inference_distortion_sweep_report_from_probes",
     "zspace_inference_distortion_geometry_probe",
     "zspace_inference_distortion_probe_cli_args",

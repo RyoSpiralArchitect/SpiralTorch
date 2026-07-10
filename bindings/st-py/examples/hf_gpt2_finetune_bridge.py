@@ -41,7 +41,10 @@ from spiraltorch.hf_ft import (
     summarize_hf_gpt2_finetune_trainer_trace,
     write_hf_gpt2_finetune_run_card,
 )
-from spiraltorch.hf_generation import build_zspace_repression_logits_processor
+from spiraltorch.hf_generation import (
+    build_zspace_repression_logits_processor,
+    hf_generation_batch_size_compat,
+)
 from spiraltorch.hf_peft import (
     hf_finetune_adapter_config,
     prepare_hf_finetune_model,
@@ -1635,48 +1638,7 @@ def _move_batch_to_device(batch: Mapping[str, Any], device: Any | None) -> dict[
     return moved
 
 
-@contextlib.contextmanager
-def _prepare_special_tokens_batch_size_compat(model: Any):
-    prepare = getattr(model, "_prepare_special_tokens", None)
-    if not callable(prepare):
-        yield False
-        return
-    try:
-        signature = inspect.signature(prepare)
-    except (TypeError, ValueError):
-        yield False
-        return
-    parameters = signature.parameters
-    accepts_batch_size = "batch_size" in parameters or any(
-        param.kind == inspect.Parameter.VAR_KEYWORD
-        for param in parameters.values()
-    )
-    if accepts_batch_size:
-        yield False
-        return
-
-    sentinel = object()
-    previous = getattr(model, "_prepare_special_tokens", sentinel)
-
-    def _compat_prepare_special_tokens(*args: Any, **kwargs: Any) -> Any:
-        kwargs.pop("batch_size", None)
-        return prepare(*args, **kwargs)
-
-    try:
-        setattr(model, "_prepare_special_tokens", _compat_prepare_special_tokens)
-    except Exception:
-        yield False
-        return
-    try:
-        yield True
-    finally:
-        try:
-            if previous is sentinel:
-                delattr(model, "_prepare_special_tokens")
-            else:
-                setattr(model, "_prepare_special_tokens", previous)
-        except Exception:
-            pass
+_prepare_special_tokens_batch_size_compat = hf_generation_batch_size_compat
 
 
 def _last_dim(value: Any) -> int | None:

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import json
 import types
+from pathlib import Path
 
 import pytest
 
 import spiraltorch as st
+from spiraltorch import hf_cli
 
 
 class _Parameter:
@@ -70,10 +73,266 @@ class _FakePeft:
         return model
 
 
+class _ArtifactConfig:
+    model_type = "gpt2"
+    use_cache = True
+
+
+class _ArtifactTokenizer:
+    def __init__(self, source: str) -> None:
+        self.source = source
+
+    def save_pretrained(self, output_dir: str | Path) -> None:
+        output = Path(output_dir)
+        (output / "tokenizer.json").write_text("{}\n", encoding="utf-8")
+
+
+class _ArtifactModel(_Model):
+    def __init__(self, source: str) -> None:
+        super().__init__("gpt2")
+        self.source = source
+        self.adapter_source = None
+        self.adapter_trainable = None
+        self.merged = False
+        self.safe_merge = None
+
+    def merge_and_unload(self, *, safe_merge: bool = False):
+        self.merged = True
+        self.safe_merge = safe_merge
+        return self
+
+    def save_pretrained(
+        self,
+        output_dir: str | Path,
+        *,
+        safe_serialization: bool = True,
+    ) -> None:
+        output = Path(output_dir)
+        (output / "config.json").write_text("{}\n", encoding="utf-8")
+        filename = "model.safetensors" if safe_serialization else "pytorch_model.bin"
+        (output / filename).write_bytes(b"model")
+
+
+class _FakeTransformers:
+    __version__ = "test-transformers"
+    config_calls = []
+    tokenizer_calls = []
+    model_calls = []
+
+    class AutoConfig:
+        @staticmethod
+        def from_pretrained(source, **kwargs):
+            _FakeTransformers.config_calls.append((str(source), dict(kwargs)))
+            return _ArtifactConfig()
+
+    class AutoTokenizer:
+        @staticmethod
+        def from_pretrained(source, **kwargs):
+            _FakeTransformers.tokenizer_calls.append((str(source), dict(kwargs)))
+            return _ArtifactTokenizer(str(source))
+
+    class AutoModelForCausalLM:
+        @staticmethod
+        def from_pretrained(source, **kwargs):
+            _FakeTransformers.model_calls.append((str(source), dict(kwargs)))
+            return _ArtifactModel(str(source))
+
+
+class _ArtifactPeft:
+    __version__ = "test-artifact-peft"
+    config_calls = []
+    model_calls = []
+
+    class PeftConfig:
+        base_model_name_or_path = "org/remote-base"
+
+        @classmethod
+        def from_pretrained(cls, source, **kwargs):
+            _ArtifactPeft.config_calls.append((str(source), dict(kwargs)))
+            return cls()
+
+        def to_dict(self):
+            return {"base_model_name_or_path": self.base_model_name_or_path}
+
+    class PeftModel:
+        @staticmethod
+        def from_pretrained(model, source, *, is_trainable=False, **kwargs):
+            _ArtifactPeft.model_calls.append(
+                (str(source), bool(is_trainable), dict(kwargs))
+            )
+            model.adapter_source = str(source)
+            model.adapter_trainable = bool(is_trainable)
+            return model
+
+
+@pytest.fixture(autouse=True)
+def _reset_artifact_fakes() -> None:
+    _FakeTransformers.config_calls.clear()
+    _FakeTransformers.tokenizer_calls.clear()
+    _FakeTransformers.model_calls.clear()
+    _ArtifactPeft.config_calls.clear()
+    _ArtifactPeft.model_calls.clear()
+
+
+def _write_adapter(path: Path, *, base_model: str = "org/base") -> Path:
+    path.mkdir()
+    (path / "adapter_config.json").write_text(
+        json.dumps(
+            {
+                "base_model_name_or_path": base_model,
+                "peft_type": "LORA",
+                "task_type": "CAUSAL_LM",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (path / "adapter_model.safetensors").write_bytes(b"adapter")
+    (path / "tokenizer.json").write_text("{}\n", encoding="utf-8")
+    return path
+
+
 def test_peft_runtime_is_public_without_eager_peft_dependency() -> None:
     assert "hf_peft" in st.__all__
+    assert "load_hf_causal_lm_artifact" in st.__all__
     assert "prepare_hf_finetune_model" in st.__all__
     assert callable(st.hf_finetune_adapter_config)
+
+
+def test_artifact_report_detects_local_adapter_and_rejects_incomplete(
+    tmp_path: Path,
+) -> None:
+    adapter = _write_adapter(tmp_path / "adapter")
+
+    report = st.hf_causal_lm_artifact_report(adapter)
+
+    assert report["status"] == "ready"
+    assert report["artifact_kind"] == "peft_adapter"
+    assert report["base_model_name_or_path"] == "org/base"
+    assert report["tokenizer_source"] == str(adapter)
+    assert report["adapter_weights_present"] is True
+    assert "kind=peft_adapter" in st.hf_causal_lm_artifact_lines(report)[0]
+
+    incomplete = tmp_path / "incomplete"
+    incomplete.mkdir()
+    (incomplete / "adapter_config.json").write_text(
+        '{"base_model_name_or_path": "org/base"}',
+        encoding="utf-8",
+    )
+    invalid = st.hf_causal_lm_artifact_report(incomplete)
+    assert invalid["status"] == "invalid"
+    assert "weight" in " ".join(invalid["errors"])
+
+
+def test_artifact_loader_reconstructs_local_trainable_adapter(tmp_path: Path) -> None:
+    adapter = _write_adapter(tmp_path / "adapter")
+
+    model, tokenizer, config, report = st.load_hf_causal_lm_artifact(
+        adapter,
+        is_trainable=True,
+        transformers_module=_FakeTransformers,
+        peft_module=_ArtifactPeft,
+        loader_kwargs={"local_files_only": True, "trust_remote_code": False},
+    )
+
+    assert isinstance(config, _ArtifactConfig)
+    assert tokenizer.source == str(adapter)
+    assert model.source == "org/base"
+    assert model.adapter_source == str(adapter)
+    assert model.adapter_trainable is True
+    assert report["adapter_loaded"] is True
+    assert report["adapter_trainable"] is True
+    assert report["resolved_base_model_name_or_path"] == "org/base"
+    assert report["resolved_tokenizer_source_kind"] == "adapter_artifact"
+    summary = st.summarize_hf_causal_lm_artifact(report)
+    assert summary["artifact_kind"] == "peft_adapter"
+    assert summary["adapter_loaded"] is True
+    assert summary["parameter_count"] == 100
+    assert _FakeTransformers.config_calls[0][0] == "org/base"
+    assert _FakeTransformers.model_calls[0][0] == "org/base"
+    assert _ArtifactPeft.model_calls[0][2] == {"local_files_only": True}
+
+
+def test_artifact_loader_keeps_full_model_path_peft_free(tmp_path: Path) -> None:
+    full_model = tmp_path / "full-model"
+    full_model.mkdir()
+    (full_model / "config.json").write_text("{}\n", encoding="utf-8")
+    (full_model / "model.safetensors").write_bytes(b"model")
+    (full_model / "tokenizer.json").write_text("{}\n", encoding="utf-8")
+
+    model, tokenizer, _config, report = st.load_hf_causal_lm_artifact(
+        full_model,
+        transformers_module=_FakeTransformers,
+        peft_module=types.SimpleNamespace(),
+        loader_kwargs={"local_files_only": True},
+    )
+
+    assert model.source == str(full_model)
+    assert tokenizer.source == str(full_model)
+    assert report["artifact_kind"] == "full_model"
+    assert report["adapter_loaded"] is False
+    assert report["peft_version"] is None
+
+
+def test_artifact_loader_resolves_remote_adapter_metadata() -> None:
+    model, tokenizer, _config, report = st.load_hf_causal_lm_artifact(
+        "org/remote-adapter",
+        artifact_kind="peft-adapter",
+        load_model=False,
+        transformers_module=_FakeTransformers,
+        peft_module=_ArtifactPeft,
+        loader_kwargs={"local_files_only": True, "trust_remote_code": True},
+    )
+
+    assert model is None
+    assert tokenizer.source == "org/remote-base"
+    assert report["runtime_resolution_required"] is True
+    assert report["resolved_base_model_name_or_path"] == "org/remote-base"
+    assert report["runtime_adapter_config"] == {
+        "base_model_name_or_path": "org/remote-base"
+    }
+    assert _ArtifactPeft.config_calls[0][1] == {"local_files_only": True}
+
+
+def test_export_adapter_merges_atomically_into_full_model(tmp_path: Path) -> None:
+    adapter = _write_adapter(tmp_path / "adapter")
+    output = tmp_path / "merged"
+
+    report = st.export_hf_merged_causal_lm(
+        adapter,
+        output,
+        transformers_module=_FakeTransformers,
+        peft_module=_ArtifactPeft,
+        loader_kwargs={"local_files_only": True},
+    )
+
+    assert report["status"] == "exported"
+    assert report["load_report"]["adapter_merged"] is True
+    assert (output / "config.json").is_file()
+    assert (output / "model.safetensors").is_file()
+    assert (output / "tokenizer.json").is_file()
+    assert (output / "spiraltorch-hf-merged-export.json").is_file()
+    assert not (output / "adapter_config.json").exists()
+    assert "adapter_merged=True" in st.hf_merged_causal_lm_export_lines(report)[0]
+
+    with pytest.raises(ValueError, match="absent or empty"):
+        st.export_hf_merged_causal_lm(
+            adapter,
+            output,
+            transformers_module=_FakeTransformers,
+            peft_module=_ArtifactPeft,
+        )
+
+
+def test_adapter_export_cli_inspects_without_loading_runtime(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    adapter = _write_adapter(tmp_path / "adapter")
+
+    code = hf_cli.adapter_export_main(["--adapter", str(adapter), "--inspect-only"])
+
+    assert code == 0
+    assert "kind=peft_adapter" in capsys.readouterr().out
 
 
 def test_adapter_config_uses_family_defaults_and_validates_ranges() -> None:

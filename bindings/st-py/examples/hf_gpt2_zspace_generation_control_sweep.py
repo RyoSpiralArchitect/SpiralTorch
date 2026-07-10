@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import contextlib
-import inspect
 import json
 import math
 import os
@@ -27,9 +26,14 @@ from spiraltorch.hf_ft import (
 )
 from spiraltorch.hf_generation import (
     build_zspace_repression_logits_processor,
+    hf_generation_batch_size_compat,
     zspace_generation_control_bridge_cli_args,
     zspace_generation_control_processor_kwargs,
     zspace_generation_control_sweep_cli_args,
+)
+from spiraltorch.hf_peft import (
+    load_hf_causal_lm_artifact,
+    summarize_hf_causal_lm_artifact,
 )
 
 
@@ -348,6 +352,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "tokenizer files."
         ),
     )
+    parser.add_argument(
+        "--model-artifact-kind",
+        choices=("auto", "full-model", "peft-adapter"),
+        default="auto",
+        help=(
+            "Interpret --model-name as a full model or PEFT adapter. auto "
+            "detects local adapter_config.json artifacts."
+        ),
+    )
     parser.add_argument("--prompt", required=True)
     parser.add_argument("--out", type=Path, default=Path("runs/hf-gpt2-zspace-generation-control-sweep.json"))
     parser.add_argument("--allow-remote", action="store_true")
@@ -645,48 +658,7 @@ def _processor_list(processor: Any, transformers: Any) -> Any:
     return [processor]
 
 
-@contextlib.contextmanager
-def _prepare_special_tokens_batch_size_compat(model: Any):
-    prepare = getattr(model, "_prepare_special_tokens", None)
-    if not callable(prepare):
-        yield False
-        return
-    try:
-        signature = inspect.signature(prepare)
-    except (TypeError, ValueError):
-        yield False
-        return
-    parameters = signature.parameters
-    accepts_batch_size = "batch_size" in parameters or any(
-        param.kind == inspect.Parameter.VAR_KEYWORD
-        for param in parameters.values()
-    )
-    if accepts_batch_size:
-        yield False
-        return
-
-    sentinel = object()
-    previous = getattr(model, "_prepare_special_tokens", sentinel)
-
-    def _compat_prepare_special_tokens(*args: Any, **kwargs: Any) -> Any:
-        kwargs.pop("batch_size", None)
-        return prepare(*args, **kwargs)
-
-    try:
-        setattr(model, "_prepare_special_tokens", _compat_prepare_special_tokens)
-    except Exception:
-        yield False
-        return
-    try:
-        yield True
-    finally:
-        try:
-            if previous is sentinel:
-                delattr(model, "_prepare_special_tokens")
-            else:
-                setattr(model, "_prepare_special_tokens", previous)
-        except Exception:
-            pass
+_prepare_special_tokens_batch_size_compat = hf_generation_batch_size_compat
 
 
 def _generate_one(
@@ -869,6 +841,8 @@ def run_sweep(args: argparse.Namespace) -> dict[str, object]:
         "status": "planned" if args.dry_run else "running",
         "model_name": args.model_name,
         "tokenizer_name": args.tokenizer_name or args.model_name,
+        "model_artifact_kind_requested": args.model_artifact_kind,
+        "model_artifact_report": None,
         "model_configs": (
             None if args.model_configs is None else str(args.model_configs)
         ),
@@ -908,16 +882,25 @@ def run_sweep(args: argparse.Namespace) -> dict[str, object]:
     import torch  # type: ignore
 
     with _hf_remote_access(args.allow_remote):
-        tokenizer = transformers.AutoTokenizer.from_pretrained(
-            args.tokenizer_name or args.model_name,
-            **_loader_kwargs(args),
+        model, tokenizer, _config, model_artifact_report = (
+            load_hf_causal_lm_artifact(
+                args.model_name,
+                tokenizer_name_or_path=args.tokenizer_name,
+                artifact_kind=args.model_artifact_kind,
+                transformers_module=transformers,
+                loader_kwargs=_loader_kwargs(args),
+            )
         )
         if getattr(tokenizer, "pad_token", None) is None:
             tokenizer.pad_token = getattr(tokenizer, "eos_token", None)
-        model = transformers.AutoModelForCausalLM.from_pretrained(
-            args.model_name,
-            **_loader_kwargs(args),
-        )
+    report["model_artifact_report"] = summarize_hf_causal_lm_artifact(
+        model_artifact_report
+    )
+    report["model_artifact_kind"] = model_artifact_report.get("artifact_kind")
+    report["model_adapter_loaded"] = model_artifact_report.get("adapter_loaded")
+    report["tokenizer_name"] = model_artifact_report.get(
+        "resolved_tokenizer_source"
+    )
     if getattr(tokenizer, "pad_token_id", None) is not None:
         model.config.pad_token_id = tokenizer.pad_token_id
     eval_model = getattr(model, "eval", None)
