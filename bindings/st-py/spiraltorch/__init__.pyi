@@ -560,6 +560,8 @@ HF_ADAPTER_PROMOTION_FILENAME: str
 HF_ADAPTER_PROMOTION_SCHEMA: str
 HF_ADAPTER_PROMOTION_CHAIN_FILENAME: str
 HF_ADAPTER_PROMOTION_CHAIN_SCHEMA: str
+HF_ADAPTER_CONTINUATION_POLICY_FILENAME: str
+HF_ADAPTER_CONTINUATION_POLICY_SCHEMA: str
 HF_FINETUNE_MODES: Tuple[str, ...]
 HF_FINETUNE_LORA_TARGET_MODULES: Dict[str, Tuple[str, ...]]
 
@@ -631,6 +633,10 @@ def hf_adapter_promotion_chain_report(
     command_artifacts: Sequence[
         Mapping[str, object] | str | PathLike[str]
     ] | None = ...,
+    max_lineage_depth: int | None = ...,
+    target_eval_loss: float | None = ...,
+    min_eval_improvement: float | None = ...,
+    plateau_patience: int = ...,
 ) -> Dict[str, object]: ...
 def write_hf_adapter_promotion_chain(
     report_or_sources: Mapping[str, object]
@@ -645,6 +651,10 @@ def write_hf_adapter_promotion_chain(
     command_artifacts: Sequence[
         Mapping[str, object] | str | PathLike[str]
     ] | None = ...,
+    max_lineage_depth: int | None = ...,
+    target_eval_loss: float | None = ...,
+    min_eval_improvement: float | None = ...,
+    plateau_patience: int = ...,
 ) -> Dict[str, object]: ...
 def hf_adapter_promotion_chain_lines(
     report_or_path: Mapping[str, object] | str | PathLike[str],
@@ -652,6 +662,29 @@ def hf_adapter_promotion_chain_lines(
 def load_hf_adapter_promotion_chain(
     value: str | PathLike[str],
 ) -> Dict[str, object]: ...
+def hf_adapter_continuation_policy_report(
+    chain_or_path: Mapping[str, object] | str | PathLike[str],
+    *,
+    max_lineage_depth: int | None = ...,
+    target_eval_loss: float | None = ...,
+    min_eval_improvement: float | None = ...,
+    plateau_patience: int = ...,
+) -> Dict[str, object]: ...
+def write_hf_adapter_continuation_policy(
+    report_or_chain: Mapping[str, object] | str | PathLike[str],
+    out: str | PathLike[str],
+    *,
+    max_lineage_depth: int | None = ...,
+    target_eval_loss: float | None = ...,
+    min_eval_improvement: float | None = ...,
+    plateau_patience: int = ...,
+) -> Dict[str, object]: ...
+def load_hf_adapter_continuation_policy(
+    value: str | PathLike[str],
+) -> Dict[str, object]: ...
+def hf_adapter_continuation_policy_lines(
+    report_or_path: Mapping[str, object] | str | PathLike[str],
+) -> List[str]: ...
 
 def load_hf_causal_lm_artifact(
     model_name_or_path: str | PathLike[str],
@@ -9822,6 +9855,8 @@ __all__ = [
     "HF_ADAPTER_PROMOTION_SCHEMA",
     "HF_ADAPTER_PROMOTION_CHAIN_FILENAME",
     "HF_ADAPTER_PROMOTION_CHAIN_SCHEMA",
+    "HF_ADAPTER_CONTINUATION_POLICY_FILENAME",
+    "HF_ADAPTER_CONTINUATION_POLICY_SCHEMA",
     "HF_FINETUNE_MODES",
     "HF_FINETUNE_LORA_TARGET_MODULES",
     "HF_GPT2_FT_DEFAULT_DEVICE_BACKENDS",
@@ -9833,6 +9868,8 @@ __all__ = [
     "hf_causal_lm_artifact_lines",
     "hf_causal_lm_artifact_report",
     "hf_adapter_fingerprint",
+    "hf_adapter_continuation_policy_lines",
+    "hf_adapter_continuation_policy_report",
     "hf_adapter_lineage_lines",
     "hf_adapter_lineage_report",
     "hf_adapter_promotion_chain_lines",
@@ -9840,6 +9877,7 @@ __all__ = [
     "hf_adapter_promotion_lines",
     "hf_adapter_promotion_report",
     "load_hf_adapter_promotion_chain",
+    "load_hf_adapter_continuation_policy",
     "hf_finetune_corpus_file_report",
     "hf_finetune_adapter_config",
     "hf_finetune_lora_target_report",
@@ -9851,6 +9889,7 @@ __all__ = [
     "summarize_hf_causal_lm_artifact",
     "prepare_hf_finetune_model",
     "write_hf_adapter_lineage",
+    "write_hf_adapter_continuation_policy",
     "write_hf_adapter_promotion_chain",
     "write_hf_adapter_promotion",
     "hf_finetune_corpus_scan_report",

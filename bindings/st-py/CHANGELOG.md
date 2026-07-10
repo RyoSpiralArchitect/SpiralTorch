@@ -33,6 +33,10 @@
   promotion gates, run-card digests, forks, rejected generations, and a unique
   continuation tip. FT run cards now retain their exact launch command, and
   `spiral-hf-scale-up` accepts a ready chain report directly for the next depth.
+- Evidence-driven adapter continuation: add opt-in maximum-depth, target-loss,
+  and minimum-improvement/patience policies to promotion chains. Decisions are
+  separately inspectable and persistable, missing eval evidence fails closed,
+  and scale-up refuses to emit another generation after a policy stop.
 - Trainer resume audit: add `hf_finetune_checkpoint_resume_report(...)` and
   compact lines for optimizer/scheduler/RNG state availability, saved versus
   requested step horizons, and the exhausted-scheduler case where adapter

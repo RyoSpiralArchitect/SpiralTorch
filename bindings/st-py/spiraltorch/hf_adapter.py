@@ -23,6 +23,10 @@ __all__ = [
     "HF_ADAPTER_PROMOTION_SCHEMA",
     "HF_ADAPTER_PROMOTION_CHAIN_FILENAME",
     "HF_ADAPTER_PROMOTION_CHAIN_SCHEMA",
+    "HF_ADAPTER_CONTINUATION_POLICY_FILENAME",
+    "HF_ADAPTER_CONTINUATION_POLICY_SCHEMA",
+    "hf_adapter_continuation_policy_lines",
+    "hf_adapter_continuation_policy_report",
     "hf_adapter_fingerprint",
     "hf_adapter_lineage_lines",
     "hf_adapter_lineage_report",
@@ -31,9 +35,11 @@ __all__ = [
     "hf_adapter_promotion_lines",
     "hf_adapter_promotion_report",
     "load_hf_adapter_lineage",
+    "load_hf_adapter_continuation_policy",
     "load_hf_adapter_promotion_chain",
     "load_hf_adapter_promotion",
     "write_hf_adapter_lineage",
+    "write_hf_adapter_continuation_policy",
     "write_hf_adapter_promotion_chain",
     "write_hf_adapter_promotion",
 ]
@@ -45,6 +51,12 @@ HF_ADAPTER_PROMOTION_SCHEMA = "spiraltorch.hf_adapter_promotion.v1"
 HF_ADAPTER_PROMOTION_FILENAME = "spiraltorch-hf-adapter-promotion.json"
 HF_ADAPTER_PROMOTION_CHAIN_SCHEMA = "spiraltorch.hf_adapter_promotion_chain.v1"
 HF_ADAPTER_PROMOTION_CHAIN_FILENAME = "spiraltorch-hf-adapter-promotion-chain.json"
+HF_ADAPTER_CONTINUATION_POLICY_SCHEMA = (
+    "spiraltorch.hf_adapter_continuation_policy.v1"
+)
+HF_ADAPTER_CONTINUATION_POLICY_FILENAME = (
+    "spiraltorch-hf-adapter-continuation-policy.json"
+)
 
 
 def _canonical_json_bytes(value: object) -> bytes:
@@ -1305,6 +1317,306 @@ def _chain_depth(value: object) -> int | None:
     return depth if depth >= 0 and depth == value else None
 
 
+def _continuation_policy_int(name: str, value: object, *, minimum: int) -> int:
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be an integer >= {minimum}")
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be an integer >= {minimum}") from exc
+    if parsed < minimum or parsed != value:
+        raise ValueError(f"{name} must be an integer >= {minimum}")
+    return parsed
+
+
+def _continuation_policy_float(
+    name: str,
+    value: object | None,
+    *,
+    minimum: float,
+) -> float | None:
+    if value is None:
+        return None
+    parsed = _finite_number(value)
+    if parsed is None or parsed < minimum:
+        raise ValueError(f"{name} must be finite and >= {minimum}")
+    return parsed
+
+
+def hf_adapter_continuation_policy_report(
+    chain_or_path: Mapping[str, object] | str | Path,
+    *,
+    max_lineage_depth: int | None = None,
+    target_eval_loss: float | None = None,
+    min_eval_improvement: float | None = None,
+    plateau_patience: int = 1,
+) -> dict[str, object]:
+    """Decide whether an audited adapter chain should train another generation."""
+
+    chain, source_path = _json_mapping(chain_or_path)
+    if chain.get("row_type") != "hf_adapter_promotion_chain":
+        raise ValueError(
+            "continuation policy requires an HF adapter promotion chain report"
+        )
+    if chain.get("schema") != HF_ADAPTER_PROMOTION_CHAIN_SCHEMA:
+        raise ValueError(
+            "unsupported HF adapter promotion chain schema: "
+            f"{chain.get('schema')}"
+        )
+    resolved_max_depth = (
+        None
+        if max_lineage_depth is None
+        else _continuation_policy_int(
+            "max_lineage_depth",
+            max_lineage_depth,
+            minimum=0,
+        )
+    )
+    resolved_target = _continuation_policy_float(
+        "target_eval_loss",
+        target_eval_loss,
+        minimum=0.0,
+    )
+    resolved_min_improvement = _continuation_policy_float(
+        "min_eval_improvement",
+        min_eval_improvement,
+        minimum=0.0,
+    )
+    resolved_patience = _continuation_policy_int(
+        "plateau_patience",
+        plateau_patience,
+        minimum=1,
+    )
+
+    raw_nodes = chain.get("nodes")
+    nodes = (
+        [dict(node) for node in raw_nodes if isinstance(node, Mapping)]
+        if isinstance(raw_nodes, Sequence) and not isinstance(raw_nodes, (str, bytes))
+        else []
+    )
+    nodes_by_id = {
+        str(node.get("adapter_id")): node
+        for node in nodes
+        if isinstance(node.get("adapter_id"), str)
+    }
+    raw_selected_path_ids = chain.get("selected_path_adapter_ids")
+    selected_path_ids = (
+        [
+            str(adapter_id)
+            for adapter_id in raw_selected_path_ids
+            if isinstance(adapter_id, str)
+        ]
+        if isinstance(raw_selected_path_ids, Sequence)
+        and not isinstance(raw_selected_path_ids, (str, bytes))
+        else []
+    )
+    missing_path_adapter_ids = [
+        adapter_id for adapter_id in selected_path_ids if adapter_id not in nodes_by_id
+    ]
+    selected_path = [
+        nodes_by_id[adapter_id]
+        for adapter_id in selected_path_ids
+        if adapter_id in nodes_by_id
+    ]
+    observations: list[dict[str, object]] = []
+    for node in selected_path:
+        depth = _chain_depth(node.get("lineage_depth"))
+        if depth in (0, None):
+            continue
+        before = _finite_number(node.get("eval_before_loss"))
+        after = _finite_number(node.get("eval_after_loss"))
+        improvement = None if before is None or after is None else before - after
+        meets_minimum = (
+            None
+            if resolved_min_improvement is None or improvement is None
+            else improvement >= resolved_min_improvement
+        )
+        observations.append(
+            {
+                "adapter_id": node.get("adapter_id"),
+                "adapter_path": node.get("adapter_path"),
+                "lineage_depth": depth,
+                "eval_before_loss": before,
+                "eval_after_loss": after,
+                "eval_improvement": improvement,
+                "min_eval_improvement": resolved_min_improvement,
+                "meets_min_eval_improvement": meets_minimum,
+            }
+        )
+
+    selected_depth = _chain_depth(chain.get("selected_lineage_depth"))
+    selected_after = (
+        _finite_number(observations[-1].get("eval_after_loss"))
+        if observations
+        else None
+    )
+    path_start_loss = (
+        _finite_number(observations[0].get("eval_before_loss"))
+        if observations
+        else None
+    )
+    path_improvement = (
+        None
+        if path_start_loss is None or selected_after is None
+        else path_start_loss - selected_after
+    )
+
+    consecutive_below_minimum = 0
+    if resolved_min_improvement is not None:
+        for observation in reversed(observations):
+            meets = observation.get("meets_min_eval_improvement")
+            if meets is not False:
+                break
+            consecutive_below_minimum += 1
+
+    missing_evidence: list[dict[str, object]] = []
+    if resolved_target is not None and selected_depth not in (0, None):
+        if selected_after is None:
+            missing_evidence.append(
+                {
+                    "field": "selected_eval_after_loss",
+                    "message": "target_eval_loss requires final evaluation evidence",
+                }
+            )
+    if resolved_min_improvement is not None and observations:
+        required_tail = observations[-min(resolved_patience, len(observations)) :]
+        for observation in required_tail:
+            if observation.get("eval_improvement") is None:
+                missing_evidence.append(
+                    {
+                        "field": "eval_improvement",
+                        "adapter_id": observation.get("adapter_id"),
+                        "lineage_depth": observation.get("lineage_depth"),
+                        "message": (
+                            "plateau detection requires before/after evaluation evidence"
+                        ),
+                    }
+                )
+    if resolved_min_improvement is not None and selected_depth not in (0, None):
+        required_generation_count = min(resolved_patience, selected_depth)
+        if len(observations) < required_generation_count:
+            missing_evidence.append(
+                {
+                    "field": "selected_path_observations",
+                    "observed": len(observations),
+                    "threshold": required_generation_count,
+                    "message": (
+                        "plateau detection is missing selected-path generation "
+                        "observations"
+                    ),
+                }
+            )
+    for adapter_id in missing_path_adapter_ids:
+        missing_evidence.append(
+            {
+                "field": "selected_path_node",
+                "adapter_id": adapter_id,
+                "message": "selected adapter path references a missing chain node",
+            }
+        )
+
+    stop_reasons: list[dict[str, object]] = []
+    if (
+        resolved_max_depth is not None
+        and selected_depth is not None
+        and selected_depth >= resolved_max_depth
+    ):
+        stop_reasons.append(
+            {
+                "code": "max_lineage_depth_reached",
+                "observed": selected_depth,
+                "threshold": resolved_max_depth,
+                "message": "selected lineage depth reached the configured maximum",
+            }
+        )
+    if (
+        resolved_target is not None
+        and selected_after is not None
+        and selected_after <= resolved_target
+    ):
+        stop_reasons.append(
+            {
+                "code": "target_eval_loss_reached",
+                "observed": selected_after,
+                "threshold": resolved_target,
+                "message": "selected adapter reached the target evaluation loss",
+            }
+        )
+    if (
+        resolved_min_improvement is not None
+        and consecutive_below_minimum >= resolved_patience
+    ):
+        stop_reasons.append(
+            {
+                "code": "eval_improvement_plateau",
+                "observed": consecutive_below_minimum,
+                "threshold": resolved_patience,
+                "message": (
+                    "consecutive generations stayed below the minimum evaluation "
+                    "improvement"
+                ),
+            }
+        )
+
+    policy_active = any(
+        value is not None
+        for value in (
+            resolved_max_depth,
+            resolved_target,
+            resolved_min_improvement,
+        )
+    )
+    if chain.get("chain_ready") is not True:
+        status = "blocked"
+        recommendation = "resolve_chain"
+    elif stop_reasons:
+        status = "stop"
+        recommendation = "stop_training"
+    elif missing_evidence:
+        status = "needs_evidence"
+        recommendation = "collect_eval_evidence"
+    else:
+        status = "continue"
+        recommendation = "continue_training"
+    return {
+        "row_type": "hf_adapter_continuation_policy",
+        "schema": HF_ADAPTER_CONTINUATION_POLICY_SCHEMA,
+        "status": status,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "source_chain_path": source_path or chain.get("report_path"),
+        "chain_schema": chain.get("schema"),
+        "chain_status": chain.get("status"),
+        "chain_ready": chain.get("chain_ready") is True,
+        "policy_active": policy_active,
+        "continuation_allowed": status == "continue",
+        "recommendation": recommendation,
+        "selected_adapter_id": chain.get("selected_adapter_id"),
+        "selected_adapter_path": chain.get("selected_adapter_path"),
+        "selected_lineage_depth": selected_depth,
+        "next_lineage_depth": None if selected_depth is None else selected_depth + 1,
+        "selected_path_adapter_ids": selected_path_ids,
+        "selected_path_generation_count": len(observations),
+        "evaluable_generation_count": sum(
+            observation.get("eval_improvement") is not None
+            for observation in observations
+        ),
+        "selected_path_eval_start_loss": path_start_loss,
+        "selected_path_eval_end_loss": selected_after,
+        "selected_path_eval_improvement": path_improvement,
+        "max_lineage_depth": resolved_max_depth,
+        "target_eval_loss": resolved_target,
+        "min_eval_improvement": resolved_min_improvement,
+        "plateau_patience": resolved_patience,
+        "consecutive_below_min_eval_improvement": consecutive_below_minimum,
+        "stop_reason_count": len(stop_reasons),
+        "stop_reason_codes": [str(reason.get("code")) for reason in stop_reasons],
+        "stop_reasons": stop_reasons,
+        "missing_evidence_count": len(missing_evidence),
+        "missing_evidence": missing_evidence,
+        "observations": observations,
+    }
+
+
 def hf_adapter_promotion_chain_report(
     sources: str | Path | Sequence[str | Path],
     *,
@@ -1312,6 +1624,10 @@ def hf_adapter_promotion_chain_report(
     allow_inferred_roots: bool = True,
     select_adapter_id: str | None = None,
     command_artifacts: Sequence[Mapping[str, object] | str | Path] | None = None,
+    max_lineage_depth: int | None = None,
+    target_eval_loss: float | None = None,
+    min_eval_improvement: float | None = None,
+    plateau_patience: int = 1,
 ) -> dict[str, object]:
     """Audit a local adapter DAG and select one promotion-ready continuation tip."""
 
@@ -1608,12 +1924,12 @@ def hf_adapter_promotion_chain_report(
         node.get("chain_eligible") is not True for node in ordered_nodes
     )
     chain_ready = selected is not None
-    continuation_ready = bool(
+    continuation_artifacts_ready = bool(
         selected is not None and selected.get("launch_command") is not None
     )
     if not chain_ready:
         status = "ambiguous" if selection_status.startswith("ambiguous") else "blocked"
-    elif not continuation_ready:
+    elif not continuation_artifacts_ready:
         status = "needs_command"
     elif rejected_count:
         status = "ready_with_rejections"
@@ -1626,13 +1942,14 @@ def hf_adapter_promotion_chain_report(
         if node.get("lineage_depth") == 0 and node.get("adapter_id") is not None
     ]
     candidate = None if selected is None else dict(selected)
-    return {
+    report: dict[str, object] = {
         "row_type": "hf_adapter_promotion_chain",
         "schema": HF_ADAPTER_PROMOTION_CHAIN_SCHEMA,
         "status": status,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "chain_ready": chain_ready,
-        "continuation_ready": continuation_ready,
+        "continuation_artifacts_ready": continuation_artifacts_ready,
+        "continuation_ready": continuation_artifacts_ready,
         "selection_status": selection_status,
         "selected_adapter_id": None if selected is None else selected.get("adapter_id"),
         "selected_adapter_path": None
@@ -1671,6 +1988,28 @@ def hf_adapter_promotion_chain_report(
         "issues": report_issues,
         "nodes": ordered_nodes,
     }
+    policy = hf_adapter_continuation_policy_report(
+        report,
+        max_lineage_depth=max_lineage_depth,
+        target_eval_loss=target_eval_loss,
+        min_eval_improvement=min_eval_improvement,
+        plateau_patience=plateau_patience,
+    )
+    continuation_allowed = policy.get("continuation_allowed") is True
+    report["continuation_policy"] = policy
+    report["continuation_policy_status"] = policy.get("status")
+    report["continuation_allowed"] = continuation_allowed
+    report["continuation_ready"] = bool(
+        continuation_artifacts_ready and continuation_allowed
+    )
+    report["continuation_stop_reason_codes"] = list(
+        policy.get("stop_reason_codes") or []
+    )
+    if chain_ready and policy.get("status") == "stop":
+        report["status"] = "stopped_by_policy"
+    elif chain_ready and policy.get("status") == "needs_evidence":
+        report["status"] = "needs_policy_evidence"
+    return report
 
 
 def write_hf_adapter_promotion_chain(
@@ -1681,6 +2020,10 @@ def write_hf_adapter_promotion_chain(
     allow_inferred_roots: bool = True,
     select_adapter_id: str | None = None,
     command_artifacts: Sequence[Mapping[str, object] | str | Path] | None = None,
+    max_lineage_depth: int | None = None,
+    target_eval_loss: float | None = None,
+    min_eval_improvement: float | None = None,
+    plateau_patience: int = 1,
 ) -> dict[str, object]:
     report = (
         dict(report_or_sources)
@@ -1691,6 +2034,10 @@ def write_hf_adapter_promotion_chain(
             allow_inferred_roots=allow_inferred_roots,
             select_adapter_id=select_adapter_id,
             command_artifacts=command_artifacts,
+            max_lineage_depth=max_lineage_depth,
+            target_eval_loss=target_eval_loss,
+            min_eval_improvement=min_eval_improvement,
+            plateau_patience=plateau_patience,
         )
     )
     path = Path(out)
@@ -1716,6 +2063,98 @@ def load_hf_adapter_promotion_chain(value: str | Path) -> dict[str, object]:
     return payload
 
 
+def write_hf_adapter_continuation_policy(
+    report_or_chain: Mapping[str, object] | str | Path,
+    out: str | Path,
+    *,
+    max_lineage_depth: int | None = None,
+    target_eval_loss: float | None = None,
+    min_eval_improvement: float | None = None,
+    plateau_patience: int = 1,
+) -> dict[str, object]:
+    report = (
+        dict(report_or_chain)
+        if isinstance(report_or_chain, Mapping)
+        and report_or_chain.get("row_type") == "hf_adapter_continuation_policy"
+        else hf_adapter_continuation_policy_report(
+            report_or_chain,
+            max_lineage_depth=max_lineage_depth,
+            target_eval_loss=target_eval_loss,
+            min_eval_improvement=min_eval_improvement,
+            plateau_patience=plateau_patience,
+        )
+    )
+    path = Path(out)
+    report["report_path"] = str(path.resolve())
+    _atomic_write_json(path, report)
+    return report
+
+
+def load_hf_adapter_continuation_policy(value: str | Path) -> dict[str, object]:
+    path = Path(value)
+    payload, _ = _json_mapping(path)
+    if payload.get("schema") != HF_ADAPTER_CONTINUATION_POLICY_SCHEMA:
+        raise ValueError(
+            "unsupported HF adapter continuation policy schema: "
+            f"{payload.get('schema')}"
+        )
+    if payload.get("row_type") != "hf_adapter_continuation_policy":
+        raise ValueError(
+            "unsupported HF adapter continuation policy row type: "
+            f"{payload.get('row_type')}"
+        )
+    payload["report_path"] = str(path.resolve())
+    return payload
+
+
+def hf_adapter_continuation_policy_lines(
+    report_or_path: Mapping[str, object] | str | Path,
+) -> list[str]:
+    report = (
+        dict(report_or_path)
+        if isinstance(report_or_path, Mapping)
+        else load_hf_adapter_continuation_policy(report_or_path)
+    )
+    reason_codes = ",".join(
+        str(code) for code in report.get("stop_reason_codes") or []
+    )
+    lines = [
+        (
+            "hf_adapter_continuation_policy "
+            f"status={report.get('status')} "
+            f"allowed={report.get('continuation_allowed')} "
+            f"depth={report.get('selected_lineage_depth')} "
+            f"next_depth={report.get('next_lineage_depth')} "
+            f"eval_loss={report.get('selected_path_eval_end_loss')} "
+            f"path_improvement={report.get('selected_path_eval_improvement')} "
+            f"plateau={report.get('consecutive_below_min_eval_improvement')}/"
+            f"{report.get('plateau_patience')} "
+            f"reasons={reason_codes or '-'}"
+        )
+    ]
+    for reason in report.get("stop_reasons") or []:
+        if not isinstance(reason, Mapping):
+            continue
+        lines.append(
+            "hf_adapter_continuation_policy_stop "
+            f"code={reason.get('code')} "
+            f"observed={reason.get('observed')} "
+            f"threshold={reason.get('threshold')} "
+            f"message={reason.get('message')}"
+        )
+    for missing in report.get("missing_evidence") or []:
+        if not isinstance(missing, Mapping):
+            continue
+        lines.append(
+            "hf_adapter_continuation_policy_missing "
+            f"field={missing.get('field')} "
+            f"depth={missing.get('lineage_depth')} "
+            f"adapter={missing.get('adapter_id')} "
+            f"message={missing.get('message')}"
+        )
+    return lines
+
+
 def hf_adapter_promotion_chain_lines(
     report_or_path: Mapping[str, object] | str | Path,
 ) -> list[str]:
@@ -1735,9 +2174,14 @@ def hf_adapter_promotion_chain_lines(
             f"selection={report.get('selection_status')} "
             f"selected={report.get('selected_adapter_id')} "
             f"depth={report.get('selected_lineage_depth')} "
+            f"policy={report.get('continuation_policy_status')} "
+            f"allowed={report.get('continuation_allowed')} "
             f"continuation_ready={report.get('continuation_ready')}"
         )
     ]
+    policy = report.get("continuation_policy")
+    if isinstance(policy, Mapping):
+        lines.extend(hf_adapter_continuation_policy_lines(policy))
     for raw_node in report.get("nodes", []):
         if not isinstance(raw_node, Mapping):
             continue

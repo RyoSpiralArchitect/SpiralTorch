@@ -212,6 +212,33 @@ def adapter_promotion_chain_main(argv: Sequence[str] | None = None) -> int:
             "matching local pre-lineage adapter."
         ),
     )
+    parser.add_argument(
+        "--max-lineage-depth",
+        type=int,
+        default=None,
+        help="Stop before launching a child beyond this lineage depth.",
+    )
+    parser.add_argument(
+        "--target-eval-loss",
+        type=float,
+        default=None,
+        help="Stop once the selected adapter reaches this eval-loss target.",
+    )
+    parser.add_argument(
+        "--min-eval-improvement",
+        type=float,
+        default=None,
+        help="Minimum required before-minus-after eval-loss improvement.",
+    )
+    parser.add_argument(
+        "--plateau-patience",
+        type=int,
+        default=1,
+        help=(
+            "Stop after this many consecutive generations stay below "
+            "--min-eval-improvement."
+        ),
+    )
     parser.add_argument("--out", type=Path, default=None)
     parser.add_argument(
         "--require-continuation-ready",
@@ -220,13 +247,20 @@ def adapter_promotion_chain_main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
-    report = hf_adapter_promotion_chain_report(
-        args.sources,
-        recursive=not args.no_recursive,
-        allow_inferred_roots=not args.no_infer_roots,
-        select_adapter_id=args.select_adapter_id,
-        command_artifacts=args.command_artifact,
-    )
+    try:
+        report = hf_adapter_promotion_chain_report(
+            args.sources,
+            recursive=not args.no_recursive,
+            allow_inferred_roots=not args.no_infer_roots,
+            select_adapter_id=args.select_adapter_id,
+            command_artifacts=args.command_artifact,
+            max_lineage_depth=args.max_lineage_depth,
+            target_eval_loss=args.target_eval_loss,
+            min_eval_improvement=args.min_eval_improvement,
+            plateau_patience=args.plateau_patience,
+        )
+    except ValueError as exc:
+        parser.error(str(exc))
     if args.out is not None:
         report = write_hf_adapter_promotion_chain(report, args.out)
     if args.json:
