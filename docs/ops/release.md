@@ -236,7 +236,10 @@ gh workflow run verify-release.yml --ref main -f release_tag="$TAG"
 ```
 
 Confirm published PyPI wheels are byte-identical to the GitHub Release wheel
-manifest. Add `--require-latest` when publishing the current release.
+manifest. Add `--require-latest` when publishing the current release. The
+verifier polls both the version-specific wheel set and PyPI's latest-version
+index for up to `--timeout` seconds, covering the short propagation window
+where uploaded wheels are visible before the project index advances.
 
 ```bash
 python scripts/security/verify_pypi_release.py \

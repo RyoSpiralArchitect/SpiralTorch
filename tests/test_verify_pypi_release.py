@@ -78,7 +78,28 @@ class VerifyPyPIReleaseTests(unittest.TestCase):
         self.assertEqual(result, {"linux.whl": "1" * 64, "mac.whl": "2" * 64})
         sleep.assert_called_once_with(0.01)
 
-    def test_main_requires_latest_when_requested(self) -> None:
+    def test_wait_for_pypi_wheels_polls_until_latest_version(self) -> None:
+        wheels = {"spiraltorch-0.4.11.whl": "1" * 64}
+        with mock.patch.object(verify_pypi_release, "pypi_wheel_digests", return_value=wheels):
+            with mock.patch.object(
+                verify_pypi_release,
+                "pypi_latest_version",
+                side_effect=["0.4.10", "0.4.11"],
+            ):
+                with mock.patch.object(verify_pypi_release.time, "sleep") as sleep:
+                    result = verify_pypi_release.wait_for_pypi_wheels(
+                        "spiraltorch",
+                        "0.4.11",
+                        expected_wheels=1,
+                        require_latest=True,
+                        timeout=30,
+                        poll_interval=0.01,
+                    )
+
+        self.assertEqual(result, wheels)
+        sleep.assert_called_once_with(0.01)
+
+    def test_main_passes_require_latest_to_publication_wait(self) -> None:
         wheels = {"spiraltorch-0.4.11.whl": "1" * 64}
         argv = [
             "verify_pypi_release.py",
@@ -95,14 +116,21 @@ class VerifyPyPIReleaseTests(unittest.TestCase):
                 "github_release_wheel_digests",
                 return_value=wheels,
             ):
-                with mock.patch.object(verify_pypi_release, "wait_for_pypi_wheels", return_value=wheels):
-                    with mock.patch.object(
-                        verify_pypi_release,
-                        "pypi_latest_version",
-                        return_value="0.4.10",
-                    ):
-                        with self.assertRaisesRegex(verify_pypi_release.VerifyError, "latest version"):
-                            verify_pypi_release.main()
+                with mock.patch.object(
+                    verify_pypi_release,
+                    "wait_for_pypi_wheels",
+                    return_value=wheels,
+                ) as wait:
+                    self.assertEqual(verify_pypi_release.main(), 0)
+
+        wait.assert_called_once_with(
+            "spiraltorch",
+            "0.4.11",
+            expected_wheels=1,
+            require_latest=True,
+            timeout=240.0,
+            poll_interval=10.0,
+        )
 
 
 if __name__ == "__main__":

@@ -51,7 +51,10 @@ def parse_args() -> argparse.Namespace:
         "--timeout",
         type=float,
         default=240.0,
-        help="Seconds to wait for PyPI JSON to expose the expected wheels. Default: 240.",
+        help=(
+            "Seconds to wait for PyPI JSON to expose the expected wheels and, "
+            "with --require-latest, the expected latest version. Default: 240."
+        ),
     )
     parser.add_argument(
         "--poll-interval",
@@ -146,20 +149,28 @@ def wait_for_pypi_wheels(
     version: str,
     *,
     expected_wheels: int | None,
+    require_latest: bool = False,
     timeout: float,
     poll_interval: float,
 ) -> dict[str, str]:
     deadline = time.time() + timeout
     wheels: dict[str, str] = {}
+    latest: str | None = None
     while True:
         wheels = pypi_wheel_digests(package, version)
         print(f"pypi_wheels_for_{version}={len(wheels)}", flush=True)
-        if expected_wheels is None or len(wheels) >= expected_wheels:
+        if require_latest:
+            latest = pypi_latest_version(package)
+            print(f"pypi_latest={latest}", flush=True)
+        wheels_ready = expected_wheels is None or len(wheels) >= expected_wheels
+        latest_ready = not require_latest or latest == version
+        if wheels_ready and latest_ready:
             return wheels
         if time.time() >= deadline:
             raise VerifyError(
-                f"Timed out waiting for {expected_wheels} PyPI wheel(s) for {package}=={version}; "
-                f"last_count={len(wheels)}"
+                f"Timed out waiting for PyPI publication of {package}=={version}; "
+                f"expected_wheels={expected_wheels} last_count={len(wheels)} "
+                f"require_latest={require_latest} latest={latest!r}"
             )
         time.sleep(poll_interval)
 
@@ -189,20 +200,13 @@ def main() -> int:
         args.package,
         args.version,
         expected_wheels=args.expected_wheels,
+        require_latest=args.require_latest,
         timeout=args.timeout,
         poll_interval=args.poll_interval,
     )
 
     if args.expected_wheels is not None and len(pypi) != args.expected_wheels:
         raise VerifyError(f"PyPI exposes {len(pypi)} wheel(s) for {args.version}; expected {args.expected_wheels}")
-    if args.require_latest:
-        latest = pypi_latest_version(args.package)
-        print(f"pypi_latest={latest}", flush=True)
-    else:
-        latest = None
-    if args.require_latest and latest != args.version:
-        raise VerifyError(f"PyPI latest version is {latest!r}; expected {args.version!r}")
-
     compare_digests(release, pypi)
     print(
         f"pypi_release_digests=ok package={args.package} version={args.version} "
