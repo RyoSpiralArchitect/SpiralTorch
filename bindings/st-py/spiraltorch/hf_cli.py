@@ -51,7 +51,17 @@ from .hf_adapter_executor_supervisor import (
     hf_adapter_continuation_executor_supervision_lines,
     hf_adapter_continuation_executor_supervision_report,
     hf_adapter_continuation_executor_supervisor_lines,
+    hf_adapter_continuation_executor_supervisor_status_lines,
+    hf_adapter_continuation_executor_supervisor_status_report,
+    hf_adapter_continuation_executor_supervisor_stop_request_lines,
+    request_hf_adapter_continuation_executor_supervisor_stop,
     supervise_hf_adapter_continuation_executor,
+)
+from .hf_adapter_executor_supervisor_launch import (
+    hf_adapter_continuation_executor_supervisor_launch_lines,
+    hf_adapter_continuation_executor_supervisor_launch_status_lines,
+    hf_adapter_continuation_executor_supervisor_launch_status_report,
+    launch_hf_adapter_continuation_executor_supervisor,
 )
 from .hf_ft import (
     HF_FINETUNE_DEFAULT_MODEL_PROFILE,
@@ -683,9 +693,7 @@ def adapter_continuation_executor_resume_main(
     return 0 if report.get("ready") is True else 1
 
 
-def adapter_continuation_executor_supervise_main(
-    argv: Sequence[str] | None = None,
-) -> int:
+def _adapter_continuation_executor_supervise_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Supervise bounded exact executor replays while preserving operator and "
@@ -698,13 +706,35 @@ def adapter_continuation_executor_supervise_main(
         action="store_true",
         help="Print one read-only supervision decision without waiting or resuming.",
     )
+    parser.add_argument(
+        "--detach",
+        action="store_true",
+        help="Run the supervisor in an isolated background process.",
+    )
     parser.add_argument("--max-resumes", type=int, default=1)
     parser.add_argument("--poll-interval-seconds", type=float, default=5.0)
     parser.add_argument("--timeout-seconds", type=float, default=0.0)
     parser.add_argument("--handoff-timeout-seconds", type=float, default=5.0)
+    parser.add_argument("--detach-handoff-timeout-seconds", type=float, default=5.0)
     parser.add_argument("--state", type=Path, default=None)
+    parser.add_argument(
+        "--launch-state",
+        dest="supervisor_launch_state",
+        type=Path,
+        default=None,
+    )
     parser.add_argument("--json", action="store_true")
-    args = parser.parse_args(argv)
+    return parser
+
+
+def _validate_adapter_continuation_executor_supervise_args(
+    parser: argparse.ArgumentParser,
+    args: argparse.Namespace,
+) -> None:
+    if args.plan and args.detach:
+        parser.error("--plan and --detach are mutually exclusive")
+    if args.supervisor_launch_state is not None and not args.detach:
+        parser.error("--launch-state requires --detach")
     if args.max_resumes <= 0:
         parser.error("--max-resumes must be positive")
     if (
@@ -715,22 +745,72 @@ def adapter_continuation_executor_supervise_main(
     for name, value in (
         ("--timeout-seconds", args.timeout_seconds),
         ("--handoff-timeout-seconds", args.handoff_timeout_seconds),
+        ("--detach-handoff-timeout-seconds", args.detach_handoff_timeout_seconds),
     ):
         if not math.isfinite(value) or value < 0.0:
             parser.error(f"{name} must be finite and non-negative")
-    try:
-        report = (
-            hf_adapter_continuation_executor_supervision_report(args.launch_state)
-            if args.plan
-            else supervise_hf_adapter_continuation_executor(
-                args.launch_state,
-                max_resumes=args.max_resumes,
-                poll_interval_seconds=args.poll_interval_seconds,
-                timeout_seconds=args.timeout_seconds,
-                handoff_timeout_seconds=args.handoff_timeout_seconds,
-                supervisor_state_path=args.state,
-            )
+
+
+def _adapter_continuation_executor_supervise_report(
+    args: argparse.Namespace,
+) -> dict[str, object]:
+    if args.plan:
+        return hf_adapter_continuation_executor_supervision_report(args.launch_state)
+    if args.detach:
+        return launch_hf_adapter_continuation_executor_supervisor(
+            args.launch_state,
+            max_resumes=args.max_resumes,
+            poll_interval_seconds=args.poll_interval_seconds,
+            timeout_seconds=args.timeout_seconds,
+            handoff_timeout_seconds=args.handoff_timeout_seconds,
+            launch_handoff_timeout_seconds=args.detach_handoff_timeout_seconds,
+            supervisor_state_path=args.state,
+            supervisor_launch_state_path=args.supervisor_launch_state,
+            command_cwd=Path.cwd(),
         )
+    return supervise_hf_adapter_continuation_executor(
+        args.launch_state,
+        max_resumes=args.max_resumes,
+        poll_interval_seconds=args.poll_interval_seconds,
+        timeout_seconds=args.timeout_seconds,
+        handoff_timeout_seconds=args.handoff_timeout_seconds,
+        supervisor_state_path=args.state,
+    )
+
+
+def _adapter_continuation_executor_supervise_lines(
+    args: argparse.Namespace,
+    report: Mapping[str, object],
+) -> list[str]:
+    if args.plan:
+        return hf_adapter_continuation_executor_supervision_lines(report)
+    if args.detach:
+        return hf_adapter_continuation_executor_supervisor_launch_lines(report)
+    return hf_adapter_continuation_executor_supervisor_lines(report)
+
+
+def _adapter_continuation_executor_supervise_exit_code(
+    args: argparse.Namespace,
+    report: Mapping[str, object],
+) -> int:
+    if args.detach:
+        return (
+            0
+            if report.get("request_status")
+            in {"already_running", "completed", "handed_off"}
+            else 1
+        )
+    return 0 if report.get("healthy") is True else 1
+
+
+def adapter_continuation_executor_supervise_main(
+    argv: Sequence[str] | None = None,
+) -> int:
+    parser = _adapter_continuation_executor_supervise_parser()
+    args = parser.parse_args(argv)
+    _validate_adapter_continuation_executor_supervise_args(parser, args)
+    try:
+        report = _adapter_continuation_executor_supervise_report(args)
     except Exception as exc:
         print(
             "hf_adapter_continuation_executor_supervisor_error "
@@ -741,14 +821,97 @@ def adapter_continuation_executor_supervise_main(
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
     else:
-        lines = (
-            hf_adapter_continuation_executor_supervision_lines(report)
-            if args.plan
-            else hf_adapter_continuation_executor_supervisor_lines(report)
+        for line in _adapter_continuation_executor_supervise_lines(args, report):
+            print(line)
+    return _adapter_continuation_executor_supervise_exit_code(args, report)
+
+
+def adapter_continuation_executor_supervisor_status_main(
+    argv: Sequence[str] | None = None,
+) -> int:
+    parser = argparse.ArgumentParser(
+        description="Inspect supervisor state, ownership, and stop control.",
+    )
+    parser.add_argument("state", type=Path)
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args(argv)
+    try:
+        report = hf_adapter_continuation_executor_supervisor_status_report(args.state)
+    except Exception as exc:
+        print(
+            "hf_adapter_continuation_executor_supervisor_status_error "
+            f"{exc.__class__.__name__}: {exc}",
+            file=sys.stderr,
         )
-        for line in lines:
+        return 2
+    if args.json:
+        print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        for line in hf_adapter_continuation_executor_supervisor_status_lines(report):
             print(line)
     return 0 if report.get("healthy") is True else 1
+
+
+def adapter_continuation_executor_supervisor_launch_status_main(
+    argv: Sequence[str] | None = None,
+) -> int:
+    parser = argparse.ArgumentParser(
+        description="Inspect detached supervisor launch and handoff state.",
+    )
+    parser.add_argument("launch_state", type=Path)
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args(argv)
+    try:
+        report = hf_adapter_continuation_executor_supervisor_launch_status_report(
+            args.launch_state
+        )
+    except Exception as exc:
+        print(
+            "hf_adapter_continuation_executor_supervisor_launch_status_error "
+            f"{exc.__class__.__name__}: {exc}",
+            file=sys.stderr,
+        )
+        return 2
+    if args.json:
+        print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        for line in hf_adapter_continuation_executor_supervisor_launch_status_lines(
+            report
+        ):
+            print(line)
+    return 0 if report.get("healthy") is True else 1
+
+
+def adapter_continuation_executor_supervisor_stop_main(
+    argv: Sequence[str] | None = None,
+) -> int:
+    parser = argparse.ArgumentParser(
+        description="Request a cooperative stop of one verified supervisor run.",
+    )
+    parser.add_argument("state", type=Path)
+    parser.add_argument("--reason", default="operator_requested")
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args(argv)
+    try:
+        report = request_hf_adapter_continuation_executor_supervisor_stop(
+            args.state,
+            reason=args.reason,
+        )
+    except Exception as exc:
+        print(
+            "hf_adapter_continuation_executor_supervisor_stop_error "
+            f"{exc.__class__.__name__}: {exc}",
+            file=sys.stderr,
+        )
+        return 2
+    if args.json:
+        print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        for line in hf_adapter_continuation_executor_supervisor_stop_request_lines(
+            report
+        ):
+            print(line)
+    return 0
 
 
 def adapter_continuation_executor_quarantine_main(

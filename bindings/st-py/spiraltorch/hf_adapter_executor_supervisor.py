@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -29,10 +30,17 @@ __all__ = [
     "HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISOR_FILENAME",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISOR_LOCK_FILENAME",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISOR_SCHEMA",
+    "HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISOR_STATUS_SCHEMA",
+    "HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISOR_STOP_REQUEST_SCHEMA",
     "hf_adapter_continuation_executor_supervision_lines",
     "hf_adapter_continuation_executor_supervision_report",
     "hf_adapter_continuation_executor_supervisor_lines",
+    "hf_adapter_continuation_executor_supervisor_status_lines",
+    "hf_adapter_continuation_executor_supervisor_status_report",
+    "hf_adapter_continuation_executor_supervisor_stop_request_lines",
     "load_hf_adapter_continuation_executor_supervisor",
+    "load_hf_adapter_continuation_executor_supervisor_stop_request",
+    "request_hf_adapter_continuation_executor_supervisor_stop",
     "supervise_hf_adapter_continuation_executor",
 ]
 
@@ -43,11 +51,20 @@ HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISION_SCHEMA = (
 HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISOR_SCHEMA = (
     "spiraltorch.hf_adapter_continuation_executor_supervisor.v1"
 )
+HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISOR_STATUS_SCHEMA = (
+    "spiraltorch.hf_adapter_continuation_executor_supervisor_status.v1"
+)
+HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISOR_STOP_REQUEST_SCHEMA = (
+    "spiraltorch.hf_adapter_continuation_executor_supervisor_stop_request.v1"
+)
 HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISOR_FILENAME = (
     "spiraltorch-hf-adapter-continuation-executor-supervisor.json"
 )
 HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISOR_LOCK_FILENAME = (
     ".spiraltorch-hf-adapter-continuation-executor-supervisor.lock"
+)
+_SUPERVISOR_CONTROL_DIRNAME = (
+    ".spiraltorch-hf-adapter-continuation-executor-supervisor-control"
 )
 
 _AUTOMATIC_RESUME_REASON = "max_generations_per_invocation_reached"
@@ -82,6 +99,157 @@ def _atomic_write_json(path: Path, payload: Mapping[str, object]) -> None:
     finally:
         if temporary is not None and temporary.exists():
             temporary.unlink()
+
+
+def _exclusive_write_json(path: Path, payload: Mapping[str, object]) -> None:
+    control_dir = path.parent
+    if control_dir.is_symlink():
+        raise RuntimeError(
+            f"executor supervisor control directory cannot be a symlink: {control_dir}"
+        )
+    control_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=True, indent=2, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+    except BaseException:
+        path.unlink(missing_ok=True)
+        raise
+
+
+def _supervisor_stop_request_path(
+    output_root: Path,
+    *,
+    supervisor_run_id: str,
+    invocation_count: int,
+) -> Path:
+    identity = hashlib.sha256(
+        f"{supervisor_run_id}\0{invocation_count}".encode("utf-8")
+    ).hexdigest()[:24]
+    return (
+        output_root
+        / _SUPERVISOR_CONTROL_DIRNAME
+        / f"stop-{invocation_count:06d}-{identity}.json"
+    )
+
+
+def _state_supervisor_stop_request_path(
+    state: Mapping[str, object],
+    run: Mapping[str, object],
+) -> Path:
+    output_root_value = state.get("output_root")
+    supervisor_run_id = run.get("supervisor_run_id")
+    invocation_count = run.get("invocation_count")
+    if output_root_value is None or not isinstance(supervisor_run_id, str):
+        raise ValueError("executor supervisor state is missing stop-request identity")
+    if not supervisor_run_id:
+        raise ValueError("executor supervisor run ID is invalid")
+    if (
+        isinstance(invocation_count, bool)
+        or not isinstance(invocation_count, int)
+        or invocation_count <= 0
+    ):
+        raise ValueError("executor supervisor invocation_count is invalid")
+    expected = _supervisor_stop_request_path(
+        Path(str(output_root_value)).expanduser().resolve(),
+        supervisor_run_id=supervisor_run_id,
+        invocation_count=invocation_count,
+    )
+    recorded = run.get("stop_request_path")
+    if recorded is None or Path(str(recorded)).expanduser().resolve() != expected:
+        raise ValueError("executor supervisor stop-request path is inconsistent")
+    return expected
+
+
+def load_hf_adapter_continuation_executor_supervisor_stop_request(
+    value: str | Path,
+) -> dict[str, object]:
+    """Load and validate one durable supervisor stop request."""
+
+    path = Path(value).expanduser()
+    if path.is_symlink():
+        raise ValueError(f"executor supervisor stop request cannot be a symlink: {path}")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, Mapping):
+        raise ValueError(
+            f"executor supervisor stop request must contain an object: {path}"
+        )
+    if (
+        payload.get("schema")
+        != HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISOR_STOP_REQUEST_SCHEMA
+    ):
+        raise ValueError(
+            "unsupported HF adapter executor supervisor stop-request schema: "
+            f"{payload.get('schema')}"
+        )
+    if (
+        payload.get("row_type")
+        != "hf_adapter_continuation_executor_supervisor_stop_request"
+    ):
+        raise ValueError(
+            "unsupported HF adapter executor supervisor stop-request row type: "
+            f"{payload.get('row_type')}"
+        )
+    required_strings = (
+        "request_id",
+        "requested_at",
+        "requested_by_hostname",
+        "reason",
+        "supervisor_run_id",
+        "supervisor_hostname",
+        "supervisor_state_path",
+        "launch_state_path",
+    )
+    if any(
+        not isinstance(payload.get(field), str) or not payload.get(field)
+        for field in required_strings
+    ):
+        raise ValueError("executor supervisor stop request identity is invalid")
+    for field in ("requested_by_pid", "supervisor_pid", "invocation_count"):
+        value = payload.get(field)
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError(
+                f"executor supervisor stop request {field} is invalid"
+            )
+    _normalized_supervisor_stop_reason(payload.get("reason"))
+    report = dict(payload)
+    report["request_path"] = str(path.resolve())
+    return report
+
+
+def _matching_supervisor_stop_request(
+    path: Path,
+    *,
+    expected_identity: Mapping[str, object],
+) -> dict[str, object] | None:
+    try:
+        request = load_hf_adapter_continuation_executor_supervisor_stop_request(path)
+    except FileNotFoundError:
+        return None
+    for field, expected in expected_identity.items():
+        if request.get(field) != expected:
+            raise ValueError(
+                "executor supervisor stop request identity differs for " f"{field}"
+            )
+    return request
+
+
+def _supervisor_stop_request_identity(
+    state: Mapping[str, object],
+    run: Mapping[str, object],
+    state_path: Path,
+) -> dict[str, object]:
+    return {
+        "supervisor_run_id": run.get("supervisor_run_id"),
+        "invocation_count": run.get("invocation_count"),
+        "supervisor_pid": run.get("pid"),
+        "supervisor_hostname": run.get("hostname"),
+        "supervisor_state_path": str(state_path),
+        "launch_state_path": state.get("launch_state_path"),
+    }
 
 
 def _launch_state_path(
@@ -639,9 +807,20 @@ def _supervisor_state_for_invocation(
     runs = _validated_supervisor_runs(state)
     if runs:
         _close_interrupted_supervisor_run(runs[-1])
+    previous_stop_request = state.pop("stop_request", None)
+    if isinstance(previous_stop_request, Mapping):
+        history = state.setdefault("stop_request_history", [])
+        if isinstance(history, list):
+            history.append(dict(previous_stop_request))
     invocation_count = int(state.get("invocation_count") or 0) + 1
+    supervisor_run_id = f"executor-supervisor-{uuid.uuid4().hex}"
+    stop_request_path = _supervisor_stop_request_path(
+        output_root,
+        supervisor_run_id=supervisor_run_id,
+        invocation_count=invocation_count,
+    )
     run = {
-        "supervisor_run_id": f"executor-supervisor-{uuid.uuid4().hex}",
+        "supervisor_run_id": supervisor_run_id,
         "invocation_count": invocation_count,
         "status": "running",
         "action": "observe_executor",
@@ -653,6 +832,7 @@ def _supervisor_state_for_invocation(
         "poll_interval_seconds": poll_interval_seconds,
         "timeout_seconds": timeout_seconds,
         "handoff_timeout_seconds": handoff_timeout_seconds,
+        "stop_request_path": str(stop_request_path),
         "resumes_started": 0,
         "transitions": [],
         "resume_events": [],
@@ -882,6 +1062,59 @@ def _finish_from_supervision_decision(
     )
 
 
+def _finish_if_supervisor_stop_requested(
+    state: dict[str, object],
+    run: dict[str, object],
+    state_path: Path,
+) -> dict[str, object] | None:
+    try:
+        stop_path = _state_supervisor_stop_request_path(state, run)
+    except ValueError as exc:
+        run["stop_request_error"] = f"{exc.__class__.__name__}: {exc}"
+        return _finish_supervisor(
+            state,
+            run,
+            state_path,
+            status="blocked",
+            action="inspect_supervisor_state",
+            healthy=False,
+            reason="supervisor_stop_request_path_invalid",
+        )
+    try:
+        request = _matching_supervisor_stop_request(
+            stop_path,
+            expected_identity=_supervisor_stop_request_identity(
+                state,
+                run,
+                state_path,
+            ),
+        )
+    except (OSError, ValueError) as exc:
+        run["stop_request_error"] = f"{exc.__class__.__name__}: {exc}"
+        return _finish_supervisor(
+            state,
+            run,
+            state_path,
+            status="blocked",
+            action="inspect_supervisor_stop_request",
+            healthy=False,
+            reason="supervisor_stop_request_invalid",
+        )
+    if request is None:
+        return None
+    run["stop_request"] = request
+    state["stop_request"] = request
+    return _finish_supervisor(
+        state,
+        run,
+        state_path,
+        status="stopped",
+        action="operator_stopped_supervisor",
+        healthy=True,
+        reason="stop_requested",
+    )
+
+
 def _run_supervisor_loop(
     state: dict[str, object],
     run: dict[str, object],
@@ -900,6 +1133,13 @@ def _run_supervisor_loop(
     try:
         while True:
             elapsed = max(0.0, monotonic() - started)
+            stop_result = _finish_if_supervisor_stop_requested(
+                state,
+                run,
+                state_path,
+            )
+            if stop_result is not None:
+                return stop_result
             try:
                 decision = hf_adapter_continuation_executor_supervision_report(
                     launch_state_path
@@ -947,19 +1187,16 @@ def _run_supervisor_loop(
                     wait_seconds = min(wait_seconds, max(0.0, timeout - elapsed))
                 sleep(wait_seconds)
                 continue
-            if decision_status == "resume_ready":
-                result = _resume_once(
-                    state,
-                    run,
-                    state_path,
-                    launch_state_path,
-                    resume_budget=resume_budget,
-                    handoff_timeout=handoff_timeout,
-                )
-                if result is not None:
-                    return result
-                continue
-            raise RuntimeError(f"unsupported supervision decision: {decision_status}")
+            result = _resume_once(
+                state,
+                run,
+                state_path,
+                launch_state_path,
+                resume_budget=resume_budget,
+                handoff_timeout=handoff_timeout,
+            )
+            if result is not None:
+                return result
     except BaseException as exc:
         run["interruption"] = f"{exc.__class__.__name__}: {exc}"
         _finish_supervisor(
@@ -1049,6 +1286,430 @@ def supervise_hf_adapter_continuation_executor(
             sleep=_sleep,
             monotonic=_monotonic,
         )
+
+
+def _supervisor_process_observation(run: Mapping[str, object]) -> str:
+    hostname = run.get("hostname")
+    if not isinstance(hostname, str) or not hostname:
+        return "unverified"
+    if hostname != socket.gethostname():
+        return "remote_unverified"
+    alive = local_pid_alive(run.get("pid"))
+    if alive is True:
+        return "alive"
+    if alive is False:
+        return "exited"
+    return "unverified"
+
+
+def _supervisor_lock_observation(output_root: Path) -> dict[str, object]:
+    path = output_root / HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISOR_LOCK_FILENAME
+    try:
+        owner = _load_supervisor_lock(path)
+    except RuntimeError as exc:
+        return {
+            "path": str(path),
+            "status": "invalid",
+            "owner": None,
+            "error": f"{exc.__class__.__name__}: {exc}",
+        }
+    if owner is None:
+        return {"path": str(path), "status": "absent", "owner": None, "error": None}
+    if (
+        owner.get("row_type")
+        != "hf_adapter_continuation_executor_supervisor_lock"
+        or not isinstance(owner.get("lock_id"), str)
+        or not owner.get("lock_id")
+        or not isinstance(owner.get("hostname"), str)
+        or not owner.get("hostname")
+        or isinstance(owner.get("pid"), bool)
+        or not isinstance(owner.get("pid"), int)
+        or int(owner.get("pid")) <= 0
+    ):
+        return {
+            "path": str(path),
+            "status": "invalid",
+            "owner": owner,
+            "error": "executor supervisor lock owner identity is invalid",
+        }
+    return {
+        "path": str(path),
+        "status": _supervisor_process_observation(owner),
+        "owner": owner,
+        "error": None,
+    }
+
+
+def _supervisor_lock_targets_state(
+    observation: Mapping[str, object],
+    state_path: Path,
+) -> bool:
+    owner = observation.get("owner")
+    if not isinstance(owner, Mapping):
+        return False
+    recorded = owner.get("supervisor_state_path")
+    return bool(
+        recorded is not None
+        and Path(str(recorded)).expanduser().resolve() == state_path
+    )
+
+
+def _supervisor_lock_matches_run(
+    observation: Mapping[str, object],
+    run: Mapping[str, object],
+    state_path: Path,
+) -> bool:
+    owner = observation.get("owner")
+    return bool(
+        isinstance(owner, Mapping)
+        and _supervisor_lock_targets_state(observation, state_path)
+        and owner.get("hostname") == run.get("hostname")
+        and owner.get("pid") == run.get("pid")
+    )
+
+
+def _supervisor_state_and_path(
+    report_or_path: Mapping[str, object] | str | Path,
+) -> tuple[dict[str, object], Path]:
+    state = (
+        dict(report_or_path)
+        if isinstance(report_or_path, Mapping)
+        and report_or_path.get("row_type")
+        == "hf_adapter_continuation_executor_supervisor"
+        else load_hf_adapter_continuation_executor_supervisor(report_or_path)
+    )
+    path_value = state.get("supervisor_state_path")
+    if path_value is None:
+        raise ValueError("executor supervisor state path is missing")
+    path = Path(str(path_value)).expanduser()
+    if path.is_symlink():
+        raise ValueError(f"executor supervisor state cannot be a symlink: {path}")
+    return state, path.resolve()
+
+
+def _supervisor_terminal_status(
+    latest_status: str,
+    *,
+    lock_status: object,
+    lock_matches_run: bool,
+    lock_targets_state: bool,
+) -> str:
+    if lock_matches_run and lock_status == "alive":
+        return "stopping"
+    if lock_targets_state and lock_status == "alive":
+        return "starting"
+    if lock_targets_state and lock_status == "remote_unverified":
+        return "remote_running"
+    if lock_targets_state and lock_status in {"unverified", "invalid"}:
+        return "running_unverified"
+    if lock_status == "alive":
+        return "ownership_conflict"
+    return latest_status
+
+
+def _supervisor_recommended_action(
+    status: str,
+    latest: Mapping[str, object] | None,
+) -> str:
+    actions = {
+        "completed": "inspect_supervisor_result",
+        "interrupted": "restart_supervisor",
+        "ownership_conflict": "inspect_supervisor_ownership",
+        "paused": "inspect_manual_boundary",
+        "remote_running": "inspect_remote_supervisor",
+        "resume_budget_reached": "run_supervisor_again",
+        "running": "monitor_supervisor",
+        "running_unverified": "inspect_supervisor_ownership",
+        "starting": "wait_for_supervisor",
+        "stopped": "restart_supervisor_if_needed",
+        "stopping": "wait_for_supervisor",
+    }
+    if status in actions:
+        return actions[status]
+    if latest is not None and isinstance(latest.get("action"), str):
+        return str(latest["action"])
+    return "inspect_supervisor_state"
+
+
+def _observed_supervisor_stop_request(
+    state: Mapping[str, object],
+    latest: Mapping[str, object] | None,
+    state_path: Path,
+) -> tuple[dict[str, object] | None, str | None, Path | None]:
+    if latest is None:
+        return None, None, None
+    try:
+        path = _state_supervisor_stop_request_path(state, latest)
+        request = _matching_supervisor_stop_request(
+            path,
+            expected_identity=_supervisor_stop_request_identity(
+                state,
+                latest,
+                state_path,
+            ),
+        )
+    except (OSError, ValueError) as exc:
+        return None, f"{exc.__class__.__name__}: {exc}", None
+    return request, None, path
+
+
+def _observed_supervisor_status(
+    latest: Mapping[str, object] | None,
+    *,
+    process_observation: str,
+    lock_status: object,
+    lock_matches_run: bool,
+    lock_targets_state: bool,
+) -> str:
+    if latest is None:
+        return "empty"
+    latest_status = str(latest.get("status") or "unknown")
+    if latest_status != "running":
+        return _supervisor_terminal_status(
+            latest_status,
+            lock_status=lock_status,
+            lock_matches_run=lock_matches_run,
+            lock_targets_state=lock_targets_state,
+        )
+    if lock_matches_run and lock_status == "alive":
+        return "running"
+    if lock_matches_run and lock_status == "remote_unverified":
+        return "remote_running"
+    if process_observation == "exited" and lock_status in {"absent", "exited"}:
+        return "interrupted"
+    return "running_unverified"
+
+
+def _supervisor_health(
+    state: Mapping[str, object],
+    latest: Mapping[str, object] | None,
+    *,
+    status: str,
+    stop_request_error: str | None,
+) -> tuple[bool, list[str]]:
+    healthy_statuses = {
+        "completed",
+        "paused",
+        "resume_budget_reached",
+        "running",
+        "starting",
+        "stopped",
+        "stopping",
+    }
+    healthy = status in healthy_statuses
+    if latest is not None and status not in {"running", "starting", "stopping"}:
+        healthy = healthy and latest.get("healthy") is True
+    issues: list[str] = []
+    if stop_request_error is not None:
+        issues.append("stop_request_invalid")
+        healthy = False
+    if state.get("status") != (None if latest is None else latest.get("status")):
+        issues.append("state_latest_status_mismatch")
+        healthy = False
+    if status in {"remote_running", "running_unverified", "ownership_conflict"}:
+        issues.append(status)
+    return healthy, issues
+
+
+def hf_adapter_continuation_executor_supervisor_status_report(
+    report_or_path: Mapping[str, object] | str | Path,
+) -> dict[str, object]:
+    """Observe durable supervisor state, lock ownership, and stop control."""
+
+    state, state_path = _supervisor_state_and_path(report_or_path)
+    runs = _validated_supervisor_runs(state)
+    latest = dict(runs[-1]) if runs else None
+    output_root_value = state.get("output_root")
+    if output_root_value is None:
+        raise ValueError("executor supervisor output_root is missing")
+    output_root = Path(str(output_root_value)).expanduser().resolve()
+    lock = _supervisor_lock_observation(output_root)
+    process_observation = (
+        "missing" if latest is None else _supervisor_process_observation(latest)
+    )
+    lock_matches_run = bool(
+        latest is not None
+        and _supervisor_lock_matches_run(lock, latest, state_path)
+    )
+    lock_targets_state = _supervisor_lock_targets_state(lock, state_path)
+    stop_request, stop_request_error, stop_request_path = (
+        _observed_supervisor_stop_request(state, latest, state_path)
+    )
+    status = _observed_supervisor_status(
+        latest,
+        process_observation=process_observation,
+        lock_status=lock.get("status"),
+        lock_matches_run=lock_matches_run,
+        lock_targets_state=lock_targets_state,
+    )
+    healthy, health_issues = _supervisor_health(
+        state,
+        latest,
+        status=status,
+        stop_request_error=stop_request_error,
+    )
+    return {
+        "row_type": "hf_adapter_continuation_executor_supervisor_status",
+        "schema": HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISOR_STATUS_SCHEMA,
+        "created_at": _now(),
+        "status": status,
+        "healthy": healthy,
+        "recommended_action": _supervisor_recommended_action(status, latest),
+        "health_issues": health_issues,
+        "supervisor_state_path": str(state_path),
+        "output_root": str(output_root),
+        "invocation_count": state.get("invocation_count"),
+        "total_resumes_started": state.get("total_resumes_started"),
+        "latest_run": latest,
+        "supervisor_run_id": (
+            None if latest is None else latest.get("supervisor_run_id")
+        ),
+        "supervisor_process_observation": process_observation,
+        "supervisor_pid_alive_observed": (
+            True
+            if process_observation == "alive"
+            else False
+            if process_observation == "exited"
+            else None
+        ),
+        "supervisor_lock_owner_verified": lock_matches_run,
+        "supervisor_lock": lock,
+        "stop_requested": stop_request is not None,
+        "stop_request": stop_request,
+        "stop_request_error": stop_request_error,
+        "stop_request_path": (
+            None if stop_request_path is None else str(stop_request_path)
+        ),
+    }
+
+
+def _normalized_supervisor_stop_reason(reason: object) -> str:
+    raw_reason = str(reason)
+    if any(ord(character) < 32 or ord(character) == 127 for character in raw_reason):
+        raise ValueError("supervisor stop reason must not contain control characters")
+    normalized = raw_reason.strip()
+    if not normalized:
+        raise ValueError("supervisor stop reason must not be empty")
+    if len(normalized) > 512:
+        raise ValueError("supervisor stop reason must be at most 512 characters")
+    return normalized
+
+
+def request_hf_adapter_continuation_executor_supervisor_stop(
+    report_or_path: Mapping[str, object] | str | Path,
+    *,
+    reason: str = "operator_requested",
+) -> dict[str, object]:
+    """Request a cooperative supervisor stop without signalling a PID."""
+
+    state, state_path = _supervisor_state_and_path(report_or_path)
+    runs = _validated_supervisor_runs(state)
+    if not runs:
+        raise RuntimeError("executor supervisor has no run to stop")
+    latest = runs[-1]
+    stop_path = _state_supervisor_stop_request_path(state, latest)
+    existing = _matching_supervisor_stop_request(
+        stop_path,
+        expected_identity=_supervisor_stop_request_identity(
+            state,
+            latest,
+            state_path,
+        ),
+    )
+    if existing is not None:
+        report = dict(existing)
+        report["created"] = False
+        return report
+    status = hf_adapter_continuation_executor_supervisor_status_report(state)
+    if (
+        status.get("status") != "running"
+        or status.get("supervisor_lock_owner_verified") is not True
+    ):
+        raise RuntimeError(
+            "executor supervisor ownership is not live and verified; no stop request "
+            "was written"
+        )
+    payload = {
+        "row_type": "hf_adapter_continuation_executor_supervisor_stop_request",
+        "schema": HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISOR_STOP_REQUEST_SCHEMA,
+        "request_id": f"executor-supervisor-stop-{uuid.uuid4().hex}",
+        "requested_at": _now(),
+        "requested_by_pid": os.getpid(),
+        "requested_by_hostname": socket.gethostname(),
+        "reason": _normalized_supervisor_stop_reason(reason),
+        "supervisor_run_id": latest.get("supervisor_run_id"),
+        "invocation_count": latest.get("invocation_count"),
+        "supervisor_pid": latest.get("pid"),
+        "supervisor_hostname": latest.get("hostname"),
+        "supervisor_state_path": str(state_path),
+        "launch_state_path": state.get("launch_state_path"),
+    }
+    created = True
+    try:
+        _exclusive_write_json(stop_path, payload)
+    except FileExistsError:
+        existing = _matching_supervisor_stop_request(
+            stop_path,
+            expected_identity=_supervisor_stop_request_identity(
+                state,
+                latest,
+                state_path,
+            ),
+        )
+        if existing is None:
+            raise RuntimeError(
+                "executor supervisor stop request disappeared during inspection"
+            )
+        payload = existing
+        created = False
+    report = dict(payload)
+    report["request_path"] = str(stop_path)
+    report["created"] = created
+    return report
+
+
+def hf_adapter_continuation_executor_supervisor_status_lines(
+    report_or_path: Mapping[str, object] | str | Path,
+) -> list[str]:
+    report = (
+        dict(report_or_path)
+        if isinstance(report_or_path, Mapping)
+        and report_or_path.get("row_type")
+        == "hf_adapter_continuation_executor_supervisor_status"
+        else hf_adapter_continuation_executor_supervisor_status_report(report_or_path)
+    )
+    return [
+        "hf_adapter_continuation_executor_supervisor_status "
+        f"status={report.get('status')} "
+        f"healthy={report.get('healthy')} "
+        f"action={report.get('recommended_action')} "
+        f"run={report.get('supervisor_run_id')} "
+        f"invocation={report.get('invocation_count')} "
+        f"pid_alive={report.get('supervisor_pid_alive_observed')} "
+        f"lock_verified={report.get('supervisor_lock_owner_verified')} "
+        f"stop_requested={report.get('stop_requested')} "
+        f"state={report.get('supervisor_state_path')}"
+    ]
+
+
+def hf_adapter_continuation_executor_supervisor_stop_request_lines(
+    report_or_path: Mapping[str, object] | str | Path,
+) -> list[str]:
+    report = (
+        dict(report_or_path)
+        if isinstance(report_or_path, Mapping)
+        else load_hf_adapter_continuation_executor_supervisor_stop_request(
+            report_or_path
+        )
+    )
+    return [
+        "hf_adapter_continuation_executor_supervisor_stop_request "
+        f"created={report.get('created')} "
+        f"run={report.get('supervisor_run_id')} "
+        f"invocation={report.get('invocation_count')} "
+        f"reason={report.get('reason')} "
+        f"request={report.get('request_path')}"
+    ]
 
 
 def hf_adapter_continuation_executor_supervisor_lines(
