@@ -144,6 +144,7 @@ def _lock_owner_report(value: object) -> dict[str, object]:
 def _attempt_summary(attempt: Mapping[str, object] | None) -> dict[str, object] | None:
     if attempt is None:
         return None
+    postflight = attempt.get("postflight")
     return {
         "attempt_id": attempt.get("attempt_id"),
         "status": attempt.get("status"),
@@ -165,6 +166,17 @@ def _attempt_summary(attempt: Mapping[str, object] | None) -> dict[str, object] 
         "command_cwd": attempt.get("command_cwd"),
         "output_dir": attempt.get("output_dir"),
         "log_path": attempt.get("log_path"),
+        "adapter_id": attempt.get("adapter_id"),
+        "parent_adapter_id": attempt.get("parent_adapter_id"),
+        "source_transition": attempt.get("source_transition"),
+        "postflight_transition": (
+            postflight.get("transition") if isinstance(postflight, Mapping) else None
+        ),
+        "postflight_transition_ready": (
+            postflight.get("transition_ready")
+            if isinstance(postflight, Mapping)
+            else None
+        ),
         "stop_request": attempt.get("stop_request"),
         "status_before_interruption": attempt.get("status_before_interruption"),
         "interruption_claim": attempt.get("interruption_claim"),
@@ -199,6 +211,24 @@ def hf_adapter_continuation_executor_status_report(
     pid_alive = local_pid_alive(pid) if same_host is True else None
 
     executor_status = str(state.get("status") or "unknown")
+    selected_transition = state.get("selected_transition")
+    selected_depth = state.get("selected_lineage_depth")
+    if selected_depth in (None, 0):
+        transition_evidence_status = "not_applicable"
+    elif (
+        isinstance(selected_transition, Mapping)
+        and selected_transition.get("transition_ready") is True
+        and state.get("selected_path_transitions_ready") is True
+    ):
+        transition_evidence_status = "ready"
+    elif (
+        selected_transition is None
+        and state.get("transition_count") is None
+        and state.get("selected_path_transitions_ready") is None
+    ):
+        transition_evidence_status = "legacy_missing"
+    else:
+        transition_evidence_status = "not_ready"
     execution = state.get("execution")
     output_root = state.get("output_root")
     lock_path = execution.get("lock_path") if isinstance(execution, Mapping) else None
@@ -331,6 +361,8 @@ def hf_adapter_continuation_executor_status_report(
         )
     )
     health_issues: list[str] = []
+    if transition_evidence_status == "not_ready":
+        health_issues.append("transition_evidence_not_ready")
     if pending_output_resolution_gate is not None:
         health_issues.append(str(pending_output_resolution_gate["issue"]))
     if stop_request_artifact.get("exists") is True and not stop_request_valid:
@@ -434,7 +466,18 @@ def hf_adapter_continuation_executor_status_report(
         "invocation_count": state.get("invocation_count"),
         "generation_attempt_count": len(generations),
         "promoted_generation_count": state.get("promoted_generation_count"),
-        "selected_lineage_depth": state.get("selected_lineage_depth"),
+        "selected_adapter_id": state.get("selected_adapter_id"),
+        "selected_lineage_depth": selected_depth,
+        "transition_count": state.get("transition_count"),
+        "ready_transition_count": state.get("ready_transition_count"),
+        "selected_path_transition_count": state.get(
+            "selected_path_transition_count"
+        ),
+        "selected_path_transitions_ready": state.get(
+            "selected_path_transitions_ready"
+        ),
+        "transition_evidence_status": transition_evidence_status,
+        "selected_transition": selected_transition,
         "active_attempt_count": len(running),
         "active_attempt": _attempt_summary(active),
         "latest_attempt": _attempt_summary(latest),
@@ -486,6 +529,9 @@ def hf_adapter_continuation_executor_status_lines(
             f"depth={report.get('selected_lineage_depth')} "
             f"attempts={report.get('generation_attempt_count')} "
             f"promoted={report.get('promoted_generation_count')} "
+            f"transitions={report.get('ready_transition_count')}/"
+            f"{report.get('transition_count')} "
+            f"transition_evidence={report.get('transition_evidence_status')} "
             f"state_age_seconds={report.get('state_age_seconds')} "
             f"stop_requested={report.get('stop_requested')} "
             "unresolved_attempt="
@@ -493,6 +539,20 @@ def hf_adapter_continuation_executor_status_lines(
             f"state={report.get('state_path')}"
         )
     ]
+    transition = report.get("selected_transition")
+    if isinstance(transition, Mapping):
+        lines.append(
+            "hf_adapter_continuation_executor_status_transition "
+            f"status={transition.get('status')} "
+            f"depth={transition.get('parent_lineage_depth')}"
+            f"->{transition.get('child_lineage_depth')} "
+            f"parent={transition.get('parent_adapter_id')} "
+            f"child={transition.get('child_adapter_id')} "
+            f"eval_handoff_delta={transition.get('eval_handoff_delta')} "
+            f"eval_improvement={transition.get('child_eval_improvement')} "
+            f"probe_process={transition.get('artifact_probe_process_status')} "
+            f"probe_pid={transition.get('artifact_probe_process_pid')}"
+        )
     attempt = report.get("active_attempt") or report.get("latest_attempt")
     if isinstance(attempt, Mapping):
         log = report.get("log")

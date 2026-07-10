@@ -225,6 +225,21 @@ def test_executor_dry_run_writes_replayable_state_and_cli(
     assert report["action"] == "run_generation"
     assert report["pending_generation"]["lineage_depth"] == 2
     assert report["pending_generation"]["preflight"]["ready"] is True
+    selected_transition = report["selected_transition"]
+    assert report["transition_count"] == 1
+    assert report["ready_transition_count"] == 1
+    assert report["selected_path_transition_count"] == 1
+    assert report["selected_path_transitions_ready"] is True
+    assert selected_transition["status"] == "ready"
+    assert selected_transition["child_adapter_id"] == report["selected_adapter_id"]
+    assert selected_transition["child_lineage_depth"] == 1
+    assert report["pending_generation"]["source_transition"] == selected_transition
+    assert report["pending_generation"]["command"][
+        "promotion_chain_selected_transition"
+    ] == selected_transition
+    assert report["pending_generation"]["preflight"][
+        "promotion_chain_selected_transition"
+    ] == selected_transition
     assert report["generation_attempt_count"] == 0
     assert not (output_root / "generation-002").exists()
     assert loaded["status"] == "ready"
@@ -233,7 +248,55 @@ def test_executor_dry_run_writes_replayable_state_and_cli(
     assert "status=ready" in output
     assert "depth=2" in output
     assert "hf_adapter_executor" in st.__all__
-    assert "status=ready" in st.hf_adapter_continuation_executor_lines(report)[0]
+    lines = st.hf_adapter_continuation_executor_lines(report)
+    assert "status=ready" in lines[0]
+    assert "transitions=1/1" in lines[0]
+    assert any(
+        line.startswith("hf_adapter_continuation_executor_transition status=ready")
+        for line in lines
+    )
+
+
+def test_executor_postflight_requires_ready_selected_transition(
+    tmp_path: Path,
+) -> None:
+    root, child = _seed_chain(tmp_path)
+    chain = st.hf_adapter_promotion_chain_report(child)
+    parent_id = st.hf_adapter_fingerprint(root)["adapter_id"]
+
+    ready = st.hf_adapter_executor._postflight_report(
+        chain,
+        output_dir=child,
+        expected_parent_adapter_id=parent_id,
+        expected_lineage_depth=1,
+    )
+    missing_chain = json.loads(json.dumps(chain))
+    missing_chain["transitions"] = []
+    missing = st.hf_adapter_executor._postflight_report(
+        missing_chain,
+        output_dir=child,
+        expected_parent_adapter_id=parent_id,
+        expected_lineage_depth=1,
+    )
+    tampered_chain = json.loads(json.dumps(chain))
+    tampered_chain["transitions"][0]["transition_ready"] = False
+    tampered = st.hf_adapter_executor._postflight_report(
+        tampered_chain,
+        output_dir=child,
+        expected_parent_adapter_id=parent_id,
+        expected_lineage_depth=1,
+    )
+
+    assert ready["ready"] is True
+    assert ready["transition_ready"] is True
+    assert ready["transition"]["parent_adapter_id"] == parent_id
+    assert ready["transition"]["child_adapter_id"] == chain["selected_adapter_id"]
+    assert missing["ready"] is False
+    assert {"selected_transition", "transition_ready"}.issubset(
+        missing["failed_checks"]
+    )
+    assert tampered["ready"] is False
+    assert "transition_ready" in tampered["failed_checks"]
 
 
 def test_executor_single_writer_lock_blocks_live_owner_and_reaps_stale_owner(
@@ -377,6 +440,39 @@ def test_executor_runs_multiple_generations_until_depth_policy_stops(
     ]
     assert [row["lineage_depth"] for row in report["generations"]] == [2, 3]
     assert all(row["postflight"]["ready"] for row in report["generations"])
+    assert report["transition_count"] == 3
+    assert report["ready_transition_count"] == 3
+    assert report["selected_path_transition_count"] == 3
+    assert report["selected_path_transitions_ready"] is True
+    postflight_transitions = [
+        row["postflight"]["transition"] for row in report["generations"]
+    ]
+    assert all(row["transition_ready"] for row in postflight_transitions)
+    assert [row["parent_adapter_id"] for row in postflight_transitions] == [
+        report["generations"][0]["parent_adapter_id"],
+        report["generations"][1]["parent_adapter_id"],
+    ]
+    assert [row["child_adapter_id"] for row in postflight_transitions] == [
+        report["generations"][0]["adapter_id"],
+        report["generations"][1]["adapter_id"],
+    ]
+    assert [row["child_lineage_depth"] for row in postflight_transitions] == [2, 3]
+    assert [row["eval_handoff_delta"] for row in postflight_transitions] == (
+        pytest.approx([0.0, -0.02])
+    )
+    assert [row["child_eval_improvement"] for row in postflight_transitions] == (
+        pytest.approx([0.08, 0.07])
+    )
+    assert report["selected_transition"] == postflight_transitions[-1]
+    assert report["generations"][1]["source_transition"] == (
+        postflight_transitions[0]
+    )
+    generation_lines = [
+        line
+        for line in st.hf_adapter_continuation_executor_lines(report)
+        if line.startswith("hf_adapter_continuation_executor_generation ")
+    ]
+    assert all("transition=ready" in line for line in generation_lines)
     assert (output_root / "generation-002" / st.HF_ADAPTER_LINEAGE_FILENAME).is_file()
     assert (output_root / "generation-003" / st.HF_ADAPTER_PROMOTION_FILENAME).is_file()
     assert len(runner.commands) == 2
@@ -1098,3 +1194,7 @@ def test_executor_recovers_completed_output_after_explicit_selection_interrupt(
     assert recovered["generations"][0]["status"] == "promoted_recovered"
     assert recovered["generations"][0]["interruption_claim"]["ready"] is True
     assert recovered["generations"][0]["postflight"]["ready"] is True
+    assert recovered["generations"][0]["postflight"]["transition_ready"] is True
+    assert recovered["selected_transition"] == (
+        recovered["generations"][0]["postflight"]["transition"]
+    )

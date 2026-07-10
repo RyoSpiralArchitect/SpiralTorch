@@ -1,6 +1,6 @@
 {
-  "schema": "spiraltorch.hf_causal_lm_artifact_probe.sample.v4",
-  "scope": "two-generation non-GPT-2 isolated-process promotion and transition smoke; not a model-quality claim",
+  "schema": "spiraltorch.hf_causal_lm_artifact_probe.sample.v5",
+  "scope": "two-generation non-GPT-2 isolated-process promotion, transition, and executor smoke; not a model-quality claim",
   "model_profile": "pythia-70m-local-smoke",
   "model_name": "EleutherAI/pythia-70m-deduped",
   "model_family": "gpt_neox",
@@ -193,11 +193,57 @@
       "continuation_ready": false
     }
   },
+  "executor": {
+    "plan": {
+      "status": "ready",
+      "action": "run_generation",
+      "reason": "dry_run_ready",
+      "selected_lineage_depth": 1,
+      "transition_count": 1,
+      "ready_transition_count": 1,
+      "selected_path_transitions_ready": true,
+      "transition_status": "ready",
+      "transition_parent_adapter_id": "sha256:7d5a0912445b73c05418b7dd80a59ace2f109b24d2602baaa4704c0724ec239c",
+      "transition_child_adapter_id": "sha256:e2f80441e43472b6b8e17b54775639b581cc7d82976b68089700c240257288c4",
+      "eval_handoff_delta": 0.0,
+      "child_eval_improvement": -0.0046367645263671875,
+      "artifact_probe_process_status": "ready",
+      "artifact_probe_process_pid": 14662,
+      "pending_lineage_depth": 2,
+      "pending_preflight_ready": true,
+      "source_transition_preserved": true,
+      "scale_up_transition_preserved": true,
+      "preflight_transition_preserved": true,
+      "generation_attempt_count": 0,
+      "generation_output_exists": false,
+      "status_report_status": "ready",
+      "status_report_healthy": true,
+      "status_report_transition_evidence": "ready"
+    },
+    "strict_stop": {
+      "status": "stopped",
+      "action": "stop_training",
+      "reason": "continuation_policy_stop",
+      "stop_reason_codes": [
+        "eval_improvement_plateau"
+      ],
+      "selected_path_eval_improvement": -0.0046367645263671875,
+      "selected_transition_preserved": true,
+      "generation_attempt_count": 0,
+      "generations_executed_this_invocation": 0,
+      "generation_output_exists": false,
+      "status_report_status": "stopped",
+      "status_report_healthy": true,
+      "status_report_transition_evidence": "ready"
+    }
+  },
   "commands": {
     "train_shape": "spiral-hf-finetune --model-profile pythia-70m-local-smoke --allow-remote --train --finetune-mode lora --lora-rank 4 --lora-alpha 8 --max-steps 1 --block-size 16 --eval-before-train --adapter-promotion-gate --adapter-promotion-probe-prompt 'SpiralTorch isolated adapter' --adapter-promotion-probe-max-new-tokens 12 --adapter-promotion-probe-device mps --adapter-promotion-probe-timeout-seconds 120 ...",
     "promotion_chain_shape": "spiral-hf-adapter-chain <adapter-dir> --require-continuation-ready",
     "scale_up_shape": "spiral-hf-scale-up <promotion-chain.json> --require-ready --write-command next-generation.json",
     "continuation_run_shape": "spiral-hf-scale-up <promotion-chain.json> --adapter-continuation continue --max-steps 2 --max-train-samples 16 --max-eval-samples 8 --write-command generation-1.json --require-ready --run",
-    "strict_stop_audit_shape": "spiral-hf-adapter-chain <generation-1-dir> --min-eval-improvement 0 --plateau-patience 1 --require-continuation-ready"
+    "strict_stop_audit_shape": "spiral-hf-adapter-chain <generation-1-dir> --min-eval-improvement 0 --plateau-patience 1 --require-continuation-ready",
+    "executor_plan_shape": "spiral-hf-adapter-executor <generation-1-dir> --output-root executor-plan --max-steps 2 --max-train-samples 16 --max-eval-samples 8",
+    "executor_strict_stop_shape": "spiral-hf-adapter-executor <generation-1-dir> --output-root executor-strict-stop --run --max-generations 1 --min-eval-improvement 0 --plateau-patience 1"
   }
 }

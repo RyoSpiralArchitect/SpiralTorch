@@ -842,7 +842,7 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
 
         self.assertEqual(
             sample["schema"],
-            "spiraltorch.hf_causal_lm_artifact_probe.sample.v4",
+            "spiraltorch.hf_causal_lm_artifact_probe.sample.v5",
         )
         self.assertEqual(sample["model_family"], "gpt_neox")
         self.assertTrue(sample["artifact_probe"]["adapter_loaded"])
@@ -926,6 +926,51 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
             ["eval_improvement_plateau"],
         )
         self.assertFalse(strict_stop["continuation_ready"])
+        executor_plan = sample["executor"]["plan"]
+        executor_stop = sample["executor"]["strict_stop"]
+        self.assertEqual(executor_plan["status"], "ready")
+        self.assertEqual(executor_plan["action"], "run_generation")
+        self.assertEqual(executor_plan["transition_count"], 1)
+        self.assertEqual(executor_plan["ready_transition_count"], 1)
+        self.assertTrue(executor_plan["selected_path_transitions_ready"])
+        self.assertEqual(
+            executor_plan["transition_parent_adapter_id"],
+            multi_generation["source_adapter_id"],
+        )
+        self.assertEqual(
+            executor_plan["transition_child_adapter_id"],
+            multi_generation["selected_adapter_id"],
+        )
+        self.assertEqual(executor_plan["eval_handoff_delta"], 0.0)
+        self.assertLess(executor_plan["child_eval_improvement"], 0.0)
+        self.assertTrue(executor_plan["source_transition_preserved"])
+        self.assertTrue(executor_plan["scale_up_transition_preserved"])
+        self.assertTrue(executor_plan["preflight_transition_preserved"])
+        self.assertTrue(executor_plan["pending_preflight_ready"])
+        self.assertEqual(executor_plan["generation_attempt_count"], 0)
+        self.assertFalse(executor_plan["generation_output_exists"])
+        self.assertEqual(executor_plan["status_report_status"], "ready")
+        self.assertTrue(executor_plan["status_report_healthy"])
+        self.assertEqual(
+            executor_plan["status_report_transition_evidence"],
+            "ready",
+        )
+        self.assertEqual(executor_stop["status"], "stopped")
+        self.assertEqual(executor_stop["action"], "stop_training")
+        self.assertEqual(executor_stop["reason"], "continuation_policy_stop")
+        self.assertEqual(
+            executor_stop["stop_reason_codes"],
+            ["eval_improvement_plateau"],
+        )
+        self.assertTrue(executor_stop["selected_transition_preserved"])
+        self.assertEqual(executor_stop["generation_attempt_count"], 0)
+        self.assertFalse(executor_stop["generation_output_exists"])
+        self.assertEqual(executor_stop["status_report_status"], "stopped")
+        self.assertTrue(executor_stop["status_report_healthy"])
+        self.assertEqual(
+            executor_stop["status_report_transition_evidence"],
+            "ready",
+        )
 
     def test_inference_distortion_runtime_plan_and_cli_args_are_importable(self) -> None:
         runtime = zspace_inference_distortion_runtime_plan(

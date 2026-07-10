@@ -737,6 +737,7 @@ def hf_adapter_continuation_executor_runtime_lines(
             supervisor_launch_state_path=supervisor_launch_state_path,
         )
     )
+    executor = report.get("executor")
     return [
         "hf_adapter_continuation_executor_runtime "
         f"status={report.get('status')} "
@@ -751,6 +752,8 @@ def hf_adapter_continuation_executor_runtime_lines(
         f"executor_launch={report.get('executor_launch_status')} "
         f"supervisor={report.get('supervisor_status')} "
         f"supervisor_launch={report.get('supervisor_launch_status')} "
+        "transition_evidence="
+        f"{executor.get('transition_evidence_status') if isinstance(executor, Mapping) else None} "
         f"state={report.get('executor_launch_state_path')}"
     ]
 

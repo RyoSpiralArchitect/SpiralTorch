@@ -37,7 +37,26 @@ def _write_running_state(
         "invocation_count": 1,
         "generation_attempt_count": 1,
         "promoted_generation_count": 0,
+        "selected_adapter_id": "child-adapter",
         "selected_lineage_depth": 1,
+        "transition_count": 1,
+        "ready_transition_count": 1,
+        "selected_path_transition_count": 1,
+        "selected_path_transitions_ready": True,
+        "selected_transition": {
+            "row_type": "hf_adapter_promotion_chain_transition",
+            "status": "ready",
+            "transition_ready": True,
+            "selected_path": True,
+            "parent_adapter_id": "root-adapter",
+            "child_adapter_id": "child-adapter",
+            "parent_lineage_depth": 0,
+            "child_lineage_depth": 1,
+            "eval_handoff_delta": 0.0,
+            "child_eval_improvement": 0.1,
+            "artifact_probe_process_status": "ready",
+            "artifact_probe_process_pid": 4242,
+        },
         "generations": [
             {
                 "attempt_id": "status-attempt",
@@ -51,6 +70,13 @@ def _write_running_state(
                 "output_dir": str(output_dir),
                 "log_path": str(log_path),
                 "command_cwd": str(path.parent),
+                "parent_adapter_id": "child-adapter",
+                "source_transition": {
+                    "status": "ready",
+                    "transition_ready": True,
+                    "parent_adapter_id": "root-adapter",
+                    "child_adapter_id": "child-adapter",
+                },
             }
         ],
     }
@@ -227,9 +253,83 @@ def test_status_reports_live_local_process_and_artifacts(
     assert report["log"]["kind_ready"] is True
     assert report["log"]["size_bytes"] == len("live-log")
     assert report["lock"]["exists"] is True
+    assert report["transition_evidence_status"] == "ready"
+    assert report["transition_count"] == 1
+    assert report["ready_transition_count"] == 1
+    assert report["selected_transition"]["child_adapter_id"] == "child-adapter"
+    assert report["active_attempt"]["source_transition"]["transition_ready"] is True
     assert code == 0
     assert "status=running" in output
     assert "pid_alive=True" in output
+    assert "transition_evidence=ready" in output
+    assert "hf_adapter_continuation_executor_status_transition" in output
+
+
+def test_status_marks_pre_transition_state_as_legacy_without_breaking_health(
+    tmp_path: Path,
+) -> None:
+    output_dir = tmp_path / "generation-002"
+    output_dir.mkdir()
+    log_path = tmp_path / "executor.log"
+    log_path.write_text("live-log", encoding="utf-8")
+    _write_live_lock(tmp_path / st.HF_ADAPTER_CONTINUATION_EXECUTOR_LOCK_FILENAME)
+    state_path = _write_running_state(
+        tmp_path / "state.json",
+        pid=os.getpid(),
+        hostname=socket.gethostname(),
+        output_dir=output_dir,
+        log_path=log_path,
+    )
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    for field in (
+        "transition_count",
+        "ready_transition_count",
+        "selected_path_transition_count",
+        "selected_path_transitions_ready",
+        "selected_transition",
+    ):
+        state.pop(field, None)
+    state["generations"][0].pop("source_transition", None)
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+
+    report = st.hf_adapter_continuation_executor_status_report(state_path)
+    lines = st.hf_adapter_continuation_executor_status_lines(report)
+
+    assert report["status"] == "running"
+    assert report["healthy"] is True
+    assert report["transition_evidence_status"] == "legacy_missing"
+    assert report["selected_transition"] is None
+    assert "transition_evidence=legacy_missing" in lines[0]
+    assert not any("_status_transition " in line for line in lines)
+
+
+def test_status_fails_health_for_explicitly_unready_transition(
+    tmp_path: Path,
+) -> None:
+    output_dir = tmp_path / "generation-002"
+    output_dir.mkdir()
+    log_path = tmp_path / "executor.log"
+    log_path.write_text("live-log", encoding="utf-8")
+    _write_live_lock(tmp_path / st.HF_ADAPTER_CONTINUATION_EXECUTOR_LOCK_FILENAME)
+    state_path = _write_running_state(
+        tmp_path / "state.json",
+        pid=os.getpid(),
+        hostname=socket.gethostname(),
+        output_dir=output_dir,
+        log_path=log_path,
+    )
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["selected_transition"]["transition_ready"] = False
+    state["selected_path_transitions_ready"] = False
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+
+    report = st.hf_adapter_continuation_executor_status_report(state_path)
+
+    assert report["status"] == "running"
+    assert report["healthy"] is False
+    assert report["transition_evidence_status"] == "not_ready"
+    assert report["health_issues"] == ["transition_evidence_not_ready"]
+    assert report["recommended_action"] == "inspect_executor_health_issues"
 
 
 def test_stop_request_is_idempotent_and_visible_as_healthy_stopping(

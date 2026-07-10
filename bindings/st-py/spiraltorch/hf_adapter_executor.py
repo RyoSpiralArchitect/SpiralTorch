@@ -593,6 +593,46 @@ def _node_for_path(
     return None
 
 
+def _selected_transition(
+    chain: Mapping[str, object],
+    *,
+    child_adapter_id: object | None = None,
+) -> dict[str, object] | None:
+    target_adapter_id = (
+        chain.get("selected_adapter_id")
+        if child_adapter_id is None
+        else child_adapter_id
+    )
+    matches = [
+        dict(raw_transition)
+        for raw_transition in chain.get("transitions") or []
+        if isinstance(raw_transition, Mapping)
+        and raw_transition.get("selected_path") is True
+        and raw_transition.get("child_adapter_id") == target_adapter_id
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _record_chain_state(
+    state: dict[str, object],
+    chain: Mapping[str, object],
+) -> None:
+    state["chain_report"] = dict(chain)
+    state["selected_adapter_id"] = chain.get("selected_adapter_id")
+    state["selected_adapter_path"] = chain.get("selected_adapter_path")
+    state["selected_lineage_depth"] = chain.get("selected_lineage_depth")
+    state["continuation_policy"] = chain.get("continuation_policy")
+    state["transition_count"] = chain.get("transition_count")
+    state["ready_transition_count"] = chain.get("ready_transition_count")
+    state["selected_path_transition_count"] = chain.get(
+        "selected_path_transition_count"
+    )
+    state["selected_path_transitions_ready"] = chain.get(
+        "selected_path_transitions_ready"
+    )
+    state["selected_transition"] = _selected_transition(chain)
+
+
 def _postflight_report(
     chain: Mapping[str, object],
     *,
@@ -601,6 +641,14 @@ def _postflight_report(
     expected_lineage_depth: int,
 ) -> dict[str, object]:
     node = _node_for_path(chain, output_dir)
+    transition = (
+        None
+        if node is None
+        else _selected_transition(
+            chain,
+            child_adapter_id=node.get("adapter_id"),
+        )
+    )
     checks = [
         {
             "name": "output_node",
@@ -640,6 +688,90 @@ def _postflight_report(
             "observed": chain.get("selected_adapter_id"),
             "threshold": None if node is None else node.get("adapter_id"),
         },
+        {
+            "name": "selected_transition",
+            "passed": transition is not None,
+            "observed": None
+            if transition is None
+            else transition.get("child_adapter_id"),
+            "threshold": None if node is None else node.get("adapter_id"),
+        },
+        {
+            "name": "transition_ready",
+            "passed": (
+                transition is not None
+                and transition.get("transition_ready") is True
+            ),
+            "observed": None
+            if transition is None
+            else transition.get("transition_ready"),
+            "threshold": True,
+        },
+        {
+            "name": "transition_parent_adapter_id",
+            "passed": (
+                transition is not None
+                and transition.get("parent_adapter_id")
+                == expected_parent_adapter_id
+            ),
+            "observed": None
+            if transition is None
+            else transition.get("parent_adapter_id"),
+            "threshold": expected_parent_adapter_id,
+        },
+        {
+            "name": "transition_child_adapter_id",
+            "passed": (
+                transition is not None
+                and node is not None
+                and transition.get("child_adapter_id") == node.get("adapter_id")
+            ),
+            "observed": None
+            if transition is None
+            else transition.get("child_adapter_id"),
+            "threshold": None if node is None else node.get("adapter_id"),
+        },
+        {
+            "name": "transition_lineage_depth",
+            "passed": (
+                transition is not None
+                and transition.get("child_lineage_depth")
+                == expected_lineage_depth
+                and transition.get("depth_step") == 1
+            ),
+            "observed": None
+            if transition is None
+            else {
+                "child_lineage_depth": transition.get("child_lineage_depth"),
+                "depth_step": transition.get("depth_step"),
+            },
+            "threshold": {
+                "child_lineage_depth": expected_lineage_depth,
+                "depth_step": 1,
+            },
+        },
+        {
+            "name": "transition_parent_fingerprint",
+            "passed": (
+                transition is not None
+                and transition.get("parent_fingerprint_verified") is True
+            ),
+            "observed": None
+            if transition is None
+            else transition.get("parent_fingerprint_verified"),
+            "threshold": True,
+        },
+        {
+            "name": "transition_weight_change",
+            "passed": (
+                transition is not None
+                and transition.get("weights_changed_from_parent") is True
+            ),
+            "observed": None
+            if transition is None
+            else transition.get("weights_changed_from_parent"),
+            "threshold": True,
+        },
     ]
     failed = [row["name"] for row in checks if row["passed"] is not True]
     return {
@@ -653,6 +785,28 @@ def _postflight_report(
         "promotion_ready": None if node is None else node.get("promotion_ready"),
         "chain_status": chain.get("status"),
         "chain_selected_adapter_id": chain.get("selected_adapter_id"),
+        "transition_status": None
+        if transition is None
+        else transition.get("status"),
+        "transition_ready": None
+        if transition is None
+        else transition.get("transition_ready"),
+        "transition": transition,
+        "eval_handoff_delta": None
+        if transition is None
+        else transition.get("eval_handoff_delta"),
+        "child_eval_improvement": None
+        if transition is None
+        else transition.get("child_eval_improvement"),
+        "artifact_probe_process_status": None
+        if transition is None
+        else transition.get("artifact_probe_process_status"),
+        "artifact_probe_process_pid": None
+        if transition is None
+        else transition.get("artifact_probe_process_pid"),
+        "artifact_probe_process_exit_code": None
+        if transition is None
+        else transition.get("artifact_probe_process_exit_code"),
         "failed_checks": failed,
         "checks": checks,
     }
@@ -1489,11 +1643,7 @@ def _run_hf_adapter_continuation_executor_unlocked(
                 action="inspect_chain_audit_failure",
                 reason="chain_audit_failed",
             )
-        state["chain_report"] = chain
-        state["selected_adapter_id"] = chain.get("selected_adapter_id")
-        state["selected_adapter_path"] = chain.get("selected_adapter_path")
-        state["selected_lineage_depth"] = chain.get("selected_lineage_depth")
-        state["continuation_policy"] = chain.get("continuation_policy")
+        _record_chain_state(state, chain)
         state["generations_executed_this_invocation"] = executed
 
         running_attempts = [
@@ -1542,11 +1692,7 @@ def _run_hf_adapter_continuation_executor_unlocked(
             for attempt in running_attempts
         ):
             chain = recovery_chain
-            state["chain_report"] = chain
-            state["selected_adapter_id"] = chain.get("selected_adapter_id")
-            state["selected_adapter_path"] = chain.get("selected_adapter_path")
-            state["selected_lineage_depth"] = chain.get("selected_lineage_depth")
-            state["continuation_policy"] = chain.get("continuation_policy")
+            _record_chain_state(state, chain)
 
         policy_status = chain.get("continuation_policy_status")
         if policy_status == "stop":
@@ -1626,6 +1772,7 @@ def _run_hf_adapter_continuation_executor_unlocked(
             "parent_adapter_path": chain.get("selected_adapter_path"),
             "lineage_depth": next_depth,
             "output_dir": str(output_dir),
+            "source_transition": _selected_transition(chain),
             "command": command,
             "preflight": preflight,
         }
@@ -1717,6 +1864,7 @@ def _run_hf_adapter_continuation_executor_unlocked(
             "parent_adapter_path": chain.get("selected_adapter_path"),
             "lineage_depth": next_depth,
             "output_dir": str(output_dir),
+            "source_transition": _selected_transition(chain),
             "command": resolved_command,
             "command_display": shlex.join(resolved_command),
             "scale_up": command,
@@ -1862,6 +2010,7 @@ def _run_hf_adapter_continuation_executor_unlocked(
             )
         attempt["status"] = "promoted"
         attempt["adapter_id"] = postflight.get("adapter_id")
+        _record_chain_state(state, post_chain)
         state.pop("pending_generation", None)
         executed += 1
         state["generations_executed_this_invocation"] = executed
@@ -1953,9 +2102,26 @@ def hf_adapter_continuation_executor_lines(
             f"depth={report.get('selected_lineage_depth')} "
             f"attempts={report.get('generation_attempt_count')} "
             f"promoted={report.get('promoted_generation_count')} "
+            f"transitions={report.get('ready_transition_count')}/"
+            f"{report.get('transition_count')} "
             f"state={report.get('state_path')}"
         )
     ]
+    selected_transition = report.get("selected_transition")
+    if isinstance(selected_transition, Mapping):
+        lines.append(
+            "hf_adapter_continuation_executor_transition "
+            f"status={selected_transition.get('status')} "
+            f"depth={selected_transition.get('parent_lineage_depth')}"
+            f"->{selected_transition.get('child_lineage_depth')} "
+            f"parent={selected_transition.get('parent_adapter_id')} "
+            f"child={selected_transition.get('child_adapter_id')} "
+            f"eval_handoff_delta={selected_transition.get('eval_handoff_delta')} "
+            f"eval_improvement={selected_transition.get('child_eval_improvement')} "
+            "probe_process="
+            f"{selected_transition.get('artifact_probe_process_status')} "
+            f"probe_pid={selected_transition.get('artifact_probe_process_pid')}"
+        )
     pending = report.get("pending_generation")
     if isinstance(pending, Mapping):
         command = pending.get("command")
@@ -1976,6 +2142,16 @@ def hf_adapter_continuation_executor_lines(
         if not isinstance(raw_attempt, Mapping):
             continue
         postflight = raw_attempt.get("postflight")
+        postflight_transition_status = (
+            postflight.get("transition_status")
+            if isinstance(postflight, Mapping)
+            else None
+        )
+        postflight_handoff = (
+            postflight.get("eval_handoff_delta")
+            if isinstance(postflight, Mapping)
+            else None
+        )
         lines.append(
             "hf_adapter_continuation_executor_generation "
             f"status={raw_attempt.get('status')} "
@@ -1986,6 +2162,8 @@ def hf_adapter_continuation_executor_lines(
             f"adapter={raw_attempt.get('adapter_id')} "
             "postflight="
             f"{postflight.get('status') if isinstance(postflight, Mapping) else None} "
+            f"transition={postflight_transition_status} "
+            f"eval_handoff_delta={postflight_handoff} "
             f"output={raw_attempt.get('output_dir')} "
             f"log={raw_attempt.get('log_path')}"
         )

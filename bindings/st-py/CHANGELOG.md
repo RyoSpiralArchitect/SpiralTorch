@@ -43,6 +43,14 @@
   isolated-probe process evidence. Scale-up commands and preflights retain the
   selected transition. The Pythia 70M sample records a real second generation
   plus a policy stop after its observed negative eval improvement.
+- Executor transition provenance: continuation executor state, pending plans,
+  attempts, recovery, and postflight reports retain the selected parent-child
+  edge. Postflight now fails closed on missing or non-ready transitions and
+  verifies parent/child identity, depth, parent fingerprint, and changed
+  weights before recording a promoted generation. Read-only status and runtime
+  lines expose transition evidence, fail health checks for explicitly non-ready
+  evidence, and identify pre-transition states as legacy rather than breaking
+  their observability.
 - Resumable adapter executor: add `spiral-hf-adapter-executor` and an importable
   state machine that closes audit, policy, scale-up, preflight, execution, and
   live postflight promotion verification into one atomic artifact. Successful,
