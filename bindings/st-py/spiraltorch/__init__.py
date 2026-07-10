@@ -958,6 +958,18 @@ from .hf_adapter_executor_status import (
     hf_adapter_continuation_executor_status_lines,
     hf_adapter_continuation_executor_status_report,
 )
+from . import hf_adapter_executor_launch as hf_adapter_executor_launch
+from .hf_adapter_executor_launch import (
+    HF_ADAPTER_CONTINUATION_EXECUTOR_LAUNCH_FILENAME,
+    HF_ADAPTER_CONTINUATION_EXECUTOR_LAUNCH_LOCK_FILENAME,
+    HF_ADAPTER_CONTINUATION_EXECUTOR_LAUNCH_SCHEMA,
+    HF_ADAPTER_CONTINUATION_EXECUTOR_LAUNCH_STATUS_SCHEMA,
+    hf_adapter_continuation_executor_launch_lines,
+    hf_adapter_continuation_executor_launch_status_lines,
+    hf_adapter_continuation_executor_launch_status_report,
+    launch_hf_adapter_continuation_executor,
+    load_hf_adapter_continuation_executor_launch,
+)
 
 from . import hf_ft_status as hf_ft_status
 from .hf_ft_status import (
@@ -1215,6 +1227,10 @@ _EXTRAS = [
     "HF_ADAPTER_CONTINUATION_EXECUTOR_FILENAME",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_LOCK_FILENAME",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_LOG_DIRNAME",
+    "HF_ADAPTER_CONTINUATION_EXECUTOR_LAUNCH_FILENAME",
+    "HF_ADAPTER_CONTINUATION_EXECUTOR_LAUNCH_LOCK_FILENAME",
+    "HF_ADAPTER_CONTINUATION_EXECUTOR_LAUNCH_SCHEMA",
+    "HF_ADAPTER_CONTINUATION_EXECUTOR_LAUNCH_STATUS_SCHEMA",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_SCHEMA",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_STATUS_SCHEMA",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_STOP_REQUEST_SCHEMA",
@@ -1225,7 +1241,11 @@ _EXTRAS = [
     "hf_causal_lm_artifact_report",
     "hf_adapter",
     "hf_adapter_executor",
+    "hf_adapter_executor_launch",
     "hf_adapter_executor_status",
+    "hf_adapter_continuation_executor_launch_lines",
+    "hf_adapter_continuation_executor_launch_status_lines",
+    "hf_adapter_continuation_executor_launch_status_report",
     "hf_adapter_continuation_executor_lines",
     "hf_adapter_continuation_executor_stop_request_lines",
     "hf_adapter_continuation_executor_status_lines",
@@ -1242,6 +1262,7 @@ _EXTRAS = [
     "load_hf_adapter_promotion_chain",
     "load_hf_adapter_continuation_policy",
     "load_hf_adapter_continuation_executor_stop_request",
+    "load_hf_adapter_continuation_executor_launch",
     "request_hf_adapter_continuation_executor_stop",
     "load_hf_adapter_continuation_executor",
     "hf_finetune_adapter_config",
@@ -1330,6 +1351,7 @@ _EXTRAS = [
     "summarize_hf_finetune_trainer_trace",
     "resolve_hf_finetune_model_profile",
     "run_hf_adapter_continuation_executor",
+    "launch_hf_adapter_continuation_executor",
     "prepare_hf_finetune_model",
     "write_hf_adapter_lineage",
     "write_hf_adapter_continuation_policy",

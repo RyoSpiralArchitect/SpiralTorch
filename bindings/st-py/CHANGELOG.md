@@ -57,6 +57,13 @@
   completed promotion at generation boundaries, and fails closed when
   cancellation leaves partial output. Status reports expose healthy `stopping`
   transitions and durable request evidence.
+- Detached executor lifecycle: let `spiral-hf-adapter-executor --run --detach`
+  launch an isolated background executor, prove handoff through a new
+  invocation plus matching single-writer-lock ownership, and retain owner-only
+  launcher logs and durable launch history. Duplicate starts fail closed on
+  unverified ownership, PID reuse alone does not block recovery, and
+  `spiral-hf-adapter-executor-launch-status` combines launcher and executor
+  health without mutating either artifact.
 - Trainer resume audit: add `hf_finetune_checkpoint_resume_report(...)` and
   compact lines for optimizer/scheduler/RNG state availability, saved versus
   requested step horizons, and the exhausted-scheduler case where adapter

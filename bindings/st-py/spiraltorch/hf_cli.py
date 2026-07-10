@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import math
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -22,10 +23,17 @@ from .hf_adapter import (
     write_hf_adapter_promotion,
 )
 from .hf_adapter_executor import (
+    HF_ADAPTER_CONTINUATION_EXECUTOR_FILENAME,
     hf_adapter_continuation_executor_lines,
     hf_adapter_continuation_executor_stop_request_lines,
     request_hf_adapter_continuation_executor_stop,
     run_hf_adapter_continuation_executor,
+)
+from .hf_adapter_executor_launch import (
+    hf_adapter_continuation_executor_launch_lines,
+    hf_adapter_continuation_executor_launch_status_lines,
+    hf_adapter_continuation_executor_launch_status_report,
+    launch_hf_adapter_continuation_executor,
 )
 from .hf_adapter_executor_status import (
     hf_adapter_continuation_executor_status_lines,
@@ -288,6 +296,59 @@ def adapter_promotion_chain_main(argv: Sequence[str] | None = None) -> int:
     return 0 if ready else 1
 
 
+def _adapter_continuation_executor_child_argv(
+    args: argparse.Namespace,
+    *,
+    state_path: Path,
+) -> list[str]:
+    child = [str(path.expanduser().resolve()) for path in args.sources]
+    child.extend(
+        [
+            "--output-root",
+            str(args.output_root.expanduser().resolve()),
+            "--state",
+            str(state_path),
+            "--run",
+            "--max-generations",
+            str(args.max_generations),
+            "--output-prefix",
+            str(args.output_prefix),
+            "--plateau-patience",
+            str(args.plateau_patience),
+            "--max-steps-multiplier",
+            str(args.max_steps_multiplier),
+            "--max-train-samples-multiplier",
+            str(args.max_train_samples_multiplier),
+        ]
+    )
+    if args.no_tee_output:
+        child.append("--no-tee-output")
+    if args.retry_interrupted:
+        child.append("--retry-interrupted")
+    for artifact in args.command_artifact:
+        child.extend(["--command-artifact", str(artifact.expanduser().resolve())])
+    if args.select_adapter_id is not None:
+        child.extend(["--select-adapter-id", str(args.select_adapter_id)])
+    if args.no_recursive:
+        child.append("--no-recursive")
+    if args.no_infer_roots:
+        child.append("--no-infer-roots")
+    for name in (
+        "max_lineage_depth",
+        "target_eval_loss",
+        "min_eval_improvement",
+        "max_steps",
+        "max_train_samples",
+        "max_eval_samples",
+        "max_eval_blocks",
+        "streaming_validation_samples",
+    ):
+        value = getattr(args, name)
+        if value is not None:
+            child.extend([f"--{name.replace('_', '-')}", str(value)])
+    return child
+
+
 def adapter_continuation_executor_main(
     argv: Sequence[str] | None = None,
 ) -> int:
@@ -309,6 +370,25 @@ def adapter_continuation_executor_main(
         "--run",
         action="store_true",
         help="Execute ready generation commands; the default only plans.",
+    )
+    parser.add_argument(
+        "--detach",
+        action="store_true",
+        help=(
+            "Launch --run in an isolated background process and return after "
+            "handoff."
+        ),
+    )
+    parser.add_argument(
+        "--detach-handoff-timeout-seconds",
+        type=float,
+        default=5.0,
+    )
+    parser.add_argument(
+        "--launch-state",
+        type=Path,
+        default=None,
+        help="Optional durable detached-launch history path.",
     )
     parser.add_argument(
         "--no-tee-output",
@@ -349,15 +429,32 @@ def adapter_continuation_executor_main(
     )
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
+    if args.detach and not args.run:
+        parser.error("--detach requires --run")
+    if args.launch_state is not None and not args.detach:
+        parser.error("--launch-state requires --detach")
+    if (
+        not math.isfinite(args.detach_handoff_timeout_seconds)
+        or args.detach_handoff_timeout_seconds < 0.0
+    ):
+        parser.error(
+            "--detach-handoff-timeout-seconds must be finite and non-negative"
+        )
     if args.max_generations <= 0:
         parser.error("--max-generations must be positive")
     if args.max_steps is not None and args.max_steps <= 0:
         parser.error("--max-steps must be positive")
-    if args.max_steps_multiplier <= 0.0:
+    if (
+        not math.isfinite(args.max_steps_multiplier)
+        or args.max_steps_multiplier <= 0.0
+    ):
         parser.error("--max-steps-multiplier must be positive")
     if args.max_train_samples is not None and args.max_train_samples < 0:
         parser.error("--max-train-samples must be non-negative")
-    if args.max_train_samples_multiplier <= 0.0:
+    if (
+        not math.isfinite(args.max_train_samples_multiplier)
+        or args.max_train_samples_multiplier <= 0.0
+    ):
         parser.error("--max-train-samples-multiplier must be positive")
     for name in (
         "max_eval_samples",
@@ -367,6 +464,43 @@ def adapter_continuation_executor_main(
         value = getattr(args, name)
         if value is not None and value < 0:
             parser.error(f"--{name.replace('_', '-')} must be non-negative")
+    if args.detach:
+        output_root = args.output_root.expanduser().resolve()
+        state_path = (
+            args.state.expanduser().resolve()
+            if args.state is not None
+            else output_root / HF_ADAPTER_CONTINUATION_EXECUTOR_FILENAME
+        )
+        try:
+            report = launch_hf_adapter_continuation_executor(
+                _adapter_continuation_executor_child_argv(
+                    args,
+                    state_path=state_path,
+                ),
+                output_root=output_root,
+                executor_state_path=state_path,
+                launch_state_path=args.launch_state,
+                command_cwd=Path.cwd(),
+                handoff_timeout_seconds=args.detach_handoff_timeout_seconds,
+            )
+        except Exception as exc:
+            print(
+                "hf_adapter_continuation_executor_launch_error "
+                f"{exc.__class__.__name__}: {exc}",
+                file=sys.stderr,
+            )
+            return 2
+        if args.json:
+            print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+        else:
+            for line in hf_adapter_continuation_executor_launch_lines(report):
+                print(line)
+        return (
+            0
+            if report.get("request_status")
+            in {"already_running", "completed", "handed_off"}
+            else 1
+        )
     try:
         report = run_hf_adapter_continuation_executor(
             args.sources,
@@ -447,6 +581,41 @@ def adapter_continuation_executor_status_main(
         print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
     else:
         for line in hf_adapter_continuation_executor_status_lines(report):
+            print(line)
+    if args.require_healthy and report.get("healthy") is not True:
+        return 1
+    return 0
+
+
+def adapter_continuation_executor_launch_status_main(
+    argv: Sequence[str] | None = None,
+) -> int:
+    parser = argparse.ArgumentParser(
+        description="Inspect a detached executor launch without mutating its state.",
+    )
+    parser.add_argument("launch_state", type=Path)
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument(
+        "--require-healthy",
+        action="store_true",
+        help="Exit nonzero for failed, interrupted, missing, or unverified state.",
+    )
+    args = parser.parse_args(argv)
+    try:
+        report = hf_adapter_continuation_executor_launch_status_report(
+            args.launch_state
+        )
+    except Exception as exc:
+        print(
+            "hf_adapter_continuation_executor_launch_status_error "
+            f"{exc.__class__.__name__}: {exc}",
+            file=sys.stderr,
+        )
+        return 2
+    if args.json:
+        print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        for line in hf_adapter_continuation_executor_launch_status_lines(report):
             print(line)
     if args.require_healthy and report.get("healthy") is not True:
         return 1
