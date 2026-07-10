@@ -731,6 +731,44 @@ can inspect or persist the same decision with
 `st.write_hf_adapter_continuation_policy(...)`, and
 `st.load_hf_adapter_continuation_policy(...)`.
 
+Close the loop with a resumable executor. Start with a dry-run; it writes an
+atomic state artifact containing the live chain audit, policy decision,
+resolved command, and preflight without launching training:
+
+```bash
+spiral-hf-adapter-executor runs/qwen2-study \
+  --output-root runs/qwen2-study/executor \
+  --state runs/qwen2-study/executor/state.json \
+  --max-lineage-depth 6 \
+  --min-eval-improvement 0.002 \
+  --plateau-patience 2
+```
+
+After inspecting that state, execute one promoted generation:
+
+```bash
+spiral-hf-adapter-executor runs/qwen2-study \
+  --output-root runs/qwen2-study/executor \
+  --state runs/qwen2-study/executor/state.json \
+  --max-lineage-depth 6 \
+  --min-eval-improvement 0.002 \
+  --plateau-patience 2 \
+  --run --max-generations 1
+```
+
+Repeat the same command to resume from the new deepest eligible adapter, or
+raise `--max-generations` explicitly for several synchronous generations in
+one invocation. The executor flushes `running` state before every subprocess,
+then re-fingerprints the output and requires the expected parent ID, lineage
+depth, promotion-ready node, and selected chain tip before advancing. A failed
+command remains in history and retries the same depth only when no partial
+output collides; unresolved interrupted runs fail closed unless explicitly
+audited with `--retry-interrupted`. Step and sample multipliers default to
+`1.0`, so repeated generations do not grow their resource budget silently.
+Python can drive the same state machine with
+`st.run_hf_adapter_continuation_executor(...)` and inspect it with
+`st.load_hf_adapter_continuation_executor(...)`.
+
 Use `--resume-from-checkpoint` only for an exact Trainer continuation that
 should restore optimizer, scheduler, and RNG state. SpiralTorch audits
 `trainer_state.json` and those state files before loading. A checkpoint saved

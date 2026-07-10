@@ -8,7 +8,7 @@ import json
 import sys
 from pathlib import Path
 from types import ModuleType
-from typing import Sequence
+from typing import Mapping, Sequence
 
 from .hf_adapter import (
     hf_adapter_lineage_lines,
@@ -20,6 +20,10 @@ from .hf_adapter import (
     write_hf_adapter_lineage,
     write_hf_adapter_promotion_chain,
     write_hf_adapter_promotion,
+)
+from .hf_adapter_executor import (
+    hf_adapter_continuation_executor_lines,
+    run_hf_adapter_continuation_executor,
 )
 from .hf_ft import (
     HF_FINETUNE_DEFAULT_MODEL_PROFILE,
@@ -276,6 +280,131 @@ def adapter_promotion_chain_main(argv: Sequence[str] | None = None) -> int:
         else report.get("chain_ready") is True
     )
     return 0 if ready else 1
+
+
+def adapter_continuation_executor_main(
+    argv: Sequence[str] | None = None,
+) -> int:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Plan or run a resumable audit-to-promotion loop for HF PEFT "
+            "adapter generations."
+        ),
+    )
+    parser.add_argument(
+        "sources",
+        nargs="+",
+        type=Path,
+        help="Adapter directory, lineage manifest, or directory tree to scan.",
+    )
+    parser.add_argument("--output-root", type=Path, required=True)
+    parser.add_argument("--state", type=Path, default=None)
+    parser.add_argument(
+        "--run",
+        action="store_true",
+        help="Execute ready generation commands; the default only plans.",
+    )
+    parser.add_argument("--max-generations", type=int, default=1)
+    parser.add_argument("--retry-interrupted", action="store_true")
+    parser.add_argument("--output-prefix", default="generation")
+    parser.add_argument(
+        "--command-artifact",
+        action="append",
+        type=Path,
+        default=[],
+        help="Recover a legacy launch command. May be repeated.",
+    )
+    parser.add_argument("--select-adapter-id", default=None)
+    parser.add_argument("--no-recursive", action="store_true")
+    parser.add_argument("--no-infer-roots", action="store_true")
+    parser.add_argument("--max-lineage-depth", type=int, default=None)
+    parser.add_argument("--target-eval-loss", type=float, default=None)
+    parser.add_argument("--min-eval-improvement", type=float, default=None)
+    parser.add_argument("--plateau-patience", type=int, default=1)
+    parser.add_argument("--max-steps", type=int, default=None)
+    parser.add_argument("--max-steps-multiplier", type=float, default=1.0)
+    parser.add_argument("--max-train-samples", type=int, default=None)
+    parser.add_argument(
+        "--max-train-samples-multiplier",
+        type=float,
+        default=1.0,
+    )
+    parser.add_argument("--max-eval-samples", type=int, default=None)
+    parser.add_argument("--max-eval-blocks", type=int, default=None)
+    parser.add_argument(
+        "--streaming-validation-samples",
+        type=int,
+        default=None,
+    )
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args(argv)
+    if args.max_generations <= 0:
+        parser.error("--max-generations must be positive")
+    if args.max_steps is not None and args.max_steps <= 0:
+        parser.error("--max-steps must be positive")
+    if args.max_steps_multiplier <= 0.0:
+        parser.error("--max-steps-multiplier must be positive")
+    if args.max_train_samples is not None and args.max_train_samples < 0:
+        parser.error("--max-train-samples must be non-negative")
+    if args.max_train_samples_multiplier <= 0.0:
+        parser.error("--max-train-samples-multiplier must be positive")
+    for name in (
+        "max_eval_samples",
+        "max_eval_blocks",
+        "streaming_validation_samples",
+    ):
+        value = getattr(args, name)
+        if value is not None and value < 0:
+            parser.error(f"--{name.replace('_', '-')} must be non-negative")
+    try:
+        report = run_hf_adapter_continuation_executor(
+            args.sources,
+            output_root=args.output_root,
+            state_path=args.state,
+            run=args.run,
+            max_generations=args.max_generations,
+            retry_interrupted=args.retry_interrupted,
+            recursive=not args.no_recursive,
+            allow_inferred_roots=not args.no_infer_roots,
+            select_adapter_id=args.select_adapter_id,
+            command_artifacts=args.command_artifact,
+            max_lineage_depth=args.max_lineage_depth,
+            target_eval_loss=args.target_eval_loss,
+            min_eval_improvement=args.min_eval_improvement,
+            plateau_patience=args.plateau_patience,
+            output_prefix=args.output_prefix,
+            max_steps=args.max_steps,
+            max_steps_multiplier=args.max_steps_multiplier,
+            max_train_samples=args.max_train_samples,
+            max_train_samples_multiplier=args.max_train_samples_multiplier,
+            max_eval_samples=args.max_eval_samples,
+            max_eval_blocks=args.max_eval_blocks,
+            streaming_validation_samples=args.streaming_validation_samples,
+        )
+    except Exception as exc:
+        print(
+            f"hf_adapter_continuation_executor_error "
+            f"{exc.__class__.__name__}: {exc}",
+            file=sys.stderr,
+        )
+        return 2
+    if args.json:
+        print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        for line in hf_adapter_continuation_executor_lines(report):
+            print(line)
+    if report.get("status") in {
+        "ready",
+        "stopped",
+        "generation_limit_reached",
+    }:
+        return 0
+    generations = report.get("generations") or []
+    if generations and isinstance(generations[-1], Mapping):
+        returncode = generations[-1].get("returncode")
+        if isinstance(returncode, int) and returncode != 0:
+            return returncode
+    return 1
 
 
 def _generation_control_profile_config_lines(report: dict) -> list[str]:
