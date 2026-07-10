@@ -819,6 +819,41 @@ spiral-hf-adapter-executor-supervise \
   --timeout-seconds 0
 ```
 
+For the normal operational path, the integrated runtime command folds the
+executor, launcher, supervision decision, supervisor, and supervisor launcher
+into one fail-closed snapshot. It can also perform the initial idempotent
+handoff:
+
+```bash
+spiral-hf-adapter-executor-runtime \
+  runs/qwen2-study/executor/spiraltorch-hf-adapter-continuation-executor-launch.json
+
+spiral-hf-adapter-executor-runtime \
+  runs/qwen2-study/executor/spiraltorch-hf-adapter-continuation-executor-launch.json \
+  --reconcile \
+  --max-resumes 5 \
+  --poll-interval-seconds 5
+```
+
+The read-only report verifies that every discovered artifact points back to the
+same executor launch, executor state, output root, supervisor state, and
+supervisor launch history. Missing optional control artifacts describe an
+`unmanaged_*` runtime; malformed or cross-wired artifacts become `invalid` and
+cannot be reconciled.
+
+Reconciliation never silently crosses a completed supervisor run. After an
+operator stop, timeout, interruption, or exhausted resume budget, the command
+returns `operator_restart_required`. Starting another bounded controller then
+requires explicit intent:
+
+```bash
+spiral-hf-adapter-executor-runtime \
+  runs/qwen2-study/executor/spiraltorch-hf-adapter-continuation-executor-launch.json \
+  --reconcile \
+  --restart-supervisor \
+  --max-resumes 5
+```
+
 The detach call returns only after a new supervisor run and its single-owner
 lock agree on the child PID. Repeating the command while that owner is verified
 is an idempotent `already_running` no-op. Observe both layers independently:
@@ -993,7 +1028,10 @@ with `st.load_hf_adapter_continuation_executor_supervisor(...)`. Detach with
 through `st.hf_adapter_continuation_executor_supervisor_status_report(...)` or
 `st.hf_adapter_continuation_executor_supervisor_launch_status_report(...)`, and
 request a controller-only stop with
-`st.request_hf_adapter_continuation_executor_supervisor_stop(...)`.
+`st.request_hf_adapter_continuation_executor_supervisor_stop(...)`. The unified
+Python entrypoints are
+`st.hf_adapter_continuation_executor_runtime_report(...)` and
+`st.reconcile_hf_adapter_continuation_executor_runtime(...)`.
 
 Use `--resume-from-checkpoint` only for an exact Trainer continuation that
 should restore optimizer, scheduler, and RNG state. SpiralTorch audits

@@ -43,6 +43,12 @@ from .hf_adapter_executor_recovery import (
     hf_adapter_continuation_executor_output_resolution_lines,
     quarantine_hf_adapter_continuation_executor_output,
 )
+from .hf_adapter_executor_runtime import (
+    hf_adapter_continuation_executor_runtime_lines,
+    hf_adapter_continuation_executor_runtime_reconcile_lines,
+    hf_adapter_continuation_executor_runtime_report,
+    reconcile_hf_adapter_continuation_executor_runtime,
+)
 from .hf_adapter_executor_status import (
     hf_adapter_continuation_executor_status_lines,
     hf_adapter_continuation_executor_status_report,
@@ -912,6 +918,82 @@ def adapter_continuation_executor_supervisor_stop_main(
         ):
             print(line)
     return 0
+
+
+def adapter_continuation_executor_runtime_main(
+    argv: Sequence[str] | None = None,
+) -> int:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Inspect or reconcile the full executor, launcher, and supervisor "
+            "runtime."
+        ),
+    )
+    parser.add_argument("launch_state", type=Path)
+    parser.add_argument(
+        "--reconcile",
+        action="store_true",
+        help="Launch a missing supervisor without crossing a prior stop boundary.",
+    )
+    parser.add_argument(
+        "--restart-supervisor",
+        action="store_true",
+        help="Explicitly authorize a new bounded run after a terminal supervisor.",
+    )
+    parser.add_argument("--max-resumes", type=int, default=1)
+    parser.add_argument("--poll-interval-seconds", type=float, default=5.0)
+    parser.add_argument("--timeout-seconds", type=float, default=0.0)
+    parser.add_argument("--handoff-timeout-seconds", type=float, default=5.0)
+    parser.add_argument("--launch-handoff-timeout-seconds", type=float, default=5.0)
+    parser.add_argument("--supervisor-state", type=Path, default=None)
+    parser.add_argument("--supervisor-launch-state", type=Path, default=None)
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args(argv)
+    if args.restart_supervisor and not args.reconcile:
+        parser.error("--restart-supervisor requires --reconcile")
+    try:
+        report = (
+            reconcile_hf_adapter_continuation_executor_runtime(
+                args.launch_state,
+                restart_supervisor=args.restart_supervisor,
+                max_resumes=args.max_resumes,
+                poll_interval_seconds=args.poll_interval_seconds,
+                timeout_seconds=args.timeout_seconds,
+                handoff_timeout_seconds=args.handoff_timeout_seconds,
+                launch_handoff_timeout_seconds=(
+                    args.launch_handoff_timeout_seconds
+                ),
+                supervisor_state_path=args.supervisor_state,
+                supervisor_launch_state_path=args.supervisor_launch_state,
+                command_cwd=Path.cwd(),
+            )
+            if args.reconcile
+            else hf_adapter_continuation_executor_runtime_report(
+                args.launch_state,
+                supervisor_state_path=args.supervisor_state,
+                supervisor_launch_state_path=args.supervisor_launch_state,
+            )
+        )
+    except Exception as exc:
+        print(
+            "hf_adapter_continuation_executor_runtime_error "
+            f"{exc.__class__.__name__}: {exc}",
+            file=sys.stderr,
+        )
+        return 2
+    if args.json:
+        print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        lines = (
+            hf_adapter_continuation_executor_runtime_reconcile_lines(report)
+            if args.reconcile
+            else hf_adapter_continuation_executor_runtime_lines(report)
+        )
+        for line in lines:
+            print(line)
+    if args.reconcile:
+        return 0 if report.get("succeeded") is True else 1
+    return 0 if report.get("healthy") is True else 1
 
 
 def adapter_continuation_executor_quarantine_main(

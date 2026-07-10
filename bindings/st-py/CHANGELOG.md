@@ -100,6 +100,13 @@
   run-targeted cooperative stop artifact lets operators stop the controller
   without signalling a PID or terminating the independently owned executor;
   stale requests cannot cross into a restarted supervisor run.
+- Integrated executor runtime control: add one read-only report over executor,
+  launcher, supervision, supervisor, and detached-supervisor launch state with
+  cross-layer path identity checks. Running
+  `spiral-hf-adapter-executor-runtime --reconcile` idempotently starts an
+  unmanaged controller, while any prior stop, timeout, interruption, or
+  resume-budget boundary requires the explicit `--restart-supervisor` opt-in
+  before a new bounded run can begin.
 - Trainer resume audit: add `hf_finetune_checkpoint_resume_report(...)` and
   compact lines for optimizer/scheduler/RNG state availability, saved versus
   requested step horizons, and the exhausted-scheduler case where adapter
