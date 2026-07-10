@@ -22,6 +22,12 @@ if str(PACKAGE_ROOT) not in sys.path:
     sys.path.insert(0, str(PACKAGE_ROOT))
 
 import spiraltorch as st
+from spiraltorch.hf_adapter import (
+    hf_adapter_lineage_lines,
+    hf_adapter_promotion_lines,
+    write_hf_adapter_lineage,
+    write_hf_adapter_promotion,
+)
 from spiraltorch.hf_ft import (
     HF_GPT2_FT_DEFAULT_DEVICE_BACKENDS,
     hf_gpt2_finetune_checkpoint_resume_lines,
@@ -213,6 +219,28 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "Resume Trainer.train() from an existing checkpoint directory, "
             "including optimizer/scheduler state when present."
         ),
+    )
+    parser.add_argument(
+        "--adapter-promotion-gate",
+        action="store_true",
+        help=(
+            "After LoRA training, require lineage integrity, changed adapter "
+            "weights, successful before/after eval, and bounded eval regression."
+        ),
+    )
+    parser.add_argument(
+        "--adapter-promotion-max-eval-loss-regression",
+        type=float,
+        default=0.0,
+        help=(
+            "Largest allowed eval_after - eval_before value for adapter "
+            "promotion. Negative values require improvement."
+        ),
+    )
+    parser.add_argument(
+        "--adapter-promotion-require-generation-change",
+        action="store_true",
+        help="Also require before/after generation hashes to differ for promotion.",
     )
     parser.add_argument("--no-trainer-trace", action="store_true")
     parser.add_argument("--trainer-telemetry", action="store_true")
@@ -500,6 +528,28 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     _apply_model_profile_defaults(args, parser=parser, raw_argv=raw_argv)
     if args.model_artifact_kind == "peft-adapter" and args.finetune_mode != "lora":
         parser.error("--model-artifact-kind peft-adapter requires --finetune-mode lora")
+    if not math.isfinite(args.adapter_promotion_max_eval_loss_regression):
+        parser.error("--adapter-promotion-max-eval-loss-regression must be finite")
+    if args.adapter_promotion_gate:
+        if not args.train or args.finetune_mode != "lora":
+            parser.error("--adapter-promotion-gate requires --train --finetune-mode lora")
+        if not args.eval_before_train:
+            parser.error("--adapter-promotion-gate requires --eval-before-train")
+        if args.no_eval_after_train or args.eval_after_train_policy == "never":
+            parser.error("--adapter-promotion-gate requires after-train evaluation")
+    if (
+        args.adapter_promotion_require_generation_change
+        and not args.adapter_promotion_gate
+    ):
+        parser.error(
+            "--adapter-promotion-require-generation-change requires "
+            "--adapter-promotion-gate"
+        )
+    if args.adapter_promotion_require_generation_change and not args.generation_prompt:
+        parser.error(
+            "--adapter-promotion-require-generation-change requires "
+            "--generation-prompt"
+        )
     if args.max_train_samples is not None and args.max_train_samples < 0:
         parser.error("--max-train-samples must be non-negative")
     if args.max_eval_samples is not None and args.max_eval_samples < 0:
@@ -2257,6 +2307,15 @@ def _base_run_card(
         ),
         "model_artifact_load_report": None,
         "finetune_start_report": _finetune_start_report(args, artifact_report),
+        "adapter_lineage": None,
+        "adapter_promotion": None,
+        "adapter_promotion_gate_requested": bool(args.adapter_promotion_gate),
+        "adapter_promotion_max_eval_loss_regression": (
+            args.adapter_promotion_max_eval_loss_regression
+        ),
+        "adapter_promotion_require_generation_change": bool(
+            args.adapter_promotion_require_generation_change
+        ),
         "adapter_saved": None,
         "resume_from_checkpoint": (
             None
@@ -2359,8 +2418,37 @@ def _base_run_card(
     }
 
 
+def _run_card_path(args: argparse.Namespace) -> Path:
+    return args.run_card or (args.output_dir / st.HF_GPT2_FT_RUN_CARD_FILENAME)
+
+
+def _path_is_within(path: Path, directory: Path) -> bool:
+    try:
+        path.resolve().relative_to(directory.resolve())
+    except ValueError:
+        return False
+    return True
+
+
+def _adapter_output_collision(
+    args: argparse.Namespace,
+    model_artifact_report: Mapping[str, object],
+) -> bool:
+    artifact_local_path = model_artifact_report.get("artifact_local_path")
+    if (
+        model_artifact_report.get("artifact_kind") != "peft_adapter"
+        or artifact_local_path is None
+    ):
+        return False
+    artifact_path = Path(str(artifact_local_path))
+    return _path_is_within(args.output_dir, artifact_path) or _path_is_within(
+        artifact_path,
+        args.output_dir,
+    )
+
+
 def _write_card(card: Mapping[str, Any], args: argparse.Namespace) -> None:
-    path = args.run_card or (args.output_dir / st.HF_GPT2_FT_RUN_CARD_FILENAME)
+    path = _run_card_path(args)
     write_hf_gpt2_finetune_run_card(card, path)
     print(f"run_card {path}")
 
@@ -2446,7 +2534,12 @@ def _main_with_runtime_access(
         model_artifact_report.get("artifact_kind") == "peft_adapter"
         and args.finetune_mode != "lora"
     )
+    adapter_output_collision = _adapter_output_collision(
+        args,
+        model_artifact_report,
+    )
     preflight["model_artifact_compatible"] = model_artifact_compatible
+    preflight["adapter_output_collision"] = adapter_output_collision
     preflight["finetune_start_report"] = _finetune_start_report(
         args,
         model_artifact_report,
@@ -2533,11 +2626,22 @@ def _main_with_runtime_access(
     if (
         model_artifact_report.get("status") != "ready"
         or not model_artifact_compatible
+        or adapter_output_collision
     ):
         if not model_artifact_compatible:
             preflight["model_artifact_error"] = (
                 "PEFT adapter artifacts require --finetune-mode lora"
             )
+        if adapter_output_collision:
+            preflight["model_artifact_error"] = (
+                "adapter input and output directories must not overlap"
+            )
+            artifact_path = Path(str(model_artifact_report["artifact_local_path"]))
+            if _path_is_within(_run_card_path(args), artifact_path):
+                print(
+                    "run_card_skipped adapter input and run-card output overlap"
+                )
+                return 1
         _write_card(preflight, args)
         return 1
     if (
@@ -2861,7 +2965,71 @@ def _main_with_runtime_access(
             ),
         }
     )
+    if card["adapter_saved"] is True:
+        parent_adapter = (
+            args.model_name
+            if model_artifact_report.get("artifact_kind") == "peft_adapter"
+            and model_artifact_report.get("artifact_is_local") is True
+            else None
+        )
+        try:
+            lineage = write_hf_adapter_lineage(
+                args.output_dir,
+                parent_adapter=parent_adapter,
+                run_card=card,
+                run_card_path=_run_card_path(args),
+            )
+            card["adapter_lineage"] = lineage
+            for line in hf_adapter_lineage_lines(lineage):
+                print(line)
+            if args.adapter_promotion_gate:
+                promotion = write_hf_adapter_promotion(
+                    args.output_dir,
+                    card,
+                    parent_adapter=parent_adapter,
+                    max_eval_loss_regression=(
+                        args.adapter_promotion_max_eval_loss_regression
+                    ),
+                    require_generation_changed=(
+                        args.adapter_promotion_require_generation_change
+                    ),
+                )
+                card["adapter_promotion"] = {
+                    key: promotion.get(key)
+                    for key in (
+                        "row_type",
+                        "schema",
+                        "status",
+                        "promotion_ready",
+                        "recommendation",
+                        "candidate_adapter_id",
+                        "parent_adapter_id",
+                        "lineage_depth",
+                        "eval_before_loss",
+                        "eval_after_loss",
+                        "eval_loss_regression",
+                        "max_eval_loss_regression",
+                        "failed_checks",
+                        "missing_checks",
+                        "report_path",
+                    )
+                }
+                for line in hf_adapter_promotion_lines(promotion):
+                    print(line)
+        except Exception as exc:
+            card.update(
+                {
+                    "failure_stage": "adapter_lineage_promotion",
+                    "failure_error": f"{exc.__class__.__name__}: {exc}",
+                }
+            )
+            _write_card(card, args)
+            return 1
     _write_card(card, args)
+    if args.adapter_promotion_gate and not bool(
+        (card.get("adapter_promotion") or {}).get("promotion_ready")
+    ):
+        return 1
     return 0
 
 

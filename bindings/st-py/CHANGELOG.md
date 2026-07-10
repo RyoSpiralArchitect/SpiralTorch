@@ -15,6 +15,11 @@
   remote PEFT artifacts as trainable inputs, reuse their active adapter without
   double attachment, and preserve artifact/base/tokenizer/runtime-config
   provenance in the run card and model-profile surfaces.
+- HF adapter lineage and promotion: fingerprint adapter config/weight content,
+  write parent/root/run-card provenance after successful LoRA saves, expose
+  `spiral-hf-adapter-lineage` / `spiral-hf-adapter-promote`, and optionally fail
+  FT runs unless weights changed and before/after eval stays within a configured
+  loss-regression bound.
 - Trainer resume audit: add `hf_finetune_checkpoint_resume_report(...)` and
   compact lines for optimizer/scheduler/RNG state availability, saved versus
   requested step horizons, and the exhausted-scheduler case where adapter

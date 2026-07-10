@@ -10,6 +10,14 @@ from pathlib import Path
 from types import ModuleType
 from typing import Sequence
 
+from .hf_adapter import (
+    hf_adapter_lineage_lines,
+    hf_adapter_lineage_report,
+    hf_adapter_promotion_lines,
+    hf_adapter_promotion_report,
+    write_hf_adapter_lineage,
+    write_hf_adapter_promotion,
+)
 from .hf_ft import (
     HF_FINETUNE_DEFAULT_MODEL_PROFILE,
     hf_finetune_model_profile_catalog,
@@ -86,6 +94,82 @@ def _run_example(name: str, argv: Sequence[str] | None = None) -> int:
     if not callable(main):
         raise AttributeError(f"SpiralTorch HF CLI example has no main(): {name}")
     return int(main(None if argv is None else list(argv)))
+
+
+def adapter_lineage_main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Fingerprint a local PEFT adapter and record its lineage.",
+    )
+    parser.add_argument("--adapter", type=Path, required=True)
+    parser.add_argument("--parent-adapter", type=Path, default=None)
+    parser.add_argument("--run-card", type=Path, default=None)
+    parser.add_argument("--out", type=Path, default=None)
+    parser.add_argument(
+        "--inspect-only",
+        action="store_true",
+        help="Build the lineage report without writing a manifest.",
+    )
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args(argv)
+    if args.inspect_only and args.out is not None:
+        parser.error("--out cannot be combined with --inspect-only")
+    report = hf_adapter_lineage_report(
+        args.adapter,
+        parent_adapter=args.parent_adapter,
+        run_card=args.run_card,
+    )
+    if not args.inspect_only:
+        report = write_hf_adapter_lineage(report, out=args.out)
+    if args.json:
+        print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        for line in hf_adapter_lineage_lines(report):
+            print(line)
+        if report.get("manifest_path") is not None:
+            print(f"hf_adapter_lineage_manifest {report['manifest_path']}")
+    return 0 if report.get("status") == "ready" else 1
+
+
+def adapter_promotion_main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Gate PEFT adapter promotion on lineage and FT evidence.",
+    )
+    parser.add_argument("--candidate", type=Path, required=True)
+    parser.add_argument("--run-card", type=Path, required=True)
+    parser.add_argument("--parent-adapter", type=Path, default=None)
+    parser.add_argument("--max-eval-loss-regression", type=float, default=0.0)
+    parser.add_argument("--no-require-eval", action="store_true")
+    parser.add_argument("--require-generation-change", action="store_true")
+    parser.add_argument("--no-require-weight-change", action="store_true")
+    parser.add_argument("--out", type=Path, default=None)
+    parser.add_argument(
+        "--inspect-only",
+        action="store_true",
+        help="Evaluate the promotion gate without writing a report.",
+    )
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args(argv)
+    if args.inspect_only and args.out is not None:
+        parser.error("--out cannot be combined with --inspect-only")
+    report = hf_adapter_promotion_report(
+        args.candidate,
+        args.run_card,
+        parent_adapter=args.parent_adapter,
+        max_eval_loss_regression=args.max_eval_loss_regression,
+        require_eval=not args.no_require_eval,
+        require_generation_changed=args.require_generation_change,
+        require_weight_change=not args.no_require_weight_change,
+    )
+    if not args.inspect_only:
+        report = write_hf_adapter_promotion(report, out=args.out)
+    if args.json:
+        print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        for line in hf_adapter_promotion_lines(report):
+            print(line)
+        if report.get("report_path") is not None:
+            print(f"hf_adapter_promotion_report {report['report_path']}")
+    return 0 if report.get("promotion_ready") is True else 1
 
 
 def _generation_control_profile_config_lines(report: dict) -> list[str]:

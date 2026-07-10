@@ -11,6 +11,7 @@ from .optim import Amegagrad, amegagrad
 export: ModuleType
 hf_ft: ModuleType
 hf_peft: ModuleType
+hf_adapter: ModuleType
 hf_ft_status: ModuleType
 hf_generation: ModuleType
 hpo: ModuleType
@@ -553,6 +554,10 @@ HF_FINETUNE_TRAINER_TRACE_FILENAME: str
 HF_FINETUNE_REQUIRED_PYTHON_PACKAGES: List[str]
 HF_FINETUNE_REQUIRED_RUST_SURFACES: List[Dict[str, str]]
 HF_CAUSAL_LM_ARTIFACT_KINDS: Tuple[str, ...]
+HF_ADAPTER_LINEAGE_FILENAME: str
+HF_ADAPTER_LINEAGE_SCHEMA: str
+HF_ADAPTER_PROMOTION_FILENAME: str
+HF_ADAPTER_PROMOTION_SCHEMA: str
 HF_FINETUNE_MODES: Tuple[str, ...]
 HF_FINETUNE_LORA_TARGET_MODULES: Dict[str, Tuple[str, ...]]
 
@@ -568,6 +573,52 @@ def hf_causal_lm_artifact_lines(
     *,
     artifact_kind: str = ...,
     tokenizer_name_or_path: str | PathLike[str] | None = ...,
+) -> List[str]: ...
+
+def hf_adapter_fingerprint(adapter: str | PathLike[str]) -> Dict[str, object]: ...
+def hf_adapter_lineage_report(
+    adapter: str | PathLike[str],
+    *,
+    parent_adapter: str | PathLike[str] | None = ...,
+    run_card: Mapping[str, object] | str | PathLike[str] | None = ...,
+    run_card_path: str | PathLike[str] | None = ...,
+) -> Dict[str, object]: ...
+def write_hf_adapter_lineage(
+    adapter_or_report: str | PathLike[str] | Mapping[str, object],
+    *,
+    parent_adapter: str | PathLike[str] | None = ...,
+    run_card: Mapping[str, object] | str | PathLike[str] | None = ...,
+    run_card_path: str | PathLike[str] | None = ...,
+    out: str | PathLike[str] | None = ...,
+) -> Dict[str, object]: ...
+def load_hf_adapter_lineage(value: str | PathLike[str]) -> Dict[str, object]: ...
+def hf_adapter_lineage_lines(
+    report_or_adapter: Mapping[str, object] | str | PathLike[str],
+) -> List[str]: ...
+def hf_adapter_promotion_report(
+    candidate_adapter: str | PathLike[str],
+    run_card: Mapping[str, object] | str | PathLike[str],
+    *,
+    parent_adapter: str | PathLike[str] | None = ...,
+    max_eval_loss_regression: float = ...,
+    require_eval: bool = ...,
+    require_generation_changed: bool = ...,
+    require_weight_change: bool = ...,
+) -> Dict[str, object]: ...
+def write_hf_adapter_promotion(
+    report_or_candidate: Mapping[str, object] | str | PathLike[str],
+    run_card: Mapping[str, object] | str | PathLike[str] | None = ...,
+    *,
+    parent_adapter: str | PathLike[str] | None = ...,
+    max_eval_loss_regression: float = ...,
+    require_eval: bool = ...,
+    require_generation_changed: bool = ...,
+    require_weight_change: bool = ...,
+    out: str | PathLike[str] | None = ...,
+) -> Dict[str, object]: ...
+def load_hf_adapter_promotion(value: str | PathLike[str]) -> Dict[str, object]: ...
+def hf_adapter_promotion_lines(
+    report_or_path: Mapping[str, object] | str | PathLike[str],
 ) -> List[str]: ...
 
 def load_hf_causal_lm_artifact(
@@ -9722,6 +9773,7 @@ __all__ = [
     "write_wgpu_first_runtime_matrix",
     "hf_ft",
     "hf_peft",
+    "hf_adapter",
     "hf_generation",
     "hf_ft_status",
     "HF_FINETUNE_DEFAULT_DEVICE_BACKENDS",
@@ -9732,6 +9784,10 @@ __all__ = [
     "HF_FINETUNE_REQUIRED_PYTHON_PACKAGES",
     "HF_FINETUNE_REQUIRED_RUST_SURFACES",
     "HF_CAUSAL_LM_ARTIFACT_KINDS",
+    "HF_ADAPTER_LINEAGE_FILENAME",
+    "HF_ADAPTER_LINEAGE_SCHEMA",
+    "HF_ADAPTER_PROMOTION_FILENAME",
+    "HF_ADAPTER_PROMOTION_SCHEMA",
     "HF_FINETUNE_MODES",
     "HF_FINETUNE_LORA_TARGET_MODULES",
     "HF_GPT2_FT_DEFAULT_DEVICE_BACKENDS",
@@ -9742,14 +9798,23 @@ __all__ = [
     "export_hf_merged_causal_lm",
     "hf_causal_lm_artifact_lines",
     "hf_causal_lm_artifact_report",
+    "hf_adapter_fingerprint",
+    "hf_adapter_lineage_lines",
+    "hf_adapter_lineage_report",
+    "hf_adapter_promotion_lines",
+    "hf_adapter_promotion_report",
     "hf_finetune_corpus_file_report",
     "hf_finetune_adapter_config",
     "hf_finetune_lora_target_report",
     "hf_finetune_parameter_report",
     "hf_merged_causal_lm_export_lines",
     "load_hf_causal_lm_artifact",
+    "load_hf_adapter_lineage",
+    "load_hf_adapter_promotion",
     "summarize_hf_causal_lm_artifact",
     "prepare_hf_finetune_model",
+    "write_hf_adapter_lineage",
+    "write_hf_adapter_promotion",
     "hf_finetune_corpus_scan_report",
     "hf_finetune_dataset_fit_report",
     "hf_finetune_disk_headroom_plan",

@@ -908,6 +908,23 @@ from .hf_peft import (
     summarize_hf_causal_lm_artifact,
 )
 
+from . import hf_adapter as hf_adapter
+from .hf_adapter import (
+    HF_ADAPTER_LINEAGE_FILENAME,
+    HF_ADAPTER_LINEAGE_SCHEMA,
+    HF_ADAPTER_PROMOTION_FILENAME,
+    HF_ADAPTER_PROMOTION_SCHEMA,
+    hf_adapter_fingerprint,
+    hf_adapter_lineage_lines,
+    hf_adapter_lineage_report,
+    hf_adapter_promotion_lines,
+    hf_adapter_promotion_report,
+    load_hf_adapter_lineage,
+    load_hf_adapter_promotion,
+    write_hf_adapter_lineage,
+    write_hf_adapter_promotion,
+)
+
 from . import hf_ft_status as hf_ft_status
 from .hf_ft_status import (
     hf_finetune_monitor_lines,
@@ -1152,11 +1169,21 @@ _EXTRAS = [
     "HF_FINETUNE_REQUIRED_PYTHON_PACKAGES",
     "HF_FINETUNE_REQUIRED_RUST_SURFACES",
     "HF_CAUSAL_LM_ARTIFACT_KINDS",
+    "HF_ADAPTER_LINEAGE_FILENAME",
+    "HF_ADAPTER_LINEAGE_SCHEMA",
+    "HF_ADAPTER_PROMOTION_FILENAME",
+    "HF_ADAPTER_PROMOTION_SCHEMA",
     "HF_FINETUNE_MODES",
     "HF_FINETUNE_LORA_TARGET_MODULES",
     "export_hf_merged_causal_lm",
     "hf_causal_lm_artifact_lines",
     "hf_causal_lm_artifact_report",
+    "hf_adapter",
+    "hf_adapter_fingerprint",
+    "hf_adapter_lineage_lines",
+    "hf_adapter_lineage_report",
+    "hf_adapter_promotion_lines",
+    "hf_adapter_promotion_report",
     "hf_finetune_adapter_config",
     "hf_finetune_corpus_file_report",
     "hf_finetune_corpus_scan_report",
@@ -1195,6 +1222,8 @@ _EXTRAS = [
     "hf_finetune_parameter_report",
     "hf_merged_causal_lm_export_lines",
     "load_hf_causal_lm_artifact",
+    "load_hf_adapter_lineage",
+    "load_hf_adapter_promotion",
     "summarize_hf_causal_lm_artifact",
     "hf_finetune_preflight_report",
     "hf_finetune_rust_dependency_report",
@@ -1241,6 +1270,8 @@ _EXTRAS = [
     "summarize_hf_finetune_trainer_trace",
     "resolve_hf_finetune_model_profile",
     "prepare_hf_finetune_model",
+    "write_hf_adapter_lineage",
+    "write_hf_adapter_promotion",
     "write_hf_finetune_run_artifact_manifest",
     "write_hf_finetune_run_ops_snapshot",
     "write_hf_finetune_milestone_runtime_report",
