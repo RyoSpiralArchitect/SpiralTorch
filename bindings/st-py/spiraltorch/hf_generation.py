@@ -27,6 +27,8 @@ __all__ = [
     "compare_zspace_inference_distortion_probes",
     "compare_zspace_generation_control_sweeps",
     "default_zspace_checkpoint_generation_prompts",
+    "hf_causal_lm_artifact_probe_lines",
+    "hf_causal_lm_artifact_probe_report",
     "hf_generation_batch_size_compat",
     "zspace_inference_distortion_sweep_report_from_probes",
     "zspace_inference_distortion_probe_cli_args",
@@ -138,6 +140,205 @@ def hf_generation_batch_size_compat(model: Any):
                     setattr(candidate, "_prepare_special_tokens", previous)
             except Exception:
                 pass
+
+
+def hf_causal_lm_artifact_probe_report(
+    model_name_or_path: str | Path,
+    *,
+    tokenizer_name_or_path: str | Path | None = None,
+    artifact_kind: str = "auto",
+    prompt: str = "SpiralTorch is",
+    max_new_tokens: int = 16,
+    do_sample: bool = False,
+    temperature: float = 1.0,
+    top_k: int | None = None,
+    device: str | None = None,
+    merge_adapter: bool = False,
+    local_files_only: bool = False,
+    trust_remote_code: bool = False,
+    transformers_module: Any = None,
+    peft_module: Any = None,
+    torch_module: Any = None,
+    loader_kwargs: Mapping[str, object] | None = None,
+    config_kwargs: Mapping[str, object] | None = None,
+    tokenizer_kwargs: Mapping[str, object] | None = None,
+    model_kwargs: Mapping[str, object] | None = None,
+    adapter_kwargs: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    """Load one causal-LM artifact and prove it can generate in a fresh path."""
+
+    from .hf_peft import (
+        load_hf_causal_lm_artifact,
+        summarize_hf_causal_lm_artifact,
+    )
+
+    prompt_text = str(prompt)
+    if not prompt_text:
+        raise ValueError("prompt must not be empty")
+    resolved_max_new_tokens = _positive_int(
+        max_new_tokens,
+        label="max_new_tokens",
+    )
+    resolved_temperature = _positive_float(temperature, label="temperature")
+    resolved_top_k = None if top_k is None else _positive_int(top_k, label="top_k")
+    runtime = torch_module or importlib.import_module("torch")
+    resolved_loader_kwargs = dict(loader_kwargs or {})
+    resolved_loader_kwargs.setdefault("local_files_only", bool(local_files_only))
+    resolved_loader_kwargs.setdefault("trust_remote_code", bool(trust_remote_code))
+
+    load_started = time.perf_counter()
+    model, tokenizer, config, load_report = load_hf_causal_lm_artifact(
+        model_name_or_path,
+        tokenizer_name_or_path=tokenizer_name_or_path,
+        artifact_kind=artifact_kind,
+        load_model=True,
+        load_tokenizer=True,
+        merge_adapter=merge_adapter,
+        transformers_module=transformers_module,
+        peft_module=peft_module,
+        loader_kwargs=resolved_loader_kwargs,
+        config_kwargs=config_kwargs,
+        tokenizer_kwargs=tokenizer_kwargs,
+        model_kwargs=model_kwargs,
+        adapter_kwargs=adapter_kwargs,
+    )
+    load_seconds = time.perf_counter() - load_started
+    if model is None or tokenizer is None:
+        raise ValueError("causal-LM artifact probe requires a model and tokenizer")
+
+    requested_device = None if device in {None, "", "auto"} else str(device)
+    if requested_device is not None:
+        move_model = getattr(model, "to", None)
+        if not callable(move_model):
+            raise ValueError("loaded causal LM does not expose to(device)")
+        moved = move_model(requested_device)
+        if moved is not None:
+            model = moved
+    evaluate = getattr(model, "eval", None)
+    if callable(evaluate):
+        evaluate()
+
+    model_device: object = requested_device or "cpu"
+    parameters = getattr(model, "parameters", None)
+    if callable(parameters):
+        try:
+            model_device = getattr(next(iter(parameters())), "device", model_device)
+        except (StopIteration, TypeError):
+            pass
+
+    encoded = tokenizer(prompt_text, return_tensors="pt")
+    if not isinstance(encoded, Mapping):
+        raise ValueError("tokenizer output must be a mapping")
+    model_inputs: dict[str, Any] = {}
+    for key, value in encoded.items():
+        move_value = getattr(value, "to", None)
+        model_inputs[str(key)] = (
+            move_value(model_device) if callable(move_value) else value
+        )
+    input_ids = model_inputs.get("input_ids")
+    if input_ids is None:
+        raise ValueError("tokenizer output did not include input_ids")
+    input_token_ids = _tensor_row_to_ints(input_ids)
+
+    generation_kwargs: dict[str, object] = {
+        "max_new_tokens": resolved_max_new_tokens,
+        "do_sample": bool(do_sample),
+    }
+    if do_sample:
+        generation_kwargs["temperature"] = resolved_temperature
+        if resolved_top_k is not None:
+            generation_kwargs["top_k"] = resolved_top_k
+    pad_token_id = getattr(tokenizer, "pad_token_id", None)
+    if pad_token_id is None:
+        pad_token_id = getattr(tokenizer, "eos_token_id", None)
+    if pad_token_id is not None:
+        generation_kwargs["pad_token_id"] = int(pad_token_id)
+
+    generate = getattr(model, "generate", None)
+    if not callable(generate):
+        raise ValueError("loaded causal LM does not expose generate")
+    inference_mode = getattr(runtime, "inference_mode", None)
+    inference_context = (
+        inference_mode() if callable(inference_mode) else contextlib.nullcontext()
+    )
+    generation_started = time.perf_counter()
+    with hf_generation_batch_size_compat(model) as compat_installed:
+        with inference_context:
+            generated = generate(**model_inputs, **generation_kwargs)
+    generation_seconds = time.perf_counter() - generation_started
+
+    output_token_ids = _tensor_row_to_ints(generated)
+    continuation_token_ids = output_token_ids[len(input_token_ids) :]
+    generated_text = tokenizer.decode(output_token_ids, skip_special_tokens=True)
+    continuation_text = tokenizer.decode(
+        continuation_token_ids,
+        skip_special_tokens=True,
+    )
+    artifact_summary = summarize_hf_causal_lm_artifact(load_report)
+    return {
+        "row_type": "hf_causal_lm_artifact_probe",
+        "status": "ready",
+        "artifact": artifact_summary,
+        "model_family": getattr(config, "model_type", None),
+        "model_class": load_report.get("model_class"),
+        "config_class": load_report.get("config_class"),
+        "tokenizer_class": load_report.get("tokenizer_class"),
+        "device": str(model_device),
+        "prompt": prompt_text,
+        "generated_text": str(generated_text),
+        "continuation_text": str(continuation_text),
+        "generated_text_changed": str(generated_text) != prompt_text,
+        "input_token_count": len(input_token_ids),
+        "output_token_count": len(output_token_ids),
+        "new_token_count": len(continuation_token_ids),
+        "generation": {
+            "max_new_tokens": resolved_max_new_tokens,
+            "do_sample": bool(do_sample),
+            "temperature": resolved_temperature if do_sample else None,
+            "top_k": resolved_top_k if do_sample else None,
+            "pad_token_id": pad_token_id,
+        },
+        "batch_size_compat_installed": bool(compat_installed),
+        "merge_adapter_requested": bool(merge_adapter),
+        "local_files_only": bool(resolved_loader_kwargs.get("local_files_only", False)),
+        "trust_remote_code": bool(
+            resolved_loader_kwargs.get("trust_remote_code", False)
+        ),
+        "load_seconds": load_seconds,
+        "generation_seconds": generation_seconds,
+    }
+
+
+def hf_causal_lm_artifact_probe_lines(
+    report: Mapping[str, object],
+) -> list[str]:
+    """Render a compact artifact probe result for terminals and run logs."""
+
+    artifact = report.get("artifact")
+    artifact_row = dict(artifact) if isinstance(artifact, Mapping) else {}
+    return [
+        (
+            "hf_causal_lm_artifact_probe "
+            f"status={report.get('status')} "
+            f"kind={artifact_row.get('artifact_kind')} "
+            f"source={artifact_row.get('artifact_source')} "
+            f"base={artifact_row.get('base_model_name_or_path')} "
+            f"family={report.get('model_family')} "
+            f"model={report.get('model_class')} "
+            f"tokenizer={report.get('tokenizer_class')} "
+            f"device={report.get('device')} "
+            f"adapter_loaded={artifact_row.get('adapter_loaded')} "
+            f"input_tokens={report.get('input_token_count')} "
+            f"new_tokens={report.get('new_token_count')} "
+            f"compat={report.get('batch_size_compat_installed')}"
+        ),
+        (
+            "hf_causal_lm_artifact_probe_text "
+            f"prompt={json.dumps(report.get('prompt'), ensure_ascii=False)} "
+            "continuation="
+            f"{json.dumps(report.get('continuation_text'), ensure_ascii=False)}"
+        ),
+    ]
 
 
 ADJUST_MIN = 0.25

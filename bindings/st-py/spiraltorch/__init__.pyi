@@ -1233,6 +1233,34 @@ def build_zspace_activation_probe_hook(
     **kwargs: object,
 ) -> ZSpaceActivationProbeHook: ...
 
+def hf_causal_lm_artifact_probe_report(
+    model_name_or_path: str | PathLike[str],
+    *,
+    tokenizer_name_or_path: str | PathLike[str] | None = ...,
+    artifact_kind: str = ...,
+    prompt: str = ...,
+    max_new_tokens: int = ...,
+    do_sample: bool = ...,
+    temperature: float = ...,
+    top_k: int | None = ...,
+    device: str | None = ...,
+    merge_adapter: bool = ...,
+    local_files_only: bool = ...,
+    trust_remote_code: bool = ...,
+    transformers_module: Any = ...,
+    peft_module: Any = ...,
+    torch_module: Any = ...,
+    loader_kwargs: Mapping[str, object] | None = ...,
+    config_kwargs: Mapping[str, object] | None = ...,
+    tokenizer_kwargs: Mapping[str, object] | None = ...,
+    model_kwargs: Mapping[str, object] | None = ...,
+    adapter_kwargs: Mapping[str, object] | None = ...,
+) -> Dict[str, object]: ...
+
+def hf_causal_lm_artifact_probe_lines(
+    report: Mapping[str, object],
+) -> List[str]: ...
+
 def hf_generation_batch_size_compat(model: Any) -> ContextManager[bool]: ...
 
 def compare_zspace_inference_distortion_probes(
@@ -10177,6 +10205,8 @@ __all__ = [
     "hf_finetune_lora_target_report",
     "hf_finetune_parameter_report",
     "hf_merged_causal_lm_export_lines",
+    "hf_causal_lm_artifact_probe_lines",
+    "hf_causal_lm_artifact_probe_report",
     "load_hf_causal_lm_artifact",
     "load_hf_adapter_lineage",
     "load_hf_adapter_promotion",
