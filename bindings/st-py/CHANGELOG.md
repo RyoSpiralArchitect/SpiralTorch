@@ -2,6 +2,18 @@
 
 ## 0.4.13
 
+- HF PEFT runtime: add lazy `spiraltorch.hf_peft` helpers plus
+  `prepare_hf_finetune_model(...)` for model-family-aware LoRA target
+  resolution, parameter-freeze audits, gradient checkpointing, and adapter
+  attachment without making PEFT an eager import dependency.
+- Generic HF bridge: add `--finetune-mode full|lora`, LoRA rank/alpha/dropout/
+  target/module-save controls, adapter-aware profile launch preflight, and run
+  card evidence for matched modules, trainable ratio, artifact kind, and saved
+  adapter files. Built-in Pythia, GPT-2, Qwen2, and SmolLM2 LoRA profiles make
+  local adapter smoke runs config-driven rather than script-specific.
+- Packaging/preflight: add `hf-peft-finetune` as the adapter-training contract
+  that combines PEFT with datasets, pyarrow, tqdm, and Trainer dependencies;
+  keep `hf-peft` as the narrower adapter load/attach surface.
 - Python API: add `spiraltorch.hf_ft` plus top-level
   `hf_gpt2_finetune_preflight_report(...)`,
   `hf_gpt2_finetune_rust_dependency_report(...)`,

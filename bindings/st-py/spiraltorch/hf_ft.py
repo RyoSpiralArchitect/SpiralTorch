@@ -18,6 +18,7 @@ from .hf_generation import (
     zspace_generation_control_processor_kwargs,
     zspace_generation_control_sweep_cli_args,
 )
+from .hf_peft import hf_finetune_adapter_config
 from .runtime_imports import (
     csv_label,
     csv_values,
@@ -220,7 +221,7 @@ HF_FINETUNE_MODEL_PROFILE_PREFLIGHT_PRESETS: dict[str, str] = {
     "inference": "hf-runtime",
     "local-full-finetune": "hf-full-finetune",
     "gpt2-ft": "hf-gpt2-ft",
-    "peft": "hf-peft",
+    "peft": "hf-peft-finetune",
     "runtime": "hf-runtime",
     "trl-sft": "hf-trl-sft",
 }
@@ -300,6 +301,29 @@ HF_FINETUNE_DEFAULT_MODEL_CONFIGS: dict[str, object] = {
             ),
         },
         {
+            "id": "causal-lm-lora-local-smoke",
+            "extends": "pythia-70m-local-smoke",
+            "training": {
+                "finetune_mode": "lora",
+                "learning_rate": 2.0e-4,
+                "gradient_checkpointing": True,
+                "per_device_train_batch_size": 1,
+                "gradient_accumulation_steps": 8,
+            },
+            "adapter": {
+                "type": "lora",
+                "rank": 16,
+                "alpha": 32,
+                "dropout": 0.05,
+                "bias": "none",
+                "target_modules": ["query_key_value", "dense"],
+            },
+            "notes": (
+                "Model-neutral PEFT smoke route backed by Pythia 70M; use this "
+                "to validate adapter save/resume before scaling to a larger family."
+            ),
+        },
+        {
             "id": "gpt2-local-smoke",
             "model_name": "gpt2",
             "tokenizer_name": "gpt2",
@@ -364,6 +388,26 @@ HF_FINETUNE_DEFAULT_MODEL_CONFIGS: dict[str, object] = {
                 "activation_name_contains": ["transformer.h.0"],
             },
             "notes": "Smaller GPT-2-family profile for local smoke runs.",
+        },
+        {
+            "id": "gpt2-lora-local-smoke",
+            "extends": "gpt2-local-smoke",
+            "training": {
+                "finetune_mode": "lora",
+                "learning_rate": 2.0e-4,
+                "gradient_checkpointing": True,
+                "per_device_train_batch_size": 1,
+                "gradient_accumulation_steps": 8,
+            },
+            "adapter": {
+                "type": "lora",
+                "rank": 16,
+                "alpha": 32,
+                "dropout": 0.05,
+                "bias": "none",
+                "target_modules": ["c_attn", "c_proj"],
+            },
+            "notes": "GPT-2 PEFT profile for adapter parity with historical full FT runs.",
         },
         {
             "id": "tiny-gpt2-ci",
@@ -544,6 +588,24 @@ HF_FINETUNE_DEFAULT_MODEL_CONFIGS: dict[str, object] = {
             "notes": "OPT-family small causal-LM profile for non-GPT local FT checks.",
         },
         {
+            "id": "qwen2-0.5b-lora-local-smoke",
+            "extends": "qwen2-0.5b-local-smoke",
+            "training": {
+                "finetune_mode": "lora",
+                "learning_rate": 2.0e-4,
+                "gradient_checkpointing": True,
+            },
+            "adapter": {
+                "type": "lora",
+                "rank": 16,
+                "alpha": 32,
+                "dropout": 0.05,
+                "bias": "none",
+                "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj"],
+            },
+            "notes": "Qwen2 0.5B LoRA route sized for local Apple Silicon trials.",
+        },
+        {
             "id": "smollm2-135m-local-smoke",
             "model_name": "HuggingFaceTB/SmolLM2-135M",
             "tokenizer_name": "HuggingFaceTB/SmolLM2-135M",
@@ -654,6 +716,24 @@ HF_FINETUNE_DEFAULT_MODEL_CONFIGS: dict[str, object] = {
                 "the relaxed runtime gate is useful while iterating on local "
                 "model paths before installing the full FT stack."
             ),
+        },
+        {
+            "id": "smollm2-135m-lora-local-smoke",
+            "extends": "smollm2-135m-local-smoke",
+            "training": {
+                "finetune_mode": "lora",
+                "learning_rate": 2.0e-4,
+                "gradient_checkpointing": True,
+            },
+            "adapter": {
+                "type": "lora",
+                "rank": 16,
+                "alpha": 32,
+                "dropout": 0.05,
+                "bias": "none",
+                "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj"],
+            },
+            "notes": "Small modern LoRA profile for fast non-GPT adapter smoke runs.",
         },
     ],
 }
@@ -822,6 +902,10 @@ def hf_finetune_model_profiles(
             profile.get("generation"),
             label=f"{profile_id}.generation",
         )
+        profile["adapter"] = _mapping_or_empty(
+            profile.get("adapter"),
+            label=f"{profile_id}.adapter",
+        )
         profile["runtime"] = _mapping_or_empty(
             profile.get("runtime"),
             label=f"{profile_id}.runtime",
@@ -875,6 +959,10 @@ def resolve_hf_finetune_model_profile(
         selected.get("runtime"),
         label=f"{profile_id}.runtime",
     )
+    adapter = _mapping_or_empty(
+        selected.get("adapter"),
+        label=f"{profile_id}.adapter",
+    )
     block_size = _positive_int_or_none(
         training.get("block_size") or selected.get("max_length"),
         label=f"{profile_id}.training.block_size",
@@ -889,6 +977,7 @@ def resolve_hf_finetune_model_profile(
     selected["training"] = training
     selected["dataset"] = dataset
     selected["generation"] = generation
+    selected["adapter"] = adapter
     selected["runtime"] = runtime
     selected["id"] = profile_id
     selected["model_name"] = _string_or_none(selected.get("model_name")) or profile_id
@@ -928,6 +1017,7 @@ def resolve_hf_finetune_model_profile(
         "checkpoint_prefix": selected.get("checkpoint_prefix") or "checkpoint-",
         "max_length": selected.get("max_length"),
         "training": training,
+        "adapter": adapter,
         "dataset": dataset,
         "generation": generation,
         "runtime": runtime,
@@ -967,6 +1057,7 @@ def hf_finetune_model_profile_catalog(
             resolved.get("generation"),
             label=f"{profile_id}.generation",
         )
+        adapter_config = _hf_finetune_profile_adapter_config(resolved)
         runtime = _mapping_or_empty(
             resolved.get("runtime"),
             label=f"{profile_id}.runtime",
@@ -1003,6 +1094,13 @@ def hf_finetune_model_profile_catalog(
                 "max_steps": training.get("max_steps"),
                 "learning_rate": training.get("learning_rate"),
                 "save_total_limit": training.get("save_total_limit"),
+                "finetune_mode": adapter_config.get("mode"),
+                "gradient_checkpointing": adapter_config.get(
+                    "gradient_checkpointing"
+                ),
+                "lora_rank": adapter_config.get("rank"),
+                "lora_alpha": adapter_config.get("alpha"),
+                "lora_target_modules": adapter_config.get("target_modules"),
                 "max_new_tokens": generation.get("max_new_tokens"),
                 "do_sample": generation.get("do_sample"),
                 "temperature": generation.get("temperature"),
@@ -1074,6 +1172,8 @@ def hf_finetune_model_profile_catalog_lines(
             f"dataset_config={row.get('dataset_config')} "
             f"block_size={row.get('block_size')} "
             f"max_train_samples={row.get('max_train_samples')} "
+            f"finetune_mode={row.get('finetune_mode')} "
+            f"lora_rank={row.get('lora_rank')} "
             f"max_new_tokens={row.get('max_new_tokens')} "
             f"do_sample={row.get('do_sample')} "
             f"zspace_top_k={row.get('zspace_top_k')} "
@@ -1084,11 +1184,49 @@ def hf_finetune_model_profile_catalog_lines(
     return lines
 
 
-def _hf_finetune_resolved_profile_mode(mode: str | None, *, train: bool) -> str:
+def _hf_finetune_resolved_profile_mode(
+    mode: str | None,
+    *,
+    train: bool,
+    finetune_mode: object = None,
+) -> str:
     key = str(mode or "auto").strip().lower()
     if key == "auto":
+        adapter_mode = str(finetune_mode or "").strip().lower()
+        if adapter_mode in {"adapter", "lora", "peft"}:
+            return "peft"
         return "full-finetune" if train else "finetune"
     return key
+
+
+def _hf_finetune_profile_adapter_config(
+    profile: Mapping[str, object],
+) -> dict[str, object]:
+    training = _mapping_or_empty(profile.get("training"), label="profile.training")
+    adapter = _mapping_or_empty(profile.get("adapter"), label="profile.adapter")
+    return hf_finetune_adapter_config(
+        mode=(
+            training.get("finetune_mode")
+            or adapter.get("mode")
+            or adapter.get("type")
+            or "full"
+        ),
+        model_family=_string_or_none(profile.get("model_family")),
+        rank=adapter.get("rank") if adapter.get("rank") is not None else 16,
+        alpha=adapter.get("alpha") if adapter.get("alpha") is not None else 32.0,
+        dropout=(
+            adapter.get("dropout")
+            if adapter.get("dropout") is not None
+            else 0.05
+        ),
+        bias=adapter.get("bias") if adapter.get("bias") is not None else "none",
+        target_modules=adapter.get("target_modules"),
+        modules_to_save=adapter.get("modules_to_save"),
+        use_rslora=bool(adapter.get("use_rslora", False)),
+        gradient_checkpointing=bool(
+            training.get("gradient_checkpointing", False)
+        ),
+    )
 
 
 def _hf_finetune_profile_preflight_preset(mode: str) -> str:
@@ -1127,7 +1265,12 @@ def hf_finetune_model_profile_preflight_report(
     """Resolve one HF model profile and probe the matching runtime imports."""
 
     resolved = resolve_hf_finetune_model_profile(config, profile=profile)
-    resolved_mode = _hf_finetune_resolved_profile_mode(mode, train=False)
+    adapter_config = _hf_finetune_profile_adapter_config(resolved)
+    resolved_mode = _hf_finetune_resolved_profile_mode(
+        mode,
+        train=False,
+        finetune_mode=adapter_config.get("mode"),
+    )
     preset = _hf_finetune_profile_preflight_preset(resolved_mode)
     runtime_report = runtime_import_preflight_report(
         runtime_import_presets=[preset],
@@ -1160,6 +1303,8 @@ def hf_finetune_model_profile_preflight_report(
         "architecture": resolved.get("architecture"),
         "model_family": resolved.get("model_family"),
         "parameter_scale": resolved.get("parameter_scale"),
+        "finetune_mode": adapter_config.get("mode"),
+        "adapter_config": adapter_config,
         "requires_remote_code": bool(resolved.get("requires_remote_code")),
         "model_profile": resolved,
         "model_profile_lines": hf_finetune_model_profile_lines(resolved),
@@ -1316,7 +1461,12 @@ def hf_finetune_model_profile_launch_plan(
     if train and metadata_only:
         raise ValueError("train and metadata_only cannot both be true")
     resolved = resolve_hf_finetune_model_profile(config, profile=profile)
-    resolved_mode = _hf_finetune_resolved_profile_mode(mode, train=bool(train))
+    adapter_config = _hf_finetune_profile_adapter_config(resolved)
+    resolved_mode = _hf_finetune_resolved_profile_mode(
+        mode,
+        train=bool(train),
+        finetune_mode=adapter_config.get("mode"),
+    )
     preflight = hf_finetune_model_profile_preflight_report(
         config,
         profile=str(resolved["profile_id"]),
@@ -1932,8 +2082,27 @@ def hf_finetune_model_profile_cli_args(
             ("eval_steps", "--eval-steps"),
             ("eval_accumulation_steps", "--eval-accumulation-steps"),
             ("save_total_limit", "--save-total-limit"),
+            ("finetune_mode", "--finetune-mode"),
         ):
             _append_value_flag(args, flag, training.get(key))
+        if training.get("gradient_checkpointing") is True:
+            args.append("--gradient-checkpointing")
+        adapter = _mapping_or_empty(report.get("adapter"), label="profile.adapter")
+        for key, flag in (
+            ("rank", "--lora-rank"),
+            ("alpha", "--lora-alpha"),
+            ("dropout", "--lora-dropout"),
+            ("bias", "--lora-bias"),
+        ):
+            _append_value_flag(args, flag, adapter.get(key))
+        if adapter.get("use_rslora") is True:
+            args.append("--lora-use-rslora")
+        for key, flag in (
+            ("target_modules", "--lora-target-module"),
+            ("modules_to_save", "--lora-module-to-save"),
+        ):
+            for value in _unique(adapter.get(key)):
+                _append_value_flag(args, flag, value)
     dataset = _mapping_or_empty(report.get("dataset"), label="profile.dataset")
     if include_dataset:
         for key, flag in (
@@ -2051,6 +2220,7 @@ def hf_finetune_model_profile_lines(
     dataset = _mapping_or_empty(profile.get("dataset"), label="profile.dataset")
     generation = _mapping_or_empty(profile.get("generation"), label="profile.generation")
     runtime = _mapping_or_empty(profile.get("runtime"), label="profile.runtime")
+    adapter_config = _hf_finetune_profile_adapter_config(profile)
     return [
         (
             "hf_ft_model_profile "
@@ -2065,6 +2235,9 @@ def hf_finetune_model_profile_lines(
             f"dataset={dataset.get('name')} "
             f"dataset_config={dataset.get('config')} "
             f"block_size={training.get('block_size')} "
+            f"finetune_mode={adapter_config.get('mode')} "
+            f"lora_rank={adapter_config.get('rank')} "
+            f"lora_targets={csv_label(adapter_config.get('target_modules'))} "
             f"max_new_tokens={generation.get('max_new_tokens')} "
             f"do_sample={generation.get('do_sample')} "
             f"activation_hooks={csv_label(runtime.get('activation_name_contains'))} "
@@ -2170,6 +2343,7 @@ def hf_finetune_model_profile_runtime_contract(
         label="profile.generation",
     )
     runtime = _mapping_or_empty(resolved.get("runtime"), label="profile.runtime")
+    adapter_config = _hf_finetune_profile_adapter_config(resolved)
     activation_hooks = _unique(runtime.get("activation_name_contains"))
     zspace_generation = {
         str(key): value
@@ -2179,7 +2353,11 @@ def hf_finetune_model_profile_runtime_contract(
         or str(key).startswith("ngram_")
         or str(key) == "last_token_repression"
     }
-    resolved_mode = _hf_finetune_resolved_profile_mode(mode, train=False)
+    resolved_mode = _hf_finetune_resolved_profile_mode(
+        mode,
+        train=False,
+        finetune_mode=adapter_config.get("mode"),
+    )
     token_estimator = _hf_finetune_token_estimator_contract(runtime)
     tokenizer_source = (
         "model"
@@ -2219,6 +2397,8 @@ def hf_finetune_model_profile_runtime_contract(
         "checkpoint_prefix": resolved.get("checkpoint_prefix"),
         "max_length": resolved.get("max_length"),
         "block_size": training.get("block_size"),
+        "finetune_mode": adapter_config.get("mode"),
+        "adapter_config": adapter_config,
         "dataset_name": dataset.get("name"),
         "dataset_config": dataset.get("config"),
         "text_column": dataset.get("text_column"),
@@ -3771,6 +3951,7 @@ def hf_gpt2_finetune_preflight_report(
     runtime_device_backends: object = None,
     required_runtime_device_ready_backends: object = None,
     require_hf_gpt2_ft: bool = True,
+    finetune_mode: str = "full",
     describe_runtime_devices=None,
 ) -> dict[str, object]:
     """Build a strict preflight report for local GPT-2 fine-tuning."""
@@ -3778,9 +3959,15 @@ def hf_gpt2_finetune_preflight_report(
     requested_backends = _unique(runtime_device_backends)
     if not requested_backends:
         requested_backends = list(HF_GPT2_FT_DEFAULT_DEVICE_BACKENDS)
-    required_presets = ["hf-gpt2-ft"] if require_hf_gpt2_ft else []
+    adapter_config = hf_finetune_adapter_config(mode=finetune_mode)
+    runtime_preset = (
+        "hf-peft-finetune"
+        if adapter_config.get("mode") == "lora"
+        else "hf-gpt2-ft"
+    )
+    required_presets = [runtime_preset] if require_hf_gpt2_ft else []
     report = runtime_import_preflight_report(
-        runtime_import_presets=["hf-gpt2-ft"],
+        runtime_import_presets=[runtime_preset],
         required_runtime_import_presets=required_presets,
         runtime_device_backends=requested_backends,
         required_runtime_device_ready_backends=required_runtime_device_ready_backends,
@@ -3800,6 +3987,8 @@ def hf_gpt2_finetune_preflight_report(
             "hf_train_split": str(train_split),
             "hf_eval_split": eval_split,
             "hf_text_column": str(text_column),
+            "hf_finetune_mode": adapter_config.get("mode"),
+            "hf_finetune_runtime_import_preset": runtime_preset,
             "hf_gpt2_ft_required": bool(require_hf_gpt2_ft),
             "hf_gpt2_ft_python_packages": dependency_report["python_package_label"],
             "hf_gpt2_ft_rust_surfaces": dependency_report["rust_surface_crates"],
@@ -3827,6 +4016,7 @@ def hf_finetune_preflight_report(
     required_runtime_device_ready_backends: object = None,
     require_hf_finetune: bool = True,
     require_hf_gpt2_ft: bool | None = None,
+    finetune_mode: str | None = None,
     describe_runtime_devices=None,
 ) -> dict[str, object]:
     """Build a model-neutral HF fine-tune preflight report.
@@ -3855,6 +4045,22 @@ def hf_finetune_preflight_report(
         _mapping_or_empty(profile_report.get("runtime"), label="profile.runtime")
         if profile_report is not None
         else {}
+    )
+    profile_adapter_config = (
+        _hf_finetune_profile_adapter_config(profile_report)
+        if profile_report is not None
+        else None
+    )
+    adapter_config = hf_finetune_adapter_config(
+        mode=(
+            finetune_mode
+            or (
+                profile_adapter_config.get("mode")
+                if profile_adapter_config is not None
+                else None
+            )
+            or "full"
+        )
     )
     resolved_model_name = (
         str(model_name)
@@ -3919,9 +4125,14 @@ def hf_finetune_preflight_report(
     requested_backends = _unique(resolved_runtime_device_backends)
     if not requested_backends:
         requested_backends = list(HF_FINETUNE_DEFAULT_DEVICE_BACKENDS)
-    required_presets = ["hf-full-finetune"] if require_full_stack else []
+    runtime_preset = (
+        "hf-peft-finetune"
+        if adapter_config.get("mode") == "lora"
+        else "hf-full-finetune"
+    )
+    required_presets = [runtime_preset] if require_full_stack else []
     report = runtime_import_preflight_report(
-        runtime_import_presets=["hf-full-finetune"],
+        runtime_import_presets=[runtime_preset],
         required_runtime_import_presets=required_presets,
         runtime_device_backends=requested_backends,
         required_runtime_device_ready_backends=resolved_required_ready_backends,
@@ -3946,6 +4157,8 @@ def hf_finetune_preflight_report(
             "hf_train_split": str(resolved_train_split),
             "hf_eval_split": resolved_eval_split,
             "hf_text_column": str(resolved_text_column),
+            "hf_finetune_mode": adapter_config.get("mode"),
+            "hf_finetune_runtime_import_preset": runtime_preset,
             # Keep legacy field names present so old summary/run-card helpers can
             # still consume model-neutral preflight reports.
             "hf_gpt2_ft_required": require_full_stack,
@@ -6100,6 +6313,17 @@ def summarize_hf_gpt2_finetune_run_card(
     )
     trainer_metrics = _mapping_item(card, "trainer_metrics")
     trainer_trace = _trainer_trace_summary_for_card(card)
+    adapter_config = _mapping_item(card, "adapter_config")
+    model_prepare = _mapping_item(card, "model_prepare_report")
+    adapter_target = _mapping_item(model_prepare, "target_report")
+    adapter_parameters = _mapping_item(
+        model_prepare,
+        "parameter_report_after",
+    )
+    adapter_checkpointing = _mapping_item(
+        model_prepare,
+        "gradient_checkpointing",
+    )
     corpus_scan = _mapping_item(card, "corpus_scan_report")
     inference_handoff = _mapping_item(card, "inference_distortion_handoff")
     inference_runtime_adapter_request = _mapping_item(
@@ -6202,6 +6426,43 @@ def summarize_hf_gpt2_finetune_run_card(
         "model_profile_extends": _hf_finetune_profile_extends_from_payload(card),
         "model_profile": card.get("model_profile"),
         "model_name": card.get("model_name"),
+        "finetune_mode": card.get("finetune_mode") or model_prepare.get("mode"),
+        "model_artifact_kind": card.get("model_artifact_kind"),
+        "adapter_saved": card.get("adapter_saved"),
+        "adapter_attached": model_prepare.get("adapter_attached"),
+        "adapter_peft_version": model_prepare.get("peft_version"),
+        "adapter_model_family": (
+            model_prepare.get("model_family") or adapter_config.get("model_family")
+        ),
+        "adapter_rank": _safe_number(adapter_config.get("rank")),
+        "adapter_alpha": _safe_number(adapter_config.get("alpha")),
+        "adapter_dropout": _safe_number(adapter_config.get("dropout")),
+        "adapter_bias": adapter_config.get("bias"),
+        "adapter_use_rslora": adapter_config.get("use_rslora"),
+        "adapter_target_modules": csv_label(
+            _unique(adapter_target.get("target_modules"))
+        ),
+        "adapter_target_source": adapter_target.get("source"),
+        "adapter_matched_module_count": _safe_number(
+            adapter_target.get("matched_module_count")
+        ),
+        "adapter_parameter_count": _safe_number(
+            adapter_parameters.get("parameter_count")
+        ),
+        "adapter_trainable_parameter_count": _safe_number(
+            adapter_parameters.get("trainable_parameter_count")
+        ),
+        "adapter_frozen_parameter_count": _safe_number(
+            adapter_parameters.get("frozen_parameter_count")
+        ),
+        "adapter_trainable_parameter_ratio": _safe_number(
+            adapter_parameters.get("trainable_parameter_ratio")
+        ),
+        "gradient_checkpointing_requested": adapter_checkpointing.get("requested"),
+        "gradient_checkpointing_enabled": adapter_checkpointing.get("enabled"),
+        "model_use_cache_after_prepare": adapter_checkpointing.get(
+            "use_cache_after"
+        ),
         "dataset_name": card.get("dataset_name"),
         "dataset_config": card.get("dataset_config"),
         "dataset_revision": card.get("dataset_revision"),
@@ -6699,6 +6960,23 @@ def _ranked_sweep_rows(
                     row.get("distortion_adjusted_eval_loss")
                 ),
                 "eval_loss_improved": row.get("eval_loss_improved"),
+                "finetune_mode": row.get("finetune_mode"),
+                "model_artifact_kind": row.get("model_artifact_kind"),
+                "adapter_saved": row.get("adapter_saved"),
+                "adapter_rank": _safe_number(row.get("adapter_rank")),
+                "adapter_target_modules": row.get("adapter_target_modules"),
+                "adapter_matched_module_count": _safe_number(
+                    row.get("adapter_matched_module_count")
+                ),
+                "adapter_trainable_parameter_count": _safe_number(
+                    row.get("adapter_trainable_parameter_count")
+                ),
+                "adapter_trainable_parameter_ratio": _safe_number(
+                    row.get("adapter_trainable_parameter_ratio")
+                ),
+                "gradient_checkpointing_enabled": row.get(
+                    "gradient_checkpointing_enabled"
+                ),
                 "generation_continuation_changed": row.get(
                     "generation_continuation_changed"
                 ),
@@ -7420,6 +7698,15 @@ def summarize_hf_gpt2_finetune_sweep_report_lines(
                 "gen_entropy="
                 f"{row.get('generation_from_inference_distortion_entropy_target')} "
             )
+        adapter_fragment = ""
+        if row.get("finetune_mode") is not None:
+            adapter_fragment = (
+                f"ft_mode={row.get('finetune_mode')} "
+                f"adapter_saved={row.get('adapter_saved')} "
+                f"adapter_rank={row.get('adapter_rank')} "
+                f"adapter_ratio={row.get('adapter_trainable_parameter_ratio')} "
+                f"adapter_targets={row.get('adapter_target_modules')} "
+            )
         lines.append(
             "hf_gpt2_ft_sweep_top "
             f"rank={row.get('rank')} "
@@ -7438,6 +7725,7 @@ def summarize_hf_gpt2_finetune_sweep_report_lines(
             f"telemetry_auto={row.get('trainer_telemetry_auto_reason')} "
             f"{inference_fragment}"
             f"{generation_inference_fragment}"
+            f"{adapter_fragment}"
             f"changed={row.get('generation_continuation_changed')} "
             f"zcontrol_changed={row.get('generation_after_control_top_token_changed_count')} "
             f"zcontrol_backend={row.get('generation_after_control_backend')}"
@@ -7832,6 +8120,12 @@ def compare_hf_gpt2_finetune_run_cards(
             1
             for summary in summaries
             if summary.get("generation_from_inference_distortion_status") == "ok"
+        ),
+        "lora_run_count": sum(
+            1 for summary in summaries if summary.get("finetune_mode") == "lora"
+        ),
+        "adapter_saved_count": sum(
+            1 for summary in summaries if summary.get("adapter_saved") is True
         ),
         "best_eval_after_run_label": (
             None if best_after is None else best_after.get("run_label")

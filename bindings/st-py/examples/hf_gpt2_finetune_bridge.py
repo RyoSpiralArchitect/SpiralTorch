@@ -42,6 +42,10 @@ from spiraltorch.hf_ft import (
     write_hf_gpt2_finetune_run_card,
 )
 from spiraltorch.hf_generation import build_zspace_repression_logits_processor
+from spiraltorch.hf_peft import (
+    hf_finetune_adapter_config,
+    prepare_hf_finetune_model,
+)
 
 
 DEFAULT_MODEL = "gpt2"
@@ -364,6 +368,45 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "loaded checkpoints back to float32 for stable continued FT."
         ),
     )
+    parser.add_argument(
+        "--finetune-mode",
+        choices=("full", "lora"),
+        default="full",
+        help="Train every parameter or attach a PEFT LoRA adapter before Trainer.train().",
+    )
+    parser.add_argument(
+        "--gradient-checkpointing",
+        action="store_true",
+        help="Trade compute for lower activation memory and disable model use_cache.",
+    )
+    parser.add_argument("--lora-rank", type=int, default=16)
+    parser.add_argument("--lora-alpha", type=float, default=32.0)
+    parser.add_argument("--lora-dropout", type=float, default=0.05)
+    parser.add_argument(
+        "--lora-bias",
+        choices=("none", "all", "lora_only"),
+        default="none",
+    )
+    parser.add_argument(
+        "--lora-target-module",
+        action="append",
+        default=[],
+        help=(
+            "PEFT target module suffix. Repeat to override model-family defaults; "
+            "for example q_proj,k_proj,v_proj,o_proj."
+        ),
+    )
+    parser.add_argument(
+        "--lora-module-to-save",
+        action="append",
+        default=[],
+        help="Additional full module to keep trainable and save beside the adapter.",
+    )
+    parser.add_argument(
+        "--lora-use-rslora",
+        action="store_true",
+        help="Use rank-stabilized LoRA scaling when supported by PEFT.",
+    )
     parser.add_argument("--per-device-train-batch-size", type=int, default=2)
     parser.add_argument("--per-device-eval-batch-size", type=int, default=2)
     parser.add_argument("--gradient-accumulation-steps", type=int, default=8)
@@ -624,6 +667,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "--resume-from-checkpoint does not exist or is not a directory: "
             f"{args.resume_from_checkpoint}"
         )
+    try:
+        args._hf_finetune_adapter_config = _adapter_config_from_args(args)
+    except ValueError as exc:
+        parser.error(f"invalid fine-tune adapter configuration: {exc}")
     return args
 
 
@@ -774,6 +821,47 @@ def _apply_model_profile_defaults(
             attr,
             _profile_value(profile, "training", key),
             flag,
+        )
+    training = _profile_section(profile, "training")
+    _set_profile_default_if_present(
+        args,
+        raw_argv,
+        training,
+        "finetune_mode",
+        "finetune_mode",
+        "--finetune-mode",
+    )
+    if training.get("gradient_checkpointing") is True and not _argv_has_option(
+        raw_argv,
+        "--gradient-checkpointing",
+    ):
+        args.gradient_checkpointing = True
+    adapter = _profile_section(profile, "adapter")
+    for attr, key, flag in (
+        ("lora_rank", "rank", "--lora-rank"),
+        ("lora_alpha", "alpha", "--lora-alpha"),
+        ("lora_dropout", "dropout", "--lora-dropout"),
+        ("lora_bias", "bias", "--lora-bias"),
+    ):
+        _set_profile_default_if_present(args, raw_argv, adapter, key, attr, flag)
+    if adapter.get("use_rslora") is True and not _argv_has_option(
+        raw_argv,
+        "--lora-use-rslora",
+    ):
+        args.lora_use_rslora = True
+    if "target_modules" in adapter and not _argv_has_option(
+        raw_argv,
+        "--lora-target-module",
+    ):
+        args.lora_target_module = _profile_string_list(
+            adapter.get("target_modules")
+        )
+    if "modules_to_save" in adapter and not _argv_has_option(
+        raw_argv,
+        "--lora-module-to-save",
+    ):
+        args.lora_module_to_save = _profile_string_list(
+            adapter.get("modules_to_save")
         )
     dataset = _profile_section(profile, "dataset")
     for attr, key, flag in (
@@ -1402,6 +1490,8 @@ def _raw_training_arguments_kwargs(
         kwargs["dataloader_num_workers"] = int(args.dataloader_num_workers)
     if has_eval and getattr(args, "eval_accumulation_steps", 0) > 0:
         kwargs["eval_accumulation_steps"] = int(args.eval_accumulation_steps)
+    if bool(getattr(args, "gradient_checkpointing", False)):
+        kwargs["gradient_checkpointing"] = True
     if has_eval:
         kwargs["eval_steps"] = int(args.eval_steps)
     if args.max_steps is not None and args.max_steps > 0:
@@ -1949,6 +2039,31 @@ def _resolved_model_profile(args: argparse.Namespace) -> Mapping[str, Any] | Non
     return profile if isinstance(profile, Mapping) else None
 
 
+def _model_family(args: argparse.Namespace) -> str | None:
+    profile = _resolved_model_profile(args)
+    if profile is None:
+        return None
+    family = profile.get("model_family")
+    return None if family is None else str(family)
+
+
+def _adapter_config_from_args(args: argparse.Namespace) -> dict[str, object]:
+    return hf_finetune_adapter_config(
+        mode=getattr(args, "finetune_mode", "full"),
+        model_family=_model_family(args),
+        rank=getattr(args, "lora_rank", 16),
+        alpha=getattr(args, "lora_alpha", 32.0),
+        dropout=getattr(args, "lora_dropout", 0.05),
+        bias=getattr(args, "lora_bias", "none"),
+        target_modules=getattr(args, "lora_target_module", None),
+        modules_to_save=getattr(args, "lora_module_to_save", None),
+        use_rslora=bool(getattr(args, "lora_use_rslora", False)),
+        gradient_checkpointing=bool(
+            getattr(args, "gradient_checkpointing", False)
+        ),
+    )
+
+
 def _tokenizer_name(args: argparse.Namespace) -> str:
     tokenizer_name = getattr(args, "tokenizer_name", None)
     if isinstance(tokenizer_name, str) and tokenizer_name.strip():
@@ -2060,6 +2175,13 @@ def _base_run_card(
         ),
         "model_train_dtype": args.model_train_dtype,
         "model_dtype_report": None,
+        "finetune_mode": args.finetune_mode,
+        "adapter_config": dict(args._hf_finetune_adapter_config),
+        "model_prepare_report": None,
+        "model_artifact_kind": (
+            "peft_adapter" if args.finetune_mode == "lora" else "full_model"
+        ),
+        "adapter_saved": None,
         "resume_from_checkpoint": (
             None
             if args.resume_from_checkpoint is None
@@ -2216,6 +2338,7 @@ def _main_with_runtime_access(
         runtime_device_backends=_runtime_backends(args),
         required_runtime_device_ready_backends=_required_ready_backends(args),
         require_hf_gpt2_ft=not args.no_require_hf_gpt2_ft,
+        finetune_mode=args.finetune_mode,
     )
     preflight["hf_remote_access"] = dict(remote_access_report)
     preflight["model_configs"] = (
@@ -2271,6 +2394,8 @@ def _main_with_runtime_access(
     preflight["trainer_loss_guard_enabled"] = not bool(args.no_trainer_loss_guard)
     preflight["trainer_loss_guard_threshold"] = args.trainer_loss_guard_threshold
     preflight["model_train_dtype"] = args.model_train_dtype
+    preflight["finetune_mode"] = args.finetune_mode
+    preflight["adapter_config"] = dict(args._hf_finetune_adapter_config)
     preflight["dataset_revision"] = args.dataset_revision
     preflight["dataset_streaming"] = bool(args.dataset_streaming)
     preflight["streaming_shuffle_buffer_size"] = args.streaming_shuffle_buffer_size
@@ -2448,6 +2573,30 @@ def _main_with_runtime_access(
     if dataset_fit_report["eval_dropped_empty"] is True:
         eval_dataset = None
         card["tokenized_eval_rows"] = tokenized_eval_rows
+    try:
+        model, model_prepare_report = prepare_hf_finetune_model(
+            model,
+            mode=args.finetune_mode,
+            model_family=_model_family(args),
+            rank=args.lora_rank,
+            alpha=args.lora_alpha,
+            dropout=args.lora_dropout,
+            bias=args.lora_bias,
+            target_modules=args.lora_target_module,
+            modules_to_save=args.lora_module_to_save,
+            use_rslora=args.lora_use_rslora,
+            gradient_checkpointing=args.gradient_checkpointing,
+        )
+        card["model_prepare_report"] = model_prepare_report
+    except Exception as exc:
+        card.update(
+            {
+                "failure_stage": "model_adapter_prepare",
+                "failure_error": f"{exc.__class__.__name__}: {exc}",
+            }
+        )
+        _write_card(card, args)
+        return 1
     collator = transformers.DataCollatorForLanguageModeling(
         tokenizer=tokenizer,
         mlm=False,
@@ -2564,6 +2713,11 @@ def _main_with_runtime_access(
             "trainer_trace_jsonl": None if trace_path is None else str(trace_path),
             "trainer_trace_summary": trainer_trace_summary,
             "model_saved": True,
+            "adapter_saved": (
+                (args.output_dir / "adapter_config.json").is_file()
+                if args.finetune_mode == "lora"
+                else None
+            ),
         }
     )
     _write_card(card, args)

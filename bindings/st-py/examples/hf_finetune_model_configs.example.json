@@ -8,6 +8,29 @@
       "notes": "Model-neutral alias for the default causal-LM smoke route; pick another profile or edit model_name/tokenizer_name for local checkpoints."
     },
     {
+      "id": "causal-lm-lora-local-smoke",
+      "extends": "pythia-70m-local-smoke",
+      "training": {
+        "finetune_mode": "lora",
+        "learning_rate": 0.0002,
+        "gradient_checkpointing": true,
+        "per_device_train_batch_size": 1,
+        "gradient_accumulation_steps": 8
+      },
+      "adapter": {
+        "type": "lora",
+        "rank": 16,
+        "alpha": 32,
+        "dropout": 0.05,
+        "bias": "none",
+        "target_modules": [
+          "query_key_value",
+          "dense"
+        ]
+      },
+      "notes": "Model-neutral PEFT smoke route backed by Pythia 70M; use this to validate adapter save/resume before scaling to a larger family."
+    },
+    {
       "id": "gpt2-local-smoke",
       "model_name": "gpt2",
       "tokenizer_name": "gpt2",
@@ -111,6 +134,29 @@
         ]
       },
       "notes": "Fast config for tests and docs; requires remote downloads when not cached."
+    },
+    {
+      "id": "gpt2-lora-local-smoke",
+      "extends": "gpt2-local-smoke",
+      "training": {
+        "finetune_mode": "lora",
+        "learning_rate": 0.0002,
+        "gradient_checkpointing": true,
+        "per_device_train_batch_size": 1,
+        "gradient_accumulation_steps": 8
+      },
+      "adapter": {
+        "type": "lora",
+        "rank": 16,
+        "alpha": 32,
+        "dropout": 0.05,
+        "bias": "none",
+        "target_modules": [
+          "c_attn",
+          "c_proj"
+        ]
+      },
+      "notes": "GPT-2 PEFT profile for adapter parity with historical full FT runs."
     },
     {
       "id": "pythia-70m-local-smoke",
@@ -264,6 +310,29 @@
       "notes": "OPT-family small causal-LM profile for non-GPT local FT checks."
     },
     {
+      "id": "qwen2-0.5b-lora-local-smoke",
+      "extends": "qwen2-0.5b-local-smoke",
+      "training": {
+        "finetune_mode": "lora",
+        "learning_rate": 0.0002,
+        "gradient_checkpointing": true
+      },
+      "adapter": {
+        "type": "lora",
+        "rank": 16,
+        "alpha": 32,
+        "dropout": 0.05,
+        "bias": "none",
+        "target_modules": [
+          "q_proj",
+          "k_proj",
+          "v_proj",
+          "o_proj"
+        ]
+      },
+      "notes": "Qwen2 0.5B LoRA route sized for local Apple Silicon trials."
+    },
+    {
       "id": "smollm2-135m-local-smoke",
       "model_name": "HuggingFaceTB/SmolLM2-135M",
       "tokenizer_name": "HuggingFaceTB/SmolLM2-135M",
@@ -371,6 +440,29 @@
         "no_require_hf_finetune": true
       },
       "notes": "Copy this profile for a local AutoModelForCausalLM directory; the relaxed runtime gate is useful while iterating on local model paths before installing the full FT stack."
+    },
+    {
+      "id": "smollm2-135m-lora-local-smoke",
+      "extends": "smollm2-135m-local-smoke",
+      "training": {
+        "finetune_mode": "lora",
+        "learning_rate": 0.0002,
+        "gradient_checkpointing": true
+      },
+      "adapter": {
+        "type": "lora",
+        "rank": 16,
+        "alpha": 32,
+        "dropout": 0.05,
+        "bias": "none",
+        "target_modules": [
+          "q_proj",
+          "k_proj",
+          "v_proj",
+          "o_proj"
+        ]
+      },
+      "notes": "Small modern LoRA profile for fast non-GPT adapter smoke runs."
     }
   ]
 }
