@@ -199,6 +199,7 @@ jobs:
           PYTHONNOUSERSITE: "1"
         run: |
           spiral-runtime-preflight --list-presets
+          python -P tools/smoke_hf_console_scripts.py
       - name: Run README python blocks
         env:
           PYTHONNOUSERSITE: "1"

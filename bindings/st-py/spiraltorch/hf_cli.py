@@ -105,9 +105,45 @@ from .hf_peft import (
 
 _PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 _EXAMPLES_ROOT = _PACKAGE_ROOT / "examples"
+_PAYLOAD_MANIFEST_PATH = Path(__file__).with_name("hf_cli_payloads.json")
+
+
+def _load_payload_manifest() -> dict[str, object]:
+    try:
+        payload = json.loads(_PAYLOAD_MANIFEST_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(
+            f"SpiralTorch HF CLI payload manifest is unreadable: {_PAYLOAD_MANIFEST_PATH}"
+        ) from exc
+    if payload.get("schema") != "spiraltorch.hf_cli_payloads.v1":
+        raise RuntimeError("unsupported SpiralTorch HF CLI payload manifest")
+    entrypoints = payload.get("entrypoint_payloads")
+    required = payload.get("required_payloads")
+    if not isinstance(entrypoints, list) or not isinstance(required, list):
+        raise RuntimeError("SpiralTorch HF CLI payload manifest is malformed")
+    if any(
+        not isinstance(value, str) or not value for value in [*entrypoints, *required]
+    ):
+        raise RuntimeError(
+            "SpiralTorch HF CLI payload manifest contains an invalid path"
+        )
+    if not set(entrypoints).issubset(required):
+        raise RuntimeError("SpiralTorch HF CLI entrypoint payloads are incomplete")
+    return payload
+
+
+_HF_CLI_PAYLOAD_MANIFEST = _load_payload_manifest()
+HF_CLI_EXAMPLE_PAYLOADS = tuple(
+    str(value) for value in _HF_CLI_PAYLOAD_MANIFEST["entrypoint_payloads"]
+)
+HF_CLI_REQUIRED_PAYLOADS = tuple(
+    str(value) for value in _HF_CLI_PAYLOAD_MANIFEST["required_payloads"]
+)
 
 
 def _example_path(name: str) -> Path:
+    if name not in HF_CLI_EXAMPLE_PAYLOADS:
+        raise ValueError(f"unsupported SpiralTorch HF CLI payload: {name}")
     path = _EXAMPLES_ROOT / name
     if not path.is_file():
         raise FileNotFoundError(

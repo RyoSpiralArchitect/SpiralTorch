@@ -36,6 +36,7 @@ class PublishPyPIWheelsTests(unittest.TestCase):
         *,
         version: str = "0.4.10",
         include_type_payloads: bool = True,
+        omit_payload: str | None = None,
     ) -> Path:
         wheel = root / f"spiraltorch-{version}-py3-none-any.whl"
         with zipfile.ZipFile(wheel, "w") as archive:
@@ -45,7 +46,8 @@ class PublishPyPIWheelsTests(unittest.TestCase):
             )
             if include_type_payloads:
                 for payload in publish_pypi_wheels.REQUIRED_WHEEL_PAYLOADS:
-                    archive.writestr(payload, "")
+                    if payload != omit_payload:
+                        archive.writestr(payload, "")
         return wheel
 
     def test_read_token_supports_hidden_prompt_source(self) -> None:
@@ -78,6 +80,19 @@ class PublishPyPIWheelsTests(unittest.TestCase):
             wheel = self.write_minimal_wheel(Path(tmp), include_type_payloads=False)
 
             with self.assertRaisesRegex(publish_pypi_wheels.PublishError, "py\\.typed"):
+                publish_pypi_wheels.validate_wheel_metadata([wheel], "0.4.10")
+
+    def test_validate_wheel_metadata_reports_missing_hf_cli_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            wheel = self.write_minimal_wheel(
+                Path(tmp),
+                omit_payload="examples/hf_finetune_bridge.py",
+            )
+
+            with self.assertRaisesRegex(
+                publish_pypi_wheels.PublishError,
+                "examples/hf_finetune_bridge\\.py",
+            ):
                 publish_pypi_wheels.validate_wheel_metadata([wheel], "0.4.10")
 
     def test_validate_wheel_metadata_reports_version_mismatch(self) -> None:

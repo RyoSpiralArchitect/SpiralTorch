@@ -35,7 +35,10 @@ def parse_args(argv: list[str] | None = None):
 
 
 def _repo_root() -> Path:
-    return _legacy._repo_root()
+    source_root = Path(__file__).resolve().parents[3]
+    if (source_root / "bindings" / "st-py" / "examples").is_dir():
+        return source_root
+    return Path.cwd().resolve()
 
 
 def _path_arg(path: Path, *, repo: Path) -> str:
@@ -75,8 +78,8 @@ def _genericize_lines(lines: list[str]) -> list[str]:
 
 def build_run_status_command(args, *, repo: Path) -> list[str]:
     command = [
-        "python3",
-        "bindings/st-py/examples/hf_finetune_run_status.py",
+        sys.executable,
+        str(EXAMPLES_ROOT / "hf_finetune_run_status.py"),
         _path_arg(args.run_dir, repo=repo),
     ]
     for flag, value in [
@@ -106,8 +109,8 @@ def build_run_status_command(args, *, repo: Path) -> list[str]:
 def build_monitor_command(args, *, repo: Path) -> list[str]:
     label = args.label or f"milestone-{args.milestone_step}"
     command = [
-        "python3",
-        "bindings/st-py/examples/hf_finetune_monitor_snapshot.py",
+        sys.executable,
+        str(EXAMPLES_ROOT / "hf_finetune_monitor_snapshot.py"),
         _path_arg(args.run_dir, repo=repo),
         "--label",
         label,
@@ -133,7 +136,13 @@ def capture_once(
 ) -> dict[str, Any]:
     repo = repo or _repo_root()
     env = dict(env or os.environ)
-    env["PYTHONPATH"] = "bindings/st-py"
+    package_root = str(EXAMPLES_ROOT.parent)
+    existing_pythonpath = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = (
+        package_root
+        if not existing_pythonpath
+        else os.pathsep.join((package_root, existing_pythonpath))
+    )
     result: dict[str, Any] = {"time_unix_s": time.time()}
     commands = [
         build_run_status_command(args, repo=repo),

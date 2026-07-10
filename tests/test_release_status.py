@@ -27,6 +27,7 @@ class ReleaseStatusTests(unittest.TestCase):
         *,
         version: str = "0.4.11",
         include_type_payloads: bool = True,
+        omit_payload: str | None = None,
     ) -> Path:
         wheel = root / f"spiraltorch-{version}-py3-none-any.whl"
         with zipfile.ZipFile(wheel, "w") as archive:
@@ -36,7 +37,8 @@ class ReleaseStatusTests(unittest.TestCase):
             )
             if include_type_payloads:
                 for payload in release_status.REQUIRED_WHEEL_PAYLOADS:
-                    archive.writestr(payload, "")
+                    if payload != omit_payload:
+                        archive.writestr(payload, "")
         return wheel
 
     def test_token_metadata_never_exposes_token_value(self) -> None:
@@ -124,6 +126,27 @@ class ReleaseStatusTests(unittest.TestCase):
         self.assertFalse(status["ready"])
         self.assertIn(wheel.name, status["missing_payloads"])
         self.assertIn("spiraltorch/py.typed", status["missing_payloads"][wheel.name])
+
+    def test_local_wheel_payload_status_reports_missing_hf_cli_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            dist = Path(tmp)
+            wheel = self.write_minimal_wheel(
+                dist,
+                omit_payload="examples/hf_finetune_bridge.py",
+            )
+
+            status = release_status.local_wheel_payload_status(
+                dist,
+                package="spiraltorch",
+                version="0.4.11",
+                expected_wheels=1,
+            )
+
+        self.assertFalse(status["ready"])
+        self.assertIn(
+            "examples/hf_finetune_bridge.py",
+            status["missing_payloads"][wheel.name],
+        )
 
     def test_build_status_points_to_auth_when_release_ready_but_unpublished(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -278,7 +301,7 @@ class ReleaseStatusTests(unittest.TestCase):
                             status = release_status.build_status(args)
 
         self.assertFalse(status["ready"]["local_wheel_payloads"])
-        self.assertIn("fix local wheel metadata/type payloads", status["next_action"])
+        self.assertIn("fix local wheel metadata/required payloads", status["next_action"])
 
 
 if __name__ == "__main__":

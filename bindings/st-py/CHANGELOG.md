@@ -107,6 +107,14 @@
   unmanaged controller, while any prior stop, timeout, interruption, or
   resume-budget boundary requires the explicit `--restart-supervisor` opt-in
   before a new bounded run can begin.
+- Self-contained HF wheel CLIs: package every direct and transitive Python
+  payload behind the installed `spiral-hf-*` and inference-distortion commands,
+  validate that manifest before PyPI publication, and execute all 35 console
+  entrypoints in the installed-wheel CI smoke. Generic run status now accepts
+  the documented `--run-dir` form, while milestone capture spawns packaged
+  sibling commands instead of repository-relative scripts. Adapter continuation
+  also accepts an audited lineage-depth-zero seed without a promotion report and
+  injects the promotion gate into required child scale-up commands.
 - Trainer resume audit: add `hf_finetune_checkpoint_resume_report(...)` and
   compact lines for optimizer/scheduler/RNG state availability, saved versus
   requested step horizons, and the exhausted-scheduler case where adapter

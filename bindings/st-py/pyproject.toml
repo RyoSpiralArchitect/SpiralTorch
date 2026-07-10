@@ -29,6 +29,9 @@ classifiers = [
 features = ["pyo3/extension-module", "pyo3/abi3-py38"]
 python-source = "."
 python-packages = ["spiral", "spiraltorch"]
+include = [
+  { path = "examples/*.py", format = ["sdist", "wheel"] },
+]
 
 [project.scripts]
 spiral-train = "spiral.cli:main"

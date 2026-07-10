@@ -19,10 +19,30 @@ PACKAGE = "spiraltorch"
 DEFAULT_REPO = os.environ.get("GITHUB_REPOSITORY", "RyoSpiralArchitect/SpiralTorch")
 DEFAULT_SECRET_ENVIRONMENT = "pypi"
 DEFAULT_TOKEN_SECRET = "PYPI_API_TOKEN"
+ROOT = Path(__file__).resolve().parents[1]
+HF_CLI_PAYLOAD_MANIFEST = (
+    ROOT / "bindings" / "st-py" / "spiraltorch" / "hf_cli_payloads.json"
+)
+
+
+def required_hf_cli_wheel_payloads() -> tuple[str, ...]:
+    payload = json.loads(HF_CLI_PAYLOAD_MANIFEST.read_text(encoding="utf-8"))
+    if payload.get("schema") != "spiraltorch.hf_cli_payloads.v1":
+        raise RuntimeError("unsupported SpiralTorch HF CLI payload manifest")
+    required = payload.get("required_payloads")
+    if not isinstance(required, list) or any(
+        not isinstance(value, str) or not value for value in required
+    ):
+        raise RuntimeError("SpiralTorch HF CLI payload manifest is malformed")
+    return tuple(f"examples/{value}" for value in required)
+
+
 REQUIRED_WHEEL_PAYLOADS = (
     "spiraltorch/__init__.pyi",
+    "spiraltorch/hf_cli_payloads.json",
     "spiraltorch/py.typed",
     "spiraltorch/spiralk.pyi",
+    *required_hf_cli_wheel_payloads(),
 )
 
 
@@ -57,7 +77,7 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         help=(
             "Optional local wheel directory to inspect for version metadata and "
-            "required type payloads before publishing."
+            "required runtime and type payloads before publishing."
         ),
     )
     parser.add_argument(
@@ -473,7 +493,7 @@ def build_status(args: argparse.Namespace) -> dict[str, Any]:
     elif not local_ready:
         next_action = "align local pyproject/Cargo versions before publishing"
     elif not local_wheel_payloads_ready:
-        next_action = "fix local wheel metadata/type payloads before publishing"
+        next_action = "fix local wheel metadata/required payloads before publishing"
     elif not release_ready:
         next_action = "fix or rebuild the GitHub Release wheel assets before publishing"
     elif github_secret_ready:
@@ -535,7 +555,7 @@ def print_text(status: dict[str, Any]) -> None:
             "local_wheels "
             f"ready={yes_no(ready['local_wheel_payloads'])} "
             f"wheels={local_wheels.get('wheel_count', 0)}/{status['expected_wheels']} "
-            f"type_payloads={len(local_wheels.get('required_payloads', []))} "
+            f"required_payloads={len(local_wheels.get('required_payloads', []))} "
             f"missing_payload_wheels={len(local_wheels.get('missing_payloads', {}))} "
             f"version_mismatch_wheels={len(local_wheels.get('version_mismatches', {}))} "
             f"metadata_error_wheels={len(local_wheels.get('metadata_errors', {}))}"

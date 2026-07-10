@@ -415,6 +415,11 @@ spiral-runtime-preflight --preset hf-peft --require --json
 spiral-runtime-preflight --preset hf-peft-finetune --require --json
 ```
 
+Release wheels include the Python payloads behind every `spiral-hf-*` and
+`spiral-zspace-inference-distortion-*` console command. These commands do not
+depend on a source checkout's `bindings/st-py/examples` directory; release
+validation rejects a wheel when a direct or transitive CLI payload is missing.
+
 Install the stronger local Hugging Face fine-tuning dependency surface with
 `pip install "spiraltorch[hf-full-finetune]"` or compose a narrower surface with
 `pip install "spiraltorch[hf-finetune,hf-peft]"`. The older
@@ -755,6 +760,11 @@ spiral-hf-adapter-executor runs/qwen2-study \
   --plateau-patience 2 \
   --run --max-generations 1
 ```
+
+An audited root adapter at lineage depth zero does not need a promotion report:
+the executor validates its lineage manifest and fingerprint, then adds
+`--adapter-promotion-gate` to the child command so every later generation must
+produce promotion evidence before it can become the selected tip.
 
 For a long run, use the same executor policy in a detached process:
 
