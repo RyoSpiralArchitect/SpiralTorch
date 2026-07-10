@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import contextlib
-import inspect
 import json
 import sys
 from collections.abc import Mapping
@@ -14,6 +12,11 @@ if str(PACKAGE_ROOT) not in sys.path:
     sys.path.insert(0, str(PACKAGE_ROOT))
 
 import spiraltorch as st
+from spiraltorch.hf_generation import hf_generation_batch_size_compat
+from spiraltorch.hf_peft import (
+    load_hf_causal_lm_artifact,
+    summarize_hf_causal_lm_artifact,
+)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -55,6 +58,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--local-model", type=Path, default=None)
     parser.add_argument("--tokenizer-name", default=None)
+    parser.add_argument(
+        "--model-artifact-kind",
+        choices=("auto", "full-model", "peft-adapter"),
+        default="auto",
+        help=(
+            "Interpret --local-model as a full model or PEFT adapter. auto "
+            "detects local adapter_config.json artifacts."
+        ),
+    )
     parser.add_argument("--allow-remote", action="store_true")
     parser.add_argument("--trust-remote-code", action="store_true")
     parser.add_argument("--max-new-tokens", type=int, default=48)
@@ -503,48 +515,7 @@ def _generate_ids(
         return output_ids, method, f"{exc.__class__.__name__}: {exc}"
 
 
-@contextlib.contextmanager
-def _prepare_special_tokens_batch_size_compat(model: Any):
-    prepare = getattr(model, "_prepare_special_tokens", None)
-    if not callable(prepare):
-        yield False
-        return
-    try:
-        signature = inspect.signature(prepare)
-    except (TypeError, ValueError):
-        yield False
-        return
-    parameters = signature.parameters
-    accepts_batch_size = "batch_size" in parameters or any(
-        param.kind == inspect.Parameter.VAR_KEYWORD
-        for param in parameters.values()
-    )
-    if accepts_batch_size:
-        yield False
-        return
-
-    sentinel = object()
-    previous = getattr(model, "_prepare_special_tokens", sentinel)
-
-    def _compat_prepare_special_tokens(*args: Any, **kwargs: Any) -> Any:
-        kwargs.pop("batch_size", None)
-        return prepare(*args, **kwargs)
-
-    try:
-        setattr(model, "_prepare_special_tokens", _compat_prepare_special_tokens)
-    except Exception:
-        yield False
-        return
-    try:
-        yield True
-    finally:
-        try:
-            if previous is sentinel:
-                delattr(model, "_prepare_special_tokens")
-            else:
-                setattr(model, "_prepare_special_tokens", previous)
-        except Exception:
-            pass
+_prepare_special_tokens_batch_size_compat = hf_generation_batch_size_compat
 
 
 def _run_local_hf(args: argparse.Namespace, adapter: dict[str, Any]) -> dict[str, Any]:
@@ -565,16 +536,17 @@ def _run_local_hf(args: argparse.Namespace, adapter: dict[str, Any]) -> dict[str
         "trust_remote_code": bool(args.trust_remote_code),
     }
     model_path = str(args.local_model)
-    tokenizer_path = str(args.tokenizer_name or args.local_model)
     try:
-        tokenizer = transformers.AutoTokenizer.from_pretrained(
-            tokenizer_path,
-            **load_kwargs,
+        model, tokenizer, _config, model_artifact_report = (
+            load_hf_causal_lm_artifact(
+                args.local_model,
+                tokenizer_name_or_path=args.tokenizer_name,
+                artifact_kind=getattr(args, "model_artifact_kind", "auto"),
+                transformers_module=transformers,
+                loader_kwargs=load_kwargs,
+            )
         )
-        model = transformers.AutoModelForCausalLM.from_pretrained(
-            model_path,
-            **load_kwargs,
-        )
+        tokenizer_path = str(model_artifact_report["resolved_tokenizer_source"])
         model.eval()
         encoded = tokenizer(args.prompt, return_tensors="pt")
         batch = _move_batch_to_device(dict(encoded), _model_device(model))
@@ -620,6 +592,11 @@ def _run_local_hf(args: argparse.Namespace, adapter: dict[str, Any]) -> dict[str
             "status": "ok",
             "model": model_path,
             "tokenizer": tokenizer_path,
+            "model_artifact_report": summarize_hf_causal_lm_artifact(
+                model_artifact_report
+            ),
+            "model_artifact_kind": model_artifact_report.get("artifact_kind"),
+            "model_adapter_loaded": model_artifact_report.get("adapter_loaded"),
             "baseline_text": baseline_text,
             "distorted_text": distorted_text,
             "changed": bool(baseline_text != distorted_text),
@@ -717,7 +694,7 @@ def _probe_config(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def _probe_runtime(args: argparse.Namespace) -> dict[str, Any]:
-    return st.zspace_inference_distortion_runtime_plan(
+    runtime = st.zspace_inference_distortion_runtime_plan(
         model_configs=args.model_configs,
         model_profile=args.model_profile,
         runtime_contract_artifact=args.runtime_contract_artifact,
@@ -734,6 +711,8 @@ def _probe_runtime(args: argparse.Namespace) -> dict[str, Any]:
         api_reasoning_effort=args.api_reasoning_effort,
         api_text_verbosity=args.api_text_verbosity,
     )
+    runtime["model_artifact_kind_requested"] = args.model_artifact_kind
+    return runtime
 
 
 def main(argv: list[str] | None = None) -> int:

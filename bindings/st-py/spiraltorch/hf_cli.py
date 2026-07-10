@@ -37,6 +37,12 @@ from .hf_generation import (
     zspace_checkpoint_generation_control_report,
     zspace_generation_control_profile_config,
 )
+from .hf_peft import (
+    export_hf_merged_causal_lm,
+    hf_causal_lm_artifact_lines,
+    hf_causal_lm_artifact_report,
+    hf_merged_causal_lm_export_lines,
+)
 
 _PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 _EXAMPLES_ROOT = _PACKAGE_ROOT / "examples"
@@ -526,6 +532,79 @@ def profile_main(argv: Sequence[str] | None = None) -> int:
     for line in hf_finetune_model_profile_lines(profile):
         print(line)
     return 0
+
+
+def adapter_export_main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Inspect a Hugging Face PEFT adapter or merge it into a standalone "
+            "causal-LM artifact."
+        ),
+    )
+    parser.add_argument("--adapter", required=True)
+    parser.add_argument("--output-dir", type=Path, default=None)
+    parser.add_argument("--tokenizer", default=None)
+    parser.add_argument(
+        "--artifact-kind",
+        choices=("auto", "full-model", "peft-adapter"),
+        default="auto",
+        help="Artifact interpretation used by --inspect-only.",
+    )
+    parser.add_argument("--inspect-only", action="store_true")
+    parser.add_argument("--allow-remote", action="store_true")
+    parser.add_argument("--trust-remote-code", action="store_true")
+    parser.add_argument("--revision", default=None)
+    parser.add_argument("--no-safe-merge", action="store_true")
+    parser.add_argument("--no-safe-serialization", action="store_true")
+    parser.add_argument("--report-out", type=Path, default=None)
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args(argv)
+    if not args.inspect_only and args.output_dir is None:
+        parser.error("--output-dir is required unless --inspect-only is used")
+
+    try:
+        if args.inspect_only:
+            report = hf_causal_lm_artifact_report(
+                args.adapter,
+                artifact_kind=args.artifact_kind,
+                tokenizer_name_or_path=args.tokenizer,
+            )
+            lines = hf_causal_lm_artifact_lines(report)
+        else:
+            loader_kwargs = {
+                "local_files_only": not bool(args.allow_remote),
+                "trust_remote_code": bool(args.trust_remote_code),
+            }
+            if args.revision:
+                loader_kwargs["revision"] = args.revision
+            report = export_hf_merged_causal_lm(
+                args.adapter,
+                args.output_dir,
+                tokenizer_name_or_path=args.tokenizer,
+                safe_merge=not args.no_safe_merge,
+                safe_serialization=not args.no_safe_serialization,
+                loader_kwargs=loader_kwargs,
+            )
+            lines = hf_merged_causal_lm_export_lines(report)
+    except Exception as exc:
+        print(
+            f"hf_adapter_export_error {exc.__class__.__name__}: {exc}",
+            file=sys.stderr,
+        )
+        return 1
+
+    payload = json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    if args.report_out is not None:
+        args.report_out.parent.mkdir(parents=True, exist_ok=True)
+        args.report_out.write_text(payload, encoding="utf-8")
+    if args.json:
+        print(payload, end="")
+    else:
+        for line in lines:
+            print(line)
+        if args.report_out is not None:
+            print(f"hf_adapter_export_report_out {args.report_out}")
+    return 0 if report.get("status") in {"ready", "exported"} else 1
 
 
 def finetune_bridge_main(argv: Sequence[str] | None = None) -> int:

@@ -28,6 +28,10 @@ from spiraltorch.ecosystem import (
     external_tensor_shape,
     external_tensor_to_list,
 )
+from spiraltorch.hf_peft import (
+    load_hf_causal_lm_artifact,
+    summarize_hf_causal_lm_artifact,
+)
 from spiraltorch.nn import ZSpaceProjector
 
 
@@ -50,6 +54,15 @@ def parse_args():
         type=Path,
         required=True,
         help="Local Transformers model/config/tokenizer directory or model id.",
+    )
+    parser.add_argument(
+        "--model-artifact-kind",
+        choices=("auto", "full-model", "peft-adapter"),
+        default="auto",
+        help=(
+            "Interpret --model-path as a full model or PEFT adapter. auto "
+            "detects local adapter_config.json artifacts."
+        ),
     )
     parser.add_argument(
         "--prompt",
@@ -721,10 +734,16 @@ def manifest_row(
     tokenizer,
     model_loaded,
     model=None,
+    model_artifact_report=None,
 ):
     row = {
         "row_type": "transformers_trace_manifest",
         "model_path": str(args.model_path),
+        "model_artifact_kind_requested": getattr(
+            args,
+            "model_artifact_kind",
+            "auto",
+        ),
         "prompt_count": len(prompts),
         "top_k": args.top_k,
         "local_files_only": not args.allow_remote,
@@ -736,6 +755,17 @@ def manifest_row(
         "zspace_source": args.zspace_source if args.zspace_project else None,
         "transformers_version": getattr(transformers, "__version__", None),
         "model_loaded": model_loaded,
+        "model_artifact_report": model_artifact_report,
+        "model_artifact_kind": (
+            None
+            if not isinstance(model_artifact_report, Mapping)
+            else model_artifact_report.get("artifact_kind")
+        ),
+        "model_adapter_loaded": (
+            None
+            if not isinstance(model_artifact_report, Mapping)
+            else model_artifact_report.get("adapter_loaded")
+        ),
     }
     row.update(import_context_fields(transformers))
     row.update(runtime_import_fields(args))
@@ -1302,17 +1332,18 @@ def main():
     prompts = load_prompts(args)
     transformers = importlib.import_module("transformers")
     kwargs = loader_kwargs(args)
-    config = transformers.AutoConfig.from_pretrained(str(args.model_path), **kwargs)
-    tokenizer = transformers.AutoTokenizer.from_pretrained(str(args.model_path), **kwargs)
+    model, tokenizer, config, model_artifact_report = (
+        load_hf_causal_lm_artifact(
+            args.model_path,
+            artifact_kind=args.model_artifact_kind,
+            load_model=not args.metadata_only,
+            transformers_module=transformers,
+            loader_kwargs=kwargs,
+        )
+    )
 
     rows = []
-    model = None
-    if not args.metadata_only:
-        model = transformers.AutoModelForCausalLM.from_pretrained(
-            str(args.model_path),
-            config=config,
-            **kwargs,
-        )
+    if model is not None:
         eval_fn = getattr(model, "eval", None)
         if callable(eval_fn):
             eval_fn()
@@ -1326,6 +1357,9 @@ def main():
             tokenizer,
             model_loaded=model is not None,
             model=model,
+            model_artifact_report=summarize_hf_causal_lm_artifact(
+                model_artifact_report
+            ),
         )
     )
     if model is not None:

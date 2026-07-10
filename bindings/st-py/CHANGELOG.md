@@ -6,6 +6,14 @@
   `prepare_hf_finetune_model(...)` for model-family-aware LoRA target
   resolution, parameter-freeze audits, gradient checkpointing, and adapter
   attachment without making PEFT an eager import dependency.
+- HF adapter lifecycle: detect local adapter-only artifacts, reconstruct their
+  base model/tokenizer/PEFT stack through `load_hf_causal_lm_artifact(...)`,
+  expose compact load provenance to local trace, Z-Space inference/generation,
+  and checkpoint audit, and add `spiral-hf-adapter-export` for atomic safe-merge
+  export to a standalone full model.
+- Transformers compatibility: apply the generation `batch_size` compatibility
+  shim through nested PEFT base models so adapter-backed generation-control
+  sweeps follow the same path as full models.
 - Generic HF bridge: add `--finetune-mode full|lora`, LoRA rank/alpha/dropout/
   target/module-save controls, adapter-aware profile launch preflight, and run
   card evidence for matched modules, trainable ratio, artifact kind, and saved

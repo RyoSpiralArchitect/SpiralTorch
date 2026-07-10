@@ -6,6 +6,7 @@ import importlib.util
 import json
 import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -2952,6 +2953,47 @@ class ZSpaceGenerationControlSweepExampleTests(unittest.TestCase):
         self.assertEqual(report["run_count"], 5)
         self.assertEqual(report["summary"]["completed_run_count"], 0)
         self.assertTrue(any(str(row["name"]).startswith("zt3") for row in runs))
+
+    def test_generation_sweep_compat_reaches_peft_base_model(self) -> None:
+        module = load_generation_control_sweep_example()
+        self.assertIs(
+            module._prepare_special_tokens_batch_size_compat,
+            st.hf_generation_batch_size_compat,
+        )
+
+        class BaseModel:
+            def _prepare_special_tokens(self, generation_config, device=None):
+                return {"generation_config": generation_config, "device": device}
+
+        class PeftWrapper:
+            def __init__(self):
+                self.base_model = types.SimpleNamespace(model=BaseModel())
+
+            def get_base_model(self):
+                return self.base_model.model
+
+        model = PeftWrapper()
+        base = model.get_base_model()
+        with self.assertRaises(TypeError):
+            base._prepare_special_tokens("cfg", batch_size=1)
+        self.assertNotIn("_prepare_special_tokens", model.__dict__)
+        self.assertNotIn("_prepare_special_tokens", base.__dict__)
+
+        with module._prepare_special_tokens_batch_size_compat(model) as installed:
+            self.assertTrue(installed)
+            self.assertEqual(
+                base._prepare_special_tokens(
+                    "cfg",
+                    device="cpu",
+                    batch_size=1,
+                ),
+                {"generation_config": "cfg", "device": "cpu"},
+            )
+
+        with self.assertRaises(TypeError):
+            base._prepare_special_tokens("cfg", batch_size=1)
+        self.assertNotIn("_prepare_special_tokens", model.__dict__)
+        self.assertNotIn("_prepare_special_tokens", base.__dict__)
 
     def test_generic_generation_control_wrappers_parse_and_dry_run(self) -> None:
         sweep_module = load_generic_generation_control_sweep_example()

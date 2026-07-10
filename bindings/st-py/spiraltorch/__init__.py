@@ -889,12 +889,19 @@ from .hf_ft import (
 
 from . import hf_peft as hf_peft
 from .hf_peft import (
+    HF_CAUSAL_LM_ARTIFACT_KINDS,
     HF_FINETUNE_LORA_TARGET_MODULES,
     HF_FINETUNE_MODES,
+    export_hf_merged_causal_lm,
+    hf_causal_lm_artifact_lines,
+    hf_causal_lm_artifact_report,
     hf_finetune_adapter_config,
     hf_finetune_lora_target_report,
     hf_finetune_parameter_report,
+    hf_merged_causal_lm_export_lines,
+    load_hf_causal_lm_artifact,
     prepare_hf_finetune_model,
+    summarize_hf_causal_lm_artifact,
 )
 
 from . import hf_ft_status as hf_ft_status
@@ -964,6 +971,7 @@ from .hf_generation import (
     compare_zspace_inference_distortion_probes,
     compare_zspace_generation_control_sweeps,
     default_zspace_checkpoint_generation_prompts,
+    hf_generation_batch_size_compat,
     zspace_inference_distortion_sweep_report_from_probes,
     zspace_inference_distortion_geometry_probe,
     zspace_inference_distortion_probe_cli_args,
@@ -1139,8 +1147,12 @@ _EXTRAS = [
     "HF_FINETUNE_TRAINER_TRACE_FILENAME",
     "HF_FINETUNE_REQUIRED_PYTHON_PACKAGES",
     "HF_FINETUNE_REQUIRED_RUST_SURFACES",
+    "HF_CAUSAL_LM_ARTIFACT_KINDS",
     "HF_FINETUNE_MODES",
     "HF_FINETUNE_LORA_TARGET_MODULES",
+    "export_hf_merged_causal_lm",
+    "hf_causal_lm_artifact_lines",
+    "hf_causal_lm_artifact_report",
     "hf_finetune_adapter_config",
     "hf_finetune_corpus_file_report",
     "hf_finetune_corpus_scan_report",
@@ -1175,6 +1187,9 @@ _EXTRAS = [
     "hf_finetune_model_profiles",
     "hf_finetune_lora_target_report",
     "hf_finetune_parameter_report",
+    "hf_merged_causal_lm_export_lines",
+    "load_hf_causal_lm_artifact",
+    "summarize_hf_causal_lm_artifact",
     "hf_finetune_preflight_report",
     "hf_finetune_rust_dependency_report",
     "hf_finetune_monitor_lines",
@@ -1304,6 +1319,7 @@ _EXTRAS = [
     "compare_zspace_inference_distortion_probes",
     "compare_zspace_generation_control_sweeps",
     "default_zspace_checkpoint_generation_prompts",
+    "hf_generation_batch_size_compat",
     "zspace_inference_distortion_sweep_report_from_probes",
     "zspace_inference_distortion_geometry_probe",
     "zspace_inference_distortion_probe_cli_args",

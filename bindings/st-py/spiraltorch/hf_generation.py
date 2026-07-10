@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import importlib
+import inspect
 import json
 import math
 import os
@@ -25,6 +27,7 @@ __all__ = [
     "compare_zspace_inference_distortion_probes",
     "compare_zspace_generation_control_sweeps",
     "default_zspace_checkpoint_generation_prompts",
+    "hf_generation_batch_size_compat",
     "zspace_inference_distortion_sweep_report_from_probes",
     "zspace_inference_distortion_probe_cli_args",
     "zspace_inference_distortion_geometry_probe",
@@ -57,6 +60,84 @@ __all__ = [
     "summarize_zspace_generation_control_sweep_lines",
     "zspace_inference_distortion_processor_kwargs",
 ]
+
+
+@contextlib.contextmanager
+def hf_generation_batch_size_compat(model: Any):
+    """Bridge old ``_prepare_special_tokens`` signatures through PEFT wrappers."""
+
+    sentinel = object()
+    candidates = [model]
+    get_base_model = getattr(model, "get_base_model", None)
+    if callable(get_base_model):
+        try:
+            candidates.append(get_base_model())
+        except Exception:
+            pass
+    for candidate in list(candidates):
+        candidates.extend(
+            nested
+            for nested in (
+                getattr(candidate, "base_model", None),
+                getattr(candidate, "model", None),
+            )
+            if nested is not None
+        )
+
+    patches = []
+    seen = set()
+    for candidate in candidates:
+        if id(candidate) in seen:
+            continue
+        seen.add(id(candidate))
+        prepare = getattr(candidate, "_prepare_special_tokens", None)
+        if not callable(prepare):
+            continue
+        try:
+            parameters = inspect.signature(prepare).parameters
+        except (TypeError, ValueError):
+            continue
+        accepts_batch_size = "batch_size" in parameters or any(
+            param.kind == inspect.Parameter.VAR_KEYWORD
+            for param in parameters.values()
+        )
+        if accepts_batch_size:
+            continue
+        candidate_state = getattr(candidate, "__dict__", {})
+        previous = (
+            candidate_state.get("_prepare_special_tokens", sentinel)
+            if isinstance(candidate_state, Mapping)
+            else sentinel
+        )
+
+        def _compat_prepare_special_tokens(
+            *args: Any,
+            _prepare=prepare,
+            **kwargs: Any,
+        ) -> Any:
+            kwargs.pop("batch_size", None)
+            return _prepare(*args, **kwargs)
+
+        try:
+            setattr(
+                candidate,
+                "_prepare_special_tokens",
+                _compat_prepare_special_tokens,
+            )
+        except Exception:
+            continue
+        patches.append((candidate, previous))
+    try:
+        yield bool(patches)
+    finally:
+        for candidate, previous in reversed(patches):
+            try:
+                if previous is sentinel:
+                    delattr(candidate, "_prepare_special_tokens")
+                else:
+                    setattr(candidate, "_prepare_special_tokens", previous)
+            except Exception:
+                pass
 
 
 ADJUST_MIN = 0.25
