@@ -972,6 +972,24 @@ only `promotion_ready=True` rows can become the selected run, be reused by
 sweep summary reports `no_promotion_ready_runs`, scale-up reports
 `adapter_promotion_not_ready`, and the non-dry-run CLI exits nonzero.
 
+For a promotion-ready LoRA winner, `scale-up-command.json` now defaults to
+`adapter_continuation=auto`: the selected run's adapter directory replaces the
+original `--model-name`, `--model-artifact-kind peft-adapter` and
+`--finetune-mode lora` are made explicit, and the expected child lineage depth
+is recorded before launch. `spiral-hf-finetune-scale-up sweep-report.json`
+therefore continues the winning weights rather than merely rerunning their
+configuration. Pass `--adapter-continuation replay` for the old configuration
+replay behavior, or `--adapter-continuation continue` to require adapter
+continuation for a non-gated LoRA run. Exact `--resume-from-checkpoint` remains
+the stronger path in `auto` mode; combining it with explicit `continue` is
+rejected as ambiguous. Scale-up preflight checks local adapter config/weights,
+input-output separation, lineage adapter ID/depth, and promotion report
+ID/readiness. The sanitized
+[`hf_adapter_scale_up_continuation_sample.json`](examples/hf_adapter_scale_up_continuation_sample.json)
+records a real tiny-GPT2 depth-1 to depth-2 continuation whose parent
+fingerprint, weight change, eval bound, and standalone promotion revalidation
+all passed.
+
 For checkpoint-level local inference, use the generic generation-control
 wrapper so the fine-tuned checkpoint stays the model path while the profile can
 provide tokenizer, decode defaults, Z-Space softmax grids, and runtime access

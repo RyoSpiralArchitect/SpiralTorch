@@ -80,6 +80,9 @@ def _scale_up_command_from_source(args) -> dict[str, Any]:
             )
     else:
         output_suffix = "scaleup" if output_suffix is None else output_suffix
+    adapter_continuation = args.adapter_continuation or (
+        "replay" if source_is_scale_up_artifact else "auto"
+    )
     command = st.hf_finetune_scale_up_command(
         source_payload,
         model_name=args.model_name,
@@ -96,7 +99,15 @@ def _scale_up_command_from_source(args) -> dict[str, Any]:
         run_card=run_card,
         trainer_trace_jsonl=trainer_trace_jsonl,
         trainer_trace_run_id=args.trainer_trace_run_id,
+        adapter_continuation=adapter_continuation,
     )
+    if (
+        source_is_scale_up_artifact
+        and adapter_continuation == "replay"
+        and args.model_name is None
+        and args.resume_from_checkpoint is None
+    ):
+        _legacy._preserve_adapter_continuation_provenance(command, source)
     command["source_path"] = str(args.source)
     if args.write_command is not None:
         command["artifact_path"] = str(args.write_command)
@@ -179,6 +190,18 @@ def main(argv: list[str] | None = None) -> int:
     print(f"hf_ft_scale_up_command status={command.get('status')}")
     if command.get("artifact_path"):
         print(f"hf_ft_scale_up_artifact {command.get('artifact_path')}")
+    if command.get("adapter_continuation_policy") is not None:
+        print(
+            "hf_ft_scale_up_adapter_continuation "
+            f"policy={command.get('adapter_continuation_policy')} "
+            f"status={command.get('adapter_continuation_status')} "
+            f"applied={command.get('adapter_continuation_applied')} "
+            f"source={command.get('adapter_continuation_source')} "
+            "source_adapter_id="
+            f"{command.get('adapter_continuation_source_adapter_id')} "
+            "expected_child_depth="
+            f"{command.get('adapter_continuation_expected_child_lineage_depth')}"
+        )
     print(
         "hf_ft_scale_up_preflight "
         f"status={command.get('preflight_status')} "

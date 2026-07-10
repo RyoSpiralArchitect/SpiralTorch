@@ -6076,6 +6076,172 @@ def _scale_up_disk_plan(command: Sequence[object]) -> dict[str, object]:
     return plan
 
 
+_SCALE_UP_ADAPTER_CONTINUATION_POLICIES = {"auto", "replay", "continue"}
+
+
+def _scale_up_adapter_continuation_policy(value: object) -> str:
+    policy = str(value or "auto").strip().lower().replace("_", "-")
+    if policy not in _SCALE_UP_ADAPTER_CONTINUATION_POLICIES:
+        choices = ", ".join(sorted(_SCALE_UP_ADAPTER_CONTINUATION_POLICIES))
+        raise ValueError(
+            f"adapter_continuation must be one of {choices}; got {value!r}"
+        )
+    return policy
+
+
+def _scale_up_adapter_continuation_plan(
+    summary: Mapping[str, object],
+    base_command: Sequence[object],
+    *,
+    policy: str,
+    model_name: str | Path | None,
+    resume_from_checkpoint: str | Path | None,
+) -> dict[str, object]:
+    candidate_source = (
+        summary.get("scale_up_candidate_output_dir")
+        or summary.get("scale_up_candidate_run_dir")
+        or _command_flag_value(base_command, "--output-dir")
+    )
+    explicit_source = None if model_name is None else str(model_name)
+    source = explicit_source or (
+        None if candidate_source is None else str(candidate_source)
+    )
+    promotion_ready = (
+        summary.get("scale_up_candidate_adapter_promotion_ready") is True
+    )
+    adapter_saved = summary.get("scale_up_candidate_adapter_saved") is True
+    lineage_ready = (
+        summary.get("scale_up_candidate_adapter_lineage_status") == "ready"
+    )
+    finetune_mode = summary.get("scale_up_candidate_finetune_mode") or (
+        _command_flag_value(base_command, "--finetune-mode")
+    )
+    adapter_evidence = bool(
+        promotion_ready
+        or adapter_saved
+        or lineage_ready
+        or finetune_mode == "lora"
+        or (policy == "continue" and explicit_source is not None)
+    )
+    existing_resume = resume_from_checkpoint or _command_flag_value(
+        base_command,
+        "--resume-from-checkpoint",
+    )
+    depth = _safe_number(summary.get("scale_up_candidate_adapter_lineage_depth"))
+    expected_child_depth = None if depth is None else int(depth) + 1
+    plan: dict[str, object] = {
+        "policy": policy,
+        "status": "replay",
+        "applied": False,
+        "reason": "configuration_replay_requested",
+        "source": source,
+        "source_origin": "explicit_model_name" if explicit_source else "candidate_output",
+        "source_is_local": bool(candidate_source is not None and explicit_source is None),
+        "source_adapter_id": summary.get(
+            "scale_up_candidate_adapter_lineage_adapter_id"
+        ),
+        "source_parent_adapter_id": summary.get(
+            "scale_up_candidate_adapter_lineage_parent_adapter_id"
+        ),
+        "source_root_adapter_id": summary.get(
+            "scale_up_candidate_adapter_lineage_root_adapter_id"
+        ),
+        "source_lineage_depth": depth,
+        "expected_child_lineage_depth": expected_child_depth,
+        "source_lineage_manifest_path": summary.get(
+            "scale_up_candidate_adapter_lineage_manifest_path"
+        ),
+        "source_promotion_report_path": summary.get(
+            "scale_up_candidate_adapter_promotion_report_path"
+        ),
+        "source_promotion_ready": promotion_ready,
+        "checkpoint_resume": None if existing_resume is None else str(existing_resume),
+    }
+    if policy == "replay":
+        return plan
+    if existing_resume is not None:
+        if policy == "continue":
+            plan.update(
+                {
+                    "status": "conflict",
+                    "reason": "adapter_continuation_conflicts_with_checkpoint_resume",
+                }
+            )
+        else:
+            plan.update(
+                {
+                    "status": "checkpoint_resume",
+                    "reason": "exact_checkpoint_resume_preferred",
+                }
+            )
+        return plan
+    if explicit_source is not None and policy == "auto":
+        plan.update(
+            {
+                "status": "explicit_model_override",
+                "reason": "explicit_model_name_preferred",
+                "source_is_local": Path(explicit_source).exists()
+                or Path(explicit_source).is_absolute()
+                or explicit_source.startswith("."),
+            }
+        )
+        return plan
+    should_continue = policy == "continue" or promotion_ready
+    if not should_continue:
+        plan.update(
+            {
+                "reason": "promotion_ready_adapter_not_available",
+                "source": None,
+            }
+        )
+        return plan
+    if source is None or not adapter_evidence:
+        plan.update(
+            {
+                "status": "unavailable",
+                "reason": (
+                    "candidate_adapter_source_missing"
+                    if source is None
+                    else "candidate_adapter_evidence_missing"
+                ),
+            }
+        )
+        return plan
+    plan.update(
+        {
+            "status": "continue",
+            "applied": True,
+            "reason": (
+                "promotion_ready_adapter_continuation"
+                if promotion_ready and policy == "auto"
+                else "explicit_adapter_continuation"
+            ),
+            "source_is_local": bool(
+                candidate_source is not None and explicit_source is None
+            )
+            or Path(source).exists()
+            or Path(source).is_absolute()
+            or source.startswith("."),
+        }
+    )
+    return plan
+
+
+def _paths_overlap(left: str | Path, right: str | Path) -> bool:
+    left_path = Path(left).resolve()
+    right_path = Path(right).resolve()
+    try:
+        left_path.relative_to(right_path)
+        return True
+    except ValueError:
+        pass
+    try:
+        right_path.relative_to(left_path)
+        return True
+    except ValueError:
+        return False
+
+
 def hf_gpt2_finetune_scale_up_command(
     report_or_summary: str | Path | Mapping[str, object],
     *,
@@ -6093,8 +6259,13 @@ def hf_gpt2_finetune_scale_up_command(
     run_card: str | Path | None = None,
     trainer_trace_jsonl: str | Path | None = None,
     trainer_trace_run_id: str | None = None,
+    adapter_continuation: str = "auto",
 ) -> dict[str, object]:
     """Build a longer FT command from the distortion-adjusted scale-up candidate."""
+
+    continuation_policy = _scale_up_adapter_continuation_policy(
+        adapter_continuation
+    )
 
     if isinstance(report_or_summary, Mapping) and report_or_summary.get(
         "row_type"
@@ -6217,8 +6388,56 @@ def hf_gpt2_finetune_scale_up_command(
         explicit=max_train_samples,
         multiplier=max_train_samples_multiplier,
     )
+    continuation = _scale_up_adapter_continuation_plan(
+        summary,
+        base_command,
+        policy=continuation_policy,
+        model_name=model_name,
+        resume_from_checkpoint=resume_from_checkpoint,
+    )
+    if continuation.get("status") in {"conflict", "unavailable"}:
+        return {
+            "row_type": "hf_gpt2_finetune_scale_up_command",
+            "status": f"adapter_continuation_{continuation.get('status')}",
+            "scale_up_candidate_label": summary.get("scale_up_candidate_label"),
+            "adapter_continuation_policy": continuation_policy,
+            "adapter_continuation_status": continuation.get("status"),
+            "adapter_continuation_reason": continuation.get("reason"),
+            "adapter_continuation_source": continuation.get("source"),
+            "adapter_continuation_checkpoint_resume": continuation.get(
+                "checkpoint_resume"
+            ),
+        }
+    continuation_source = (
+        str(continuation.get("source"))
+        if continuation.get("applied") is True
+        else None
+    )
+    if (
+        continuation_source is not None
+        and resolved_output_dir is not None
+        and _paths_overlap(continuation_source, resolved_output_dir)
+    ):
+        return {
+            "row_type": "hf_gpt2_finetune_scale_up_command",
+            "status": "adapter_continuation_output_collision",
+            "scale_up_candidate_label": summary.get("scale_up_candidate_label"),
+            "adapter_continuation_policy": continuation_policy,
+            "adapter_continuation_status": "output_collision",
+            "adapter_continuation_reason": "adapter_input_and_output_overlap",
+            "adapter_continuation_source": continuation_source,
+            "output_dir": resolved_output_dir,
+        }
     overrides = {
-        "--model-name": None if model_name is None else str(model_name),
+        "--model-name": (
+            continuation_source
+            if continuation_source is not None
+            else (None if model_name is None else str(model_name))
+        ),
+        "--model-artifact-kind": (
+            "peft-adapter" if continuation_source is not None else None
+        ),
+        "--finetune-mode": "lora" if continuation_source is not None else None,
         "--resume-from-checkpoint": (
             None if resume_from_checkpoint is None else str(resume_from_checkpoint)
         ),
@@ -6254,6 +6473,42 @@ def hf_gpt2_finetune_scale_up_command(
         ),
         "scale_up_candidate_adapter_lineage_depth": summary.get(
             "scale_up_candidate_adapter_lineage_depth"
+        ),
+        "adapter_continuation_policy": continuation_policy,
+        "adapter_continuation_status": continuation.get("status"),
+        "adapter_continuation_applied": continuation.get("applied"),
+        "adapter_continuation_reason": continuation.get("reason"),
+        "adapter_continuation_source": continuation.get("source"),
+        "adapter_continuation_source_origin": continuation.get("source_origin"),
+        "adapter_continuation_source_is_local": continuation.get(
+            "source_is_local"
+        ),
+        "adapter_continuation_source_adapter_id": continuation.get(
+            "source_adapter_id"
+        ),
+        "adapter_continuation_source_parent_adapter_id": continuation.get(
+            "source_parent_adapter_id"
+        ),
+        "adapter_continuation_source_root_adapter_id": continuation.get(
+            "source_root_adapter_id"
+        ),
+        "adapter_continuation_source_lineage_depth": continuation.get(
+            "source_lineage_depth"
+        ),
+        "adapter_continuation_expected_child_lineage_depth": continuation.get(
+            "expected_child_lineage_depth"
+        ),
+        "adapter_continuation_source_lineage_manifest_path": continuation.get(
+            "source_lineage_manifest_path"
+        ),
+        "adapter_continuation_source_promotion_report_path": continuation.get(
+            "source_promotion_report_path"
+        ),
+        "adapter_continuation_source_promotion_ready": continuation.get(
+            "source_promotion_ready"
+        ),
+        "adapter_continuation_checkpoint_resume": continuation.get(
+            "checkpoint_resume"
         ),
         "base_command": base_command,
         "base_command_display": _shell_join_args(base_command),
@@ -6303,12 +6558,46 @@ def _scale_up_preflight_command_from_source(
     return None, None
 
 
+def _scale_up_preflight_artifact_payload(
+    command_or_artifact: str | Path | Mapping[str, object] | Sequence[object],
+) -> dict[str, object]:
+    if isinstance(command_or_artifact, Mapping):
+        return dict(command_or_artifact)
+    if isinstance(command_or_artifact, (str, Path)):
+        path = Path(command_or_artifact)
+        if path.is_file():
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                return {}
+            return dict(payload) if isinstance(payload, Mapping) else {}
+    return {}
+
+
 def hf_gpt2_finetune_scale_up_preflight_report(
     command_or_artifact: str | Path | Mapping[str, object] | Sequence[object],
 ) -> dict[str, object]:
     """Preflight a resolved scale-up command before a longer FT run."""
 
     command, source_path = _scale_up_preflight_command_from_source(command_or_artifact)
+    artifact = _scale_up_preflight_artifact_payload(command_or_artifact)
+    artifact_row_type = str(artifact.get("row_type") or "")
+    if (
+        "adapter_continuation_applied" not in artifact
+        and "sweep_report" in artifact_row_type
+    ):
+        try:
+            resolved_artifact = hf_gpt2_finetune_scale_up_command(artifact)
+        except (OSError, ValueError):
+            resolved_artifact = {}
+        if resolved_artifact.get("status") == "ok":
+            artifact = resolved_artifact
+            resolved_command = resolved_artifact.get("command")
+            if isinstance(resolved_command, Sequence) and not isinstance(
+                resolved_command,
+                (str, bytes),
+            ):
+                command = [str(item) for item in resolved_command]
     if not command:
         return {
             "row_type": "hf_gpt2_finetune_scale_up_preflight",
@@ -6419,6 +6708,250 @@ def hf_gpt2_finetune_scale_up_preflight_report(
                     }
                 )
 
+    continuation_applied = artifact.get("adapter_continuation_applied") is True
+    continuation_source = artifact.get("adapter_continuation_source")
+    continuation_local = artifact.get("adapter_continuation_source_is_local") is True
+    if continuation_applied:
+        model_name = _command_flag_value(command, "--model-name")
+        artifact_kind = _command_flag_value(command, "--model-artifact-kind")
+        finetune_mode = _command_flag_value(command, "--finetune-mode")
+        continuation_input = {
+            "flag": "--model-name",
+            "path": continuation_source,
+            "kind": "adapter_continuation",
+            "local": continuation_local,
+        }
+        inputs.append(continuation_input)
+        if continuation_source is None or model_name != str(continuation_source):
+            issues.append(
+                {
+                    "severity": "error",
+                    "field": "adapter_continuation_source",
+                    "path": continuation_source,
+                    "message": "continuation source must match --model-name",
+                }
+            )
+        if artifact_kind != "peft-adapter":
+            issues.append(
+                {
+                    "severity": "error",
+                    "field": "--model-artifact-kind",
+                    "path": artifact_kind,
+                    "message": "adapter continuation requires peft-adapter input",
+                }
+            )
+        if finetune_mode != "lora":
+            issues.append(
+                {
+                    "severity": "error",
+                    "field": "--finetune-mode",
+                    "path": finetune_mode,
+                    "message": "adapter continuation requires LoRA fine-tuning",
+                }
+            )
+        if continuation_local and continuation_source is not None:
+            adapter_path = Path(str(continuation_source))
+            continuation_input["exists"] = adapter_path.is_dir()
+            if not adapter_path.is_dir():
+                issues.append(
+                    {
+                        "severity": "error",
+                        "field": "adapter_continuation_source",
+                        "path": str(adapter_path),
+                        "message": "local continuation adapter directory does not exist",
+                    }
+                )
+            else:
+                adapter_config = adapter_path / "adapter_config.json"
+                adapter_weights = next(
+                    (
+                        path
+                        for path in (
+                            adapter_path / "adapter_model.safetensors",
+                            adapter_path / "adapter_model.bin",
+                        )
+                        if path.is_file()
+                    ),
+                    None,
+                )
+                continuation_input["adapter_config_exists"] = adapter_config.is_file()
+                continuation_input["adapter_weights_path"] = (
+                    None if adapter_weights is None else str(adapter_weights)
+                )
+                if not adapter_config.is_file():
+                    issues.append(
+                        {
+                            "severity": "error",
+                            "field": "adapter_continuation_source",
+                            "path": str(adapter_config),
+                            "message": "adapter continuation config is missing",
+                        }
+                    )
+                if adapter_weights is None:
+                    issues.append(
+                        {
+                            "severity": "error",
+                            "field": "adapter_continuation_source",
+                            "path": str(adapter_path),
+                            "message": "adapter continuation weights are missing",
+                        }
+                    )
+        for field, label in (
+            (
+                "adapter_continuation_source_lineage_manifest_path",
+                "adapter lineage manifest",
+            ),
+            (
+                "adapter_continuation_source_promotion_report_path",
+                "adapter promotion report",
+            ),
+        ):
+            value = artifact.get(field)
+            if value is None:
+                continue
+            path = Path(str(value))
+            exists = path.is_file()
+            inputs.append(
+                {
+                    "field": field,
+                    "path": str(path),
+                    "exists": exists,
+                }
+            )
+            if not exists:
+                issues.append(
+                    {
+                        "severity": "error",
+                        "field": field,
+                        "path": str(path),
+                        "message": f"{label} does not exist",
+                    }
+                )
+                continue
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                issues.append(
+                    {
+                        "severity": "error",
+                        "field": field,
+                        "path": str(path),
+                        "message": f"{label} is not valid JSON: {exc}",
+                    }
+                )
+                continue
+            if not isinstance(payload, Mapping):
+                issues.append(
+                    {
+                        "severity": "error",
+                        "field": field,
+                        "path": str(path),
+                        "message": f"{label} must contain a JSON object",
+                    }
+                )
+                continue
+            expected_adapter_id = artifact.get(
+                "adapter_continuation_source_adapter_id"
+            )
+            if field.endswith("lineage_manifest_path"):
+                observed_adapter_id = payload.get("adapter_id")
+                observed_depth = _safe_number(payload.get("lineage_depth"))
+                expected_depth = _safe_number(
+                    artifact.get("adapter_continuation_source_lineage_depth")
+                )
+                if payload.get("status") != "ready":
+                    issues.append(
+                        {
+                            "severity": "error",
+                            "field": field,
+                            "path": str(path),
+                            "message": "adapter lineage manifest is not ready",
+                        }
+                    )
+                if (
+                    expected_adapter_id is not None
+                    and observed_adapter_id != expected_adapter_id
+                ):
+                    issues.append(
+                        {
+                            "severity": "error",
+                            "field": field,
+                            "path": str(path),
+                            "message": "adapter lineage fingerprint does not match source",
+                        }
+                    )
+                if expected_depth is not None and observed_depth != expected_depth:
+                    issues.append(
+                        {
+                            "severity": "error",
+                            "field": field,
+                            "path": str(path),
+                            "message": "adapter lineage depth does not match source",
+                        }
+                    )
+            else:
+                observed_adapter_id = payload.get("candidate_adapter_id")
+                if payload.get("promotion_ready") is not True:
+                    issues.append(
+                        {
+                            "severity": "error",
+                            "field": field,
+                            "path": str(path),
+                            "message": "adapter promotion report is not ready",
+                        }
+                    )
+                if (
+                    expected_adapter_id is not None
+                    and observed_adapter_id != expected_adapter_id
+                ):
+                    issues.append(
+                        {
+                            "severity": "error",
+                            "field": field,
+                            "path": str(path),
+                            "message": "adapter promotion fingerprint does not match source",
+                        }
+                    )
+        if (
+            artifact.get("adapter_continuation_source_adapter_id") is not None
+            and artifact.get("adapter_continuation_source_lineage_manifest_path")
+            is None
+        ):
+            issues.append(
+                {
+                    "severity": "error",
+                    "field": "adapter_continuation_source_lineage_manifest_path",
+                    "message": "adapter continuation lineage manifest is missing",
+                }
+            )
+        if (
+            artifact.get("adapter_continuation_source_promotion_ready") is True
+            and artifact.get("adapter_continuation_source_promotion_report_path")
+            is None
+        ):
+            issues.append(
+                {
+                    "severity": "error",
+                    "field": "adapter_continuation_source_promotion_report_path",
+                    "message": "promotion-ready continuation report is missing",
+                }
+            )
+        output_value = _command_flag_value(command, "--output-dir")
+        if (
+            continuation_source is not None
+            and output_value is not None
+            and continuation_local
+            and _paths_overlap(str(continuation_source), output_value)
+        ):
+            issues.append(
+                {
+                    "severity": "error",
+                    "field": "--output-dir",
+                    "path": output_value,
+                    "message": "adapter continuation input and output overlap",
+                }
+            )
+
     for flag in ("--output-dir", "--run-card", "--trainer-trace-jsonl"):
         value = _command_flag_value(command, flag)
         if value is None:
@@ -6503,6 +7036,20 @@ def hf_gpt2_finetune_scale_up_preflight_report(
         "executable": executable,
         "executable_resolved": executable_resolved,
         "bridge_script": bridge_script,
+        "adapter_continuation_policy": artifact.get(
+            "adapter_continuation_policy"
+        ),
+        "adapter_continuation_status": artifact.get(
+            "adapter_continuation_status"
+        ),
+        "adapter_continuation_applied": continuation_applied,
+        "adapter_continuation_source": continuation_source,
+        "adapter_continuation_source_adapter_id": artifact.get(
+            "adapter_continuation_source_adapter_id"
+        ),
+        "adapter_continuation_expected_child_lineage_depth": artifact.get(
+            "adapter_continuation_expected_child_lineage_depth"
+        ),
         "inputs": inputs,
         "outputs": outputs,
         "disk_plan": disk_plan,
@@ -6530,6 +7077,18 @@ def hf_gpt2_finetune_scale_up_preflight_lines(
             f"executable={report.get('executable_resolved') or report.get('executable')}"
         )
     ]
+    if report.get("adapter_continuation_policy") is not None:
+        lines.append(
+            "hf_gpt2_ft_scale_up_adapter_continuation "
+            f"policy={report.get('adapter_continuation_policy')} "
+            f"status={report.get('adapter_continuation_status')} "
+            f"applied={report.get('adapter_continuation_applied')} "
+            f"source={report.get('adapter_continuation_source')} "
+            "source_adapter_id="
+            f"{report.get('adapter_continuation_source_adapter_id')} "
+            "expected_child_depth="
+            f"{report.get('adapter_continuation_expected_child_lineage_depth')}"
+        )
     disk_plan = report.get("disk_plan")
     if isinstance(disk_plan, Mapping):
         lines.append(
@@ -7807,10 +8366,55 @@ def summarize_hf_gpt2_finetune_sweep_report(
             if scale_up_candidate is None
             else scale_up_candidate.get("adapter_promotion_ready")
         ),
+        "scale_up_candidate_adapter_promotion_report_path": (
+            None
+            if scale_up_candidate is None
+            else scale_up_candidate.get("adapter_promotion_report_path")
+        ),
+        "scale_up_candidate_adapter_saved": (
+            None
+            if scale_up_candidate is None
+            else scale_up_candidate.get("adapter_saved")
+        ),
+        "scale_up_candidate_finetune_mode": (
+            None
+            if scale_up_candidate is None
+            else scale_up_candidate.get("finetune_mode")
+        ),
+        "scale_up_candidate_model_artifact_kind": (
+            None
+            if scale_up_candidate is None
+            else scale_up_candidate.get("model_artifact_kind")
+        ),
+        "scale_up_candidate_adapter_lineage_status": (
+            None
+            if scale_up_candidate is None
+            else scale_up_candidate.get("adapter_lineage_status")
+        ),
+        "scale_up_candidate_adapter_lineage_adapter_id": (
+            None
+            if scale_up_candidate is None
+            else scale_up_candidate.get("adapter_lineage_adapter_id")
+        ),
+        "scale_up_candidate_adapter_lineage_parent_adapter_id": (
+            None
+            if scale_up_candidate is None
+            else scale_up_candidate.get("adapter_lineage_parent_adapter_id")
+        ),
+        "scale_up_candidate_adapter_lineage_root_adapter_id": (
+            None
+            if scale_up_candidate is None
+            else scale_up_candidate.get("adapter_lineage_root_adapter_id")
+        ),
         "scale_up_candidate_adapter_lineage_depth": (
             None
             if scale_up_candidate is None
             else _safe_number(scale_up_candidate.get("adapter_lineage_depth"))
+        ),
+        "scale_up_candidate_adapter_lineage_manifest_path": (
+            None
+            if scale_up_candidate is None
+            else scale_up_candidate.get("adapter_lineage_manifest_path")
         ),
         "scale_up_candidate_distortion_adjusted_eval_loss": (
             None
@@ -7850,6 +8454,28 @@ def summarize_hf_gpt2_finetune_sweep_report(
         or scale_up_command_payload.get("status"),
         "scale_up_command_applied_override_count": _safe_number(
             scale_up_command_payload.get("applied_override_count")
+        ),
+        "scale_up_command_adapter_continuation_policy": scale_up_command_payload.get(
+            "adapter_continuation_policy"
+        ),
+        "scale_up_command_adapter_continuation_status": scale_up_command_payload.get(
+            "adapter_continuation_status"
+        ),
+        "scale_up_command_adapter_continuation_applied": scale_up_command_payload.get(
+            "adapter_continuation_applied"
+        ),
+        "scale_up_command_adapter_continuation_source": scale_up_command_payload.get(
+            "adapter_continuation_source"
+        ),
+        "scale_up_command_adapter_continuation_source_adapter_id": (
+            scale_up_command_payload.get("adapter_continuation_source_adapter_id")
+        ),
+        "scale_up_command_adapter_continuation_expected_child_lineage_depth": (
+            _safe_number(
+                scale_up_command_payload.get(
+                    "adapter_continuation_expected_child_lineage_depth"
+                )
+            )
         ),
         "scale_up_command_preview": report.get("scale_up_command_preview")
         or scale_up_command_payload.get("command_preview"),
@@ -8072,6 +8698,14 @@ def summarize_hf_gpt2_finetune_sweep_report_lines(
             "hf_gpt2_ft_sweep_scale_up_command "
             f"status={summary.get('scale_up_command_status')} "
             f"overrides={summary.get('scale_up_command_applied_override_count')} "
+            "adapter_continuation="
+            f"{summary.get('scale_up_command_adapter_continuation_status')} "
+            "continuation_applied="
+            f"{summary.get('scale_up_command_adapter_continuation_applied')} "
+            "continuation_source="
+            f"{summary.get('scale_up_command_adapter_continuation_source')} "
+            "expected_child_depth="
+            f"{summary.get('scale_up_command_adapter_continuation_expected_child_lineage_depth')} "
             f"path={summary.get('scale_up_command_path')} "
             f"preview={summary.get('scale_up_command_preview')}"
         )

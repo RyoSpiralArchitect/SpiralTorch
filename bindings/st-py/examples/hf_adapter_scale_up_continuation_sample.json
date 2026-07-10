@@ -1,0 +1,43 @@
+{
+  "row_type": "hf_adapter_scale_up_continuation_sample",
+  "schema": "spiraltorch.hf_adapter_scale_up_continuation_sample.v1",
+  "model": "sshleifer/tiny-gpt2",
+  "purpose": "mechanism smoke validation; not a model-quality benchmark",
+  "source_adapter": {
+    "adapter_id": "sha256:70aa98eb46b69935f305d172e141ef525fe99da223fb91daa2abcc759154ebe9",
+    "lineage_depth": 1,
+    "promotion_ready": true,
+    "root_adapter_id": "sha256:01671238bd220e4a819057f9367ea559dbc2570a43661b8bf56f9403cdeb10cb"
+  },
+  "scale_up_resolution": {
+    "adapter_continuation_applied": true,
+    "adapter_continuation_policy": "auto",
+    "adapter_continuation_status": "continue",
+    "expected_child_lineage_depth": 2,
+    "model_artifact_kind": "peft_adapter",
+    "preflight_error_count": 0,
+    "preflight_status": "ready"
+  },
+  "training": {
+    "eval_after_loss": 10.483808517456055,
+    "eval_before_loss": 10.483813285827637,
+    "eval_loss_regression": -4.76837158203125e-06,
+    "max_eval_loss_regression": 0.01,
+    "steps": 1
+  },
+  "result_adapter": {
+    "adapter_id": "sha256:87030a6e8c33b245e547e2cbdcc9c2bfe4beae0336a3afe40681539fd4977411",
+    "failed_promotion_checks": [],
+    "lineage_depth": 2,
+    "missing_promotion_checks": [],
+    "parent_adapter_id": "sha256:70aa98eb46b69935f305d172e141ef525fe99da223fb91daa2abcc759154ebe9",
+    "parent_fingerprint_verified": true,
+    "promotion_ready": true,
+    "root_adapter_id": "sha256:01671238bd220e4a819057f9367ea559dbc2570a43661b8bf56f9403cdeb10cb",
+    "weights_changed_from_parent": true
+  },
+  "standalone_promotion_revalidation": {
+    "promotion_ready": true,
+    "status": "ready"
+  }
+}
