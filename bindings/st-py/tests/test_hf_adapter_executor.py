@@ -8,7 +8,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Sequence
+from typing import Mapping, Sequence
 
 import pytest
 import spiraltorch as st
@@ -530,6 +530,44 @@ def test_executor_honors_stop_at_generation_boundary_after_promotion(
     assert report["stop_request"]["reason"] == "stop after promoted generation"
     assert stop_reports[0]["created"] is True
     assert not (output_root / "generation-003").exists()
+
+
+def test_executor_honors_stop_during_preflight_without_launching(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _, child = _seed_chain(tmp_path)
+    output_root = tmp_path / "executor-runs"
+    state_path = output_root / "state.json"
+    runner = FakeFineTuneRunner([0.05], weight_prefix="must-not-launch")
+
+    def request_stop(_command: Mapping[str, object]) -> dict[str, object]:
+        st.request_hf_adapter_continuation_executor_stop(
+            state_path,
+            reason="stop during preflight",
+        )
+        return {"status": "ready", "ready": True}
+
+    monkeypatch.setattr(
+        st.hf_adapter_executor,
+        "hf_finetune_scale_up_preflight_report",
+        request_stop,
+    )
+    report = st.run_hf_adapter_continuation_executor(
+        child,
+        output_root=output_root,
+        state_path=state_path,
+        run=True,
+        max_lineage_depth=2,
+        command_runner=runner,
+    )
+
+    assert report["status"] == "stopped"
+    assert report["reason"] == "stop_requested"
+    assert report["stop_request"]["reason"] == "stop during preflight"
+    assert report["generation_attempt_count"] == 0
+    assert runner.commands == []
+    assert not (output_root / "generation-002").exists()
 
 
 def test_executor_stops_after_new_generation_completes_plateau(

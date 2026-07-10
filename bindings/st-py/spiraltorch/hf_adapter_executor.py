@@ -1421,6 +1421,21 @@ def _run_hf_adapter_continuation_executor_unlocked(
                 action="resolve_preflight",
                 reason="scale_up_preflight_not_ready",
             )
+        launch_stop_request = _matching_stop_request(
+            stop_request_path,
+            run_id=state.get("run_id"),
+            invocation_count=state.get("invocation_count"),
+        )
+        if launch_stop_request is not None:
+            state["stop_request"] = launch_stop_request
+            state.pop("pending_generation", None)
+            return _finish(
+                state,
+                resolved_state_path,
+                status="stopped",
+                action="resume_executor",
+                reason="stop_requested",
+            )
         if not run:
             return _finish(
                 state,
