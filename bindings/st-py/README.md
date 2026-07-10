@@ -758,16 +758,40 @@ spiral-hf-adapter-executor runs/qwen2-study \
 
 Repeat the same command to resume from the new deepest eligible adapter, or
 raise `--max-generations` explicitly for several synchronous generations in
-one invocation. The executor flushes `running` state before every subprocess,
-then re-fingerprints the output and requires the expected parent ID, lineage
-depth, promotion-ready node, and selected chain tip before advancing. A failed
-command remains in history and retries the same depth only when no partial
-output collides; unresolved interrupted runs fail closed unless explicitly
-audited with `--retry-interrupted`. Step and sample multipliers default to
-`1.0`, so repeated generations do not grow their resource budget silently.
-Python can drive the same state machine with
+one invocation. The executor holds a single-writer lock for the output root,
+flushes `running` state before every subprocess, then records the child PID,
+hostname, working directory, and a unique combined stdout/stderr log under
+`executor-logs/`. Logs are created owner-only (`0600`) on POSIX. Output is also
+mirrored to the terminal by default; use
+`--no-tee-output` to keep the terminal quiet without losing the durable log.
+While output flows, byte-count and last-output heartbeats are flushed to state
+at a bounded interval. After the process exits, the executor re-fingerprints
+the output and requires the expected parent ID, lineage depth, promotion-ready
+node, and selected chain tip before advancing. A failed command remains in
+history and retries the same depth only when no partial output collides;
+unresolved interrupted runs fail closed unless explicitly audited with
+`--retry-interrupted`. A recorded live local PID or unverified remote process
+blocks recovery even with that flag, preventing duplicate training. Step and
+sample multipliers default to `1.0`, so repeated generations do not grow their
+resource budget silently.
+
+Inspect a live or completed executor without changing its state:
+
+```bash
+spiral-hf-adapter-executor-status \
+  runs/qwen2-study/executor/state.json \
+  --require-healthy
+```
+
+The status surface reports state age, active attempt, local PID liveness,
+single-writer lock presence, output presence, and log size. PID liveness is an
+observation rather than a process-identity guarantee; remote-host and legacy
+attempts are reported as unverified instead of being guessed healthy.
+`--require-healthy` also rejects a missing active lock, durable subprocess log,
+or promoted output. Python can drive the same state machine with
 `st.run_hf_adapter_continuation_executor(...)` and inspect it with
-`st.load_hf_adapter_continuation_executor(...)`.
+`st.load_hf_adapter_continuation_executor(...)` or
+`st.hf_adapter_continuation_executor_status_report(...)`.
 
 Use `--resume-from-checkpoint` only for an exact Trainer continuation that
 should restore optimizer, scheduler, and RNG state. SpiralTorch audits

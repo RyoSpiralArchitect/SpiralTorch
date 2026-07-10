@@ -6,14 +6,18 @@ import json
 import math
 import os
 import shlex
+import socket
 import subprocess
+import sys
 import tempfile
 import time
 import uuid
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
+from ._process import local_pid_alive
 from .hf_adapter import (
     HF_ADAPTER_LINEAGE_FILENAME,
     hf_adapter_promotion_chain_report,
@@ -25,6 +29,8 @@ from .hf_ft import (
 
 __all__ = [
     "HF_ADAPTER_CONTINUATION_EXECUTOR_FILENAME",
+    "HF_ADAPTER_CONTINUATION_EXECUTOR_LOCK_FILENAME",
+    "HF_ADAPTER_CONTINUATION_EXECUTOR_LOG_DIRNAME",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_SCHEMA",
     "hf_adapter_continuation_executor_lines",
     "load_hf_adapter_continuation_executor",
@@ -38,9 +44,16 @@ HF_ADAPTER_CONTINUATION_EXECUTOR_SCHEMA = (
 HF_ADAPTER_CONTINUATION_EXECUTOR_FILENAME = (
     "spiraltorch-hf-adapter-continuation-executor.json"
 )
+HF_ADAPTER_CONTINUATION_EXECUTOR_LOCK_FILENAME = (
+    ".spiraltorch-hf-adapter-continuation-executor.lock"
+)
+HF_ADAPTER_CONTINUATION_EXECUTOR_LOG_DIRNAME = "executor-logs"
+_PROCESS_PROGRESS_INTERVAL_SECONDS = 5.0
 
 
 CommandRunner = Callable[[Sequence[str]], object]
+ProcessStarted = Callable[[int], None]
+ProcessProgress = Callable[[int], None]
 
 
 def _now() -> str:
@@ -77,6 +90,98 @@ def _atomic_write_json(path: Path, payload: Mapping[str, object]) -> None:
     finally:
         if temporary is not None and temporary.exists():
             temporary.unlink()
+
+
+def _load_executor_lock(path: Path) -> dict[str, object] | None:
+    if path.is_symlink():
+        raise RuntimeError(f"executor lock cannot be a symbolic link: {path}")
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError) as exc:
+        raise RuntimeError(f"executor lock is unreadable: {path}: {exc}") from exc
+    if not isinstance(payload, Mapping):
+        raise RuntimeError(f"executor lock must contain a JSON object: {path}")
+    return dict(payload)
+
+
+def _executor_lock_owner_is_stale(owner: Mapping[str, object]) -> bool:
+    return bool(
+        owner.get("row_type") == "hf_adapter_continuation_executor_lock"
+        and isinstance(owner.get("lock_id"), str)
+        and owner.get("hostname") == socket.gethostname()
+        and local_pid_alive(owner.get("pid")) is False
+    )
+
+
+def _reap_stale_executor_lock(path: Path) -> bool:
+    reaper = path.with_name(f"{path.name}.reap")
+    try:
+        reaper.mkdir(mode=0o700)
+    except FileExistsError:
+        return False
+    try:
+        current = _load_executor_lock(path)
+        if current is None or not _executor_lock_owner_is_stale(current):
+            return False
+        path.unlink()
+        return True
+    finally:
+        reaper.rmdir()
+
+
+@contextmanager
+def _executor_lock(output_root: Path) -> Iterator[Path]:
+    output_root.mkdir(parents=True, exist_ok=True)
+    path = output_root / HF_ADAPTER_CONTINUATION_EXECUTOR_LOCK_FILENAME
+    owner = {
+        "row_type": "hf_adapter_continuation_executor_lock",
+        "lock_id": f"executor-lock-{uuid.uuid4().hex}",
+        "pid": os.getpid(),
+        "hostname": socket.gethostname(),
+        "created_at": _now(),
+    }
+    encoded = (json.dumps(owner, ensure_ascii=True, sort_keys=True) + "\n").encode(
+        "utf-8"
+    )
+    acquired = False
+    for _ in range(8):
+        try:
+            descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except FileExistsError:
+            existing = _load_executor_lock(path)
+            if existing is None:
+                continue
+            if _executor_lock_owner_is_stale(existing):
+                if not _reap_stale_executor_lock(path):
+                    time.sleep(0.05)
+                continue
+            raise RuntimeError(
+                "executor output_root is locked; inspect the recorded owner before retrying: "
+                f"{path}"
+            )
+        try:
+            with os.fdopen(descriptor, "wb") as handle:
+                handle.write(encoded)
+                handle.flush()
+                os.fsync(handle.fileno())
+        except BaseException:
+            path.unlink(missing_ok=True)
+            raise
+        acquired = True
+        break
+    if not acquired:
+        raise RuntimeError(f"could not acquire executor lock: {path}")
+    try:
+        yield path
+    finally:
+        try:
+            current = _load_executor_lock(path)
+        except RuntimeError:
+            current = None
+        if current is not None and current.get("lock_id") == owner["lock_id"]:
+            path.unlink(missing_ok=True)
 
 
 def load_hf_adapter_continuation_executor(
@@ -141,6 +246,7 @@ def _state_for_invocation(
     state_path: Path,
     policy: Mapping[str, object],
     scale_up: Mapping[str, object],
+    execution: Mapping[str, object],
     run: bool,
     max_generations: int,
 ) -> dict[str, object]:
@@ -171,6 +277,7 @@ def _state_for_invocation(
             )
     state["policy"] = dict(policy)
     state["scale_up"] = dict(scale_up)
+    state["execution"] = dict(execution)
     state["mode"] = "run" if run else "plan"
     state["max_generations_per_invocation"] = max_generations
     state["invocation_count"] = int(state.get("invocation_count") or 0) + 1
@@ -341,20 +448,111 @@ def _execute_command(
     command_runner: CommandRunner | None,
     command_cwd: str | Path | None,
     command_env: Mapping[str, str] | None,
+    log_path: Path | None,
+    tee_output: bool,
+    process_started: ProcessStarted | None,
+    process_progress: ProcessProgress | None,
 ) -> int:
     if command_runner is not None:
         return _command_returncode(command_runner(command))
+    if log_path is None:
+        raise ValueError("log_path is required for subprocess execution")
     environment = None
     if command_env is not None:
         environment = dict(os.environ)
         environment.update({str(key): str(value) for key, value in command_env.items()})
-    completed = subprocess.run(
-        list(command),
-        check=False,
-        cwd=None if command_cwd is None else str(command_cwd),
-        env=environment,
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_descriptor = os.open(
+        log_path,
+        os.O_CREAT | os.O_EXCL | os.O_WRONLY,
+        0o600,
     )
-    return int(completed.returncode)
+    with os.fdopen(log_descriptor, "wb", buffering=0) as log_handle:
+        header = (
+            f"[spiraltorch-executor] started_at={_now()} "
+            f"command={shlex.join([str(value) for value in command])}\n"
+        ).encode("utf-8")
+        log_handle.write(header)
+        log_bytes = len(header)
+        last_progress_at: float | None = None
+        process = subprocess.Popen(
+            list(command),
+            cwd=None if command_cwd is None else str(command_cwd),
+            env=environment,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+        try:
+            if process_started is not None:
+                process_started(process.pid)
+            if process.stdout is None:
+                raise RuntimeError("subprocess stdout pipe was not created")
+            binary_output = getattr(sys.stdout, "buffer", None) if tee_output else None
+            text_output = sys.stdout if tee_output and binary_output is None else None
+            tee_failed = False
+            read_chunk = getattr(process.stdout, "read1", process.stdout.read)
+            while chunk := read_chunk(64 * 1024):
+                log_handle.write(chunk)
+                log_bytes += len(chunk)
+                now = time.monotonic()
+                if process_progress is not None and (
+                    last_progress_at is None
+                    or now - last_progress_at >= _PROCESS_PROGRESS_INTERVAL_SECONDS
+                ):
+                    process_progress(log_bytes)
+                    last_progress_at = now
+                if not tee_failed and (
+                    binary_output is not None or text_output is not None
+                ):
+                    try:
+                        if binary_output is not None:
+                            binary_output.write(chunk)
+                            binary_output.flush()
+                        elif text_output is not None:
+                            text_output.write(chunk.decode("utf-8", errors="replace"))
+                            text_output.flush()
+                    except (BrokenPipeError, OSError, UnicodeError):
+                        tee_failed = True
+            returncode = int(process.wait())
+            log_handle.write(
+                (
+                    f"\n[spiraltorch-executor] exited_at={_now()} "
+                    f"returncode={returncode}\n"
+                ).encode("utf-8")
+            )
+            return returncode
+        except BaseException as exc:
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=5.0)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+            try:
+                log_handle.write(
+                    (
+                        f"\n[spiraltorch-executor] aborted_at={_now()} "
+                        f"exception={exc.__class__.__name__}\n"
+                    ).encode("utf-8")
+                )
+            except OSError:
+                pass
+            raise
+
+
+def _running_attempt_process_observation(attempt: Mapping[str, object]) -> str:
+    hostname = attempt.get("hostname")
+    if not isinstance(hostname, str) or not hostname:
+        return "legacy_unverified"
+    if hostname != socket.gethostname():
+        return "remote_unverified"
+    alive = local_pid_alive(attempt.get("pid"))
+    if alive is True:
+        return "alive"
+    if alive is False:
+        return "exited"
+    return "local_unverified"
 
 
 def _recover_running_attempts(
@@ -367,6 +565,15 @@ def _recover_running_attempts(
     for raw_attempt in generations:
         if not isinstance(raw_attempt, dict) or raw_attempt.get("status") != "running":
             continue
+        process_observation = _running_attempt_process_observation(raw_attempt)
+        raw_attempt["process_liveness_observed_at"] = _now()
+        raw_attempt["process_liveness_observation"] = process_observation
+        if process_observation == "alive":
+            return "running attempt process is still alive; monitor it before recovery"
+        if process_observation == "remote_unverified":
+            return "running attempt belongs to another host; verify it before recovery"
+        if process_observation == "local_unverified":
+            return "running attempt process liveness is unverified; refusing automatic recovery"
         output_value = raw_attempt.get("output_dir")
         if output_value is None:
             return "running attempt is missing output_dir"
@@ -531,7 +738,7 @@ def _validate_executor_arguments(
         raise ValueError("output_prefix must be one path-safe name")
 
 
-def run_hf_adapter_continuation_executor(
+def _run_hf_adapter_continuation_executor_unlocked(
     sources: str | Path | Sequence[str | Path],
     *,
     output_root: str | Path,
@@ -558,6 +765,7 @@ def run_hf_adapter_continuation_executor(
     command_runner: CommandRunner | None = None,
     command_cwd: str | Path | None = None,
     command_env: Mapping[str, str] | None = None,
+    tee_output: bool = True,
 ) -> dict[str, object]:
     """Plan or run promoted adapter generations until policy or budget stops."""
 
@@ -585,6 +793,14 @@ def run_hf_adapter_continuation_executor(
     )
     if resolved_state_path == resolved_output_root:
         raise ValueError("state_path must be a file below or outside output_root")
+    if resolved_state_path == (
+        resolved_output_root / HF_ADAPTER_CONTINUATION_EXECUTOR_LOCK_FILENAME
+    ):
+        raise ValueError("state_path cannot overwrite the executor lock")
+    if resolved_state_path == (
+        resolved_output_root / HF_ADAPTER_CONTINUATION_EXECUTOR_LOG_DIRNAME
+    ):
+        raise ValueError("state_path cannot replace the executor log directory")
     if resolved_state_path in source_paths:
         raise ValueError("state_path cannot overwrite an adapter chain source")
     policy = {
@@ -603,12 +819,29 @@ def run_hf_adapter_continuation_executor(
         "streaming_validation_samples": streaming_validation_samples,
         "output_prefix": output_prefix,
     }
+    resolved_command_cwd = (
+        Path(command_cwd).expanduser().resolve()
+        if command_cwd is not None
+        else Path.cwd().resolve()
+    )
+    log_dir = resolved_output_root / HF_ADAPTER_CONTINUATION_EXECUTOR_LOG_DIRNAME
+    execution = {
+        "runner_kind": "custom" if command_runner is not None else "subprocess",
+        "command_cwd": str(resolved_command_cwd),
+        "lock_path": str(
+            resolved_output_root / HF_ADAPTER_CONTINUATION_EXECUTOR_LOCK_FILENAME
+        ),
+        "log_dir": None if command_runner is not None else str(log_dir),
+        "state_progress_interval_seconds": _PROCESS_PROGRESS_INTERVAL_SECONDS,
+        "tee_output": bool(tee_output),
+    }
     state = _state_for_invocation(
         source_paths=source_paths,
         output_root=resolved_output_root,
         state_path=resolved_state_path,
         policy=policy,
         scale_up=scale_up,
+        execution=execution,
         run=run,
         max_generations=max_generations,
     )
@@ -835,10 +1068,25 @@ def run_hf_adapter_continuation_executor(
                 reason="scale_up_command_missing",
             )
         resolved_command = [str(item) for item in command_values]
+        attempt_id = f"generation-attempt-{uuid.uuid4().hex}"
+        attempt_log_path = (
+            None
+            if command_runner is not None
+            else log_dir / f"{output_prefix}-{next_depth:03d}-{attempt_id[-12:]}.log"
+        )
         attempt = {
-            "attempt_id": f"generation-attempt-{uuid.uuid4().hex}",
+            "attempt_id": attempt_id,
             "status": "running",
             "started_at": _now(),
+            "runner_kind": execution["runner_kind"],
+            "hostname": socket.gethostname(),
+            "pid": None,
+            "command_cwd": str(resolved_command_cwd),
+            "log_path": None if attempt_log_path is None else str(attempt_log_path),
+            "log_stream": (
+                None if attempt_log_path is None else "combined_stdout_stderr"
+            ),
+            "tee_output": bool(tee_output),
             "parent_adapter_id": chain.get("selected_adapter_id"),
             "parent_adapter_path": chain.get("selected_adapter_path"),
             "lineage_depth": next_depth,
@@ -858,12 +1106,31 @@ def run_hf_adapter_continuation_executor(
         _write_state(resolved_state_path, state)
 
         started = time.monotonic()
+
+        def record_process_started(pid: int) -> None:
+            attempt["pid"] = pid
+            attempt["process_started_at"] = _now()
+            _write_state(resolved_state_path, state)
+
+        def record_process_progress(log_bytes: int) -> None:
+            attempt["last_output_at"] = _now()
+            attempt["log_bytes_observed"] = log_bytes
+            _write_state(resolved_state_path, state)
+
         try:
             returncode = _execute_command(
                 resolved_command,
                 command_runner=command_runner,
                 command_cwd=command_cwd,
                 command_env=command_env,
+                log_path=attempt_log_path,
+                tee_output=tee_output,
+                process_started=(
+                    None if command_runner is not None else record_process_started
+                ),
+                process_progress=(
+                    None if command_runner is not None else record_process_progress
+                ),
             )
         except Exception as exc:
             attempt["status"] = "failed"
@@ -878,6 +1145,7 @@ def run_hf_adapter_continuation_executor(
                 reason="command_runner_failed",
             )
         attempt["returncode"] = returncode
+        attempt["process_exited_at"] = _now()
         attempt["completed_at"] = _now()
         attempt["duration_seconds"] = time.monotonic() - started
         if returncode != 0:
@@ -940,6 +1208,69 @@ def run_hf_adapter_continuation_executor(
         _write_state(resolved_state_path, state)
 
 
+def run_hf_adapter_continuation_executor(
+    sources: str | Path | Sequence[str | Path],
+    *,
+    output_root: str | Path,
+    state_path: str | Path | None = None,
+    run: bool = False,
+    max_generations: int = 1,
+    retry_interrupted: bool = False,
+    recursive: bool = True,
+    allow_inferred_roots: bool = True,
+    select_adapter_id: str | None = None,
+    command_artifacts: Sequence[Mapping[str, object] | str | Path] | None = None,
+    max_lineage_depth: int | None = None,
+    target_eval_loss: float | None = None,
+    min_eval_improvement: float | None = None,
+    plateau_patience: int = 1,
+    output_prefix: str = "generation",
+    max_steps: int | None = None,
+    max_steps_multiplier: float | None = 1.0,
+    max_train_samples: int | None = None,
+    max_train_samples_multiplier: float | None = 1.0,
+    max_eval_samples: int | None = None,
+    max_eval_blocks: int | None = None,
+    streaming_validation_samples: int | None = None,
+    command_runner: CommandRunner | None = None,
+    command_cwd: str | Path | None = None,
+    command_env: Mapping[str, str] | None = None,
+    tee_output: bool = True,
+) -> dict[str, object]:
+    """Plan or run an adapter continuation executor under a single-writer lock."""
+
+    resolved_output_root = Path(output_root).expanduser().resolve()
+    with _executor_lock(resolved_output_root):
+        return _run_hf_adapter_continuation_executor_unlocked(
+            sources,
+            output_root=resolved_output_root,
+            state_path=state_path,
+            run=run,
+            max_generations=max_generations,
+            retry_interrupted=retry_interrupted,
+            recursive=recursive,
+            allow_inferred_roots=allow_inferred_roots,
+            select_adapter_id=select_adapter_id,
+            command_artifacts=command_artifacts,
+            max_lineage_depth=max_lineage_depth,
+            target_eval_loss=target_eval_loss,
+            min_eval_improvement=min_eval_improvement,
+            plateau_patience=plateau_patience,
+            output_prefix=output_prefix,
+            max_steps=max_steps,
+            max_steps_multiplier=max_steps_multiplier,
+            max_train_samples=max_train_samples,
+            max_train_samples_multiplier=max_train_samples_multiplier,
+            max_eval_samples=max_eval_samples,
+            max_eval_blocks=max_eval_blocks,
+            streaming_validation_samples=streaming_validation_samples,
+            command_runner=command_runner,
+            command_cwd=command_cwd,
+            command_env=command_env,
+            tee_output=tee_output,
+        )
+
+
 def hf_adapter_continuation_executor_lines(
     report_or_path: Mapping[str, object] | str | Path,
 ) -> list[str]:
@@ -985,9 +1316,12 @@ def hf_adapter_continuation_executor_lines(
             f"status={raw_attempt.get('status')} "
             f"depth={raw_attempt.get('lineage_depth')} "
             f"returncode={raw_attempt.get('returncode')} "
+            f"pid={raw_attempt.get('pid')} "
+            f"host={raw_attempt.get('hostname')} "
             f"adapter={raw_attempt.get('adapter_id')} "
             "postflight="
             f"{postflight.get('status') if isinstance(postflight, Mapping) else None} "
-            f"output={raw_attempt.get('output_dir')}"
+            f"output={raw_attempt.get('output_dir')} "
+            f"log={raw_attempt.get('log_path')}"
         )
     return lines

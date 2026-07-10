@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import socket
 import sys
 from pathlib import Path
 from typing import Sequence
@@ -232,6 +234,54 @@ def test_executor_dry_run_writes_replayable_state_and_cli(
     assert "status=ready" in st.hf_adapter_continuation_executor_lines(report)[0]
 
 
+def test_executor_single_writer_lock_blocks_live_owner_and_reaps_stale_owner(
+    tmp_path: Path,
+) -> None:
+    _, child = _seed_chain(tmp_path)
+    output_root = tmp_path / "executor-runs"
+    output_root.mkdir()
+    lock_path = output_root / st.HF_ADAPTER_CONTINUATION_EXECUTOR_LOCK_FILENAME
+    lock_path.write_text(
+        json.dumps(
+            {
+                "row_type": "hf_adapter_continuation_executor_lock",
+                "lock_id": "live-owner",
+                "pid": os.getpid(),
+                "hostname": socket.gethostname(),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RuntimeError, match="is locked"):
+        st.run_hf_adapter_continuation_executor(
+            child,
+            output_root=output_root,
+            max_lineage_depth=2,
+        )
+
+    assert lock_path.is_file()
+    lock_path.write_text(
+        json.dumps(
+            {
+                "row_type": "hf_adapter_continuation_executor_lock",
+                "lock_id": "stale-owner",
+                "pid": 99_999_999,
+                "hostname": socket.gethostname(),
+            }
+        ),
+        encoding="utf-8",
+    )
+    report = st.run_hf_adapter_continuation_executor(
+        child,
+        output_root=output_root,
+        max_lineage_depth=2,
+    )
+
+    assert report["status"] == "ready"
+    assert not lock_path.exists()
+
+
 def test_executor_runs_multiple_generations_until_depth_policy_stops(
     tmp_path: Path,
 ) -> None:
@@ -266,6 +316,47 @@ def test_executor_runs_multiple_generations_until_depth_policy_stops(
     assert (output_root / "generation-002" / st.HF_ADAPTER_LINEAGE_FILENAME).is_file()
     assert (output_root / "generation-003" / st.HF_ADAPTER_PROMOTION_FILENAME).is_file()
     assert len(runner.commands) == 2
+
+
+def test_executor_flushes_subprocess_pid_and_progress_into_attempt_state(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _, child = _seed_chain(tmp_path)
+    runner = FakeFineTuneRunner([0.05], weight_prefix="observed")
+    output_root = tmp_path / "executor-runs"
+    lock_path = output_root / st.HF_ADAPTER_CONTINUATION_EXECUTOR_LOCK_FILENAME
+
+    def observed_execute(command: Sequence[str], **kwargs: object) -> int:
+        assert kwargs["command_runner"] is None
+        assert lock_path.is_file()
+        kwargs["process_started"](4242)
+        kwargs["process_progress"](512)
+        return runner(command)
+
+    monkeypatch.setattr(
+        st.hf_adapter_executor,
+        "_execute_command",
+        observed_execute,
+    )
+    report = st.run_hf_adapter_continuation_executor(
+        child,
+        output_root=output_root,
+        run=True,
+        max_lineage_depth=2,
+    )
+    attempt = report["generations"][0]
+
+    assert report["status"] == "stopped"
+    assert attempt["runner_kind"] == "subprocess"
+    assert attempt["hostname"] == socket.gethostname()
+    assert attempt["pid"] == 4242
+    assert attempt["log_bytes_observed"] == 512
+    assert attempt["last_output_at"]
+    assert attempt["process_started_at"]
+    assert attempt["process_exited_at"]
+    assert attempt["log_path"].endswith(".log")
+    assert not lock_path.exists()
 
 
 def test_executor_stops_after_new_generation_completes_plateau(
@@ -454,6 +545,37 @@ def test_executor_rejects_invalid_configuration_before_writing_state(
         )
 
     assert not state_path.exists()
+    assert not (
+        output_root / st.HF_ADAPTER_CONTINUATION_EXECUTOR_LOCK_FILENAME
+    ).exists()
+
+
+@pytest.mark.parametrize(
+    "reserved_name",
+    [
+        st.HF_ADAPTER_CONTINUATION_EXECUTOR_LOCK_FILENAME,
+        st.HF_ADAPTER_CONTINUATION_EXECUTOR_LOG_DIRNAME,
+    ],
+)
+def test_executor_rejects_reserved_state_paths(
+    tmp_path: Path,
+    reserved_name: str,
+) -> None:
+    _, child = _seed_chain(tmp_path)
+    output_root = tmp_path / "executor-runs"
+    reserved_path = output_root / reserved_name
+
+    with pytest.raises(ValueError, match="state_path"):
+        st.run_hf_adapter_continuation_executor(
+            child,
+            output_root=output_root,
+            state_path=reserved_path,
+        )
+
+    assert not reserved_path.exists()
+    assert not (
+        output_root / st.HF_ADAPTER_CONTINUATION_EXECUTOR_LOCK_FILENAME
+    ).exists()
 
 
 def test_executor_fails_closed_on_interrupted_attempt_then_explicitly_retries(
@@ -474,6 +596,9 @@ def test_executor_fails_closed_on_interrupted_attempt_then_explicitly_retries(
         {
             "attempt_id": "interrupted-test",
             "status": "running",
+            "runner_kind": "subprocess",
+            "hostname": socket.gethostname(),
+            "pid": 99_999_999,
             "parent_adapter_id": pending["parent_adapter_id"],
             "lineage_depth": pending["lineage_depth"],
             "output_dir": pending["output_dir"],
@@ -508,6 +633,52 @@ def test_executor_fails_closed_on_interrupted_attempt_then_explicitly_retries(
     ]
     assert retried["promoted_generation_count"] == 1
     assert len(runner.commands) == 1
+
+
+def test_executor_refuses_retry_while_recorded_child_pid_is_alive(
+    tmp_path: Path,
+) -> None:
+    _, child = _seed_chain(tmp_path)
+    output_root = tmp_path / "executor-runs"
+    state_path = output_root / "state.json"
+    planned = st.run_hf_adapter_continuation_executor(
+        child,
+        output_root=output_root,
+        state_path=state_path,
+        max_lineage_depth=2,
+    )
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    pending = planned["pending_generation"]
+    state["generations"] = [
+        {
+            "attempt_id": "still-running-test",
+            "status": "running",
+            "runner_kind": "subprocess",
+            "hostname": socket.gethostname(),
+            "pid": os.getpid(),
+            "parent_adapter_id": pending["parent_adapter_id"],
+            "lineage_depth": pending["lineage_depth"],
+            "output_dir": pending["output_dir"],
+        }
+    ]
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    runner = FakeFineTuneRunner([0.05], weight_prefix="must-not-run")
+
+    blocked = st.run_hf_adapter_continuation_executor(
+        child,
+        output_root=output_root,
+        state_path=state_path,
+        run=True,
+        retry_interrupted=True,
+        max_lineage_depth=2,
+        command_runner=runner,
+    )
+
+    assert blocked["status"] == "blocked"
+    assert blocked["action"] == "audit_interrupted_generation"
+    assert "still alive" in blocked["reason"]
+    assert blocked["generations"][0]["process_liveness_observation"] == "alive"
+    assert runner.commands == []
 
 
 def test_executor_recovers_completed_output_after_explicit_selection_interrupt(

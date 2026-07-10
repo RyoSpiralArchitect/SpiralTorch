@@ -42,6 +42,14 @@
   live postflight promotion verification into one atomic artifact. Successful,
   failed, interrupted, and resumed generations retain command and lineage
   evidence, while per-invocation generation limits prevent accidental runaway.
+- Executor observability: persist a unique owner-only combined subprocess log
+  plus PID, hostname, and working-directory provenance for every real
+  generation, and add `spiral-hf-adapter-executor-status` for read-only local
+  liveness, artifact, and state-age checks. Quiet terminal mode keeps the
+  durable log, while remote
+  and legacy process identity remains explicitly unverified; recorded live or
+  remote child processes and a per-output-root single-writer lock prevent
+  duplicate FT launches.
 - Trainer resume audit: add `hf_finetune_checkpoint_resume_report(...)` and
   compact lines for optimizer/scheduler/RNG state availability, saved versus
   requested step horizons, and the exhausted-scheduler case where adapter
