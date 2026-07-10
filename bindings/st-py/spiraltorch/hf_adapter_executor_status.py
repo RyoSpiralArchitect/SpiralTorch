@@ -11,6 +11,7 @@ from pathlib import Path
 from ._process import local_pid_alive
 from .hf_adapter_executor import (
     HF_ADAPTER_CONTINUATION_EXECUTOR_LOCK_FILENAME,
+    _interruption_claim_report,
     _pending_output_resolution_gate,
     _unresolved_failed_attempt_output,
     load_hf_adapter_continuation_executor,
@@ -165,6 +166,8 @@ def _attempt_summary(attempt: Mapping[str, object] | None) -> dict[str, object] 
         "output_dir": attempt.get("output_dir"),
         "log_path": attempt.get("log_path"),
         "stop_request": attempt.get("stop_request"),
+        "status_before_interruption": attempt.get("status_before_interruption"),
+        "interruption_claim": attempt.get("interruption_claim"),
         "output_resolution": attempt.get("output_resolution"),
     }
 
@@ -307,6 +310,21 @@ def hf_adapter_continuation_executor_status_report(
         None if observed_attempt is None else observed_attempt.get("log_path"),
         expect_directory=False,
     )
+    interruption_claim = None
+    if observed_status == "interrupted" and active is not None:
+        interruption_claim = _interruption_claim_report(active)
+    elif observed_attempt is not None and isinstance(
+        observed_attempt.get("interruption_claim"), Mapping
+    ):
+        interruption_claim = dict(observed_attempt["interruption_claim"])
+    interruption_lock_ready = bool(
+        lock.get("exists") is False
+        or (
+            lock_owner.get("valid") is True
+            and lock_owner.get("same_host") is True
+            and lock_owner.get("pid_alive_observed") is False
+        )
+    )
     health_issues: list[str] = []
     if pending_output_resolution_gate is not None:
         health_issues.append(str(pending_output_resolution_gate["issue"]))
@@ -341,16 +359,51 @@ def hf_adapter_continuation_executor_status_report(
     ):
         health_issues.append("promoted_output_missing")
     if unresolved_generation is not None:
+        unresolved_status = unresolved_generation.get("attempt_status")
         health_issues.append(
             "cancelled_output_present"
-            if unresolved_generation.get("attempt_status") == "cancelled"
+            if unresolved_status == "cancelled"
+            else "interrupted_output_present"
+            if unresolved_status == "interrupted"
             else "failed_generation_output_present"
         )
+    if (
+        observed_status == "interrupted"
+        and active is not None
+        and output.get("exists") is True
+    ):
+        health_issues.append(
+            "interrupted_output_present"
+            if isinstance(interruption_claim, Mapping)
+            and interruption_claim.get("ready") is True
+            and interruption_lock_ready
+            else "interrupted_output_lock_unavailable"
+            if isinstance(interruption_claim, Mapping)
+            and interruption_claim.get("ready") is True
+            else "interrupted_output_scope_unverified"
+        )
+    health_issues = list(dict.fromkeys(health_issues))
     healthy = lifecycle_healthy and not health_issues
     if "output_quarantine_intent_invalid" in health_issues:
         recommended_action = "inspect_output_quarantine_intent"
     elif "output_quarantine_incomplete" in health_issues:
         recommended_action = "complete_output_quarantine"
+    elif "interrupted_output_present" in health_issues:
+        recommended_action = "quarantine_interrupted_output"
+    elif "interrupted_output_lock_unavailable" in health_issues:
+        recommended_action = (
+            "wait_for_executor_exit"
+            if lock_owner.get("valid") is True
+            and lock_owner.get("same_host") is True
+            and lock_owner.get("pid_alive_observed") is True
+            else "inspect_executor_lock"
+        )
+    elif "interrupted_output_scope_unverified" in health_issues:
+        recommended_action = (
+            str(interruption_claim.get("action"))
+            if isinstance(interruption_claim, Mapping)
+            else "inspect_interrupted_process_scope"
+        )
     elif "cancelled_output_present" in health_issues:
         recommended_action = "resolve_cancelled_output"
     elif "failed_generation_output_present" in health_issues:
@@ -388,6 +441,8 @@ def hf_adapter_continuation_executor_status_report(
             else pending_output_resolution_gate["attempt_ids"]
         ),
         "unresolved_generation": unresolved_generation,
+        "interruption_claim": interruption_claim,
+        "interruption_lock_ready": interruption_lock_ready,
         "current_hostname": current_hostname,
         "attempt_hostname": attempt_hostname,
         "same_host": same_host,
@@ -457,6 +512,10 @@ def hf_adapter_continuation_executor_status_lines(
             f"{lock_owner.get('pid_alive_observed') if isinstance(lock_owner, Mapping) else None} "
             "output_resolution="
             f"{attempt.get('output_resolution', {}).get('resolution_id') if isinstance(attempt.get('output_resolution'), Mapping) else None} "
+            "interruption_ready="
+            f"{report.get('interruption_claim', {}).get('ready') if isinstance(report.get('interruption_claim'), Mapping) else None} "
+            "process_group_alive="
+            f"{report.get('interruption_claim', {}).get('process_group_alive_observed') if isinstance(report.get('interruption_claim'), Mapping) else None} "
             f"log={attempt.get('log_path')}"
         )
     return lines

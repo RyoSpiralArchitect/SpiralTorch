@@ -13,10 +13,13 @@ from pathlib import Path
 
 from ._process import local_pid_alive
 from .hf_adapter_executor import (
+    HF_ADAPTER_CONTINUATION_EXECUTOR_INTERRUPTION_CLAIM_SCHEMA,
     HF_ADAPTER_CONTINUATION_EXECUTOR_LOCK_FILENAME,
     HF_ADAPTER_CONTINUATION_EXECUTOR_OUTPUT_RESOLUTION_SCHEMA,
     _executor_lock,
     _executor_lock_owner_is_stale,
+    _interruption_claim_matches_attempt,
+    _interruption_claim_report,
     _load_executor_lock,
     _write_state,
     load_hf_adapter_continuation_executor,
@@ -24,6 +27,7 @@ from .hf_adapter_executor import (
 
 __all__ = [
     "HF_ADAPTER_CONTINUATION_EXECUTOR_OUTPUT_RESOLUTION_SCHEMA",
+    "HF_ADAPTER_CONTINUATION_EXECUTOR_INTERRUPTION_CLAIM_SCHEMA",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_QUARANTINE_SUFFIX",
     "hf_adapter_continuation_executor_output_quarantine_report",
     "hf_adapter_continuation_executor_output_resolution_lines",
@@ -36,6 +40,7 @@ HF_ADAPTER_CONTINUATION_EXECUTOR_QUARANTINE_SUFFIX = ".executor-quarantine"
 _RESOLVABLE_ATTEMPT_STATUSES = {
     "cancelled",
     "failed",
+    "interrupted",
     "postflight_failed",
 }
 
@@ -114,6 +119,23 @@ def _run_id(state: Mapping[str, object]) -> str:
     if any(ord(character) < 32 or ord(character) == 127 for character in value):
         raise ValueError("executor run_id must not contain control characters")
     return value
+
+
+def _recorded_interruption_claim(
+    value: object,
+    *,
+    attempt: Mapping[str, object],
+) -> dict[str, object]:
+    if not isinstance(value, Mapping):
+        raise RuntimeError("executor interruption claim is missing")
+    claim = dict(value)
+    if (
+        not _interruption_claim_matches_attempt(claim, attempt=attempt)
+        or claim.get("recorded_hostname") != socket.gethostname()
+        or claim.get("current_hostname") != socket.gethostname()
+    ):
+        raise RuntimeError("executor interruption claim is invalid")
+    return claim
 
 
 def _tree_snapshot(path: Path) -> dict[str, object]:
@@ -244,9 +266,7 @@ def _destination_path(
     quarantine_root: Path,
 ) -> Path:
     identity = hashlib.sha256(
-        (f"{_run_id(state)}\0{attempt.get('attempt_id')}\0{source}").encode(
-            "utf-8"
-        )
+        (f"{_run_id(state)}\0{attempt.get('attempt_id')}\0{source}").encode("utf-8")
     ).hexdigest()[:24]
     return quarantine_root / f"{source.name}-{identity}"
 
@@ -340,8 +360,23 @@ def _resolution_plan(
             or existing.get("quarantine_root") != str(quarantine_root)
         ):
             raise RuntimeError("executor attempt has inconsistent output resolution")
-        if _validate_reason(str(existing.get("reason") or "")) != existing.get("reason"):
+        if _validate_reason(str(existing.get("reason") or "")) != existing.get(
+            "reason"
+        ):
             raise RuntimeError("executor output resolution reason is inconsistent")
+        if attempt.get("status") == "interrupted":
+            resolution_claim = _recorded_interruption_claim(
+                existing.get("interruption_claim"),
+                attempt=attempt,
+            )
+            attempt_claim = _recorded_interruption_claim(
+                attempt.get("interruption_claim"),
+                attempt=attempt,
+            )
+            if resolution_claim != attempt_claim:
+                raise RuntimeError("executor interruption claims differ")
+        elif existing.get("interruption_claim") is not None:
+            raise RuntimeError("executor output resolution has an unexpected claim")
         if (
             source.exists() and not claimed_by_later_promotion
         ) or not destination.is_dir():
@@ -376,9 +411,34 @@ def _resolution_plan(
 
     if claimed_by_later_promotion:
         raise RuntimeError("executor attempt output is claimed by a later promotion")
-    if attempt.get("status") not in _RESOLVABLE_ATTEMPT_STATUSES:
+    attempt_status = attempt.get("status")
+    interruption_claim = None
+    if attempt_status == "running":
+        interruption_claim = _interruption_claim_report(attempt)
+        if interruption_claim.get("ready") is not True:
+            return {
+                "row_type": "hf_adapter_continuation_executor_output_quarantine",
+                "schema": HF_ADAPTER_CONTINUATION_EXECUTOR_OUTPUT_RESOLUTION_SCHEMA,
+                "status": "interruption_unverified",
+                "ready": False,
+                "action": interruption_claim.get("action"),
+                "state_path": str(state_path),
+                "output_root": str(output_root),
+                "attempt_id": attempt.get("attempt_id"),
+                "attempt_status": attempt_status,
+                "lineage_depth": attempt.get("lineage_depth"),
+                "source_path": str(source),
+                "source_exists": source.exists(),
+                "destination_path": str(destination),
+                "destination_exists": destination.exists(),
+                "quarantine_root": str(quarantine_root),
+                "interruption_claim": interruption_claim,
+                "existing_resolution": None,
+                "pending_resolution": None,
+            }
+    elif attempt_status not in _RESOLVABLE_ATTEMPT_STATUSES:
         raise RuntimeError(
-            "executor attempt is not cancelled, failed, or postflight_failed"
+            "executor attempt is not cancelled, failed, interrupted, or postflight_failed"
         )
     pending_state = state.get("pending_output_resolution")
     pending_attempt = attempt.get("pending_output_resolution")
@@ -409,9 +469,33 @@ def _resolution_plan(
         ):
             raise RuntimeError("executor output quarantine intent is invalid")
         if _validate_reason(str(pending.get("reason") or "")) != pending.get("reason"):
-            raise RuntimeError("executor output quarantine intent reason is inconsistent")
+            raise RuntimeError(
+                "executor output quarantine intent reason is inconsistent"
+            )
+        if attempt_status == "interrupted":
+            pending_claim = _recorded_interruption_claim(
+                pending.get("interruption_claim"),
+                attempt=attempt,
+            )
+            attempt_claim = _recorded_interruption_claim(
+                attempt.get("interruption_claim"),
+                attempt=attempt,
+            )
+            if pending_claim != attempt_claim:
+                raise RuntimeError("executor interruption claims differ")
+            interruption_claim = pending_claim
+        elif pending.get("interruption_claim") is not None:
+            raise RuntimeError(
+                "executor output quarantine intent has an unexpected claim"
+            )
     elif pending_state is not None or pending_attempt is not None:
         raise RuntimeError("executor output quarantine intent must be an object")
+    if attempt_status == "interrupted" and pending is None:
+        raise RuntimeError(
+            "interrupted attempt is missing its durable quarantine intent"
+        )
+    if attempt_status == "running" and pending is not None:
+        raise RuntimeError("running attempt cannot already have a quarantine intent")
 
     source_exists = source.exists()
     destination_exists = destination.exists()
@@ -473,6 +557,7 @@ def _resolution_plan(
         "quarantine_root": str(quarantine_root),
         "source_snapshot": source_snapshot,
         "destination_snapshot": destination_snapshot,
+        "interruption_claim": interruption_claim,
         "existing_resolution": None,
         "pending_resolution": pending,
     }
@@ -523,12 +608,17 @@ def hf_adapter_continuation_executor_output_quarantine_report(
     lock = _executor_lock_report(output_root)
     if lock.get("status") not in {"absent", "stale"}:
         attempt, _ = _attempt(state, attempt_id)
+        lock_status = lock.get("status")
         return {
             "row_type": "hf_adapter_continuation_executor_output_quarantine",
             "schema": HF_ADAPTER_CONTINUATION_EXECUTOR_OUTPUT_RESOLUTION_SCHEMA,
             "status": "executor_locked",
             "ready": False,
-            "action": "wait_for_executor_exit",
+            "action": (
+                "wait_for_executor_exit"
+                if lock_status == "active"
+                else "inspect_executor_lock"
+            ),
             "state_path": str(state_path),
             "output_root": str(output_root),
             "attempt_id": attempt.get("attempt_id"),
@@ -576,6 +666,12 @@ def quarantine_hf_adapter_continuation_executor_output(
                 }
             )
             return report
+        if plan.get("ready") is not True:
+            claim = plan.get("interruption_claim")
+            issue = (
+                claim.get("issue") if isinstance(claim, Mapping) else plan.get("status")
+            )
+            raise RuntimeError(f"executor output quarantine is not ready: {issue}")
 
         attempt, _ = _attempt(state, attempt_id)
         source = Path(str(plan["source_path"]))
@@ -585,6 +681,31 @@ def quarantine_hf_adapter_continuation_executor_output(
         if not isinstance(history, list):
             raise ValueError("executor output_resolution_history must be a list")
         pending = plan.get("pending_resolution")
+        interruption_claim = plan.get("interruption_claim")
+        if attempt.get("status") == "running":
+            interruption_claim = _interruption_claim_report(attempt)
+            if interruption_claim.get("ready") is not True:
+                raise RuntimeError(
+                    "executor interruption process scope changed before quarantine"
+                )
+            interruption_claim = _recorded_interruption_claim(
+                interruption_claim,
+                attempt=attempt,
+            )
+            attempt["status_before_interruption"] = "running"
+            attempt["status"] = "interrupted"
+            attempt["interrupted_at"] = interruption_claim["observed_at"]
+            attempt["process_liveness_observed_at"] = interruption_claim["observed_at"]
+            attempt["process_liveness_observation"] = "exited"
+            attempt["interruption_claim"] = dict(interruption_claim)
+            state["status"] = "interrupted"
+            state["action"] = "complete_output_quarantine"
+            state["reason"] = "interrupted_attempt_claimed"
+        elif attempt.get("status") == "interrupted":
+            interruption_claim = _recorded_interruption_claim(
+                interruption_claim,
+                attempt=attempt,
+            )
         if isinstance(pending, Mapping):
             intent = dict(pending)
         else:
@@ -607,6 +728,11 @@ def quarantine_hf_adapter_continuation_executor_output(
                 "destination_path": str(destination),
                 "quarantine_root": str(quarantine_root),
                 "tree_snapshot": dict(snapshot),
+                "interruption_claim": (
+                    dict(interruption_claim)
+                    if isinstance(interruption_claim, Mapping)
+                    else None
+                ),
             }
             state["pending_output_resolution"] = dict(intent)
             attempt["pending_output_resolution"] = dict(intent)
@@ -629,6 +755,14 @@ def quarantine_hf_adapter_continuation_executor_output(
                 destination.replace(source)
             state.pop("pending_output_resolution", None)
             attempt.pop("pending_output_resolution", None)
+            if intent.get("interruption_claim") is not None:
+                attempt["status"] = "running"
+                attempt.pop("status_before_interruption", None)
+                attempt.pop("interrupted_at", None)
+                attempt.pop("interruption_claim", None)
+                state["status"] = "blocked"
+                state["action"] = "reclaim_interrupted_generation"
+                state["reason"] = "quarantine_metadata_changed"
             _write_state(state_path, state)
             raise RuntimeError("quarantined output metadata changed during move")
 
@@ -647,16 +781,26 @@ def quarantine_hf_adapter_continuation_executor_output(
             "destination_path": str(destination),
             "quarantine_root": str(quarantine_root),
             "tree_snapshot": snapshot,
+            "interruption_claim": intent.get("interruption_claim"),
             "adopted_after_interrupted_write": adopted,
         }
         attempt["output_resolution"] = dict(resolution)
         attempt.pop("pending_output_resolution", None)
         history.append(dict(resolution))
         state.pop("pending_output_resolution", None)
+        pending_generation = state.get("pending_generation")
+        if isinstance(pending_generation, Mapping) and pending_generation.get(
+            "attempt_id"
+        ) == attempt.get("attempt_id"):
+            state.pop("pending_generation", None)
         state["last_output_resolution"] = dict(resolution)
         state["status"] = "output_quarantined"
         state["action"] = "resume_executor"
-        state["reason"] = "failed_generation_output_quarantined"
+        state["reason"] = (
+            "interrupted_generation_output_quarantined"
+            if intent.get("interruption_claim") is not None
+            else "failed_generation_output_quarantined"
+        )
         state.pop("unresolved_generation", None)
         state.pop("output_resolution_gate", None)
         _write_state(state_path, state)

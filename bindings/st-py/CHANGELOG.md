@@ -73,6 +73,12 @@
   idempotent resolution history, blocks executor re-entry while an intent is
   unfinished or inconsistent, and returns status to a healthy
   `output_quarantined` / `resume_executor` handoff.
+- Interrupted executor recovery: the same quarantine flow can now claim a
+  stale `running` subprocess only after proving both its local leader PID and
+  isolated POSIX process group are absent. The proof is rechecked under lock,
+  persisted through intent/resolution history, exposed in live status, and
+  remains fail-closed for remote, custom, live, or process-scope-unverified
+  attempts.
 - Trainer resume audit: add `hf_finetune_checkpoint_resume_report(...)` and
   compact lines for optimizer/scheduler/RNG state availability, saved versus
   requested step horizons, and the exhausted-scheduler case where adapter

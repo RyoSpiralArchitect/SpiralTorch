@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import socket
 import stat
+import subprocess
+import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -82,6 +86,31 @@ def _write_lock(path: Path, *, pid: int) -> None:
         ),
         encoding="utf-8",
     )
+
+
+def _mark_attempt_running(
+    state_path: Path,
+    *,
+    pid: int,
+    hostname: str | None = None,
+    runner_kind: str = "subprocess",
+    process_group_isolated: bool = True,
+    stop_scope: str = "process_group",
+) -> None:
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["status"] = "running"
+    state["action"] = "run_generation"
+    state["reason"] = "executor_process_interrupted"
+    attempt = state["generations"][0]
+    attempt["status"] = "running"
+    attempt["runner_kind"] = runner_kind
+    attempt["process_group_isolated"] = process_group_isolated
+    attempt["stop_scope"] = stop_scope
+    attempt["hostname"] = hostname or socket.gethostname()
+    attempt["pid"] = pid
+    attempt.pop("returncode", None)
+    state["pending_generation"] = dict(attempt)
+    state_path.write_text(json.dumps(state), encoding="utf-8")
 
 
 def _write_launch_state(
@@ -278,6 +307,206 @@ def test_quarantine_fails_closed_on_live_lock_and_reaps_stale_lock(
     assert not lock_path.exists()
 
 
+@pytest.mark.skipif(os.name != "posix", reason="requires POSIX process groups")
+def test_quarantine_claims_interrupted_subprocess_and_restores_health(
+    tmp_path: Path,
+) -> None:
+    state_path, output_root, output_dir = _write_cancelled_state(tmp_path)
+    _mark_attempt_running(state_path, pid=99_999_999)
+    launcher_log = tmp_path / "interrupted-launcher.log"
+    launcher_log.write_text("interrupted", encoding="utf-8")
+    launch_state = _write_launch_state(
+        tmp_path / "interrupted-launch.json",
+        output_root=output_root,
+        executor_state_path=state_path,
+        log_path=launcher_log,
+    )
+
+    status_before = st.hf_adapter_continuation_executor_status_report(state_path)
+    launch_before = st.hf_adapter_continuation_executor_launch_status_report(
+        launch_state
+    )
+    plan = st.hf_adapter_continuation_executor_output_quarantine_report(
+        state_path,
+        attempt_id="generation-attempt-recovery",
+    )
+    resolution = st.quarantine_hf_adapter_continuation_executor_output(
+        state_path,
+        attempt_id="generation-attempt-recovery",
+        reason="verified interrupted subprocess",
+    )
+    loaded = st.load_hf_adapter_continuation_executor(state_path)
+    status_after = st.hf_adapter_continuation_executor_status_report(state_path)
+    launch_after = st.hf_adapter_continuation_executor_launch_status_report(
+        launch_state
+    )
+    attempt = loaded["generations"][0]
+
+    assert status_before["status"] == "interrupted"
+    assert status_before["recommended_action"] == "quarantine_interrupted_output"
+    assert status_before["interruption_claim"]["ready"] is True
+    assert launch_before["status"] == "executor_interrupted"
+    assert launch_before["recommended_action"] == "quarantine_interrupted_output"
+    assert plan["status"] == "quarantine_ready"
+    assert plan["interruption_claim"]["pid_alive_observed"] is False
+    assert plan["interruption_claim"]["process_group_alive_observed"] is False
+    assert resolution["created"] is True
+    assert resolution["attempt_status"] == "interrupted"
+    assert resolution["interruption_claim"]["schema"] == (
+        st.HF_ADAPTER_CONTINUATION_EXECUTOR_INTERRUPTION_CLAIM_SCHEMA
+    )
+    assert attempt["status"] == "interrupted"
+    assert attempt["status_before_interruption"] == "running"
+    assert attempt["interruption_claim"] == resolution["interruption_claim"]
+    assert "pending_generation" not in loaded
+    assert loaded["reason"] == "interrupted_generation_output_quarantined"
+    assert not output_dir.exists()
+    assert status_after["status"] == "output_quarantined"
+    assert status_after["healthy"] is True
+    assert status_after["recommended_action"] == "resume_executor"
+    assert status_after["interruption_claim"] == resolution["interruption_claim"]
+    assert launch_after["status"] == "recoverable"
+    assert launch_after["recommended_action"] == "resume_executor"
+
+
+@pytest.mark.skipif(os.name != "posix", reason="requires POSIX process groups")
+def test_quarantine_rejects_claim_that_no_longer_matches_attempt(
+    tmp_path: Path,
+) -> None:
+    state_path, _, _ = _write_cancelled_state(tmp_path)
+    _mark_attempt_running(state_path, pid=99_999_999)
+    st.quarantine_hf_adapter_continuation_executor_output(
+        state_path,
+        attempt_id="generation-attempt-recovery",
+    )
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["generations"][0]["pid"] = 100_000_000
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="interruption claim is invalid"):
+        st.hf_adapter_continuation_executor_output_quarantine_report(
+            state_path,
+            attempt_id="generation-attempt-recovery",
+        )
+
+
+def test_quarantine_refuses_live_interrupted_attempt(tmp_path: Path) -> None:
+    state_path, _, output_dir = _write_cancelled_state(tmp_path)
+    _mark_attempt_running(state_path, pid=os.getpid())
+
+    plan = st.hf_adapter_continuation_executor_output_quarantine_report(
+        state_path,
+        attempt_id="generation-attempt-recovery",
+    )
+    with pytest.raises(RuntimeError, match="attempt_process_alive"):
+        st.quarantine_hf_adapter_continuation_executor_output(
+            state_path,
+            attempt_id="generation-attempt-recovery",
+        )
+
+    assert plan["status"] == "interruption_unverified"
+    assert plan["ready"] is False
+    assert plan["action"] == "wait_for_process_exit"
+    assert plan["interruption_claim"]["issue"] == "attempt_process_alive"
+    assert output_dir.is_dir()
+
+
+def test_quarantine_treats_out_of_range_pid_as_unverified(tmp_path: Path) -> None:
+    state_path, _, output_dir = _write_cancelled_state(tmp_path)
+    _mark_attempt_running(state_path, pid=10**100)
+
+    plan = st.hf_adapter_continuation_executor_output_quarantine_report(
+        state_path,
+        attempt_id="generation-attempt-recovery",
+    )
+
+    assert plan["status"] == "interruption_unverified"
+    assert plan["ready"] is False
+    assert plan["action"] == "inspect_unverified_process"
+    assert plan["interruption_claim"]["issue"] == (
+        "attempt_process_liveness_unverified"
+    )
+    assert output_dir.is_dir()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="requires POSIX process groups")
+def test_interrupted_status_waits_for_independent_live_executor_lock(
+    tmp_path: Path,
+) -> None:
+    state_path, output_root, output_dir = _write_cancelled_state(tmp_path)
+    _mark_attempt_running(state_path, pid=99_999_999)
+    lock_path = output_root / st.HF_ADAPTER_CONTINUATION_EXECUTOR_LOCK_FILENAME
+    _write_lock(lock_path, pid=os.getpid())
+
+    status = st.hf_adapter_continuation_executor_status_report(state_path)
+    plan = st.hf_adapter_continuation_executor_output_quarantine_report(
+        state_path,
+        attempt_id="generation-attempt-recovery",
+    )
+
+    assert status["status"] == "interrupted"
+    assert status["interruption_claim"]["ready"] is True
+    assert status["interruption_lock_ready"] is False
+    assert "interrupted_output_lock_unavailable" in status["health_issues"]
+    assert status["recommended_action"] == "wait_for_executor_exit"
+    assert plan["status"] == "executor_locked"
+    assert plan["action"] == "wait_for_executor_exit"
+    assert output_dir.is_dir()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="requires POSIX process groups")
+def test_quarantine_refuses_surviving_interrupted_process_group(
+    tmp_path: Path,
+) -> None:
+    child_script = "import time; time.sleep(60)"
+    leader_script = (
+        "import subprocess, sys; "
+        f"child=subprocess.Popen([sys.executable, '-c', {child_script!r}], "
+        "stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); "
+        "print(child.pid, flush=True)"
+    )
+    leader = subprocess.Popen(
+        [sys.executable, "-c", leader_script],
+        stdout=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    assert leader.stdout is not None
+    child_pid = int(leader.stdout.readline().strip())
+    leader.wait(timeout=10)
+    state_path, _, output_dir = _write_cancelled_state(tmp_path)
+    _mark_attempt_running(state_path, pid=leader.pid)
+    try:
+        plan = st.hf_adapter_continuation_executor_output_quarantine_report(
+            state_path,
+            attempt_id="generation-attempt-recovery",
+        )
+        with pytest.raises(RuntimeError, match="attempt_process_group_alive"):
+            st.quarantine_hf_adapter_continuation_executor_output(
+                state_path,
+                attempt_id="generation-attempt-recovery",
+            )
+
+        assert plan["status"] == "interruption_unverified"
+        assert plan["action"] == "wait_for_process_group_exit"
+        assert plan["interruption_claim"]["pid"] == leader.pid
+        assert plan["interruption_claim"]["pid_alive_observed"] is False
+        assert plan["interruption_claim"]["process_group_alive_observed"] is True
+        assert output_dir.is_dir()
+    finally:
+        try:
+            os.killpg(leader.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            try:
+                os.kill(child_pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.05)
+
+
 def test_quarantine_rejects_wrong_attempt_claimed_output_and_symlink(
     tmp_path: Path,
 ) -> None:
@@ -423,6 +652,65 @@ def test_quarantine_adopts_move_left_by_interrupted_state_write(
     assert resolution["tree_snapshot"]["file_count"] == 2
 
 
+@pytest.mark.skipif(os.name != "posix", reason="requires POSIX process groups")
+def test_interrupted_quarantine_adopts_move_after_final_write_interruption(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_path, _, output_dir = _write_cancelled_state(tmp_path)
+    _mark_attempt_running(state_path, pid=99_999_999)
+    real_write_state = hf_adapter_executor_recovery._write_state
+    write_count = 0
+
+    def interrupt_final_write(path: Path, state: dict[str, object]) -> None:
+        nonlocal write_count
+        write_count += 1
+        if write_count == 2:
+            raise RuntimeError("simulated interrupted final state write")
+        real_write_state(path, state)
+
+    monkeypatch.setattr(
+        hf_adapter_executor_recovery,
+        "_write_state",
+        interrupt_final_write,
+    )
+    with pytest.raises(RuntimeError, match="interrupted final state write"):
+        st.quarantine_hf_adapter_continuation_executor_output(
+            state_path,
+            attempt_id="generation-attempt-recovery",
+            reason="interrupted claim adoption",
+        )
+    persisted = st.load_hf_adapter_continuation_executor(state_path)
+    attempt = persisted["generations"][0]
+    destination = Path(persisted["pending_output_resolution"]["destination_path"])
+
+    assert not output_dir.exists()
+    assert destination.is_dir()
+    assert attempt["status"] == "interrupted"
+    assert attempt["interruption_claim"]["ready"] is True
+    assert (
+        persisted["pending_output_resolution"]["interruption_claim"]
+        == (attempt["interruption_claim"])
+    )
+
+    monkeypatch.setattr(hf_adapter_executor_recovery, "_write_state", real_write_state)
+    plan = st.hf_adapter_continuation_executor_output_quarantine_report(
+        state_path,
+        attempt_id="generation-attempt-recovery",
+    )
+    resolution = st.quarantine_hf_adapter_continuation_executor_output(
+        state_path,
+        attempt_id="generation-attempt-recovery",
+        reason="ignored adoption reason",
+    )
+
+    assert plan["status"] == "quarantine_adoption_ready"
+    assert resolution["created"] is True
+    assert resolution["adopted_after_interrupted_write"] is True
+    assert resolution["reason"] == "interrupted claim adoption"
+    assert resolution["interruption_claim"] == attempt["interruption_claim"]
+
+
 def test_quarantine_cli_supports_plan_execute_and_health_gate(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -461,5 +749,6 @@ def test_quarantine_cli_supports_plan_execute_and_health_gate(
         "hf_adapter_continuation_executor_output_resolution_lines",
         "quarantine_hf_adapter_continuation_executor_output",
         "HF_ADAPTER_CONTINUATION_EXECUTOR_OUTPUT_RESOLUTION_SCHEMA",
+        "HF_ADAPTER_CONTINUATION_EXECUTOR_INTERRUPTION_CLAIM_SCHEMA",
     ):
         assert name in st.__all__

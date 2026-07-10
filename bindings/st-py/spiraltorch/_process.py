@@ -27,6 +27,8 @@ def local_pid_alive(pid: object) -> bool | None:
         kernel32.CloseHandle.restype = wintypes.BOOL
         process_query_limited_information = 0x1000
         still_active = 259
+        if pid > 0xFFFFFFFF:
+            return None
         handle = kernel32.OpenProcess(
             process_query_limited_information,
             False,
@@ -52,5 +54,34 @@ def local_pid_alive(pid: object) -> bool | None:
             return False
         if exc.errno == errno.EPERM:
             return True
+        return None
+    except (OverflowError, ValueError):
+        return None
+    return True
+
+
+def local_process_group_alive(process_group_id: object) -> bool | None:
+    """Observe a POSIX process group without claiming member identity."""
+
+    if (
+        os.name != "posix"
+        or isinstance(process_group_id, bool)
+        or not isinstance(process_group_id, int)
+        or process_group_id <= 0
+    ):
+        return None
+    try:
+        os.killpg(process_group_id, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError as exc:
+        if exc.errno == errno.ESRCH:
+            return False
+        if exc.errno == errno.EPERM:
+            return True
+        return None
+    except (OverflowError, ValueError):
         return None
     return True
