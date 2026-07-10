@@ -24,6 +24,8 @@ if str(PACKAGE_ROOT) not in sys.path:
 import spiraltorch as st
 from spiraltorch.hf_ft import (
     HF_GPT2_FT_DEFAULT_DEVICE_BACKENDS,
+    hf_gpt2_finetune_checkpoint_resume_lines,
+    hf_gpt2_finetune_checkpoint_resume_report,
     hf_gpt2_finetune_corpus_file_report,
     hf_gpt2_finetune_corpus_scan_report,
     hf_gpt2_finetune_dataset_fit_report,
@@ -46,8 +48,12 @@ from spiraltorch.hf_generation import (
     hf_generation_batch_size_compat,
 )
 from spiraltorch.hf_peft import (
+    hf_causal_lm_artifact_lines,
+    hf_causal_lm_artifact_report,
     hf_finetune_adapter_config,
+    load_hf_causal_lm_artifact,
     prepare_hf_finetune_model,
+    summarize_hf_causal_lm_artifact,
 )
 
 
@@ -83,6 +89,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument("--model-name", default=DEFAULT_MODEL)
+    parser.add_argument(
+        "--model-artifact-kind",
+        choices=("auto", "full-model", "peft-adapter"),
+        default="auto",
+        help=(
+            "Interpret --model-name as a full model or PEFT adapter. auto "
+            "detects local adapter_config.json artifacts; remote adapters must "
+            "use peft-adapter."
+        ),
+    )
     parser.add_argument(
         "--tokenizer-name",
         default=None,
@@ -482,6 +498,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--zspace-strength", type=float, default=1.0)
     args = parser.parse_args(argv)
     _apply_model_profile_defaults(args, parser=parser, raw_argv=raw_argv)
+    if args.model_artifact_kind == "peft-adapter" and args.finetune_mode != "lora":
+        parser.error("--model-artifact-kind peft-adapter requires --finetune-mode lora")
     if args.max_train_samples is not None and args.max_train_samples < 0:
         parser.error("--max-train-samples must be non-negative")
     if args.max_eval_samples is not None and args.max_eval_samples < 0:
@@ -750,6 +768,11 @@ def _apply_model_profile_defaults(
     raw_argv: Sequence[str],
 ) -> None:
     args._hf_finetune_model_profile = None
+    args._hf_model_name_explicit = _argv_has_option(raw_argv, "--model-name")
+    args._hf_tokenizer_name_explicit = _argv_has_option(
+        raw_argv,
+        "--tokenizer-name",
+    )
     if args.model_configs is None and args.model_profile is None:
         return
     try:
@@ -767,11 +790,18 @@ def _apply_model_profile_defaults(
         profile.get("model_name"),
         "--model-name",
     )
+    _set_profile_default(
+        args,
+        raw_argv,
+        "model_artifact_kind",
+        profile.get("artifact_kind") or profile.get("model_artifact_kind"),
+        "--model-artifact-kind",
+    )
     if _argv_has_option(raw_argv, "--model-name") and not _argv_has_option(
         raw_argv,
         "--tokenizer-name",
     ):
-        args.tokenizer_name = args.model_name
+        args.tokenizer_name = None
     else:
         _set_profile_default(
             args,
@@ -2030,12 +2060,88 @@ def _tokenizer_name(args: argparse.Namespace) -> str:
     tokenizer_name = getattr(args, "tokenizer_name", None)
     if isinstance(tokenizer_name, str) and tokenizer_name.strip():
         return tokenizer_name
+    if bool(getattr(args, "_hf_model_name_explicit", False)):
+        return str(args.model_name)
     profile = _resolved_model_profile(args)
     if profile is not None:
         profile_tokenizer = profile.get("tokenizer_name")
         if isinstance(profile_tokenizer, str) and profile_tokenizer.strip():
             return profile_tokenizer
     return str(args.model_name)
+
+
+def _tokenizer_override(args: argparse.Namespace) -> str | None:
+    tokenizer_name = getattr(args, "tokenizer_name", None)
+    if isinstance(tokenizer_name, str) and tokenizer_name.strip():
+        profile = _resolved_model_profile(args)
+        if (
+            not bool(getattr(args, "_hf_tokenizer_name_explicit", False))
+            and isinstance(profile, Mapping)
+            and profile.get("artifact_kind") == "peft_adapter"
+            and tokenizer_name == str(args.model_name)
+        ):
+            return None
+        return tokenizer_name
+    return None
+
+
+def _model_artifact_report(args: argparse.Namespace) -> dict[str, object]:
+    return hf_causal_lm_artifact_report(
+        args.model_name,
+        artifact_kind=args.model_artifact_kind,
+        tokenizer_name_or_path=_tokenizer_override(args),
+    )
+
+
+def _finetune_start_report(
+    args: argparse.Namespace,
+    artifact_report: Mapping[str, object],
+) -> dict[str, object]:
+    resume_report = dict(
+        getattr(args, "_hf_checkpoint_resume_report", {}) or {}
+    )
+    adapter_preloaded = artifact_report.get("artifact_kind") == "peft_adapter"
+    trainer_resume = args.resume_from_checkpoint is not None
+    if adapter_preloaded and trainer_resume:
+        mode = "adapter_trainer_checkpoint_resume"
+    elif trainer_resume:
+        mode = "trainer_checkpoint_resume"
+    elif adapter_preloaded:
+        mode = "adapter_warm_start"
+    elif args.finetune_mode == "lora":
+        mode = "new_adapter"
+    else:
+        mode = "full_model"
+    return {
+        "row_type": "hf_finetune_start_report",
+        "status": "ready",
+        "mode": mode,
+        "model_artifact_kind": artifact_report.get("artifact_kind"),
+        "model_source": artifact_report.get("artifact_source"),
+        "base_model_name_or_path": artifact_report.get(
+            "base_model_name_or_path"
+        ),
+        "adapter_preloaded": adapter_preloaded,
+        "adapter_weights_source": (
+            artifact_report.get("artifact_source") if adapter_preloaded else None
+        ),
+        "weights_only_warm_start": adapter_preloaded and not trainer_resume,
+        "trainer_checkpoint_resume": trainer_resume,
+        "trainer_checkpoint_source": (
+            None
+            if args.resume_from_checkpoint is None
+            else str(args.resume_from_checkpoint)
+        ),
+        "optimizer_scheduler_state_requested": trainer_resume,
+        "exact_state_available": resume_report.get("exact_state_available"),
+        "scheduler_horizon_exhausted": resume_report.get(
+            "scheduler_horizon_exhausted"
+        ),
+        "scheduler_extension_risk": resume_report.get(
+            "scheduler_extension_risk"
+        ),
+        "resume_recommendation": resume_report.get("recommendation"),
+    }
 
 
 def _runtime_backends(args: argparse.Namespace) -> list[str]:
@@ -2113,17 +2219,22 @@ def _base_run_card(
     torch: Any = None,
     datasets: Any = None,
 ) -> dict[str, Any]:
+    artifact_report = dict(
+        getattr(args, "_hf_causal_lm_artifact_report", {}) or {}
+    )
     return {
         "row_type": "hf_gpt2_finetune_run_card",
         "preflight": preflight,
         "disk_report": dict(preflight.get("disk_report") or {}),
         "disk_headroom_plan": dict(preflight.get("disk_headroom_plan") or {}),
+        "checkpoint_resume_report": preflight.get("checkpoint_resume_report"),
         "spiraltorch_version": getattr(st, "__version__", None),
         "transformers_version": getattr(transformers, "__version__", None),
         "torch_version": getattr(torch, "__version__", None),
         "datasets_version": getattr(datasets, "__version__", None),
         "model_name": args.model_name,
         "tokenizer_name": _tokenizer_name(args),
+        "model_artifact_kind_requested": args.model_artifact_kind,
         "model_configs": None if args.model_configs is None else str(args.model_configs),
         "model_profile_id": (
             None
@@ -2140,9 +2251,12 @@ def _base_run_card(
         "finetune_mode": args.finetune_mode,
         "adapter_config": dict(args._hf_finetune_adapter_config),
         "model_prepare_report": None,
-        "model_artifact_kind": (
-            "peft_adapter" if args.finetune_mode == "lora" else "full_model"
+        "model_artifact_kind": artifact_report.get("artifact_kind"),
+        "model_artifact_report": summarize_hf_causal_lm_artifact(
+            artifact_report
         ),
+        "model_artifact_load_report": None,
+        "finetune_start_report": _finetune_start_report(args, artifact_report),
         "adapter_saved": None,
         "resume_from_checkpoint": (
             None
@@ -2270,6 +2384,17 @@ def _main_with_runtime_access(
     args: argparse.Namespace,
     remote_access_report: Mapping[str, object],
 ) -> int:
+    model_artifact_report = _model_artifact_report(args)
+    args._hf_causal_lm_artifact_report = model_artifact_report
+    checkpoint_resume_report = (
+        None
+        if args.resume_from_checkpoint is None
+        else hf_gpt2_finetune_checkpoint_resume_report(
+            args.resume_from_checkpoint,
+            requested_max_steps=(args.max_steps if args.max_steps > 0 else None),
+        )
+    )
+    args._hf_checkpoint_resume_report = checkpoint_resume_report
     corpus_file_report = _corpus_file_report(args)
     corpus_scan_report = _corpus_scan_report(args)
     inference_distortion_source = (
@@ -2312,6 +2437,21 @@ def _main_with_runtime_access(
         else dict(_resolved_model_profile(args))
     )
     preflight["tokenizer_name"] = _tokenizer_name(args)
+    preflight["model_artifact_kind_requested"] = args.model_artifact_kind
+    preflight["model_artifact_report"] = dict(model_artifact_report)
+    preflight["model_artifact_summary"] = summarize_hf_causal_lm_artifact(
+        model_artifact_report
+    )
+    model_artifact_compatible = not (
+        model_artifact_report.get("artifact_kind") == "peft_adapter"
+        and args.finetune_mode != "lora"
+    )
+    preflight["model_artifact_compatible"] = model_artifact_compatible
+    preflight["finetune_start_report"] = _finetune_start_report(
+        args,
+        model_artifact_report,
+    )
+    preflight["checkpoint_resume_report"] = checkpoint_resume_report
     preflight["resume_from_checkpoint"] = (
         None
         if args.resume_from_checkpoint is None
@@ -2381,8 +2521,31 @@ def _main_with_runtime_access(
     if profile is not None:
         for line in hf_finetune_model_profile_lines(profile):
             print(line)
+    for line in hf_causal_lm_artifact_lines(model_artifact_report):
+        print(line)
+    if checkpoint_resume_report is not None:
+        for line in hf_gpt2_finetune_checkpoint_resume_lines(
+            checkpoint_resume_report
+        ):
+            print(line)
     for line in hf_gpt2_finetune_summary_lines(preflight):
         print(line)
+    if (
+        model_artifact_report.get("status") != "ready"
+        or not model_artifact_compatible
+    ):
+        if not model_artifact_compatible:
+            preflight["model_artifact_error"] = (
+                "PEFT adapter artifacts require --finetune-mode lora"
+            )
+        _write_card(preflight, args)
+        return 1
+    if (
+        checkpoint_resume_report is not None
+        and checkpoint_resume_report.get("status") == "invalid"
+    ):
+        _write_card(preflight, args)
+        return 1
     if not preflight["runtime_import_preflight_passed"]:
         _write_card(preflight, args)
         return 1
@@ -2410,16 +2573,29 @@ def _main_with_runtime_access(
         datasets=datasets,
     )
     try:
-        tokenizer = transformers.AutoTokenizer.from_pretrained(
-            _tokenizer_name(args),
-            **_loader_kwargs(args),
+        model, tokenizer, _model_config, model_artifact_load_report = (
+            load_hf_causal_lm_artifact(
+                args.model_name,
+                tokenizer_name_or_path=_tokenizer_override(args),
+                artifact_kind=args.model_artifact_kind,
+                is_trainable=(
+                    model_artifact_report.get("artifact_kind") == "peft_adapter"
+                ),
+                transformers_module=transformers,
+                loader_kwargs=_loader_kwargs(args),
+            )
+        )
+        card["model_artifact_load_report"] = summarize_hf_causal_lm_artifact(
+            model_artifact_load_report
+        )
+        card["model_artifact_kind"] = model_artifact_load_report.get(
+            "artifact_kind"
+        )
+        card["tokenizer_name"] = model_artifact_load_report.get(
+            "resolved_tokenizer_source"
         )
         if getattr(tokenizer, "pad_token", None) is None:
             tokenizer.pad_token = getattr(tokenizer, "eos_token", None)
-        model = transformers.AutoModelForCausalLM.from_pretrained(
-            args.model_name,
-            **_loader_kwargs(args),
-        )
         card["model_dtype_report"] = _prepare_model_train_dtype(model, args)
         if getattr(tokenizer, "pad_token_id", None) is not None:
             model.config.pad_token_id = tokenizer.pad_token_id
@@ -2548,6 +2724,9 @@ def _main_with_runtime_access(
             modules_to_save=args.lora_module_to_save,
             use_rslora=args.lora_use_rslora,
             gradient_checkpointing=args.gradient_checkpointing,
+            preloaded_adapter=(
+                model_artifact_report.get("artifact_kind") == "peft_adapter"
+            ),
         )
         card["model_prepare_report"] = model_prepare_report
     except Exception as exc:

@@ -10,7 +10,7 @@ import sys
 import tempfile
 import types
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
@@ -4262,6 +4262,58 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertTrue(
             any("hf_gpt2_ft_disk_headroom" in line for line in headroom_lines)
         )
+
+    def test_checkpoint_resume_audit_flags_exhausted_scheduler_horizon(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            checkpoint = Path(tmp) / "checkpoint-1"
+            checkpoint.mkdir()
+            (checkpoint / "trainer_state.json").write_text(
+                json.dumps(
+                    {
+                        "global_step": 1,
+                        "max_steps": 1,
+                        "log_history": [
+                            {"step": 1, "learning_rate": 0.0001}
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            for filename in ("optimizer.pt", "scheduler.pt", "rng_state.pth"):
+                (checkpoint / filename).write_bytes(b"state")
+            (checkpoint / "adapter_config.json").write_text("{}\n", encoding="utf-8")
+            (checkpoint / "adapter_model.safetensors").write_bytes(b"adapter")
+
+            report = st.hf_finetune_checkpoint_resume_report(
+                checkpoint,
+                requested_max_steps=2,
+            )
+            legacy = st.hf_gpt2_finetune_checkpoint_resume_report(
+                checkpoint,
+                requested_max_steps=2,
+            )
+            lines = st.hf_finetune_checkpoint_resume_lines(report)
+            invalid_checkpoint = Path(tmp) / "checkpoint-invalid"
+            invalid_checkpoint.mkdir()
+            invalid = st.hf_finetune_checkpoint_resume_report(
+                invalid_checkpoint,
+                requested_max_steps=2,
+            )
+
+        self.assertEqual(report["row_type"], "hf_finetune_checkpoint_resume_report")
+        self.assertEqual(legacy["row_type"], "hf_gpt2_finetune_checkpoint_resume_report")
+        self.assertEqual(report["status"], "ready_with_warning")
+        self.assertTrue(report["exact_state_available"])
+        self.assertTrue(report["scheduler_horizon_exhausted"])
+        self.assertTrue(report["scheduler_extension_risk"])
+        self.assertEqual(report["recommendation"], "adapter_weights_only_warm_start")
+        self.assertNotIn("--resume-from-checkpoint", report["recommended_args"])
+        self.assertIn("extension_risk=True", lines[0])
+        self.assertIn("hf_ft_checkpoint_resume", lines[0])
+        self.assertEqual(invalid["status"], "invalid")
+        self.assertEqual(invalid["recommendation"], "invalid_checkpoint")
+        self.assertEqual(invalid["recommended_args"], [])
+        self.assertIn("hf_finetune_checkpoint_resume_report", st.__all__)
 
     def test_example_dataloader_pin_memory_auto_prefers_cuda_only(self) -> None:
         module = load_bridge_example()
@@ -8951,6 +9003,108 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             lora_args._hf_finetune_adapter_config["mode"],
             "lora",
         )
+
+    def test_bridge_detects_adapter_warm_start_and_keeps_resume_distinct(
+        self,
+    ) -> None:
+        module = load_bridge_example()
+        with tempfile.TemporaryDirectory() as tmp:
+            adapter = Path(tmp) / "adapter"
+            adapter.mkdir()
+            (adapter / "adapter_config.json").write_text(
+                json.dumps(
+                    {
+                        "base_model_name_or_path": "org/base",
+                        "peft_type": "LORA",
+                        "task_type": "CAUSAL_LM",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (adapter / "adapter_model.safetensors").write_bytes(b"adapter")
+            args = module.parse_args(
+                [
+                    "--model-name",
+                    str(adapter),
+                    "--finetune-mode",
+                    "lora",
+                    "--metadata-only",
+                ]
+            )
+            artifact_report = module._model_artifact_report(args)
+
+        start = module._finetune_start_report(args, artifact_report)
+        resumed = module._finetune_start_report(
+            types.SimpleNamespace(
+                resume_from_checkpoint=Path("checkpoint-20"),
+                finetune_mode="lora",
+            ),
+            artifact_report,
+        )
+
+        self.assertEqual(artifact_report["artifact_kind"], "peft_adapter")
+        self.assertEqual(artifact_report["base_model_name_or_path"], "org/base")
+        self.assertIsNone(module._tokenizer_override(args))
+        self.assertEqual(start["mode"], "adapter_warm_start")
+        self.assertTrue(start["weights_only_warm_start"])
+        self.assertFalse(start["optimizer_scheduler_state_requested"])
+        self.assertEqual(resumed["mode"], "adapter_trainer_checkpoint_resume")
+        self.assertFalse(resumed["weights_only_warm_start"])
+        self.assertTrue(resumed["optimizer_scheduler_state_requested"])
+
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            module.parse_args(
+                [
+                    "--model-name",
+                    "org/adapter",
+                    "--model-artifact-kind",
+                    "peft-adapter",
+                    "--metadata-only",
+                ]
+            )
+
+    def test_adapter_artifact_kind_flows_through_model_profiles(self) -> None:
+        profile = st.resolve_hf_finetune_model_profile(
+            {
+                "schema": "spiraltorch.hf_finetune_model_configs.v1",
+                "profiles": [
+                    {
+                        "id": "continued-adapter",
+                        "model_name": "org/adapter",
+                        "artifact_kind": "peft-adapter",
+                        "tokenizer_name": "org/base",
+                        "training": {"finetune_mode": "lora"},
+                    }
+                ],
+            },
+            profile="continued-adapter",
+        )
+        cli_args = st.hf_finetune_model_profile_cli_args(profile)
+        preflight = st.hf_finetune_model_profile_preflight_report(
+            {
+                "profiles": [
+                    {
+                        "id": "continued-adapter",
+                        "model_name": "org/adapter",
+                        "artifact_kind": "peft-adapter",
+                        "tokenizer_name": "org/base",
+                        "training": {"finetune_mode": "lora"},
+                    }
+                ]
+            },
+            profile="continued-adapter",
+        )
+        contract = st.hf_finetune_model_profile_runtime_contract(profile)
+
+        self.assertEqual(profile["artifact_kind"], "peft_adapter")
+        self.assertIn("--model-artifact-kind", cli_args)
+        kind_index = cli_args.index("--model-artifact-kind")
+        self.assertEqual(cli_args[kind_index + 1], "peft-adapter")
+        self.assertEqual(preflight["artifact_kind"], "peft_adapter")
+        self.assertEqual(contract["artifact_kind"], "peft_adapter")
+        self.assertIn("--model-artifact-kind", contract["explicit_inference_runtime_cli_args"])
+        profile_lines = st.hf_finetune_model_profile_lines(profile)
+        self.assertIn("artifact_kind=peft_adapter", profile_lines[0])
 
     def test_bridge_model_profile_dataset_and_runtime_defaults(self) -> None:
         module = load_bridge_example()

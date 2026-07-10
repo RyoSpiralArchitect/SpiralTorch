@@ -11,7 +11,6 @@ import shutil
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Any
 
 from .hf_generation import (
     zspace_generation_control_bridge_cli_args,
@@ -44,6 +43,8 @@ __all__ = [
     "hf_finetune_preflight_report",
     "hf_finetune_corpus_file_report",
     "hf_finetune_corpus_scan_report",
+    "hf_finetune_checkpoint_resume_lines",
+    "hf_finetune_checkpoint_resume_report",
     "hf_finetune_dataset_fit_report",
     "hf_finetune_disk_headroom_plan",
     "hf_finetune_eval_report",
@@ -85,6 +86,8 @@ __all__ = [
     "hf_gpt2_finetune_preflight_report",
     "hf_gpt2_finetune_corpus_file_report",
     "hf_gpt2_finetune_corpus_scan_report",
+    "hf_gpt2_finetune_checkpoint_resume_lines",
+    "hf_gpt2_finetune_checkpoint_resume_report",
     "hf_gpt2_finetune_dataset_fit_report",
     "hf_gpt2_finetune_disk_headroom_plan",
     "hf_gpt2_finetune_eval_report",
@@ -777,6 +780,26 @@ def _string_or_none(value: object) -> str | None:
     return text or None
 
 
+def _hf_finetune_artifact_kind(value: object) -> str:
+    text = (_string_or_none(value) or "auto").lower().replace("-", "_")
+    aliases = {
+        "auto": "auto",
+        "model": "full_model",
+        "full": "full_model",
+        "full_model": "full_model",
+        "adapter": "peft_adapter",
+        "lora": "peft_adapter",
+        "peft": "peft_adapter",
+        "peft_adapter": "peft_adapter",
+    }
+    try:
+        return aliases[text]
+    except KeyError as exc:
+        raise ValueError(
+            "model artifact kind must be auto, full-model, or peft-adapter"
+        ) from exc
+
+
 def _deep_merge_hf_profile(
     base: Mapping[str, object],
     override: Mapping[str, object],
@@ -981,6 +1004,9 @@ def resolve_hf_finetune_model_profile(
     selected["runtime"] = runtime
     selected["id"] = profile_id
     selected["model_name"] = _string_or_none(selected.get("model_name")) or profile_id
+    selected["artifact_kind"] = _hf_finetune_artifact_kind(
+        selected.get("artifact_kind") or selected.get("model_artifact_kind")
+    )
     selected["tokenizer_name"] = (
         _string_or_none(selected.get("tokenizer_name"))
         or str(selected["model_name"])
@@ -1009,6 +1035,7 @@ def resolve_hf_finetune_model_profile(
         "profile_id": profile_id,
         "extends": _string_or_none(selected.get("extends")),
         "model_name": selected["model_name"],
+        "artifact_kind": selected["artifact_kind"],
         "tokenizer_name": selected["tokenizer_name"],
         "architecture": selected["architecture"],
         "model_family": selected["model_family"],
@@ -1068,6 +1095,7 @@ def hf_finetune_model_profile_catalog(
                 "is_default": profile_id == default_profile,
                 "extends": resolved.get("extends"),
                 "model_name": resolved.get("model_name"),
+                "artifact_kind": resolved.get("artifact_kind"),
                 "tokenizer_name": resolved.get("tokenizer_name"),
                 "architecture": resolved.get("architecture"),
                 "model_family": resolved.get("model_family"),
@@ -1165,6 +1193,7 @@ def hf_finetune_model_profile_catalog_lines(
             f"default={row.get('is_default')} "
             f"extends={row.get('extends')} "
             f"model={row.get('model_name')} "
+            f"artifact_kind={row.get('artifact_kind')} "
             f"tokenizer={row.get('tokenizer_name')} "
             f"family={row.get('model_family')} "
             f"scale={row.get('parameter_scale')} "
@@ -1299,6 +1328,7 @@ def hf_finetune_model_profile_preflight_report(
         "profile_id": resolved.get("profile_id"),
         "profile_extends": resolved.get("extends"),
         "model_name": resolved.get("model_name"),
+        "artifact_kind": resolved.get("artifact_kind"),
         "tokenizer_name": resolved.get("tokenizer_name"),
         "architecture": resolved.get("architecture"),
         "model_family": resolved.get("model_family"),
@@ -1367,6 +1397,7 @@ def hf_finetune_model_profile_preflight_lines(
             f"profile={report.get('profile_id')} "
             f"extends={_hf_finetune_profile_extends_from_payload(report)} "
             f"mode={report.get('mode')} "
+            f"artifact_kind={report.get('artifact_kind')} "
             f"preset={report.get('runtime_import_preset')} "
             f"required={report.get('require_runtime_import_preset')} "
             f"passed={report.get('runtime_import_preflight_passed')} "
@@ -1516,6 +1547,7 @@ def hf_finetune_model_profile_launch_plan(
         "profile_id": resolved.get("profile_id"),
         "profile_extends": resolved.get("extends"),
         "model_name": resolved.get("model_name"),
+        "artifact_kind": resolved.get("artifact_kind"),
         "tokenizer_name": resolved.get("tokenizer_name"),
         "architecture": resolved.get("architecture"),
         "command_source": "profile_reference"
@@ -1605,6 +1637,7 @@ def hf_finetune_model_profile_launch_plan_lines(
             f"profile={plan.get('profile_id')} "
             f"extends={_hf_finetune_profile_extends_from_payload(plan)} "
             f"mode={plan.get('mode')} "
+            f"artifact_kind={plan.get('artifact_kind')} "
             f"source={plan.get('command_source')} "
             f"train={plan.get('launch_train')} "
             f"metadata_only={plan.get('launch_metadata_only')} "
@@ -2063,6 +2096,13 @@ def hf_finetune_model_profile_cli_args(
     args: list[str] = []
     if include_model:
         _append_value_flag(args, "--model-name", report.get("model_name"))
+        artifact_kind = report.get("artifact_kind")
+        if artifact_kind not in {None, "auto"}:
+            _append_value_flag(
+                args,
+                "--model-artifact-kind",
+                str(artifact_kind).replace("_", "-"),
+            )
         if report.get("tokenizer_name") != report.get("model_name"):
             _append_value_flag(args, "--tokenizer-name", report.get("tokenizer_name"))
     training = _mapping_or_empty(report.get("training"), label="profile.training")
@@ -2228,6 +2268,7 @@ def hf_finetune_model_profile_lines(
             f"profile={profile.get('profile_id')} "
             f"extends={profile.get('extends')} "
             f"model={profile.get('model_name')} "
+            f"artifact_kind={profile.get('artifact_kind')} "
             f"tokenizer={profile.get('tokenizer_name')} "
             f"architecture={profile.get('architecture')} "
             f"family={profile.get('model_family')} "
@@ -2295,12 +2336,19 @@ def _hf_finetune_token_estimator_contract(
 def _hf_finetune_runtime_contract_explicit_cli_args(
     *,
     model_name: object,
+    artifact_kind: object,
     tokenizer_name: object,
     generation: Mapping[str, object],
     runtime: Mapping[str, object],
 ) -> list[str]:
     args: list[str] = []
     _append_value_flag(args, "--local-model", model_name)
+    if artifact_kind not in {None, "auto"}:
+        _append_value_flag(
+            args,
+            "--model-artifact-kind",
+            str(artifact_kind).replace("_", "-"),
+        )
     if tokenizer_name != model_name:
         _append_value_flag(args, "--tokenizer-name", tokenizer_name)
     _append_value_flag(args, "--max-new-tokens", generation.get("max_new_tokens"))
@@ -2375,6 +2423,7 @@ def hf_finetune_model_profile_runtime_contract(
     )
     explicit_inference_runtime_args = _hf_finetune_runtime_contract_explicit_cli_args(
         model_name=resolved.get("model_name"),
+        artifact_kind=resolved.get("artifact_kind"),
         tokenizer_name=resolved.get("tokenizer_name"),
         generation=generation,
         runtime=runtime,
@@ -2389,6 +2438,7 @@ def hf_finetune_model_profile_runtime_contract(
         "profile_id": resolved.get("profile_id"),
         "profile_extends": resolved.get("extends"),
         "model_name": resolved.get("model_name"),
+        "artifact_kind": resolved.get("artifact_kind"),
         "tokenizer_name": resolved.get("tokenizer_name"),
         "tokenizer_source": tokenizer_source,
         "architecture": resolved.get("architecture"),
@@ -2569,6 +2619,7 @@ def hf_finetune_model_profile_runtime_contract_lines(
             f"mode={report.get('mode')} "
             f"preset={report.get('runtime_import_preset')} "
             f"model={report.get('model_name')} "
+            f"artifact_kind={report.get('artifact_kind')} "
             f"tokenizer={report.get('tokenizer_name')} "
             f"tokenizer_source={report.get('tokenizer_source')} "
             f"family={report.get('model_family')} "
@@ -5822,6 +5873,199 @@ def hf_gpt2_finetune_disk_headroom_plan(
     }
 
 
+def hf_gpt2_finetune_checkpoint_resume_report(
+    checkpoint: str | Path,
+    *,
+    requested_max_steps: int | None = None,
+) -> dict[str, object]:
+    """Audit Trainer-state resume semantics before continuing an FT run."""
+
+    path = Path(checkpoint)
+    state_path = path / "trainer_state.json"
+    errors: list[str] = []
+    warnings: list[str] = []
+    state: dict[str, object] = {}
+    if not path.is_dir():
+        errors.append("checkpoint directory does not exist")
+    elif not state_path.is_file():
+        errors.append("checkpoint is missing trainer_state.json")
+    else:
+        try:
+            payload = json.loads(state_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            errors.append(f"failed to read trainer_state.json: {exc}")
+        else:
+            if isinstance(payload, Mapping):
+                state = dict(payload)
+                if not state:
+                    errors.append("trainer_state.json is empty")
+            else:
+                errors.append("trainer_state.json must contain an object")
+
+    global_step_number = _safe_number(state.get("global_step"))
+    saved_max_steps_number = _safe_number(state.get("max_steps"))
+    global_step = (
+        None if global_step_number is None else int(global_step_number)
+    )
+    saved_max_steps = (
+        None if saved_max_steps_number is None else int(saved_max_steps_number)
+    )
+    requested_steps = (
+        int(requested_max_steps)
+        if requested_max_steps is not None and int(requested_max_steps) > 0
+        else None
+    )
+    log_history = state.get("log_history")
+    last_learning_rate = None
+    if isinstance(log_history, Sequence) and not isinstance(log_history, (str, bytes)):
+        for row in reversed(log_history):
+            if isinstance(row, Mapping) and row.get("learning_rate") is not None:
+                last_learning_rate = _safe_number(row.get("learning_rate"))
+                break
+
+    optimizer_present = any(
+        (path / name).is_file() for name in ("optimizer.pt", "optimizer.bin")
+    )
+    scheduler_present = (path / "scheduler.pt").is_file()
+    rng_state_present = (path / "rng_state.pth").is_file() or any(
+        path.glob("rng_state_*.pth")
+    )
+    adapter_weights_present = (path / "adapter_config.json").is_file() and any(
+        (path / name).is_file()
+        for name in (
+            "adapter_model.safetensors",
+            "adapter_model.safetensors.index.json",
+            "adapter_model.bin",
+        )
+    )
+    full_model_weights_present = any(
+        (path / name).is_file()
+        for name in (
+            "model.safetensors",
+            "model.safetensors.index.json",
+            "pytorch_model.bin",
+            "pytorch_model.bin.index.json",
+        )
+    )
+    trainer_state_present = bool(state)
+    exact_state_available = (
+        trainer_state_present
+        and optimizer_present
+        and scheduler_present
+        and rng_state_present
+        and (adapter_weights_present or full_model_weights_present)
+    )
+    scheduler_horizon_exhausted = bool(
+        global_step is not None
+        and saved_max_steps is not None
+        and saved_max_steps > 0
+        and global_step >= saved_max_steps
+    )
+    extension_requested = bool(
+        requested_steps is not None
+        and global_step is not None
+        and requested_steps > global_step
+    )
+    scheduler_extension_risk = scheduler_horizon_exhausted and extension_requested
+    if trainer_state_present and not optimizer_present:
+        warnings.append("optimizer state is missing; resume cannot be exact")
+    if trainer_state_present and not scheduler_present:
+        warnings.append("scheduler state is missing; resume cannot preserve LR state")
+    if trainer_state_present and not rng_state_present:
+        warnings.append("RNG state is missing; sample order cannot be reproduced exactly")
+    if trainer_state_present and not (
+        adapter_weights_present or full_model_weights_present
+    ):
+        warnings.append("model or adapter weights are missing; resume cannot be exact")
+    if scheduler_extension_risk:
+        warnings.append(
+            "saved scheduler horizon is exhausted; extending exact resume may keep "
+            "the learning rate at zero"
+        )
+
+    if errors:
+        status = "invalid"
+    elif exact_state_available:
+        status = "ready_with_warning" if warnings else "ready"
+    else:
+        status = "partial"
+    if errors:
+        recommendation = "invalid_checkpoint"
+        recommended_args: list[str] = []
+    elif scheduler_extension_risk and adapter_weights_present:
+        recommendation = "adapter_weights_only_warm_start"
+        recommended_args = [
+            "--model-name",
+            str(path),
+            "--finetune-mode",
+            "lora",
+        ]
+    elif scheduler_extension_risk:
+        recommendation = "weights_only_warm_start"
+        recommended_args = ["--model-name", str(path)]
+    else:
+        recommendation = "exact_trainer_resume"
+        recommended_args = ["--model-name", str(path)]
+        if adapter_weights_present:
+            recommended_args.extend(["--finetune-mode", "lora"])
+        recommended_args.extend(["--resume-from-checkpoint", str(path)])
+    return {
+        "row_type": "hf_gpt2_finetune_checkpoint_resume_report",
+        "status": status,
+        "checkpoint": str(path),
+        "trainer_state_path": str(state_path),
+        "trainer_state_present": trainer_state_present,
+        "optimizer_state_present": optimizer_present,
+        "scheduler_state_present": scheduler_present,
+        "rng_state_present": rng_state_present,
+        "adapter_weights_present": adapter_weights_present,
+        "full_model_weights_present": full_model_weights_present,
+        "exact_state_available": exact_state_available,
+        "global_step": global_step,
+        "saved_max_steps": saved_max_steps,
+        "requested_max_steps": requested_steps,
+        "extension_requested": extension_requested,
+        "last_logged_learning_rate": last_learning_rate,
+        "scheduler_horizon_exhausted": scheduler_horizon_exhausted,
+        "scheduler_extension_risk": scheduler_extension_risk,
+        "recommendation": recommendation,
+        "recommended_args": recommended_args,
+        "errors": errors,
+        "warnings": warnings,
+    }
+
+
+def hf_gpt2_finetune_checkpoint_resume_lines(
+    report_or_checkpoint: Mapping[str, object] | str | Path,
+    *,
+    requested_max_steps: int | None = None,
+) -> list[str]:
+    """Render a compact Trainer checkpoint-resume audit."""
+
+    report = (
+        dict(report_or_checkpoint)
+        if isinstance(report_or_checkpoint, Mapping)
+        else hf_gpt2_finetune_checkpoint_resume_report(
+            report_or_checkpoint,
+            requested_max_steps=requested_max_steps,
+        )
+    )
+    return [
+        (
+            "hf_gpt2_ft_checkpoint_resume "
+            f"status={report.get('status')} "
+            f"checkpoint={report.get('checkpoint')} "
+            f"global_step={report.get('global_step')} "
+            f"saved_max_steps={report.get('saved_max_steps')} "
+            f"requested_max_steps={report.get('requested_max_steps')} "
+            f"exact_state={report.get('exact_state_available')} "
+            f"scheduler_exhausted={report.get('scheduler_horizon_exhausted')} "
+            f"extension_risk={report.get('scheduler_extension_risk')} "
+            f"recommendation={report.get('recommendation')}"
+        )
+    ]
+
+
 def _scale_up_disk_plan(command: Sequence[object]) -> dict[str, object]:
     plan = hf_gpt2_finetune_disk_headroom_plan(
         _command_flag_value(command, "--output-dir"),
@@ -8391,6 +8635,28 @@ def hf_finetune_dataset_fit_report(*args: object, **kwargs: object) -> dict[str,
 
 def hf_finetune_disk_headroom_plan(*args: object, **kwargs: object) -> dict[str, object]:
     return _generic_report_from(hf_gpt2_finetune_disk_headroom_plan, *args, **kwargs)
+
+
+def hf_finetune_checkpoint_resume_report(
+    *args: object,
+    **kwargs: object,
+) -> dict[str, object]:
+    return _generic_report_from(
+        hf_gpt2_finetune_checkpoint_resume_report,
+        *args,
+        **kwargs,
+    )
+
+
+def hf_finetune_checkpoint_resume_lines(
+    *args: object,
+    **kwargs: object,
+) -> list[str]:
+    return _generic_lines_from(
+        hf_gpt2_finetune_checkpoint_resume_lines,
+        *args,
+        **kwargs,
+    )
 
 
 def hf_finetune_eval_report(*args: object, **kwargs: object) -> dict[str, object]:

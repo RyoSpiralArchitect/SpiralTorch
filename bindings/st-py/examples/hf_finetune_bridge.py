@@ -51,6 +51,12 @@ def _install_generic_bindings() -> None:
     """Route legacy bridge internals through model-neutral SpiralTorch helpers."""
 
     bindings = {
+        "hf_gpt2_finetune_checkpoint_resume_lines": (
+            st.hf_finetune_checkpoint_resume_lines
+        ),
+        "hf_gpt2_finetune_checkpoint_resume_report": (
+            st.hf_finetune_checkpoint_resume_report
+        ),
         "hf_gpt2_finetune_corpus_file_report": st.hf_finetune_corpus_file_report,
         "hf_gpt2_finetune_corpus_scan_report": st.hf_finetune_corpus_scan_report,
         "hf_gpt2_finetune_dataset_fit_report": st.hf_finetune_dataset_fit_report,

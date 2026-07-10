@@ -11,6 +11,14 @@
   expose compact load provenance to local trace, Z-Space inference/generation,
   and checkpoint audit, and add `spiral-hf-adapter-export` for atomic safe-merge
   export to a standalone full model.
+- HF adapter continuation: let `spiral-hf-finetune` consume local or declared
+  remote PEFT artifacts as trainable inputs, reuse their active adapter without
+  double attachment, and preserve artifact/base/tokenizer/runtime-config
+  provenance in the run card and model-profile surfaces.
+- Trainer resume audit: add `hf_finetune_checkpoint_resume_report(...)` and
+  compact lines for optimizer/scheduler/RNG state availability, saved versus
+  requested step horizons, and the exhausted-scheduler case where adapter
+  weights-only warm start is safer than extending exact Trainer resume.
 - Transformers compatibility: apply the generation `batch_size` compatibility
   shim through nested PEFT base models so adapter-backed generation-control
   sweeps follow the same path as full models.
