@@ -44,12 +44,16 @@ def parse_args(argv: list[str] | None = None):
         args.run_card = args.output_dir / DEFAULT_RUN_CARD_FILENAME
     if not _argv_has_option(raw_argv, "--trainer-trace-jsonl"):
         args.trainer_trace_jsonl = args.output_dir / DEFAULT_TRAINER_TRACE_FILENAME
-    args._hf_finetune_launch_command = [
-        sys.executable,
-        str(Path(__file__).resolve()),
-        *raw_argv,
-    ]
-    args._hf_finetune_launch_command_source = "hf_finetune_bridge"
+    launch_prefix = globals().get("_SPIRALTORCH_LAUNCH_COMMAND_PREFIX")
+    if not isinstance(launch_prefix, (list, tuple)) or not launch_prefix:
+        launch_prefix = [sys.executable, str(Path(__file__).resolve())]
+    args._hf_finetune_launch_command = [*map(str, launch_prefix), *raw_argv]
+    args._hf_finetune_launch_command_source = str(
+        globals().get(
+            "_SPIRALTORCH_LAUNCH_COMMAND_SOURCE",
+            "hf_finetune_bridge",
+        )
+    )
     return args
 
 

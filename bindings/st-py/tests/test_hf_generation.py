@@ -842,7 +842,7 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
 
         self.assertEqual(
             sample["schema"],
-            "spiraltorch.hf_causal_lm_artifact_probe.sample.v5",
+            "spiraltorch.hf_causal_lm_artifact_probe.sample.v6",
         )
         self.assertEqual(sample["model_family"], "gpt_neox")
         self.assertTrue(sample["artifact_probe"]["adapter_loaded"])
@@ -971,6 +971,104 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
             executor_stop["status_report_transition_evidence"],
             "ready",
         )
+        executor_generation_2 = sample["executor"]["generation_2_run"]
+        portable_generation_3 = sample["executor"]["portable_generation_3_run"]
+        canonical_generation_4 = sample["executor"]["canonical_generation_4_run"]
+        self.assertEqual(executor_generation_2["attempt_status"], "promoted")
+        self.assertEqual(executor_generation_2["returncode"], 0)
+        self.assertEqual(executor_generation_2["selected_lineage_depth"], 2)
+        self.assertEqual(executor_generation_2["transition_count"], 2)
+        self.assertEqual(executor_generation_2["ready_transition_count"], 2)
+        self.assertEqual(
+            executor_generation_2["parent_adapter_id"],
+            multi_generation["selected_adapter_id"],
+        )
+        self.assertEqual(executor_generation_2["eval_handoff_delta"], 0.0)
+        self.assertGreater(executor_generation_2["child_eval_improvement"], 0.0)
+        self.assertEqual(executor_generation_2["postflight_status"], "ready")
+        self.assertEqual(portable_generation_3["attempt_status"], "promoted")
+        self.assertEqual(portable_generation_3["returncode"], 0)
+        self.assertEqual(
+            portable_generation_3["command_runtime_status"],
+            "portable_module",
+        )
+        self.assertTrue(portable_generation_3["command_runtime_portable"])
+        self.assertTrue(portable_generation_3["command_runtime_rewrite_applied"])
+        self.assertEqual(
+            portable_generation_3["source_entrypoint_kind"],
+            "python_bridge_script",
+        )
+        self.assertEqual(
+            portable_generation_3["runtime_module"],
+            "spiraltorch.hf_finetune_entrypoint",
+        )
+        self.assertTrue(portable_generation_3["runtime_module_importable"])
+        self.assertFalse(portable_generation_3["repository_bridge_required"])
+        self.assertEqual(portable_generation_3["selected_lineage_depth"], 3)
+        self.assertEqual(portable_generation_3["transition_count"], 3)
+        self.assertEqual(portable_generation_3["ready_transition_count"], 3)
+        self.assertEqual(
+            portable_generation_3["parent_adapter_id"],
+            executor_generation_2["child_adapter_id"],
+        )
+        self.assertEqual(portable_generation_3["eval_handoff_delta"], 0.0)
+        self.assertGreater(portable_generation_3["child_eval_improvement"], 0.0)
+        self.assertEqual(portable_generation_3["postflight_status"], "ready")
+        self.assertEqual(portable_generation_3["independent_chain_node_count"], 4)
+        self.assertEqual(
+            portable_generation_3["independent_chain_transition_count"],
+            3,
+        )
+        self.assertEqual(
+            portable_generation_3["independent_chain_ready_transition_count"],
+            3,
+        )
+        self.assertTrue(
+            portable_generation_3["independent_chain_continuation_ready"]
+        )
+        self.assertEqual(canonical_generation_4["attempt_status"], "promoted")
+        self.assertEqual(canonical_generation_4["returncode"], 0)
+        self.assertEqual(
+            canonical_generation_4["command_runtime_status"],
+            "portable_module",
+        )
+        self.assertEqual(
+            canonical_generation_4["run_card_launch_command_source"],
+            "spiraltorch.hf_finetune_entrypoint",
+        )
+        self.assertTrue(canonical_generation_4["run_card_matches_executor_command"])
+        self.assertEqual(canonical_generation_4["selected_lineage_depth"], 4)
+        self.assertEqual(canonical_generation_4["transition_count"], 4)
+        self.assertEqual(canonical_generation_4["ready_transition_count"], 4)
+        self.assertEqual(
+            canonical_generation_4["parent_adapter_id"],
+            portable_generation_3["child_adapter_id"],
+        )
+        self.assertEqual(canonical_generation_4["eval_handoff_delta"], 0.0)
+        self.assertGreater(canonical_generation_4["child_eval_improvement"], 0.0)
+        self.assertEqual(canonical_generation_4["postflight_status"], "ready")
+        self.assertEqual(canonical_generation_4["independent_chain_node_count"], 5)
+        self.assertEqual(
+            canonical_generation_4["independent_chain_transition_count"],
+            4,
+        )
+        self.assertEqual(
+            canonical_generation_4["independent_chain_ready_transition_count"],
+            4,
+        )
+        self.assertTrue(
+            canonical_generation_4["independent_chain_continuation_ready"]
+        )
+        self.assertEqual(canonical_generation_4["next_plan_status"], "ready")
+        self.assertEqual(canonical_generation_4["next_plan_lineage_depth"], 5)
+        self.assertEqual(
+            canonical_generation_4["next_plan_source_entrypoint_kind"],
+            "python_module",
+        )
+        self.assertFalse(
+            canonical_generation_4["next_plan_runtime_rewrite_applied"]
+        )
+        self.assertTrue(canonical_generation_4["next_plan_module_importable"])
 
     def test_inference_distortion_runtime_plan_and_cli_args_are_importable(self) -> None:
         runtime = zspace_inference_distortion_runtime_plan(

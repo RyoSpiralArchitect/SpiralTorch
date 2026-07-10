@@ -766,6 +766,20 @@ the executor validates its lineage manifest and fingerprint, then adds
 `--adapter-promotion-gate` to the child command so every later generation must
 produce promotion evidence before it can become the selected tip.
 
+The continuation runtime entrypoint does not depend on the repository staying
+at its original absolute path. Known `hf_finetune_bridge.py`, legacy
+`hf_gpt2_finetune_bridge.py`, and `spiral-hf-finetune` prefixes are rewritten
+to the current interpreter's
+`python -m spiraltorch.hf_finetune_entrypoint`. The state keeps the original
+prefix as provenance, preflight verifies that the packaged module is
+importable, and unknown custom launchers are preserved rather than guessed.
+Executor plan, attempt, and status lines expose this as
+`runtime=portable_module`. Corpus, model-config, and other data paths remain
+explicit preflight inputs and must still exist where the continuation runs.
+Runs launched through the installed entrypoint write the canonical module
+prefix back into their run cards, so subsequent plans are idempotent rather
+than repeatedly recovering a historical script path.
+
 For a long run, use the same executor policy in a detached process:
 
 ```bash

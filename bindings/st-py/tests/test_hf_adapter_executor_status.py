@@ -71,6 +71,11 @@ def _write_running_state(
                 "log_path": str(log_path),
                 "command_cwd": str(path.parent),
                 "parent_adapter_id": "child-adapter",
+                "command_runtime": {
+                    "status": "portable_module",
+                    "portable": True,
+                    "module": "spiraltorch.hf_finetune_entrypoint",
+                },
                 "source_transition": {
                     "status": "ready",
                     "transition_ready": True,
@@ -258,11 +263,15 @@ def test_status_reports_live_local_process_and_artifacts(
     assert report["ready_transition_count"] == 1
     assert report["selected_transition"]["child_adapter_id"] == "child-adapter"
     assert report["active_attempt"]["source_transition"]["transition_ready"] is True
+    assert report["active_attempt"]["command_runtime"]["status"] == (
+        "portable_module"
+    )
     assert code == 0
     assert "status=running" in output
     assert "pid_alive=True" in output
     assert "transition_evidence=ready" in output
     assert "hf_adapter_continuation_executor_status_transition" in output
+    assert "runtime=portable_module" in output
 
 
 def test_status_marks_pre_transition_state_as_legacy_without_breaking_health(

@@ -2768,7 +2768,12 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         )
         self.assertEqual(scale_up_command["status"], "ok")
         self.assertEqual(scale_up_command["scale_up_candidate_label"], "safe")
+        self.assertEqual(scale_up_command["source_base_command"], safe_command)
         self.assertEqual(scale_up_command["base_command"], safe_command)
+        self.assertEqual(
+            scale_up_command["command_runtime_status"],
+            "preserved_unknown",
+        )
         self.assertIn("--max-steps 20", scale_up_command["command_display"])
         self.assertIn("--max-train-samples 200", scale_up_command["command_display"])
         self.assertIn(
@@ -4521,7 +4526,12 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(args.wait_launch_script.name, "hf_finetune_wait_launch.py")
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["preflight_status"], "ready")
-        self.assertEqual(Path(result["command"][1]).name, "hf_finetune_bridge.py")
+        self.assertEqual(
+            result["command"][:3],
+            [sys.executable, "-m", "spiraltorch.hf_finetune_entrypoint"],
+        )
+        self.assertEqual(result["command_runtime_status"], "portable_module")
+        self.assertTrue(result["command_runtime"]["rewrite_applied"])
         self.assertIn("EleutherAI/pythia-70m-deduped", result["command_display"])
         self.assertIn("--max-steps 8", result["command_display"])
         self.assertIn("--max-train-samples 32", result["command_display"])
@@ -4555,8 +4565,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             "hf_finetune_scale_up_command",
         )
         self.assertEqual(
-            Path(implicit_artifact_command["command"][1]).name,
-            "hf_finetune_bridge.py",
+            implicit_artifact_command["command"][:3],
+            [sys.executable, "-m", "spiraltorch.hf_finetune_entrypoint"],
         )
         self.assertEqual(
             Path(
@@ -4578,6 +4588,130 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             st.HF_FINETUNE_TRAINER_TRACE_FILENAME,
         )
         self.assertNotIn("hf-gpt2-ft", implicit_artifact_command["command_display"])
+
+    def test_scale_up_rewrites_stale_bridge_path_to_importable_module(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            train_path = root / "train.txt"
+            train_path.write_text("portable spiral\n", encoding="utf-8")
+            stale_bridge = root / "removed-repo" / "hf_finetune_bridge.py"
+            source_command = [
+                sys.executable,
+                str(stale_bridge),
+                "--train-file",
+                str(train_path),
+                "--output-dir",
+                str(root / "source-run"),
+                "--max-steps",
+                "1",
+                "--max-train-samples",
+                "1",
+            ]
+            summary = {
+                "row_type": "hf_finetune_sweep_report_summary",
+                "scale_up_candidate_label": "stale-repo-run",
+                "scale_up_candidate_command": source_command,
+                "scale_up_candidate_output_dir": str(root / "source-run"),
+            }
+            report = st.hf_finetune_scale_up_command(
+                summary,
+                max_steps=2,
+                max_train_samples=2,
+            )
+            preflight = st.hf_finetune_scale_up_preflight_report(report)
+            tampered = dict(report)
+            tampered["command"] = [
+                sys.executable,
+                "-m",
+                "spiraltorch.missing_finetune_entrypoint",
+                *report["command"][3:],
+            ]
+            tampered_preflight = st.hf_finetune_scale_up_preflight_report(tampered)
+            custom = st.hf_finetune_scale_up_command(
+                {
+                    **summary,
+                    "scale_up_candidate_command": [
+                        "custom-finetune-runtime",
+                        *source_command[2:],
+                    ],
+                },
+                max_steps=2,
+                max_train_samples=2,
+            )
+            console = st.hf_finetune_scale_up_command(
+                {
+                    **summary,
+                    "scale_up_candidate_command": [
+                        "spiral-hf-finetune",
+                        *source_command[2:],
+                    ],
+                },
+                max_steps=2,
+                max_train_samples=2,
+            )
+            module_native = st.hf_finetune_scale_up_command(
+                {
+                    **summary,
+                    "scale_up_candidate_command": [
+                        sys.executable,
+                        "-m",
+                        "spiraltorch.hf_finetune_entrypoint",
+                        *source_command[2:],
+                    ],
+                },
+                max_steps=2,
+                max_train_samples=2,
+            )
+            module_help = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "spiraltorch.hf_finetune_entrypoint",
+                    "--help",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+        self.assertEqual(report["status"], "ok")
+        self.assertEqual(report["source_base_command"], source_command)
+        self.assertEqual(
+            report["command"][:3],
+            [sys.executable, "-m", "spiraltorch.hf_finetune_entrypoint"],
+        )
+        self.assertNotIn(str(stale_bridge), report["command"])
+        self.assertEqual(report["command_runtime_status"], "portable_module")
+        self.assertEqual(
+            report["command_runtime"]["source_kind"],
+            "python_bridge_script",
+        )
+        self.assertTrue(report["command_runtime"]["rewrite_applied"])
+        self.assertTrue(preflight["ready"])
+        self.assertIsNone(preflight["bridge_script"])
+        self.assertEqual(
+            preflight["command_runtime_module"],
+            "spiraltorch.hf_finetune_entrypoint",
+        )
+        self.assertTrue(preflight["command_runtime_module_importable"])
+        self.assertFalse(tampered_preflight["ready"])
+        self.assertIn(
+            "command_runtime",
+            {issue["field"] for issue in tampered_preflight["issues"]},
+        )
+        self.assertEqual(custom["command_runtime_status"], "preserved_unknown")
+        self.assertEqual(custom["command"][0], "custom-finetune-runtime")
+        self.assertEqual(console["command_runtime_status"], "portable_module")
+        self.assertEqual(console["command_runtime"]["source_kind"], "console_script")
+        self.assertTrue(console["command_runtime"]["rewrite_applied"])
+        self.assertEqual(module_native["command_runtime_status"], "portable_module")
+        self.assertEqual(
+            module_native["command_runtime"]["source_kind"],
+            "python_module",
+        )
+        self.assertFalse(module_native["command_runtime"]["rewrite_applied"])
+        self.assertEqual(module_help.returncode, 0, module_help.stderr)
+        self.assertIn("usage:", module_help.stdout)
 
     def test_sweep_example_resume_existing_reuses_successful_run_cards(self) -> None:
         module = load_sweep_example()
@@ -10166,6 +10300,40 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         )
         self.assertTrue(relaxed_args.no_require_hf_gpt2_ft)
         self.assertTrue(legacy_relaxed_args.no_require_hf_gpt2_ft)
+
+    def test_hf_cli_records_portable_module_launch_command(self) -> None:
+        module = load_generic_bridge_example()
+        module._SPIRALTORCH_LAUNCH_COMMAND_PREFIX = [
+            sys.executable,
+            "-m",
+            "spiraltorch.hf_finetune_entrypoint",
+        ]
+        module._SPIRALTORCH_LAUNCH_COMMAND_SOURCE = (
+            "spiraltorch.hf_finetune_entrypoint"
+        )
+        args = module.parse_args(["--metadata-only"])
+        with mock.patch.object(hf_cli, "_run_example", return_value=0) as run_example:
+            code = hf_cli.finetune_bridge_main(["--metadata-only"])
+
+        self.assertEqual(
+            args._hf_finetune_launch_command[:3],
+            [sys.executable, "-m", "spiraltorch.hf_finetune_entrypoint"],
+        )
+        self.assertEqual(
+            args._hf_finetune_launch_command_source,
+            "spiraltorch.hf_finetune_entrypoint",
+        )
+        self.assertEqual(code, 0)
+        run_example.assert_called_once_with(
+            "hf_finetune_bridge.py",
+            ["--metadata-only"],
+            launch_command_prefix=[
+                sys.executable,
+                "-m",
+                "spiraltorch.hf_finetune_entrypoint",
+            ],
+            launch_command_source="spiraltorch.hf_finetune_entrypoint",
+        )
 
     def test_installed_hf_profile_cli_resolves_profiles(self) -> None:
         stdout = io.StringIO()
