@@ -45,6 +45,7 @@ spiral-hf-adapter-executor = "spiraltorch.hf_cli:adapter_continuation_executor_m
 spiral-hf-adapter-executor-launch-status = "spiraltorch.hf_cli:adapter_continuation_executor_launch_status_main"
 spiral-hf-adapter-executor-quarantine = "spiraltorch.hf_cli:adapter_continuation_executor_quarantine_main"
 spiral-hf-adapter-executor-resume = "spiraltorch.hf_cli:adapter_continuation_executor_resume_main"
+spiral-hf-adapter-executor-runtime = "spiraltorch.hf_cli:adapter_continuation_executor_runtime_main"
 spiral-hf-adapter-executor-status = "spiraltorch.hf_cli:adapter_continuation_executor_status_main"
 spiral-hf-adapter-executor-stop = "spiraltorch.hf_cli:adapter_continuation_executor_stop_main"
 spiral-hf-adapter-executor-supervise = "spiraltorch.hf_cli:adapter_continuation_executor_supervise_main"

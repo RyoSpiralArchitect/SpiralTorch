@@ -1007,6 +1007,15 @@ from .hf_adapter_executor_supervisor_launch import (
     launch_hf_adapter_continuation_executor_supervisor,
     load_hf_adapter_continuation_executor_supervisor_launch,
 )
+from . import hf_adapter_executor_runtime as hf_adapter_executor_runtime
+from .hf_adapter_executor_runtime import (
+    HF_ADAPTER_CONTINUATION_EXECUTOR_RUNTIME_RECONCILE_SCHEMA,
+    HF_ADAPTER_CONTINUATION_EXECUTOR_RUNTIME_SCHEMA,
+    hf_adapter_continuation_executor_runtime_lines,
+    hf_adapter_continuation_executor_runtime_reconcile_lines,
+    hf_adapter_continuation_executor_runtime_report,
+    reconcile_hf_adapter_continuation_executor_runtime,
+)
 from . import hf_adapter_executor_recovery as hf_adapter_executor_recovery
 from .hf_adapter_executor_recovery import (
     HF_ADAPTER_CONTINUATION_EXECUTOR_INTERRUPTION_CLAIM_SCHEMA,
@@ -1278,6 +1287,8 @@ _EXTRAS = [
     "HF_ADAPTER_CONTINUATION_EXECUTOR_LAUNCH_SCHEMA",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_LAUNCH_STATUS_SCHEMA",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_RESUME_SCHEMA",
+    "HF_ADAPTER_CONTINUATION_EXECUTOR_RUNTIME_RECONCILE_SCHEMA",
+    "HF_ADAPTER_CONTINUATION_EXECUTOR_RUNTIME_SCHEMA",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISION_SCHEMA",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISOR_FILENAME",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISOR_LAUNCH_FILENAME",
@@ -1303,6 +1314,7 @@ _EXTRAS = [
     "hf_adapter_executor",
     "hf_adapter_executor_launch",
     "hf_adapter_executor_recovery",
+    "hf_adapter_executor_runtime",
     "hf_adapter_executor_status",
     "hf_adapter_executor_supervisor",
     "hf_adapter_executor_supervisor_launch",
@@ -1311,6 +1323,9 @@ _EXTRAS = [
     "hf_adapter_continuation_executor_launch_status_report",
     "hf_adapter_continuation_executor_resume_lines",
     "hf_adapter_continuation_executor_resume_report",
+    "hf_adapter_continuation_executor_runtime_lines",
+    "hf_adapter_continuation_executor_runtime_reconcile_lines",
+    "hf_adapter_continuation_executor_runtime_report",
     "hf_adapter_continuation_executor_supervision_lines",
     "hf_adapter_continuation_executor_supervision_report",
     "hf_adapter_continuation_executor_supervisor_lines",
@@ -1343,6 +1358,7 @@ _EXTRAS = [
     "load_hf_adapter_continuation_executor_supervisor_launch",
     "load_hf_adapter_continuation_executor_supervisor_stop_request",
     "request_hf_adapter_continuation_executor_stop",
+    "reconcile_hf_adapter_continuation_executor_runtime",
     "quarantine_hf_adapter_continuation_executor_output",
     "resume_hf_adapter_continuation_executor",
     "request_hf_adapter_continuation_executor_supervisor_stop",

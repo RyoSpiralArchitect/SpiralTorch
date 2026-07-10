@@ -15,6 +15,7 @@ hf_adapter: ModuleType
 hf_adapter_executor: ModuleType
 hf_adapter_executor_launch: ModuleType
 hf_adapter_executor_recovery: ModuleType
+hf_adapter_executor_runtime: ModuleType
 hf_adapter_executor_status: ModuleType
 hf_adapter_executor_supervisor: ModuleType
 hf_adapter_executor_supervisor_launch: ModuleType
@@ -577,6 +578,8 @@ HF_ADAPTER_CONTINUATION_EXECUTOR_LAUNCH_LOCK_FILENAME: str
 HF_ADAPTER_CONTINUATION_EXECUTOR_LAUNCH_SCHEMA: str
 HF_ADAPTER_CONTINUATION_EXECUTOR_LAUNCH_STATUS_SCHEMA: str
 HF_ADAPTER_CONTINUATION_EXECUTOR_RESUME_SCHEMA: str
+HF_ADAPTER_CONTINUATION_EXECUTOR_RUNTIME_RECONCILE_SCHEMA: str
+HF_ADAPTER_CONTINUATION_EXECUTOR_RUNTIME_SCHEMA: str
 HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISION_SCHEMA: str
 HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISOR_FILENAME: str
 HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISOR_LAUNCH_FILENAME: str
@@ -801,6 +804,34 @@ def resume_hf_adapter_continuation_executor(
 ) -> Dict[str, object]: ...
 def hf_adapter_continuation_executor_resume_lines(
     report_or_path: Mapping[str, object] | str | PathLike[str],
+) -> List[str]: ...
+def hf_adapter_continuation_executor_runtime_report(
+    report_or_path: Mapping[str, object] | str | PathLike[str],
+    *,
+    supervisor_state_path: str | PathLike[str] | None = ...,
+    supervisor_launch_state_path: str | PathLike[str] | None = ...,
+) -> Dict[str, object]: ...
+def hf_adapter_continuation_executor_runtime_lines(
+    report_or_path: Mapping[str, object] | str | PathLike[str],
+    *,
+    supervisor_state_path: str | PathLike[str] | None = ...,
+    supervisor_launch_state_path: str | PathLike[str] | None = ...,
+) -> List[str]: ...
+def reconcile_hf_adapter_continuation_executor_runtime(
+    report_or_path: Mapping[str, object] | str | PathLike[str],
+    *,
+    restart_supervisor: bool = ...,
+    max_resumes: int = ...,
+    poll_interval_seconds: float = ...,
+    timeout_seconds: float = ...,
+    handoff_timeout_seconds: float = ...,
+    launch_handoff_timeout_seconds: float = ...,
+    supervisor_state_path: str | PathLike[str] | None = ...,
+    supervisor_launch_state_path: str | PathLike[str] | None = ...,
+    command_cwd: str | PathLike[str] | None = ...,
+) -> Dict[str, object]: ...
+def hf_adapter_continuation_executor_runtime_reconcile_lines(
+    report: Mapping[str, object],
 ) -> List[str]: ...
 def hf_adapter_continuation_executor_supervision_report(
     report_or_path: Mapping[str, object] | str | PathLike[str],
@@ -10035,6 +10066,7 @@ __all__ = [
     "hf_adapter_executor",
     "hf_adapter_executor_launch",
     "hf_adapter_executor_recovery",
+    "hf_adapter_executor_runtime",
     "hf_adapter_executor_status",
     "hf_adapter_executor_supervisor",
     "hf_adapter_executor_supervisor_launch",
@@ -10065,6 +10097,8 @@ __all__ = [
     "HF_ADAPTER_CONTINUATION_EXECUTOR_LAUNCH_SCHEMA",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_LAUNCH_STATUS_SCHEMA",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_RESUME_SCHEMA",
+    "HF_ADAPTER_CONTINUATION_EXECUTOR_RUNTIME_RECONCILE_SCHEMA",
+    "HF_ADAPTER_CONTINUATION_EXECUTOR_RUNTIME_SCHEMA",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISION_SCHEMA",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISOR_FILENAME",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISOR_LAUNCH_FILENAME",
@@ -10098,6 +10132,9 @@ __all__ = [
     "hf_adapter_continuation_executor_launch_status_report",
     "hf_adapter_continuation_executor_resume_lines",
     "hf_adapter_continuation_executor_resume_report",
+    "hf_adapter_continuation_executor_runtime_lines",
+    "hf_adapter_continuation_executor_runtime_reconcile_lines",
+    "hf_adapter_continuation_executor_runtime_report",
     "hf_adapter_continuation_executor_supervision_lines",
     "hf_adapter_continuation_executor_supervision_report",
     "hf_adapter_continuation_executor_supervisor_lines",
@@ -10128,6 +10165,7 @@ __all__ = [
     "load_hf_adapter_continuation_executor_supervisor_launch",
     "load_hf_adapter_continuation_executor_supervisor_stop_request",
     "request_hf_adapter_continuation_executor_stop",
+    "reconcile_hf_adapter_continuation_executor_runtime",
     "quarantine_hf_adapter_continuation_executor_output",
     "resume_hf_adapter_continuation_executor",
     "request_hf_adapter_continuation_executor_supervisor_stop",
