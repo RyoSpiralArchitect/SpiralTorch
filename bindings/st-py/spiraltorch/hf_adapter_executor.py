@@ -1773,6 +1773,7 @@ def _run_hf_adapter_continuation_executor_unlocked(
             "lineage_depth": next_depth,
             "output_dir": str(output_dir),
             "source_transition": _selected_transition(chain),
+            "command_runtime": command.get("command_runtime"),
             "command": command,
             "preflight": preflight,
         }
@@ -1865,6 +1866,7 @@ def _run_hf_adapter_continuation_executor_unlocked(
             "lineage_depth": next_depth,
             "output_dir": str(output_dir),
             "source_transition": _selected_transition(chain),
+            "command_runtime": command.get("command_runtime"),
             "command": resolved_command,
             "command_display": shlex.join(resolved_command),
             "scale_up": command,
@@ -2126,6 +2128,12 @@ def hf_adapter_continuation_executor_lines(
     if isinstance(pending, Mapping):
         command = pending.get("command")
         command_status = command.get("status") if isinstance(command, Mapping) else None
+        command_runtime = pending.get("command_runtime")
+        runtime_status = (
+            command_runtime.get("status")
+            if isinstance(command_runtime, Mapping)
+            else None
+        )
         preflight = pending.get("preflight")
         preflight_status = (
             preflight.get("status") if isinstance(preflight, Mapping) else None
@@ -2135,6 +2143,7 @@ def hf_adapter_continuation_executor_lines(
             f"status={pending.get('status')} "
             f"depth={pending.get('lineage_depth')} "
             f"command={command_status} "
+            f"runtime={runtime_status} "
             f"preflight={preflight_status} "
             f"output={pending.get('output_dir')}"
         )
@@ -2152,6 +2161,12 @@ def hf_adapter_continuation_executor_lines(
             if isinstance(postflight, Mapping)
             else None
         )
+        command_runtime = raw_attempt.get("command_runtime")
+        runtime_status = (
+            command_runtime.get("status")
+            if isinstance(command_runtime, Mapping)
+            else None
+        )
         lines.append(
             "hf_adapter_continuation_executor_generation "
             f"status={raw_attempt.get('status')} "
@@ -2160,6 +2175,7 @@ def hf_adapter_continuation_executor_lines(
             f"pid={raw_attempt.get('pid')} "
             f"host={raw_attempt.get('hostname')} "
             f"adapter={raw_attempt.get('adapter_id')} "
+            f"runtime={runtime_status} "
             "postflight="
             f"{postflight.get('status') if isinstance(postflight, Mapping) else None} "
             f"transition={postflight_transition_status} "

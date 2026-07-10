@@ -15,6 +15,10 @@ PREFIXES = (
     "spiral-hf-",
     "spiral-zspace-inference-distortion-",
 )
+MODULE_ENTRYPOINTS = (
+    "spiraltorch.hf_artifact_probe_worker",
+    "spiraltorch.hf_finetune_entrypoint",
+)
 
 
 def main() -> int:
@@ -49,20 +53,18 @@ def main() -> int:
         if completed.returncode != 0:
             detail = (completed.stderr or completed.stdout)[-500:].strip()
             failures.append(f"{name}: exit={completed.returncode} {detail}")
-    worker = subprocess.run(
-        [sys.executable, "-m", "spiraltorch.hf_artifact_probe_worker", "--help"],
-        check=False,
-        capture_output=True,
-        env=env,
-        text=True,
-        timeout=60.0,
-    )
-    if worker.returncode != 0:
-        detail = (worker.stderr or worker.stdout)[-500:].strip()
-        failures.append(
-            "spiraltorch.hf_artifact_probe_worker: "
-            f"exit={worker.returncode} {detail}"
+    for module in MODULE_ENTRYPOINTS:
+        completed = subprocess.run(
+            [sys.executable, "-m", module, "--help"],
+            check=False,
+            capture_output=True,
+            env=env,
+            text=True,
+            timeout=60.0,
         )
+        if completed.returncode != 0:
+            detail = (completed.stderr or completed.stdout)[-500:].strip()
+            failures.append(f"{module}: exit={completed.returncode} {detail}")
     if failures:
         raise RuntimeError("HF CLI smoke failed:\n" + "\n".join(failures))
     print(f"hf_console_scripts=ok count={len(names)}")

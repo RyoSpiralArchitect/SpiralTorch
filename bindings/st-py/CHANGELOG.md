@@ -51,6 +51,16 @@
   lines expose transition evidence, fail health checks for explicitly non-ready
   evidence, and identify pre-transition states as legacy rather than breaking
   their observability.
+- Wheel-native continuation runtime: scale-up recognizes recorded generic and
+  legacy HF bridge scripts plus the installed `spiral-hf-finetune` command and
+  rewrites them to the current interpreter's
+  `python -m spiraltorch.hf_finetune_entrypoint`. Command artifacts retain the
+  source prefix, preflight checks module importability, executor plan/attempt/
+  status output records the selected runtime, and unknown custom launchers are
+  left unchanged. Installed entrypoints also write the canonical module prefix
+  into new run cards. The Pythia 70M sample now includes real depth-two through
+  depth-four executor promotions, independent chain audits, and an idempotent
+  depth-five plan from a module-native parent.
 - Resumable adapter executor: add `spiral-hf-adapter-executor` and an importable
   state machine that closes audit, policy, scale-up, preflight, execution, and
   live postflight promotion verification into one atomic artifact. Successful,

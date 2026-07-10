@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import math
 import os
 import shlex
 import shutil
+import sys
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
@@ -144,6 +146,15 @@ HF_GPT2_FT_RUN_CARD_FILENAME = "spiraltorch-hf-gpt2-ft-run-card.json"
 HF_GPT2_FT_TRAINER_TRACE_FILENAME = "spiraltorch-hf-gpt2-ft-trainer-trace.jsonl"
 HF_FINETUNE_RUN_CARD_FILENAME = "spiraltorch-hf-finetune-run-card.json"
 HF_FINETUNE_TRAINER_TRACE_FILENAME = "spiraltorch-hf-finetune-trainer-trace.jsonl"
+_HF_FINETUNE_ENTRYPOINT_MODULE = "spiraltorch.hf_finetune_entrypoint"
+_HF_FINETUNE_BRIDGE_SCRIPT_NAMES = {
+    "hf_finetune_bridge.py",
+    "hf_gpt2_finetune_bridge.py",
+}
+_HF_FINETUNE_CONSOLE_SCRIPT_NAMES = {
+    "spiral-hf-finetune",
+    "spiral-hf-finetune.exe",
+}
 HF_GPT2_FT_DISTORTION_EVAL_PENALTY_WEIGHT = 0.1
 HF_GPT2_FT_REQUIRED_PYTHON_PACKAGES = [
     "transformers",
@@ -6079,6 +6090,73 @@ def _scale_up_disk_plan(command: Sequence[object]) -> dict[str, object]:
 _SCALE_UP_ADAPTER_CONTINUATION_POLICIES = {"auto", "replay", "continue"}
 
 
+def _scale_up_portable_runtime_command(
+    command: Sequence[object],
+) -> tuple[list[str], dict[str, object]]:
+    values = [str(item) for item in command]
+    source_prefix: list[str] = []
+    source_kind = "unknown"
+    argument_offset: int | None = None
+
+    if (
+        len(values) >= 3
+        and values[1] == "-m"
+        and values[2] == _HF_FINETUNE_ENTRYPOINT_MODULE
+    ):
+        source_prefix = values[:3]
+        source_kind = "python_module"
+        argument_offset = 3
+    elif (
+        len(values) >= 2
+        and Path(values[0]).name.lower().startswith(("python", "pypy"))
+        and Path(values[1]).name.lower() in _HF_FINETUNE_BRIDGE_SCRIPT_NAMES
+    ):
+        source_prefix = values[:2]
+        source_kind = "python_bridge_script"
+        argument_offset = 2
+    elif (
+        values
+        and Path(values[0]).name.lower() in _HF_FINETUNE_BRIDGE_SCRIPT_NAMES
+    ):
+        source_prefix = values[:1]
+        source_kind = "bridge_script"
+        argument_offset = 1
+    elif (
+        values
+        and Path(values[0]).name.lower() in _HF_FINETUNE_CONSOLE_SCRIPT_NAMES
+    ):
+        source_prefix = values[:1]
+        source_kind = "console_script"
+        argument_offset = 1
+
+    if argument_offset is None:
+        return values, {
+            "status": "preserved_unknown",
+            "portable": False,
+            "rewrite_applied": False,
+            "source_kind": source_kind,
+            "source_prefix": source_prefix,
+            "python_executable": None,
+            "module": None,
+        }
+
+    portable_prefix = [
+        str(sys.executable),
+        "-m",
+        _HF_FINETUNE_ENTRYPOINT_MODULE,
+    ]
+    portable = [*portable_prefix, *values[argument_offset:]]
+    return portable, {
+        "status": "portable_module",
+        "portable": True,
+        "rewrite_applied": portable != values,
+        "source_kind": source_kind,
+        "source_prefix": source_prefix,
+        "python_executable": portable_prefix[0],
+        "module": _HF_FINETUNE_ENTRYPOINT_MODULE,
+    }
+
+
 def _scale_up_adapter_continuation_policy(value: object) -> str:
     policy = str(value or "auto").strip().lower().replace("_", "-")
     if policy not in _SCALE_UP_ADAPTER_CONTINUATION_POLICIES:
@@ -6575,14 +6653,17 @@ def hf_gpt2_finetune_scale_up_command(
             "scale_up_candidate_label": summary.get("scale_up_candidate_label"),
             **chain_provenance,
         }
-    base_command = [str(item) for item in command_value]
+    source_base_command = [str(item) for item in command_value]
+    base_command, command_runtime = _scale_up_portable_runtime_command(
+        source_base_command
+    )
     source_run_card = summary.get("scale_up_candidate_run_card") or _command_flag_value(
-        base_command,
+        source_base_command,
         "--run-card",
     )
     source_trace = summary.get(
         "scale_up_candidate_trainer_trace_jsonl"
-    ) or _command_flag_value(base_command, "--trainer-trace-jsonl")
+    ) or _command_flag_value(source_base_command, "--trainer-trace-jsonl")
     run_card_filename = (
         HF_FINETUNE_RUN_CARD_FILENAME
         if source_run_card is not None
@@ -6813,6 +6894,10 @@ def hf_gpt2_finetune_scale_up_command(
         "adapter_continuation_checkpoint_resume": continuation.get(
             "checkpoint_resume"
         ),
+        "command_runtime": command_runtime,
+        "command_runtime_status": command_runtime.get("status"),
+        "source_base_command": source_base_command,
+        "source_base_command_display": _shell_join_args(source_base_command),
         "base_command": base_command,
         "base_command_display": _shell_join_args(base_command),
         "command": command,
@@ -6937,6 +7022,8 @@ def hf_gpt2_finetune_scale_up_preflight_report(
             "promotion_chain_selected_transition": artifact.get(
                 "promotion_chain_selected_transition"
             ),
+            "command_runtime": artifact.get("command_runtime"),
+            "command_runtime_status": artifact.get("command_runtime_status"),
             "command": command,
             "error_count": 1,
             "warning_count": 0,
@@ -7005,6 +7092,69 @@ def hf_gpt2_finetune_scale_up_preflight_report(
                 "message": "bridge script does not exist",
             }
         )
+
+    _, detected_command_runtime = _scale_up_portable_runtime_command(command)
+    artifact_command_runtime = artifact.get("command_runtime")
+    command_runtime = (
+        dict(artifact_command_runtime)
+        if isinstance(artifact_command_runtime, Mapping)
+        else detected_command_runtime
+    )
+    command_runtime_status = artifact.get("command_runtime_status") or (
+        command_runtime.get("status")
+    )
+    detected_runtime_status = detected_command_runtime.get("status")
+    if (
+        isinstance(artifact_command_runtime, Mapping)
+        and command_runtime_status != detected_runtime_status
+    ):
+        issues.append(
+            {
+                "severity": "error",
+                "field": "command_runtime",
+                "path": detected_runtime_status,
+                "message": "command runtime metadata does not match command prefix",
+            }
+        )
+    runtime_module = (
+        command[2]
+        if len(command) >= 3 and command[1] == "-m"
+        else None
+    )
+    runtime_module_importable: bool | None = None
+    if command_runtime_status == "portable_module":
+        if runtime_module != _HF_FINETUNE_ENTRYPOINT_MODULE:
+            issues.append(
+                {
+                    "severity": "error",
+                    "field": "command_runtime",
+                    "path": runtime_module,
+                    "message": "portable fine-tune module entrypoint is missing",
+                }
+            )
+        else:
+            try:
+                runtime_module_importable = (
+                    importlib.util.find_spec(runtime_module) is not None
+                )
+            except (ImportError, ModuleNotFoundError, ValueError):
+                runtime_module_importable = False
+            inputs.append(
+                {
+                    "field": "command_runtime_module",
+                    "module": runtime_module,
+                    "importable": runtime_module_importable,
+                }
+            )
+            if not runtime_module_importable:
+                issues.append(
+                    {
+                        "severity": "error",
+                        "field": "command_runtime_module",
+                        "path": runtime_module,
+                        "message": "portable fine-tune module is not importable",
+                    }
+                )
 
     for flag in (
         "--train-file",
@@ -7379,6 +7529,10 @@ def hf_gpt2_finetune_scale_up_preflight_report(
         "executable": executable,
         "executable_resolved": executable_resolved,
         "bridge_script": bridge_script,
+        "command_runtime": command_runtime,
+        "command_runtime_status": command_runtime_status,
+        "command_runtime_module": runtime_module,
+        "command_runtime_module_importable": runtime_module_importable,
         "adapter_continuation_policy": artifact.get(
             "adapter_continuation_policy"
         ),
@@ -7423,7 +7577,10 @@ def hf_gpt2_finetune_scale_up_preflight_lines(
             f"status={report.get('status')} "
             f"errors={report.get('error_count')} "
             f"warnings={report.get('warning_count')} "
-            f"executable={report.get('executable_resolved') or report.get('executable')}"
+            f"executable={report.get('executable_resolved') or report.get('executable')} "
+            f"runtime={report.get('command_runtime_status')} "
+            f"module={report.get('command_runtime_module')} "
+            f"module_importable={report.get('command_runtime_module_importable')}"
         )
     ]
     if report.get("adapter_continuation_policy") is not None:

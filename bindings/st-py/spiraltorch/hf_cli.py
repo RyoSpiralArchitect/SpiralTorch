@@ -177,8 +177,18 @@ def _load_example(name: str) -> ModuleType:
     return module
 
 
-def _run_example(name: str, argv: Sequence[str] | None = None) -> int:
+def _run_example(
+    name: str,
+    argv: Sequence[str] | None = None,
+    *,
+    launch_command_prefix: Sequence[str] | None = None,
+    launch_command_source: str | None = None,
+) -> int:
     module = _load_example(name)
+    if launch_command_prefix is not None:
+        module._SPIRALTORCH_LAUNCH_COMMAND_PREFIX = list(launch_command_prefix)
+    if launch_command_source is not None:
+        module._SPIRALTORCH_LAUNCH_COMMAND_SOURCE = launch_command_source
     main = getattr(module, "main", None)
     if not callable(main):
         raise AttributeError(f"SpiralTorch HF CLI example has no main(): {name}")
@@ -1731,7 +1741,16 @@ def artifact_probe_main(argv: Sequence[str] | None = None) -> int:
 
 
 def finetune_bridge_main(argv: Sequence[str] | None = None) -> int:
-    return _run_example("hf_finetune_bridge.py", argv)
+    return _run_example(
+        "hf_finetune_bridge.py",
+        argv,
+        launch_command_prefix=[
+            sys.executable,
+            "-m",
+            "spiraltorch.hf_finetune_entrypoint",
+        ],
+        launch_command_source="spiraltorch.hf_finetune_entrypoint",
+    )
 
 
 def finetune_sweep_main(argv: Sequence[str] | None = None) -> int:

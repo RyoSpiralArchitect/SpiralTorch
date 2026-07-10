@@ -240,6 +240,17 @@ def test_executor_dry_run_writes_replayable_state_and_cli(
     assert report["pending_generation"]["preflight"][
         "promotion_chain_selected_transition"
     ] == selected_transition
+    command_runtime = report["pending_generation"]["command_runtime"]
+    assert command_runtime["status"] == "portable_module"
+    assert command_runtime["source_kind"] == "python_bridge_script"
+    assert report["pending_generation"]["command"]["command"][:3] == [
+        sys.executable,
+        "-m",
+        "spiraltorch.hf_finetune_entrypoint",
+    ]
+    assert report["pending_generation"]["preflight"][
+        "command_runtime_module_importable"
+    ] is True
     assert report["generation_attempt_count"] == 0
     assert not (output_root / "generation-002").exists()
     assert loaded["status"] == "ready"
@@ -255,6 +266,7 @@ def test_executor_dry_run_writes_replayable_state_and_cli(
         line.startswith("hf_adapter_continuation_executor_transition status=ready")
         for line in lines
     )
+    assert any("runtime=portable_module" in line for line in lines)
 
 
 def test_executor_postflight_requires_ready_selected_transition(
