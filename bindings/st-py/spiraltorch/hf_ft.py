@@ -6404,6 +6404,27 @@ def hf_gpt2_finetune_scale_up_command(
     chain, chain_source_path = _scale_up_promotion_chain_payload(report_or_summary)
     chain_provenance: dict[str, object] = {}
     if chain is not None:
+        raw_transitions = chain.get("transitions")
+        transitions = (
+            [
+                dict(transition)
+                for transition in raw_transitions
+                if isinstance(transition, Mapping)
+            ]
+            if isinstance(raw_transitions, Sequence)
+            and not isinstance(raw_transitions, (str, bytes))
+            else []
+        )
+        selected_adapter_id = chain.get("selected_adapter_id")
+        selected_transition = next(
+            (
+                transition
+                for transition in reversed(transitions)
+                if transition.get("selected_path") is True
+                and transition.get("child_adapter_id") == selected_adapter_id
+            ),
+            None,
+        )
         chain_provenance = {
             "promotion_chain_schema": chain.get("schema"),
             "promotion_chain_status": chain.get("status"),
@@ -6422,6 +6443,17 @@ def hf_gpt2_finetune_scale_up_command(
             "promotion_chain_rejected_node_count": chain.get(
                 "rejected_node_count"
             ),
+            "promotion_chain_transition_count": chain.get("transition_count"),
+            "promotion_chain_ready_transition_count": chain.get(
+                "ready_transition_count"
+            ),
+            "promotion_chain_selected_path_transition_count": chain.get(
+                "selected_path_transition_count"
+            ),
+            "promotion_chain_selected_path_transitions_ready": chain.get(
+                "selected_path_transitions_ready"
+            ),
+            "promotion_chain_selected_transition": selected_transition,
             "promotion_chain_continuation_policy_status": chain.get(
                 "continuation_policy_status"
             ),
@@ -6899,6 +6931,12 @@ def hf_gpt2_finetune_scale_up_preflight_report(
             "promotion_chain_continuation_stop_reason_codes": list(
                 artifact.get("promotion_chain_continuation_stop_reason_codes") or []
             ),
+            "promotion_chain_selected_path_transitions_ready": artifact.get(
+                "promotion_chain_selected_path_transitions_ready"
+            ),
+            "promotion_chain_selected_transition": artifact.get(
+                "promotion_chain_selected_transition"
+            ),
             "command": command,
             "error_count": 1,
             "warning_count": 0,
@@ -7354,6 +7392,12 @@ def hf_gpt2_finetune_scale_up_preflight_report(
         ),
         "adapter_continuation_expected_child_lineage_depth": artifact.get(
             "adapter_continuation_expected_child_lineage_depth"
+        ),
+        "promotion_chain_selected_path_transitions_ready": artifact.get(
+            "promotion_chain_selected_path_transitions_ready"
+        ),
+        "promotion_chain_selected_transition": artifact.get(
+            "promotion_chain_selected_transition"
         ),
         "inputs": inputs,
         "outputs": outputs,

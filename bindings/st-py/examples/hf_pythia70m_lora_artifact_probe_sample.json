@@ -1,6 +1,6 @@
 {
-  "schema": "spiraltorch.hf_causal_lm_artifact_probe.sample.v3",
-  "scope": "one-step non-GPT-2 isolated-process promotion smoke; not a model-quality claim",
+  "schema": "spiraltorch.hf_causal_lm_artifact_probe.sample.v4",
+  "scope": "two-generation non-GPT-2 isolated-process promotion and transition smoke; not a model-quality claim",
   "model_profile": "pythia-70m-local-smoke",
   "model_name": "EleutherAI/pythia-70m-deduped",
   "model_family": "gpt_neox",
@@ -12,6 +12,7 @@
     "peft": "0.19.1"
   },
   "training": {
+    "generation": 0,
     "finetune_mode": "lora",
     "max_steps": 1,
     "seed": 29,
@@ -124,9 +125,79 @@
     "source_probe_process_pid": 449,
     "source_probe_process_exit_code": 0
   },
+  "multi_generation": {
+    "status": "ready",
+    "node_count": 2,
+    "transition_count": 1,
+    "ready_transition_count": 1,
+    "selected_path_transition_count": 1,
+    "selected_path_transitions_ready": true,
+    "selected_lineage_depth": 1,
+    "source_adapter_id": "sha256:7d5a0912445b73c05418b7dd80a59ace2f109b24d2602baaa4704c0724ec239c",
+    "selected_adapter_id": "sha256:e2f80441e43472b6b8e17b54775639b581cc7d82976b68089700c240257288c4",
+    "generation_1_training": {
+      "finetune_start_mode": "adapter_warm_start",
+      "adapter_preloaded": true,
+      "adapter_attached_now": false,
+      "weights_only_warm_start": true,
+      "max_steps": 2,
+      "max_train_samples": 16,
+      "max_eval_samples": 8,
+      "train_loss": 7.194960832595825,
+      "eval_before_loss": 7.777690887451172,
+      "eval_after_loss": 7.782327651977539,
+      "eval_loss_regression": 0.0046367645263671875,
+      "promotion_ready": true,
+      "artifact_probe_status": "ready",
+      "artifact_probe_new_token_count": 12,
+      "artifact_probe_generated_text": "SpiralTorch isolated adapter, a new type of adapter, a new type of adapter",
+      "artifact_probe_process_status": "ready",
+      "artifact_probe_process_parent_pid": 14548,
+      "artifact_probe_process_pid": 14662,
+      "artifact_probe_process_exit_code": 0
+    },
+    "transition": {
+      "row_type": "hf_adapter_promotion_chain_transition",
+      "status": "ready",
+      "transition_ready": true,
+      "selected_path": true,
+      "parent_adapter_id": "sha256:7d5a0912445b73c05418b7dd80a59ace2f109b24d2602baaa4704c0724ec239c",
+      "child_adapter_id": "sha256:e2f80441e43472b6b8e17b54775639b581cc7d82976b68089700c240257288c4",
+      "parent_lineage_depth": 0,
+      "child_lineage_depth": 1,
+      "depth_step": 1,
+      "root_matches": true,
+      "base_model_matches": true,
+      "parent_fingerprint_verified": true,
+      "weights_changed_from_parent": true,
+      "parent_eval_after_loss": 7.777690887451172,
+      "child_eval_before_loss": 7.777690887451172,
+      "child_eval_after_loss": 7.782327651977539,
+      "eval_handoff_observed": true,
+      "eval_handoff_delta": 0.0,
+      "child_eval_improvement": -0.0046367645263671875,
+      "promotion_ready": true,
+      "promotion_revalidated_ready": true,
+      "artifact_probe_process_status": "ready",
+      "artifact_probe_process_pid": 14662,
+      "artifact_probe_process_exit_code": 0
+    },
+    "strict_stop_policy": {
+      "min_eval_improvement": 0.0,
+      "plateau_patience": 1,
+      "status": "stop",
+      "stop_reason_codes": [
+        "eval_improvement_plateau"
+      ],
+      "selected_path_eval_improvement": -0.0046367645263671875,
+      "continuation_ready": false
+    }
+  },
   "commands": {
     "train_shape": "spiral-hf-finetune --model-profile pythia-70m-local-smoke --allow-remote --train --finetune-mode lora --lora-rank 4 --lora-alpha 8 --max-steps 1 --block-size 16 --eval-before-train --adapter-promotion-gate --adapter-promotion-probe-prompt 'SpiralTorch isolated adapter' --adapter-promotion-probe-max-new-tokens 12 --adapter-promotion-probe-device mps --adapter-promotion-probe-timeout-seconds 120 ...",
     "promotion_chain_shape": "spiral-hf-adapter-chain <adapter-dir> --require-continuation-ready",
-    "scale_up_shape": "spiral-hf-scale-up <promotion-chain.json> --require-ready --write-command next-generation.json"
+    "scale_up_shape": "spiral-hf-scale-up <promotion-chain.json> --require-ready --write-command next-generation.json",
+    "continuation_run_shape": "spiral-hf-scale-up <promotion-chain.json> --adapter-continuation continue --max-steps 2 --max-train-samples 16 --max-eval-samples 8 --write-command generation-1.json --require-ready --run",
+    "strict_stop_audit_shape": "spiral-hf-adapter-chain <generation-1-dir> --min-eval-improvement 0 --plateau-patience 1 --require-continuation-ready"
   }
 }

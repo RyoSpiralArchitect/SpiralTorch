@@ -658,6 +658,8 @@ def test_adapter_promotion_chain_selects_deepest_tip_for_scale_up(
         tmp_path / "grandchild",
         child,
         b"grandchild",
+        before=0.9,
+        after=0.8,
     )
 
     report = st.hf_adapter_promotion_chain_report(tmp_path)
@@ -687,9 +689,39 @@ def test_adapter_promotion_chain_selects_deepest_tip_for_scale_up(
         child_lineage["adapter_id"],
         grandchild_lineage["adapter_id"],
     ]
+    assert report["transition_count"] == 2
+    assert report["ready_transition_count"] == 2
+    assert report["rejected_transition_count"] == 0
+    assert report["selected_path_transition_count"] == 2
+    assert report["selected_path_transitions_ready"] is True
+    assert [row["status"] for row in report["transitions"]] == ["ready", "ready"]
+    child_to_grandchild = report["transitions"][1]
+    assert child_to_grandchild["row_type"] == (
+        "hf_adapter_promotion_chain_transition"
+    )
+    assert child_to_grandchild["parent_adapter_id"] == child_lineage["adapter_id"]
+    assert child_to_grandchild["child_adapter_id"] == grandchild_lineage["adapter_id"]
+    assert child_to_grandchild["depth_step"] == 1
+    assert child_to_grandchild["root_matches"] is True
+    assert child_to_grandchild["base_model_matches"] is True
+    assert child_to_grandchild["parent_fingerprint_verified"] is True
+    assert child_to_grandchild["weights_changed_from_parent"] is True
+    assert child_to_grandchild["eval_handoff_observed"] is True
+    assert child_to_grandchild["eval_handoff_delta"] == pytest.approx(0.0)
+    assert child_to_grandchild["child_eval_improvement"] == pytest.approx(0.1)
+    assert child_to_grandchild["selected_path"] is True
     assert written["report_path"] == str(report_path.resolve())
     assert loaded["selected_adapter_id"] == grandchild_lineage["adapter_id"]
-    assert "continuation_ready=True" in st.hf_adapter_promotion_chain_lines(report)[0]
+    report_lines = st.hf_adapter_promotion_chain_lines(report)
+    transition_lines = [
+        line
+        for line in report_lines
+        if line.startswith("hf_adapter_promotion_chain_transition ")
+    ]
+    assert "continuation_ready=True" in report_lines[0]
+    assert "transitions=2" in report_lines[0]
+    assert len(transition_lines) == 2
+    assert "eval_handoff_delta=0.0" in transition_lines[1]
     assert scale_up["status"] == "ok"
     assert scale_up["adapter_continuation_applied"] is True
     assert scale_up["adapter_continuation_source"] == str(grandchild.resolve())
@@ -703,6 +735,11 @@ def test_adapter_promotion_chain_selects_deepest_tip_for_scale_up(
         == grandchild_lineage["adapter_id"]
     )
     assert scale_up["promotion_chain_source_path"] == str(report_path)
+    assert scale_up["promotion_chain_transition_count"] == 2
+    assert scale_up["promotion_chain_ready_transition_count"] == 2
+    assert scale_up["promotion_chain_selected_path_transition_count"] == 2
+    assert scale_up["promotion_chain_selected_path_transitions_ready"] is True
+    assert scale_up["promotion_chain_selected_transition"] == child_to_grandchild
     assert scale_up["command"][scale_up["command"].index("--model-name") + 1] == str(
         grandchild.resolve()
     )
@@ -711,6 +748,27 @@ def test_adapter_promotion_chain_selects_deepest_tip_for_scale_up(
     assert direct_preflight["adapter_continuation_source_adapter_id"] == (
         grandchild_lineage["adapter_id"]
     )
+    assert direct_preflight["promotion_chain_selected_path_transitions_ready"] is True
+    assert direct_preflight["promotion_chain_selected_transition"] == (
+        child_to_grandchild
+    )
+    legacy_chain = json.loads(json.dumps(report))
+    for field in (
+        "transitions",
+        "transition_count",
+        "ready_transition_count",
+        "rejected_transition_count",
+        "selected_path_transition_count",
+        "selected_path_transitions_ready",
+    ):
+        legacy_chain.pop(field, None)
+    legacy_scale_up = st.hf_finetune_scale_up_command(
+        legacy_chain,
+        output_dir=tmp_path / "legacy-great-grandchild",
+    )
+    assert legacy_scale_up["status"] == "ok"
+    assert legacy_scale_up["promotion_chain_transition_count"] is None
+    assert legacy_scale_up["promotion_chain_selected_transition"] is None
     unsupported = dict(report)
     unsupported["schema"] = "spiraltorch.hf_adapter_promotion_chain.v999"
     assert st.hf_finetune_scale_up_command(unsupported)["status"] == (
@@ -746,6 +804,13 @@ def test_adapter_promotion_chain_stops_before_blocked_generation(
     assert report["selected_adapter_id"] == child_lineage["adapter_id"]
     assert report["selected_lineage_depth"] == 1
     assert report["rejected_node_count"] == 1
+    assert report["transition_count"] == 2
+    assert report["ready_transition_count"] == 1
+    assert report["rejected_transition_count"] == 1
+    assert report["selected_path_transition_count"] == 1
+    assert report["selected_path_transitions_ready"] is True
+    assert report["transitions"][1]["status"] == "rejected"
+    assert report["transitions"][1]["selected_path"] is False
     grandchild_node = next(
         node for node in report["nodes"] if node["adapter_path"] == str(grandchild)
     )
