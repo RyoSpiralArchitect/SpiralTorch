@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import sys
 from pathlib import Path
 
 import pytest
@@ -66,6 +67,68 @@ def _run_card(parent: Path, *, before: float = 1.0, after: float = 0.9) -> dict:
             "eval_perplexity": 2.46,
         },
     }
+
+
+def _adapter_launch_command(
+    parent: Path,
+    child: Path,
+    run_card_path: Path,
+) -> list[str]:
+    bridge = Path(__file__).resolve().parents[1] / "examples" / "hf_finetune_bridge.py"
+    return [
+        sys.executable,
+        str(bridge),
+        "--model-name",
+        str(parent),
+        "--train",
+        "--output-dir",
+        str(child),
+        "--run-card",
+        str(run_card_path),
+        "--trainer-trace-jsonl",
+        str(child / "spiraltorch-hf-finetune-trainer-trace.jsonl"),
+        "--finetune-mode",
+        "lora",
+        "--max-steps",
+        "1",
+        "--max-train-samples",
+        "8",
+    ]
+
+
+def _write_promoted_child(
+    child: Path,
+    parent: Path,
+    weights: bytes,
+    *,
+    launch_command: bool = True,
+) -> tuple[Path, dict, dict]:
+    adapter = _write_adapter(child, weights)
+    run_card_path = adapter / "spiraltorch-hf-finetune-run-card.json"
+    card = _run_card(parent)
+    if launch_command:
+        card["launch_command"] = _adapter_launch_command(
+            parent,
+            adapter,
+            run_card_path,
+        )
+        card["launch_command_display"] = " ".join(card["launch_command"])
+        card["launch_command_source"] = "test"
+    lineage = st.write_hf_adapter_lineage(
+        adapter,
+        parent_adapter=parent,
+        run_card=card,
+        run_card_path=run_card_path,
+    )
+    card["adapter_lineage"] = lineage
+    promotion = st.write_hf_adapter_promotion(
+        adapter,
+        card,
+        parent_adapter=parent,
+    )
+    card["adapter_promotion"] = promotion
+    run_card_path.write_text(json.dumps(card), encoding="utf-8")
+    return adapter, lineage, promotion
 
 
 def test_adapter_fingerprint_is_path_independent_and_weight_sensitive(
@@ -330,3 +393,258 @@ def test_run_card_digest_survives_generic_row_type_normalization(
 
     assert report["promotion_ready"] is True
     assert "run_card_digest" not in report["failed_checks"]
+
+
+def test_adapter_promotion_chain_selects_deepest_tip_for_scale_up(
+    tmp_path: Path,
+) -> None:
+    root = _write_adapter(tmp_path / "root", b"root")
+    root_lineage = st.write_hf_adapter_lineage(root)
+    child, child_lineage, _ = _write_promoted_child(
+        tmp_path / "child",
+        root,
+        b"child",
+    )
+    grandchild, grandchild_lineage, _ = _write_promoted_child(
+        tmp_path / "grandchild",
+        child,
+        b"grandchild",
+    )
+
+    report = st.hf_adapter_promotion_chain_report(tmp_path)
+    report_path = tmp_path / st.HF_ADAPTER_PROMOTION_CHAIN_FILENAME
+    written = st.write_hf_adapter_promotion_chain(report, report_path)
+    loaded = st.load_hf_adapter_promotion_chain(report_path)
+    scale_up = st.hf_finetune_scale_up_command(
+        report_path,
+        output_dir=tmp_path / "great-grandchild",
+        max_steps=4,
+        max_train_samples=16,
+    )
+    direct_preflight = st.hf_finetune_scale_up_preflight_report(report)
+
+    assert root_lineage["lineage_depth"] == 0
+    assert child_lineage["lineage_depth"] == 1
+    assert grandchild_lineage["lineage_depth"] == 2
+    assert report["status"] == "ready"
+    assert report["chain_ready"] is True
+    assert report["continuation_ready"] is True
+    assert report["node_count"] == 3
+    assert report["eligible_node_count"] == 3
+    assert report["selected_adapter_id"] == grandchild_lineage["adapter_id"]
+    assert report["selected_adapter_path"] == str(grandchild.resolve())
+    assert report["selected_path_adapter_ids"] == [
+        root_lineage["adapter_id"],
+        child_lineage["adapter_id"],
+        grandchild_lineage["adapter_id"],
+    ]
+    assert written["report_path"] == str(report_path.resolve())
+    assert loaded["selected_adapter_id"] == grandchild_lineage["adapter_id"]
+    assert "continuation_ready=True" in st.hf_adapter_promotion_chain_lines(report)[0]
+    assert scale_up["status"] == "ok"
+    assert scale_up["adapter_continuation_applied"] is True
+    assert scale_up["adapter_continuation_source"] == str(grandchild.resolve())
+    assert (
+        scale_up["adapter_continuation_source_adapter_id"]
+        == grandchild_lineage["adapter_id"]
+    )
+    assert scale_up["adapter_continuation_expected_child_lineage_depth"] == 3
+    assert (
+        scale_up["promotion_chain_selected_adapter_id"]
+        == grandchild_lineage["adapter_id"]
+    )
+    assert scale_up["promotion_chain_source_path"] == str(report_path)
+    assert scale_up["command"][scale_up["command"].index("--model-name") + 1] == str(
+        grandchild.resolve()
+    )
+    assert direct_preflight["status"] == "ready"
+    assert direct_preflight["adapter_continuation_applied"] is True
+    assert direct_preflight["adapter_continuation_source_adapter_id"] == (
+        grandchild_lineage["adapter_id"]
+    )
+    unsupported = dict(report)
+    unsupported["schema"] = "spiraltorch.hf_adapter_promotion_chain.v999"
+    assert st.hf_finetune_scale_up_command(unsupported)["status"] == (
+        "promotion_chain_unsupported_schema"
+    )
+
+
+def test_adapter_promotion_chain_stops_before_blocked_generation(
+    tmp_path: Path,
+) -> None:
+    root = _write_adapter(tmp_path / "root", b"root")
+    st.write_hf_adapter_lineage(root)
+    child, child_lineage, _ = _write_promoted_child(
+        tmp_path / "child",
+        root,
+        b"child",
+    )
+    grandchild, _, _ = _write_promoted_child(
+        tmp_path / "grandchild",
+        child,
+        b"grandchild",
+    )
+    promotion_path = grandchild / st.HF_ADAPTER_PROMOTION_FILENAME
+    blocked = json.loads(promotion_path.read_text(encoding="utf-8"))
+    blocked["status"] = "blocked"
+    blocked["promotion_ready"] = False
+    blocked["failed_checks"] = ["eval_loss_regression"]
+    promotion_path.write_text(json.dumps(blocked), encoding="utf-8")
+
+    report = st.hf_adapter_promotion_chain_report(tmp_path)
+
+    assert report["status"] == "ready_with_rejections"
+    assert report["selected_adapter_id"] == child_lineage["adapter_id"]
+    assert report["selected_lineage_depth"] == 1
+    assert report["rejected_node_count"] == 1
+    grandchild_node = next(
+        node for node in report["nodes"] if node["adapter_path"] == str(grandchild)
+    )
+    assert grandchild_node["status"] == "rejected"
+    assert any(
+        issue["code"] == "promotion_not_ready" for issue in grandchild_node["issues"]
+    )
+
+
+def test_adapter_promotion_chain_requires_explicit_selection_for_equal_forks(
+    tmp_path: Path,
+) -> None:
+    root = _write_adapter(tmp_path / "root", b"root")
+    st.write_hf_adapter_lineage(root)
+    first, first_lineage, _ = _write_promoted_child(
+        tmp_path / "first",
+        root,
+        b"first",
+    )
+    _, second_lineage, _ = _write_promoted_child(
+        tmp_path / "second",
+        root,
+        b"second",
+    )
+
+    ambiguous = st.hf_adapter_promotion_chain_report(tmp_path)
+    selected = st.hf_adapter_promotion_chain_report(
+        tmp_path,
+        select_adapter_id=first_lineage["adapter_id"],
+    )
+
+    assert ambiguous["status"] == "ambiguous"
+    assert ambiguous["chain_ready"] is False
+    assert ambiguous["continuation_ready"] is False
+    assert ambiguous["fork_count"] == 1
+    assert ambiguous["selection_status"] == "ambiguous_deepest_tips"
+    assert selected["status"] == "ready"
+    assert selected["selection_status"] == "explicit"
+    assert selected["selected_adapter_path"] == str(first.resolve())
+    assert selected["selected_adapter_id"] != second_lineage["adapter_id"]
+
+
+def test_adapter_promotion_chain_recovers_legacy_launch_command_artifact(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = _write_adapter(tmp_path / "root", b"root")
+    st.write_hf_adapter_lineage(root)
+    child, child_lineage, _ = _write_promoted_child(
+        tmp_path / "child",
+        root,
+        b"child",
+        launch_command=False,
+    )
+    run_card_path = child / "spiraltorch-hf-finetune-run-card.json"
+    command_artifact = tmp_path / "scale-up-command.json"
+    command_artifact.write_text(
+        json.dumps(
+            {
+                "row_type": "hf_finetune_scale_up_command",
+                "status": "ok",
+                "run_returncode": 0,
+                "command": _adapter_launch_command(root, child, run_card_path),
+            }
+        ),
+        encoding="utf-8",
+    )
+    chain_path = tmp_path / "chain.json"
+
+    code = hf_cli.adapter_promotion_chain_main(
+        [
+            str(tmp_path),
+            "--command-artifact",
+            str(command_artifact),
+            "--out",
+            str(chain_path),
+            "--require-continuation-ready",
+        ]
+    )
+    output = capsys.readouterr().out
+    report = json.loads(chain_path.read_text(encoding="utf-8"))
+
+    assert code == 0
+    assert report["status"] == "ready"
+    assert report["selected_adapter_id"] == child_lineage["adapter_id"]
+    assert report["continuation_ready"] is True
+    assert report["continuation_candidate"]["launch_command_source"] == (
+        "command_artifact"
+    )
+    assert "continuation_ready=True" in output
+
+
+def test_adapter_promotion_chain_infers_verified_pre_lineage_seed(
+    tmp_path: Path,
+) -> None:
+    root = _write_adapter(tmp_path / "root", b"root")
+    st.write_hf_adapter_lineage(root)
+    child, child_lineage, _ = _write_promoted_child(
+        tmp_path / "child",
+        root,
+        b"child",
+    )
+    (root / st.HF_ADAPTER_LINEAGE_FILENAME).unlink()
+
+    inferred = st.hf_adapter_promotion_chain_report(child)
+    strict = st.hf_adapter_promotion_chain_report(
+        child,
+        allow_inferred_roots=False,
+    )
+
+    assert inferred["status"] == "ready"
+    assert inferred["root_count"] == 1
+    assert inferred["eligible_node_count"] == 2
+    assert inferred["selected_adapter_id"] == child_lineage["adapter_id"]
+    root_node = next(node for node in inferred["nodes"] if node["lineage_depth"] == 0)
+    assert root_node["lineage_status"] == "inferred_seed"
+    assert root_node["validation_ready"] is True
+    assert any(
+        issue["code"] == "root_lineage_inferred" for issue in root_node["issues"]
+    )
+    assert strict["status"] == "blocked"
+    assert strict["eligible_node_count"] == 0
+
+
+def test_adapter_promotion_chain_revalidates_stored_promotion(
+    tmp_path: Path,
+) -> None:
+    root = _write_adapter(tmp_path / "root", b"root")
+    st.write_hf_adapter_lineage(root)
+    child, _, _ = _write_promoted_child(
+        tmp_path / "child",
+        root,
+        b"child",
+    )
+    promotion_path = child / st.HF_ADAPTER_PROMOTION_FILENAME
+    tampered = json.loads(promotion_path.read_text(encoding="utf-8"))
+    tampered["eval_loss_regression"] = 42.0
+    promotion_path.write_text(json.dumps(tampered), encoding="utf-8")
+
+    report = st.hf_adapter_promotion_chain_report(tmp_path)
+    child_node = next(
+        node for node in report["nodes"] if node["adapter_path"] == str(child)
+    )
+
+    assert child_node["status"] == "rejected"
+    assert child_node["promotion_ready"] is True
+    assert child_node["promotion_revalidated_ready"] is True
+    assert any(
+        issue["code"] == "promotion_revalidation_mismatch"
+        for issue in child_node["issues"]
+    )

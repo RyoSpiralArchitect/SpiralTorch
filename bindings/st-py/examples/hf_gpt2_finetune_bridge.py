@@ -11,6 +11,7 @@ import json
 import math
 import os
 import random
+import shlex
 import shutil
 import sys
 from collections.abc import Mapping, Sequence
@@ -742,6 +743,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         args._hf_finetune_adapter_config = _adapter_config_from_args(args)
     except ValueError as exc:
         parser.error(f"invalid fine-tune adapter configuration: {exc}")
+    args._hf_finetune_launch_command = [
+        sys.executable,
+        str(Path(__file__).resolve()),
+        *raw_argv,
+    ]
+    args._hf_finetune_launch_command_source = "hf_gpt2_finetune_bridge"
     return args
 
 
@@ -2272,8 +2279,20 @@ def _base_run_card(
     artifact_report = dict(
         getattr(args, "_hf_causal_lm_artifact_report", {}) or {}
     )
+    launch_command = list(
+        getattr(args, "_hf_finetune_launch_command", []) or []
+    )
     return {
         "row_type": "hf_gpt2_finetune_run_card",
+        "launch_command": launch_command or None,
+        "launch_command_display": shlex.join(launch_command)
+        if launch_command
+        else None,
+        "launch_command_source": getattr(
+            args,
+            "_hf_finetune_launch_command_source",
+            None,
+        ),
         "preflight": preflight,
         "disk_report": dict(preflight.get("disk_report") or {}),
         "disk_headroom_plan": dict(preflight.get("disk_headroom_plan") or {}),
@@ -2591,6 +2610,18 @@ def _main_with_runtime_access(
     preflight["model_train_dtype"] = args.model_train_dtype
     preflight["finetune_mode"] = args.finetune_mode
     preflight["adapter_config"] = dict(args._hf_finetune_adapter_config)
+    launch_command = list(
+        getattr(args, "_hf_finetune_launch_command", []) or []
+    )
+    preflight["launch_command"] = launch_command or None
+    preflight["launch_command_display"] = (
+        shlex.join(launch_command) if launch_command else None
+    )
+    preflight["launch_command_source"] = getattr(
+        args,
+        "_hf_finetune_launch_command_source",
+        None,
+    )
     preflight["dataset_revision"] = args.dataset_revision
     preflight["dataset_streaming"] = bool(args.dataset_streaming)
     preflight["streaming_shuffle_buffer_size"] = args.streaming_shuffle_buffer_size

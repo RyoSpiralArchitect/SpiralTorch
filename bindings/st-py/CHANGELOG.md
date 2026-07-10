@@ -28,6 +28,11 @@
   parent PEFT artifact by default, preserve lineage provenance through command
   replay, expose `auto` / `replay` / `continue` policy, and preflight local
   adapter weights plus lineage/promotion fingerprint and depth consistency.
+- Multi-generation adapter chains: add `spiral-hf-adapter-chain` plus importable
+  DAG reports that revalidate fingerprints, parent/root/depth continuity,
+  promotion gates, run-card digests, forks, rejected generations, and a unique
+  continuation tip. FT run cards now retain their exact launch command, and
+  `spiral-hf-scale-up` accepts a ready chain report directly for the next depth.
 - Trainer resume audit: add `hf_finetune_checkpoint_resume_report(...)` and
   compact lines for optimizer/scheduler/RNG state availability, saved versus
   requested step horizons, and the exhausted-scheduler case where adapter

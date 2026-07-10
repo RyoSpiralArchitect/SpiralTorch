@@ -558,6 +558,8 @@ HF_ADAPTER_LINEAGE_FILENAME: str
 HF_ADAPTER_LINEAGE_SCHEMA: str
 HF_ADAPTER_PROMOTION_FILENAME: str
 HF_ADAPTER_PROMOTION_SCHEMA: str
+HF_ADAPTER_PROMOTION_CHAIN_FILENAME: str
+HF_ADAPTER_PROMOTION_CHAIN_SCHEMA: str
 HF_FINETUNE_MODES: Tuple[str, ...]
 HF_FINETUNE_LORA_TARGET_MODULES: Dict[str, Tuple[str, ...]]
 
@@ -620,6 +622,36 @@ def load_hf_adapter_promotion(value: str | PathLike[str]) -> Dict[str, object]: 
 def hf_adapter_promotion_lines(
     report_or_path: Mapping[str, object] | str | PathLike[str],
 ) -> List[str]: ...
+def hf_adapter_promotion_chain_report(
+    sources: str | PathLike[str] | Sequence[str | PathLike[str]],
+    *,
+    recursive: bool = ...,
+    allow_inferred_roots: bool = ...,
+    select_adapter_id: str | None = ...,
+    command_artifacts: Sequence[
+        Mapping[str, object] | str | PathLike[str]
+    ] | None = ...,
+) -> Dict[str, object]: ...
+def write_hf_adapter_promotion_chain(
+    report_or_sources: Mapping[str, object]
+    | str
+    | PathLike[str]
+    | Sequence[str | PathLike[str]],
+    out: str | PathLike[str],
+    *,
+    recursive: bool = ...,
+    allow_inferred_roots: bool = ...,
+    select_adapter_id: str | None = ...,
+    command_artifacts: Sequence[
+        Mapping[str, object] | str | PathLike[str]
+    ] | None = ...,
+) -> Dict[str, object]: ...
+def hf_adapter_promotion_chain_lines(
+    report_or_path: Mapping[str, object] | str | PathLike[str],
+) -> List[str]: ...
+def load_hf_adapter_promotion_chain(
+    value: str | PathLike[str],
+) -> Dict[str, object]: ...
 
 def load_hf_causal_lm_artifact(
     model_name_or_path: str | PathLike[str],
@@ -9788,6 +9820,8 @@ __all__ = [
     "HF_ADAPTER_LINEAGE_SCHEMA",
     "HF_ADAPTER_PROMOTION_FILENAME",
     "HF_ADAPTER_PROMOTION_SCHEMA",
+    "HF_ADAPTER_PROMOTION_CHAIN_FILENAME",
+    "HF_ADAPTER_PROMOTION_CHAIN_SCHEMA",
     "HF_FINETUNE_MODES",
     "HF_FINETUNE_LORA_TARGET_MODULES",
     "HF_GPT2_FT_DEFAULT_DEVICE_BACKENDS",
@@ -9801,8 +9835,11 @@ __all__ = [
     "hf_adapter_fingerprint",
     "hf_adapter_lineage_lines",
     "hf_adapter_lineage_report",
+    "hf_adapter_promotion_chain_lines",
+    "hf_adapter_promotion_chain_report",
     "hf_adapter_promotion_lines",
     "hf_adapter_promotion_report",
+    "load_hf_adapter_promotion_chain",
     "hf_finetune_corpus_file_report",
     "hf_finetune_adapter_config",
     "hf_finetune_lora_target_report",
@@ -9814,6 +9851,7 @@ __all__ = [
     "summarize_hf_causal_lm_artifact",
     "prepare_hf_finetune_model",
     "write_hf_adapter_lineage",
+    "write_hf_adapter_promotion_chain",
     "write_hf_adapter_promotion",
     "hf_finetune_corpus_scan_report",
     "hf_finetune_dataset_fit_report",

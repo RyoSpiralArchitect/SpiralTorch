@@ -44,6 +44,12 @@ def parse_args(argv: list[str] | None = None):
         args.run_card = args.output_dir / DEFAULT_RUN_CARD_FILENAME
     if not _argv_has_option(raw_argv, "--trainer-trace-jsonl"):
         args.trainer_trace_jsonl = args.output_dir / DEFAULT_TRAINER_TRACE_FILENAME
+    args._hf_finetune_launch_command = [
+        sys.executable,
+        str(Path(__file__).resolve()),
+        *raw_argv,
+    ]
+    args._hf_finetune_launch_command_source = "hf_finetune_bridge"
     return args
 
 

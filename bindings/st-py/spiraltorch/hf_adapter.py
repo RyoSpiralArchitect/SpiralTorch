@@ -6,8 +6,9 @@ import hashlib
 import json
 import math
 import os
+import shlex
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -20,14 +21,20 @@ __all__ = [
     "HF_ADAPTER_LINEAGE_SCHEMA",
     "HF_ADAPTER_PROMOTION_FILENAME",
     "HF_ADAPTER_PROMOTION_SCHEMA",
+    "HF_ADAPTER_PROMOTION_CHAIN_FILENAME",
+    "HF_ADAPTER_PROMOTION_CHAIN_SCHEMA",
     "hf_adapter_fingerprint",
     "hf_adapter_lineage_lines",
     "hf_adapter_lineage_report",
+    "hf_adapter_promotion_chain_lines",
+    "hf_adapter_promotion_chain_report",
     "hf_adapter_promotion_lines",
     "hf_adapter_promotion_report",
     "load_hf_adapter_lineage",
+    "load_hf_adapter_promotion_chain",
     "load_hf_adapter_promotion",
     "write_hf_adapter_lineage",
+    "write_hf_adapter_promotion_chain",
     "write_hf_adapter_promotion",
 ]
 
@@ -36,6 +43,8 @@ HF_ADAPTER_LINEAGE_SCHEMA = "spiraltorch.hf_adapter_lineage.v1"
 HF_ADAPTER_LINEAGE_FILENAME = "spiraltorch-hf-adapter-lineage.json"
 HF_ADAPTER_PROMOTION_SCHEMA = "spiraltorch.hf_adapter_promotion.v1"
 HF_ADAPTER_PROMOTION_FILENAME = "spiraltorch-hf-adapter-promotion.json"
+HF_ADAPTER_PROMOTION_CHAIN_SCHEMA = "spiraltorch.hf_adapter_promotion_chain.v1"
+HF_ADAPTER_PROMOTION_CHAIN_FILENAME = "spiraltorch-hf-adapter-promotion-chain.json"
 
 
 def _canonical_json_bytes(value: object) -> bytes:
@@ -697,5 +706,1072 @@ def hf_adapter_promotion_lines(
             f"required={raw_check.get('required')} "
             f"observed={raw_check.get('observed')} "
             f"threshold={raw_check.get('threshold')}"
+        )
+    return lines
+
+
+def _chain_issue(
+    code: str,
+    message: str,
+    *,
+    severity: str = "error",
+    path: str | Path | None = None,
+    adapter_id: object = None,
+) -> dict[str, object]:
+    return {
+        "code": code,
+        "severity": severity,
+        "message": message,
+        "path": None if path is None else str(path),
+        "adapter_id": adapter_id,
+    }
+
+
+def _chain_source_paths(
+    sources: str | Path | Sequence[str | Path],
+) -> list[Path]:
+    if isinstance(sources, (str, Path)):
+        values: Sequence[str | Path] = [sources]
+    elif isinstance(sources, Sequence):
+        values = sources
+    else:
+        raise TypeError("adapter chain sources must be paths or a sequence of paths")
+    paths = [Path(value).expanduser() for value in values]
+    if not paths:
+        raise ValueError("at least one adapter chain source is required")
+    return paths
+
+
+def _discover_lineage_manifests(
+    sources: str | Path | Sequence[str | Path],
+    *,
+    recursive: bool,
+) -> tuple[list[Path], list[dict[str, object]]]:
+    manifests: dict[Path, None] = {}
+    issues: list[dict[str, object]] = []
+    for source in _chain_source_paths(sources):
+        if source.is_file():
+            if source.name != HF_ADAPTER_LINEAGE_FILENAME:
+                issues.append(
+                    _chain_issue(
+                        "unsupported_source_file",
+                        "chain source files must be adapter lineage manifests",
+                        path=source,
+                    )
+                )
+                continue
+            manifests[source.resolve()] = None
+            continue
+        if not source.is_dir():
+            issues.append(
+                _chain_issue(
+                    "missing_source",
+                    "adapter chain source does not exist",
+                    path=source,
+                )
+            )
+            continue
+        before = len(manifests)
+        direct = source / HF_ADAPTER_LINEAGE_FILENAME
+        if direct.is_file():
+            manifests[direct.resolve()] = None
+        if recursive:
+            for path in source.rglob(HF_ADAPTER_LINEAGE_FILENAME):
+                manifests[path.resolve()] = None
+        if len(manifests) == before:
+            issues.append(
+                _chain_issue(
+                    "lineage_not_found",
+                    "no adapter lineage manifests were found under this source",
+                    path=source,
+                )
+            )
+
+    # Pull local ancestors into the report even when the caller starts at a tip.
+    pending = list(manifests)
+    cursor = 0
+    while cursor < len(pending):
+        manifest = pending[cursor]
+        cursor += 1
+        try:
+            payload, _ = _json_mapping(manifest)
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+        parent_path = payload.get("parent_adapter_path")
+        if parent_path is None:
+            continue
+        parent_manifest = (
+            Path(str(parent_path)).expanduser() / HF_ADAPTER_LINEAGE_FILENAME
+        )
+        if not parent_manifest.is_file():
+            continue
+        resolved = parent_manifest.resolve()
+        if resolved not in manifests:
+            manifests[resolved] = None
+            pending.append(resolved)
+    return sorted(manifests, key=str), issues
+
+
+def _chain_reference_path(value: object, *, anchor: Path) -> Path | None:
+    if value is None or not str(value).strip():
+        return None
+    path = Path(str(value)).expanduser()
+    return (anchor / path).resolve() if not path.is_absolute() else path.resolve()
+
+
+def _chain_run_card(
+    lineage: Mapping[str, object],
+    adapter_path: Path,
+) -> tuple[dict[str, Any] | None, Path | None, str | None]:
+    candidates: list[Path] = []
+    referenced = _chain_reference_path(
+        lineage.get("run_card_path"),
+        anchor=adapter_path,
+    )
+    if referenced is not None:
+        candidates.append(referenced)
+    for filename in (
+        "spiraltorch-hf-finetune-run-card.json",
+        "spiraltorch-hf-gpt2-ft-run-card.json",
+    ):
+        candidate = adapter_path / filename
+        if candidate not in candidates:
+            candidates.append(candidate)
+    for candidate in candidates:
+        if not candidate.is_file():
+            continue
+        try:
+            payload, _ = _json_mapping(candidate)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            return None, candidate, f"{exc.__class__.__name__}: {exc}"
+        return payload, candidate, None
+    return None, referenced, None
+
+
+def _chain_command(value: object) -> list[str] | None:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        return None
+    command = [str(item) for item in value]
+    return command or None
+
+
+def _chain_command_flag(command: Sequence[object], flag: str) -> str | None:
+    values = [str(item) for item in command]
+    for index, value in enumerate(values):
+        if value == flag and index + 1 < len(values):
+            return values[index + 1]
+        prefix = f"{flag}="
+        if value.startswith(prefix):
+            return value[len(prefix) :]
+    return None
+
+
+def _chain_command_artifacts(
+    values: Sequence[Mapping[str, object] | str | Path] | None,
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    rows: list[dict[str, object]] = []
+    issues: list[dict[str, object]] = []
+    for value in values or []:
+        source_path: Path | None = None
+        if isinstance(value, Mapping):
+            payload = dict(value)
+        else:
+            source_path = Path(value).expanduser()
+            try:
+                payload, _ = _json_mapping(source_path)
+            except (OSError, ValueError, json.JSONDecodeError) as exc:
+                issues.append(
+                    _chain_issue(
+                        "invalid_command_artifact",
+                        f"failed to load command artifact: {exc}",
+                        path=source_path,
+                    )
+                )
+                continue
+        command = _chain_command(payload.get("command"))
+        output_dir = (
+            None
+            if command is None
+            else _chain_command_flag(
+                command,
+                "--output-dir",
+            )
+        )
+        if command is None or output_dir is None:
+            issues.append(
+                _chain_issue(
+                    "command_artifact_missing_output",
+                    "command artifact must contain a command with --output-dir",
+                    path=source_path,
+                )
+            )
+            continue
+        rows.append(
+            {
+                "command": command,
+                "output_dir": str(Path(output_dir).expanduser().resolve()),
+                "source_path": None
+                if source_path is None
+                else str(source_path.resolve()),
+                "run_returncode": payload.get("run_returncode"),
+                "preflight_status": payload.get("preflight_status"),
+            }
+        )
+    return rows, issues
+
+
+def _adapter_promotion_chain_node(manifest_path: Path) -> dict[str, object]:
+    adapter_path = manifest_path.parent.resolve()
+    issues: list[dict[str, object]] = []
+    try:
+        lineage = load_hf_adapter_lineage(manifest_path)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        return {
+            "row_type": "hf_adapter_promotion_chain_node",
+            "status": "invalid",
+            "adapter_path": str(adapter_path),
+            "adapter_id": None,
+            "lineage_manifest_path": str(manifest_path),
+            "issues": [
+                _chain_issue(
+                    "invalid_lineage_manifest",
+                    f"failed to load lineage manifest: {exc}",
+                    path=manifest_path,
+                )
+            ],
+        }
+
+    adapter_id = lineage.get("adapter_id")
+    if lineage.get("status") != "ready":
+        issues.append(
+            _chain_issue(
+                "lineage_not_ready",
+                "lineage manifest status is not ready",
+                path=manifest_path,
+                adapter_id=adapter_id,
+            )
+        )
+    try:
+        fingerprint = hf_adapter_fingerprint(adapter_path)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        fingerprint = {}
+        issues.append(
+            _chain_issue(
+                "adapter_fingerprint_failed",
+                f"failed to fingerprint adapter: {exc}",
+                path=adapter_path,
+                adapter_id=adapter_id,
+            )
+        )
+    if fingerprint and fingerprint.get("adapter_id") != adapter_id:
+        issues.append(
+            _chain_issue(
+                "adapter_fingerprint_mismatch",
+                "adapter weights no longer match the lineage fingerprint",
+                path=adapter_path,
+                adapter_id=adapter_id,
+            )
+        )
+
+    stored_adapter_path = _chain_reference_path(
+        lineage.get("adapter_path"),
+        anchor=adapter_path,
+    )
+    if stored_adapter_path is not None and stored_adapter_path != adapter_path:
+        issues.append(
+            _chain_issue(
+                "adapter_path_relocated",
+                "adapter directory moved after the lineage manifest was written",
+                severity="warning",
+                path=stored_adapter_path,
+                adapter_id=adapter_id,
+            )
+        )
+
+    run_card, run_card_path, run_card_error = _chain_run_card(lineage, adapter_path)
+    if run_card_error is not None:
+        issues.append(
+            _chain_issue(
+                "invalid_run_card",
+                run_card_error,
+                path=run_card_path,
+                adapter_id=adapter_id,
+            )
+        )
+    lineage_card_sha256 = lineage.get("run_card_sha256")
+    observed_card_sha256 = None if run_card is None else _run_card_sha256(run_card)
+    depth = lineage.get("lineage_depth")
+    if depth not in (0, None) and run_card is None:
+        issues.append(
+            _chain_issue(
+                "run_card_missing",
+                "non-root lineage node is missing its fine-tune run card",
+                path=run_card_path or adapter_path,
+                adapter_id=adapter_id,
+            )
+        )
+    if lineage_card_sha256 is not None and observed_card_sha256 != lineage_card_sha256:
+        issues.append(
+            _chain_issue(
+                "run_card_digest_mismatch",
+                "run card no longer matches the lineage digest",
+                path=run_card_path,
+                adapter_id=adapter_id,
+            )
+        )
+
+    promotion_path = adapter_path / HF_ADAPTER_PROMOTION_FILENAME
+    promotion: dict[str, object] | None = None
+    if promotion_path.is_file():
+        try:
+            promotion = load_hf_adapter_promotion(promotion_path)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            issues.append(
+                _chain_issue(
+                    "invalid_promotion_report",
+                    f"failed to load promotion report: {exc}",
+                    path=promotion_path,
+                    adapter_id=adapter_id,
+                )
+            )
+    elif depth not in (0, None):
+        issues.append(
+            _chain_issue(
+                "promotion_report_missing",
+                "non-root lineage node is missing its promotion report",
+                path=promotion_path,
+                adapter_id=adapter_id,
+            )
+        )
+    if promotion is not None:
+        for matches, code, message in (
+            (
+                promotion.get("candidate_adapter_id") == adapter_id,
+                "promotion_candidate_mismatch",
+                "promotion candidate does not match the lineage adapter",
+            ),
+            (
+                promotion.get("parent_adapter_id") == lineage.get("parent_adapter_id"),
+                "promotion_parent_mismatch",
+                "promotion parent does not match the lineage parent",
+            ),
+            (
+                promotion.get("lineage_depth") == depth,
+                "promotion_depth_mismatch",
+                "promotion depth does not match the lineage depth",
+            ),
+            (
+                promotion.get("run_card_sha256") == lineage_card_sha256,
+                "promotion_run_card_mismatch",
+                "promotion run-card digest does not match lineage",
+            ),
+        ):
+            if not matches:
+                issues.append(
+                    _chain_issue(
+                        code,
+                        message,
+                        path=promotion_path,
+                        adapter_id=adapter_id,
+                    )
+                )
+        if depth not in (0, None) and (
+            promotion.get("status") != "ready"
+            or promotion.get("promotion_ready") is not True
+        ):
+            issues.append(
+                _chain_issue(
+                    "promotion_not_ready",
+                    "promotion gate did not approve this lineage node",
+                    path=promotion_path,
+                    adapter_id=adapter_id,
+                )
+            )
+    promotion_revalidation: dict[str, object] | None = None
+    if promotion is not None and run_card is not None and depth not in (0, None):
+        parent_path = _chain_reference_path(
+            lineage.get("parent_adapter_path"),
+            anchor=adapter_path,
+        )
+        try:
+            promotion_revalidation = hf_adapter_promotion_report(
+                adapter_path,
+                run_card,
+                parent_adapter=(
+                    parent_path
+                    if parent_path is not None and parent_path.is_dir()
+                    else None
+                ),
+                max_eval_loss_regression=float(
+                    promotion.get("max_eval_loss_regression") or 0.0
+                ),
+                require_eval=promotion.get("require_eval") is not False,
+                require_generation_changed=(
+                    promotion.get("require_generation_changed") is True
+                ),
+                require_weight_change=(
+                    promotion.get("require_weight_change") is not False
+                ),
+            )
+        except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            issues.append(
+                _chain_issue(
+                    "promotion_revalidation_failed",
+                    f"failed to re-evaluate promotion gate: {exc}",
+                    path=promotion_path,
+                    adapter_id=adapter_id,
+                )
+            )
+        else:
+            revalidation_fields = (
+                "status",
+                "promotion_ready",
+                "candidate_adapter_id",
+                "parent_adapter_id",
+                "lineage_depth",
+                "run_card_sha256",
+                "eval_loss_regression",
+                "failed_checks",
+                "missing_checks",
+            )
+            mismatched_fields = [
+                field
+                for field in revalidation_fields
+                if promotion.get(field) != promotion_revalidation.get(field)
+            ]
+            if mismatched_fields:
+                issues.append(
+                    _chain_issue(
+                        "promotion_revalidation_mismatch",
+                        "stored promotion differs from live revalidation: "
+                        + ",".join(mismatched_fields),
+                        path=promotion_path,
+                        adapter_id=adapter_id,
+                    )
+                )
+            if promotion_revalidation.get("promotion_ready") is not True:
+                issues.append(
+                    _chain_issue(
+                        "promotion_revalidation_not_ready",
+                        "live promotion revalidation did not approve this node",
+                        path=promotion_path,
+                        adapter_id=adapter_id,
+                    )
+                )
+
+    launch_command = (
+        None if run_card is None else _chain_command(run_card.get("launch_command"))
+    )
+    return {
+        "row_type": "hf_adapter_promotion_chain_node",
+        "status": "pending",
+        "adapter_path": str(adapter_path),
+        "adapter_id": adapter_id,
+        "parent_adapter_id": lineage.get("parent_adapter_id"),
+        "parent_adapter_path": lineage.get("parent_adapter_path"),
+        "root_adapter_id": lineage.get("root_adapter_id"),
+        "ancestor_adapter_ids": list(lineage.get("ancestor_adapter_ids") or []),
+        "lineage_depth": depth,
+        "base_model_name_or_path": lineage.get("base_model_name_or_path"),
+        "created_at": lineage.get("created_at"),
+        "lineage_status": lineage.get("status"),
+        "lineage_manifest_path": str(manifest_path),
+        "parent_fingerprint_verified": lineage.get("parent_fingerprint_verified"),
+        "weights_changed_from_parent": lineage.get("weights_changed_from_parent"),
+        "run_card_path": None if run_card_path is None else str(run_card_path),
+        "run_card_sha256": observed_card_sha256,
+        "trainer_trace_jsonl": None
+        if run_card is None
+        else run_card.get("trainer_trace_jsonl"),
+        "promotion_status": None if promotion is None else promotion.get("status"),
+        "promotion_ready": None
+        if promotion is None
+        else promotion.get("promotion_ready"),
+        "promotion_revalidated_ready": None
+        if promotion_revalidation is None
+        else promotion_revalidation.get("promotion_ready"),
+        "promotion_report_path": str(promotion_path)
+        if promotion_path.is_file()
+        else None,
+        "eval_before_loss": None
+        if promotion is None
+        else promotion.get("eval_before_loss"),
+        "eval_after_loss": None
+        if promotion is None
+        else promotion.get("eval_after_loss"),
+        "eval_loss_regression": None
+        if promotion is None
+        else promotion.get("eval_loss_regression"),
+        "launch_command": launch_command,
+        "launch_command_display": None
+        if launch_command is None
+        else shlex.join(launch_command),
+        "launch_command_source": "run_card" if launch_command is not None else None,
+        "issues": issues,
+    }
+
+
+def _chain_add_node_issue(
+    node: dict[str, object],
+    code: str,
+    message: str,
+    *,
+    severity: str = "error",
+    path: str | Path | None = None,
+) -> None:
+    issues = node.setdefault("issues", [])
+    if isinstance(issues, list):
+        issues.append(
+            _chain_issue(
+                code,
+                message,
+                severity=severity,
+                path=path or node.get("adapter_path"),
+                adapter_id=node.get("adapter_id"),
+            )
+        )
+
+
+def _chain_inferred_root_node(
+    child: Mapping[str, object],
+) -> dict[str, object] | None:
+    parent_id = child.get("parent_adapter_id")
+    parent_path = _chain_reference_path(
+        child.get("parent_adapter_path"),
+        anchor=Path(str(child.get("adapter_path"))),
+    )
+    if (
+        not isinstance(parent_id, str)
+        or parent_path is None
+        or not parent_path.is_dir()
+    ):
+        return None
+    try:
+        fingerprint = hf_adapter_fingerprint(parent_path)
+    except (OSError, ValueError, json.JSONDecodeError):
+        return None
+    if fingerprint.get("adapter_id") != parent_id:
+        return None
+    return {
+        "row_type": "hf_adapter_promotion_chain_node",
+        "status": "pending",
+        "adapter_path": str(parent_path),
+        "adapter_id": parent_id,
+        "parent_adapter_id": None,
+        "parent_adapter_path": None,
+        "root_adapter_id": parent_id,
+        "ancestor_adapter_ids": [],
+        "lineage_depth": 0,
+        "base_model_name_or_path": fingerprint.get("base_model_name_or_path"),
+        "created_at": None,
+        "lineage_status": "inferred_seed",
+        "lineage_manifest_path": None,
+        "parent_fingerprint_verified": None,
+        "weights_changed_from_parent": None,
+        "run_card_path": None,
+        "run_card_sha256": None,
+        "trainer_trace_jsonl": None,
+        "promotion_status": None,
+        "promotion_ready": None,
+        "promotion_report_path": None,
+        "eval_before_loss": None,
+        "eval_after_loss": None,
+        "eval_loss_regression": None,
+        "launch_command": None,
+        "launch_command_display": None,
+        "launch_command_source": None,
+        "issues": [
+            _chain_issue(
+                "root_lineage_inferred",
+                (
+                    "seed lineage manifest is absent; root identity was inferred "
+                    "from matching local adapter weights"
+                ),
+                severity="warning",
+                path=parent_path,
+                adapter_id=parent_id,
+            )
+        ],
+    }
+
+
+def _chain_depth(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        depth = int(value)
+    except (TypeError, ValueError):
+        return None
+    return depth if depth >= 0 and depth == value else None
+
+
+def hf_adapter_promotion_chain_report(
+    sources: str | Path | Sequence[str | Path],
+    *,
+    recursive: bool = True,
+    allow_inferred_roots: bool = True,
+    select_adapter_id: str | None = None,
+    command_artifacts: Sequence[Mapping[str, object] | str | Path] | None = None,
+) -> dict[str, object]:
+    """Audit a local adapter DAG and select one promotion-ready continuation tip."""
+
+    manifest_paths, report_issues = _discover_lineage_manifests(
+        sources,
+        recursive=recursive,
+    )
+    nodes = [_adapter_promotion_chain_node(path) for path in manifest_paths]
+    if allow_inferred_roots:
+        known_ids = {
+            node.get("adapter_id")
+            for node in nodes
+            if isinstance(node.get("adapter_id"), str)
+        }
+        inferred_roots: dict[str, dict[str, object]] = {}
+        for child in nodes:
+            if _chain_depth(child.get("lineage_depth")) != 1:
+                continue
+            parent_id = child.get("parent_adapter_id")
+            if not isinstance(parent_id, str) or parent_id in known_ids:
+                continue
+            inferred = _chain_inferred_root_node(child)
+            if inferred is not None:
+                inferred_roots[parent_id] = inferred
+        nodes.extend(inferred_roots.values())
+    command_rows, command_issues = _chain_command_artifacts(command_artifacts)
+    report_issues.extend(command_issues)
+    for node in nodes:
+        if node.get("launch_command") is not None:
+            continue
+        matches = [
+            row
+            for row in command_rows
+            if row.get("output_dir") == node.get("adapter_path")
+        ]
+        if len(matches) > 1:
+            _chain_add_node_issue(
+                node,
+                "multiple_command_artifacts",
+                "multiple launch commands target this adapter directory",
+                severity="warning",
+            )
+        if matches:
+            selected_command = matches[-1]
+            node["launch_command"] = selected_command.get("command")
+            node["launch_command_display"] = shlex.join(
+                [str(item) for item in selected_command.get("command") or []]
+            )
+            node["launch_command_source"] = "command_artifact"
+            node["launch_command_artifact_path"] = selected_command.get("source_path")
+
+    id_rows: dict[str, list[dict[str, object]]] = {}
+    for node in nodes:
+        adapter_id = node.get("adapter_id")
+        if isinstance(adapter_id, str):
+            id_rows.setdefault(adapter_id, []).append(node)
+    for adapter_id, duplicates in id_rows.items():
+        if len(duplicates) <= 1:
+            continue
+        for node in duplicates:
+            _chain_add_node_issue(
+                node,
+                "duplicate_adapter_id",
+                "the same adapter fingerprint appears in multiple directories",
+            )
+
+    unique_nodes = {
+        adapter_id: rows[0] for adapter_id, rows in id_rows.items() if len(rows) == 1
+    }
+    children: dict[str, list[str]] = {adapter_id: [] for adapter_id in unique_nodes}
+    for adapter_id, node in unique_nodes.items():
+        depth = _chain_depth(node.get("lineage_depth"))
+        node["lineage_depth"] = depth
+        parent_id = node.get("parent_adapter_id")
+        if depth is None:
+            _chain_add_node_issue(
+                node,
+                "invalid_lineage_depth",
+                "lineage depth must be a non-negative integer",
+            )
+            continue
+        if depth == 0:
+            if parent_id is not None:
+                _chain_add_node_issue(
+                    node,
+                    "root_has_parent",
+                    "depth-zero lineage nodes cannot have a parent",
+                )
+            if node.get("root_adapter_id") != adapter_id:
+                _chain_add_node_issue(
+                    node,
+                    "root_identity_mismatch",
+                    "depth-zero lineage root must identify itself",
+                )
+            if node.get("ancestor_adapter_ids"):
+                _chain_add_node_issue(
+                    node,
+                    "root_has_ancestors",
+                    "depth-zero lineage nodes cannot have ancestors",
+                )
+            continue
+        if not isinstance(parent_id, str) or parent_id not in unique_nodes:
+            _chain_add_node_issue(
+                node,
+                "parent_node_missing",
+                "the declared parent lineage node was not found",
+            )
+            continue
+        parent = unique_nodes[parent_id]
+        children[parent_id].append(adapter_id)
+        parent_depth = _chain_depth(parent.get("lineage_depth"))
+        if parent_depth is None or depth != parent_depth + 1:
+            _chain_add_node_issue(
+                node,
+                "lineage_depth_discontinuity",
+                "child lineage depth must equal parent depth plus one",
+            )
+        if node.get("root_adapter_id") != parent.get("root_adapter_id"):
+            _chain_add_node_issue(
+                node,
+                "root_lineage_mismatch",
+                "child and parent lineage roots differ",
+            )
+        if node.get("base_model_name_or_path") != parent.get("base_model_name_or_path"):
+            _chain_add_node_issue(
+                node,
+                "base_model_mismatch",
+                "child and parent adapters resolve different base models",
+            )
+        expected_ancestors = [
+            *list(parent.get("ancestor_adapter_ids") or []),
+            parent_id,
+        ]
+        if node.get("ancestor_adapter_ids") != expected_ancestors:
+            _chain_add_node_issue(
+                node,
+                "ancestor_sequence_mismatch",
+                "ancestor IDs do not form the parent lineage prefix",
+            )
+        parent_path = _chain_reference_path(
+            node.get("parent_adapter_path"),
+            anchor=Path(str(node.get("adapter_path"))),
+        )
+        if parent_path is not None and str(parent_path) != parent.get("adapter_path"):
+            _chain_add_node_issue(
+                node,
+                "parent_path_mismatch",
+                "declared parent path resolves to a different adapter node",
+                path=parent_path,
+            )
+        if node.get("parent_fingerprint_verified") is not True:
+            _chain_add_node_issue(
+                node,
+                "parent_fingerprint_unverified",
+                "non-root lineage parent fingerprint was not verified",
+            )
+        if node.get("weights_changed_from_parent") is not True:
+            _chain_add_node_issue(
+                node,
+                "weights_unchanged",
+                "non-root adapter weights did not change from the parent",
+            )
+
+    forks: list[dict[str, object]] = []
+    for parent_id, child_ids in children.items():
+        if len(child_ids) <= 1:
+            continue
+        forks.append(
+            {
+                "parent_adapter_id": parent_id,
+                "child_adapter_ids": sorted(child_ids),
+                "child_count": len(child_ids),
+            }
+        )
+        report_issues.append(
+            _chain_issue(
+                "lineage_fork",
+                "multiple child adapters branch from the same parent",
+                severity="warning",
+                adapter_id=parent_id,
+            )
+        )
+
+    ordered_nodes = sorted(
+        nodes,
+        key=lambda node: (
+            _chain_depth(node.get("lineage_depth"))
+            if _chain_depth(node.get("lineage_depth")) is not None
+            else 10**9,
+            str(node.get("adapter_id") or ""),
+            str(node.get("adapter_path") or ""),
+        ),
+    )
+    eligible_ids: set[str] = set()
+    for node in ordered_nodes:
+        node_issues = node.get("issues") or []
+        validation_ready = not any(
+            isinstance(issue, Mapping) and issue.get("severity") == "error"
+            for issue in node_issues
+        )
+        adapter_id = node.get("adapter_id")
+        depth = _chain_depth(node.get("lineage_depth"))
+        eligible = bool(validation_ready and isinstance(adapter_id, str))
+        if eligible and depth not in (0, None):
+            eligible = bool(
+                node.get("promotion_ready") is True
+                and node.get("parent_adapter_id") in eligible_ids
+            )
+        node["validation_ready"] = validation_ready
+        node["chain_eligible"] = eligible
+        node["status"] = "ready" if eligible else "rejected"
+        if eligible and isinstance(adapter_id, str):
+            eligible_ids.add(adapter_id)
+
+    eligible_tips = [
+        node
+        for node in ordered_nodes
+        if node.get("chain_eligible") is True
+        and not any(
+            child_id in eligible_ids
+            for child_id in children.get(
+                str(node.get("adapter_id")),
+                [],
+            )
+        )
+    ]
+    selected: dict[str, object] | None = None
+    if select_adapter_id is not None:
+        candidate = unique_nodes.get(select_adapter_id)
+        if candidate is not None and candidate.get("chain_eligible") is True:
+            selected = candidate
+            selection_status = "explicit"
+        else:
+            selection_status = "invalid_selection"
+            report_issues.append(
+                _chain_issue(
+                    "selected_adapter_not_eligible",
+                    "the requested adapter is absent or not chain-eligible",
+                    adapter_id=select_adapter_id,
+                )
+            )
+    elif eligible_tips:
+        max_depth = max(int(node.get("lineage_depth") or 0) for node in eligible_tips)
+        deepest = [
+            node
+            for node in eligible_tips
+            if int(node.get("lineage_depth") or 0) == max_depth
+        ]
+        if len(deepest) == 1:
+            selected = deepest[0]
+            selection_status = "deepest_unique_tip"
+        else:
+            selection_status = "ambiguous_deepest_tips"
+            report_issues.append(
+                _chain_issue(
+                    "ambiguous_continuation_tip",
+                    "multiple promotion-ready tips share the deepest lineage depth",
+                )
+            )
+    else:
+        selection_status = "no_eligible_tip"
+        report_issues.append(
+            _chain_issue(
+                "no_eligible_tip",
+                "no lineage node is eligible for continuation",
+            )
+        )
+
+    selected_path_ids: list[str] = []
+    cursor_node = selected
+    seen_ids: set[str] = set()
+    while cursor_node is not None:
+        cursor_id = cursor_node.get("adapter_id")
+        if not isinstance(cursor_id, str) or cursor_id in seen_ids:
+            break
+        selected_path_ids.append(cursor_id)
+        seen_ids.add(cursor_id)
+        parent_id = cursor_node.get("parent_adapter_id")
+        cursor_node = (
+            unique_nodes.get(str(parent_id)) if parent_id is not None else None
+        )
+    selected_path_ids.reverse()
+
+    node_issues = [
+        issue
+        for node in ordered_nodes
+        for issue in node.get("issues", [])
+        if isinstance(issue, Mapping)
+    ]
+    all_issues = [*report_issues, *node_issues]
+    error_count = sum(issue.get("severity") == "error" for issue in all_issues)
+    warning_count = sum(issue.get("severity") == "warning" for issue in all_issues)
+    rejected_count = sum(
+        node.get("chain_eligible") is not True for node in ordered_nodes
+    )
+    chain_ready = selected is not None
+    continuation_ready = bool(
+        selected is not None and selected.get("launch_command") is not None
+    )
+    if not chain_ready:
+        status = "ambiguous" if selection_status.startswith("ambiguous") else "blocked"
+    elif not continuation_ready:
+        status = "needs_command"
+    elif rejected_count:
+        status = "ready_with_rejections"
+    else:
+        status = "ready"
+
+    roots = [
+        node
+        for node in ordered_nodes
+        if node.get("lineage_depth") == 0 and node.get("adapter_id") is not None
+    ]
+    candidate = None if selected is None else dict(selected)
+    return {
+        "row_type": "hf_adapter_promotion_chain",
+        "schema": HF_ADAPTER_PROMOTION_CHAIN_SCHEMA,
+        "status": status,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "chain_ready": chain_ready,
+        "continuation_ready": continuation_ready,
+        "selection_status": selection_status,
+        "selected_adapter_id": None if selected is None else selected.get("adapter_id"),
+        "selected_adapter_path": None
+        if selected is None
+        else selected.get("adapter_path"),
+        "selected_lineage_depth": None
+        if selected is None
+        else selected.get("lineage_depth"),
+        "selected_path_adapter_ids": selected_path_ids,
+        "continuation_candidate": candidate,
+        "continuation_candidate_command": None
+        if selected is None
+        else selected.get("launch_command"),
+        "continuation_candidate_command_display": None
+        if selected is None
+        else selected.get("launch_command_display"),
+        "node_count": len(ordered_nodes),
+        "root_count": len(roots),
+        "root_adapter_ids": [node.get("adapter_id") for node in roots],
+        "eligible_node_count": len(eligible_ids),
+        "eligible_tip_count": len(eligible_tips),
+        "eligible_tip_adapter_ids": [node.get("adapter_id") for node in eligible_tips],
+        "promotion_ready_node_count": sum(
+            node.get("promotion_ready") is True for node in ordered_nodes
+        ),
+        "rejected_node_count": rejected_count,
+        "launch_command_available_count": sum(
+            node.get("launch_command") is not None for node in ordered_nodes
+        ),
+        "fork_count": len(forks),
+        "forks": forks,
+        "integrity_ready": error_count == 0,
+        "issue_count": len(all_issues),
+        "error_count": error_count,
+        "warning_count": warning_count,
+        "issues": report_issues,
+        "nodes": ordered_nodes,
+    }
+
+
+def write_hf_adapter_promotion_chain(
+    report_or_sources: Mapping[str, object] | str | Path | Sequence[str | Path],
+    out: str | Path,
+    *,
+    recursive: bool = True,
+    allow_inferred_roots: bool = True,
+    select_adapter_id: str | None = None,
+    command_artifacts: Sequence[Mapping[str, object] | str | Path] | None = None,
+) -> dict[str, object]:
+    report = (
+        dict(report_or_sources)
+        if isinstance(report_or_sources, Mapping)
+        else hf_adapter_promotion_chain_report(
+            report_or_sources,
+            recursive=recursive,
+            allow_inferred_roots=allow_inferred_roots,
+            select_adapter_id=select_adapter_id,
+            command_artifacts=command_artifacts,
+        )
+    )
+    path = Path(out)
+    report["report_path"] = str(path.resolve())
+    _atomic_write_json(path, report)
+    return report
+
+
+def load_hf_adapter_promotion_chain(value: str | Path) -> dict[str, object]:
+    path = Path(value)
+    payload, _ = _json_mapping(path)
+    if payload.get("schema") != HF_ADAPTER_PROMOTION_CHAIN_SCHEMA:
+        raise ValueError(
+            "unsupported HF adapter promotion chain schema: "
+            f"{payload.get('schema')}"
+        )
+    if payload.get("row_type") != "hf_adapter_promotion_chain":
+        raise ValueError(
+            "unsupported HF adapter promotion chain row type: "
+            f"{payload.get('row_type')}"
+        )
+    payload["report_path"] = str(path.resolve())
+    return payload
+
+
+def hf_adapter_promotion_chain_lines(
+    report_or_path: Mapping[str, object] | str | Path,
+) -> list[str]:
+    report, _ = (
+        (dict(report_or_path), None)
+        if isinstance(report_or_path, Mapping)
+        else (load_hf_adapter_promotion_chain(report_or_path), None)
+    )
+    lines = [
+        (
+            "hf_adapter_promotion_chain "
+            f"status={report.get('status')} "
+            f"nodes={report.get('node_count')} "
+            f"eligible={report.get('eligible_node_count')} "
+            f"rejected={report.get('rejected_node_count')} "
+            f"forks={report.get('fork_count')} "
+            f"selection={report.get('selection_status')} "
+            f"selected={report.get('selected_adapter_id')} "
+            f"depth={report.get('selected_lineage_depth')} "
+            f"continuation_ready={report.get('continuation_ready')}"
+        )
+    ]
+    for raw_node in report.get("nodes", []):
+        if not isinstance(raw_node, Mapping):
+            continue
+        lines.append(
+            "hf_adapter_promotion_chain_node "
+            f"status={raw_node.get('status')} "
+            f"depth={raw_node.get('lineage_depth')} "
+            f"adapter={raw_node.get('adapter_id')} "
+            f"parent={raw_node.get('parent_adapter_id')} "
+            f"promotion_ready={raw_node.get('promotion_ready')} "
+            f"eval_regression={raw_node.get('eval_loss_regression')} "
+            f"command={raw_node.get('launch_command_source')} "
+            f"path={raw_node.get('adapter_path')}"
+        )
+        for raw_issue in raw_node.get("issues", []):
+            if not isinstance(raw_issue, Mapping):
+                continue
+            lines.append(
+                "hf_adapter_promotion_chain_issue "
+                f"severity={raw_issue.get('severity')} "
+                f"code={raw_issue.get('code')} "
+                f"adapter={raw_issue.get('adapter_id')} "
+                f"path={raw_issue.get('path')} "
+                f"message={raw_issue.get('message')}"
+            )
+    for raw_issue in report.get("issues", []):
+        if not isinstance(raw_issue, Mapping):
+            continue
+        lines.append(
+            "hf_adapter_promotion_chain_issue "
+            f"severity={raw_issue.get('severity')} "
+            f"code={raw_issue.get('code')} "
+            f"adapter={raw_issue.get('adapter_id')} "
+            f"path={raw_issue.get('path')} "
+            f"message={raw_issue.get('message')}"
         )
     return lines
