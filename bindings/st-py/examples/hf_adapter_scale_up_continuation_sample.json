@@ -36,6 +36,41 @@
     "root_adapter_id": "sha256:01671238bd220e4a819057f9367ea559dbc2570a43661b8bf56f9403cdeb10cb",
     "weights_changed_from_parent": true
   },
+  "promotion_chain_validation": {
+    "continuation_ready": true,
+    "eligible_node_count": 5,
+    "error_count": 0,
+    "fork_count": 1,
+    "launch_command_available_count": 1,
+    "node_count": 5,
+    "root_lineage_inferred_from_matching_local_weights": true,
+    "selected_adapter_id": "sha256:26568749e197eb5c7d18fb7cdaa7d8f00697fc88e63a83a9a5be850c35158364",
+    "selected_lineage_depth": 3,
+    "selection_status": "deepest_unique_tip",
+    "status": "ready",
+    "warning_count": 2
+  },
+  "promotion_chain_result_adapter": {
+    "adapter_id": "sha256:26568749e197eb5c7d18fb7cdaa7d8f00697fc88e63a83a9a5be850c35158364",
+    "eval_after_loss": 10.483804702758789,
+    "eval_before_loss": 10.483808517456055,
+    "eval_loss_regression": -3.814697265625e-06,
+    "launch_command_recorded": true,
+    "lineage_depth": 3,
+    "parent_adapter_id": "sha256:87030a6e8c33b245e547e2cbdcc9c2bfe4beae0336a3afe40681539fd4977411",
+    "promotion_ready": true,
+    "root_adapter_id": "sha256:01671238bd220e4a819057f9367ea559dbc2570a43661b8bf56f9403cdeb10cb",
+    "steps": 2,
+    "weights_changed_from_parent": true
+  },
+  "promotion_chain_next_scale_up": {
+    "adapter_continuation_applied": true,
+    "expected_child_lineage_depth": 4,
+    "preflight_error_count": 0,
+    "preflight_status": "ready",
+    "preflight_warning_count": 0,
+    "source_adapter_id": "sha256:26568749e197eb5c7d18fb7cdaa7d8f00697fc88e63a83a9a5be850c35158364"
+  },
   "standalone_promotion_revalidation": {
     "promotion_ready": true,
     "status": "ready"

@@ -677,6 +677,34 @@ The importable equivalents are `st.hf_adapter_fingerprint(...)`,
 explicitly unverified until its adapter files are available locally, so it
 cannot silently satisfy the default promotion gate.
 
+Audit several promoted generations as one chain, then feed its selected tip
+directly back into the normal scale-up command builder:
+
+```bash
+spiral-hf-adapter-chain runs/qwen2-study \
+  --out runs/qwen2-study/promotion-chain.json \
+  --require-continuation-ready
+
+spiral-hf-scale-up runs/qwen2-study/promotion-chain.json \
+  --output-dir runs/qwen2-generation-next \
+  --write-command runs/qwen2-study/next-generation.json \
+  --require-ready
+```
+
+The chain report re-fingerprints every local adapter, verifies parent/root/depth
+and ancestor continuity, checks each non-root promotion report and run-card
+digest, preserves rejected branches, and selects only a unique deepest ready
+tip. Equal-depth tips return `ambiguous` until `--select-adapter-id` resolves
+the fork. New FT run cards carry their exact `launch_command`, so each promoted
+generation can produce the next one without a sweep artifact. For older run
+cards, repeat `--command-artifact <scale-up-command.json>`; a local seed from
+before lineage manifests existed may be inferred only when its live fingerprint
+matches the declared root ID (`--no-infer-roots` disables that compatibility
+path). Python can use `st.hf_adapter_promotion_chain_report(...)`,
+`st.write_hf_adapter_promotion_chain(...)`,
+`st.load_hf_adapter_promotion_chain(...)`, and then
+`st.hf_finetune_scale_up_command(chain, ...)` for the same flow.
+
 Use `--resume-from-checkpoint` only for an exact Trainer continuation that
 should restore optimizer, scheduler, and RNG state. SpiralTorch audits
 `trainer_state.json` and those state files before loading. A checkpoint saved
@@ -976,7 +1004,7 @@ For a promotion-ready LoRA winner, `scale-up-command.json` now defaults to
 `adapter_continuation=auto`: the selected run's adapter directory replaces the
 original `--model-name`, `--model-artifact-kind peft-adapter` and
 `--finetune-mode lora` are made explicit, and the expected child lineage depth
-is recorded before launch. `spiral-hf-finetune-scale-up sweep-report.json`
+is recorded before launch. `spiral-hf-scale-up sweep-report.json`
 therefore continues the winning weights rather than merely rerunning their
 configuration. Pass `--adapter-continuation replay` for the old configuration
 replay behavior, or `--adapter-continuation continue` to require adapter

@@ -6242,6 +6242,93 @@ def _paths_overlap(left: str | Path, right: str | Path) -> bool:
         return False
 
 
+def _scale_up_promotion_chain_payload(
+    value: str | Path | Mapping[str, object],
+) -> tuple[dict[str, object] | None, str | None]:
+    if isinstance(value, Mapping):
+        payload = dict(value)
+        return (
+            (payload, None)
+            if payload.get("row_type") == "hf_adapter_promotion_chain"
+            else (None, None)
+        )
+    path = Path(value)
+    if not path.is_file():
+        return None, None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None, None
+    if not isinstance(payload, Mapping) or payload.get(
+        "row_type"
+    ) != "hf_adapter_promotion_chain":
+        return None, None
+    return dict(payload), str(path)
+
+
+def _scale_up_promotion_chain_summary(
+    chain: Mapping[str, object],
+) -> dict[str, object] | None:
+    candidate = chain.get("continuation_candidate")
+    if not isinstance(candidate, Mapping):
+        return None
+    command = chain.get("continuation_candidate_command") or candidate.get(
+        "launch_command"
+    )
+    if not isinstance(command, Sequence) or isinstance(command, (str, bytes)):
+        return None
+    return {
+        "row_type": "hf_gpt2_finetune_sweep_report_summary",
+        "scale_up_candidate_label": candidate.get("adapter_id"),
+        "scale_up_candidate_reason": "promotion_chain_tip",
+        "scale_up_candidate_command": [str(item) for item in command],
+        "scale_up_candidate_output_dir": candidate.get("adapter_path"),
+        "scale_up_candidate_run_dir": candidate.get("adapter_path"),
+        "scale_up_candidate_run_card": candidate.get("run_card_path"),
+        "scale_up_candidate_trainer_trace_jsonl": candidate.get(
+            "trainer_trace_jsonl"
+        ),
+        "scale_up_candidate_finetune_mode": _command_flag_value(
+            command,
+            "--finetune-mode",
+        )
+        or "lora",
+        "scale_up_candidate_adapter_saved": True,
+        "adapter_promotion_required": True,
+        "adapter_promotion_ready_count": chain.get("promotion_ready_node_count"),
+        "adapter_promotion_not_ready_count": chain.get("rejected_node_count"),
+        "scale_up_candidate_adapter_promotion_status": candidate.get(
+            "promotion_status"
+        ),
+        "scale_up_candidate_adapter_promotion_ready": candidate.get(
+            "promotion_ready"
+        )
+        is True
+        or candidate.get("lineage_depth") == 0,
+        "scale_up_candidate_adapter_promotion_report_path": candidate.get(
+            "promotion_report_path"
+        ),
+        "scale_up_candidate_adapter_lineage_status": candidate.get(
+            "lineage_status"
+        ),
+        "scale_up_candidate_adapter_lineage_adapter_id": candidate.get(
+            "adapter_id"
+        ),
+        "scale_up_candidate_adapter_lineage_parent_adapter_id": candidate.get(
+            "parent_adapter_id"
+        ),
+        "scale_up_candidate_adapter_lineage_root_adapter_id": candidate.get(
+            "root_adapter_id"
+        ),
+        "scale_up_candidate_adapter_lineage_depth": candidate.get(
+            "lineage_depth"
+        ),
+        "scale_up_candidate_adapter_lineage_manifest_path": candidate.get(
+            "lineage_manifest_path"
+        ),
+    }
+
+
 def hf_gpt2_finetune_scale_up_command(
     report_or_summary: str | Path | Mapping[str, object],
     *,
@@ -6266,8 +6353,56 @@ def hf_gpt2_finetune_scale_up_command(
     continuation_policy = _scale_up_adapter_continuation_policy(
         adapter_continuation
     )
+    chain, chain_source_path = _scale_up_promotion_chain_payload(report_or_summary)
+    chain_provenance: dict[str, object] = {}
+    if chain is not None:
+        chain_provenance = {
+            "promotion_chain_schema": chain.get("schema"),
+            "promotion_chain_status": chain.get("status"),
+            "promotion_chain_source_path": chain_source_path
+            or chain.get("report_path"),
+            "promotion_chain_selection_status": chain.get("selection_status"),
+            "promotion_chain_selected_adapter_id": chain.get(
+                "selected_adapter_id"
+            ),
+            "promotion_chain_selected_adapter_path": chain.get(
+                "selected_adapter_path"
+            ),
+            "promotion_chain_selected_lineage_depth": chain.get(
+                "selected_lineage_depth"
+            ),
+            "promotion_chain_rejected_node_count": chain.get(
+                "rejected_node_count"
+            ),
+        }
+        if chain.get("schema") != "spiraltorch.hf_adapter_promotion_chain.v1":
+            return {
+                "row_type": "hf_gpt2_finetune_scale_up_command",
+                "status": "promotion_chain_unsupported_schema",
+                "adapter_continuation_policy": continuation_policy,
+                **chain_provenance,
+            }
+        if chain.get("continuation_ready") is not True:
+            return {
+                "row_type": "hf_gpt2_finetune_scale_up_command",
+                "status": "promotion_chain_not_ready",
+                "adapter_continuation_policy": continuation_policy,
+                "promotion_chain_continuation_ready": chain.get(
+                    "continuation_ready"
+                ),
+                **chain_provenance,
+            }
 
-    if isinstance(report_or_summary, Mapping) and report_or_summary.get(
+    if chain is not None:
+        summary = _scale_up_promotion_chain_summary(chain)
+        if summary is None:
+            return {
+                "row_type": "hf_gpt2_finetune_scale_up_command",
+                "status": "promotion_chain_missing_command",
+                "adapter_continuation_policy": continuation_policy,
+                **chain_provenance,
+            }
+    elif isinstance(report_or_summary, Mapping) and report_or_summary.get(
         "row_type"
     ) == "hf_gpt2_finetune_sweep_report_summary":
         summary = dict(report_or_summary)
@@ -6317,6 +6452,7 @@ def hf_gpt2_finetune_scale_up_command(
             "adapter_promotion_not_ready_count": summary.get(
                 "adapter_promotion_not_ready_count"
             ),
+            **chain_provenance,
         }
     command_value = summary.get("scale_up_candidate_command")
     if not isinstance(command_value, Sequence) or isinstance(
@@ -6327,6 +6463,7 @@ def hf_gpt2_finetune_scale_up_command(
             "row_type": "hf_gpt2_finetune_scale_up_command",
             "status": "missing_candidate_command",
             "scale_up_candidate_label": summary.get("scale_up_candidate_label"),
+            **chain_provenance,
         }
     base_command = [str(item) for item in command_value]
     source_run_card = summary.get("scale_up_candidate_run_card") or _command_flag_value(
@@ -6407,6 +6544,7 @@ def hf_gpt2_finetune_scale_up_command(
             "adapter_continuation_checkpoint_resume": continuation.get(
                 "checkpoint_resume"
             ),
+            **chain_provenance,
         }
     continuation_source = (
         str(continuation.get("source"))
@@ -6427,6 +6565,7 @@ def hf_gpt2_finetune_scale_up_command(
             "adapter_continuation_reason": "adapter_input_and_output_overlap",
             "adapter_continuation_source": continuation_source,
             "output_dir": resolved_output_dir,
+            **chain_provenance,
         }
     overrides = {
         "--model-name": (
@@ -6517,6 +6656,7 @@ def hf_gpt2_finetune_scale_up_command(
         "command_preview": _cli_arg_preview(command),
         "applied_overrides": applied,
         "applied_override_count": len(applied),
+        **chain_provenance,
     }
 
 
@@ -6584,7 +6724,10 @@ def hf_gpt2_finetune_scale_up_preflight_report(
     artifact_row_type = str(artifact.get("row_type") or "")
     if (
         "adapter_continuation_applied" not in artifact
-        and "sweep_report" in artifact_row_type
+        and (
+            "sweep_report" in artifact_row_type
+            or artifact_row_type == "hf_adapter_promotion_chain"
+        )
     ):
         try:
             resolved_artifact = hf_gpt2_finetune_scale_up_command(artifact)
@@ -7252,6 +7395,9 @@ def summarize_hf_gpt2_finetune_run_card(
         "row_type": "hf_gpt2_finetune_run_card_summary",
         "run_label": _run_label(card, source_path=source_path, run_label=run_label),
         "run_card_path": source_path,
+        "launch_command": _json_safe(card.get("launch_command")),
+        "launch_command_display": card.get("launch_command_display"),
+        "launch_command_source": card.get("launch_command_source"),
         "model_profile_id": card.get("model_profile_id"),
         "model_profile_extends": _hf_finetune_profile_extends_from_payload(card),
         "model_profile": card.get("model_profile"),

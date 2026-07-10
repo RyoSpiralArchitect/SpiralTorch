@@ -3920,6 +3920,21 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             sample["source_adapter"]["adapter_id"],
         )
         self.assertTrue(sample["result_adapter"]["promotion_ready"])
+        self.assertEqual(
+            sample["promotion_chain_result_adapter"]["lineage_depth"],
+            3,
+        )
+        self.assertTrue(sample["promotion_chain_validation"]["continuation_ready"])
+        self.assertEqual(
+            sample["promotion_chain_next_scale_up"][
+                "expected_child_lineage_depth"
+            ],
+            4,
+        )
+        self.assertEqual(
+            sample["promotion_chain_next_scale_up"]["preflight_error_count"],
+            0,
+        )
 
     def test_scale_up_example_replays_sweep_report_and_command_artifact(self) -> None:
         sweep_module = load_sweep_example()
@@ -9407,6 +9422,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             lora_args._hf_finetune_adapter_config["mode"],
             "lora",
         )
+        self.assertEqual(
+            Path(args._hf_finetune_launch_command[1]).name,
+            "hf_gpt2_finetune_bridge.py",
+        )
+        self.assertEqual(
+            args._hf_finetune_launch_command_source,
+            "hf_gpt2_finetune_bridge",
+        )
 
     def test_bridge_detects_adapter_warm_start_and_keeps_resume_distinct(
         self,
@@ -9764,6 +9787,18 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         )
         self.assertEqual(default_args.model_name, "EleutherAI/pythia-70m-deduped")
         self.assertEqual(default_args.tokenizer_name, "EleutherAI/pythia-70m-deduped")
+        self.assertEqual(
+            Path(default_args._hf_finetune_launch_command[1]).name,
+            "hf_finetune_bridge.py",
+        )
+        self.assertEqual(
+            default_args._hf_finetune_launch_command[-1],
+            "--metadata-only",
+        )
+        self.assertEqual(
+            default_args._hf_finetune_launch_command_source,
+            "hf_finetune_bridge",
+        )
         self.assertEqual(args.model_name, "sshleifer/tiny-gpt2")
         self.assertEqual(args.tokenizer_name, "sshleifer/tiny-gpt2")
         self.assertEqual(args.block_size, 64)

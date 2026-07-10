@@ -13,9 +13,12 @@ from typing import Sequence
 from .hf_adapter import (
     hf_adapter_lineage_lines,
     hf_adapter_lineage_report,
+    hf_adapter_promotion_chain_lines,
+    hf_adapter_promotion_chain_report,
     hf_adapter_promotion_lines,
     hf_adapter_promotion_report,
     write_hf_adapter_lineage,
+    write_hf_adapter_promotion_chain,
     write_hf_adapter_promotion,
 )
 from .hf_ft import (
@@ -170,6 +173,75 @@ def adapter_promotion_main(argv: Sequence[str] | None = None) -> int:
         if report.get("report_path") is not None:
             print(f"hf_adapter_promotion_report {report['report_path']}")
     return 0 if report.get("promotion_ready") is True else 1
+
+
+def adapter_promotion_chain_main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Audit a local PEFT adapter promotion DAG and select its deepest "
+            "unambiguous continuation tip."
+        ),
+    )
+    parser.add_argument(
+        "sources",
+        nargs="+",
+        type=Path,
+        help="Adapter directory, lineage manifest, or directory tree to scan.",
+    )
+    parser.add_argument(
+        "--command-artifact",
+        action="append",
+        type=Path,
+        default=[],
+        help=(
+            "Scale-up command artifact used to recover launch commands for older "
+            "run cards. May be repeated."
+        ),
+    )
+    parser.add_argument(
+        "--select-adapter-id",
+        default=None,
+        help="Resolve a same-depth fork by selecting one eligible adapter ID.",
+    )
+    parser.add_argument("--no-recursive", action="store_true")
+    parser.add_argument(
+        "--no-infer-roots",
+        action="store_true",
+        help=(
+            "Require a lineage manifest for the seed instead of accepting a "
+            "matching local pre-lineage adapter."
+        ),
+    )
+    parser.add_argument("--out", type=Path, default=None)
+    parser.add_argument(
+        "--require-continuation-ready",
+        action="store_true",
+        help="Return nonzero unless the selected tip has a replayable launch command.",
+    )
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args(argv)
+    report = hf_adapter_promotion_chain_report(
+        args.sources,
+        recursive=not args.no_recursive,
+        allow_inferred_roots=not args.no_infer_roots,
+        select_adapter_id=args.select_adapter_id,
+        command_artifacts=args.command_artifact,
+    )
+    if args.out is not None:
+        report = write_hf_adapter_promotion_chain(report, args.out)
+    if args.json:
+        print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        for line in hf_adapter_promotion_chain_lines(report):
+            print(line)
+        if report.get("report_path") is not None:
+            print(f"hf_adapter_promotion_chain_report {report['report_path']}")
+    ready = (
+        report.get("continuation_ready") is True
+        if args.require_continuation_ready
+        else report.get("chain_ready") is True
+    )
+    return 0 if ready else 1
 
 
 def _generation_control_profile_config_lines(report: dict) -> list[str]:
