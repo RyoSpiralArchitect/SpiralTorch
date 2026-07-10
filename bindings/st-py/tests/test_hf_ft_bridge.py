@@ -2654,6 +2654,18 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                     "trace_last_inference_distortion_logits_ngram_repression_strength": 0.0,
                 },
             )
+            safe.update(
+                {
+                    "adapter_saved": True,
+                    "finetune_mode": "lora",
+                    "adapter_lineage": {
+                        "status": "ready",
+                        "adapter_id": "sha256:safe-adapter",
+                        "root_adapter_id": "sha256:safe-adapter",
+                        "lineage_depth": 1,
+                    },
+                }
+            )
             hf_ft.write_hf_gpt2_finetune_run_card(risky, risky_path)
             hf_ft.write_hf_gpt2_finetune_run_card(safe, safe_path)
 
@@ -2712,6 +2724,12 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 max_train_samples=4096,
                 max_eval_samples=256,
                 output_dir=Path(tmp) / "safe-long-run",
+            )
+            explicit_adapter_continuation = (
+                hf_ft.hf_gpt2_finetune_scale_up_command(
+                    sweep_summary,
+                    adapter_continuation="continue",
+                )
             )
 
         self.assertEqual(comparison["best_eval_after_run_label"], "risky")
@@ -2792,6 +2810,19 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             explicit_scale_up_command["command_display"],
         )
         self.assertEqual(explicit_scale_up_command["applied_override_count"], 8)
+        self.assertTrue(
+            explicit_adapter_continuation["adapter_continuation_applied"]
+        )
+        self.assertEqual(
+            explicit_adapter_continuation["adapter_continuation_source"],
+            str(safe_output_dir),
+        )
+        self.assertEqual(
+            explicit_adapter_continuation["command"][
+                explicit_adapter_continuation["command"].index("--model-name") + 1
+            ],
+            str(safe_output_dir),
+        )
         self.assertTrue(
             any("hf_gpt2_ft_sweep_scale_up candidate=safe" in line for line in lines)
         )
@@ -3524,6 +3555,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
 
     def test_sweep_adapter_promotion_selects_only_ready_runs(self) -> None:
         module = load_sweep_example()
+        scale_up_module = load_scale_up_example()
         with tempfile.TemporaryDirectory() as tmp:
             train_path = Path(tmp) / "train.txt"
             train_path.write_text("alpha spiral\nbeta zspace\n", encoding="utf-8")
@@ -3617,6 +3649,41 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                     },
                     run_card_path,
                 )
+                (run_card_path.parent / "adapter_config.json").write_text(
+                    json.dumps({"peft_type": "LORA"}),
+                    encoding="utf-8",
+                )
+                (run_card_path.parent / "adapter_model.safetensors").write_bytes(
+                    f"adapter-{seed}".encode("ascii")
+                )
+                (
+                    run_card_path.parent / st.HF_ADAPTER_LINEAGE_FILENAME
+                ).write_text(
+                    json.dumps(
+                        {
+                            "status": "ready",
+                            "adapter_id": f"sha256:child-{seed}",
+                            "parent_adapter_id": "sha256:parent",
+                            "root_adapter_id": "sha256:parent",
+                            "lineage_depth": 1,
+                        }
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+                (
+                    run_card_path.parent / st.HF_ADAPTER_PROMOTION_FILENAME
+                ).write_text(
+                    json.dumps(
+                        {
+                            "status": "ready" if ready else "blocked",
+                            "promotion_ready": ready,
+                            "candidate_adapter_id": f"sha256:child-{seed}",
+                        }
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
                 return types.SimpleNamespace(returncode=0 if ready else 1)
 
             with mock.patch.object(module.subprocess, "run", side_effect=fake_run):
@@ -3647,6 +3714,60 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             )
             no_ready_scale_up = hf_ft.hf_gpt2_finetune_scale_up_command(
                 no_ready_summary
+            )
+            replay_scale_up = hf_ft.hf_gpt2_finetune_scale_up_command(
+                report["summary"],
+                adapter_continuation="replay",
+            )
+            resume_checkpoint = Path(tmp) / "checkpoint-1"
+            resume_checkpoint.mkdir()
+            continuation_conflict = hf_ft.hf_gpt2_finetune_scale_up_command(
+                report["summary"],
+                adapter_continuation="continue",
+                resume_from_checkpoint=resume_checkpoint,
+            )
+            continuation_collision = hf_ft.hf_gpt2_finetune_scale_up_command(
+                report["summary"],
+                output_dir=ready_run["run_dir"],
+            )
+            continuation_preflight = (
+                hf_ft.hf_gpt2_finetune_scale_up_preflight_report(
+                    report["scale_up_command"]
+                )
+            )
+            summary_preflight = hf_ft.hf_gpt2_finetune_scale_up_preflight_report(
+                report["summary"]
+            )
+            tampered_continuation = dict(report["scale_up_command"])
+            tampered_continuation[
+                "adapter_continuation_source_adapter_id"
+            ] = "sha256:tampered"
+            tampered_preflight = hf_ft.hf_gpt2_finetune_scale_up_preflight_report(
+                tampered_continuation
+            )
+            continuation_preflight_lines = (
+                hf_ft.hf_gpt2_finetune_scale_up_preflight_lines(
+                    continuation_preflight
+                )
+            )
+            cli_scale_up = scale_up_module.run_scale_up(
+                scale_up_module.parse_args(
+                    [str(out_dir / "sweep-report.json")]
+                )
+            )
+            cli_replay = scale_up_module.run_scale_up(
+                scale_up_module.parse_args(
+                    [
+                        str(out_dir / "sweep-report.json"),
+                        "--adapter-continuation",
+                        "replay",
+                    ]
+                )
+            )
+            artifact_replay = scale_up_module.run_scale_up(
+                scale_up_module.parse_args(
+                    [str(out_dir / "scale-up-command.json")]
+                )
             )
             lines = hf_ft.summarize_hf_gpt2_finetune_sweep_report_lines(report)
 
@@ -3695,14 +3816,110 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 "scale_up_candidate_adapter_promotion_ready"
             ]
         )
+        self.assertTrue(report["scale_up_command"]["adapter_continuation_applied"])
+        self.assertEqual(
+            report["scale_up_command"]["adapter_continuation_status"],
+            "continue",
+        )
+        self.assertEqual(
+            report["scale_up_command"]["adapter_continuation_reason"],
+            "promotion_ready_adapter_continuation",
+        )
+        self.assertEqual(
+            report["scale_up_command"]["adapter_continuation_source"],
+            ready_run["run_dir"],
+        )
+        self.assertEqual(
+            report["scale_up_command"]["adapter_continuation_source_adapter_id"],
+            "sha256:child-13",
+        )
+        self.assertEqual(
+            report["scale_up_command"][
+                "adapter_continuation_expected_child_lineage_depth"
+            ],
+            2,
+        )
+        scale_up_values = report["scale_up_command"]["command"]
+        self.assertEqual(
+            scale_up_values[scale_up_values.index("--model-name") + 1],
+            ready_run["run_dir"],
+        )
+        self.assertEqual(
+            scale_up_values[scale_up_values.index("--model-artifact-kind") + 1],
+            "peft-adapter",
+        )
+        self.assertEqual(
+            scale_up_values[scale_up_values.index("--finetune-mode") + 1],
+            "lora",
+        )
         self.assertIn(ready_run["name"], report["scale_up_command"]["command_display"])
+        self.assertFalse(replay_scale_up["adapter_continuation_applied"])
+        replay_values = replay_scale_up["command"]
+        self.assertEqual(
+            replay_values[replay_values.index("--model-name") + 1],
+            "Qwen/Qwen2-0.5B",
+        )
+        self.assertEqual(
+            continuation_conflict["status"],
+            "adapter_continuation_conflict",
+        )
+        self.assertEqual(
+            continuation_collision["status"],
+            "adapter_continuation_output_collision",
+        )
+        self.assertTrue(continuation_preflight["ready"])
+        self.assertTrue(continuation_preflight["adapter_continuation_applied"])
+        self.assertTrue(summary_preflight["ready"])
+        self.assertTrue(summary_preflight["adapter_continuation_applied"])
+        self.assertFalse(tampered_preflight["ready"])
+        self.assertTrue(
+            any(
+                "fingerprint does not match source" in str(issue.get("message"))
+                for issue in tampered_preflight["issues"]
+            )
+        )
+        self.assertTrue(cli_scale_up["adapter_continuation_applied"])
+        self.assertEqual(cli_scale_up["adapter_continuation_policy"], "auto")
+        self.assertEqual(cli_scale_up["preflight_status"], "ready")
+        self.assertFalse(cli_replay["adapter_continuation_applied"])
+        self.assertEqual(cli_replay["adapter_continuation_policy"], "replay")
+        self.assertTrue(artifact_replay["adapter_continuation_applied"])
+        self.assertTrue(artifact_replay["adapter_continuation_artifact_replay"])
+        self.assertEqual(artifact_replay["adapter_continuation_policy"], "auto")
+        self.assertEqual(artifact_replay["preflight_status"], "ready")
+        self.assertTrue(
+            any(
+                "expected_child_depth=2" in line
+                for line in continuation_preflight_lines
+            )
+        )
         self.assertTrue(any("promotion_ready=True" in line for line in lines))
+        self.assertTrue(any("continuation_applied=True" in line for line in lines))
         self.assertEqual(no_ready_summary["status"], "no_promotion_ready_runs")
         self.assertIsNone(no_ready_summary["scale_up_candidate_label"])
         self.assertEqual(
             no_ready_scale_up["status"],
             "adapter_promotion_not_ready",
         )
+        with self.assertRaisesRegex(ValueError, "adapter_continuation"):
+            hf_ft.hf_gpt2_finetune_scale_up_command(
+                report["summary"],
+                adapter_continuation="invalid",
+            )
+        sample = json.loads(
+            (
+                Path(__file__).resolve().parents[1]
+                / "examples"
+                / "hf_adapter_scale_up_continuation_sample.json"
+            ).read_text(encoding="utf-8")
+        )
+        self.assertEqual(sample["source_adapter"]["lineage_depth"], 1)
+        self.assertEqual(sample["result_adapter"]["lineage_depth"], 2)
+        self.assertEqual(
+            sample["result_adapter"]["parent_adapter_id"],
+            sample["source_adapter"]["adapter_id"],
+        )
+        self.assertTrue(sample["result_adapter"]["promotion_ready"])
 
     def test_scale_up_example_replays_sweep_report_and_command_artifact(self) -> None:
         sweep_module = load_sweep_example()
@@ -4111,6 +4328,11 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(written["wait_launch_command"], result["wait_launch_command"])
         self.assertEqual(installed_code, 0)
         self.assertIn("hf_ft_scale_up_command status=ok", stdout.getvalue())
+        self.assertIn(
+            "hf_ft_scale_up_adapter_continuation "
+            "policy=auto status=replay applied=False",
+            stdout.getvalue(),
+        )
         self.assertEqual(
             implicit_artifact_command["row_type"],
             "hf_finetune_scale_up_command",

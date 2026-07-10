@@ -24,6 +24,10 @@
   every bridge command, retain blocked candidates in comparison evidence, and
   restrict selection, resume reuse, and scale-up command generation to adapters
   whose promotion gate is ready.
+- Adapter-continuing HF scale-up: resolve promotion-ready sweep winners as the
+  parent PEFT artifact by default, preserve lineage provenance through command
+  replay, expose `auto` / `replay` / `continue` policy, and preflight local
+  adapter weights plus lineage/promotion fingerprint and depth consistency.
 - Trainer resume audit: add `hf_finetune_checkpoint_resume_report(...)` and
   compact lines for optimizer/scheduler/RNG state availability, saved versus
   requested step horizons, and the exhausted-scheduler case where adapter

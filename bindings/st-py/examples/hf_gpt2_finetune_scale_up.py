@@ -16,7 +16,7 @@ PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 if str(PACKAGE_ROOT) not in sys.path:
     sys.path.insert(0, str(PACKAGE_ROOT))
 
-import spiraltorch as st
+import spiraltorch as st  # noqa: E402
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -50,6 +50,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--max-eval-blocks", type=int, default=None)
     parser.add_argument("--streaming-validation-samples", type=int, default=None)
     parser.add_argument("--model-name", default=None)
+    parser.add_argument(
+        "--adapter-continuation",
+        choices=("auto", "replay", "continue"),
+        default=None,
+        help=(
+            "Choose whether scale-up replays the selected configuration or "
+            "continues from its saved PEFT adapter. Defaults to auto for sweep "
+            "reports and replay for an already-resolved command artifact."
+        ),
+    )
     parser.add_argument("--resume-from-checkpoint", type=Path, default=None)
     parser.add_argument(
         "--allow-missing-resume-checkpoint",
@@ -199,7 +209,8 @@ def _summary_from_scale_up_artifact(
     ):
         command_value = []
     command = [str(item) for item in command_value]
-    return {
+    run_card = _flag_value(command, "--run-card")
+    summary = {
         "row_type": "hf_gpt2_finetune_sweep_report_summary",
         "scale_up_candidate_label": artifact.get("scale_up_candidate_label"),
         "scale_up_candidate_reason": artifact.get("scale_up_candidate_reason"),
@@ -211,12 +222,84 @@ def _summary_from_scale_up_artifact(
         ),
         "scale_up_candidate_command": command,
         "scale_up_candidate_output_dir": _flag_value(command, "--output-dir"),
-        "scale_up_candidate_run_card": _flag_value(command, "--run-card"),
+        "scale_up_candidate_run_card": run_card,
         "scale_up_candidate_trainer_trace_jsonl": _flag_value(
             command,
             "--trainer-trace-jsonl",
         ),
+        "scale_up_candidate_finetune_mode": _flag_value(
+            command,
+            "--finetune-mode",
+        ),
+        "scale_up_candidate_model_artifact_kind": _flag_value(
+            command,
+            "--model-artifact-kind",
+        ),
+        "scale_up_candidate_adapter_lineage_depth": artifact.get(
+            "adapter_continuation_expected_child_lineage_depth"
+        ),
     }
+    if run_card is not None and Path(run_card).is_file():
+        card_summary = st.summarize_hf_gpt2_finetune_run_card(run_card)
+        summary.update(
+            {
+                "adapter_promotion_required": card_summary.get(
+                    "adapter_promotion_gate_requested"
+                )
+                is True,
+                "scale_up_candidate_adapter_saved": card_summary.get(
+                    "adapter_saved"
+                ),
+                "scale_up_candidate_finetune_mode": card_summary.get(
+                    "finetune_mode"
+                ),
+                "scale_up_candidate_model_artifact_kind": card_summary.get(
+                    "model_artifact_kind"
+                ),
+                "scale_up_candidate_adapter_promotion_status": card_summary.get(
+                    "adapter_promotion_status"
+                ),
+                "scale_up_candidate_adapter_promotion_ready": card_summary.get(
+                    "adapter_promotion_ready"
+                ),
+                "scale_up_candidate_adapter_promotion_report_path": card_summary.get(
+                    "adapter_promotion_report_path"
+                ),
+                "scale_up_candidate_adapter_lineage_status": card_summary.get(
+                    "adapter_lineage_status"
+                ),
+                "scale_up_candidate_adapter_lineage_adapter_id": card_summary.get(
+                    "adapter_lineage_adapter_id"
+                ),
+                "scale_up_candidate_adapter_lineage_parent_adapter_id": (
+                    card_summary.get("adapter_lineage_parent_adapter_id")
+                ),
+                "scale_up_candidate_adapter_lineage_root_adapter_id": card_summary.get(
+                    "adapter_lineage_root_adapter_id"
+                ),
+                "scale_up_candidate_adapter_lineage_depth": card_summary.get(
+                    "adapter_lineage_depth"
+                ),
+                "scale_up_candidate_adapter_lineage_manifest_path": card_summary.get(
+                    "adapter_lineage_manifest_path"
+                ),
+            }
+        )
+    return summary
+
+
+def _preserve_adapter_continuation_provenance(
+    command: dict[str, Any],
+    source: Mapping[str, Any],
+) -> None:
+    preserved = False
+    for key, value in source.items():
+        if not str(key).startswith("adapter_continuation_"):
+            continue
+        command[str(key)] = value
+        preserved = True
+    if preserved:
+        command["adapter_continuation_artifact_replay"] = True
 
 
 def _scale_up_command_from_source(args: argparse.Namespace) -> dict[str, Any]:
@@ -261,6 +344,9 @@ def _scale_up_command_from_source(args: argparse.Namespace) -> dict[str, Any]:
             )
     else:
         output_suffix = "scaleup" if output_suffix is None else output_suffix
+    adapter_continuation = args.adapter_continuation or (
+        "replay" if source_is_scale_up_artifact else "auto"
+    )
     command = st.hf_gpt2_finetune_scale_up_command(
         source_payload,
         model_name=args.model_name,
@@ -277,7 +363,15 @@ def _scale_up_command_from_source(args: argparse.Namespace) -> dict[str, Any]:
         run_card=run_card,
         trainer_trace_jsonl=trainer_trace_jsonl,
         trainer_trace_run_id=args.trainer_trace_run_id,
+        adapter_continuation=adapter_continuation,
     )
+    if (
+        source_is_scale_up_artifact
+        and adapter_continuation == "replay"
+        and args.model_name is None
+        and args.resume_from_checkpoint is None
+    ):
+        _preserve_adapter_continuation_provenance(command, source)
     command["source_path"] = str(args.source)
     if args.write_command is not None:
         command["artifact_path"] = str(args.write_command)
@@ -404,6 +498,18 @@ def main(argv: list[str] | None = None) -> int:
     print(f"scale_up_command status={command.get('status')}")
     if command.get("artifact_path"):
         print(f"scale_up_artifact {command.get('artifact_path')}")
+    if command.get("adapter_continuation_policy") is not None:
+        print(
+            "scale_up_adapter_continuation "
+            f"policy={command.get('adapter_continuation_policy')} "
+            f"status={command.get('adapter_continuation_status')} "
+            f"applied={command.get('adapter_continuation_applied')} "
+            f"source={command.get('adapter_continuation_source')} "
+            "source_adapter_id="
+            f"{command.get('adapter_continuation_source_adapter_id')} "
+            "expected_child_depth="
+            f"{command.get('adapter_continuation_expected_child_lineage_depth')}"
+        )
     print(
         "scale_up_preflight "
         f"status={command.get('preflight_status')} "
