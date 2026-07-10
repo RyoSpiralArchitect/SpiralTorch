@@ -6132,6 +6132,21 @@ def hf_gpt2_finetune_scale_up_command(
         }
     else:
         summary = summarize_hf_gpt2_finetune_sweep_report(report_or_summary)
+    if summary.get("adapter_promotion_required") is True and summary.get(
+        "scale_up_candidate_adapter_promotion_ready"
+    ) is not True:
+        return {
+            "row_type": "hf_gpt2_finetune_scale_up_command",
+            "status": "adapter_promotion_not_ready",
+            "scale_up_candidate_label": summary.get("scale_up_candidate_label"),
+            "adapter_promotion_required": True,
+            "adapter_promotion_ready_count": summary.get(
+                "adapter_promotion_ready_count"
+            ),
+            "adapter_promotion_not_ready_count": summary.get(
+                "adapter_promotion_not_ready_count"
+            ),
+        }
     command_value = summary.get("scale_up_candidate_command")
     if not isinstance(command_value, Sequence) or isinstance(
         command_value,
@@ -6229,6 +6244,16 @@ def hf_gpt2_finetune_scale_up_command(
         ),
         "scale_up_candidate_distortion_pressure_index": summary.get(
             "scale_up_candidate_distortion_pressure_index"
+        ),
+        "adapter_promotion_required": summary.get("adapter_promotion_required"),
+        "scale_up_candidate_adapter_promotion_status": summary.get(
+            "scale_up_candidate_adapter_promotion_status"
+        ),
+        "scale_up_candidate_adapter_promotion_ready": summary.get(
+            "scale_up_candidate_adapter_promotion_ready"
+        ),
+        "scale_up_candidate_adapter_lineage_depth": summary.get(
+            "scale_up_candidate_adapter_lineage_depth"
         ),
         "base_command": base_command,
         "base_command_display": _shell_join_args(base_command),
@@ -6558,6 +6583,8 @@ def summarize_hf_gpt2_finetune_run_card(
     trainer_metrics = _mapping_item(card, "trainer_metrics")
     trainer_trace = _trainer_trace_summary_for_card(card)
     adapter_config = _mapping_item(card, "adapter_config")
+    adapter_lineage = _mapping_item(card, "adapter_lineage")
+    adapter_promotion = _mapping_item(card, "adapter_promotion")
     model_prepare = _mapping_item(card, "model_prepare_report")
     adapter_target = _mapping_item(model_prepare, "target_report")
     adapter_parameters = _mapping_item(
@@ -6673,6 +6700,42 @@ def summarize_hf_gpt2_finetune_run_card(
         "finetune_mode": card.get("finetune_mode") or model_prepare.get("mode"),
         "model_artifact_kind": card.get("model_artifact_kind"),
         "adapter_saved": card.get("adapter_saved"),
+        "adapter_lineage_status": adapter_lineage.get("status"),
+        "adapter_lineage_adapter_id": adapter_lineage.get("adapter_id"),
+        "adapter_lineage_parent_adapter_id": adapter_lineage.get(
+            "parent_adapter_id"
+        ),
+        "adapter_lineage_root_adapter_id": adapter_lineage.get("root_adapter_id"),
+        "adapter_lineage_depth": _safe_number(adapter_lineage.get("lineage_depth")),
+        "adapter_lineage_parent_fingerprint_verified": adapter_lineage.get(
+            "parent_fingerprint_verified"
+        ),
+        "adapter_lineage_weights_changed_from_parent": adapter_lineage.get(
+            "weights_changed_from_parent"
+        ),
+        "adapter_lineage_manifest_path": adapter_lineage.get("manifest_path"),
+        "adapter_lineage_run_card_sha256": adapter_lineage.get("run_card_sha256"),
+        "adapter_promotion_gate_requested": card.get(
+            "adapter_promotion_gate_requested"
+        ),
+        "adapter_promotion_status": adapter_promotion.get("status"),
+        "adapter_promotion_ready": adapter_promotion.get("promotion_ready"),
+        "adapter_promotion_recommendation": adapter_promotion.get(
+            "recommendation"
+        ),
+        "adapter_promotion_eval_loss_regression": _safe_number(
+            adapter_promotion.get("eval_loss_regression")
+        ),
+        "adapter_promotion_max_eval_loss_regression": _safe_number(
+            adapter_promotion.get("max_eval_loss_regression")
+        ),
+        "adapter_promotion_failed_checks": csv_label(
+            _unique(adapter_promotion.get("failed_checks"))
+        ),
+        "adapter_promotion_missing_checks": csv_label(
+            _unique(adapter_promotion.get("missing_checks"))
+        ),
+        "adapter_promotion_report_path": adapter_promotion.get("report_path"),
         "adapter_attached": model_prepare.get("adapter_attached"),
         "adapter_peft_version": model_prepare.get("peft_version"),
         "adapter_model_family": (
@@ -7137,6 +7200,20 @@ def _best_summary(
     return min(candidates, key=lambda item: item[0])[1]
 
 
+def _promotion_ready_summaries(
+    summaries: Sequence[Mapping[str, object]],
+    *,
+    required: bool,
+) -> list[Mapping[str, object]]:
+    if not required:
+        return list(summaries)
+    return [
+        summary
+        for summary in summaries
+        if summary.get("adapter_promotion_ready") is True
+    ]
+
+
 def _sweep_summary_rows(
     comparison: Mapping[str, object],
 ) -> list[dict[str, object]]:
@@ -7169,11 +7246,18 @@ def _ranked_sweep_rows(
     summaries: Sequence[Mapping[str, object]],
     *,
     top_n: int,
+    promotion_ready_first: bool = False,
 ) -> list[dict[str, object]]:
-    def sort_key(row: Mapping[str, object]) -> tuple[float, float, str]:
+    def sort_key(row: Mapping[str, object]) -> tuple[int, float, float, str]:
         eval_after = _safe_number(row.get("effective_eval_after_loss"))
         eval_delta = _safe_number(row.get("eval_loss_delta"))
         return (
+            (
+                0
+                if not promotion_ready_first
+                or row.get("adapter_promotion_ready") is True
+                else 1
+            ),
             math.inf if eval_after is None else float(eval_after),
             math.inf if eval_delta is None else float(eval_delta),
             str(row.get("run_label") or ""),
@@ -7207,6 +7291,33 @@ def _ranked_sweep_rows(
                 "finetune_mode": row.get("finetune_mode"),
                 "model_artifact_kind": row.get("model_artifact_kind"),
                 "adapter_saved": row.get("adapter_saved"),
+                "adapter_lineage_status": row.get("adapter_lineage_status"),
+                "adapter_lineage_depth": _safe_number(
+                    row.get("adapter_lineage_depth")
+                ),
+                "adapter_lineage_parent_fingerprint_verified": row.get(
+                    "adapter_lineage_parent_fingerprint_verified"
+                ),
+                "adapter_lineage_weights_changed_from_parent": row.get(
+                    "adapter_lineage_weights_changed_from_parent"
+                ),
+                "adapter_promotion_gate_requested": row.get(
+                    "adapter_promotion_gate_requested"
+                ),
+                "adapter_promotion_status": row.get("adapter_promotion_status"),
+                "adapter_promotion_ready": row.get("adapter_promotion_ready"),
+                "adapter_promotion_recommendation": row.get(
+                    "adapter_promotion_recommendation"
+                ),
+                "adapter_promotion_eval_loss_regression": _safe_number(
+                    row.get("adapter_promotion_eval_loss_regression")
+                ),
+                "adapter_promotion_failed_checks": row.get(
+                    "adapter_promotion_failed_checks"
+                ),
+                "adapter_promotion_missing_checks": row.get(
+                    "adapter_promotion_missing_checks"
+                ),
                 "adapter_rank": _safe_number(row.get("adapter_rank")),
                 "adapter_target_modules": row.get("adapter_target_modules"),
                 "adapter_matched_module_count": _safe_number(
@@ -7494,14 +7605,59 @@ def summarize_hf_gpt2_finetune_sweep_report(
         if isinstance(runs_value, Sequence) and not isinstance(runs_value, (str, bytes))
         else []
     )
-    best_delta = _safe_number(comparison.get("best_eval_loss_delta"))
-    best_delta_label = comparison.get("best_eval_loss_delta_run_label")
-    best_after_label = comparison.get("best_eval_after_run_label")
-    scale_up_candidate = _best_summary(summaries, "distortion_adjusted_eval_loss")
-    selected_reason = "best_eval_after_loss"
+    promotion_requested_count = int(
+        _safe_number(comparison.get("adapter_promotion_gate_requested_count")) or 0
+    )
+    promotion_policy = report.get("adapter_promotion_gate_requested")
+    adapter_promotion_required = bool(
+        promotion_policy is True or promotion_requested_count > 0
+    )
+    promotion_eligible_summaries = _promotion_ready_summaries(
+        summaries,
+        required=adapter_promotion_required,
+    )
+    promotion_ineligible_summaries = (
+        [
+            summary
+            for summary in summaries
+            if summary.get("adapter_promotion_ready") is not True
+        ]
+        if adapter_promotion_required
+        else []
+    )
+    best_after = _best_summary(
+        promotion_eligible_summaries,
+        "effective_eval_after_loss",
+    )
+    best_delta_summary = _best_summary(
+        promotion_eligible_summaries,
+        "eval_loss_delta",
+    )
+    best_after_label = None if best_after is None else best_after.get("run_label")
+    best_delta_label = (
+        None if best_delta_summary is None else best_delta_summary.get("run_label")
+    )
+    best_delta = (
+        None
+        if best_delta_summary is None
+        else _safe_number(best_delta_summary.get("eval_loss_delta"))
+    )
+    scale_up_candidate = _best_summary(
+        promotion_eligible_summaries,
+        "distortion_adjusted_eval_loss",
+    )
+    selected_reason = (
+        "best_promotion_ready_eval_after_loss"
+        if adapter_promotion_required
+        else "best_eval_after_loss"
+    )
     selected_label = best_after_label
     if best_delta is not None and best_delta < 0.0 and best_delta_label:
-        selected_reason = "best_eval_loss_delta"
+        selected_reason = (
+            "best_promotion_ready_eval_loss_delta"
+            if adapter_promotion_required
+            else "best_eval_loss_delta"
+        )
         selected_label = best_delta_label
     selected_run = _selected_sweep_run(runs, selected_label)
     scale_up_candidate_label = (
@@ -7514,6 +7670,8 @@ def summarize_hf_gpt2_finetune_sweep_report(
     dry_run = bool(report.get("dry_run"))
     if dry_run:
         status = "planned"
+    elif adapter_promotion_required and not promotion_eligible_summaries:
+        status = "no_promotion_ready_runs"
     elif completed is None or int(completed) <= 0:
         status = "no_completed_runs"
     elif failed is not None and int(failed) > 0:
@@ -7529,11 +7687,36 @@ def summarize_hf_gpt2_finetune_sweep_report(
         "run_count": _safe_number(report.get("run_count")),
         "attempted_run_count": _safe_number(report.get("attempted_run_count")),
         "completed_run_count": completed,
+        "promotion_evaluated_run_count": _safe_number(
+            report.get("promotion_evaluated_run_count")
+        ),
         "failed_run_count": failed,
         "reused_run_count": _safe_number(report.get("reused_run_count")),
         "skipped_run_count": _safe_number(report.get("skipped_run_count")),
         "comparison_run_count": _safe_number(comparison.get("run_count")),
         "successful_run_count": _safe_number(comparison.get("successful_run_count")),
+        "adapter_lineage_ready_count": _safe_number(
+            comparison.get("adapter_lineage_ready_count")
+        ),
+        "adapter_promotion_required": adapter_promotion_required,
+        "adapter_promotion_gate_requested_count": promotion_requested_count,
+        "adapter_promotion_ready_count": _safe_number(
+            comparison.get("adapter_promotion_ready_count")
+        ),
+        "adapter_promotion_blocked_count": _safe_number(
+            comparison.get("adapter_promotion_blocked_count")
+        ),
+        "adapter_promotion_needs_evidence_count": _safe_number(
+            comparison.get("adapter_promotion_needs_evidence_count")
+        ),
+        "adapter_promotion_not_ready_count": _safe_number(
+            comparison.get("adapter_promotion_not_ready_count")
+        ),
+        "all_requested_adapter_promotions_ready": comparison.get(
+            "all_requested_adapter_promotions_ready"
+        ),
+        "promotion_eligible_run_count": len(promotion_eligible_summaries),
+        "promotion_ineligible_run_count": len(promotion_ineligible_summaries),
         "eval_after_ok_count": _safe_number(comparison.get("eval_after_ok_count")),
         "eval_loss_improved_count": _safe_number(
             comparison.get("eval_loss_improved_count")
@@ -7590,8 +7773,16 @@ def summarize_hf_gpt2_finetune_sweep_report(
         "trainer_telemetry_enabled": report.get("trainer_telemetry_enabled"),
         "trainer_telemetry_auto_reason": report.get("trainer_telemetry_auto_reason"),
         "best_eval_after_run_label": best_after_label,
-        "best_eval_after_loss": _safe_number(comparison.get("best_eval_after_loss")),
-        "best_eval_after_loss_source": comparison.get("best_eval_after_loss_source"),
+        "best_eval_after_loss": (
+            None
+            if best_after is None
+            else _safe_number(best_after.get("effective_eval_after_loss"))
+        ),
+        "best_eval_after_loss_source": (
+            None
+            if best_after is None
+            else best_after.get("effective_eval_after_loss_source")
+        ),
         "best_eval_loss_delta_run_label": best_delta_label,
         "best_eval_loss_delta": best_delta,
         "selected_run_label": selected_label,
@@ -7600,7 +7791,26 @@ def summarize_hf_gpt2_finetune_sweep_report(
         "scale_up_candidate_reason": (
             None
             if scale_up_candidate is None
-            else "lowest_distortion_adjusted_eval_loss"
+            else (
+                "lowest_promotion_ready_distortion_adjusted_eval_loss"
+                if adapter_promotion_required
+                else "lowest_distortion_adjusted_eval_loss"
+            )
+        ),
+        "scale_up_candidate_adapter_promotion_status": (
+            None
+            if scale_up_candidate is None
+            else scale_up_candidate.get("adapter_promotion_status")
+        ),
+        "scale_up_candidate_adapter_promotion_ready": (
+            None
+            if scale_up_candidate is None
+            else scale_up_candidate.get("adapter_promotion_ready")
+        ),
+        "scale_up_candidate_adapter_lineage_depth": (
+            None
+            if scale_up_candidate is None
+            else _safe_number(scale_up_candidate.get("adapter_lineage_depth"))
         ),
         "scale_up_candidate_distortion_adjusted_eval_loss": (
             None
@@ -7776,12 +7986,24 @@ def summarize_hf_gpt2_finetune_sweep_report(
         "inference_distortion_explicit_generation_bridge_cli_preview": (
             _cli_arg_preview(inference_explicit_generation_bridge_cli_args)
         ),
-        "top_runs": _ranked_sweep_rows(summaries, top_n=top_n),
+        "top_runs": _ranked_sweep_rows(
+            summaries,
+            top_n=top_n,
+            promotion_ready_first=adapter_promotion_required,
+        ),
         "failed_runs": [
             {
                 "name": row.get("name"),
                 "run_card": row.get("run_card"),
                 "returncode": row.get("returncode"),
+                "adapter_promotion_status": row.get("adapter_promotion_status"),
+                "adapter_promotion_ready": row.get("adapter_promotion_ready"),
+                "adapter_promotion_failed_checks": row.get(
+                    "adapter_promotion_failed_checks"
+                ),
+                "adapter_promotion_missing_checks": row.get(
+                    "adapter_promotion_missing_checks"
+                ),
                 "command_display": row.get("command_display"),
             }
             for row in runs
@@ -7809,7 +8031,11 @@ def summarize_hf_gpt2_finetune_sweep_report_lines(
             f"runs={summary.get('completed_run_count')}/{summary.get('run_count')} "
             f"failed={summary.get('failed_run_count')} "
             f"reused={summary.get('reused_run_count')} "
-            f"skipped={summary.get('skipped_run_count')}"
+            f"skipped={summary.get('skipped_run_count')} "
+            f"promotion_required={summary.get('adapter_promotion_required')} "
+            "promotion_ready="
+            f"{summary.get('adapter_promotion_ready_count')}/"
+            f"{summary.get('adapter_promotion_gate_requested_count')}"
         ),
         (
             "hf_gpt2_ft_sweep_best "
@@ -7831,6 +8057,12 @@ def summarize_hf_gpt2_finetune_sweep_report_lines(
             f"{summary.get('scale_up_candidate_distortion_pressure_index')} "
             "eval_after="
             f"{summary.get('scale_up_candidate_effective_eval_after_loss')} "
+            "promotion="
+            f"{summary.get('scale_up_candidate_adapter_promotion_status')} "
+            "promotion_ready="
+            f"{summary.get('scale_up_candidate_adapter_promotion_ready')} "
+            "lineage_depth="
+            f"{summary.get('scale_up_candidate_adapter_lineage_depth')} "
             f"card={summary.get('scale_up_candidate_run_card')} "
             f"trace={summary.get('scale_up_candidate_trainer_trace_jsonl')} "
             f"dir={summary.get('scale_up_candidate_run_dir')}"
@@ -7950,6 +8182,12 @@ def summarize_hf_gpt2_finetune_sweep_report_lines(
                 f"adapter_rank={row.get('adapter_rank')} "
                 f"adapter_ratio={row.get('adapter_trainable_parameter_ratio')} "
                 f"adapter_targets={row.get('adapter_target_modules')} "
+                f"lineage={row.get('adapter_lineage_status')} "
+                f"lineage_depth={row.get('adapter_lineage_depth')} "
+                f"promotion={row.get('adapter_promotion_status')} "
+                f"promotion_ready={row.get('adapter_promotion_ready')} "
+                f"promotion_failed={row.get('adapter_promotion_failed_checks')} "
+                f"promotion_missing={row.get('adapter_promotion_missing_checks')} "
             )
         lines.append(
             "hf_gpt2_ft_sweep_top "
@@ -8341,13 +8579,41 @@ def compare_hf_gpt2_finetune_run_cards(
     best_after = _best_summary(summaries, "effective_eval_after_loss")
     best_delta = _best_summary(summaries, "eval_loss_delta")
     best_adjusted = _best_summary(summaries, "distortion_adjusted_eval_loss")
+    promotion_ready_summaries = [
+        summary
+        for summary in summaries
+        if summary.get("adapter_promotion_ready") is True
+    ]
+    best_promotion_ready_after = _best_summary(
+        promotion_ready_summaries,
+        "effective_eval_after_loss",
+    )
+    best_promotion_ready_delta = _best_summary(
+        promotion_ready_summaries,
+        "eval_loss_delta",
+    )
+    best_promotion_ready_adjusted = _best_summary(
+        promotion_ready_summaries,
+        "distortion_adjusted_eval_loss",
+    )
+    promotion_requested = [
+        summary
+        for summary in summaries
+        if summary.get("adapter_promotion_gate_requested") is True
+    ]
     run_label_values = [str(summary.get("run_label")) for summary in summaries]
     return {
         "row_type": "hf_gpt2_finetune_run_card_comparison",
         "run_count": len(summaries),
         "run_labels": csv_label(run_label_values),
         "successful_run_count": sum(
-            1 for summary in summaries if not summary.get("failure_stage")
+            1
+            for summary in summaries
+            if not summary.get("failure_stage")
+            and (
+                summary.get("adapter_promotion_gate_requested") is not True
+                or summary.get("adapter_promotion_ready") is True
+            )
         ),
         "eval_after_ok_count": sum(
             1 for summary in summaries if summary.get("eval_after_status") == "ok"
@@ -8370,6 +8636,36 @@ def compare_hf_gpt2_finetune_run_cards(
         ),
         "adapter_saved_count": sum(
             1 for summary in summaries if summary.get("adapter_saved") is True
+        ),
+        "adapter_lineage_ready_count": sum(
+            1
+            for summary in summaries
+            if summary.get("adapter_lineage_status") == "ready"
+        ),
+        "adapter_promotion_gate_requested_count": len(promotion_requested),
+        "adapter_promotion_ready_count": len(promotion_ready_summaries),
+        "adapter_promotion_blocked_count": sum(
+            1
+            for summary in summaries
+            if summary.get("adapter_promotion_status") == "blocked"
+        ),
+        "adapter_promotion_needs_evidence_count": sum(
+            1
+            for summary in summaries
+            if summary.get("adapter_promotion_status") == "needs_evidence"
+        ),
+        "adapter_promotion_not_ready_count": sum(
+            1
+            for summary in promotion_requested
+            if summary.get("adapter_promotion_ready") is not True
+        ),
+        "all_requested_adapter_promotions_ready": (
+            None
+            if not promotion_requested
+            else all(
+                summary.get("adapter_promotion_ready") is True
+                for summary in promotion_requested
+            )
         ),
         "best_eval_after_run_label": (
             None if best_after is None else best_after.get("run_label")
@@ -8400,6 +8696,38 @@ def compare_hf_gpt2_finetune_run_cards(
             None
             if best_adjusted is None
             else best_adjusted.get("distortion_pressure_index")
+        ),
+        "best_promotion_ready_eval_after_run_label": (
+            None
+            if best_promotion_ready_after is None
+            else best_promotion_ready_after.get("run_label")
+        ),
+        "best_promotion_ready_eval_after_loss": (
+            None
+            if best_promotion_ready_after is None
+            else best_promotion_ready_after.get("effective_eval_after_loss")
+        ),
+        "best_promotion_ready_eval_loss_delta_run_label": (
+            None
+            if best_promotion_ready_delta is None
+            else best_promotion_ready_delta.get("run_label")
+        ),
+        "best_promotion_ready_eval_loss_delta": (
+            None
+            if best_promotion_ready_delta is None
+            else best_promotion_ready_delta.get("eval_loss_delta")
+        ),
+        "best_promotion_ready_distortion_adjusted_run_label": (
+            None
+            if best_promotion_ready_adjusted is None
+            else best_promotion_ready_adjusted.get("run_label")
+        ),
+        "best_promotion_ready_distortion_adjusted_eval_loss": (
+            None
+            if best_promotion_ready_adjusted is None
+            else best_promotion_ready_adjusted.get(
+                "distortion_adjusted_eval_loss"
+            )
         ),
         "summaries": summaries,
     }

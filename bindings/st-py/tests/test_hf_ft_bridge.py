@@ -3522,6 +3522,188 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             )
         )
 
+    def test_sweep_adapter_promotion_selects_only_ready_runs(self) -> None:
+        module = load_sweep_example()
+        with tempfile.TemporaryDirectory() as tmp:
+            train_path = Path(tmp) / "train.txt"
+            train_path.write_text("alpha spiral\nbeta zspace\n", encoding="utf-8")
+            out_dir = Path(tmp) / "sweep"
+            args = module.parse_args(
+                [
+                    "--out-dir",
+                    str(out_dir),
+                    "--model-configs",
+                    str(MODEL_CONFIGS_PATH),
+                    "--model-profile",
+                    "qwen2-0.5b-lora-local-smoke",
+                    "--train-file",
+                    str(train_path),
+                    "--validation-fraction",
+                    "0.5",
+                    "--eval-before-train",
+                    "--adapter-promotion-gate",
+                    "--block-size-values",
+                    "8",
+                    "--learning-rate-values",
+                    "0.001",
+                    "--max-step-values",
+                    "1",
+                    "--seed-values",
+                    "7,13",
+                ]
+            )
+
+            def fake_run(command, *, check=False):
+                del check
+                run_card_path = Path(command[command.index("--run-card") + 1])
+                seed = int(command[command.index("--seed") + 1])
+                ready = seed == 13
+                loss = 1.2 if ready else 1.0
+                hf_ft.write_hf_gpt2_finetune_run_card(
+                    {
+                        "row_type": "hf_gpt2_finetune_run_card",
+                        "model_name": "Qwen/Qwen2-0.5B",
+                        "dataset_name": "local-files",
+                        "dataset_source": "local_files",
+                        "load_status": "ok",
+                        "failure_stage": None,
+                        "model_saved": True,
+                        "adapter_saved": True,
+                        "finetune_mode": "lora",
+                        "model_artifact_kind": "peft_adapter",
+                        "dataset_fit_report": {
+                            "verdict": "train_eval_ready",
+                            "train_ready": True,
+                            "eval_ready": True,
+                        },
+                        "adapter_lineage": {
+                            "status": "ready",
+                            "adapter_id": f"sha256:child-{seed}",
+                            "parent_adapter_id": "sha256:parent",
+                            "root_adapter_id": "sha256:parent",
+                            "lineage_depth": 1,
+                            "parent_fingerprint_verified": True,
+                            "weights_changed_from_parent": True,
+                            "manifest_path": str(
+                                run_card_path.parent
+                                / st.HF_ADAPTER_LINEAGE_FILENAME
+                            ),
+                        },
+                        "adapter_promotion_gate_requested": True,
+                        "adapter_promotion": {
+                            "status": "ready" if ready else "blocked",
+                            "promotion_ready": ready,
+                            "recommendation": (
+                                "promote_candidate" if ready else "keep_parent"
+                            ),
+                            "eval_loss_regression": loss - 2.0,
+                            "max_eval_loss_regression": 0.0,
+                            "failed_checks": [] if ready else ["candidate_fingerprint"],
+                            "missing_checks": [],
+                            "report_path": str(
+                                run_card_path.parent
+                                / st.HF_ADAPTER_PROMOTION_FILENAME
+                            ),
+                        },
+                        "trainer_metrics": {"train_loss": 1.4},
+                        "eval_before_train": hf_ft.hf_gpt2_finetune_eval_report(
+                            stage="before_train",
+                            metrics={"eval_loss": 2.0},
+                        ),
+                        "eval_after_train": hf_ft.hf_gpt2_finetune_eval_report(
+                            stage="after_train",
+                            metrics={"eval_loss": loss},
+                        ),
+                    },
+                    run_card_path,
+                )
+                return types.SimpleNamespace(returncode=0 if ready else 1)
+
+            with mock.patch.object(module.subprocess, "run", side_effect=fake_run):
+                report = module.run_sweep(args)
+            blocked_run = next(
+                run for run in report["runs"] if run["adapter_promotion_ready"] is False
+            )
+            ready_run = next(
+                run for run in report["runs"] if run["adapter_promotion_ready"] is True
+            )
+            blocked_path = Path(blocked_run["run_card"])
+            blocked_comparison = hf_ft.compare_hf_gpt2_finetune_run_cards(
+                [blocked_path],
+                run_labels=["blocked"],
+            )
+            no_ready_report = {
+                "row_type": "hf_gpt2_finetune_sweep_report",
+                "dry_run": False,
+                "adapter_promotion_gate_requested": False,
+                "run_count": 1,
+                "completed_run_count": 0,
+                "failed_run_count": 1,
+                "comparison": blocked_comparison,
+                "runs": [blocked_run],
+            }
+            no_ready_summary = hf_ft.summarize_hf_gpt2_finetune_sweep_report(
+                no_ready_report
+            )
+            no_ready_scale_up = hf_ft.hf_gpt2_finetune_scale_up_command(
+                no_ready_summary
+            )
+            lines = hf_ft.summarize_hf_gpt2_finetune_sweep_report_lines(report)
+
+            self.assertTrue(module._is_reusable_run_card(blocked_path))
+            self.assertFalse(
+                module._is_reusable_run_card(
+                    blocked_path,
+                    require_adapter_promotion=True,
+                )
+            )
+
+        comparison = report["comparison"]
+        summary = report["summary"]
+        self.assertEqual(report["completed_run_count"], 1)
+        self.assertEqual(report["failed_run_count"], 1)
+        self.assertEqual(report["promotion_evaluated_run_count"], 2)
+        self.assertEqual(comparison["run_count"], 2)
+        self.assertEqual(comparison["successful_run_count"], 1)
+        self.assertIn("seed7", comparison["best_eval_after_run_label"])
+        self.assertIn(
+            "seed13",
+            comparison["best_promotion_ready_eval_after_run_label"],
+        )
+        self.assertEqual(comparison["adapter_lineage_ready_count"], 2)
+        self.assertEqual(comparison["adapter_promotion_ready_count"], 1)
+        self.assertEqual(comparison["adapter_promotion_blocked_count"], 1)
+        self.assertFalse(comparison["all_requested_adapter_promotions_ready"])
+        self.assertTrue(summary["adapter_promotion_required"])
+        self.assertEqual(summary["promotion_eligible_run_count"], 1)
+        self.assertEqual(summary["promotion_ineligible_run_count"], 1)
+        self.assertIn("seed13", summary["selected_run_label"])
+        self.assertEqual(
+            summary["selected_reason"],
+            "best_promotion_ready_eval_loss_delta",
+        )
+        self.assertIn("seed13", summary["scale_up_candidate_label"])
+        self.assertEqual(
+            summary["scale_up_candidate_reason"],
+            "lowest_promotion_ready_distortion_adjusted_eval_loss",
+        )
+        self.assertTrue(summary["scale_up_candidate_adapter_promotion_ready"])
+        self.assertEqual(summary["top_runs"][0]["adapter_promotion_status"], "ready")
+        self.assertEqual(report["scale_up_command_status"], "ok")
+        self.assertTrue(
+            report["scale_up_command"][
+                "scale_up_candidate_adapter_promotion_ready"
+            ]
+        )
+        self.assertIn(ready_run["name"], report["scale_up_command"]["command_display"])
+        self.assertTrue(any("promotion_ready=True" in line for line in lines))
+        self.assertEqual(no_ready_summary["status"], "no_promotion_ready_runs")
+        self.assertIsNone(no_ready_summary["scale_up_candidate_label"])
+        self.assertEqual(
+            no_ready_scale_up["status"],
+            "adapter_promotion_not_ready",
+        )
+
     def test_scale_up_example_replays_sweep_report_and_command_artifact(self) -> None:
         sweep_module = load_sweep_example()
         scale_up_module = load_scale_up_example()
@@ -10125,6 +10307,61 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             lora_bridge_args.lora_target_module,
             ["q_proj", "k_proj", "v_proj", "o_proj"],
         )
+
+    def test_sweep_profile_forwards_adapter_promotion_policy(self) -> None:
+        module = load_sweep_example()
+        with tempfile.TemporaryDirectory() as tmp:
+            args = module.parse_args(
+                [
+                    "--dry-run",
+                    "--out-dir",
+                    str(Path(tmp) / "lora-sweep"),
+                    "--model-configs",
+                    str(MODEL_CONFIGS_PATH),
+                    "--model-profile",
+                    "qwen2-0.5b-lora-local-smoke",
+                    "--eval-before-train",
+                    "--adapter-promotion-gate",
+                    "--adapter-promotion-max-eval-loss-regression",
+                    "0.03",
+                    "--generation-prompt",
+                    "SpiralTorch is",
+                    "--adapter-promotion-require-generation-change",
+                ]
+            )
+            runs = module.build_sweep_runs(args)
+            report = module.run_sweep(args)
+
+        command = runs[0]["command"]
+        bridge_args = load_bridge_example().parse_args(command[2:])
+        self.assertEqual(args.finetune_mode, "lora")
+        self.assertEqual(args.model_artifact_kind, "auto")
+        self.assertIn("--finetune-mode", command)
+        self.assertIn("--model-artifact-kind", command)
+        self.assertIn("--adapter-promotion-gate", command)
+        self.assertIn(
+            "--adapter-promotion-require-generation-change",
+            command,
+        )
+        self.assertTrue(bridge_args.adapter_promotion_gate)
+        self.assertEqual(
+            bridge_args.adapter_promotion_max_eval_loss_regression,
+            0.03,
+        )
+        self.assertTrue(bridge_args.adapter_promotion_require_generation_change)
+        self.assertTrue(report["adapter_promotion_gate_requested"])
+        self.assertEqual(report["finetune_mode"], "lora")
+        self.assertTrue(report["summary"]["adapter_promotion_required"])
+        self.assertEqual(report["summary"]["status"], "planned")
+
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            module.parse_args(
+                [
+                    "--dry-run",
+                    "--eval-before-train",
+                    "--adapter-promotion-gate",
+                ]
+            )
 
     def test_sweep_model_profile_dataset_and_runtime_flow_to_bridge_commands(
         self,

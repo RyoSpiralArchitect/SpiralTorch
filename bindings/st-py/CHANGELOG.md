@@ -20,6 +20,10 @@
   `spiral-hf-adapter-lineage` / `spiral-hf-adapter-promote`, and optionally fail
   FT runs unless weights changed and before/after eval stays within a configured
   loss-regression bound.
+- Promotion-aware HF sweeps: forward LoRA artifact/mode/promotion policy through
+  every bridge command, retain blocked candidates in comparison evidence, and
+  restrict selection, resume reuse, and scale-up command generation to adapters
+  whose promotion gate is ready.
 - Trainer resume audit: add `hf_finetune_checkpoint_resume_report(...)` and
   compact lines for optimizer/scheduler/RNG state availability, saved versus
   requested step horizons, and the exhausted-scheduler case where adapter

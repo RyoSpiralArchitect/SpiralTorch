@@ -102,6 +102,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--model-name", default="gpt2")
     parser.add_argument("--tokenizer-name", default=None)
+    parser.add_argument(
+        "--model-artifact-kind",
+        choices=("auto", "full-model", "peft-adapter"),
+        default=None,
+    )
+    parser.add_argument(
+        "--finetune-mode",
+        choices=("full", "lora"),
+        default=None,
+    )
     parser.add_argument("--dataset-name", default="wikitext")
     parser.add_argument("--dataset-config", default="wikitext-2-raw-v1")
     parser.add_argument("--dataset-revision", default=None)
@@ -130,6 +140,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--eval-after-train-policy",
         choices=("always", "never", "skip-if-final-step-eval"),
         default="always",
+    )
+    parser.add_argument("--adapter-promotion-gate", action="store_true")
+    parser.add_argument(
+        "--adapter-promotion-max-eval-loss-regression",
+        type=float,
+        default=0.0,
+    )
+    parser.add_argument(
+        "--adapter-promotion-require-generation-change",
+        action="store_true",
     )
     parser.add_argument("--no-trainer-trace", action="store_true")
     parser.add_argument("--trainer-telemetry", action="store_true")
@@ -249,6 +269,31 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("--streaming-shuffle-buffer-size must be non-negative")
     if args.streaming_validation_samples < 0:
         parser.error("--streaming-validation-samples must be non-negative")
+    if not math.isfinite(args.adapter_promotion_max_eval_loss_regression):
+        parser.error("--adapter-promotion-max-eval-loss-regression must be finite")
+    if args.adapter_promotion_gate:
+        if args.finetune_mode != "lora":
+            parser.error(
+                "--adapter-promotion-gate requires --finetune-mode lora "
+                "or a LoRA model profile"
+            )
+        if not args.eval_before_train:
+            parser.error("--adapter-promotion-gate requires --eval-before-train")
+        if args.no_eval_after_train or args.eval_after_train_policy == "never":
+            parser.error("--adapter-promotion-gate requires after-train evaluation")
+    if (
+        args.adapter_promotion_require_generation_change
+        and not args.adapter_promotion_gate
+    ):
+        parser.error(
+            "--adapter-promotion-require-generation-change requires "
+            "--adapter-promotion-gate"
+        )
+    if args.adapter_promotion_require_generation_change and not args.generation_prompt:
+        parser.error(
+            "--adapter-promotion-require-generation-change requires "
+            "--generation-prompt"
+        )
     if args.generation_max_new_tokens <= 0:
         parser.error("--generation-max-new-tokens must be positive")
     if args.generation_temperature <= 0.0:
@@ -490,6 +535,13 @@ def _apply_model_profile_defaults(
         profile.get("model_name"),
         "--model-name",
     )
+    _set_profile_default(
+        args,
+        raw_argv,
+        "model_artifact_kind",
+        profile.get("artifact_kind") or profile.get("model_artifact_kind"),
+        "--model-artifact-kind",
+    )
     if _argv_has_option(raw_argv, "--model-name") and not _argv_has_option(
         raw_argv,
         "--tokenizer-name",
@@ -503,9 +555,16 @@ def _apply_model_profile_defaults(
             profile.get("tokenizer_name"),
             "--tokenizer-name",
         )
-    block_size = _profile_value(profile, "training", "block_size") or profile.get(
-        "max_length"
+    training = _profile_section(profile, "training")
+    adapter = _profile_section(profile, "adapter")
+    _set_profile_default(
+        args,
+        raw_argv,
+        "finetune_mode",
+        training.get("finetune_mode") or adapter.get("type"),
+        "--finetune-mode",
     )
+    block_size = training.get("block_size") or profile.get("max_length")
     if block_size is not None:
         _set_profile_default(
             args,
@@ -808,6 +867,15 @@ def _bridge_command(
         "--dataloader-pin-memory",
         str(args.dataloader_pin_memory),
     ]
+    if args.model_artifact_kind is not None:
+        command.extend(
+            [
+                "--model-artifact-kind",
+                str(args.model_artifact_kind).replace("_", "-"),
+            ]
+        )
+    if args.finetune_mode is not None:
+        command.extend(["--finetune-mode", str(args.finetune_mode)])
     if args.save_total_limit is not None:
         command.extend(["--save-total-limit", str(args.save_total_limit)])
     if args.model_configs is not None:
@@ -868,6 +936,16 @@ def _bridge_command(
     command.extend(["--eval-after-train-policy", str(args.eval_after_train_policy)])
     if args.no_eval_after_train:
         command.append("--no-eval-after-train")
+    if args.adapter_promotion_gate:
+        command.append("--adapter-promotion-gate")
+        command.extend(
+            [
+                "--adapter-promotion-max-eval-loss-regression",
+                str(args.adapter_promotion_max_eval_loss_regression),
+            ]
+        )
+        if args.adapter_promotion_require_generation_change:
+            command.append("--adapter-promotion-require-generation-change")
     if args.no_trainer_trace:
         command.append("--no-trainer-trace")
     if args.trainer_telemetry:
@@ -1063,6 +1141,17 @@ def build_sweep_runs(args: argparse.Namespace) -> list[dict[str, Any]]:
                 "seed": seed,
                 "model_name": str(args.model_name),
                 "tokenizer_name": str(args.tokenizer_name or args.model_name),
+                "model_artifact_kind": args.model_artifact_kind,
+                "finetune_mode": args.finetune_mode,
+                "adapter_promotion_gate_requested": bool(
+                    args.adapter_promotion_gate
+                ),
+                "adapter_promotion_max_eval_loss_regression": (
+                    args.adapter_promotion_max_eval_loss_regression
+                ),
+                "adapter_promotion_require_generation_change": bool(
+                    args.adapter_promotion_require_generation_change
+                ),
                 "dataset_name": str(args.dataset_name),
                 "dataset_config": args.dataset_config,
                 "dataset_revision": args.dataset_revision,
@@ -1123,7 +1212,11 @@ def _attach_scale_up_command_artifact(
     return scale_up_command
 
 
-def _is_reusable_run_card(path: Path) -> bool:
+def _is_reusable_run_card(
+    path: Path,
+    *,
+    require_adapter_promotion: bool = False,
+) -> bool:
     if not path.is_file():
         return False
     try:
@@ -1139,7 +1232,33 @@ def _is_reusable_run_card(path: Path) -> bool:
     dataset_fit = card.get("dataset_fit_report")
     if isinstance(dataset_fit, dict) and dataset_fit.get("train_ready") is False:
         return False
+    promotion = card.get("adapter_promotion")
+    if require_adapter_promotion and (
+        not isinstance(promotion, Mapping)
+        or promotion.get("promotion_ready") is not True
+    ):
+        return False
     return True
+
+
+def _adapter_promotion_evidence(path: Path) -> dict[str, object]:
+    try:
+        card = st.load_hf_gpt2_finetune_run_card(path)
+    except (OSError, ValueError):
+        return {}
+    promotion = card.get("adapter_promotion")
+    lineage = card.get("adapter_lineage")
+    promotion_payload = promotion if isinstance(promotion, Mapping) else {}
+    lineage_payload = lineage if isinstance(lineage, Mapping) else {}
+    return {
+        "adapter_lineage_status": lineage_payload.get("status"),
+        "adapter_lineage_depth": lineage_payload.get("lineage_depth"),
+        "adapter_promotion_status": promotion_payload.get("status"),
+        "adapter_promotion_ready": promotion_payload.get("promotion_ready"),
+        "adapter_promotion_recommendation": promotion_payload.get("recommendation"),
+        "adapter_promotion_failed_checks": promotion_payload.get("failed_checks"),
+        "adapter_promotion_missing_checks": promotion_payload.get("missing_checks"),
+    }
 
 
 def _inference_distortion_report_path(args: argparse.Namespace) -> str | None:
@@ -1156,6 +1275,20 @@ def _inference_distortion_probe_path(args: argparse.Namespace) -> str | None:
         if args.inference_distortion_probe is None
         else str(args.inference_distortion_probe)
     )
+
+
+def _adapter_promotion_policy(args: argparse.Namespace) -> dict[str, object]:
+    return {
+        "model_artifact_kind": args.model_artifact_kind,
+        "finetune_mode": args.finetune_mode,
+        "adapter_promotion_gate_requested": bool(args.adapter_promotion_gate),
+        "adapter_promotion_max_eval_loss_regression": (
+            args.adapter_promotion_max_eval_loss_regression
+        ),
+        "adapter_promotion_require_generation_change": bool(
+            args.adapter_promotion_require_generation_change
+        ),
+    }
 
 
 def _inference_distortion_source_path(args: argparse.Namespace) -> str | None:
@@ -1260,6 +1393,7 @@ def run_sweep(args: argparse.Namespace) -> dict[str, Any]:
         "streaming_shuffle_buffer_size": args.streaming_shuffle_buffer_size,
         "streaming_validation_samples": args.streaming_validation_samples,
         "min_free_disk_gb": args.min_free_disk_gb,
+        **_adapter_promotion_policy(args),
         "model_configs": None if args.model_configs is None else str(args.model_configs),
         "model_profile": model_profile,
         "model_profile_lines": model_profile_lines,
@@ -1285,6 +1419,7 @@ def run_sweep(args: argparse.Namespace) -> dict[str, Any]:
             "run_count": len(runs),
             "attempted_run_count": 0,
             "completed_run_count": 0,
+            "promotion_evaluated_run_count": 0,
             "failed_run_count": 0,
             "reused_run_count": 0,
             "skipped_run_count": len(runs),
@@ -1299,6 +1434,7 @@ def run_sweep(args: argparse.Namespace) -> dict[str, Any]:
             "streaming_shuffle_buffer_size": args.streaming_shuffle_buffer_size,
             "streaming_validation_samples": args.streaming_validation_samples,
             "min_free_disk_gb": args.min_free_disk_gb,
+            **_adapter_promotion_policy(args),
             "model_configs": (
                 None if args.model_configs is None else str(args.model_configs)
             ),
@@ -1325,36 +1461,57 @@ def run_sweep(args: argparse.Namespace) -> dict[str, Any]:
 
     completed_cards = []
     completed_labels = []
+    comparison_cards = []
+    comparison_labels = []
     for run in runs:
         run_card = Path(str(run["run_card"]))
-        if args.resume_existing and not args.force and _is_reusable_run_card(run_card):
+        if (
+            args.resume_existing
+            and not args.force
+            and _is_reusable_run_card(
+                run_card,
+                require_adapter_promotion=bool(args.adapter_promotion_gate),
+            )
+        ):
             print(f"sweep_reuse {run['name']}")
             run["returncode"] = 0
             run["status"] = "reused"
             run["reused"] = True
+            run.update(_adapter_promotion_evidence(run_card))
             completed_cards.append(str(run_card))
             completed_labels.append(str(run["name"]))
+            comparison_cards.append(str(run_card))
+            comparison_labels.append(str(run["name"]))
             continue
         Path(str(run["run_dir"])).mkdir(parents=True, exist_ok=True)
         print(f"sweep_run {run['name']}")
         result = subprocess.run(run["command"], check=False)
         run["returncode"] = int(result.returncode)
+        evidence = _adapter_promotion_evidence(run_card) if run_card.is_file() else {}
+        run.update(evidence)
         if result.returncode == 0 and run_card.is_file():
             run["status"] = "completed"
             completed_cards.append(str(run_card))
             completed_labels.append(str(run["name"]))
+            comparison_cards.append(str(run_card))
+            comparison_labels.append(str(run["name"]))
         else:
             run["status"] = "failed"
             run["reused"] = False
+            if args.adapter_promotion_gate and evidence.get(
+                "adapter_promotion_status"
+            ) in {"blocked", "needs_evidence"}:
+                comparison_cards.append(str(run_card))
+                comparison_labels.append(str(run["name"]))
             if args.fail_fast:
                 break
 
     comparison = (
         st.compare_hf_gpt2_finetune_run_cards(
-            completed_cards,
-            run_labels=completed_labels,
+            comparison_cards,
+            run_labels=comparison_labels,
         )
-        if completed_cards
+        if comparison_cards
         else None
     )
     attempted_run_count = sum(
@@ -1376,6 +1533,9 @@ def run_sweep(args: argparse.Namespace) -> dict[str, Any]:
         "run_count": len(runs),
         "attempted_run_count": attempted_run_count,
         "completed_run_count": len(completed_cards),
+        "promotion_evaluated_run_count": sum(
+            1 for run in runs if run.get("adapter_promotion_status") is not None
+        ),
         "failed_run_count": failed_run_count,
         "reused_run_count": reused_run_count,
         "skipped_run_count": sum(1 for run in runs if run.get("status") == "planned"),
@@ -1390,6 +1550,7 @@ def run_sweep(args: argparse.Namespace) -> dict[str, Any]:
         "streaming_shuffle_buffer_size": args.streaming_shuffle_buffer_size,
         "streaming_validation_samples": args.streaming_validation_samples,
         "min_free_disk_gb": args.min_free_disk_gb,
+        **_adapter_promotion_policy(args),
         "model_configs": None if args.model_configs is None else str(args.model_configs),
         "model_profile": model_profile,
         "model_profile_lines": model_profile_lines,
@@ -1429,6 +1590,14 @@ def main(argv: list[str] | None = None) -> int:
         if command_display:
             print(f"scale_up_replay {command_display}")
     failed = int(report.get("failed_run_count") or 0)
+    summary = report.get("summary")
+    if (
+        args.adapter_promotion_gate
+        and not args.dry_run
+        and isinstance(summary, Mapping)
+        and summary.get("status") == "no_promotion_ready_runs"
+    ):
+        return 1
     return 1 if failed and args.fail_fast else 0
 
 
