@@ -15,6 +15,13 @@ fn search_error_to_py(err: SearchError) -> PyErr {
         SearchError::EmptySpace => {
             PyValueError::new_err("search space must have at least one parameter")
         }
+        error @ (SearchError::InvalidParameter { .. }
+        | SearchError::DuplicateParameter(_)
+        | SearchError::InvalidResource(_)
+        | SearchError::InvalidStrategy(_)
+        | SearchError::NonFiniteMetric { .. }
+        | SearchError::InvalidCheckpoint(_)) => PyValueError::new_err(error.to_string()),
+        error @ SearchError::TrialIdExhausted => PyRuntimeError::new_err(error.to_string()),
     }
 }
 
@@ -292,9 +299,9 @@ impl PySearchLoop {
             let space = parse_space(space)?;
             let state = dict_to_state(checkpoint)?;
             let tracker = tracker_from_py(tracker);
-            Ok(PySearchLoop::new(SearchLoop::from_state(
-                space, state, tracker,
-            )))
+            let loop_inner =
+                SearchLoop::from_state(space, state, tracker).map_err(search_error_to_py)?;
+            Ok(PySearchLoop::new(loop_inner))
         })
     }
 
