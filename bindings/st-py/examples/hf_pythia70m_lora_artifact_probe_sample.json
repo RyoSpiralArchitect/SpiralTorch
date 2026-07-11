@@ -1,6 +1,6 @@
 {
-  "schema": "spiraltorch.hf_causal_lm_artifact_probe.sample.v7",
-  "scope": "a qualified root plus five promoted non-GPT-2 continuation generations through isolated probes, executor postflight, a canonical wheel-native entrypoint, and fail-fast parent identity gates; not a model-quality claim",
+  "schema": "spiraltorch.hf_causal_lm_artifact_probe.sample.v8",
+  "scope": "a qualified root plus six promoted non-GPT-2 continuation generations through isolated probes, executor postflight, a canonical wheel-native entrypoint, and fail-fast parent and local training-input identity gates; not a model-quality claim",
   "model_profile": "pythia-70m-local-smoke",
   "model_name": "EleutherAI/pythia-70m-deduped",
   "model_family": "gpt_neox",
@@ -384,6 +384,56 @@
       "status_report_status": "stopped",
       "status_report_healthy": true,
       "status_report_transition_evidence": "ready"
+    },
+    "training_input_generation_6_run": {
+      "wheel_version": "0.4.13",
+      "status": "stopped",
+      "action": "stop_training",
+      "reason": "continuation_policy_stop",
+      "stop_reason_codes": [
+        "max_lineage_depth_reached"
+      ],
+      "attempt_status": "promoted",
+      "returncode": 0,
+      "command_runtime_status": "portable_module",
+      "runtime_module": "spiraltorch.hf_finetune_entrypoint",
+      "training_input_contract_status": "enforced",
+      "training_input_fail_fast": true,
+      "training_input_path_independent": true,
+      "training_input_expected_id": "sha256:3512330c29bed1149c5736d6a865bb3c3a705c76821b33a867db96fee44c2b6f",
+      "training_input_observed_id": "sha256:3512330c29bed1149c5736d6a865bb3c3a705c76821b33a867db96fee44c2b6f",
+      "training_input_preflight_status": "ready",
+      "training_input_after_load_status": "ready",
+      "training_input_preflight_verified": true,
+      "training_input_after_load_verified": true,
+      "training_input_count": 3,
+      "training_input_file_count": 3,
+      "training_input_total_bytes": 14544,
+      "launch_command_pins_training_input": true,
+      "selected_lineage_depth": 6,
+      "node_count": 7,
+      "transition_count": 6,
+      "ready_transition_count": 6,
+      "selected_path_transitions_ready": true,
+      "training_input_transition_required": true,
+      "training_input_transition_ready": true,
+      "parent_adapter_id": "sha256:b2516f8067426a2043796b20d8f4f9cbaa5cedd076b1419ed5b127dc3385f0c6",
+      "child_adapter_id": "sha256:fc7c88740c2927efc5a32b407e9a198b0800dcc3a51e944c888c9c2e81d06ee3",
+      "eval_before_loss": 7.71561336517334,
+      "eval_after_loss": 7.672252655029297,
+      "eval_handoff_delta": 0.00019979476928710938,
+      "child_eval_improvement": 0.04336071014404297,
+      "path_eval_improvement": 0.105438232421875,
+      "artifact_probe_status": "ready",
+      "artifact_probe_new_token_count": 12,
+      "artifact_probe_generated_text": "SpiralTorch isolated adapter, the Spiral Torch, the Spiral",
+      "artifact_probe_process_status": "ready",
+      "artifact_probe_process_pid": 79109,
+      "artifact_probe_process_exit_code": 0,
+      "postflight_status": "ready",
+      "status_report_status": "stopped",
+      "status_report_healthy": true,
+      "status_report_transition_evidence": "ready"
     }
   },
   "commands": {
@@ -396,6 +446,6 @@
     "executor_strict_stop_shape": "spiral-hf-adapter-executor <generation-1-dir> --output-root executor-strict-stop --run --max-generations 1 --min-eval-improvement 0 --plateau-patience 1",
     "executor_run_shape": "spiral-hf-adapter-executor <promoted-generation-dir> --output-root executor-live --run --max-generations 1 --max-steps 2 --max-train-samples 16 --max-eval-samples 8",
     "portable_runtime_shape": "python -m spiraltorch.hf_finetune_entrypoint ...",
-    "identity_guard_shape": "python -m spiraltorch.hf_finetune_entrypoint --model-name <parent-adapter> --expected-parent-adapter-id sha256:<digest> --expected-parent-lineage-depth <depth> --expected-root-adapter-id sha256:<root> ..."
+    "identity_guard_shape": "python -m spiraltorch.hf_finetune_entrypoint --model-name <parent-adapter> --expected-parent-adapter-id sha256:<digest> --expected-parent-lineage-depth <depth> --expected-root-adapter-id sha256:<root> --expected-training-input-id sha256:<bundle> ..."
   }
 }

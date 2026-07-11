@@ -321,6 +321,20 @@ def test_adapter_lineage_and_transition_require_declared_input_identity(
             phase="after_load",
         )
     )
+    train_file = tmp_path / "train.txt"
+    train_file.write_text("spiral training\n", encoding="utf-8")
+    training_input_preflight = st.hf_finetune_input_identity_report(
+        train_files=[train_file],
+        phase="preflight",
+    )
+    card["training_input_identity"] = training_input_preflight
+    card["training_input_identity_after_load"] = (
+        st.hf_finetune_input_identity_report(
+            train_files=[train_file],
+            expected_input_id=training_input_preflight["observed_input_id"],
+            phase="after_load",
+        )
+    )
     run_card_path = child / "spiraltorch-hf-finetune-run-card.json"
     lineage = st.write_hf_adapter_lineage(
         child,
@@ -348,6 +362,13 @@ def test_adapter_lineage_and_transition_require_declared_input_identity(
     assert transition["input_identity_ready"] is True
     assert transition["input_identity_preflight_status"] == "ready"
     assert transition["input_identity_after_load_status"] == "ready"
+    assert lineage["training_input_identity_required"] is True
+    assert lineage["training_input_identity_verified"] is True
+    assert transition["training_input_identity_required"] is True
+    assert transition["training_input_identity_ready"] is True
+    assert transition["training_input_preflight_status"] == "ready"
+    assert transition["training_input_after_load_status"] == "ready"
+    assert transition["training_input_continuity_observed"] is False
 
     bad_card = _run_card(parent)
     bad_card["adapter_input_identity"] = dict(card["adapter_input_identity"])
@@ -359,6 +380,15 @@ def test_adapter_lineage_and_transition_require_declared_input_identity(
             child,
             parent_adapter=parent,
             run_card=bad_card,
+        )
+
+    bad_training_card = json.loads(json.dumps(card))
+    bad_training_card["training_input_identity_after_load"]["status"] = "blocked"
+    with pytest.raises(ValueError, match="after-load identity is not ready"):
+        st.write_hf_adapter_lineage(
+            child,
+            parent_adapter=parent,
+            run_card=bad_training_card,
         )
 
 

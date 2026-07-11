@@ -2814,7 +2814,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             f"--resume-from-checkpoint {safe_checkpoint}",
             explicit_scale_up_command["command_display"],
         )
-        self.assertEqual(explicit_scale_up_command["applied_override_count"], 8)
+        self.assertEqual(explicit_scale_up_command["applied_override_count"], 9)
         self.assertTrue(
             explicit_adapter_continuation["adapter_continuation_applied"]
         )
@@ -3545,7 +3545,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("--max-steps 2", scale_up_command["command_display"])
         self.assertIn("--max-train-samples 8192", scale_up_command["command_display"])
         self.assertIn("-scaleup", scale_up_command["command_display"])
-        self.assertEqual(scale_up_command["applied_override_count"], 5)
+        self.assertEqual(scale_up_command["applied_override_count"], 6)
         self.assertEqual(stored_report["summary"]["scale_up_command_status"], "ok")
         self.assertIn(
             "--max-steps 2",
@@ -3573,8 +3573,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                     "bridge.py",
                     "--model-configs",
                     config.name,
-                    "--train-file",
-                    train.name,
+                    f"--train-file={train.name}",
                     "--validation-file",
                     "missing.txt",
                 ],
@@ -3589,12 +3588,108 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             str(config.resolve()),
         )
         self.assertEqual(
-            command[command.index("--train-file") + 1],
-            str(train.resolve()),
+            next(value for value in command if value.startswith("--train-file=")),
+            f"--train-file={train.resolve()}",
         )
         self.assertEqual(
             command[command.index("--validation-file") + 1],
             "missing.txt",
+        )
+
+    def test_scale_up_pins_local_input_content_across_relocation_and_replay(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "source"
+            source.mkdir()
+            config = source / "profiles.json"
+            train = source / "train.txt"
+            config.write_text("{}\n", encoding="utf-8")
+            train.write_text("spiral training\n", encoding="utf-8")
+            output = root / "output"
+            command = [
+                sys.executable,
+                str(EXAMPLE_PATH),
+                "--model-configs",
+                str(config),
+                "--train-file",
+                str(train),
+                "--output-dir",
+                str(output),
+                "--run-card",
+                str(output / "run-card.json"),
+                "--max-steps",
+                "1",
+                "--max-train-samples",
+                "8",
+            ]
+            summary = {
+                "row_type": "hf_gpt2_finetune_sweep_report_summary",
+                "scale_up_candidate_label": "local-input",
+                "scale_up_candidate_reason": "test",
+                "scale_up_candidate_command": command,
+                "scale_up_candidate_output_dir": str(output),
+                "scale_up_candidate_run_card": str(output / "run-card.json"),
+                "scale_up_candidate_launch_cwd": str(source),
+            }
+            scale_up = hf_ft.hf_gpt2_finetune_scale_up_command(summary)
+            preflight = hf_ft.hf_gpt2_finetune_scale_up_preflight_report(scale_up)
+            expected_id = scale_up["training_input_expected_id"]
+
+            relocated = root / "relocated"
+            relocated.mkdir()
+            relocated_config = relocated / config.name
+            relocated_train = relocated / train.name
+            relocated_config.write_bytes(config.read_bytes())
+            relocated_train.write_bytes(train.read_bytes())
+            relocated_artifact = json.loads(json.dumps(scale_up))
+            relocated_command = relocated_artifact["command"]
+            relocated_command[relocated_command.index("--model-configs") + 1] = str(
+                relocated_config
+            )
+            relocated_command[relocated_command.index("--train-file") + 1] = str(
+                relocated_train
+            )
+            relocated_preflight = hf_ft.hf_gpt2_finetune_scale_up_preflight_report(
+                relocated_artifact
+            )
+            replay = hf_ft.hf_gpt2_finetune_scale_up_command(
+                scale_up,
+                adapter_continuation="replay",
+                output_dir=root / "replay",
+                max_steps_multiplier=None,
+                max_train_samples_multiplier=None,
+            )
+
+            relocated_train.write_text("tampered corpus\n", encoding="utf-8")
+            blocked = hf_ft.hf_gpt2_finetune_scale_up_preflight_report(
+                relocated_artifact
+            )
+
+        self.assertEqual(scale_up["training_input_identity_contract_status"], "enforced")
+        self.assertEqual(scale_up["training_input_identity"]["status"], "ready")
+        self.assertEqual(
+            scale_up["command"][
+                scale_up["command"].index("--expected-training-input-id") + 1
+            ],
+            expected_id,
+        )
+        self.assertTrue(preflight["ready"])
+        self.assertEqual(preflight["training_input_identity"]["status"], "ready")
+        self.assertTrue(relocated_preflight["ready"])
+        self.assertEqual(
+            relocated_preflight["training_input_identity"]["observed_input_id"],
+            expected_id,
+        )
+        self.assertEqual(replay["training_input_expected_id"], expected_id)
+        self.assertFalse(blocked["ready"])
+        self.assertEqual(blocked["training_input_identity"]["status"], "blocked")
+        self.assertTrue(
+            any(
+                issue.get("field") == "training_input_identity_contract"
+                for issue in blocked["issues"]
+            )
         )
 
     def test_scale_up_preflight_allows_root_adapter_without_promotion_report(
@@ -10002,6 +10097,53 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         for argv in invalid_argv:
             with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
                 module.parse_args(argv)
+
+    def test_bridge_canonicalizes_and_rechecks_training_input_identity(
+        self,
+    ) -> None:
+        module = load_bridge_example()
+        with tempfile.TemporaryDirectory() as tmp:
+            train = Path(tmp) / "train.txt"
+            train.write_text("spiral training\n", encoding="utf-8")
+            args = module.parse_args(
+                [
+                    "--train-file",
+                    str(train),
+                    "--metadata-only",
+                ]
+            )
+            preflight = module._training_input_identity_report(
+                args,
+                phase="preflight",
+            )
+            module._canonicalize_training_input_launch_command(args, preflight)
+            canonical_command = args._hf_finetune_launch_command
+
+            train.write_text("tampered corpus\n", encoding="utf-8")
+            after_load = module._training_input_identity_report(
+                args,
+                phase="after_load",
+                expected_input_id=preflight["observed_input_id"],
+            )
+
+        self.assertEqual(preflight["status"], "ready")
+        self.assertIn("--expected-training-input-id", canonical_command)
+        self.assertEqual(
+            canonical_command[
+                canonical_command.index("--expected-training-input-id") + 1
+            ],
+            preflight["observed_input_id"],
+        )
+        self.assertEqual(after_load["status"], "blocked")
+        self.assertFalse(after_load["expected_identity_verified"])
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            module.parse_args(
+                [
+                    "--expected-training-input-id",
+                    "invalid",
+                    "--metadata-only",
+                ]
+            )
 
     def test_bridge_adapter_promotion_gate_requires_auditable_evidence(
         self,

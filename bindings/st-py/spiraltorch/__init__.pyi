@@ -11,6 +11,7 @@ from .optim import Amegagrad, amegagrad
 export: ModuleType
 hf_ft: ModuleType
 hf_peft: ModuleType
+hf_input_identity: ModuleType
 hf_adapter: ModuleType
 hf_adapter_executor: ModuleType
 hf_adapter_executor_launch: ModuleType
@@ -560,6 +561,7 @@ HF_FINETUNE_RUN_CARD_FILENAME: str
 HF_FINETUNE_TRAINER_TRACE_FILENAME: str
 HF_FINETUNE_REQUIRED_PYTHON_PACKAGES: List[str]
 HF_FINETUNE_REQUIRED_RUST_SURFACES: List[Dict[str, str]]
+HF_FINETUNE_INPUT_IDENTITY_SCHEMA: str
 HF_CAUSAL_LM_ARTIFACT_KINDS: Tuple[str, ...]
 HF_ADAPTER_LINEAGE_FILENAME: str
 HF_ADAPTER_LINEAGE_SCHEMA: str
@@ -614,6 +616,21 @@ def hf_causal_lm_artifact_lines(
     tokenizer_name_or_path: str | PathLike[str] | None = ...,
 ) -> List[str]: ...
 
+def hf_finetune_input_identity_report(
+    *,
+    model_configs: str | PathLike[str] | None = ...,
+    train_files: Sequence[str | PathLike[str]] = ...,
+    validation_files: Sequence[str | PathLike[str]] = ...,
+    inference_distortion_sweep_report: str | PathLike[str] | None = ...,
+    inference_distortion_probe: str | PathLike[str] | None = ...,
+    resume_from_checkpoint: str | PathLike[str] | None = ...,
+    expected_input_id: str | None = ...,
+    phase: str = ...,
+) -> Dict[str, object]: ...
+def hf_finetune_input_identity_lines(
+    report_or_inputs: Mapping[str, object] | None = ...,
+    **kwargs: object,
+) -> List[str]: ...
 def hf_adapter_fingerprint(adapter: str | PathLike[str]) -> Dict[str, object]: ...
 def hf_adapter_input_identity_report(
     adapter: str | PathLike[str],
@@ -10129,6 +10146,7 @@ __all__ = [
     "write_wgpu_first_runtime_matrix",
     "hf_ft",
     "hf_peft",
+    "hf_input_identity",
     "hf_adapter",
     "hf_adapter_executor",
     "hf_adapter_executor_launch",
@@ -10146,6 +10164,7 @@ __all__ = [
     "HF_FINETUNE_TRAINER_TRACE_FILENAME",
     "HF_FINETUNE_REQUIRED_PYTHON_PACKAGES",
     "HF_FINETUNE_REQUIRED_RUST_SURFACES",
+    "HF_FINETUNE_INPUT_IDENTITY_SCHEMA",
     "HF_CAUSAL_LM_ARTIFACT_KINDS",
     "HF_ADAPTER_LINEAGE_FILENAME",
     "HF_ADAPTER_LINEAGE_SCHEMA",
@@ -10193,6 +10212,8 @@ __all__ = [
     "export_hf_merged_causal_lm",
     "hf_causal_lm_artifact_lines",
     "hf_causal_lm_artifact_report",
+    "hf_finetune_input_identity_lines",
+    "hf_finetune_input_identity_report",
     "hf_adapter_fingerprint",
     "hf_adapter_input_identity_lines",
     "hf_adapter_input_identity_report",

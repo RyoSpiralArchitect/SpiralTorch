@@ -534,6 +534,33 @@ def hf_adapter_lineage_report(
             and expected_parent_id != parent.get("adapter_id")
         ):
             errors.append("run-card expected adapter identity does not match parent")
+    training_input_identity = _run_card_input_identity(
+        card_payload,
+        "training_input_identity",
+    )
+    training_input_identity_after_load = _run_card_input_identity(
+        card_payload,
+        "training_input_identity_after_load",
+    )
+    strongest_training_input_identity = (
+        training_input_identity_after_load or training_input_identity
+    )
+    expected_training_input_id = (
+        training_input_identity_after_load.get("expected_input_id")
+        or training_input_identity.get("expected_input_id")
+    )
+    training_input_identity_required = expected_training_input_id is not None
+    if training_input_identity_required:
+        if training_input_identity.get("status") != "ready":
+            errors.append("run-card training input preflight identity is not ready")
+        if training_input_identity_after_load.get("status") != "ready":
+            errors.append("run-card training input after-load identity is not ready")
+        observed_before = training_input_identity.get("observed_input_id")
+        observed_after = training_input_identity_after_load.get("observed_input_id")
+        if observed_before != expected_training_input_id:
+            errors.append("run-card training input preflight identity does not match")
+        if observed_after != expected_training_input_id:
+            errors.append("run-card training input after-load identity does not match")
     parent_reference = (
         None if parent is None else parent.get("adapter_path")
     ) or start_report.get("adapter_weights_source")
@@ -588,6 +615,32 @@ def hf_adapter_lineage_report(
         "parent_input_identity_preflight_status": input_identity.get("status"),
         "parent_input_identity_after_load_status": input_identity_after_load.get(
             "status"
+        ),
+        "training_input_identity_present": bool(strongest_training_input_identity),
+        "training_input_identity_required": training_input_identity_required,
+        "training_input_identity_status": strongest_training_input_identity.get(
+            "status"
+        ),
+        "training_input_expected_id": expected_training_input_id,
+        "training_input_observed_id": strongest_training_input_identity.get(
+            "observed_input_id"
+        ),
+        "training_input_identity_verified": (
+            None
+            if not strongest_training_input_identity
+            else strongest_training_input_identity.get("status") == "ready"
+            and strongest_training_input_identity.get("identity_verified") is True
+            and (
+                expected_training_input_id is None
+                or strongest_training_input_identity.get("observed_input_id")
+                == expected_training_input_id
+            )
+        ),
+        "training_input_identity_preflight_status": training_input_identity.get(
+            "status"
+        ),
+        "training_input_identity_after_load_status": (
+            training_input_identity_after_load.get("status")
         ),
         "weights_changed_from_parent": (
             None
@@ -1639,6 +1692,26 @@ def _adapter_promotion_chain_node(manifest_path: Path) -> dict[str, object]:
         "parent_input_identity_after_load_status": lineage.get(
             "parent_input_identity_after_load_status"
         ),
+        "training_input_identity_present": lineage.get(
+            "training_input_identity_present"
+        ),
+        "training_input_identity_required": lineage.get(
+            "training_input_identity_required"
+        ),
+        "training_input_identity_status": lineage.get(
+            "training_input_identity_status"
+        ),
+        "training_input_expected_id": lineage.get("training_input_expected_id"),
+        "training_input_observed_id": lineage.get("training_input_observed_id"),
+        "training_input_identity_verified": lineage.get(
+            "training_input_identity_verified"
+        ),
+        "training_input_identity_preflight_status": lineage.get(
+            "training_input_identity_preflight_status"
+        ),
+        "training_input_identity_after_load_status": lineage.get(
+            "training_input_identity_after_load_status"
+        ),
         "weights_changed_from_parent": lineage.get("weights_changed_from_parent"),
         "run_card_path": None if run_card_path is None else str(run_card_path),
         "run_card_sha256": observed_card_sha256,
@@ -1769,6 +1842,14 @@ def _chain_inferred_root_node(
         "lineage_status": "inferred_seed",
         "lineage_manifest_path": None,
         "parent_fingerprint_verified": None,
+        "training_input_identity_present": None,
+        "training_input_identity_required": None,
+        "training_input_identity_status": None,
+        "training_input_expected_id": None,
+        "training_input_observed_id": None,
+        "training_input_identity_verified": None,
+        "training_input_identity_preflight_status": None,
+        "training_input_identity_after_load_status": None,
         "weights_changed_from_parent": None,
         "run_card_path": None,
         "run_card_sha256": None,
@@ -1852,11 +1933,35 @@ def _adapter_promotion_chain_transition(
             and child.get("parent_input_identity_after_load_status") == "ready"
         )
     )
+    training_input_expected_id = child.get("training_input_expected_id")
+    training_input_observed_id = child.get("training_input_observed_id")
+    training_input_identity_required = training_input_expected_id is not None
+    training_input_identity_ready = bool(
+        not training_input_identity_required
+        or (
+            training_input_expected_id == training_input_observed_id
+            and child.get("training_input_identity_status") == "ready"
+            and child.get("training_input_identity_verified") is True
+            and child.get("training_input_identity_preflight_status") == "ready"
+            and child.get("training_input_identity_after_load_status") == "ready"
+        )
+    )
+    parent_training_input_id = parent.get("training_input_observed_id")
+    training_input_continuity_observed = bool(
+        parent_training_input_id is not None
+        and training_input_observed_id is not None
+    )
+    training_input_matches_parent = (
+        None
+        if not training_input_continuity_observed
+        else parent_training_input_id == training_input_observed_id
+    )
     lineage_ready = bool(
         depth_step == 1
         and root_matches
         and base_model_matches
         and input_identity_ready
+        and training_input_identity_ready
         and child.get("parent_fingerprint_verified") is True
         and child.get("weights_changed_from_parent") is True
     )
@@ -1894,6 +1999,22 @@ def _adapter_promotion_chain_transition(
         "input_identity_after_load_status": child.get(
             "parent_input_identity_after_load_status"
         ),
+        "training_input_identity_required": training_input_identity_required,
+        "training_input_identity_ready": training_input_identity_ready,
+        "training_input_identity_status": child.get(
+            "training_input_identity_status"
+        ),
+        "training_input_expected_id": training_input_expected_id,
+        "training_input_observed_id": training_input_observed_id,
+        "training_input_preflight_status": child.get(
+            "training_input_identity_preflight_status"
+        ),
+        "training_input_after_load_status": child.get(
+            "training_input_identity_after_load_status"
+        ),
+        "parent_training_input_id": parent_training_input_id,
+        "training_input_continuity_observed": training_input_continuity_observed,
+        "training_input_matches_parent": training_input_matches_parent,
         "lineage_ready": lineage_ready,
         "parent_fingerprint_verified": (
             child.get("parent_fingerprint_verified") is True
@@ -2847,6 +2968,12 @@ def hf_adapter_promotion_chain_lines(
             f"input_identity_required="
             f"{raw_transition.get('input_identity_required')} "
             f"input_identity_ready={raw_transition.get('input_identity_ready')} "
+            f"training_input_required="
+            f"{raw_transition.get('training_input_identity_required')} "
+            f"training_input_ready="
+            f"{raw_transition.get('training_input_identity_ready')} "
+            f"training_input_matches_parent="
+            f"{raw_transition.get('training_input_matches_parent')} "
             f"weights_changed={raw_transition.get('weights_changed_from_parent')} "
             f"eval_handoff_delta={raw_transition.get('eval_handoff_delta')} "
             f"eval_improvement={raw_transition.get('child_eval_improvement')} "

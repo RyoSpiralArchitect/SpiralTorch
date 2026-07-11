@@ -842,7 +842,7 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
 
         self.assertEqual(
             sample["schema"],
-            "spiraltorch.hf_causal_lm_artifact_probe.sample.v7",
+            "spiraltorch.hf_causal_lm_artifact_probe.sample.v8",
         )
         self.assertEqual(sample["model_family"], "gpt_neox")
         self.assertTrue(sample["artifact_probe"]["adapter_loaded"])
@@ -975,6 +975,9 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         portable_generation_3 = sample["executor"]["portable_generation_3_run"]
         canonical_generation_4 = sample["executor"]["canonical_generation_4_run"]
         identity_generation_5 = sample["executor"]["identity_generation_5_run"]
+        training_input_generation_6 = sample["executor"][
+            "training_input_generation_6_run"
+        ]
         self.assertEqual(executor_generation_2["attempt_status"], "promoted")
         self.assertEqual(executor_generation_2["returncode"], 0)
         self.assertEqual(executor_generation_2["selected_lineage_depth"], 2)
@@ -1132,6 +1135,74 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
             identity_generation_5["status_report_transition_evidence"],
             "ready",
         )
+        self.assertEqual(training_input_generation_6["attempt_status"], "promoted")
+        self.assertEqual(training_input_generation_6["returncode"], 0)
+        self.assertEqual(training_input_generation_6["status"], "stopped")
+        self.assertEqual(
+            training_input_generation_6["stop_reason_codes"],
+            ["max_lineage_depth_reached"],
+        )
+        self.assertEqual(
+            training_input_generation_6["training_input_contract_status"],
+            "enforced",
+        )
+        self.assertTrue(training_input_generation_6["training_input_fail_fast"])
+        self.assertTrue(
+            training_input_generation_6["training_input_path_independent"]
+        )
+        self.assertEqual(
+            training_input_generation_6["training_input_expected_id"],
+            training_input_generation_6["training_input_observed_id"],
+        )
+        self.assertEqual(
+            training_input_generation_6["training_input_preflight_status"],
+            "ready",
+        )
+        self.assertEqual(
+            training_input_generation_6["training_input_after_load_status"],
+            "ready",
+        )
+        self.assertTrue(
+            training_input_generation_6["training_input_preflight_verified"]
+        )
+        self.assertTrue(
+            training_input_generation_6["training_input_after_load_verified"]
+        )
+        self.assertEqual(training_input_generation_6["training_input_count"], 3)
+        self.assertEqual(
+            training_input_generation_6["training_input_file_count"],
+            3,
+        )
+        self.assertTrue(
+            training_input_generation_6["launch_command_pins_training_input"]
+        )
+        self.assertEqual(training_input_generation_6["selected_lineage_depth"], 6)
+        self.assertEqual(training_input_generation_6["node_count"], 7)
+        self.assertEqual(training_input_generation_6["transition_count"], 6)
+        self.assertEqual(training_input_generation_6["ready_transition_count"], 6)
+        self.assertTrue(
+            training_input_generation_6["selected_path_transitions_ready"]
+        )
+        self.assertTrue(
+            training_input_generation_6["training_input_transition_required"]
+        )
+        self.assertTrue(
+            training_input_generation_6["training_input_transition_ready"]
+        )
+        self.assertEqual(
+            training_input_generation_6["parent_adapter_id"],
+            identity_generation_5["child_adapter_id"],
+        )
+        self.assertGreater(
+            training_input_generation_6["child_eval_improvement"],
+            0.0,
+        )
+        self.assertGreater(
+            training_input_generation_6["path_eval_improvement"],
+            0.0,
+        )
+        self.assertEqual(training_input_generation_6["postflight_status"], "ready")
+        self.assertTrue(training_input_generation_6["status_report_healthy"])
 
     def test_inference_distortion_runtime_plan_and_cli_args_are_importable(self) -> None:
         runtime = zspace_inference_distortion_runtime_plan(
