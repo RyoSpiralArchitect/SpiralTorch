@@ -129,6 +129,7 @@ def _write_promoted_adapter(
     expected_finetune_replay_id: str | None = None,
     trainer_trace_summary: Mapping[str, object] | None = None,
     trainer_trace_rows: Sequence[Mapping[str, object]] | None = None,
+    seal_trainer_trace_segment: bool = False,
     dataset_name: str = "org/corpus",
     dataset_revision: str = "e93a9faa9c77e5d09219f6c868bfc7a1bd65593c",
 ) -> dict[str, object]:
@@ -161,6 +162,11 @@ def _write_promoted_adapter(
         )
     if "--trainer-trace-jsonl" in command:
         trace_path = Path(_flag(command, "--trainer-trace-jsonl"))
+        trace_segment_plan = (
+            st.hf_finetune_trainer_trace_segment_plan(trace_path)
+            if seal_trainer_trace_segment
+            else None
+        )
         card["trainer_trace_jsonl"] = str(trace_path)
         card["trainer_telemetry_requested"] = "--trainer-telemetry" in command
         card["trainer_telemetry_enabled"] = bool(
@@ -180,6 +186,12 @@ def _write_promoted_adapter(
                 trainer_trace_summary = st.summarize_hf_finetune_trainer_trace(
                     trainer_trace_rows
                 )
+        if trace_segment_plan is not None:
+            card["trainer_trace_segment"] = (
+                st.hf_finetune_trainer_trace_segment_receipt(
+                    trace_segment_plan
+                )
+            )
     if trainer_trace_summary is not None:
         card["trainer_trace_summary"] = dict(trainer_trace_summary)
     if runtime_input_id is not None:
@@ -472,6 +484,7 @@ class FakeFineTuneRunner:
         weight_prefix: str = "generated",
         trainer_telemetry: Sequence[tuple[float, float] | None] | None = None,
         trainer_geometry_guard_observations: int | None = None,
+        trainer_trace_segments: bool = False,
     ) -> None:
         self.improvements = list(improvements)
         self.fail_returncode = fail_returncode
@@ -480,6 +493,7 @@ class FakeFineTuneRunner:
         self.trainer_geometry_guard_observations = (
             trainer_geometry_guard_observations
         )
+        self.trainer_trace_segments = trainer_trace_segments
         self.commands: list[list[str]] = []
 
     def __call__(self, command: Sequence[str]) -> int:
@@ -614,6 +628,7 @@ class FakeFineTuneRunner:
             after=before - improvement,
             launch_command=values,
             trainer_trace_rows=trainer_trace_rows,
+            seal_trainer_trace_segment=self.trainer_trace_segments,
         )
         return 0
 
@@ -994,6 +1009,7 @@ def test_executor_requires_durable_trainer_telemetry_evidence_after_generation(
         command_runner=FakeFineTuneRunner(
             [0.05],
             trainer_telemetry=[(0.65, 0.70)],
+            trainer_trace_segments=True,
         ),
     )
 
@@ -1032,6 +1048,14 @@ def test_executor_requires_durable_trainer_telemetry_evidence_after_generation(
         "fully_armed"
     )
     assert ready_evidence["geometry_guard_node_matches"] is True
+    assert ready_evidence["trainer_trace_segment_required"] is True
+    assert str(ready_evidence["trainer_trace_segment_id"]).startswith(
+        "sha256:"
+    )
+    assert str(ready_evidence["trainer_trace_segment_receipt_id"]).startswith(
+        "sha256:"
+    )
+    assert ready_evidence["trainer_trace_segment_matches"] is True
     assert ready_evidence["node_matches_trace"] is True
     assert str(ready_evidence["trace_sha256"]).startswith("sha256:")
     assert str(ready_evidence["evidence_id"]).startswith("sha256:")
@@ -1044,6 +1068,8 @@ def test_executor_requires_durable_trainer_telemetry_evidence_after_generation(
         and "geometry_guard_triggers=0" in line
         and "geometry_guard_armed=True" in line
         and "guard_runtime=fully_armed" in line
+        and "trace_segment=sha256:" in line
+        and "trace_segment_matches=True" in line
         for line in st.hf_adapter_continuation_executor_lines(ready)
     )
 
@@ -1061,6 +1087,18 @@ def test_executor_requires_durable_trainer_telemetry_evidence_after_generation(
     trace_path.write_text(original_trace, encoding="utf-8")
 
     original_state = ready_state.read_text(encoding="utf-8")
+    tampered_state = json.loads(original_state)
+    tampered_state["generations"][-1]["postflight"][
+        "trainer_telemetry_evidence"
+    ]["trainer_trace_segment_matches"] = False
+    ready_state.write_text(json.dumps(tampered_state), encoding="utf-8")
+    with pytest.raises(
+        ValueError,
+        match="trainer telemetry evidence identity mismatch",
+    ):
+        st.load_hf_adapter_continuation_executor(ready_state)
+
+    ready_state.write_text(original_state, encoding="utf-8")
     tampered_state = json.loads(original_state)
     tampered_state["generations"][-1]["postflight"][
         "trainer_telemetry_evidence"

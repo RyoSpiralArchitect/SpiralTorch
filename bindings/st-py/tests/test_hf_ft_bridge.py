@@ -13664,6 +13664,367 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIsNotNone(summary["trace_last_psi_total"])
         self.assertEqual(callback.event_count, 4)
 
+    def test_trainer_trace_segments_preserve_parent_and_seal_receipt(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            canonical_trace = root / "trainer-trace.jsonl"
+            canonical_trace.write_text(
+                json.dumps({"event": "log", "global_step": 8}) + "\n",
+                encoding="utf-8",
+            )
+            parent_bytes = canonical_trace.read_bytes()
+            plan = st.hf_finetune_trainer_trace_segment_plan(
+                canonical_trace,
+                resume_from_checkpoint=root / "checkpoint-8",
+                initial_step=8,
+            )
+            segment_path = Path(str(plan["trace_path"]))
+            segment_path.write_text(
+                json.dumps({"event": "log", "global_step": 9}) + "\n",
+                encoding="utf-8",
+            )
+            receipt = st.hf_finetune_trainer_trace_segment_receipt(plan)
+            run_summary = st.summarize_hf_finetune_run_card(
+                {
+                    "trainer_trace_jsonl": str(segment_path),
+                    "trainer_trace_segment_receipt": receipt,
+                }
+            )
+            summary_lines = st.hf_finetune_summary_lines(run_summary)
+            parent_preserved_before_tamper = (
+                canonical_trace.read_bytes() == parent_bytes
+            )
+            retry_plan = st.hf_finetune_trainer_trace_segment_plan(
+                canonical_trace,
+                resume_from_checkpoint=root / "checkpoint-8",
+                initial_step=8,
+                previous_segment=receipt,
+            )
+            Path(str(retry_plan["trace_path"])).write_text(
+                json.dumps({"event": "log", "global_step": 10}) + "\n",
+                encoding="utf-8",
+            )
+            retry_receipt = (
+                st.hf_finetune_trainer_trace_segment_receipt(retry_plan)
+            )
+            fresh_trace = root / "fresh-trace.jsonl"
+            fresh_trace.write_text(
+                json.dumps({"event": "old", "global_step": 99}) + "\n",
+                encoding="utf-8",
+            )
+            fresh_plan = st.hf_finetune_trainer_trace_segment_plan(
+                fresh_trace
+            )
+            fresh_trace.write_text(
+                json.dumps({"event": "log", "global_step": 0}) + "\n",
+                encoding="utf-8",
+            )
+            fresh_receipt = (
+                st.hf_finetune_trainer_trace_segment_receipt(fresh_plan)
+            )
+            fresh_with_previous = (
+                st.hf_finetune_trainer_trace_segment_plan(
+                    root / "fresh-with-previous.jsonl",
+                    previous_segment=receipt,
+                )
+            )
+            orphan_resume_plan = (
+                st.hf_finetune_trainer_trace_segment_plan(
+                    root / "orphan-trace.jsonl",
+                    resume_from_checkpoint=root / "checkpoint-4",
+                    initial_step=4,
+                )
+            )
+            empty_parent = root / "empty-parent.jsonl"
+            empty_parent.write_text("", encoding="utf-8")
+            empty_parent_plan = (
+                st.hf_finetune_trainer_trace_segment_plan(
+                    empty_parent,
+                    resume_from_checkpoint=root / "checkpoint-4",
+                    initial_step=4,
+                )
+            )
+            lines = st.hf_finetune_trainer_trace_segment_lines(receipt)
+            canonical_trace.write_text(
+                canonical_trace.read_text(encoding="utf-8")
+                + json.dumps({"event": "tampered", "global_step": 8})
+                + "\n",
+                encoding="utf-8",
+            )
+            tampered_receipt = st.hf_finetune_trainer_trace_segment_receipt(
+                plan
+            )
+            tampered_retry_receipt = (
+                st.hf_finetune_trainer_trace_segment_receipt(retry_receipt)
+            )
+            tampered_resume_plan = (
+                st.hf_finetune_trainer_trace_segment_plan(
+                    canonical_trace,
+                    resume_from_checkpoint=root / "checkpoint-9",
+                    initial_step=9,
+                    previous_segment=receipt,
+                )
+            )
+
+        self.assertEqual(
+            plan["row_type"],
+            "hf_finetune_trainer_trace_segment_plan",
+        )
+        self.assertEqual(plan["status"], "resume_segment")
+        self.assertTrue(plan["ready"])
+        self.assertTrue(plan["trace_path_rewritten"])
+        self.assertTrue(plan["preserves_parent_trace"])
+        self.assertIn("resume-step-000000000008", segment_path.name)
+        self.assertTrue(parent_preserved_before_tamper)
+        self.assertEqual(receipt["status"], "ready")
+        self.assertTrue(receipt["ready"])
+        self.assertTrue(receipt["parent_integrity_ready"])
+        self.assertEqual(receipt["trace_event_count"], 1)
+        self.assertEqual(
+            run_summary["trainer_trace_segment_id"],
+            receipt["segment_id"],
+        )
+        self.assertEqual(
+            run_summary["trainer_trace_segment_receipt_id"],
+            receipt["receipt_id"],
+        )
+        self.assertTrue(
+            any("trainer_trace_segment" in line for line in summary_lines)
+        )
+        self.assertEqual(retry_plan["attempt"], 2)
+        self.assertTrue(retry_plan["collision_avoided"])
+        self.assertEqual(retry_plan["lineage_depth"], 2)
+        self.assertTrue(retry_plan["previous_segment_revalidated_ready"])
+        self.assertIn("attempt-2", str(retry_plan["trace_path"]))
+        self.assertTrue(retry_receipt["ready"])
+        self.assertTrue(retry_receipt["previous_segment_integrity_ready"])
+        self.assertEqual(fresh_plan["status"], "fresh_segment")
+        self.assertIsNone(fresh_plan["parent_trace_path"])
+        self.assertEqual(
+            Path(str(fresh_plan["trace_path"])),
+            fresh_trace.resolve(),
+        )
+        self.assertTrue(fresh_receipt["ready"])
+        self.assertEqual(fresh_with_previous["lineage_depth"], 0)
+        self.assertIsNone(fresh_with_previous["parent_segment_id"])
+        self.assertFalse(
+            fresh_with_previous["previous_segment_receipt_required"]
+        )
+        self.assertEqual(
+            orphan_resume_plan["status"],
+            "resume_without_prior_trace",
+        )
+        self.assertTrue(orphan_resume_plan["trace_path_rewritten"])
+        self.assertIn(
+            "resume-step-000000000004",
+            str(orphan_resume_plan["trace_path"]),
+        )
+        self.assertFalse(empty_parent_plan["ready"])
+        self.assertTrue(
+            any(
+                issue.get("field") == "parent_trace"
+                for issue in empty_parent_plan["issues"]
+            )
+        )
+        self.assertIn("trainer_trace_segment", lines[0])
+        self.assertFalse(tampered_receipt["ready"])
+        self.assertFalse(tampered_receipt["parent_integrity_ready"])
+        self.assertFalse(tampered_retry_receipt["ready"])
+        self.assertFalse(
+            tampered_retry_receipt["previous_segment_integrity_ready"]
+        )
+        self.assertFalse(tampered_resume_plan["ready"])
+        self.assertFalse(
+            tampered_resume_plan["previous_segment_revalidated_ready"]
+        )
+        self.assertTrue(
+            any(
+                issue.get("field") == "previous_segment_receipt"
+                for issue in tampered_resume_plan["issues"]
+            )
+        )
+        self.assertEqual(
+            st.HF_FINETUNE_TRAINER_TRACE_SEGMENT_SCHEMA,
+            "spiraltorch.hf_finetune_trainer_trace_segment.v1",
+        )
+        self.assertIn("hf_finetune_trainer_trace_segment_plan", st.__all__)
+
+    def test_bridge_resume_routes_callback_to_immutable_trace_segment(self) -> None:
+        module = load_bridge_example()
+        fake_transformers = types.ModuleType("transformers")
+
+        class TrainerCallback:
+            pass
+
+        fake_transformers.TrainerCallback = TrainerCallback
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output_dir = root / "run"
+            output_dir.mkdir()
+            train_path = root / "train.txt"
+            train_path.write_text("spiral geometry\n", encoding="utf-8")
+            checkpoint = output_dir / "checkpoint-8"
+            checkpoint.mkdir()
+            (checkpoint / "trainer_state.json").write_text(
+                json.dumps({"global_step": 8, "max_steps": 16}),
+                encoding="utf-8",
+            )
+            canonical_trace = (
+                output_dir / st.HF_GPT2_FT_TRAINER_TRACE_FILENAME
+            )
+            canonical_trace.write_text(
+                json.dumps({"event": "log", "global_step": 8}) + "\n",
+                encoding="utf-8",
+            )
+            canonical_bytes = canonical_trace.read_bytes()
+            run_card = output_dir / st.HF_GPT2_FT_RUN_CARD_FILENAME
+            run_card.write_text(
+                json.dumps({"trainer_trace_jsonl": str(canonical_trace)}),
+                encoding="utf-8",
+            )
+            args = module.parse_args(
+                [
+                    "--train",
+                    "--train-file",
+                    str(train_path),
+                    "--output-dir",
+                    str(output_dir),
+                    "--resume-from-checkpoint",
+                    str(checkpoint),
+                    "--max-steps",
+                    "16",
+                ]
+            )
+            checkpoint_report = st.hf_finetune_checkpoint_resume_report(
+                checkpoint,
+                requested_max_steps=16,
+            )
+            plan = module._apply_trainer_trace_segment_plan(
+                args,
+                checkpoint_report,
+            )
+            assert plan is not None
+            segment_path = Path(str(plan["trace_path"]))
+            path_reserved_before_callback = segment_path.is_file()
+            run_card.write_text(
+                json.dumps(
+                    {
+                        "trainer_trace_jsonl": str(segment_path),
+                        "trainer_trace_segment": plan,
+                        "trainer_trace_segment_plan": plan,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            failed_previous_segment, failed_previous_trace = (
+                module._previous_trainer_trace_segment(args)
+            )
+            assert failed_previous_segment is not None
+            recovered_plan = st.hf_finetune_trainer_trace_segment_plan(
+                canonical_trace,
+                resume_from_checkpoint=checkpoint,
+                initial_step=9,
+                previous_segment=failed_previous_segment,
+            )
+            canonical_trace.write_text(
+                canonical_trace.read_text(encoding="utf-8")
+                + json.dumps({"event": "tampered", "global_step": 8})
+                + "\n",
+                encoding="utf-8",
+            )
+            tampered_recovery_plan = (
+                st.hf_finetune_trainer_trace_segment_plan(
+                    canonical_trace,
+                    resume_from_checkpoint=checkpoint,
+                    initial_step=9,
+                    previous_segment=failed_previous_segment,
+                )
+            )
+            canonical_trace.write_bytes(canonical_bytes)
+            with mock.patch.dict(sys.modules, {"transformers": fake_transformers}):
+                callback = hf_ft.hf_gpt2_finetune_trainer_trace_callback(
+                    segment_path,
+                    run_id="resume-segment",
+                )
+            callback.on_train_begin(
+                types.SimpleNamespace(output_dir=str(output_dir)),
+                types.SimpleNamespace(global_step=8, max_steps=16),
+                types.SimpleNamespace(),
+            )
+            card: dict[str, object] = {}
+            receipt = module._attach_trainer_trace_segment_receipt(card, args)
+            parent_preserved = canonical_trace.read_bytes() == canonical_bytes
+            assert receipt is not None
+            canonical_trace.write_text(
+                canonical_trace.read_text(encoding="utf-8")
+                + json.dumps({"event": "tampered", "global_step": 8})
+                + "\n",
+                encoding="utf-8",
+            )
+            blocked_followup = st.hf_finetune_trainer_trace_segment_plan(
+                canonical_trace,
+                resume_from_checkpoint=checkpoint,
+                initial_step=10,
+                previous_segment=receipt,
+            )
+            run_card.write_text(
+                json.dumps(
+                    {
+                        "trainer_trace_jsonl": blocked_followup["trace_path"],
+                        "trainer_trace_segment": blocked_followup,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            recovered_blocked_parent, _ = (
+                module._previous_trainer_trace_segment(args)
+            )
+            assert recovered_blocked_parent is not None
+            blocked_retry = st.hf_finetune_trainer_trace_segment_plan(
+                canonical_trace,
+                resume_from_checkpoint=checkpoint,
+                initial_step=10,
+                previous_segment=recovered_blocked_parent,
+            )
+
+        self.assertTrue(parent_preserved)
+        self.assertTrue(path_reserved_before_callback)
+        self.assertTrue(plan["trace_path_reserved"])
+        self.assertEqual(
+            failed_previous_segment["status"],
+            "sealed_parent_anchor",
+        )
+        self.assertEqual(failed_previous_trace, canonical_trace.resolve())
+        self.assertTrue(recovered_plan["ready"])
+        self.assertTrue(
+            recovered_plan["previous_segment_trace_integrity_ready"]
+        )
+        self.assertFalse(tampered_recovery_plan["ready"])
+        self.assertFalse(
+            tampered_recovery_plan["previous_segment_trace_integrity_ready"]
+        )
+        self.assertNotEqual(segment_path, canonical_trace)
+        self.assertEqual(args.trainer_trace_jsonl, segment_path)
+        self.assertEqual(
+            args._hf_finetune_launch_command[
+                args._hf_finetune_launch_command.index(
+                    "--trainer-trace-jsonl"
+                )
+                + 1
+            ],
+            str(segment_path),
+        )
+        self.assertIsNotNone(receipt)
+        self.assertTrue(receipt["ready"])
+        self.assertTrue(receipt["parent_integrity_ready"])
+        self.assertEqual(card["trainer_trace_segment"], receipt)
+        self.assertFalse(blocked_followup["ready"])
+        self.assertEqual(
+            recovered_blocked_parent["receipt_id"],
+            receipt["receipt_id"],
+        )
+        self.assertFalse(blocked_retry["ready"])
+
     def test_bridge_geometry_guard_auto_enables_telemetry_and_validates_cli(
         self,
     ) -> None:

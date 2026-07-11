@@ -675,6 +675,10 @@ def _validate_trainer_telemetry_evidence_rows(
             "geometry_guard_runtime_evidence_ready",
             "geometry_guard_runtime_evidence_basis",
             "geometry_guard_node_matches",
+            "trainer_trace_segment_required",
+            "trainer_trace_segment_id",
+            "trainer_trace_segment_receipt_id",
+            "trainer_trace_segment_matches",
             "node_matches_trace",
         ):
             if field in evidence:
@@ -1376,6 +1380,10 @@ def _trainer_telemetry_evidence_contract(
             "geometry_guard_trigger_receipt_ready": None,
             "geometry_guard_runtime_evidence_ready": None,
             "geometry_guard_runtime_evidence_basis": None,
+            "trainer_trace_segment_required": None,
+            "trainer_trace_segment_id": None,
+            "trainer_trace_segment_receipt_id": None,
+            "trainer_trace_segment_matches": None,
             "trace_path": resolved_command_contract.get("trainer_trace_jsonl"),
             "trace_exists": None,
             "trace_sha256": None,
@@ -1744,11 +1752,60 @@ def _trainer_telemetry_evidence_contract(
             == geometry_guard_armed
         )
     )
+    raw_node_trace_segment = (
+        None if node is None else node.get("trainer_trace_segment")
+    )
+    node_trace_segment = (
+        dict(raw_node_trace_segment)
+        if isinstance(raw_node_trace_segment, Mapping)
+        else {}
+    )
+    trainer_trace_segment_required = bool(
+        node_trace_segment.get("receipt_id") is not None
+    )
+    node_trace_segment_path = None
+    if node_trace_segment.get("trace_path") is not None:
+        node_trace_segment_path = Path(
+            str(node_trace_segment.get("trace_path"))
+        ).expanduser()
+        if not node_trace_segment_path.is_absolute():
+            run_card_path = None if node is None else node.get("run_card_path")
+            base = (
+                Path(str(run_card_path)).expanduser().parent
+                if run_card_path is not None
+                else Path.cwd()
+            )
+            node_trace_segment_path = base / node_trace_segment_path
+        node_trace_segment_path = node_trace_segment_path.resolve()
+    trainer_trace_segment_matches = bool(
+        not trainer_trace_segment_required
+        or (
+            trace_path is not None
+            and node_trace_segment_path == trace_path
+            and node_trace_segment.get("trace_sha256") == trace_sha256
+            and node_trace_segment.get("trace_bytes") == trace_bytes
+            and node_trace_segment.get("ready") is True
+            and node is not None
+            and node.get("trainer_trace_segment_revalidated_ready") is True
+        )
+    )
+    if trainer_trace_segment_required and not trainer_trace_segment_matches:
+        issues.append(
+            {
+                "field": "trainer_trace_segment",
+                "observed": node_trace_segment,
+                "message": (
+                    "chain node trainer trace segment does not match the raw "
+                    "trace receipt"
+                ),
+            }
+        )
     node_matches_trace = bool(
         count_matches
         and desire_matches
         and psi_matches
         and geometry_guard_node_matches
+        and trainer_trace_segment_matches
     )
     if not node_matches_trace:
         issues.append(
@@ -1774,6 +1831,15 @@ def _trainer_telemetry_evidence_contract(
                     "trace_last_training_geometry_guard_armed": None
                     if node is None
                     else node.get("trace_last_training_geometry_guard_armed"),
+                    "trainer_trace_segment_id": node_trace_segment.get(
+                        "segment_id"
+                    ),
+                    "trainer_trace_segment_receipt_id": node_trace_segment.get(
+                        "receipt_id"
+                    ),
+                    "trainer_trace_segment_matches": (
+                        trainer_trace_segment_matches
+                    ),
                 },
                 "message": "chain node telemetry does not match the trace receipt",
             }
@@ -1833,6 +1899,12 @@ def _trainer_telemetry_evidence_contract(
             geometry_guard_runtime_evidence_basis
         ),
         "geometry_guard_node_matches": geometry_guard_node_matches,
+        "trainer_trace_segment_required": trainer_trace_segment_required,
+        "trainer_trace_segment_id": node_trace_segment.get("segment_id"),
+        "trainer_trace_segment_receipt_id": node_trace_segment.get(
+            "receipt_id"
+        ),
+        "trainer_trace_segment_matches": trainer_trace_segment_matches,
         "node_matches_trace": node_matches_trace,
         "required_axes": required_axes,
     }
@@ -1916,6 +1988,12 @@ def _trainer_telemetry_evidence_contract(
         if node is None
         else node.get("geometry_guard_runtime_evidence_basis"),
         "geometry_guard_node_matches": geometry_guard_node_matches,
+        "trainer_trace_segment_required": trainer_trace_segment_required,
+        "trainer_trace_segment_id": node_trace_segment.get("segment_id"),
+        "trainer_trace_segment_receipt_id": node_trace_segment.get(
+            "receipt_id"
+        ),
+        "trainer_trace_segment_matches": trainer_trace_segment_matches,
         "node_matches_trace": node_matches_trace,
         "evidence_id": _canonical_sha256(evidence_payload)
         if trace_sha256 is not None
@@ -4284,6 +4362,16 @@ def hf_adapter_continuation_executor_lines(
             if isinstance(telemetry_evidence, Mapping)
             else None
         )
+        telemetry_trace_segment_id = (
+            telemetry_evidence.get("trainer_trace_segment_id")
+            if isinstance(telemetry_evidence, Mapping)
+            else None
+        )
+        telemetry_trace_segment_matches = (
+            telemetry_evidence.get("trainer_trace_segment_matches")
+            if isinstance(telemetry_evidence, Mapping)
+            else None
+        )
         command_runtime = raw_attempt.get("command_runtime")
         runtime_status = (
             command_runtime.get("status")
@@ -4397,6 +4485,8 @@ def hf_adapter_continuation_executor_lines(
             f"geometry_guard_armed={telemetry_geometry_guard_armed} "
             f"guard_runtime={telemetry_geometry_guard_runtime_basis} "
             f"guard_pending_axes={telemetry_geometry_guard_pending_axes} "
+            f"trace_segment={telemetry_trace_segment_id} "
+            f"trace_segment_matches={telemetry_trace_segment_matches} "
             f"input_identity={input_identity_status} "
             f"training_input_identity={training_input_identity_status} "
             f"dataset_input_contract={dataset_input_contract_status} "

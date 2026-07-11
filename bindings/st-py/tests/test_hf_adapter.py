@@ -155,6 +155,7 @@ def _write_promoted_child(
     finetune_replay_id: str | None = None,
     expected_finetune_replay_id: str | None = None,
     trainer_trace_summary: dict[str, object] | None = None,
+    trainer_trace_segment: dict[str, object] | None = None,
     trainer_geometry_guard_active: bool = False,
     max_train_samples: int = 8,
     block_size: int = 128,
@@ -165,6 +166,10 @@ def _write_promoted_child(
     card = _run_card(parent, before=before, after=after)
     if trainer_trace_summary is not None:
         card["trainer_trace_summary"] = dict(trainer_trace_summary)
+    if trainer_trace_segment is not None:
+        card["trainer_trace_jsonl"] = trainer_trace_segment.get("trace_path")
+        card["trainer_trace_segment"] = dict(trainer_trace_segment)
+        card["trainer_trace_segment_receipt"] = dict(trainer_trace_segment)
     if trainer_geometry_guard_active:
         card["trainer_geometry_guard_active"] = True
         card["trainer_geometry_guard_min_events"] = 3
@@ -2282,4 +2287,52 @@ def test_adapter_promotion_chain_revalidates_stored_promotion(
     assert any(
         issue["code"] == "promotion_revalidation_mismatch"
         for issue in child_node["issues"]
+    )
+
+
+def test_adapter_promotion_chain_revalidates_trainer_trace_segment(
+    tmp_path: Path,
+) -> None:
+    root = _write_adapter(tmp_path / "root", b"root")
+    st.write_hf_adapter_lineage(root)
+    trace_path = tmp_path / "child-trace.jsonl"
+    trace_plan = st.hf_finetune_trainer_trace_segment_plan(trace_path)
+    trace_path.write_text(
+        json.dumps({"event": "log", "global_step": 1}) + "\n",
+        encoding="utf-8",
+    )
+    trace_receipt = st.hf_finetune_trainer_trace_segment_receipt(trace_plan)
+    child, _, _ = _write_promoted_child(
+        tmp_path / "child",
+        root,
+        b"child",
+        trainer_trace_segment=trace_receipt,
+    )
+
+    ready_report = st.hf_adapter_promotion_chain_report(tmp_path)
+    ready_node = next(
+        node
+        for node in ready_report["nodes"]
+        if node["adapter_path"] == str(child)
+    )
+    trace_path.write_text(
+        trace_path.read_text(encoding="utf-8")
+        + json.dumps({"event": "tampered", "global_step": 1})
+        + "\n",
+        encoding="utf-8",
+    )
+    tampered_report = st.hf_adapter_promotion_chain_report(tmp_path)
+    tampered_node = next(
+        node
+        for node in tampered_report["nodes"]
+        if node["adapter_path"] == str(child)
+    )
+
+    assert ready_node["trainer_trace_segment_id"] == trace_receipt["segment_id"]
+    assert ready_node["trainer_trace_segment_revalidated_ready"] is True
+    assert tampered_node["status"] == "rejected"
+    assert tampered_node["trainer_trace_segment_revalidated_ready"] is False
+    assert any(
+        issue["code"] == "trainer_trace_segment_integrity_mismatch"
+        for issue in tampered_node["issues"]
     )

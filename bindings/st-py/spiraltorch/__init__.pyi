@@ -564,6 +564,7 @@ HF_FINETUNE_DEFAULT_MODEL_PROFILE: str
 HF_FINETUNE_MODEL_CONFIG_SCHEMA: str
 HF_FINETUNE_RUN_CARD_FILENAME: str
 HF_FINETUNE_TRAINER_TRACE_FILENAME: str
+HF_FINETUNE_TRAINER_TRACE_SEGMENT_SCHEMA: str
 HF_FINETUNE_REQUIRED_PYTHON_PACKAGES: List[str]
 HF_FINETUNE_REQUIRED_RUST_SURFACES: List[Dict[str, str]]
 HF_FINETUNE_INPUT_IDENTITY_SCHEMA: str
@@ -1900,6 +1901,40 @@ def hf_gpt2_finetune_trainer_trace_event(
     run_id: str | None = ...,
     extra: Mapping[str, object] | None = ...,
 ) -> Dict[str, object]: ...
+
+def hf_gpt2_finetune_trainer_trace_segment_plan(
+    trace_path: str | PathLike[str],
+    *,
+    resume_from_checkpoint: str | PathLike[str] | None = ...,
+    initial_step: object = ...,
+    previous_segment: Mapping[str, object] | None = ...,
+    previous_trace_path: str | PathLike[str] | None = ...,
+) -> Dict[str, object]: ...
+
+def hf_finetune_trainer_trace_segment_plan(
+    trace_path: str | PathLike[str],
+    *,
+    resume_from_checkpoint: str | PathLike[str] | None = ...,
+    initial_step: object = ...,
+    previous_segment: Mapping[str, object] | None = ...,
+    previous_trace_path: str | PathLike[str] | None = ...,
+) -> Dict[str, object]: ...
+
+def hf_gpt2_finetune_trainer_trace_segment_receipt(
+    plan: Mapping[str, object],
+) -> Dict[str, object]: ...
+
+def hf_finetune_trainer_trace_segment_receipt(
+    plan: Mapping[str, object],
+) -> Dict[str, object]: ...
+
+def hf_gpt2_finetune_trainer_trace_segment_lines(
+    report: Mapping[str, object],
+) -> list[str]: ...
+
+def hf_finetune_trainer_trace_segment_lines(
+    report: Mapping[str, object],
+) -> list[str]: ...
 
 def write_hf_gpt2_finetune_trainer_trace_event(
     row: Mapping[str, object],
@@ -10379,6 +10414,7 @@ __all__ = [
     "HF_FINETUNE_MODEL_CONFIG_SCHEMA",
     "HF_FINETUNE_RUN_CARD_FILENAME",
     "HF_FINETUNE_TRAINER_TRACE_FILENAME",
+    "HF_FINETUNE_TRAINER_TRACE_SEGMENT_SCHEMA",
     "HF_FINETUNE_REQUIRED_PYTHON_PACKAGES",
     "HF_FINETUNE_REQUIRED_RUST_SURFACES",
     "HF_FINETUNE_INPUT_IDENTITY_SCHEMA",
@@ -10575,6 +10611,9 @@ __all__ = [
     "hf_finetune_training_telemetry_frame",
     "hf_finetune_trainer_trace_callback",
     "hf_finetune_trainer_trace_event",
+    "hf_finetune_trainer_trace_segment_lines",
+    "hf_finetune_trainer_trace_segment_plan",
+    "hf_finetune_trainer_trace_segment_receipt",
     "hf_finetune_zspace_probe",
     "compare_hf_finetune_run_cards",
     "load_hf_finetune_model_configs",
@@ -10637,6 +10676,9 @@ __all__ = [
     "hf_gpt2_finetune_training_telemetry_frame",
     "hf_gpt2_finetune_trainer_trace_callback",
     "hf_gpt2_finetune_trainer_trace_event",
+    "hf_gpt2_finetune_trainer_trace_segment_lines",
+    "hf_gpt2_finetune_trainer_trace_segment_plan",
+    "hf_gpt2_finetune_trainer_trace_segment_receipt",
     "hf_gpt2_finetune_zspace_probe",
     "compare_hf_gpt2_finetune_run_cards",
     "load_hf_gpt2_finetune_run_card",
