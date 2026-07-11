@@ -727,6 +727,9 @@ spiral-hf-adapter-chain runs/qwen2-study \
   --max-lineage-depth 6 \
   --target-eval-loss 2.40 \
   --min-eval-improvement 0.002 \
+  --max-distortion-pressure-index 0.45 \
+  --min-desire-stability 0.60 \
+  --max-psi-total 0.80 \
   --plateau-patience 2 \
   --out runs/qwen2-study/promotion-chain.json \
   --require-continuation-ready
@@ -735,10 +738,19 @@ spiral-hf-adapter-chain runs/qwen2-study \
 These gates are opt-in. `max lineage depth` stops at the selected depth,
 `target eval loss` stops after reaching the target, and the plateau gate stops
 after the configured number of consecutive generations have
-`eval_before_loss - eval_after_loss` below the minimum. Missing eval evidence
-blocks continuation instead of being treated as improvement. A stopped report
-keeps `chain_ready=True` and `continuation_artifacts_ready=True` for audit, but
-sets `continuation_ready=False`; `spiral-hf-scale-up` then returns
+`eval_before_loss - eval_after_loss` below the minimum. The optional geometry
+gates stop when distortion pressure or maximum trainer psi rises above its
+limit, or when mean desire stability falls below its minimum. All three
+thresholds use the normalized `[0, 1]` range. Distortion evidence can come from
+the run card's inference-distortion handoff; desire and psi evidence come from
+trainer telemetry produced by `--trainer-telemetry`. Once a geometry gate is
+configured, missing or out-of-range evidence blocks continuation rather than
+silently passing. A depth-zero seed is allowed to launch its first measured
+generation without telemetry; that child must then provide every configured
+signal before another generation can run. A stopped report keeps
+`chain_ready=True` and
+`continuation_artifacts_ready=True` for audit, but sets
+`continuation_ready=False`; `spiral-hf-scale-up` then returns
 `promotion_chain_stopped_by_policy` without emitting a launch command. Python
 can inspect or persist the same decision with
 `st.hf_adapter_continuation_policy_report(...)`,
@@ -755,6 +767,9 @@ spiral-hf-adapter-executor runs/qwen2-study \
   --state runs/qwen2-study/executor/state.json \
   --max-lineage-depth 6 \
   --min-eval-improvement 0.002 \
+  --max-distortion-pressure-index 0.45 \
+  --min-desire-stability 0.60 \
+  --max-psi-total 0.80 \
   --plateau-patience 2
 ```
 
@@ -766,6 +781,9 @@ spiral-hf-adapter-executor runs/qwen2-study \
   --state runs/qwen2-study/executor/state.json \
   --max-lineage-depth 6 \
   --min-eval-improvement 0.002 \
+  --max-distortion-pressure-index 0.45 \
+  --min-desire-stability 0.60 \
+  --max-psi-total 0.80 \
   --plateau-patience 2 \
   --run --max-generations 1
 ```

@@ -818,6 +818,9 @@ def hf_adapter_promotion_chain_report(
     max_lineage_depth: int | None = ...,
     target_eval_loss: float | None = ...,
     min_eval_improvement: float | None = ...,
+    max_distortion_pressure_index: float | None = ...,
+    min_desire_stability: float | None = ...,
+    max_psi_total: float | None = ...,
     plateau_patience: int = ...,
 ) -> Dict[str, object]: ...
 def write_hf_adapter_promotion_chain(
@@ -836,6 +839,9 @@ def write_hf_adapter_promotion_chain(
     max_lineage_depth: int | None = ...,
     target_eval_loss: float | None = ...,
     min_eval_improvement: float | None = ...,
+    max_distortion_pressure_index: float | None = ...,
+    min_desire_stability: float | None = ...,
+    max_psi_total: float | None = ...,
     plateau_patience: int = ...,
 ) -> Dict[str, object]: ...
 def hf_adapter_promotion_chain_lines(
@@ -850,6 +856,9 @@ def hf_adapter_continuation_policy_report(
     max_lineage_depth: int | None = ...,
     target_eval_loss: float | None = ...,
     min_eval_improvement: float | None = ...,
+    max_distortion_pressure_index: float | None = ...,
+    min_desire_stability: float | None = ...,
+    max_psi_total: float | None = ...,
     plateau_patience: int = ...,
 ) -> Dict[str, object]: ...
 def write_hf_adapter_continuation_policy(
@@ -859,6 +868,9 @@ def write_hf_adapter_continuation_policy(
     max_lineage_depth: int | None = ...,
     target_eval_loss: float | None = ...,
     min_eval_improvement: float | None = ...,
+    max_distortion_pressure_index: float | None = ...,
+    min_desire_stability: float | None = ...,
+    max_psi_total: float | None = ...,
     plateau_patience: int = ...,
 ) -> Dict[str, object]: ...
 def load_hf_adapter_continuation_policy(
@@ -886,6 +898,9 @@ def run_hf_adapter_continuation_executor(
     max_lineage_depth: int | None = ...,
     target_eval_loss: float | None = ...,
     min_eval_improvement: float | None = ...,
+    max_distortion_pressure_index: float | None = ...,
+    min_desire_stability: float | None = ...,
+    max_psi_total: float | None = ...,
     plateau_patience: int = ...,
     output_prefix: str = ...,
     max_steps: int | None = ...,

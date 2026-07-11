@@ -127,6 +127,7 @@ def _write_promoted_adapter(
     expected_training_recipe_id: str | None = None,
     finetune_replay_id: str | None = None,
     expected_finetune_replay_id: str | None = None,
+    trainer_trace_summary: Mapping[str, object] | None = None,
     dataset_name: str = "org/corpus",
     dataset_revision: str = "e93a9faa9c77e5d09219f6c868bfc7a1bd65593c",
 ) -> dict[str, object]:
@@ -139,6 +140,8 @@ def _write_promoted_adapter(
         after=after,
         launch_command=command,
     )
+    if trainer_trace_summary is not None:
+        card["trainer_trace_summary"] = dict(trainer_trace_summary)
     if runtime_input_id is not None:
         for key, phase in (
             ("model_runtime_identity_pre_model", "pre_model_load"),
@@ -392,6 +395,7 @@ def _seed_chain(
     tokenized_dataset_id: str | None = None,
     training_recipe_id: str | None = None,
     finetune_replay_id: str | None = None,
+    trainer_trace_summary: Mapping[str, object] | None = None,
 ) -> tuple[Path, Path]:
     root = _write_adapter(tmp_path / "root", b"root")
     st.write_hf_adapter_lineage(root)
@@ -414,6 +418,7 @@ def _seed_chain(
         expected_training_recipe_id=training_recipe_id,
         finetune_replay_id=finetune_replay_id,
         expected_finetune_replay_id=finetune_replay_id,
+        trainer_trace_summary=trainer_trace_summary,
     )
     return root, child
 
@@ -567,6 +572,89 @@ def test_executor_dry_run_writes_replayable_state_and_cli(
     assert "status=ready" in (
         st.hf_adapter_continuation_executor_generation_plan_lines(plan)[0]
     )
+
+
+def test_executor_seals_geometry_policy_and_forwards_detached_cli(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _, child = _seed_chain(
+        tmp_path,
+        trainer_trace_summary={
+            "trace_training_telemetry_count": 3,
+            "trace_mean_desire_stability": 0.75,
+            "trace_max_psi_total": 0.50,
+            "trace_last_inference_distortion_risk_score": 0.25,
+        },
+    )
+    output_root = tmp_path / "executor-runs"
+    state_path = output_root / "state.json"
+    planned = st.run_hf_adapter_continuation_executor(
+        child,
+        output_root=output_root,
+        state_path=state_path,
+        max_distortion_pressure_index=0.40,
+        min_desire_stability=0.70,
+        max_psi_total=0.60,
+    )
+    changed = st.run_hf_adapter_continuation_executor(
+        child,
+        output_root=output_root,
+        state_path=state_path,
+        run=True,
+        max_distortion_pressure_index=0.45,
+        min_desire_stability=0.70,
+        max_psi_total=0.60,
+    )
+    captured: dict[str, object] = {}
+
+    def fake_launch(executor_argv, **kwargs):
+        captured["executor_argv"] = list(executor_argv)
+        captured["kwargs"] = kwargs
+        return {"request_status": "handed_off"}
+
+    monkeypatch.setattr(
+        hf_cli,
+        "launch_hf_adapter_continuation_executor",
+        fake_launch,
+    )
+    code = hf_cli.adapter_continuation_executor_main(
+        [
+            str(child),
+            "--output-root",
+            str(output_root),
+            "--state",
+            str(state_path),
+            "--max-distortion-pressure-index",
+            "0.40",
+            "--min-desire-stability",
+            "0.70",
+            "--max-psi-total",
+            "0.60",
+            "--run",
+            "--detach",
+            "--json",
+        ]
+    )
+    capsys.readouterr()
+
+    policy = planned["policy"]
+    assert planned["status"] == "ready"
+    assert policy["max_distortion_pressure_index"] == pytest.approx(0.40)
+    assert policy["min_desire_stability"] == pytest.approx(0.70)
+    assert policy["max_psi_total"] == pytest.approx(0.60)
+    assert changed["status"] == "blocked"
+    assert changed["reason"] == "pending_generation_plan_changed"
+    assert changed["generation_plan_gate"]["pending_component_ids"][
+        "policy"
+    ] != changed["generation_plan_gate"]["candidate_component_ids"]["policy"]
+    child_argv = captured["executor_argv"]
+    assert isinstance(child_argv, list)
+    assert _flag(child_argv, "--max-distortion-pressure-index") == "0.4"
+    assert _flag(child_argv, "--min-desire-stability") == "0.7"
+    assert _flag(child_argv, "--max-psi-total") == "0.6"
+    assert code == 0
 
 
 def test_executor_blocks_plan_drift_until_explicit_replan(tmp_path: Path) -> None:
@@ -1744,6 +1832,10 @@ def test_executor_resumes_after_per_invocation_generation_limit(
         {"max_generations": 1.5},
         {"max_lineage_depth": -1},
         {"target_eval_loss": float("nan")},
+        {"max_distortion_pressure_index": 1.1},
+        {"min_desire_stability": -0.1},
+        {"max_psi_total": -0.1},
+        {"max_psi_total": 1.1},
         {"plateau_patience": 0},
         {"max_steps_multiplier": 0.0},
         {"output_prefix": "../generation"},

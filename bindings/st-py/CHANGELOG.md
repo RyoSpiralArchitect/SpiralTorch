@@ -37,6 +37,11 @@
   and minimum-improvement/patience policies to promotion chains. Decisions are
   separately inspectable and persistable, missing eval evidence fails closed,
   and scale-up refuses to emit another generation after a policy stop.
+- Geometry-health continuation gates: promotion chains now carry live
+  distortion pressure, desire stability, and psi telemetry from each run card.
+  Optional thresholds fail closed on missing evidence, stop unsafe selected
+  tips, and remain sealed into executor generation-plan identity across CLI,
+  detached launch, and Python APIs.
 - Adapter generation-transition audit: promotion chains now expose explicit
   parent-to-child rows for depth/root/base continuity, parent fingerprints,
   changed weights, eval handoff and improvement, promotion revalidation, and

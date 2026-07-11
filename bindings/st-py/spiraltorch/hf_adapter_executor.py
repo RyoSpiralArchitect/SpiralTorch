@@ -976,6 +976,11 @@ def _policy_kwargs(policy: Mapping[str, object]) -> dict[str, object]:
         "max_lineage_depth": policy.get("max_lineage_depth"),
         "target_eval_loss": policy.get("target_eval_loss"),
         "min_eval_improvement": policy.get("min_eval_improvement"),
+        "max_distortion_pressure_index": policy.get(
+            "max_distortion_pressure_index"
+        ),
+        "min_desire_stability": policy.get("min_desire_stability"),
+        "max_psi_total": policy.get("max_psi_total"),
         "plateau_patience": policy.get("plateau_patience", 1),
     }
 
@@ -2014,6 +2019,9 @@ def _validate_executor_arguments(
     max_lineage_depth: int | None,
     target_eval_loss: float | None,
     min_eval_improvement: float | None,
+    max_distortion_pressure_index: float | None,
+    min_desire_stability: float | None,
+    max_psi_total: float | None,
     plateau_patience: int,
     max_steps: int | None,
     max_steps_multiplier: float | None,
@@ -2033,6 +2041,14 @@ def _validate_executor_arguments(
         min_eval_improvement,
         minimum=0.0,
     )
+    for name, value in (
+        ("max_distortion_pressure_index", max_distortion_pressure_index),
+        ("min_desire_stability", min_desire_stability),
+        ("max_psi_total", max_psi_total),
+    ):
+        _validate_optional_float(name, value, minimum=0.0)
+        if value is not None and float(value) > 1.0:
+            raise ValueError(f"{name} must be finite and between 0.0 and 1.0")
     _validate_optional_int("plateau_patience", plateau_patience, minimum=1)
     _validate_optional_int("max_steps", max_steps, minimum=1)
     _validate_optional_float(
@@ -2085,6 +2101,9 @@ def _run_hf_adapter_continuation_executor_unlocked(
     max_lineage_depth: int | None = None,
     target_eval_loss: float | None = None,
     min_eval_improvement: float | None = None,
+    max_distortion_pressure_index: float | None = None,
+    min_desire_stability: float | None = None,
+    max_psi_total: float | None = None,
     plateau_patience: int = 1,
     output_prefix: str = "generation",
     max_steps: int | None = None,
@@ -2106,6 +2125,9 @@ def _run_hf_adapter_continuation_executor_unlocked(
         max_lineage_depth=max_lineage_depth,
         target_eval_loss=target_eval_loss,
         min_eval_improvement=min_eval_improvement,
+        max_distortion_pressure_index=max_distortion_pressure_index,
+        min_desire_stability=min_desire_stability,
+        max_psi_total=max_psi_total,
         plateau_patience=plateau_patience,
         max_steps=max_steps,
         max_steps_multiplier=max_steps_multiplier,
@@ -2149,6 +2171,9 @@ def _run_hf_adapter_continuation_executor_unlocked(
         "max_lineage_depth": max_lineage_depth,
         "target_eval_loss": target_eval_loss,
         "min_eval_improvement": min_eval_improvement,
+        "max_distortion_pressure_index": max_distortion_pressure_index,
+        "min_desire_stability": min_desire_stability,
+        "max_psi_total": max_psi_total,
         "plateau_patience": plateau_patience,
     }
     scale_up = {
@@ -2868,6 +2893,9 @@ def run_hf_adapter_continuation_executor(
     max_lineage_depth: int | None = None,
     target_eval_loss: float | None = None,
     min_eval_improvement: float | None = None,
+    max_distortion_pressure_index: float | None = None,
+    min_desire_stability: float | None = None,
+    max_psi_total: float | None = None,
     plateau_patience: int = 1,
     output_prefix: str = "generation",
     max_steps: int | None = None,
@@ -2902,6 +2930,9 @@ def run_hf_adapter_continuation_executor(
             max_lineage_depth=max_lineage_depth,
             target_eval_loss=target_eval_loss,
             min_eval_improvement=min_eval_improvement,
+            max_distortion_pressure_index=max_distortion_pressure_index,
+            min_desire_stability=min_desire_stability,
+            max_psi_total=max_psi_total,
             plateau_patience=plateau_patience,
             output_prefix=output_prefix,
             max_steps=max_steps,
