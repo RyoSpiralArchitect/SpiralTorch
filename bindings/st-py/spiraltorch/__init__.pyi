@@ -569,6 +569,7 @@ HF_ADAPTER_PROMOTION_CHAIN_FILENAME: str
 HF_ADAPTER_PROMOTION_CHAIN_SCHEMA: str
 HF_ADAPTER_CONTINUATION_POLICY_FILENAME: str
 HF_ADAPTER_CONTINUATION_POLICY_SCHEMA: str
+HF_ADAPTER_INPUT_IDENTITY_SCHEMA: str
 HF_ADAPTER_CONTINUATION_EXECUTOR_CONTROL_DIRNAME: str
 HF_ADAPTER_CONTINUATION_EXECUTOR_FILENAME: str
 HF_ADAPTER_CONTINUATION_EXECUTOR_LOCK_FILENAME: str
@@ -614,6 +615,19 @@ def hf_causal_lm_artifact_lines(
 ) -> List[str]: ...
 
 def hf_adapter_fingerprint(adapter: str | PathLike[str]) -> Dict[str, object]: ...
+def hf_adapter_input_identity_report(
+    adapter: str | PathLike[str],
+    *,
+    expected_adapter_id: str | None = ...,
+    expected_lineage_depth: int | None = ...,
+    expected_root_adapter_id: str | None = ...,
+    require_lineage: bool = ...,
+    phase: str = ...,
+) -> Dict[str, object]: ...
+def hf_adapter_input_identity_lines(
+    report_or_adapter: Mapping[str, object] | str | PathLike[str],
+    **kwargs: object,
+) -> List[str]: ...
 def hf_adapter_lineage_report(
     adapter: str | PathLike[str],
     *,
@@ -1717,6 +1731,8 @@ def hf_gpt2_finetune_scale_up_command(
     run_card: str | PathLike[str] | None = ...,
     trainer_trace_jsonl: str | PathLike[str] | None = ...,
     trainer_trace_run_id: str | None = ...,
+    adapter_continuation: str = ...,
+    source_cwd: str | PathLike[str] | None = ...,
 ) -> Dict[str, object]: ...
 
 def hf_gpt2_finetune_scale_up_preflight_report(
@@ -10139,6 +10155,7 @@ __all__ = [
     "HF_ADAPTER_PROMOTION_CHAIN_SCHEMA",
     "HF_ADAPTER_CONTINUATION_POLICY_FILENAME",
     "HF_ADAPTER_CONTINUATION_POLICY_SCHEMA",
+    "HF_ADAPTER_INPUT_IDENTITY_SCHEMA",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_CONTROL_DIRNAME",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_FILENAME",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_LOCK_FILENAME",
@@ -10177,6 +10194,8 @@ __all__ = [
     "hf_causal_lm_artifact_lines",
     "hf_causal_lm_artifact_report",
     "hf_adapter_fingerprint",
+    "hf_adapter_input_identity_lines",
+    "hf_adapter_input_identity_report",
     "hf_adapter_continuation_executor_lines",
     "hf_adapter_continuation_executor_launch_lines",
     "hf_adapter_continuation_executor_launch_status_lines",

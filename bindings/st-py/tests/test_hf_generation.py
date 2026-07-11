@@ -842,7 +842,7 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
 
         self.assertEqual(
             sample["schema"],
-            "spiraltorch.hf_causal_lm_artifact_probe.sample.v6",
+            "spiraltorch.hf_causal_lm_artifact_probe.sample.v7",
         )
         self.assertEqual(sample["model_family"], "gpt_neox")
         self.assertTrue(sample["artifact_probe"]["adapter_loaded"])
@@ -974,6 +974,7 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         executor_generation_2 = sample["executor"]["generation_2_run"]
         portable_generation_3 = sample["executor"]["portable_generation_3_run"]
         canonical_generation_4 = sample["executor"]["canonical_generation_4_run"]
+        identity_generation_5 = sample["executor"]["identity_generation_5_run"]
         self.assertEqual(executor_generation_2["attempt_status"], "promoted")
         self.assertEqual(executor_generation_2["returncode"], 0)
         self.assertEqual(executor_generation_2["selected_lineage_depth"], 2)
@@ -1069,6 +1070,68 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
             canonical_generation_4["next_plan_runtime_rewrite_applied"]
         )
         self.assertTrue(canonical_generation_4["next_plan_module_importable"])
+        self.assertEqual(identity_generation_5["attempt_status"], "promoted")
+        self.assertEqual(identity_generation_5["returncode"], 0)
+        self.assertEqual(identity_generation_5["status"], "stopped")
+        self.assertEqual(identity_generation_5["action"], "stop_training")
+        self.assertEqual(
+            identity_generation_5["stop_reason_codes"],
+            ["max_lineage_depth_reached"],
+        )
+        self.assertEqual(
+            identity_generation_5["command_runtime_status"],
+            "portable_module",
+        )
+        self.assertEqual(
+            identity_generation_5["parent_identity_contract_status"],
+            "enforced",
+        )
+        self.assertTrue(identity_generation_5["parent_identity_fail_fast"])
+        self.assertEqual(
+            identity_generation_5["parent_identity_expected_adapter_id"],
+            canonical_generation_4["child_adapter_id"],
+        )
+        self.assertEqual(
+            identity_generation_5["parent_identity_observed_adapter_id"],
+            canonical_generation_4["child_adapter_id"],
+        )
+        self.assertEqual(
+            identity_generation_5["parent_identity_preflight_status"],
+            "ready",
+        )
+        self.assertEqual(
+            identity_generation_5["parent_identity_after_load_status"],
+            "ready",
+        )
+        self.assertTrue(
+            identity_generation_5["parent_identity_transition_required"]
+        )
+        self.assertTrue(identity_generation_5["parent_identity_transition_ready"])
+        self.assertTrue(identity_generation_5["source_cwd_recorded"])
+        self.assertEqual(
+            identity_generation_5["input_path_resolution_status"],
+            "ready",
+        )
+        self.assertEqual(identity_generation_5["input_path_rewritten_count"], 3)
+        self.assertEqual(identity_generation_5["input_path_unresolved_count"], 0)
+        self.assertTrue(identity_generation_5["launch_input_paths_absolute"])
+        self.assertEqual(identity_generation_5["selected_lineage_depth"], 5)
+        self.assertEqual(identity_generation_5["node_count"], 6)
+        self.assertEqual(identity_generation_5["transition_count"], 5)
+        self.assertEqual(identity_generation_5["ready_transition_count"], 5)
+        self.assertEqual(
+            identity_generation_5["parent_adapter_id"],
+            canonical_generation_4["child_adapter_id"],
+        )
+        self.assertEqual(identity_generation_5["eval_handoff_delta"], 0.0)
+        self.assertGreater(identity_generation_5["child_eval_improvement"], 0.0)
+        self.assertGreater(identity_generation_5["path_eval_improvement"], 0.0)
+        self.assertEqual(identity_generation_5["postflight_status"], "ready")
+        self.assertTrue(identity_generation_5["status_report_healthy"])
+        self.assertEqual(
+            identity_generation_5["status_report_transition_evidence"],
+            "ready",
+        )
 
     def test_inference_distortion_runtime_plan_and_cli_args_are_importable(self) -> None:
         runtime = zspace_inference_distortion_runtime_plan(

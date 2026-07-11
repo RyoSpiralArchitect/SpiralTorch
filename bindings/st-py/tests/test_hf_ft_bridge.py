@@ -3558,6 +3558,45 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             )
         )
 
+    def test_scale_up_resolves_relative_inputs_from_recorded_launch_cwd(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            source_cwd = Path(tmp)
+            config = source_cwd / "configs.json"
+            train = source_cwd / "train.txt"
+            config.write_text("{}\n", encoding="utf-8")
+            train.write_text("spiral\n", encoding="utf-8")
+            command, report = hf_ft._scale_up_resolve_input_paths(
+                [
+                    sys.executable,
+                    "bridge.py",
+                    "--model-configs",
+                    config.name,
+                    "--train-file",
+                    train.name,
+                    "--validation-file",
+                    "missing.txt",
+                ],
+                source_cwd=source_cwd,
+            )
+
+        self.assertEqual(report["status"], "unresolved")
+        self.assertEqual(report["rewritten_count"], 2)
+        self.assertEqual(report["unresolved_count"], 1)
+        self.assertEqual(
+            command[command.index("--model-configs") + 1],
+            str(config.resolve()),
+        )
+        self.assertEqual(
+            command[command.index("--train-file") + 1],
+            str(train.resolve()),
+        )
+        self.assertEqual(
+            command[command.index("--validation-file") + 1],
+            "missing.txt",
+        )
+
     def test_scale_up_preflight_allows_root_adapter_without_promotion_report(
         self,
     ) -> None:
@@ -3566,27 +3605,20 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             adapter_dir = root / "root-adapter"
             adapter_dir.mkdir()
             (adapter_dir / "adapter_config.json").write_text(
-                json.dumps({"peft_type": "LORA"}),
+                json.dumps(
+                    {
+                        "peft_type": "LORA",
+                        "base_model_name_or_path": "org/base",
+                    }
+                ),
                 encoding="utf-8",
             )
             (adapter_dir / "adapter_model.safetensors").write_bytes(b"adapter")
             train_path = root / "train.txt"
             train_path.write_text("alpha spiral\nbeta zspace\n", encoding="utf-8")
-            lineage_path = adapter_dir / st.HF_ADAPTER_LINEAGE_FILENAME
-            adapter_id = "sha256:root-adapter"
-            lineage_path.write_text(
-                json.dumps(
-                    {
-                        "status": "ready",
-                        "adapter_id": adapter_id,
-                        "parent_adapter_id": None,
-                        "root_adapter_id": adapter_id,
-                        "lineage_depth": 0,
-                    }
-                )
-                + "\n",
-                encoding="utf-8",
-            )
+            root_lineage = st.write_hf_adapter_lineage(adapter_dir)
+            lineage_path = Path(root_lineage["manifest_path"])
+            adapter_id = root_lineage["adapter_id"]
             base_command = [
                 sys.executable,
                 str(GENERIC_EXAMPLE_PATH),
@@ -3624,17 +3656,16 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             )
 
             root_preflight = hf_ft.hf_finetune_scale_up_preflight_report(artifact)
+            child_lineage = dict(root_lineage)
+            child_lineage.update(
+                {
+                    "parent_adapter_id": "sha256:" + "a" * 64,
+                    "root_adapter_id": "sha256:" + "a" * 64,
+                    "lineage_depth": 1,
+                }
+            )
             lineage_path.write_text(
-                json.dumps(
-                    {
-                        "status": "ready",
-                        "adapter_id": adapter_id,
-                        "parent_adapter_id": "sha256:parent",
-                        "root_adapter_id": "sha256:parent",
-                        "lineage_depth": 1,
-                    }
-                )
-                + "\n",
+                json.dumps(child_lineage) + "\n",
                 encoding="utf-8",
             )
             child_artifact = {
@@ -3698,6 +3729,22 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 seed = int(command[command.index("--seed") + 1])
                 ready = seed == 13
                 loss = 1.2 if ready else 1.0
+                (run_card_path.parent / "adapter_config.json").write_text(
+                    json.dumps(
+                        {
+                            "peft_type": "LORA",
+                            "base_model_name_or_path": "Qwen/Qwen2-0.5B",
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                (run_card_path.parent / "adapter_model.safetensors").write_bytes(
+                    f"adapter-{seed}".encode("ascii")
+                )
+                adapter_id = st.hf_adapter_fingerprint(run_card_path.parent)[
+                    "adapter_id"
+                ]
+                parent_id = "sha256:" + "a" * 64
                 hf_ft.write_hf_gpt2_finetune_run_card(
                     {
                         "row_type": "hf_gpt2_finetune_run_card",
@@ -3724,9 +3771,9 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                         },
                         "adapter_lineage": {
                             "status": "ready",
-                            "adapter_id": f"sha256:child-{seed}",
-                            "parent_adapter_id": "sha256:parent",
-                            "root_adapter_id": "sha256:parent",
+                            "adapter_id": adapter_id,
+                            "parent_adapter_id": parent_id,
+                            "root_adapter_id": parent_id,
                             "lineage_depth": 1,
                             "parent_fingerprint_verified": True,
                             "weights_changed_from_parent": True,
@@ -3809,22 +3856,16 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                     },
                     run_card_path,
                 )
-                (run_card_path.parent / "adapter_config.json").write_text(
-                    json.dumps({"peft_type": "LORA"}),
-                    encoding="utf-8",
-                )
-                (run_card_path.parent / "adapter_model.safetensors").write_bytes(
-                    f"adapter-{seed}".encode("ascii")
-                )
                 (
                     run_card_path.parent / st.HF_ADAPTER_LINEAGE_FILENAME
                 ).write_text(
                     json.dumps(
                         {
+                            "schema": st.HF_ADAPTER_LINEAGE_SCHEMA,
                             "status": "ready",
-                            "adapter_id": f"sha256:child-{seed}",
-                            "parent_adapter_id": "sha256:parent",
-                            "root_adapter_id": "sha256:parent",
+                            "adapter_id": adapter_id,
+                            "parent_adapter_id": parent_id,
+                            "root_adapter_id": parent_id,
                             "lineage_depth": 1,
                         }
                     )
@@ -3838,7 +3879,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                         {
                             "status": "ready" if ready else "blocked",
                             "promotion_ready": ready,
-                            "candidate_adapter_id": f"sha256:child-{seed}",
+                            "candidate_adapter_id": adapter_id,
                         }
                     )
                     + "\n",
@@ -3901,7 +3942,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             tampered_continuation = dict(report["scale_up_command"])
             tampered_continuation[
                 "adapter_continuation_source_adapter_id"
-            ] = "sha256:tampered"
+            ] = "sha256:" + "f" * 64
             tampered_preflight = hf_ft.hf_gpt2_finetune_scale_up_preflight_report(
                 tampered_continuation
             )
@@ -4038,7 +4079,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         )
         self.assertEqual(
             report["scale_up_command"]["adapter_continuation_source_adapter_id"],
-            "sha256:child-13",
+            summary["scale_up_candidate_adapter_lineage_adapter_id"],
         )
         self.assertEqual(
             report["scale_up_command"][
@@ -4058,6 +4099,24 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(
             scale_up_values[scale_up_values.index("--finetune-mode") + 1],
             "lora",
+        )
+        self.assertEqual(
+            scale_up_values[
+                scale_up_values.index("--expected-parent-adapter-id") + 1
+            ],
+            summary["scale_up_candidate_adapter_lineage_adapter_id"],
+        )
+        self.assertEqual(
+            scale_up_values[
+                scale_up_values.index("--expected-parent-lineage-depth") + 1
+            ],
+            "1",
+        )
+        self.assertEqual(
+            scale_up_values[
+                scale_up_values.index("--expected-root-adapter-id") + 1
+            ],
+            summary["scale_up_candidate_adapter_lineage_root_adapter_id"],
         )
         self.assertIn(ready_run["name"], report["scale_up_command"]["command_display"])
         self.assertFalse(replay_scale_up["adapter_continuation_applied"])
@@ -4094,6 +4153,18 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertTrue(artifact_replay["adapter_continuation_artifact_replay"])
         self.assertEqual(artifact_replay["adapter_continuation_policy"], "auto")
         self.assertEqual(artifact_replay["preflight_status"], "ready")
+        artifact_replay_values = artifact_replay["command"]
+        for flag in (
+            "--expected-parent-adapter-id",
+            "--expected-parent-lineage-depth",
+            "--expected-root-adapter-id",
+        ):
+            self.assertEqual(
+                artifact_replay_values[
+                    artifact_replay_values.index(flag) + 1
+                ],
+                scale_up_values[scale_up_values.index(flag) + 1],
+            )
         self.assertTrue(
             any(
                 "expected_child_depth=2" in line
@@ -9778,6 +9849,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             args._hf_finetune_launch_command_source,
             "hf_gpt2_finetune_bridge",
         )
+        self.assertEqual(
+            args._hf_finetune_launch_cwd,
+            str(Path.cwd().resolve()),
+        )
 
     def test_bridge_detects_adapter_warm_start_and_keeps_resume_distinct(
         self,
@@ -9807,6 +9882,12 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 ]
             )
             artifact_report = module._model_artifact_report(args)
+            input_identity = module._adapter_input_identity_report(
+                args,
+                artifact_report,
+                phase="preflight",
+            )
+            args._hf_adapter_input_identity_report = input_identity
 
         start = module._finetune_start_report(args, artifact_report)
         resumed = module._finetune_start_report(
@@ -9821,6 +9902,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(artifact_report["base_model_name_or_path"], "org/base")
         self.assertIsNone(module._tokenizer_override(args))
         self.assertEqual(start["mode"], "adapter_warm_start")
+        self.assertEqual(start["adapter_input_identity"]["status"], "ready")
+        self.assertTrue(start["parent_adapter_identity_verified"])
         self.assertTrue(start["weights_only_warm_start"])
         self.assertFalse(start["optimizer_scheduler_state_requested"])
         self.assertEqual(resumed["mode"], "adapter_trainer_checkpoint_resume")
@@ -9837,6 +9920,88 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                     "--metadata-only",
                 ]
             )
+
+    def test_bridge_fails_fast_on_expected_parent_adapter_identity_drift(
+        self,
+    ) -> None:
+        module = load_bridge_example()
+        with tempfile.TemporaryDirectory() as tmp:
+            adapter = Path(tmp) / "adapter"
+            adapter.mkdir()
+            (adapter / "adapter_config.json").write_text(
+                json.dumps(
+                    {
+                        "base_model_name_or_path": "org/base",
+                        "peft_type": "LORA",
+                        "task_type": "CAUSAL_LM",
+                        "r": 4,
+                        "lora_alpha": 8,
+                        "target_modules": ["q_proj"],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            weights = adapter / "adapter_model.safetensors"
+            weights.write_bytes(b"adapter")
+            lineage = st.write_hf_adapter_lineage(adapter)
+            args = module.parse_args(
+                [
+                    "--model-name",
+                    str(adapter),
+                    "--model-artifact-kind",
+                    "peft-adapter",
+                    "--finetune-mode",
+                    "lora",
+                    "--expected-parent-adapter-id",
+                    lineage["adapter_id"],
+                    "--expected-parent-lineage-depth",
+                    "0",
+                    "--expected-root-adapter-id",
+                    lineage["root_adapter_id"],
+                    "--metadata-only",
+                ]
+            )
+            artifact_report = module._model_artifact_report(args)
+            ready = module._adapter_input_identity_report(
+                args,
+                artifact_report,
+                phase="preflight",
+            )
+
+            weights.write_bytes(b"tampered")
+            blocked = module._adapter_input_identity_report(
+                args,
+                artifact_report,
+                phase="preflight",
+            )
+
+        self.assertEqual(ready["status"], "ready")
+        self.assertEqual(ready["observed_adapter_id"], lineage["adapter_id"])
+        self.assertEqual(blocked["status"], "blocked")
+        self.assertFalse(blocked["identity_verified"])
+        self.assertIn(
+            "adapter fingerprint does not match expected adapter id",
+            blocked["errors"],
+        )
+        invalid_argv = [
+            [
+                "--finetune-mode",
+                "lora",
+                "--expected-parent-adapter-id",
+                "invalid",
+            ],
+            ["--expected-parent-lineage-depth", "0"],
+            ["--expected-root-adapter-id", "sha256:" + "0" * 64],
+            [
+                "--finetune-mode",
+                "full",
+                "--expected-parent-adapter-id",
+                "sha256:" + "0" * 64,
+            ],
+        ]
+        for argv in invalid_argv:
+            with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                module.parse_args(argv)
 
     def test_bridge_adapter_promotion_gate_requires_auditable_evidence(
         self,

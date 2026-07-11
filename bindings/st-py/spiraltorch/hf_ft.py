@@ -5778,6 +5778,116 @@ def _command_with_overrides(
     return updated
 
 
+def _command_without_value_flags(
+    command: Sequence[object],
+    flags: Sequence[str],
+) -> list[str]:
+    removed = {str(flag) for flag in flags}
+    values = [str(item) for item in command]
+    updated: list[str] = []
+    index = 0
+    while index < len(values):
+        item = values[index]
+        if item in removed:
+            index += 2
+            continue
+        if any(item.startswith(f"{flag}=") for flag in removed):
+            index += 1
+            continue
+        updated.append(item)
+        index += 1
+    return updated
+
+
+_SCALE_UP_PORTABLE_INPUT_PATH_FLAGS = {
+    "--model-configs",
+    "--train-file",
+    "--validation-file",
+    "--inference-distortion-sweep-report",
+    "--inference-distortion-probe",
+    "--resume-from-checkpoint",
+}
+
+
+def _scale_up_resolve_input_paths(
+    command: Sequence[object],
+    *,
+    source_cwd: str | Path | None,
+) -> tuple[list[str], dict[str, object]]:
+    values = [str(item) for item in command]
+    if source_cwd is None:
+        return values, {
+            "status": "source_cwd_missing",
+            "source_cwd": None,
+            "rewritten_count": 0,
+            "unresolved_count": 0,
+            "inputs": [],
+        }
+    anchor = Path(source_cwd).expanduser().resolve()
+    rows: list[dict[str, object]] = []
+    index = 0
+    while index < len(values):
+        flag = values[index]
+        if flag not in _SCALE_UP_PORTABLE_INPUT_PATH_FLAGS:
+            index += 1
+            continue
+        if index + 1 >= len(values):
+            rows.append(
+                {
+                    "flag": flag,
+                    "source": None,
+                    "resolved": None,
+                    "status": "missing_value",
+                }
+            )
+            index += 1
+            continue
+        source = values[index + 1]
+        path = Path(source).expanduser()
+        if path.is_absolute():
+            rows.append(
+                {
+                    "flag": flag,
+                    "source": source,
+                    "resolved": str(path),
+                    "status": "already_absolute",
+                }
+            )
+        else:
+            candidate = (anchor / path).resolve()
+            if candidate.exists():
+                values[index + 1] = str(candidate)
+                rows.append(
+                    {
+                        "flag": flag,
+                        "source": source,
+                        "resolved": str(candidate),
+                        "status": "rewritten_absolute",
+                    }
+                )
+            else:
+                rows.append(
+                    {
+                        "flag": flag,
+                        "source": source,
+                        "resolved": str(candidate),
+                        "status": "unresolved",
+                    }
+                )
+        index += 2
+    rewritten_count = sum(row["status"] == "rewritten_absolute" for row in rows)
+    unresolved_count = sum(
+        row["status"] in {"unresolved", "missing_value"} for row in rows
+    )
+    return values, {
+        "status": "ready" if unresolved_count == 0 else "unresolved",
+        "source_cwd": str(anchor),
+        "rewritten_count": rewritten_count,
+        "unresolved_count": unresolved_count,
+        "inputs": rows,
+    }
+
+
 def _nearest_existing_parent(path: Path) -> Path | None:
     current = path
     while not current.exists() and current.parent != current:
@@ -6390,6 +6500,7 @@ def _scale_up_promotion_chain_summary(
         "scale_up_candidate_trainer_trace_jsonl": candidate.get(
             "trainer_trace_jsonl"
         ),
+        "scale_up_candidate_launch_cwd": candidate.get("launch_cwd"),
         "scale_up_candidate_finetune_mode": _command_flag_value(
             command,
             "--finetune-mode",
@@ -6473,6 +6584,7 @@ def hf_gpt2_finetune_scale_up_command(
     trainer_trace_jsonl: str | Path | None = None,
     trainer_trace_run_id: str | None = None,
     adapter_continuation: str = "auto",
+    source_cwd: str | Path | None = None,
 ) -> dict[str, object]:
     """Build a longer FT command from the distortion-adjusted scale-up candidate."""
 
@@ -6623,6 +6735,7 @@ def hf_gpt2_finetune_scale_up_command(
                 command,
                 "--trainer-trace-jsonl",
             ),
+            "scale_up_candidate_launch_cwd": report_or_summary.get("command_cwd"),
         }
     else:
         summary = summarize_hf_gpt2_finetune_sweep_report(report_or_summary)
@@ -6656,6 +6769,13 @@ def hf_gpt2_finetune_scale_up_command(
     source_base_command = [str(item) for item in command_value]
     base_command, command_runtime = _scale_up_portable_runtime_command(
         source_base_command
+    )
+    resolved_source_cwd = source_cwd or summary.get("scale_up_candidate_launch_cwd")
+    base_command, command_path_resolution = _scale_up_resolve_input_paths(
+        base_command,
+        source_cwd=(
+            None if resolved_source_cwd is None else str(resolved_source_cwd)
+        ),
     )
     source_run_card = summary.get("scale_up_candidate_run_card") or _command_flag_value(
         source_base_command,
@@ -6758,6 +6878,58 @@ def hf_gpt2_finetune_scale_up_command(
             "output_dir": resolved_output_dir,
             **chain_provenance,
         }
+    identity_flags = (
+        "--expected-parent-adapter-id",
+        "--expected-parent-lineage-depth",
+        "--expected-root-adapter-id",
+    )
+    replay_identity = bool(
+        continuation_policy == "replay"
+        and continuation.get("status") == "replay"
+    )
+    if replay_identity:
+        expected_parent_adapter_id = _command_flag_value(
+            base_command,
+            "--expected-parent-adapter-id",
+        )
+        expected_parent_lineage_depth = _command_flag_value(
+            base_command,
+            "--expected-parent-lineage-depth",
+        )
+        expected_root_adapter_id = _command_flag_value(
+            base_command,
+            "--expected-root-adapter-id",
+        )
+    else:
+        base_command = _command_without_value_flags(base_command, identity_flags)
+        expected_parent_adapter_id = (
+            continuation.get("source_adapter_id")
+            if continuation_source is not None
+            else None
+        )
+        expected_parent_lineage_depth = (
+            continuation.get("source_lineage_depth")
+            if continuation_source is not None
+            else None
+        )
+        expected_root_adapter_id = (
+            continuation.get("source_root_adapter_id")
+            if continuation_source is not None
+            else None
+        )
+    identity_contract = {
+        "status": (
+            "enforced"
+            if expected_parent_adapter_id is not None
+            else "not_available"
+            if continuation_source is not None
+            else "not_applicable"
+        ),
+        "expected_parent_adapter_id": expected_parent_adapter_id,
+        "expected_parent_lineage_depth": expected_parent_lineage_depth,
+        "expected_root_adapter_id": expected_root_adapter_id,
+        "fail_fast": expected_parent_adapter_id is not None,
+    }
     overrides = {
         "--model-name": (
             continuation_source
@@ -6771,6 +6943,9 @@ def hf_gpt2_finetune_scale_up_command(
         "--resume-from-checkpoint": (
             None if resume_from_checkpoint is None else str(resume_from_checkpoint)
         ),
+        "--expected-parent-adapter-id": expected_parent_adapter_id,
+        "--expected-parent-lineage-depth": expected_parent_lineage_depth,
+        "--expected-root-adapter-id": expected_root_adapter_id,
         "--output-dir": resolved_output_dir,
         "--run-card": resolved_run_card,
         "--trainer-trace-jsonl": resolved_trace,
@@ -6894,8 +7069,21 @@ def hf_gpt2_finetune_scale_up_command(
         "adapter_continuation_checkpoint_resume": continuation.get(
             "checkpoint_resume"
         ),
+        "adapter_continuation_identity_contract": identity_contract,
+        "adapter_continuation_identity_contract_status": identity_contract.get(
+            "status"
+        ),
+        "adapter_continuation_expected_parent_adapter_id": (
+            expected_parent_adapter_id
+        ),
+        "adapter_continuation_expected_parent_lineage_depth": (
+            expected_parent_lineage_depth
+        ),
+        "adapter_continuation_expected_root_adapter_id": expected_root_adapter_id,
         "command_runtime": command_runtime,
         "command_runtime_status": command_runtime.get("status"),
+        "command_path_resolution": command_path_resolution,
+        "source_command_cwd": command_path_resolution.get("source_cwd"),
         "source_base_command": source_base_command,
         "source_base_command_display": _shell_join_args(source_base_command),
         "base_command": base_command,
@@ -7157,6 +7345,7 @@ def hf_gpt2_finetune_scale_up_preflight_report(
                 )
 
     for flag in (
+        "--model-configs",
         "--train-file",
         "--validation-file",
         "--inference-distortion-sweep-report",
@@ -7191,6 +7380,7 @@ def hf_gpt2_finetune_scale_up_preflight_report(
                     }
                 )
 
+    adapter_input_identity: dict[str, object] | None = None
     continuation_applied = artifact.get("adapter_continuation_applied") is True
     continuation_source = artifact.get("adapter_continuation_source")
     continuation_local = artifact.get("adapter_continuation_source_is_local") is True
@@ -7198,11 +7388,38 @@ def hf_gpt2_finetune_scale_up_preflight_report(
         model_name = _command_flag_value(command, "--model-name")
         artifact_kind = _command_flag_value(command, "--model-artifact-kind")
         finetune_mode = _command_flag_value(command, "--finetune-mode")
+        expected_parent_adapter_id = artifact.get(
+            "adapter_continuation_expected_parent_adapter_id"
+        ) or artifact.get("adapter_continuation_source_adapter_id")
+        expected_parent_lineage_depth = artifact.get(
+            "adapter_continuation_expected_parent_lineage_depth"
+        )
+        if expected_parent_lineage_depth is None:
+            expected_parent_lineage_depth = artifact.get(
+                "adapter_continuation_source_lineage_depth"
+            )
+        expected_root_adapter_id = artifact.get(
+            "adapter_continuation_expected_root_adapter_id"
+        ) or artifact.get("adapter_continuation_source_root_adapter_id")
+        command_expected_parent_id = _command_flag_value(
+            command,
+            "--expected-parent-adapter-id",
+        )
+        command_expected_depth = _command_flag_value(
+            command,
+            "--expected-parent-lineage-depth",
+        )
+        command_expected_root_id = _command_flag_value(
+            command,
+            "--expected-root-adapter-id",
+        )
         continuation_input = {
             "flag": "--model-name",
             "path": continuation_source,
             "kind": "adapter_continuation",
             "local": continuation_local,
+            "expected_parent_adapter_id": expected_parent_adapter_id,
+            "command_expected_parent_adapter_id": command_expected_parent_id,
         }
         inputs.append(continuation_input)
         if continuation_source is None or model_name != str(continuation_source):
@@ -7230,6 +7447,47 @@ def hf_gpt2_finetune_scale_up_preflight_report(
                     "field": "--finetune-mode",
                     "path": finetune_mode,
                     "message": "adapter continuation requires LoRA fine-tuning",
+                }
+            )
+        for field, command_value, expected_value in (
+            (
+                "--expected-parent-adapter-id",
+                command_expected_parent_id,
+                expected_parent_adapter_id,
+            ),
+            (
+                "--expected-parent-lineage-depth",
+                command_expected_depth,
+                None
+                if expected_parent_lineage_depth is None
+                else str(expected_parent_lineage_depth),
+            ),
+            (
+                "--expected-root-adapter-id",
+                command_expected_root_id,
+                expected_root_adapter_id,
+            ),
+        ):
+            if expected_value is not None and command_value != str(expected_value):
+                issues.append(
+                    {
+                        "severity": "error",
+                        "field": field,
+                        "path": command_value,
+                        "message": (
+                            "continuation identity command does not match "
+                            "the selected adapter"
+                        ),
+                    }
+                )
+        if expected_parent_adapter_id is None:
+            issues.append(
+                {
+                    "severity": "warning",
+                    "field": "adapter_continuation_identity_contract",
+                    "message": (
+                        "continuation source has no cryptographic adapter identity"
+                    ),
                 }
             )
         if continuation_local and continuation_source is not None:
@@ -7279,6 +7537,55 @@ def hf_gpt2_finetune_scale_up_preflight_report(
                             "message": "adapter continuation weights are missing",
                         }
                     )
+                if adapter_config.is_file() and adapter_weights is not None:
+                    try:
+                        from .hf_adapter import hf_adapter_input_identity_report
+
+                        adapter_input_identity = hf_adapter_input_identity_report(
+                            adapter_path,
+                            expected_adapter_id=(
+                                None
+                                if expected_parent_adapter_id is None
+                                else str(expected_parent_adapter_id)
+                            ),
+                            expected_lineage_depth=(
+                                None
+                                if expected_parent_lineage_depth is None
+                                else int(expected_parent_lineage_depth)
+                            ),
+                            expected_root_adapter_id=(
+                                None
+                                if expected_root_adapter_id is None
+                                else str(expected_root_adapter_id)
+                            ),
+                            require_lineage=expected_parent_adapter_id is not None,
+                            phase="scale_up_preflight",
+                        )
+                    except (OSError, TypeError, ValueError) as exc:
+                        issues.append(
+                            {
+                                "severity": "error",
+                                "field": "adapter_continuation_identity_contract",
+                                "path": str(adapter_path),
+                                "message": f"adapter identity verification failed: {exc}",
+                            }
+                        )
+                    else:
+                        continuation_input["identity"] = adapter_input_identity
+                        if adapter_input_identity.get("status") != "ready":
+                            issues.append(
+                                {
+                                    "severity": "error",
+                                    "field": (
+                                        "adapter_continuation_identity_contract"
+                                    ),
+                                    "path": str(adapter_path),
+                                    "message": (
+                                        "adapter continuation input does not match "
+                                        "the selected identity"
+                                    ),
+                                }
+                            )
         for field, label in (
             (
                 "adapter_continuation_source_lineage_manifest_path",
@@ -7533,6 +7840,8 @@ def hf_gpt2_finetune_scale_up_preflight_report(
         "command_runtime_status": command_runtime_status,
         "command_runtime_module": runtime_module,
         "command_runtime_module_importable": runtime_module_importable,
+        "command_path_resolution": artifact.get("command_path_resolution"),
+        "source_command_cwd": artifact.get("source_command_cwd"),
         "adapter_continuation_policy": artifact.get(
             "adapter_continuation_policy"
         ),
@@ -7544,6 +7853,10 @@ def hf_gpt2_finetune_scale_up_preflight_report(
         "adapter_continuation_source_adapter_id": artifact.get(
             "adapter_continuation_source_adapter_id"
         ),
+        "adapter_continuation_identity_contract": artifact.get(
+            "adapter_continuation_identity_contract"
+        ),
+        "adapter_input_identity": adapter_input_identity,
         "adapter_continuation_expected_child_lineage_depth": artifact.get(
             "adapter_continuation_expected_child_lineage_depth"
         ),
@@ -7771,6 +8084,7 @@ def summarize_hf_gpt2_finetune_run_card(
         "launch_command": _json_safe(card.get("launch_command")),
         "launch_command_display": card.get("launch_command_display"),
         "launch_command_source": card.get("launch_command_source"),
+        "launch_cwd": card.get("launch_cwd"),
         "model_profile_id": card.get("model_profile_id"),
         "model_profile_extends": _hf_finetune_profile_extends_from_payload(card),
         "model_profile": card.get("model_profile"),
@@ -8455,6 +8769,7 @@ def _ranked_sweep_rows(
                 "rank": index,
                 "run_label": row.get("run_label"),
                 "run_card_path": row.get("run_card_path"),
+                "launch_cwd": row.get("launch_cwd"),
                 "eval_after_loss": _safe_number(row.get("eval_after_loss")),
                 "effective_eval_after_loss": _safe_number(
                     row.get("effective_eval_after_loss")
@@ -9108,6 +9423,11 @@ def summarize_hf_gpt2_finetune_sweep_report(
         "scale_up_candidate_output_dir": scale_up_candidate_run.get("output_dir")
         or scale_up_candidate_run.get("run_dir"),
         "scale_up_candidate_run_card": scale_up_candidate_run.get("run_card"),
+        "scale_up_candidate_launch_cwd": (
+            None
+            if scale_up_candidate is None
+            else scale_up_candidate.get("launch_cwd")
+        ),
         "scale_up_candidate_trainer_trace_jsonl": scale_up_candidate_run.get(
             "trainer_trace_jsonl"
         ),

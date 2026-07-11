@@ -1,6 +1,6 @@
 {
-  "schema": "spiraltorch.hf_causal_lm_artifact_probe.sample.v6",
-  "scope": "a qualified root plus four promoted non-GPT-2 continuation generations through isolated probes, executor postflight, and a canonical wheel-native continuation entrypoint; not a model-quality claim",
+  "schema": "spiraltorch.hf_causal_lm_artifact_probe.sample.v7",
+  "scope": "a qualified root plus five promoted non-GPT-2 continuation generations through isolated probes, executor postflight, a canonical wheel-native entrypoint, and fail-fast parent identity gates; not a model-quality claim",
   "model_profile": "pythia-70m-local-smoke",
   "model_name": "EleutherAI/pythia-70m-deduped",
   "model_family": "gpt_neox",
@@ -335,6 +335,55 @@
       "next_plan_source_entrypoint_kind": "python_module",
       "next_plan_runtime_rewrite_applied": false,
       "next_plan_module_importable": true
+    },
+    "identity_generation_5_run": {
+      "wheel_version": "0.4.13",
+      "status": "stopped",
+      "action": "stop_training",
+      "reason": "continuation_policy_stop",
+      "stop_reason_codes": [
+        "max_lineage_depth_reached"
+      ],
+      "attempt_status": "promoted",
+      "returncode": 0,
+      "command_runtime_status": "portable_module",
+      "runtime_module": "spiraltorch.hf_finetune_entrypoint",
+      "runtime_rewrite_applied": false,
+      "parent_identity_contract_status": "enforced",
+      "parent_identity_fail_fast": true,
+      "parent_identity_expected_adapter_id": "sha256:cfb36a984155c1b2cd65ed134aa6c83a9b71cd5906794c299148e854ae2e2f15",
+      "parent_identity_observed_adapter_id": "sha256:cfb36a984155c1b2cd65ed134aa6c83a9b71cd5906794c299148e854ae2e2f15",
+      "parent_identity_preflight_status": "ready",
+      "parent_identity_after_load_status": "ready",
+      "parent_identity_transition_required": true,
+      "parent_identity_transition_ready": true,
+      "source_cwd_recorded": true,
+      "input_path_resolution_status": "ready",
+      "input_path_rewritten_count": 3,
+      "input_path_unresolved_count": 0,
+      "launch_input_paths_absolute": true,
+      "selected_lineage_depth": 5,
+      "node_count": 6,
+      "transition_count": 5,
+      "ready_transition_count": 5,
+      "selected_path_transitions_ready": true,
+      "parent_adapter_id": "sha256:cfb36a984155c1b2cd65ed134aa6c83a9b71cd5906794c299148e854ae2e2f15",
+      "child_adapter_id": "sha256:b2516f8067426a2043796b20d8f4f9cbaa5cedd076b1419ed5b127dc3385f0c6",
+      "eval_before_loss": 7.7219743728637695,
+      "eval_after_loss": 7.715413570404053,
+      "eval_handoff_delta": 0.0,
+      "child_eval_improvement": 0.006560802459716797,
+      "path_eval_improvement": 0.06227731704711914,
+      "artifact_probe_status": "ready",
+      "artifact_probe_new_token_count": 12,
+      "artifact_probe_generated_text": "SpiralTorch isolated adapter, a small, medium-sized, and a small,",
+      "artifact_probe_process_status": "ready",
+      "artifact_probe_process_pid": 31295,
+      "artifact_probe_process_exit_code": 0,
+      "postflight_status": "ready",
+      "status_report_status": "stopped",
+      "status_report_healthy": true,
+      "status_report_transition_evidence": "ready"
     }
   },
   "commands": {
@@ -346,6 +395,7 @@
     "executor_plan_shape": "spiral-hf-adapter-executor <generation-1-dir> --output-root executor-plan --max-steps 2 --max-train-samples 16 --max-eval-samples 8",
     "executor_strict_stop_shape": "spiral-hf-adapter-executor <generation-1-dir> --output-root executor-strict-stop --run --max-generations 1 --min-eval-improvement 0 --plateau-patience 1",
     "executor_run_shape": "spiral-hf-adapter-executor <promoted-generation-dir> --output-root executor-live --run --max-generations 1 --max-steps 2 --max-train-samples 16 --max-eval-samples 8",
-    "portable_runtime_shape": "python -m spiraltorch.hf_finetune_entrypoint ..."
+    "portable_runtime_shape": "python -m spiraltorch.hf_finetune_entrypoint ...",
+    "identity_guard_shape": "python -m spiraltorch.hf_finetune_entrypoint --model-name <parent-adapter> --expected-parent-adapter-id sha256:<digest> --expected-parent-lineage-depth <depth> --expected-root-adapter-id sha256:<root> ..."
   }
 }

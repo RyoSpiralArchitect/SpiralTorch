@@ -169,6 +169,8 @@ def _attempt_summary(attempt: Mapping[str, object] | None) -> dict[str, object] 
         "adapter_id": attempt.get("adapter_id"),
         "parent_adapter_id": attempt.get("parent_adapter_id"),
         "command_runtime": attempt.get("command_runtime"),
+        "parent_identity_contract": attempt.get("parent_identity_contract"),
+        "adapter_input_identity": attempt.get("adapter_input_identity"),
         "source_transition": attempt.get("source_transition"),
         "postflight_transition": (
             postflight.get("transition") if isinstance(postflight, Mapping) else None
@@ -551,12 +553,14 @@ def hf_adapter_continuation_executor_status_lines(
             f"child={transition.get('child_adapter_id')} "
             f"eval_handoff_delta={transition.get('eval_handoff_delta')} "
             f"eval_improvement={transition.get('child_eval_improvement')} "
+            f"input_identity={transition.get('input_identity_ready')} "
             f"probe_process={transition.get('artifact_probe_process_status')} "
             f"probe_pid={transition.get('artifact_probe_process_pid')}"
         )
     attempt = report.get("active_attempt") or report.get("latest_attempt")
     if isinstance(attempt, Mapping):
         command_runtime = attempt.get("command_runtime")
+        adapter_input_identity = attempt.get("adapter_input_identity")
         log = report.get("log")
         output = report.get("output")
         lock = report.get("lock")
@@ -568,6 +572,8 @@ def hf_adapter_continuation_executor_status_lines(
             f"runner={attempt.get('runner_kind')} "
             "runtime="
             f"{command_runtime.get('status') if isinstance(command_runtime, Mapping) else None} "
+            "input_identity="
+            f"{adapter_input_identity.get('status') if isinstance(adapter_input_identity, Mapping) else None} "
             f"stop_scope={attempt.get('stop_scope')} "
             f"host={attempt.get('hostname')} "
             f"pid={attempt.get('pid')} "

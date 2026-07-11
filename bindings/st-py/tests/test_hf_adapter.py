@@ -222,6 +222,53 @@ def test_adapter_fingerprint_includes_shards_referenced_by_index(
     assert before["adapter_id"] != after["adapter_id"]
 
 
+def test_adapter_input_identity_verifies_expected_lineage_and_detects_tamper(
+    tmp_path: Path,
+) -> None:
+    adapter = _write_adapter(tmp_path / "adapter", b"adapter")
+    lineage = st.write_hf_adapter_lineage(adapter)
+
+    ready = st.hf_adapter_input_identity_report(
+        adapter,
+        expected_adapter_id=lineage["adapter_id"],
+        expected_lineage_depth=0,
+        expected_root_adapter_id=lineage["root_adapter_id"],
+        require_lineage=True,
+    )
+
+    assert ready["status"] == "ready"
+    assert ready["identity_verified"] is True
+    assert ready["expected_identity_verified"] is True
+    assert ready["lineage_fingerprint_verified"] is True
+    assert ready["lineage_depth_verified"] is True
+    assert ready["root_adapter_verified"] is True
+    assert "verified=True" in st.hf_adapter_input_identity_lines(ready)[0]
+
+    (adapter / "adapter_model.safetensors").write_bytes(b"tampered")
+    blocked = st.hf_adapter_input_identity_report(
+        adapter,
+        expected_adapter_id=lineage["adapter_id"],
+        expected_lineage_depth=0,
+        expected_root_adapter_id=lineage["root_adapter_id"],
+        require_lineage=True,
+    )
+
+    assert blocked["status"] == "blocked"
+    assert blocked["identity_verified"] is False
+    assert blocked["expected_identity_verified"] is False
+    assert blocked["lineage_fingerprint_verified"] is False
+    assert set(blocked["errors"]) == {
+        "adapter fingerprint does not match expected adapter id",
+        "adapter lineage fingerprint does not match adapter files",
+    }
+
+    with pytest.raises(ValueError, match="sha256"):
+        st.hf_adapter_input_identity_report(
+            adapter,
+            expected_adapter_id="not-an-adapter-id",
+        )
+
+
 def test_adapter_lineage_chains_parent_and_run_card_identity(tmp_path: Path) -> None:
     parent = _write_adapter(tmp_path / "parent", b"parent")
     child = _write_adapter(tmp_path / "child", b"child")
@@ -247,6 +294,72 @@ def test_adapter_lineage_chains_parent_and_run_card_identity(tmp_path: Path) -> 
     assert "depth=1" in st.hf_adapter_lineage_lines(loaded)[0]
     with pytest.raises(ValueError, match="parent directories must differ"):
         st.write_hf_adapter_lineage(parent, parent_adapter=parent)
+
+
+def test_adapter_lineage_and_transition_require_declared_input_identity(
+    tmp_path: Path,
+) -> None:
+    parent = _write_adapter(tmp_path / "parent", b"parent")
+    parent_lineage = st.write_hf_adapter_lineage(parent)
+    child = _write_adapter(tmp_path / "child", b"child")
+    card = _run_card(parent)
+    card["adapter_input_identity"] = st.hf_adapter_input_identity_report(
+        parent,
+        expected_adapter_id=parent_lineage["adapter_id"],
+        expected_lineage_depth=0,
+        expected_root_adapter_id=parent_lineage["root_adapter_id"],
+        require_lineage=True,
+        phase="preflight",
+    )
+    card["adapter_input_identity_after_load"] = (
+        st.hf_adapter_input_identity_report(
+            parent,
+            expected_adapter_id=parent_lineage["adapter_id"],
+            expected_lineage_depth=0,
+            expected_root_adapter_id=parent_lineage["root_adapter_id"],
+            require_lineage=True,
+            phase="after_load",
+        )
+    )
+    run_card_path = child / "spiraltorch-hf-finetune-run-card.json"
+    lineage = st.write_hf_adapter_lineage(
+        child,
+        parent_adapter=parent,
+        run_card=card,
+        run_card_path=run_card_path,
+    )
+    card["adapter_lineage"] = lineage
+    promotion = st.write_hf_adapter_promotion(
+        child,
+        card,
+        parent_adapter=parent,
+    )
+    card["adapter_promotion"] = promotion
+    run_card_path.write_text(json.dumps(card), encoding="utf-8")
+
+    chain = st.hf_adapter_promotion_chain_report(tmp_path)
+    transition = chain["transitions"][0]
+
+    assert lineage["parent_input_identity_present"] is True
+    assert lineage["parent_input_identity_verified"] is True
+    assert lineage["parent_input_expected_adapter_id"] == parent_lineage["adapter_id"]
+    assert transition["status"] == "ready"
+    assert transition["input_identity_required"] is True
+    assert transition["input_identity_ready"] is True
+    assert transition["input_identity_preflight_status"] == "ready"
+    assert transition["input_identity_after_load_status"] == "ready"
+
+    bad_card = _run_card(parent)
+    bad_card["adapter_input_identity"] = dict(card["adapter_input_identity"])
+    bad_card["adapter_input_identity"]["observed_adapter_id"] = (
+        "sha256:" + "0" * 64
+    )
+    with pytest.raises(ValueError, match="input identity does not match parent"):
+        st.write_hf_adapter_lineage(
+            child,
+            parent_adapter=parent,
+            run_card=bad_card,
+        )
 
 
 def test_adapter_promotion_requires_lineage_weight_change_and_eval(
@@ -730,6 +843,18 @@ def test_adapter_promotion_chain_selects_deepest_tip_for_scale_up(
         == grandchild_lineage["adapter_id"]
     )
     assert scale_up["adapter_continuation_expected_child_lineage_depth"] == 3
+    identity_contract = scale_up["adapter_continuation_identity_contract"]
+    assert identity_contract["status"] == "enforced"
+    assert identity_contract["fail_fast"] is True
+    assert (
+        identity_contract["expected_parent_adapter_id"]
+        == grandchild_lineage["adapter_id"]
+    )
+    assert identity_contract["expected_parent_lineage_depth"] == 2
+    assert (
+        identity_contract["expected_root_adapter_id"]
+        == root_lineage["adapter_id"]
+    )
     assert (
         scale_up["promotion_chain_selected_adapter_id"]
         == grandchild_lineage["adapter_id"]
@@ -743,6 +868,15 @@ def test_adapter_promotion_chain_selects_deepest_tip_for_scale_up(
     assert scale_up["command"][scale_up["command"].index("--model-name") + 1] == str(
         grandchild.resolve()
     )
+    assert scale_up["command"][
+        scale_up["command"].index("--expected-parent-adapter-id") + 1
+    ] == grandchild_lineage["adapter_id"]
+    assert scale_up["command"][
+        scale_up["command"].index("--expected-parent-lineage-depth") + 1
+    ] == "2"
+    assert scale_up["command"][
+        scale_up["command"].index("--expected-root-adapter-id") + 1
+    ] == root_lineage["adapter_id"]
     assert direct_preflight["status"] == "ready"
     assert direct_preflight["adapter_continuation_applied"] is True
     assert direct_preflight["adapter_continuation_source_adapter_id"] == (
@@ -751,6 +885,11 @@ def test_adapter_promotion_chain_selects_deepest_tip_for_scale_up(
     assert direct_preflight["promotion_chain_selected_path_transitions_ready"] is True
     assert direct_preflight["promotion_chain_selected_transition"] == (
         child_to_grandchild
+    )
+    assert direct_preflight["adapter_input_identity"]["status"] == "ready"
+    assert (
+        direct_preflight["adapter_input_identity"]["observed_adapter_id"]
+        == grandchild_lineage["adapter_id"]
     )
     legacy_chain = json.loads(json.dumps(report))
     for field in (
@@ -773,6 +912,15 @@ def test_adapter_promotion_chain_selects_deepest_tip_for_scale_up(
     unsupported["schema"] = "spiraltorch.hf_adapter_promotion_chain.v999"
     assert st.hf_finetune_scale_up_command(unsupported)["status"] == (
         "promotion_chain_unsupported_schema"
+    )
+
+    (grandchild / "adapter_model.safetensors").write_bytes(b"tampered")
+    tampered_preflight = st.hf_finetune_scale_up_preflight_report(scale_up)
+    assert tampered_preflight["status"] == "blocked"
+    assert tampered_preflight["adapter_input_identity"]["status"] == "blocked"
+    assert any(
+        issue["field"] == "adapter_continuation_identity_contract"
+        for issue in tampered_preflight["issues"]
     )
 
 

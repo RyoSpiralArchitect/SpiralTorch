@@ -61,6 +61,15 @@
   into new run cards. The Pythia 70M sample now includes real depth-two through
   depth-four executor promotions, independent chain audits, and an idempotent
   depth-five plan from a module-native parent.
+- Cryptographic continuation input gate: scale-up and executor commands now pin
+  the expected parent adapter ID, lineage depth, and root ID; the FT bridge
+  fingerprints local config/weights before model load and again after load,
+  failing before dataset or Trainer work on a mismatch. Run cards, transitions,
+  executor state/status, and public Python reports retain the observed contract.
+  Recorded `launch_cwd` also makes relative model-config, corpus, validation,
+  distortion, and checkpoint inputs portable across wheel-installed executor
+  working directories. The Pythia 70M sample includes the real promoted fifth
+  generation that passed both identity observations from a fresh wheel.
 - Resumable adapter executor: add `spiral-hf-adapter-executor` and an importable
   state machine that closes audit, policy, scale-up, preflight, execution, and
   live postflight promotion verification into one atomic artifact. Successful,

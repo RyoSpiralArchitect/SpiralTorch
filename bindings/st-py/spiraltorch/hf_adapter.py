@@ -25,9 +25,12 @@ __all__ = [
     "HF_ADAPTER_PROMOTION_CHAIN_SCHEMA",
     "HF_ADAPTER_CONTINUATION_POLICY_FILENAME",
     "HF_ADAPTER_CONTINUATION_POLICY_SCHEMA",
+    "HF_ADAPTER_INPUT_IDENTITY_SCHEMA",
     "hf_adapter_continuation_policy_lines",
     "hf_adapter_continuation_policy_report",
     "hf_adapter_fingerprint",
+    "hf_adapter_input_identity_lines",
+    "hf_adapter_input_identity_report",
     "hf_adapter_lineage_lines",
     "hf_adapter_lineage_report",
     "hf_adapter_promotion_chain_lines",
@@ -57,6 +60,7 @@ HF_ADAPTER_CONTINUATION_POLICY_SCHEMA = (
 HF_ADAPTER_CONTINUATION_POLICY_FILENAME = (
     "spiraltorch-hf-adapter-continuation-policy.json"
 )
+HF_ADAPTER_INPUT_IDENTITY_SCHEMA = "spiraltorch.hf_adapter_input_identity.v1"
 
 
 def _canonical_json_bytes(value: object) -> bytes:
@@ -214,6 +218,165 @@ def hf_adapter_fingerprint(adapter: str | Path) -> dict[str, object]:
     }
 
 
+def _validated_adapter_id(name: str, value: object | None) -> str | None:
+    if value is None:
+        return None
+    adapter_id = str(value).strip()
+    digest = adapter_id.removeprefix("sha256:")
+    if (
+        not adapter_id.startswith("sha256:")
+        or len(digest) != 64
+        or any(character not in "0123456789abcdef" for character in digest)
+    ):
+        raise ValueError(f"{name} must be a lowercase sha256:<64 hex> adapter id")
+    return adapter_id
+
+
+def hf_adapter_input_identity_report(
+    adapter: str | Path,
+    *,
+    expected_adapter_id: str | None = None,
+    expected_lineage_depth: int | None = None,
+    expected_root_adapter_id: str | None = None,
+    require_lineage: bool = False,
+    phase: str = "preflight",
+) -> dict[str, object]:
+    """Verify the exact local adapter selected as continuation input."""
+
+    expected_id = _validated_adapter_id(
+        "expected_adapter_id",
+        expected_adapter_id,
+    )
+    expected_root_id = _validated_adapter_id(
+        "expected_root_adapter_id",
+        expected_root_adapter_id,
+    )
+    if expected_lineage_depth is not None:
+        if (
+            isinstance(expected_lineage_depth, bool)
+            or not isinstance(expected_lineage_depth, int)
+            or expected_lineage_depth < 0
+        ):
+            raise ValueError("expected_lineage_depth must be a non-negative integer")
+    resolved_phase = str(phase).strip()
+    if not resolved_phase:
+        raise ValueError("phase must not be empty")
+
+    fingerprint = hf_adapter_fingerprint(adapter)
+    adapter_path = Path(str(fingerprint["adapter_path"]))
+    observed_id = str(fingerprint["adapter_id"])
+    lineage_path = adapter_path / HF_ADAPTER_LINEAGE_FILENAME
+    lineage: dict[str, object] | None = None
+    errors: list[str] = []
+    if expected_id is not None and observed_id != expected_id:
+        errors.append("adapter fingerprint does not match expected adapter id")
+
+    if lineage_path.is_file():
+        try:
+            lineage = load_hf_adapter_lineage(lineage_path)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            errors.append(f"adapter lineage manifest is invalid: {exc}")
+        else:
+            if lineage.get("status") != "ready":
+                errors.append("adapter lineage manifest is not ready")
+            if lineage.get("adapter_id") != observed_id:
+                errors.append("adapter lineage fingerprint does not match adapter files")
+            if (
+                expected_lineage_depth is not None
+                and lineage.get("lineage_depth") != expected_lineage_depth
+            ):
+                errors.append("adapter lineage depth does not match expected depth")
+            if (
+                expected_root_id is not None
+                and lineage.get("root_adapter_id") != expected_root_id
+            ):
+                errors.append("adapter lineage root does not match expected root")
+    elif require_lineage or expected_lineage_depth is not None or expected_root_id:
+        errors.append("adapter lineage manifest is required but missing")
+
+    expected_identity_verified = (
+        None if expected_id is None else observed_id == expected_id
+    )
+    lineage_fingerprint_verified = (
+        None if lineage is None else lineage.get("adapter_id") == observed_id
+    )
+    lineage_depth_verified = (
+        None
+        if expected_lineage_depth is None
+        else lineage is not None
+        and lineage.get("lineage_depth") == expected_lineage_depth
+    )
+    root_adapter_verified = (
+        None
+        if expected_root_id is None
+        else lineage is not None
+        and lineage.get("root_adapter_id") == expected_root_id
+    )
+    return {
+        "row_type": "hf_adapter_input_identity",
+        "schema": HF_ADAPTER_INPUT_IDENTITY_SCHEMA,
+        "status": "ready" if not errors else "blocked",
+        "phase": resolved_phase,
+        "captured_at": datetime.now(timezone.utc).isoformat(),
+        "adapter_path": str(adapter_path),
+        "observed_adapter_id": observed_id,
+        "expected_adapter_id": expected_id,
+        "expected_identity_verified": expected_identity_verified,
+        "adapter_sha256": fingerprint.get("adapter_sha256"),
+        "adapter_config_sha256": fingerprint.get("adapter_config_sha256"),
+        "adapter_weight_bytes": fingerprint.get("adapter_weight_bytes"),
+        "adapter_weight_file_count": fingerprint.get("adapter_weight_file_count"),
+        "base_model_name_or_path": fingerprint.get("base_model_name_or_path"),
+        "lineage_required": bool(
+            require_lineage
+            or expected_lineage_depth is not None
+            or expected_root_id is not None
+        ),
+        "lineage_manifest_path": str(lineage_path),
+        "lineage_manifest_present": lineage_path.is_file(),
+        "lineage_status": None if lineage is None else lineage.get("status"),
+        "lineage_adapter_id": None if lineage is None else lineage.get("adapter_id"),
+        "lineage_fingerprint_verified": lineage_fingerprint_verified,
+        "observed_lineage_depth": (
+            None if lineage is None else lineage.get("lineage_depth")
+        ),
+        "expected_lineage_depth": expected_lineage_depth,
+        "lineage_depth_verified": lineage_depth_verified,
+        "observed_root_adapter_id": (
+            None if lineage is None else lineage.get("root_adapter_id")
+        ),
+        "expected_root_adapter_id": expected_root_id,
+        "root_adapter_verified": root_adapter_verified,
+        "identity_verified": not errors,
+        "error_count": len(errors),
+        "errors": errors,
+    }
+
+
+def hf_adapter_input_identity_lines(
+    report_or_adapter: Mapping[str, object] | str | Path,
+    **kwargs: object,
+) -> list[str]:
+    report = (
+        dict(report_or_adapter)
+        if isinstance(report_or_adapter, Mapping)
+        else hf_adapter_input_identity_report(report_or_adapter, **kwargs)
+    )
+    return [
+        (
+            "hf_adapter_input_identity "
+            f"status={report.get('status')} "
+            f"phase={report.get('phase')} "
+            f"verified={report.get('identity_verified')} "
+            f"observed={report.get('observed_adapter_id')} "
+            f"expected={report.get('expected_adapter_id')} "
+            f"depth={report.get('observed_lineage_depth')} "
+            f"root={report.get('observed_root_adapter_id')} "
+            f"errors={report.get('error_count')}"
+        )
+    ]
+
+
 def _manifest_path(value: str | Path, filename: str) -> Path:
     path = Path(value)
     return path / filename if path.is_dir() else path
@@ -283,6 +446,21 @@ def _run_card_sha256(value: Mapping[str, object] | str | Path | None) -> str | N
     return _sha256_bytes(_canonical_json_bytes(canonical)) if payload else None
 
 
+def _run_card_input_identity(
+    card_payload: Mapping[str, object],
+    field: str,
+) -> dict[str, object]:
+    value = card_payload.get(field)
+    if isinstance(value, Mapping):
+        return dict(value)
+    start = card_payload.get("finetune_start_report")
+    if isinstance(start, Mapping):
+        nested = start.get(field)
+        if isinstance(nested, Mapping):
+            return dict(nested)
+    return {}
+
+
 def hf_adapter_lineage_report(
     adapter: str | Path,
     *,
@@ -334,6 +512,28 @@ def hf_adapter_lineage_report(
     card_payload, detected_card_path = _run_card_payload(run_card)
     start = card_payload.get("finetune_start_report")
     start_report = dict(start) if isinstance(start, Mapping) else {}
+    input_identity = _run_card_input_identity(
+        card_payload,
+        "adapter_input_identity",
+    )
+    input_identity_after_load = _run_card_input_identity(
+        card_payload,
+        "adapter_input_identity_after_load",
+    )
+    strongest_input_identity = input_identity_after_load or input_identity
+    if parent is not None and strongest_input_identity:
+        if strongest_input_identity.get("status") != "ready":
+            errors.append("run-card adapter input identity is not ready")
+        if strongest_input_identity.get("observed_adapter_id") != parent.get(
+            "adapter_id"
+        ):
+            errors.append("run-card adapter input identity does not match parent")
+        expected_parent_id = strongest_input_identity.get("expected_adapter_id")
+        if (
+            expected_parent_id is not None
+            and expected_parent_id != parent.get("adapter_id")
+        ):
+            errors.append("run-card expected adapter identity does not match parent")
     parent_reference = (
         None if parent is None else parent.get("adapter_path")
     ) or start_report.get("adapter_weights_source")
@@ -367,6 +567,28 @@ def hf_adapter_lineage_report(
         "parent_adapter_id": None if parent is None else parent.get("adapter_id"),
         "parent_adapter_reference": parent_reference,
         "parent_fingerprint_verified": parent is not None,
+        "parent_input_identity_present": bool(strongest_input_identity),
+        "parent_input_identity_status": strongest_input_identity.get("status"),
+        "parent_input_identity_phase": strongest_input_identity.get("phase"),
+        "parent_input_expected_adapter_id": strongest_input_identity.get(
+            "expected_adapter_id"
+        ),
+        "parent_input_observed_adapter_id": strongest_input_identity.get(
+            "observed_adapter_id"
+        ),
+        "parent_input_identity_verified": (
+            None
+            if not strongest_input_identity
+            else strongest_input_identity.get("status") == "ready"
+            and strongest_input_identity.get("identity_verified") is True
+            and parent is not None
+            and strongest_input_identity.get("observed_adapter_id")
+            == parent.get("adapter_id")
+        ),
+        "parent_input_identity_preflight_status": input_identity.get("status"),
+        "parent_input_identity_after_load_status": input_identity_after_load.get(
+            "status"
+        ),
         "weights_changed_from_parent": (
             None
             if parent is None
@@ -1398,6 +1620,25 @@ def _adapter_promotion_chain_node(manifest_path: Path) -> dict[str, object]:
         "lineage_status": lineage.get("status"),
         "lineage_manifest_path": str(manifest_path),
         "parent_fingerprint_verified": lineage.get("parent_fingerprint_verified"),
+        "parent_input_identity_present": lineage.get(
+            "parent_input_identity_present"
+        ),
+        "parent_input_identity_status": lineage.get("parent_input_identity_status"),
+        "parent_input_expected_adapter_id": lineage.get(
+            "parent_input_expected_adapter_id"
+        ),
+        "parent_input_observed_adapter_id": lineage.get(
+            "parent_input_observed_adapter_id"
+        ),
+        "parent_input_identity_verified": lineage.get(
+            "parent_input_identity_verified"
+        ),
+        "parent_input_identity_preflight_status": lineage.get(
+            "parent_input_identity_preflight_status"
+        ),
+        "parent_input_identity_after_load_status": lineage.get(
+            "parent_input_identity_after_load_status"
+        ),
         "weights_changed_from_parent": lineage.get("weights_changed_from_parent"),
         "run_card_path": None if run_card_path is None else str(run_card_path),
         "run_card_sha256": observed_card_sha256,
@@ -1467,6 +1708,7 @@ def _adapter_promotion_chain_node(manifest_path: Path) -> dict[str, object]:
         if launch_command is None
         else shlex.join(launch_command),
         "launch_command_source": "run_card" if launch_command is not None else None,
+        "launch_cwd": None if run_card is None else run_card.get("launch_cwd"),
         "issues": issues,
     }
 
@@ -1540,6 +1782,7 @@ def _chain_inferred_root_node(
         "launch_command": None,
         "launch_command_display": None,
         "launch_command_source": None,
+        "launch_cwd": None,
         "issues": [
             _chain_issue(
                 "root_lineage_inferred",
@@ -1595,10 +1838,25 @@ def _adapter_promotion_chain_transition(
     base_model_matches = parent.get("base_model_name_or_path") == child.get(
         "base_model_name_or_path"
     )
+    input_expected_id = child.get("parent_input_expected_adapter_id")
+    input_observed_id = child.get("parent_input_observed_adapter_id")
+    input_identity_required = input_expected_id is not None
+    input_identity_ready = bool(
+        not input_identity_required
+        or (
+            input_expected_id == parent.get("adapter_id")
+            and input_observed_id == parent.get("adapter_id")
+            and child.get("parent_input_identity_status") == "ready"
+            and child.get("parent_input_identity_verified") is True
+            and child.get("parent_input_identity_preflight_status") == "ready"
+            and child.get("parent_input_identity_after_load_status") == "ready"
+        )
+    )
     lineage_ready = bool(
         depth_step == 1
         and root_matches
         and base_model_matches
+        and input_identity_ready
         and child.get("parent_fingerprint_verified") is True
         and child.get("weights_changed_from_parent") is True
     )
@@ -1625,6 +1883,17 @@ def _adapter_promotion_chain_transition(
         "root_matches": root_matches,
         "base_model_name_or_path": child.get("base_model_name_or_path"),
         "base_model_matches": base_model_matches,
+        "input_identity_required": input_identity_required,
+        "input_identity_ready": input_identity_ready,
+        "input_identity_status": child.get("parent_input_identity_status"),
+        "input_identity_expected_parent_adapter_id": input_expected_id,
+        "input_identity_observed_parent_adapter_id": input_observed_id,
+        "input_identity_preflight_status": child.get(
+            "parent_input_identity_preflight_status"
+        ),
+        "input_identity_after_load_status": child.get(
+            "parent_input_identity_after_load_status"
+        ),
         "lineage_ready": lineage_ready,
         "parent_fingerprint_verified": (
             child.get("parent_fingerprint_verified") is True
@@ -2575,6 +2844,9 @@ def hf_adapter_promotion_chain_lines(
             f"child={raw_transition.get('child_adapter_id')} "
             f"selected={raw_transition.get('selected_path')} "
             f"parent_verified={raw_transition.get('parent_fingerprint_verified')} "
+            f"input_identity_required="
+            f"{raw_transition.get('input_identity_required')} "
+            f"input_identity_ready={raw_transition.get('input_identity_ready')} "
             f"weights_changed={raw_transition.get('weights_changed_from_parent')} "
             f"eval_handoff_delta={raw_transition.get('eval_handoff_delta')} "
             f"eval_improvement={raw_transition.get('child_eval_improvement')} "

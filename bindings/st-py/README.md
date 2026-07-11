@@ -766,6 +766,14 @@ the executor validates its lineage manifest and fingerprint, then adds
 `--adapter-promotion-gate` to the child command so every later generation must
 produce promotion evidence before it can become the selected tip.
 
+Every audited child command also receives
+`--expected-parent-adapter-id`, `--expected-parent-lineage-depth`, and
+`--expected-root-adapter-id`. The bridge re-fingerprints adapter config and
+weights before loading the model and immediately after load, then refuses to
+touch the dataset or Trainer if either observation differs from the selected
+chain tip. Executor plan, pending, attempt, postflight, and status artifacts
+retain this input-identity contract and its observed evidence.
+
 The continuation runtime entrypoint does not depend on the repository staying
 at its original absolute path. Known `hf_finetune_bridge.py`, legacy
 `hf_gpt2_finetune_bridge.py`, and `spiral-hf-finetune` prefixes are rewritten
@@ -774,11 +782,15 @@ to the current interpreter's
 prefix as provenance, preflight verifies that the packaged module is
 importable, and unknown custom launchers are preserved rather than guessed.
 Executor plan, attempt, and status lines expose this as
-`runtime=portable_module`. Corpus, model-config, and other data paths remain
-explicit preflight inputs and must still exist where the continuation runs.
-Runs launched through the installed entrypoint write the canonical module
-prefix back into their run cards, so subsequent plans are idempotent rather
-than repeatedly recovering a historical script path.
+`runtime=portable_module`. New run cards also record `launch_cwd`; scale-up and
+executor plans resolve relative model-config, corpus, validation, distortion,
+and checkpoint paths against that source directory before preflight. Explicit
+absolute paths remain unchanged, unresolved inputs fail closed, and command
+artifacts retain the resolution report. Runs launched through the installed
+entrypoint write the canonical module prefix and working directory back into
+their run cards, so subsequent plans are portable and idempotent rather than
+repeatedly recovering a historical script path or depending on the caller's
+current directory.
 
 For a long run, use the same executor policy in a detached process:
 
@@ -1356,7 +1368,9 @@ For a promotion-ready LoRA winner, `scale-up-command.json` now defaults to
 `adapter_continuation=auto`: the selected run's adapter directory replaces the
 original `--model-name`, `--model-artifact-kind peft-adapter` and
 `--finetune-mode lora` are made explicit, and the expected child lineage depth
-is recorded before launch. `spiral-hf-scale-up sweep-report.json`
+is recorded before launch. The emitted command also pins the expected parent
+adapter ID/depth/root ID, and the child verifies that content fingerprint both
+before and immediately after model load. `spiral-hf-scale-up sweep-report.json`
 therefore continues the winning weights rather than merely rerunning their
 configuration. Pass `--adapter-continuation replay` for the old configuration
 replay behavior, or `--adapter-continuation continue` to require adapter
@@ -1364,7 +1378,11 @@ continuation for a non-gated LoRA run. Exact `--resume-from-checkpoint` remains
 the stronger path in `auto` mode; combining it with explicit `continue` is
 rejected as ambiguous. Scale-up preflight checks local adapter config/weights,
 input-output separation, lineage adapter ID/depth, and promotion report
-ID/readiness. The sanitized
+ID/readiness. When the source run card records `launch_cwd`, relative model
+config, corpus, validation, distortion, and checkpoint arguments are resolved
+against that directory and recorded in `command_path_resolution`, allowing a
+wheel-installed executor to launch from another working directory without
+silently changing its inputs. The sanitized
 [`hf_adapter_scale_up_continuation_sample.json`](examples/hf_adapter_scale_up_continuation_sample.json)
 records a real tiny-GPT2 depth-1 to depth-2 continuation whose parent
 fingerprint, weight change, eval bound, and standalone promotion revalidation
