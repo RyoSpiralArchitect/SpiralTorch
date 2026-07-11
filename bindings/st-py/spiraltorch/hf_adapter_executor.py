@@ -26,6 +26,7 @@ from .hf_adapter import (
     hf_adapter_promotion_chain_report,
 )
 from .hf_ft import (
+    hf_finetune_geometry_guard_runtime_evidence_report,
     hf_finetune_scale_up_command,
     hf_finetune_scale_up_preflight_report,
 )
@@ -132,6 +133,7 @@ def _trainer_trace_snapshot(
     max_psi_total: float | None = None
     geometry_guard_count = 0
     geometry_guard_trigger_count = 0
+    geometry_guard_armed_transition_count = 0
     last_geometry_guard: dict[str, object] = {}
     with path.open("rb") as handle:
         for line_number, raw_line in enumerate(handle, 1):
@@ -175,6 +177,8 @@ def _trainer_trace_snapshot(
                 last_geometry_guard = dict(geometry_guard)
                 if geometry_guard.get("triggered_now") is True:
                     geometry_guard_trigger_count += 1
+                if geometry_guard.get("armed_now") is True:
+                    geometry_guard_armed_transition_count += 1
     return (
         f"sha256:{digest.hexdigest()}",
         total_bytes,
@@ -190,6 +194,9 @@ def _trainer_trace_snapshot(
             "trace_training_geometry_guard_count": geometry_guard_count,
             "trace_training_geometry_guard_trigger_count": (
                 geometry_guard_trigger_count
+            ),
+            "trace_training_geometry_guard_armed_transition_count": (
+                geometry_guard_armed_transition_count
             ),
             "trace_last_training_geometry_guard_status": last_geometry_guard.get(
                 "status"
@@ -211,6 +218,32 @@ def _trainer_trace_snapshot(
             ),
             "trace_last_training_geometry_guard_patience": _integer_value(
                 last_geometry_guard.get("patience")
+            ),
+            "trace_last_training_geometry_guard_armed": _optional_bool(
+                last_geometry_guard.get("armed")
+            ),
+            "trace_last_training_geometry_guard_armed_at_step": _finite_float(
+                last_geometry_guard.get("armed_at_step")
+            ),
+            "trace_last_training_geometry_guard_required_axes": _string_list(
+                last_geometry_guard.get("required_axes")
+            ),
+            "trace_last_training_geometry_guard_armed_axes": _string_list(
+                last_geometry_guard.get("armed_axes")
+            ),
+            "trace_last_training_geometry_guard_pending_axes": _string_list(
+                last_geometry_guard.get("pending_axes")
+            ),
+            "trace_last_training_geometry_guard_arming_progress": _finite_float(
+                last_geometry_guard.get("arming_progress")
+            ),
+            "trace_last_training_geometry_guard_desire_observation_count": (
+                _integer_value(
+                    last_geometry_guard.get("desire_observation_count")
+                )
+            ),
+            "trace_last_training_geometry_guard_psi_observation_count": (
+                _integer_value(last_geometry_guard.get("psi_observation_count"))
             ),
             "trace_last_training_geometry_guard_horizon": (
                 dict(last_geometry_guard.get("horizon"))
@@ -246,6 +279,19 @@ def _integer_value(value: object) -> int | None:
     if parsed is None or not parsed.is_integer():
         return None
     return int(parsed)
+
+
+def _optional_bool(value: object) -> bool | None:
+    return value if isinstance(value, bool) else None
+
+
+def _string_list(value: object) -> list[str] | None:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        return None
+    values = list(value)
+    if not all(isinstance(item, str) for item in values):
+        return None
+    return [str(item) for item in values]
 
 
 def _valid_generation_plan_id(value: object) -> bool:
@@ -614,6 +660,25 @@ def _validate_trainer_telemetry_evidence_rows(
             evidence_identity_payload["geometry_guard_horizon_matches"] = (
                 evidence.get("geometry_guard_horizon_matches")
             )
+        for field in (
+            "trace_training_geometry_guard_armed_transition_count",
+            "trace_last_training_geometry_guard_armed",
+            "trace_last_training_geometry_guard_armed_at_step",
+            "trace_last_training_geometry_guard_required_axes",
+            "trace_last_training_geometry_guard_armed_axes",
+            "trace_last_training_geometry_guard_pending_axes",
+            "trace_last_training_geometry_guard_arming_progress",
+            "trace_last_training_geometry_guard_desire_observation_count",
+            "trace_last_training_geometry_guard_psi_observation_count",
+            "geometry_guard_axes_match",
+            "geometry_guard_trigger_receipt_ready",
+            "geometry_guard_runtime_evidence_ready",
+            "geometry_guard_runtime_evidence_basis",
+            "geometry_guard_node_matches",
+            "node_matches_trace",
+        ):
+            if field in evidence:
+                evidence_identity_payload[field] = evidence.get(field)
         expected_evidence_id = _canonical_sha256(evidence_identity_payload)
         if evidence.get("evidence_id") != expected_evidence_id:
             raise ValueError(
@@ -1307,6 +1372,10 @@ def _trainer_telemetry_evidence_contract(
             ),
             "geometry_guard_required": False,
             "geometry_guard_horizon_matches": None,
+            "geometry_guard_axes_match": None,
+            "geometry_guard_trigger_receipt_ready": None,
+            "geometry_guard_runtime_evidence_ready": None,
+            "geometry_guard_runtime_evidence_basis": None,
             "trace_path": resolved_command_contract.get("trainer_trace_jsonl"),
             "trace_exists": None,
             "trace_sha256": None,
@@ -1317,7 +1386,16 @@ def _trainer_telemetry_evidence_contract(
             "trace_max_psi_total": None,
             "trace_training_geometry_guard_count": None,
             "trace_training_geometry_guard_trigger_count": None,
+            "trace_training_geometry_guard_armed_transition_count": None,
             "trace_last_training_geometry_guard_status": None,
+            "trace_last_training_geometry_guard_armed": None,
+            "trace_last_training_geometry_guard_armed_at_step": None,
+            "trace_last_training_geometry_guard_required_axes": None,
+            "trace_last_training_geometry_guard_armed_axes": None,
+            "trace_last_training_geometry_guard_pending_axes": None,
+            "trace_last_training_geometry_guard_arming_progress": None,
+            "trace_last_training_geometry_guard_desire_observation_count": None,
+            "trace_last_training_geometry_guard_psi_observation_count": None,
             "node_matches_trace": None,
             "evidence_id": None,
             "issues": [],
@@ -1422,6 +1500,39 @@ def _trainer_telemetry_evidence_contract(
     geometry_guard_trigger_step = _finite_float(
         trace_summary.get("trace_last_training_geometry_guard_trigger_step")
     )
+    geometry_guard_armed_transition_count = _integer_value(
+        trace_summary.get(
+            "trace_training_geometry_guard_armed_transition_count"
+        )
+    )
+    geometry_guard_armed = _optional_bool(
+        trace_summary.get("trace_last_training_geometry_guard_armed")
+    )
+    geometry_guard_armed_at_step = _finite_float(
+        trace_summary.get("trace_last_training_geometry_guard_armed_at_step")
+    )
+    geometry_guard_required_axes = _string_list(
+        trace_summary.get("trace_last_training_geometry_guard_required_axes")
+    )
+    geometry_guard_armed_axes = _string_list(
+        trace_summary.get("trace_last_training_geometry_guard_armed_axes")
+    )
+    geometry_guard_pending_axes = _string_list(
+        trace_summary.get("trace_last_training_geometry_guard_pending_axes")
+    )
+    geometry_guard_arming_progress = _finite_float(
+        trace_summary.get("trace_last_training_geometry_guard_arming_progress")
+    )
+    geometry_guard_desire_observation_count = _integer_value(
+        trace_summary.get(
+            "trace_last_training_geometry_guard_desire_observation_count"
+        )
+    )
+    geometry_guard_psi_observation_count = _integer_value(
+        trace_summary.get(
+            "trace_last_training_geometry_guard_psi_observation_count"
+        )
+    )
     if telemetry_count is None or telemetry_count < 1:
         issues.append(
             {
@@ -1453,6 +1564,43 @@ def _trainer_telemetry_evidence_contract(
         )
     geometry_guard_matches = True
     geometry_guard_horizon_matches = True
+    geometry_guard_runtime_evidence = (
+        hf_finetune_geometry_guard_runtime_evidence_report(
+            active=geometry_guard_required,
+            minimum_observations=resolved_geometry_guard_contract.get(
+                "minimum_observations"
+            ),
+            required_axes=geometry_guard_required_axes,
+            expected_axes=required_axes if geometry_guard_required else None,
+            armed_axes=geometry_guard_armed_axes,
+            pending_axes=geometry_guard_pending_axes,
+            armed=geometry_guard_armed,
+            armed_transition_count=geometry_guard_armed_transition_count,
+            armed_at_step=geometry_guard_armed_at_step,
+            arming_progress=geometry_guard_arming_progress,
+            desire_observation_count=(
+                geometry_guard_desire_observation_count
+            ),
+            psi_observation_count=geometry_guard_psi_observation_count,
+            trigger_count=geometry_guard_trigger_count,
+            status=geometry_guard_status,
+            reason_codes=geometry_guard_reason_codes,
+            trigger_step=geometry_guard_trigger_step,
+        )
+    )
+    geometry_guard_axes_match = bool(
+        not geometry_guard_required
+        or geometry_guard_runtime_evidence.get("axes_match") is True
+    )
+    geometry_guard_trigger_receipt_ready = (
+        geometry_guard_runtime_evidence.get("trigger_receipt_ready") is True
+    )
+    geometry_guard_runtime_evidence_ready = (
+        geometry_guard_runtime_evidence.get("ready") is True
+    )
+    geometry_guard_runtime_evidence_basis = (
+        geometry_guard_runtime_evidence.get("basis")
+    )
     if geometry_guard_required:
         observed_guard_contract = {
             "min_desire_stability": trace_summary.get(
@@ -1534,6 +1682,21 @@ def _trainer_telemetry_evidence_contract(
                     "message": "live geometry guard horizon does not match the command",
                 }
             )
+        if not geometry_guard_runtime_evidence_ready:
+            issues.append(
+                {
+                    "field": "trainer_geometry_guard_runtime_evidence",
+                    "observed": geometry_guard_runtime_evidence,
+                    "threshold": {
+                        "fully_armed": True,
+                        "or_consistent_trigger_receipt": True,
+                    },
+                    "message": (
+                        "live geometry guard neither fully armed nor emitted "
+                        "a consistent trigger receipt"
+                    ),
+                }
+            )
 
     node_telemetry_count = (
         None
@@ -1562,7 +1725,26 @@ def _trainer_telemetry_evidence_contract(
             and _numbers_match(psi_total, node.get("trace_max_psi_total"))
         )
     )
-    node_matches_trace = bool(count_matches and desire_matches and psi_matches)
+    geometry_guard_node_matches = bool(
+        not geometry_guard_required
+        or (
+            node is not None
+            and node.get("geometry_guard_runtime_evidence")
+            == geometry_guard_runtime_evidence
+            and node.get("geometry_guard_runtime_evidence_ready")
+            == geometry_guard_runtime_evidence_ready
+            and node.get("geometry_guard_runtime_evidence_basis")
+            == geometry_guard_runtime_evidence_basis
+            and node.get("trace_last_training_geometry_guard_armed")
+            == geometry_guard_armed
+        )
+    )
+    node_matches_trace = bool(
+        count_matches
+        and desire_matches
+        and psi_matches
+        and geometry_guard_node_matches
+    )
     if not node_matches_trace:
         issues.append(
             {
@@ -1575,6 +1757,18 @@ def _trainer_telemetry_evidence_contract(
                     "trace_max_psi_total": None
                     if node is None
                     else node.get("trace_max_psi_total"),
+                    "geometry_guard_runtime_evidence_ready": None
+                    if node is None
+                    else node.get("geometry_guard_runtime_evidence_ready"),
+                    "geometry_guard_runtime_evidence": None
+                    if node is None
+                    else node.get("geometry_guard_runtime_evidence"),
+                    "geometry_guard_runtime_evidence_basis": None
+                    if node is None
+                    else node.get("geometry_guard_runtime_evidence_basis"),
+                    "trace_last_training_geometry_guard_armed": None
+                    if node is None
+                    else node.get("trace_last_training_geometry_guard_armed"),
                 },
                 "message": "chain node telemetry does not match the trace receipt",
             }
@@ -1588,6 +1782,9 @@ def _trainer_telemetry_evidence_contract(
         "trace_max_psi_total": psi_total,
         "trace_training_geometry_guard_count": geometry_guard_count,
         "trace_training_geometry_guard_trigger_count": geometry_guard_trigger_count,
+        "trace_training_geometry_guard_armed_transition_count": (
+            geometry_guard_armed_transition_count
+        ),
         "trace_last_training_geometry_guard_status": geometry_guard_status,
         "trace_last_training_geometry_guard_reason_codes": (
             geometry_guard_reason_codes
@@ -1598,6 +1795,40 @@ def _trainer_telemetry_evidence_contract(
         "geometry_guard_required": geometry_guard_required,
         "geometry_guard_matches": geometry_guard_matches,
         "geometry_guard_horizon_matches": geometry_guard_horizon_matches,
+        "trace_last_training_geometry_guard_armed": geometry_guard_armed,
+        "trace_last_training_geometry_guard_armed_at_step": (
+            geometry_guard_armed_at_step
+        ),
+        "trace_last_training_geometry_guard_required_axes": (
+            geometry_guard_required_axes
+        ),
+        "trace_last_training_geometry_guard_armed_axes": (
+            geometry_guard_armed_axes
+        ),
+        "trace_last_training_geometry_guard_pending_axes": (
+            geometry_guard_pending_axes
+        ),
+        "trace_last_training_geometry_guard_arming_progress": (
+            geometry_guard_arming_progress
+        ),
+        "trace_last_training_geometry_guard_desire_observation_count": (
+            geometry_guard_desire_observation_count
+        ),
+        "trace_last_training_geometry_guard_psi_observation_count": (
+            geometry_guard_psi_observation_count
+        ),
+        "geometry_guard_axes_match": geometry_guard_axes_match,
+        "geometry_guard_trigger_receipt_ready": (
+            geometry_guard_trigger_receipt_ready
+        ),
+        "geometry_guard_runtime_evidence_ready": (
+            geometry_guard_runtime_evidence_ready
+        ),
+        "geometry_guard_runtime_evidence_basis": (
+            geometry_guard_runtime_evidence_basis
+        ),
+        "geometry_guard_node_matches": geometry_guard_node_matches,
+        "node_matches_trace": node_matches_trace,
         "required_axes": required_axes,
     }
     ready = not issues
@@ -1622,6 +1853,9 @@ def _trainer_telemetry_evidence_contract(
         "trace_max_psi_total": psi_total,
         "trace_training_geometry_guard_count": geometry_guard_count,
         "trace_training_geometry_guard_trigger_count": geometry_guard_trigger_count,
+        "trace_training_geometry_guard_armed_transition_count": (
+            geometry_guard_armed_transition_count
+        ),
         "trace_last_training_geometry_guard_status": geometry_guard_status,
         "trace_last_training_geometry_guard_reason_codes": (
             geometry_guard_reason_codes
@@ -1631,6 +1865,38 @@ def _trainer_telemetry_evidence_contract(
         ),
         "geometry_guard_matches": geometry_guard_matches,
         "geometry_guard_horizon_matches": geometry_guard_horizon_matches,
+        "trace_last_training_geometry_guard_armed": geometry_guard_armed,
+        "trace_last_training_geometry_guard_armed_at_step": (
+            geometry_guard_armed_at_step
+        ),
+        "trace_last_training_geometry_guard_required_axes": (
+            geometry_guard_required_axes
+        ),
+        "trace_last_training_geometry_guard_armed_axes": (
+            geometry_guard_armed_axes
+        ),
+        "trace_last_training_geometry_guard_pending_axes": (
+            geometry_guard_pending_axes
+        ),
+        "trace_last_training_geometry_guard_arming_progress": (
+            geometry_guard_arming_progress
+        ),
+        "trace_last_training_geometry_guard_desire_observation_count": (
+            geometry_guard_desire_observation_count
+        ),
+        "trace_last_training_geometry_guard_psi_observation_count": (
+            geometry_guard_psi_observation_count
+        ),
+        "geometry_guard_axes_match": geometry_guard_axes_match,
+        "geometry_guard_trigger_receipt_ready": (
+            geometry_guard_trigger_receipt_ready
+        ),
+        "geometry_guard_runtime_evidence_ready": (
+            geometry_guard_runtime_evidence_ready
+        ),
+        "geometry_guard_runtime_evidence_basis": (
+            geometry_guard_runtime_evidence_basis
+        ),
         "node_trace_training_telemetry_count": node_telemetry_count,
         "node_trace_mean_desire_stability": None
         if node is None
@@ -1638,6 +1904,13 @@ def _trainer_telemetry_evidence_contract(
         "node_trace_max_psi_total": None
         if node is None
         else node.get("trace_max_psi_total"),
+        "node_geometry_guard_runtime_evidence_ready": None
+        if node is None
+        else node.get("geometry_guard_runtime_evidence_ready"),
+        "node_geometry_guard_runtime_evidence_basis": None
+        if node is None
+        else node.get("geometry_guard_runtime_evidence_basis"),
+        "geometry_guard_node_matches": geometry_guard_node_matches,
         "node_matches_trace": node_matches_trace,
         "evidence_id": _canonical_sha256(evidence_payload)
         if trace_sha256 is not None
@@ -3989,6 +4262,23 @@ def hf_adapter_continuation_executor_lines(
             if isinstance(telemetry_evidence, Mapping)
             else None
         )
+        telemetry_geometry_guard_armed = (
+            telemetry_evidence.get("trace_last_training_geometry_guard_armed")
+            if isinstance(telemetry_evidence, Mapping)
+            else None
+        )
+        telemetry_geometry_guard_runtime_basis = (
+            telemetry_evidence.get("geometry_guard_runtime_evidence_basis")
+            if isinstance(telemetry_evidence, Mapping)
+            else None
+        )
+        telemetry_geometry_guard_pending_axes = (
+            telemetry_evidence.get(
+                "trace_last_training_geometry_guard_pending_axes"
+            )
+            if isinstance(telemetry_evidence, Mapping)
+            else None
+        )
         command_runtime = raw_attempt.get("command_runtime")
         runtime_status = (
             command_runtime.get("status")
@@ -4099,6 +4389,9 @@ def hf_adapter_continuation_executor_lines(
             f"telemetry_evidence={telemetry_evidence_status} "
             f"telemetry_events={telemetry_evidence_count} "
             f"geometry_guard_triggers={telemetry_geometry_guard_trigger_count} "
+            f"geometry_guard_armed={telemetry_geometry_guard_armed} "
+            f"guard_runtime={telemetry_geometry_guard_runtime_basis} "
+            f"guard_pending_axes={telemetry_geometry_guard_pending_axes} "
             f"input_identity={input_identity_status} "
             f"training_input_identity={training_input_identity_status} "
             f"dataset_input_contract={dataset_input_contract_status} "

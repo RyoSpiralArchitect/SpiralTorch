@@ -155,6 +155,7 @@ def _write_promoted_child(
     finetune_replay_id: str | None = None,
     expected_finetune_replay_id: str | None = None,
     trainer_trace_summary: dict[str, object] | None = None,
+    trainer_geometry_guard_active: bool = False,
     max_train_samples: int = 8,
     block_size: int = 128,
     dataset_revision: str = "e93a9faa9c77e5d09219f6c868bfc7a1bd65593c",
@@ -164,6 +165,9 @@ def _write_promoted_child(
     card = _run_card(parent, before=before, after=after)
     if trainer_trace_summary is not None:
         card["trainer_trace_summary"] = dict(trainer_trace_summary)
+    if trainer_geometry_guard_active:
+        card["trainer_geometry_guard_active"] = True
+        card["trainer_geometry_guard_min_events"] = 3
     if runtime_input_id is not None:
         card["model_runtime_identity_pre_model"] = {
             "row_type": "hf_causal_lm_runtime_identity",
@@ -2010,6 +2014,106 @@ def test_adapter_continuation_policy_gates_selected_tip_geometry_telemetry(
     assert "code=distortion_pressure_limit_exceeded" in output
     assert "code=desire_stability_below_minimum" in output
     assert "code=psi_total_limit_exceeded" in output
+
+
+def test_adapter_promotion_requires_geometry_guard_runtime_evidence(
+    tmp_path: Path,
+) -> None:
+    root = _write_adapter(tmp_path / "root", b"root")
+    st.write_hf_adapter_lineage(root)
+    _, _, unarmed = _write_promoted_child(
+        tmp_path / "unarmed",
+        root,
+        b"unarmed",
+        trainer_trace_summary={
+            "trace_training_geometry_guard_count": 1,
+            "trace_training_geometry_guard_runtime_evidence": {
+                "active": True,
+                "minimum_observations": 3,
+            },
+            "trace_training_geometry_guard_triggered": False,
+            "trace_training_geometry_guard_armed_transition_count": 0,
+            "trace_last_training_geometry_guard_status": "warming_up",
+            "trace_last_training_geometry_guard_armed": False,
+            "trace_last_training_geometry_guard_required_axes": (
+                "desire_stability,psi_total"
+            ),
+            "trace_last_training_geometry_guard_armed_axes": "none",
+            "trace_last_training_geometry_guard_pending_axes": (
+                "desire_stability,psi_total"
+            ),
+            "trace_last_training_geometry_guard_arming_progress": 0.5,
+            "trace_last_training_geometry_guard_desire_observation_count": 1,
+            "trace_last_training_geometry_guard_psi_observation_count": 2,
+        },
+    )
+    _, _, armed = _write_promoted_child(
+        tmp_path / "armed",
+        root,
+        b"armed",
+        trainer_geometry_guard_active=True,
+        trainer_trace_summary={
+            "trace_training_geometry_guard_triggered": False,
+            "trace_training_geometry_guard_trigger_count": 0,
+            "trace_training_geometry_guard_armed_transition_count": 1,
+            "trace_last_training_geometry_guard_status": "within_limits",
+            "trace_last_training_geometry_guard_armed": True,
+            "trace_last_training_geometry_guard_armed_at_step": 4,
+            "trace_last_training_geometry_guard_required_axes": (
+                "desire_stability,psi_total"
+            ),
+            "trace_last_training_geometry_guard_armed_axes": (
+                "desire_stability,psi_total"
+            ),
+            "trace_last_training_geometry_guard_arming_progress": 1.0,
+            "trace_last_training_geometry_guard_pending_axes": "none",
+            "trace_last_training_geometry_guard_desire_observation_count": 3,
+            "trace_last_training_geometry_guard_psi_observation_count": 4,
+        },
+    )
+    _, _, triggered = _write_promoted_child(
+        tmp_path / "triggered",
+        root,
+        b"triggered",
+        trainer_geometry_guard_active=True,
+        trainer_trace_summary={
+            "trace_training_geometry_guard_triggered": True,
+            "trace_training_geometry_guard_trigger_count": 1,
+            "trace_training_geometry_guard_armed_transition_count": 0,
+            "trace_last_training_geometry_guard_status": "stop_requested",
+            "trace_last_training_geometry_guard_reason_codes": (
+                "psi_total_limit_exceeded"
+            ),
+            "trace_last_training_geometry_guard_trigger_step": 3,
+            "trace_last_training_geometry_guard_armed": False,
+            "trace_last_training_geometry_guard_required_axes": (
+                "desire_stability,psi_total"
+            ),
+            "trace_last_training_geometry_guard_armed_axes": "psi_total",
+            "trace_last_training_geometry_guard_pending_axes": (
+                "desire_stability"
+            ),
+            "trace_last_training_geometry_guard_arming_progress": (
+                5.0 / 6.0
+            ),
+            "trace_last_training_geometry_guard_desire_observation_count": 2,
+            "trace_last_training_geometry_guard_psi_observation_count": 3,
+        },
+    )
+
+    assert unarmed["status"] == "blocked"
+    assert unarmed["promotion_ready"] is False
+    assert unarmed["geometry_guard_runtime_evidence_required"] is True
+    assert unarmed["geometry_guard_runtime_evidence_ready"] is False
+    assert "geometry_guard_runtime_evidence" in unarmed["failed_checks"]
+    assert armed["promotion_ready"] is True
+    assert armed["geometry_guard_runtime_evidence_ready"] is True
+    assert armed["geometry_guard_runtime_evidence_basis"] == "fully_armed"
+    assert triggered["promotion_ready"] is True
+    assert triggered["geometry_guard_runtime_evidence_ready"] is True
+    assert triggered["geometry_guard_runtime_evidence_basis"] == (
+        "guard_triggered"
+    )
 
 
 @pytest.mark.parametrize(
