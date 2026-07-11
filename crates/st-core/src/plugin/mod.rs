@@ -69,6 +69,7 @@ use crate::PureResult;
 use st_tensor::TensorOpEvent;
 use st_tensor::{set_tensor_op_meta_observer, set_tensor_op_observer, TensorOpMetaEvent};
 use std::any::Any;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::Arc;
 
 fn panic_payload_message(payload: Box<dyn Any + Send>) -> String {
@@ -81,8 +82,11 @@ fn panic_payload_message(payload: Box<dyn Any + Send>) -> String {
         Err(payload) => payload,
     };
 
-    // The destructor belongs to the panicking extension and may panic again.
-    std::mem::forget(payload);
+    // The destructor belongs to the panicking extension and may panic again. Only leak the
+    // secondary panic payload; ordinary unknown payloads are still released.
+    if let Err(secondary_payload) = catch_unwind(AssertUnwindSafe(|| drop(payload))) {
+        std::mem::forget(secondary_payload);
+    }
     "non-string panic payload".to_string()
 }
 
