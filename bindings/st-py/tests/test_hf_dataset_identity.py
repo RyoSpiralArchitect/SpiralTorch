@@ -4,8 +4,11 @@ from types import SimpleNamespace
 
 from spiraltorch.hf_dataset_identity import (
     HF_DATASET_INPUT_IDENTITY_SCHEMA,
+    HF_DATASET_MATERIALIZATION_IDENTITY_SCHEMA,
     hf_dataset_input_identity_lines,
     hf_dataset_input_identity_report,
+    hf_dataset_materialization_identity_lines,
+    hf_dataset_materialization_identity_report,
 )
 
 
@@ -108,3 +111,87 @@ def test_dataset_identity_reports_resolution_and_local_scope_honestly() -> None:
     assert blocked["status"] == "blocked"
     assert local["status"] == "not_applicable"
     assert local["coverage"] == "delegated_to_local_training_input_identity"
+
+
+def test_materialization_identity_hashes_exact_selected_rows_in_order() -> None:
+    train = [{"text": "alpha"}, {"text": "beta\n"}, {"text": "猫"}]
+    evaluation = [{"text": "held out"}]
+
+    first = hf_dataset_materialization_identity_report(
+        train_dataset=train,
+        eval_dataset=evaluation,
+    )
+    replay = hf_dataset_materialization_identity_report(
+        train_dataset=[dict(row) for row in train],
+        eval_dataset=[dict(row) for row in evaluation],
+        expected_identity_id=str(first["observed_identity_id"]),
+    )
+
+    assert first["schema"] == HF_DATASET_MATERIALIZATION_IDENTITY_SCHEMA
+    assert first["status"] == "ready"
+    assert first["materialized_rows_verified"] is True
+    assert first["total_rows"] == 4
+    assert first["total_utf8_bytes"] == len("alphabeta\n猫held out".encode())
+    assert replay["status"] == "ready"
+    assert replay["expected_identity_verified"] is True
+    assert replay["observed_identity_id"] == first["observed_identity_id"]
+    line = hf_dataset_materialization_identity_lines(replay)[0]
+    assert "status=ready" in line
+    assert "rows=4" in line
+
+
+def test_materialization_identity_rejects_content_order_and_split_drift() -> None:
+    train = [{"text": "alpha"}, {"text": "beta"}]
+    baseline = hf_dataset_materialization_identity_report(train_dataset=train)
+    expected = str(baseline["observed_identity_id"])
+
+    content_drift = hf_dataset_materialization_identity_report(
+        train_dataset=[{"text": "alpha"}, {"text": "beta "}],
+        expected_identity_id=expected,
+    )
+    order_drift = hf_dataset_materialization_identity_report(
+        train_dataset=list(reversed(train)),
+        expected_identity_id=expected,
+    )
+    split_drift = hf_dataset_materialization_identity_report(
+        train_dataset=train,
+        eval_dataset=[],
+        expected_identity_id=expected,
+    )
+
+    assert content_drift["status"] == "blocked"
+    assert order_drift["status"] == "blocked"
+    assert split_drift["status"] == "blocked"
+
+
+def test_materialization_identity_blocks_unhashable_text_rows() -> None:
+    missing = hf_dataset_materialization_identity_report(
+        train_dataset=[{"body": "alpha"}],
+    )
+    non_text = hf_dataset_materialization_identity_report(
+        train_dataset=[{"text": None}],
+    )
+
+    assert missing["status"] == "blocked"
+    assert missing["observed_identity_id"] is None
+    assert missing["materialized_rows_verified"] is False
+    assert "does not contain text column" in str(missing["errors"])
+    assert non_text["status"] == "blocked"
+    assert "must be str" in str(non_text["errors"])
+
+
+def test_materialization_identity_contains_dataset_access_failures() -> None:
+    class BrokenDataset:
+        def __len__(self) -> int:
+            return 1
+
+        def __getitem__(self, index: int):
+            raise OSError(f"row {index} unavailable")
+
+    report = hf_dataset_materialization_identity_report(
+        train_dataset=BrokenDataset(),
+    )
+
+    assert report["status"] == "blocked"
+    assert report["observed_identity_id"] is None
+    assert "row 0 unavailable" in str(report["errors"])

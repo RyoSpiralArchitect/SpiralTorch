@@ -1,4 +1,4 @@
-"""Immutable Hugging Face dataset source contracts for fine-tuning."""
+"""Hugging Face dataset source and materialization contracts for fine-tuning."""
 
 from __future__ import annotations
 
@@ -10,13 +10,22 @@ from typing import Any
 
 __all__ = [
     "HF_DATASET_INPUT_IDENTITY_SCHEMA",
+    "HF_DATASET_MATERIALIZATION_IDENTITY_SCHEMA",
     "hf_dataset_input_identity_lines",
     "hf_dataset_input_identity_report",
+    "hf_dataset_materialization_identity_lines",
+    "hf_dataset_materialization_identity_report",
 ]
 
 
 HF_DATASET_INPUT_IDENTITY_SCHEMA = "spiraltorch.hf_dataset_input_identity.v1"
 _HF_DATASET_INPUT_BUNDLE_SCHEMA = "spiraltorch.hf_dataset_input_bundle.v1"
+HF_DATASET_MATERIALIZATION_IDENTITY_SCHEMA = (
+    "spiraltorch.hf_dataset_materialization_identity.v1"
+)
+_HF_DATASET_MATERIALIZATION_BUNDLE_SCHEMA = (
+    "spiraltorch.hf_dataset_materialization_bundle.v1"
+)
 
 
 def _canonical_json_bytes(value: object) -> bytes:
@@ -247,6 +256,171 @@ def hf_dataset_input_identity_lines(
         f"requested_revision={report.get('requested_revision')} "
         f"effective_revision={report.get('effective_revision')} "
         f"resolution={report.get('revision_resolution_source')} "
+        f"verified={report.get('identity_verified')} "
+        f"observed={report.get('observed_identity_id')} "
+        f"expected={report.get('expected_identity_id')} "
+        f"errors={report.get('error_count')}"
+    ]
+
+
+def _materialized_split_identity(
+    dataset: Any | None,
+    *,
+    role: str,
+    text_column: str,
+) -> dict[str, object]:
+    if dataset is None:
+        return {
+            "role": role,
+            "present": False,
+            "row_count": 0,
+            "utf8_bytes": 0,
+            "empty_text_rows": 0,
+            "content_sha256": None,
+        }
+    try:
+        row_count = len(dataset)
+    except (TypeError, AttributeError) as exc:
+        raise TypeError(f"{role} dataset must expose a stable row count") from exc
+    if row_count < 0:
+        raise ValueError(f"{role} dataset reported a negative row count")
+
+    digest = hashlib.sha256()
+    utf8_bytes = 0
+    empty_text_rows = 0
+    for index in range(row_count):
+        row = dataset[index]
+        if not isinstance(row, Mapping):
+            raise TypeError(f"{role} row {index} must be a mapping")
+        if text_column not in row:
+            raise KeyError(
+                f"{role} row {index} does not contain text column {text_column!r}"
+            )
+        text = row[text_column]
+        if not isinstance(text, str):
+            raise TypeError(
+                f"{role} row {index} text column {text_column!r} must be str"
+            )
+        encoded = text.encode("utf-8")
+        digest.update(len(encoded).to_bytes(8, byteorder="big", signed=False))
+        digest.update(encoded)
+        utf8_bytes += len(encoded)
+        empty_text_rows += int(not text)
+
+    if len(dataset) != row_count:
+        raise RuntimeError(f"{role} dataset changed while hashing materialized rows")
+    return {
+        "role": role,
+        "present": True,
+        "row_count": row_count,
+        "utf8_bytes": utf8_bytes,
+        "empty_text_rows": empty_text_rows,
+        "content_sha256": digest.hexdigest(),
+    }
+
+
+def hf_dataset_materialization_identity_report(
+    *,
+    train_dataset: Any,
+    eval_dataset: Any | None = None,
+    text_column: object = "text",
+    expected_identity_id: str | None = None,
+    phase: str = "after_load",
+) -> dict[str, object]:
+    """Fingerprint the exact selected text rows presented for tokenization.
+
+    The report hashes every selected train/eval text value in order without
+    retaining corpus text. This closes the provenance gap left by dataset
+    builders that fetch mutable content outside the pinned Hub repository.
+    """
+
+    expected_id = _validated_identity_id(expected_identity_id)
+    resolved_phase = str(phase).strip()
+    if not resolved_phase:
+        raise ValueError("phase must not be empty")
+    column = str(text_column).strip()
+    if not column:
+        raise ValueError("text_column must not be empty")
+
+    errors: list[str] = []
+    splits: list[dict[str, object]] = []
+    for role, dataset in (("train", train_dataset), ("eval", eval_dataset)):
+        try:
+            splits.append(
+                _materialized_split_identity(
+                    dataset,
+                    role=role,
+                    text_column=column,
+                )
+            )
+        except (KeyError, IndexError, OSError, RuntimeError, TypeError, ValueError) as exc:
+            errors.append(f"{exc.__class__.__name__}: {exc}")
+            splits.append(
+                {
+                    "role": role,
+                    "present": dataset is not None,
+                    "status": "blocked",
+                }
+            )
+
+    identity_payload = None
+    observed_id = None
+    if not errors:
+        identity_payload = {
+            "schema": _HF_DATASET_MATERIALIZATION_BUNDLE_SCHEMA,
+            "text_column": column,
+            "splits": splits,
+        }
+        observed_id = f"sha256:{_sha256_bytes(_canonical_json_bytes(identity_payload))}"
+    if expected_id is not None and observed_id != expected_id:
+        errors.append("dataset materialization identity does not match expected id")
+
+    status = "blocked" if errors else "ready"
+    total_rows = sum(
+        int(split.get("row_count") or 0)
+        for split in splits
+        if split.get("present") is True
+    )
+    total_utf8_bytes = sum(
+        int(split.get("utf8_bytes") or 0)
+        for split in splits
+        if split.get("present") is True
+    )
+    return {
+        "row_type": "hf_dataset_materialization_identity",
+        "schema": HF_DATASET_MATERIALIZATION_IDENTITY_SCHEMA,
+        "status": status,
+        "phase": resolved_phase,
+        "captured_at": datetime.now(timezone.utc).isoformat(),
+        "text_column": column,
+        "observed_identity_id": observed_id,
+        "expected_identity_id": expected_id,
+        "expected_identity_verified": (
+            None if expected_id is None else observed_id == expected_id and not errors
+        ),
+        "identity_verified": status == "ready",
+        "path_independent": True,
+        "coverage": "exact_selected_text_rows_in_order",
+        "materialized_rows_verified": status == "ready",
+        "total_rows": total_rows,
+        "total_utf8_bytes": total_utf8_bytes,
+        "splits": splits,
+        "identity_payload": identity_payload,
+        "error_count": len(errors),
+        "errors": errors,
+    }
+
+
+def hf_dataset_materialization_identity_lines(
+    report: Mapping[str, object],
+) -> list[str]:
+    return [
+        "hf_dataset_materialization_identity "
+        f"status={report.get('status')} "
+        f"phase={report.get('phase')} "
+        f"column={report.get('text_column')} "
+        f"rows={report.get('total_rows')} "
+        f"utf8_bytes={report.get('total_utf8_bytes')} "
         f"verified={report.get('identity_verified')} "
         f"observed={report.get('observed_identity_id')} "
         f"expected={report.get('expected_identity_id')} "

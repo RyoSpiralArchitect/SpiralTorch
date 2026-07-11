@@ -40,8 +40,11 @@ from spiraltorch.hf_execution_identity import (
 )
 from spiraltorch.hf_dataset_identity import (
     HF_DATASET_INPUT_IDENTITY_SCHEMA,
+    HF_DATASET_MATERIALIZATION_IDENTITY_SCHEMA,
     hf_dataset_input_identity_lines,
     hf_dataset_input_identity_report,
+    hf_dataset_materialization_identity_lines,
+    hf_dataset_materialization_identity_report,
 )
 from spiraltorch.hf_ft import (
     HF_GPT2_FT_DEFAULT_DEVICE_BACKENDS,
@@ -176,6 +179,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "Fail before model loading unless the remote Hugging Face dataset "
             "repository commit and logical config/split selection match this "
             "sha256 identity."
+        ),
+    )
+    parser.add_argument(
+        "--expected-dataset-materialization-id",
+        default=None,
+        help=(
+            "Fail after dataset selection and before tokenization unless every "
+            "selected train/eval text row matches this sha256 identity."
         ),
     )
     parser.add_argument(
@@ -651,6 +662,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         parser.error("--expected-training-input-id must be sha256:<64 lowercase hex>")
     if not _valid_adapter_id(args.expected_dataset_input_id):
         parser.error("--expected-dataset-input-id must be sha256:<64 lowercase hex>")
+    if not _valid_adapter_id(args.expected_dataset_materialization_id):
+        parser.error(
+            "--expected-dataset-materialization-id must be "
+            "sha256:<64 lowercase hex>"
+        )
     if not _valid_adapter_id(args.expected_runtime_input_id):
         parser.error("--expected-runtime-input-id must be sha256:<64 lowercase hex>")
     if not _valid_adapter_id(args.expected_execution_input_id):
@@ -875,6 +891,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         parser.error("--generation-from-inference-distortion requires --generation-prompt")
     if args.metadata_only and args.train:
         parser.error("--metadata-only and --train are mutually exclusive")
+    if (
+        args.expected_dataset_materialization_id is not None
+        and not args.train
+        and not args.metadata_only
+    ):
+        parser.error(
+            "--expected-dataset-materialization-id requires --train or "
+            "--metadata-only"
+        )
     if args.validation_file and not args.train_file:
         parser.error("--validation-file requires --train-file")
     if args.validation_file and args.validation_fraction > 0.0:
@@ -1370,6 +1395,14 @@ def _requires_remote_dataset_identity(args: argparse.Namespace) -> bool:
             or args.metadata_only
             or args.expected_dataset_input_id is not None
         )
+    )
+
+
+def _requires_dataset_materialization_identity(args: argparse.Namespace) -> bool:
+    return bool(
+        args.train
+        or args.metadata_only
+        or args.expected_dataset_materialization_id is not None
     )
 
 
@@ -2640,6 +2673,41 @@ def _dataset_input_identity_report(
         }
 
 
+def _dataset_materialization_identity_report(
+    args: argparse.Namespace,
+    train_dataset: Any,
+    eval_dataset: Any | None,
+    *,
+    expected_identity_id: str | None = None,
+) -> dict[str, object]:
+    expected_id = (
+        expected_identity_id
+        if expected_identity_id is not None
+        else getattr(args, "expected_dataset_materialization_id", None)
+    )
+    try:
+        return hf_dataset_materialization_identity_report(
+            train_dataset=train_dataset,
+            eval_dataset=eval_dataset,
+            text_column=args.text_column,
+            expected_identity_id=expected_id,
+            phase="after_selection",
+        )
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        return {
+            "row_type": "hf_dataset_materialization_identity",
+            "schema": HF_DATASET_MATERIALIZATION_IDENTITY_SCHEMA,
+            "status": "blocked",
+            "phase": "after_selection",
+            "expected_identity_id": expected_id,
+            "observed_identity_id": None,
+            "identity_verified": False,
+            "materialized_rows_verified": False,
+            "error_count": 1,
+            "errors": [f"{exc.__class__.__name__}: {exc}"],
+        }
+
+
 def _canonicalize_dataset_input_launch_command(
     args: argparse.Namespace,
     report: Mapping[str, object],
@@ -2673,6 +2741,24 @@ def _canonicalize_dataset_input_launch_command(
     if not _argv_has_option(command, "--expected-dataset-input-id"):
         command.extend(["--expected-dataset-input-id", str(observed_id)])
     args._hf_finetune_launch_command = command
+
+
+def _canonicalize_dataset_materialization_launch_command(
+    args: argparse.Namespace,
+    report: Mapping[str, object],
+) -> None:
+    command = list(getattr(args, "_hf_finetune_launch_command", []) or [])
+    observed_id = report.get("observed_identity_id")
+    if (
+        command
+        and report.get("status") == "ready"
+        and observed_id is not None
+        and not _argv_has_option(command, "--expected-dataset-materialization-id")
+    ):
+        command.extend(
+            ["--expected-dataset-materialization-id", str(observed_id)]
+        )
+        args._hf_finetune_launch_command = command
 
 
 def _canonicalize_training_input_launch_command(
@@ -2796,6 +2882,12 @@ def _refresh_card_launch_command(
     command = list(getattr(args, "_hf_finetune_launch_command", []) or [])
     card["launch_command"] = command or None
     card["launch_command_display"] = shlex.join(command) if command else None
+    nested_preflight = card.get("preflight")
+    if isinstance(nested_preflight, dict) and nested_preflight is not card:
+        nested_preflight["launch_command"] = command or None
+        nested_preflight["launch_command_display"] = (
+            shlex.join(command) if command else None
+        )
 
 
 def _finetune_start_report(
@@ -2813,6 +2905,9 @@ def _finetune_start_report(
     )
     dataset_input_identity = dict(
         getattr(args, "_hf_dataset_input_identity_report", {}) or {}
+    )
+    dataset_materialization_identity = dict(
+        getattr(args, "_hf_dataset_materialization_identity_report", {}) or {}
     )
     runtime_input_identity = dict(
         getattr(args, "_hf_runtime_input_identity_report", {}) or {}
@@ -2869,6 +2964,14 @@ def _finetune_start_report(
             if not dataset_input_identity
             or dataset_input_identity.get("status") == "not_applicable"
             else dataset_input_identity.get("identity_verified") is True
+        ),
+        "dataset_materialization_identity": (
+            dataset_materialization_identity or None
+        ),
+        "dataset_materialization_identity_verified": (
+            None
+            if not dataset_materialization_identity
+            else dataset_materialization_identity.get("identity_verified") is True
         ),
         "runtime_input_identity": runtime_input_identity or None,
         "runtime_input_identity_verified": (
@@ -3058,6 +3161,19 @@ def _base_run_card(
                 getattr(args, "_hf_dataset_input_identity_report", {}) or {}
             ).get("effective_dataset_name"),
             "fail_fast": _requires_remote_dataset_identity(args),
+        },
+        "dataset_materialization_identity": None,
+        "dataset_materialization_identity_contract": {
+            "status": (
+                "pending"
+                if _requires_dataset_materialization_identity(args)
+                else "not_requested"
+            ),
+            "expected_identity_id": args.expected_dataset_materialization_id,
+            "observed_identity_id": None,
+            "identity_verified": False,
+            "fail_fast": _requires_dataset_materialization_identity(args),
+            "verification_phase": "after_selection",
         },
         "model_runtime_identity_pre_model": None,
         "model_runtime_identity_after_model": None,
@@ -3369,6 +3485,19 @@ def _main_with_runtime_access(
         ),
         "fail_fast": _requires_remote_dataset_identity(args),
         "verification_phase": "dataset_load",
+    }
+    preflight["dataset_materialization_identity"] = None
+    preflight["dataset_materialization_identity_contract"] = {
+        "status": (
+            "pending"
+            if _requires_dataset_materialization_identity(args)
+            else "not_requested"
+        ),
+        "expected_identity_id": args.expected_dataset_materialization_id,
+        "observed_identity_id": None,
+        "identity_verified": False,
+        "fail_fast": _requires_dataset_materialization_identity(args),
+        "verification_phase": "after_selection",
     }
     preflight["model_runtime_identity_contract"] = {
         "status": (
@@ -3923,6 +4052,76 @@ def _main_with_runtime_access(
     raw_eval = (
         None if raw_eval is None else _select_rows(raw_eval, args.max_eval_samples)
     )
+    dataset_materialization_identity = _dataset_materialization_identity_report(
+        args,
+        raw_train,
+        raw_eval,
+    )
+    args._hf_dataset_materialization_identity_report = (
+        dataset_materialization_identity
+    )
+    _canonicalize_dataset_materialization_launch_command(
+        args,
+        dataset_materialization_identity,
+    )
+    _refresh_card_launch_command(card, args)
+    card["dataset_materialization_identity"] = dict(
+        dataset_materialization_identity
+    )
+    card["dataset_materialization_identity_contract"] = {
+        "status": (
+            "blocked"
+            if dataset_materialization_identity.get("status") != "ready"
+            else "enforced"
+            if args.expected_dataset_materialization_id is not None
+            else "adopted"
+        ),
+        "expected_identity_id": (
+            args.expected_dataset_materialization_id
+            or dataset_materialization_identity.get("observed_identity_id")
+        ),
+        "observed_identity_id": dataset_materialization_identity.get(
+            "observed_identity_id"
+        ),
+        "identity_verified": dataset_materialization_identity.get(
+            "identity_verified"
+        ),
+        "total_rows": dataset_materialization_identity.get("total_rows"),
+        "total_utf8_bytes": dataset_materialization_identity.get(
+            "total_utf8_bytes"
+        ),
+        "fail_fast": True,
+        "verification_phase": "after_selection",
+    }
+    nested_preflight = card.get("preflight")
+    if isinstance(nested_preflight, dict):
+        nested_preflight["dataset_materialization_identity"] = dict(
+            dataset_materialization_identity
+        )
+        nested_preflight["dataset_materialization_identity_contract"] = dict(
+            card["dataset_materialization_identity_contract"]
+        )
+    card["finetune_start_report"] = _finetune_start_report(
+        args,
+        model_artifact_load_report,
+    )
+    for line in hf_dataset_materialization_identity_lines(
+        dataset_materialization_identity
+    ):
+        print(line)
+    if dataset_materialization_identity.get("status") != "ready":
+        card.update(
+            {
+                "load_status": "error",
+                "failure_stage": "dataset_materialization_identity_after_selection",
+                "failure_error": (
+                    "selected dataset rows do not match the required "
+                    "materialization identity"
+                ),
+            }
+        )
+        _write_card(card, args)
+        return 1
     preview_texts = _text_rows(raw_train, args.text_column)
 
     zspace_probe = None

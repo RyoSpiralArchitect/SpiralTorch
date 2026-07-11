@@ -3889,6 +3889,113 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             )
         )
 
+    def test_scale_up_pins_dataset_materialization_and_rejects_drift(
+        self,
+    ) -> None:
+        materialization_id = f"sha256:{'7' * 64}"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output = root / "source"
+            command = [
+                sys.executable,
+                str(EXAMPLE_PATH),
+                "--metadata-only",
+                "--output-dir",
+                str(output),
+                "--run-card",
+                str(output / "run-card.json"),
+            ]
+            summary = {
+                "row_type": "hf_gpt2_finetune_sweep_report_summary",
+                "scale_up_candidate_label": "materialization-pinned",
+                "scale_up_candidate_reason": "test",
+                "scale_up_candidate_command": command,
+                "scale_up_candidate_output_dir": str(output),
+                "scale_up_candidate_run_card": str(output / "run-card.json"),
+                "scale_up_candidate_dataset_materialization_identity_status": (
+                    "ready"
+                ),
+                "scale_up_candidate_dataset_materialization_identity_verified": True,
+                "scale_up_candidate_dataset_materialization_observed_id": (
+                    materialization_id
+                ),
+                "scale_up_candidate_dataset_materialization_total_rows": 96,
+            }
+            scale_up = hf_ft.hf_gpt2_finetune_scale_up_command(
+                summary,
+                output_dir=root / "next",
+                max_steps_multiplier=None,
+                max_train_samples_multiplier=None,
+            )
+            preflight = hf_ft.hf_gpt2_finetune_scale_up_preflight_report(scale_up)
+            tampered = json.loads(json.dumps(scale_up))
+            flag_index = tampered["command"].index(
+                "--expected-dataset-materialization-id"
+            )
+            del tampered["command"][flag_index : flag_index + 2]
+            blocked = hf_ft.hf_gpt2_finetune_scale_up_preflight_report(tampered)
+            drifted_summary = dict(summary)
+            drifted_summary["scale_up_candidate_command"] = [
+                *command,
+                "--expected-dataset-materialization-id",
+                materialization_id,
+            ]
+            drifted_summary[
+                "scale_up_candidate_dataset_materialization_observed_id"
+            ] = f"sha256:{'8' * 64}"
+            drifted = hf_ft.hf_gpt2_finetune_scale_up_command(
+                drifted_summary,
+                output_dir=root / "drifted",
+                max_steps_multiplier=None,
+                max_train_samples_multiplier=None,
+            )
+            drifted_preflight = hf_ft.hf_gpt2_finetune_scale_up_preflight_report(
+                drifted
+            )
+
+        self.assertEqual(
+            scale_up["dataset_materialization_expected_id"],
+            materialization_id,
+        )
+        self.assertEqual(
+            scale_up["dataset_materialization_identity_contract_status"],
+            "enforced",
+        )
+        self.assertEqual(
+            scale_up["command"][
+                scale_up["command"].index(
+                    "--expected-dataset-materialization-id"
+                )
+                + 1
+            ],
+            materialization_id,
+        )
+        self.assertTrue(preflight["ready"])
+        self.assertEqual(
+            preflight["dataset_materialization_expected_id"],
+            materialization_id,
+        )
+        self.assertFalse(blocked["ready"])
+        self.assertTrue(
+            any(
+                issue.get("field")
+                == "--expected-dataset-materialization-id"
+                for issue in blocked["issues"]
+            )
+        )
+        self.assertEqual(
+            drifted["dataset_materialization_identity_contract_status"],
+            "blocked",
+        )
+        self.assertFalse(drifted_preflight["ready"])
+        self.assertTrue(
+            any(
+                issue.get("field")
+                == "dataset_materialization_identity_contract"
+                for issue in drifted_preflight["issues"]
+            )
+        )
+
     def test_scale_up_pins_execution_identity_and_rejects_flag_drift(
         self,
     ) -> None:
@@ -10508,6 +10615,74 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 ]
             )
 
+    def test_bridge_canonicalizes_materialized_rows_for_next_generation(
+        self,
+    ) -> None:
+        module = load_bridge_example()
+        args = module.parse_args(["--metadata-only"])
+        materialization = module._dataset_materialization_identity_report(
+            args,
+            FakeDataset([{"text": "alpha"}, {"text": "beta"}]),
+            FakeDataset([{"text": "held out"}]),
+        )
+
+        module._canonicalize_dataset_materialization_launch_command(
+            args,
+            materialization,
+        )
+        command = args._hf_finetune_launch_command
+        expected = materialization["observed_identity_id"]
+
+        self.assertEqual(materialization["status"], "ready")
+        self.assertEqual(materialization["total_rows"], 3)
+        self.assertEqual(
+            command[
+                command.index("--expected-dataset-materialization-id") + 1
+            ],
+            expected,
+        )
+        replay = module._dataset_materialization_identity_report(
+            module.parse_args(
+                [
+                    "--metadata-only",
+                    "--expected-dataset-materialization-id",
+                    expected,
+                ]
+            ),
+            FakeDataset([{"text": "alpha"}, {"text": "beta"}]),
+            FakeDataset([{"text": "held out"}]),
+        )
+        drift = module._dataset_materialization_identity_report(
+            module.parse_args(
+                [
+                    "--metadata-only",
+                    "--expected-dataset-materialization-id",
+                    expected,
+                ]
+            ),
+            FakeDataset([{"text": "alpha"}, {"text": "changed"}]),
+            FakeDataset([{"text": "held out"}]),
+        )
+        self.assertEqual(replay["status"], "ready")
+        self.assertTrue(replay["expected_identity_verified"])
+        self.assertEqual(drift["status"], "blocked")
+
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            module.parse_args(
+                [
+                    "--expected-dataset-materialization-id",
+                    expected,
+                ]
+            )
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            module.parse_args(
+                [
+                    "--metadata-only",
+                    "--expected-dataset-materialization-id",
+                    "invalid",
+                ]
+            )
+
     def test_bridge_only_requires_remote_dataset_identity_when_loading(self) -> None:
         module = load_bridge_example()
 
@@ -10522,6 +10697,11 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertTrue(module._requires_remote_dataset_identity(metadata))
         self.assertTrue(module._requires_remote_dataset_identity(training))
         self.assertTrue(module._requires_remote_dataset_identity(expected))
+        self.assertFalse(
+            module._requires_dataset_materialization_identity(preflight_only)
+        )
+        self.assertTrue(module._requires_dataset_materialization_identity(metadata))
+        self.assertTrue(module._requires_dataset_materialization_identity(training))
 
     def test_bridge_canonicalizes_execution_identity_for_next_generation(
         self,
