@@ -1539,7 +1539,13 @@ original `--model-name`, `--model-artifact-kind peft-adapter` and
 `--finetune-mode lora` are made explicit, and the expected child lineage depth
 is recorded before launch. The emitted command also pins the expected parent
 adapter ID/depth/root ID, and the child verifies that content fingerprint both
-before and immediately after model load. `spiral-hf-scale-up sweep-report.json`
+before and immediately after model load. Promotion-required children also get a
+complete launch contract: `--train`, LoRA mode, before/after evaluation, and the
+promotion gate are normalized together. Source metadata/tokenize/recipe-only
+switches, `--no-eval-after-train`, or `--eval-after-train-policy never` are
+removed safely, while preflight rejects any later command/metadata tampering or
+an incomplete generation-change policy.
+`spiral-hf-scale-up sweep-report.json`
 therefore continues the winning weights rather than merely rerunning their
 configuration. Pass `--adapter-continuation replay` for the old configuration
 replay behavior, or `--adapter-continuation continue` to require adapter
