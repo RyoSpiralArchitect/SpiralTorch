@@ -4336,6 +4336,19 @@ def hf_gpt2_finetune_summary_lines(report: Mapping[str, object]) -> list[str]:
         if isinstance(geometry_guard_runtime, Mapping)
         else {}
     )
+    if report.get("trainer_geometry_guard_active") is True:
+        lines.append(
+            "hf_gpt2_ft_trainer_geometry_guard_horizon "
+            f"status={report.get('trainer_geometry_guard_horizon_status')} "
+            f"ready={report.get('trainer_geometry_guard_horizon_ready')} "
+            "segment="
+            f"{report.get('trainer_geometry_guard_initial_step')}->"
+            f"{report.get('trainer_geometry_guard_max_steps')} "
+            f"remaining={report.get('trainer_geometry_guard_remaining_steps')} "
+            "log_events="
+            f"{report.get('trainer_geometry_guard_available_log_events')}/"
+            f"{report.get('trainer_geometry_guard_required_log_events')}"
+        )
     if report.get("trace_training_geometry_guard_count") is not None:
         lines.append(
             "hf_gpt2_ft_trainer_geometry_guard "
@@ -4351,6 +4364,10 @@ def hf_gpt2_finetune_summary_lines(report: Mapping[str, object]) -> list[str]:
             f"{report.get('trace_last_training_geometry_guard_pending_axes')} "
             f"runtime={geometry_guard_runtime.get('basis')} "
             f"horizon={report.get('trainer_geometry_guard_horizon_status')} "
+            "segment="
+            f"{report.get('trainer_geometry_guard_initial_step')}->"
+            f"{report.get('trainer_geometry_guard_max_steps')} "
+            f"remaining={report.get('trainer_geometry_guard_remaining_steps')} "
             "log_events="
             f"{report.get('trainer_geometry_guard_available_log_events')}/"
             f"{report.get('trainer_geometry_guard_required_log_events')} "
@@ -4632,16 +4649,29 @@ def _positive_integer(value: object, *, label: str) -> int:
     return resolved
 
 
+def _optional_non_negative_integer(value: object) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    number = _safe_number(value)
+    if number is None or not math.isfinite(float(number)):
+        return None
+    resolved = int(number)
+    if float(resolved) != float(number) or resolved < 0:
+        return None
+    return resolved
+
+
 def hf_gpt2_finetune_geometry_guard_horizon_report(
     *,
     max_steps: object,
     logging_steps: object,
+    initial_step: object = 0,
     min_desire_stability_guard: object = None,
     max_psi_total_guard: object = None,
     minimum_observations: object = 3,
     patience: object = 2,
 ) -> dict[str, object]:
-    """Prove that a guarded Trainer run can emit enough telemetry to arm."""
+    """Prove the remaining Trainer segment can emit enough telemetry to arm."""
 
     min_desire = _optional_unit_interval(
         min_desire_stability_guard,
@@ -4660,6 +4690,9 @@ def hf_gpt2_finetune_geometry_guard_horizon_report(
         label="minimum_observations",
     )
     resolved_patience = _positive_integer(patience, label="patience")
+    resolved_initial_step = _optional_non_negative_integer(initial_step)
+    if resolved_initial_step is None:
+        raise ValueError("initial_step must be a non-negative integer")
     active = bool(min_desire is not None or max_psi is not None)
     max_steps_number = _safe_number(max_steps)
     resolved_max_steps = (
@@ -4675,14 +4708,25 @@ def hf_gpt2_finetune_geometry_guard_horizon_report(
         if min_desire is not None
         else resolved_minimum_observations + resolved_patience - 1
     )
+    initial_step_within_horizon = bool(
+        resolved_max_steps is not None
+        and resolved_initial_step <= resolved_max_steps
+    )
+    remaining_steps = (
+        resolved_max_steps - resolved_initial_step
+        if initial_step_within_horizon and resolved_max_steps is not None
+        else None
+    )
     available_log_events = (
         None
-        if resolved_max_steps is None
-        else resolved_max_steps // resolved_logging_steps
+        if remaining_steps is None or resolved_max_steps is None
+        else (
+            resolved_max_steps // resolved_logging_steps
+            - resolved_initial_step // resolved_logging_steps
+        )
     )
     horizon_sufficient = bool(
-        resolved_max_steps is not None
-        and resolved_max_steps >= required_log_events
+        remaining_steps is not None and remaining_steps >= required_log_events
     )
     cadence_sufficient = bool(
         available_log_events is not None
@@ -4690,14 +4734,17 @@ def hf_gpt2_finetune_geometry_guard_horizon_report(
     )
     recommended_logging_steps = (
         None
-        if not active or resolved_max_steps is None
-        else max(1, resolved_max_steps // required_log_events)
+        if not active or remaining_steps is None
+        else max(1, remaining_steps // required_log_events)
     )
     if not active:
         status = "not_applicable"
         ready = True
     elif resolved_max_steps is None:
         status = "max_steps_required"
+        ready = False
+    elif not initial_step_within_horizon:
+        status = "initial_step_exceeds_max_steps"
         ready = False
     elif not horizon_sufficient:
         status = "horizon_too_short"
@@ -4714,6 +4761,10 @@ def hf_gpt2_finetune_geometry_guard_horizon_report(
         "active": active,
         "ready": ready,
         "max_steps": resolved_max_steps,
+        "initial_step": resolved_initial_step,
+        "resume_aware": resolved_initial_step > 0,
+        "initial_step_within_horizon": initial_step_within_horizon,
+        "remaining_steps": remaining_steps,
         "logging_steps": resolved_logging_steps,
         "min_desire_stability_guard": min_desire,
         "max_psi_total_guard": max_psi,
@@ -4725,20 +4776,11 @@ def hf_gpt2_finetune_geometry_guard_horizon_report(
         "cadence_sufficient": cadence_sufficient if active else True,
         "recommended_logging_steps": recommended_logging_steps,
         "auto_adjustment_possible": bool(active and horizon_sufficient),
-        "minimum_max_steps": required_log_events if active else None,
+        "minimum_remaining_steps": required_log_events if active else None,
+        "minimum_max_steps": (
+            resolved_initial_step + required_log_events if active else None
+        ),
     }
-
-
-def _optional_non_negative_integer(value: object) -> int | None:
-    if value is None or isinstance(value, bool):
-        return None
-    number = _safe_number(value)
-    if number is None or not math.isfinite(float(number)):
-        return None
-    resolved = int(number)
-    if float(resolved) != float(number) or resolved < 0:
-        return None
-    return resolved
 
 
 def hf_gpt2_finetune_geometry_guard_runtime_evidence_report(
@@ -6972,14 +7014,16 @@ def hf_gpt2_finetune_checkpoint_resume_report(
             else:
                 errors.append("trainer_state.json must contain an object")
 
-    global_step_number = _safe_number(state.get("global_step"))
-    saved_max_steps_number = _safe_number(state.get("max_steps"))
-    global_step = (
-        None if global_step_number is None else int(global_step_number)
-    )
-    saved_max_steps = (
-        None if saved_max_steps_number is None else int(saved_max_steps_number)
-    )
+    global_step = _optional_non_negative_integer(state.get("global_step"))
+    saved_max_steps = _optional_non_negative_integer(state.get("max_steps"))
+    if state and global_step is None:
+        errors.append(
+            "trainer_state.json global_step must be a non-negative integer"
+        )
+    if state.get("max_steps") is not None and saved_max_steps is None:
+        errors.append(
+            "trainer_state.json max_steps must be a non-negative integer"
+        )
     requested_steps = (
         int(requested_max_steps)
         if requested_max_steps is not None and int(requested_max_steps) > 0
@@ -7103,6 +7147,24 @@ def hf_gpt2_finetune_checkpoint_resume_report(
         "errors": errors,
         "warnings": warnings,
     }
+
+
+def _geometry_guard_resume_context(
+    checkpoint: object,
+    *,
+    requested_max_steps: object,
+) -> tuple[int, dict[str, object] | None]:
+    if checkpoint is None:
+        return 0, None
+    requested_steps = _optional_non_negative_integer(requested_max_steps)
+    report = hf_gpt2_finetune_checkpoint_resume_report(
+        str(checkpoint),
+        requested_max_steps=(
+            requested_steps if requested_steps and requested_steps > 0 else None
+        ),
+    )
+    initial_step = _optional_non_negative_integer(report.get("global_step"))
+    return (0 if initial_step is None else initial_step), report
 
 
 def hf_gpt2_finetune_checkpoint_resume_lines(
@@ -8439,6 +8501,15 @@ def hf_gpt2_finetune_scale_up_command(
         if resolved_max_steps is not None
         else _command_flag_value(base_command, "--max-steps")
     )
+    effective_resume_checkpoint = (
+        resume_from_checkpoint or source_resume_checkpoint
+    )
+    geometry_guard_initial_step, geometry_guard_checkpoint_resume_report = (
+        _geometry_guard_resume_context(
+            effective_resume_checkpoint,
+            requested_max_steps=effective_max_steps,
+        )
+    )
     source_logging_steps = _positive_integer(
         _command_flag_value(base_command, "--logging-steps") or 25,
         label="logging_steps",
@@ -8447,6 +8518,7 @@ def hf_gpt2_finetune_scale_up_command(
         hf_gpt2_finetune_geometry_guard_horizon_report(
             max_steps=effective_max_steps,
             logging_steps=source_logging_steps,
+            initial_step=geometry_guard_initial_step,
             min_desire_stability_guard=resolved_min_desire_guard,
             max_psi_total_guard=resolved_max_psi_guard,
             minimum_observations=resolved_geometry_guard_min_events,
@@ -8473,6 +8545,7 @@ def hf_gpt2_finetune_scale_up_command(
         hf_gpt2_finetune_geometry_guard_horizon_report(
             max_steps=effective_max_steps,
             logging_steps=resolved_logging_steps,
+            initial_step=geometry_guard_initial_step,
             min_desire_stability_guard=resolved_min_desire_guard,
             max_psi_total_guard=resolved_max_psi_guard,
             minimum_observations=resolved_geometry_guard_min_events,
@@ -8840,6 +8913,10 @@ def hf_gpt2_finetune_scale_up_command(
         "trainer_max_psi_total_guard": resolved_max_psi_guard,
         "trainer_geometry_guard_min_events": resolved_geometry_guard_min_events,
         "trainer_geometry_guard_patience": resolved_geometry_guard_patience,
+        "trainer_geometry_guard_initial_step": geometry_guard_initial_step,
+        "trainer_geometry_guard_checkpoint_resume_report": (
+            geometry_guard_checkpoint_resume_report
+        ),
         "trainer_geometry_guard_source": source_trainer_geometry_guard,
         "trainer_geometry_guard_source_logging_steps": source_logging_steps,
         "trainer_geometry_guard_resolved_logging_steps": resolved_logging_steps,
@@ -9556,10 +9633,41 @@ def hf_gpt2_finetune_scale_up_preflight_report(
             ),
         }
     )
+    geometry_guard_initial_step, geometry_guard_checkpoint_resume_report = (
+        _geometry_guard_resume_context(
+            _command_flag_value(command, "--resume-from-checkpoint"),
+            requested_max_steps=_command_flag_value(command, "--max-steps"),
+        )
+    )
+    if geometry_guard_checkpoint_resume_report is not None:
+        checkpoint_resume_ready = (
+            geometry_guard_checkpoint_resume_report.get("status") != "invalid"
+        )
+        inputs.append(
+            {
+                "field": "checkpoint_resume",
+                "observed": geometry_guard_checkpoint_resume_report,
+                "required_for_geometry_guard": trainer_geometry_guard_active,
+                "verified": (
+                    checkpoint_resume_ready
+                    if trainer_geometry_guard_active
+                    else None
+                ),
+            }
+        )
+        if trainer_geometry_guard_active and not checkpoint_resume_ready:
+            issues.append(
+                {
+                    "severity": "error",
+                    "field": "checkpoint_resume",
+                    "message": "checkpoint resume metadata is invalid",
+                }
+            )
     trainer_geometry_guard_horizon = (
         hf_gpt2_finetune_geometry_guard_horizon_report(
             max_steps=_command_flag_value(command, "--max-steps"),
             logging_steps=_command_flag_value(command, "--logging-steps") or 25,
+            initial_step=geometry_guard_initial_step,
             min_desire_stability_guard=expected_min_desire_guard,
             max_psi_total_guard=expected_max_psi_guard,
             minimum_observations=expected_guard_min_events,
@@ -9577,6 +9685,10 @@ def hf_gpt2_finetune_scale_up_preflight_report(
             "active",
             "ready",
             "max_steps",
+            "initial_step",
+            "resume_aware",
+            "initial_step_within_horizon",
+            "remaining_steps",
             "logging_steps",
             "min_desire_stability_guard",
             "max_psi_total_guard",
@@ -9588,6 +9700,7 @@ def hf_gpt2_finetune_scale_up_preflight_report(
             "cadence_sufficient",
             "recommended_logging_steps",
             "auto_adjustment_possible",
+            "minimum_remaining_steps",
             "minimum_max_steps",
         )
         trainer_geometry_guard_horizon_matches = all(
@@ -10741,6 +10854,10 @@ def hf_gpt2_finetune_scale_up_preflight_report(
         "trainer_geometry_guard_command_contract_matches": (
             trainer_geometry_guard_command_contract_matches
         ),
+        "trainer_geometry_guard_initial_step": geometry_guard_initial_step,
+        "trainer_geometry_guard_checkpoint_resume_report": (
+            geometry_guard_checkpoint_resume_report
+        ),
         "trainer_geometry_guard_horizon": trainer_geometry_guard_horizon,
         "trainer_geometry_guard_horizon_matches": (
             trainer_geometry_guard_horizon_matches
@@ -10891,6 +11008,8 @@ def hf_gpt2_finetune_scale_up_preflight_lines(
             f"{report.get('trainer_geometry_guard_command_contract_matches')} "
             f"guard_horizon={geometry_guard_horizon.get('status')} "
             f"guard_horizon_ready={geometry_guard_horizon.get('ready')} "
+            f"guard_initial_step={geometry_guard_horizon.get('initial_step')} "
+            f"guard_remaining_steps={geometry_guard_horizon.get('remaining_steps')} "
             "guard_horizon_matches="
             f"{report.get('trainer_geometry_guard_horizon_matches')}"
         )
@@ -11725,6 +11844,18 @@ def summarize_hf_gpt2_finetune_run_card(
         ),
         "trainer_geometry_guard_horizon_ready": (
             trainer_geometry_guard_horizon.get("ready")
+        ),
+        "trainer_geometry_guard_initial_step": (
+            trainer_geometry_guard_horizon.get("initial_step")
+        ),
+        "trainer_geometry_guard_max_steps": (
+            trainer_geometry_guard_horizon.get("max_steps")
+        ),
+        "trainer_geometry_guard_remaining_steps": (
+            trainer_geometry_guard_horizon.get("remaining_steps")
+        ),
+        "trainer_geometry_guard_resume_aware": (
+            trainer_geometry_guard_horizon.get("resume_aware")
         ),
         "trainer_geometry_guard_required_log_events": (
             trainer_geometry_guard_horizon.get("required_log_events")
@@ -14028,6 +14159,7 @@ def hf_gpt2_finetune_trainer_trace_callback(
     max_psi_total_guard: float | None = None,
     geometry_guard_min_events: int = 3,
     geometry_guard_patience: int = 2,
+    geometry_guard_initial_step: int = 0,
 ):
     """Create a Transformers TrainerCallback that writes SpiralTorch JSONL."""
 
@@ -14074,6 +14206,13 @@ def hf_gpt2_finetune_trainer_trace_callback(
         geometry_guard_patience,
         label="geometry_guard_patience",
     )
+    geometry_guard_initial_step_value = _optional_non_negative_integer(
+        geometry_guard_initial_step
+    )
+    if geometry_guard_initial_step_value is None:
+        raise ValueError(
+            "geometry_guard_initial_step must be a non-negative integer"
+        )
     geometry_guard_active = bool(
         min_desire_stability_value is not None or max_psi_total_value is not None
     )
@@ -14251,6 +14390,7 @@ def hf_gpt2_finetune_trainer_trace_callback(
                     "logging_steps",
                     _safe_attr(args, "logging_steps", 1),
                 ),
+                initial_step=geometry_guard_initial_step_value,
                 min_desire_stability_guard=min_desire_stability_value,
                 max_psi_total_guard=max_psi_total_value,
                 minimum_observations=geometry_guard_min_events_value,

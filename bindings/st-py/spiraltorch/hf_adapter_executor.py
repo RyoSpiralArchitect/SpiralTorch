@@ -1634,6 +1634,10 @@ def _trainer_telemetry_evidence_contract(
             "active",
             "ready",
             "max_steps",
+            "initial_step",
+            "resume_aware",
+            "initial_step_within_horizon",
+            "remaining_steps",
             "logging_steps",
             "min_desire_stability_guard",
             "max_psi_total_guard",
@@ -1645,6 +1649,7 @@ def _trainer_telemetry_evidence_contract(
             "cadence_sufficient",
             "recommended_logging_steps",
             "auto_adjustment_possible",
+            "minimum_remaining_steps",
             "minimum_max_steps",
         )
         geometry_guard_horizon_matches = bool(
