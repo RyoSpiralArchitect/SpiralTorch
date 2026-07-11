@@ -584,6 +584,16 @@ def hf_adapter_continuation_executor_runtime_report(
         "output_root": str(paths["output_root"]),
         "supervisor_state_path": str(paths["supervisor_state_path"]),
         "supervisor_launch_state_path": str(paths["supervisor_launch_state_path"]),
+        "generation_plan_id": (
+            supervision.get("generation_plan_id")
+            if isinstance(supervision, Mapping)
+            else None
+        ),
+        "generation_plan_status": (
+            supervision.get("generation_plan_status")
+            if isinstance(supervision, Mapping)
+            else None
+        ),
         "executor_launch": executor_launch_status,
         "executor": executor_status,
         "supervision": supervision,
@@ -752,6 +762,7 @@ def hf_adapter_continuation_executor_runtime_lines(
         f"executor_launch={report.get('executor_launch_status')} "
         f"supervisor={report.get('supervisor_status')} "
         f"supervisor_launch={report.get('supervisor_launch_status')} "
+        f"plan_id={report.get('generation_plan_id')} "
         "transition_evidence="
         f"{executor.get('transition_evidence_status') if isinstance(executor, Mapping) else None} "
         f"state={report.get('executor_launch_state_path')}"

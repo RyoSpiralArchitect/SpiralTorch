@@ -12,9 +12,47 @@ from pathlib import Path
 
 import pytest
 import spiraltorch as st
-from spiraltorch import hf_adapter_executor_launch
+from spiraltorch import hf_adapter_executor, hf_adapter_executor_launch
 from spiraltorch import hf_adapter_executor_supervisor as supervisor
 from spiraltorch import hf_cli
+
+
+def _sealed_pending_generation(
+    state_path: Path,
+    *,
+    lineage_depth: int,
+) -> dict[str, object]:
+    output_dir = state_path.parent / f"generation-{lineage_depth:03d}"
+    pending: dict[str, object] = {
+        "status": "planned",
+        "parent_adapter_id": "sha256:" + "2" * 64,
+        "parent_adapter_path": str(state_path.parent / "parent-adapter"),
+        "lineage_depth": lineage_depth,
+        "output_dir": str(output_dir),
+        "source_transition": None,
+        "command": {
+            "command": [
+                sys.executable,
+                "-c",
+                "raise SystemExit(0)",
+                "--output-dir",
+                str(output_dir),
+            ]
+        },
+    }
+    hf_adapter_executor._seal_generation_plan(
+        pending,
+        policy={"status": "continue"},
+        scale_up={"max_steps": 1},
+        max_generations=1,
+        execution={
+            "command_cwd": str(state_path.parent),
+            "command_env_override_keys": [],
+            "command_env_override_count": 0,
+            "command_env_sha256": None,
+        },
+    )
+    return pending
 
 
 def _executor_state(
@@ -26,7 +64,7 @@ def _executor_state(
     invocation_count: int = 1,
 ) -> dict[str, object]:
     now = datetime.now(timezone.utc).isoformat()
-    return {
+    state: dict[str, object] = {
         "row_type": "hf_adapter_continuation_executor",
         "schema": st.HF_ADAPTER_CONTINUATION_EXECUTOR_SCHEMA,
         "status": status,
@@ -48,6 +86,16 @@ def _executor_state(
             )
         },
     }
+    if (
+        status == "generation_limit_reached"
+        and action == "resume_executor"
+        and reason == "max_generations_per_invocation_reached"
+    ):
+        state["pending_generation"] = _sealed_pending_generation(
+            path,
+            lineage_depth=invocation_count + 1,
+        )
+    return state
 
 
 def _write_launch_artifact(
@@ -196,6 +244,11 @@ def test_supervision_decision_honors_automatic_and_manual_boundaries(
     assert report["action"] == expected_action
     assert report["healthy"] is True
     assert report["automatic_resume_allowed"] is (expected_status == "resume_ready")
+    if expected_status == "resume_ready":
+        assert report["generation_plan_required"] is True
+        assert report["generation_plan_status"] == "ready"
+        assert str(report["generation_plan_id"]).startswith("sha256:")
+        assert report["generation_plan_rebound"] is True
 
 
 def test_supervision_does_not_mask_failed_latest_launch_with_old_policy_state(
@@ -314,17 +367,34 @@ def _append_terminal_launch(
     reason: str,
 ) -> dict[str, object]:
     state = json.loads(state_path.read_text(encoding="utf-8"))
+    source_pending = state.get("pending_generation")
+    source_generation_plan_id = (
+        source_pending.get("generation_plan_id")
+        if isinstance(source_pending, dict)
+        else None
+    )
     state["invocation_count"] = int(state["invocation_count"]) + 1
     state["status"] = (
         "stopped" if action == "stop_training" else "generation_limit_reached"
     )
     state["action"] = action
     state["reason"] = reason
+    if reason == "max_generations_per_invocation_reached":
+        state["pending_generation"] = _sealed_pending_generation(
+            state_path,
+            lineage_depth=int(state["invocation_count"]) + 1,
+        )
+    else:
+        state.pop("pending_generation", None)
     state_path.write_text(json.dumps(state), encoding="utf-8")
 
     launch = json.loads(launch_path.read_text(encoding="utf-8"))
     source = launch["launches"][-1]
     latest = dict(source)
+    resumed_argv = hf_adapter_executor_launch._generation_plan_rebound_argv(
+        source["executor_argv"],
+        generation_plan_id=str(source_generation_plan_id),
+    )
     latest.update(
         {
             "launch_id": f"supervisor-resumed-{state['invocation_count']}",
@@ -336,6 +406,15 @@ def _append_terminal_launch(
             },
             "executor_run_id": state["run_id"],
             "executor_invocation_count": state["invocation_count"],
+            "executor_argv": resumed_argv,
+            "command": hf_adapter_executor_launch._executor_child_command(resumed_argv),
+            "resume_contract": hf_adapter_executor_launch._resume_contract(
+                resumed_argv,
+                output_root=state_path.parent.resolve(),
+                executor_state_path=state_path.resolve(),
+                command_cwd=Path(str(source["command_cwd"])),
+            ),
+            "resumed_from_generation_plan_id": source_generation_plan_id,
         }
     )
     launch["launches"].append(latest)
@@ -352,6 +431,9 @@ def _append_terminal_launch(
         "resumed_launch_id": latest["launch_id"],
         "executor_invocation_count": int(state["invocation_count"]) - 1,
         "resumed_executor_invocation_count": state["invocation_count"],
+        "generation_plan_id": source_generation_plan_id,
+        "generation_plan_status": "ready",
+        "generation_plan_rebound": True,
     }
 
 
@@ -401,10 +483,38 @@ def test_supervisor_resumes_once_then_completes_and_persists_transitions(
         "completed",
     ]
     assert latest["resume_events"][0]["resumed_executor_invocation_count"] == 2
+    assert (
+        latest["resume_events"][0]["generation_plan_id"]
+        == report["latest_run"]["transitions"][0]["generation_plan_id"]
+    )
+    assert latest["resume_events"][0]["generation_plan_rebound"] is True
     assert not (
         state_path.parent
         / supervisor.HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISOR_LOCK_FILENAME
     ).exists()
+    status = supervisor.hf_adapter_continuation_executor_supervisor_status_report(
+        report["supervisor_state_path"]
+    )
+    assert status["latest_resume_generation_plan_id"] == latest["resume_events"][0][
+        "generation_plan_id"
+    ]
+    assert (
+        f"plan_id={status['latest_resume_generation_plan_id']}"
+        in supervisor.hf_adapter_continuation_executor_supervisor_status_lines(status)[
+            0
+        ]
+    )
+
+    corrupt = json.loads(Path(report["supervisor_state_path"]).read_text("utf-8"))
+    corrupt["runs"][-1]["resume_events"][0]["generation_plan_id"] = "invalid"
+    Path(report["supervisor_state_path"]).write_text(
+        json.dumps(corrupt),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="generation plan history is invalid"):
+        supervisor.load_hf_adapter_continuation_executor_supervisor(
+            report["supervisor_state_path"]
+        )
 
 
 def test_supervisor_budget_timeout_and_live_owner_lock_are_bounded(
@@ -679,6 +789,10 @@ def _terminal_executor_command(
             "status": "generation_limit_reached",
             "action": "resume_executor",
             "reason": "max_generations_per_invocation_reached",
+            "pending_generation": _sealed_pending_generation(
+                state_path,
+                lineage_depth=invocation_count + 1,
+            ),
         }
     )
     script = """

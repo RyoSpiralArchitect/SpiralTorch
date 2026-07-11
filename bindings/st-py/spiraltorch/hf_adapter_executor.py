@@ -1933,6 +1933,16 @@ def _generation_plan_summary(row: Mapping[str, object]) -> dict[str, object]:
     }
 
 
+def _drop_unready_pending_generation(state: dict[str, object]) -> None:
+    pending = state.get("pending_generation")
+    if (
+        not isinstance(pending, Mapping)
+        or pending.get("status") != "planned"
+        or _generation_plan_verification(pending).get("ready") is not True
+    ):
+        state.pop("pending_generation", None)
+
+
 def _record_generation_replan(
     state: dict[str, object],
     *,
@@ -2339,16 +2349,6 @@ def _run_hf_adapter_continuation_executor_unlocked(
                 action="recover_launch_command",
                 reason="continuation_command_missing",
             )
-        if run and executed >= max_generations:
-            state.pop("pending_generation", None)
-            return _finish(
-                state,
-                resolved_state_path,
-                status="generation_limit_reached",
-                action="resume_executor",
-                reason="max_generations_per_invocation_reached",
-            )
-
         selected_depth = int(chain.get("selected_lineage_depth") or 0)
         next_depth = selected_depth + 1
         output_dir = (
@@ -2554,7 +2554,7 @@ def _run_hf_adapter_continuation_executor_unlocked(
         )
         if launch_stop_request is not None:
             state["stop_request"] = launch_stop_request
-            state.pop("pending_generation", None)
+            _drop_unready_pending_generation(state)
             return _finish(
                 state,
                 resolved_state_path,
@@ -2569,6 +2569,14 @@ def _run_hf_adapter_continuation_executor_unlocked(
                 status="ready",
                 action="run_generation",
                 reason="dry_run_ready",
+            )
+        if executed >= max_generations:
+            return _finish(
+                state,
+                resolved_state_path,
+                status="generation_limit_reached",
+                action="resume_executor",
+                reason="max_generations_per_invocation_reached",
             )
 
         generation_plan_verification = _generation_plan_verification(pending)

@@ -16,7 +16,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ._process import local_pid_alive
-from .hf_adapter_executor import HF_ADAPTER_CONTINUATION_EXECUTOR_LOCK_FILENAME
+from .hf_adapter_executor import (
+    HF_ADAPTER_CONTINUATION_EXECUTOR_LOCK_FILENAME,
+    _valid_generation_plan_id,
+)
 from .hf_adapter_executor_launch import (
     HF_ADAPTER_CONTINUATION_EXECUTOR_LAUNCH_LOCK_FILENAME,
     hf_adapter_continuation_executor_launch_status_report,
@@ -305,6 +308,18 @@ def _supervision_values(
         "issue": issue,
         "resume_plan": None if resume_plan is None else dict(resume_plan),
         "resume_plan_error": resume_plan_error,
+        "generation_plan_required": (
+            None if resume_plan is None else resume_plan.get("generation_plan_required")
+        ),
+        "generation_plan_status": (
+            None if resume_plan is None else resume_plan.get("generation_plan_status")
+        ),
+        "generation_plan_id": (
+            None if resume_plan is None else resume_plan.get("generation_plan_id")
+        ),
+        "generation_plan_rebound": (
+            None if resume_plan is None else resume_plan.get("generation_plan_rebound")
+        ),
     }
 
 
@@ -517,6 +532,10 @@ def hf_adapter_continuation_executor_supervision_report(
             None if resume_plan is None else resume_plan.get("issue")
         ),
         "resume_plan_error": resume_plan_error,
+        "generation_plan_required": decision.get("generation_plan_required"),
+        "generation_plan_status": decision.get("generation_plan_status"),
+        "generation_plan_id": decision.get("generation_plan_id"),
+        "generation_plan_rebound": decision.get("generation_plan_rebound"),
     }
 
 
@@ -540,6 +559,7 @@ def hf_adapter_continuation_executor_supervision_lines(
         f"launch={report.get('source_launch_id')} "
         f"invocation={report.get('executor_invocation_count')} "
         f"reason={report.get('executor_reason')} "
+        f"plan_id={report.get('generation_plan_id')} "
         f"launch_state={report.get('launch_state_path')}"
     ]
 
@@ -567,6 +587,7 @@ def load_hf_adapter_continuation_executor_supervisor(
         )
     if not isinstance(payload.get("runs"), list):
         raise ValueError("executor supervisor runs must be a list")
+    _validated_supervisor_runs(payload)
     report = dict(payload)
     report["supervisor_state_path"] = str(path.resolve())
     return report
@@ -722,16 +743,45 @@ def _validate_supervisor_counters(
     for run in runs:
         resumes_started = run.get("resumes_started")
         resume_events = run.get("resume_events")
+        transitions = run.get("transitions")
         if (
             isinstance(resumes_started, bool)
             or not isinstance(resumes_started, int)
             or resumes_started < 0
             or not isinstance(resume_events, list)
             or any(not isinstance(event, Mapping) for event in resume_events)
+            or not isinstance(transitions, list)
+            or any(not isinstance(row, Mapping) for row in transitions)
         ):
             raise ValueError("executor supervisor resume history is invalid")
         if resumes_started != len(resume_events):
             raise ValueError("executor supervisor resume event count is inconsistent")
+        transition_plan_ids = {
+            transition.get("generation_plan_id")
+            for transition in transitions
+            if transition.get("status") == "resume_ready"
+        }
+        for event in resume_events:
+            generation_plan_fields_present = any(
+                field in event
+                for field in (
+                    "generation_plan_id",
+                    "generation_plan_status",
+                    "generation_plan_rebound",
+                )
+            )
+            if not generation_plan_fields_present:
+                continue
+            generation_plan_id = event.get("generation_plan_id")
+            if (
+                not _valid_generation_plan_id(generation_plan_id)
+                or event.get("generation_plan_status") != "ready"
+                or not isinstance(event.get("generation_plan_rebound"), bool)
+                or generation_plan_id not in transition_plan_ids
+            ):
+                raise ValueError(
+                    "executor supervisor generation plan history is invalid"
+                )
         counted_resumes += resumes_started
     if total_resumes != counted_resumes:
         raise ValueError("executor supervisor total resume count is inconsistent")
@@ -862,6 +912,7 @@ def _decision_signature(decision: Mapping[str, object]) -> tuple[object, ...]:
         decision.get("source_launch_id"),
         decision.get("executor_invocation_count"),
         decision.get("executor_reason"),
+        decision.get("generation_plan_id"),
     )
 
 
@@ -1019,6 +1070,9 @@ def _resume_once(
                 "resumed_executor_invocation_count"
             ),
             "request_status": resume.get("status"),
+            "generation_plan_id": resume.get("generation_plan_id"),
+            "generation_plan_status": resume.get("generation_plan_status"),
+            "generation_plan_rebound": resume.get("generation_plan_rebound"),
         }
     )
     _write_supervisor_state(state_path, state)
@@ -1548,6 +1602,14 @@ def hf_adapter_continuation_executor_supervisor_status_report(
         status=status,
         stop_request_error=stop_request_error,
     )
+    resume_events = latest.get("resume_events") if latest is not None else None
+    latest_resume = (
+        resume_events[-1]
+        if isinstance(resume_events, list)
+        and resume_events
+        and isinstance(resume_events[-1], Mapping)
+        else None
+    )
     return {
         "row_type": "hf_adapter_continuation_executor_supervisor_status",
         "schema": HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISOR_STATUS_SCHEMA,
@@ -1579,6 +1641,14 @@ def hf_adapter_continuation_executor_supervisor_status_report(
         "stop_request_error": stop_request_error,
         "stop_request_path": (
             None if stop_request_path is None else str(stop_request_path)
+        ),
+        "latest_resume_generation_plan_id": (
+            None if latest_resume is None else latest_resume.get("generation_plan_id")
+        ),
+        "latest_resume_generation_plan_status": (
+            None
+            if latest_resume is None
+            else latest_resume.get("generation_plan_status")
         ),
     }
 
@@ -1688,6 +1758,7 @@ def hf_adapter_continuation_executor_supervisor_status_lines(
         f"pid_alive={report.get('supervisor_pid_alive_observed')} "
         f"lock_verified={report.get('supervisor_lock_owner_verified')} "
         f"stop_requested={report.get('stop_requested')} "
+        f"plan_id={report.get('latest_resume_generation_plan_id')} "
         f"state={report.get('supervisor_state_path')}"
     ]
 
@@ -1726,6 +1797,14 @@ def hf_adapter_continuation_executor_supervisor_lines(
     if not isinstance(latest, Mapping):
         runs = report.get("runs") or []
         latest = runs[-1] if runs and isinstance(runs[-1], Mapping) else {}
+    resume_events = latest.get("resume_events") or []
+    latest_resume = (
+        resume_events[-1]
+        if isinstance(resume_events, list)
+        and resume_events
+        and isinstance(resume_events[-1], Mapping)
+        else None
+    )
     return [
         "hf_adapter_continuation_executor_supervisor "
         f"status={report.get('status')} "
@@ -1735,5 +1814,6 @@ def hf_adapter_continuation_executor_supervisor_lines(
         f"invocation={report.get('invocation_count')} "
         f"resumes={latest.get('resumes_started')} "
         f"total_resumes={report.get('total_resumes_started')} "
+        f"plan_id={None if latest_resume is None else latest_resume.get('generation_plan_id')} "
         f"state={report.get('supervisor_state_path')}"
     ]
