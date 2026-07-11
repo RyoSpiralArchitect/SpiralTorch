@@ -842,6 +842,28 @@ whole dataset/tokenization audit without constructing Trainer; the resulting
 run card rewrites its canonical replay command to `--train` and carries the
 newly adopted tokenized identity into the real launch.
 
+Immediately before `Trainer` construction, the bridge adds a separate effective
+training-recipe identity. It reads the instantiated `TrainingArguments`, not
+raw argv, so Transformers defaults and compatibility aliases are already
+resolved. The payload covers optimizer and scheduler settings, effective batch
+and accumulation, seed/data order, precision and checkpointing, dataloader and
+evaluation control, applied full-FT/LoRA trainability, model dtype conversion,
+Trainer checkpoint-resume state, the causal-LM collator, and the loss-guard
+callback. Model, tokenizer, corpus, tokenized blocks, package/device runtime,
+output paths, run names, and trace destinations remain in their own contracts;
+moving an otherwise identical run directory therefore does not change the
+recipe ID.
+
+Use `--training-recipe-only` for a no-optimization adoption pass. It performs
+the real model preparation and constructs effective `TrainingArguments`, writes
+`training_recipe_identity` into the run card, then stops before callback or
+`Trainer` construction. Its canonical launch command replaces that flag with
+`--train` and adds `--expected-training-recipe-id`. The real launch then fails
+before `Trainer(...)` if LR, schedule, batch, seed, precision, LoRA target/rank,
+resume semantics, or training-control behavior drifted. Python callers can use
+`st.hf_finetune_training_recipe_identity_report(...)` and
+`st.hf_finetune_training_recipe_identity_lines(...)` directly.
+
 Scale-up keeps these contracts strict without making corpus growth impossible.
 If sample/eval shape stays unchanged, the child must reproduce both parent
 dataset identities exactly. Selection changes such as `--max-train-samples`,
@@ -854,6 +876,14 @@ command delta rather than trusting its reissue boolean. After the child run,
 promotion-chain validation applies the same layer-specific boundary and exposes
 each reissue on the transition. Content drift with no corresponding
 command-shape change remains rejected.
+
+An intentional scale-up always reissues the training-recipe layer because its
+step horizon and often its batch/corpus plan are deliberately different. The
+planner strips the parent's `--expected-training-recipe-id`, records the source
+ID plus a `reissued` contract, and preflight rejects a command that accidentally
+retains the parent ID. The child adopts its newly resolved recipe immediately
+before its own Trainer construction; unchanged dataset, model/runtime, and
+execution identities remain independently enforced.
 
 The model basis and tokenizer now form a second content-addressed runtime
 contract. Remote base models record the resolved Hub commit plus stable config

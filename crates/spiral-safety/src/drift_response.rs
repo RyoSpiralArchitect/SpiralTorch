@@ -564,10 +564,7 @@ pub fn trainer_penalty_with(metrics: &DrlMetrics, min_radius: f32) -> f32 {
     if let Some(min_tipping) = metrics
         .frame_signatures
         .values()
-        .filter_map(|sig| {
-            sig.tipping_radius
-                .and_then(|r| if r > 0.0 { Some(r) } else { None })
-        })
+        .filter_map(|sig| sig.tipping_radius.filter(|&radius| radius > 0.0))
         .min_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal))
     {
         if min_tipping < min_radius {
@@ -591,10 +588,8 @@ pub fn trainer_penalty_with(metrics: &DrlMetrics, min_radius: f32) -> f32 {
             .direction_signatures
             .values()
             .flat_map(|map| {
-                map.values().filter_map(|sig| {
-                    sig.tipping_radius
-                        .and_then(|r| if r > 0.0 { Some(r) } else { None })
-                })
+                map.values()
+                    .filter_map(|sig| sig.tipping_radius.filter(|&radius| radius > 0.0))
             })
             .min_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal))
         {

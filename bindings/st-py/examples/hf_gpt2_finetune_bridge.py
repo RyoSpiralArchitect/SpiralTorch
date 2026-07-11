@@ -81,6 +81,11 @@ from spiraltorch.hf_input_identity import (
     hf_finetune_input_identity_lines,
     hf_finetune_input_identity_report,
 )
+from spiraltorch.hf_training_identity import (
+    HF_FINETUNE_TRAINING_RECIPE_IDENTITY_SCHEMA,
+    hf_finetune_training_recipe_identity_lines,
+    hf_finetune_training_recipe_identity_report,
+)
 from spiraltorch.hf_peft import (
     HfCausalLmRuntimeIdentityError,
     hf_causal_lm_artifact_lines,
@@ -215,6 +220,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "Fail before model weight loading unless the SpiralTorch build, "
             "HF package contents, Python/platform, device capabilities, and "
             "compute-affecting environment match this sha256 identity."
+        ),
+    )
+    parser.add_argument(
+        "--expected-training-recipe-id",
+        default=None,
+        help=(
+            "Fail after effective TrainingArguments and model preparation resolve "
+            "but before Trainer construction unless the optimization recipe "
+            "matches this sha256 identity."
         ),
     )
     parser.add_argument(
@@ -430,6 +444,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help=(
             "Load and tokenize the selected dataset, verify exact Trainer-input "
             "identity, then stop before model preparation or Trainer construction."
+        ),
+    )
+    parser.add_argument(
+        "--training-recipe-only",
+        action="store_true",
+        help=(
+            "Resolve the exact training recipe and stop before Trainer "
+            "construction. The run-card launch command is rewritten to --train "
+            "with the observed recipe identity pinned."
         ),
     )
     parser.add_argument("--max-train-samples", type=int, default=4096)
@@ -696,6 +719,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         parser.error(
             "--expected-execution-input-id must be sha256:<64 lowercase hex>"
         )
+    if not _valid_adapter_id(args.expected_training_recipe_id):
+        parser.error(
+            "--expected-training-recipe-id must be sha256:<64 lowercase hex>"
+        )
     if (
         args.expected_parent_lineage_depth is not None
         and args.expected_parent_lineage_depth < 0
@@ -912,15 +939,23 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         )
     if args.generation_from_inference_distortion and not args.generation_prompt:
         parser.error("--generation-from-inference-distortion requires --generation-prompt")
-    if sum(bool(value) for value in (args.train, args.metadata_only, args.tokenize_only)) > 1:
+    run_modes = (
+        args.train,
+        args.metadata_only,
+        args.tokenize_only,
+        args.training_recipe_only,
+    )
+    if sum(bool(value) for value in run_modes) > 1:
         parser.error(
-            "--train, --metadata-only, and --tokenize-only are mutually exclusive"
+            "--train, --metadata-only, --tokenize-only, and "
+            "--training-recipe-only are mutually exclusive"
         )
     if (
         args.expected_dataset_materialization_id is not None
         and not args.train
         and not args.metadata_only
         and not args.tokenize_only
+        and not args.training_recipe_only
     ):
         parser.error(
             "--expected-dataset-materialization-id requires --train or "
@@ -930,9 +965,20 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         args.expected_tokenized_dataset_id is not None
         and not args.train
         and not args.tokenize_only
+        and not args.training_recipe_only
     ):
         parser.error(
-            "--expected-tokenized-dataset-id requires --train or --tokenize-only"
+            "--expected-tokenized-dataset-id requires --train, --tokenize-only, "
+            "or --training-recipe-only"
+        )
+    if (
+        args.expected_training_recipe_id is not None
+        and not args.train
+        and not args.training_recipe_only
+    ):
+        parser.error(
+            "--expected-training-recipe-id requires --train or "
+            "--training-recipe-only"
         )
     if args.validation_file and not args.train_file:
         parser.error("--validation-file requires --train-file")
@@ -1421,11 +1467,15 @@ def _has_local_corpus(args: argparse.Namespace) -> bool:
     return bool(args.train_file)
 
 
+def _training_semantics_requested(args: argparse.Namespace) -> bool:
+    return bool(args.train or args.training_recipe_only)
+
+
 def _requires_remote_dataset_identity(args: argparse.Namespace) -> bool:
     return bool(
         not _has_local_corpus(args)
         and (
-            args.train
+            _training_semantics_requested(args)
             or args.metadata_only
             or args.tokenize_only
             or args.expected_dataset_input_id is not None
@@ -1435,7 +1485,7 @@ def _requires_remote_dataset_identity(args: argparse.Namespace) -> bool:
 
 def _requires_dataset_materialization_identity(args: argparse.Namespace) -> bool:
     return bool(
-        args.train
+        _training_semantics_requested(args)
         or args.metadata_only
         or args.tokenize_only
         or args.expected_dataset_materialization_id is not None
@@ -1444,9 +1494,16 @@ def _requires_dataset_materialization_identity(args: argparse.Namespace) -> bool
 
 def _requires_tokenized_dataset_identity(args: argparse.Namespace) -> bool:
     return bool(
-        args.train
+        _training_semantics_requested(args)
         or args.tokenize_only
         or args.expected_tokenized_dataset_id is not None
+    )
+
+
+def _requires_training_recipe_identity(args: argparse.Namespace) -> bool:
+    return bool(
+        _training_semantics_requested(args)
+        or args.expected_training_recipe_id is not None
     )
 
 
@@ -1829,7 +1886,7 @@ def _raw_training_arguments_kwargs(
     kwargs: dict[str, Any] = {
         "output_dir": str(args.output_dir),
         "overwrite_output_dir": True,
-        "do_train": bool(args.train),
+        "do_train": _training_semantics_requested(args),
         "do_eval": bool(has_eval),
         "num_train_epochs": float(args.num_train_epochs),
         "learning_rate": float(args.learning_rate),
@@ -1841,8 +1898,10 @@ def _raw_training_arguments_kwargs(
         "save_total_limit": int(args.save_total_limit),
         "report_to": ["none"],
         "seed": int(args.seed),
-        "save_strategy": "steps" if args.train else "no",
-        strategy_key: "steps" if has_eval and args.train else "no",
+        "save_strategy": "steps" if _training_semantics_requested(args) else "no",
+        strategy_key: (
+            "steps" if has_eval and _training_semantics_requested(args) else "no"
+        ),
     }
     resolved_pin_memory = getattr(args, "_resolved_dataloader_pin_memory", None)
     if resolved_pin_memory is not None:
@@ -2128,7 +2187,7 @@ def _model_first_parameter_dtype(model: Any) -> str | None:
 def _prepare_model_train_dtype(model: Any, args: argparse.Namespace) -> dict[str, object]:
     mode = str(getattr(args, "model_train_dtype", "auto"))
     before = _model_first_parameter_dtype(model)
-    should_cast = bool(getattr(args, "train", False)) and (
+    should_cast = _training_semantics_requested(args) and (
         mode == "float32" or (mode == "auto" and before in {"torch.float16", "torch.bfloat16"})
     )
     cast_status = "not_requested"
@@ -2142,7 +2201,7 @@ def _prepare_model_train_dtype(model: Any, args: argparse.Namespace) -> dict[str
     return {
         "row_type": "hf_gpt2_finetune_model_dtype_report",
         "policy": mode,
-        "train_requested": bool(getattr(args, "train", False)),
+        "train_requested": _training_semantics_requested(args),
         "dtype_before": before,
         "dtype_after": _model_first_parameter_dtype(model),
         "cast_status": cast_status,
@@ -2786,6 +2845,76 @@ def _tokenized_dataset_identity_report(
         }
 
 
+def _training_recipe_trainer_contract(args: argparse.Namespace) -> dict[str, object]:
+    trace_enabled = not bool(args.no_trainer_trace)
+    return {
+        "trainer": "transformers.Trainer",
+        "data_collator": {
+            "class": "transformers.DataCollatorForLanguageModeling",
+            "mlm": False,
+        },
+        "trainer_train": {
+            "resume_from_checkpoint": args.resume_from_checkpoint is not None,
+        },
+        "evaluation_control": {
+            "eval_before_train": bool(args.eval_before_train),
+            "eval_after_train_policy": args.eval_after_train_policy,
+            "no_eval_after_train": bool(args.no_eval_after_train),
+        },
+        "trace_callback": {
+            "enabled": trace_enabled,
+            "stop_on_nonfinite_loss": (
+                trace_enabled and not bool(args.no_trainer_loss_guard)
+            ),
+            "loss_guard_threshold": (
+                args.trainer_loss_guard_threshold if trace_enabled else None
+            ),
+        },
+    }
+
+
+def _training_recipe_identity_report(
+    args: argparse.Namespace,
+    training_arguments: object,
+    model_prepare_report: Mapping[str, object],
+    model_dtype_report: Mapping[str, object] | None,
+    *,
+    expected_identity_id: str | None = None,
+) -> dict[str, object]:
+    expected_id = (
+        expected_identity_id
+        if expected_identity_id is not None
+        else getattr(args, "expected_training_recipe_id", None)
+    )
+    try:
+        return hf_finetune_training_recipe_identity_report(
+            training_arguments,
+            model_prepare_report=model_prepare_report,
+            model_dtype_report=model_dtype_report,
+            checkpoint_resume_report=getattr(
+                args,
+                "_hf_checkpoint_resume_report",
+                None,
+            ),
+            trainer_contract=_training_recipe_trainer_contract(args),
+            expected_identity_id=expected_id,
+            phase="before_trainer_init",
+        )
+    except (TypeError, ValueError) as exc:
+        return {
+            "row_type": "hf_finetune_training_recipe_identity",
+            "schema": HF_FINETUNE_TRAINING_RECIPE_IDENTITY_SCHEMA,
+            "status": "blocked",
+            "phase": "before_trainer_init",
+            "expected_identity_id": expected_id,
+            "observed_identity_id": None,
+            "identity_verified": False,
+            "path_independent": True,
+            "error_count": 1,
+            "errors": [f"{exc.__class__.__name__}: {exc}"],
+        }
+
+
 def _canonicalize_dataset_input_launch_command(
     args: argparse.Namespace,
     report: Mapping[str, object],
@@ -2854,6 +2983,23 @@ def _canonicalize_tokenized_dataset_launch_command(
         command.extend(["--expected-tokenized-dataset-id", str(observed_id)])
     if getattr(args, "tokenize_only", False):
         command = [item for item in command if item != "--tokenize-only"]
+        if "--train" not in command:
+            command.append("--train")
+    args._hf_finetune_launch_command = command
+
+
+def _canonicalize_training_recipe_launch_command(
+    args: argparse.Namespace,
+    report: Mapping[str, object],
+) -> None:
+    command = list(getattr(args, "_hf_finetune_launch_command", []) or [])
+    observed_id = report.get("observed_identity_id")
+    if not command or report.get("status") != "ready" or observed_id is None:
+        return
+    if not _argv_has_option(command, "--expected-training-recipe-id"):
+        command.extend(["--expected-training-recipe-id", str(observed_id)])
+    if getattr(args, "training_recipe_only", False):
+        command = [item for item in command if item != "--training-recipe-only"]
         if "--train" not in command:
             command.append("--train")
     args._hf_finetune_launch_command = command
@@ -3016,6 +3162,9 @@ def _finetune_start_report(
     execution_input_identity = dict(
         getattr(args, "_hf_execution_input_identity_report", {}) or {}
     )
+    training_recipe_identity = dict(
+        getattr(args, "_hf_training_recipe_identity_report", {}) or {}
+    )
     adapter_preloaded = artifact_report.get("artifact_kind") == "peft_adapter"
     trainer_resume = args.resume_from_checkpoint is not None
     if adapter_preloaded and trainer_resume:
@@ -3091,6 +3240,12 @@ def _finetune_start_report(
             None
             if not execution_input_identity
             else execution_input_identity.get("identity_verified") is True
+        ),
+        "training_recipe_identity": training_recipe_identity or None,
+        "training_recipe_identity_verified": (
+            None
+            if not training_recipe_identity
+            else training_recipe_identity.get("identity_verified") is True
         ),
         "weights_only_warm_start": adapter_preloaded and not trainer_resume,
         "trainer_checkpoint_resume": trainer_resume,
@@ -3295,6 +3450,20 @@ def _base_run_card(
             "fail_fast": _requires_tokenized_dataset_identity(args),
             "verification_phase": "after_tokenization",
         },
+        "training_recipe_identity": None,
+        "training_recipe_identity_contract": {
+            "status": (
+                "pending"
+                if _requires_training_recipe_identity(args)
+                else "not_requested"
+            ),
+            "expected_identity_id": args.expected_training_recipe_id,
+            "observed_identity_id": None,
+            "identity_verified": False,
+            "fail_fast": _requires_training_recipe_identity(args),
+            "verification_phase": "before_trainer_init",
+            "scale_up_inheritance": "recompute_after_intentional_recipe_change",
+        },
         "model_runtime_identity_pre_model": None,
         "model_runtime_identity_after_model": None,
         "model_runtime_identity_contract": {
@@ -3406,9 +3575,11 @@ def _base_run_card(
         "train_requested": bool(args.train),
         "metadata_only": bool(args.metadata_only),
         "tokenize_only": bool(args.tokenize_only),
+        "training_recipe_only": bool(args.training_recipe_only),
+        "training_semantics_requested": _training_semantics_requested(args),
         "trainer_trace_jsonl": (
             None
-            if args.metadata_only or args.tokenize_only
+            if args.metadata_only or args.tokenize_only or args.training_recipe_only
             else str(_trainer_trace_path(args))
         ),
         "trainer_telemetry_requested": bool(args.trainer_telemetry),
@@ -3635,6 +3806,20 @@ def _main_with_runtime_access(
         "fail_fast": _requires_tokenized_dataset_identity(args),
         "verification_phase": "after_tokenization",
     }
+    preflight["training_recipe_identity"] = None
+    preflight["training_recipe_identity_contract"] = {
+        "status": (
+            "pending"
+            if _requires_training_recipe_identity(args)
+            else "not_requested"
+        ),
+        "expected_identity_id": args.expected_training_recipe_id,
+        "observed_identity_id": None,
+        "identity_verified": False,
+        "fail_fast": _requires_training_recipe_identity(args),
+        "verification_phase": "before_trainer_init",
+        "scale_up_inheritance": "recompute_after_intentional_recipe_change",
+    }
     preflight["model_runtime_identity_contract"] = {
         "status": (
             "enforced" if args.expected_runtime_input_id is not None else "observe"
@@ -3814,7 +3999,11 @@ def _main_with_runtime_access(
     if preflight["disk_report"].get("status") != "ok":
         _write_card(preflight, args)
         return 1
-    if not args.train and not args.metadata_only and not args.tokenize_only:
+    if (
+        not _training_semantics_requested(args)
+        and not args.metadata_only
+        and not args.tokenize_only
+    ):
         _write_card(preflight, args)
         return 0
 
@@ -4460,6 +4649,75 @@ def _main_with_runtime_access(
         )
         _write_card(card, args)
         return 1
+    model_dtype_report = card.get("model_dtype_report")
+    training_recipe_identity = _training_recipe_identity_report(
+        args,
+        training_args,
+        model_prepare_report,
+        model_dtype_report if isinstance(model_dtype_report, Mapping) else None,
+    )
+    args._hf_training_recipe_identity_report = training_recipe_identity
+    _canonicalize_training_recipe_launch_command(
+        args,
+        training_recipe_identity,
+    )
+    _refresh_card_launch_command(card, args)
+    card["training_recipe_identity"] = dict(training_recipe_identity)
+    card["training_recipe_identity_contract"] = {
+        "status": (
+            "blocked"
+            if training_recipe_identity.get("status") != "ready"
+            else "enforced"
+            if args.expected_training_recipe_id is not None
+            else "adopted"
+        ),
+        "expected_identity_id": (
+            args.expected_training_recipe_id
+            or training_recipe_identity.get("observed_identity_id")
+        ),
+        "observed_identity_id": training_recipe_identity.get(
+            "observed_identity_id"
+        ),
+        "identity_verified": training_recipe_identity.get("identity_verified"),
+        "path_independent": training_recipe_identity.get("path_independent"),
+        "training_argument_count": training_recipe_identity.get(
+            "training_argument_count"
+        ),
+        "fail_fast": True,
+        "verification_phase": "before_trainer_init",
+        "scale_up_inheritance": "recompute_after_intentional_recipe_change",
+    }
+    nested_preflight = card.get("preflight")
+    if isinstance(nested_preflight, dict):
+        nested_preflight["training_recipe_identity"] = dict(
+            training_recipe_identity
+        )
+        nested_preflight["training_recipe_identity_contract"] = dict(
+            card["training_recipe_identity_contract"]
+        )
+    card["finetune_start_report"] = _finetune_start_report(
+        args,
+        model_artifact_load_report,
+    )
+    for line in hf_finetune_training_recipe_identity_lines(
+        training_recipe_identity
+    ):
+        print(line)
+    if training_recipe_identity.get("status") != "ready":
+        card.update(
+            {
+                "failure_stage": "training_recipe_identity_before_trainer_init",
+                "failure_error": (
+                    "effective training recipe does not match the required "
+                    "identity"
+                ),
+            }
+        )
+        _write_card(card, args)
+        return 1
+    if args.training_recipe_only:
+        _write_card(card, args)
+        return 0
     trace_path = _trainer_trace_path(args)
     callbacks = []
     if trace_path is not None:

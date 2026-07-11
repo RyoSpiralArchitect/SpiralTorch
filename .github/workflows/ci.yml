@@ -186,6 +186,8 @@ jobs:
           for symbol in (
               "HF_TOKENIZED_DATASET_IDENTITY_SCHEMA",
               "hf_tokenized_dataset_identity_report",
+              "HF_FINETUNE_TRAINING_RECIPE_IDENTITY_SCHEMA",
+              "hf_finetune_training_recipe_identity_report",
           ):
               if symbol not in stub:
                   raise RuntimeError(f"packaged stub is missing {symbol}")
@@ -195,6 +197,13 @@ jobs:
           )
           if tokenized.get("status") != "ready":
               raise RuntimeError(f"tokenized dataset identity unavailable: {tokenized!r}")
+
+          recipe = spiraltorch.hf_finetune_training_recipe_identity_report(
+              {"learning_rate": 5e-5, "max_steps": 1, "seed": 13},
+              model_prepare_report={"mode": "full"},
+          )
+          if recipe.get("status") != "ready":
+              raise RuntimeError(f"training recipe identity unavailable: {recipe!r}")
 
           submodules = [
               "spiraltorch.psi",

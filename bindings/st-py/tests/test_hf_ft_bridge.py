@@ -14103,6 +14103,237 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             hf_ft.summarize_hf_gpt2_finetune_trainer_trace,
         )
 
+    def test_bridge_adopts_and_enforces_effective_training_recipe(self) -> None:
+        module = load_bridge_example()
+        args = module.parse_args(["--training-recipe-only"])
+        args._resolved_dataloader_pin_memory = False
+
+        class TrainingArguments:
+            def __init__(
+                self,
+                output_dir=None,
+                do_train=False,
+                do_eval=False,
+                num_train_epochs=1.0,
+                learning_rate=5e-5,
+                per_device_train_batch_size=2,
+                per_device_eval_batch_size=2,
+                gradient_accumulation_steps=8,
+                logging_steps=25,
+                save_steps=250,
+                save_total_limit=2,
+                report_to=None,
+                seed=13,
+                save_strategy="no",
+                eval_strategy="no",
+                dataloader_pin_memory=False,
+                max_steps=-1,
+            ):
+                pass
+
+        raw = module._raw_training_arguments_kwargs(
+            args,
+            has_eval=True,
+            cls=TrainingArguments,
+        )
+        effective = {
+            "do_train": raw["do_train"],
+            "do_eval": raw["do_eval"],
+            "num_train_epochs": raw["num_train_epochs"],
+            "max_steps": raw.get("max_steps", -1),
+            "learning_rate": raw["learning_rate"],
+            "per_device_train_batch_size": raw["per_device_train_batch_size"],
+            "gradient_accumulation_steps": raw["gradient_accumulation_steps"],
+            "seed": raw["seed"],
+            "eval_strategy": raw["eval_strategy"],
+            "dataloader_pin_memory": raw["dataloader_pin_memory"],
+        }
+        model_prepare = {
+            "mode": "full",
+            "model_family": "gpt2",
+            "adapter_attached": False,
+            "adapter_config_source": "request",
+            "adapter_config": {"mode": "full"},
+            "parameter_report_after": {
+                "total_parameter_count": 124_000_000,
+                "trainable_parameter_count": 124_000_000,
+            },
+        }
+        dtype = {
+            "policy": "auto",
+            "train_requested": True,
+            "dtype_before": "torch.float32",
+            "dtype_after": "torch.float32",
+            "cast_status": "not_requested",
+        }
+        adopted = module._training_recipe_identity_report(
+            args,
+            effective,
+            model_prepare,
+            dtype,
+        )
+        module._canonicalize_training_recipe_launch_command(args, adopted)
+        command = args._hf_finetune_launch_command
+        expected = adopted["observed_identity_id"]
+
+        self.assertTrue(raw["do_train"])
+        self.assertEqual(raw["save_strategy"], "steps")
+        self.assertEqual(raw["eval_strategy"], "steps")
+        self.assertEqual(adopted["status"], "ready")
+        self.assertIn("--train", command)
+        self.assertNotIn("--training-recipe-only", command)
+        self.assertEqual(
+            command[command.index("--expected-training-recipe-id") + 1],
+            expected,
+        )
+
+        replay_args = module.parse_args(
+            ["--training-recipe-only", "--expected-training-recipe-id", expected]
+        )
+        replay = module._training_recipe_identity_report(
+            replay_args,
+            effective,
+            model_prepare,
+            dtype,
+        )
+        drifted = module._training_recipe_identity_report(
+            replay_args,
+            dict(effective, max_steps=2048),
+            model_prepare,
+            dtype,
+        )
+        self.assertEqual(replay["status"], "ready")
+        self.assertTrue(replay["expected_identity_verified"])
+        self.assertEqual(drifted["status"], "blocked")
+
+    def test_bridge_training_recipe_identity_mode_contract(self) -> None:
+        module = load_bridge_example()
+        preflight_only = module.parse_args([])
+        metadata = module.parse_args(["--metadata-only"])
+        recipe = module.parse_args(["--training-recipe-only"])
+        training = module.parse_args(["--train"])
+        expected = f"sha256:{'a' * 64}"
+
+        self.assertFalse(module._requires_training_recipe_identity(preflight_only))
+        self.assertFalse(module._requires_training_recipe_identity(metadata))
+        self.assertTrue(module._requires_training_recipe_identity(recipe))
+        self.assertTrue(module._requires_training_recipe_identity(training))
+        self.assertTrue(module._requires_tokenized_dataset_identity(recipe))
+        self.assertTrue(module._requires_dataset_materialization_identity(recipe))
+        self.assertTrue(module._training_semantics_requested(recipe))
+
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            module.parse_args(
+                ["--metadata-only", "--expected-training-recipe-id", expected]
+            )
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            module.parse_args(["--training-recipe-only", "--train"])
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            module.parse_args(
+                ["--training-recipe-only", "--expected-training-recipe-id", "bad"]
+            )
+
+    def test_scale_up_reissues_training_recipe_identity(self) -> None:
+        recipe_id = f"sha256:{'c' * 64}"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output = root / "source"
+            command = [
+                sys.executable,
+                str(EXAMPLE_PATH),
+                "--train",
+                "--output-dir",
+                str(output),
+                "--run-card",
+                str(output / "run-card.json"),
+                "--max-steps",
+                "128",
+                "--expected-training-recipe-id",
+                recipe_id,
+            ]
+            summary = {
+                "row_type": "hf_gpt2_finetune_sweep_report_summary",
+                "scale_up_candidate_label": "recipe-pinned",
+                "scale_up_candidate_reason": "test",
+                "scale_up_candidate_command": command,
+                "scale_up_candidate_output_dir": str(output),
+                "scale_up_candidate_run_card": str(output / "run-card.json"),
+                "scale_up_candidate_training_recipe_identity_status": "ready",
+                "scale_up_candidate_training_recipe_identity_verified": True,
+                "scale_up_candidate_training_recipe_observed_id": recipe_id,
+            }
+            scale_up = hf_ft.hf_gpt2_finetune_scale_up_command(
+                summary,
+                output_dir=root / "next",
+                max_steps=256,
+                max_steps_multiplier=None,
+                max_train_samples_multiplier=None,
+            )
+            preflight = hf_ft.hf_gpt2_finetune_scale_up_preflight_report(scale_up)
+            tampered_command = json.loads(json.dumps(scale_up))
+            tampered_command["command"].extend(
+                ["--expected-training-recipe-id", recipe_id]
+            )
+            blocked_command = hf_ft.hf_gpt2_finetune_scale_up_preflight_report(
+                tampered_command
+            )
+            tampered_contract = json.loads(json.dumps(scale_up))
+            tampered_contract["training_recipe_identity_contract"]["status"] = (
+                "enforced"
+            )
+            blocked_contract = hf_ft.hf_gpt2_finetune_scale_up_preflight_report(
+                tampered_contract
+            )
+
+        self.assertEqual(scale_up["status"], "ok")
+        self.assertEqual(scale_up["training_recipe_source_expected_id"], recipe_id)
+        self.assertIsNone(scale_up["training_recipe_expected_id"])
+        self.assertEqual(
+            scale_up["training_recipe_identity_contract_status"],
+            "reissued",
+        )
+        self.assertNotIn("--expected-training-recipe-id", scale_up["command"])
+        self.assertTrue(preflight["ready"])
+        self.assertFalse(blocked_command["ready"])
+        self.assertTrue(
+            any(
+                issue.get("field") == "--expected-training-recipe-id"
+                for issue in blocked_command["issues"]
+            )
+        )
+        self.assertFalse(blocked_contract["ready"])
+        self.assertTrue(
+            any(
+                issue.get("field") == "training_recipe_identity_contract"
+                for issue in blocked_contract["issues"]
+            )
+        )
+
+    def test_run_card_summary_exposes_training_recipe_identity(self) -> None:
+        recipe_id = f"sha256:{'d' * 64}"
+        summary = hf_ft.summarize_hf_gpt2_finetune_run_card(
+            {
+                "row_type": "hf_gpt2_finetune_run_card",
+                "training_recipe_identity": {
+                    "status": "ready",
+                    "identity_verified": True,
+                    "observed_identity_id": recipe_id,
+                    "training_argument_count": 75,
+                },
+                "training_recipe_identity_contract": {
+                    "status": "enforced",
+                    "expected_identity_id": recipe_id,
+                },
+            }
+        )
+
+        self.assertEqual(summary["training_recipe_identity_status"], "ready")
+        self.assertTrue(summary["training_recipe_identity_verified"])
+        self.assertEqual(summary["training_recipe_expected_id"], recipe_id)
+        self.assertEqual(summary["training_recipe_observed_id"], recipe_id)
+        self.assertEqual(summary["training_recipe_argument_count"], 75)
+        self.assertEqual(summary["training_recipe_contract_status"], "enforced")
+
 
 if __name__ == "__main__":
     unittest.main()

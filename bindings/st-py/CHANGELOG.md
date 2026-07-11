@@ -94,6 +94,14 @@
   drift despite unchanged raw rows and tokenizer references. New
   `--tokenize-only` performs this full audit without constructing Trainer and
   emits a canonical `--train` replay command carrying the adopted identity.
+- Effective HF training-recipe identity: fingerprint instantiated
+  `TrainingArguments` optimizer/scheduler, batch/seed/precision/dataloader
+  controls, applied full-FT or LoRA trainability, model dtype, checkpoint-resume
+  state, causal-LM collator, and loss guard after defaults resolve but before
+  `Trainer` construction. `--training-recipe-only` adopts the path-independent
+  ID without optimizing; canonical replays enforce
+  `--expected-training-recipe-id`, while intentional scale-up strips the parent
+  ID, records an audited reissue, and lets the child adopt its changed recipe.
 - Audited dataset scale-up reissue: selection changes reissue raw-row and
   tokenized identities instead of incorrectly enforcing the parent's smaller
   materialization, while post-tokenization block-size/eval-block changes reissue
