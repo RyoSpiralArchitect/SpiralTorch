@@ -916,6 +916,13 @@ from .hf_runtime_identity import (
     hf_causal_lm_runtime_identity_report,
 )
 
+from . import hf_dataset_identity as hf_dataset_identity
+from .hf_dataset_identity import (
+    HF_DATASET_INPUT_IDENTITY_SCHEMA,
+    hf_dataset_input_identity_lines,
+    hf_dataset_input_identity_report,
+)
+
 from . import hf_execution_identity as hf_execution_identity
 from .hf_execution_identity import (
     HF_FINETUNE_EXECUTION_IDENTITY_SCHEMA,
@@ -1298,6 +1305,7 @@ _EXTRAS = [
     "HF_FINETUNE_REQUIRED_PYTHON_PACKAGES",
     "HF_FINETUNE_REQUIRED_RUST_SURFACES",
     "HF_FINETUNE_INPUT_IDENTITY_SCHEMA",
+    "HF_DATASET_INPUT_IDENTITY_SCHEMA",
     "HF_FINETUNE_EXECUTION_IDENTITY_SCHEMA",
     "HF_CAUSAL_LM_ARTIFACT_KINDS",
     "HF_CAUSAL_LM_RUNTIME_IDENTITY_SCHEMA",
@@ -1358,6 +1366,7 @@ _EXTRAS = [
     "hf_input_identity",
     "hf_execution_identity",
     "hf_runtime_identity",
+    "hf_dataset_identity",
     "hf_adapter_continuation_executor_launch_lines",
     "hf_adapter_continuation_executor_launch_status_lines",
     "hf_adapter_continuation_executor_launch_status_report",
@@ -1388,6 +1397,8 @@ _EXTRAS = [
     "hf_adapter_input_identity_report",
     "hf_finetune_input_identity_lines",
     "hf_finetune_input_identity_report",
+    "hf_dataset_input_identity_lines",
+    "hf_dataset_input_identity_report",
     "hf_adapter_lineage_lines",
     "hf_adapter_lineage_report",
     "hf_adapter_promotion_chain_lines",

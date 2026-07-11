@@ -3781,6 +3781,114 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             )
         )
 
+    def test_scale_up_pins_dataset_identity_revision_and_rejects_drift(
+        self,
+    ) -> None:
+        dataset_id = f"sha256:{'9' * 64}"
+        revision = "e93a9faa9c77e5d09219f6c868bfc7a1bd65593c"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output = root / "source"
+            command = [
+                sys.executable,
+                str(EXAMPLE_PATH),
+                "--metadata-only",
+                "--dataset-revision",
+                revision,
+                "--output-dir",
+                str(output),
+                "--run-card",
+                str(output / "run-card.json"),
+            ]
+            summary = {
+                "row_type": "hf_gpt2_finetune_sweep_report_summary",
+                "scale_up_candidate_label": "dataset-pinned",
+                "scale_up_candidate_reason": "test",
+                "scale_up_candidate_command": command,
+                "scale_up_candidate_output_dir": str(output),
+                "scale_up_candidate_run_card": str(output / "run-card.json"),
+                "scale_up_candidate_dataset_input_identity_status": "ready",
+                "scale_up_candidate_dataset_input_identity_verified": True,
+                "scale_up_candidate_dataset_input_observed_id": dataset_id,
+                "scale_up_candidate_dataset_input_effective_revision": revision,
+                "scale_up_candidate_dataset_input_effective_name": (
+                    "Salesforce/wikitext"
+                ),
+            }
+            scale_up = hf_ft.hf_gpt2_finetune_scale_up_command(
+                summary,
+                output_dir=root / "next",
+                max_steps_multiplier=None,
+                max_train_samples_multiplier=None,
+            )
+            preflight = hf_ft.hf_gpt2_finetune_scale_up_preflight_report(scale_up)
+            tampered = json.loads(json.dumps(scale_up))
+            flag_index = tampered["command"].index("--expected-dataset-input-id")
+            del tampered["command"][flag_index : flag_index + 2]
+            blocked = hf_ft.hf_gpt2_finetune_scale_up_preflight_report(tampered)
+            drifted_summary = dict(summary)
+            drifted_summary["scale_up_candidate_command"] = [
+                *command,
+                "--expected-dataset-input-id",
+                dataset_id,
+            ]
+            drifted_summary["scale_up_candidate_dataset_input_observed_id"] = (
+                f"sha256:{'8' * 64}"
+            )
+            drifted = hf_ft.hf_gpt2_finetune_scale_up_command(
+                drifted_summary,
+                output_dir=root / "drifted",
+                max_steps_multiplier=None,
+                max_train_samples_multiplier=None,
+            )
+            drifted_preflight = hf_ft.hf_gpt2_finetune_scale_up_preflight_report(
+                drifted
+            )
+
+        self.assertEqual(scale_up["dataset_input_expected_id"], dataset_id)
+        self.assertEqual(
+            scale_up["dataset_input_identity_contract_status"],
+            "enforced",
+        )
+        self.assertEqual(
+            scale_up["command"][
+                scale_up["command"].index("--expected-dataset-input-id") + 1
+            ],
+            dataset_id,
+        )
+        self.assertEqual(
+            scale_up["command"][
+                scale_up["command"].index("--dataset-revision") + 1
+            ],
+            revision,
+        )
+        self.assertEqual(
+            scale_up["command"][
+                scale_up["command"].index("--dataset-name") + 1
+            ],
+            "Salesforce/wikitext",
+        )
+        self.assertTrue(preflight["ready"])
+        self.assertEqual(preflight["dataset_input_expected_id"], dataset_id)
+        self.assertFalse(blocked["ready"])
+        self.assertTrue(
+            any(
+                issue.get("field") == "--expected-dataset-input-id"
+                for issue in blocked["issues"]
+            )
+        )
+        self.assertEqual(
+            drifted["dataset_input_identity_contract_status"],
+            "blocked",
+        )
+        self.assertFalse(drifted_preflight["ready"])
+        self.assertTrue(
+            any(
+                issue.get("field") == "dataset_input_identity_contract"
+                for issue in drifted_preflight["issues"]
+            )
+        )
+
     def test_scale_up_pins_execution_identity_and_rejects_flag_drift(
         self,
     ) -> None:
@@ -10354,6 +10462,66 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                     "--metadata-only",
                 ]
             )
+
+    def test_bridge_canonicalizes_dataset_identity_for_next_generation(
+        self,
+    ) -> None:
+        module = load_bridge_example()
+        args = module.parse_args(
+            ["--dataset-revision", "main", "--metadata-only"]
+        )
+        dataset_id = f"sha256:{'d' * 64}"
+        revision = "e93a9faa9c77e5d09219f6c868bfc7a1bd65593c"
+
+        module._canonicalize_dataset_input_launch_command(
+            args,
+            {
+                "status": "ready",
+                "observed_identity_id": dataset_id,
+                "effective_dataset_name": "Salesforce/wikitext",
+                "effective_revision": revision,
+            },
+        )
+        command = args._hf_finetune_launch_command
+
+        self.assertEqual(args.dataset_revision, revision)
+        self.assertEqual(args.dataset_name, "Salesforce/wikitext")
+        self.assertEqual(
+            command[command.index("--dataset-name") + 1],
+            "Salesforce/wikitext",
+        )
+        self.assertEqual(
+            command[command.index("--dataset-revision") + 1],
+            revision,
+        )
+        self.assertEqual(command.count("--dataset-revision"), 1)
+        self.assertEqual(
+            command[command.index("--expected-dataset-input-id") + 1],
+            dataset_id,
+        )
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            module.parse_args(
+                [
+                    "--expected-dataset-input-id",
+                    "invalid",
+                    "--metadata-only",
+                ]
+            )
+
+    def test_bridge_only_requires_remote_dataset_identity_when_loading(self) -> None:
+        module = load_bridge_example()
+
+        preflight_only = module.parse_args([])
+        metadata = module.parse_args(["--metadata-only"])
+        training = module.parse_args(["--train"])
+        expected = module.parse_args(
+            ["--expected-dataset-input-id", f"sha256:{'e' * 64}"]
+        )
+
+        self.assertFalse(module._requires_remote_dataset_identity(preflight_only))
+        self.assertTrue(module._requires_remote_dataset_identity(metadata))
+        self.assertTrue(module._requires_remote_dataset_identity(training))
+        self.assertTrue(module._requires_remote_dataset_identity(expected))
 
     def test_bridge_canonicalizes_execution_identity_for_next_generation(
         self,

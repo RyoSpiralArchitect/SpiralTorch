@@ -14,6 +14,7 @@ hf_peft: ModuleType
 hf_input_identity: ModuleType
 hf_execution_identity: ModuleType
 hf_runtime_identity: ModuleType
+hf_dataset_identity: ModuleType
 hf_adapter: ModuleType
 hf_adapter_executor: ModuleType
 hf_adapter_executor_launch: ModuleType
@@ -564,6 +565,7 @@ HF_FINETUNE_TRAINER_TRACE_FILENAME: str
 HF_FINETUNE_REQUIRED_PYTHON_PACKAGES: List[str]
 HF_FINETUNE_REQUIRED_RUST_SURFACES: List[Dict[str, str]]
 HF_FINETUNE_INPUT_IDENTITY_SCHEMA: str
+HF_DATASET_INPUT_IDENTITY_SCHEMA: str
 HF_FINETUNE_EXECUTION_IDENTITY_SCHEMA: str
 HF_CAUSAL_LM_ARTIFACT_KINDS: Tuple[str, ...]
 HF_CAUSAL_LM_RUNTIME_IDENTITY_SCHEMA: str
@@ -652,6 +654,22 @@ def hf_finetune_input_identity_report(
 def hf_finetune_input_identity_lines(
     report_or_inputs: Mapping[str, object] | None = ...,
     **kwargs: object,
+) -> List[str]: ...
+def hf_dataset_input_identity_report(
+    *,
+    dataset_name: object,
+    dataset_config: object | None = ...,
+    requested_revision: object | None = ...,
+    train_split: object | None = ...,
+    eval_split: object | None = ...,
+    text_column: object | None = ...,
+    local_files: bool = ...,
+    expected_identity_id: str | None = ...,
+    phase: str = ...,
+    hub_api: Any | None = ...,
+) -> Dict[str, object]: ...
+def hf_dataset_input_identity_lines(
+    report: Mapping[str, object],
 ) -> List[str]: ...
 def hf_finetune_execution_identity_report(
     runtime_preflight: Mapping[str, object],

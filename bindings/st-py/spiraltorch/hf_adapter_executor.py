@@ -1783,6 +1783,18 @@ def _run_hf_adapter_continuation_executor_unlocked(
                 "training_input_identity_contract"
             ),
             "training_input_identity": preflight.get("training_input_identity"),
+            "dataset_input_identity_contract": command.get(
+                "dataset_input_identity_contract"
+            ),
+            "dataset_input_expected_id": preflight.get(
+                "dataset_input_expected_id"
+            ),
+            "dataset_input_effective_revision": preflight.get(
+                "dataset_input_effective_revision"
+            ),
+            "dataset_input_effective_name": preflight.get(
+                "dataset_input_effective_name"
+            ),
             "runtime_input_identity_contract": command.get(
                 "runtime_input_identity_contract"
             ),
@@ -1896,6 +1908,18 @@ def _run_hf_adapter_continuation_executor_unlocked(
                 "training_input_identity_contract"
             ),
             "training_input_identity": preflight.get("training_input_identity"),
+            "dataset_input_identity_contract": command.get(
+                "dataset_input_identity_contract"
+            ),
+            "dataset_input_expected_id": preflight.get(
+                "dataset_input_expected_id"
+            ),
+            "dataset_input_effective_revision": preflight.get(
+                "dataset_input_effective_revision"
+            ),
+            "dataset_input_effective_name": preflight.get(
+                "dataset_input_effective_name"
+            ),
             "runtime_input_identity_contract": command.get(
                 "runtime_input_identity_contract"
             ),
@@ -2164,6 +2188,10 @@ def hf_adapter_continuation_executor_lines(
             f"input_identity={selected_transition.get('input_identity_ready')} "
             "training_input_identity="
             f"{selected_transition.get('training_input_identity_ready')} "
+            "dataset_input_required="
+            f"{selected_transition.get('dataset_input_identity_required')} "
+            "dataset_input_identity="
+            f"{selected_transition.get('dataset_input_identity_ready')} "
             "runtime_input_required="
             f"{selected_transition.get('runtime_input_identity_required')} "
             "runtime_input_identity="
@@ -2202,6 +2230,12 @@ def hf_adapter_continuation_executor_lines(
             if isinstance(training_input_identity, Mapping)
             else None
         )
+        dataset_input_contract = pending.get("dataset_input_identity_contract")
+        dataset_input_contract_status = (
+            dataset_input_contract.get("status")
+            if isinstance(dataset_input_contract, Mapping)
+            else None
+        )
         runtime_input_contract = pending.get("runtime_input_identity_contract")
         runtime_input_contract_status = (
             runtime_input_contract.get("status")
@@ -2225,6 +2259,11 @@ def hf_adapter_continuation_executor_lines(
             f"preflight={preflight_status} "
             f"input_identity={input_identity_status} "
             f"training_input_identity={training_input_identity_status} "
+            f"dataset_input_contract={dataset_input_contract_status} "
+            f"dataset_input_expected={pending.get('dataset_input_expected_id')} "
+            "dataset_input_revision="
+            f"{pending.get('dataset_input_effective_revision')} "
+            f"dataset_input_name={pending.get('dataset_input_effective_name')} "
             f"runtime_input_contract={runtime_input_contract_status} "
             f"runtime_input_expected={pending.get('runtime_input_expected_id')} "
             f"execution_input_contract={execution_input_contract_status} "
@@ -2264,6 +2303,12 @@ def hf_adapter_continuation_executor_lines(
             if isinstance(training_input_identity, Mapping)
             else None
         )
+        dataset_input_contract = raw_attempt.get("dataset_input_identity_contract")
+        dataset_input_contract_status = (
+            dataset_input_contract.get("status")
+            if isinstance(dataset_input_contract, Mapping)
+            else None
+        )
         runtime_input_contract = raw_attempt.get("runtime_input_identity_contract")
         runtime_input_contract_status = (
             runtime_input_contract.get("status")
@@ -2289,6 +2334,13 @@ def hf_adapter_continuation_executor_lines(
             f"runtime={runtime_status} "
             f"input_identity={input_identity_status} "
             f"training_input_identity={training_input_identity_status} "
+            f"dataset_input_contract={dataset_input_contract_status} "
+            "dataset_input_expected="
+            f"{raw_attempt.get('dataset_input_expected_id')} "
+            "dataset_input_revision="
+            f"{raw_attempt.get('dataset_input_effective_revision')} "
+            "dataset_input_name="
+            f"{raw_attempt.get('dataset_input_effective_name')} "
             f"runtime_input_contract={runtime_input_contract_status} "
             f"runtime_input_expected={raw_attempt.get('runtime_input_expected_id')} "
             f"execution_input_contract={execution_input_contract_status} "

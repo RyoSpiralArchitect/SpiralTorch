@@ -791,6 +791,24 @@ same report with `st.hf_finetune_input_identity_report(...)` and
 and reads all covered bytes at both phases, so very large corpora or checkpoints
 should budget that I/O rather than treating the gate as metadata-only.
 
+Remote Hub corpora use a separate immutable dataset-source contract. Before
+model weights load, the bridge resolves a requested dataset branch or tag to
+the Hub's canonical repository id and 40-hex commit, then fingerprints that
+repository commit together with the dataset config, train/eval split
+expressions, and text column. For example, `wikitext@main` is rewritten to a
+namespaced repository plus an immutable revision before `load_dataset(...)` is
+called. The canonical launch command records both `--dataset-revision` and
+`--expected-dataset-input-id`; the identity is checked again after dataset
+load, and later scale-up/executor generations require the same parent/child
+identity before promotion. Any config, split, column, repository, or commit
+drift fails before model loading. Use
+`st.hf_dataset_input_identity_report(...)` and
+`st.hf_dataset_input_identity_lines(...)` to inspect the same contract. This
+scope pins the Hub repository and logical selection, not mutable external URLs
+that a custom dataset builder may fetch. Local `--train-file` corpora remain
+covered by the byte-level local training-input identity above instead of being
+double counted.
+
 The model basis and tokenizer now form a second content-addressed runtime
 contract. Remote base models record the resolved Hub commit plus stable config
 and tokenizer semantics; tokenizer files shipped with an adapter and local

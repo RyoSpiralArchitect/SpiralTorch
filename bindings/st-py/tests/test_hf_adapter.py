@@ -141,6 +141,9 @@ def _write_promoted_child(
     expected_runtime_input_id: str | None = None,
     execution_input_id: str | None = None,
     expected_execution_input_id: str | None = None,
+    dataset_input_id: str | None = None,
+    expected_dataset_input_id: str | None = None,
+    dataset_revision: str = "e93a9faa9c77e5d09219f6c868bfc7a1bd65593c",
 ) -> tuple[Path, dict, dict]:
     adapter = _write_adapter(child, weights)
     run_card_path = adapter / "spiraltorch-hf-finetune-run-card.json"
@@ -202,6 +205,37 @@ def _write_promoted_child(
             ),
             "expected_identity_id": expected_execution_input_id,
             "observed_identity_id": execution_input_id,
+            "identity_verified": True,
+            "fail_fast": True,
+        }
+    if dataset_input_id is not None:
+        card["dataset_input_identity"] = {
+            "row_type": "hf_dataset_input_identity",
+            "status": "ready",
+            "phase": "preflight",
+            "expected_identity_id": expected_dataset_input_id,
+            "observed_identity_id": dataset_input_id,
+            "effective_revision": dataset_revision,
+            "identity_verified": True,
+        }
+        card["dataset_input_identity_after_load"] = {
+            "row_type": "hf_dataset_input_identity",
+            "status": "ready",
+            "phase": "after_load",
+            "expected_identity_id": expected_dataset_input_id or dataset_input_id,
+            "observed_identity_id": dataset_input_id,
+            "effective_revision": dataset_revision,
+            "identity_verified": True,
+        }
+        card["dataset_input_identity_contract"] = {
+            "status": (
+                "enforced"
+                if expected_dataset_input_id is not None
+                else "adopted"
+            ),
+            "expected_identity_id": expected_dataset_input_id or dataset_input_id,
+            "observed_identity_id": dataset_input_id,
+            "effective_revision": dataset_revision,
             "identity_verified": True,
             "fail_fast": True,
         }
@@ -537,6 +571,60 @@ def test_adapter_chain_adopts_then_requires_runtime_input_identity(
             parent_adapter=enforced,
             run_card=incomplete_card,
         )
+
+
+def test_adapter_chain_adopts_then_requires_dataset_input_identity(
+    tmp_path: Path,
+) -> None:
+    dataset_input_id = "sha256:" + "6" * 64
+    root = _write_adapter(tmp_path / "root", b"root")
+    st.write_hf_adapter_lineage(root)
+    adopted, adopted_lineage, _ = _write_promoted_child(
+        tmp_path / "adopted",
+        root,
+        b"adopted",
+        dataset_input_id=dataset_input_id,
+    )
+    enforced, enforced_lineage, _ = _write_promoted_child(
+        tmp_path / "enforced",
+        adopted,
+        b"enforced",
+        dataset_input_id=dataset_input_id,
+        expected_dataset_input_id=dataset_input_id,
+    )
+    _, dropped_lineage, _ = _write_promoted_child(
+        tmp_path / "dropped",
+        enforced,
+        b"dropped",
+    )
+
+    chain = st.hf_adapter_promotion_chain_report(tmp_path)
+    root_to_adopted, adopted_to_enforced, enforced_to_dropped = chain[
+        "transitions"
+    ]
+
+    assert adopted_lineage["dataset_input_identity_verified"] is True
+    assert adopted_lineage["dataset_input_observed_id"] == dataset_input_id
+    assert root_to_adopted["dataset_input_identity_ready"] is True
+    assert root_to_adopted["dataset_input_adopted"] is True
+    assert root_to_adopted["status"] == "ready"
+
+    assert enforced_lineage["dataset_input_identity_required"] is True
+    assert enforced_lineage["dataset_input_expected_id"] == dataset_input_id
+    assert adopted_to_enforced["dataset_input_identity_ready"] is True
+    assert adopted_to_enforced["dataset_input_matches_parent"] is True
+    assert adopted_to_enforced["status"] == "ready"
+
+    assert dropped_lineage["dataset_input_identity_present"] is False
+    assert enforced_to_dropped["dataset_input_identity_required"] is True
+    assert enforced_to_dropped["dataset_input_identity_ready"] is False
+    assert enforced_to_dropped["status"] == "rejected"
+    transition_lines = [
+        line
+        for line in st.hf_adapter_promotion_chain_lines(chain)
+        if line.startswith("hf_adapter_promotion_chain_transition ")
+    ]
+    assert "dataset_input_ready=False" in transition_lines[-1]
 
 
 def test_adapter_chain_adopts_then_requires_execution_input_identity(

@@ -38,6 +38,11 @@ from spiraltorch.hf_execution_identity import (
     hf_finetune_execution_identity_lines,
     hf_finetune_execution_identity_report,
 )
+from spiraltorch.hf_dataset_identity import (
+    HF_DATASET_INPUT_IDENTITY_SCHEMA,
+    hf_dataset_input_identity_lines,
+    hf_dataset_input_identity_report,
+)
 from spiraltorch.hf_ft import (
     HF_GPT2_FT_DEFAULT_DEVICE_BACKENDS,
     hf_gpt2_finetune_checkpoint_resume_lines,
@@ -162,6 +167,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help=(
             "Fail before model loading unless local model-config, corpus, "
             "distortion, and checkpoint inputs match this sha256 bundle identity."
+        ),
+    )
+    parser.add_argument(
+        "--expected-dataset-input-id",
+        default=None,
+        help=(
+            "Fail before model loading unless the remote Hugging Face dataset "
+            "repository commit and logical config/split selection match this "
+            "sha256 identity."
         ),
     )
     parser.add_argument(
@@ -635,6 +649,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         parser.error("--expected-root-adapter-id must be sha256:<64 lowercase hex>")
     if not _valid_adapter_id(args.expected_training_input_id):
         parser.error("--expected-training-input-id must be sha256:<64 lowercase hex>")
+    if not _valid_adapter_id(args.expected_dataset_input_id):
+        parser.error("--expected-dataset-input-id must be sha256:<64 lowercase hex>")
     if not _valid_adapter_id(args.expected_runtime_input_id):
         parser.error("--expected-runtime-input-id must be sha256:<64 lowercase hex>")
     if not _valid_adapter_id(args.expected_execution_input_id):
@@ -901,6 +917,27 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def _argv_has_option(raw_argv: Sequence[str], *names: str) -> bool:
     prefixes = tuple(f"{name}=" for name in names)
     return any(arg in names or arg.startswith(prefixes) for arg in raw_argv)
+
+
+def _replace_or_append_command_option(
+    command: Sequence[str],
+    flag: str,
+    value: object,
+) -> list[str]:
+    output: list[str] = []
+    index = 0
+    while index < len(command):
+        item = str(command[index])
+        if item == flag:
+            index += 2
+            continue
+        if item.startswith(f"{flag}="):
+            index += 1
+            continue
+        output.append(item)
+        index += 1
+    output.extend([flag, str(value)])
+    return output
 
 
 def _profile_value(profile: Mapping[str, Any], section: str, key: str) -> Any:
@@ -1323,6 +1360,17 @@ def _load_dataset_split(
 
 def _has_local_corpus(args: argparse.Namespace) -> bool:
     return bool(args.train_file)
+
+
+def _requires_remote_dataset_identity(args: argparse.Namespace) -> bool:
+    return bool(
+        not _has_local_corpus(args)
+        and (
+            args.train
+            or args.metadata_only
+            or args.expected_dataset_input_id is not None
+        )
+    )
 
 
 def _uses_streaming_dataset(args: argparse.Namespace) -> bool:
@@ -2555,6 +2603,78 @@ def _training_input_identity_report(
         }
 
 
+def _dataset_input_identity_report(
+    args: argparse.Namespace,
+    *,
+    phase: str,
+    expected_identity_id: str | None = None,
+) -> dict[str, object]:
+    expected_id = (
+        expected_identity_id
+        if expected_identity_id is not None
+        else getattr(args, "expected_dataset_input_id", None)
+    )
+    try:
+        return hf_dataset_input_identity_report(
+            dataset_name=args.dataset_name,
+            dataset_config=args.dataset_config,
+            requested_revision=args.dataset_revision,
+            train_split=args.train_split,
+            eval_split=args.eval_split,
+            text_column=args.text_column,
+            local_files=_has_local_corpus(args),
+            expected_identity_id=expected_id,
+            phase=phase,
+        )
+    except (OSError, TypeError, ValueError) as exc:
+        return {
+            "row_type": "hf_dataset_input_identity",
+            "schema": HF_DATASET_INPUT_IDENTITY_SCHEMA,
+            "status": "blocked" if expected_id is not None else "evidence_incomplete",
+            "phase": phase,
+            "expected_identity_id": expected_id,
+            "observed_identity_id": None,
+            "identity_verified": False,
+            "error_count": 1,
+            "errors": [f"{exc.__class__.__name__}: {exc}"],
+        }
+
+
+def _canonicalize_dataset_input_launch_command(
+    args: argparse.Namespace,
+    report: Mapping[str, object],
+) -> None:
+    if report.get("status") != "ready":
+        return
+    effective_revision = report.get("effective_revision")
+    effective_dataset_name = report.get("effective_dataset_name")
+    observed_id = report.get("observed_identity_id")
+    if (
+        effective_dataset_name is None
+        or effective_revision is None
+        or observed_id is None
+    ):
+        return
+    args.dataset_name = str(effective_dataset_name)
+    args.dataset_revision = str(effective_revision)
+    command = list(getattr(args, "_hf_finetune_launch_command", []) or [])
+    if not command:
+        return
+    command = _replace_or_append_command_option(
+        command,
+        "--dataset-name",
+        effective_dataset_name,
+    )
+    command = _replace_or_append_command_option(
+        command,
+        "--dataset-revision",
+        effective_revision,
+    )
+    if not _argv_has_option(command, "--expected-dataset-input-id"):
+        command.extend(["--expected-dataset-input-id", str(observed_id)])
+    args._hf_finetune_launch_command = command
+
+
 def _canonicalize_training_input_launch_command(
     args: argparse.Namespace,
     report: Mapping[str, object],
@@ -2691,6 +2811,9 @@ def _finetune_start_report(
     training_input_identity = dict(
         getattr(args, "_hf_training_input_identity_report", {}) or {}
     )
+    dataset_input_identity = dict(
+        getattr(args, "_hf_dataset_input_identity_report", {}) or {}
+    )
     runtime_input_identity = dict(
         getattr(args, "_hf_runtime_input_identity_report", {}) or {}
     )
@@ -2739,6 +2862,13 @@ def _finetune_start_report(
             if not training_input_identity
             or training_input_identity.get("status") == "not_applicable"
             else training_input_identity.get("identity_verified") is True
+        ),
+        "dataset_input_identity": dataset_input_identity or None,
+        "dataset_input_identity_verified": (
+            None
+            if not dataset_input_identity
+            or dataset_input_identity.get("status") == "not_applicable"
+            else dataset_input_identity.get("identity_verified") is True
         ),
         "runtime_input_identity": runtime_input_identity or None,
         "runtime_input_identity_verified": (
@@ -2907,6 +3037,28 @@ def _base_run_card(
             or None
         ),
         "training_input_identity_after_load": None,
+        "dataset_input_identity": (
+            dict(getattr(args, "_hf_dataset_input_identity_report", {}) or {})
+            or None
+        ),
+        "dataset_input_identity_after_load": None,
+        "dataset_input_identity_contract": {
+            "status": (
+                "not_applicable"
+                if _has_local_corpus(args)
+                else "enforced"
+                if args.expected_dataset_input_id is not None
+                else "adopted"
+            ),
+            "expected_identity_id": args.expected_dataset_input_id,
+            "observed_identity_id": dict(
+                getattr(args, "_hf_dataset_input_identity_report", {}) or {}
+            ).get("observed_identity_id"),
+            "effective_dataset_name": dict(
+                getattr(args, "_hf_dataset_input_identity_report", {}) or {}
+            ).get("effective_dataset_name"),
+            "fail_fast": _requires_remote_dataset_identity(args),
+        },
         "model_runtime_identity_pre_model": None,
         "model_runtime_identity_after_model": None,
         "model_runtime_identity_contract": {
@@ -3127,6 +3279,12 @@ def _main_with_runtime_access(
     )
     args._hf_training_input_identity_report = training_input_identity
     _canonicalize_training_input_launch_command(args, training_input_identity)
+    dataset_input_identity = _dataset_input_identity_report(
+        args,
+        phase="preflight",
+    )
+    args._hf_dataset_input_identity_report = dataset_input_identity
+    _canonicalize_dataset_input_launch_command(args, dataset_input_identity)
     checkpoint_resume_report = (
         None
         if args.resume_from_checkpoint is None
@@ -3189,6 +3347,29 @@ def _main_with_runtime_access(
         else dict(adapter_input_identity)
     )
     preflight["training_input_identity"] = dict(training_input_identity)
+    preflight["dataset_input_identity"] = dict(dataset_input_identity)
+    preflight["dataset_input_identity_contract"] = {
+        "status": (
+            "not_applicable"
+            if dataset_input_identity.get("status") == "not_applicable"
+            else "enforced"
+            if args.expected_dataset_input_id is not None
+            else "adopted"
+            if dataset_input_identity.get("status") == "ready"
+            else "evidence_incomplete"
+        ),
+        "expected_identity_id": args.expected_dataset_input_id,
+        "observed_identity_id": dataset_input_identity.get(
+            "observed_identity_id"
+        ),
+        "identity_verified": dataset_input_identity.get("identity_verified"),
+        "effective_revision": dataset_input_identity.get("effective_revision"),
+        "effective_dataset_name": dataset_input_identity.get(
+            "effective_dataset_name"
+        ),
+        "fail_fast": _requires_remote_dataset_identity(args),
+        "verification_phase": "dataset_load",
+    }
     preflight["model_runtime_identity_contract"] = {
         "status": (
             "enforced" if args.expected_runtime_input_id is not None else "observe"
@@ -3301,6 +3482,8 @@ def _main_with_runtime_access(
             print(line)
     for line in hf_finetune_input_identity_lines(training_input_identity):
         print(line)
+    for line in hf_dataset_input_identity_lines(dataset_input_identity):
+        print(line)
     if checkpoint_resume_report is not None:
         for line in hf_gpt2_finetune_checkpoint_resume_lines(
             checkpoint_resume_report
@@ -3317,6 +3500,11 @@ def _main_with_runtime_access(
             and adapter_input_identity.get("status") != "ready"
         )
         or training_input_identity.get("status") == "blocked"
+        or (
+            _requires_remote_dataset_identity(args)
+            and dataset_input_identity.get("status") != "ready"
+        )
+        or dataset_input_identity.get("status") == "blocked"
     ):
         if not model_artifact_compatible:
             preflight["model_artifact_error"] = (
@@ -3342,6 +3530,10 @@ def _main_with_runtime_access(
         if training_input_identity.get("status") == "blocked":
             preflight["training_input_identity_error"] = (
                 "fine-tune local input identity verification failed"
+            )
+        if dataset_input_identity.get("status") not in {"ready", "not_applicable"}:
+            preflight["dataset_input_identity_error"] = (
+                "remote dataset commit identity verification failed"
             )
         _write_card(preflight, args)
         return 1
@@ -3651,7 +3843,79 @@ def _main_with_runtime_access(
         stage="before_train",
     )
 
-    raw_train, raw_eval, loaded_corpus_report = _load_raw_datasets(datasets, args)
+    try:
+        raw_train, raw_eval, loaded_corpus_report = _load_raw_datasets(
+            datasets,
+            args,
+        )
+    except Exception as exc:
+        card.update(
+            {
+                "load_status": "error",
+                "failure_stage": "dataset_load",
+                "failure_error": f"{exc.__class__.__name__}: {exc}",
+            }
+        )
+        _write_card(card, args)
+        return 1
+    dataset_input_identity_after_load = _dataset_input_identity_report(
+        args,
+        phase="after_load",
+        expected_identity_id=(
+            None
+            if dataset_input_identity.get("status") == "not_applicable"
+            else dataset_input_identity.get("observed_identity_id")
+        ),
+    )
+    card["dataset_input_identity_after_load"] = dict(
+        dataset_input_identity_after_load
+    )
+    card["dataset_input_identity_contract"] = {
+        "status": (
+            "not_applicable"
+            if dataset_input_identity_after_load.get("status") == "not_applicable"
+            else "enforced"
+            if args.expected_dataset_input_id is not None
+            else "adopted"
+            if dataset_input_identity_after_load.get("status") == "ready"
+            else "evidence_incomplete"
+        ),
+        "expected_identity_id": (
+            args.expected_dataset_input_id
+            or dataset_input_identity.get("observed_identity_id")
+        ),
+        "observed_identity_id": dataset_input_identity_after_load.get(
+            "observed_identity_id"
+        ),
+        "identity_verified": dataset_input_identity_after_load.get(
+            "identity_verified"
+        ),
+        "effective_revision": dataset_input_identity_after_load.get(
+            "effective_revision"
+        ),
+        "effective_dataset_name": dataset_input_identity_after_load.get(
+            "effective_dataset_name"
+        ),
+        "fail_fast": _requires_remote_dataset_identity(args),
+        "verification_phase": "after_load",
+    }
+    if dataset_input_identity_after_load.get("status") not in {
+        "ready",
+        "not_applicable",
+    }:
+        card.update(
+            {
+                "load_status": "error",
+                "failure_stage": "dataset_input_identity_after_load",
+                "failure_error": (
+                    "remote dataset identity changed during dataset loading"
+                ),
+            }
+        )
+        _write_card(card, args)
+        return 1
+    for line in hf_dataset_input_identity_lines(dataset_input_identity_after_load):
+        print(line)
     if loaded_corpus_report is not None:
         corpus_file_report = loaded_corpus_report
         card["corpus_file_report"] = corpus_file_report
