@@ -81,6 +81,11 @@ from spiraltorch.hf_input_identity import (
     hf_finetune_input_identity_lines,
     hf_finetune_input_identity_report,
 )
+from spiraltorch.hf_replay_identity import (
+    HF_FINETUNE_REPLAY_IDENTITY_SCHEMA,
+    hf_finetune_replay_identity_lines,
+    hf_finetune_replay_identity_report,
+)
 from spiraltorch.hf_training_identity import (
     HF_FINETUNE_TRAINING_RECIPE_IDENTITY_SCHEMA,
     hf_finetune_training_recipe_identity_lines,
@@ -229,6 +234,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "Fail after effective TrainingArguments and model preparation resolve "
             "but before Trainer construction unless the optimization recipe "
             "matches this sha256 identity."
+        ),
+    )
+    parser.add_argument(
+        "--expected-finetune-replay-id",
+        default=None,
+        help=(
+            "Fail before Trainer construction unless the complete model, data, "
+            "runtime, execution, and effective recipe identity bundle matches "
+            "this sha256 identity."
         ),
     )
     parser.add_argument(
@@ -723,6 +737,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         parser.error(
             "--expected-training-recipe-id must be sha256:<64 lowercase hex>"
         )
+    if not _valid_adapter_id(args.expected_finetune_replay_id):
+        parser.error(
+            "--expected-finetune-replay-id must be sha256:<64 lowercase hex>"
+        )
     if (
         args.expected_parent_lineage_depth is not None
         and args.expected_parent_lineage_depth < 0
@@ -978,6 +996,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     ):
         parser.error(
             "--expected-training-recipe-id requires --train or "
+            "--training-recipe-only"
+        )
+    if (
+        args.expected_finetune_replay_id is not None
+        and not args.train
+        and not args.training_recipe_only
+    ):
+        parser.error(
+            "--expected-finetune-replay-id requires --train or "
             "--training-recipe-only"
         )
     if args.validation_file and not args.train_file:
@@ -1504,6 +1531,13 @@ def _requires_training_recipe_identity(args: argparse.Namespace) -> bool:
     return bool(
         _training_semantics_requested(args)
         or args.expected_training_recipe_id is not None
+    )
+
+
+def _requires_finetune_replay_identity(args: argparse.Namespace) -> bool:
+    return bool(
+        _training_semantics_requested(args)
+        or args.expected_finetune_replay_id is not None
     )
 
 
@@ -2915,6 +2949,54 @@ def _training_recipe_identity_report(
         }
 
 
+def _finetune_replay_identity_report(
+    args: argparse.Namespace,
+    *,
+    adapter_input_identity: Mapping[str, object] | None,
+    adapter_input_required: bool,
+    training_input_identity: Mapping[str, object] | None,
+    dataset_input_identity: Mapping[str, object] | None,
+    dataset_materialization_identity: Mapping[str, object] | None,
+    tokenized_dataset_identity: Mapping[str, object] | None,
+    model_runtime_identity: Mapping[str, object] | None,
+    execution_identity: Mapping[str, object] | None,
+    training_recipe_identity: Mapping[str, object] | None,
+    expected_identity_id: str | None = None,
+) -> dict[str, object]:
+    expected_id = (
+        expected_identity_id
+        if expected_identity_id is not None
+        else getattr(args, "expected_finetune_replay_id", None)
+    )
+    try:
+        return hf_finetune_replay_identity_report(
+            adapter_input_identity=adapter_input_identity,
+            adapter_input_required=adapter_input_required,
+            training_input_identity=training_input_identity,
+            dataset_input_identity=dataset_input_identity,
+            dataset_materialization_identity=dataset_materialization_identity,
+            tokenized_dataset_identity=tokenized_dataset_identity,
+            model_runtime_identity=model_runtime_identity,
+            execution_identity=execution_identity,
+            training_recipe_identity=training_recipe_identity,
+            expected_identity_id=expected_id,
+            phase="before_trainer_init",
+        )
+    except (TypeError, ValueError) as exc:
+        return {
+            "row_type": "hf_finetune_replay_identity",
+            "schema": HF_FINETUNE_REPLAY_IDENTITY_SCHEMA,
+            "status": "blocked",
+            "phase": "before_trainer_init",
+            "expected_identity_id": expected_id,
+            "observed_identity_id": None,
+            "identity_verified": False,
+            "path_independent": True,
+            "error_count": 1,
+            "errors": [f"{exc.__class__.__name__}: {exc}"],
+        }
+
+
 def _canonicalize_dataset_input_launch_command(
     args: argparse.Namespace,
     report: Mapping[str, object],
@@ -3002,6 +3084,19 @@ def _canonicalize_training_recipe_launch_command(
         command = [item for item in command if item != "--training-recipe-only"]
         if "--train" not in command:
             command.append("--train")
+    args._hf_finetune_launch_command = command
+
+
+def _canonicalize_finetune_replay_launch_command(
+    args: argparse.Namespace,
+    report: Mapping[str, object],
+) -> None:
+    command = list(getattr(args, "_hf_finetune_launch_command", []) or [])
+    observed_id = report.get("observed_identity_id")
+    if not command or report.get("status") != "ready" or observed_id is None:
+        return
+    if not _argv_has_option(command, "--expected-finetune-replay-id"):
+        command.extend(["--expected-finetune-replay-id", str(observed_id)])
     args._hf_finetune_launch_command = command
 
 
@@ -3165,6 +3260,9 @@ def _finetune_start_report(
     training_recipe_identity = dict(
         getattr(args, "_hf_training_recipe_identity_report", {}) or {}
     )
+    finetune_replay_identity = dict(
+        getattr(args, "_hf_finetune_replay_identity_report", {}) or {}
+    )
     adapter_preloaded = artifact_report.get("artifact_kind") == "peft_adapter"
     trainer_resume = args.resume_from_checkpoint is not None
     if adapter_preloaded and trainer_resume:
@@ -3246,6 +3344,12 @@ def _finetune_start_report(
             None
             if not training_recipe_identity
             else training_recipe_identity.get("identity_verified") is True
+        ),
+        "finetune_replay_identity": finetune_replay_identity or None,
+        "finetune_replay_identity_verified": (
+            None
+            if not finetune_replay_identity
+            else finetune_replay_identity.get("identity_verified") is True
         ),
         "weights_only_warm_start": adapter_preloaded and not trainer_resume,
         "trainer_checkpoint_resume": trainer_resume,
@@ -3463,6 +3567,20 @@ def _base_run_card(
             "fail_fast": _requires_training_recipe_identity(args),
             "verification_phase": "before_trainer_init",
             "scale_up_inheritance": "recompute_after_intentional_recipe_change",
+        },
+        "finetune_replay_identity": None,
+        "finetune_replay_identity_contract": {
+            "status": (
+                "pending"
+                if _requires_finetune_replay_identity(args)
+                else "not_requested"
+            ),
+            "expected_identity_id": args.expected_finetune_replay_id,
+            "observed_identity_id": None,
+            "identity_verified": False,
+            "fail_fast": _requires_finetune_replay_identity(args),
+            "verification_phase": "before_trainer_init",
+            "scale_up_inheritance": "recompute_after_intentional_run_change",
         },
         "model_runtime_identity_pre_model": None,
         "model_runtime_identity_after_model": None,
@@ -3819,6 +3937,20 @@ def _main_with_runtime_access(
         "fail_fast": _requires_training_recipe_identity(args),
         "verification_phase": "before_trainer_init",
         "scale_up_inheritance": "recompute_after_intentional_recipe_change",
+    }
+    preflight["finetune_replay_identity"] = None
+    preflight["finetune_replay_identity_contract"] = {
+        "status": (
+            "pending"
+            if _requires_finetune_replay_identity(args)
+            else "not_requested"
+        ),
+        "expected_identity_id": args.expected_finetune_replay_id,
+        "observed_identity_id": None,
+        "identity_verified": False,
+        "fail_fast": _requires_finetune_replay_identity(args),
+        "verification_phase": "before_trainer_init",
+        "scale_up_inheritance": "recompute_after_intentional_run_change",
     }
     preflight["model_runtime_identity_contract"] = {
         "status": (
@@ -4710,6 +4842,80 @@ def _main_with_runtime_access(
                 "failure_error": (
                     "effective training recipe does not match the required "
                     "identity"
+                ),
+            }
+        )
+        _write_card(card, args)
+        return 1
+    finetune_replay_identity = _finetune_replay_identity_report(
+        args,
+        adapter_input_identity=adapter_input_identity_after_load,
+        adapter_input_required=(
+            model_artifact_load_report.get("artifact_kind") == "peft_adapter"
+        ),
+        training_input_identity=training_input_identity_after_load,
+        dataset_input_identity=dataset_input_identity_after_load,
+        dataset_materialization_identity=dataset_materialization_identity,
+        tokenized_dataset_identity=tokenized_dataset_identity,
+        model_runtime_identity=strongest_runtime_identity,
+        execution_identity=execution_identity_after_model,
+        training_recipe_identity=training_recipe_identity,
+    )
+    args._hf_finetune_replay_identity_report = finetune_replay_identity
+    _canonicalize_finetune_replay_launch_command(
+        args,
+        finetune_replay_identity,
+    )
+    _refresh_card_launch_command(card, args)
+    card["finetune_replay_identity"] = dict(finetune_replay_identity)
+    card["finetune_replay_identity_contract"] = {
+        "status": (
+            "blocked"
+            if finetune_replay_identity.get("status") != "ready"
+            else "enforced"
+            if args.expected_finetune_replay_id is not None
+            else "adopted"
+        ),
+        "expected_identity_id": (
+            args.expected_finetune_replay_id
+            or finetune_replay_identity.get("observed_identity_id")
+        ),
+        "observed_identity_id": finetune_replay_identity.get(
+            "observed_identity_id"
+        ),
+        "identity_verified": finetune_replay_identity.get("identity_verified"),
+        "path_independent": finetune_replay_identity.get("path_independent"),
+        "component_count": finetune_replay_identity.get("component_count"),
+        "applicable_component_count": finetune_replay_identity.get(
+            "applicable_component_count"
+        ),
+        "ready_component_count": finetune_replay_identity.get(
+            "ready_component_count"
+        ),
+        "fail_fast": True,
+        "verification_phase": "before_trainer_init",
+        "scale_up_inheritance": "recompute_after_intentional_run_change",
+    }
+    if isinstance(nested_preflight, dict):
+        nested_preflight["finetune_replay_identity"] = dict(
+            finetune_replay_identity
+        )
+        nested_preflight["finetune_replay_identity_contract"] = dict(
+            card["finetune_replay_identity_contract"]
+        )
+    card["finetune_start_report"] = _finetune_start_report(
+        args,
+        model_artifact_load_report,
+    )
+    for line in hf_finetune_replay_identity_lines(finetune_replay_identity):
+        print(line)
+    if finetune_replay_identity.get("status") != "ready":
+        card.update(
+            {
+                "failure_stage": "finetune_replay_identity_before_trainer_init",
+                "failure_error": (
+                    "complete fine-tune replay identity does not match the "
+                    "required run contract"
                 ),
             }
         )

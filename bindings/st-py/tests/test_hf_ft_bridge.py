@@ -14233,6 +14233,103 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 ["--training-recipe-only", "--expected-training-recipe-id", "bad"]
             )
 
+    def test_bridge_finetune_replay_identity_contract(self) -> None:
+        module = load_bridge_example()
+        expected = f"sha256:{'a' * 64}"
+        recipe = module.parse_args(["--training-recipe-only"])
+        training = module.parse_args(["--train"])
+
+        self.assertTrue(module._requires_finetune_replay_identity(recipe))
+        self.assertTrue(module._requires_finetune_replay_identity(training))
+        self.assertFalse(
+            module._requires_finetune_replay_identity(module.parse_args([]))
+        )
+
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            module.parse_args(
+                ["--metadata-only", "--expected-finetune-replay-id", expected]
+            )
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            module.parse_args(
+                ["--training-recipe-only", "--expected-finetune-replay-id", "bad"]
+            )
+
+    def test_bridge_adopts_and_verifies_finetune_replay_identity(self) -> None:
+        module = load_bridge_example()
+
+        def identity(seed: str) -> str:
+            return f"sha256:{seed * 64}"
+
+        def report(schema: str, seed: str) -> dict[str, object]:
+            return {
+                "schema": schema,
+                "status": "ready",
+                "observed_identity_id": identity(seed),
+                "identity_verified": True,
+            }
+
+        components = {
+            "adapter_input_identity": None,
+            "adapter_input_required": False,
+            "training_input_identity": {
+                "schema": "training-input.v1",
+                "status": "ready",
+                "observed_input_id": identity("1"),
+                "identity_verified": True,
+            },
+            "dataset_input_identity": {
+                "schema": "dataset-input.v1",
+                "status": "not_applicable",
+                "identity_verified": False,
+            },
+            "dataset_materialization_identity": report(
+                "materialization.v1", "2"
+            ),
+            "tokenized_dataset_identity": report("tokenized.v1", "3"),
+            "model_runtime_identity": report("runtime.v1", "4"),
+            "execution_identity": report("execution.v1", "5"),
+            "training_recipe_identity": report("recipe.v1", "6"),
+        }
+        args = module.parse_args(["--training-recipe-only"])
+        args._hf_finetune_launch_command = [
+            sys.executable,
+            str(EXAMPLE_PATH),
+            "--training-recipe-only",
+        ]
+        adopted = module._finetune_replay_identity_report(args, **components)
+        module._canonicalize_finetune_replay_launch_command(args, adopted)
+        expected = adopted["observed_identity_id"]
+
+        self.assertEqual(adopted["status"], "ready")
+        self.assertEqual(
+            args._hf_finetune_launch_command[
+                args._hf_finetune_launch_command.index(
+                    "--expected-finetune-replay-id"
+                )
+                + 1
+            ],
+            expected,
+        )
+
+        replay_args = module.parse_args(
+            ["--training-recipe-only", "--expected-finetune-replay-id", expected]
+        )
+        replay = module._finetune_replay_identity_report(
+            replay_args,
+            **components,
+        )
+        drifted_components = dict(components)
+        drifted_components["training_recipe_identity"] = report("recipe.v1", "7")
+        blocked = module._finetune_replay_identity_report(
+            replay_args,
+            **drifted_components,
+        )
+
+        self.assertEqual(replay["status"], "ready")
+        self.assertTrue(replay["expected_identity_verified"])
+        self.assertEqual(blocked["status"], "blocked")
+        self.assertFalse(blocked["expected_identity_verified"])
+
     def test_scale_up_reissues_training_recipe_identity(self) -> None:
         recipe_id = f"sha256:{'c' * 64}"
         with tempfile.TemporaryDirectory() as tmp:
@@ -14309,6 +14406,82 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             )
         )
 
+    def test_scale_up_reissues_finetune_replay_identity(self) -> None:
+        replay_id = f"sha256:{'e' * 64}"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output = root / "source"
+            command = [
+                sys.executable,
+                str(EXAMPLE_PATH),
+                "--train",
+                "--output-dir",
+                str(output),
+                "--run-card",
+                str(output / "run-card.json"),
+                "--max-steps",
+                "128",
+                "--expected-finetune-replay-id",
+                replay_id,
+            ]
+            summary = {
+                "row_type": "hf_gpt2_finetune_sweep_report_summary",
+                "scale_up_candidate_label": "replay-pinned",
+                "scale_up_candidate_reason": "test",
+                "scale_up_candidate_command": command,
+                "scale_up_candidate_output_dir": str(output),
+                "scale_up_candidate_run_card": str(output / "run-card.json"),
+                "scale_up_candidate_finetune_replay_identity_status": "ready",
+                "scale_up_candidate_finetune_replay_identity_verified": True,
+                "scale_up_candidate_finetune_replay_observed_id": replay_id,
+            }
+            scale_up = hf_ft.hf_gpt2_finetune_scale_up_command(
+                summary,
+                output_dir=root / "next",
+                max_steps=256,
+                max_steps_multiplier=None,
+                max_train_samples_multiplier=None,
+            )
+            preflight = hf_ft.hf_gpt2_finetune_scale_up_preflight_report(scale_up)
+            tampered_command = json.loads(json.dumps(scale_up))
+            tampered_command["command"].extend(
+                ["--expected-finetune-replay-id", replay_id]
+            )
+            blocked_command = hf_ft.hf_gpt2_finetune_scale_up_preflight_report(
+                tampered_command
+            )
+            tampered_contract = json.loads(json.dumps(scale_up))
+            tampered_contract["finetune_replay_identity_contract"]["status"] = (
+                "enforced"
+            )
+            blocked_contract = hf_ft.hf_gpt2_finetune_scale_up_preflight_report(
+                tampered_contract
+            )
+
+        self.assertEqual(scale_up["status"], "ok")
+        self.assertEqual(scale_up["finetune_replay_source_expected_id"], replay_id)
+        self.assertIsNone(scale_up["finetune_replay_expected_id"])
+        self.assertEqual(
+            scale_up["finetune_replay_identity_contract_status"],
+            "reissued",
+        )
+        self.assertNotIn("--expected-finetune-replay-id", scale_up["command"])
+        self.assertTrue(preflight["ready"])
+        self.assertFalse(blocked_command["ready"])
+        self.assertTrue(
+            any(
+                issue.get("field") == "--expected-finetune-replay-id"
+                for issue in blocked_command["issues"]
+            )
+        )
+        self.assertFalse(blocked_contract["ready"])
+        self.assertTrue(
+            any(
+                issue.get("field") == "finetune_replay_identity_contract"
+                for issue in blocked_contract["issues"]
+            )
+        )
+
     def test_run_card_summary_exposes_training_recipe_identity(self) -> None:
         recipe_id = f"sha256:{'d' * 64}"
         summary = hf_ft.summarize_hf_gpt2_finetune_run_card(
@@ -14333,6 +14506,35 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(summary["training_recipe_observed_id"], recipe_id)
         self.assertEqual(summary["training_recipe_argument_count"], 75)
         self.assertEqual(summary["training_recipe_contract_status"], "enforced")
+
+    def test_run_card_summary_exposes_finetune_replay_identity(self) -> None:
+        replay_id = f"sha256:{'f' * 64}"
+        summary = hf_ft.summarize_hf_gpt2_finetune_run_card(
+            {
+                "row_type": "hf_gpt2_finetune_run_card",
+                "finetune_replay_identity": {
+                    "status": "ready",
+                    "identity_verified": True,
+                    "observed_identity_id": replay_id,
+                    "component_count": 8,
+                    "applicable_component_count": 7,
+                    "ready_component_count": 7,
+                },
+                "finetune_replay_identity_contract": {
+                    "status": "enforced",
+                    "expected_identity_id": replay_id,
+                },
+            }
+        )
+
+        self.assertEqual(summary["finetune_replay_identity_status"], "ready")
+        self.assertTrue(summary["finetune_replay_identity_verified"])
+        self.assertEqual(summary["finetune_replay_expected_id"], replay_id)
+        self.assertEqual(summary["finetune_replay_observed_id"], replay_id)
+        self.assertEqual(summary["finetune_replay_component_count"], 8)
+        self.assertEqual(summary["finetune_replay_applicable_component_count"], 7)
+        self.assertEqual(summary["finetune_replay_ready_component_count"], 7)
+        self.assertEqual(summary["finetune_replay_contract_status"], "enforced")
 
 
 if __name__ == "__main__":

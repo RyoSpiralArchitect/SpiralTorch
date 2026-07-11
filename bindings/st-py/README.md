@@ -864,6 +864,20 @@ resume semantics, or training-control behavior drifted. Python callers can use
 `st.hf_finetune_training_recipe_identity_report(...)` and
 `st.hf_finetune_training_recipe_identity_lines(...)` directly.
 
+At that same final boundary, SpiralTorch binds all independently verified
+layers into one `finetune_replay_identity`: adapter input lineage when present,
+local training inputs or the resolved Hub dataset source, exact selected text
+rows, exact tokenized blocks, model/tokenizer runtime, software/device
+execution, and the effective training recipe. The composite payload contains
+only each component schema, applicability, and content-addressed ID, so report
+paths and timestamps do not affect it. A `--training-recipe-only` adoption run
+adds `--expected-finetune-replay-id` to its canonical `--train` command. The
+individual expected-ID flags remain in that command to preserve earlier,
+layer-specific failures; the composite is the final fail-closed check before
+`Trainer(...)`. Use `st.hf_finetune_replay_identity_report(...)` and
+`st.hf_finetune_replay_identity_lines(...)` when assembling or auditing the
+same bundle outside the bridge.
+
 Scale-up keeps these contracts strict without making corpus growth impossible.
 If sample/eval shape stays unchanged, the child must reproduce both parent
 dataset identities exactly. Selection changes such as `--max-train-samples`,
@@ -881,9 +895,11 @@ An intentional scale-up always reissues the training-recipe layer because its
 step horizon and often its batch/corpus plan are deliberately different. The
 planner strips the parent's `--expected-training-recipe-id`, records the source
 ID plus a `reissued` contract, and preflight rejects a command that accidentally
-retains the parent ID. The child adopts its newly resolved recipe immediately
-before its own Trainer construction; unchanged dataset, model/runtime, and
-execution identities remain independently enforced.
+retains the parent ID. It also strips and reissues
+`--expected-finetune-replay-id`, because changed recipe or row-selection layers
+necessarily define a new complete run identity. The child adopts both newly
+resolved IDs immediately before its own Trainer construction; unchanged
+dataset, model/runtime, and execution identities remain independently enforced.
 
 The model basis and tokenizer now form a second content-addressed runtime
 contract. Remote base models record the resolved Hub commit plus stable config

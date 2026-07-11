@@ -188,6 +188,8 @@ jobs:
               "hf_tokenized_dataset_identity_report",
               "HF_FINETUNE_TRAINING_RECIPE_IDENTITY_SCHEMA",
               "hf_finetune_training_recipe_identity_report",
+              "HF_FINETUNE_REPLAY_IDENTITY_SCHEMA",
+              "hf_finetune_replay_identity_report",
           ):
               if symbol not in stub:
                   raise RuntimeError(f"packaged stub is missing {symbol}")
@@ -204,6 +206,30 @@ jobs:
           )
           if recipe.get("status") != "ready":
               raise RuntimeError(f"training recipe identity unavailable: {recipe!r}")
+
+          def ready_identity(schema, seed, *, field="observed_identity_id"):
+              return {
+                  "schema": schema,
+                  "status": "ready",
+                  field: f"sha256:{seed * 64}",
+                  "identity_verified": True,
+              }
+
+          replay = spiraltorch.hf_finetune_replay_identity_report(
+              training_input_identity=ready_identity(
+                  "training-input.v1", "1", field="observed_input_id"
+              ),
+              dataset_input_identity=None,
+              dataset_materialization_identity=ready_identity(
+                  "materialization.v1", "2"
+              ),
+              tokenized_dataset_identity=ready_identity("tokenized.v1", "3"),
+              model_runtime_identity=ready_identity("runtime.v1", "4"),
+              execution_identity=ready_identity("execution.v1", "5"),
+              training_recipe_identity=ready_identity("recipe.v1", "6"),
+          )
+          if replay.get("status") != "ready":
+              raise RuntimeError(f"fine-tune replay identity unavailable: {replay!r}")
 
           submodules = [
               "spiraltorch.psi",

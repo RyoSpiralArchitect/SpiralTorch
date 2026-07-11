@@ -102,6 +102,12 @@
   ID without optimizing; canonical replays enforce
   `--expected-training-recipe-id`, while intentional scale-up strips the parent
   ID, records an audited reissue, and lets the child adopt its changed recipe.
+- Composite HF fine-tune replay identity: bind adapter lineage, local or Hub
+  source identity, exact materialized rows, exact tokenized blocks,
+  model/tokenizer runtime, software/device execution, and effective recipe into
+  one path-independent final Trainer-boundary ID. Adoption commands add
+  `--expected-finetune-replay-id` alongside the layer-specific gates; scale-up
+  strips and audits a composite reissue instead of inheriting the parent run.
 - Audited dataset scale-up reissue: selection changes reissue raw-row and
   tokenized identities instead of incorrectly enforcing the parent's smaller
   materialization, while post-tokenization block-size/eval-block changes reissue
