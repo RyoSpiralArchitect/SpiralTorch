@@ -382,7 +382,7 @@ maturin build -m bindings/st-py/Cargo.toml --release --locked
 maturin build -m bindings/st-py/Cargo.toml --release --locked --features logic,kdsl
 
 # CPU-only (drop the default WGPU route but keep the standard Python surface)
-maturin build -m bindings/st-py/Cargo.toml --release --locked --no-default-features --features python-default
+maturin build -m bindings/st-py/Cargo.toml --release --locked --no-default-features --features python-default,cpu
 
 # Add CUDA or HIP alongside the default WGPU-first wheel
 maturin build -m bindings/st-py/Cargo.toml --release --locked --features cuda,logic,kdsl

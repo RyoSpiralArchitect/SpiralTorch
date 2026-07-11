@@ -23,8 +23,8 @@ hip = ["st-core/hip", "st-tensor/hip"]
 selfsup = []
 
 [dependencies]
-st-tensor = { path = "../st-tensor" }
-st-core = { path = "../st-core" }
+st-tensor = { path = "../st-tensor", default-features = false, features = ["cpu", "faer"] }
+st-core = { path = "../st-core", default-features = false }
 st-frac = { path = "../st-frac" }
 st-text = { path = "../st-text" }
 spiral-config = { path = "../spiral-config" }
@@ -52,6 +52,10 @@ path = "../../examples/ecosystem_integration_demo.rs"
 [[example]]
 name = "fine_tune_with_selfsup"
 path = "../../examples/fine_tune_with_selfsup.rs"
+
+[[example]]
+name = "selfsup_info_nce"
+required-features = ["selfsup"]
 
 [[example]]
 name = "modelzoo_mlp_regression"
@@ -124,3 +128,4 @@ path = "../../examples/gnn_trainer_band_trace_demo.rs"
 [[example]]
 name = "layernorm_wgpu_demo"
 path = "../../examples/layernorm_wgpu_demo.rs"
+required-features = ["wgpu"]

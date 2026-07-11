@@ -13,11 +13,12 @@ path = "src/lib.rs"
 [features]
 hip-real = ["hip", "st-backend-hip/hip-real"]
 default = []
-hip      = ["dep:st-backend-hip"]
-wgpu     = ["dep:wgpu", "dep:bytemuck", "dep:pollster", "dep:once_cell", "st-frac/wgpu"]
+cpu      = ["st-tensor/cpu"]
+hip      = ["dep:st-backend-hip", "st-tensor/hip"]
+wgpu     = ["dep:wgpu", "dep:bytemuck", "dep:pollster", "dep:once_cell", "st-frac/wgpu", "st-tensor/wgpu"]
 wgpu-rt  = ["wgpu"]
-mps      = []
-cuda     = ["dep:cudarc"]
+mps      = ["st-tensor/mps"]
+cuda     = ["dep:cudarc", "st-tensor/cuda"]
 logic    = ["dep:st-softlogic"]
 "logic-learn" = ["logic", "st-softlogic/learn_store"]
 kdsl     = ["dep:st-kdsl", "logic"]
@@ -71,7 +72,7 @@ julia-ffi-poc  = { path = "../julia-ffi-poc", optional = true }
 ureq           = { version = "2.9", optional = true, default-features = true, features = ["json"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-st-tensor = { path = "../st-tensor" }
+st-tensor = { path = "../st-tensor", default-features = false, features = ["cpu", "faer"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 st-tensor = { path = "../st-tensor", default-features = false }

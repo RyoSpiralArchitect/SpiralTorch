@@ -10,8 +10,8 @@ publish = false
 python = ["dep:pyo3"]
 
 [dependencies]
-st-core = { path = "../st-core" }
-st-tensor = { path = "../st-tensor" }
+st-core = { path = "../st-core", default-features = false }
+st-tensor = { path = "../st-tensor", default-features = false, features = ["cpu", "faer"] }
 st-nn = { path = "../st-nn" }
 st-text = { path = "../st-text" }
 serde = { version = "1", features = ["derive"] }
