@@ -5920,6 +5920,9 @@ def _scale_up_resolve_input_paths(
 
 _HF_FINETUNE_EXPECTED_INPUT_ID_FLAG = "--expected-training-input-id"
 _HF_FINETUNE_EXPECTED_DATASET_INPUT_ID_FLAG = "--expected-dataset-input-id"
+_HF_FINETUNE_EXPECTED_DATASET_MATERIALIZATION_ID_FLAG = (
+    "--expected-dataset-materialization-id"
+)
 _HF_FINETUNE_EXPECTED_RUNTIME_INPUT_ID_FLAG = "--expected-runtime-input-id"
 _HF_FINETUNE_EXPECTED_EXECUTION_INPUT_ID_FLAG = (
     "--expected-execution-input-id"
@@ -6596,6 +6599,21 @@ def _scale_up_promotion_chain_summary(
         "scale_up_candidate_dataset_input_effective_name": candidate.get(
             "dataset_input_effective_name"
         ),
+        "scale_up_candidate_dataset_materialization_identity_status": candidate.get(
+            "dataset_materialization_identity_status"
+        ),
+        "scale_up_candidate_dataset_materialization_identity_verified": candidate.get(
+            "dataset_materialization_identity_verified"
+        ),
+        "scale_up_candidate_dataset_materialization_expected_id": candidate.get(
+            "dataset_materialization_expected_id"
+        ),
+        "scale_up_candidate_dataset_materialization_observed_id": candidate.get(
+            "dataset_materialization_observed_id"
+        ),
+        "scale_up_candidate_dataset_materialization_total_rows": candidate.get(
+            "dataset_materialization_total_rows"
+        ),
         "scale_up_candidate_runtime_input_identity_status": candidate.get(
             "runtime_input_identity_status"
         ),
@@ -7040,6 +7058,72 @@ def hf_gpt2_finetune_scale_up_command(
         "name_continuity_matches": dataset_name_continuity_matches,
         "fail_fast": expected_dataset_input_id is not None,
     }
+    source_expected_dataset_materialization_id = _command_flag_value(
+        base_command,
+        _HF_FINETUNE_EXPECTED_DATASET_MATERIALIZATION_ID_FLAG,
+    )
+    candidate_dataset_materialization_id = summary.get(
+        "scale_up_candidate_dataset_materialization_observed_id"
+    )
+    candidate_dataset_materialization_ready = bool(
+        summary.get(
+            "scale_up_candidate_dataset_materialization_identity_status"
+        )
+        == "ready"
+        and summary.get(
+            "scale_up_candidate_dataset_materialization_identity_verified"
+        )
+        is True
+        and candidate_dataset_materialization_id is not None
+    )
+    expected_dataset_materialization_id = (
+        source_expected_dataset_materialization_id
+        or (
+            str(candidate_dataset_materialization_id)
+            if candidate_dataset_materialization_ready
+            else None
+        )
+    )
+    dataset_materialization_continuity_matches = bool(
+        source_expected_dataset_materialization_id is None
+        or candidate_dataset_materialization_id is None
+        or str(source_expected_dataset_materialization_id)
+        == str(candidate_dataset_materialization_id)
+    )
+    base_command = _command_without_value_flags(
+        base_command,
+        (_HF_FINETUNE_EXPECTED_DATASET_MATERIALIZATION_ID_FLAG,),
+    )
+    dataset_materialization_identity_contract = {
+        "status": (
+            "blocked"
+            if not dataset_materialization_continuity_matches
+            else "enforced"
+            if expected_dataset_materialization_id is not None
+            else "observe"
+        ),
+        "expected_identity_id": expected_dataset_materialization_id,
+        "source_expected_identity_id": (
+            source_expected_dataset_materialization_id
+        ),
+        "candidate_observed_identity_id": (
+            candidate_dataset_materialization_id
+        ),
+        "candidate_identity_status": summary.get(
+            "scale_up_candidate_dataset_materialization_identity_status"
+        ),
+        "candidate_identity_verified": summary.get(
+            "scale_up_candidate_dataset_materialization_identity_verified"
+        ),
+        "candidate_total_rows": summary.get(
+            "scale_up_candidate_dataset_materialization_total_rows"
+        ),
+        "identity_continuity_matches": (
+            dataset_materialization_continuity_matches
+        ),
+        "fail_fast": expected_dataset_materialization_id is not None,
+        "verification_phase": "after_selection",
+    }
     source_expected_runtime_input_id = _command_flag_value(
         base_command,
         _HF_FINETUNE_EXPECTED_RUNTIME_INPUT_ID_FLAG,
@@ -7302,6 +7386,9 @@ def hf_gpt2_finetune_scale_up_command(
         "--expected-root-adapter-id": expected_root_adapter_id,
         _HF_FINETUNE_EXPECTED_INPUT_ID_FLAG: expected_training_input_id,
         _HF_FINETUNE_EXPECTED_DATASET_INPUT_ID_FLAG: expected_dataset_input_id,
+        _HF_FINETUNE_EXPECTED_DATASET_MATERIALIZATION_ID_FLAG: (
+            expected_dataset_materialization_id
+        ),
         "--dataset-name": effective_dataset_name,
         "--dataset-revision": effective_dataset_revision,
         _HF_FINETUNE_EXPECTED_RUNTIME_INPUT_ID_FLAG: expected_runtime_input_id,
@@ -7366,6 +7453,21 @@ def hf_gpt2_finetune_scale_up_command(
         ),
         "scale_up_candidate_dataset_input_effective_name": summary.get(
             "scale_up_candidate_dataset_input_effective_name"
+        ),
+        "scale_up_candidate_dataset_materialization_identity_status": summary.get(
+            "scale_up_candidate_dataset_materialization_identity_status"
+        ),
+        "scale_up_candidate_dataset_materialization_identity_verified": summary.get(
+            "scale_up_candidate_dataset_materialization_identity_verified"
+        ),
+        "scale_up_candidate_dataset_materialization_expected_id": summary.get(
+            "scale_up_candidate_dataset_materialization_expected_id"
+        ),
+        "scale_up_candidate_dataset_materialization_observed_id": summary.get(
+            "scale_up_candidate_dataset_materialization_observed_id"
+        ),
+        "scale_up_candidate_dataset_materialization_total_rows": summary.get(
+            "scale_up_candidate_dataset_materialization_total_rows"
         ),
         "scale_up_candidate_runtime_input_identity_status": summary.get(
             "scale_up_candidate_runtime_input_identity_status"
@@ -7509,6 +7611,15 @@ def hf_gpt2_finetune_scale_up_command(
         "dataset_input_expected_id": expected_dataset_input_id,
         "dataset_input_effective_revision": effective_dataset_revision,
         "dataset_input_effective_name": effective_dataset_name,
+        "dataset_materialization_identity_contract": (
+            dataset_materialization_identity_contract
+        ),
+        "dataset_materialization_identity_contract_status": (
+            dataset_materialization_identity_contract.get("status")
+        ),
+        "dataset_materialization_expected_id": (
+            expected_dataset_materialization_id
+        ),
         "runtime_input_identity_contract": runtime_input_identity_contract,
         "runtime_input_identity_contract_status": (
             runtime_input_identity_contract.get("status")
@@ -7927,6 +8038,51 @@ def hf_gpt2_finetune_scale_up_preflight_report(
                 "severity": "error",
                 "field": "dataset_input_identity_contract",
                 "message": "source dataset identity continuity is blocked",
+            }
+        )
+
+    command_expected_dataset_materialization_id = _command_flag_value(
+        command,
+        _HF_FINETUNE_EXPECTED_DATASET_MATERIALIZATION_ID_FLAG,
+    )
+    artifact_dataset_materialization_contract = artifact.get(
+        "dataset_materialization_identity_contract"
+    )
+    artifact_expected_dataset_materialization_id = artifact.get(
+        "dataset_materialization_expected_id"
+    )
+    if (
+        artifact_expected_dataset_materialization_id is None
+        and isinstance(artifact_dataset_materialization_contract, Mapping)
+    ):
+        artifact_expected_dataset_materialization_id = (
+            artifact_dataset_materialization_contract.get("expected_identity_id")
+        )
+    if (
+        artifact_expected_dataset_materialization_id is not None
+        and command_expected_dataset_materialization_id
+        != str(artifact_expected_dataset_materialization_id)
+    ):
+        issues.append(
+            {
+                "severity": "error",
+                "field": _HF_FINETUNE_EXPECTED_DATASET_MATERIALIZATION_ID_FLAG,
+                "path": command_expected_dataset_materialization_id,
+                "message": (
+                    "dataset materialization identity command does not match "
+                    "scale-up metadata"
+                ),
+            }
+        )
+    if (
+        isinstance(artifact_dataset_materialization_contract, Mapping)
+        and artifact_dataset_materialization_contract.get("status") == "blocked"
+    ):
+        issues.append(
+            {
+                "severity": "error",
+                "field": "dataset_materialization_identity_contract",
+                "message": "source dataset materialization continuity is blocked",
             }
         )
 
@@ -8542,6 +8698,13 @@ def hf_gpt2_finetune_scale_up_preflight_report(
         "dataset_input_effective_name": (
             command_dataset_name or artifact_effective_dataset_name
         ),
+        "dataset_materialization_identity_contract": (
+            artifact_dataset_materialization_contract
+        ),
+        "dataset_materialization_expected_id": (
+            command_expected_dataset_materialization_id
+            or artifact_expected_dataset_materialization_id
+        ),
         "runtime_input_identity_contract": artifact_runtime_contract,
         "runtime_input_expected_id": (
             command_expected_runtime_input_id
@@ -8623,6 +8786,21 @@ def hf_gpt2_finetune_scale_up_preflight_lines(
             "name_continuity="
             f"{dataset_input_contract.get('name_continuity_matches')} "
             f"fail_fast={dataset_input_contract.get('fail_fast')}"
+        )
+    dataset_materialization_contract = report.get(
+        "dataset_materialization_identity_contract"
+    )
+    if isinstance(dataset_materialization_contract, Mapping):
+        lines.append(
+            "hf_gpt2_ft_scale_up_dataset_materialization_identity "
+            f"status={dataset_materialization_contract.get('status')} "
+            f"expected={report.get('dataset_materialization_expected_id')} "
+            "candidate="
+            f"{dataset_materialization_contract.get('candidate_observed_identity_id')} "
+            "continuity="
+            f"{dataset_materialization_contract.get('identity_continuity_matches')} "
+            f"rows={dataset_materialization_contract.get('candidate_total_rows')} "
+            f"fail_fast={dataset_materialization_contract.get('fail_fast')}"
         )
     runtime_input_contract = report.get("runtime_input_identity_contract")
     if isinstance(runtime_input_contract, Mapping):
@@ -8725,6 +8903,14 @@ def summarize_hf_gpt2_finetune_run_card(
     dataset_input_identity_contract = _mapping_item(
         card,
         "dataset_input_identity_contract",
+    )
+    dataset_materialization_identity = _mapping_item(
+        card,
+        "dataset_materialization_identity",
+    )
+    dataset_materialization_identity_contract = _mapping_item(
+        card,
+        "dataset_materialization_identity_contract",
     )
     runtime_input_identity_pre_model = _mapping_item(
         card,
@@ -8929,6 +9115,29 @@ def summarize_hf_gpt2_finetune_run_card(
         ),
         "dataset_input_contract_status": dataset_input_identity_contract.get(
             "status"
+        ),
+        "dataset_materialization_identity_status": (
+            dataset_materialization_identity.get("status")
+        ),
+        "dataset_materialization_identity_verified": (
+            dataset_materialization_identity.get("identity_verified")
+        ),
+        "dataset_materialization_expected_id": (
+            dataset_materialization_identity_contract.get("expected_identity_id")
+            if dataset_materialization_identity_contract
+            else dataset_materialization_identity.get("expected_identity_id")
+        ),
+        "dataset_materialization_observed_id": (
+            dataset_materialization_identity.get("observed_identity_id")
+        ),
+        "dataset_materialization_total_rows": _safe_number(
+            dataset_materialization_identity.get("total_rows")
+        ),
+        "dataset_materialization_total_utf8_bytes": _safe_number(
+            dataset_materialization_identity.get("total_utf8_bytes")
+        ),
+        "dataset_materialization_contract_status": (
+            dataset_materialization_identity_contract.get("status")
         ),
         "runtime_input_identity_status": runtime_input_identity.get("status"),
         "runtime_input_identity_verified": runtime_input_identity.get(
@@ -10359,6 +10568,31 @@ def summarize_hf_gpt2_finetune_sweep_report(
             None
             if scale_up_candidate is None
             else scale_up_candidate.get("dataset_input_effective_name")
+        ),
+        "scale_up_candidate_dataset_materialization_identity_status": (
+            None
+            if scale_up_candidate is None
+            else scale_up_candidate.get("dataset_materialization_identity_status")
+        ),
+        "scale_up_candidate_dataset_materialization_identity_verified": (
+            None
+            if scale_up_candidate is None
+            else scale_up_candidate.get("dataset_materialization_identity_verified")
+        ),
+        "scale_up_candidate_dataset_materialization_expected_id": (
+            None
+            if scale_up_candidate is None
+            else scale_up_candidate.get("dataset_materialization_expected_id")
+        ),
+        "scale_up_candidate_dataset_materialization_observed_id": (
+            None
+            if scale_up_candidate is None
+            else scale_up_candidate.get("dataset_materialization_observed_id")
+        ),
+        "scale_up_candidate_dataset_materialization_total_rows": (
+            None
+            if scale_up_candidate is None
+            else scale_up_candidate.get("dataset_materialization_total_rows")
         ),
         "scale_up_candidate_runtime_input_identity_status": (
             None

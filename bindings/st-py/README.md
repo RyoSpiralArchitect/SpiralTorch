@@ -809,6 +809,23 @@ that a custom dataset builder may fetch. Local `--train-file` corpora remain
 covered by the byte-level local training-input identity above instead of being
 double counted.
 
+Once the requested splits are loaded and `--max-train-samples` /
+`--max-eval-samples` are applied, the bridge also hashes every selected text
+row in exact order. Split presence, row boundaries, whitespace, Unicode UTF-8
+bytes, and the text-column name all contribute to this second identity; corpus
+text itself is not retained in the report. The first metadata/training run
+adopts the observed value as `--expected-dataset-materialization-id` in its
+canonical launch command. Replays and later adapter generations enforce it
+before tokenization or Trainer construction. This catches mutable external
+builder downloads as well as changed streaming shuffle, validation fallback,
+or selected-row content even when the Hub commit identity above still matches.
+It applies to local and remote datasets because it fingerprints the rows that
+will actually reach the tokenizer. Use
+`st.hf_dataset_materialization_identity_report(...)` and
+`st.hf_dataset_materialization_identity_lines(...)` for the same privacy-safe
+contract; hashing cost is linear in the selected text bytes and is bounded by
+the configured sample caps for streaming runs.
+
 The model basis and tokenizer now form a second content-addressed runtime
 contract. Remote base models record the resolved Hub commit plus stable config
 and tokenizer semantics; tokenizer files shipped with an adapter and local

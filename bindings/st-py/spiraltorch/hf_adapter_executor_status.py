@@ -183,6 +183,12 @@ def _attempt_summary(attempt: Mapping[str, object] | None) -> dict[str, object] 
             "dataset_input_effective_revision"
         ),
         "dataset_input_effective_name": attempt.get("dataset_input_effective_name"),
+        "dataset_materialization_identity_contract": attempt.get(
+            "dataset_materialization_identity_contract"
+        ),
+        "dataset_materialization_expected_id": attempt.get(
+            "dataset_materialization_expected_id"
+        ),
         "runtime_input_identity_contract": attempt.get(
             "runtime_input_identity_contract"
         ),
@@ -582,6 +588,10 @@ def hf_adapter_continuation_executor_status_lines(
             f"{transition.get('dataset_input_identity_required')} "
             "dataset_input_identity="
             f"{transition.get('dataset_input_identity_ready')} "
+            "dataset_materialization_required="
+            f"{transition.get('dataset_materialization_identity_required')} "
+            "dataset_materialization_identity="
+            f"{transition.get('dataset_materialization_identity_ready')} "
             "runtime_input_required="
             f"{transition.get('runtime_input_identity_required')} "
             "runtime_input_identity="
@@ -599,6 +609,9 @@ def hf_adapter_continuation_executor_status_lines(
         adapter_input_identity = attempt.get("adapter_input_identity")
         training_input_identity = attempt.get("training_input_identity")
         dataset_input_contract = attempt.get("dataset_input_identity_contract")
+        dataset_materialization_contract = attempt.get(
+            "dataset_materialization_identity_contract"
+        )
         runtime_input_contract = attempt.get("runtime_input_identity_contract")
         execution_input_contract = attempt.get(
             "execution_input_identity_contract"
@@ -624,6 +637,10 @@ def hf_adapter_continuation_executor_status_lines(
             "dataset_input_revision="
             f"{attempt.get('dataset_input_effective_revision')} "
             f"dataset_input_name={attempt.get('dataset_input_effective_name')} "
+            "dataset_materialization_contract="
+            f"{dataset_materialization_contract.get('status') if isinstance(dataset_materialization_contract, Mapping) else None} "
+            "dataset_materialization_expected="
+            f"{attempt.get('dataset_materialization_expected_id')} "
             "runtime_input_contract="
             f"{runtime_input_contract.get('status') if isinstance(runtime_input_contract, Mapping) else None} "
             f"runtime_input_expected={attempt.get('runtime_input_expected_id')} "

@@ -1795,6 +1795,12 @@ def _run_hf_adapter_continuation_executor_unlocked(
             "dataset_input_effective_name": preflight.get(
                 "dataset_input_effective_name"
             ),
+            "dataset_materialization_identity_contract": command.get(
+                "dataset_materialization_identity_contract"
+            ),
+            "dataset_materialization_expected_id": preflight.get(
+                "dataset_materialization_expected_id"
+            ),
             "runtime_input_identity_contract": command.get(
                 "runtime_input_identity_contract"
             ),
@@ -1919,6 +1925,12 @@ def _run_hf_adapter_continuation_executor_unlocked(
             ),
             "dataset_input_effective_name": preflight.get(
                 "dataset_input_effective_name"
+            ),
+            "dataset_materialization_identity_contract": command.get(
+                "dataset_materialization_identity_contract"
+            ),
+            "dataset_materialization_expected_id": preflight.get(
+                "dataset_materialization_expected_id"
             ),
             "runtime_input_identity_contract": command.get(
                 "runtime_input_identity_contract"
@@ -2192,6 +2204,10 @@ def hf_adapter_continuation_executor_lines(
             f"{selected_transition.get('dataset_input_identity_required')} "
             "dataset_input_identity="
             f"{selected_transition.get('dataset_input_identity_ready')} "
+            "dataset_materialization_required="
+            f"{selected_transition.get('dataset_materialization_identity_required')} "
+            "dataset_materialization_identity="
+            f"{selected_transition.get('dataset_materialization_identity_ready')} "
             "runtime_input_required="
             f"{selected_transition.get('runtime_input_identity_required')} "
             "runtime_input_identity="
@@ -2236,6 +2252,14 @@ def hf_adapter_continuation_executor_lines(
             if isinstance(dataset_input_contract, Mapping)
             else None
         )
+        dataset_materialization_contract = pending.get(
+            "dataset_materialization_identity_contract"
+        )
+        dataset_materialization_contract_status = (
+            dataset_materialization_contract.get("status")
+            if isinstance(dataset_materialization_contract, Mapping)
+            else None
+        )
         runtime_input_contract = pending.get("runtime_input_identity_contract")
         runtime_input_contract_status = (
             runtime_input_contract.get("status")
@@ -2264,6 +2288,10 @@ def hf_adapter_continuation_executor_lines(
             "dataset_input_revision="
             f"{pending.get('dataset_input_effective_revision')} "
             f"dataset_input_name={pending.get('dataset_input_effective_name')} "
+            "dataset_materialization_contract="
+            f"{dataset_materialization_contract_status} "
+            "dataset_materialization_expected="
+            f"{pending.get('dataset_materialization_expected_id')} "
             f"runtime_input_contract={runtime_input_contract_status} "
             f"runtime_input_expected={pending.get('runtime_input_expected_id')} "
             f"execution_input_contract={execution_input_contract_status} "
@@ -2309,6 +2337,14 @@ def hf_adapter_continuation_executor_lines(
             if isinstance(dataset_input_contract, Mapping)
             else None
         )
+        dataset_materialization_contract = raw_attempt.get(
+            "dataset_materialization_identity_contract"
+        )
+        dataset_materialization_contract_status = (
+            dataset_materialization_contract.get("status")
+            if isinstance(dataset_materialization_contract, Mapping)
+            else None
+        )
         runtime_input_contract = raw_attempt.get("runtime_input_identity_contract")
         runtime_input_contract_status = (
             runtime_input_contract.get("status")
@@ -2341,6 +2377,10 @@ def hf_adapter_continuation_executor_lines(
             f"{raw_attempt.get('dataset_input_effective_revision')} "
             "dataset_input_name="
             f"{raw_attempt.get('dataset_input_effective_name')} "
+            "dataset_materialization_contract="
+            f"{dataset_materialization_contract_status} "
+            "dataset_materialization_expected="
+            f"{raw_attempt.get('dataset_materialization_expected_id')} "
             f"runtime_input_contract={runtime_input_contract_status} "
             f"runtime_input_expected={raw_attempt.get('runtime_input_expected_id')} "
             f"execution_input_contract={execution_input_contract_status} "

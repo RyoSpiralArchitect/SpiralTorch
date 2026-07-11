@@ -78,6 +78,13 @@
   transitions, executor state/status, and public Python reports retain the
   evidence. The Pythia 70M sample now includes a sixth promoted generation
   whose three-file bundle passed both observations from a fresh wheel.
+- Exact dataset materialization identity: hash every selected train/eval text
+  row in order after split, shuffle, validation fallback, and sample limits are
+  applied. Canonical launch commands adopt
+  `--expected-dataset-materialization-id`; replay, adapter lineage, promotion
+  transitions, scale-up, and executor state fail closed when actual row bytes
+  drift even if the Hub repository commit is unchanged. Public Python reports
+  expose split row/byte digests without retaining corpus text.
 - Content-addressed HF runtime inputs: fingerprint the effective base-model
   basis and tokenizer, pin remote config resolution to its observed Hub commit
   for tokenizer/model loading, and fail before model weights load when an
