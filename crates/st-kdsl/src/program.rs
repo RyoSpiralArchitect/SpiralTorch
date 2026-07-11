@@ -5,7 +5,7 @@
 
 use std::fmt;
 
-use crate::{Ctx, Err, Hard, Out, SoftRule};
+use crate::{Ctx, Err, EvalError, Hard, Out, SoftRule};
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -24,6 +24,7 @@ pub struct Program {
 }
 
 const MAX_LOOP_ITERATIONS: usize = 65_536;
+const MAX_FUNCTION_CALL_DEPTH: usize = 256;
 
 #[derive(Clone, Debug)]
 struct FunctionDef {
@@ -164,27 +165,34 @@ impl Program {
     }
 
     /// Evaluates the program for the given [`Ctx`].
-    pub fn evaluate(&self, ctx: &Ctx) -> Out {
+    pub fn evaluate(&self, ctx: &Ctx) -> Result<Out, EvalError> {
         let mut sink = NoopTraceSink;
         self.evaluate_with_sink(ctx, &mut sink)
     }
 
     /// Evaluates the program while recording a structured execution trace.
-    pub fn evaluate_with_trace(&self, ctx: &Ctx, max_events: usize) -> (Out, KdslEvaluationTrace) {
+    pub fn evaluate_with_trace(
+        &self,
+        ctx: &Ctx,
+        max_events: usize,
+    ) -> Result<(Out, KdslEvaluationTrace), EvalError> {
         let mut trace = KdslEvaluationTrace::new(max_events);
-        let out = self.evaluate_with_sink(ctx, &mut trace);
-        (out, trace)
+        let out = self.evaluate_with_sink(ctx, &mut trace)?;
+        Ok((out, trace))
     }
 
-    fn evaluate_with_sink(&self, ctx: &Ctx, sink: &mut dyn TraceSink) -> Out {
+    fn evaluate_with_sink(&self, ctx: &Ctx, sink: &mut dyn TraceSink) -> Result<Out, EvalError> {
         let mut hard = Hard::default();
         let mut soft = Vec::<SoftRule>::new();
         let mut locals = vec![Value::default(); self.locals];
 
-        let signal = self.execute_block(&self.stmts, ctx, &mut locals, &mut hard, &mut soft, sink);
-        debug_assert_eq!(signal, FlowSignal::None, "top-level control flow escape");
+        let signal =
+            self.execute_block(&self.stmts, ctx, &mut locals, &mut hard, &mut soft, sink)?;
+        if signal != FlowSignal::None {
+            return Err(EvalError::InvalidProgram("top-level control flow escape"));
+        }
 
-        Out { hard, soft }
+        Ok(Out { hard, soft })
     }
 
     fn execute_block(
@@ -195,42 +203,43 @@ impl Program {
         hard: &mut Hard,
         soft: &mut Vec<SoftRule>,
         sink: &mut dyn TraceSink,
-    ) -> FlowSignal {
+    ) -> Result<FlowSignal, EvalError> {
         for stmt in block {
             let signal = match stmt {
                 Stmt::Assign(assign) => {
-                    assign.apply(self, ctx, locals, hard, sink);
+                    assign.apply(self, ctx, locals, hard, sink)?;
                     FlowSignal::None
                 }
                 Stmt::Let(binding) => {
-                    binding.store(self, ctx, locals, sink);
+                    binding.store(self, ctx, locals, sink)?;
                     FlowSignal::None
                 }
                 Stmt::Set(update) => {
-                    update.store(self, ctx, locals, sink);
+                    update.store(self, ctx, locals, sink)?;
                     FlowSignal::None
                 }
                 Stmt::Soft(rule) => {
-                    rule.apply(self, ctx, locals, soft, sink);
+                    rule.apply(self, ctx, locals, soft, sink)?;
                     FlowSignal::None
                 }
                 Stmt::If(branch) => {
-                    let cond = branch
-                        .const_cond
-                        .unwrap_or_else(|| branch.cond.evaluate(self, ctx, locals).as_bool());
+                    let cond = match branch.const_cond {
+                        Some(cond) => cond,
+                        None => branch.cond.evaluate(self, ctx, locals, 0)?.as_bool()?,
+                    };
                     sink.record(KdslTraceEvent::If { condition: cond });
                     if cond {
-                        self.execute_block(&branch.then_branch, ctx, locals, hard, soft, sink)
+                        self.execute_block(&branch.then_branch, ctx, locals, hard, soft, sink)?
                     } else {
-                        self.execute_block(&branch.else_branch, ctx, locals, hard, soft, sink)
+                        self.execute_block(&branch.else_branch, ctx, locals, hard, soft, sink)?
                     }
                 }
                 Stmt::While(loop_stmt) => {
-                    loop_stmt.run(self, ctx, locals, hard, soft, sink);
+                    loop_stmt.run(self, ctx, locals, hard, soft, sink)?;
                     FlowSignal::None
                 }
                 Stmt::For(loop_stmt) => {
-                    loop_stmt.run(self, ctx, locals, hard, soft, sink);
+                    loop_stmt.run(self, ctx, locals, hard, soft, sink)?;
                     FlowSignal::None
                 }
                 Stmt::Break => {
@@ -245,10 +254,10 @@ impl Program {
 
             match signal {
                 FlowSignal::None => {}
-                FlowSignal::Break | FlowSignal::Continue => return signal,
+                FlowSignal::Break | FlowSignal::Continue => return Ok(signal),
             }
         }
-        FlowSignal::None
+        Ok(FlowSignal::None)
     }
 
     fn evaluate_user_function(
@@ -257,17 +266,27 @@ impl Program {
         ctx: &Ctx,
         caller_locals: &[Value],
         args: &[ExprNode],
-    ) -> Value {
-        let def = &self.functions[index];
+        call_depth: usize,
+    ) -> Result<Value, EvalError> {
+        if call_depth >= MAX_FUNCTION_CALL_DEPTH {
+            return Err(EvalError::RecursionLimit {
+                limit: MAX_FUNCTION_CALL_DEPTH,
+            });
+        }
+        let def = self
+            .functions
+            .get(index)
+            .ok_or(EvalError::InvalidProgram("unknown function index"))?;
+        let next_depth = call_depth + 1;
         if def.params == 0 {
-            return def.eval(self, ctx, &[]);
+            return def.eval(self, ctx, &[], next_depth);
         }
 
         let mut values = Vec::with_capacity(def.params);
         for expr in args {
-            values.push(expr.evaluate(self, ctx, caller_locals));
+            values.push(expr.evaluate(self, ctx, caller_locals, next_depth)?);
         }
-        def.eval(self, ctx, &values)
+        def.eval(self, ctx, &values, next_depth)
     }
 
     fn local_name(&self, id: usize) -> &str {
@@ -306,23 +325,24 @@ impl AssignStmt {
         locals: &[Value],
         hard: &mut Hard,
         sink: &mut dyn TraceSink,
-    ) {
+    ) -> Result<(), EvalError> {
         let value = match &self.const_value {
             Some(value) => value.clone(),
-            None => self.expr.evaluate(program, ctx, locals),
+            None => self.expr.evaluate(program, ctx, locals, 0)?,
         };
+        value.ensure_finite()?;
         match self.field {
-            Field::U2 => hard.use_2ce = Some(value.as_bool()),
-            Field::Wg => hard.wg = Some(value.as_u32()),
-            Field::Kl => hard.kl = Some(value.as_u32()),
-            Field::Ch => hard.ch = Some(value.as_u32()),
-            Field::Algo => hard.algo = Some(value.as_u8()),
-            Field::Midk => hard.midk = Some(value.as_u8()),
-            Field::Bottomk => hard.bottomk = Some(value.as_u8()),
-            Field::Ctile => hard.ctile = Some(value.as_u32()),
-            Field::TileCols => hard.tile_cols = Some(value.as_u32()),
-            Field::Radix => hard.radix = Some(value.as_u32()),
-            Field::Segments => hard.segments = Some(value.as_u32()),
+            Field::U2 => hard.use_2ce = Some(value.as_bool()?),
+            Field::Wg => hard.wg = Some(value.as_u32()?),
+            Field::Kl => hard.kl = Some(value.as_u32()?),
+            Field::Ch => hard.ch = Some(value.as_u32()?),
+            Field::Algo => hard.algo = Some(value.as_u8()?),
+            Field::Midk => hard.midk = Some(value.as_u8()?),
+            Field::Bottomk => hard.bottomk = Some(value.as_u8()?),
+            Field::Ctile => hard.ctile = Some(value.as_u32()?),
+            Field::TileCols => hard.tile_cols = Some(value.as_u32()?),
+            Field::Radix => hard.radix = Some(value.as_u32()?),
+            Field::Segments => hard.segments = Some(value.as_u32()?),
         }
 
         if sink.enabled() {
@@ -331,6 +351,7 @@ impl AssignStmt {
                 value: KdslValue::from_runtime(&value),
             });
         }
+        Ok(())
     }
 }
 
@@ -342,19 +363,29 @@ struct LetStmt {
 }
 
 impl LetStmt {
-    fn store(&self, program: &Program, ctx: &Ctx, locals: &mut [Value], sink: &mut dyn TraceSink) {
+    fn store(
+        &self,
+        program: &Program,
+        ctx: &Ctx,
+        locals: &mut [Value],
+        sink: &mut dyn TraceSink,
+    ) -> Result<(), EvalError> {
         let value = match &self.const_value {
             Some(value) => value.clone(),
-            None => self.expr.evaluate(program, ctx, locals),
+            None => self.expr.evaluate(program, ctx, locals, 0)?,
         };
-        locals[self.id] = value;
+        value.ensure_finite()?;
+        let slot = locals
+            .get_mut(self.id)
+            .ok_or(EvalError::InvalidProgram("unknown local index"))?;
+        *slot = value;
         if sink.enabled() {
-            let value = &locals[self.id];
             sink.record(KdslTraceEvent::Let {
                 name: program.local_name(self.id).to_string(),
-                value: KdslValue::from_runtime(value),
+                value: KdslValue::from_runtime(slot),
             });
         }
+        Ok(())
     }
 }
 
@@ -366,19 +397,29 @@ struct SetStmt {
 }
 
 impl SetStmt {
-    fn store(&self, program: &Program, ctx: &Ctx, locals: &mut [Value], sink: &mut dyn TraceSink) {
+    fn store(
+        &self,
+        program: &Program,
+        ctx: &Ctx,
+        locals: &mut [Value],
+        sink: &mut dyn TraceSink,
+    ) -> Result<(), EvalError> {
         let value = match &self.const_value {
             Some(value) => value.clone(),
-            None => self.expr.evaluate(program, ctx, locals),
+            None => self.expr.evaluate(program, ctx, locals, 0)?,
         };
-        locals[self.id] = value;
+        value.ensure_finite()?;
+        let slot = locals
+            .get_mut(self.id)
+            .ok_or(EvalError::InvalidProgram("unknown local index"))?;
+        *slot = value;
         if sink.enabled() {
-            let value = &locals[self.id];
             sink.record(KdslTraceEvent::Set {
                 name: program.local_name(self.id).to_string(),
-                value: KdslValue::from_runtime(value),
+                value: KdslValue::from_runtime(slot),
             });
         }
+        Ok(())
     }
 }
 
@@ -401,10 +442,14 @@ impl SoftStmt {
         locals: &[Value],
         soft: &mut Vec<SoftRule>,
         sink: &mut dyn TraceSink,
-    ) {
-        let should_apply = self
-            .const_cond
-            .unwrap_or_else(|| self.cond_expr.evaluate(program, ctx, locals).as_bool());
+    ) -> Result<(), EvalError> {
+        let should_apply = match self.const_cond {
+            Some(cond) => cond,
+            None => self
+                .cond_expr
+                .evaluate(program, ctx, locals, 0)?
+                .as_bool()?,
+        };
         if !should_apply {
             if sink.enabled() {
                 sink.record(KdslTraceEvent::Soft {
@@ -414,16 +459,21 @@ impl SoftStmt {
                     weight: None,
                 });
             }
-            return;
+            return Ok(());
         }
 
         let value = match &self.const_value {
             Some(value) => value.clone(),
-            None => self.value_expr.evaluate(program, ctx, locals),
+            None => self.value_expr.evaluate(program, ctx, locals, 0)?,
         };
-        let weight = self
-            .const_weight
-            .unwrap_or_else(|| self.weight_expr.evaluate(program, ctx, locals).as_f64() as f32);
+        value.ensure_finite()?;
+        let weight = match self.const_weight {
+            Some(weight) => weight,
+            None => self
+                .weight_expr
+                .evaluate(program, ctx, locals, 0)?
+                .as_f32()?,
+        };
 
         if sink.enabled() {
             sink.record(KdslTraceEvent::Soft {
@@ -436,50 +486,51 @@ impl SoftStmt {
 
         match self.field {
             Field::U2 => soft.push(SoftRule::U2 {
-                val: value.as_bool(),
+                val: value.as_bool()?,
                 w: weight,
             }),
             Field::Wg => soft.push(SoftRule::Wg {
-                val: value.as_u32(),
+                val: value.as_u32()?,
                 w: weight,
             }),
             Field::Kl => soft.push(SoftRule::Kl {
-                val: value.as_u32(),
+                val: value.as_u32()?,
                 w: weight,
             }),
             Field::Ch => soft.push(SoftRule::Ch {
-                val: value.as_u32(),
+                val: value.as_u32()?,
                 w: weight,
             }),
             Field::Algo => soft.push(SoftRule::Algo {
-                val: value.as_u8(),
+                val: value.as_u8()?,
                 w: weight,
             }),
             Field::Midk => soft.push(SoftRule::Midk {
-                val: value.as_u8(),
+                val: value.as_u8()?,
                 w: weight,
             }),
             Field::Bottomk => soft.push(SoftRule::Bottomk {
-                val: value.as_u8(),
+                val: value.as_u8()?,
                 w: weight,
             }),
             Field::Ctile => soft.push(SoftRule::Ctile {
-                val: value.as_u32(),
+                val: value.as_u32()?,
                 w: weight,
             }),
             Field::TileCols => soft.push(SoftRule::TileCols {
-                val: value.as_u32(),
+                val: value.as_u32()?,
                 w: weight,
             }),
             Field::Radix => soft.push(SoftRule::Radix {
-                val: value.as_u32(),
+                val: value.as_u32()?,
                 w: weight,
             }),
             Field::Segments => soft.push(SoftRule::Segments {
-                val: value.as_u32(),
+                val: value.as_u32()?,
                 w: weight,
             }),
         }
+        Ok(())
     }
 }
 
@@ -507,38 +558,32 @@ impl WhileStmt {
         hard: &mut Hard,
         soft: &mut Vec<SoftRule>,
         sink: &mut dyn TraceSink,
-    ) {
+    ) -> Result<(), EvalError> {
         if matches!(self.const_cond, Some(false)) {
             if sink.enabled() {
                 sink.record(KdslTraceEvent::While { iterations: 0 });
             }
-            return;
+            return Ok(());
         }
-
-        debug_assert_ne!(
-            self.const_cond,
-            Some(true),
-            "constant-true while loops are rejected at parse time"
-        );
 
         let mut iterations = 0usize;
         loop {
-            let cond = self
-                .const_cond
-                .unwrap_or_else(|| self.cond.evaluate(program, ctx, locals).as_bool());
+            let cond = match self.const_cond {
+                Some(cond) => cond,
+                None => self.cond.evaluate(program, ctx, locals, 0)?.as_bool()?,
+            };
             if !cond {
                 break;
             }
-
-            let signal = program.execute_block(&self.body, ctx, locals, hard, soft, sink);
-            iterations += 1;
             if iterations >= MAX_LOOP_ITERATIONS {
-                debug_assert!(
-                    iterations < MAX_LOOP_ITERATIONS,
-                    "while loop iteration cap reached"
-                );
-                break;
+                return Err(EvalError::LoopIterationLimit {
+                    kind: "while",
+                    limit: MAX_LOOP_ITERATIONS,
+                });
             }
+
+            let signal = program.execute_block(&self.body, ctx, locals, hard, soft, sink)?;
+            iterations += 1;
 
             match signal {
                 FlowSignal::None => {}
@@ -550,6 +595,7 @@ impl WhileStmt {
         if sink.enabled() {
             sink.record(KdslTraceEvent::While { iterations });
         }
+        Ok(())
     }
 }
 
@@ -573,18 +619,18 @@ impl ForStmt {
         hard: &mut Hard,
         soft: &mut Vec<SoftRule>,
         sink: &mut dyn TraceSink,
-    ) {
+    ) -> Result<(), EvalError> {
         let start_value = match &self.const_start {
             Some(value) => value.clone(),
-            None => self.start.evaluate(program, ctx, locals),
+            None => self.start.evaluate(program, ctx, locals, 0)?,
         };
         let end_value = match &self.const_end {
             Some(value) => value.clone(),
-            None => self.end.evaluate(program, ctx, locals),
+            None => self.end.evaluate(program, ctx, locals, 0)?,
         };
 
-        let start = start_value.as_i64();
-        let end = end_value.as_i64();
+        let start = start_value.as_i64()?;
+        let end = end_value.as_i64()?;
 
         let mut current = start;
         let mut iterations = 0usize;
@@ -606,23 +652,30 @@ impl ForStmt {
             if !in_range {
                 break;
             }
-
-            locals[self.id] = Value::from_f64(current as f64);
-            let signal = program.execute_block(&self.body, ctx, locals, hard, soft, sink);
-            iterations += 1;
             if iterations >= MAX_LOOP_ITERATIONS {
-                debug_assert!(
-                    iterations < MAX_LOOP_ITERATIONS,
-                    "for loop iteration cap reached"
-                );
-                break;
+                return Err(EvalError::LoopIterationLimit {
+                    kind: "for",
+                    limit: MAX_LOOP_ITERATIONS,
+                });
             }
+
+            let slot = locals
+                .get_mut(self.id)
+                .ok_or(EvalError::InvalidProgram("unknown for-loop local index"))?;
+            *slot = Value::from_f64(current as f64);
+            let signal = program.execute_block(&self.body, ctx, locals, hard, soft, sink)?;
+            iterations += 1;
 
             if matches!(signal, FlowSignal::Break) {
                 break;
             }
 
-            current += step;
+            if current == end {
+                break;
+            }
+            current = current
+                .checked_add(step)
+                .ok_or(EvalError::IntegerOverflow)?;
 
             if matches!(signal, FlowSignal::Continue) {
                 continue;
@@ -638,6 +691,7 @@ impl ForStmt {
                 iterations,
             });
         }
+        Ok(())
     }
 }
 
@@ -810,8 +864,12 @@ impl Parser {
             self.expect(Token::Rp)?;
 
             let const_value = value_expr.const_value();
-            let const_weight = weight_expr.const_value().map(|v| v.as_f64() as f32);
-            let const_cond = cond_expr.const_value().map(|v| v.as_bool());
+            let const_weight = weight_expr
+                .const_value()
+                .and_then(|value| value.as_f32().ok());
+            let const_cond = cond_expr
+                .const_value()
+                .and_then(|value| value.as_bool().ok());
 
             return Ok(Stmt::Soft(SoftStmt {
                 field,
@@ -891,15 +949,16 @@ impl Parser {
 
     fn parse_if_stmt(&mut self) -> Result<Stmt, Err> {
         let cond = self.parse_expr()?;
-        let const_cond = cond.const_value().map(|v| v.as_bool());
+        let const_cond = cond.const_value().and_then(|value| value.as_bool().ok());
         let then_branch = self.parse_block()?;
 
         let else_branch = if self.consume_else()? {
             if self.consume_if()? {
-                match self.parse_if_stmt()? {
-                    Stmt::If(branch) => vec![Stmt::If(branch)],
-                    _ => unreachable!(),
-                }
+                let nested = self.parse_if_stmt()?;
+                let Stmt::If(branch) = nested else {
+                    return Err(Err::Parse(self.error_pos_prev()));
+                };
+                vec![Stmt::If(branch)]
             } else {
                 self.parse_block()?
             }
@@ -917,7 +976,7 @@ impl Parser {
 
     fn parse_while_stmt(&mut self) -> Result<Stmt, Err> {
         let cond = self.parse_expr()?;
-        let const_cond = cond.const_value().map(|v| v.as_bool());
+        let const_cond = cond.const_value().and_then(|value| value.as_bool().ok());
         if matches!(const_cond, Some(true)) {
             return Err(Err::Parse(self.error_pos_prev()));
         }
@@ -955,7 +1014,7 @@ impl Parser {
             let id = match self.define_local(name) {
                 Ok(id) => id,
                 Err(err) => {
-                    self.pop_scope();
+                    self.pop_scope()?;
                     return Err(err);
                 }
             };
@@ -971,7 +1030,7 @@ impl Parser {
                 self.expect(Token::RBrace)?;
                 Ok(stmts)
             })();
-            self.pop_scope();
+            self.pop_scope()?;
             body_result.map(|body| (id, body))
         })();
         self.loop_depth -= 1;
@@ -1003,7 +1062,7 @@ impl Parser {
             self.expect(Token::RBrace)?;
             Ok(stmts)
         })();
-        self.pop_scope();
+        self.pop_scope()?;
         result
     }
 
@@ -1497,8 +1556,11 @@ impl Parser {
         self.scopes.push(HashMap::new());
     }
 
-    fn pop_scope(&mut self) {
-        self.scopes.pop().expect("scope underflow");
+    fn pop_scope(&mut self) -> Result<(), Err> {
+        self.scopes
+            .pop()
+            .map(|_| ())
+            .ok_or_else(|| Err::Parse(self.error_pos()))
     }
 
     fn define_local(&mut self, name: String) -> Result<usize, Err> {
@@ -1674,23 +1736,27 @@ impl From<Operator> for BinaryOp {
 }
 
 impl BinaryOp {
-    fn apply(self, lhs: Value, rhs: Value) -> Value {
+    fn apply(self, lhs: Value, rhs: Value) -> Result<Value, EvalError> {
         use BinaryOp::*;
-        match self {
-            Add => Value::from_f64(lhs.as_f64() + rhs.as_f64()),
-            Sub => Value::from_f64(lhs.as_f64() - rhs.as_f64()),
-            Mul => Value::from_f64(lhs.as_f64() * rhs.as_f64()),
-            Div => Value::from_f64(lhs.as_f64() / rhs.as_f64()),
-            Mod => Value::from_f64(lhs.as_f64() % rhs.as_f64()),
-            Less => Value::from_bool(lhs.as_f64() < rhs.as_f64()),
-            LessEq => Value::from_bool(lhs.as_f64() <= rhs.as_f64()),
-            Greater => Value::from_bool(lhs.as_f64() > rhs.as_f64()),
-            GreaterEq => Value::from_bool(lhs.as_f64() >= rhs.as_f64()),
+        lhs.ensure_finite()?;
+        rhs.ensure_finite()?;
+        let value = match self {
+            Add => Value::from_f64(lhs.as_f64()? + rhs.as_f64()?),
+            Sub => Value::from_f64(lhs.as_f64()? - rhs.as_f64()?),
+            Mul => Value::from_f64(lhs.as_f64()? * rhs.as_f64()?),
+            Div => Value::from_f64(lhs.as_f64()? / rhs.as_f64()?),
+            Mod => Value::from_f64(lhs.as_f64()? % rhs.as_f64()?),
+            Less => Value::from_bool(lhs.as_f64()? < rhs.as_f64()?),
+            LessEq => Value::from_bool(lhs.as_f64()? <= rhs.as_f64()?),
+            Greater => Value::from_bool(lhs.as_f64()? > rhs.as_f64()?),
+            GreaterEq => Value::from_bool(lhs.as_f64()? >= rhs.as_f64()?),
             Eq => Value::from_bool(lhs.equals(&rhs)),
             NotEq => Value::from_bool(!lhs.equals(&rhs)),
-            And => Value::from_bool(lhs.as_bool() && rhs.as_bool()),
-            Or => Value::from_bool(lhs.as_bool() || rhs.as_bool()),
-        }
+            And => Value::from_bool(lhs.as_bool()? && rhs.as_bool()?),
+            Or => Value::from_bool(lhs.as_bool()? || rhs.as_bool()?),
+        };
+        value.ensure_finite()?;
+        Ok(value)
     }
 }
 
@@ -1831,7 +1897,9 @@ impl ExprNode {
                 let lhs = lhs.fold();
                 let rhs = rhs.fold();
                 if let (Some(l), Some(r)) = (lhs.const_value(), rhs.const_value()) {
-                    return ExprNode::from_value(op.apply(l, r));
+                    if let Ok(value) = op.apply(l, r) {
+                        return ExprNode::from_value(value);
+                    }
                 }
                 Binary {
                     op,
@@ -1848,8 +1916,11 @@ impl ExprNode {
                 match target {
                     CallTarget::Intrinsic(function) => {
                         if function == Function::Select {
-                            if let Some(cond) = folded_args[0].const_value() {
-                                return if cond.as_bool() {
+                            if let Some(cond) = folded_args[0]
+                                .const_value()
+                                .and_then(|value| value.as_bool().ok())
+                            {
+                                return if cond {
                                     folded_args[1].clone()
                                 } else {
                                     folded_args[2].clone()
@@ -1862,7 +1933,9 @@ impl ExprNode {
                             .map(ExprNode::const_value)
                             .collect::<Option<Vec<_>>>()
                         {
-                            return ExprNode::from_value(function.eval(&values));
+                            if let Ok(value) = function.eval(&values) {
+                                return ExprNode::from_value(value);
+                            }
                         }
 
                         Call(CallTarget::Intrinsic(function), folded_args)
@@ -1888,9 +1961,11 @@ impl ExprNode {
                 let index = index.fold();
                 if let (Some(container), Some(offset)) = (target.const_value(), index.const_value())
                 {
-                    let resolved = offset.as_i64();
-                    let value = container.into_indexed(resolved);
-                    return ExprNode::from_value(value);
+                    if let Ok(resolved) = offset.as_i64() {
+                        if let Ok(value) = container.into_indexed(resolved) {
+                            return ExprNode::from_value(value);
+                        }
+                    }
                 }
                 ExprNode::Index {
                     target: Box::new(target),
@@ -1903,21 +1978,28 @@ impl ExprNode {
     fn const_value(&self) -> Option<Value> {
         use ExprNode::*;
         match self {
-            Number(n) => Some(Value::from_f64(*n)),
+            Number(n) if n.is_finite() => Some(Value::from_f64(*n)),
+            Number(_) => None,
             Bool(b) => Some(Value::from_bool(*b)),
             Field(_) | Local(_) => None,
-            UnaryNeg(expr) => expr.const_value().map(|v| Value::from_f64(-v.as_f64())),
-            UnaryNot(expr) => expr.const_value().map(|v| Value::from_bool(!v.as_bool())),
+            UnaryNeg(expr) => {
+                let value = expr.const_value()?.as_f64().ok()?;
+                Some(Value::from_f64(-value))
+            }
+            UnaryNot(expr) => {
+                let value = expr.const_value()?.as_bool().ok()?;
+                Some(Value::from_bool(!value))
+            }
             Binary { op, lhs, rhs } => {
                 let l = lhs.const_value()?;
                 let r = rhs.const_value()?;
-                Some(op.apply(l, r))
+                op.apply(l, r).ok()
             }
             Call(target, args) => match target {
                 CallTarget::Intrinsic(function) => {
                     if function == &Function::Select {
-                        let cond = args[0].const_value()?;
-                        if cond.as_bool() {
+                        let cond = args[0].const_value()?.as_bool().ok()?;
+                        if cond {
                             return args[1].const_value();
                         } else {
                             return args[2].const_value();
@@ -1928,7 +2010,7 @@ impl ExprNode {
                         .iter()
                         .map(ExprNode::const_value)
                         .collect::<Option<Vec<_>>>()?;
-                    Some(function.eval(&values))
+                    function.eval(&values).ok()
                 }
                 CallTarget::User(_) => None,
             },
@@ -1950,74 +2032,89 @@ impl ExprNode {
             }
             Index { target, index } => {
                 let container = target.const_value()?;
-                let offset = index.const_value()?.as_i64();
-                Some(container.into_indexed(offset))
+                let offset = index.const_value()?.as_i64().ok()?;
+                container.into_indexed(offset).ok()
             }
         }
     }
 
-    fn evaluate(&self, program: &Program, ctx: &Ctx, locals: &[Value]) -> Value {
+    fn evaluate(
+        &self,
+        program: &Program,
+        ctx: &Ctx,
+        locals: &[Value],
+        call_depth: usize,
+    ) -> Result<Value, EvalError> {
         use ExprNode::*;
-        match self {
+        let value = match self {
             Number(n) => Value::from_f64(*n),
             Bool(b) => Value::from_bool(*b),
             Field(field) => field.read(ctx),
-            Local(id) => locals[*id].clone(),
-            UnaryNeg(expr) => Value::from_f64(-expr.evaluate(program, ctx, locals).as_f64()),
-            UnaryNot(expr) => Value::from_bool(!expr.evaluate(program, ctx, locals).as_bool()),
+            Local(id) => locals
+                .get(*id)
+                .cloned()
+                .ok_or(EvalError::InvalidProgram("unknown local index"))?,
+            UnaryNeg(expr) => {
+                Value::from_f64(-expr.evaluate(program, ctx, locals, call_depth)?.as_f64()?)
+            }
+            UnaryNot(expr) => {
+                Value::from_bool(!expr.evaluate(program, ctx, locals, call_depth)?.as_bool()?)
+            }
             Binary { op, lhs, rhs } => match op {
                 BinaryOp::And => {
-                    let left = lhs.evaluate(program, ctx, locals);
-                    if !left.as_bool() {
+                    let left = lhs.evaluate(program, ctx, locals, call_depth)?;
+                    if !left.as_bool()? {
                         Value::from_bool(false)
                     } else {
-                        Value::from_bool(rhs.evaluate(program, ctx, locals).as_bool())
+                        Value::from_bool(rhs.evaluate(program, ctx, locals, call_depth)?.as_bool()?)
                     }
                 }
                 BinaryOp::Or => {
-                    let left = lhs.evaluate(program, ctx, locals);
-                    if left.as_bool() {
+                    let left = lhs.evaluate(program, ctx, locals, call_depth)?;
+                    if left.as_bool()? {
                         Value::from_bool(true)
                     } else {
-                        Value::from_bool(rhs.evaluate(program, ctx, locals).as_bool())
+                        Value::from_bool(rhs.evaluate(program, ctx, locals, call_depth)?.as_bool()?)
                     }
                 }
                 _ => {
-                    let l = lhs.evaluate(program, ctx, locals);
-                    let r = rhs.evaluate(program, ctx, locals);
-                    op.apply(l, r)
+                    let l = lhs.evaluate(program, ctx, locals, call_depth)?;
+                    let r = rhs.evaluate(program, ctx, locals, call_depth)?;
+                    op.apply(l, r)?
                 }
             },
             Call(target, args) => match target {
                 CallTarget::Intrinsic(function) => {
-                    function.eval_runtime(program, ctx, locals, args)
+                    function.eval_runtime(program, ctx, locals, args, call_depth)?
                 }
                 CallTarget::User(index) => {
-                    program.evaluate_user_function(*index, ctx, locals, args)
+                    program.evaluate_user_function(*index, ctx, locals, args, call_depth)?
                 }
             },
             List(elements) => {
                 let mut values = Vec::with_capacity(elements.len());
                 for element in elements {
-                    values.push(element.evaluate(program, ctx, locals));
+                    values.push(element.evaluate(program, ctx, locals, call_depth)?);
                 }
                 Value::from_list(values)
             }
             Index { target, index } => {
-                let container = target.evaluate(program, ctx, locals);
-                let offset = index.evaluate(program, ctx, locals).as_i64();
-                container.into_indexed(offset)
+                let container = target.evaluate(program, ctx, locals, call_depth)?;
+                let offset = index.evaluate(program, ctx, locals, call_depth)?.as_i64()?;
+                container.into_indexed(offset)?
             }
             Match { scrutinee, arms } => {
-                let value = scrutinee.evaluate(program, ctx, locals);
+                let value = scrutinee.evaluate(program, ctx, locals, call_depth)?;
                 for arm in arms {
-                    if arm.matches(program, ctx, locals, &value) {
-                        return arm.evaluate(program, ctx, locals);
+                    if arm.matches(program, ctx, locals, &value, call_depth)? {
+                        return arm.evaluate(program, ctx, locals, call_depth);
                     }
                 }
-                panic!("non-exhaustive match expression");
+                return Err(EvalError::NonExhaustiveMatch);
             }
-        }
+        };
+        value.ensure_finite()?;
+        Ok(value)
     }
 
     fn from_value(value: Value) -> Self {
@@ -2052,67 +2149,92 @@ impl Value {
         Value::List(values)
     }
 
-    fn as_f64(&self) -> f64 {
+    fn ensure_finite(&self) -> Result<(), EvalError> {
         match self {
-            Value::F(v) => *v,
-            Value::B(true) => 1.0,
-            Value::B(false) => 0.0,
-            Value::List(_) => panic!("cannot coerce list to number"),
+            Value::F(value) if !value.is_finite() => Err(EvalError::NonFiniteNumber),
+            Value::List(values) => values.iter().try_for_each(Value::ensure_finite),
+            Value::F(_) | Value::B(_) => Ok(()),
         }
     }
 
-    fn as_bool(&self) -> bool {
+    fn as_f64(&self) -> Result<f64, EvalError> {
         match self {
-            Value::B(v) => *v,
-            Value::F(v) => *v != 0.0,
-            Value::List(_) => panic!("cannot coerce list to boolean"),
+            Value::F(v) if v.is_finite() => Ok(*v),
+            Value::F(_) => Err(EvalError::NonFiniteNumber),
+            Value::B(true) => Ok(1.0),
+            Value::B(false) => Ok(0.0),
+            Value::List(_) => Err(EvalError::ExpectedNumber),
         }
     }
 
-    fn as_i64(&self) -> i64 {
-        self.as_f64().round() as i64
-    }
-
-    fn as_u32(&self) -> u32 {
-        self.as_f64().round() as u32
-    }
-
-    fn as_u8(&self) -> u8 {
-        self.as_f64().round() as u8
-    }
-
-    fn as_list(&self) -> &[Value] {
+    fn as_bool(&self) -> Result<bool, EvalError> {
         match self {
-            Value::List(values) => values,
-            _ => panic!("expected list value"),
+            Value::B(v) => Ok(*v),
+            Value::F(v) if v.is_finite() => Ok(*v != 0.0),
+            Value::F(_) => Err(EvalError::NonFiniteNumber),
+            Value::List(_) => Err(EvalError::ExpectedBoolean),
         }
     }
 
-    fn into_list(self) -> Vec<Value> {
-        match self {
-            Value::List(values) => values,
-            _ => panic!("expected list value"),
+    fn as_i64(&self) -> Result<i64, EvalError> {
+        Ok(self.as_f64()?.round() as i64)
+    }
+
+    fn as_f32(&self) -> Result<f32, EvalError> {
+        let value = self.as_f64()? as f32;
+        if value.is_finite() {
+            Ok(value)
+        } else {
+            Err(EvalError::NonFiniteNumber)
         }
     }
 
-    fn len(&self) -> usize {
+    fn as_u32(&self) -> Result<u32, EvalError> {
+        Ok(self.as_f64()?.round() as u32)
+    }
+
+    fn as_u8(&self) -> Result<u8, EvalError> {
+        Ok(self.as_f64()?.round() as u8)
+    }
+
+    fn as_list(&self) -> Result<&[Value], EvalError> {
         match self {
-            Value::List(values) => values.len(),
-            _ => panic!("expected list value"),
+            Value::List(values) => Ok(values),
+            _ => Err(EvalError::ExpectedList),
         }
     }
 
-    fn into_indexed(self, index: i64) -> Value {
+    fn into_list(self) -> Result<Vec<Value>, EvalError> {
+        match self {
+            Value::List(values) => Ok(values),
+            _ => Err(EvalError::ExpectedList),
+        }
+    }
+
+    fn len(&self) -> Result<usize, EvalError> {
+        match self {
+            Value::List(values) => Ok(values.len()),
+            _ => Err(EvalError::ExpectedList),
+        }
+    }
+
+    fn into_indexed(self, index: i64) -> Result<Value, EvalError> {
         match self {
             Value::List(values) => {
                 let len = values.len() as i64;
                 let resolved = if index < 0 { len + index } else { index };
                 if resolved < 0 || resolved >= len {
-                    panic!("list index out of bounds");
+                    return Err(EvalError::ListIndexOutOfBounds {
+                        index,
+                        len: values.len(),
+                    });
                 }
-                values.into_iter().nth(resolved as usize).unwrap()
+                values
+                    .into_iter()
+                    .nth(resolved as usize)
+                    .ok_or(EvalError::InvalidProgram("resolved list index missing"))
             }
-            _ => panic!("expected list value"),
+            _ => Err(EvalError::ExpectedList),
         }
     }
 
@@ -2181,56 +2303,59 @@ impl Function {
         }
     }
 
-    fn eval(&self, values: &[Value]) -> Value {
-        match self {
-            Function::Log2 => Value::from_f64(values[0].as_f64().log2()),
+    fn eval(&self, values: &[Value]) -> Result<Value, EvalError> {
+        let value = match self {
+            Function::Log2 => Value::from_f64(values[0].as_f64()?.log2()),
             Function::Select => {
-                if values[0].as_bool() {
+                if values[0].as_bool()? {
                     values[1].clone()
                 } else {
                     values[2].clone()
                 }
             }
             Function::Clamp => {
-                let v = values[0].as_f64();
-                let lo = values[1].as_f64();
-                let hi = values[2].as_f64();
-                Value::from_f64(v.max(lo).min(hi))
+                let value = values[0].as_f64()?;
+                let lower = values[1].as_f64()?;
+                let upper = values[2].as_f64()?;
+                Value::from_f64(value.max(lower).min(upper))
             }
             Function::Min => {
                 let mut iter = values.iter();
-                let first = iter.next().expect("min requires arguments");
-                let mut best = first.as_f64();
-                for v in iter {
-                    best = best.min(v.as_f64());
+                let first = iter
+                    .next()
+                    .ok_or(EvalError::InvalidProgram("min requires arguments"))?;
+                let mut best = first.as_f64()?;
+                for value in iter {
+                    best = best.min(value.as_f64()?);
                 }
                 Value::from_f64(best)
             }
             Function::Max => {
                 let mut iter = values.iter();
-                let first = iter.next().expect("max requires arguments");
-                let mut best = first.as_f64();
-                for v in iter {
-                    best = best.max(v.as_f64());
+                let first = iter
+                    .next()
+                    .ok_or(EvalError::InvalidProgram("max requires arguments"))?;
+                let mut best = first.as_f64()?;
+                for value in iter {
+                    best = best.max(value.as_f64()?);
                 }
                 Value::from_f64(best)
             }
-            Function::Abs => Value::from_f64(values[0].as_f64().abs()),
-            Function::Floor => Value::from_f64(values[0].as_f64().floor()),
-            Function::Ceil => Value::from_f64(values[0].as_f64().ceil()),
-            Function::Round => Value::from_f64(values[0].as_f64().round()),
-            Function::Sqrt => Value::from_f64(values[0].as_f64().sqrt()),
-            Function::Pow => Value::from_f64(values[0].as_f64().powf(values[1].as_f64())),
-            Function::Len => Value::from_f64(values[0].len() as f64),
+            Function::Abs => Value::from_f64(values[0].as_f64()?.abs()),
+            Function::Floor => Value::from_f64(values[0].as_f64()?.floor()),
+            Function::Ceil => Value::from_f64(values[0].as_f64()?.ceil()),
+            Function::Round => Value::from_f64(values[0].as_f64()?.round()),
+            Function::Sqrt => Value::from_f64(values[0].as_f64()?.sqrt()),
+            Function::Pow => Value::from_f64(values[0].as_f64()?.powf(values[1].as_f64()?)),
+            Function::Len => Value::from_f64(values[0].len()? as f64),
             Function::Sum => {
-                let total = values[0]
-                    .as_list()
-                    .iter()
-                    .map(|value| value.as_f64())
-                    .sum::<f64>();
+                let total = values[0].as_list()?.iter().try_fold(0.0, |total, value| {
+                    Ok::<_, EvalError>(total + value.as_f64()?)
+                })?;
                 Value::from_f64(total)
             }
-        }
+        };
+        Ok(value)
     }
 
     fn eval_runtime(
@@ -2239,79 +2364,112 @@ impl Function {
         ctx: &Ctx,
         locals: &[Value],
         args: &[ExprNode],
-    ) -> Value {
-        match self {
+        call_depth: usize,
+    ) -> Result<Value, EvalError> {
+        let value = match self {
             Function::Select => {
-                let cond = args[0].evaluate(program, ctx, locals);
-                if cond.as_bool() {
-                    args[1].evaluate(program, ctx, locals)
+                let cond = args[0].evaluate(program, ctx, locals, call_depth)?;
+                if cond.as_bool()? {
+                    args[1].evaluate(program, ctx, locals, call_depth)?
                 } else {
-                    args[2].evaluate(program, ctx, locals)
+                    args[2].evaluate(program, ctx, locals, call_depth)?
                 }
             }
             Function::Clamp => {
-                let v = args[0].evaluate(program, ctx, locals).as_f64();
-                let lo = args[1].evaluate(program, ctx, locals).as_f64();
-                let hi = args[2].evaluate(program, ctx, locals).as_f64();
-                Value::from_f64(v.max(lo).min(hi))
+                let value = args[0]
+                    .evaluate(program, ctx, locals, call_depth)?
+                    .as_f64()?;
+                let lower = args[1]
+                    .evaluate(program, ctx, locals, call_depth)?
+                    .as_f64()?;
+                let upper = args[2]
+                    .evaluate(program, ctx, locals, call_depth)?
+                    .as_f64()?;
+                Value::from_f64(value.max(lower).min(upper))
             }
             Function::Min => {
                 let mut iter = args.iter();
-                let mut best = iter
+                let first = iter
                     .next()
-                    .map(|expr| expr.evaluate(program, ctx, locals).as_f64())
-                    .unwrap();
+                    .ok_or(EvalError::InvalidProgram("min requires arguments"))?;
+                let mut best = first.evaluate(program, ctx, locals, call_depth)?.as_f64()?;
                 for expr in iter {
-                    best = best.min(expr.evaluate(program, ctx, locals).as_f64());
+                    best = best.min(expr.evaluate(program, ctx, locals, call_depth)?.as_f64()?);
                 }
                 Value::from_f64(best)
             }
             Function::Max => {
                 let mut iter = args.iter();
-                let mut best = iter
+                let first = iter
                     .next()
-                    .map(|expr| expr.evaluate(program, ctx, locals).as_f64())
-                    .unwrap();
+                    .ok_or(EvalError::InvalidProgram("max requires arguments"))?;
+                let mut best = first.evaluate(program, ctx, locals, call_depth)?.as_f64()?;
                 for expr in iter {
-                    best = best.max(expr.evaluate(program, ctx, locals).as_f64());
+                    best = best.max(expr.evaluate(program, ctx, locals, call_depth)?.as_f64()?);
                 }
                 Value::from_f64(best)
             }
-            Function::Log2
-            | Function::Abs
-            | Function::Floor
-            | Function::Ceil
-            | Function::Round
-            | Function::Sqrt => {
-                let value = args[0].evaluate(program, ctx, locals).as_f64();
-                match self {
-                    Function::Log2 => Value::from_f64(value.log2()),
-                    Function::Abs => Value::from_f64(value.abs()),
-                    Function::Floor => Value::from_f64(value.floor()),
-                    Function::Ceil => Value::from_f64(value.ceil()),
-                    Function::Round => Value::from_f64(value.round()),
-                    Function::Sqrt => Value::from_f64(value.sqrt()),
-                    _ => unreachable!(),
-                }
-            }
+            Function::Log2 => Value::from_f64(
+                args[0]
+                    .evaluate(program, ctx, locals, call_depth)?
+                    .as_f64()?
+                    .log2(),
+            ),
+            Function::Abs => Value::from_f64(
+                args[0]
+                    .evaluate(program, ctx, locals, call_depth)?
+                    .as_f64()?
+                    .abs(),
+            ),
+            Function::Floor => Value::from_f64(
+                args[0]
+                    .evaluate(program, ctx, locals, call_depth)?
+                    .as_f64()?
+                    .floor(),
+            ),
+            Function::Ceil => Value::from_f64(
+                args[0]
+                    .evaluate(program, ctx, locals, call_depth)?
+                    .as_f64()?
+                    .ceil(),
+            ),
+            Function::Round => Value::from_f64(
+                args[0]
+                    .evaluate(program, ctx, locals, call_depth)?
+                    .as_f64()?
+                    .round(),
+            ),
+            Function::Sqrt => Value::from_f64(
+                args[0]
+                    .evaluate(program, ctx, locals, call_depth)?
+                    .as_f64()?
+                    .sqrt(),
+            ),
             Function::Pow => {
-                let base = args[0].evaluate(program, ctx, locals).as_f64();
-                let exp = args[1].evaluate(program, ctx, locals).as_f64();
+                let base = args[0]
+                    .evaluate(program, ctx, locals, call_depth)?
+                    .as_f64()?;
+                let exp = args[1]
+                    .evaluate(program, ctx, locals, call_depth)?
+                    .as_f64()?;
                 Value::from_f64(base.powf(exp))
             }
             Function::Len => {
-                let list = args[0].evaluate(program, ctx, locals);
-                Value::from_f64(list.len() as f64)
+                let list = args[0].evaluate(program, ctx, locals, call_depth)?;
+                Value::from_f64(list.len()? as f64)
             }
             Function::Sum => {
-                let values = args[0].evaluate(program, ctx, locals).into_list();
+                let values = args[0]
+                    .evaluate(program, ctx, locals, call_depth)?
+                    .into_list()?;
                 let mut total = 0.0;
                 for value in values {
-                    total += value.as_f64();
+                    total += value.as_f64()?;
                 }
                 Value::from_f64(total)
             }
-        }
+        };
+        Ok(value)
     }
 }
 
@@ -2337,16 +2495,22 @@ impl FunctionDef {
         }
     }
 
-    fn eval(&self, program: &Program, ctx: &Ctx, locals: &[Value]) -> Value {
+    fn eval(
+        &self,
+        program: &Program,
+        ctx: &Ctx,
+        locals: &[Value],
+        call_depth: usize,
+    ) -> Result<Value, EvalError> {
         if self.params == 0 {
             if let Some(value) = &self.const_value {
-                return value.clone();
+                return Ok(value.clone());
             }
             debug_assert!(locals.is_empty());
         } else {
             debug_assert_eq!(locals.len(), self.params);
         }
-        self.expr.evaluate(program, ctx, locals)
+        self.expr.evaluate(program, ctx, locals, call_depth)
     }
 }
 
@@ -2636,7 +2800,7 @@ mod tests {
     #[test]
     fn parses_and_evaluates_assignments() {
         let program = Program::parse("wg: 256; radix: log2(k);").unwrap();
-        let out = program.evaluate(&ctx());
+        let out = program.evaluate(&ctx()).unwrap();
         assert_eq!(out.hard.wg, Some(256));
         assert_eq!(out.hard.radix, Some(9));
     }
@@ -2644,7 +2808,7 @@ mod tests {
     #[test]
     fn folds_constants() {
         let program = Program::parse("radix: clamp(16, 2, 8);").unwrap();
-        let out = program.evaluate(&ctx());
+        let out = program.evaluate(&ctx()).unwrap();
         assert_eq!(out.hard.radix, Some(8));
     }
 
@@ -2660,7 +2824,7 @@ mod tests {
             ",
         )
         .unwrap();
-        let out = program.evaluate(&ctx());
+        let out = program.evaluate(&ctx()).unwrap();
         assert_eq!(out.hard.radix, Some(6));
     }
 
@@ -2680,7 +2844,7 @@ mod tests {
             ",
         )
         .unwrap();
-        let out = program.evaluate(&ctx());
+        let out = program.evaluate(&ctx()).unwrap();
         assert_eq!(out.hard.radix, Some(19));
     }
 
@@ -2702,7 +2866,7 @@ mod tests {
             ",
         )
         .unwrap();
-        let out = program.evaluate(&ctx());
+        let out = program.evaluate(&ctx()).unwrap();
         assert_eq!(out.hard.radix, Some(9));
     }
 
@@ -2710,7 +2874,7 @@ mod tests {
     fn evaluates_soft_rules() {
         let script = "soft (wg, r / 4, 0.25, true);";
         let program = Program::parse(script).unwrap();
-        let out = program.evaluate(&ctx());
+        let out = program.evaluate(&ctx()).unwrap();
         assert_eq!(out.soft.len(), 1);
     }
 
@@ -2718,7 +2882,7 @@ mod tests {
     fn supports_locals_and_modulo() {
         let script = "let base = r / 4; wg: base; soft (wg, base, 0.5, base % 2 == 0);";
         let program = Program::parse(script).unwrap();
-        let out = program.evaluate(&ctx());
+        let out = program.evaluate(&ctx()).unwrap();
         assert_eq!(out.hard.wg, Some(256));
         assert_eq!(out.soft.len(), 1);
     }
@@ -2727,7 +2891,7 @@ mod tests {
     fn advanced_math_functions_fold() {
         let script = "radix: max(min(pow(2, 3), sqrt(64)), abs(-4));";
         let program = Program::parse(script).unwrap();
-        let out = program.evaluate(&ctx());
+        let out = program.evaluate(&ctx()).unwrap();
         assert_eq!(out.hard.radix, Some(8));
     }
 
@@ -2750,7 +2914,7 @@ mod tests {
 
         let program = Program::parse(script).unwrap();
 
-        let out = program.evaluate(&ctx());
+        let out = program.evaluate(&ctx()).unwrap();
         assert_eq!(out.hard.wg, Some(256));
         assert_eq!(out.soft.len(), 1);
         match &out.soft[0] {
@@ -2763,7 +2927,7 @@ mod tests {
 
         let mut alt_ctx = ctx();
         alt_ctx.sg = false;
-        let out_alt = program.evaluate(&alt_ctx);
+        let out_alt = program.evaluate(&alt_ctx).unwrap();
         assert_eq!(out_alt.hard.wg, Some(256));
         assert_eq!(out_alt.soft.len(), 1);
         match &out_alt.soft[0] {
@@ -2787,7 +2951,7 @@ mod tests {
         "#;
 
         let program = Program::parse(script).unwrap();
-        let out = program.evaluate(&ctx());
+        let out = program.evaluate(&ctx()).unwrap();
         assert_eq!(out.soft.len(), 2);
         match &out.soft[0] {
             SoftRule::Wg { val, w } => {
@@ -2818,7 +2982,7 @@ mod tests {
         "#;
 
         let program = Program::parse(script).unwrap();
-        let out = program.evaluate(&ctx());
+        let out = program.evaluate(&ctx()).unwrap();
         assert_eq!(out.hard.wg, Some(8));
     }
 
@@ -2838,7 +3002,7 @@ mod tests {
         "#;
 
         let program = Program::parse(script).unwrap();
-        let out = program.evaluate(&ctx());
+        let out = program.evaluate(&ctx()).unwrap();
         assert_eq!(out.hard.wg, Some(10));
     }
 
@@ -2858,7 +3022,7 @@ mod tests {
         "#;
 
         let program = Program::parse(script).unwrap();
-        let out = program.evaluate(&ctx());
+        let out = program.evaluate(&ctx()).unwrap();
         assert_eq!(out.hard.wg, Some(9));
     }
 
@@ -2866,6 +3030,49 @@ mod tests {
     fn rejects_constant_true_while_loops() {
         let script = "while true { wg: 1; }";
         assert!(Program::parse(script).is_err());
+    }
+
+    #[test]
+    fn dynamic_while_loop_reports_iteration_limit() {
+        let script = r#"
+            let keep_running = r > 0;
+            while keep_running { wg: 1; }
+        "#;
+        let program = Program::parse(script).unwrap();
+
+        assert_eq!(
+            program.evaluate(&ctx()).unwrap_err(),
+            EvalError::LoopIterationLimit {
+                kind: "while",
+                limit: MAX_LOOP_ITERATIONS,
+            }
+        );
+    }
+
+    #[test]
+    fn large_for_loop_reports_iteration_limit() {
+        let program = Program::parse("for i in 0..70000 { wg: i; }").unwrap();
+
+        assert_eq!(
+            program.evaluate(&ctx()).unwrap_err(),
+            EvalError::LoopIterationLimit {
+                kind: "for",
+                limit: MAX_LOOP_ITERATIONS,
+            }
+        );
+    }
+
+    #[test]
+    fn loops_may_complete_at_exact_iteration_limit() {
+        let for_program = Program::parse("for i in 0..65536 { wg: i; }").unwrap();
+        assert_eq!(for_program.evaluate(&ctx()).unwrap().hard.wg, Some(65_535));
+
+        let while_program =
+            Program::parse("let i = 0; while i < 65536 { set i = i + 1; } wg: i;").unwrap();
+        assert_eq!(
+            while_program.evaluate(&ctx()).unwrap().hard.wg,
+            Some(65_536)
+        );
     }
 
     #[test]
@@ -2886,12 +3093,12 @@ mod tests {
         "#;
 
         let program = Program::parse(script).unwrap();
-        let out = program.evaluate(&ctx());
+        let out = program.evaluate(&ctx()).unwrap();
         assert_eq!(out.hard.wg, Some(2));
 
         let mut bigger = ctx();
         bigger.r = 1536;
-        let out_big = program.evaluate(&bigger);
+        let out_big = program.evaluate(&bigger).unwrap();
         assert_eq!(out_big.hard.wg, Some(4));
     }
 
@@ -2910,19 +3117,19 @@ mod tests {
         let mut rich = ctx();
         rich.sg = true;
         rich.r = 4096;
-        let out_rich = program.evaluate(&rich);
+        let out_rich = program.evaluate(&rich).unwrap();
         assert_eq!(out_rich.hard.wg, Some(9));
 
         let mut mid = ctx();
         mid.sg = false;
         mid.k = 512;
-        let out_mid = program.evaluate(&mid);
+        let out_mid = program.evaluate(&mid).unwrap();
         assert_eq!(out_mid.hard.wg, Some(7));
 
         let mut poor = ctx();
         poor.sg = false;
         poor.k = 64;
-        let out_poor = program.evaluate(&poor);
+        let out_poor = program.evaluate(&poor).unwrap();
         assert_eq!(out_poor.hard.wg, Some(1));
     }
 
@@ -2940,6 +3147,16 @@ mod tests {
     }
 
     #[test]
+    fn guarded_wildcard_reports_non_exhaustive_match() {
+        let program = Program::parse("wg: match r { _ if false => 1 };").unwrap();
+
+        assert_eq!(
+            program.evaluate(&ctx()).unwrap_err(),
+            EvalError::NonExhaustiveMatch
+        );
+    }
+
+    #[test]
     fn user_function_invocation() {
         let script = r#"
             fn tuned(val) => sel(val > 2048, 9, 7);
@@ -2949,12 +3166,12 @@ mod tests {
         let program = Program::parse(script).unwrap();
         let mut rich = ctx();
         rich.r = 4096;
-        let out_rich = program.evaluate(&rich);
+        let out_rich = program.evaluate(&rich).unwrap();
         assert_eq!(out_rich.hard.wg, Some(9));
 
         let mut modest = ctx();
         modest.r = 1024;
-        let out_modest = program.evaluate(&modest);
+        let out_modest = program.evaluate(&modest).unwrap();
         assert_eq!(out_modest.hard.wg, Some(7));
     }
 
@@ -2966,8 +3183,24 @@ mod tests {
         "#;
 
         let program = Program::parse(script).unwrap();
-        let out = program.evaluate(&ctx());
+        let out = program.evaluate(&ctx()).unwrap();
         assert_eq!(out.hard.radix, Some(24));
+    }
+
+    #[test]
+    fn recursive_function_reports_call_depth_limit() {
+        let script = r#"
+            fn recurse(n) => recurse(n + 1);
+            wg: recurse(0);
+        "#;
+        let program = Program::parse(script).unwrap();
+
+        assert_eq!(
+            program.evaluate(&ctx()).unwrap_err(),
+            EvalError::RecursionLimit {
+                limit: MAX_FUNCTION_CALL_DEPTH,
+            }
+        );
     }
 
     #[test]
@@ -2978,7 +3211,7 @@ mod tests {
         "#;
 
         let program = Program::parse(script).unwrap();
-        let out = program.evaluate(&ctx());
+        let out = program.evaluate(&ctx()).unwrap();
         assert_eq!(out.hard.wg, Some(13));
     }
 
@@ -2992,10 +3225,71 @@ mod tests {
         "#;
 
         let program = Program::parse(script).unwrap();
-        let out = program.evaluate(&ctx());
+        let out = program.evaluate(&ctx()).unwrap();
         assert_eq!(out.hard.wg, Some(16385));
         assert_eq!(out.hard.tile_cols, Some(3));
         assert_eq!(out.hard.radix, Some(512));
+    }
+
+    #[test]
+    fn list_scalar_coercion_returns_evaluation_error() {
+        let program = Program::parse("let values = [1, 2]; wg: values + 1;").unwrap();
+
+        assert_eq!(
+            program.evaluate(&ctx()).unwrap_err(),
+            EvalError::ExpectedNumber
+        );
+    }
+
+    #[test]
+    fn scalar_list_intrinsic_returns_evaluation_error() {
+        let program = Program::parse("wg: len(r);").unwrap();
+
+        assert_eq!(
+            program.evaluate(&ctx()).unwrap_err(),
+            EvalError::ExpectedList
+        );
+    }
+
+    #[test]
+    fn list_index_out_of_bounds_returns_evaluation_error() {
+        for (script, index) in [("wg: [1, 2][2];", 2), ("wg: [1, 2][-3];", -3)] {
+            let program = Program::parse(script).unwrap();
+            assert_eq!(
+                program.evaluate(&ctx()).unwrap_err(),
+                EvalError::ListIndexOutOfBounds { index, len: 2 }
+            );
+        }
+    }
+
+    #[test]
+    fn public_eval_wraps_runtime_errors() {
+        let err = crate::eval_program("wg: [1, 2];", &ctx()).unwrap_err();
+
+        assert!(matches!(err, Err::Eval(EvalError::ExpectedNumber)));
+    }
+
+    #[test]
+    fn non_finite_numbers_are_rejected_before_reaching_outputs() {
+        for script in [
+            "wg: 0 / 0;",
+            "wg: 1 / 0;",
+            "let unused = 1 / 0; wg: 1;",
+            "soft(wg, 1, 0 / 0, true);",
+            "soft(wg, 1, pow(10, 50), true);",
+            "if 0 / 0 { wg: 1; }",
+            "u2: sqrt(-1) == sqrt(-1);",
+            "wg: match sqrt(-1) { _ => 1 };",
+        ] {
+            let program = Program::parse(script).unwrap();
+            assert_eq!(
+                program.evaluate(&ctx()).unwrap_err(),
+                EvalError::NonFiniteNumber
+            );
+        }
+
+        let lazy = Program::parse("wg: sel(false, sqrt(-1), 7);").unwrap();
+        assert_eq!(lazy.evaluate(&ctx()).unwrap().hard.wg, Some(7));
     }
 
     #[test]
@@ -3007,7 +3301,7 @@ mod tests {
         "#;
 
         let program = Program::parse(script).unwrap();
-        let out = program.evaluate(&ctx());
+        let out = program.evaluate(&ctx()).unwrap();
         assert_eq!(out.hard.wg, Some(6));
         assert_eq!(out.soft.len(), 1);
         match &out.soft[0] {
@@ -3028,7 +3322,7 @@ mod tests {
             soft(radix, base, 1.0, false);
         "#;
         let program = Program::parse(script).unwrap();
-        let (out, trace) = program.evaluate_with_trace(&ctx(), 128);
+        let (out, trace) = program.evaluate_with_trace(&ctx(), 128).unwrap();
         assert_eq!(out.hard.wg, Some(256));
         assert_eq!(out.soft.len(), 1);
 
@@ -3054,7 +3348,7 @@ mod tests {
             }
         "#;
         let program = Program::parse(script).unwrap();
-        let (_out, trace) = program.evaluate_with_trace(&ctx(), 4);
+        let (_out, trace) = program.evaluate_with_trace(&ctx(), 4).unwrap();
         assert!(trace.events().len() <= 4);
         assert!(trace.is_truncated());
     }

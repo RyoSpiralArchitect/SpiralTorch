@@ -26,7 +26,7 @@ pub fn stable_cache_key<Z: Serialize>(
     mut flags: Vec<String>,
     defs_hm: &HashMap<String, String>,
     zframe: &Z,
-) -> String {
+) -> Result<String, serde_json::Error> {
     flags.sort();
     let defs = defs_hm
         .iter()
@@ -41,8 +41,8 @@ pub fn stable_cache_key<Z: Serialize>(
         defs,
         zframe,
     };
-    let bytes = serde_json::to_vec(&fp).expect("fingerprint serialize");
-    blake3::hash(&bytes).to_hex().to_string()
+    let bytes = serde_json::to_vec(&fp)?;
+    Ok(blake3::hash(&bytes).to_hex().to_string())
 }
 
 #[cfg(test)]
@@ -72,7 +72,8 @@ mod tests {
             vec!["-O".into(), "--foo".into()],
             &d1,
             &Z { a: 1, b: 2 },
-        );
+        )
+        .unwrap();
         let k2 = stable_cache_key(
             "rustc1",
             "x86",
@@ -81,7 +82,39 @@ mod tests {
             vec!["--foo".into(), "-O".into()],
             &d2,
             &Z { a: 1, b: 2 },
-        );
+        )
+        .unwrap();
         assert_eq!(k1, k2);
+    }
+
+    #[test]
+    fn serialization_errors_are_returned() {
+        struct FailingZ;
+
+        impl Serialize for FailingZ {
+            fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: serde::Serializer,
+            {
+                Err(serde::ser::Error::custom(
+                    "intentional serialization failure",
+                ))
+            }
+        }
+
+        let err = stable_cache_key(
+            "rustc1",
+            "x86",
+            "wgpu",
+            "f32",
+            Vec::new(),
+            &HashMap::new(),
+            &FailingZ,
+        )
+        .unwrap_err();
+
+        assert!(err
+            .to_string()
+            .contains("intentional serialization failure"));
     }
 }

@@ -3,7 +3,7 @@
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 // Unauthorized derivative works or closed redistribution prohibited under AGPL §13.
 
-use super::{Ctx, ExprNode, Program, Value};
+use super::{Ctx, EvalError, ExprNode, Program, Value};
 
 #[derive(Clone, Debug)]
 pub(super) struct MatchArm {
@@ -30,20 +30,24 @@ impl MatchArm {
         ctx: &Ctx,
         locals: &[Value],
         scrutinee: &Value,
-    ) -> bool {
-        let pattern_match = self
-            .patterns
-            .iter()
-            .any(|pattern| pattern.matches(program, ctx, locals, scrutinee));
+        call_depth: usize,
+    ) -> Result<bool, EvalError> {
+        let mut pattern_match = false;
+        for pattern in &self.patterns {
+            if pattern.matches(program, ctx, locals, scrutinee, call_depth)? {
+                pattern_match = true;
+                break;
+            }
+        }
 
         if !pattern_match {
-            return false;
+            return Ok(false);
         }
 
         if let Some(guard) = &self.guard {
-            guard.evaluate(program, ctx, locals).as_bool()
+            guard.evaluate(program, ctx, locals, call_depth)?.as_bool()
         } else {
-            true
+            Ok(true)
         }
     }
 
@@ -65,7 +69,7 @@ impl MatchArm {
         }
 
         if let Some(guard) = &self.guard {
-            if !guard.const_value()?.as_bool() {
+            if !guard.const_value()?.as_bool().ok()? {
                 return None;
             }
         }
@@ -73,8 +77,14 @@ impl MatchArm {
         self.expr.const_value()
     }
 
-    pub(super) fn evaluate(&self, program: &Program, ctx: &Ctx, locals: &[Value]) -> Value {
-        self.expr.evaluate(program, ctx, locals)
+    pub(super) fn evaluate(
+        &self,
+        program: &Program,
+        ctx: &Ctx,
+        locals: &[Value],
+        call_depth: usize,
+    ) -> Result<Value, EvalError> {
+        self.expr.evaluate(program, ctx, locals, call_depth)
     }
 
     pub(super) fn has_wildcard(&self) -> bool {
@@ -112,25 +122,32 @@ impl MatchPattern {
         }
     }
 
-    fn matches(&self, program: &Program, ctx: &Ctx, locals: &[Value], scrutinee: &Value) -> bool {
+    fn matches(
+        &self,
+        program: &Program,
+        ctx: &Ctx,
+        locals: &[Value],
+        scrutinee: &Value,
+        call_depth: usize,
+    ) -> Result<bool, EvalError> {
         match self {
-            MatchPattern::Wildcard => true,
+            MatchPattern::Wildcard => Ok(true),
             MatchPattern::Expr(expr) => {
-                let candidate = expr.evaluate(program, ctx, locals);
-                candidate.equals(scrutinee)
+                let candidate = expr.evaluate(program, ctx, locals, call_depth)?;
+                Ok(candidate.equals(scrutinee))
             }
             MatchPattern::Range {
                 start,
                 end,
                 inclusive,
             } => {
-                let lo = start.evaluate(program, ctx, locals).as_f64();
-                let hi = end.evaluate(program, ctx, locals).as_f64();
-                let value = scrutinee.as_f64();
+                let lo = start.evaluate(program, ctx, locals, call_depth)?.as_f64()?;
+                let hi = end.evaluate(program, ctx, locals, call_depth)?.as_f64()?;
+                let value = scrutinee.as_f64()?;
                 if *inclusive {
-                    value >= lo && value <= hi
+                    Ok(value >= lo && value <= hi)
                 } else {
-                    value >= lo && value < hi
+                    Ok(value >= lo && value < hi)
                 }
             }
         }
@@ -148,9 +165,9 @@ impl MatchPattern {
                 end,
                 inclusive,
             } => {
-                let lo = start.const_value()?.as_f64();
-                let hi = end.const_value()?.as_f64();
-                let value = scrutinee.as_f64();
+                let lo = start.const_value()?.as_f64().ok()?;
+                let hi = end.const_value()?.as_f64().ok()?;
+                let value = scrutinee.as_f64().ok()?;
                 if *inclusive {
                     Some(value >= lo && value <= hi)
                 } else {
