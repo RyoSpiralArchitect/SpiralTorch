@@ -743,11 +743,16 @@ gates stop when distortion pressure or maximum trainer psi rises above its
 limit, or when mean desire stability falls below its minimum. All three
 thresholds use the normalized `[0, 1]` range. Distortion evidence can come from
 the run card's inference-distortion handoff; desire and psi evidence come from
-trainer telemetry produced by `--trainer-telemetry`. Once a geometry gate is
-configured, missing or out-of-range evidence blocks continuation rather than
-silently passing. A depth-zero seed is allowed to launch its first measured
-generation without telemetry; that child must then provide every configured
-signal before another generation can run. A stopped report keeps
+trainer telemetry produced by `--trainer-telemetry`. When desire or psi gates
+are active, the continuation executor automatically adds that switch and
+removes a conflicting `--no-trainer-trace` from the next scale-up command. The
+resulting telemetry command contract is sealed into the generation plan and
+recomputed by preflight; a distortion-only gate leaves trainer telemetry
+unchanged. Once a geometry gate is configured, missing or out-of-range evidence
+blocks continuation rather than silently passing. A depth-zero seed is allowed
+to launch its first measured generation without telemetry; that child must then
+provide every configured signal before another generation can run. A stopped
+report keeps
 `chain_ready=True` and
 `continuation_artifacts_ready=True` for audit, but sets
 `continuation_ready=False`; `spiral-hf-scale-up` then returns

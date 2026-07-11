@@ -644,6 +644,26 @@ def test_executor_seals_geometry_policy_and_forwards_detached_cli(
     assert policy["max_distortion_pressure_index"] == pytest.approx(0.40)
     assert policy["min_desire_stability"] == pytest.approx(0.70)
     assert policy["max_psi_total"] == pytest.approx(0.60)
+    pending = planned["pending_generation"]
+    pending_command = pending["command"]["command"]
+    telemetry_contract = pending["trainer_telemetry_command_contract"]
+    assert planned["scale_up"]["require_trainer_telemetry"] is True
+    assert pending["trainer_telemetry_required"] is True
+    assert "--trainer-telemetry" in pending_command
+    assert "--no-trainer-trace" not in pending_command
+    assert telemetry_contract["status"] == "enforced"
+    assert telemetry_contract["required"] is True
+    assert telemetry_contract["ready"] is True
+    assert pending["preflight"][
+        "trainer_telemetry_command_contract_matches"
+    ] is True
+    assert pending["generation_plan_contract"]["components"]["scale_up"][
+        "require_trainer_telemetry"
+    ] is True
+    assert any(
+        "trainer_telemetry=enforced" in line
+        for line in st.hf_adapter_continuation_executor_lines(planned)
+    )
     assert changed["status"] == "blocked"
     assert changed["reason"] == "pending_generation_plan_changed"
     assert changed["generation_plan_gate"]["pending_component_ids"][
@@ -655,6 +675,21 @@ def test_executor_seals_geometry_policy_and_forwards_detached_cli(
     assert _flag(child_argv, "--min-desire-stability") == "0.7"
     assert _flag(child_argv, "--max-psi-total") == "0.6"
     assert code == 0
+
+    distortion_only = st.run_hf_adapter_continuation_executor(
+        child,
+        output_root=tmp_path / "distortion-only-runs",
+        max_distortion_pressure_index=0.40,
+    )
+    distortion_pending = distortion_only["pending_generation"]
+    distortion_command = distortion_pending["command"]["command"]
+    assert distortion_only["status"] == "ready"
+    assert distortion_only["scale_up"]["require_trainer_telemetry"] is False
+    assert distortion_pending["trainer_telemetry_required"] is False
+    assert "--trainer-telemetry" not in distortion_command
+    assert distortion_pending["trainer_telemetry_command_contract"]["status"] == (
+        "not_applicable"
+    )
 
 
 def test_executor_blocks_plan_drift_until_explicit_replan(tmp_path: Path) -> None:

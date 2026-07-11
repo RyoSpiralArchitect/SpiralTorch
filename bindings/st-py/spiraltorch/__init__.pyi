@@ -1891,6 +1891,7 @@ def hf_gpt2_finetune_scale_up_command(
     run_card: str | PathLike[str] | None = ...,
     trainer_trace_jsonl: str | PathLike[str] | None = ...,
     trainer_trace_run_id: str | None = ...,
+    require_trainer_telemetry: bool = ...,
     adapter_continuation: str = ...,
     source_cwd: str | PathLike[str] | None = ...,
 ) -> Dict[str, object]: ...

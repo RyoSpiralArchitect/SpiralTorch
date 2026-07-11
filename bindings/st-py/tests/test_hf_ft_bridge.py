@@ -4462,6 +4462,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 "--output-dir",
                 str(adapter_dir),
                 "--metadata-only",
+                "--no-trainer-trace",
                 "--no-eval-after-train",
                 "--eval-after-train-policy",
                 "never",
@@ -4485,9 +4486,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 "scale_up_candidate_adapter_promotion_report_path": None,
                 "adapter_promotion_required": True,
             }
+            unrequired_artifact = hf_ft.hf_finetune_scale_up_command(
+                summary,
+                output_dir=root / "unrequired-child-adapter",
+            )
             artifact = hf_ft.hf_finetune_scale_up_command(
                 summary,
                 output_dir=root / "child-adapter",
+                require_trainer_telemetry=True,
             )
             command = artifact["command"]
             bridge_argv = (
@@ -4529,6 +4535,15 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                     *artifact["command"],
                     "--adapter-promotion-require-generation-change",
                 ],
+                "--trainer-telemetry": [
+                    item
+                    for item in artifact["command"]
+                    if item != "--trainer-telemetry"
+                ],
+                "--no-trainer-trace": [
+                    *artifact["command"],
+                    "--no-trainer-trace",
+                ],
             }
             tampered_preflights = {
                 field: hf_ft.hf_finetune_scale_up_preflight_report(
@@ -4558,13 +4573,17 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
 
         self.assertEqual(artifact["status"], "ok")
         self.assertTrue(bridge_args.train)
+        self.assertTrue(bridge_args.trainer_telemetry)
+        self.assertFalse(bridge_args.no_trainer_trace)
         self.assertTrue(bridge_args.eval_before_train)
         self.assertTrue(bridge_args.adapter_promotion_gate)
         self.assertEqual(bridge_args.finetune_mode, "lora")
         self.assertIn("--train", artifact["command"])
         self.assertIn("--eval-before-train", artifact["command"])
         self.assertIn("--adapter-promotion-gate", artifact["command"])
+        self.assertIn("--trainer-telemetry", artifact["command"])
         self.assertNotIn("--metadata-only", artifact["command"])
+        self.assertNotIn("--no-trainer-trace", artifact["command"])
         self.assertNotIn("--no-eval-after-train", artifact["command"])
         self.assertEqual(
             artifact["command"][
@@ -4577,6 +4596,20 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             "enforced",
         )
         self.assertTrue(artifact["adapter_promotion_command_contract"]["ready"])
+        self.assertTrue(artifact["trainer_telemetry_required"])
+        self.assertTrue(artifact["trainer_telemetry_auto_enabled"])
+        self.assertTrue(artifact["trainer_trace_auto_enabled"])
+        self.assertEqual(
+            artifact["trainer_telemetry_command_contract_status"],
+            "enforced",
+        )
+        self.assertTrue(artifact["trainer_telemetry_command_contract"]["ready"])
+        self.assertNotIn("--trainer-telemetry", unrequired_artifact["command"])
+        self.assertIn("--no-trainer-trace", unrequired_artifact["command"])
+        self.assertEqual(
+            unrequired_artifact["trainer_telemetry_command_contract_status"],
+            "not_applicable",
+        )
         self.assertFalse(artifact["applied_overrides"]["--metadata-only"])
         self.assertTrue(artifact["applied_overrides"]["--train"])
         self.assertTrue(artifact["applied_overrides"]["--eval-before-train"])
@@ -4590,9 +4623,16 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertTrue(
             root_preflight["adapter_promotion_command_contract_matches"]
         )
+        self.assertTrue(root_preflight["trainer_telemetry_required"])
+        self.assertTrue(
+            root_preflight["trainer_telemetry_command_contract_matches"]
+        )
         self.assertIn("promotion_contract=enforced", root_preflight_lines[0])
         self.assertIn("promotion_contract_ready=True", root_preflight_lines[0])
         self.assertIn("promotion_contract_matches=True", root_preflight_lines[0])
+        self.assertIn("telemetry_contract=enforced", root_preflight_lines[0])
+        self.assertIn("telemetry_contract_ready=True", root_preflight_lines[0])
+        self.assertIn("telemetry_contract_matches=True", root_preflight_lines[0])
         for field, preflight in tampered_preflights.items():
             self.assertFalse(preflight["ready"], field)
             self.assertTrue(
