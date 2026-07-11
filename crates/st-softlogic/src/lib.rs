@@ -103,14 +103,15 @@ pub fn beam_select<C: Clone>(
         cand: C,
         score: f32,
     }
-    let mut beam: Vec<Node<C>> = vec![Node {
+    let mut beam_head = Node {
         cand: seed,
         score: f32::NEG_INFINITY,
-    }];
+    };
+    let mut beam_tail = Vec::<Node<C>>::new();
 
     for _depth in 0..max_depth {
         let mut pool: Vec<Node<C>> = Vec::new();
-        for n in &beam {
+        for n in std::iter::once(&beam_head).chain(&beam_tail) {
             let nbrs = expand(&n.cand);
             for c in nbrs {
                 let s = score_fn(&c);
@@ -120,15 +121,62 @@ pub fn beam_select<C: Clone>(
         if pool.is_empty() {
             break;
         }
-        pool.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(Ordering::Equal));
-        pool.truncate(beam_k.max(1));
-        beam = pool;
+        pool.sort_by(|a, b| compare_beam_scores(b.score, a.score));
+        let mut ranked = pool.into_iter();
+        let Some(next_head) = ranked.next() else {
+            break;
+        };
+        beam_head = next_head;
+        beam_tail = ranked.take(beam_k.max(1).saturating_sub(1)).collect();
     }
-    beam.into_iter()
-        .max_by(|a, b| a.score.partial_cmp(&b.score).unwrap())
-        .unwrap()
-        .cand
+    beam_head.cand
+}
+
+fn compare_beam_scores(lhs: f32, rhs: f32) -> Ordering {
+    match (lhs.is_nan(), rhs.is_nan()) {
+        (true, false) => Ordering::Less,
+        (false, true) => Ordering::Greater,
+        _ => lhs.partial_cmp(&rhs).unwrap_or(Ordering::Equal),
+    }
 }
 
 #[cfg(feature = "learn_store")]
 pub mod learn;
+
+#[cfg(test)]
+mod tests {
+    use super::beam_select;
+
+    #[test]
+    fn beam_select_prefers_numeric_scores_over_nan() {
+        let selected = beam_select(
+            0,
+            |candidate| match candidate {
+                0 => vec![1, 2],
+                _ => Vec::new(),
+            },
+            |candidate| match candidate {
+                1 => f32::NAN,
+                2 => 1.0,
+                _ => 0.0,
+            },
+            2,
+            1,
+        );
+
+        assert_eq!(selected, 2);
+    }
+
+    #[test]
+    fn beam_select_returns_seed_when_expansion_is_empty() {
+        let selected = beam_select(
+            "seed".to_string(),
+            |_| Vec::<String>::new(),
+            |_| f32::NAN,
+            0,
+            3,
+        );
+
+        assert_eq!(selected, "seed");
+    }
+}
