@@ -994,31 +994,68 @@ impl MellinLogGrid {
         let scale = 2.0 * inv_points;
         let mut loss = 0.0;
 
-        for (z, prefactor) in plan.z_points.iter().zip(plan.prefactors.iter()) {
+        for (point_index, (z, prefactor)) in
+            plan.z_points.iter().zip(plan.prefactors.iter()).enumerate()
+        {
             let mut series = ComplexScalar::new(0.0, 0.0);
             let mut pow = ComplexScalar::new(1.0, 0.0);
             for idx in 0..len {
-                let diff = self.samples[idx] - target.samples[idx];
-                let coeff = diff * ComplexScalar::new(self.weights[idx], 0.0);
-                series += coeff * pow;
-                pow *= *z;
+                let coeff = finite_output(
+                    self.weighted[idx] - target.weighted[idx],
+                    "Mellin training coefficient",
+                    idx,
+                )?;
+                let term = finite_output(coeff * pow, "Mellin training term", idx)?;
+                series = finite_output(series + term, "Mellin training series", point_index)?;
+                if idx + 1 < len {
+                    pow = finite_output(pow * *z, "Mellin training power", point_index)?;
+                }
             }
 
-            let error = series * *prefactor;
-            loss += error.norm_sqr();
+            let error = finite_output(series * *prefactor, "Mellin training error", point_index)?;
+            let squared_error = finite_scalar_output(
+                error.norm_sqr(),
+                "Mellin training squared error",
+                point_index,
+            )?;
+            loss = finite_scalar_output(loss + squared_error, "Mellin training loss", point_index)?;
 
-            let factor = error * prefactor.conj();
+            let factor = finite_output(
+                error * prefactor.conj(),
+                "Mellin training gradient factor",
+                point_index,
+            )?;
             let conj_z = z.conj();
             let mut pow_conj = ComplexScalar::new(1.0, 0.0);
-            for (grad_slot, &w) in grad.iter_mut().zip(self.weights.iter()).take(len) {
-                *grad_slot += factor * pow_conj * ComplexScalar::new(w, 0.0);
-                pow_conj *= conj_z;
+            for (sample_index, (grad_slot, &w)) in grad
+                .iter_mut()
+                .zip(self.weights.iter())
+                .take(len)
+                .enumerate()
+            {
+                let contribution = finite_output(
+                    factor * pow_conj * ComplexScalar::new(w, 0.0),
+                    "Mellin training gradient contribution",
+                    sample_index,
+                )?;
+                *grad_slot = finite_output(
+                    *grad_slot + contribution,
+                    "Mellin training gradient",
+                    sample_index,
+                )?;
+                if sample_index + 1 < len {
+                    pow_conj = finite_output(
+                        pow_conj * conj_z,
+                        "Mellin training adjoint power",
+                        point_index,
+                    )?;
+                }
             }
         }
 
-        loss *= inv_points;
-        for g in &mut grad {
-            *g *= scale;
+        loss = finite_scalar_output(loss * inv_points, "Mellin training loss", 0)?;
+        for (index, g) in grad.iter_mut().enumerate() {
+            *g = finite_output(*g * scale, "Mellin training gradient", index)?;
         }
 
         Ok((loss, grad))
@@ -1036,11 +1073,17 @@ impl MellinLogGrid {
         }
 
         let (loss, grad) = self.l2_loss_grad_plan_match_grid(plan, target)?;
-        for (sample, grad) in self.samples.iter_mut().zip(grad.iter()) {
-            sample.re -= lr * grad.re;
-            sample.im -= lr * grad.im;
+        let mut next_samples = Vec::with_capacity(self.samples.len());
+        for (index, (sample, grad)) in self.samples.iter().zip(grad.iter()).enumerate() {
+            next_samples.push(finite_output(
+                *sample - *grad * lr,
+                "Mellin training sample",
+                index,
+            )?);
         }
-        self.weighted = prepare_weighted_series(&self.samples, &self.weights)?;
+        let next_weighted = prepare_weighted_series(&next_samples, &self.weights)?;
+        self.samples = next_samples;
+        self.weighted = next_weighted;
         Ok(loss)
     }
 
@@ -2127,6 +2170,154 @@ mod tests {
             "Hilbert inner product",
             0,
         );
+    }
+
+    #[test]
+    fn mellin_training_loss_matches_grids_with_different_windows() {
+        let samples = vec![ComplexScalar::new(1.0, 0.0); 4];
+        let grid = MellinLogGrid::new(0.0, 0.25, samples.clone()).unwrap();
+        let target =
+            MellinLogGrid::new_with_window(0.0, 0.25, samples, LogLatticeWindow::Hann, false)
+                .unwrap();
+        let plan = MellinEvalPlan::many(0.0, 0.25, &[ComplexScalar::new(0.0, 0.0)]).unwrap();
+
+        let actual_error =
+            grid.evaluate_plan(&plan).unwrap()[0] - target.evaluate_plan(&plan).unwrap()[0];
+        let (loss, grad) = grid.l2_loss_grad_plan_match_grid(&plan, &target).unwrap();
+
+        assert!((loss - actual_error.norm_sqr()).abs() < 1.0e-6);
+        assert!(grad.iter().any(|value| value.norm() > 0.0));
+    }
+
+    #[test]
+    fn mellin_training_complex_gradient_matches_finite_difference() {
+        let log_start = -0.2;
+        let log_step = 0.15;
+        let samples = vec![
+            ComplexScalar::new(0.3, -0.2),
+            ComplexScalar::new(-0.1, 0.4),
+            ComplexScalar::new(0.2, 0.1),
+        ];
+        let target = MellinLogGrid::new_with_window(
+            log_start,
+            log_step,
+            vec![
+                ComplexScalar::new(-0.2, 0.1),
+                ComplexScalar::new(0.5, -0.3),
+                ComplexScalar::new(0.1, 0.2),
+            ],
+            LogLatticeWindow::Hann,
+            false,
+        )
+        .unwrap();
+        let plan = MellinEvalPlan::many(
+            log_start,
+            log_step,
+            &[ComplexScalar::new(0.3, 0.2), ComplexScalar::new(0.7, -0.4)],
+        )
+        .unwrap();
+        let grid = MellinLogGrid::new(log_start, log_step, samples.clone()).unwrap();
+        let (_, grad) = grid.l2_loss_grad_plan_match_grid(&plan, &target).unwrap();
+        let loss_for = |candidate: Vec<ComplexScalar>| {
+            MellinLogGrid::new(log_start, log_step, candidate)
+                .unwrap()
+                .l2_loss_grad_plan_match_grid(&plan, &target)
+                .unwrap()
+                .0
+        };
+        let epsilon = 1.0e-3;
+
+        for index in 0..samples.len() {
+            let mut plus = samples.clone();
+            let mut minus = samples.clone();
+            plus[index].re += epsilon;
+            minus[index].re -= epsilon;
+            let numeric_re = (loss_for(plus) - loss_for(minus)) / (2.0 * epsilon);
+
+            let mut plus = samples.clone();
+            let mut minus = samples.clone();
+            plus[index].im += epsilon;
+            minus[index].im -= epsilon;
+            let numeric_im = (loss_for(plus) - loss_for(minus)) / (2.0 * epsilon);
+
+            assert!((grad[index].re - numeric_re).abs() < 2.0e-4);
+            assert!((grad[index].im - numeric_im).abs() < 2.0e-4);
+        }
+    }
+
+    #[test]
+    fn mellin_training_rejects_non_finite_loss() {
+        let grid =
+            MellinLogGrid::new(0.0, 1.0, vec![ComplexScalar::new(Scalar::MAX, 0.0)]).unwrap();
+        let target = MellinLogGrid::new(0.0, 1.0, vec![ComplexScalar::new(0.0, 0.0)]).unwrap();
+        let plan = MellinEvalPlan::many(0.0, 1.0, &[ComplexScalar::new(0.0, 0.0)]).unwrap();
+
+        assert_non_finite_scalar_output(
+            grid.l2_loss_grad_plan_match_grid(&plan, &target),
+            "Mellin training squared error",
+            0,
+        );
+    }
+
+    #[test]
+    fn mellin_training_step_is_transactional_on_overflow() {
+        let mut grid = MellinLogGrid::new(0.0, 1.0, vec![ComplexScalar::new(1.0, 0.0)]).unwrap();
+        let target = MellinLogGrid::new(0.0, 1.0, vec![ComplexScalar::new(0.0, 0.0)]).unwrap();
+        let plan = MellinEvalPlan::many(0.0, 1.0, &[ComplexScalar::new(0.0, 0.0)]).unwrap();
+        let samples_before = grid.samples.clone();
+        let weighted_before = grid.weighted.clone();
+
+        assert_non_finite_output(
+            grid.train_step_l2_plan_match_grid(&plan, &target, Scalar::MAX),
+            "Mellin training sample",
+            0,
+        );
+        assert_eq!(grid.samples, samples_before);
+        assert_eq!(grid.weighted, weighted_before);
+    }
+
+    #[test]
+    fn mellin_training_step_is_transactional_on_weighted_overflow() {
+        let samples = vec![ComplexScalar::new(0.0, 0.0); 4];
+        let mut grid =
+            MellinLogGrid::new_with_window(0.0, 1.0, samples, LogLatticeWindow::Hann, true)
+                .unwrap();
+        let target = MellinLogGrid::new_with_window(
+            0.0,
+            1.0,
+            vec![ComplexScalar::new(1.0, 0.0); 4],
+            LogLatticeWindow::Hann,
+            true,
+        )
+        .unwrap();
+        let plan = MellinEvalPlan::many(0.0, 1.0, &[ComplexScalar::new(0.0, 0.0)]).unwrap();
+        let samples_before = grid.samples.clone();
+        let weighted_before = grid.weighted.clone();
+
+        assert!(matches!(
+            grid.train_step_l2_plan_match_grid(&plan, &target, Scalar::MAX / 10.0),
+            Err(MellinError::ZSpace(ZSpaceError::NonFiniteWeightedCoeff {
+                index: 1,
+                ..
+            }))
+        ));
+        assert_eq!(grid.samples, samples_before);
+        assert_eq!(grid.weighted, weighted_before);
+    }
+
+    #[test]
+    fn mellin_training_step_commits_samples_and_weights_together() {
+        let mut grid = MellinLogGrid::new(0.0, 1.0, vec![ComplexScalar::new(1.0, 0.0)]).unwrap();
+        let target = MellinLogGrid::new(0.0, 1.0, vec![ComplexScalar::new(0.0, 0.0)]).unwrap();
+        let plan = MellinEvalPlan::many(0.0, 1.0, &[ComplexScalar::new(0.0, 0.0)]).unwrap();
+
+        let loss = grid
+            .train_step_l2_plan_match_grid(&plan, &target, 0.25)
+            .unwrap();
+
+        assert!((loss - 1.0).abs() < 1.0e-6);
+        assert!((grid.samples[0].re - 0.5).abs() < 1.0e-6);
+        assert_eq!(grid.samples, grid.weighted);
     }
 
     #[test]
