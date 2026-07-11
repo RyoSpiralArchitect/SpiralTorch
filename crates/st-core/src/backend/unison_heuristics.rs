@@ -473,10 +473,6 @@ impl<'a> RankScenario<'a> {
         self
     }
 
-    fn with_current_realgrad(self) -> Self {
-        self.with_realgrad_summary(hub::get_last_realgrad().map(|pulse| pulse.gradient_summary()))
-    }
-
     #[inline]
     fn caps(&self) -> &'a DeviceCaps {
         self.caps
@@ -1912,7 +1908,20 @@ pub fn choose_unified_rank(
     caps: DeviceCaps,
     kind: RankKind,
 ) -> Choice {
-    let scenario = RankScenario::new(rows, cols, k, &caps, kind).with_current_realgrad();
+    let realgrad_summary = hub::get_last_realgrad().map(|pulse| pulse.gradient_summary());
+    choose_unified_rank_with_realgrad(rows, cols, k, caps, kind, realgrad_summary)
+}
+
+fn choose_unified_rank_with_realgrad(
+    rows: u32,
+    cols: u32,
+    k: u32,
+    caps: DeviceCaps,
+    kind: RankKind,
+    realgrad_summary: Option<GradientSummary>,
+) -> Choice {
+    let scenario =
+        RankScenario::new(rows, cols, k, &caps, kind).with_realgrad_summary(realgrad_summary);
     let baseline = fallback_with_scenario(scenario);
     let mut best = baseline;
     let mut best_score = score_choice(&baseline, &baseline, scenario);
@@ -1994,46 +2003,36 @@ pub fn choose_unified_rank(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::telemetry::hub;
     use std::sync::{Arc, Mutex};
 
     #[test]
     fn tuned_latency_window_responds_to_gradient_feedback() {
-        hub::clear_last_realgrad_for_test();
-        let pulse = hub::RealGradPulse {
-            gradient_norm: 64.0,
-            gradient_sparsity: 0.1,
-            ..Default::default()
-        };
-        hub::set_last_realgrad(&pulse);
         let caps = DeviceCaps::wgpu(32, true, 256);
-        let scenario =
-            RankScenario::new(64, 4_096, 48, &caps, RankKind::MidK).with_current_realgrad();
+        let scenario = RankScenario::new(64, 4_096, 48, &caps, RankKind::MidK)
+            .with_realgrad_summary(Some(GradientSummary {
+                norm: 64.0,
+                sparsity: 0.1,
+            }));
         let (min_ctile, max_ctile) = scenario.latency_bounds().expect("latency bounds available");
         let window = scenario.latency_window(min_ctile, max_ctile);
         let baseline_slack = scenario.latency_slack().expect("latency slack available");
         assert!(window.slack >= baseline_slack);
-        hub::clear_last_realgrad_for_test();
     }
 
     #[test]
-    fn rank_scenario_freezes_realgrad_feedback() {
-        hub::clear_last_realgrad_for_test();
-        let pulse = hub::RealGradPulse {
-            gradient_norm: 48.0,
-            gradient_sparsity: 0.2,
-            ..Default::default()
+    fn rank_scenario_keeps_realgrad_snapshot() {
+        let summary = GradientSummary {
+            norm: 48.0,
+            sparsity: 0.2,
         };
-        hub::set_last_realgrad(&pulse);
-
         let caps = DeviceCaps::wgpu(32, true, 256);
-        let scenario =
-            RankScenario::new(64, 4_096, 48, &caps, RankKind::MidK).with_current_realgrad();
+        let scenario = RankScenario::new(64, 4_096, 48, &caps, RankKind::MidK)
+            .with_realgrad_summary(Some(summary));
         let (min_ctile, max_ctile) = scenario.latency_bounds().expect("latency bounds available");
         let before = scenario.latency_window_snapshot(min_ctile, max_ctile);
-        hub::clear_last_realgrad_for_test();
         let after = scenario.latency_window_snapshot(min_ctile, max_ctile);
 
+        assert_eq!(scenario.realgrad_summary, Some(summary));
         assert_eq!(before, after);
     }
 
@@ -2167,7 +2166,6 @@ mod tests {
     #[test]
     fn unified_rank_choice_emits_backend_meta() {
         let _lock = crate::telemetry::tensor_observer_lock();
-        hub::clear_last_realgrad_for_test();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
         let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
@@ -2178,9 +2176,8 @@ mod tests {
         })));
 
         let caps = DeviceCaps::wgpu(32, true, 256);
-        let out = choose_unified_rank(64, 4_096, 48, caps, RankKind::MidK);
+        let out = choose_unified_rank_with_realgrad(64, 4_096, 48, caps, RankKind::MidK, None);
         st_tensor::set_tensor_op_meta_observer(previous);
-        hub::clear_last_realgrad_for_test();
 
         assert!(out.ctile > 0);
         let events = events.lock().unwrap();
@@ -2215,7 +2212,6 @@ mod tests {
     #[test]
     fn small_char_lm_rank_shape_has_generated_wgpu_candidate() {
         let _lock = crate::telemetry::tensor_observer_lock();
-        hub::clear_last_realgrad_for_test();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
         let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
@@ -2226,9 +2222,8 @@ mod tests {
         })));
 
         let caps = DeviceCaps::wgpu(32, true, 256);
-        let out = choose_unified_rank(2, 69, 1, caps, RankKind::MidK);
+        let out = choose_unified_rank_with_realgrad(2, 69, 1, caps, RankKind::MidK, None);
         st_tensor::set_tensor_op_meta_observer(previous);
-        hub::clear_last_realgrad_for_test();
 
         assert_eq!(out.wg, 64);
         let events = events.lock().unwrap();
