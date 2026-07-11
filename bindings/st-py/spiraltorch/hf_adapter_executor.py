@@ -110,6 +110,103 @@ def _canonical_sha256(payload: object) -> str:
     return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
 
 
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while chunk := handle.read(1024 * 1024):
+            digest.update(chunk)
+    return f"sha256:{digest.hexdigest()}"
+
+
+def _trainer_trace_snapshot(
+    path: Path,
+) -> tuple[str, int, dict[str, object]]:
+    digest = hashlib.sha256()
+    total_bytes = 0
+    event_count = 0
+    telemetry_count = 0
+    desire_stability_total = 0.0
+    desire_stability_count = 0
+    max_psi_total: float | None = None
+    with path.open("rb") as handle:
+        for line_number, raw_line in enumerate(handle, 1):
+            digest.update(raw_line)
+            total_bytes += len(raw_line)
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise ValueError(
+                    f"{path}:{line_number} invalid JSONL: {exc}"
+                ) from exc
+            if not isinstance(row, Mapping):
+                continue
+            event_count += 1
+            telemetry = row.get("training_telemetry")
+            if isinstance(telemetry, Mapping) and telemetry.get("status") == "ok":
+                telemetry_count += 1
+            desire = row.get("desire")
+            if not isinstance(desire, Mapping) and isinstance(telemetry, Mapping):
+                desire = telemetry.get("desire")
+            if isinstance(desire, Mapping):
+                stability = _finite_float(desire.get("stability"))
+                if stability is not None:
+                    desire_stability_total += stability
+                    desire_stability_count += 1
+            psi = row.get("psi")
+            if not isinstance(psi, Mapping) and isinstance(telemetry, Mapping):
+                psi = telemetry.get("psi")
+            if isinstance(psi, Mapping):
+                psi_total = _finite_float(psi.get("total"))
+                if psi_total is not None and (
+                    max_psi_total is None or psi_total > max_psi_total
+                ):
+                    max_psi_total = psi_total
+    return (
+        f"sha256:{digest.hexdigest()}",
+        total_bytes,
+        {
+            "trace_event_count": event_count,
+            "trace_training_telemetry_count": telemetry_count,
+            "trace_mean_desire_stability": (
+                desire_stability_total / desire_stability_count
+                if desire_stability_count
+                else None
+            ),
+            "trace_max_psi_total": max_psi_total,
+        },
+    )
+
+
+def _finite_float(value: object) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        parsed = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return parsed if math.isfinite(parsed) else None
+
+
+def _numbers_match(left: object, right: object) -> bool:
+    left_number = _finite_float(left)
+    right_number = _finite_float(right)
+    return bool(
+        left_number is not None
+        and right_number is not None
+        and math.isclose(left_number, right_number, rel_tol=1e-12, abs_tol=1e-12)
+    )
+
+
+def _integer_value(value: object) -> int | None:
+    parsed = _finite_float(value)
+    if parsed is None or not parsed.is_integer():
+        return None
+    return int(parsed)
+
+
 def _valid_generation_plan_id(value: object) -> bool:
     if not isinstance(value, str):
         return False
@@ -388,6 +485,73 @@ def _validate_generation_plan_rows(
             )
 
 
+def _validate_trainer_telemetry_evidence_rows(
+    state: Mapping[str, object],
+    *,
+    path: Path,
+) -> None:
+    for index, row in enumerate(state.get("generations") or []):
+        if not isinstance(row, Mapping):
+            continue
+        postflight = row.get("postflight")
+        if not isinstance(postflight, Mapping):
+            continue
+        evidence = postflight.get("trainer_telemetry_evidence")
+        if (
+            not isinstance(evidence, Mapping)
+            or evidence.get("required") is not True
+            or evidence.get("ready") is not True
+        ):
+            continue
+        location = f"generations[{index}].postflight.trainer_telemetry_evidence"
+        trace_value = evidence.get("trace_path")
+        expected_sha256 = evidence.get("trace_sha256")
+        if not isinstance(trace_value, str) or not trace_value:
+            raise ValueError(
+                f"executor trainer telemetry evidence path is invalid at {location}: "
+                f"{path}"
+            )
+        if not isinstance(expected_sha256, str) or not expected_sha256.startswith(
+            "sha256:"
+        ):
+            raise ValueError(
+                "executor trainer telemetry evidence digest is invalid at "
+                f"{location}: {path}"
+            )
+        trace_path = Path(trace_value).expanduser()
+        if not trace_path.is_absolute():
+            trace_path = path.parent / trace_path
+        if not trace_path.is_file():
+            raise ValueError(
+                "executor trainer telemetry evidence trace is missing at "
+                f"{location}: {trace_path}"
+            )
+        if _file_sha256(trace_path) != expected_sha256:
+            raise ValueError(
+                "executor trainer telemetry evidence digest mismatch at "
+                f"{location}: {trace_path}"
+            )
+        expected_evidence_id = _canonical_sha256(
+            {
+                "trace_sha256": expected_sha256,
+                "trace_event_count": evidence.get("trace_event_count"),
+                "trace_training_telemetry_count": evidence.get(
+                    "trace_training_telemetry_count"
+                ),
+                "trace_mean_desire_stability": evidence.get(
+                    "trace_mean_desire_stability"
+                ),
+                "trace_max_psi_total": evidence.get("trace_max_psi_total"),
+                "required_axes": evidence.get("required_axes"),
+            }
+        )
+        if evidence.get("evidence_id") != expected_evidence_id:
+            raise ValueError(
+                "executor trainer telemetry evidence identity mismatch at "
+                f"{location}: {path}"
+            )
+
+
 def _source_paths(
     sources: str | Path | Sequence[str | Path],
 ) -> list[Path]:
@@ -530,6 +694,7 @@ def load_hf_adapter_continuation_executor(
             f"{payload.get('row_type')}"
         )
     _validate_generation_plan_rows(payload, path=path)
+    _validate_trainer_telemetry_evidence_rows(payload, path=path)
     report = dict(payload)
     report["state_path"] = str(path.resolve())
     return report
@@ -1021,6 +1186,237 @@ def _node_for_path(
     return None
 
 
+def _trainer_telemetry_evidence_contract(
+    *,
+    node: Mapping[str, object] | None,
+    policy: Mapping[str, object] | None,
+    command_contract: Mapping[str, object] | None,
+    command_cwd: str | Path | None,
+) -> dict[str, object]:
+    resolved_policy = dict(policy) if isinstance(policy, Mapping) else {}
+    resolved_command_contract = (
+        dict(command_contract) if isinstance(command_contract, Mapping) else {}
+    )
+    desire_required = resolved_policy.get("min_desire_stability") is not None
+    psi_required = resolved_policy.get("max_psi_total") is not None
+    command_required = resolved_command_contract.get("required") is True
+    required = bool(desire_required or psi_required or command_required)
+    required_axes = [
+        name
+        for name, active in (
+            ("desire_stability", desire_required),
+            ("psi_total", psi_required),
+        )
+        if active
+    ]
+    if not required:
+        return {
+            "row_type": "hf_adapter_continuation_trainer_telemetry_evidence",
+            "status": "not_applicable",
+            "required": False,
+            "ready": True,
+            "required_axes": [],
+            "command_contract_status": resolved_command_contract.get("status"),
+            "trace_path": resolved_command_contract.get("trainer_trace_jsonl"),
+            "trace_exists": None,
+            "trace_sha256": None,
+            "trace_bytes": None,
+            "trace_event_count": None,
+            "trace_training_telemetry_count": None,
+            "trace_mean_desire_stability": None,
+            "trace_max_psi_total": None,
+            "node_matches_trace": None,
+            "evidence_id": None,
+            "issues": [],
+        }
+
+    issues: list[dict[str, object]] = []
+    if not command_required:
+        issues.append(
+            {
+                "field": "trainer_telemetry_command_contract",
+                "message": "geometry policy requires a telemetry command contract",
+            }
+        )
+    if (
+        resolved_command_contract.get("status") != "enforced"
+        or resolved_command_contract.get("ready") is not True
+    ):
+        issues.append(
+            {
+                "field": "trainer_telemetry_command_contract",
+                "message": "trainer telemetry command contract is not enforced",
+            }
+        )
+
+    trace_value = resolved_command_contract.get("trainer_trace_jsonl")
+    trace_path: Path | None = None
+    if not isinstance(trace_value, (str, Path)) or not str(trace_value):
+        issues.append(
+            {
+                "field": "trainer_trace_jsonl",
+                "message": "trainer telemetry trace path is missing",
+            }
+        )
+    else:
+        trace_path = Path(str(trace_value)).expanduser()
+        if not trace_path.is_absolute():
+            base = (
+                Path(command_cwd).expanduser()
+                if command_cwd is not None
+                else Path.cwd()
+            )
+            trace_path = base / trace_path
+        trace_path = trace_path.resolve()
+
+    trace_exists = trace_path is not None and trace_path.is_file()
+    trace_sha256: str | None = None
+    trace_bytes: int | None = None
+    trace_summary: dict[str, object] = {}
+    if not trace_exists:
+        issues.append(
+            {
+                "field": "trainer_trace_jsonl",
+                "observed": None if trace_path is None else str(trace_path),
+                "message": "trainer telemetry trace file is missing",
+            }
+        )
+    elif trace_path is not None:
+        try:
+            trace_sha256, trace_bytes, trace_summary = _trainer_trace_snapshot(
+                trace_path
+            )
+        except (OSError, TypeError, ValueError) as exc:
+            issues.append(
+                {
+                    "field": "trainer_trace_jsonl",
+                    "observed": str(trace_path),
+                    "message": f"trainer telemetry trace is unreadable: {exc}",
+                }
+            )
+
+    trace_event_count = _integer_value(trace_summary.get("trace_event_count"))
+    telemetry_count = _integer_value(
+        trace_summary.get("trace_training_telemetry_count")
+    )
+    desire_stability = _finite_float(
+        trace_summary.get("trace_mean_desire_stability")
+    )
+    psi_total = _finite_float(trace_summary.get("trace_max_psi_total"))
+    if telemetry_count is None or telemetry_count < 1:
+        issues.append(
+            {
+                "field": "trace_training_telemetry_count",
+                "observed": telemetry_count,
+                "threshold": 1,
+                "message": "trainer telemetry trace contains no valid telemetry events",
+            }
+        )
+    if desire_required and (
+        desire_stability is None or not 0.0 <= desire_stability <= 1.0
+    ):
+        issues.append(
+            {
+                "field": "trace_mean_desire_stability",
+                "observed": desire_stability,
+                "threshold": "[0,1]",
+                "message": "desire stability evidence is missing or out of range",
+            }
+        )
+    if psi_required and (psi_total is None or not 0.0 <= psi_total <= 1.0):
+        issues.append(
+            {
+                "field": "trace_max_psi_total",
+                "observed": psi_total,
+                "threshold": "[0,1]",
+                "message": "psi total evidence is missing or out of range",
+            }
+        )
+
+    node_telemetry_count = (
+        None
+        if node is None
+        else _integer_value(node.get("trace_training_telemetry_count"))
+    )
+    count_matches = bool(
+        telemetry_count is not None
+        and node_telemetry_count is not None
+        and telemetry_count == node_telemetry_count
+    )
+    desire_matches = bool(
+        not desire_required
+        or (
+            node is not None
+            and _numbers_match(
+                desire_stability,
+                node.get("trace_mean_desire_stability"),
+            )
+        )
+    )
+    psi_matches = bool(
+        not psi_required
+        or (
+            node is not None
+            and _numbers_match(psi_total, node.get("trace_max_psi_total"))
+        )
+    )
+    node_matches_trace = bool(count_matches and desire_matches and psi_matches)
+    if not node_matches_trace:
+        issues.append(
+            {
+                "field": "trainer_telemetry_chain_node",
+                "observed": {
+                    "trace_training_telemetry_count": node_telemetry_count,
+                    "trace_mean_desire_stability": None
+                    if node is None
+                    else node.get("trace_mean_desire_stability"),
+                    "trace_max_psi_total": None
+                    if node is None
+                    else node.get("trace_max_psi_total"),
+                },
+                "message": "chain node telemetry does not match the trace receipt",
+            }
+        )
+
+    evidence_payload = {
+        "trace_sha256": trace_sha256,
+        "trace_event_count": trace_event_count,
+        "trace_training_telemetry_count": telemetry_count,
+        "trace_mean_desire_stability": desire_stability,
+        "trace_max_psi_total": psi_total,
+        "required_axes": required_axes,
+    }
+    ready = not issues
+    return {
+        "row_type": "hf_adapter_continuation_trainer_telemetry_evidence",
+        "status": "ready" if ready else "blocked",
+        "required": True,
+        "ready": ready,
+        "required_axes": required_axes,
+        "command_contract_status": resolved_command_contract.get("status"),
+        "trace_path": None if trace_path is None else str(trace_path),
+        "trace_exists": trace_exists,
+        "trace_sha256": trace_sha256,
+        "trace_bytes": trace_bytes,
+        "trace_event_count": trace_event_count,
+        "trace_training_telemetry_count": telemetry_count,
+        "trace_mean_desire_stability": desire_stability,
+        "trace_max_psi_total": psi_total,
+        "node_trace_training_telemetry_count": node_telemetry_count,
+        "node_trace_mean_desire_stability": None
+        if node is None
+        else node.get("trace_mean_desire_stability"),
+        "node_trace_max_psi_total": None
+        if node is None
+        else node.get("trace_max_psi_total"),
+        "node_matches_trace": node_matches_trace,
+        "evidence_id": _canonical_sha256(evidence_payload)
+        if trace_sha256 is not None
+        else None,
+        "issues": issues,
+    }
+
+
 def _selected_transition(
     chain: Mapping[str, object],
     *,
@@ -1067,6 +1463,9 @@ def _postflight_report(
     output_dir: Path,
     expected_parent_adapter_id: object,
     expected_lineage_depth: int,
+    policy: Mapping[str, object] | None = None,
+    trainer_telemetry_command_contract: Mapping[str, object] | None = None,
+    command_cwd: str | Path | None = None,
 ) -> dict[str, object]:
     node = _node_for_path(chain, output_dir)
     transition = (
@@ -1076,6 +1475,12 @@ def _postflight_report(
             chain,
             child_adapter_id=node.get("adapter_id"),
         )
+    )
+    trainer_telemetry_evidence = _trainer_telemetry_evidence_contract(
+        node=node,
+        policy=policy,
+        command_contract=trainer_telemetry_command_contract,
+        command_cwd=command_cwd,
     )
     checks = [
         {
@@ -1225,6 +1630,21 @@ def _postflight_report(
             },
             "threshold": {"ready": True},
         },
+        {
+            "name": "trainer_telemetry_evidence",
+            "passed": trainer_telemetry_evidence.get("ready") is True,
+            "observed": {
+                "status": trainer_telemetry_evidence.get("status"),
+                "evidence_id": trainer_telemetry_evidence.get("evidence_id"),
+                "trace_training_telemetry_count": trainer_telemetry_evidence.get(
+                    "trace_training_telemetry_count"
+                ),
+            },
+            "threshold": {
+                "required": trainer_telemetry_evidence.get("required"),
+                "ready": True,
+            },
+        },
     ]
     failed = [row["name"] for row in checks if row["passed"] is not True]
     return {
@@ -1275,6 +1695,11 @@ def _postflight_report(
         "finetune_replay_observed_id": None
         if transition is None
         else transition.get("finetune_replay_observed_id"),
+        "trainer_telemetry_evidence_status": trainer_telemetry_evidence.get(
+            "status"
+        ),
+        "trainer_telemetry_evidence_ready": trainer_telemetry_evidence.get("ready"),
+        "trainer_telemetry_evidence": trainer_telemetry_evidence,
         "failed_checks": failed,
         "checks": checks,
     }
@@ -1567,6 +1992,24 @@ def _recover_running_attempts(
             output_dir=output_dir,
             expected_parent_adapter_id=raw_attempt.get("parent_adapter_id"),
             expected_lineage_depth=int(raw_attempt.get("lineage_depth") or -1),
+            policy=(
+                state.get("policy")
+                if isinstance(state.get("policy"), Mapping)
+                else None
+            ),
+            trainer_telemetry_command_contract=(
+                raw_attempt.get("trainer_telemetry_command_contract")
+                if isinstance(
+                    raw_attempt.get("trainer_telemetry_command_contract"),
+                    Mapping,
+                )
+                else None
+            ),
+            command_cwd=(
+                str(raw_attempt.get("command_cwd"))
+                if raw_attempt.get("command_cwd") is not None
+                else None
+            ),
         )
         if postflight.get("ready") is True:
             raw_attempt["status"] = "promoted_recovered"
@@ -2863,17 +3306,37 @@ def _run_hf_adapter_continuation_executor_unlocked(
             output_dir=output_dir,
             expected_parent_adapter_id=chain.get("selected_adapter_id"),
             expected_lineage_depth=next_depth,
+            policy=policy,
+            trainer_telemetry_command_contract=(
+                attempt.get("trainer_telemetry_command_contract")
+                if isinstance(
+                    attempt.get("trainer_telemetry_command_contract"),
+                    Mapping,
+                )
+                else None
+            ),
+            command_cwd=resolved_command_cwd,
         )
         attempt["postflight"] = postflight
         state["chain_report"] = post_chain
         if postflight.get("ready") is not True:
             attempt["status"] = "postflight_failed"
+            telemetry_evidence = postflight.get("trainer_telemetry_evidence")
+            telemetry_evidence_failed = bool(
+                isinstance(telemetry_evidence, Mapping)
+                and telemetry_evidence.get("required") is True
+                and telemetry_evidence.get("ready") is not True
+            )
             return _finish(
                 state,
                 resolved_state_path,
                 status="failed",
                 action="inspect_generation_postflight",
-                reason="generated_adapter_not_promotion_ready",
+                reason=(
+                    "generated_adapter_telemetry_evidence_not_ready"
+                    if telemetry_evidence_failed
+                    else "generated_adapter_not_promotion_ready"
+                ),
             )
         attempt["status"] = "promoted"
         attempt["adapter_id"] = postflight.get("adapter_id")
@@ -3195,6 +3658,21 @@ def hf_adapter_continuation_executor_lines(
             if isinstance(postflight, Mapping)
             else None
         )
+        telemetry_evidence = (
+            postflight.get("trainer_telemetry_evidence")
+            if isinstance(postflight, Mapping)
+            else None
+        )
+        telemetry_evidence_status = (
+            telemetry_evidence.get("status")
+            if isinstance(telemetry_evidence, Mapping)
+            else None
+        )
+        telemetry_evidence_count = (
+            telemetry_evidence.get("trace_training_telemetry_count")
+            if isinstance(telemetry_evidence, Mapping)
+            else None
+        )
         command_runtime = raw_attempt.get("command_runtime")
         runtime_status = (
             command_runtime.get("status")
@@ -3284,6 +3762,8 @@ def hf_adapter_continuation_executor_lines(
             f"adapter={raw_attempt.get('adapter_id')} "
             f"runtime={runtime_status} "
             f"trainer_telemetry={trainer_telemetry_contract_status} "
+            f"telemetry_evidence={telemetry_evidence_status} "
+            f"telemetry_events={telemetry_evidence_count} "
             f"input_identity={input_identity_status} "
             f"training_input_identity={training_input_identity_status} "
             f"dataset_input_contract={dataset_input_contract_status} "

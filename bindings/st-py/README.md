@@ -748,7 +748,14 @@ are active, the continuation executor automatically adds that switch and
 removes a conflicting `--no-trainer-trace` from the next scale-up command. The
 resulting telemetry command contract is sealed into the generation plan and
 recomputed by preflight; a distortion-only gate leaves trainer telemetry
-unchanged. Once a geometry gate is configured, missing or out-of-range evidence
+unchanged. After a gated generation exits, executor postflight reads the exact
+trainer trace, requires at least one telemetry event and every configured
+desire/psi aggregate, cross-checks them against the audited chain node, and
+records content-addressed trace and evidence IDs. Missing trace evidence fails
+postflight, while present evidence outside a policy threshold remains a valid
+receipt and produces a normal continuation stop. Successful receipts are
+digest-checked whenever executor state is loaded, so later trace mutation fails
+closed. Once a geometry gate is configured, missing or out-of-range evidence
 blocks continuation rather than silently passing. A depth-zero seed is allowed
 to launch its first measured generation without telemetry; that child must then
 provide every configured signal before another generation can run. A stopped

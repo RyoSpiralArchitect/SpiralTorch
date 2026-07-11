@@ -128,6 +128,7 @@ def _write_promoted_adapter(
     finetune_replay_id: str | None = None,
     expected_finetune_replay_id: str | None = None,
     trainer_trace_summary: Mapping[str, object] | None = None,
+    trainer_trace_rows: Sequence[Mapping[str, object]] | None = None,
     dataset_name: str = "org/corpus",
     dataset_revision: str = "e93a9faa9c77e5d09219f6c868bfc7a1bd65593c",
 ) -> dict[str, object]:
@@ -140,6 +141,27 @@ def _write_promoted_adapter(
         after=after,
         launch_command=command,
     )
+    if "--trainer-trace-jsonl" in command:
+        trace_path = Path(_flag(command, "--trainer-trace-jsonl"))
+        card["trainer_trace_jsonl"] = str(trace_path)
+        card["trainer_telemetry_requested"] = "--trainer-telemetry" in command
+        card["trainer_telemetry_enabled"] = bool(
+            "--trainer-telemetry" in command
+            and "--no-trainer-trace" not in command
+        )
+        if trainer_trace_rows is not None:
+            trace_path.parent.mkdir(parents=True, exist_ok=True)
+            trace_path.write_text(
+                "".join(
+                    json.dumps(dict(row), sort_keys=True) + "\n"
+                    for row in trainer_trace_rows
+                ),
+                encoding="utf-8",
+            )
+            if trainer_trace_summary is None:
+                trainer_trace_summary = st.summarize_hf_finetune_trainer_trace(
+                    trainer_trace_rows
+                )
     if trainer_trace_summary is not None:
         card["trainer_trace_summary"] = dict(trainer_trace_summary)
     if runtime_input_id is not None:
@@ -430,10 +452,12 @@ class FakeFineTuneRunner:
         *,
         fail_returncode: int | None = None,
         weight_prefix: str = "generated",
+        trainer_telemetry: Sequence[tuple[float, float] | None] | None = None,
     ) -> None:
         self.improvements = list(improvements)
         self.fail_returncode = fail_returncode
         self.weight_prefix = weight_prefix
+        self.trainer_telemetry = list(trainer_telemetry or [])
         self.commands: list[list[str]] = []
 
     def __call__(self, command: Sequence[str]) -> int:
@@ -443,8 +467,29 @@ class FakeFineTuneRunner:
             return self.fail_returncode
         output = Path(_flag(values, "--output-dir"))
         parent = Path(_flag(values, "--model-name"))
-        improvement = self.improvements[len(self.commands) - 1]
-        before = 0.9 - (len(self.commands) - 1) * 0.1
+        generation_index = len(self.commands) - 1
+        improvement = self.improvements[generation_index]
+        before = 0.9 - generation_index * 0.1
+        telemetry = (
+            self.trainer_telemetry[generation_index]
+            if generation_index < len(self.trainer_telemetry)
+            else None
+        )
+        trainer_trace_rows = (
+            None
+            if telemetry is None
+            else [
+                {
+                    "event": "log",
+                    "global_step": 1,
+                    "training_telemetry": {
+                        "status": "ok",
+                        "desire": {"stability": telemetry[0]},
+                        "psi": {"total": telemetry[1]},
+                    },
+                }
+            ]
+        )
         _write_promoted_adapter(
             output,
             parent,
@@ -452,6 +497,7 @@ class FakeFineTuneRunner:
             before=before,
             after=before - improvement,
             launch_command=values,
+            trainer_trace_rows=trainer_trace_rows,
         )
         return 0
 
@@ -690,6 +736,127 @@ def test_executor_seals_geometry_policy_and_forwards_detached_cli(
     assert distortion_pending["trainer_telemetry_command_contract"]["status"] == (
         "not_applicable"
     )
+
+
+def test_executor_requires_durable_trainer_telemetry_evidence_after_generation(
+    tmp_path: Path,
+) -> None:
+    parent_telemetry = {
+        "trace_training_telemetry_count": 1,
+        "trace_mean_desire_stability": 0.75,
+        "trace_max_psi_total": 0.50,
+    }
+    missing_source = tmp_path / "missing-source"
+    missing_source.mkdir()
+    _, missing_child = _seed_chain(
+        missing_source,
+        trainer_trace_summary=parent_telemetry,
+    )
+    missing_root = tmp_path / "missing-runs"
+    missing = st.run_hf_adapter_continuation_executor(
+        missing_child,
+        output_root=missing_root,
+        state_path=missing_root / "state.json",
+        run=True,
+        min_desire_stability=0.70,
+        max_psi_total=0.60,
+        command_runner=FakeFineTuneRunner([0.05]),
+    )
+
+    missing_attempt = missing["generations"][-1]
+    missing_evidence = missing_attempt["postflight"][
+        "trainer_telemetry_evidence"
+    ]
+    assert missing["status"] == "failed"
+    assert missing["reason"] == "generated_adapter_telemetry_evidence_not_ready"
+    assert missing_attempt["status"] == "postflight_failed"
+    assert missing_evidence["status"] == "blocked"
+    assert missing_evidence["required"] is True
+    assert missing_evidence["ready"] is False
+    assert missing_evidence["trace_exists"] is False
+    assert {
+        issue["field"] for issue in missing_evidence["issues"]
+    } >= {
+        "trainer_trace_jsonl",
+        "trace_training_telemetry_count",
+        "trainer_telemetry_chain_node",
+    }
+    assert any(
+        "telemetry_evidence=blocked" in line
+        for line in st.hf_adapter_continuation_executor_lines(missing)
+    )
+
+    ready_source = tmp_path / "ready-source"
+    ready_source.mkdir()
+    _, ready_child = _seed_chain(
+        ready_source,
+        trainer_trace_summary=parent_telemetry,
+    )
+    ready_root = tmp_path / "ready-runs"
+    ready_state = ready_root / "state.json"
+    ready = st.run_hf_adapter_continuation_executor(
+        ready_child,
+        output_root=ready_root,
+        state_path=ready_state,
+        run=True,
+        min_desire_stability=0.70,
+        max_psi_total=0.60,
+        command_runner=FakeFineTuneRunner(
+            [0.05],
+            trainer_telemetry=[(0.65, 0.70)],
+        ),
+    )
+
+    ready_attempt = ready["generations"][-1]
+    ready_evidence = ready_attempt["postflight"]["trainer_telemetry_evidence"]
+    assert ready["status"] == "stopped"
+    assert ready["reason"] == "continuation_policy_stop"
+    assert ready["continuation_policy"]["stop_reason_codes"] == [
+        "desire_stability_below_minimum",
+        "psi_total_limit_exceeded",
+    ]
+    assert ready_attempt["status"] == "promoted"
+    assert ready_evidence["status"] == "ready"
+    assert ready_evidence["ready"] is True
+    assert ready_evidence["required_axes"] == ["desire_stability", "psi_total"]
+    assert ready_evidence["trace_exists"] is True
+    assert ready_evidence["trace_training_telemetry_count"] == 1
+    assert ready_evidence["trace_mean_desire_stability"] == pytest.approx(0.65)
+    assert ready_evidence["trace_max_psi_total"] == pytest.approx(0.70)
+    assert ready_evidence["node_matches_trace"] is True
+    assert str(ready_evidence["trace_sha256"]).startswith("sha256:")
+    assert str(ready_evidence["evidence_id"]).startswith("sha256:")
+    assert st.load_hf_adapter_continuation_executor(ready_state)["status"] == (
+        "stopped"
+    )
+    assert any(
+        "telemetry_evidence=ready" in line and "telemetry_events=1" in line
+        for line in st.hf_adapter_continuation_executor_lines(ready)
+    )
+
+    trace_path = Path(str(ready_evidence["trace_path"]))
+    original_trace = trace_path.read_text(encoding="utf-8")
+    trace_path.write_text(
+        original_trace + "{}\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(
+        ValueError,
+        match="trainer telemetry evidence digest mismatch",
+    ):
+        st.load_hf_adapter_continuation_executor(ready_state)
+    trace_path.write_text(original_trace, encoding="utf-8")
+
+    tampered_state = json.loads(ready_state.read_text(encoding="utf-8"))
+    tampered_state["generations"][-1]["postflight"][
+        "trainer_telemetry_evidence"
+    ]["trace_max_psi_total"] = 0.55
+    ready_state.write_text(json.dumps(tampered_state), encoding="utf-8")
+    with pytest.raises(
+        ValueError,
+        match="trainer telemetry evidence identity mismatch",
+    ):
+        st.load_hf_adapter_continuation_executor(ready_state)
 
 
 def test_executor_blocks_plan_drift_until_explicit_replan(tmp_path: Path) -> None:
