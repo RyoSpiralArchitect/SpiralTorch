@@ -641,11 +641,10 @@ impl ZRBFAttention {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, Mutex, OnceLock};
+    use std::sync::{Arc, Mutex};
 
     fn observer_lock() -> std::sync::MutexGuard<'static, ()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+        crate::test_global_state_lock()
     }
 
     fn reference_attention_mean<G: ZFrameGeometry>(
@@ -909,7 +908,7 @@ mod tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -955,7 +954,7 @@ mod tests {
         let tensor = ZTensor::new(mu, sigma, indices).unwrap();
         let attention = ZRBFAttention::new(6, 2, ZMetricWeights::default(), true).unwrap();
         let _ = attention.forward(&tensor, &frame).unwrap();
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
 
         let events = events.lock().unwrap();
         let metric_meta = events

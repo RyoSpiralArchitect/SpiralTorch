@@ -9431,7 +9431,15 @@ impl AmegaHypergrad {
             return Ok(());
         }
         let gradient = Tensor::from_vec(self.rows, self.cols, self.gradient.clone())?;
-        let scaled = gradient.scale_with_backend(factor, backend)?;
+        let scaled = gradient
+            .scale_with_backend(factor, backend)
+            .map_err(|error| match error {
+                TensorError::NonFiniteValue { value, .. } => TensorError::NonFiniteValue {
+                    label: "hypergrad_scaled_gradient",
+                    value,
+                },
+                other => other,
+            })?;
         let mut next_gradient = self.gradient.clone();
         for (idx, &candidate) in scaled.data().iter().enumerate() {
             next_gradient[idx] =
@@ -9580,6 +9588,11 @@ impl AmegaHypergrad {
         self.topos.guard_tensor("hypergrad_wave", tensor)?;
         let tolerance = self.topos.tolerance();
         let values = tensor.data();
+        let repaired_gradient_values = self
+            .gradient
+            .iter()
+            .filter(|value| !value.is_finite())
+            .count();
         #[cfg(feature = "wgpu")]
         let mut wgpu_failure: Option<String> = None;
 
@@ -9589,8 +9602,15 @@ impl AmegaHypergrad {
                 && !values.is_empty()
                 && wgpu_dense::is_available()
             {
+                let repaired_gradient = (repaired_gradient_values > 0).then(|| {
+                    self.gradient
+                        .iter()
+                        .map(|value| if value.is_finite() { *value } else { 0.0 })
+                        .collect::<Vec<_>>()
+                });
+                let gradient = repaired_gradient.as_deref().unwrap_or(&self.gradient);
                 match wgpu_dense::hypergrad_accumulate_wave(
-                    &self.gradient,
+                    gradient,
                     values,
                     self.rows,
                     self.cols,
@@ -9650,6 +9670,10 @@ impl AmegaHypergrad {
                                         .filter(|value| !value.is_finite())
                                         .count()),
                                 );
+                                data.insert(
+                                    "gradient_non_finite_values_repaired".to_string(),
+                                    serde_json::json!(repaired_gradient_values),
+                                );
                                 insert_gradient_summary_meta(data, "gradient", self.summary());
                             },
                         );
@@ -9673,7 +9697,11 @@ impl AmegaHypergrad {
         for (idx, &value) in values.iter().enumerate() {
             let denom = 1.0 - self.curvature * value * value;
             let update = value / denom.abs().max(tolerance);
-            let old = self.gradient[idx];
+            let old = if self.gradient[idx].is_finite() {
+                self.gradient[idx]
+            } else {
+                0.0
+            };
             let candidate = old + update;
             next_gradient[idx] =
                 self.checked_saturated_gradient("hypergrad_accumulate_wave", candidate)?;
@@ -9709,6 +9737,10 @@ impl AmegaHypergrad {
                 data.insert(
                     "input_non_finite_values".to_string(),
                     serde_json::json!(values.iter().filter(|value| !value.is_finite()).count()),
+                );
+                data.insert(
+                    "gradient_non_finite_values_repaired".to_string(),
+                    serde_json::json!(repaired_gradient_values),
                 );
                 #[cfg(feature = "wgpu")]
                 if let Some(message) = wgpu_failure.as_deref() {
@@ -11232,7 +11264,7 @@ mod tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = crate::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = crate::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -11242,7 +11274,7 @@ mod tests {
         let input = unwrap_ok(Tensor::from_vec(1, 3, vec![-0.75, 0.0, 0.75]));
         let grad = unwrap_ok(Tensor::from_vec(1, 3, vec![0.2, -0.5, 0.3]));
         let _ = unwrap_ok(input.gelu_backward(&grad));
-        crate::set_tensor_op_meta_observer(previous);
+        crate::set_thread_meta_observer(previous);
 
         let events = events.lock().unwrap();
         let gelu_backward = events
@@ -11260,7 +11292,7 @@ mod tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = crate::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = crate::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -11270,7 +11302,7 @@ mod tests {
         let input = unwrap_ok(Tensor::from_vec(1, 3, vec![-0.75, 0.0, 0.75]));
         let grad = unwrap_ok(Tensor::from_vec(1, 3, vec![0.2, -0.5, 0.3]));
         let _ = unwrap_ok(input.gelu_backward_with_backend(&grad, TensorUtilBackend::Cpu));
-        crate::set_tensor_op_meta_observer(previous);
+        crate::set_thread_meta_observer(previous);
 
         let events = events.lock().unwrap();
         let gelu_backward = events
@@ -12301,7 +12333,7 @@ mod tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = crate::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = crate::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -12357,7 +12389,7 @@ mod tests {
             0.2,
             TensorUtilBackend::GpuWgpu,
         ));
-        crate::set_tensor_op_meta_observer(previous);
+        crate::set_thread_meta_observer(previous);
 
         let events = events.lock().unwrap();
         for op_name in [
@@ -12814,7 +12846,7 @@ mod tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = crate::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = crate::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -12838,7 +12870,7 @@ mod tests {
         let _ = inplace.sum_axis1();
         let _ = unwrap_ok(Tensor::cat_rows(&[a.clone(), b.clone()]));
         let _ = unwrap_ok(mean_squared_error(&a, &b));
-        crate::set_tensor_op_meta_observer(previous);
+        crate::set_thread_meta_observer(previous);
 
         let events = events.lock().unwrap();
         let find = |op_name: &'static str| {
@@ -13121,7 +13153,7 @@ mod tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = crate::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = crate::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -13138,7 +13170,7 @@ mod tests {
             MatmulBackend::CpuNaive,
             TensorUtilBackend::Cpu,
         ));
-        crate::set_tensor_op_meta_observer(previous);
+        crate::set_thread_meta_observer(previous);
 
         assert!(loss.is_finite());
         let events = events.lock().unwrap();
@@ -13241,7 +13273,7 @@ mod tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = crate::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = crate::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -13253,7 +13285,7 @@ mod tests {
         let _ = tensor.sum_abs();
         let projected = unwrap_ok(tensor.project_to_poincare(-1.0));
         let _ = unwrap_ok(projected.hyperbolic_distance(&projected, -1.0));
-        crate::set_tensor_op_meta_observer(previous);
+        crate::set_thread_meta_observer(previous);
 
         let events = events.lock().unwrap();
         let find = |op_name: &'static str| {
@@ -13304,7 +13336,7 @@ mod tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = crate::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = crate::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -13326,7 +13358,7 @@ mod tests {
             Some(&attn_bias),
             AttentionBackend::Cpu,
         ));
-        crate::set_tensor_op_meta_observer(previous);
+        crate::set_thread_meta_observer(previous);
 
         assert_eq!(output.shape(), (0, 4));
         assert!(output.data().is_empty());
@@ -13479,7 +13511,7 @@ mod tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = crate::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = crate::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -13497,7 +13529,7 @@ mod tests {
             1.0e-5,
             LayerNormBackend::Cpu,
         ));
-        crate::set_tensor_op_meta_observer(previous);
+        crate::set_thread_meta_observer(previous);
 
         assert_eq!(output.shape(), (0, 3));
         assert!(output.data().is_empty());
@@ -13985,7 +14017,7 @@ mod tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = crate::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = crate::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -14011,7 +14043,7 @@ mod tests {
 
         let _ = unwrap_ok(lhs.matmul(&rhs));
         let _ = unwrap_ok(lhs.matmul_prepacked(&packed));
-        crate::set_tensor_op_meta_observer(previous);
+        crate::set_thread_meta_observer(previous);
 
         let events = events.lock().unwrap();
         let matmul = events
@@ -14046,7 +14078,7 @@ mod tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = crate::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = crate::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -14059,7 +14091,7 @@ mod tests {
             vec![1.0, -0.5, 0.25, 0.0, 2.0, -1.0],
         ));
         let _ = unwrap_ok(logits.row_softmax_with_backend(SoftmaxBackend::Cpu));
-        crate::set_tensor_op_meta_observer(previous);
+        crate::set_thread_meta_observer(previous);
 
         let events = events.lock().unwrap();
         let softmax = events
@@ -14092,7 +14124,7 @@ mod tests {
             let _lock = observer_lock();
             let events = Arc::new(Mutex::new(Vec::new()));
             let captured = events.clone();
-            let previous = crate::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            let previous = crate::set_thread_meta_observer(Some(Arc::new(move |event| {
                 captured
                     .lock()
                     .unwrap()
@@ -14107,7 +14139,7 @@ mod tests {
             let _ = unwrap_ok(logits.row_softmax_with_backend(SoftmaxBackend::GpuWgpu));
             let _ = unwrap_ok(logits.row_softmax_hardmax_with_backend(SoftmaxBackend::GpuWgpu));
             let _ = unwrap_ok(logits.row_hardmax_with_backend(HardmaxBackend::GpuWgpu));
-            crate::set_tensor_op_meta_observer(previous);
+            crate::set_thread_meta_observer(previous);
 
             let events = events.lock().unwrap();
             for op_name in ["row_softmax", "row_softmax_hardmax", "row_hardmax"] {
@@ -14193,7 +14225,7 @@ mod tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = crate::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = crate::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -14212,7 +14244,7 @@ mod tests {
         ));
         let bias = vec![0.2, -0.1];
         let _ = unwrap_ok(lhs.matmul_bias_gelu_with_backend(&rhs, &bias, MatmulBackend::CpuNaive));
-        crate::set_tensor_op_meta_observer(previous);
+        crate::set_thread_meta_observer(previous);
 
         let events = events.lock().unwrap();
         let fused = events
@@ -14659,7 +14691,7 @@ mod tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = crate::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = crate::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -14673,7 +14705,7 @@ mod tests {
         ));
         let mut tape = unwrap_ok(AmegaHypergrad::new(-1.0, 0.05, 2, 3));
         unwrap_ok(tape.accumulate_wave_with_backend(&wave, TensorUtilBackend::GpuWgpu));
-        crate::set_tensor_op_meta_observer(previous);
+        crate::set_thread_meta_observer(previous);
 
         let expected = GradientSummary::from_slice(tape.gradient());
         assert_summary_close(tape.summary(), expected);
@@ -14879,7 +14911,7 @@ mod tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = crate::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = crate::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -14900,7 +14932,7 @@ mod tests {
         unwrap_ok(realgrad.accumulate_wave(&wave));
         unwrap_ok(realgrad.accumulate_pair(&prediction, &target));
 
-        crate::set_tensor_op_meta_observer(previous);
+        crate::set_thread_meta_observer(previous);
 
         let events = events.lock().unwrap();
         let find = |op_name: &'static str| {
@@ -14999,6 +15031,33 @@ mod tests {
         assert_eq!(tape.non_finite_count(), 0);
         assert!(!tape.has_non_finite());
         assert!(tape.non_finite_ratio().abs() < 1e-6);
+    }
+
+    #[test]
+    fn hypergrad_accumulate_wave_reports_repaired_gradient_values() {
+        let mut tape = unwrap_ok(AmegaHypergrad::new(-1.0, 0.05, 1, 3));
+        tape.gradient_mut()
+            .copy_from_slice(&[f32::NAN, 1.0, f32::INFINITY]);
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = Arc::clone(&events);
+        let previous = crate::set_thread_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
+
+        let zeros = unwrap_ok(Tensor::zeros(1, 3));
+        unwrap_ok(tape.accumulate_wave_with_backend(&zeros, TensorUtilBackend::Cpu));
+        crate::set_thread_meta_observer(previous);
+
+        assert!(tape.gradient().iter().all(|value| value.is_finite()));
+        let events = events.lock().unwrap();
+        let event = events
+            .iter()
+            .find(|(op_name, _)| *op_name == "hypergrad_accumulate_wave")
+            .expect("hypergrad accumulate metadata event");
+        assert_eq!(event.1["gradient_non_finite_values_repaired"], 2);
     }
 
     #[test]

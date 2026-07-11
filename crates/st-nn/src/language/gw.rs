@@ -408,14 +408,10 @@ mod tests {
     use st_core::backend::device_caps::DeviceCaps;
     #[cfg(feature = "wgpu")]
     use st_tensor::backend::wgpu_dense;
-    use std::sync::{Arc, Mutex, OnceLock};
+    use std::sync::{Arc, Mutex};
 
     fn observer_lock() -> std::sync::MutexGuard<'static, ()> {
-        static OBSERVER_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        OBSERVER_LOCK
-            .get_or_init(|| Mutex::new(()))
-            .lock()
-            .expect("observer lock available")
+        crate::test_global_state_lock()
     }
 
     #[cfg(feature = "wgpu")]
@@ -470,7 +466,7 @@ mod tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -480,7 +476,7 @@ mod tests {
         let normalised = normalise("gw_test_marginal", &[0.25, 0.75]).unwrap();
         let mut in_place = vec![2.0, 1.0, 1.0];
         normalise_in_place("gw_test_in_place", &mut in_place);
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
 
         assert!((normalised.iter().sum::<f32>() - 1.0).abs() < 1e-6);
         assert!((in_place.iter().sum::<f32>() - 1.0).abs() < 1e-6);
@@ -531,7 +527,7 @@ mod tests {
         std::env::set_var(KEY, "0");
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -546,7 +542,7 @@ mod tests {
             normalise_in_place("gw_test_in_place_wgpu", &mut in_place);
             (normalised, in_place)
         };
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
         restore_tensor_util_wgpu_min_values(previous_min);
 
         assert!((normalised.iter().sum::<f32>() - 1.0).abs() < 1e-6);

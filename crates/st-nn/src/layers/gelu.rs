@@ -212,11 +212,10 @@ impl Module for Gelu {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, Mutex, OnceLock};
+    use std::sync::{Arc, Mutex};
 
     fn observer_lock() -> std::sync::MutexGuard<'static, ()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+        crate::test_global_state_lock()
     }
 
     #[test]
@@ -334,7 +333,7 @@ mod tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -345,7 +344,7 @@ mod tests {
         let input = Tensor::from_vec(0, 4, Vec::new()).unwrap();
         let grad_out = Tensor::from_vec(0, 4, Vec::new()).unwrap();
         let _ = layer.backward(&input, &grad_out).unwrap();
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
 
         let events = events.lock().unwrap();
         let gelu = events
@@ -363,7 +362,7 @@ mod tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -381,7 +380,7 @@ mod tests {
         let grad_out =
             Tensor::from_vec(2, 4, vec![0.2, -0.5, 0.3, 0.1, -0.4, 0.6, 0.8, -0.2]).unwrap();
         let _ = layer.backward(&input, &grad_out).unwrap();
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
 
         let events = events.lock().unwrap();
         let gelu = events

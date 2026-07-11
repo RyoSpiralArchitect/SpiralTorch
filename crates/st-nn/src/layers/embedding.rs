@@ -503,11 +503,10 @@ mod tests {
     use crate::execution::{push_backend_policy, BackendPolicy};
     #[cfg(feature = "wgpu")]
     use st_core::backend::device_caps::DeviceCaps;
-    use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+    use std::sync::{Arc, Mutex};
 
-    fn observer_lock() -> MutexGuard<'static, ()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+    fn observer_lock() -> std::sync::MutexGuard<'static, ()> {
+        crate::test_global_state_lock()
     }
 
     #[test]
@@ -616,7 +615,7 @@ mod tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -627,7 +626,7 @@ mod tests {
         let input = Tensor::from_vec(3, 0, Vec::new()).unwrap();
         let output = layer.forward(&input).unwrap();
         let grad_input = layer.backward(&input, &output).unwrap();
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
 
         assert_eq!(output.shape(), (3, 0));
         assert_eq!(grad_input.shape(), input.shape());
@@ -662,7 +661,7 @@ mod tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -674,7 +673,7 @@ mod tests {
         let output = layer.forward(&input).unwrap();
         let grad_output = Tensor::from_vec(1, 10, vec![0.5; 10]).unwrap();
         let grad_input = layer.backward(&input, &grad_output).unwrap();
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
 
         assert_eq!(output.shape(), (1, 10));
         assert_eq!(grad_input.shape(), input.shape());
@@ -731,7 +730,7 @@ mod tests {
 
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -753,7 +752,7 @@ mod tests {
         .unwrap();
         let grad_input = layer.backward(&input, &grad_output).unwrap();
         drop(guard);
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
         match previous_threshold {
             Some(value) => std::env::set_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES", value),
             None => std::env::remove_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES"),

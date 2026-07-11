@@ -1370,14 +1370,9 @@ pub fn run_zspace_learning_pass(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::OnceLock;
 
     fn observer_lock() -> std::sync::MutexGuard<'static, ()> {
-        static OBSERVER_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        OBSERVER_LOCK
-            .get_or_init(|| Mutex::new(()))
-            .lock()
-            .expect("observer lock available")
+        crate::test_global_state_lock()
     }
 
     #[test]
@@ -1385,7 +1380,7 @@ mod tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -1402,7 +1397,7 @@ mod tests {
             tongues: Vec::new(),
         };
         let analytics = heatmap.analyse().expect("heatmap analytics");
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
 
         assert!(analytics.total_energy > 0.0);
         assert!(analytics.leading_norm > 0.0);

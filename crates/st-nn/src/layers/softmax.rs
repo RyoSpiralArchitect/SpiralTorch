@@ -804,11 +804,10 @@ impl Module for ZSpaceSoftmax {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, Mutex, OnceLock};
+    use std::sync::{Arc, Mutex};
 
     fn observer_lock() -> std::sync::MutexGuard<'static, ()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+        crate::test_global_state_lock()
     }
 
     #[test]
@@ -831,7 +830,7 @@ mod tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -841,7 +840,7 @@ mod tests {
         let layer = ZSpaceSoftmax::new(-1.0, 1.0).unwrap();
         let input = Tensor::from_vec(2, 3, vec![1.0, 0.0, -1.0, 0.5, -0.25, 0.75]).unwrap();
         let _ = layer.forward(&input).unwrap();
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
 
         let events = events.lock().unwrap();
         let softmax = events
@@ -899,7 +898,7 @@ mod tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -910,7 +909,7 @@ mod tests {
         let input = Tensor::from_vec(1, 3, vec![0.2, -0.1, 0.3]).unwrap();
         let grad_out = Tensor::from_vec(1, 3, vec![0.05, -0.02, 0.1]).unwrap();
         let _ = layer.backward(&input, &grad_out).unwrap();
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
 
         let events = events.lock().unwrap();
         let backward = events
@@ -1051,7 +1050,7 @@ mod tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -1066,7 +1065,7 @@ mod tests {
             .unwrap();
         let input = Tensor::from_vec(1, 3, vec![0.0, 0.0, 0.0]).unwrap();
         let _ = layer.forward(&input).unwrap();
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
 
         let events = events.lock().unwrap();
         let zspace = events
@@ -1130,7 +1129,7 @@ mod tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -1146,7 +1145,7 @@ mod tests {
         let input = Tensor::from_vec(1, 3, vec![1.1, -0.45, 0.25]).unwrap();
         let grad_out = Tensor::from_vec(1, 3, vec![0.4, -0.15, 0.25]).unwrap();
         let _ = layer.backward(&input, &grad_out).unwrap();
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
 
         let events = events.lock().unwrap();
         let backward = events

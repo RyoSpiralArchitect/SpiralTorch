@@ -73,10 +73,11 @@ jobs:
         run: |
           cargo build -p st-core --release
           cargo test  -p st-core --release -- --nocapture
-      - name: build upper stack
+      - name: test upper stack
         if: matrix.run_upper_stack
         run: |
-          cargo build -p st-nn --release
+          cargo test -p st-tensor --release --no-default-features --features cpu,faer --lib
+          cargo test -p st-nn --release --lib
           cargo build -p st-spiral-rl --release
           cargo build -p st-rec --release
 
