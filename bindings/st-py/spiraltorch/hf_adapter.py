@@ -722,6 +722,52 @@ def hf_adapter_lineage_report(
             errors.append("run-card execution input pre-model identity does not match")
         if execution_observed_after != expected_execution_input_id:
             errors.append("run-card execution input after-model identity does not match")
+    finetune_replay_identity = _run_card_input_identity(
+        card_payload,
+        "finetune_replay_identity",
+    )
+    finetune_replay_contract = _run_card_input_identity(
+        card_payload,
+        "finetune_replay_identity_contract",
+    )
+    expected_finetune_replay_id = (
+        finetune_replay_contract.get("expected_identity_id")
+        if finetune_replay_contract
+        else finetune_replay_identity.get("expected_identity_id")
+    )
+    observed_finetune_replay_id = finetune_replay_identity.get(
+        "observed_identity_id"
+    )
+    finetune_replay_identity_present = bool(
+        finetune_replay_identity or finetune_replay_contract
+    )
+    finetune_replay_identity_required = bool(
+        finetune_replay_identity_present or expected_finetune_replay_id is not None
+    )
+    finetune_replay_contract_status = finetune_replay_contract.get("status")
+    if finetune_replay_identity_required:
+        if finetune_replay_identity.get("status") != "ready":
+            errors.append("run-card fine-tune replay identity is not ready")
+        if finetune_replay_identity.get("identity_verified") is not True:
+            errors.append("run-card fine-tune replay identity is not verified")
+        if observed_finetune_replay_id is None:
+            errors.append("run-card fine-tune replay observed identity is missing")
+        if (
+            expected_finetune_replay_id is not None
+            and observed_finetune_replay_id != expected_finetune_replay_id
+        ):
+            errors.append("run-card fine-tune replay identity does not match")
+        if finetune_replay_contract_status not in {"adopted", "enforced"}:
+            errors.append("run-card fine-tune replay contract is not final")
+        contract_observed_id = finetune_replay_contract.get(
+            "observed_identity_id"
+        )
+        if contract_observed_id != observed_finetune_replay_id:
+            errors.append(
+                "run-card fine-tune replay contract observation does not match"
+            )
+        if finetune_replay_contract.get("identity_verified") is not True:
+            errors.append("run-card fine-tune replay contract is not verified")
     parent_reference = (
         None if parent is None else parent.get("adapter_path")
     ) or start_report.get("adapter_weights_source")
@@ -940,6 +986,40 @@ def hf_adapter_lineage_report(
         "execution_input_identity_after_model_status": (
             execution_input_identity_after_model.get("status")
         ),
+        "finetune_replay_identity_present": finetune_replay_identity_present,
+        "finetune_replay_identity_required": finetune_replay_identity_required,
+        "finetune_replay_identity_status": finetune_replay_identity.get("status"),
+        "finetune_replay_identity_contract_status": (
+            finetune_replay_contract_status
+        ),
+        "finetune_replay_expected_id": expected_finetune_replay_id,
+        "finetune_replay_observed_id": observed_finetune_replay_id,
+        "finetune_replay_component_count": finetune_replay_identity.get(
+            "component_count"
+        ),
+        "finetune_replay_applicable_component_count": (
+            finetune_replay_identity.get("applicable_component_count")
+        ),
+        "finetune_replay_ready_component_count": finetune_replay_identity.get(
+            "ready_component_count"
+        ),
+        "finetune_replay_identity_verified": (
+            None
+            if not finetune_replay_identity_present
+            else finetune_replay_identity.get("status") == "ready"
+            and finetune_replay_identity.get("identity_verified") is True
+            and observed_finetune_replay_id is not None
+            and (
+                expected_finetune_replay_id is None
+                or observed_finetune_replay_id == expected_finetune_replay_id
+            )
+            and (
+                finetune_replay_contract_status in {"adopted", "enforced"}
+                and finetune_replay_contract.get("identity_verified") is True
+                and finetune_replay_contract.get("observed_identity_id")
+                == observed_finetune_replay_id
+            )
+        ),
         "weights_changed_from_parent": (
             None
             if parent is None
@@ -1024,6 +1104,10 @@ def hf_adapter_lineage_lines(
             f"{report.get('execution_input_identity_required')} "
             "execution_input_status="
             f"{report.get('execution_input_identity_status')} "
+            "finetune_replay_required="
+            f"{report.get('finetune_replay_identity_required')} "
+            "finetune_replay_status="
+            f"{report.get('finetune_replay_identity_status')} "
             f"start={report.get('finetune_start_mode')}"
         )
     ]
@@ -1193,6 +1277,37 @@ def hf_adapter_promotion_report(
                 "status": None if lineage is None else lineage.get("status"),
             },
             message="candidate must carry a ready lineage manifest",
+        ),
+        _check(
+            "finetune_replay_identity",
+            passed=(
+                None
+                if lineage is None
+                or lineage.get("finetune_replay_identity_required") is not True
+                else lineage.get("finetune_replay_identity_verified") is True
+            ),
+            required=(
+                lineage is not None
+                and lineage.get("finetune_replay_identity_required") is True
+            ),
+            observed=(
+                None
+                if lineage is None
+                else {
+                    "status": lineage.get("finetune_replay_identity_status"),
+                    "contract_status": lineage.get(
+                        "finetune_replay_identity_contract_status"
+                    ),
+                    "observed_identity_id": lineage.get(
+                        "finetune_replay_observed_id"
+                    ),
+                    "verified": lineage.get(
+                        "finetune_replay_identity_verified"
+                    ),
+                }
+            ),
+            threshold={"status": "ready", "verified": True},
+            message="candidate run must carry a verified fine-tune replay identity",
         ),
         _check(
             "candidate_fingerprint",
@@ -1394,6 +1509,31 @@ def hf_adapter_promotion_report(
         "parent_adapter_id": None if parent is None else parent.get("adapter_id"),
         "lineage_manifest_path": str(lineage_path),
         "lineage_depth": None if lineage is None else lineage.get("lineage_depth"),
+        "finetune_replay_identity_required": (
+            None
+            if lineage is None
+            else lineage.get("finetune_replay_identity_required")
+        ),
+        "finetune_replay_identity_status": (
+            None
+            if lineage is None
+            else lineage.get("finetune_replay_identity_status")
+        ),
+        "finetune_replay_identity_contract_status": (
+            None
+            if lineage is None
+            else lineage.get("finetune_replay_identity_contract_status")
+        ),
+        "finetune_replay_observed_id": (
+            None
+            if lineage is None
+            else lineage.get("finetune_replay_observed_id")
+        ),
+        "finetune_replay_identity_verified": (
+            None
+            if lineage is None
+            else lineage.get("finetune_replay_identity_verified")
+        ),
         "run_card_path": card_path,
         "run_card_sha256": _run_card_sha256(card_payload),
         "eval_before_loss": before_loss,
@@ -1492,6 +1632,9 @@ def hf_adapter_promotion_lines(
             f"artifact_probe={report.get('artifact_probe_status')} "
             f"probe_process={report.get('artifact_probe_process_status')} "
             f"probe_pid={report.get('artifact_probe_process_pid')} "
+            f"finetune_replay={report.get('finetune_replay_identity_status')} "
+            "finetune_replay_verified="
+            f"{report.get('finetune_replay_identity_verified')} "
             f"recommendation={report.get('recommendation')}"
         )
     ]
@@ -1981,6 +2124,11 @@ def _adapter_promotion_chain_node(manifest_path: Path) -> dict[str, object]:
                 "parent_adapter_id",
                 "lineage_depth",
                 "run_card_sha256",
+                "finetune_replay_identity_required",
+                "finetune_replay_identity_status",
+                "finetune_replay_identity_contract_status",
+                "finetune_replay_observed_id",
+                "finetune_replay_identity_verified",
                 "eval_loss_regression",
                 "artifact_probe_status",
                 "artifact_probe_new_token_count",
@@ -2193,6 +2341,36 @@ def _adapter_promotion_chain_node(manifest_path: Path) -> dict[str, object]:
         "execution_input_identity_after_model_status": lineage.get(
             "execution_input_identity_after_model_status"
         ),
+        "finetune_replay_identity_present": lineage.get(
+            "finetune_replay_identity_present"
+        ),
+        "finetune_replay_identity_required": lineage.get(
+            "finetune_replay_identity_required"
+        ),
+        "finetune_replay_identity_status": lineage.get(
+            "finetune_replay_identity_status"
+        ),
+        "finetune_replay_identity_contract_status": lineage.get(
+            "finetune_replay_identity_contract_status"
+        ),
+        "finetune_replay_expected_id": lineage.get(
+            "finetune_replay_expected_id"
+        ),
+        "finetune_replay_observed_id": lineage.get(
+            "finetune_replay_observed_id"
+        ),
+        "finetune_replay_component_count": lineage.get(
+            "finetune_replay_component_count"
+        ),
+        "finetune_replay_applicable_component_count": lineage.get(
+            "finetune_replay_applicable_component_count"
+        ),
+        "finetune_replay_ready_component_count": lineage.get(
+            "finetune_replay_ready_component_count"
+        ),
+        "finetune_replay_identity_verified": lineage.get(
+            "finetune_replay_identity_verified"
+        ),
         "weights_changed_from_parent": lineage.get("weights_changed_from_parent"),
         "run_card_path": None if run_card_path is None else str(run_card_path),
         "run_card_sha256": observed_card_sha256,
@@ -2373,6 +2551,16 @@ def _chain_inferred_root_node(
         "execution_input_identity_verified": None,
         "execution_input_identity_pre_model_status": None,
         "execution_input_identity_after_model_status": None,
+        "finetune_replay_identity_present": None,
+        "finetune_replay_identity_required": None,
+        "finetune_replay_identity_status": None,
+        "finetune_replay_identity_contract_status": None,
+        "finetune_replay_expected_id": None,
+        "finetune_replay_observed_id": None,
+        "finetune_replay_component_count": None,
+        "finetune_replay_applicable_component_count": None,
+        "finetune_replay_ready_component_count": None,
+        "finetune_replay_identity_verified": None,
         "weights_changed_from_parent": None,
         "run_card_path": None,
         "run_card_sha256": None,
@@ -2753,6 +2941,54 @@ def _adapter_promotion_chain_transition(
         if not execution_input_continuity_observed
         else parent_execution_input_id == execution_input_observed_id
     )
+    finetune_replay_expected_id = child.get("finetune_replay_expected_id")
+    finetune_replay_observed_id = child.get("finetune_replay_observed_id")
+    parent_finetune_replay_id = parent.get("finetune_replay_observed_id")
+    finetune_replay_evidence_present = bool(
+        child.get("finetune_replay_identity_present") is True
+        or child.get("finetune_replay_identity_status") is not None
+        or finetune_replay_expected_id is not None
+        or finetune_replay_observed_id is not None
+    )
+    finetune_replay_report_ready = bool(
+        child.get("finetune_replay_identity_status") == "ready"
+        and child.get("finetune_replay_identity_verified") is True
+        and finetune_replay_observed_id is not None
+        and (
+            finetune_replay_expected_id is None
+            or finetune_replay_expected_id == finetune_replay_observed_id
+        )
+        and child.get("finetune_replay_identity_contract_status")
+        in {"adopted", "enforced"}
+    )
+    finetune_replay_identity_required = bool(
+        parent_finetune_replay_id is not None or finetune_replay_evidence_present
+    )
+    finetune_replay_identity_adopted = bool(
+        parent_finetune_replay_id is None
+        and finetune_replay_report_ready
+    )
+    finetune_replay_identity_reissued = bool(
+        parent_finetune_replay_id is not None
+        and finetune_replay_report_ready
+        and finetune_replay_observed_id != parent_finetune_replay_id
+    )
+    finetune_replay_identity_ready = bool(
+        not finetune_replay_identity_required
+        or parent_finetune_replay_id is None
+        and finetune_replay_report_ready
+        or parent_finetune_replay_id is not None
+        and finetune_replay_identity_reissued
+    )
+    finetune_replay_continuity_observed = bool(
+        parent_finetune_replay_id is not None
+        and finetune_replay_observed_id is not None
+    )
+    finetune_replay_matches_parent = (
+        None
+        if not finetune_replay_continuity_observed
+        else parent_finetune_replay_id == finetune_replay_observed_id
+    )
     lineage_ready = bool(
         depth_step == 1
         and root_matches
@@ -2764,6 +3000,7 @@ def _adapter_promotion_chain_transition(
         and tokenized_dataset_identity_ready
         and runtime_input_identity_ready
         and execution_input_identity_ready
+        and finetune_replay_identity_ready
         and child.get("parent_fingerprint_verified") is True
         and child.get("weights_changed_from_parent") is True
     )
@@ -2928,6 +3165,26 @@ def _adapter_promotion_chain_transition(
             execution_input_continuity_observed
         ),
         "execution_input_matches_parent": execution_input_matches_parent,
+        "finetune_replay_identity_required": (
+            finetune_replay_identity_required
+        ),
+        "finetune_replay_evidence_present": finetune_replay_evidence_present,
+        "finetune_replay_identity_ready": finetune_replay_identity_ready,
+        "finetune_replay_identity_status": child.get(
+            "finetune_replay_identity_status"
+        ),
+        "finetune_replay_identity_contract_status": child.get(
+            "finetune_replay_identity_contract_status"
+        ),
+        "finetune_replay_expected_id": finetune_replay_expected_id,
+        "finetune_replay_observed_id": finetune_replay_observed_id,
+        "parent_finetune_replay_id": parent_finetune_replay_id,
+        "finetune_replay_identity_adopted": finetune_replay_identity_adopted,
+        "finetune_replay_identity_reissued": finetune_replay_identity_reissued,
+        "finetune_replay_continuity_observed": (
+            finetune_replay_continuity_observed
+        ),
+        "finetune_replay_matches_parent": finetune_replay_matches_parent,
         "lineage_ready": lineage_ready,
         "parent_fingerprint_verified": (
             child.get("parent_fingerprint_verified") is True
@@ -3929,6 +4186,16 @@ def hf_adapter_promotion_chain_lines(
             f"{raw_transition.get('execution_input_adopted')} "
             f"execution_input_matches_parent="
             f"{raw_transition.get('execution_input_matches_parent')} "
+            f"finetune_replay_required="
+            f"{raw_transition.get('finetune_replay_identity_required')} "
+            f"finetune_replay_ready="
+            f"{raw_transition.get('finetune_replay_identity_ready')} "
+            f"finetune_replay_adopted="
+            f"{raw_transition.get('finetune_replay_identity_adopted')} "
+            f"finetune_replay_reissued="
+            f"{raw_transition.get('finetune_replay_identity_reissued')} "
+            f"finetune_replay_matches_parent="
+            f"{raw_transition.get('finetune_replay_matches_parent')} "
             f"weights_changed={raw_transition.get('weights_changed_from_parent')} "
             f"eval_handoff_delta={raw_transition.get('eval_handoff_delta')} "
             f"eval_improvement={raw_transition.get('child_eval_improvement')} "
@@ -3951,6 +4218,9 @@ def hf_adapter_promotion_chain_lines(
             f"probe_process={raw_node.get('artifact_probe_process_status')} "
             f"probe_pid={raw_node.get('artifact_probe_process_pid')} "
             f"eval_regression={raw_node.get('eval_loss_regression')} "
+            f"finetune_replay={raw_node.get('finetune_replay_identity_status')} "
+            "finetune_replay_verified="
+            f"{raw_node.get('finetune_replay_identity_verified')} "
             f"command={raw_node.get('launch_command_source')} "
             f"path={raw_node.get('adapter_path')}"
         )

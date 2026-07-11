@@ -108,6 +108,17 @@
   one path-independent final Trainer-boundary ID. Adoption commands add
   `--expected-finetune-replay-id` alongside the layer-specific gates; scale-up
   strips and audits a composite reissue instead of inheriting the parent run.
+- Generation-scoped replay lineage: adapter lineage and promotion-chain edges
+  now validate the composite fine-tune replay report and final contract. Legacy
+  nodes without composite evidence remain compatible, but descendants of an
+  adopted node must publish a different verified ID; dropping or reusing the
+  parent composite blocks continuation. Executor plan, attempt, postflight, and
+  live-status artifacts retain both recipe and composite reissue contracts plus
+  their source IDs without pinning those source IDs into the child command.
+- Deterministic PEFT continuation recipes: runtime adapter configs now
+  canonicalize unordered sets such as `target_modules` into sorted JSON lists
+  before recipe hashing, preventing process hash randomization from producing a
+  false recipe/composite drift during exact adapter replay.
 - Audited dataset scale-up reissue: selection changes reissue raw-row and
   tokenized identities instead of incorrectly enforcing the parent's smaller
   materialization, while post-tokenization block-size/eval-block changes reissue

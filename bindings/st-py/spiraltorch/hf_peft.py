@@ -8,6 +8,7 @@ import json
 import math
 import tempfile
 from collections.abc import Iterable, Mapping
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -587,6 +588,32 @@ def _peft_loader_options(options: Mapping[str, object]) -> dict[str, object]:
     return {key: value for key, value in options.items() if key in accepted}
 
 
+def _json_safe_runtime_adapter_value(value: object) -> object:
+    if isinstance(value, Enum):
+        return _json_safe_runtime_adapter_value(value.value)
+    if value is None or isinstance(value, (bool, float, int, str)):
+        return value
+    if isinstance(value, Mapping):
+        return {
+            str(key): _json_safe_runtime_adapter_value(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_json_safe_runtime_adapter_value(item) for item in value]
+    if isinstance(value, (set, frozenset)):
+        items = [_json_safe_runtime_adapter_value(item) for item in value]
+        return sorted(
+            items,
+            key=lambda item: json.dumps(
+                item,
+                ensure_ascii=True,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+        )
+    return str(value)
+
+
 def _runtime_adapter_config(peft_config: Any) -> dict[str, object]:
     to_dict = getattr(peft_config, "to_dict", None)
     if callable(to_dict):
@@ -595,7 +622,9 @@ def _runtime_adapter_config(peft_config: Any) -> dict[str, object]:
         except Exception:
             payload = None
         if isinstance(payload, Mapping):
-            return json.loads(json.dumps(dict(payload), default=str))
+            normalized = _json_safe_runtime_adapter_value(payload)
+            if isinstance(normalized, dict):
+                return normalized
     payload = getattr(peft_config, "__dict__", None)
     if isinstance(payload, Mapping):
         return {

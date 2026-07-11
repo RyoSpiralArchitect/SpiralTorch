@@ -205,6 +205,24 @@ def _attempt_summary(attempt: Mapping[str, object] | None) -> dict[str, object] 
         "execution_input_expected_id": attempt.get(
             "execution_input_expected_id"
         ),
+        "training_recipe_identity_contract": attempt.get(
+            "training_recipe_identity_contract"
+        ),
+        "training_recipe_source_expected_id": attempt.get(
+            "training_recipe_source_expected_id"
+        ),
+        "training_recipe_expected_id": attempt.get(
+            "training_recipe_expected_id"
+        ),
+        "finetune_replay_identity_contract": attempt.get(
+            "finetune_replay_identity_contract"
+        ),
+        "finetune_replay_source_expected_id": attempt.get(
+            "finetune_replay_source_expected_id"
+        ),
+        "finetune_replay_expected_id": attempt.get(
+            "finetune_replay_expected_id"
+        ),
         "source_transition": attempt.get("source_transition"),
         "postflight_transition": (
             postflight.get("transition") if isinstance(postflight, Mapping) else None
@@ -234,6 +252,8 @@ def hf_adapter_continuation_executor_status_report(
     generations = [
         row for row in state.get("generations") or [] if isinstance(row, Mapping)
     ]
+    raw_pending = state.get("pending_generation")
+    pending = raw_pending if isinstance(raw_pending, Mapping) else None
     running = [row for row in generations if row.get("status") == "running"]
     active = running[-1] if running else None
     latest = generations[-1] if generations else None
@@ -516,6 +536,7 @@ def hf_adapter_continuation_executor_status_report(
         "transition_evidence_status": transition_evidence_status,
         "selected_transition": selected_transition,
         "active_attempt_count": len(running),
+        "pending_generation": _attempt_summary(pending),
         "active_attempt": _attempt_summary(active),
         "latest_attempt": _attempt_summary(latest),
         "last_output_resolution": state.get("last_output_resolution"),
@@ -614,8 +635,44 @@ def hf_adapter_continuation_executor_status_lines(
             f"{transition.get('execution_input_identity_required')} "
             "execution_input_identity="
             f"{transition.get('execution_input_identity_ready')} "
+            "finetune_replay_required="
+            f"{transition.get('finetune_replay_identity_required')} "
+            "finetune_replay_identity="
+            f"{transition.get('finetune_replay_identity_ready')} "
+            "finetune_replay_reissued="
+            f"{transition.get('finetune_replay_identity_reissued')} "
             f"probe_process={transition.get('artifact_probe_process_status')} "
             f"probe_pid={transition.get('artifact_probe_process_pid')}"
+        )
+    pending = report.get("pending_generation")
+    if (
+        isinstance(pending, Mapping)
+        and report.get("active_attempt") is None
+        and report.get("latest_attempt") is None
+    ):
+        training_recipe_contract = pending.get(
+            "training_recipe_identity_contract"
+        )
+        finetune_replay_contract = pending.get(
+            "finetune_replay_identity_contract"
+        )
+        lines.append(
+            "hf_adapter_continuation_executor_status_pending "
+            f"status={pending.get('status')} "
+            f"depth={pending.get('lineage_depth')} "
+            "training_recipe_contract="
+            f"{training_recipe_contract.get('status') if isinstance(training_recipe_contract, Mapping) else None} "
+            "training_recipe_source="
+            f"{pending.get('training_recipe_source_expected_id')} "
+            "training_recipe_expected="
+            f"{pending.get('training_recipe_expected_id')} "
+            "finetune_replay_contract="
+            f"{finetune_replay_contract.get('status') if isinstance(finetune_replay_contract, Mapping) else None} "
+            "finetune_replay_source="
+            f"{pending.get('finetune_replay_source_expected_id')} "
+            "finetune_replay_expected="
+            f"{pending.get('finetune_replay_expected_id')} "
+            f"output={pending.get('output_dir')}"
         )
     attempt = report.get("active_attempt") or report.get("latest_attempt")
     if isinstance(attempt, Mapping):
@@ -632,6 +689,12 @@ def hf_adapter_continuation_executor_status_lines(
         runtime_input_contract = attempt.get("runtime_input_identity_contract")
         execution_input_contract = attempt.get(
             "execution_input_identity_contract"
+        )
+        training_recipe_contract = attempt.get(
+            "training_recipe_identity_contract"
+        )
+        finetune_replay_contract = attempt.get(
+            "finetune_replay_identity_contract"
         )
         log = report.get("log")
         output = report.get("output")
@@ -669,6 +732,18 @@ def hf_adapter_continuation_executor_status_lines(
             f"{execution_input_contract.get('status') if isinstance(execution_input_contract, Mapping) else None} "
             "execution_input_expected="
             f"{attempt.get('execution_input_expected_id')} "
+            "training_recipe_contract="
+            f"{training_recipe_contract.get('status') if isinstance(training_recipe_contract, Mapping) else None} "
+            "training_recipe_source="
+            f"{attempt.get('training_recipe_source_expected_id')} "
+            "training_recipe_expected="
+            f"{attempt.get('training_recipe_expected_id')} "
+            "finetune_replay_contract="
+            f"{finetune_replay_contract.get('status') if isinstance(finetune_replay_contract, Mapping) else None} "
+            "finetune_replay_source="
+            f"{attempt.get('finetune_replay_source_expected_id')} "
+            "finetune_replay_expected="
+            f"{attempt.get('finetune_replay_expected_id')} "
             f"stop_scope={attempt.get('stop_scope')} "
             f"host={attempt.get('hostname')} "
             f"pid={attempt.get('pid')} "

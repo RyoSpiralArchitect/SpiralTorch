@@ -56,6 +56,9 @@ def _write_running_state(
             "child_eval_improvement": 0.1,
             "runtime_input_identity_required": True,
             "runtime_input_identity_ready": True,
+            "finetune_replay_identity_required": True,
+            "finetune_replay_identity_ready": True,
+            "finetune_replay_identity_reissued": True,
             "artifact_probe_process_status": "ready",
             "artifact_probe_process_pid": 4242,
         },
@@ -83,6 +86,20 @@ def _write_running_state(
                     "expected_identity_id": "sha256:" + "5" * 64,
                 },
                 "runtime_input_expected_id": "sha256:" + "5" * 64,
+                "training_recipe_identity_contract": {
+                    "status": "reissued",
+                    "source_expected_identity_id": "sha256:" + "b" * 64,
+                    "expected_identity_id": None,
+                },
+                "training_recipe_source_expected_id": "sha256:" + "b" * 64,
+                "training_recipe_expected_id": None,
+                "finetune_replay_identity_contract": {
+                    "status": "reissued",
+                    "source_expected_identity_id": "sha256:" + "e" * 64,
+                    "expected_identity_id": None,
+                },
+                "finetune_replay_source_expected_id": "sha256:" + "e" * 64,
+                "finetune_replay_expected_id": None,
                 "source_transition": {
                     "status": "ready",
                     "transition_ready": True,
@@ -269,6 +286,7 @@ def test_status_reports_live_local_process_and_artifacts(
     assert report["transition_count"] == 1
     assert report["ready_transition_count"] == 1
     assert report["selected_transition"]["child_adapter_id"] == "child-adapter"
+    assert report["selected_transition"]["finetune_replay_identity_ready"] is True
     assert report["active_attempt"]["source_transition"]["transition_ready"] is True
     assert report["active_attempt"]["command_runtime"]["status"] == (
         "portable_module"
@@ -279,6 +297,18 @@ def test_status_reports_live_local_process_and_artifacts(
     assert report["active_attempt"]["runtime_input_expected_id"] == (
         "sha256:" + "5" * 64
     )
+    assert report["active_attempt"]["training_recipe_identity_contract"][
+        "status"
+    ] == "reissued"
+    assert report["active_attempt"]["training_recipe_source_expected_id"] == (
+        "sha256:" + "b" * 64
+    )
+    assert report["active_attempt"]["finetune_replay_identity_contract"][
+        "status"
+    ] == "reissued"
+    assert report["active_attempt"]["finetune_replay_source_expected_id"] == (
+        "sha256:" + "e" * 64
+    )
     assert code == 0
     assert "status=running" in output
     assert "pid_alive=True" in output
@@ -287,6 +317,50 @@ def test_status_reports_live_local_process_and_artifacts(
     assert "runtime=portable_module" in output
     assert "runtime_input_identity=True" in output
     assert "runtime_input_contract=enforced" in output
+    assert "finetune_replay_identity=True" in output
+    assert "training_recipe_contract=reissued" in output
+    assert "finetune_replay_contract=reissued" in output
+
+
+def test_status_preserves_planned_recipe_and_replay_reissue_contracts(
+    tmp_path: Path,
+) -> None:
+    output_dir = tmp_path / "generation-002"
+    state_path = _write_running_state(
+        tmp_path / "state.json",
+        pid=None,
+        hostname=socket.gethostname(),
+        output_dir=output_dir,
+        log_path=tmp_path / "executor.log",
+    )
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    pending = state["generations"][0]
+    pending["status"] = "planned"
+    pending["pid"] = None
+    state["status"] = "ready"
+    state["generations"] = []
+    state["pending_generation"] = pending
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+
+    report = st.hf_adapter_continuation_executor_status_report(state_path)
+    lines = st.hf_adapter_continuation_executor_status_lines(report)
+
+    assert report["status"] == "ready"
+    assert report["active_attempt"] is None
+    assert report["latest_attempt"] is None
+    assert report["pending_generation"]["status"] == "planned"
+    assert report["pending_generation"]["training_recipe_identity_contract"][
+        "status"
+    ] == "reissued"
+    assert report["pending_generation"]["finetune_replay_identity_contract"][
+        "status"
+    ] == "reissued"
+    assert any(
+        line.startswith("hf_adapter_continuation_executor_status_pending ")
+        and "training_recipe_contract=reissued" in line
+        and "finetune_replay_contract=reissued" in line
+        for line in lines
+    )
 
 
 def test_status_marks_pre_transition_state_as_legacy_without_breaking_health(
