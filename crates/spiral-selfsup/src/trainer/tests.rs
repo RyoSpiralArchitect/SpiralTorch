@@ -2,6 +2,7 @@ use super::distributed::st_distributed::DistributedError;
 use super::{DistributedDevice, MetricReduce, TrainingDevice, TrainingDeviceError};
 use st_core::distributed::AccumulatorSynchronizer;
 use std::sync::{Arc, Barrier};
+use std::time::{Duration, Instant};
 
 #[test]
 fn distributed_device_all_reduce_averages_gradients() {
@@ -76,6 +77,24 @@ fn distributed_device_rejects_invalid_world_size() {
         error,
         TrainingDeviceError::Rendezvous(DistributedError::EmptyWorldSize(0))
     ));
+}
+
+#[test]
+fn distributed_device_collective_timeout_is_configurable() {
+    let device = DistributedDevice::new("configurable-timeout", 0, 2)
+        .unwrap()
+        .with_collective_timeout(Duration::from_millis(20));
+    let mut gradients = [1.0, -1.0];
+    let started = Instant::now();
+
+    let error = device.synchronize_gradients(&mut gradients).unwrap_err();
+
+    assert!(matches!(
+        error,
+        TrainingDeviceError::Rendezvous(DistributedError::CollectiveTimeout { .. })
+    ));
+    assert!(started.elapsed() < Duration::from_secs(1));
+    assert_eq!(gradients, [1.0, -1.0]);
 }
 
 #[test]
