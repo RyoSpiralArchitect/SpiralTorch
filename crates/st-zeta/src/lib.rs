@@ -1,5 +1,10 @@
 //! Telemetry helpers for emitting SoftLogic feedback signals.
 
+#![cfg_attr(
+    not(test),
+    deny(clippy::expect_used, clippy::panic, clippy::unwrap_used)
+)]
+
 pub mod spiral_reality;
 
 use anyhow::Result;
