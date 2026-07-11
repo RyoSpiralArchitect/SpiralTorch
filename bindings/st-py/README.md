@@ -770,6 +770,16 @@ Trainer construction so concurrent resumes cannot select the same segment.
 Adapter-chain audit and executor postflight reread these files and fail closed
 if either the prior receipt or the generated segment changed. Legacy run cards
 without a segment receipt remain readable.
+The bridge also rebuilds a root-to-tip `trainer_trace_lineage` after each run
+and stores a cumulative `trainer_trace_lineage_summary`. The lineage verifier
+checks every segment/receipt ID, file digest, byte and event count, parent path,
+and boundary before assigning a content-addressed lineage ID. Retry attempts
+from the same checkpoint may repeat or rewind global steps; those boundaries
+remain valid artifact history but are reported separately through
+`step_overlap_or_rewind_count` and cumulative repeated-step counters. Live
+geometry guards and executor threshold checks intentionally continue to use the
+current segment, while generation curves, milestone handoffs, and artifact
+manifests use the verified lineage and its active tip.
 Guard configuration, horizon evidence, and stop reasons are written into the
 trainer trace and run card. After a gated generation exits, executor postflight
 reads the
@@ -1389,6 +1399,14 @@ segment = st.hf_finetune_trainer_trace_segment_plan(
     initial_step=1000,
 )
 print(st.hf_finetune_trainer_trace_segment_lines(segment)[0])
+
+lineage = st.hf_finetune_trainer_trace_lineage_report(
+    "runs/qwen2-lora/spiraltorch-hf-finetune-run-card.json"
+)
+rows = st.load_hf_finetune_trainer_trace_lineage(lineage)
+summary = st.summarize_hf_finetune_trainer_trace_lineage(lineage)
+print(st.hf_finetune_trainer_trace_lineage_lines(lineage)[0])
+print(len(rows), summary["trace_eval_loss_series"])
 ```
 
 The installed bridge writes the segment receipt automatically after training.

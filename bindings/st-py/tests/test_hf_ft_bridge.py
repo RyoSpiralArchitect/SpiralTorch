@@ -1104,8 +1104,69 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             sweeps,
             top_n=1,
         )
+        with tempfile.TemporaryDirectory() as tmp:
+            trace_root = Path(tmp) / "trainer-trace.jsonl"
+            trace_root.write_text(
+                "".join(
+                    json.dumps(row) + "\n"
+                    for row in (
+                        {
+                            "event": "evaluate",
+                            "global_step": 0,
+                            "metrics": {"eval_loss": 4.0},
+                        },
+                        {
+                            "event": "evaluate",
+                            "global_step": 384,
+                            "metrics": {"eval_loss": 3.2},
+                        },
+                    )
+                ),
+                encoding="utf-8",
+            )
+            segment_plan = hf_ft.hf_finetune_trainer_trace_segment_plan(
+                trace_root,
+                resume_from_checkpoint=Path(tmp) / "checkpoint-384",
+                initial_step=384,
+            )
+            segment_path = Path(str(segment_plan["trace_path"]))
+            segment_path.write_text(
+                json.dumps(
+                    {
+                        "event": "evaluate",
+                        "global_step": 512,
+                        "metrics": {"eval_loss": 3.1},
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            segment_receipt = (
+                hf_ft.hf_finetune_trainer_trace_segment_receipt(
+                    segment_plan
+                )
+            )
+            lineage_card = {
+                key: value
+                for key, value in card.items()
+                if key != "trainer_trace_summary"
+            }
+            lineage_card.update(
+                {
+                    "trainer_trace_jsonl": str(segment_path),
+                    "trainer_trace_segment_receipt": segment_receipt,
+                }
+            )
+            lineage_report = (
+                hf_ft.hf_gpt2_finetune_generation_curve_report(
+                    lineage_card,
+                    sweeps,
+                    top_n=3,
+                )
+            )
 
         self.assertEqual(report["row_type"], "hf_gpt2_finetune_generation_curve")
+        self.assertEqual(report["trace_scope"], "current_segment")
         self.assertEqual(report["curve_model_count"], 3)
         self.assertEqual(report["recommended_model_name"], "runs/latest-ft")
         self.assertEqual(report["recommended_step"], 512)
@@ -1126,6 +1187,15 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("model=runs/latest-ft/checkpoint-384", " ".join(lines))
         self.assertIn("zspace_generation_control_compare", " ".join(lines))
         self.assertIn("hf_gpt2_ft_generation_curve", direct_lines[0])
+        self.assertEqual(lineage_report["trace_scope"], "lineage")
+        self.assertEqual(
+            lineage_report["trainer_trace_lineage_segment_count"],
+            2,
+        )
+        self.assertEqual(
+            lineage_report["eval_loss_series"],
+            "0=4.0,384=3.2,512=3.1",
+        )
 
     def test_generation_curve_example_accepts_live_trace_without_run_card(self) -> None:
         module = load_generation_curve_example()
@@ -9931,6 +10001,13 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             run_dir = Path(tmp) / "run"
             run_dir.mkdir()
+            generic_trace_path = (
+                run_dir / "spiraltorch-hf-finetune-trainer-trace.jsonl"
+            )
+            resume_trace_path = run_dir / (
+                "spiraltorch-hf-finetune-trainer-trace."
+                "resume-step-000000006144.jsonl"
+            )
             direct_history = run_dir / "direct-run-status-history.jsonl"
             eval_history = run_dir / "watch-6144-eval-history.jsonl"
             checkpoint_history = run_dir / "watch-6144-checkpoint-history.jsonl"
@@ -9945,6 +10022,35 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             checkpoint_history.write_text(
                 json.dumps({"checkpoint_names": ["checkpoint-6144"]}) + "\n",
                 encoding="utf-8",
+            )
+            generic_trace_path.write_text(
+                json.dumps(
+                    {"event": "generic_train_begin", "global_step": 4096}
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            resume_plan = st.hf_finetune_trainer_trace_segment_plan(
+                generic_trace_path,
+                resume_from_checkpoint=run_dir / "checkpoint-6144",
+                initial_step=6144,
+            )
+            self.assertEqual(
+                Path(str(resume_plan["trace_path"])),
+                resume_trace_path.resolve(),
+            )
+            resume_trace_path.write_text(
+                json.dumps(
+                    {"event": "resume_train_begin", "global_step": 6144}
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            resume_receipt = st.hf_finetune_trainer_trace_segment_receipt(
+                resume_plan
+            )
+            resume_lineage = st.hf_finetune_trainer_trace_lineage_report(
+                resume_receipt
             )
             for name, payload in (
                 ("milestone-6144-capture.json", {"milestone_step": 6144}),
@@ -9974,6 +10080,9 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                             "profile_id": "causal-lm-local-smoke",
                             "extends": "pythia-70m-local-smoke",
                         },
+                        "trainer_trace_jsonl": str(resume_trace_path),
+                        "trainer_trace_lineage": resume_lineage,
+                        "trainer_trace_segment_receipt": resume_receipt,
                     },
                 ),
             ):
@@ -9984,10 +10093,6 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             )
             (run_dir / "spiraltorch-hf-gpt2-ft-trainer-trace.jsonl").write_text(
                 json.dumps({"event": "train_begin"}) + "\n",
-                encoding="utf-8",
-            )
-            (run_dir / "spiraltorch-hf-finetune-trainer-trace.jsonl").write_text(
-                json.dumps({"event": "generic_train_begin"}) + "\n",
                 encoding="utf-8",
             )
             (run_dir / "checkpoint-4096").mkdir()
@@ -10089,12 +10194,40 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                     "--quiet",
                 ]
             )
+            resume_handoff = st.hf_gpt2_finetune_milestone_handoff_report(
+                {
+                    "row_type": "hf_gpt2_finetune_milestone_capture",
+                    "milestone_step": 6144,
+                    "milestone_ready": True,
+                    "milestone_checkpoint_ready": True,
+                },
+                run_dir=run_dir,
+                dry_run=True,
+            )
+            generic_trace_path.write_text(
+                generic_trace_path.read_text(encoding="utf-8")
+                + json.dumps({"event": "tampered", "global_step": 4097})
+                + "\n",
+                encoding="utf-8",
+            )
+            blocked_manifest = st.hf_gpt2_finetune_run_artifact_manifest(
+                run_dir,
+                generation_limit=1,
+                checkpoint_limit=2,
+            )
 
         self.assertEqual(manifest["row_type"], "hf_gpt2_finetune_run_artifact_manifest")
         self.assertEqual(manifest["status"], "ready")
         self.assertEqual(manifest["source_count"], 3)
         self.assertEqual(manifest["missing_latest_count"], 0)
         self.assertEqual(manifest["generation_sweep_count"], 1)
+        self.assertEqual(manifest["trainer_trace_segment_count"], 2)
+        self.assertEqual(manifest["trainer_trace_lineage_status"], "ready")
+        self.assertTrue(manifest["trainer_trace_lineage_ready"])
+        self.assertEqual(
+            manifest["trainer_trace_lineage_id"],
+            resume_lineage["lineage_id"],
+        )
         self.assertEqual(manifest["checkpoint_count"], 2)
         self.assertEqual(manifest["latest_milestone_step"], 6144)
         self.assertEqual(manifest["latest_checkpoint_step"], 6144)
@@ -10116,7 +10249,33 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         )
         self.assertEqual(
             manifest["latest_artifacts"]["latest.trainer_trace"]["path"],
-            str(run_dir / "spiraltorch-hf-finetune-trainer-trace.jsonl"),
+            str(resume_trace_path.resolve()),
+        )
+        self.assertEqual(
+            [record["path"] for record in manifest["trainer_trace_segments"]],
+            [str(generic_trace_path.resolve()), str(resume_trace_path.resolve())],
+        )
+        self.assertEqual(
+            resume_handoff["package_kwargs"]["curve_trainer_trace_jsonl"],
+            str(resume_trace_path.resolve()),
+        )
+        self.assertIn(str(resume_trace_path.resolve()), resume_handoff["command"])
+        self.assertEqual(
+            blocked_manifest["trainer_trace_lineage_status"],
+            "blocked",
+        )
+        self.assertFalse(blocked_manifest["trainer_trace_lineage_ready"])
+        self.assertEqual(blocked_manifest["trainer_trace_segment_count"], 0)
+        self.assertEqual(
+            blocked_manifest["latest_artifacts"]["latest.trainer_trace"]["path"],
+            str(resume_trace_path.resolve()),
+        )
+        self.assertTrue(
+            any(
+                "hf_gpt2_ft_run_artifact_trace_segment" in line
+                and str(resume_trace_path.resolve()) in line
+                for line in lines
+            )
         )
         self.assertEqual(written["artifact_count"], manifest["artifact_count"])
         self.assertEqual(
@@ -13701,11 +13860,59 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 previous_segment=receipt,
             )
             Path(str(retry_plan["trace_path"])).write_text(
-                json.dumps({"event": "log", "global_step": 10}) + "\n",
+                json.dumps({"event": "log", "global_step": 9}) + "\n",
                 encoding="utf-8",
             )
             retry_receipt = (
                 st.hf_finetune_trainer_trace_segment_receipt(retry_plan)
+            )
+            lineage = hf_ft.hf_finetune_trainer_trace_lineage_report(
+                retry_receipt
+            )
+            receipt_path = root / "trainer-trace-receipt.json"
+            receipt_path.write_text(
+                json.dumps(retry_receipt) + "\n",
+                encoding="utf-8",
+            )
+            lineage_from_receipt_path = (
+                hf_ft.hf_finetune_trainer_trace_lineage_report(
+                    receipt_path
+                )
+            )
+            lineage_rows = (
+                hf_ft.load_hf_finetune_trainer_trace_lineage(lineage)
+            )
+            lineage_summary = (
+                hf_ft.summarize_hf_finetune_trainer_trace_lineage(
+                    lineage
+                )
+            )
+            lineage_card = {
+                "trainer_trace_jsonl": str(retry_plan["trace_path"]),
+                "trainer_trace_segment_receipt": retry_receipt,
+                "trainer_trace_lineage": lineage,
+                "trainer_trace_lineage_summary": lineage_summary,
+            }
+            lineage_lines = hf_ft.hf_finetune_trainer_trace_lineage_lines(
+                lineage
+            )
+            retry_path = Path(str(retry_plan["trace_path"]))
+            retry_bytes = retry_path.read_bytes()
+            retry_path.unlink()
+            missing_tip_lineage = (
+                hf_ft.hf_finetune_trainer_trace_lineage_report(
+                    retry_receipt
+                )
+            )
+            retry_path.write_bytes(retry_bytes)
+            cyclic_receipt = dict(receipt)
+            cyclic_receipt["previous_segment_receipt"] = cyclic_receipt
+            cyclic_lineage = hf_ft.hf_finetune_trainer_trace_lineage_report(
+                cyclic_receipt
+            )
+            limited_lineage = hf_ft.hf_finetune_trainer_trace_lineage_report(
+                retry_receipt,
+                max_segments=1,
             )
             fresh_trace = root / "fresh-trace.jsonl"
             fresh_trace.write_text(
@@ -13721,6 +13928,34 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             )
             fresh_receipt = (
                 st.hf_finetune_trainer_trace_segment_receipt(fresh_plan)
+            )
+            legacy_lineage = (
+                hf_ft.hf_finetune_trainer_trace_lineage_report(
+                    {"trainer_trace_jsonl": str(fresh_trace)}
+                )
+            )
+            portable_dir = root / "portable"
+            portable_dir.mkdir()
+            portable_trace = portable_dir / "trainer-trace.jsonl"
+            portable_trace.write_text(
+                json.dumps(
+                    {
+                        "event": "log",
+                        "global_step": 3,
+                        "metrics": {"loss": 1.25},
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            portable_card = portable_dir / "run-card.json"
+            portable_card.write_text(
+                json.dumps({"trainer_trace_jsonl": portable_trace.name})
+                + "\n",
+                encoding="utf-8",
+            )
+            portable_summary = st.summarize_hf_finetune_run_card(
+                portable_card
             )
             fresh_with_previous = (
                 st.hf_finetune_trainer_trace_segment_plan(
@@ -13756,6 +13991,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             )
             tampered_retry_receipt = (
                 st.hf_finetune_trainer_trace_segment_receipt(retry_receipt)
+            )
+            tampered_lineage = (
+                hf_ft.hf_finetune_trainer_trace_lineage_report(
+                    retry_receipt
+                )
+            )
+            tampered_run_summary = st.summarize_hf_finetune_run_card(
+                lineage_card
             )
             tampered_resume_plan = (
                 st.hf_finetune_trainer_trace_segment_plan(
@@ -13798,6 +14041,57 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("attempt-2", str(retry_plan["trace_path"]))
         self.assertTrue(retry_receipt["ready"])
         self.assertTrue(retry_receipt["previous_segment_integrity_ready"])
+        self.assertEqual(lineage["status"], "ready")
+        self.assertTrue(lineage["ready"])
+        self.assertTrue(lineage["fully_sealed"])
+        self.assertEqual(
+            lineage_from_receipt_path["lineage_id"],
+            lineage["lineage_id"],
+        )
+        self.assertEqual(
+            lineage_from_receipt_path["source_kind"],
+            "receipt",
+        )
+        self.assertEqual(lineage["segment_count"], 3)
+        self.assertEqual(lineage["trace_event_count"], 3)
+        self.assertEqual(len(lineage_rows), 3)
+        self.assertEqual(
+            [row["trace_lineage_segment_index"] for row in lineage_rows],
+            [0, 1, 2],
+        )
+        self.assertEqual(lineage_summary["trace_scope"], "lineage")
+        self.assertEqual(lineage_summary["trace_event_count"], 3)
+        self.assertEqual(lineage_summary["trace_lineage_segment_count"], 3)
+        self.assertEqual(
+            lineage_summary["trace_lineage_step_overlap_or_rewind_count"],
+            1,
+        )
+        self.assertEqual(
+            lineage_summary["trace_lineage_boundary_repeated_step_count"],
+            1,
+        )
+        self.assertIn("trainer_trace_lineage", lineage_lines[0])
+        self.assertFalse(missing_tip_lineage["ready"])
+        self.assertTrue(
+            any(
+                issue["code"] == "segment_receipt_mismatch"
+                for issue in missing_tip_lineage["issues"]
+            )
+        )
+        self.assertFalse(cyclic_lineage["ready"])
+        self.assertTrue(
+            any(
+                issue["code"] == "receipt_cycle"
+                for issue in cyclic_lineage["issues"]
+            )
+        )
+        self.assertFalse(limited_lineage["ready"])
+        self.assertTrue(
+            any(
+                issue["code"] == "segment_limit_exceeded"
+                for issue in limited_lineage["issues"]
+            )
+        )
         self.assertEqual(fresh_plan["status"], "fresh_segment")
         self.assertIsNone(fresh_plan["parent_trace_path"])
         self.assertEqual(
@@ -13805,6 +14099,22 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             fresh_trace.resolve(),
         )
         self.assertTrue(fresh_receipt["ready"])
+        self.assertEqual(legacy_lineage["status"], "legacy_unsealed")
+        self.assertTrue(legacy_lineage["ready"])
+        self.assertFalse(legacy_lineage["fully_sealed"])
+        self.assertEqual(
+            portable_summary["trainer_trace_lineage_status"],
+            "legacy_unsealed",
+        )
+        self.assertTrue(portable_summary["trainer_trace_lineage_ready"])
+        self.assertEqual(
+            portable_summary["trainer_trace_lineage_event_count"],
+            1,
+        )
+        self.assertEqual(
+            portable_summary["trainer_trace_lineage_last_loss"],
+            1.25,
+        )
         self.assertEqual(fresh_with_previous["lineage_depth"], 0)
         self.assertIsNone(fresh_with_previous["parent_segment_id"])
         self.assertFalse(
@@ -13833,6 +14143,16 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertFalse(
             tampered_retry_receipt["previous_segment_integrity_ready"]
         )
+        self.assertFalse(tampered_lineage["ready"])
+        self.assertEqual(tampered_lineage["status"], "blocked")
+        self.assertFalse(tampered_run_summary["trainer_trace_lineage_ready"])
+        self.assertEqual(
+            tampered_run_summary["trainer_trace_lineage_summary"],
+            {},
+        )
+        self.assertIsNone(
+            tampered_run_summary["trainer_trace_lineage_last_loss"]
+        )
         self.assertFalse(tampered_resume_plan["ready"])
         self.assertFalse(
             tampered_resume_plan["previous_segment_revalidated_ready"]
@@ -13847,7 +14167,16 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             st.HF_FINETUNE_TRAINER_TRACE_SEGMENT_SCHEMA,
             "spiraltorch.hf_finetune_trainer_trace_segment.v1",
         )
+        self.assertEqual(
+            st.HF_FINETUNE_TRAINER_TRACE_LINEAGE_SCHEMA,
+            "spiraltorch.hf_finetune_trainer_trace_lineage.v1",
+        )
         self.assertIn("hf_finetune_trainer_trace_segment_plan", st.__all__)
+        self.assertIn("hf_finetune_trainer_trace_lineage_report", st.__all__)
+        self.assertIs(
+            st.hf_finetune_trainer_trace_lineage_report,
+            hf_ft.hf_finetune_trainer_trace_lineage_report,
+        )
 
     def test_bridge_resume_routes_callback_to_immutable_trace_segment(self) -> None:
         module = load_bridge_example()
@@ -14018,6 +14347,14 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertTrue(receipt["ready"])
         self.assertTrue(receipt["parent_integrity_ready"])
         self.assertEqual(card["trainer_trace_segment"], receipt)
+        self.assertTrue(card["trainer_trace_lineage"]["ready"])
+        self.assertEqual(card["trainer_trace_lineage"]["segment_count"], 2)
+        self.assertEqual(
+            card["trainer_trace_lineage_summary"][
+                "trace_lineage_segment_count"
+            ],
+            2,
+        )
         self.assertFalse(blocked_followup["ready"])
         self.assertEqual(
             recovered_blocked_parent["receipt_id"],

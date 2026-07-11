@@ -2330,9 +2330,18 @@ def test_adapter_promotion_chain_revalidates_trainer_trace_segment(
 
     assert ready_node["trainer_trace_segment_id"] == trace_receipt["segment_id"]
     assert ready_node["trainer_trace_segment_revalidated_ready"] is True
+    assert ready_node["trainer_trace_lineage_ready"] is True
+    assert ready_node["trainer_trace_lineage_segment_count"] == 1
+    assert ready_node["trainer_trace_lineage_revalidated_ready"] is True
     assert tampered_node["status"] == "rejected"
     assert tampered_node["trainer_trace_segment_revalidated_ready"] is False
+    assert tampered_node["trainer_trace_lineage_ready"] is False
+    assert tampered_node["trainer_trace_lineage_revalidated_ready"] is False
     assert any(
         issue["code"] == "trainer_trace_segment_integrity_mismatch"
+        for issue in tampered_node["issues"]
+    )
+    assert any(
+        issue["code"] == "trainer_trace_lineage_integrity_mismatch"
         for issue in tampered_node["issues"]
     )

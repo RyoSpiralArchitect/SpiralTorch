@@ -40,6 +40,7 @@ __all__ = [
     "HF_FINETUNE_MODEL_CONFIG_SCHEMA",
     "HF_FINETUNE_RUN_CARD_FILENAME",
     "HF_FINETUNE_TRAINER_TRACE_FILENAME",
+    "HF_FINETUNE_TRAINER_TRACE_LINEAGE_SCHEMA",
     "HF_FINETUNE_TRAINER_TRACE_SEGMENT_SCHEMA",
     "HF_FINETUNE_REQUIRED_PYTHON_PACKAGES",
     "HF_FINETUNE_REQUIRED_RUST_SURFACES",
@@ -95,6 +96,8 @@ __all__ = [
     "hf_finetune_geometry_guard_runtime_evidence_report",
     "hf_finetune_trainer_trace_callback",
     "hf_finetune_trainer_trace_event",
+    "hf_finetune_trainer_trace_lineage_lines",
+    "hf_finetune_trainer_trace_lineage_report",
     "hf_finetune_trainer_trace_segment_lines",
     "hf_finetune_trainer_trace_segment_plan",
     "hf_finetune_trainer_trace_segment_receipt",
@@ -127,6 +130,8 @@ __all__ = [
     "hf_gpt2_finetune_geometry_guard_runtime_evidence_report",
     "hf_gpt2_finetune_trainer_trace_callback",
     "hf_gpt2_finetune_trainer_trace_event",
+    "hf_gpt2_finetune_trainer_trace_lineage_lines",
+    "hf_gpt2_finetune_trainer_trace_lineage_report",
     "hf_gpt2_finetune_trainer_trace_segment_lines",
     "hf_gpt2_finetune_trainer_trace_segment_plan",
     "hf_gpt2_finetune_trainer_trace_segment_receipt",
@@ -138,17 +143,21 @@ __all__ = [
     "load_hf_finetune_model_profile_launch_plan",
     "load_hf_finetune_sweep_report",
     "load_hf_finetune_trainer_trace",
+    "load_hf_finetune_trainer_trace_lineage",
     "load_hf_gpt2_finetune_run_card",
     "load_hf_gpt2_finetune_sweep_report",
     "load_hf_gpt2_finetune_trainer_trace",
+    "load_hf_gpt2_finetune_trainer_trace_lineage",
     "summarize_hf_finetune_run_card",
     "summarize_hf_finetune_sweep_report",
     "summarize_hf_finetune_sweep_report_lines",
     "summarize_hf_finetune_trainer_trace",
+    "summarize_hf_finetune_trainer_trace_lineage",
     "summarize_hf_gpt2_finetune_run_card",
     "summarize_hf_gpt2_finetune_sweep_report",
     "summarize_hf_gpt2_finetune_sweep_report_lines",
     "summarize_hf_gpt2_finetune_trainer_trace",
+    "summarize_hf_gpt2_finetune_trainer_trace_lineage",
     "write_hf_finetune_model_profile_launch_plan",
     "write_hf_finetune_model_profile_launch_bundle",
     "write_hf_finetune_model_profile_launch_script",
@@ -165,6 +174,9 @@ HF_GPT2_FT_RUN_CARD_FILENAME = "spiraltorch-hf-gpt2-ft-run-card.json"
 HF_GPT2_FT_TRAINER_TRACE_FILENAME = "spiraltorch-hf-gpt2-ft-trainer-trace.jsonl"
 HF_FINETUNE_RUN_CARD_FILENAME = "spiraltorch-hf-finetune-run-card.json"
 HF_FINETUNE_TRAINER_TRACE_FILENAME = "spiraltorch-hf-finetune-trainer-trace.jsonl"
+HF_FINETUNE_TRAINER_TRACE_LINEAGE_SCHEMA = (
+    "spiraltorch.hf_finetune_trainer_trace_lineage.v1"
+)
 HF_FINETUNE_TRAINER_TRACE_SEGMENT_SCHEMA = (
     "spiraltorch.hf_finetune_trainer_trace_segment.v1"
 )
@@ -4311,6 +4323,13 @@ def hf_gpt2_finetune_summary_lines(report: Mapping[str, object]) -> list[str]:
                 trainer_trace_segment
             )
         )
+    trainer_trace_lineage = report.get("trainer_trace_lineage")
+    if isinstance(trainer_trace_lineage, Mapping):
+        lines.extend(
+            hf_gpt2_finetune_trainer_trace_lineage_lines(
+                trainer_trace_lineage
+            )
+        )
     corpus = report.get("corpus_file_report")
     if isinstance(corpus, Mapping):
         lines.append(
@@ -5871,6 +5890,675 @@ def hf_gpt2_finetune_trainer_trace_segment_lines(
     ]
 
 
+def _trainer_trace_lineage_path(
+    value: object,
+    *,
+    base_dir: Path,
+) -> Path | None:
+    if value is None or not str(value).strip():
+        return None
+    path = Path(str(value)).expanduser()
+    if not path.is_absolute():
+        path = base_dir / path
+    return path.resolve()
+
+
+def _trainer_trace_lineage_input(
+    receipt_or_card: str | Path | Mapping[str, object],
+) -> tuple[dict[str, object], Path, str | None, str]:
+    if isinstance(receipt_or_card, (str, Path)):
+        source_path = Path(receipt_or_card).expanduser().resolve()
+        try:
+            payload = json.loads(source_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"{source_path} invalid JSON: {exc}") from exc
+        if not isinstance(payload, Mapping):
+            raise ValueError(f"{source_path} did not contain a JSON object")
+        source_kind = (
+            "receipt"
+            if payload.get("receipt_id") is not None
+            and payload.get("trace_path") is not None
+            else "run_card"
+        )
+        return dict(payload), source_path.parent, str(source_path), source_kind
+    if not isinstance(receipt_or_card, Mapping):
+        raise TypeError("trace lineage source must be a receipt, run card, or path")
+    payload = dict(receipt_or_card)
+    source_kind = (
+        "receipt"
+        if payload.get("receipt_id") is not None
+        and payload.get("trace_path") is not None
+        else "run_card"
+    )
+    return payload, Path.cwd(), None, source_kind
+
+
+def _trainer_trace_lineage_receipt_copy(
+    receipt: Mapping[str, object],
+    *,
+    base_dir: Path,
+) -> dict[str, object]:
+    copied = dict(receipt)
+    for key in ("canonical_trace_path", "trace_path", "parent_trace_path"):
+        resolved = _trainer_trace_lineage_path(copied.get(key), base_dir=base_dir)
+        if resolved is not None:
+            copied[key] = str(resolved)
+    return copied
+
+
+def _trainer_trace_segment_identity_matches(
+    receipt: Mapping[str, object],
+) -> tuple[bool, str | None]:
+    identity = {
+        "schema": receipt.get("schema"),
+        "canonical_trace_path": receipt.get("canonical_trace_path"),
+        "trace_path": receipt.get("trace_path"),
+        "resume_from_checkpoint": receipt.get("resume_from_checkpoint"),
+        "initial_step": receipt.get("initial_step"),
+        "attempt": receipt.get("attempt"),
+        "lineage_depth": receipt.get("lineage_depth"),
+        "parent_segment_id": receipt.get("parent_segment_id"),
+        "parent_segment_receipt_id": receipt.get(
+            "parent_segment_receipt_id"
+        ),
+        "parent_trace_path": receipt.get("parent_trace_path"),
+        "parent_trace_sha256": receipt.get("parent_trace_sha256"),
+        "parent_trace_bytes": receipt.get("parent_trace_bytes"),
+    }
+    observed = receipt.get("segment_id")
+    if observed == _trainer_trace_segment_id(identity):
+        return True, "current"
+    legacy_identity = dict(identity)
+    legacy_identity.pop("parent_segment_receipt_id", None)
+    if observed == _trainer_trace_segment_id(legacy_identity):
+        return True, "legacy_v1"
+    return False, None
+
+
+def _trainer_trace_receipt_identity_matches(
+    receipt: Mapping[str, object],
+    *,
+    evidence: Mapping[str, object],
+    parent_integrity_ready: bool,
+    previous_receipt_integrity_ready: bool | None,
+) -> tuple[bool, str | None, str]:
+    previous_receipt = receipt.get("previous_segment_receipt")
+    previous_receipt_id = receipt.get("parent_segment_receipt_id")
+    if previous_receipt_id is None and isinstance(previous_receipt, Mapping):
+        previous_receipt_id = previous_receipt.get("receipt_id")
+    identity = {
+        "schema": receipt.get("schema"),
+        "segment_id": receipt.get("segment_id"),
+        "trace_sha256": evidence.get("sha256"),
+        "trace_bytes": evidence.get("bytes"),
+        "trace_event_count": evidence.get("event_count"),
+        "parent_trace_sha256": receipt.get("parent_trace_sha256"),
+        "parent_integrity_ready": parent_integrity_ready,
+        "previous_segment_receipt_id": previous_receipt_id,
+        "previous_segment_integrity_ready": previous_receipt_integrity_ready,
+    }
+    expected = _trainer_trace_segment_id(identity)
+    if receipt.get("receipt_id") == expected:
+        return True, "current", expected
+    legacy_identity = {
+        key: value
+        for key, value in identity.items()
+        if key
+        not in {
+            "previous_segment_receipt_id",
+            "previous_segment_integrity_ready",
+        }
+    }
+    legacy_expected = _trainer_trace_segment_id(legacy_identity)
+    if receipt.get("receipt_id") == legacy_expected:
+        return True, "legacy_v1", legacy_expected
+    return False, None, expected
+
+
+def _trainer_trace_lineage_issue(
+    code: str,
+    message: str,
+    *,
+    path: object = None,
+    observed: object = None,
+) -> dict[str, object]:
+    return {
+        "code": code,
+        "message": message,
+        "path": None if path is None else str(path),
+        "observed": observed,
+    }
+
+
+def hf_gpt2_finetune_trainer_trace_lineage_report(
+    receipt_or_card: str | Path | Mapping[str, object],
+    *,
+    max_segments: int = 1024,
+) -> dict[str, object]:
+    """Rebuild and verify an immutable root-to-tip Trainer trace lineage."""
+
+    if max_segments <= 0:
+        raise ValueError("max_segments must be positive")
+    payload, base_dir, source_path, source_kind = _trainer_trace_lineage_input(
+        receipt_or_card
+    )
+    if payload.get("row_type") in {
+        "hf_gpt2_finetune_trainer_trace_lineage",
+        "hf_finetune_trainer_trace_lineage",
+    }:
+        raise TypeError("trace lineage reports are loaded directly, not rebuilt")
+    raw_receipt = (
+        payload
+        if source_kind == "receipt"
+        else payload.get("trainer_trace_segment_receipt")
+        or payload.get("trainer_trace_segment")
+    )
+    receipt = (
+        dict(raw_receipt)
+        if isinstance(raw_receipt, Mapping)
+        and raw_receipt.get("receipt_id") is not None
+        else None
+    )
+    legacy_trace_path = (
+        None
+        if receipt is not None
+        else _trainer_trace_lineage_path(
+            payload.get("trainer_trace_jsonl"),
+            base_dir=base_dir,
+        )
+    )
+    issues: list[dict[str, object]] = []
+    warnings: list[dict[str, object]] = []
+    receipt_chain_tip_first: list[dict[str, object]] = []
+    if receipt is not None:
+        current: Mapping[str, object] | None = receipt
+        seen_receipt_ids: set[str] = set()
+        seen_objects: set[int] = set()
+        while isinstance(current, Mapping):
+            if len(receipt_chain_tip_first) >= max_segments:
+                issues.append(
+                    _trainer_trace_lineage_issue(
+                        "segment_limit_exceeded",
+                        f"trainer trace lineage exceeded {max_segments} segments",
+                    )
+                )
+                break
+            object_id = id(current)
+            receipt_id = str(current.get("receipt_id") or "")
+            if object_id in seen_objects or (
+                receipt_id and receipt_id in seen_receipt_ids
+            ):
+                issues.append(
+                    _trainer_trace_lineage_issue(
+                        "receipt_cycle",
+                        "trainer trace receipt lineage contains a cycle",
+                        observed=receipt_id or None,
+                    )
+                )
+                break
+            seen_objects.add(object_id)
+            if receipt_id:
+                seen_receipt_ids.add(receipt_id)
+            receipt_chain_tip_first.append(
+                _trainer_trace_lineage_receipt_copy(
+                    current,
+                    base_dir=base_dir,
+                )
+            )
+            previous = current.get("previous_segment_receipt")
+            current = previous if isinstance(previous, Mapping) else None
+    receipts = list(reversed(receipt_chain_tip_first))
+    segments: list[dict[str, object]] = []
+
+    if receipts:
+        oldest = receipts[0]
+        oldest_parent_path = _trainer_trace_lineage_path(
+            oldest.get("parent_trace_path"),
+            base_dir=base_dir,
+        )
+        if oldest_parent_path is not None:
+            evidence = _trainer_trace_file_evidence(oldest_parent_path)
+            expected_event_count = oldest.get("parent_trace_event_count")
+            digest_matches = evidence.get("sha256") == oldest.get(
+                "parent_trace_sha256"
+            )
+            bytes_match = evidence.get("bytes") == oldest.get(
+                "parent_trace_bytes"
+            )
+            events_match = bool(
+                expected_event_count is None
+                or evidence.get("event_count") == expected_event_count
+            )
+            ready = bool(
+                evidence.get("status") == "ready"
+                and digest_matches
+                and bytes_match
+                and events_match
+            )
+            if not ready:
+                issues.append(
+                    _trainer_trace_lineage_issue(
+                        "sealed_parent_mismatch",
+                        "sealed root trainer trace no longer matches its receipt",
+                        path=oldest_parent_path,
+                        observed=evidence,
+                    )
+                )
+            depth = _optional_non_negative_integer(oldest.get("lineage_depth"))
+            segments.append(
+                {
+                    "segment_kind": "sealed_parent",
+                    "status": "ready" if ready else "blocked",
+                    "ready": ready,
+                    "sealed": True,
+                    "integrity_ready": ready,
+                    "lineage_depth": None if depth is None else max(0, depth - 1),
+                    "segment_id": oldest.get("parent_segment_id"),
+                    "receipt_id": oldest.get("parent_segment_receipt_id"),
+                    "trace_path": str(oldest_parent_path),
+                    "trace_status": evidence.get("status"),
+                    "trace_sha256": evidence.get("sha256"),
+                    "trace_bytes": evidence.get("bytes"),
+                    "trace_event_count": evidence.get("event_count"),
+                    "trace_first_global_step": evidence.get("first_global_step"),
+                    "trace_last_global_step": evidence.get("last_global_step"),
+                    "parent_trace_path": None,
+                    "parent_trace_sha256": None,
+                    "parent_trace_bytes": None,
+                    "parent_segment_id": None,
+                    "parent_segment_receipt_id": None,
+                    "parent_integrity_ready": None,
+                    "segment_identity_matches": None,
+                    "receipt_identity_matches": None,
+                    "receipt_identity_version": None,
+                    "parent_continuity_ready": None,
+                }
+            )
+    elif legacy_trace_path is not None:
+        evidence = _trainer_trace_file_evidence(legacy_trace_path)
+        ready = evidence.get("status") == "ready"
+        if not ready:
+            issues.append(
+                _trainer_trace_lineage_issue(
+                    "legacy_trace_invalid",
+                    "legacy trainer trace is missing, empty, or invalid",
+                    path=legacy_trace_path,
+                    observed=evidence,
+                )
+            )
+        segments.append(
+            {
+                "segment_kind": "legacy_unsealed",
+                "status": "ready" if ready else "blocked",
+                "ready": ready,
+                "sealed": False,
+                "integrity_ready": None,
+                "lineage_depth": 0,
+                "segment_id": None,
+                "receipt_id": None,
+                "trace_path": str(legacy_trace_path),
+                "trace_status": evidence.get("status"),
+                "trace_sha256": evidence.get("sha256"),
+                "trace_bytes": evidence.get("bytes"),
+                "trace_event_count": evidence.get("event_count"),
+                "trace_first_global_step": evidence.get("first_global_step"),
+                "trace_last_global_step": evidence.get("last_global_step"),
+                "parent_trace_path": None,
+                "parent_trace_sha256": None,
+                "parent_trace_bytes": None,
+                "parent_segment_id": None,
+                "parent_segment_receipt_id": None,
+                "parent_integrity_ready": None,
+                "segment_identity_matches": None,
+                "receipt_identity_matches": None,
+                "receipt_identity_version": None,
+                "parent_continuity_ready": None,
+            }
+        )
+
+    previous_receipt_ready: bool | None = None
+    for receipt_row in receipts:
+        trace_path = _trainer_trace_lineage_path(
+            receipt_row.get("trace_path"),
+            base_dir=base_dir,
+        )
+        parent_path = _trainer_trace_lineage_path(
+            receipt_row.get("parent_trace_path"),
+            base_dir=base_dir,
+        )
+        evidence = (
+            _trainer_trace_file_evidence(trace_path)
+            if trace_path is not None
+            else {"status": "missing"}
+        )
+        parent_evidence = (
+            _trainer_trace_file_evidence(parent_path)
+            if parent_path is not None
+            else None
+        )
+        parent_integrity_ready = bool(
+            parent_evidence is None
+            or (
+                parent_evidence.get("status") == "ready"
+                and parent_evidence.get("sha256")
+                == receipt_row.get("parent_trace_sha256")
+                and parent_evidence.get("bytes")
+                == receipt_row.get("parent_trace_bytes")
+            )
+        )
+        segment_identity_matches, segment_identity_version = (
+            _trainer_trace_segment_identity_matches(receipt_row)
+        )
+        receipt_identity_matches, receipt_identity_version, expected_receipt_id = (
+            _trainer_trace_receipt_identity_matches(
+                receipt_row,
+                evidence=evidence,
+                parent_integrity_ready=parent_integrity_ready,
+                previous_receipt_integrity_ready=previous_receipt_ready,
+            )
+        )
+        trace_matches = bool(
+            evidence.get("status") == "ready"
+            and evidence.get("sha256") == receipt_row.get("trace_sha256")
+            and evidence.get("bytes") == receipt_row.get("trace_bytes")
+            and evidence.get("event_count")
+            == receipt_row.get("trace_event_count")
+        )
+        ready = bool(
+            receipt_row.get("ready") is True
+            and trace_matches
+            and parent_integrity_ready
+            and previous_receipt_ready is not False
+            and segment_identity_matches
+            and receipt_identity_matches
+        )
+        if not ready:
+            issues.append(
+                _trainer_trace_lineage_issue(
+                    "segment_receipt_mismatch",
+                    "trainer trace segment or receipt identity no longer matches",
+                    path=trace_path,
+                    observed={
+                        "trace_matches": trace_matches,
+                        "parent_integrity_ready": parent_integrity_ready,
+                        "previous_receipt_integrity_ready": (
+                            previous_receipt_ready
+                        ),
+                        "segment_identity_matches": segment_identity_matches,
+                        "receipt_identity_matches": receipt_identity_matches,
+                        "expected_receipt_id": expected_receipt_id,
+                    },
+                )
+            )
+        segments.append(
+            {
+                "segment_kind": "receipt",
+                "status": "ready" if ready else "blocked",
+                "ready": ready,
+                "sealed": True,
+                "integrity_ready": ready,
+                "lineage_depth": receipt_row.get("lineage_depth"),
+                "segment_id": receipt_row.get("segment_id"),
+                "receipt_id": receipt_row.get("receipt_id"),
+                "trace_path": None if trace_path is None else str(trace_path),
+                "trace_status": evidence.get("status"),
+                "trace_sha256": evidence.get("sha256"),
+                "trace_bytes": evidence.get("bytes"),
+                "trace_event_count": evidence.get("event_count"),
+                "trace_first_global_step": evidence.get("first_global_step"),
+                "trace_last_global_step": evidence.get("last_global_step"),
+                "initial_step": receipt_row.get("initial_step"),
+                "attempt": receipt_row.get("attempt"),
+                "resume_requested": receipt_row.get("resume_requested"),
+                "resume_from_checkpoint": receipt_row.get(
+                    "resume_from_checkpoint"
+                ),
+                "parent_trace_path": (
+                    None if parent_path is None else str(parent_path)
+                ),
+                "parent_trace_sha256": receipt_row.get("parent_trace_sha256"),
+                "parent_trace_bytes": receipt_row.get("parent_trace_bytes"),
+                "parent_segment_id": receipt_row.get("parent_segment_id"),
+                "parent_segment_receipt_id": receipt_row.get(
+                    "parent_segment_receipt_id"
+                ),
+                "parent_integrity_ready": parent_integrity_ready,
+                "previous_receipt_integrity_ready": previous_receipt_ready,
+                "segment_identity_matches": segment_identity_matches,
+                "segment_identity_version": segment_identity_version,
+                "receipt_identity_matches": receipt_identity_matches,
+                "receipt_identity_version": receipt_identity_version,
+                "parent_continuity_ready": None,
+            }
+        )
+        previous_receipt_ready = ready
+
+    continuity_ready = True
+    step_continuity_verified = True
+    step_continuity_ready = True
+    boundaries: list[dict[str, object]] = []
+    for parent, child in zip(segments, segments[1:]):
+        child_parent_path = child.get("parent_trace_path")
+        path_matches = child_parent_path == parent.get("trace_path")
+        digest_matches = child.get("parent_trace_sha256") == parent.get(
+            "trace_sha256"
+        )
+        bytes_matches = child.get("parent_trace_bytes") == parent.get(
+            "trace_bytes"
+        )
+        parent_segment_id = child.get("parent_segment_id")
+        segment_id_matches = bool(
+            parent_segment_id is None
+            or parent_segment_id == parent.get("segment_id")
+        )
+        parent_receipt_id = child.get("parent_segment_receipt_id")
+        receipt_id_matches = bool(
+            parent_receipt_id is None
+            or parent_receipt_id == parent.get("receipt_id")
+        )
+        parent_last_step = _safe_number(parent.get("trace_last_global_step"))
+        child_initial_step = _safe_number(child.get("initial_step"))
+        child_first_step = _safe_number(child.get("trace_first_global_step"))
+        step_ready = None
+        if parent_last_step is not None and child_initial_step is not None:
+            step_ready = child_initial_step >= parent_last_step
+        if child_first_step is not None and child_initial_step is not None:
+            first_step_ready = child_first_step >= child_initial_step
+            step_ready = (
+                first_step_ready
+                if step_ready is None
+                else step_ready and first_step_ready
+            )
+        if step_ready is None:
+            step_continuity_verified = False
+        elif not step_ready:
+            step_continuity_ready = False
+        boundary_ready = bool(
+            path_matches
+            and digest_matches
+            and bytes_matches
+            and segment_id_matches
+            and receipt_id_matches
+        )
+        child["parent_continuity_ready"] = boundary_ready
+        continuity_ready = continuity_ready and boundary_ready
+        boundary = {
+            "parent_segment_id": parent.get("segment_id"),
+            "child_segment_id": child.get("segment_id"),
+            "path_matches": path_matches,
+            "digest_matches": digest_matches,
+            "bytes_matches": bytes_matches,
+            "segment_id_matches": segment_id_matches,
+            "receipt_id_matches": receipt_id_matches,
+            "parent_last_global_step": parent_last_step,
+            "child_initial_step": child_initial_step,
+            "child_first_global_step": child_first_step,
+            "step_continuity_ready": step_ready,
+            "ready": boundary_ready,
+        }
+        boundaries.append(boundary)
+        if not boundary_ready:
+            issues.append(
+                _trainer_trace_lineage_issue(
+                    "segment_continuity_mismatch",
+                    "adjacent trainer trace segments are not continuous",
+                    path=child.get("trace_path"),
+                    observed=boundary,
+                )
+            )
+        if step_ready is False:
+            warnings.append(
+                _trainer_trace_lineage_issue(
+                    "step_overlap_or_rewind",
+                    (
+                        "trainer trace segment starts at or before work already "
+                        "observed in its parent"
+                    ),
+                    path=child.get("trace_path"),
+                    observed=boundary,
+                )
+            )
+
+    for index, segment in enumerate(segments):
+        segment["lineage_index"] = index
+    ready = bool(
+        segments
+        and not issues
+        and continuity_ready
+        and all(segment.get("ready") is True for segment in segments)
+    )
+    fully_sealed = bool(
+        segments and all(segment.get("sealed") is True for segment in segments)
+    )
+    total_events = sum(
+        int(segment.get("trace_event_count") or 0) for segment in segments
+    )
+    first_step = next(
+        (
+            segment.get("trace_first_global_step")
+            for segment in segments
+            if segment.get("trace_first_global_step") is not None
+        ),
+        None,
+    )
+    last_step = next(
+        (
+            segment.get("trace_last_global_step")
+            for segment in reversed(segments)
+            if segment.get("trace_last_global_step") is not None
+        ),
+        None,
+    )
+    lineage_identity = {
+        "schema": HF_FINETUNE_TRAINER_TRACE_LINEAGE_SCHEMA,
+        "segments": [
+            {
+                "segment_kind": segment.get("segment_kind"),
+                "segment_id": segment.get("segment_id"),
+                "receipt_id": segment.get("receipt_id"),
+                "trace_path": segment.get("trace_path"),
+                "trace_sha256": segment.get("trace_sha256"),
+                "trace_bytes": segment.get("trace_bytes"),
+                "trace_event_count": segment.get("trace_event_count"),
+            }
+            for segment in segments
+        ],
+    }
+    lineage_id = _trainer_trace_segment_id(lineage_identity)
+    status = (
+        "blocked"
+        if not ready
+        else "ready"
+        if fully_sealed
+        else "legacy_unsealed"
+    )
+    tip = segments[-1] if segments else {}
+    return {
+        "row_type": "hf_gpt2_finetune_trainer_trace_lineage",
+        "schema": HF_FINETUNE_TRAINER_TRACE_LINEAGE_SCHEMA,
+        "status": status,
+        "ready": ready,
+        "fully_sealed": fully_sealed,
+        "integrity_ready": bool(ready and fully_sealed),
+        "continuity_ready": continuity_ready,
+        "step_continuity_verified": step_continuity_verified,
+        "step_continuity_ready": (
+            step_continuity_ready if step_continuity_verified else None
+        ),
+        "step_overlap_or_rewind_count": sum(
+            boundary.get("step_continuity_ready") is False
+            for boundary in boundaries
+        ),
+        "lineage_id": lineage_id,
+        "source_kind": source_kind,
+        "source_path": source_path,
+        "segment_count": len(segments),
+        "receipt_segment_count": sum(
+            segment.get("segment_kind") == "receipt" for segment in segments
+        ),
+        "legacy_segment_count": sum(
+            segment.get("segment_kind") != "receipt" for segment in segments
+        ),
+        "trace_event_count": total_events,
+        "trace_first_global_step": first_step,
+        "trace_last_global_step": last_step,
+        "tip_segment_id": tip.get("segment_id"),
+        "tip_receipt_id": tip.get("receipt_id"),
+        "tip_trace_path": tip.get("trace_path"),
+        "segment_ids": [
+            segment.get("segment_id")
+            for segment in segments
+            if segment.get("segment_id") is not None
+        ],
+        "receipt_ids": [
+            segment.get("receipt_id")
+            for segment in segments
+            if segment.get("receipt_id") is not None
+        ],
+        "trace_paths": [segment.get("trace_path") for segment in segments],
+        "segments": segments,
+        "boundaries": boundaries,
+        "issues": issues,
+        "warnings": warnings,
+    }
+
+
+def hf_gpt2_finetune_trainer_trace_lineage_lines(
+    report: Mapping[str, object],
+) -> list[str]:
+    """Render a verified trainer-trace lineage and its segment boundaries."""
+
+    lines = [
+        (
+            "hf_gpt2_ft_trainer_trace_lineage "
+            f"status={report.get('status')} "
+            f"ready={report.get('ready')} "
+            f"sealed={report.get('fully_sealed')} "
+            f"segments={report.get('segment_count')} "
+            f"events={report.get('trace_event_count')} "
+            f"steps={report.get('trace_first_global_step')}->"
+            f"{report.get('trace_last_global_step')} "
+            f"lineage_id={report.get('lineage_id')}"
+        )
+    ]
+    for raw_segment in report.get("segments") or []:
+        if not isinstance(raw_segment, Mapping):
+            continue
+        lines.append(
+            "hf_gpt2_ft_trainer_trace_lineage_segment "
+            f"index={raw_segment.get('lineage_index')} "
+            f"kind={raw_segment.get('segment_kind')} "
+            f"ready={raw_segment.get('ready')} "
+            f"depth={raw_segment.get('lineage_depth')} "
+            f"steps={raw_segment.get('trace_first_global_step')}->"
+            f"{raw_segment.get('trace_last_global_step')} "
+            f"events={raw_segment.get('trace_event_count')} "
+            f"segment_id={raw_segment.get('segment_id')} "
+            f"path={raw_segment.get('trace_path')}"
+        )
+    return lines
+
+
 def load_hf_gpt2_finetune_trainer_trace(path: str | Path) -> list[dict[str, object]]:
     """Load SpiralTorch HF Trainer trace JSONL rows."""
 
@@ -6425,6 +7113,183 @@ def summarize_hf_gpt2_finetune_trainer_trace(
     }
 
 
+def _trainer_trace_lineage_report_payload(
+    receipt_card_or_report: str | Path | Mapping[str, object],
+) -> dict[str, object]:
+    if isinstance(receipt_card_or_report, Mapping) and receipt_card_or_report.get(
+        "row_type"
+    ) in {
+        "hf_gpt2_finetune_trainer_trace_lineage",
+        "hf_finetune_trainer_trace_lineage",
+    }:
+        return dict(receipt_card_or_report)
+    return hf_gpt2_finetune_trainer_trace_lineage_report(
+        receipt_card_or_report
+    )
+
+
+def load_hf_gpt2_finetune_trainer_trace_lineage(
+    receipt_card_or_report: str | Path | Mapping[str, object],
+    *,
+    require_ready: bool = True,
+) -> list[dict[str, object]]:
+    """Load verified Trainer rows from every immutable lineage segment."""
+
+    report = _trainer_trace_lineage_report_payload(receipt_card_or_report)
+    if require_ready and report.get("ready") is not True:
+        raise ValueError(
+            "trainer trace lineage is not ready: "
+            f"{report.get('status')} {report.get('issues')}"
+        )
+    rows: list[dict[str, object]] = []
+    for raw_segment in report.get("segments") or []:
+        if not isinstance(raw_segment, Mapping):
+            continue
+        trace_value = raw_segment.get("trace_path")
+        if trace_value is None:
+            raise ValueError("trainer trace lineage segment is missing trace_path")
+        trace_path = Path(str(trace_value)).expanduser().resolve()
+        evidence = _trainer_trace_file_evidence(trace_path)
+        matches_report = bool(
+            evidence.get("status") == "ready"
+            and evidence.get("sha256") == raw_segment.get("trace_sha256")
+            and evidence.get("bytes") == raw_segment.get("trace_bytes")
+            and evidence.get("event_count")
+            == raw_segment.get("trace_event_count")
+        )
+        if not matches_report:
+            raise ValueError(
+                "trainer trace lineage changed after report: "
+                f"{trace_path}"
+            )
+        segment_rows = load_hf_gpt2_finetune_trainer_trace(trace_path)
+        if len(segment_rows) != int(raw_segment.get("trace_event_count") or 0):
+            raise ValueError(
+                "trainer trace lineage event count changed while loading: "
+                f"{trace_path}"
+            )
+        for row in segment_rows:
+            annotated = dict(row)
+            annotated.update(
+                {
+                    "trace_lineage_id": report.get("lineage_id"),
+                    "trace_lineage_segment_index": raw_segment.get(
+                        "lineage_index"
+                    ),
+                    "trace_lineage_segment_kind": raw_segment.get(
+                        "segment_kind"
+                    ),
+                    "trace_lineage_segment_id": raw_segment.get("segment_id"),
+                    "trace_lineage_receipt_id": raw_segment.get("receipt_id"),
+                    "trace_lineage_trace_path": str(trace_path),
+                    "trace_lineage_initial_step": raw_segment.get(
+                        "initial_step"
+                    ),
+                }
+            )
+            rows.append(annotated)
+    return rows
+
+
+def summarize_hf_gpt2_finetune_trainer_trace_lineage(
+    receipt_card_or_report: str | Path | Mapping[str, object],
+    *,
+    max_steps: object = None,
+) -> dict[str, object]:
+    """Summarize a verified root-to-tip Trainer trace as one learning curve."""
+
+    report = _trainer_trace_lineage_report_payload(receipt_card_or_report)
+    rows = load_hf_gpt2_finetune_trainer_trace_lineage(report)
+    cumulative = summarize_hf_gpt2_finetune_trainer_trace(
+        rows,
+        max_steps=max_steps,
+    )
+    segment_summaries: list[dict[str, object]] = []
+    step_sets: list[set[int | float]] = []
+    for raw_segment in report.get("segments") or []:
+        if not isinstance(raw_segment, Mapping):
+            continue
+        index = raw_segment.get("lineage_index")
+        segment_rows = [
+            row
+            for row in rows
+            if row.get("trace_lineage_segment_index") == index
+        ]
+        summary = summarize_hf_gpt2_finetune_trainer_trace(
+            segment_rows,
+            max_steps=max_steps,
+        )
+        segment_steps = {
+            step
+            for row in segment_rows
+            if (step := _safe_number(row.get("global_step"))) is not None
+        }
+        step_sets.append(segment_steps)
+        segment_summaries.append(
+            {
+                "lineage_index": index,
+                "segment_kind": raw_segment.get("segment_kind"),
+                "segment_id": raw_segment.get("segment_id"),
+                "receipt_id": raw_segment.get("receipt_id"),
+                "trace_path": raw_segment.get("trace_path"),
+                "initial_step": raw_segment.get("initial_step"),
+                "trace_event_count": summary.get("trace_event_count"),
+                "trace_first_global_step": raw_segment.get(
+                    "trace_first_global_step"
+                ),
+                "trace_last_global_step": raw_segment.get(
+                    "trace_last_global_step"
+                ),
+                "trace_last_loss": summary.get("trace_last_loss"),
+                "trace_min_loss": summary.get("trace_min_loss"),
+                "trace_last_eval_loss": summary.get("trace_last_eval_loss"),
+                "trace_min_eval_loss": summary.get("trace_min_eval_loss"),
+                "trace_training_telemetry_count": summary.get(
+                    "trace_training_telemetry_count"
+                ),
+                "trace_training_geometry_guard_count": summary.get(
+                    "trace_training_geometry_guard_count"
+                ),
+            }
+        )
+    seen_steps: set[int | float] = set()
+    repeated_boundary_steps = 0
+    for segment_steps in step_sets:
+        repeated_boundary_steps += len(seen_steps.intersection(segment_steps))
+        seen_steps.update(segment_steps)
+    return {
+        **cumulative,
+        "row_type": "hf_gpt2_finetune_trainer_trace_lineage_summary",
+        "trace_scope": "lineage",
+        "trace_lineage_status": report.get("status"),
+        "trace_lineage_ready": report.get("ready"),
+        "trace_lineage_fully_sealed": report.get("fully_sealed"),
+        "trace_lineage_id": report.get("lineage_id"),
+        "trace_lineage_segment_count": report.get("segment_count"),
+        "trace_lineage_receipt_segment_count": report.get(
+            "receipt_segment_count"
+        ),
+        "trace_lineage_legacy_segment_count": report.get(
+            "legacy_segment_count"
+        ),
+        "trace_lineage_boundary_count": len(report.get("boundaries") or []),
+        "trace_lineage_boundary_repeated_step_count": repeated_boundary_steps,
+        "trace_lineage_step_continuity_verified": report.get(
+            "step_continuity_verified"
+        ),
+        "trace_lineage_step_continuity_ready": report.get(
+            "step_continuity_ready"
+        ),
+        "trace_lineage_step_overlap_or_rewind_count": report.get(
+            "step_overlap_or_rewind_count"
+        ),
+        "trace_lineage_tip_segment_id": report.get("tip_segment_id"),
+        "trace_lineage_tip_receipt_id": report.get("tip_receipt_id"),
+        "trace_lineage_tip_trace_path": report.get("tip_trace_path"),
+        "trace_lineage_segment_summaries": segment_summaries,
+    }
+
+
 def load_hf_gpt2_finetune_run_card(path: str | Path) -> dict[str, object]:
     """Load one GPT-2 FT run-card JSON artifact."""
 
@@ -6495,6 +7360,58 @@ def _trainer_trace_summary_for_card(
     merged = dict(trace_summary)
     merged.update(summary)
     return merged
+
+
+def _trainer_trace_lineage_for_card(
+    card: Mapping[str, object],
+    *,
+    source_path: str | None = None,
+) -> dict[str, object]:
+    stored = _mapping_item(card, "trainer_trace_lineage")
+    if not (
+        isinstance(card.get("trainer_trace_segment_receipt"), Mapping)
+        or isinstance(card.get("trainer_trace_segment"), Mapping)
+        or card.get("trainer_trace_jsonl") is not None
+    ):
+        return stored
+    try:
+        return hf_gpt2_finetune_trainer_trace_lineage_report(
+            source_path if source_path is not None else card
+        )
+    except (OSError, TypeError, ValueError) as exc:
+        issues = list(stored.get("issues") or [])
+        issues.append(
+            _trainer_trace_lineage_issue(
+                "lineage_revalidation_failed",
+                f"failed to revalidate trainer trace lineage: {exc}",
+            )
+        )
+        return {
+            **stored,
+            "status": "blocked",
+            "ready": False,
+            "integrity_ready": False,
+            "issues": issues,
+        }
+
+
+def _trainer_trace_lineage_summary_for_card(
+    card: Mapping[str, object],
+    *,
+    source_path: str | None = None,
+) -> dict[str, object]:
+    lineage = _trainer_trace_lineage_for_card(
+        card,
+        source_path=source_path,
+    )
+    if lineage.get("ready") is not True:
+        return {}
+    try:
+        return summarize_hf_gpt2_finetune_trainer_trace_lineage(
+            lineage
+        )
+    except (OSError, TypeError, ValueError):
+        return {}
 
 
 def _numeric_delta(
@@ -11637,6 +12554,14 @@ def summarize_hf_gpt2_finetune_run_card(
         card,
         "trainer_trace_segment_receipt",
     ) or _mapping_item(card, "trainer_trace_segment")
+    trainer_trace_lineage = _trainer_trace_lineage_for_card(
+        card,
+        source_path=source_path,
+    )
+    trainer_trace_lineage_summary = _trainer_trace_lineage_summary_for_card(
+        card,
+        source_path=source_path,
+    )
     trainer_geometry_guard_runtime_evidence = _mapping_item(
         trainer_trace,
         "trace_training_geometry_guard_runtime_evidence",
@@ -11888,6 +12813,44 @@ def summarize_hf_gpt2_finetune_run_card(
         ),
         "trainer_trace_segment_event_count": _safe_number(
             trainer_trace_segment.get("trace_event_count")
+        ),
+        "trainer_trace_lineage": trainer_trace_lineage,
+        "trainer_trace_lineage_summary": trainer_trace_lineage_summary,
+        "trainer_trace_lineage_status": trainer_trace_lineage.get("status"),
+        "trainer_trace_lineage_ready": trainer_trace_lineage.get("ready"),
+        "trainer_trace_lineage_fully_sealed": trainer_trace_lineage.get(
+            "fully_sealed"
+        ),
+        "trainer_trace_lineage_id": trainer_trace_lineage.get("lineage_id"),
+        "trainer_trace_lineage_segment_count": _safe_number(
+            trainer_trace_lineage.get("segment_count")
+        ),
+        "trainer_trace_lineage_event_count": _safe_number(
+            trainer_trace_lineage.get("trace_event_count")
+        ),
+        "trainer_trace_lineage_first_global_step": _safe_number(
+            trainer_trace_lineage.get("trace_first_global_step")
+        ),
+        "trainer_trace_lineage_last_global_step": _safe_number(
+            trainer_trace_lineage.get("trace_last_global_step")
+        ),
+        "trainer_trace_lineage_step_overlap_or_rewind_count": _safe_number(
+            trainer_trace_lineage.get("step_overlap_or_rewind_count")
+        ),
+        "trainer_trace_lineage_eval_loss_series": (
+            trainer_trace_lineage_summary.get("trace_eval_loss_series")
+        ),
+        "trainer_trace_lineage_last_loss": _safe_number(
+            trainer_trace_lineage_summary.get("trace_last_loss")
+        ),
+        "trainer_trace_lineage_min_loss": _safe_number(
+            trainer_trace_lineage_summary.get("trace_min_loss")
+        ),
+        "trainer_trace_lineage_last_eval_loss": _safe_number(
+            trainer_trace_lineage_summary.get("trace_last_eval_loss")
+        ),
+        "trainer_trace_lineage_min_eval_loss": _safe_number(
+            trainer_trace_lineage_summary.get("trace_min_eval_loss")
         ),
         "launch_command": _json_safe(card.get("launch_command")),
         "launch_command_display": card.get("launch_command_display"),
@@ -13737,6 +14700,21 @@ def summarize_hf_gpt2_finetune_sweep_report(
             if scale_up_candidate is None
             else scale_up_candidate.get("trainer_trace_segment_ready")
         ),
+        "scale_up_candidate_trainer_trace_lineage_id": (
+            None
+            if scale_up_candidate is None
+            else scale_up_candidate.get("trainer_trace_lineage_id")
+        ),
+        "scale_up_candidate_trainer_trace_lineage_segment_count": (
+            None
+            if scale_up_candidate is None
+            else scale_up_candidate.get("trainer_trace_lineage_segment_count")
+        ),
+        "scale_up_candidate_trainer_trace_lineage_ready": (
+            None
+            if scale_up_candidate is None
+            else scale_up_candidate.get("trainer_trace_lineage_ready")
+        ),
         "scale_up_candidate_command_display": scale_up_candidate_run.get(
             "command_display"
         ),
@@ -13793,6 +14771,15 @@ def summarize_hf_gpt2_finetune_sweep_report(
         ),
         "selected_trainer_trace_segment_ready": selected_summary.get(
             "trainer_trace_segment_ready"
+        ),
+        "selected_trainer_trace_lineage_id": selected_summary.get(
+            "trainer_trace_lineage_id"
+        ),
+        "selected_trainer_trace_lineage_segment_count": selected_summary.get(
+            "trainer_trace_lineage_segment_count"
+        ),
+        "selected_trainer_trace_lineage_ready": selected_summary.get(
+            "trainer_trace_lineage_ready"
         ),
         "selected_command_display": selected_run.get("command_display"),
         "selected_command": _sweep_run_command(selected_run),
@@ -14332,7 +15319,23 @@ def hf_gpt2_finetune_generation_curve_report(
     from .hf_generation import compare_zspace_generation_control_sweeps
 
     card, source_path = _run_card_payload(card_or_path)
-    trace_summary = _trainer_trace_summary_for_card(card)
+    current_trace_summary = _trainer_trace_summary_for_card(card)
+    trace_lineage = _trainer_trace_lineage_for_card(
+        card,
+        source_path=source_path,
+    )
+    try:
+        lineage_trace_summary = (
+            summarize_hf_gpt2_finetune_trainer_trace_lineage(
+                trace_lineage
+            )
+            if trace_lineage.get("ready") is True
+            else {}
+        )
+    except (OSError, TypeError, ValueError):
+        lineage_trace_summary = {}
+    trace_summary = lineage_trace_summary or current_trace_summary
+    trace_scope = "lineage" if lineage_trace_summary else "current_segment"
     eval_points = _curve_eval_loss_points(trace_summary)
     eval_by_step = _curve_eval_loss_by_step(eval_points)
     comparison = compare_zspace_generation_control_sweeps(
@@ -14402,6 +15405,13 @@ def hf_gpt2_finetune_generation_curve_report(
         "model_name": card.get("model_name"),
         "dataset_name": card.get("dataset_name"),
         "dataset_config": card.get("dataset_config"),
+        "trace_scope": trace_scope,
+        "trainer_trace_lineage_status": trace_lineage.get("status"),
+        "trainer_trace_lineage_ready": trace_lineage.get("ready"),
+        "trainer_trace_lineage_id": trace_lineage.get("lineage_id"),
+        "trainer_trace_lineage_segment_count": trace_lineage.get(
+            "segment_count"
+        ),
         "eval_loss_series": trace_summary.get("trace_eval_loss_series"),
         "eval_loss_points": eval_points,
         "comparison": comparison,
@@ -14465,6 +15475,9 @@ def hf_gpt2_finetune_generation_curve_lines(
             f"models={report.get('curve_model_count')} "
             f"sweeps={report.get('completed_sweep_count')}/"
             f"{report.get('sweep_count')} "
+            f"trace_scope={report.get('trace_scope')} "
+            "trace_segments="
+            f"{report.get('trainer_trace_lineage_segment_count')} "
             f"eval_loss_series={report.get('eval_loss_series')} "
             f"recommend={report.get('recommended_model_name')} "
             f"step={report.get('recommended_step')}"
@@ -15475,6 +16488,31 @@ def hf_finetune_trainer_trace_segment_lines(
     )
 
 
+def hf_finetune_trainer_trace_lineage_report(
+    *args: object,
+    **kwargs: object,
+) -> dict[str, object]:
+    return dict(
+        _genericize_hf_finetune_payload(
+            hf_gpt2_finetune_trainer_trace_lineage_report(
+                *args,
+                **kwargs,
+            )
+        )
+    )
+
+
+def hf_finetune_trainer_trace_lineage_lines(
+    *args: object,
+    **kwargs: object,
+) -> list[str]:
+    return _generic_lines_from(
+        hf_gpt2_finetune_trainer_trace_lineage_lines,
+        *args,
+        **kwargs,
+    )
+
+
 def hf_finetune_zspace_probe(*args: object, **kwargs: object) -> dict[str, object]:
     return _generic_report_from(hf_gpt2_finetune_zspace_probe, *args, **kwargs)
 
@@ -15496,6 +16534,14 @@ def load_hf_finetune_sweep_report(path: str | Path) -> dict[str, object]:
 
 def load_hf_finetune_trainer_trace(path: str | Path) -> list[dict[str, object]]:
     rows = load_hf_gpt2_finetune_trainer_trace(path)
+    return [dict(_genericize_hf_finetune_payload(row)) for row in rows]
+
+
+def load_hf_finetune_trainer_trace_lineage(
+    *args: object,
+    **kwargs: object,
+) -> list[dict[str, object]]:
+    rows = load_hf_gpt2_finetune_trainer_trace_lineage(*args, **kwargs)
     return [dict(_genericize_hf_finetune_payload(row)) for row in rows]
 
 
@@ -15530,6 +16576,17 @@ def summarize_hf_finetune_trainer_trace(
 ) -> dict[str, object]:
     return _generic_report_from(
         summarize_hf_gpt2_finetune_trainer_trace,
+        *args,
+        **kwargs,
+    )
+
+
+def summarize_hf_finetune_trainer_trace_lineage(
+    *args: object,
+    **kwargs: object,
+) -> dict[str, object]:
+    return _generic_report_from(
+        summarize_hf_gpt2_finetune_trainer_trace_lineage,
         *args,
         **kwargs,
     )

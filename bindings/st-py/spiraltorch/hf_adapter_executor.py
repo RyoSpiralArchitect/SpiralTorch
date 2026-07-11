@@ -679,6 +679,10 @@ def _validate_trainer_telemetry_evidence_rows(
             "trainer_trace_segment_id",
             "trainer_trace_segment_receipt_id",
             "trainer_trace_segment_matches",
+            "trainer_trace_lineage_required",
+            "trainer_trace_lineage_id",
+            "trainer_trace_lineage_segment_count",
+            "trainer_trace_lineage_matches",
             "node_matches_trace",
         ):
             if field in evidence:
@@ -1384,6 +1388,10 @@ def _trainer_telemetry_evidence_contract(
             "trainer_trace_segment_id": None,
             "trainer_trace_segment_receipt_id": None,
             "trainer_trace_segment_matches": None,
+            "trainer_trace_lineage_required": None,
+            "trainer_trace_lineage_id": None,
+            "trainer_trace_lineage_segment_count": None,
+            "trainer_trace_lineage_matches": None,
             "trace_path": resolved_command_contract.get("trainer_trace_jsonl"),
             "trace_exists": None,
             "trace_sha256": None,
@@ -1800,12 +1808,59 @@ def _trainer_telemetry_evidence_contract(
                 ),
             }
         )
+    raw_node_trace_lineage = (
+        None if node is None else node.get("trainer_trace_lineage")
+    )
+    node_trace_lineage = (
+        dict(raw_node_trace_lineage)
+        if isinstance(raw_node_trace_lineage, Mapping)
+        else {}
+    )
+    trainer_trace_lineage_required = trainer_trace_segment_required
+    node_lineage_tip_path = None
+    if node_trace_lineage.get("tip_trace_path") is not None:
+        node_lineage_tip_path = Path(
+            str(node_trace_lineage.get("tip_trace_path"))
+        ).expanduser()
+        if not node_lineage_tip_path.is_absolute():
+            run_card_path = None if node is None else node.get("run_card_path")
+            base = (
+                Path(str(run_card_path)).expanduser().parent
+                if run_card_path is not None
+                else Path.cwd()
+            )
+            node_lineage_tip_path = base / node_lineage_tip_path
+        node_lineage_tip_path = node_lineage_tip_path.resolve()
+    trainer_trace_lineage_matches = bool(
+        not trainer_trace_lineage_required
+        or (
+            trace_path is not None
+            and node_lineage_tip_path == trace_path
+            and node_trace_lineage.get("tip_receipt_id")
+            == node_trace_segment.get("receipt_id")
+            and node_trace_lineage.get("ready") is True
+            and node is not None
+            and node.get("trainer_trace_lineage_revalidated_ready") is True
+        )
+    )
+    if trainer_trace_lineage_required and not trainer_trace_lineage_matches:
+        issues.append(
+            {
+                "field": "trainer_trace_lineage",
+                "observed": node_trace_lineage,
+                "message": (
+                    "chain node trainer trace lineage does not end at the "
+                    "raw trace receipt"
+                ),
+            }
+        )
     node_matches_trace = bool(
         count_matches
         and desire_matches
         and psi_matches
         and geometry_guard_node_matches
         and trainer_trace_segment_matches
+        and trainer_trace_lineage_matches
     )
     if not node_matches_trace:
         issues.append(
@@ -1905,6 +1960,12 @@ def _trainer_telemetry_evidence_contract(
             "receipt_id"
         ),
         "trainer_trace_segment_matches": trainer_trace_segment_matches,
+        "trainer_trace_lineage_required": trainer_trace_lineage_required,
+        "trainer_trace_lineage_id": node_trace_lineage.get("lineage_id"),
+        "trainer_trace_lineage_segment_count": node_trace_lineage.get(
+            "segment_count"
+        ),
+        "trainer_trace_lineage_matches": trainer_trace_lineage_matches,
         "node_matches_trace": node_matches_trace,
         "required_axes": required_axes,
     }
@@ -1994,6 +2055,12 @@ def _trainer_telemetry_evidence_contract(
             "receipt_id"
         ),
         "trainer_trace_segment_matches": trainer_trace_segment_matches,
+        "trainer_trace_lineage_required": trainer_trace_lineage_required,
+        "trainer_trace_lineage_id": node_trace_lineage.get("lineage_id"),
+        "trainer_trace_lineage_segment_count": node_trace_lineage.get(
+            "segment_count"
+        ),
+        "trainer_trace_lineage_matches": trainer_trace_lineage_matches,
         "node_matches_trace": node_matches_trace,
         "evidence_id": _canonical_sha256(evidence_payload)
         if trace_sha256 is not None
@@ -4372,6 +4439,21 @@ def hf_adapter_continuation_executor_lines(
             if isinstance(telemetry_evidence, Mapping)
             else None
         )
+        telemetry_trace_lineage_id = (
+            telemetry_evidence.get("trainer_trace_lineage_id")
+            if isinstance(telemetry_evidence, Mapping)
+            else None
+        )
+        telemetry_trace_lineage_segment_count = (
+            telemetry_evidence.get("trainer_trace_lineage_segment_count")
+            if isinstance(telemetry_evidence, Mapping)
+            else None
+        )
+        telemetry_trace_lineage_matches = (
+            telemetry_evidence.get("trainer_trace_lineage_matches")
+            if isinstance(telemetry_evidence, Mapping)
+            else None
+        )
         command_runtime = raw_attempt.get("command_runtime")
         runtime_status = (
             command_runtime.get("status")
@@ -4487,6 +4569,9 @@ def hf_adapter_continuation_executor_lines(
             f"guard_pending_axes={telemetry_geometry_guard_pending_axes} "
             f"trace_segment={telemetry_trace_segment_id} "
             f"trace_segment_matches={telemetry_trace_segment_matches} "
+            f"trace_lineage={telemetry_trace_lineage_id} "
+            f"trace_lineage_segments={telemetry_trace_lineage_segment_count} "
+            f"trace_lineage_matches={telemetry_trace_lineage_matches} "
             f"input_identity={input_identity_status} "
             f"training_input_identity={training_input_identity_status} "
             f"dataset_input_contract={dataset_input_contract_status} "

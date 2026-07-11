@@ -15,6 +15,7 @@ from typing import Any
 
 from .hf_ft import (
     hf_finetune_geometry_guard_runtime_evidence_report,
+    hf_finetune_trainer_trace_lineage_report,
     hf_finetune_trainer_trace_segment_receipt,
     summarize_hf_finetune_run_card,
 )
@@ -2202,6 +2203,47 @@ def _adapter_promotion_chain_node(manifest_path: Path) -> dict[str, object]:
         if isinstance(trace_segment_revalidation, Mapping)
         else trace_segment
     )
+    trace_lineage_revalidation = None
+    trace_lineage_revalidated_ready = None
+    if run_card is not None and (
+        trace_segment is not None or run_card.get("trainer_trace_jsonl") is not None
+    ):
+        try:
+            trace_lineage_revalidation = (
+                hf_finetune_trainer_trace_lineage_report(
+                    run_card_path if run_card_path is not None else run_card
+                )
+            )
+        except (OSError, TypeError, ValueError) as exc:
+            if trace_segment is not None:
+                issues.append(
+                    _chain_issue(
+                        "trainer_trace_lineage_revalidation_failed",
+                        f"failed to revalidate trainer trace lineage: {exc}",
+                        path=run_card_path,
+                        adapter_id=adapter_id,
+                    )
+                )
+                trace_lineage_revalidated_ready = False
+        else:
+            if trace_segment is not None:
+                trace_lineage_revalidated_ready = bool(
+                    trace_lineage_revalidation.get("ready") is True
+                    and trace_lineage_revalidation.get("tip_receipt_id")
+                    == trace_segment.get("receipt_id")
+                )
+                if not trace_lineage_revalidated_ready:
+                    issues.append(
+                        _chain_issue(
+                            "trainer_trace_lineage_integrity_mismatch",
+                            (
+                                "trainer trace lineage is not continuous or "
+                                "does not end at the run-card receipt"
+                            ),
+                            path=run_card_path,
+                            adapter_id=adapter_id,
+                        )
+                    )
     depth = lineage.get("lineage_depth")
     if depth not in (0, None) and run_card is None:
         issues.append(
@@ -2633,6 +2675,28 @@ def _adapter_promotion_chain_node(manifest_path: Path) -> dict[str, object]:
             trace_segment_revalidated_ready
         ),
         "trainer_trace_segment_revalidation": trace_segment_revalidation,
+        "trainer_trace_lineage": trace_lineage_revalidation,
+        "trainer_trace_lineage_status": None
+        if trace_lineage_revalidation is None
+        else trace_lineage_revalidation.get("status"),
+        "trainer_trace_lineage_ready": None
+        if trace_lineage_revalidation is None
+        else trace_lineage_revalidation.get("ready"),
+        "trainer_trace_lineage_id": None
+        if trace_lineage_revalidation is None
+        else trace_lineage_revalidation.get("lineage_id"),
+        "trainer_trace_lineage_segment_count": None
+        if trace_lineage_revalidation is None
+        else trace_lineage_revalidation.get("segment_count"),
+        "trainer_trace_lineage_event_count": None
+        if trace_lineage_revalidation is None
+        else trace_lineage_revalidation.get("trace_event_count"),
+        "trainer_trace_lineage_step_overlap_or_rewind_count": None
+        if trace_lineage_revalidation is None
+        else trace_lineage_revalidation.get("step_overlap_or_rewind_count"),
+        "trainer_trace_lineage_revalidated_ready": (
+            trace_lineage_revalidated_ready
+        ),
         "promotion_status": None if promotion is None else promotion.get("status"),
         "promotion_ready": None
         if promotion is None
@@ -2887,6 +2951,14 @@ def _chain_inferred_root_node(
         "trainer_trace_segment_previous_integrity_ready": None,
         "trainer_trace_segment_revalidated_ready": None,
         "trainer_trace_segment_revalidation": None,
+        "trainer_trace_lineage": None,
+        "trainer_trace_lineage_status": None,
+        "trainer_trace_lineage_ready": None,
+        "trainer_trace_lineage_id": None,
+        "trainer_trace_lineage_segment_count": None,
+        "trainer_trace_lineage_event_count": None,
+        "trainer_trace_lineage_step_overlap_or_rewind_count": None,
+        "trainer_trace_lineage_revalidated_ready": None,
         "promotion_status": None,
         "promotion_ready": None,
         "promotion_report_path": None,
@@ -3564,6 +3636,15 @@ def _adapter_promotion_chain_transition(
         "child_trainer_trace_segment_revalidated_ready": child.get(
             "trainer_trace_segment_revalidated_ready"
         ),
+        "child_trainer_trace_lineage_id": child.get(
+            "trainer_trace_lineage_id"
+        ),
+        "child_trainer_trace_lineage_segment_count": child.get(
+            "trainer_trace_lineage_segment_count"
+        ),
+        "child_trainer_trace_lineage_revalidated_ready": child.get(
+            "trainer_trace_lineage_revalidated_ready"
+        ),
         "child_geometry_guard_runtime_evidence_ready": child.get(
             "geometry_guard_runtime_evidence_ready"
         ),
@@ -3790,6 +3871,15 @@ def hf_adapter_continuation_policy_report(
                 "trainer_trace_segment_revalidated_ready": node.get(
                     "trainer_trace_segment_revalidated_ready"
                 ),
+                "trainer_trace_lineage_id": node.get(
+                    "trainer_trace_lineage_id"
+                ),
+                "trainer_trace_lineage_segment_count": node.get(
+                    "trainer_trace_lineage_segment_count"
+                ),
+                "trainer_trace_lineage_revalidated_ready": node.get(
+                    "trainer_trace_lineage_revalidated_ready"
+                ),
                 "geometry_guard_runtime_evidence_ready": node.get(
                     "geometry_guard_runtime_evidence_ready"
                 ),
@@ -3857,6 +3947,21 @@ def hf_adapter_continuation_policy_report(
     )
     selected_trainer_trace_segment_revalidated_ready = (
         selected_observation.get("trainer_trace_segment_revalidated_ready")
+        if selected_observation is not None
+        else None
+    )
+    selected_trainer_trace_lineage_id = (
+        selected_observation.get("trainer_trace_lineage_id")
+        if selected_observation is not None
+        else None
+    )
+    selected_trainer_trace_lineage_segment_count = (
+        selected_observation.get("trainer_trace_lineage_segment_count")
+        if selected_observation is not None
+        else None
+    )
+    selected_trainer_trace_lineage_revalidated_ready = (
+        selected_observation.get("trainer_trace_lineage_revalidated_ready")
         if selected_observation is not None
         else None
     )
@@ -4117,6 +4222,15 @@ def hf_adapter_continuation_policy_report(
         ),
         "selected_trainer_trace_segment_revalidated_ready": (
             selected_trainer_trace_segment_revalidated_ready
+        ),
+        "selected_trainer_trace_lineage_id": (
+            selected_trainer_trace_lineage_id
+        ),
+        "selected_trainer_trace_lineage_segment_count": (
+            selected_trainer_trace_lineage_segment_count
+        ),
+        "selected_trainer_trace_lineage_revalidated_ready": (
+            selected_trainer_trace_lineage_revalidated_ready
         ),
         "selected_geometry_guard_runtime_evidence_ready": (
             selected_geometry_guard_runtime_evidence_ready
@@ -4718,6 +4832,11 @@ def hf_adapter_continuation_policy_lines(
             f"trace_segment={report.get('selected_trainer_trace_segment_id')} "
             "trace_segment_revalidated="
             f"{report.get('selected_trainer_trace_segment_revalidated_ready')} "
+            f"trace_lineage={report.get('selected_trainer_trace_lineage_id')} "
+            "trace_lineage_segments="
+            f"{report.get('selected_trainer_trace_lineage_segment_count')} "
+            "trace_lineage_revalidated="
+            f"{report.get('selected_trainer_trace_lineage_revalidated_ready')} "
             "guard_runtime="
             f"{report.get('selected_geometry_guard_runtime_evidence_basis')} "
             f"plateau={report.get('consecutive_below_min_eval_improvement')}/"
@@ -4857,6 +4976,12 @@ def hf_adapter_promotion_chain_lines(
             f"{raw_transition.get('child_trainer_trace_segment_id')} "
             "trace_segment_revalidated="
             f"{raw_transition.get('child_trainer_trace_segment_revalidated_ready')} "
+            "trace_lineage="
+            f"{raw_transition.get('child_trainer_trace_lineage_id')} "
+            "trace_lineage_segments="
+            f"{raw_transition.get('child_trainer_trace_lineage_segment_count')} "
+            "trace_lineage_revalidated="
+            f"{raw_transition.get('child_trainer_trace_lineage_revalidated_ready')} "
             "guard_runtime="
             f"{raw_transition.get('child_geometry_guard_runtime_evidence_basis')} "
             f"promotion_ready={raw_transition.get('promotion_ready')} "
@@ -4881,6 +5006,11 @@ def hf_adapter_promotion_chain_lines(
             f"trace_segment={raw_node.get('trainer_trace_segment_id')} "
             "trace_segment_revalidated="
             f"{raw_node.get('trainer_trace_segment_revalidated_ready')} "
+            f"trace_lineage={raw_node.get('trainer_trace_lineage_id')} "
+            "trace_lineage_segments="
+            f"{raw_node.get('trainer_trace_lineage_segment_count')} "
+            "trace_lineage_revalidated="
+            f"{raw_node.get('trainer_trace_lineage_revalidated_ready')} "
             f"guard_runtime={raw_node.get('geometry_guard_runtime_evidence_basis')} "
             f"finetune_replay={raw_node.get('finetune_replay_identity_status')} "
             "finetune_replay_verified="
