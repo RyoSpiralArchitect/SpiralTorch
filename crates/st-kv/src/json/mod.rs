@@ -24,4 +24,5 @@ pub use expiry::JsonExpiry;
 #[cfg(feature = "redis")]
 pub use options::{
     AutomatedJsonSetOptions, JsonSetOptions, JsonSetOptionsBuilder, PreparedJsonSetOptions,
+    SharedPreparedJsonSetOptions,
 };

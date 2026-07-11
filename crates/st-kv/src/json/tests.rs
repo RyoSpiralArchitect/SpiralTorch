@@ -9,6 +9,7 @@ use super::{
     AutomatedJsonSetOptions, CommandFragment, JsonExpiry, JsonSetOptions, PreparedJsonSetOptions,
 };
 use crate::KvErr;
+use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
 
 #[test]
@@ -314,7 +315,7 @@ fn automated_prepared_options_cache_reuses_instances() {
     let first = PreparedJsonSetOptions::automated(options).expect("automation should prepare");
     let second = PreparedJsonSetOptions::automated(options).expect("automation should reuse");
 
-    assert!(std::ptr::eq(first, second));
+    assert!(Arc::ptr_eq(&first, &second));
     assert_eq!(first.fragments(), &[CommandFragment::Keyword("NX")]);
 }
 
@@ -335,9 +336,15 @@ fn automated_json_set_options_wrap_cached_prepared_instances() {
         .expect("automated options should prepare");
     let prepared = PreparedJsonSetOptions::automated(options).expect("prepared cache should exist");
 
-    assert!(std::ptr::eq(automated.prepared(), prepared));
+    assert!(std::ptr::eq(automated.prepared(), prepared.as_ref()));
     assert_eq!(automated.fragments(), &[CommandFragment::Keyword("XX")]);
     assert!(!automated.is_empty());
+
+    let cloned = automated.clone();
+    assert!(Arc::ptr_eq(
+        &automated.shared_prepared(),
+        &cloned.shared_prepared()
+    ));
 }
 
 #[test]

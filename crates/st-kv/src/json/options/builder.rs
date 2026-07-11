@@ -124,6 +124,6 @@ impl JsonSetOptionsBuilder {
 
     /// Finalises the builder directly into a prepared fragment set.
     pub fn build_prepared(self) -> KvResult<PreparedJsonSetOptions> {
-        Ok(self.build()?.prepare()?)
+        self.build()?.prepare()
     }
 }
