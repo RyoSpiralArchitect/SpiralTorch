@@ -26,9 +26,16 @@
 //! - Baker–Gill–Solovay (BGS), "Relativizations of the P=?NP Question", SIAM J. Comput.
 //! - Bogdanov–Trevisan, "Average‑Case Complexity" (DistNP/HeurP standard definitions)
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use std::collections::HashMap;
 use tracing::{debug, info};
+
+/// Largest SAT variable count accepted by generated experiment instances.
+pub const MAX_EXPERIMENT_VARIABLES: usize = 100_000;
+/// Largest aggregate clause count accepted by one experiment configuration.
+pub const MAX_EXPERIMENT_CLAUSES: usize = 1_000_000;
+/// Largest result table accepted from one experiment configuration.
+pub const MAX_EXPERIMENT_RESULTS: usize = 100_000;
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Experiment configuration helpers
@@ -67,9 +74,124 @@ pub struct ExperimentConfig {
 
 impl ExperimentConfig {
     /// Total number of instances generated per `n`.
-    pub fn total_instances_per_n(&self) -> usize {
-        self.planted_instances + self.dense_instances
+    pub fn total_instances_per_n(&self) -> Result<usize> {
+        self.planted_instances
+            .checked_add(self.dense_instances)
+            .context("experiment instance count overflow")
     }
+
+    /// Validate dimensions and bound the aggregate generated workload.
+    pub fn validate(&self) -> Result<()> {
+        if self.n_values.is_empty() {
+            bail!("experiment configuration requires at least one n value");
+        }
+        if self.base_trials == 0 {
+            bail!("experiment base_trials must be greater than zero");
+        }
+        if self.summary_top_k == 0 {
+            bail!("experiment summary_top_k must be greater than zero");
+        }
+        if self.rep_ks.contains(&0) {
+            bail!("experiment repetition counts must be greater than zero");
+        }
+
+        let instances_per_n = self.total_instances_per_n()?;
+        if instances_per_n == 0 {
+            bail!("experiment configuration must generate at least one instance per n");
+        }
+        validate_seed_span(
+            "planted",
+            self.planted_seed_offset,
+            self.n_values.len(),
+            self.planted_instances,
+            0,
+        )?;
+        validate_seed_span(
+            "dense",
+            self.dense_seed_offset,
+            self.n_values.len(),
+            self.dense_instances,
+            1_000_000,
+        )?;
+
+        let mut total_clauses = 0usize;
+        for &n in &self.n_values {
+            validate_problem_size(n)?;
+            let planted_clauses = n
+                .checked_mul(4)
+                .and_then(|clauses| clauses.checked_mul(self.planted_instances))
+                .context("planted experiment clause count overflow")?;
+            let dense_clauses = n
+                .checked_mul(7)
+                .and_then(|clauses| clauses.checked_mul(self.dense_instances))
+                .context("dense experiment clause count overflow")?;
+            total_clauses = total_clauses
+                .checked_add(planted_clauses)
+                .and_then(|total| total.checked_add(dense_clauses))
+                .context("aggregate experiment clause count overflow")?;
+        }
+
+        if total_clauses > MAX_EXPERIMENT_CLAUSES {
+            bail!(
+                "experiment would generate {total_clauses} clauses, exceeding the limit of {MAX_EXPERIMENT_CLAUSES}"
+            );
+        }
+
+        let methods_per_n = self
+            .advice_bits_options
+            .len()
+            .checked_add(1)
+            .and_then(|variants| self.rep_ks.len().checked_mul(variants))
+            .and_then(|variants| variants.checked_add(1))
+            .context("experiment method count overflow")?;
+        let total_results = methods_per_n
+            .checked_mul(self.n_values.len())
+            .context("experiment result count overflow")?;
+        if total_results > MAX_EXPERIMENT_RESULTS {
+            bail!(
+                "experiment would generate {total_results} results, exceeding the limit of {MAX_EXPERIMENT_RESULTS}"
+            );
+        }
+        Ok(())
+    }
+}
+
+fn validate_seed_span(
+    label: &str,
+    offset: u64,
+    n_count: usize,
+    instances_per_n: usize,
+    instance_id_offset: u64,
+) -> Result<()> {
+    let generated = n_count
+        .checked_mul(instances_per_n)
+        .with_context(|| format!("{label} seed span overflow"))?;
+    let Some(last_index) = generated.checked_sub(1) else {
+        return Ok(());
+    };
+    let last_index =
+        u64::try_from(last_index).with_context(|| format!("{label} seed span exceeds u64"))?;
+    offset
+        .checked_add(last_index)
+        .and_then(|seed| seed.checked_add(instance_id_offset))
+        .with_context(|| format!("{label} seed or instance id overflow"))?;
+    Ok(())
+}
+
+fn validate_problem_size(n: usize) -> Result<()> {
+    if n == 0 {
+        bail!("SAT problem size n must be greater than zero");
+    }
+    if n > MAX_EXPERIMENT_VARIABLES {
+        bail!("SAT problem size n={n} exceeds the limit of {MAX_EXPERIMENT_VARIABLES} variables");
+    }
+    Ok(())
+}
+
+fn generated_literal(seed: u64, index: usize, multiplier: u64, n: u64) -> i32 {
+    let offset = (index as u64).wrapping_mul(multiplier);
+    let variable = seed.wrapping_add(offset) % n;
+    variable as i32 + 1
 }
 
 impl Default for ExperimentConfig {
@@ -118,45 +240,52 @@ impl SatInstance {
 
     /// Generate planted SAT instance (50% of distribution)
     /// 1つの割当を埋め込み、節数 4n
-    pub fn generate_planted(n: usize, seed: u64) -> Self {
-        let num_clauses = 4 * n;
-        let mut clauses = Vec::new();
+    pub fn generate_planted(n: usize, seed: u64) -> Result<Self> {
+        validate_problem_size(n)?;
+        let num_clauses = n.checked_mul(4).context("planted clause count overflow")?;
+        let n_u64 = n as u64;
+        let mut clauses = Vec::with_capacity(num_clauses);
 
         // Simple deterministic generation based on seed
         for i in 0..num_clauses {
-            let var1 = ((seed + i as u64) % n as u64) as i32 + 1;
-            let var2 = ((seed + i as u64 * 7) % n as u64) as i32 + 1;
-            let var3 = ((seed + i as u64 * 13) % n as u64) as i32 + 1;
+            let var1 = generated_literal(seed, i, 1, n_u64);
+            let var2 = generated_literal(seed, i, 7, n_u64);
+            let var3 = generated_literal(seed, i, 13, n_u64);
             clauses.push(vec![var1, var2, var3]);
         }
 
-        Self {
+        Ok(Self {
             n,
             clauses,
             is_sat: true, // Planted instances are SAT
             instance_id: seed,
-        }
+        })
     }
 
     /// Generate high-density random instance (50% of distribution)
     /// 節数 7n、小規模でも UNSAT が多め
-    pub fn generate_dense_random(n: usize, seed: u64) -> Self {
-        let num_clauses = 7 * n;
-        let mut clauses = Vec::new();
+    pub fn generate_dense_random(n: usize, seed: u64) -> Result<Self> {
+        validate_problem_size(n)?;
+        let num_clauses = n.checked_mul(7).context("dense clause count overflow")?;
+        let n_u64 = n as u64;
+        let instance_id = seed
+            .checked_add(1_000_000)
+            .context("dense instance id overflow")?;
+        let mut clauses = Vec::with_capacity(num_clauses);
 
         for i in 0..num_clauses {
-            let var1 = ((seed + i as u64 * 3) % n as u64) as i32 + 1;
-            let var2 = ((seed + i as u64 * 11) % n as u64) as i32 + 1;
-            let var3 = ((seed + i as u64 * 17) % n as u64) as i32 + 1;
+            let var1 = generated_literal(seed, i, 3, n_u64);
+            let var2 = generated_literal(seed, i, 11, n_u64);
+            let var3 = generated_literal(seed, i, 17, n_u64);
             clauses.push(vec![var1, -var2, var3]);
         }
 
-        Self {
+        Ok(Self {
             n,
             clauses,
             is_sat: !seed.is_multiple_of(3), // Mostly UNSAT
-            instance_id: seed + 1000000,
-        }
+            instance_id,
+        })
     }
 }
 
@@ -183,13 +312,16 @@ impl RandomSampler {
             // For SAT instances, probability of success increases with trials
             // Simple model: P(success) = 1 - (1 - 1/2^n)^trials
             let base_prob = 1.0 / (1u64 << instance.n.min(10)) as f64;
-            let success_prob = 1.0 - (1.0 - base_prob).powi(self.trials as i32);
+            let success_prob = 1.0 - (1.0 - base_prob).powf(self.trials as f64);
             (instance.instance_id % 100) as f64 / 100.0 < success_prob
         }
     }
 
     /// Compute error rate on a dataset
     pub fn error_rate(&self, instances: &[SatInstance]) -> f64 {
+        if instances.is_empty() {
+            return 0.0;
+        }
         let errors: usize = instances
             .iter()
             .filter(|inst| self.run(inst) != inst.is_sat)
@@ -214,12 +346,19 @@ impl RepetitionOracle {
         }
     }
 
-    /// Run k independent trials and OR the results
+    /// Run the deterministic repetition surrogate.
+    ///
+    /// Repeating [`RandomSampler::run`] is observationally identical because it
+    /// carries no mutable RNG state, so this preserves the prior OR semantics in
+    /// constant time.
     pub fn run(&self, instance: &SatInstance) -> bool {
-        (0..self.k).any(|_| self.base_sampler.run(instance))
+        self.k > 0 && self.base_sampler.run(instance)
     }
 
     pub fn error_rate(&self, instances: &[SatInstance]) -> f64 {
+        if instances.is_empty() {
+            return 0.0;
+        }
         let errors: usize = instances
             .iter()
             .filter(|inst| self.run(inst) != inst.is_sat)
@@ -282,6 +421,9 @@ impl AdviceOracle {
     }
 
     pub fn error_rate(&self, instances: &[SatInstance]) -> f64 {
+        if instances.is_empty() {
+            return 0.0;
+        }
         let errors: usize = instances
             .iter()
             .filter(|inst| self.run(inst) != inst.is_sat)
@@ -311,29 +453,22 @@ pub struct MethodStatistics {
 pub fn run_numerical_experiments_with_config(
     config: &ExperimentConfig,
 ) -> Result<Vec<ExperimentResult>> {
+    config.validate()?;
+    let instances_per_n = config.total_instances_per_n()?;
     let mut results = Vec::new();
     for (idx, &n) in config.n_values.iter().enumerate() {
         info!("Running experiments for n = {}", n);
 
         // Generate dataset according to the config
-        let mut instances = Vec::with_capacity(config.total_instances_per_n());
+        let mut instances = Vec::with_capacity(instances_per_n);
         for i in 0..config.planted_instances {
-            let seed = config.planted_seed_offset
-                + (idx as u64 * config.planted_instances as u64)
-                + i as u64;
-            instances.push(SatInstance::generate_planted(n, seed));
+            let seed =
+                configured_seed(config.planted_seed_offset, idx, config.planted_instances, i)?;
+            instances.push(SatInstance::generate_planted(n, seed)?);
         }
         for i in 0..config.dense_instances {
-            let seed =
-                config.dense_seed_offset + (idx as u64 * config.dense_instances as u64) + i as u64;
-            instances.push(SatInstance::generate_dense_random(n, seed));
-        }
-
-        if instances.is_empty() {
-            anyhow::bail!(
-                "Experiment configuration produced zero instances for n = {}",
-                n
-            );
+            let seed = configured_seed(config.dense_seed_offset, idx, config.dense_instances, i)?;
+            instances.push(SatInstance::generate_dense_random(n, seed)?);
         }
 
         // Base random sampler (configurable trials)
@@ -377,16 +512,49 @@ pub fn run_numerical_experiments_with_config(
     Ok(results)
 }
 
+fn configured_seed(
+    offset: u64,
+    n_index: usize,
+    instances_per_n: usize,
+    instance_index: usize,
+) -> Result<u64> {
+    let n_index = u64::try_from(n_index).context("experiment n index exceeds u64")?;
+    let instances_per_n =
+        u64::try_from(instances_per_n).context("experiment instance count exceeds u64")?;
+    let instance_index =
+        u64::try_from(instance_index).context("experiment instance index exceeds u64")?;
+    offset
+        .checked_add(
+            n_index
+                .checked_mul(instances_per_n)
+                .context("experiment seed stride overflow")?,
+        )
+        .and_then(|seed| seed.checked_add(instance_index))
+        .context("experiment seed overflow")
+}
+
 /// Run numerical experiments using the default configuration.
 pub fn run_numerical_experiments() -> Result<Vec<ExperimentResult>> {
     run_numerical_experiments_with_config(&ExperimentConfig::default())
 }
 
-/// Compute aggregate statistics per method.
-pub fn compute_method_statistics(results: &[ExperimentResult]) -> Vec<MethodStatistics> {
+/// Compute finite aggregate statistics per method.
+pub fn compute_method_statistics(results: &[ExperimentResult]) -> Result<Vec<MethodStatistics>> {
     let mut method_errors: HashMap<String, Vec<f64>> = HashMap::new();
 
-    for result in results {
+    for (index, result) in results.iter().enumerate() {
+        if result.method.trim().is_empty() {
+            bail!("experiment result {index} has an empty method name");
+        }
+        if result.n == 0 {
+            bail!("experiment result {index} has invalid n=0");
+        }
+        if !result.error_rate.is_finite() || !(0.0..=1.0).contains(&result.error_rate) {
+            bail!(
+                "experiment result {index} has invalid error rate {} (expected a finite value in [0, 1])",
+                result.error_rate
+            );
+        }
         method_errors
             .entry(result.method.clone())
             .or_default()
@@ -395,20 +563,20 @@ pub fn compute_method_statistics(results: &[ExperimentResult]) -> Vec<MethodStat
 
     let mut stats = Vec::with_capacity(method_errors.len());
     for (method, errors) in method_errors {
-        if errors.is_empty() {
+        let mut errors = errors.into_iter();
+        let Some(first) = errors.next() else {
             continue;
+        };
+        let mut worst = first;
+        let mut best = first;
+        let mut mean = first;
+        let mut count = 1usize;
+        for error in errors {
+            worst = worst.max(error);
+            best = best.min(error);
+            count += 1;
+            mean += (error - mean) / count as f64;
         }
-        let worst = errors
-            .iter()
-            .copied()
-            .max_by(|a, b| a.partial_cmp(b).unwrap())
-            .unwrap_or(0.0);
-        let best = errors
-            .iter()
-            .copied()
-            .min_by(|a, b| a.partial_cmp(b).unwrap())
-            .unwrap_or(0.0);
-        let mean = errors.iter().sum::<f64>() / errors.len() as f64;
         stats.push(MethodStatistics {
             method,
             worst_error: worst,
@@ -417,15 +585,16 @@ pub fn compute_method_statistics(results: &[ExperimentResult]) -> Vec<MethodStat
         });
     }
 
-    stats
+    stats.sort_by(|left, right| left.method.cmp(&right.method));
+    Ok(stats)
 }
 
 /// Compute d̂_{n_max} = max error across all n values for each method
-pub fn compute_worst_error(results: &[ExperimentResult]) -> HashMap<String, f64> {
-    compute_method_statistics(results)
+pub fn compute_worst_error(results: &[ExperimentResult]) -> Result<HashMap<String, f64>> {
+    Ok(compute_method_statistics(results)?
         .into_iter()
         .map(|stats| (stats.method, stats.worst_error))
-        .collect()
+        .collect())
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -581,9 +750,16 @@ pub struct SpiralPoint {
 
 impl SpiralPoint {
     /// Create a new point on the Spiral
-    pub fn new(theta: f64) -> Self {
-        let normalized_theta = theta % (2.0 * std::f64::consts::PI);
+    pub fn new(theta: f64) -> Result<Self> {
+        if !theta.is_finite() {
+            bail!("spiral angle must be finite, got {theta}");
+        }
+        Ok(Self::from_normalized(
+            theta.rem_euclid(2.0 * std::f64::consts::PI),
+        ))
+    }
 
+    fn from_normalized(normalized_theta: f64) -> Self {
         // Divide the circle into three regions
         let (phase, oracle) = if normalized_theta < 2.0 {
             (SpiralPhase::Equal, OracleType::Equal)
@@ -601,10 +777,23 @@ impl SpiralPoint {
     }
 
     /// Advance along the Spiral path
-    pub fn advance(&mut self, delta_theta: f64) {
-        self.theta = (self.theta + delta_theta) % (2.0 * std::f64::consts::PI);
-        *self = Self::new(self.theta);
+    pub fn advance(&mut self, delta_theta: f64) -> Result<()> {
+        if !delta_theta.is_finite() {
+            bail!("spiral delta angle must be finite, got {delta_theta}");
+        }
+        let next = Self::new(self.theta + delta_theta)?;
+        *self = next;
+        Ok(())
     }
+}
+
+fn validate_canonical_point(point: &SpiralPoint, label: &str) -> Result<()> {
+    let canonical = SpiralPoint::new(point.theta)
+        .with_context(|| format!("invalid {label} spiral point angle"))?;
+    if canonical.phase != point.phase || canonical.oracle != point.oracle {
+        bail!("{label} spiral point phase or oracle does not match its angle");
+    }
+    Ok(())
 }
 
 /// Monodromy loop: track how Φ_= transforms under parallel transport
@@ -635,7 +824,7 @@ pub struct MonodromyLoop {
 impl MonodromyLoop {
     /// Create a new monodromy loop starting at θ = 0
     pub fn new() -> Self {
-        let start = SpiralPoint::new(0.0);
+        let start = SpiralPoint::from_normalized(0.0);
         Self {
             start: start.clone(),
             current: start,
@@ -651,17 +840,44 @@ impl MonodromyLoop {
             self.current.theta
         );
 
-        // Traverse through all three phases
-        let steps = vec![(1.0, "U_= → U_≈"), (2.0, "U_≈ → U_≠"), (3.0, "U_≠ → U_=")];
-
-        for (delta, desc) in steps {
-            self.current.advance(delta);
-            debug!("Crossed to phase {:?} ({})", self.current.phase, desc);
+        let next_loops = self
+            .loops
+            .checked_add(1)
+            .context("monodromy loop counter overflow")?;
+        validate_canonical_point(&self.start, "start")?;
+        validate_canonical_point(&self.current, "current")?;
+        if self.start.phase != SpiralPhase::Equal {
+            bail!("monodromy loop must start in the Equal phase");
         }
+        if (self.current.theta - self.start.theta).abs() > f64::EPSILON
+            || self.current.phase != self.start.phase
+            || self.current.oracle != self.start.oracle
+        {
+            bail!("monodromy loop is not closed at its start point");
+        }
+        if !matches!(self.phi_equal_sign, -1 | 1) {
+            bail!(
+                "monodromy sign must be -1 or 1 before traversal, got {}",
+                self.phi_equal_sign
+            );
+        }
+        let next_sign = self
+            .phi_equal_sign
+            .checked_neg()
+            .context("monodromy sign overflow")?;
+        // Validate canonical checkpoints before committing the closed state.
+        let checkpoints = [(3.0, "U_= → U_≈"), (5.0, "U_≈ → U_≠")];
+        for (theta, desc) in checkpoints {
+            let checkpoint = SpiralPoint::new(theta)?;
+            debug!("Crossed to phase {:?} ({})", checkpoint.phase, desc);
+        }
+        let next_current = self.start.clone();
+        debug!("Closed at phase {:?} ({})", next_current.phase, "U_≠ → U_=");
 
         // After one complete loop, Φ_= flips sign
-        self.loops += 1;
-        self.phi_equal_sign *= -1;
+        self.current = next_current;
+        self.loops = next_loops;
+        self.phi_equal_sign = next_sign;
 
         info!(
             "Completed loop {}. Φ_= sign is now {}",
@@ -720,7 +936,8 @@ impl SpiralReality {
         // Run numerical experiments
         let experiments = run_numerical_experiments_with_config(&config)
             .context("Failed to run numerical experiments")?;
-        let method_statistics = compute_method_statistics(&experiments);
+        let method_statistics = compute_method_statistics(&experiments)
+            .context("Failed to aggregate numerical experiments")?;
         let worst_errors = method_statistics
             .iter()
             .map(|stats| (stats.method.clone(), stats.worst_error))
@@ -847,11 +1064,7 @@ impl SpiralReality {
 
         report.push_str("\n  Method statistics (sorted by mean error):\n");
         let mut sorted_methods = self.method_statistics.clone();
-        sorted_methods.sort_by(|a, b| {
-            a.mean_error
-                .partial_cmp(&b.mean_error)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        sorted_methods.sort_by(|a, b| a.mean_error.total_cmp(&b.mean_error));
         let top_k = self.experiment_config.summary_top_k.max(1);
         for stats in sorted_methods.iter().take(top_k) {
             report.push_str(&format!(
@@ -903,24 +1116,18 @@ impl SpiralReality {
     }
 }
 
-impl Default for SpiralReality {
-    fn default() -> Self {
-        Self::new().expect("Failed to initialize SpiralReality")
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_sat_instance_generation() {
-        let planted = SatInstance::generate_planted(9, 42);
+        let planted = SatInstance::generate_planted(9, 42).expect("planted instance");
         assert_eq!(planted.n, 9);
         assert_eq!(planted.clauses.len(), 36); // 4n
         assert!(planted.is_sat);
 
-        let dense = SatInstance::generate_dense_random(9, 42);
+        let dense = SatInstance::generate_dense_random(9, 42).expect("dense instance");
         assert_eq!(dense.n, 9);
         assert_eq!(dense.clauses.len(), 63); // 7n
     }
@@ -928,8 +1135,8 @@ mod tests {
     #[test]
     fn test_random_sampler() {
         let sampler = RandomSampler::new(8);
-        let _sat_instance = SatInstance::generate_planted(9, 1);
-        let unsat_instance = SatInstance::generate_dense_random(9, 1);
+        let _sat_instance = SatInstance::generate_planted(9, 1).expect("planted instance");
+        let unsat_instance = SatInstance::generate_dense_random(9, 1).expect("dense instance");
 
         // UNSAT instances should never give false positives
         if !unsat_instance.is_sat {
@@ -946,8 +1153,8 @@ mod tests {
     #[test]
     fn test_advice_oracle() {
         let instances = vec![
-            SatInstance::generate_planted(9, 1),
-            SatInstance::generate_dense_random(9, 2),
+            SatInstance::generate_planted(9, 1).expect("planted instance"),
+            SatInstance::generate_dense_random(9, 2).expect("dense instance"),
         ];
 
         let mut advice = AdviceOracle::new(8, 1, 2048);
@@ -998,13 +1205,13 @@ mod tests {
 
     #[test]
     fn test_spiral_point() {
-        let p1 = SpiralPoint::new(0.5);
+        let p1 = SpiralPoint::new(0.5).expect("finite point");
         assert_eq!(p1.phase, SpiralPhase::Equal);
 
-        let p2 = SpiralPoint::new(3.0);
+        let p2 = SpiralPoint::new(3.0).expect("finite point");
         assert_eq!(p2.phase, SpiralPhase::Approximate);
 
-        let p3 = SpiralPoint::new(5.0);
+        let p3 = SpiralPoint::new(5.0).expect("finite point");
         assert_eq!(p3.phase, SpiralPhase::NotEqual);
     }
 
@@ -1017,10 +1224,13 @@ mod tests {
         loop_state.traverse_loop().unwrap();
         assert_eq!(loop_state.loops, 1);
         assert!(!loop_state.phi_equal_value()); // Flips after one loop
+        assert_eq!(loop_state.current.theta, loop_state.start.theta);
+        assert_eq!(loop_state.current.phase, loop_state.start.phase);
 
         loop_state.traverse_loop().unwrap();
         assert_eq!(loop_state.loops, 2);
         assert!(loop_state.phi_equal_value()); // Flips back
+        assert_eq!(loop_state.current.theta, loop_state.start.theta);
     }
 
     #[test]
@@ -1071,7 +1281,7 @@ mod tests {
         assert_eq!(results.len(), 7);
         assert!(results.iter().all(|res| res.n == 5));
 
-        let stats = compute_method_statistics(&results);
+        let stats = compute_method_statistics(&results).expect("finite statistics");
         assert_eq!(stats.len(), 7);
         for stat in stats {
             assert!(stat.worst_error >= stat.best_error - f64::EPSILON);
@@ -1099,5 +1309,241 @@ mod tests {
         let summary = reality.summary();
         assert!(summary.contains("n values: [7]"));
         assert!(summary.contains("Base trials: 2"));
+    }
+
+    #[test]
+    fn experiment_config_rejects_invalid_and_oversized_workloads() {
+        let config = ExperimentConfig {
+            n_values: Vec::new(),
+            ..ExperimentConfig::default()
+        };
+        assert!(config.validate().is_err());
+
+        let config = ExperimentConfig {
+            n_values: vec![0],
+            ..ExperimentConfig::default()
+        };
+        assert!(config.validate().is_err());
+
+        let config = ExperimentConfig {
+            base_trials: 0,
+            ..ExperimentConfig::default()
+        };
+        assert!(config.validate().is_err());
+
+        let config = ExperimentConfig {
+            planted_instances: 0,
+            dense_instances: 0,
+            ..ExperimentConfig::default()
+        };
+        assert!(config.validate().is_err());
+
+        let config = ExperimentConfig {
+            rep_ks: vec![1, 0],
+            ..ExperimentConfig::default()
+        };
+        assert!(config.validate().is_err());
+
+        let config = ExperimentConfig {
+            planted_instances: usize::MAX,
+            dense_instances: 1,
+            ..ExperimentConfig::default()
+        };
+        assert!(config.validate().is_err());
+
+        let config = ExperimentConfig {
+            n_values: vec![MAX_EXPERIMENT_VARIABLES, MAX_EXPERIMENT_VARIABLES],
+            planted_instances: 0,
+            dense_instances: 1,
+            ..ExperimentConfig::default()
+        };
+        assert!(config.validate().is_err());
+
+        let config = ExperimentConfig {
+            n_values: vec![1],
+            planted_instances: 1,
+            dense_instances: 0,
+            rep_ks: vec![1],
+            advice_bits_options: vec![0; MAX_EXPERIMENT_RESULTS],
+            ..ExperimentConfig::default()
+        };
+        assert!(config.validate().is_err());
+
+        let config = ExperimentConfig {
+            n_values: vec![1, 2],
+            planted_instances: 1,
+            dense_instances: 0,
+            planted_seed_offset: u64::MAX,
+            ..ExperimentConfig::default()
+        };
+        assert!(config.validate().is_err());
+
+        let config = ExperimentConfig {
+            n_values: vec![1],
+            planted_instances: 0,
+            dense_instances: 1,
+            dense_seed_offset: u64::MAX,
+            ..ExperimentConfig::default()
+        };
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn generated_instances_reject_invalid_sizes_and_overflow() {
+        assert!(SatInstance::generate_planted(0, 1).is_err());
+        assert!(SatInstance::generate_dense_random(MAX_EXPERIMENT_VARIABLES + 1, 1).is_err());
+        assert!(SatInstance::generate_dense_random(3, u64::MAX).is_err());
+    }
+
+    #[test]
+    fn empty_dataset_error_rates_are_finite_zero() {
+        let sampler = RandomSampler::new(1);
+        let repetition = RepetitionOracle::new(1, 1);
+        let advice = AdviceOracle::new(1, 1, 0);
+
+        assert_eq!(sampler.error_rate(&[]), 0.0);
+        assert_eq!(repetition.error_rate(&[]), 0.0);
+        assert_eq!(advice.error_rate(&[]), 0.0);
+        assert!(sampler.run(&SatInstance::new(3, Vec::new(), true, 1)));
+        let _ = RandomSampler::new(usize::MAX).run(&SatInstance::new(3, Vec::new(), true, 1));
+        assert!(!RepetitionOracle::new(1, usize::MAX).run(&SatInstance::new(
+            3,
+            Vec::new(),
+            false,
+            1,
+        )));
+    }
+
+    #[test]
+    fn method_statistics_reject_invalid_results() {
+        for invalid in [
+            ExperimentResult {
+                method: String::new(),
+                n: 1,
+                error_rate: 0.5,
+            },
+            ExperimentResult {
+                method: "method".into(),
+                n: 0,
+                error_rate: 0.5,
+            },
+            ExperimentResult {
+                method: "method".into(),
+                n: 1,
+                error_rate: f64::NAN,
+            },
+            ExperimentResult {
+                method: "method".into(),
+                n: 1,
+                error_rate: f64::INFINITY,
+            },
+            ExperimentResult {
+                method: "method".into(),
+                n: 1,
+                error_rate: -0.1,
+            },
+            ExperimentResult {
+                method: "method".into(),
+                n: 1,
+                error_rate: 1.1,
+            },
+        ] {
+            assert!(compute_method_statistics(&[invalid]).is_err());
+        }
+    }
+
+    #[test]
+    fn method_statistics_are_finite_and_deterministic() {
+        let results = vec![
+            ExperimentResult {
+                method: "zeta".into(),
+                n: 3,
+                error_rate: 1.0,
+            },
+            ExperimentResult {
+                method: "alpha".into(),
+                n: 3,
+                error_rate: 0.25,
+            },
+            ExperimentResult {
+                method: "zeta".into(),
+                n: 5,
+                error_rate: 0.0,
+            },
+        ];
+
+        let stats = compute_method_statistics(&results).expect("valid statistics");
+        assert_eq!(stats[0].method, "alpha");
+        assert_eq!(stats[1].method, "zeta");
+        assert_eq!(stats[1].best_error, 0.0);
+        assert_eq!(stats[1].worst_error, 1.0);
+        assert_eq!(stats[1].mean_error, 0.5);
+        assert_eq!(
+            compute_worst_error(&results)
+                .expect("valid worst errors")
+                .get("zeta"),
+            Some(&1.0)
+        );
+    }
+
+    #[test]
+    fn spiral_points_normalize_angles_and_reject_non_finite_updates() {
+        let mut point = SpiralPoint::new(-0.5).expect("finite negative angle");
+        assert!((point.theta - (2.0 * std::f64::consts::PI - 0.5)).abs() < f64::EPSILON);
+        assert_eq!(point.phase, SpiralPhase::NotEqual);
+
+        let original = point.clone();
+        assert!(point.advance(f64::NAN).is_err());
+        assert_eq!(point.theta, original.theta);
+        assert_eq!(point.phase, original.phase);
+        assert_eq!(point.oracle, original.oracle);
+        assert!(SpiralPoint::new(f64::INFINITY).is_err());
+    }
+
+    #[test]
+    fn monodromy_overflow_leaves_state_unchanged() {
+        let mut loop_state = MonodromyLoop::new();
+        loop_state.loops = usize::MAX;
+        let original_current = loop_state.current.clone();
+        let original_sign = loop_state.phi_equal_sign;
+
+        assert!(loop_state.traverse_loop().is_err());
+        assert_eq!(loop_state.loops, usize::MAX);
+        assert_eq!(loop_state.current.theta, original_current.theta);
+        assert_eq!(loop_state.current.phase, original_current.phase);
+        assert_eq!(loop_state.current.oracle, original_current.oracle);
+        assert_eq!(loop_state.phi_equal_sign, original_sign);
+
+        loop_state.loops = 0;
+        loop_state.phi_equal_sign = i32::MIN;
+        assert!(loop_state.traverse_loop().is_err());
+        assert_eq!(loop_state.loops, 0);
+        assert_eq!(loop_state.current.theta, original_current.theta);
+        assert_eq!(loop_state.phi_equal_sign, i32::MIN);
+
+        loop_state.phi_equal_sign = 0;
+        assert!(loop_state.traverse_loop().is_err());
+        assert_eq!(loop_state.current.theta, original_current.theta);
+        assert_eq!(loop_state.phi_equal_sign, 0);
+    }
+
+    #[test]
+    fn monodromy_rejects_open_or_inconsistent_state_transactionally() {
+        let mut loop_state = MonodromyLoop::new();
+        loop_state.current = SpiralPoint::new(3.0).expect("approximate point");
+        let original = loop_state.current.clone();
+
+        assert!(loop_state.traverse_loop().is_err());
+        assert_eq!(loop_state.loops, 0);
+        assert_eq!(loop_state.current.theta, original.theta);
+        assert_eq!(loop_state.current.phase, original.phase);
+        assert_eq!(loop_state.current.oracle, original.oracle);
+
+        loop_state.current.phase = SpiralPhase::Equal;
+        let original = loop_state.current.clone();
+        assert!(loop_state.traverse_loop().is_err());
+        assert_eq!(loop_state.current.theta, original.theta);
+        assert_eq!(loop_state.current.phase, original.phase);
+        assert_eq!(loop_state.current.oracle, original.oracle);
     }
 }
