@@ -120,6 +120,23 @@ class SpiralTorchSmokeTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             st.plugin.clear_listeners(strict=True)
 
+    def test_plugin_publish_report(self) -> None:
+        event_type = f"DispatchReport_{uuid.uuid4().hex}"
+        events: list[dict] = []
+        subscription_id = st.plugin.subscribe(event_type, events.append)
+        try:
+            report = st.plugin.publish_report(event_type, {"ok": True})
+        finally:
+            st.plugin.unsubscribe(event_type, subscription_id)
+
+        self.assertEqual(report["event_type"], event_type)
+        self.assertTrue(report["ok"])
+        self.assertEqual(report["matched"], 1)
+        self.assertEqual(report["delivered"], 1)
+        self.assertEqual(report["panicked"], 0)
+        self.assertEqual(report["failures"], [])
+        self.assertEqual(events[-1]["payload"], {"ok": True})
+
     def test_plugin_unregister_service(self) -> None:
         name = f"demo_service_{uuid.uuid4().hex}"
         st.plugin.register_service(name, {"ok": True})

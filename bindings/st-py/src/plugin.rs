@@ -11,8 +11,8 @@ use crate::json::{json_to_py, py_to_json};
 use crate::tensor::tensor_err_to_py;
 use st_core::plugin::{
     global_registry, init_plugin_system, EventListener, Plugin, PluginCapability, PluginContext,
-    PluginEvent, PluginEventJsonlWriter, PluginEventJsonlWriterConfig, PluginEventRecorder,
-    PluginEventRecorderConfig, PluginMetadata,
+    PluginEvent, PluginEventDispatchReport, PluginEventJsonlWriter, PluginEventJsonlWriterConfig,
+    PluginEventRecorder, PluginEventRecorderConfig, PluginMetadata,
 };
 use st_core::PureResult;
 use st_core::TensorError;
@@ -1606,8 +1606,17 @@ fn validate_dependencies(py: Python<'_>, internal_only: bool, strict: bool) -> P
 #[pyo3(signature = (event_type, payload=None))]
 fn publish(py: Python<'_>, event_type: &str, payload: Option<PyObject>) -> PyResult<()> {
     init_plugin_system().map_err(tensor_err_to_py)?;
+    let event = custom_event_from_py(py, event_type, payload)?;
+    global_registry().event_bus().publish(&event);
+    Ok(())
+}
 
-    let event = match payload {
+fn custom_event_from_py(
+    py: Python<'_>,
+    event_type: &str,
+    payload: Option<PyObject>,
+) -> PyResult<PluginEvent> {
+    Ok(match payload {
         None => PluginEvent::custom(event_type, serde_json::Value::Null),
         Some(payload) => {
             let payload = payload.bind(py);
@@ -1619,10 +1628,42 @@ fn publish(py: Python<'_>, event_type: &str, payload: Option<PyObject>) -> PyRes
                 PluginEvent::custom(event_type, py_to_json(payload)?)
             }
         }
-    };
+    })
+}
 
-    global_registry().event_bus().publish(&event);
-    Ok(())
+fn dispatch_report_to_py(py: Python<'_>, report: &PluginEventDispatchReport) -> PyResult<PyObject> {
+    let dict = PyDict::new(py);
+    dict.set_item("ok", report.ok())?;
+    dict.set_item("event_type", &report.event_type)?;
+    dict.set_item("matched", report.matched)?;
+    dict.set_item("delivered", report.delivered)?;
+    dict.set_item("panicked", report.panicked())?;
+
+    let failures = PyList::empty(py);
+    for failure in &report.failures {
+        let item = PyDict::new(py);
+        item.set_item("subscription_id", failure.subscription_id)?;
+        item.set_item("message", &failure.message)?;
+        failures.append(item)?;
+    }
+    dict.set_item("failures", failures)?;
+    Ok(dict.into_py(py))
+}
+
+/// Publish a custom event and report Rust-level listener panics.
+///
+/// Python callback exceptions are printed by the callback adapter and count as delivered.
+#[pyfunction]
+#[pyo3(signature = (event_type, payload=None))]
+fn publish_report(
+    py: Python<'_>,
+    event_type: &str,
+    payload: Option<PyObject>,
+) -> PyResult<PyObject> {
+    init_plugin_system().map_err(tensor_err_to_py)?;
+    let event = custom_event_from_py(py, event_type, payload)?;
+    let report = global_registry().event_bus().publish_report(&event);
+    dispatch_report_to_py(py, &report)
 }
 
 #[pyfunction]
@@ -2069,6 +2110,7 @@ pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()>
     module.add_function(wrap_pyfunction!(initialize_all, &module)?)?;
     module.add_function(wrap_pyfunction!(shutdown, &module)?)?;
     module.add_function(wrap_pyfunction!(publish, &module)?)?;
+    module.add_function(wrap_pyfunction!(publish_report, &module)?)?;
     module.add_function(wrap_pyfunction!(has_listeners, &module)?)?;
     module.add_function(wrap_pyfunction!(clear_listeners, &module)?)?;
     module.add_function(wrap_pyfunction!(load_entrypoints, &module)?)?;
@@ -2106,6 +2148,7 @@ pub(crate) fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()>
             "initialize_all",
             "shutdown",
             "publish",
+            "publish_report",
             "has_listeners",
             "clear_listeners",
             "load_entrypoints",
