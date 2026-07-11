@@ -490,6 +490,44 @@ class FakeFineTuneRunner:
                 }
             ]
         )
+        if trainer_trace_rows is not None and (
+            "--trainer-min-desire-stability-guard" in values
+            or "--trainer-max-psi-total-guard" in values
+        ):
+            min_desire_guard = (
+                float(_flag(values, "--trainer-min-desire-stability-guard"))
+                if "--trainer-min-desire-stability-guard" in values
+                else None
+            )
+            max_psi_guard = (
+                float(_flag(values, "--trainer-max-psi-total-guard"))
+                if "--trainer-max-psi-total-guard" in values
+                else None
+            )
+            trainer_trace_rows[0]["training_geometry_guard"] = {
+                "row_type": "hf_gpt2_finetune_training_geometry_guard",
+                "status": "within_limits",
+                "active": True,
+                "stop_requested": False,
+                "triggered_now": False,
+                "reason_codes": [],
+                "min_desire_stability": min_desire_guard,
+                "max_psi_total": max_psi_guard,
+                "minimum_observations": int(
+                    _flag(values, "--trainer-geometry-guard-min-events")
+                ),
+                "patience": int(
+                    _flag(values, "--trainer-geometry-guard-patience")
+                ),
+                "breach_streak": 0,
+                "current_desire_stability": telemetry[0],
+                "running_mean_desire_stability": telemetry[0],
+                "desire_observation_count": 1,
+                "current_psi_total": telemetry[1],
+                "observed_max_psi_total": telemetry[1],
+                "psi_observation_count": 1,
+                "trigger_step": None,
+            }
         _write_promoted_adapter(
             output,
             parent,
@@ -693,21 +731,41 @@ def test_executor_seals_geometry_policy_and_forwards_detached_cli(
     pending = planned["pending_generation"]
     pending_command = pending["command"]["command"]
     telemetry_contract = pending["trainer_telemetry_command_contract"]
+    geometry_guard_contract = pending[
+        "trainer_geometry_guard_command_contract"
+    ]
     assert planned["scale_up"]["require_trainer_telemetry"] is True
     assert pending["trainer_telemetry_required"] is True
     assert "--trainer-telemetry" in pending_command
     assert "--no-trainer-trace" not in pending_command
+    assert _flag(
+        pending_command,
+        "--trainer-min-desire-stability-guard",
+    ) == "0.7"
+    assert _flag(pending_command, "--trainer-max-psi-total-guard") == "0.6"
+    assert _flag(pending_command, "--trainer-geometry-guard-min-events") == "3"
+    assert _flag(pending_command, "--trainer-geometry-guard-patience") == "2"
     assert telemetry_contract["status"] == "enforced"
     assert telemetry_contract["required"] is True
     assert telemetry_contract["ready"] is True
+    assert geometry_guard_contract["status"] == "enforced"
+    assert geometry_guard_contract["ready"] is True
+    assert geometry_guard_contract["min_desire_stability"] == pytest.approx(0.70)
+    assert geometry_guard_contract["max_psi_total"] == pytest.approx(0.60)
     assert pending["preflight"][
         "trainer_telemetry_command_contract_matches"
+    ] is True
+    assert pending["preflight"][
+        "trainer_geometry_guard_command_contract_matches"
     ] is True
     assert pending["generation_plan_contract"]["components"]["scale_up"][
         "require_trainer_telemetry"
     ] is True
+    assert pending["generation_plan_contract"]["components"]["scale_up"][
+        "trainer_geometry_guard_min_events"
+    ] == 3
     assert any(
-        "trainer_telemetry=enforced" in line
+        "trainer_telemetry=enforced" in line and "geometry_guard=enforced" in line
         for line in st.hf_adapter_continuation_executor_lines(planned)
     )
     assert changed["status"] == "blocked"
@@ -736,6 +794,9 @@ def test_executor_seals_geometry_policy_and_forwards_detached_cli(
     assert distortion_pending["trainer_telemetry_command_contract"]["status"] == (
         "not_applicable"
     )
+    assert distortion_pending["trainer_geometry_guard_command_contract"][
+        "status"
+    ] == "not_applicable"
 
 
 def test_executor_requires_durable_trainer_telemetry_evidence_after_generation(
@@ -823,6 +884,13 @@ def test_executor_requires_durable_trainer_telemetry_evidence_after_generation(
     assert ready_evidence["trace_training_telemetry_count"] == 1
     assert ready_evidence["trace_mean_desire_stability"] == pytest.approx(0.65)
     assert ready_evidence["trace_max_psi_total"] == pytest.approx(0.70)
+    assert ready_evidence["geometry_guard_required"] is True
+    assert ready_evidence["geometry_guard_matches"] is True
+    assert ready_evidence["trace_training_geometry_guard_count"] == 1
+    assert ready_evidence["trace_training_geometry_guard_trigger_count"] == 0
+    assert ready_evidence["trace_last_training_geometry_guard_status"] == (
+        "within_limits"
+    )
     assert ready_evidence["node_matches_trace"] is True
     assert str(ready_evidence["trace_sha256"]).startswith("sha256:")
     assert str(ready_evidence["evidence_id"]).startswith("sha256:")
@@ -830,7 +898,9 @@ def test_executor_requires_durable_trainer_telemetry_evidence_after_generation(
         "stopped"
     )
     assert any(
-        "telemetry_evidence=ready" in line and "telemetry_events=1" in line
+        "telemetry_evidence=ready" in line
+        and "telemetry_events=1" in line
+        and "geometry_guard_triggers=0" in line
         for line in st.hf_adapter_continuation_executor_lines(ready)
     )
 

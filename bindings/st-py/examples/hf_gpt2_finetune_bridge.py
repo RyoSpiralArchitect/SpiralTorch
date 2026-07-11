@@ -413,6 +413,30 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--trainer-desire-gain", type=float, default=1.0)
     parser.add_argument("--trainer-psi-gain", type=float, default=1.0)
     parser.add_argument(
+        "--trainer-min-desire-stability-guard",
+        type=float,
+        default=None,
+        help="Gracefully stop when guarded running-mean desire stability is lower.",
+    )
+    parser.add_argument(
+        "--trainer-max-psi-total-guard",
+        type=float,
+        default=None,
+        help="Gracefully stop when guarded maximum trainer psi is higher.",
+    )
+    parser.add_argument(
+        "--trainer-geometry-guard-min-events",
+        type=int,
+        default=3,
+        help="Minimum metric observations per active geometry guard.",
+    )
+    parser.add_argument(
+        "--trainer-geometry-guard-patience",
+        type=int,
+        default=2,
+        help="Consecutive breached telemetry frames required before stopping.",
+    )
+    parser.add_argument(
         "--no-trainer-loss-guard",
         action="store_true",
         help=(
@@ -909,15 +933,34 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         parser.error("--eval-accumulation-steps must be non-negative")
     if args.dataloader_num_workers < 0:
         parser.error("--dataloader-num-workers must be non-negative")
-    if args.trainer_telemetry and args.no_trainer_trace:
-        parser.error("--trainer-telemetry requires trainer tracing")
-    if args.trainer_telemetry:
+    geometry_guard_active = bool(
+        args.trainer_min_desire_stability_guard is not None
+        or args.trainer_max_psi_total_guard is not None
+    )
+    if (args.trainer_telemetry or geometry_guard_active) and args.no_trainer_trace:
+        parser.error("trainer telemetry and geometry guards require trainer tracing")
+    if args.trainer_telemetry or geometry_guard_active:
         if not str(args.trainer_telemetry_prefix).strip():
             parser.error("--trainer-telemetry-prefix must be non-empty")
         if args.trainer_desire_gain < 0.0 or not math.isfinite(args.trainer_desire_gain):
             parser.error("--trainer-desire-gain must be finite and non-negative")
         if args.trainer_psi_gain < 0.0 or not math.isfinite(args.trainer_psi_gain):
             parser.error("--trainer-psi-gain must be finite and non-negative")
+    for name, value in (
+        (
+            "--trainer-min-desire-stability-guard",
+            args.trainer_min_desire_stability_guard,
+        ),
+        ("--trainer-max-psi-total-guard", args.trainer_max_psi_total_guard),
+    ):
+        if value is not None and (
+            not math.isfinite(value) or not 0.0 <= value <= 1.0
+        ):
+            parser.error(f"{name} must be finite and in [0.0, 1.0]")
+    if args.trainer_geometry_guard_min_events <= 0:
+        parser.error("--trainer-geometry-guard-min-events must be positive")
+    if args.trainer_geometry_guard_patience <= 0:
+        parser.error("--trainer-geometry-guard-patience must be positive")
     if args.trainer_loss_guard_threshold < 0.0 or not math.isfinite(
         args.trainer_loss_guard_threshold
     ):
@@ -1765,6 +1808,11 @@ def _trainer_telemetry_auto_reason(
         return None
     if bool(getattr(args, "no_trainer_trace", False)):
         return None
+    if (
+        getattr(args, "trainer_min_desire_stability_guard", None) is not None
+        or getattr(args, "trainer_max_psi_total_guard", None) is not None
+    ):
+        return "geometry_guard"
     if isinstance(inference_distortion_handoff, Mapping):
         return "inference_distortion_handoff"
     return None
@@ -3712,6 +3760,18 @@ def _base_run_card(
         "trainer_telemetry_prefix": args.trainer_telemetry_prefix,
         "trainer_desire_gain": args.trainer_desire_gain,
         "trainer_psi_gain": args.trainer_psi_gain,
+        "trainer_min_desire_stability_guard": (
+            args.trainer_min_desire_stability_guard
+        ),
+        "trainer_max_psi_total_guard": args.trainer_max_psi_total_guard,
+        "trainer_geometry_guard_min_events": (
+            args.trainer_geometry_guard_min_events
+        ),
+        "trainer_geometry_guard_patience": args.trainer_geometry_guard_patience,
+        "trainer_geometry_guard_active": bool(
+            args.trainer_min_desire_stability_guard is not None
+            or args.trainer_max_psi_total_guard is not None
+        ),
         "trainer_loss_guard_enabled": not bool(args.no_trainer_loss_guard),
         "trainer_loss_guard_threshold": args.trainer_loss_guard_threshold,
         "inference_distortion_sweep_report": (
@@ -4948,6 +5008,14 @@ def _main_with_runtime_access(
                 psi_gain=args.trainer_psi_gain,
                 stop_on_nonfinite_loss=not bool(args.no_trainer_loss_guard),
                 loss_guard_threshold=args.trainer_loss_guard_threshold,
+                min_desire_stability_guard=(
+                    args.trainer_min_desire_stability_guard
+                ),
+                max_psi_total_guard=args.trainer_max_psi_total_guard,
+                geometry_guard_min_events=(
+                    args.trainer_geometry_guard_min_events
+                ),
+                geometry_guard_patience=args.trainer_geometry_guard_patience,
                 inference_distortion_handoff=card.get("inference_distortion_handoff"),
             )
         )

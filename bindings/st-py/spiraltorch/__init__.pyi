@@ -1892,6 +1892,10 @@ def hf_gpt2_finetune_scale_up_command(
     trainer_trace_jsonl: str | PathLike[str] | None = ...,
     trainer_trace_run_id: str | None = ...,
     require_trainer_telemetry: bool = ...,
+    trainer_min_desire_stability_guard: float | None = ...,
+    trainer_max_psi_total_guard: float | None = ...,
+    trainer_geometry_guard_min_events: int = ...,
+    trainer_geometry_guard_patience: int = ...,
     adapter_continuation: str = ...,
     source_cwd: str | PathLike[str] | None = ...,
 ) -> Dict[str, object]: ...
@@ -1930,6 +1934,10 @@ def hf_gpt2_finetune_trainer_trace_callback(
     psi_gain: float = ...,
     stop_on_nonfinite_loss: bool = ...,
     loss_guard_threshold: float | None = ...,
+    min_desire_stability_guard: float | None = ...,
+    max_psi_total_guard: float | None = ...,
+    geometry_guard_min_events: int = ...,
+    geometry_guard_patience: int = ...,
 ) -> object: ...
 
 def hf_gpt2_finetune_zspace_probe(
