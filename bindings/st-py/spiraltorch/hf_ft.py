@@ -5941,6 +5941,9 @@ _HF_FINETUNE_EXPECTED_RUNTIME_INPUT_ID_FLAG = "--expected-runtime-input-id"
 _HF_FINETUNE_EXPECTED_EXECUTION_INPUT_ID_FLAG = (
     "--expected-execution-input-id"
 )
+_HF_FINETUNE_EXPECTED_TRAINING_RECIPE_ID_FLAG = (
+    "--expected-training-recipe-id"
+)
 _HF_FINETUNE_DATASET_SHAPE_FLAGS = (
     "--max-train-samples",
     "--max-eval-samples",
@@ -6662,6 +6665,18 @@ def _scale_up_promotion_chain_summary(
         "scale_up_candidate_tokenized_dataset_total_input_tokens": candidate.get(
             "tokenized_dataset_total_input_tokens"
         ),
+        "scale_up_candidate_training_recipe_identity_status": candidate.get(
+            "training_recipe_identity_status"
+        ),
+        "scale_up_candidate_training_recipe_identity_verified": candidate.get(
+            "training_recipe_identity_verified"
+        ),
+        "scale_up_candidate_training_recipe_expected_id": candidate.get(
+            "training_recipe_expected_id"
+        ),
+        "scale_up_candidate_training_recipe_observed_id": candidate.get(
+            "training_recipe_observed_id"
+        ),
         "scale_up_candidate_runtime_input_identity_status": candidate.get(
             "runtime_input_identity_status"
         ),
@@ -6962,6 +6977,22 @@ def hf_gpt2_finetune_scale_up_command(
             None if resolved_source_cwd is None else str(resolved_source_cwd)
         ),
     )
+    source_expected_training_recipe_id = _command_flag_value(
+        base_command,
+        _HF_FINETUNE_EXPECTED_TRAINING_RECIPE_ID_FLAG,
+    )
+    base_command = _command_without_value_flags(
+        base_command,
+        (_HF_FINETUNE_EXPECTED_TRAINING_RECIPE_ID_FLAG,),
+    )
+    training_recipe_identity_contract = {
+        "status": "reissued",
+        "source_expected_identity_id": source_expected_training_recipe_id,
+        "expected_identity_id": None,
+        "reason": "intentional_scale_up_recipe_change",
+        "fail_fast": False,
+        "verification_phase": "before_trainer_init",
+    }
     source_max_train_samples = _command_flag_value(
         base_command,
         "--max-train-samples",
@@ -7691,6 +7722,18 @@ def hf_gpt2_finetune_scale_up_command(
         "scale_up_candidate_execution_input_observed_id": summary.get(
             "scale_up_candidate_execution_input_observed_id"
         ),
+        "scale_up_candidate_training_recipe_identity_status": summary.get(
+            "scale_up_candidate_training_recipe_identity_status"
+        ),
+        "scale_up_candidate_training_recipe_identity_verified": summary.get(
+            "scale_up_candidate_training_recipe_identity_verified"
+        ),
+        "scale_up_candidate_training_recipe_expected_id": summary.get(
+            "scale_up_candidate_training_recipe_expected_id"
+        ),
+        "scale_up_candidate_training_recipe_observed_id": summary.get(
+            "scale_up_candidate_training_recipe_observed_id"
+        ),
         "adapter_promotion_required": summary.get("adapter_promotion_required"),
         "scale_up_candidate_adapter_promotion_status": summary.get(
             "scale_up_candidate_adapter_promotion_status"
@@ -7845,6 +7888,14 @@ def hf_gpt2_finetune_scale_up_command(
             execution_input_identity_contract.get("status")
         ),
         "execution_input_expected_id": expected_execution_input_id,
+        "training_recipe_identity_contract": training_recipe_identity_contract,
+        "training_recipe_identity_contract_status": (
+            training_recipe_identity_contract.get("status")
+        ),
+        "training_recipe_source_expected_id": (
+            source_expected_training_recipe_id
+        ),
+        "training_recipe_expected_id": None,
         "command_runtime": command_runtime,
         "command_runtime_status": command_runtime.get("status"),
         "command_path_resolution": command_path_resolution,
@@ -8110,6 +8161,51 @@ def hf_gpt2_finetune_scale_up_preflight_report(
                 )
 
     training_input_identity: dict[str, object] | None = None
+    command_expected_training_recipe_id = _command_flag_value(
+        command,
+        _HF_FINETUNE_EXPECTED_TRAINING_RECIPE_ID_FLAG,
+    )
+    artifact_training_recipe_contract = artifact.get(
+        "training_recipe_identity_contract"
+    )
+    if command_expected_training_recipe_id is not None:
+        issues.append(
+            {
+                "severity": "error",
+                "field": _HF_FINETUNE_EXPECTED_TRAINING_RECIPE_ID_FLAG,
+                "path": command_expected_training_recipe_id,
+                "message": (
+                    "scale-up must recompute its effective training recipe "
+                    "instead of inheriting the source recipe identity"
+                ),
+            }
+        )
+    if (
+        isinstance(artifact_training_recipe_contract, Mapping)
+        and artifact_training_recipe_contract.get("status") != "reissued"
+    ):
+        issues.append(
+            {
+                "severity": "error",
+                "field": "training_recipe_identity_contract",
+                "message": "scale-up training recipe identity must be reissued",
+            }
+        )
+    inputs.append(
+        {
+            "field": "training_recipe_identity_reissue",
+            "source_expected_identity_id": artifact.get(
+                "training_recipe_source_expected_id"
+            ),
+            "command_expected_identity_id": command_expected_training_recipe_id,
+            "status": (
+                artifact_training_recipe_contract.get("status")
+                if isinstance(artifact_training_recipe_contract, Mapping)
+                else None
+            ),
+            "verified": command_expected_training_recipe_id is None,
+        }
+    )
     command_expected_training_input_id = _command_flag_value(
         command,
         _HF_FINETUNE_EXPECTED_INPUT_ID_FLAG,
@@ -9158,6 +9254,11 @@ def hf_gpt2_finetune_scale_up_preflight_report(
             command_expected_execution_input_id
             or artifact_expected_execution_input_id
         ),
+        "training_recipe_identity_contract": artifact_training_recipe_contract,
+        "training_recipe_source_expected_id": artifact.get(
+            "training_recipe_source_expected_id"
+        ),
+        "training_recipe_expected_id": command_expected_training_recipe_id,
         "adapter_continuation_expected_child_lineage_depth": artifact.get(
             "adapter_continuation_expected_child_lineage_depth"
         ),
@@ -9265,6 +9366,16 @@ def hf_gpt2_finetune_scale_up_preflight_lines(
             "input_tokens="
             f"{tokenized_dataset_contract.get('candidate_total_input_tokens')} "
             f"fail_fast={tokenized_dataset_contract.get('fail_fast')}"
+        )
+    training_recipe_contract = report.get("training_recipe_identity_contract")
+    if isinstance(training_recipe_contract, Mapping):
+        lines.append(
+            "hf_gpt2_ft_scale_up_training_recipe_identity "
+            f"status={training_recipe_contract.get('status')} "
+            f"source={report.get('training_recipe_source_expected_id')} "
+            f"expected={report.get('training_recipe_expected_id')} "
+            f"reason={training_recipe_contract.get('reason')} "
+            f"fail_fast={training_recipe_contract.get('fail_fast')}"
         )
     runtime_input_contract = report.get("runtime_input_identity_contract")
     if isinstance(runtime_input_contract, Mapping):
@@ -9383,6 +9494,14 @@ def summarize_hf_gpt2_finetune_run_card(
     tokenized_dataset_identity_contract = _mapping_item(
         card,
         "tokenized_dataset_identity_contract",
+    )
+    training_recipe_identity = _mapping_item(
+        card,
+        "training_recipe_identity",
+    )
+    training_recipe_identity_contract = _mapping_item(
+        card,
+        "training_recipe_identity_contract",
     )
     runtime_input_identity_pre_model = _mapping_item(
         card,
@@ -9632,6 +9751,24 @@ def summarize_hf_gpt2_finetune_run_card(
             tokenized_dataset_identity.get("total_input_tokens")
         ),
         "tokenized_dataset_contract_status": tokenized_dataset_identity_contract.get(
+            "status"
+        ),
+        "training_recipe_identity_status": training_recipe_identity.get("status"),
+        "training_recipe_identity_verified": training_recipe_identity.get(
+            "identity_verified"
+        ),
+        "training_recipe_expected_id": (
+            training_recipe_identity_contract.get("expected_identity_id")
+            if training_recipe_identity_contract
+            else training_recipe_identity.get("expected_identity_id")
+        ),
+        "training_recipe_observed_id": training_recipe_identity.get(
+            "observed_identity_id"
+        ),
+        "training_recipe_argument_count": _safe_number(
+            training_recipe_identity.get("training_argument_count")
+        ),
+        "training_recipe_contract_status": training_recipe_identity_contract.get(
             "status"
         ),
         "runtime_input_identity_status": runtime_input_identity.get("status"),
@@ -11118,6 +11255,26 @@ def summarize_hf_gpt2_finetune_sweep_report(
             None
             if scale_up_candidate is None
             else scale_up_candidate.get("tokenized_dataset_total_input_tokens")
+        ),
+        "scale_up_candidate_training_recipe_identity_status": (
+            None
+            if scale_up_candidate is None
+            else scale_up_candidate.get("training_recipe_identity_status")
+        ),
+        "scale_up_candidate_training_recipe_identity_verified": (
+            None
+            if scale_up_candidate is None
+            else scale_up_candidate.get("training_recipe_identity_verified")
+        ),
+        "scale_up_candidate_training_recipe_expected_id": (
+            None
+            if scale_up_candidate is None
+            else scale_up_candidate.get("training_recipe_expected_id")
+        ),
+        "scale_up_candidate_training_recipe_observed_id": (
+            None
+            if scale_up_candidate is None
+            else scale_up_candidate.get("training_recipe_observed_id")
         ),
         "scale_up_candidate_runtime_input_identity_status": (
             None

@@ -569,6 +569,7 @@ HF_DATASET_INPUT_IDENTITY_SCHEMA: str
 HF_DATASET_MATERIALIZATION_IDENTITY_SCHEMA: str
 HF_TOKENIZED_DATASET_IDENTITY_SCHEMA: str
 HF_FINETUNE_EXECUTION_IDENTITY_SCHEMA: str
+HF_FINETUNE_TRAINING_RECIPE_IDENTITY_SCHEMA: str
 HF_CAUSAL_LM_ARTIFACT_KINDS: Tuple[str, ...]
 HF_CAUSAL_LM_RUNTIME_IDENTITY_SCHEMA: str
 HF_ADAPTER_LINEAGE_FILENAME: str
@@ -709,6 +710,19 @@ def hf_finetune_execution_identity_report(
     phase: str = ...,
 ) -> Dict[str, object]: ...
 def hf_finetune_execution_identity_lines(
+    report: Mapping[str, object],
+) -> List[str]: ...
+def hf_finetune_training_recipe_identity_report(
+    training_arguments: object,
+    *,
+    model_prepare_report: Mapping[str, object],
+    model_dtype_report: Mapping[str, object] | None = ...,
+    checkpoint_resume_report: Mapping[str, object] | None = ...,
+    trainer_contract: Mapping[str, object] | None = ...,
+    expected_identity_id: str | None = ...,
+    phase: str = ...,
+) -> Dict[str, object]: ...
+def hf_finetune_training_recipe_identity_lines(
     report: Mapping[str, object],
 ) -> List[str]: ...
 def hf_adapter_fingerprint(adapter: str | PathLike[str]) -> Dict[str, object]: ...
