@@ -212,6 +212,11 @@ def _trainer_trace_snapshot(
             "trace_last_training_geometry_guard_patience": _integer_value(
                 last_geometry_guard.get("patience")
             ),
+            "trace_last_training_geometry_guard_horizon": (
+                dict(last_geometry_guard.get("horizon"))
+                if isinstance(last_geometry_guard.get("horizon"), Mapping)
+                else None
+            ),
         },
     )
 
@@ -604,6 +609,10 @@ def _validate_trainer_telemetry_evidence_rows(
                         "geometry_guard_matches"
                     ),
                 }
+            )
+        if "geometry_guard_horizon_matches" in evidence:
+            evidence_identity_payload["geometry_guard_horizon_matches"] = (
+                evidence.get("geometry_guard_horizon_matches")
             )
         expected_evidence_id = _canonical_sha256(evidence_identity_payload)
         if evidence.get("evidence_id") != expected_evidence_id:
@@ -1253,6 +1262,7 @@ def _trainer_telemetry_evidence_contract(
     policy: Mapping[str, object] | None,
     command_contract: Mapping[str, object] | None,
     geometry_guard_command_contract: Mapping[str, object] | None,
+    geometry_guard_horizon: Mapping[str, object] | None,
     command_cwd: str | Path | None,
 ) -> dict[str, object]:
     resolved_policy = dict(policy) if isinstance(policy, Mapping) else {}
@@ -1262,6 +1272,11 @@ def _trainer_telemetry_evidence_contract(
     resolved_geometry_guard_contract = (
         dict(geometry_guard_command_contract)
         if isinstance(geometry_guard_command_contract, Mapping)
+        else {}
+    )
+    resolved_geometry_guard_horizon = (
+        dict(geometry_guard_horizon)
+        if isinstance(geometry_guard_horizon, Mapping)
         else {}
     )
     desire_required = resolved_policy.get("min_desire_stability") is not None
@@ -1291,6 +1306,7 @@ def _trainer_telemetry_evidence_contract(
                 resolved_geometry_guard_contract.get("status")
             ),
             "geometry_guard_required": False,
+            "geometry_guard_horizon_matches": None,
             "trace_path": resolved_command_contract.get("trainer_trace_jsonl"),
             "trace_exists": None,
             "trace_sha256": None,
@@ -1436,6 +1452,7 @@ def _trainer_telemetry_evidence_contract(
             }
         )
     geometry_guard_matches = True
+    geometry_guard_horizon_matches = True
     if geometry_guard_required:
         observed_guard_contract = {
             "min_desire_stability": trace_summary.get(
@@ -1461,6 +1478,35 @@ def _trainer_telemetry_evidence_contract(
             )
         }
         geometry_guard_matches = observed_guard_contract == expected_guard_contract
+        observed_guard_horizon = trace_summary.get(
+            "trace_last_training_geometry_guard_horizon"
+        )
+        horizon_fields = (
+            "status",
+            "active",
+            "ready",
+            "max_steps",
+            "logging_steps",
+            "min_desire_stability_guard",
+            "max_psi_total_guard",
+            "minimum_observations",
+            "patience",
+            "required_log_events",
+            "available_log_events",
+            "horizon_sufficient",
+            "cadence_sufficient",
+            "recommended_logging_steps",
+            "auto_adjustment_possible",
+            "minimum_max_steps",
+        )
+        geometry_guard_horizon_matches = bool(
+            isinstance(observed_guard_horizon, Mapping)
+            and all(
+                observed_guard_horizon.get(field)
+                == resolved_geometry_guard_horizon.get(field)
+                for field in horizon_fields
+            )
+        )
         if geometry_guard_count is None or geometry_guard_count < 1:
             issues.append(
                 {
@@ -1477,6 +1523,15 @@ def _trainer_telemetry_evidence_contract(
                     "observed": observed_guard_contract,
                     "threshold": expected_guard_contract,
                     "message": "live geometry guard trace does not match the command",
+                }
+            )
+        if not geometry_guard_horizon_matches:
+            issues.append(
+                {
+                    "field": "trainer_geometry_guard_trace_horizon",
+                    "observed": observed_guard_horizon,
+                    "threshold": resolved_geometry_guard_horizon,
+                    "message": "live geometry guard horizon does not match the command",
                 }
             )
 
@@ -1542,6 +1597,7 @@ def _trainer_telemetry_evidence_contract(
         ),
         "geometry_guard_required": geometry_guard_required,
         "geometry_guard_matches": geometry_guard_matches,
+        "geometry_guard_horizon_matches": geometry_guard_horizon_matches,
         "required_axes": required_axes,
     }
     ready = not issues
@@ -1574,6 +1630,7 @@ def _trainer_telemetry_evidence_contract(
             geometry_guard_trigger_step
         ),
         "geometry_guard_matches": geometry_guard_matches,
+        "geometry_guard_horizon_matches": geometry_guard_horizon_matches,
         "node_trace_training_telemetry_count": node_telemetry_count,
         "node_trace_mean_desire_stability": None
         if node is None
@@ -1638,6 +1695,7 @@ def _postflight_report(
     policy: Mapping[str, object] | None = None,
     trainer_telemetry_command_contract: Mapping[str, object] | None = None,
     trainer_geometry_guard_command_contract: Mapping[str, object] | None = None,
+    trainer_geometry_guard_horizon: Mapping[str, object] | None = None,
     command_cwd: str | Path | None = None,
 ) -> dict[str, object]:
     node = _node_for_path(chain, output_dir)
@@ -1656,6 +1714,7 @@ def _postflight_report(
         geometry_guard_command_contract=(
             trainer_geometry_guard_command_contract
         ),
+        geometry_guard_horizon=trainer_geometry_guard_horizon,
         command_cwd=command_cwd,
     )
     checks = [
@@ -2185,6 +2244,14 @@ def _recover_running_attempts(
                 raw_attempt.get("trainer_geometry_guard_command_contract")
                 if isinstance(
                     raw_attempt.get("trainer_geometry_guard_command_contract"),
+                    Mapping,
+                )
+                else None
+            ),
+            trainer_geometry_guard_horizon=(
+                raw_attempt.get("trainer_geometry_guard_horizon")
+                if isinstance(
+                    raw_attempt.get("trainer_geometry_guard_horizon"),
                     Mapping,
                 )
                 else None
@@ -3062,6 +3129,9 @@ def _run_hf_adapter_continuation_executor_unlocked(
             "trainer_geometry_guard_command_contract": command.get(
                 "trainer_geometry_guard_command_contract"
             ),
+            "trainer_geometry_guard_horizon": command.get(
+                "trainer_geometry_guard_horizon"
+            ),
             "parent_identity_contract": command.get(
                 "adapter_continuation_identity_contract"
             ),
@@ -3310,6 +3380,9 @@ def _run_hf_adapter_continuation_executor_unlocked(
             "trainer_geometry_guard_command_contract": command.get(
                 "trainer_geometry_guard_command_contract"
             ),
+            "trainer_geometry_guard_horizon": command.get(
+                "trainer_geometry_guard_horizon"
+            ),
             "parent_identity_contract": command.get(
                 "adapter_continuation_identity_contract"
             ),
@@ -3521,6 +3594,14 @@ def _run_hf_adapter_continuation_executor_unlocked(
                 attempt.get("trainer_geometry_guard_command_contract")
                 if isinstance(
                     attempt.get("trainer_geometry_guard_command_contract"),
+                    Mapping,
+                )
+                else None
+            ),
+            trainer_geometry_guard_horizon=(
+                attempt.get("trainer_geometry_guard_horizon")
+                if isinstance(
+                    attempt.get("trainer_geometry_guard_horizon"),
                     Mapping,
                 )
                 else None
@@ -3739,6 +3820,14 @@ def hf_adapter_continuation_executor_lines(
             if isinstance(trainer_geometry_guard_contract, Mapping)
             else None
         )
+        trainer_geometry_guard_horizon = pending.get(
+            "trainer_geometry_guard_horizon"
+        )
+        trainer_geometry_guard_horizon_status = (
+            trainer_geometry_guard_horizon.get("status")
+            if isinstance(trainer_geometry_guard_horizon, Mapping)
+            else None
+        )
         preflight = pending.get("preflight")
         preflight_status = (
             preflight.get("status") if isinstance(preflight, Mapping) else None
@@ -3823,6 +3912,7 @@ def hf_adapter_continuation_executor_lines(
             f"runtime={runtime_status} "
             f"trainer_telemetry={trainer_telemetry_contract_status} "
             f"geometry_guard={trainer_geometry_guard_contract_status} "
+            f"guard_horizon={trainer_geometry_guard_horizon_status} "
             f"preflight={preflight_status} "
             f"input_identity={input_identity_status} "
             f"training_input_identity={training_input_identity_status} "
@@ -3921,6 +4011,14 @@ def hf_adapter_continuation_executor_lines(
             if isinstance(trainer_geometry_guard_contract, Mapping)
             else None
         )
+        trainer_geometry_guard_horizon = raw_attempt.get(
+            "trainer_geometry_guard_horizon"
+        )
+        trainer_geometry_guard_horizon_status = (
+            trainer_geometry_guard_horizon.get("status")
+            if isinstance(trainer_geometry_guard_horizon, Mapping)
+            else None
+        )
         input_identity = raw_attempt.get("adapter_input_identity")
         input_identity_status = (
             input_identity.get("status")
@@ -3997,6 +4095,7 @@ def hf_adapter_continuation_executor_lines(
             f"runtime={runtime_status} "
             f"trainer_telemetry={trainer_telemetry_contract_status} "
             f"geometry_guard={trainer_geometry_guard_contract_status} "
+            f"guard_horizon={trainer_geometry_guard_horizon_status} "
             f"telemetry_evidence={telemetry_evidence_status} "
             f"telemetry_events={telemetry_evidence_count} "
             f"geometry_guard_triggers={telemetry_geometry_guard_trigger_count} "

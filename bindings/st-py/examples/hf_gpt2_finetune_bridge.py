@@ -59,6 +59,7 @@ from spiraltorch.hf_ft import (
     hf_gpt2_finetune_disk_headroom_plan,
     hf_gpt2_finetune_eval_report,
     hf_gpt2_finetune_generation_report,
+    hf_gpt2_finetune_geometry_guard_horizon_report,
     hf_gpt2_finetune_inference_distortion_handoff_report,
     hf_gpt2_finetune_inference_distortion_handoff_lines,
     hf_gpt2_finetune_preflight_report,
@@ -961,6 +962,26 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         parser.error("--trainer-geometry-guard-min-events must be positive")
     if args.trainer_geometry_guard_patience <= 0:
         parser.error("--trainer-geometry-guard-patience must be positive")
+    geometry_guard_horizon = hf_gpt2_finetune_geometry_guard_horizon_report(
+        max_steps=args.max_steps,
+        logging_steps=args.logging_steps,
+        min_desire_stability_guard=(
+            args.trainer_min_desire_stability_guard
+        ),
+        max_psi_total_guard=args.trainer_max_psi_total_guard,
+        minimum_observations=args.trainer_geometry_guard_min_events,
+        patience=args.trainer_geometry_guard_patience,
+    )
+    args._trainer_geometry_guard_horizon = geometry_guard_horizon
+    if geometry_guard_active and geometry_guard_horizon.get("ready") is not True:
+        parser.error(
+            "trainer geometry guard is not observable: "
+            f"{geometry_guard_horizon.get('status')} "
+            "(set explicit --max-steps and reduce --logging-steps; "
+            f"minimum max_steps={geometry_guard_horizon.get('minimum_max_steps')}, "
+            "recommended logging_steps="
+            f"{geometry_guard_horizon.get('recommended_logging_steps')})"
+        )
     if args.trainer_loss_guard_threshold < 0.0 or not math.isfinite(
         args.trainer_loss_guard_threshold
     ):
@@ -3771,6 +3792,9 @@ def _base_run_card(
         "trainer_geometry_guard_active": bool(
             args.trainer_min_desire_stability_guard is not None
             or args.trainer_max_psi_total_guard is not None
+        ),
+        "trainer_geometry_guard_horizon": dict(
+            getattr(args, "_trainer_geometry_guard_horizon", {}) or {}
         ),
         "trainer_loss_guard_enabled": not bool(args.no_trainer_loss_guard),
         "trainer_loss_guard_threshold": args.trainer_loss_guard_threshold,

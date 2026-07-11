@@ -90,6 +90,7 @@ __all__ = [
     "hf_finetune_scale_up_preflight_report",
     "hf_finetune_summary_lines",
     "hf_finetune_training_telemetry_frame",
+    "hf_finetune_geometry_guard_horizon_report",
     "hf_finetune_trainer_trace_callback",
     "hf_finetune_trainer_trace_event",
     "hf_finetune_zspace_probe",
@@ -117,6 +118,7 @@ __all__ = [
     "hf_gpt2_finetune_scale_up_preflight_report",
     "hf_gpt2_finetune_summary_lines",
     "hf_gpt2_finetune_training_telemetry_frame",
+    "hf_gpt2_finetune_geometry_guard_horizon_report",
     "hf_gpt2_finetune_trainer_trace_callback",
     "hf_gpt2_finetune_trainer_trace_event",
     "hf_gpt2_finetune_zspace_probe",
@@ -4332,6 +4334,10 @@ def hf_gpt2_finetune_summary_lines(report: Mapping[str, object]) -> list[str]:
             "triggers="
             f"{report.get('trace_training_geometry_guard_trigger_count')} "
             f"status={report.get('trace_last_training_geometry_guard_status')} "
+            f"horizon={report.get('trainer_geometry_guard_horizon_status')} "
+            "log_events="
+            f"{report.get('trainer_geometry_guard_available_log_events')}/"
+            f"{report.get('trainer_geometry_guard_required_log_events')} "
             "reasons="
             f"{report.get('trace_last_training_geometry_guard_reason_codes')} "
             f"step={report.get('trace_last_training_geometry_guard_trigger_step')}"
@@ -4608,6 +4614,103 @@ def _positive_integer(value: object, *, label: str) -> int:
     if float(resolved) != float(number) or resolved < 1:
         raise ValueError(f"{label} must be a positive integer")
     return resolved
+
+
+def hf_gpt2_finetune_geometry_guard_horizon_report(
+    *,
+    max_steps: object,
+    logging_steps: object,
+    min_desire_stability_guard: object = None,
+    max_psi_total_guard: object = None,
+    minimum_observations: object = 3,
+    patience: object = 2,
+) -> dict[str, object]:
+    """Prove that a guarded Trainer run can emit enough telemetry to arm."""
+
+    min_desire = _optional_unit_interval(
+        min_desire_stability_guard,
+        label="min_desire_stability_guard",
+    )
+    max_psi = _optional_unit_interval(
+        max_psi_total_guard,
+        label="max_psi_total_guard",
+    )
+    resolved_logging_steps = _positive_integer(
+        logging_steps,
+        label="logging_steps",
+    )
+    resolved_minimum_observations = _positive_integer(
+        minimum_observations,
+        label="minimum_observations",
+    )
+    resolved_patience = _positive_integer(patience, label="patience")
+    active = bool(min_desire is not None or max_psi is not None)
+    max_steps_number = _safe_number(max_steps)
+    resolved_max_steps = (
+        int(max_steps_number)
+        if max_steps_number is not None
+        and math.isfinite(float(max_steps_number))
+        and float(int(max_steps_number)) == float(max_steps_number)
+        and int(max_steps_number) > 0
+        else None
+    )
+    required_log_events = (
+        resolved_minimum_observations + resolved_patience
+        if min_desire is not None
+        else resolved_minimum_observations + resolved_patience - 1
+    )
+    available_log_events = (
+        None
+        if resolved_max_steps is None
+        else resolved_max_steps // resolved_logging_steps
+    )
+    horizon_sufficient = bool(
+        resolved_max_steps is not None
+        and resolved_max_steps >= required_log_events
+    )
+    cadence_sufficient = bool(
+        available_log_events is not None
+        and available_log_events >= required_log_events
+    )
+    recommended_logging_steps = (
+        None
+        if not active or resolved_max_steps is None
+        else max(1, resolved_max_steps // required_log_events)
+    )
+    if not active:
+        status = "not_applicable"
+        ready = True
+    elif resolved_max_steps is None:
+        status = "max_steps_required"
+        ready = False
+    elif not horizon_sufficient:
+        status = "horizon_too_short"
+        ready = False
+    elif not cadence_sufficient:
+        status = "cadence_too_sparse"
+        ready = False
+    else:
+        status = "ready"
+        ready = True
+    return {
+        "row_type": "hf_gpt2_finetune_geometry_guard_horizon",
+        "status": status,
+        "active": active,
+        "ready": ready,
+        "max_steps": resolved_max_steps,
+        "logging_steps": resolved_logging_steps,
+        "min_desire_stability_guard": min_desire,
+        "max_psi_total_guard": max_psi,
+        "minimum_observations": resolved_minimum_observations,
+        "patience": resolved_patience,
+        "required_log_events": required_log_events if active else 0,
+        "available_log_events": available_log_events,
+        "horizon_sufficient": horizon_sufficient if active else True,
+        "cadence_sufficient": cadence_sufficient if active else True,
+        "recommended_logging_steps": recommended_logging_steps,
+        "auto_adjustment_possible": bool(active and horizon_sufficient),
+        "minimum_max_steps": required_log_events if active else None,
+    }
 
 
 def _prefixed_numeric_payload(
@@ -5324,6 +5427,11 @@ def summarize_hf_gpt2_finetune_trainer_trace(
         guard for guard in geometry_guards if guard.get("triggered_now") is True
     ]
     last_geometry_guard = geometry_guards[-1] if geometry_guards else {}
+    last_geometry_guard_horizon = (
+        dict(last_geometry_guard.get("horizon"))
+        if isinstance(last_geometry_guard.get("horizon"), Mapping)
+        else {}
+    )
     return {
         "row_type": "hf_gpt2_finetune_trainer_trace_summary",
         "trace_event_count": len(rows),
@@ -5385,6 +5493,18 @@ def summarize_hf_gpt2_finetune_trainer_trace(
         ),
         "trace_last_training_geometry_guard_psi_total": _safe_number(
             last_geometry_guard.get("observed_max_psi_total")
+        ),
+        "trace_last_training_geometry_guard_horizon_status": (
+            last_geometry_guard_horizon.get("status")
+        ),
+        "trace_last_training_geometry_guard_horizon_ready": (
+            last_geometry_guard_horizon.get("ready")
+        ),
+        "trace_last_training_geometry_guard_horizon_required_log_events": (
+            last_geometry_guard_horizon.get("required_log_events")
+        ),
+        "trace_last_training_geometry_guard_horizon_available_log_events": (
+            last_geometry_guard_horizon.get("available_log_events")
         ),
         "trace_inference_distortion_telemetry_count": len(inference_handoff_present),
         "trace_last_inference_distortion_desire_pressure": (
@@ -7175,12 +7295,6 @@ def hf_gpt2_finetune_scale_up_command(
         trainer_geometry_guard_patience,
         label="trainer_geometry_guard_patience",
     )
-    trainer_geometry_guard_active = bool(
-        resolved_min_desire_guard is not None or resolved_max_psi_guard is not None
-    )
-    trainer_telemetry_required = bool(
-        require_trainer_telemetry or trainer_geometry_guard_active
-    )
     continuation_policy = _scale_up_adapter_continuation_policy(
         adapter_continuation
     )
@@ -7380,6 +7494,46 @@ def hf_gpt2_finetune_scale_up_command(
         flag: _command_flag_value(base_command, flag)
         for flag in trainer_geometry_guard_flags
     }
+    source_min_desire_guard = _optional_unit_interval(
+        source_trainer_geometry_guard[
+            "--trainer-min-desire-stability-guard"
+        ],
+        label="source trainer_min_desire_stability_guard",
+    )
+    source_max_psi_guard = _optional_unit_interval(
+        source_trainer_geometry_guard["--trainer-max-psi-total-guard"],
+        label="source trainer_max_psi_total_guard",
+    )
+    if resolved_min_desire_guard is None:
+        resolved_min_desire_guard = source_min_desire_guard
+    if resolved_max_psi_guard is None:
+        resolved_max_psi_guard = source_max_psi_guard
+    source_geometry_guard_active = bool(
+        source_min_desire_guard is not None or source_max_psi_guard is not None
+    )
+    if source_geometry_guard_active:
+        source_minimum_observations = source_trainer_geometry_guard[
+            "--trainer-geometry-guard-min-events"
+        ]
+        source_patience = source_trainer_geometry_guard[
+            "--trainer-geometry-guard-patience"
+        ]
+        if trainer_geometry_guard_min_events == 3 and source_minimum_observations:
+            resolved_geometry_guard_min_events = _positive_integer(
+                source_minimum_observations,
+                label="source trainer_geometry_guard_min_events",
+            )
+        if trainer_geometry_guard_patience == 2 and source_patience:
+            resolved_geometry_guard_patience = _positive_integer(
+                source_patience,
+                label="source trainer_geometry_guard_patience",
+            )
+    trainer_geometry_guard_active = bool(
+        resolved_min_desire_guard is not None or resolved_max_psi_guard is not None
+    )
+    trainer_telemetry_required = bool(
+        require_trainer_telemetry or trainer_geometry_guard_active
+    )
     base_command = _command_without_value_flags(
         base_command,
         trainer_geometry_guard_flags,
@@ -7904,6 +8058,55 @@ def hf_gpt2_finetune_scale_up_command(
         explicit=max_steps,
         multiplier=max_steps_multiplier,
     )
+    effective_max_steps = (
+        resolved_max_steps
+        if resolved_max_steps is not None
+        else _command_flag_value(base_command, "--max-steps")
+    )
+    source_logging_steps = _positive_integer(
+        _command_flag_value(base_command, "--logging-steps") or 25,
+        label="logging_steps",
+    )
+    trainer_geometry_guard_horizon_before_adjustment = (
+        hf_gpt2_finetune_geometry_guard_horizon_report(
+            max_steps=effective_max_steps,
+            logging_steps=source_logging_steps,
+            min_desire_stability_guard=resolved_min_desire_guard,
+            max_psi_total_guard=resolved_max_psi_guard,
+            minimum_observations=resolved_geometry_guard_min_events,
+            patience=resolved_geometry_guard_patience,
+        )
+    )
+    recommended_logging_steps = trainer_geometry_guard_horizon_before_adjustment.get(
+        "recommended_logging_steps"
+    )
+    resolved_logging_steps = source_logging_steps
+    if (
+        trainer_geometry_guard_active
+        and trainer_geometry_guard_horizon_before_adjustment.get(
+            "auto_adjustment_possible"
+        )
+        is True
+        and isinstance(recommended_logging_steps, int)
+    ):
+        resolved_logging_steps = min(
+            source_logging_steps,
+            recommended_logging_steps,
+        )
+    trainer_geometry_guard_horizon = (
+        hf_gpt2_finetune_geometry_guard_horizon_report(
+            max_steps=effective_max_steps,
+            logging_steps=resolved_logging_steps,
+            min_desire_stability_guard=resolved_min_desire_guard,
+            max_psi_total_guard=resolved_max_psi_guard,
+            minimum_observations=resolved_geometry_guard_min_events,
+            patience=resolved_geometry_guard_patience,
+        )
+    )
+    trainer_geometry_guard_logging_auto_adjusted = bool(
+        trainer_geometry_guard_active
+        and resolved_logging_steps != source_logging_steps
+    )
     continuation = _scale_up_adapter_continuation_plan(
         summary,
         base_command,
@@ -8043,6 +8246,9 @@ def hf_gpt2_finetune_scale_up_command(
             resolved_geometry_guard_patience
             if trainer_geometry_guard_active
             else None
+        ),
+        "--logging-steps": (
+            resolved_logging_steps if trainer_geometry_guard_active else None
         ),
         "--max-steps": resolved_max_steps,
         "--max-train-samples": resolved_max_train_samples,
@@ -8259,6 +8465,15 @@ def hf_gpt2_finetune_scale_up_command(
         "trainer_geometry_guard_min_events": resolved_geometry_guard_min_events,
         "trainer_geometry_guard_patience": resolved_geometry_guard_patience,
         "trainer_geometry_guard_source": source_trainer_geometry_guard,
+        "trainer_geometry_guard_source_logging_steps": source_logging_steps,
+        "trainer_geometry_guard_resolved_logging_steps": resolved_logging_steps,
+        "trainer_geometry_guard_logging_auto_adjusted": (
+            trainer_geometry_guard_logging_auto_adjusted
+        ),
+        "trainer_geometry_guard_horizon_before_adjustment": (
+            trainer_geometry_guard_horizon_before_adjustment
+        ),
+        "trainer_geometry_guard_horizon": trainer_geometry_guard_horizon,
         "trainer_telemetry_command_contract": trainer_telemetry_command_contract,
         "trainer_telemetry_command_contract_status": (
             trainer_telemetry_command_contract.get("status")
@@ -8962,6 +9177,95 @@ def hf_gpt2_finetune_scale_up_preflight_report(
             "verified": bool(
                 trainer_geometry_guard_command_contract.get("ready")
                 and trainer_geometry_guard_command_contract_matches
+            ),
+        }
+    )
+    trainer_geometry_guard_horizon = (
+        hf_gpt2_finetune_geometry_guard_horizon_report(
+            max_steps=_command_flag_value(command, "--max-steps"),
+            logging_steps=_command_flag_value(command, "--logging-steps") or 25,
+            min_desire_stability_guard=expected_min_desire_guard,
+            max_psi_total_guard=expected_max_psi_guard,
+            minimum_observations=expected_guard_min_events,
+            patience=expected_guard_patience,
+        )
+    )
+    declared_geometry_guard_horizon = artifact.get(
+        "trainer_geometry_guard_horizon"
+    )
+    trainer_geometry_guard_horizon_matches = True
+    if isinstance(declared_geometry_guard_horizon, Mapping):
+        horizon_fields = (
+            "row_type",
+            "status",
+            "active",
+            "ready",
+            "max_steps",
+            "logging_steps",
+            "min_desire_stability_guard",
+            "max_psi_total_guard",
+            "minimum_observations",
+            "patience",
+            "required_log_events",
+            "available_log_events",
+            "horizon_sufficient",
+            "cadence_sufficient",
+            "recommended_logging_steps",
+            "auto_adjustment_possible",
+            "minimum_max_steps",
+        )
+        trainer_geometry_guard_horizon_matches = all(
+            declared_geometry_guard_horizon.get(field)
+            == trainer_geometry_guard_horizon.get(field)
+            for field in horizon_fields
+        )
+        if not trainer_geometry_guard_horizon_matches:
+            issues.append(
+                {
+                    "severity": "error",
+                    "field": "trainer_geometry_guard_horizon",
+                    "message": (
+                        "trainer geometry guard horizon metadata does not match "
+                        "the resolved command"
+                    ),
+                }
+            )
+    elif geometry_guard_metadata_declared and trainer_geometry_guard_active:
+        trainer_geometry_guard_horizon_matches = False
+        issues.append(
+            {
+                "severity": "error",
+                "field": "trainer_geometry_guard_horizon",
+                "message": "required trainer geometry guard horizon is missing",
+            }
+        )
+    if (
+        trainer_geometry_guard_active
+        and trainer_geometry_guard_horizon.get("ready") is not True
+    ):
+        issues.append(
+            {
+                "severity": "error",
+                "field": "trainer_geometry_guard_horizon",
+                "message": (
+                    "trainer geometry guard cannot arm within the resolved "
+                    f"training horizon: {trainer_geometry_guard_horizon.get('status')}"
+                ),
+            }
+        )
+    inputs.append(
+        {
+            "field": "trainer_geometry_guard_horizon",
+            "declared": (
+                dict(declared_geometry_guard_horizon)
+                if isinstance(declared_geometry_guard_horizon, Mapping)
+                else None
+            ),
+            "observed": trainer_geometry_guard_horizon,
+            "metadata_matches": trainer_geometry_guard_horizon_matches,
+            "verified": bool(
+                trainer_geometry_guard_horizon.get("ready")
+                and trainer_geometry_guard_horizon_matches
             ),
         }
     )
@@ -10061,6 +10365,10 @@ def hf_gpt2_finetune_scale_up_preflight_report(
         "trainer_geometry_guard_command_contract_matches": (
             trainer_geometry_guard_command_contract_matches
         ),
+        "trainer_geometry_guard_horizon": trainer_geometry_guard_horizon,
+        "trainer_geometry_guard_horizon_matches": (
+            trainer_geometry_guard_horizon_matches
+        ),
         "command_path_resolution": artifact.get("command_path_resolution"),
         "source_command_cwd": artifact.get("source_command_cwd"),
         "adapter_continuation_policy": artifact.get(
@@ -10177,6 +10485,12 @@ def hf_gpt2_finetune_scale_up_preflight_lines(
         if isinstance(geometry_guard_contract, Mapping)
         else {}
     )
+    geometry_guard_horizon = report.get("trainer_geometry_guard_horizon")
+    geometry_guard_horizon = (
+        geometry_guard_horizon
+        if isinstance(geometry_guard_horizon, Mapping)
+        else {}
+    )
     lines = [
         (
             "hf_gpt2_ft_scale_up_preflight "
@@ -10198,7 +10512,11 @@ def hf_gpt2_finetune_scale_up_preflight_lines(
             f"geometry_guard={geometry_guard_contract.get('status')} "
             f"geometry_guard_ready={geometry_guard_contract.get('ready')} "
             "geometry_guard_matches="
-            f"{report.get('trainer_geometry_guard_command_contract_matches')}"
+            f"{report.get('trainer_geometry_guard_command_contract_matches')} "
+            f"guard_horizon={geometry_guard_horizon.get('status')} "
+            f"guard_horizon_ready={geometry_guard_horizon.get('ready')} "
+            "guard_horizon_matches="
+            f"{report.get('trainer_geometry_guard_horizon_matches')}"
         )
     ]
     if report.get("dataset_shape_reissue_declared") is True:
@@ -10363,6 +10681,10 @@ def summarize_hf_gpt2_finetune_run_card(
     )
     trainer_metrics = _mapping_item(card, "trainer_metrics")
     trainer_trace = _trainer_trace_summary_for_card(card)
+    trainer_geometry_guard_horizon = _mapping_item(
+        card,
+        "trainer_geometry_guard_horizon",
+    )
     adapter_config = _mapping_item(card, "adapter_config")
     adapter_lineage = _mapping_item(card, "adapter_lineage")
     adapter_promotion = _mapping_item(card, "adapter_promotion")
@@ -11018,6 +11340,18 @@ def summarize_hf_gpt2_finetune_run_card(
         "trainer_geometry_guard_patience": card.get(
             "trainer_geometry_guard_patience"
         ),
+        "trainer_geometry_guard_horizon_status": (
+            trainer_geometry_guard_horizon.get("status")
+        ),
+        "trainer_geometry_guard_horizon_ready": (
+            trainer_geometry_guard_horizon.get("ready")
+        ),
+        "trainer_geometry_guard_required_log_events": (
+            trainer_geometry_guard_horizon.get("required_log_events")
+        ),
+        "trainer_geometry_guard_available_log_events": (
+            trainer_geometry_guard_horizon.get("available_log_events")
+        ),
         "inference_distortion_handoff_status": inference_handoff.get("status"),
         "inference_distortion_sweep_path": inference_handoff.get("source_path"),
         "inference_distortion_recommended_probe": inference_handoff.get(
@@ -11208,6 +11542,12 @@ def summarize_hf_gpt2_finetune_run_card(
         "trace_last_training_geometry_guard_trigger_step": _metric_number(
             trainer_trace,
             "trace_last_training_geometry_guard_trigger_step",
+        ),
+        "trace_last_training_geometry_guard_horizon_status": trainer_trace.get(
+            "trace_last_training_geometry_guard_horizon_status"
+        ),
+        "trace_last_training_geometry_guard_horizon_ready": trainer_trace.get(
+            "trace_last_training_geometry_guard_horizon_ready"
         ),
         "trace_mean_psi_total": _metric_number(
             trainer_trace,
@@ -13339,6 +13679,7 @@ def hf_gpt2_finetune_trainer_trace_callback(
         def _geometry_guard(
             self,
             frame: Mapping[str, object],
+            args: object,
             state: object,
             control: object,
         ) -> dict[str, object] | None:
@@ -13431,6 +13772,22 @@ def hf_gpt2_finetune_trainer_trace_callback(
                 status = "within_limits"
             else:
                 status = "observing"
+            horizon = hf_gpt2_finetune_geometry_guard_horizon_report(
+                max_steps=_safe_attr(
+                    state,
+                    "max_steps",
+                    _safe_attr(args, "max_steps"),
+                ),
+                logging_steps=_safe_attr(
+                    state,
+                    "logging_steps",
+                    _safe_attr(args, "logging_steps", 1),
+                ),
+                min_desire_stability_guard=min_desire_stability_value,
+                max_psi_total_guard=max_psi_total_value,
+                minimum_observations=geometry_guard_min_events_value,
+                patience=geometry_guard_patience_value,
+            )
             return {
                 "row_type": "hf_gpt2_finetune_training_geometry_guard",
                 "status": status,
@@ -13450,6 +13807,7 @@ def hf_gpt2_finetune_trainer_trace_callback(
                 "observed_max_psi_total": self.geometry_max_psi_total,
                 "psi_observation_count": self.geometry_psi_total_count,
                 "trigger_step": self.geometry_guard_trigger_step,
+                "horizon": horizon,
             }
 
         def _emit(
@@ -13486,6 +13844,7 @@ def hf_gpt2_finetune_trainer_trace_callback(
                 merged_extra["psi"] = telemetry_frame.get("psi")
                 geometry_guard = self._geometry_guard(
                     telemetry_frame,
+                    args,
                     state,
                     control,
                 )
@@ -13903,6 +14262,17 @@ def hf_finetune_training_telemetry_frame(
 ) -> dict[str, object]:
     return _generic_report_from(
         hf_gpt2_finetune_training_telemetry_frame,
+        *args,
+        **kwargs,
+    )
+
+
+def hf_finetune_geometry_guard_horizon_report(
+    *args: object,
+    **kwargs: object,
+) -> dict[str, object]:
+    return _generic_report_from(
+        hf_gpt2_finetune_geometry_guard_horizon_report,
         *args,
         **kwargs,
     )

@@ -54,6 +54,10 @@
   psi can request a graceful early stop after a bounded observation warm-up and
   breach patience. Scale-up/preflight seal the guard command, traces retain its
   decisions, and postflight requires matching live guard frames.
+- Geometry-guard horizon contract: guarded runs now prove that `max_steps` and
+  `logging_steps` can emit enough telemetry to arm the callback. Scale-up
+  automatically tightens sparse logging cadence, direct bridge use validates
+  the horizon, and preflight fails closed when total steps are insufficient.
 - Adapter generation-transition audit: promotion chains now expose explicit
   parent-to-child rows for depth/root/base continuity, parent fingerprints,
   changed weights, eval handoff and improvement, promotion revalidation, and
