@@ -18,6 +18,7 @@ from .hf_ft import (
     HF_FINETUNE_TRAINER_TRACE_FILENAME,
     HF_GPT2_FT_RUN_CARD_FILENAME,
     HF_GPT2_FT_TRAINER_TRACE_FILENAME,
+    hf_gpt2_finetune_trainer_trace_lineage_report,
 )
 
 __all__ = [
@@ -1150,6 +1151,12 @@ def hf_gpt2_finetune_milestone_handoff_report(
             if default_run_card.is_file():
                 resolved_curve_run_card = default_run_card
                 break
+    if trainer_trace_jsonl is None:
+        active_trace = _run_card_active_trainer_trace_path(
+            resolved_curve_run_card
+        )
+        if active_trace is not None:
+            resolved_trainer_trace = active_trace
     package_kwargs: dict[str, Any] = {
         "compare_with_sweep": compare_paths,
         "compare_with_label": compare_labels,
@@ -1878,6 +1885,82 @@ def _run_card_model_metadata(path: str | Path | None) -> dict[str, Any]:
     return _payload_model_metadata(payload if isinstance(payload, Mapping) else None)
 
 
+def _run_card_trainer_trace_lineage(
+    path: str | Path | None,
+) -> dict[str, object]:
+    if path is None:
+        return {}
+    try:
+        return hf_gpt2_finetune_trainer_trace_lineage_report(path)
+    except (OSError, TypeError, ValueError):
+        return {}
+
+
+def _trainer_trace_paths_from_lineage(
+    lineage: Mapping[str, object],
+) -> list[Path]:
+    if lineage.get("ready") is not True:
+        return []
+    paths: list[Path] = []
+    for segment in lineage.get("segments") or []:
+        if not isinstance(segment, Mapping):
+            continue
+        value = segment.get("trace_path")
+        if value is None or not str(value).strip():
+            continue
+        trace_path = Path(str(value)).expanduser()
+        trace_path = trace_path.resolve()
+        if trace_path not in paths:
+            paths.append(trace_path)
+    return paths
+
+
+def _run_card_current_trainer_trace_path(
+    path: str | Path | None,
+) -> Path | None:
+    if path is None:
+        return None
+    card_path = Path(path).expanduser().resolve()
+    try:
+        payload = json.loads(card_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, Mapping):
+        return None
+    values: list[object] = [payload.get("trainer_trace_jsonl")]
+    for key in (
+        "trainer_trace_segment_receipt",
+        "trainer_trace_segment",
+        "trainer_trace_segment_plan",
+    ):
+        segment = payload.get(key)
+        if isinstance(segment, Mapping):
+            values.append(segment.get("trace_path"))
+    for value in values:
+        if value is None or not str(value).strip():
+            continue
+        trace_path = Path(str(value)).expanduser()
+        if not trace_path.is_absolute():
+            trace_path = card_path.parent / trace_path
+        return trace_path.resolve()
+    return None
+
+
+def _run_card_trainer_trace_paths(path: str | Path | None) -> list[Path]:
+    return _trainer_trace_paths_from_lineage(
+        _run_card_trainer_trace_lineage(path)
+    )
+
+
+def _run_card_active_trainer_trace_path(
+    path: str | Path | None,
+) -> Path | None:
+    paths = _run_card_trainer_trace_paths(path)
+    if paths:
+        return paths[-1]
+    return _run_card_current_trainer_trace_path(path)
+
+
 def _status_history_model_metadata(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     metadata = _empty_model_metadata()
     source_index: int | None = None
@@ -2097,6 +2180,17 @@ def hf_gpt2_finetune_run_artifact_manifest(
             ["*trainer-trace*.jsonl"],
         ],
     )
+    trainer_trace_lineage = _run_card_trainer_trace_lineage(run_card_path)
+    run_card_trace_paths = _trainer_trace_paths_from_lineage(
+        trainer_trace_lineage
+    )
+    active_trace_path = (
+        run_card_trace_paths[-1]
+        if run_card_trace_paths
+        else _run_card_current_trainer_trace_path(run_card_path)
+    )
+    if active_trace_path is not None:
+        trainer_trace_path = active_trace_path
     run_card_model = _run_card_model_metadata(run_card_path)
     compare_path = _latest_runtime_path(
         run_root,
@@ -2118,6 +2212,13 @@ def hf_gpt2_finetune_run_artifact_manifest(
         _runtime_artifact_record("latest.trainer_trace", trainer_trace_path),
         _runtime_artifact_record("latest.generation_compare", compare_path),
         _runtime_artifact_record("latest.generation_curve", curve_path),
+    ]
+    trainer_trace_segments = [
+        _runtime_artifact_record(
+            "trainer_trace_segment",
+            path,
+        )
+        for path in run_card_trace_paths
     ]
     generation_sweeps = [
         _runtime_artifact_record("generation_sweep", path)
@@ -2155,6 +2256,7 @@ def hf_gpt2_finetune_run_artifact_manifest(
     all_records = [
         *source_records,
         *latest_records,
+        *trainer_trace_segments,
         *generation_sweeps,
         *checkpoint_records,
     ]
@@ -2174,6 +2276,14 @@ def hf_gpt2_finetune_run_artifact_manifest(
         "generation_sweep_count": sum(
             1 for record in generation_sweeps if record.get("exists") is True
         ),
+        "trainer_trace_segment_count": sum(
+            1
+            for record in trainer_trace_segments
+            if record.get("exists") is True
+        ),
+        "trainer_trace_lineage_status": trainer_trace_lineage.get("status"),
+        "trainer_trace_lineage_ready": trainer_trace_lineage.get("ready"),
+        "trainer_trace_lineage_id": trainer_trace_lineage.get("lineage_id"),
         "checkpoint_count": sum(
             1 for record in checkpoint_records if record.get("exists") is True
         ),
@@ -2190,6 +2300,7 @@ def hf_gpt2_finetune_run_artifact_manifest(
         "sources": sources,
         "source_artifacts": _runtime_records_by_kind(source_records),
         "latest_artifacts": _runtime_records_by_kind(latest_records),
+        "trainer_trace_segments": trainer_trace_segments,
         "generation_sweeps": generation_sweeps,
         "checkpoints": checkpoint_records,
     }
@@ -2233,6 +2344,12 @@ def hf_gpt2_finetune_run_artifact_manifest_lines(
             f"sources={_number_text(report.get('source_count'))} "
             f"missing_latest={_number_text(report.get('missing_latest_count'))} "
             f"generation_sweeps={_number_text(report.get('generation_sweep_count'))} "
+            "trace_segments="
+            f"{_number_text(report.get('trainer_trace_segment_count'))} "
+            "trace_lineage="
+            f"{_number_text(report.get('trainer_trace_lineage_status'))} "
+            "trace_lineage_ready="
+            f"{_number_text(report.get('trainer_trace_lineage_ready'))} "
             f"checkpoints={_number_text(report.get('checkpoint_count'))} "
             f"latest_step={_number_text(report.get('latest_milestone_step'))} "
             f"latest_checkpoint_step={_number_text(report.get('latest_checkpoint_step'))} "
@@ -2269,6 +2386,15 @@ def hf_gpt2_finetune_run_artifact_manifest_lines(
         append_records(
             "source",
             [value for value in source_values.values() if isinstance(value, Mapping)],
+        )
+    trace_segments = report.get("trainer_trace_segments")
+    if isinstance(trace_segments, Sequence) and not isinstance(
+        trace_segments,
+        (str, bytes),
+    ):
+        append_records(
+            "trace_segment",
+            [value for value in trace_segments if isinstance(value, Mapping)],
         )
     sweeps = report.get("generation_sweeps")
     if isinstance(sweeps, Sequence) and not isinstance(sweeps, (str, bytes)):

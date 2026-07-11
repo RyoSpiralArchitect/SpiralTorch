@@ -68,6 +68,13 @@
   Trainer telemetry. Run cards seal parent/current digests and segment lineage;
   bridge preflight rejects a changed prior receipt, while adapter-chain and
   executor audits revalidate the sealed files and keep legacy cards readable.
+- Cumulative trainer-trace lineage: rebuild and revalidate ordered trace
+  segments from run cards or receipts, load rows with segment annotations, and
+  summarize complete loss/eval/telemetry curves across exact resumes. Bridge
+  run cards persist lineage reports and cumulative summaries; generation curves,
+  milestone handoffs, artifact manifests, adapter chains, sweeps, and executor
+  evidence now carry the verified lineage ID and active tip. Same-checkpoint
+  retries remain valid but expose step-overlap/rewind warnings and counters.
 - Live geometry-guard arming receipts: guard traces now distinguish warm-up
   from fully armed coverage per desire/psi axis and emit one arm transition.
   Adapter promotion, chain audit, and continuation postflight reject early

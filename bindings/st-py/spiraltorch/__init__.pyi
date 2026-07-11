@@ -564,6 +564,7 @@ HF_FINETUNE_DEFAULT_MODEL_PROFILE: str
 HF_FINETUNE_MODEL_CONFIG_SCHEMA: str
 HF_FINETUNE_RUN_CARD_FILENAME: str
 HF_FINETUNE_TRAINER_TRACE_FILENAME: str
+HF_FINETUNE_TRAINER_TRACE_LINEAGE_SCHEMA: str
 HF_FINETUNE_TRAINER_TRACE_SEGMENT_SCHEMA: str
 HF_FINETUNE_REQUIRED_PYTHON_PACKAGES: List[str]
 HF_FINETUNE_REQUIRED_RUST_SURFACES: List[Dict[str, str]]
@@ -1935,6 +1936,50 @@ def hf_gpt2_finetune_trainer_trace_segment_lines(
 def hf_finetune_trainer_trace_segment_lines(
     report: Mapping[str, object],
 ) -> list[str]: ...
+
+def hf_gpt2_finetune_trainer_trace_lineage_report(
+    receipt_or_card: str | PathLike[str] | Mapping[str, object],
+    *,
+    max_segments: int = ...,
+) -> Dict[str, object]: ...
+
+def hf_finetune_trainer_trace_lineage_report(
+    receipt_or_card: str | PathLike[str] | Mapping[str, object],
+    *,
+    max_segments: int = ...,
+) -> Dict[str, object]: ...
+
+def hf_gpt2_finetune_trainer_trace_lineage_lines(
+    report: Mapping[str, object],
+) -> list[str]: ...
+
+def hf_finetune_trainer_trace_lineage_lines(
+    report: Mapping[str, object],
+) -> list[str]: ...
+
+def load_hf_gpt2_finetune_trainer_trace_lineage(
+    receipt_card_or_report: str | PathLike[str] | Mapping[str, object],
+    *,
+    require_ready: bool = ...,
+) -> List[Dict[str, object]]: ...
+
+def load_hf_finetune_trainer_trace_lineage(
+    receipt_card_or_report: str | PathLike[str] | Mapping[str, object],
+    *,
+    require_ready: bool = ...,
+) -> List[Dict[str, object]]: ...
+
+def summarize_hf_gpt2_finetune_trainer_trace_lineage(
+    receipt_card_or_report: str | PathLike[str] | Mapping[str, object],
+    *,
+    max_steps: object = ...,
+) -> Dict[str, object]: ...
+
+def summarize_hf_finetune_trainer_trace_lineage(
+    receipt_card_or_report: str | PathLike[str] | Mapping[str, object],
+    *,
+    max_steps: object = ...,
+) -> Dict[str, object]: ...
 
 def write_hf_gpt2_finetune_trainer_trace_event(
     row: Mapping[str, object],
@@ -10414,6 +10459,7 @@ __all__ = [
     "HF_FINETUNE_MODEL_CONFIG_SCHEMA",
     "HF_FINETUNE_RUN_CARD_FILENAME",
     "HF_FINETUNE_TRAINER_TRACE_FILENAME",
+    "HF_FINETUNE_TRAINER_TRACE_LINEAGE_SCHEMA",
     "HF_FINETUNE_TRAINER_TRACE_SEGMENT_SCHEMA",
     "HF_FINETUNE_REQUIRED_PYTHON_PACKAGES",
     "HF_FINETUNE_REQUIRED_RUST_SURFACES",
@@ -10611,6 +10657,8 @@ __all__ = [
     "hf_finetune_training_telemetry_frame",
     "hf_finetune_trainer_trace_callback",
     "hf_finetune_trainer_trace_event",
+    "hf_finetune_trainer_trace_lineage_lines",
+    "hf_finetune_trainer_trace_lineage_report",
     "hf_finetune_trainer_trace_segment_lines",
     "hf_finetune_trainer_trace_segment_plan",
     "hf_finetune_trainer_trace_segment_receipt",
@@ -10621,11 +10669,13 @@ __all__ = [
     "load_hf_finetune_sweep_report",
     "load_hf_finetune_status_history",
     "load_hf_finetune_trainer_trace",
+    "load_hf_finetune_trainer_trace_lineage",
     "summarize_hf_finetune_run_card",
     "summarize_hf_finetune_sweep_report",
     "summarize_hf_finetune_sweep_report_lines",
     "summarize_hf_finetune_status_history",
     "summarize_hf_finetune_trainer_trace",
+    "summarize_hf_finetune_trainer_trace_lineage",
     "resolve_hf_finetune_model_profile",
     "write_hf_finetune_run_artifact_manifest",
     "write_hf_finetune_run_ops_snapshot",
@@ -10676,6 +10726,8 @@ __all__ = [
     "hf_gpt2_finetune_training_telemetry_frame",
     "hf_gpt2_finetune_trainer_trace_callback",
     "hf_gpt2_finetune_trainer_trace_event",
+    "hf_gpt2_finetune_trainer_trace_lineage_lines",
+    "hf_gpt2_finetune_trainer_trace_lineage_report",
     "hf_gpt2_finetune_trainer_trace_segment_lines",
     "hf_gpt2_finetune_trainer_trace_segment_plan",
     "hf_gpt2_finetune_trainer_trace_segment_receipt",
@@ -10685,11 +10737,13 @@ __all__ = [
     "load_hf_gpt2_finetune_sweep_report",
     "load_hf_gpt2_finetune_status_history",
     "load_hf_gpt2_finetune_trainer_trace",
+    "load_hf_gpt2_finetune_trainer_trace_lineage",
     "summarize_hf_gpt2_finetune_run_card",
     "summarize_hf_gpt2_finetune_sweep_report",
     "summarize_hf_gpt2_finetune_sweep_report_lines",
     "summarize_hf_gpt2_finetune_status_history",
     "summarize_hf_gpt2_finetune_trainer_trace",
+    "summarize_hf_gpt2_finetune_trainer_trace_lineage",
     "write_hf_gpt2_finetune_run_artifact_manifest",
     "write_hf_gpt2_finetune_run_ops_snapshot",
     "write_hf_gpt2_finetune_milestone_runtime_report",

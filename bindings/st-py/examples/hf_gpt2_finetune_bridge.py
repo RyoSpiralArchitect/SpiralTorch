@@ -65,10 +65,13 @@ from spiraltorch.hf_ft import (
     hf_gpt2_finetune_preflight_report,
     hf_gpt2_finetune_summary_lines,
     hf_gpt2_finetune_trainer_trace_callback,
+    hf_gpt2_finetune_trainer_trace_lineage_lines,
+    hf_gpt2_finetune_trainer_trace_lineage_report,
     hf_gpt2_finetune_trainer_trace_segment_lines,
     hf_gpt2_finetune_trainer_trace_segment_plan,
     hf_gpt2_finetune_trainer_trace_segment_receipt,
     hf_gpt2_finetune_zspace_probe,
+    summarize_hf_gpt2_finetune_trainer_trace_lineage,
     hf_finetune_model_profile_lines,
     resolve_hf_finetune_model_profile,
     summarize_hf_gpt2_finetune_trainer_trace,
@@ -3818,6 +3821,8 @@ def _base_run_card(
             "_trainer_trace_segment_plan",
             None,
         ),
+        "trainer_trace_lineage": None,
+        "trainer_trace_lineage_summary": None,
         "trainer_telemetry_requested": bool(args.trainer_telemetry),
         "trainer_telemetry_enabled": _trainer_telemetry_enabled(
             args,
@@ -4098,7 +4103,25 @@ def _attach_trainer_trace_segment_receipt(
     receipt = hf_gpt2_finetune_trainer_trace_segment_receipt(plan)
     card["trainer_trace_segment"] = receipt
     card["trainer_trace_segment_receipt"] = receipt
+    lineage = hf_gpt2_finetune_trainer_trace_lineage_report(receipt)
+    card["trainer_trace_lineage"] = lineage
+    try:
+        lineage_summary = summarize_hf_gpt2_finetune_trainer_trace_lineage(
+            lineage,
+            max_steps=args.max_steps,
+        )
+    except (OSError, TypeError, ValueError):
+        lineage_summary = None
+    card["trainer_trace_lineage_summary"] = lineage_summary
     return receipt
+
+
+def _print_trainer_trace_lineage(card: Mapping[str, Any]) -> None:
+    lineage = card.get("trainer_trace_lineage")
+    if not isinstance(lineage, Mapping):
+        return
+    for line in hf_gpt2_finetune_trainer_trace_lineage_lines(lineage):
+        print(line)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -5364,6 +5387,7 @@ def _main_with_runtime_access(
                 trace_segment_receipt
             ):
                 print(line)
+            _print_trainer_trace_lineage(card)
         _write_card(card, args)
         return 1
     eval_after_skip_reason = _eval_after_train_skipped_reason(
@@ -5394,6 +5418,7 @@ def _main_with_runtime_access(
             trace_segment_receipt
         ):
             print(line)
+        _print_trainer_trace_lineage(card)
     trainer_trace_summary = (
         None
         if trace_path is None or not trace_path.exists()

@@ -1056,6 +1056,12 @@ def test_executor_requires_durable_trainer_telemetry_evidence_after_generation(
         "sha256:"
     )
     assert ready_evidence["trainer_trace_segment_matches"] is True
+    assert ready_evidence["trainer_trace_lineage_required"] is True
+    assert str(ready_evidence["trainer_trace_lineage_id"]).startswith(
+        "sha256:"
+    )
+    assert ready_evidence["trainer_trace_lineage_segment_count"] == 1
+    assert ready_evidence["trainer_trace_lineage_matches"] is True
     assert ready_evidence["node_matches_trace"] is True
     assert str(ready_evidence["trace_sha256"]).startswith("sha256:")
     assert str(ready_evidence["evidence_id"]).startswith("sha256:")
@@ -1070,6 +1076,9 @@ def test_executor_requires_durable_trainer_telemetry_evidence_after_generation(
         and "guard_runtime=fully_armed" in line
         and "trace_segment=sha256:" in line
         and "trace_segment_matches=True" in line
+        and "trace_lineage=sha256:" in line
+        and "trace_lineage_segments=1" in line
+        and "trace_lineage_matches=True" in line
         for line in st.hf_adapter_continuation_executor_lines(ready)
     )
 
