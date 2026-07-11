@@ -412,6 +412,10 @@ def _adapter_continuation_executor_child_argv(
         child.append("--no-tee-output")
     if args.retry_interrupted:
         child.append("--retry-interrupted")
+    if args.expected_plan_id is not None:
+        child.extend(["--expected-plan-id", str(args.expected_plan_id)])
+    if args.require_pending_plan:
+        child.append("--require-pending-plan")
     for artifact in args.command_artifact:
         child.extend(["--command-artifact", str(artifact.expanduser().resolve())])
     if args.select_adapter_id is not None:
@@ -483,6 +487,16 @@ def adapter_continuation_executor_main(
         help="Write subprocess output only to its executor log.",
     )
     parser.add_argument("--max-generations", type=int, default=1)
+    parser.add_argument(
+        "--expected-plan-id",
+        default=None,
+        help="Execute only the exact sealed generation plan identity.",
+    )
+    parser.add_argument(
+        "--require-pending-plan",
+        action="store_true",
+        help="Require a prior plan-only invocation before the first generation.",
+    )
     parser.add_argument("--retry-interrupted", action="store_true")
     parser.add_argument("--output-prefix", default="generation")
     parser.add_argument(
@@ -520,6 +534,10 @@ def adapter_continuation_executor_main(
         parser.error("--detach requires --run")
     if args.launch_state is not None and not args.detach:
         parser.error("--launch-state requires --detach")
+    if args.expected_plan_id is not None and not args.run:
+        parser.error("--expected-plan-id requires --run")
+    if args.require_pending_plan and not args.run:
+        parser.error("--require-pending-plan requires --run")
     if (
         not math.isfinite(args.detach_handoff_timeout_seconds)
         or args.detach_handoff_timeout_seconds < 0.0
@@ -595,6 +613,8 @@ def adapter_continuation_executor_main(
             state_path=args.state,
             run=args.run,
             max_generations=args.max_generations,
+            expected_plan_id=args.expected_plan_id,
+            require_pending_plan=args.require_pending_plan,
             retry_interrupted=args.retry_interrupted,
             recursive=not args.no_recursive,
             allow_inferred_roots=not args.no_infer_roots,

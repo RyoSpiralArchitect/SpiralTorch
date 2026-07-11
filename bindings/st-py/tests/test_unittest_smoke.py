@@ -31,6 +31,25 @@ def _temp_dir(prefix: str) -> str:
 
 
 class SpiralTorchSmokeTest(unittest.TestCase):
+    def test_hf_adapter_executor_generation_plan_exports(self) -> None:
+        expected = [
+            "HF_ADAPTER_CONTINUATION_EXECUTOR_GENERATION_PLAN_SCHEMA",
+            "hf_adapter_continuation_executor_generation_plan_lines",
+            "hf_adapter_continuation_executor_generation_plan_report",
+        ]
+        stub = Path(st.__file__).resolve().with_name("__init__.pyi").read_text(
+            encoding="utf-8"
+        )
+        for name in expected:
+            with self.subTest(name=name):
+                self.assertTrue(hasattr(st, name))
+                self.assertIn(name, st.__all__)
+                self.assertIn(name, stub)
+        self.assertEqual(
+            st.HF_ADAPTER_CONTINUATION_EXECUTOR_GENERATION_PLAN_SCHEMA,
+            "spiraltorch.hf_adapter_continuation_executor_generation_plan.v1",
+        )
+
     def test_runtime_import_preflight_top_level_exports(self) -> None:
         report = st.runtime_import_preflight_report(
             runtime_imports=["math"],

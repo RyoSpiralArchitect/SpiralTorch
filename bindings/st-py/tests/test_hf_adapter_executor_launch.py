@@ -685,6 +685,9 @@ def test_detach_cli_replays_executor_arguments_without_recursing(
             "--no-tee-output",
             "--max-generations",
             "3",
+            "--expected-plan-id",
+            "sha256:" + "a" * 64,
+            "--require-pending-plan",
             "--retry-interrupted",
             "--output-prefix",
             "round",
@@ -728,6 +731,8 @@ def test_detach_cli_replays_executor_arguments_without_recursing(
     assert "--detach" not in child
     assert "--launch-state" not in child
     assert "--json" not in child
+    assert "--require-pending-plan" in child
+    assert _flag(child, "--expected-plan-id") == "sha256:" + "a" * 64
     assert _flag(child, "--state") == str(
         (output_root / st.HF_ADAPTER_CONTINUATION_EXECUTOR_FILENAME).resolve()
     )

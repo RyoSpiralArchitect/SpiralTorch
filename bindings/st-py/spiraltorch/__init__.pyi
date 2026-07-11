@@ -606,6 +606,7 @@ HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISOR_SCHEMA: str
 HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISOR_STATUS_SCHEMA: str
 HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISOR_STOP_REQUEST_SCHEMA: str
 HF_ADAPTER_CONTINUATION_EXECUTOR_INTERRUPTION_CLAIM_SCHEMA: str
+HF_ADAPTER_CONTINUATION_EXECUTOR_GENERATION_PLAN_SCHEMA: str
 HF_ADAPTER_CONTINUATION_EXECUTOR_OUTPUT_RESOLUTION_SCHEMA: str
 HF_ADAPTER_CONTINUATION_EXECUTOR_QUARANTINE_SUFFIX: str
 HF_ADAPTER_CONTINUATION_EXECUTOR_SCHEMA: str
@@ -873,6 +874,8 @@ def run_hf_adapter_continuation_executor(
     state_path: str | PathLike[str] | None = ...,
     run: bool = ...,
     max_generations: int = ...,
+    expected_plan_id: str | None = ...,
+    require_pending_plan: bool = ...,
     retry_interrupted: bool = ...,
     recursive: bool = ...,
     allow_inferred_roots: bool = ...,
@@ -913,6 +916,16 @@ def hf_adapter_continuation_executor_stop_request_lines(
 ) -> List[str]: ...
 def hf_adapter_continuation_executor_lines(
     report_or_path: Mapping[str, object] | str | PathLike[str],
+) -> List[str]: ...
+def hf_adapter_continuation_executor_generation_plan_report(
+    report_or_path: Mapping[str, object] | str | PathLike[str],
+    *,
+    candidate: bool = ...,
+) -> Dict[str, object]: ...
+def hf_adapter_continuation_executor_generation_plan_lines(
+    report_or_path: Mapping[str, object] | str | PathLike[str],
+    *,
+    candidate: bool = ...,
 ) -> List[str]: ...
 def hf_adapter_continuation_executor_status_report(
     report_or_path: Mapping[str, object] | str | PathLike[str],
@@ -10316,6 +10329,7 @@ __all__ = [
     "HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISOR_STATUS_SCHEMA",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_SUPERVISOR_STOP_REQUEST_SCHEMA",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_INTERRUPTION_CLAIM_SCHEMA",
+    "HF_ADAPTER_CONTINUATION_EXECUTOR_GENERATION_PLAN_SCHEMA",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_OUTPUT_RESOLUTION_SCHEMA",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_QUARANTINE_SUFFIX",
     "HF_ADAPTER_CONTINUATION_EXECUTOR_SCHEMA",
@@ -10342,6 +10356,8 @@ __all__ = [
     "hf_adapter_input_identity_lines",
     "hf_adapter_input_identity_report",
     "hf_adapter_continuation_executor_lines",
+    "hf_adapter_continuation_executor_generation_plan_lines",
+    "hf_adapter_continuation_executor_generation_plan_report",
     "hf_adapter_continuation_executor_launch_lines",
     "hf_adapter_continuation_executor_launch_status_lines",
     "hf_adapter_continuation_executor_launch_status_report",

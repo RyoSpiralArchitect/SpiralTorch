@@ -363,6 +363,38 @@ def test_status_preserves_planned_recipe_and_replay_reissue_contracts(
     )
 
 
+def test_status_lines_show_planned_generation_after_previous_attempt(
+    tmp_path: Path,
+) -> None:
+    state_path = _write_running_state(
+        tmp_path / "state.json",
+        pid=None,
+        hostname=socket.gethostname(),
+        output_dir=tmp_path / "generation-002",
+        log_path=tmp_path / "executor.log",
+    )
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    previous = state["generations"][0]
+    previous["status"] = "promoted"
+    pending = dict(previous)
+    pending["status"] = "planned"
+    pending["lineage_depth"] = 3
+    pending["generation_plan_id"] = "sha256:" + "a" * 64
+    state["status"] = "ready"
+    state["pending_generation"] = pending
+
+    report = st.hf_adapter_continuation_executor_status_report(state)
+    lines = st.hf_adapter_continuation_executor_status_lines(report)
+
+    assert report["latest_attempt"] is not None
+    assert any(
+        line.startswith("hf_adapter_continuation_executor_status_pending ")
+        and f"plan_id={pending['generation_plan_id']}" in line
+        and "depth=3" in line
+        for line in lines
+    )
+
+
 def test_status_marks_pre_transition_state_as_legacy_without_breaking_health(
     tmp_path: Path,
 ) -> None:

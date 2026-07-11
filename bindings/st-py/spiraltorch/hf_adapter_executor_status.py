@@ -168,6 +168,11 @@ def _attempt_summary(attempt: Mapping[str, object] | None) -> dict[str, object] 
         "log_path": attempt.get("log_path"),
         "adapter_id": attempt.get("adapter_id"),
         "parent_adapter_id": attempt.get("parent_adapter_id"),
+        "generation_plan_id": attempt.get("generation_plan_id"),
+        "generation_plan_contract": attempt.get("generation_plan_contract"),
+        "generation_plan_verification": attempt.get(
+            "generation_plan_verification"
+        ),
         "command_runtime": attempt.get("command_runtime"),
         "parent_identity_contract": attempt.get("parent_identity_contract"),
         "adapter_input_identity": attempt.get("adapter_input_identity"),
@@ -363,6 +368,14 @@ def hf_adapter_continuation_executor_status_report(
         recommended_action = "recover_interrupted_generation"
     elif observed_status == "failed":
         recommended_action = "inspect_executor_failure"
+    elif observed_status == "blocked" and state.get("reason") in {
+        "pending_generation_plan_unsealed",
+        "pending_generation_plan_invalid",
+        "pending_generation_plan_changed",
+        "pending_generation_plan_required",
+        "expected_generation_plan_mismatch",
+    }:
+        recommended_action = "review_generation_plan"
     elif observed_status == "blocked":
         recommended_action = "resolve_executor_block"
     elif observed_status == "output_quarantined":
@@ -523,6 +536,15 @@ def hf_adapter_continuation_executor_status_report(
         "invocation_count": state.get("invocation_count"),
         "generation_attempt_count": len(generations),
         "promoted_generation_count": state.get("promoted_generation_count"),
+        "generation_plan_history_count": len(
+            state.get("generation_plan_history") or []
+        ),
+        "generation_plan_gate": state.get("generation_plan_gate"),
+        "pending_generation_candidate": _attempt_summary(
+            state.get("pending_generation_candidate")
+            if isinstance(state.get("pending_generation_candidate"), Mapping)
+            else None
+        ),
         "selected_adapter_id": state.get("selected_adapter_id"),
         "selected_lineage_depth": selected_depth,
         "transition_count": state.get("transition_count"),
@@ -576,6 +598,12 @@ def hf_adapter_continuation_executor_status_lines(
         else hf_adapter_continuation_executor_status_report(report_or_path)
     )
     unresolved = report.get("unresolved_generation")
+    generation_plan_gate = report.get("generation_plan_gate")
+    generation_plan_gate_reason = (
+        generation_plan_gate.get("reason")
+        if isinstance(generation_plan_gate, Mapping)
+        else None
+    )
     lines = [
         (
             "hf_adapter_continuation_executor_status "
@@ -587,6 +615,8 @@ def hf_adapter_continuation_executor_status_lines(
             f"depth={report.get('selected_lineage_depth')} "
             f"attempts={report.get('generation_attempt_count')} "
             f"promoted={report.get('promoted_generation_count')} "
+            f"plan_history={report.get('generation_plan_history_count')} "
+            f"plan_gate={generation_plan_gate_reason} "
             f"transitions={report.get('ready_transition_count')}/"
             f"{report.get('transition_count')} "
             f"transition_evidence={report.get('transition_evidence_status')} "
@@ -648,7 +678,7 @@ def hf_adapter_continuation_executor_status_lines(
     if (
         isinstance(pending, Mapping)
         and report.get("active_attempt") is None
-        and report.get("latest_attempt") is None
+        and pending.get("status") == "planned"
     ):
         training_recipe_contract = pending.get(
             "training_recipe_identity_contract"
@@ -660,6 +690,7 @@ def hf_adapter_continuation_executor_status_lines(
             "hf_adapter_continuation_executor_status_pending "
             f"status={pending.get('status')} "
             f"depth={pending.get('lineage_depth')} "
+            f"plan_id={pending.get('generation_plan_id')} "
             "training_recipe_contract="
             f"{training_recipe_contract.get('status') if isinstance(training_recipe_contract, Mapping) else None} "
             "training_recipe_source="
@@ -673,6 +704,14 @@ def hf_adapter_continuation_executor_status_lines(
             "finetune_replay_expected="
             f"{pending.get('finetune_replay_expected_id')} "
             f"output={pending.get('output_dir')}"
+        )
+    candidate = report.get("pending_generation_candidate")
+    if isinstance(candidate, Mapping):
+        lines.append(
+            "hf_adapter_continuation_executor_status_plan_candidate "
+            f"plan_id={candidate.get('generation_plan_id')} "
+            f"depth={candidate.get('lineage_depth')} "
+            f"output={candidate.get('output_dir')}"
         )
     attempt = report.get("active_attempt") or report.get("latest_attempt")
     if isinstance(attempt, Mapping):

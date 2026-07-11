@@ -961,6 +961,43 @@ their run cards, so subsequent plans are portable and idempotent rather than
 repeatedly recovering a historical script path or depending on the caller's
 current directory.
 
+The foreground executor seals every ready generation plan before execution. Run
+the command once without `--run`, review the emitted `plan_id`, and then bind the
+first generation to that exact command, parent adapter, lineage/output,
+continuation policy, scale-up settings, working directory, and environment
+override digest. Environment values are never persisted; the state records only
+the sorted override keys, their count, and the digest:
+
+```bash
+spiral-hf-adapter-executor runs/qwen2-study \
+  --output-root runs/qwen2-study/executor \
+  --state runs/qwen2-study/executor/state.json \
+  --max-lineage-depth 6 \
+  --max-steps 1024
+
+spiral-hf-adapter-executor runs/qwen2-study \
+  --output-root runs/qwen2-study/executor \
+  --state runs/qwen2-study/executor/state.json \
+  --max-lineage-depth 6 \
+  --max-steps 1024 \
+  --run --max-generations 1 \
+  --require-pending-plan \
+  --expected-plan-id sha256:<reviewed-plan-id>
+```
+
+If any bound input changes, `--run` stops with
+`action=review_generation_plan`, preserves the reviewed pending plan, and
+records the new candidate separately. Re-run the changed command without
+`--run` to adopt it intentionally; the state retains both scale-up and
+generation-plan history. Legacy pending plans remain readable but must also be
+sealed by one plan-only invocation before execution. The Python API exposes the
+same check through
+`hf_adapter_continuation_executor_generation_plan_report(...)` and its concise
+line formatter. `require_pending_plan` and `expected_plan_id` apply to the first
+generation in one invocation; later generations remain bounded by
+`max_generations` and are sealed as they are derived from the newly promoted
+tip.
+
 For a long run, use the same executor policy in a detached process:
 
 ```bash
