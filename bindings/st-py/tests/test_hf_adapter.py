@@ -139,6 +139,8 @@ def _write_promoted_child(
     after: float = 0.9,
     runtime_input_id: str | None = None,
     expected_runtime_input_id: str | None = None,
+    execution_input_id: str | None = None,
+    expected_execution_input_id: str | None = None,
 ) -> tuple[Path, dict, dict]:
     adapter = _write_adapter(child, weights)
     run_card_path = adapter / "spiraltorch-hf-finetune-run-card.json"
@@ -172,6 +174,36 @@ def _write_promoted_child(
             "observed_identity_id": runtime_input_id,
             "identity_verified": True,
             "fail_fast": expected_runtime_input_id is not None,
+        }
+    if execution_input_id is not None:
+        card["finetune_execution_identity_pre_model"] = {
+            "row_type": "hf_finetune_execution_identity",
+            "status": "ready",
+            "phase": "pre_model_load",
+            "expected_identity_id": expected_execution_input_id,
+            "observed_identity_id": execution_input_id,
+            "identity_verified": True,
+        }
+        card["finetune_execution_identity_after_model"] = {
+            "row_type": "hf_finetune_execution_identity",
+            "status": "ready",
+            "phase": "after_model_load",
+            "expected_identity_id": (
+                expected_execution_input_id or execution_input_id
+            ),
+            "observed_identity_id": execution_input_id,
+            "identity_verified": True,
+        }
+        card["finetune_execution_identity_contract"] = {
+            "status": (
+                "enforced"
+                if expected_execution_input_id is not None
+                else "adopted"
+            ),
+            "expected_identity_id": expected_execution_input_id,
+            "observed_identity_id": execution_input_id,
+            "identity_verified": True,
+            "fail_fast": True,
         }
     if launch_command:
         card["launch_command"] = _adapter_launch_command(
@@ -505,6 +537,68 @@ def test_adapter_chain_adopts_then_requires_runtime_input_identity(
             parent_adapter=enforced,
             run_card=incomplete_card,
         )
+
+
+def test_adapter_chain_adopts_then_requires_execution_input_identity(
+    tmp_path: Path,
+) -> None:
+    execution_input_id = "sha256:" + "8" * 64
+    root = _write_adapter(tmp_path / "root", b"root")
+    st.write_hf_adapter_lineage(root)
+    adopted, adopted_lineage, _ = _write_promoted_child(
+        tmp_path / "adopted",
+        root,
+        b"adopted",
+        execution_input_id=execution_input_id,
+    )
+    enforced, enforced_lineage, _ = _write_promoted_child(
+        tmp_path / "enforced",
+        adopted,
+        b"enforced",
+        execution_input_id=execution_input_id,
+        expected_execution_input_id=execution_input_id,
+    )
+    _, dropped_lineage, _ = _write_promoted_child(
+        tmp_path / "dropped",
+        enforced,
+        b"dropped",
+        execution_input_id=execution_input_id,
+    )
+
+    chain = st.hf_adapter_promotion_chain_report(tmp_path)
+    root_to_adopted, adopted_to_enforced, enforced_to_dropped = chain[
+        "transitions"
+    ]
+
+    assert adopted_lineage["execution_input_identity_required"] is False
+    assert adopted_lineage["execution_input_identity_verified"] is True
+    assert adopted_lineage["execution_input_observed_id"] == execution_input_id
+    assert root_to_adopted["execution_input_identity_required"] is False
+    assert root_to_adopted["execution_input_identity_ready"] is True
+    assert root_to_adopted["execution_input_adopted"] is True
+    assert root_to_adopted["execution_input_matches_parent"] is None
+    assert root_to_adopted["status"] == "ready"
+
+    assert enforced_lineage["execution_input_identity_required"] is True
+    assert enforced_lineage["execution_input_expected_id"] == execution_input_id
+    assert adopted_to_enforced["execution_input_identity_required"] is True
+    assert adopted_to_enforced["execution_input_identity_ready"] is True
+    assert adopted_to_enforced["execution_input_matches_parent"] is True
+    assert adopted_to_enforced["status"] == "ready"
+
+    assert dropped_lineage["execution_input_identity_required"] is False
+    assert enforced_to_dropped["execution_input_identity_required"] is True
+    assert enforced_to_dropped["execution_input_identity_ready"] is False
+    assert enforced_to_dropped["execution_input_expected_id"] is None
+    assert enforced_to_dropped["execution_input_matches_parent"] is True
+    assert enforced_to_dropped["lineage_ready"] is False
+    assert enforced_to_dropped["status"] == "rejected"
+    transition_lines = [
+        line
+        for line in st.hf_adapter_promotion_chain_lines(chain)
+        if line.startswith("hf_adapter_promotion_chain_transition ")
+    ]
+    assert "execution_input_ready=False" in transition_lines[-1]
 
 
 def test_adapter_promotion_requires_lineage_weight_change_and_eval(

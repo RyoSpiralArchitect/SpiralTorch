@@ -5920,6 +5920,9 @@ def _scale_up_resolve_input_paths(
 
 _HF_FINETUNE_EXPECTED_INPUT_ID_FLAG = "--expected-training-input-id"
 _HF_FINETUNE_EXPECTED_RUNTIME_INPUT_ID_FLAG = "--expected-runtime-input-id"
+_HF_FINETUNE_EXPECTED_EXECUTION_INPUT_ID_FLAG = (
+    "--expected-execution-input-id"
+)
 
 
 def _finetune_input_identity_from_command(
@@ -6586,6 +6589,18 @@ def _scale_up_promotion_chain_summary(
         "scale_up_candidate_runtime_input_observed_id": candidate.get(
             "runtime_input_observed_id"
         ),
+        "scale_up_candidate_execution_input_identity_status": candidate.get(
+            "execution_input_identity_status"
+        ),
+        "scale_up_candidate_execution_input_identity_verified": candidate.get(
+            "execution_input_identity_verified"
+        ),
+        "scale_up_candidate_execution_input_expected_id": candidate.get(
+            "execution_input_expected_id"
+        ),
+        "scale_up_candidate_execution_input_observed_id": candidate.get(
+            "execution_input_observed_id"
+        ),
         "scale_up_candidate_finetune_mode": _command_flag_value(
             command,
             "--finetune-mode",
@@ -6962,6 +6977,55 @@ def hf_gpt2_finetune_scale_up_command(
         "continuity_matches": runtime_input_continuity_matches,
         "fail_fast": expected_runtime_input_id is not None,
     }
+    source_expected_execution_input_id = _command_flag_value(
+        base_command,
+        _HF_FINETUNE_EXPECTED_EXECUTION_INPUT_ID_FLAG,
+    )
+    candidate_execution_input_id = summary.get(
+        "scale_up_candidate_execution_input_observed_id"
+    )
+    candidate_execution_input_ready = bool(
+        summary.get("scale_up_candidate_execution_input_identity_status")
+        == "ready"
+        and summary.get("scale_up_candidate_execution_input_identity_verified")
+        is True
+        and candidate_execution_input_id is not None
+    )
+    expected_execution_input_id = source_expected_execution_input_id or (
+        str(candidate_execution_input_id)
+        if candidate_execution_input_ready
+        else None
+    )
+    execution_input_continuity_matches = bool(
+        source_expected_execution_input_id is None
+        or candidate_execution_input_id is None
+        or str(source_expected_execution_input_id)
+        == str(candidate_execution_input_id)
+    )
+    base_command = _command_without_value_flags(
+        base_command,
+        (_HF_FINETUNE_EXPECTED_EXECUTION_INPUT_ID_FLAG,),
+    )
+    execution_input_identity_contract = {
+        "status": (
+            "blocked"
+            if not execution_input_continuity_matches
+            else "enforced"
+            if expected_execution_input_id is not None
+            else "observe"
+        ),
+        "expected_identity_id": expected_execution_input_id,
+        "source_expected_identity_id": source_expected_execution_input_id,
+        "candidate_observed_identity_id": candidate_execution_input_id,
+        "candidate_identity_status": summary.get(
+            "scale_up_candidate_execution_input_identity_status"
+        ),
+        "candidate_identity_verified": summary.get(
+            "scale_up_candidate_execution_input_identity_verified"
+        ),
+        "continuity_matches": execution_input_continuity_matches,
+        "fail_fast": expected_execution_input_id is not None,
+    }
     source_run_card = summary.get("scale_up_candidate_run_card") or _command_flag_value(
         source_base_command,
         "--run-card",
@@ -7133,6 +7197,9 @@ def hf_gpt2_finetune_scale_up_command(
         "--expected-root-adapter-id": expected_root_adapter_id,
         _HF_FINETUNE_EXPECTED_INPUT_ID_FLAG: expected_training_input_id,
         _HF_FINETUNE_EXPECTED_RUNTIME_INPUT_ID_FLAG: expected_runtime_input_id,
+        _HF_FINETUNE_EXPECTED_EXECUTION_INPUT_ID_FLAG: (
+            expected_execution_input_id
+        ),
         "--output-dir": resolved_output_dir,
         "--run-card": resolved_run_card,
         "--trainer-trace-jsonl": resolved_trace,
@@ -7185,6 +7252,18 @@ def hf_gpt2_finetune_scale_up_command(
         ),
         "scale_up_candidate_runtime_input_observed_id": summary.get(
             "scale_up_candidate_runtime_input_observed_id"
+        ),
+        "scale_up_candidate_execution_input_identity_status": summary.get(
+            "scale_up_candidate_execution_input_identity_status"
+        ),
+        "scale_up_candidate_execution_input_identity_verified": summary.get(
+            "scale_up_candidate_execution_input_identity_verified"
+        ),
+        "scale_up_candidate_execution_input_expected_id": summary.get(
+            "scale_up_candidate_execution_input_expected_id"
+        ),
+        "scale_up_candidate_execution_input_observed_id": summary.get(
+            "scale_up_candidate_execution_input_observed_id"
         ),
         "adapter_promotion_required": summary.get("adapter_promotion_required"),
         "scale_up_candidate_adapter_promotion_status": summary.get(
@@ -7302,6 +7381,11 @@ def hf_gpt2_finetune_scale_up_command(
             runtime_input_identity_contract.get("status")
         ),
         "runtime_input_expected_id": expected_runtime_input_id,
+        "execution_input_identity_contract": execution_input_identity_contract,
+        "execution_input_identity_contract_status": (
+            execution_input_identity_contract.get("status")
+        ),
+        "execution_input_expected_id": expected_execution_input_id,
         "command_runtime": command_runtime,
         "command_runtime_status": command_runtime.get("status"),
         "command_path_resolution": command_path_resolution,
@@ -7670,6 +7754,51 @@ def hf_gpt2_finetune_scale_up_preflight_report(
                 "severity": "error",
                 "field": "runtime_input_identity_contract",
                 "message": "source runtime identity continuity is blocked",
+            }
+        )
+
+    command_expected_execution_input_id = _command_flag_value(
+        command,
+        _HF_FINETUNE_EXPECTED_EXECUTION_INPUT_ID_FLAG,
+    )
+    artifact_execution_contract = artifact.get(
+        "execution_input_identity_contract"
+    )
+    artifact_expected_execution_input_id = artifact.get(
+        "execution_input_expected_id"
+    )
+    if (
+        artifact_expected_execution_input_id is None
+        and isinstance(artifact_execution_contract, Mapping)
+    ):
+        artifact_expected_execution_input_id = artifact_execution_contract.get(
+            "expected_identity_id"
+        )
+    if (
+        artifact_expected_execution_input_id is not None
+        and command_expected_execution_input_id
+        != str(artifact_expected_execution_input_id)
+    ):
+        issues.append(
+            {
+                "severity": "error",
+                "field": _HF_FINETUNE_EXPECTED_EXECUTION_INPUT_ID_FLAG,
+                "path": command_expected_execution_input_id,
+                "message": (
+                    "execution input identity command does not match scale-up "
+                    "metadata"
+                ),
+            }
+        )
+    if (
+        isinstance(artifact_execution_contract, Mapping)
+        and artifact_execution_contract.get("status") == "blocked"
+    ):
+        issues.append(
+            {
+                "severity": "error",
+                "field": "execution_input_identity_contract",
+                "message": "source execution identity continuity is blocked",
             }
         )
 
@@ -8194,6 +8323,11 @@ def hf_gpt2_finetune_scale_up_preflight_report(
             command_expected_runtime_input_id
             or artifact_expected_runtime_input_id
         ),
+        "execution_input_identity_contract": artifact_execution_contract,
+        "execution_input_expected_id": (
+            command_expected_execution_input_id
+            or artifact_expected_execution_input_id
+        ),
         "adapter_continuation_expected_child_lineage_depth": artifact.get(
             "adapter_continuation_expected_child_lineage_depth"
         ),
@@ -8257,6 +8391,17 @@ def hf_gpt2_finetune_scale_up_preflight_lines(
             f"candidate={runtime_input_contract.get('candidate_observed_identity_id')} "
             f"continuity={runtime_input_contract.get('continuity_matches')} "
             f"fail_fast={runtime_input_contract.get('fail_fast')}"
+        )
+    execution_input_contract = report.get("execution_input_identity_contract")
+    if isinstance(execution_input_contract, Mapping):
+        lines.append(
+            "hf_gpt2_ft_scale_up_execution_input_identity "
+            f"status={execution_input_contract.get('status')} "
+            f"expected={report.get('execution_input_expected_id')} "
+            "candidate="
+            f"{execution_input_contract.get('candidate_observed_identity_id')} "
+            f"continuity={execution_input_contract.get('continuity_matches')} "
+            f"fail_fast={execution_input_contract.get('fail_fast')}"
         )
     disk_plan = report.get("disk_plan")
     if isinstance(disk_plan, Mapping):
@@ -8338,6 +8483,21 @@ def summarize_hf_gpt2_finetune_run_card(
     runtime_input_identity_contract = _mapping_item(
         card,
         "model_runtime_identity_contract",
+    )
+    execution_input_identity_pre_model = _mapping_item(
+        card,
+        "finetune_execution_identity_pre_model",
+    )
+    execution_input_identity_after_model = _mapping_item(
+        card,
+        "finetune_execution_identity_after_model",
+    )
+    execution_input_identity = (
+        execution_input_identity_after_model or execution_input_identity_pre_model
+    )
+    execution_input_identity_contract = _mapping_item(
+        card,
+        "finetune_execution_identity_contract",
     )
     tokenizer_save = _mapping_item(card, "tokenizer_save_report")
     adapter_artifact_probe = _mapping_item(card, "adapter_artifact_probe")
@@ -8505,6 +8665,27 @@ def summarize_hf_gpt2_finetune_run_card(
             "status"
         ),
         "runtime_input_contract_status": runtime_input_identity_contract.get(
+            "status"
+        ),
+        "execution_input_identity_status": execution_input_identity.get("status"),
+        "execution_input_identity_verified": execution_input_identity.get(
+            "identity_verified"
+        ),
+        "execution_input_expected_id": (
+            execution_input_identity_contract.get("expected_identity_id")
+            if execution_input_identity_contract
+            else execution_input_identity.get("expected_identity_id")
+        ),
+        "execution_input_observed_id": execution_input_identity.get(
+            "observed_identity_id"
+        ),
+        "execution_input_pre_model_status": execution_input_identity_pre_model.get(
+            "status"
+        ),
+        "execution_input_after_model_status": (
+            execution_input_identity_after_model.get("status")
+        ),
+        "execution_input_contract_status": execution_input_identity_contract.get(
             "status"
         ),
         "model_profile_id": card.get("model_profile_id"),
@@ -9884,6 +10065,26 @@ def summarize_hf_gpt2_finetune_sweep_report(
             None
             if scale_up_candidate is None
             else scale_up_candidate.get("runtime_input_observed_id")
+        ),
+        "scale_up_candidate_execution_input_identity_status": (
+            None
+            if scale_up_candidate is None
+            else scale_up_candidate.get("execution_input_identity_status")
+        ),
+        "scale_up_candidate_execution_input_identity_verified": (
+            None
+            if scale_up_candidate is None
+            else scale_up_candidate.get("execution_input_identity_verified")
+        ),
+        "scale_up_candidate_execution_input_expected_id": (
+            None
+            if scale_up_candidate is None
+            else scale_up_candidate.get("execution_input_expected_id")
+        ),
+        "scale_up_candidate_execution_input_observed_id": (
+            None
+            if scale_up_candidate is None
+            else scale_up_candidate.get("execution_input_observed_id")
         ),
         "scale_up_candidate_training_input_observed_id": (
             None

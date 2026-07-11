@@ -601,6 +601,46 @@ def hf_adapter_lineage_report(
             errors.append("run-card runtime input pre-model identity does not match")
         if runtime_observed_after != expected_runtime_input_id:
             errors.append("run-card runtime input after-model identity does not match")
+    execution_input_identity_pre_model = _run_card_input_identity(
+        card_payload,
+        "finetune_execution_identity_pre_model",
+    )
+    execution_input_identity_after_model = _run_card_input_identity(
+        card_payload,
+        "finetune_execution_identity_after_model",
+    )
+    strongest_execution_input_identity = (
+        execution_input_identity_after_model or execution_input_identity_pre_model
+    )
+    execution_input_contract = _run_card_input_identity(
+        card_payload,
+        "finetune_execution_identity_contract",
+    )
+    expected_execution_input_id = (
+        execution_input_contract.get("expected_identity_id")
+        if execution_input_contract
+        else execution_input_identity_pre_model.get("expected_identity_id")
+        or execution_input_identity_after_model.get("expected_identity_id")
+    )
+    execution_input_identity_required = expected_execution_input_id is not None
+    execution_observed_before = execution_input_identity_pre_model.get(
+        "observed_identity_id"
+    )
+    execution_observed_after = execution_input_identity_after_model.get(
+        "observed_identity_id"
+    )
+    if strongest_execution_input_identity:
+        if execution_input_identity_pre_model.get("status") != "ready":
+            errors.append("run-card execution input pre-model identity is not ready")
+        if execution_input_identity_after_model.get("status") != "ready":
+            errors.append("run-card execution input after-model identity is not ready")
+        if execution_observed_before != execution_observed_after:
+            errors.append("run-card execution input identity changed during model load")
+    if execution_input_identity_required:
+        if execution_observed_before != expected_execution_input_id:
+            errors.append("run-card execution input pre-model identity does not match")
+        if execution_observed_after != expected_execution_input_id:
+            errors.append("run-card execution input after-model identity does not match")
     parent_reference = (
         None if parent is None else parent.get("adapter_path")
     ) or start_report.get("adapter_weights_source")
@@ -708,6 +748,34 @@ def hf_adapter_lineage_report(
         "runtime_input_identity_after_model_status": (
             runtime_input_identity_after_model.get("status")
         ),
+        "execution_input_identity_present": bool(
+            strongest_execution_input_identity
+        ),
+        "execution_input_identity_required": execution_input_identity_required,
+        "execution_input_identity_status": strongest_execution_input_identity.get(
+            "status"
+        ),
+        "execution_input_expected_id": expected_execution_input_id,
+        "execution_input_observed_id": strongest_execution_input_identity.get(
+            "observed_identity_id"
+        ),
+        "execution_input_identity_verified": (
+            None
+            if not strongest_execution_input_identity
+            else strongest_execution_input_identity.get("status") == "ready"
+            and strongest_execution_input_identity.get("identity_verified") is True
+            and (
+                expected_execution_input_id is None
+                or strongest_execution_input_identity.get("observed_identity_id")
+                == expected_execution_input_id
+            )
+        ),
+        "execution_input_identity_pre_model_status": (
+            execution_input_identity_pre_model.get("status")
+        ),
+        "execution_input_identity_after_model_status": (
+            execution_input_identity_after_model.get("status")
+        ),
         "weights_changed_from_parent": (
             None
             if parent is None
@@ -776,6 +844,10 @@ def hf_adapter_lineage_lines(
             f"{report.get('runtime_input_identity_required')} "
             "runtime_input_status="
             f"{report.get('runtime_input_identity_status')} "
+            "execution_input_required="
+            f"{report.get('execution_input_identity_required')} "
+            "execution_input_status="
+            f"{report.get('execution_input_identity_status')} "
             f"start={report.get('finetune_start_mode')}"
         )
     ]
@@ -1802,6 +1874,26 @@ def _adapter_promotion_chain_node(manifest_path: Path) -> dict[str, object]:
         "runtime_input_identity_after_model_status": lineage.get(
             "runtime_input_identity_after_model_status"
         ),
+        "execution_input_identity_present": lineage.get(
+            "execution_input_identity_present"
+        ),
+        "execution_input_identity_required": lineage.get(
+            "execution_input_identity_required"
+        ),
+        "execution_input_identity_status": lineage.get(
+            "execution_input_identity_status"
+        ),
+        "execution_input_expected_id": lineage.get("execution_input_expected_id"),
+        "execution_input_observed_id": lineage.get("execution_input_observed_id"),
+        "execution_input_identity_verified": lineage.get(
+            "execution_input_identity_verified"
+        ),
+        "execution_input_identity_pre_model_status": lineage.get(
+            "execution_input_identity_pre_model_status"
+        ),
+        "execution_input_identity_after_model_status": lineage.get(
+            "execution_input_identity_after_model_status"
+        ),
         "weights_changed_from_parent": lineage.get("weights_changed_from_parent"),
         "run_card_path": None if run_card_path is None else str(run_card_path),
         "run_card_sha256": observed_card_sha256,
@@ -1948,6 +2040,14 @@ def _chain_inferred_root_node(
         "runtime_input_identity_verified": None,
         "runtime_input_identity_pre_model_status": None,
         "runtime_input_identity_after_model_status": None,
+        "execution_input_identity_present": None,
+        "execution_input_identity_required": None,
+        "execution_input_identity_status": None,
+        "execution_input_expected_id": None,
+        "execution_input_observed_id": None,
+        "execution_input_identity_verified": None,
+        "execution_input_identity_pre_model_status": None,
+        "execution_input_identity_after_model_status": None,
         "weights_changed_from_parent": None,
         "run_card_path": None,
         "run_card_sha256": None,
@@ -2080,6 +2180,50 @@ def _adapter_promotion_chain_transition(
         if not runtime_input_continuity_observed
         else parent_runtime_input_id == runtime_input_observed_id
     )
+    execution_input_expected_id = child.get("execution_input_expected_id")
+    execution_input_observed_id = child.get("execution_input_observed_id")
+    parent_execution_input_id = parent.get("execution_input_observed_id")
+    execution_input_identity_required = bool(
+        parent_execution_input_id is not None
+        or execution_input_expected_id is not None
+    )
+    execution_reports_ready = bool(
+        child.get("execution_input_identity_status") == "ready"
+        and child.get("execution_input_identity_verified") is True
+        and child.get("execution_input_identity_pre_model_status") == "ready"
+        and child.get("execution_input_identity_after_model_status") == "ready"
+    )
+    if parent_execution_input_id is None:
+        execution_input_identity_ready = bool(
+            execution_input_observed_id is None
+            and execution_input_expected_id is None
+            or execution_input_observed_id is not None
+            and execution_reports_ready
+            and (
+                execution_input_expected_id is None
+                or execution_input_expected_id == execution_input_observed_id
+            )
+        )
+    else:
+        execution_input_identity_ready = bool(
+            execution_input_expected_id == parent_execution_input_id
+            and execution_input_observed_id == parent_execution_input_id
+            and execution_reports_ready
+        )
+    execution_input_adopted = bool(
+        parent_execution_input_id is None
+        and execution_input_observed_id is not None
+        and execution_input_identity_ready
+    )
+    execution_input_continuity_observed = bool(
+        parent_execution_input_id is not None
+        and execution_input_observed_id is not None
+    )
+    execution_input_matches_parent = (
+        None
+        if not execution_input_continuity_observed
+        else parent_execution_input_id == execution_input_observed_id
+    )
     lineage_ready = bool(
         depth_step == 1
         and root_matches
@@ -2087,6 +2231,7 @@ def _adapter_promotion_chain_transition(
         and input_identity_ready
         and training_input_identity_ready
         and runtime_input_identity_ready
+        and execution_input_identity_ready
         and child.get("parent_fingerprint_verified") is True
         and child.get("weights_changed_from_parent") is True
     )
@@ -2156,6 +2301,25 @@ def _adapter_promotion_chain_transition(
         ),
         "runtime_input_continuity_observed": runtime_input_continuity_observed,
         "runtime_input_matches_parent": runtime_input_matches_parent,
+        "execution_input_identity_required": execution_input_identity_required,
+        "execution_input_identity_ready": execution_input_identity_ready,
+        "execution_input_identity_status": child.get(
+            "execution_input_identity_status"
+        ),
+        "execution_input_expected_id": execution_input_expected_id,
+        "execution_input_observed_id": execution_input_observed_id,
+        "parent_execution_input_id": parent_execution_input_id,
+        "execution_input_pre_model_status": child.get(
+            "execution_input_identity_pre_model_status"
+        ),
+        "execution_input_after_model_status": child.get(
+            "execution_input_identity_after_model_status"
+        ),
+        "execution_input_adopted": execution_input_adopted,
+        "execution_input_continuity_observed": (
+            execution_input_continuity_observed
+        ),
+        "execution_input_matches_parent": execution_input_matches_parent,
         "lineage_ready": lineage_ready,
         "parent_fingerprint_verified": (
             child.get("parent_fingerprint_verified") is True
@@ -3121,6 +3285,14 @@ def hf_adapter_promotion_chain_lines(
             f"{raw_transition.get('runtime_input_identity_ready')} "
             f"runtime_input_matches_parent="
             f"{raw_transition.get('runtime_input_matches_parent')} "
+            f"execution_input_required="
+            f"{raw_transition.get('execution_input_identity_required')} "
+            f"execution_input_ready="
+            f"{raw_transition.get('execution_input_identity_ready')} "
+            f"execution_input_adopted="
+            f"{raw_transition.get('execution_input_adopted')} "
+            f"execution_input_matches_parent="
+            f"{raw_transition.get('execution_input_matches_parent')} "
             f"weights_changed={raw_transition.get('weights_changed_from_parent')} "
             f"eval_handoff_delta={raw_transition.get('eval_handoff_delta')} "
             f"eval_improvement={raw_transition.get('child_eval_improvement')} "
