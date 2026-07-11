@@ -5,6 +5,7 @@
 //! Plugin context providing access to the runtime environment.
 
 use super::events::{EventListener, PluginEventBus};
+use super::sync::lock_recover;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -41,29 +42,28 @@ impl PluginContext {
 
     /// Get a configuration value.
     pub fn get_config(&self, key: &str) -> Option<String> {
-        self.config.lock().unwrap().get(key).cloned()
+        lock_recover(&self.config).get(key).cloned()
     }
 
     /// Set a configuration value.
     pub fn set_config(&self, key: impl Into<String>, value: impl Into<String>) {
-        self.config.lock().unwrap().insert(key.into(), value.into());
+        let key = key.into();
+        let value = value.into();
+        lock_recover(&self.config).insert(key, value);
     }
 
     /// Unset a configuration value.
     ///
     /// Returns `true` when a key existed and was removed.
     pub fn unset_config(&self, key: &str) -> bool {
-        self.config.lock().unwrap().remove(key).is_some()
+        lock_recover(&self.config).remove(key).is_some()
     }
 
     /// List all configuration key/value pairs.
     ///
     /// The returned list is sorted by key for deterministic iteration.
     pub fn list_config(&self) -> Vec<(String, String)> {
-        let mut items: Vec<(String, String)> = self
-            .config
-            .lock()
-            .unwrap()
+        let mut items: Vec<(String, String)> = lock_recover(&self.config)
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
@@ -75,7 +75,7 @@ impl PluginContext {
     ///
     /// Returns a sorted list of keys that were removed.
     pub fn clear_config(&self, prefix: Option<&str>) -> Vec<String> {
-        let mut config = self.config.lock().unwrap();
+        let mut config = lock_recover(&self.config);
         let mut keys: Vec<String> = config.keys().cloned().collect();
         keys.sort();
 
@@ -104,10 +104,13 @@ impl PluginContext {
         name: impl Into<String>,
         service: T,
     ) {
-        self.services
-            .lock()
-            .unwrap()
-            .insert(name.into(), Arc::new(service));
+        let name = name.into();
+        let service: Arc<dyn std::any::Any + Send + Sync> = Arc::new(service);
+        let previous = {
+            let mut services = lock_recover(&self.services);
+            services.insert(name, service)
+        };
+        drop(previous);
     }
 
     /// Get a service registered by another plugin.
@@ -115,21 +118,25 @@ impl PluginContext {
         &self,
         name: &str,
     ) -> Option<Arc<T>> {
-        self.services
-            .lock()
-            .unwrap()
+        lock_recover(&self.services)
             .get(name)
             .and_then(|s| s.clone().downcast::<T>().ok())
     }
 
     /// List all registered services.
     pub fn list_services(&self) -> Vec<String> {
-        self.services.lock().unwrap().keys().cloned().collect()
+        let mut names: Vec<String> = lock_recover(&self.services).keys().cloned().collect();
+        names.sort();
+        names
     }
 
     /// Unregister a previously registered service.
     pub fn unregister_service(&self, name: &str) -> bool {
-        self.services.lock().unwrap().remove(name).is_some()
+        let removed = {
+            let mut services = lock_recover(&self.services);
+            services.remove(name)
+        };
+        removed.is_some()
     }
 }
 
@@ -146,6 +153,33 @@ impl Clone for PluginContext {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::panic::{catch_unwind, AssertUnwindSafe};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Weak;
+    use std::thread;
+
+    struct PanickingString;
+
+    impl From<PanickingString> for String {
+        fn from(_: PanickingString) -> Self {
+            panic!("conversion failed")
+        }
+    }
+
+    struct ServiceDropProbe {
+        services: Weak<Mutex<HashMap<String, Arc<dyn std::any::Any + Send + Sync>>>>,
+        dropped_without_lock: Arc<AtomicBool>,
+    }
+
+    impl Drop for ServiceDropProbe {
+        fn drop(&mut self) {
+            let unlocked = self
+                .services
+                .upgrade()
+                .is_some_and(|services| services.try_lock().is_ok());
+            self.dropped_without_lock.store(unlocked, Ordering::SeqCst);
+        }
+    }
 
     #[test]
     fn test_config_storage() {
@@ -182,12 +216,73 @@ mod tests {
         let ctx = PluginContext::new(PluginEventBus::new());
 
         ctx.register_service("test_service", 42i32);
+        ctx.register_service("alpha_service", 7i32);
 
         let service = ctx.get_service::<i32>("test_service");
         assert!(service.is_some());
         assert_eq!(*service.unwrap(), 42);
+        assert_eq!(
+            ctx.list_services(),
+            vec!["alpha_service".to_string(), "test_service".to_string()]
+        );
         assert!(ctx.unregister_service("test_service"));
         assert!(ctx.get_service::<i32>("test_service").is_none());
         assert!(!ctx.unregister_service("test_service"));
+    }
+
+    #[test]
+    fn test_context_recovers_poisoned_stores() {
+        let ctx = PluginContext::new(PluginEventBus::new());
+        let config = Arc::clone(&ctx.config);
+        let services = Arc::clone(&ctx.services);
+
+        let _ = thread::spawn(move || {
+            let _guard = config.lock().unwrap();
+            panic!("poison config");
+        })
+        .join();
+        let _ = thread::spawn(move || {
+            let _guard = services.lock().unwrap();
+            panic!("poison services");
+        })
+        .join();
+
+        ctx.set_config("recovered", "yes");
+        ctx.register_service("answer", 42i32);
+
+        assert_eq!(ctx.get_config("recovered"), Some("yes".to_string()));
+        assert_eq!(*ctx.get_service::<i32>("answer").unwrap(), 42);
+        assert!(!ctx.config.is_poisoned());
+        assert!(!ctx.services.is_poisoned());
+    }
+
+    #[test]
+    fn test_input_conversion_happens_before_config_lock() {
+        let ctx = PluginContext::new(PluginEventBus::new());
+
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            ctx.set_config(PanickingString, "value");
+        }));
+
+        assert!(result.is_err());
+        assert!(!ctx.config.is_poisoned());
+        ctx.set_config("healthy", "value");
+        assert_eq!(ctx.get_config("healthy"), Some("value".to_string()));
+    }
+
+    #[test]
+    fn test_service_is_dropped_after_store_lock_is_released() {
+        let ctx = PluginContext::new(PluginEventBus::new());
+        let dropped_without_lock = Arc::new(AtomicBool::new(false));
+        ctx.register_service(
+            "probe",
+            ServiceDropProbe {
+                services: Arc::downgrade(&ctx.services),
+                dropped_without_lock: Arc::clone(&dropped_without_lock),
+            },
+        );
+
+        assert!(ctx.unregister_service("probe"));
+        assert!(dropped_without_lock.load(Ordering::SeqCst));
     }
 }

@@ -2,6 +2,11 @@
 // © 2025 Ryo ∴ SpiralArchitect (kishkavsesvit@icloud.com)
 // Part of SpiralTorch — Licensed under AGPL-3.0-or-later.
 
+#![cfg_attr(
+    not(test),
+    deny(clippy::expect_used, clippy::panic, clippy::unwrap_used)
+)]
+
 //! Unified plugin/extension system for the SpiralTorch ecosystem.
 //!
 //! This module provides a pluggable architecture that allows components to be
@@ -44,6 +49,8 @@ pub mod loader;
 pub mod recorder;
 pub mod registry;
 pub mod traits;
+
+mod sync;
 
 pub use context::{PluginContext, PluginDependency};
 pub use events::{EventListener, PluginEvent, PluginEventBus};

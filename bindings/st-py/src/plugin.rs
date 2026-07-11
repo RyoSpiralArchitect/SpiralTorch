@@ -1023,10 +1023,7 @@ fn find_by_capability(capability: &str) -> PyResult<Vec<String>> {
 #[pyo3(signature = (key))]
 fn get_config(key: &str) -> PyResult<Option<String>> {
     init_plugin_system().map_err(tensor_err_to_py)?;
-    let ctx = global_registry().context();
-    let ctx = ctx
-        .lock()
-        .map_err(|_| PyTypeError::new_err("plugin context lock was poisoned"))?;
+    let ctx = global_registry().context_snapshot();
     Ok(ctx.get_config(key))
 }
 
@@ -1034,10 +1031,7 @@ fn get_config(key: &str) -> PyResult<Option<String>> {
 #[pyo3(signature = (key, value))]
 fn set_config(key: &str, value: &str) -> PyResult<()> {
     init_plugin_system().map_err(tensor_err_to_py)?;
-    let ctx = global_registry().context();
-    let ctx = ctx
-        .lock()
-        .map_err(|_| PyTypeError::new_err("plugin context lock was poisoned"))?;
+    let ctx = global_registry().context_snapshot();
     ctx.set_config(key, value);
     Ok(())
 }
@@ -1046,10 +1040,7 @@ fn set_config(key: &str, value: &str) -> PyResult<()> {
 #[pyo3(signature = (key))]
 fn unset_config(key: &str) -> PyResult<bool> {
     init_plugin_system().map_err(tensor_err_to_py)?;
-    let ctx = global_registry().context();
-    let ctx = ctx
-        .lock()
-        .map_err(|_| PyTypeError::new_err("plugin context lock was poisoned"))?;
+    let ctx = global_registry().context_snapshot();
     Ok(ctx.unset_config(key))
 }
 
@@ -1057,10 +1048,7 @@ fn unset_config(key: &str) -> PyResult<bool> {
 #[pyo3(signature = (prefix=None))]
 fn list_config(py: Python<'_>, prefix: Option<&str>) -> PyResult<PyObject> {
     init_plugin_system().map_err(tensor_err_to_py)?;
-    let ctx = global_registry().context();
-    let ctx = ctx
-        .lock()
-        .map_err(|_| PyTypeError::new_err("plugin context lock was poisoned"))?;
+    let ctx = global_registry().context_snapshot();
     let items = ctx.list_config();
     let dict = PyDict::new(py);
     for (key, value) in items {
@@ -1078,10 +1066,7 @@ fn list_config(py: Python<'_>, prefix: Option<&str>) -> PyResult<PyObject> {
 #[pyo3(signature = (prefix=None, *, strict=false))]
 fn clear_config(prefix: Option<&str>, strict: bool) -> PyResult<Vec<String>> {
     init_plugin_system().map_err(tensor_err_to_py)?;
-    let ctx = global_registry().context();
-    let ctx = ctx
-        .lock()
-        .map_err(|_| PyTypeError::new_err("plugin context lock was poisoned"))?;
+    let ctx = global_registry().context_snapshot();
     let removed = ctx.clear_config(prefix);
     if strict && removed.is_empty() {
         return Err(PyValueError::new_err(match prefix {
@@ -1096,10 +1081,7 @@ fn clear_config(prefix: Option<&str>, strict: bool) -> PyResult<Vec<String>> {
 #[pyo3(signature = (name, service))]
 fn register_service(name: &str, service: PyObject) -> PyResult<()> {
     init_plugin_system().map_err(tensor_err_to_py)?;
-    let ctx = global_registry().context();
-    let ctx = ctx
-        .lock()
-        .map_err(|_| PyTypeError::new_err("plugin context lock was poisoned"))?;
+    let ctx = global_registry().context_snapshot();
     ctx.register_service(name, Mutex::new(service));
     Ok(())
 }
@@ -1108,10 +1090,7 @@ fn register_service(name: &str, service: PyObject) -> PyResult<()> {
 #[pyo3(signature = (name))]
 fn get_service(py: Python<'_>, name: &str) -> PyResult<Option<PyObject>> {
     init_plugin_system().map_err(tensor_err_to_py)?;
-    let ctx = global_registry().context();
-    let ctx = ctx
-        .lock()
-        .map_err(|_| PyTypeError::new_err("plugin context lock was poisoned"))?;
+    let ctx = global_registry().context_snapshot();
     let Some(service) = ctx.get_service::<Mutex<Py<PyAny>>>(name) else {
         return Ok(None);
     };
@@ -1125,10 +1104,7 @@ fn get_service(py: Python<'_>, name: &str) -> PyResult<Option<PyObject>> {
 #[pyfunction]
 fn list_services() -> PyResult<Vec<String>> {
     init_plugin_system().map_err(tensor_err_to_py)?;
-    let ctx = global_registry().context();
-    let ctx = ctx
-        .lock()
-        .map_err(|_| PyTypeError::new_err("plugin context lock was poisoned"))?;
+    let ctx = global_registry().context_snapshot();
     Ok(ctx.list_services())
 }
 
@@ -1136,10 +1112,7 @@ fn list_services() -> PyResult<Vec<String>> {
 #[pyo3(signature = (name))]
 fn unregister_service(name: &str) -> PyResult<bool> {
     init_plugin_system().map_err(tensor_err_to_py)?;
-    let ctx = global_registry().context();
-    let ctx = ctx
-        .lock()
-        .map_err(|_| PyTypeError::new_err("plugin context lock was poisoned"))?;
+    let ctx = global_registry().context_snapshot();
     Ok(ctx.unregister_service(name))
 }
 

@@ -295,6 +295,30 @@ class SpiralTorchSmokeTest(unittest.TestCase):
         self.assertTrue(plugin.unloaded)
         self.assertNotIn(plugin_id, st.plugin.list_plugins())
 
+    def test_python_plugin_unload_failure_does_not_leave_zombie(self) -> None:
+        plugin_id = f"demo_unload_failure_{uuid.uuid4().hex}"
+
+        class FailingUnloadPlugin:
+            def metadata(self) -> dict:
+                return {"id": plugin_id, "version": "0.0.1"}
+
+            def on_unload(self) -> None:
+                raise RuntimeError("intentional unload failure")
+
+        st.plugin.register_python_plugin(FailingUnloadPlugin())
+        with self.assertRaisesRegex(RuntimeError, "intentional unload failure"):
+            st.plugin.unregister_plugin(plugin_id)
+
+        self.assertNotIn(plugin_id, st.plugin.list_plugins())
+        replacement = FailingUnloadPlugin()
+        self.assertEqual(st.plugin.register_python_plugin(replacement), plugin_id)
+        self.assertIn(plugin_id, st.plugin.list_plugins())
+
+        # The replacement intentionally fails too; the registry should still be clean.
+        with self.assertRaises(RuntimeError):
+            st.plugin.unregister_plugin(plugin_id)
+        self.assertNotIn(plugin_id, st.plugin.list_plugins())
+
     def test_python_plugin_load_path(self) -> None:
         plugin_id = f"demo_path_plugin_{uuid.uuid4().hex}"
         plugin_source = textwrap.dedent(
