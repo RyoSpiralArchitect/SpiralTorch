@@ -1,12 +1,31 @@
-use pyo3::exceptions::{PyRuntimeError, PyValueError};
+#![cfg_attr(
+    not(test),
+    deny(clippy::expect_used, clippy::panic, clippy::unwrap_used)
+)]
+
+use pyo3::exceptions::{PyAttributeError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
+use pyo3::pyclass::{PyTraverseError, PyVisit};
 use pyo3::types::{PyAny, PyDict, PyList, PySequence};
 use pyo3::IntoPy;
 use spiral_hpo::{
     self as hpo, ExperimentTracker, NoOpTracker, Objective, ParamSpec, ParamValue, ResourceConfig,
     SearchError, SearchLoop, SearchLoopState, SearchSpace, Strategy, TrialRecord,
 };
-use std::sync::Mutex;
+use std::collections::VecDeque;
+use std::sync::{Arc, Mutex, MutexGuard};
+
+const MAX_TRACKER_EVENTS_PER_DISPATCH: usize = 1_024;
+
+fn lock_recover<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    match mutex.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            mutex.clear_poison();
+            poisoned.into_inner()
+        }
+    }
+}
 
 fn search_error_to_py(err: SearchError) -> PyErr {
     match err {
@@ -191,82 +210,237 @@ fn state_to_json(state: &SearchLoopState) -> PyResult<String> {
         .map_err(|err| PyRuntimeError::new_err(format!("failed to serialize checkpoint: {err}")))
 }
 
-struct PythonTracker {
-    callback: Option<Py<PyAny>>,
+#[derive(Clone)]
+enum TrackerEvent {
+    TrialStart(TrialRecord),
+    TrialEnd { trial: TrialRecord, metric: f64 },
+    Checkpoint(SearchLoopState),
 }
 
-impl PythonTracker {
-    fn new(callback: Option<Py<PyAny>>) -> Self {
-        Self { callback }
+#[derive(Default)]
+struct TrackerQueue {
+    events: VecDeque<TrackerEvent>,
+    dispatching: bool,
+}
+
+struct DeferredTracker {
+    queue: Arc<Mutex<TrackerQueue>>,
+}
+
+impl DeferredTracker {
+    fn push(&self, event: TrackerEvent) {
+        lock_recover(&self.queue).events.push_back(event);
+    }
+}
+
+impl ExperimentTracker for DeferredTracker {
+    fn on_trial_start(&mut self, trial: &TrialRecord) {
+        self.push(TrackerEvent::TrialStart(trial.clone()));
     }
 
-    fn with_callback(
-        &mut self,
+    fn on_trial_end(&mut self, trial: &TrialRecord, metric: f64) {
+        self.push(TrackerEvent::TrialEnd {
+            trial: trial.clone(),
+            metric,
+        });
+    }
+
+    fn on_checkpoint(&mut self, state: &SearchLoopState) {
+        self.push(TrackerEvent::Checkpoint(state.clone()));
+    }
+}
+
+struct DispatchReset<'a> {
+    queue: &'a Mutex<TrackerQueue>,
+    armed: bool,
+}
+
+impl DispatchReset<'_> {
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for DispatchReset<'_> {
+    fn drop(&mut self) {
+        if self.armed {
+            lock_recover(self.queue).dispatching = false;
+        }
+    }
+}
+
+struct PythonTrackerDispatcher {
+    callback: Py<PyAny>,
+    queue: Arc<Mutex<TrackerQueue>>,
+}
+
+impl PythonTrackerDispatcher {
+    fn callback_method(&self, py: Python<'_>, method: &str) -> Option<Py<PyAny>> {
+        match self.callback.getattr(py, method) {
+            Ok(callback) => Some(callback),
+            Err(error) => {
+                if !error.is_instance_of::<PyAttributeError>(py) {
+                    error.write_unraisable(py, Some(self.callback.bind(py)));
+                }
+                None
+            }
+        }
+    }
+
+    fn report_error(&self, py: Python<'_>, error: PyErr) {
+        error.write_unraisable(py, Some(self.callback.bind(py)));
+    }
+
+    fn dispatch_trial(
+        &self,
         py: Python<'_>,
         method: &str,
         trial: &TrialRecord,
         metric: Option<f64>,
     ) {
-        if let Some(ref cb) = self.callback {
-            if let Ok(attr) = cb.getattr(py, method) {
-                if let Ok(trial_dict) = trial_to_dict(py, trial) {
-                    let _ = match metric {
-                        Some(metric) => attr.call1(py, (trial_dict.clone_ref(py), metric)),
-                        None => attr.call1(py, (trial_dict,)),
-                    };
+        let Some(callback) = self.callback_method(py, method) else {
+            return;
+        };
+        let trial_dict = match trial_to_dict(py, trial) {
+            Ok(trial_dict) => trial_dict,
+            Err(error) => {
+                self.report_error(py, error);
+                return;
+            }
+        };
+        let result = match metric {
+            Some(metric) => callback.call1(py, (trial_dict, metric)),
+            None => callback.call1(py, (trial_dict,)),
+        };
+        if let Err(error) = result {
+            self.report_error(py, error);
+        }
+    }
+
+    fn dispatch_event(&self, py: Python<'_>, event: TrackerEvent) {
+        match event {
+            TrackerEvent::TrialStart(trial) => {
+                self.dispatch_trial(py, "on_trial_start", &trial, None);
+            }
+            TrackerEvent::TrialEnd { trial, metric } => {
+                self.dispatch_trial(py, "on_trial_end", &trial, Some(metric));
+            }
+            TrackerEvent::Checkpoint(state) => {
+                let Some(callback) = self.callback_method(py, "on_checkpoint") else {
+                    return;
+                };
+                let checkpoint = match state_to_json(&state) {
+                    Ok(checkpoint) => checkpoint,
+                    Err(error) => {
+                        self.report_error(py, error);
+                        return;
+                    }
+                };
+                if let Err(error) = callback.call1(py, (checkpoint,)) {
+                    self.report_error(py, error);
                 }
             }
         }
     }
-}
 
-impl ExperimentTracker for PythonTracker {
-    fn on_trial_start(&mut self, trial: &TrialRecord) {
-        Python::with_gil(|py| self.with_callback(py, "on_trial_start", trial, None));
-    }
+    fn dispatch(&self, py: Python<'_>) {
+        {
+            let mut queue = lock_recover(&self.queue);
+            if queue.dispatching {
+                return;
+            }
+            queue.dispatching = true;
+        }
+        let mut reset = DispatchReset {
+            queue: &self.queue,
+            armed: true,
+        };
 
-    fn on_trial_end(&mut self, trial: &TrialRecord, metric: f64) {
-        Python::with_gil(|py| self.with_callback(py, "on_trial_end", trial, Some(metric)));
-    }
-
-    fn on_checkpoint(&mut self, state: &SearchLoopState) {
-        if let Some(ref cb) = self.callback {
-            Python::with_gil(|py| {
-                if let Ok(attr) = cb.getattr(py, "on_checkpoint") {
-                    if let Ok(json) = state_to_json(state) {
-                        let _ = attr.call1(py, (json,));
+        for _ in 0..MAX_TRACKER_EVENTS_PER_DISPATCH {
+            let event = {
+                let mut queue = lock_recover(&self.queue);
+                match queue.events.pop_front() {
+                    Some(event) => event,
+                    None => {
+                        queue.dispatching = false;
+                        reset.disarm();
+                        return;
                     }
                 }
-            });
+            };
+            self.dispatch_event(py, event);
+        }
+
+        let dropped_events = {
+            let mut queue = lock_recover(&self.queue);
+            let dropped_events = queue.events.len();
+            queue.events.clear();
+            queue.dispatching = false;
+            reset.disarm();
+            dropped_events
+        };
+        if dropped_events > 0 {
+            self.report_error(
+                py,
+                PyRuntimeError::new_err(format!(
+                    "tracker callback event budget exceeded; dropped {dropped_events} queued events"
+                )),
+            );
         }
     }
 }
 
-unsafe impl Send for PythonTracker {}
-
-fn tracker_from_py(callback: Option<Py<PyAny>>) -> Box<dyn ExperimentTracker> {
-    if callback.is_some() {
-        Box::new(PythonTracker::new(callback))
-    } else {
-        Box::new(NoOpTracker)
+fn tracker_from_py(
+    callback: Option<Py<PyAny>>,
+) -> (Box<dyn ExperimentTracker>, Option<PythonTrackerDispatcher>) {
+    match callback {
+        Some(callback) => {
+            let queue = Arc::new(Mutex::new(TrackerQueue::default()));
+            (
+                Box::new(DeferredTracker {
+                    queue: Arc::clone(&queue),
+                }),
+                Some(PythonTrackerDispatcher { callback, queue }),
+            )
+        }
+        None => (Box::new(NoOpTracker), None),
     }
 }
 
 #[pyclass(name = "SearchLoop", module = "spiraltorch.hpo")]
 pub struct PySearchLoop {
     inner: Mutex<SearchLoop>,
+    tracker_dispatcher: Option<PythonTrackerDispatcher>,
 }
 
 impl PySearchLoop {
-    fn new(inner: SearchLoop) -> Self {
+    fn new(inner: SearchLoop, tracker_dispatcher: Option<PythonTrackerDispatcher>) -> Self {
         Self {
             inner: Mutex::new(inner),
+            tracker_dispatcher,
+        }
+    }
+
+    fn dispatch_tracker_events(&self, py: Python<'_>) {
+        if let Some(dispatcher) = &self.tracker_dispatcher {
+            dispatcher.dispatch(py);
         }
     }
 }
 
 #[pymethods]
 impl PySearchLoop {
+    fn __traverse__(&self, visit: PyVisit<'_>) -> Result<(), PyTraverseError> {
+        if let Some(dispatcher) = &self.tracker_dispatcher {
+            visit.call(&dispatcher.callback)?;
+        }
+        Ok(())
+    }
+
+    fn __clear__(&mut self) {
+        self.tracker_dispatcher = None;
+    }
+
     #[staticmethod]
     #[pyo3(signature = (space, strategy, resource=None, tracker=None, maximize=false))]
     pub fn create(
@@ -280,11 +454,11 @@ impl PySearchLoop {
             let space = parse_space(space)?;
             let strategy = parse_strategy(strategy)?;
             let resource = parse_resource_config(resource)?;
-            let tracker = tracker_from_py(tracker);
+            let (tracker, tracker_dispatcher) = tracker_from_py(tracker);
             let objective = Objective::from_maximize(maximize);
             let loop_inner = SearchLoop::new(space, strategy, resource, objective, tracker)
                 .map_err(search_error_to_py)?;
-            Ok(PySearchLoop::new(loop_inner))
+            Ok(PySearchLoop::new(loop_inner, tracker_dispatcher))
         })
     }
 
@@ -298,34 +472,46 @@ impl PySearchLoop {
         Python::with_gil(|_py| {
             let space = parse_space(space)?;
             let state = dict_to_state(checkpoint)?;
-            let tracker = tracker_from_py(tracker);
+            let (tracker, tracker_dispatcher) = tracker_from_py(tracker);
             let loop_inner =
                 SearchLoop::from_state(space, state, tracker).map_err(search_error_to_py)?;
-            Ok(PySearchLoop::new(loop_inner))
+            Ok(PySearchLoop::new(loop_inner, tracker_dispatcher))
         })
     }
 
     pub fn suggest(&self, py: Python<'_>) -> PyResult<PyObject> {
-        let mut guard = self.inner.lock().unwrap();
-        let record = guard.suggest().map_err(search_error_to_py)?;
+        let record = {
+            let mut guard = lock_recover(&self.inner);
+            guard.suggest().map_err(search_error_to_py)?
+        };
+        self.dispatch_tracker_events(py);
         trial_to_dict(py, &record)
     }
 
-    pub fn observe(&self, trial_id: usize, metric: f64) -> PyResult<()> {
-        let mut guard = self.inner.lock().unwrap();
-        guard.observe(trial_id, metric).map_err(search_error_to_py)
+    pub fn observe(&self, py: Python<'_>, trial_id: usize, metric: f64) -> PyResult<()> {
+        {
+            let mut guard = lock_recover(&self.inner);
+            guard
+                .observe(trial_id, metric)
+                .map_err(search_error_to_py)?;
+        }
+        self.dispatch_tracker_events(py);
+        Ok(())
     }
 
-    pub fn checkpoint(&self) -> PyResult<String> {
-        let mut guard = self.inner.lock().unwrap();
-        let state = guard.checkpoint();
+    pub fn checkpoint(&self, py: Python<'_>) -> PyResult<String> {
+        let state = {
+            let mut guard = lock_recover(&self.inner);
+            guard.checkpoint()
+        };
+        self.dispatch_tracker_events(py);
         state_to_json(&state)
     }
 
     pub fn pending(&self, py: Python<'_>) -> PyResult<Py<PyList>> {
-        let guard = self.inner.lock().unwrap();
+        let pending = lock_recover(&self.inner).pending().to_vec();
         let list = PyList::empty(py);
-        for record in guard.pending() {
+        for record in &pending {
             let entry = trial_to_dict(py, record)?;
             list.append(entry.bind(py))?;
         }
@@ -333,9 +519,9 @@ impl PySearchLoop {
     }
 
     pub fn completed(&self, py: Python<'_>) -> PyResult<Py<PyList>> {
-        let guard = self.inner.lock().unwrap();
+        let completed = lock_recover(&self.inner).completed().to_vec();
         let list = PyList::empty(py);
-        for record in guard.completed() {
+        for record in &completed {
             let entry = trial_to_dict(py, record)?;
             list.append(entry.bind(py))?;
         }
@@ -343,21 +529,17 @@ impl PySearchLoop {
     }
 
     pub fn objective(&self) -> PyResult<String> {
-        let guard = self.inner.lock().unwrap();
-        Ok(guard.objective().as_str().to_string())
+        let objective = lock_recover(&self.inner).objective();
+        Ok(objective.as_str().to_string())
     }
 
     pub fn best_trial(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
-        let guard = self.inner.lock().unwrap();
-        guard
-            .best_trial()
-            .map(|record| trial_to_dict(py, &record))
-            .transpose()
+        let best = lock_recover(&self.inner).best_trial();
+        best.map(|record| trial_to_dict(py, &record)).transpose()
     }
 
     pub fn summary(&self, py: Python<'_>) -> PyResult<PyObject> {
-        let guard = self.inner.lock().unwrap();
-        let summary = guard.summary();
+        let summary = lock_recover(&self.inner).summary();
         let dict = PyDict::new(py);
         dict.set_item("objective", summary.objective.as_str())?;
         dict.set_item("total_trials", summary.total_trials)?;
@@ -382,4 +564,58 @@ pub fn register(py: Python<'_>, parent: &Bound<PyModule>) -> PyResult<()> {
     module.add("__doc__", "Hyper-parameter search utilities.")?;
     parent.add_submodule(&module)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::panic::{catch_unwind, AssertUnwindSafe};
+
+    fn test_search_loop() -> SearchLoop {
+        SearchLoop::new(
+            SearchSpace::new(vec![ParamSpec::Int {
+                name: "layers".to_string(),
+                low: 1,
+                high: 4,
+            }]),
+            Strategy::Random(hpo::strategies::RandomStrategy::new(7)),
+            ResourceConfig::default(),
+            Objective::Minimize,
+            Box::new(NoOpTracker),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn poisoned_search_loop_mutex_is_recovered() {
+        let search = PySearchLoop::new(test_search_loop(), None);
+        let panic = catch_unwind(AssertUnwindSafe(|| {
+            let _guard = lock_recover(&search.inner);
+            panic!("poison search loop");
+        }));
+        assert!(panic.is_err());
+
+        assert!(lock_recover(&search.inner).pending().is_empty());
+    }
+
+    #[test]
+    fn deferred_tracker_recovers_a_poisoned_event_queue() {
+        let queue = Arc::new(Mutex::new(TrackerQueue::default()));
+        let panic = catch_unwind(AssertUnwindSafe(|| {
+            let _guard = lock_recover(&queue);
+            panic!("poison event queue");
+        }));
+        assert!(panic.is_err());
+
+        let mut tracker = DeferredTracker {
+            queue: Arc::clone(&queue),
+        };
+        tracker.on_trial_start(&TrialRecord {
+            id: 0,
+            suggestion: Default::default(),
+            metric: None,
+        });
+
+        assert_eq!(lock_recover(&queue).events.len(), 1);
+    }
 }
