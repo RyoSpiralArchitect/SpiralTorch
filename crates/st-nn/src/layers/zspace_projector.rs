@@ -446,18 +446,14 @@ impl StableZSpaceProjector {
 mod tests {
     use super::*;
     use st_tensor::topos::OpenCartesianTopos;
-    use std::sync::{Arc, Mutex, OnceLock};
+    use std::sync::{Arc, Mutex};
 
     fn demo_topos() -> OpenCartesianTopos {
         OpenCartesianTopos::new(-1.0, 1e-5, 10.0, 256, 8192).unwrap()
     }
 
     fn observer_lock() -> std::sync::MutexGuard<'static, ()> {
-        static OBSERVER_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        OBSERVER_LOCK
-            .get_or_init(|| Mutex::new(()))
-            .lock()
-            .expect("observer lock available")
+        crate::test_global_state_lock()
     }
 
     #[test]
@@ -494,7 +490,7 @@ mod tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -506,7 +502,7 @@ mod tests {
         let module = ZSpaceProjector::new(topos, encoder).unwrap();
         let input = Tensor::from_vec(1, 4, vec![0.1, -0.2, 0.3, -0.4]).unwrap();
         let output = module.forward(&input).unwrap();
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
 
         assert_eq!(output.shape(), input.shape());
         let events = events.lock().unwrap();
@@ -549,7 +545,7 @@ mod tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -562,7 +558,7 @@ mod tests {
         let input = Tensor::from_vec(1, 4, vec![0.1, -0.2, 0.3, -0.4]).unwrap();
         let grad_out = Tensor::from_vec(1, 4, vec![0.2, -0.1, 0.05, -0.3]).unwrap();
         let grad_in = module.backward(&input, &grad_out).unwrap();
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
 
         assert_eq!(grad_in.shape(), grad_out.shape());
         let events = events.lock().unwrap();
@@ -668,7 +664,7 @@ mod tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -676,7 +672,7 @@ mod tests {
         })));
         let projector = ZSpaceProjector::new(topos, encoder).unwrap();
         let projected = projector.reimport_biome(&biome).unwrap();
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
 
         assert_eq!(projected.shape(), (1, 4));
         let events = events.lock().unwrap();

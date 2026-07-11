@@ -169,14 +169,10 @@ impl DiffusionStep {
 mod tests {
     use super::super::info_geometry::InformationGeometryMetric;
     use super::*;
-    use std::sync::{Arc, Mutex, OnceLock};
+    use std::sync::{Arc, Mutex};
 
     fn observer_lock() -> std::sync::MutexGuard<'static, ()> {
-        static OBSERVER_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        OBSERVER_LOCK
-            .get_or_init(|| Mutex::new(()))
-            .lock()
-            .expect("observer lock available")
+        crate::test_global_state_lock()
     }
 
     fn hint(channel: &str, tags: &[&str], intensity: f32) -> NarrativeHint {
@@ -216,7 +212,7 @@ mod tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -224,7 +220,7 @@ mod tests {
         })));
 
         diffusion.observe(&hints[0], 0.5);
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
 
         let sum = diffusion.state.iter().sum::<f64>();
         assert!((sum - 1.0).abs() < 1e-6);

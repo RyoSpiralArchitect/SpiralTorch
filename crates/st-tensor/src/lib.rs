@@ -31,8 +31,8 @@ pub use pure::*;
 
 pub use observability::{
     emit_tensor_op, emit_tensor_op_meta, set_tensor_op_meta_observer, set_tensor_op_observer,
-    tensor_op_meta_observer_installed, TensorOpEvent, TensorOpMetaEvent, TensorOpMetaObserver,
-    TensorOpObserver,
+    set_thread_meta_observer, tensor_op_meta_observer_installed, TensorOpEvent, TensorOpMetaEvent,
+    TensorOpMetaObserver, TensorOpObserver,
 };
 
 #[doc = "Expose the hardmax backend selector."]

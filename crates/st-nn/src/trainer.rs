@@ -83,7 +83,7 @@ use st_core::telemetry::zspace_region::{
 };
 use st_core::theory::zpulse::ZScale;
 use st_tensor::{
-    set_tensor_op_meta_observer, topos::OpenCartesianTopos, GradientSummary, TensorOpMetaEvent,
+    set_thread_meta_observer, topos::OpenCartesianTopos, GradientSummary, TensorOpMetaEvent,
     TensorOpMetaObserver,
 };
 use std::collections::HashMap;
@@ -91,16 +91,9 @@ use std::env;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
-#[cfg(test)]
+#[cfg(all(test, feature = "selfsup"))]
 fn tensor_meta_observer_test_lock() -> std::sync::MutexGuard<'static, ()> {
-    tensor_meta_observer_lock()
-}
-
-fn tensor_meta_observer_lock() -> std::sync::MutexGuard<'static, ()> {
-    static LOCK: std::sync::OnceLock<Mutex<()>> = std::sync::OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+    crate::test_global_state_lock()
 }
 
 #[cfg(test)]
@@ -2407,14 +2400,12 @@ fn write_coherence_repair_extra(
 }
 
 struct TensorOpMetaStepCollector {
-    _observer_lock: std::sync::MutexGuard<'static, ()>,
     trace: Arc<Mutex<TensorBackendStepTrace>>,
     previous: Option<TensorOpMetaObserver>,
 }
 
 impl TensorOpMetaStepCollector {
     fn install() -> Self {
-        let observer_lock = tensor_meta_observer_lock();
         let trace = Arc::new(Mutex::new(TensorBackendStepTrace::default()));
         let trace_capture = Arc::clone(&trace);
         let previous_slot: Arc<Mutex<Option<TensorOpMetaObserver>>> = Arc::new(Mutex::new(None));
@@ -2432,15 +2423,11 @@ impl TensorOpMetaStepCollector {
                 previous(event);
             }
         });
-        let previous = set_tensor_op_meta_observer(Some(observer));
+        let previous = set_thread_meta_observer(Some(observer));
         *previous_slot
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = previous.clone();
-        Self {
-            _observer_lock: observer_lock,
-            trace,
-            previous,
-        }
+        Self { trace, previous }
     }
 
     fn clear(&self) {
@@ -2462,7 +2449,7 @@ impl TensorOpMetaStepCollector {
 
 impl Drop for TensorOpMetaStepCollector {
     fn drop(&mut self) {
-        set_tensor_op_meta_observer(self.previous.take());
+        set_thread_meta_observer(self.previous.take());
     }
 }
 
@@ -7510,15 +7497,11 @@ mod tests {
     use st_tensor::topos::OpenCartesianTopos;
     use std::collections::HashMap;
     use std::num::NonZeroUsize;
-    use std::sync::{Arc, Mutex, OnceLock};
+    use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant, SystemTime};
 
     fn env_lock() -> std::sync::MutexGuard<'static, ()> {
-        static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        ENV_LOCK
-            .get_or_init(|| Mutex::new(()))
-            .lock()
-            .expect("env lock available")
+        crate::test_global_state_lock()
     }
 
     struct StrictGpuOverrideRestore {

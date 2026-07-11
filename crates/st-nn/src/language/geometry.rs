@@ -897,14 +897,10 @@ mod tests {
     use st_core::backend::device_caps::DeviceCaps;
     #[cfg(feature = "wgpu")]
     use st_tensor::backend::wgpu_dense;
-    use std::sync::{Arc, Mutex, OnceLock};
+    use std::sync::{Arc, Mutex};
 
     fn observer_lock() -> std::sync::MutexGuard<'static, ()> {
-        static OBSERVER_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        OBSERVER_LOCK
-            .get_or_init(|| Mutex::new(()))
-            .lock()
-            .expect("observer lock available")
+        crate::test_global_state_lock()
     }
 
     #[cfg(feature = "wgpu")]
@@ -939,7 +935,7 @@ mod tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -948,7 +944,7 @@ mod tests {
 
         let kernel =
             SparseKernel::from_rows(vec![vec![(0, 2.0), (1, 1.0)], vec![(1, 3.0)]], 1e-6).unwrap();
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
 
         assert_eq!(kernel.vocab_size(), 2);
         let events = events.lock().unwrap();
@@ -982,7 +978,7 @@ mod tests {
         std::env::set_var(KEY, "0");
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -994,7 +990,7 @@ mod tests {
             let _guard = push_backend_policy(policy);
             SparseKernel::from_rows(vec![vec![(0, 2.0), (1, 1.0)], vec![(1, 1.0)]], 1e-6).unwrap()
         };
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
         restore_tensor_util_wgpu_min_values(previous_min);
 
         assert_eq!(kernel.vocab_size(), 2);
@@ -1030,7 +1026,7 @@ mod tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -1040,7 +1036,7 @@ mod tests {
         let hinted = ConceptHint::Distribution(vec![0.6, -0.1, 0.4]).as_distribution(&bridge);
         let inferred =
             ConceptHint::Window(vec![(0, 0.8), (99, 0.4), (1, -0.2)]).as_distribution(&bridge);
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
 
         assert_eq!(hinted.len(), bridge.concept_count());
         assert_eq!(inferred.len(), bridge.concept_count());
@@ -1150,7 +1146,7 @@ mod tests {
         std::env::set_var(KEY, "0");
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -1169,7 +1165,7 @@ mod tests {
             let _guard = push_backend_policy(policy);
             ConceptHint::Distribution(vec![0.6, -0.1, 0.4]).as_distribution(&bridge)
         };
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
         restore_tensor_util_wgpu_min_values(previous_min);
 
         assert_eq!(distribution.len(), bridge.concept_count());
@@ -1203,7 +1199,7 @@ mod tests {
         std::env::set_var(KEY, "0");
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -1223,7 +1219,7 @@ mod tests {
             let _guard = push_backend_policy(policy);
             bridge.infer_from_window(&[(0, 0.8), (1, 0.4)], 1e-6)
         };
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
         restore_tensor_util_wgpu_min_values(previous_min);
 
         assert_eq!(distribution.len(), bridge.concept_count());

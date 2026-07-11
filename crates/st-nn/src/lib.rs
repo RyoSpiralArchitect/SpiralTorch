@@ -9,6 +9,14 @@
 //! stack entirely in Rust while remaining fully compatible with the hypergrad
 //! tape and SpiralK planners.
 
+#[cfg(test)]
+pub(crate) fn test_global_state_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 pub mod cloud;
 pub mod dataset;
 pub mod discovery;

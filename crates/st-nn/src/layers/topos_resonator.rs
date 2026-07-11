@@ -184,11 +184,10 @@ impl Module for ToposResonator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+    use std::sync::{Arc, Mutex};
 
-    fn observer_lock() -> MutexGuard<'static, ()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+    fn observer_lock() -> std::sync::MutexGuard<'static, ()> {
+        crate::test_global_state_lock()
     }
 
     #[test]
@@ -225,7 +224,7 @@ mod tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -237,7 +236,7 @@ mod tests {
         let out = resonator.forward(&input).unwrap();
         let grad_output = Tensor::from_vec(2, 2, vec![0.5, 0.25, 0.1, 0.0]).unwrap();
         let grad_input = resonator.backward(&input, &grad_output).unwrap();
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
 
         assert_eq!(out.shape(), input.shape());
         assert_eq!(grad_input.shape(), input.shape());

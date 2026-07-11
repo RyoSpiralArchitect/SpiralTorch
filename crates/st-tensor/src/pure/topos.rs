@@ -3698,7 +3698,7 @@ mod tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = crate::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = crate::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -3719,7 +3719,7 @@ mod tests {
         ));
         unwrap_ok(biome.renormalise_weights());
         let canopy = unwrap_ok(biome.canopy());
-        crate::set_tensor_op_meta_observer(previous);
+        crate::set_thread_meta_observer(previous);
 
         assert_eq!(canopy.shape(), (1, 2));
         let events = events.lock().unwrap();
@@ -3793,7 +3793,7 @@ mod tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = crate::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = crate::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -3811,7 +3811,7 @@ mod tests {
             unwrap_ok(Tensor::from_vec(1, 2, vec![3.0, 4.0])),
         ));
         let canopy = unwrap_ok(biome.canopy_with_backend(TensorUtilBackend::Cpu));
-        crate::set_tensor_op_meta_observer(previous);
+        crate::set_thread_meta_observer(previous);
 
         assert_eq!(canopy.shape(), (1, 2));
         let events = events.lock().unwrap();
@@ -3897,7 +3897,7 @@ mod tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = crate::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = crate::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -3907,7 +3907,7 @@ mod tests {
         let topos = demo_topos();
         let mut slice = vec![2.0, -1.0, f32::INFINITY, 0.5];
         unwrap_ok(topos.guard_probability_slice("probability_guard_meta", &mut slice));
-        crate::set_tensor_op_meta_observer(previous);
+        crate::set_thread_meta_observer(previous);
 
         assert!(slice.iter().all(|value| value.is_finite() && *value >= 0.0));
         assert!((slice.iter().sum::<f32>() - 1.0).abs() < 1e-6);

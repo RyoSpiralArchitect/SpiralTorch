@@ -434,14 +434,10 @@ mod tests {
     #[cfg(feature = "wgpu")]
     use st_tensor::backend::wgpu_dense;
     use std::collections::HashSet;
-    use std::sync::{Arc, Mutex, OnceLock};
+    use std::sync::{Arc, Mutex};
 
     fn observer_lock() -> std::sync::MutexGuard<'static, ()> {
-        static OBSERVER_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        OBSERVER_LOCK
-            .get_or_init(|| Mutex::new(()))
-            .lock()
-            .expect("observer lock available")
+        crate::test_global_state_lock()
     }
 
     #[cfg(feature = "wgpu")]
@@ -524,7 +520,7 @@ mod tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -533,7 +529,7 @@ mod tests {
 
         let mut vector = vec![0.25, 0.75, 0.0];
         DesireAutomation::normalise(&mut vector);
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
 
         assert!((vector.iter().sum::<f32>() - 1.0).abs() < 1e-6);
         let events = events.lock().unwrap();
@@ -569,7 +565,7 @@ mod tests {
         std::env::set_var(KEY, "0");
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -582,7 +578,7 @@ mod tests {
             let _guard = push_backend_policy(policy);
             DesireAutomation::normalise(&mut vector);
         }
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
         restore_tensor_util_wgpu_min_values(previous_min);
 
         assert!((vector.iter().sum::<f32>() - 1.0).abs() < 1e-6);

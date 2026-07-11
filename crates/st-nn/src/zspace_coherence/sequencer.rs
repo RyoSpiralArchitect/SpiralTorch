@@ -2715,7 +2715,7 @@ mod tests {
     #[cfg(feature = "wgpu")]
     use st_tensor::wgpu_dense;
     use st_tensor::Tensor;
-    use std::sync::{Arc, Mutex, OnceLock};
+    use std::sync::{Arc, Mutex};
 
     fn make_diagnostics(
         coherence: Vec<f32>,
@@ -2749,11 +2749,7 @@ mod tests {
     }
 
     fn observer_lock() -> std::sync::MutexGuard<'static, ()> {
-        static OBSERVER_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        OBSERVER_LOCK
-            .get_or_init(|| Mutex::new(()))
-            .lock()
-            .expect("observer lock available")
+        crate::test_global_state_lock()
     }
 
     #[cfg(feature = "wgpu")]
@@ -2771,7 +2767,7 @@ mod tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -2782,7 +2778,7 @@ mod tests {
         let seq = ZSpaceCoherenceSequencer::new(6, 2, -1.0, topos).unwrap();
         let aggregated = Tensor::from_vec(1, 6, vec![0.2, 0.4, 0.0, 0.0, 0.8, 0.6]).unwrap();
         let window = seq.derive_semantic_window(&aggregated, &[0.25, 0.75], 3);
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
 
         assert!(!window.is_empty());
         let events = events.lock().unwrap();
@@ -2822,7 +2818,7 @@ mod tests {
         std::env::set_var(KEY, "0");
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -2842,7 +2838,7 @@ mod tests {
             let _guard = push_backend_policy(policy);
             seq.derive_semantic_window(&aggregated, &[0.25, 0.75], 3)
         };
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
         restore_tensor_util_wgpu_min_values(previous_min);
 
         assert!(!window.is_empty());
@@ -2868,7 +2864,7 @@ mod tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -2879,7 +2875,7 @@ mod tests {
         let seq = ZSpaceCoherenceSequencer::new(6, 2, -1.0, topos).unwrap();
         let aggregated = Tensor::from_vec(1, 6, vec![0.2, 0.4, 0.0, 0.0, 0.8, 0.6]).unwrap();
         let window = seq.derive_semantic_window(&aggregated, &[0.25, 0.75], 0);
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
 
         assert!(window.is_empty());
         let events = events.lock().unwrap();
@@ -2905,7 +2901,7 @@ mod tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -2927,7 +2923,7 @@ mod tests {
         let distribution = seq
             .derive_semantic_distribution(&aggregated, &[0.7, 0.3], &semantics)
             .unwrap();
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
 
         assert_eq!(distribution.len(), semantics.concept_count());
         let events = events.lock().unwrap();
@@ -2970,7 +2966,7 @@ mod tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -2978,7 +2974,7 @@ mod tests {
         })));
 
         let fused = ZSpaceCoherenceSequencer::fuse_distributions(&[0.7, 0.3], &[0.2, 0.8]);
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
 
         assert_eq!(fused.len(), 2);
         let events = events.lock().unwrap();
@@ -3014,7 +3010,7 @@ mod tests {
         std::env::set_var(KEY, "0");
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -3026,7 +3022,7 @@ mod tests {
             let _guard = push_backend_policy(policy);
             ZSpaceCoherenceSequencer::fuse_distributions(&[0.7, 0.3], &[0.2, 0.8])
         };
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
         restore_tensor_util_wgpu_min_values(previous_min);
 
         assert_eq!(fused.len(), 2);
@@ -3048,7 +3044,7 @@ mod tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -3059,7 +3055,7 @@ mod tests {
         let seq = ZSpaceCoherenceSequencer::new(6, 3, -1.0, topos).unwrap();
         let aggregated = Tensor::from_vec(2, 3, vec![0.1, 0.2, 0.3, -0.1, 0.4, 0.6]).unwrap();
         let pulse = seq.summarise_maxwell_pulse(&aggregated, &[0.2, 0.5, 0.3]);
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
 
         assert_eq!(pulse.blocks, 2);
         let events = events.lock().unwrap();

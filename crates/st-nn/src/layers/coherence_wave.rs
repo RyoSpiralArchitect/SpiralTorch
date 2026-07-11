@@ -348,11 +348,10 @@ impl Module for ZSpaceCoherenceWaveBlock {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+    use std::sync::{Arc, Mutex};
 
-    fn observer_lock() -> MutexGuard<'static, ()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+    fn observer_lock() -> std::sync::MutexGuard<'static, ()> {
+        crate::test_global_state_lock()
     }
 
     #[test]
@@ -371,7 +370,7 @@ mod tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -383,7 +382,7 @@ mod tests {
         let out = block.forward(&input).unwrap();
         let grad_out = Tensor::from_vec(1, 6, vec![0.01; 6]).unwrap();
         let grad_in = block.backward(&input, &grad_out).unwrap();
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
 
         assert_eq!(out.shape(), (1, 6));
         assert_eq!(grad_in.shape(), input.shape());

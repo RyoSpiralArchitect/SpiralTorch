@@ -302,11 +302,10 @@ impl Module for Relu {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+    use std::sync::{Arc, Mutex};
 
-    fn observer_lock() -> MutexGuard<'static, ()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+    fn observer_lock() -> std::sync::MutexGuard<'static, ()> {
+        crate::test_global_state_lock()
     }
 
     #[test]
@@ -377,7 +376,7 @@ mod tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -389,7 +388,7 @@ mod tests {
         let grad_output = Tensor::from_vec(1, 4, vec![0.3, 0.4, 0.5, 0.6]).unwrap();
         let _ = relu.forward(&input).unwrap();
         let _ = relu.backward(&input, &grad_output).unwrap();
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
 
         let events = events.lock().unwrap();
         let forward = events

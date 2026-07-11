@@ -1018,7 +1018,7 @@ mod tests {
             let _lock = tensor_meta_observer_test_lock();
             let events = Arc::new(Mutex::new(Vec::new()));
             let captured = events.clone();
-            let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+            let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
                 captured
                     .lock()
                     .unwrap()
@@ -1028,7 +1028,7 @@ mod tests {
             let mut loss = InfoNCELoss::new(0.5, true);
             let _ = loss.forward(&prediction, &target).unwrap();
             let grad = loss.backward(&prediction, &target).unwrap();
-            st_tensor::set_tensor_op_meta_observer(previous);
+            st_tensor::set_thread_meta_observer(previous);
 
             assert_eq!(grad.shape(), prediction.shape());
             let events = events.lock().unwrap().clone();
@@ -1087,7 +1087,7 @@ mod tests {
         let _lock = tensor_meta_observer_test_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -1102,7 +1102,7 @@ mod tests {
             let grad = loss.backward(&prediction, &target).unwrap();
             (output, grad)
         };
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
         match previous_threshold {
             Some(value) => std::env::set_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES", value),
             None => std::env::remove_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES"),

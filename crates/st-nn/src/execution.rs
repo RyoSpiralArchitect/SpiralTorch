@@ -412,13 +412,10 @@ fn wgpu_softmax_backend() -> SoftmaxBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, Mutex, OnceLock};
+    use std::sync::{Arc, Mutex};
 
     fn observer_lock() -> std::sync::MutexGuard<'static, ()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+        crate::test_global_state_lock()
     }
 
     #[test]
@@ -485,20 +482,19 @@ mod tests {
 
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous_observer =
-            st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
-                captured
-                    .lock()
-                    .unwrap()
-                    .push((event.op_name, event.data.clone()));
-            })));
+        let previous_observer = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push((event.op_name, event.data.clone()));
+        })));
 
         let policy = BackendPolicy::from_device_caps(DeviceCaps::wgpu(32, true, 256));
         let guard = push_backend_policy(policy);
         let selected = current_tensor_util_backend_for_values(8);
         drop(guard);
 
-        st_tensor::set_tensor_op_meta_observer(previous_observer);
+        st_tensor::set_thread_meta_observer(previous_observer);
         match previous_threshold {
             Some(value) => std::env::set_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES", value),
             None => std::env::remove_var("SPIRALTORCH_TENSOR_UTIL_WGPU_MIN_VALUES"),

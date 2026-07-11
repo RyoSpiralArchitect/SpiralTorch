@@ -167,11 +167,10 @@ pub(crate) fn reduce_loss_terms(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+    use std::sync::{Arc, Mutex};
 
-    fn observer_lock() -> MutexGuard<'static, ()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+    fn observer_lock() -> std::sync::MutexGuard<'static, ()> {
+        crate::test_global_state_lock()
     }
 
     #[test]
@@ -189,7 +188,7 @@ mod tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = Arc::clone(&events);
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -202,7 +201,7 @@ mod tests {
         let _ = loss.forward(&prediction, &target).unwrap();
         let _ = loss.backward(&prediction, &target).unwrap();
 
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
         let events = events
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -263,7 +262,7 @@ mod tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = Arc::clone(&events);
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -283,7 +282,7 @@ mod tests {
         let mut triplet = TripletLoss::new(1.0);
         let _ = triplet.forward(&prediction, &target).unwrap();
 
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
         let events = events
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());

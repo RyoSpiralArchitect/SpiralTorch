@@ -852,11 +852,10 @@ mod tests {
     use crate::{Dataset, MeanSquaredError, ModuleTrainer, RoundtableConfig};
     use st_core::backend::device_caps::DeviceCaps;
     use std::num::NonZeroUsize;
-    use std::sync::{Arc, Mutex, OnceLock};
+    use std::sync::{Arc, Mutex};
 
     fn observer_lock() -> std::sync::MutexGuard<'static, ()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+        crate::test_global_state_lock()
     }
 
     fn sample_context() -> GraphContext {
@@ -918,7 +917,7 @@ mod tests {
         let _lock = observer_lock();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = events.clone();
-        let previous = st_tensor::set_tensor_op_meta_observer(Some(Arc::new(move |event| {
+        let previous = st_tensor::set_thread_meta_observer(Some(Arc::new(move |event| {
             captured
                 .lock()
                 .unwrap()
@@ -929,7 +928,7 @@ mod tests {
         let grad = Tensor::from_vec(1, 2, vec![0.6, -0.3]).unwrap();
         let _ = GraphReadout::Mean.forward(&nodes).unwrap();
         let _ = GraphReadout::Mean.backward(&nodes, &grad).unwrap();
-        st_tensor::set_tensor_op_meta_observer(previous);
+        st_tensor::set_thread_meta_observer(previous);
 
         let events = events.lock().unwrap();
         let forward = events
