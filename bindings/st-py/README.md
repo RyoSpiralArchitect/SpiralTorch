@@ -809,6 +809,21 @@ read all covered weight bytes before and after load, so large local models must
 budget two additional sequential reads; remote models use the immutable Hub
 commit rather than downloading and hashing weights twice.
 
+The software and device basis forms a third fail-fast identity. Before model
+weights load, the bridge fingerprints the installed SpiralTorch wheel and HF
+stack from normalized distribution `RECORD` rows, Python/OS/architecture,
+stable SpiralTorch backend reports, Torch CUDA/MPS capabilities, and selected
+compute-affecting environment variables. Absolute install paths, hostnames,
+timestamps, free-memory values, and SpiralTorch's intentionally volatile
+runtime `BUILD_FINGERPRINT` are excluded. The report is repeated after model
+load; a first generation adopts the observed ID and canonicalizes it as
+`--expected-execution-input-id`, while later scale-up/executor generations
+enforce it and require parent/child continuity before promotion. Use
+`st.hf_finetune_execution_identity_report(...)` and
+`st.hf_finetune_execution_identity_lines(...)` for the same public surface.
+Missing wheel `RECORD` evidence is fail-closed rather than silently reduced to
+package version checks.
+
 The continuation runtime entrypoint does not depend on the repository staying
 at its original absolute path. Known `hf_finetune_bridge.py`, legacy
 `hf_gpt2_finetune_bridge.py`, and `spiral-hf-finetune` prefixes are rewritten

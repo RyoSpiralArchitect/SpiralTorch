@@ -3781,6 +3781,97 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             )
         )
 
+    def test_scale_up_pins_execution_identity_and_rejects_flag_drift(
+        self,
+    ) -> None:
+        execution_id = f"sha256:{'c' * 64}"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output = root / "source"
+            command = [
+                sys.executable,
+                str(EXAMPLE_PATH),
+                "--metadata-only",
+                "--output-dir",
+                str(output),
+                "--run-card",
+                str(output / "run-card.json"),
+            ]
+            summary = {
+                "row_type": "hf_gpt2_finetune_sweep_report_summary",
+                "scale_up_candidate_label": "execution-pinned",
+                "scale_up_candidate_reason": "test",
+                "scale_up_candidate_command": command,
+                "scale_up_candidate_output_dir": str(output),
+                "scale_up_candidate_run_card": str(output / "run-card.json"),
+                "scale_up_candidate_execution_input_identity_status": "ready",
+                "scale_up_candidate_execution_input_identity_verified": True,
+                "scale_up_candidate_execution_input_observed_id": execution_id,
+            }
+            scale_up = hf_ft.hf_gpt2_finetune_scale_up_command(
+                summary,
+                output_dir=root / "next",
+                max_steps_multiplier=None,
+                max_train_samples_multiplier=None,
+            )
+            preflight = hf_ft.hf_gpt2_finetune_scale_up_preflight_report(scale_up)
+            tampered = json.loads(json.dumps(scale_up))
+            flag_index = tampered["command"].index(
+                "--expected-execution-input-id"
+            )
+            del tampered["command"][flag_index : flag_index + 2]
+            blocked = hf_ft.hf_gpt2_finetune_scale_up_preflight_report(tampered)
+            drifted_summary = dict(summary)
+            drifted_summary["scale_up_candidate_command"] = [
+                *command,
+                "--expected-execution-input-id",
+                execution_id,
+            ]
+            drifted_summary["scale_up_candidate_execution_input_observed_id"] = (
+                f"sha256:{'d' * 64}"
+            )
+            drifted = hf_ft.hf_gpt2_finetune_scale_up_command(
+                drifted_summary,
+                output_dir=root / "drifted",
+                max_steps_multiplier=None,
+                max_train_samples_multiplier=None,
+            )
+            drifted_preflight = hf_ft.hf_gpt2_finetune_scale_up_preflight_report(
+                drifted
+            )
+
+        self.assertEqual(scale_up["execution_input_expected_id"], execution_id)
+        self.assertEqual(
+            scale_up["execution_input_identity_contract_status"],
+            "enforced",
+        )
+        self.assertEqual(
+            scale_up["command"][
+                scale_up["command"].index("--expected-execution-input-id") + 1
+            ],
+            execution_id,
+        )
+        self.assertTrue(preflight["ready"])
+        self.assertEqual(preflight["execution_input_expected_id"], execution_id)
+        self.assertFalse(blocked["ready"])
+        self.assertTrue(
+            any(
+                issue.get("field") == "--expected-execution-input-id"
+                for issue in blocked["issues"]
+            )
+        )
+        self.assertEqual(
+            drifted["execution_input_identity_contract_status"],
+            "blocked",
+        )
+        self.assertFalse(drifted_preflight["ready"])
+        self.assertTrue(
+            any(
+                issue.get("field") == "execution_input_identity_contract"
+                for issue in drifted_preflight["issues"]
+            )
+        )
+
     def test_scale_up_preflight_allows_root_adapter_without_promotion_report(
         self,
     ) -> None:
@@ -10259,6 +10350,36 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             module.parse_args(
                 [
                     "--expected-runtime-input-id",
+                    "invalid",
+                    "--metadata-only",
+                ]
+            )
+
+    def test_bridge_canonicalizes_execution_identity_for_next_generation(
+        self,
+    ) -> None:
+        module = load_bridge_example()
+        args = module.parse_args(["--metadata-only"])
+        execution_id = f"sha256:{'c' * 64}"
+
+        module._canonicalize_execution_input_launch_command(
+            args,
+            {
+                "status": "ready",
+                "observed_identity_id": execution_id,
+            },
+        )
+        command = args._hf_finetune_launch_command
+
+        self.assertIn("--expected-execution-input-id", command)
+        self.assertEqual(
+            command[command.index("--expected-execution-input-id") + 1],
+            execution_id,
+        )
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            module.parse_args(
+                [
+                    "--expected-execution-input-id",
                     "invalid",
                     "--metadata-only",
                 ]

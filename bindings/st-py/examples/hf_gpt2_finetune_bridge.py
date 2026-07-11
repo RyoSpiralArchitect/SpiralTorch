@@ -33,6 +33,11 @@ from spiraltorch.hf_adapter import (
     write_hf_adapter_lineage,
     write_hf_adapter_promotion,
 )
+from spiraltorch.hf_execution_identity import (
+    HF_FINETUNE_EXECUTION_IDENTITY_SCHEMA,
+    hf_finetune_execution_identity_lines,
+    hf_finetune_execution_identity_report,
+)
 from spiraltorch.hf_ft import (
     HF_GPT2_FT_DEFAULT_DEVICE_BACKENDS,
     hf_gpt2_finetune_checkpoint_resume_lines,
@@ -165,6 +170,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help=(
             "Fail before model weight loading unless the resolved base-model "
             "commit/content and tokenizer semantics match this sha256 identity."
+        ),
+    )
+    parser.add_argument(
+        "--expected-execution-input-id",
+        default=None,
+        help=(
+            "Fail before model weight loading unless the SpiralTorch build, "
+            "HF package contents, Python/platform, device capabilities, and "
+            "compute-affecting environment match this sha256 identity."
         ),
     )
     parser.add_argument(
@@ -623,6 +637,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         parser.error("--expected-training-input-id must be sha256:<64 lowercase hex>")
     if not _valid_adapter_id(args.expected_runtime_input_id):
         parser.error("--expected-runtime-input-id must be sha256:<64 lowercase hex>")
+    if not _valid_adapter_id(args.expected_execution_input_id):
+        parser.error(
+            "--expected-execution-input-id must be sha256:<64 lowercase hex>"
+        )
     if (
         args.expected_parent_lineage_depth is not None
         and args.expected_parent_lineage_depth < 0
@@ -2601,6 +2619,56 @@ def _canonicalize_runtime_input_launch_command(
         args._hf_finetune_launch_command = command
 
 
+def _execution_input_identity_report(
+    args: argparse.Namespace,
+    runtime_preflight: Mapping[str, object],
+    torch: Any,
+    *,
+    phase: str,
+    expected_identity_id: str | None = None,
+) -> dict[str, object]:
+    expected_id = (
+        expected_identity_id
+        if expected_identity_id is not None
+        else getattr(args, "expected_execution_input_id", None)
+    )
+    try:
+        return hf_finetune_execution_identity_report(
+            runtime_preflight,
+            torch_module=torch,
+            expected_identity_id=expected_id,
+            phase=phase,
+        )
+    except (OSError, TypeError, ValueError) as exc:
+        return {
+            "row_type": "hf_finetune_execution_identity",
+            "schema": HF_FINETUNE_EXECUTION_IDENTITY_SCHEMA,
+            "status": "blocked",
+            "phase": phase,
+            "expected_identity_id": expected_id,
+            "observed_identity_id": None,
+            "identity_verified": False,
+            "error_count": 1,
+            "errors": [f"{exc.__class__.__name__}: {exc}"],
+        }
+
+
+def _canonicalize_execution_input_launch_command(
+    args: argparse.Namespace,
+    report: Mapping[str, object],
+) -> None:
+    command = list(getattr(args, "_hf_finetune_launch_command", []) or [])
+    observed_id = report.get("observed_identity_id")
+    if (
+        command
+        and report.get("status") == "ready"
+        and observed_id is not None
+        and not _argv_has_option(command, "--expected-execution-input-id")
+    ):
+        command.extend(["--expected-execution-input-id", str(observed_id)])
+        args._hf_finetune_launch_command = command
+
+
 def _refresh_card_launch_command(
     card: dict[str, Any],
     args: argparse.Namespace,
@@ -2625,6 +2693,9 @@ def _finetune_start_report(
     )
     runtime_input_identity = dict(
         getattr(args, "_hf_runtime_input_identity_report", {}) or {}
+    )
+    execution_input_identity = dict(
+        getattr(args, "_hf_execution_input_identity_report", {}) or {}
     )
     adapter_preloaded = artifact_report.get("artifact_kind") == "peft_adapter"
     trainer_resume = args.resume_from_checkpoint is not None
@@ -2674,6 +2745,12 @@ def _finetune_start_report(
             None
             if not runtime_input_identity
             else runtime_input_identity.get("identity_verified") is True
+        ),
+        "execution_input_identity": execution_input_identity or None,
+        "execution_input_identity_verified": (
+            None
+            if not execution_input_identity
+            else execution_input_identity.get("identity_verified") is True
         ),
         "weights_only_warm_start": adapter_preloaded and not trainer_resume,
         "trainer_checkpoint_resume": trainer_resume,
@@ -2840,6 +2917,22 @@ def _base_run_card(
             ),
             "expected_identity_id": args.expected_runtime_input_id,
             "fail_fast": args.expected_runtime_input_id is not None,
+        },
+        "finetune_execution_identity_pre_model": (
+            dict(
+                getattr(args, "_hf_execution_input_identity_report", {}) or {}
+            )
+            or None
+        ),
+        "finetune_execution_identity_after_model": None,
+        "finetune_execution_identity_contract": {
+            "status": (
+                "enforced"
+                if args.expected_execution_input_id is not None
+                else "observe"
+            ),
+            "expected_identity_id": args.expected_execution_input_id,
+            "fail_fast": True,
         },
         "adapter_lineage": None,
         "adapter_promotion": None,
@@ -3274,6 +3367,52 @@ def _main_with_runtime_access(
     args._resolved_dataloader_pin_memory = _resolve_dataloader_pin_memory(torch, args)
     _set_seed(torch, transformers, args.seed)
 
+    execution_identity_pre_model = _execution_input_identity_report(
+        args,
+        preflight,
+        torch,
+        phase="pre_model_load",
+    )
+    args._hf_execution_input_identity_report = execution_identity_pre_model
+    _canonicalize_execution_input_launch_command(
+        args,
+        execution_identity_pre_model,
+    )
+    preflight["finetune_execution_identity_pre_model"] = dict(
+        execution_identity_pre_model
+    )
+    preflight["finetune_execution_identity_contract"] = {
+        "status": (
+            "enforced"
+            if args.expected_execution_input_id is not None
+            else "adopted"
+            if execution_identity_pre_model.get("status") == "ready"
+            else "evidence_incomplete"
+        ),
+        "expected_identity_id": args.expected_execution_input_id,
+        "observed_identity_id": execution_identity_pre_model.get(
+            "observed_identity_id"
+        ),
+        "identity_verified": execution_identity_pre_model.get(
+            "identity_verified"
+        ),
+        "fail_fast": True,
+        "verification_phase": "pre_model_load",
+    }
+    _refresh_card_launch_command(preflight, args)
+    for line in hf_finetune_execution_identity_lines(
+        execution_identity_pre_model
+    ):
+        print(line)
+    if execution_identity_pre_model.get("status") != "ready":
+        preflight["load_status"] = "error"
+        preflight["failure_stage"] = "finetune_execution_identity_pre_model"
+        preflight["failure_error"] = (
+            "fine-tune execution environment identity verification failed"
+        )
+        _write_card(preflight, args)
+        return 1
+
     card = _base_run_card(
         args,
         preflight,
@@ -3374,6 +3513,46 @@ def _main_with_runtime_access(
         card["training_input_identity_after_load"] = dict(
             training_input_identity_after_load
         )
+        execution_identity_after_model = _execution_input_identity_report(
+            args,
+            preflight,
+            torch,
+            phase="after_model_load",
+            expected_identity_id=(
+                args.expected_execution_input_id
+                or execution_identity_pre_model.get("observed_identity_id")
+            ),
+        )
+        card["finetune_execution_identity_after_model"] = dict(
+            execution_identity_after_model
+        )
+        args._hf_execution_input_identity_report = execution_identity_after_model
+        _canonicalize_execution_input_launch_command(
+            args,
+            execution_identity_after_model,
+        )
+        _refresh_card_launch_command(card, args)
+        card["finetune_execution_identity_contract"] = {
+            "status": (
+                "enforced"
+                if args.expected_execution_input_id is not None
+                else "adopted"
+                if execution_identity_after_model.get("status") == "ready"
+                else "evidence_incomplete"
+            ),
+            "expected_identity_id": args.expected_execution_input_id,
+            "observed_identity_id": execution_identity_after_model.get(
+                "observed_identity_id"
+            ),
+            "identity_verified": execution_identity_after_model.get(
+                "identity_verified"
+            ),
+            "fail_fast": True,
+        }
+        card["finetune_start_report"] = _finetune_start_report(
+            args,
+            model_artifact_load_report,
+        )
         card["tokenizer_name"] = model_artifact_load_report.get(
             "resolved_tokenizer_source"
         )
@@ -3437,12 +3616,31 @@ def _main_with_runtime_access(
         )
         _write_card(card, args)
         return 1
+    if execution_identity_after_model.get("status") != "ready":
+        card.update(
+            {
+                "load_status": "error",
+                "failure_stage": "finetune_execution_identity_after_model",
+                "failure_error": (
+                    "fine-tune execution environment changed during model loading"
+                ),
+            }
+        )
+        _write_card(card, args)
+        return 1
     for runtime_identity in (
         card.get("model_runtime_identity_pre_model"),
         card.get("model_runtime_identity_after_model"),
     ):
         if isinstance(runtime_identity, Mapping):
             for line in hf_causal_lm_runtime_identity_lines(runtime_identity):
+                print(line)
+    for execution_identity in (
+        card.get("finetune_execution_identity_pre_model"),
+        card.get("finetune_execution_identity_after_model"),
+    ):
+        if isinstance(execution_identity, Mapping):
+            for line in hf_finetune_execution_identity_lines(execution_identity):
                 print(line)
     card["load_status"] = "ok"
     card["generation_before_train"] = _generation_sample(
