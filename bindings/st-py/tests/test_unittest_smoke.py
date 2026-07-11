@@ -1550,6 +1550,18 @@ class SpiralTorchSmokeTest(unittest.TestCase):
         self.assertEqual(len(vals2), 1)
         self.assertEqual(len(derivs2), 1)
 
+        with self.assertRaisesRegex(RuntimeError, r"series value\[0\] became non-finite"):
+            st.zspace.zspace_eval_stable(
+                [3.4028235e38, 3.4028235e38],
+                [0.0, 0.0],
+                [2.0],
+                [0.0],
+            )
+
+        overflow_grid = st.frac.MellinLogGrid(1.0, 1.0, [complex(3.4028235e38, 0.0)])
+        with self.assertRaisesRegex(ValueError, r"Mellin value\[0\] became non-finite"):
+            overflow_grid.evaluate_stable(1.0 + 0.0j)
+
     def test_drl_safety_metrics_smoke(self) -> None:
         word = {
             "name": "AI",
