@@ -13,6 +13,7 @@ hf_ft: ModuleType
 hf_peft: ModuleType
 hf_input_identity: ModuleType
 hf_execution_identity: ModuleType
+hf_training_identity: ModuleType
 hf_runtime_identity: ModuleType
 hf_dataset_identity: ModuleType
 hf_adapter: ModuleType
