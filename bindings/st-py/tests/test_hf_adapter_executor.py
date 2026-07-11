@@ -117,6 +117,10 @@ def _write_promoted_adapter(
     expected_runtime_input_id: str | None = None,
     execution_input_id: str | None = None,
     expected_execution_input_id: str | None = None,
+    dataset_input_id: str | None = None,
+    expected_dataset_input_id: str | None = None,
+    dataset_name: str = "org/corpus",
+    dataset_revision: str = "e93a9faa9c77e5d09219f6c868bfc7a1bd65593c",
 ) -> dict[str, object]:
     adapter = _write_adapter(output, weights)
     command = list(launch_command or _launch_command(parent, output))
@@ -181,6 +185,50 @@ def _write_promoted_adapter(
             "observed_identity_id": execution_input_id,
             "identity_verified": True,
         }
+    if dataset_input_id is not None:
+        card["dataset_input_identity"] = {
+            "status": "ready",
+            "phase": "preflight",
+            "expected_identity_id": expected_dataset_input_id,
+            "observed_identity_id": dataset_input_id,
+            "effective_dataset_name": dataset_name,
+            "effective_revision": dataset_revision,
+            "identity_verified": True,
+        }
+        card["dataset_input_identity_after_load"] = {
+            "status": "ready",
+            "phase": "after_load",
+            "expected_identity_id": expected_dataset_input_id or dataset_input_id,
+            "observed_identity_id": dataset_input_id,
+            "effective_dataset_name": dataset_name,
+            "effective_revision": dataset_revision,
+            "identity_verified": True,
+        }
+        card["dataset_input_identity_contract"] = {
+            "status": (
+                "enforced"
+                if expected_dataset_input_id is not None
+                else "adopted"
+            ),
+            "expected_identity_id": expected_dataset_input_id or dataset_input_id,
+            "observed_identity_id": dataset_input_id,
+            "effective_dataset_name": dataset_name,
+            "effective_revision": dataset_revision,
+            "identity_verified": True,
+            "fail_fast": True,
+        }
+        command.extend(
+            [
+                "--dataset-name",
+                dataset_name,
+                "--dataset-revision",
+                dataset_revision,
+                "--expected-dataset-input-id",
+                expected_dataset_input_id or dataset_input_id,
+            ]
+        )
+        card["launch_command"] = command
+        card["launch_command_display"] = " ".join(command)
     lineage = st.write_hf_adapter_lineage(
         adapter,
         parent_adapter=parent,
@@ -204,6 +252,7 @@ def _seed_chain(
     improvement: float = 0.1,
     runtime_input_id: str | None = None,
     execution_input_id: str | None = None,
+    dataset_input_id: str | None = None,
 ) -> tuple[Path, Path]:
     root = _write_adapter(tmp_path / "root", b"root")
     st.write_hf_adapter_lineage(root)
@@ -216,6 +265,8 @@ def _seed_chain(
         after=1.0 - improvement,
         runtime_input_id=runtime_input_id,
         execution_input_id=execution_input_id,
+        dataset_input_id=dataset_input_id,
+        expected_dataset_input_id=dataset_input_id,
     )
     return root, child
 
@@ -378,6 +429,37 @@ def test_executor_preserves_enforced_runtime_input_contract(tmp_path: Path) -> N
     assert any(
         "runtime_input_contract=enforced" in line
         and f"runtime_input_expected={runtime_input_id}" in line
+        for line in st.hf_adapter_continuation_executor_lines(report)
+    )
+
+
+def test_executor_preserves_enforced_dataset_input_contract(tmp_path: Path) -> None:
+    dataset_input_id = "sha256:" + "4" * 64
+    _, child = _seed_chain(tmp_path, dataset_input_id=dataset_input_id)
+
+    report = st.run_hf_adapter_continuation_executor(
+        child,
+        output_root=tmp_path / "executor-runs",
+        max_lineage_depth=3,
+        max_steps=2,
+        max_train_samples=16,
+    )
+    pending = report["pending_generation"]
+    contract = pending["dataset_input_identity_contract"]
+    command = pending["command"]["command"]
+
+    assert contract["status"] == "enforced"
+    assert contract["expected_identity_id"] == dataset_input_id
+    assert pending["dataset_input_expected_id"] == dataset_input_id
+    assert pending["dataset_input_effective_name"] == "org/corpus"
+    assert pending["dataset_input_effective_revision"] == (
+        "e93a9faa9c77e5d09219f6c868bfc7a1bd65593c"
+    )
+    assert _flag(command, "--expected-dataset-input-id") == dataset_input_id
+    assert _flag(command, "--dataset-name") == "org/corpus"
+    assert any(
+        "dataset_input_contract=enforced" in line
+        and f"dataset_input_expected={dataset_input_id}" in line
         for line in st.hf_adapter_continuation_executor_lines(report)
     )
 

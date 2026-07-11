@@ -561,6 +561,41 @@ def hf_adapter_lineage_report(
             errors.append("run-card training input preflight identity does not match")
         if observed_after != expected_training_input_id:
             errors.append("run-card training input after-load identity does not match")
+    dataset_input_identity = _run_card_input_identity(
+        card_payload,
+        "dataset_input_identity",
+    )
+    dataset_input_identity_after_load = _run_card_input_identity(
+        card_payload,
+        "dataset_input_identity_after_load",
+    )
+    strongest_dataset_input_identity = (
+        dataset_input_identity_after_load or dataset_input_identity
+    )
+    dataset_input_contract = _run_card_input_identity(
+        card_payload,
+        "dataset_input_identity_contract",
+    )
+    expected_dataset_input_id = (
+        dataset_input_contract.get("expected_identity_id")
+        if dataset_input_contract
+        else dataset_input_identity_after_load.get("expected_identity_id")
+        or dataset_input_identity.get("expected_identity_id")
+    )
+    dataset_input_identity_required = expected_dataset_input_id is not None
+    dataset_observed_before = dataset_input_identity.get("observed_identity_id")
+    dataset_observed_after = dataset_input_identity_after_load.get(
+        "observed_identity_id"
+    )
+    if dataset_input_identity_required:
+        if dataset_input_identity.get("status") != "ready":
+            errors.append("run-card dataset input preflight identity is not ready")
+        if dataset_input_identity_after_load.get("status") != "ready":
+            errors.append("run-card dataset input after-load identity is not ready")
+        if dataset_observed_before != expected_dataset_input_id:
+            errors.append("run-card dataset input preflight identity does not match")
+        if dataset_observed_after != expected_dataset_input_id:
+            errors.append("run-card dataset input after-load identity does not match")
     runtime_input_identity_pre_model = _run_card_input_identity(
         card_payload,
         "model_runtime_identity_pre_model",
@@ -722,6 +757,38 @@ def hf_adapter_lineage_report(
         "training_input_identity_after_load_status": (
             training_input_identity_after_load.get("status")
         ),
+        "dataset_input_identity_present": bool(strongest_dataset_input_identity),
+        "dataset_input_identity_required": dataset_input_identity_required,
+        "dataset_input_identity_status": strongest_dataset_input_identity.get(
+            "status"
+        ),
+        "dataset_input_expected_id": expected_dataset_input_id,
+        "dataset_input_observed_id": strongest_dataset_input_identity.get(
+            "observed_identity_id"
+        ),
+        "dataset_input_effective_revision": strongest_dataset_input_identity.get(
+            "effective_revision"
+        ),
+        "dataset_input_effective_name": strongest_dataset_input_identity.get(
+            "effective_dataset_name"
+        ),
+        "dataset_input_identity_verified": (
+            None
+            if not strongest_dataset_input_identity
+            else strongest_dataset_input_identity.get("status")
+            in {"ready", "not_applicable"}
+            and (
+                not dataset_input_identity_required
+                or strongest_dataset_input_identity.get("observed_identity_id")
+                == expected_dataset_input_id
+            )
+        ),
+        "dataset_input_identity_preflight_status": dataset_input_identity.get(
+            "status"
+        ),
+        "dataset_input_identity_after_load_status": (
+            dataset_input_identity_after_load.get("status")
+        ),
         "runtime_input_identity_present": bool(strongest_runtime_input_identity),
         "runtime_input_identity_required": runtime_input_identity_required,
         "runtime_input_identity_status": strongest_runtime_input_identity.get(
@@ -844,6 +911,10 @@ def hf_adapter_lineage_lines(
             f"{report.get('runtime_input_identity_required')} "
             "runtime_input_status="
             f"{report.get('runtime_input_identity_status')} "
+            "dataset_input_required="
+            f"{report.get('dataset_input_identity_required')} "
+            "dataset_input_status="
+            f"{report.get('dataset_input_identity_status')} "
             "execution_input_required="
             f"{report.get('execution_input_identity_required')} "
             "execution_input_status="
@@ -1854,6 +1925,32 @@ def _adapter_promotion_chain_node(manifest_path: Path) -> dict[str, object]:
         "training_input_identity_after_load_status": lineage.get(
             "training_input_identity_after_load_status"
         ),
+        "dataset_input_identity_present": lineage.get(
+            "dataset_input_identity_present"
+        ),
+        "dataset_input_identity_required": lineage.get(
+            "dataset_input_identity_required"
+        ),
+        "dataset_input_identity_status": lineage.get(
+            "dataset_input_identity_status"
+        ),
+        "dataset_input_expected_id": lineage.get("dataset_input_expected_id"),
+        "dataset_input_observed_id": lineage.get("dataset_input_observed_id"),
+        "dataset_input_effective_revision": lineage.get(
+            "dataset_input_effective_revision"
+        ),
+        "dataset_input_effective_name": lineage.get(
+            "dataset_input_effective_name"
+        ),
+        "dataset_input_identity_verified": lineage.get(
+            "dataset_input_identity_verified"
+        ),
+        "dataset_input_identity_preflight_status": lineage.get(
+            "dataset_input_identity_preflight_status"
+        ),
+        "dataset_input_identity_after_load_status": lineage.get(
+            "dataset_input_identity_after_load_status"
+        ),
         "runtime_input_identity_present": lineage.get(
             "runtime_input_identity_present"
         ),
@@ -2032,6 +2129,16 @@ def _chain_inferred_root_node(
         "training_input_identity_verified": None,
         "training_input_identity_preflight_status": None,
         "training_input_identity_after_load_status": None,
+        "dataset_input_identity_present": None,
+        "dataset_input_identity_required": None,
+        "dataset_input_identity_status": None,
+        "dataset_input_expected_id": None,
+        "dataset_input_observed_id": None,
+        "dataset_input_effective_revision": None,
+        "dataset_input_effective_name": None,
+        "dataset_input_identity_verified": None,
+        "dataset_input_identity_preflight_status": None,
+        "dataset_input_identity_after_load_status": None,
         "runtime_input_identity_present": None,
         "runtime_input_identity_required": None,
         "runtime_input_identity_status": None,
@@ -2154,6 +2261,58 @@ def _adapter_promotion_chain_transition(
         if not training_input_continuity_observed
         else parent_training_input_id == training_input_observed_id
     )
+    dataset_input_expected_id = child.get("dataset_input_expected_id")
+    dataset_input_observed_id = child.get("dataset_input_observed_id")
+    parent_dataset_input_id = parent.get("dataset_input_observed_id")
+    dataset_input_evidence_present = bool(
+        child.get("dataset_input_identity_present") is True
+        or child.get("dataset_input_identity_status") is not None
+        or dataset_input_expected_id is not None
+        or dataset_input_observed_id is not None
+    )
+    dataset_reports_ready = bool(
+        child.get("dataset_input_identity_status") in {"ready", "not_applicable"}
+        and child.get("dataset_input_identity_verified") is True
+        and child.get("dataset_input_identity_preflight_status")
+        in {"ready", "not_applicable"}
+        and child.get("dataset_input_identity_after_load_status")
+        in {"ready", "not_applicable"}
+    )
+    dataset_input_identity_required = bool(
+        parent_dataset_input_id is not None or dataset_input_expected_id is not None
+    )
+    if parent_dataset_input_id is None:
+        dataset_input_identity_ready = bool(
+            dataset_input_observed_id is None
+            and dataset_input_expected_id is None
+            and (not dataset_input_evidence_present or dataset_reports_ready)
+            or dataset_input_observed_id is not None
+            and dataset_reports_ready
+            and (
+                dataset_input_expected_id is None
+                or dataset_input_expected_id == dataset_input_observed_id
+            )
+        )
+    else:
+        dataset_input_identity_ready = bool(
+            dataset_input_expected_id == parent_dataset_input_id
+            and dataset_input_observed_id == parent_dataset_input_id
+            and dataset_reports_ready
+        )
+    dataset_input_adopted = bool(
+        parent_dataset_input_id is None
+        and dataset_input_observed_id is not None
+        and dataset_input_identity_ready
+    )
+    dataset_input_continuity_observed = bool(
+        parent_dataset_input_id is not None
+        and dataset_input_observed_id is not None
+    )
+    dataset_input_matches_parent = (
+        None
+        if not dataset_input_continuity_observed
+        else parent_dataset_input_id == dataset_input_observed_id
+    )
     runtime_input_expected_id = child.get("runtime_input_expected_id")
     runtime_input_observed_id = child.get("runtime_input_observed_id")
     parent_runtime_input_id = parent.get("runtime_input_observed_id")
@@ -2230,6 +2389,7 @@ def _adapter_promotion_chain_transition(
         and base_model_matches
         and input_identity_ready
         and training_input_identity_ready
+        and dataset_input_identity_ready
         and runtime_input_identity_ready
         and execution_input_identity_ready
         and child.get("parent_fingerprint_verified") is True
@@ -2285,6 +2445,30 @@ def _adapter_promotion_chain_transition(
         "parent_training_input_id": parent_training_input_id,
         "training_input_continuity_observed": training_input_continuity_observed,
         "training_input_matches_parent": training_input_matches_parent,
+        "dataset_input_identity_required": dataset_input_identity_required,
+        "dataset_input_evidence_present": dataset_input_evidence_present,
+        "dataset_input_identity_ready": dataset_input_identity_ready,
+        "dataset_input_identity_status": child.get(
+            "dataset_input_identity_status"
+        ),
+        "dataset_input_expected_id": dataset_input_expected_id,
+        "dataset_input_observed_id": dataset_input_observed_id,
+        "dataset_input_effective_revision": child.get(
+            "dataset_input_effective_revision"
+        ),
+        "dataset_input_effective_name": child.get(
+            "dataset_input_effective_name"
+        ),
+        "parent_dataset_input_id": parent_dataset_input_id,
+        "dataset_input_preflight_status": child.get(
+            "dataset_input_identity_preflight_status"
+        ),
+        "dataset_input_after_load_status": child.get(
+            "dataset_input_identity_after_load_status"
+        ),
+        "dataset_input_adopted": dataset_input_adopted,
+        "dataset_input_continuity_observed": dataset_input_continuity_observed,
+        "dataset_input_matches_parent": dataset_input_matches_parent,
         "runtime_input_identity_required": runtime_input_identity_required,
         "runtime_input_identity_ready": runtime_input_identity_ready,
         "runtime_input_identity_status": child.get(
@@ -3279,6 +3463,14 @@ def hf_adapter_promotion_chain_lines(
             f"{raw_transition.get('training_input_identity_ready')} "
             f"training_input_matches_parent="
             f"{raw_transition.get('training_input_matches_parent')} "
+            f"dataset_input_required="
+            f"{raw_transition.get('dataset_input_identity_required')} "
+            f"dataset_input_ready="
+            f"{raw_transition.get('dataset_input_identity_ready')} "
+            f"dataset_input_adopted="
+            f"{raw_transition.get('dataset_input_adopted')} "
+            f"dataset_input_matches_parent="
+            f"{raw_transition.get('dataset_input_matches_parent')} "
             f"runtime_input_required="
             f"{raw_transition.get('runtime_input_identity_required')} "
             f"runtime_input_ready="
