@@ -527,6 +527,18 @@ class FakeFineTuneRunner:
                 "observed_max_psi_total": telemetry[1],
                 "psi_observation_count": 1,
                 "trigger_step": None,
+                "horizon": st.hf_finetune_geometry_guard_horizon_report(
+                    max_steps=int(_flag(values, "--max-steps")),
+                    logging_steps=int(_flag(values, "--logging-steps")),
+                    min_desire_stability_guard=min_desire_guard,
+                    max_psi_total_guard=max_psi_guard,
+                    minimum_observations=int(
+                        _flag(values, "--trainer-geometry-guard-min-events")
+                    ),
+                    patience=int(
+                        _flag(values, "--trainer-geometry-guard-patience")
+                    ),
+                ),
             }
         _write_promoted_adapter(
             output,
@@ -681,6 +693,7 @@ def test_executor_seals_geometry_policy_and_forwards_detached_cli(
         max_distortion_pressure_index=0.40,
         min_desire_stability=0.70,
         max_psi_total=0.60,
+        max_steps=8,
     )
     changed = st.run_hf_adapter_continuation_executor(
         child,
@@ -690,6 +703,7 @@ def test_executor_seals_geometry_policy_and_forwards_detached_cli(
         max_distortion_pressure_index=0.45,
         min_desire_stability=0.70,
         max_psi_total=0.60,
+        max_steps=8,
     )
     captured: dict[str, object] = {}
 
@@ -716,6 +730,8 @@ def test_executor_seals_geometry_policy_and_forwards_detached_cli(
             "0.70",
             "--max-psi-total",
             "0.60",
+            "--max-steps",
+            "8",
             "--run",
             "--detach",
             "--json",
@@ -745,6 +761,7 @@ def test_executor_seals_geometry_policy_and_forwards_detached_cli(
     assert _flag(pending_command, "--trainer-max-psi-total-guard") == "0.6"
     assert _flag(pending_command, "--trainer-geometry-guard-min-events") == "3"
     assert _flag(pending_command, "--trainer-geometry-guard-patience") == "2"
+    assert _flag(pending_command, "--logging-steps") == "1"
     assert telemetry_contract["status"] == "enforced"
     assert telemetry_contract["required"] is True
     assert telemetry_contract["ready"] is True
@@ -752,6 +769,9 @@ def test_executor_seals_geometry_policy_and_forwards_detached_cli(
     assert geometry_guard_contract["ready"] is True
     assert geometry_guard_contract["min_desire_stability"] == pytest.approx(0.70)
     assert geometry_guard_contract["max_psi_total"] == pytest.approx(0.60)
+    assert pending["trainer_geometry_guard_horizon"]["status"] == "ready"
+    assert pending["trainer_geometry_guard_horizon"]["required_log_events"] == 5
+    assert pending["trainer_geometry_guard_horizon"]["available_log_events"] == 8
     assert pending["preflight"][
         "trainer_telemetry_command_contract_matches"
     ] is True
@@ -821,6 +841,7 @@ def test_executor_requires_durable_trainer_telemetry_evidence_after_generation(
         run=True,
         min_desire_stability=0.70,
         max_psi_total=0.60,
+        max_steps=8,
         command_runner=FakeFineTuneRunner([0.05]),
     )
 
@@ -862,6 +883,7 @@ def test_executor_requires_durable_trainer_telemetry_evidence_after_generation(
         run=True,
         min_desire_stability=0.70,
         max_psi_total=0.60,
+        max_steps=8,
         command_runner=FakeFineTuneRunner(
             [0.05],
             trainer_telemetry=[(0.65, 0.70)],
@@ -886,6 +908,7 @@ def test_executor_requires_durable_trainer_telemetry_evidence_after_generation(
     assert ready_evidence["trace_max_psi_total"] == pytest.approx(0.70)
     assert ready_evidence["geometry_guard_required"] is True
     assert ready_evidence["geometry_guard_matches"] is True
+    assert ready_evidence["geometry_guard_horizon_matches"] is True
     assert ready_evidence["trace_training_geometry_guard_count"] == 1
     assert ready_evidence["trace_training_geometry_guard_trigger_count"] == 0
     assert ready_evidence["trace_last_training_geometry_guard_status"] == (

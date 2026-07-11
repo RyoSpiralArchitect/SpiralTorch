@@ -1827,6 +1827,26 @@ def hf_gpt2_finetune_training_telemetry_frame(
     inference_distortion_handoff: Mapping[str, object] | None = ...,
 ) -> Dict[str, object]: ...
 
+def hf_gpt2_finetune_geometry_guard_horizon_report(
+    *,
+    max_steps: object,
+    logging_steps: object,
+    min_desire_stability_guard: object = ...,
+    max_psi_total_guard: object = ...,
+    minimum_observations: object = ...,
+    patience: object = ...,
+) -> Dict[str, object]: ...
+
+def hf_finetune_geometry_guard_horizon_report(
+    *,
+    max_steps: object,
+    logging_steps: object,
+    min_desire_stability_guard: object = ...,
+    max_psi_total_guard: object = ...,
+    minimum_observations: object = ...,
+    patience: object = ...,
+) -> Dict[str, object]: ...
+
 def hf_gpt2_finetune_trainer_trace_event(
     event: str,
     *,

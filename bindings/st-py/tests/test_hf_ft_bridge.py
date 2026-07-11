@@ -4498,6 +4498,19 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 trainer_max_psi_total_guard=0.60,
                 trainer_geometry_guard_min_events=3,
                 trainer_geometry_guard_patience=2,
+                max_steps=10,
+            )
+            short_horizon_artifact = hf_ft.hf_finetune_scale_up_command(
+                summary,
+                output_dir=root / "short-horizon-child-adapter",
+                trainer_min_desire_stability_guard=0.70,
+                trainer_max_psi_total_guard=0.60,
+                max_steps=4,
+            )
+            short_horizon_preflight = (
+                hf_ft.hf_finetune_scale_up_preflight_report(
+                    short_horizon_artifact
+                )
             )
             command = artifact["command"]
             bridge_argv = (
@@ -4510,6 +4523,15 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             root_preflight = hf_ft.hf_finetune_scale_up_preflight_report(artifact)
             root_preflight_lines = (
                 hf_ft.hf_finetune_scale_up_preflight_lines(root_preflight)
+            )
+            replayed_artifact = hf_ft.hf_finetune_scale_up_command(
+                artifact,
+                output_dir=root / "replayed-child-adapter",
+                max_steps_multiplier=None,
+                max_train_samples_multiplier=None,
+            )
+            replayed_preflight = hf_ft.hf_finetune_scale_up_preflight_report(
+                replayed_artifact
             )
             tampered_cases = {
                 "--adapter-promotion-gate": [
@@ -4561,6 +4583,11 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                     "--trainer-geometry-guard-patience",
                     "9",
                 ],
+                "trainer_geometry_guard_horizon": [
+                    *artifact["command"],
+                    "--logging-steps",
+                    "25",
+                ],
             }
             tampered_preflights = {
                 field: hf_ft.hf_finetune_scale_up_preflight_report(
@@ -4599,6 +4626,8 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(bridge_args.trainer_max_psi_total_guard, 0.60)
         self.assertEqual(bridge_args.trainer_geometry_guard_min_events, 3)
         self.assertEqual(bridge_args.trainer_geometry_guard_patience, 2)
+        self.assertEqual(bridge_args.max_steps, 10)
+        self.assertEqual(bridge_args.logging_steps, 2)
         self.assertTrue(bridge_args.eval_before_train)
         self.assertTrue(bridge_args.adapter_promotion_gate)
         self.assertEqual(bridge_args.finetune_mode, "lora")
@@ -4636,6 +4665,19 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertTrue(
             artifact["trainer_geometry_guard_command_contract"]["ready"]
         )
+        self.assertTrue(artifact["trainer_geometry_guard_logging_auto_adjusted"])
+        self.assertEqual(
+            artifact["trainer_geometry_guard_source_logging_steps"],
+            25,
+        )
+        self.assertEqual(
+            artifact["trainer_geometry_guard_resolved_logging_steps"],
+            2,
+        )
+        self.assertEqual(
+            artifact["trainer_geometry_guard_horizon"]["status"],
+            "ready",
+        )
         self.assertNotIn("--trainer-telemetry", unrequired_artifact["command"])
         self.assertIn("--no-trainer-trace", unrequired_artifact["command"])
         self.assertEqual(
@@ -4663,6 +4705,27 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertTrue(
             root_preflight["trainer_geometry_guard_command_contract_matches"]
         )
+        self.assertTrue(root_preflight["trainer_geometry_guard_horizon_matches"])
+        self.assertTrue(root_preflight["trainer_geometry_guard_horizon"]["ready"])
+        self.assertTrue(replayed_artifact["trainer_geometry_guard_active"])
+        self.assertEqual(
+            replayed_artifact["trainer_min_desire_stability_guard"],
+            0.70,
+        )
+        self.assertEqual(
+            replayed_artifact["trainer_max_psi_total_guard"],
+            0.60,
+        )
+        self.assertEqual(replayed_artifact["trainer_geometry_guard_min_events"], 3)
+        self.assertEqual(replayed_artifact["trainer_geometry_guard_patience"], 2)
+        self.assertEqual(
+            replayed_artifact["trainer_geometry_guard_horizon"]["max_steps"],
+            10,
+        )
+        self.assertTrue(replayed_preflight["ready"])
+        self.assertTrue(
+            replayed_preflight["trainer_geometry_guard_horizon_matches"]
+        )
         self.assertIn("promotion_contract=enforced", root_preflight_lines[0])
         self.assertIn("promotion_contract_ready=True", root_preflight_lines[0])
         self.assertIn("promotion_contract_matches=True", root_preflight_lines[0])
@@ -4672,6 +4735,20 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertIn("geometry_guard=enforced", root_preflight_lines[0])
         self.assertIn("geometry_guard_ready=True", root_preflight_lines[0])
         self.assertIn("geometry_guard_matches=True", root_preflight_lines[0])
+        self.assertIn("guard_horizon=ready", root_preflight_lines[0])
+        self.assertIn("guard_horizon_ready=True", root_preflight_lines[0])
+        self.assertIn("guard_horizon_matches=True", root_preflight_lines[0])
+        self.assertEqual(
+            short_horizon_artifact["trainer_geometry_guard_horizon"]["status"],
+            "horizon_too_short",
+        )
+        self.assertFalse(short_horizon_preflight["ready"])
+        self.assertTrue(
+            any(
+                issue.get("field") == "trainer_geometry_guard_horizon"
+                for issue in short_horizon_preflight["issues"]
+            )
+        )
         for field, preflight in tampered_preflights.items():
             self.assertFalse(preflight["ready"], field)
             self.assertTrue(
@@ -13290,8 +13367,16 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             pass
 
         fake_transformers.TrainerCallback = TrainerCallback
-        args = types.SimpleNamespace(output_dir="runs/gpt2")
-        state = types.SimpleNamespace(global_step=0, epoch=0.0, max_steps=1)
+        args = types.SimpleNamespace(
+            output_dir="runs/gpt2",
+            logging_steps=0.5,
+        )
+        state = types.SimpleNamespace(
+            global_step=0,
+            epoch=0.0,
+            max_steps=4,
+            logging_steps=2,
+        )
         control = types.SimpleNamespace()
         with tempfile.TemporaryDirectory() as tmp:
             path = f"{tmp}/trace.jsonl"
@@ -13373,6 +13458,11 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         self.assertEqual(
             rows[2]["training_geometry_guard"]["reason_codes"],
             ["desire_stability_below_minimum"],
+        )
+        self.assertTrue(rows[2]["training_geometry_guard"]["horizon"]["ready"])
+        self.assertEqual(
+            rows[2]["training_geometry_guard"]["horizon"]["logging_steps"],
+            2,
         )
         self.assertEqual(
             rows[1]["telemetry"]["hf_ft.inference_distortion.desire_pressure"],
@@ -13457,6 +13547,10 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 "4",
                 "--trainer-geometry-guard-patience",
                 "3",
+                "--max-steps",
+                "14",
+                "--logging-steps",
+                "2",
             ]
         )
 
@@ -13468,6 +13562,11 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
         )
         self.assertEqual(args.trainer_geometry_guard_min_events, 4)
         self.assertEqual(args.trainer_geometry_guard_patience, 3)
+        self.assertTrue(args._trainer_geometry_guard_horizon["ready"])
+        self.assertEqual(
+            args._trainer_geometry_guard_horizon["required_log_events"],
+            7,
+        )
         invalid_args = (
             ["--trainer-min-desire-stability-guard", "1.1"],
             ["--trainer-max-psi-total-guard", "-0.1"],
@@ -13478,10 +13577,53 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
                 "0.7",
                 "--no-trainer-trace",
             ],
+            [
+                "--trainer-min-desire-stability-guard",
+                "0.7",
+                "--max-steps",
+                "4",
+                "--logging-steps",
+                "1",
+            ],
         )
         for extra in invalid_args:
             with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
                 module.parse_args(["--metadata-only", *extra])
+
+    def test_trainer_geometry_guard_horizon_reports_armable_cadence(self) -> None:
+        sparse = st.hf_finetune_geometry_guard_horizon_report(
+            max_steps=100,
+            logging_steps=25,
+            min_desire_stability_guard=0.7,
+            minimum_observations=3,
+            patience=2,
+        )
+        short = st.hf_finetune_geometry_guard_horizon_report(
+            max_steps=4,
+            logging_steps=1,
+            min_desire_stability_guard=0.7,
+            minimum_observations=3,
+            patience=2,
+        )
+        psi_only = st.hf_finetune_geometry_guard_horizon_report(
+            max_steps=4,
+            logging_steps=1,
+            max_psi_total_guard=0.6,
+            minimum_observations=3,
+            patience=2,
+        )
+
+        self.assertEqual(sparse["status"], "cadence_too_sparse")
+        self.assertFalse(sparse["ready"])
+        self.assertEqual(sparse["required_log_events"], 5)
+        self.assertEqual(sparse["available_log_events"], 4)
+        self.assertEqual(sparse["recommended_logging_steps"], 20)
+        self.assertEqual(short["status"], "horizon_too_short")
+        self.assertEqual(short["minimum_max_steps"], 5)
+        self.assertEqual(psi_only["status"], "ready")
+        self.assertTrue(psi_only["ready"])
+        self.assertEqual(psi_only["required_log_events"], 4)
+        self.assertIn("hf_finetune_geometry_guard_horizon_report", st.__all__)
 
     def test_trainer_geometry_guard_honors_default_warmup_and_patience(
         self,
@@ -13528,6 +13670,7 @@ class HuggingFaceFineTuneBridgeTest(unittest.TestCase):
             "stop_requested",
         )
         self.assertTrue(rows[-1]["training_geometry_guard"]["triggered_now"])
+        self.assertTrue(rows[-1]["training_geometry_guard"]["horizon"]["ready"])
         self.assertEqual(
             rows[-1]["training_geometry_guard"]["reason_codes"],
             ["desire_stability_below_minimum"],

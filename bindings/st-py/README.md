@@ -752,8 +752,13 @@ unchanged. The same desire/psi thresholds are installed in the Trainer callback
 as a live geometry guard. After three metric observations, two consecutive
 breached frames request a graceful Transformers stop; psi uses the observed
 maximum and desire uses its running mean, matching the continuation policy's
-aggregate direction. Guard configuration and stop reasons are written into the
-trainer trace. After a gated generation exits, executor postflight reads the
+aggregate direction. Guarded runs also require an explicit `max_steps` horizon
+with enough log events to arm: desire needs five events under the default
+warm-up/patience, while psi-only needs four. Scale-up automatically lowers
+`logging_steps` when cadence alone is too sparse; preflight blocks when the
+total step horizon itself is too short. Guard configuration, horizon evidence,
+and stop reasons are written into the trainer trace and run card. After a gated
+generation exits, executor postflight reads the
 exact trainer trace, requires at least one telemetry event and every configured
 desire/psi aggregate, cross-checks them against the audited chain node, and
 verifies that live guard frames match the sealed command before recording
