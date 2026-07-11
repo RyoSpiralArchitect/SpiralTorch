@@ -710,6 +710,15 @@ path). Python can use `st.hf_adapter_promotion_chain_report(...)`,
 `st.load_hf_adapter_promotion_chain(...)`, and then
 `st.hf_finetune_scale_up_command(chain, ...)` for the same flow.
 
+Historical lineage manifests without a composite fine-tune replay identity stay
+readable. Once a generation adopts that identity, however, each descendant must
+carry a ready `adopted` or `enforced` contract with a newly observed composite
+ID. Reusing or dropping the parent ID blocks the transition because the adapter
+input and effective recipe are generation-scoped. Scale-up and the continuation
+executor therefore remove the source `--expected-training-recipe-id` and
+`--expected-finetune-replay-id`, record both source IDs as `reissued`, and expose
+the new contracts through pending plans, attempts, postflight, and live status.
+
 Make the chain stop itself when additional adapter generations no longer earn
 their cost:
 

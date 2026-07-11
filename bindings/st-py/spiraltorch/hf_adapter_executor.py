@@ -772,6 +772,31 @@ def _postflight_report(
             else transition.get("weights_changed_from_parent"),
             "threshold": True,
         },
+        {
+            "name": "transition_finetune_replay_identity",
+            "passed": (
+                transition is not None
+                and transition.get("finetune_replay_identity_ready") is True
+            ),
+            "observed": None
+            if transition is None
+            else {
+                "required": transition.get(
+                    "finetune_replay_identity_required"
+                ),
+                "ready": transition.get("finetune_replay_identity_ready"),
+                "adopted": transition.get(
+                    "finetune_replay_identity_adopted"
+                ),
+                "reissued": transition.get(
+                    "finetune_replay_identity_reissued"
+                ),
+                "observed_identity_id": transition.get(
+                    "finetune_replay_observed_id"
+                ),
+            },
+            "threshold": {"ready": True},
+        },
     ]
     failed = [row["name"] for row in checks if row["passed"] is not True]
     return {
@@ -807,6 +832,21 @@ def _postflight_report(
         "artifact_probe_process_exit_code": None
         if transition is None
         else transition.get("artifact_probe_process_exit_code"),
+        "finetune_replay_identity_required": None
+        if transition is None
+        else transition.get("finetune_replay_identity_required"),
+        "finetune_replay_identity_ready": None
+        if transition is None
+        else transition.get("finetune_replay_identity_ready"),
+        "finetune_replay_identity_adopted": None
+        if transition is None
+        else transition.get("finetune_replay_identity_adopted"),
+        "finetune_replay_identity_reissued": None
+        if transition is None
+        else transition.get("finetune_replay_identity_reissued"),
+        "finetune_replay_observed_id": None
+        if transition is None
+        else transition.get("finetune_replay_observed_id"),
         "failed_checks": failed,
         "checks": checks,
     }
@@ -1819,6 +1859,24 @@ def _run_hf_adapter_continuation_executor_unlocked(
             "execution_input_expected_id": preflight.get(
                 "execution_input_expected_id"
             ),
+            "training_recipe_identity_contract": command.get(
+                "training_recipe_identity_contract"
+            ),
+            "training_recipe_source_expected_id": command.get(
+                "training_recipe_source_expected_id"
+            ),
+            "training_recipe_expected_id": preflight.get(
+                "training_recipe_expected_id"
+            ),
+            "finetune_replay_identity_contract": command.get(
+                "finetune_replay_identity_contract"
+            ),
+            "finetune_replay_source_expected_id": command.get(
+                "finetune_replay_source_expected_id"
+            ),
+            "finetune_replay_expected_id": preflight.get(
+                "finetune_replay_expected_id"
+            ),
             "command": command,
             "preflight": preflight,
         }
@@ -1955,6 +2013,24 @@ def _run_hf_adapter_continuation_executor_unlocked(
             ),
             "execution_input_expected_id": preflight.get(
                 "execution_input_expected_id"
+            ),
+            "training_recipe_identity_contract": command.get(
+                "training_recipe_identity_contract"
+            ),
+            "training_recipe_source_expected_id": command.get(
+                "training_recipe_source_expected_id"
+            ),
+            "training_recipe_expected_id": preflight.get(
+                "training_recipe_expected_id"
+            ),
+            "finetune_replay_identity_contract": command.get(
+                "finetune_replay_identity_contract"
+            ),
+            "finetune_replay_source_expected_id": command.get(
+                "finetune_replay_source_expected_id"
+            ),
+            "finetune_replay_expected_id": preflight.get(
+                "finetune_replay_expected_id"
             ),
             "command": resolved_command,
             "command_display": shlex.join(resolved_command),
@@ -2236,6 +2312,12 @@ def hf_adapter_continuation_executor_lines(
             f"{selected_transition.get('execution_input_identity_required')} "
             "execution_input_identity="
             f"{selected_transition.get('execution_input_identity_ready')} "
+            "finetune_replay_required="
+            f"{selected_transition.get('finetune_replay_identity_required')} "
+            "finetune_replay_ready="
+            f"{selected_transition.get('finetune_replay_identity_ready')} "
+            "finetune_replay_reissued="
+            f"{selected_transition.get('finetune_replay_identity_reissued')} "
             "probe_process="
             f"{selected_transition.get('artifact_probe_process_status')} "
             f"probe_pid={selected_transition.get('artifact_probe_process_pid')}"
@@ -2302,6 +2384,20 @@ def hf_adapter_continuation_executor_lines(
             if isinstance(execution_input_contract, Mapping)
             else None
         )
+        training_recipe_contract = pending.get("training_recipe_identity_contract")
+        training_recipe_contract_status = (
+            training_recipe_contract.get("status")
+            if isinstance(training_recipe_contract, Mapping)
+            else None
+        )
+        finetune_replay_contract = pending.get(
+            "finetune_replay_identity_contract"
+        )
+        finetune_replay_contract_status = (
+            finetune_replay_contract.get("status")
+            if isinstance(finetune_replay_contract, Mapping)
+            else None
+        )
         lines.append(
             "hf_adapter_continuation_executor_pending "
             f"status={pending.get('status')} "
@@ -2328,6 +2424,16 @@ def hf_adapter_continuation_executor_lines(
             f"execution_input_contract={execution_input_contract_status} "
             "execution_input_expected="
             f"{pending.get('execution_input_expected_id')} "
+            f"training_recipe_contract={training_recipe_contract_status} "
+            "training_recipe_source="
+            f"{pending.get('training_recipe_source_expected_id')} "
+            "training_recipe_expected="
+            f"{pending.get('training_recipe_expected_id')} "
+            f"finetune_replay_contract={finetune_replay_contract_status} "
+            "finetune_replay_source="
+            f"{pending.get('finetune_replay_source_expected_id')} "
+            "finetune_replay_expected="
+            f"{pending.get('finetune_replay_expected_id')} "
             f"output={pending.get('output_dir')}"
         )
     for raw_attempt in report.get("generations") or []:
@@ -2398,6 +2504,22 @@ def hf_adapter_continuation_executor_lines(
             if isinstance(execution_input_contract, Mapping)
             else None
         )
+        training_recipe_contract = raw_attempt.get(
+            "training_recipe_identity_contract"
+        )
+        training_recipe_contract_status = (
+            training_recipe_contract.get("status")
+            if isinstance(training_recipe_contract, Mapping)
+            else None
+        )
+        finetune_replay_contract = raw_attempt.get(
+            "finetune_replay_identity_contract"
+        )
+        finetune_replay_contract_status = (
+            finetune_replay_contract.get("status")
+            if isinstance(finetune_replay_contract, Mapping)
+            else None
+        )
         lines.append(
             "hf_adapter_continuation_executor_generation "
             f"status={raw_attempt.get('status')} "
@@ -2428,6 +2550,16 @@ def hf_adapter_continuation_executor_lines(
             f"execution_input_contract={execution_input_contract_status} "
             "execution_input_expected="
             f"{raw_attempt.get('execution_input_expected_id')} "
+            f"training_recipe_contract={training_recipe_contract_status} "
+            "training_recipe_source="
+            f"{raw_attempt.get('training_recipe_source_expected_id')} "
+            "training_recipe_expected="
+            f"{raw_attempt.get('training_recipe_expected_id')} "
+            f"finetune_replay_contract={finetune_replay_contract_status} "
+            "finetune_replay_source="
+            f"{raw_attempt.get('finetune_replay_source_expected_id')} "
+            "finetune_replay_expected="
+            f"{raw_attempt.get('finetune_replay_expected_id')} "
             "postflight="
             f"{postflight.get('status') if isinstance(postflight, Mapping) else None} "
             f"transition={postflight_transition_status} "

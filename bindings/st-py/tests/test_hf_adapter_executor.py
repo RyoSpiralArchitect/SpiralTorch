@@ -123,6 +123,10 @@ def _write_promoted_adapter(
     expected_dataset_materialization_id: str | None = None,
     tokenized_dataset_id: str | None = None,
     expected_tokenized_dataset_id: str | None = None,
+    training_recipe_id: str | None = None,
+    expected_training_recipe_id: str | None = None,
+    finetune_replay_id: str | None = None,
+    expected_finetune_replay_id: str | None = None,
     dataset_name: str = "org/corpus",
     dataset_revision: str = "e93a9faa9c77e5d09219f6c868bfc7a1bd65593c",
 ) -> dict[str, object]:
@@ -299,6 +303,67 @@ def _write_promoted_adapter(
         )
         card["launch_command"] = command
         card["launch_command_display"] = " ".join(command)
+    if training_recipe_id is not None:
+        card["training_recipe_identity"] = {
+            "row_type": "hf_finetune_training_recipe_identity",
+            "status": "ready",
+            "phase": "before_trainer_init",
+            "expected_identity_id": expected_training_recipe_id,
+            "observed_identity_id": training_recipe_id,
+            "identity_verified": True,
+            "training_argument_count": 75,
+        }
+        card["training_recipe_identity_contract"] = {
+            "status": (
+                "enforced"
+                if expected_training_recipe_id is not None
+                else "adopted"
+            ),
+            "expected_identity_id": expected_training_recipe_id or training_recipe_id,
+            "observed_identity_id": training_recipe_id,
+            "identity_verified": True,
+            "fail_fast": True,
+        }
+        command.extend(
+            [
+                "--expected-training-recipe-id",
+                expected_training_recipe_id or training_recipe_id,
+            ]
+        )
+        card["launch_command"] = command
+        card["launch_command_display"] = " ".join(command)
+    if finetune_replay_id is not None:
+        card["finetune_replay_identity"] = {
+            "row_type": "hf_finetune_replay_identity",
+            "status": "ready",
+            "phase": "before_trainer_init",
+            "expected_identity_id": expected_finetune_replay_id,
+            "observed_identity_id": finetune_replay_id,
+            "identity_verified": True,
+            "component_count": 8,
+            "applicable_component_count": 7,
+            "ready_component_count": 7,
+        }
+        card["finetune_replay_identity_contract"] = {
+            "status": (
+                "enforced"
+                if expected_finetune_replay_id is not None
+                else "adopted"
+            ),
+            "expected_identity_id": expected_finetune_replay_id
+            or finetune_replay_id,
+            "observed_identity_id": finetune_replay_id,
+            "identity_verified": True,
+            "fail_fast": True,
+        }
+        command.extend(
+            [
+                "--expected-finetune-replay-id",
+                expected_finetune_replay_id or finetune_replay_id,
+            ]
+        )
+        card["launch_command"] = command
+        card["launch_command_display"] = " ".join(command)
     lineage = st.write_hf_adapter_lineage(
         adapter,
         parent_adapter=parent,
@@ -325,6 +390,8 @@ def _seed_chain(
     dataset_input_id: str | None = None,
     dataset_materialization_id: str | None = None,
     tokenized_dataset_id: str | None = None,
+    training_recipe_id: str | None = None,
+    finetune_replay_id: str | None = None,
 ) -> tuple[Path, Path]:
     root = _write_adapter(tmp_path / "root", b"root")
     st.write_hf_adapter_lineage(root)
@@ -343,6 +410,10 @@ def _seed_chain(
         expected_dataset_materialization_id=dataset_materialization_id,
         tokenized_dataset_id=tokenized_dataset_id,
         expected_tokenized_dataset_id=tokenized_dataset_id,
+        training_recipe_id=training_recipe_id,
+        expected_training_recipe_id=training_recipe_id,
+        finetune_replay_id=finetune_replay_id,
+        expected_finetune_replay_id=finetune_replay_id,
     )
     return root, child
 
@@ -649,6 +720,46 @@ def test_executor_reissues_post_selection_identities_for_shape_change(
     )
 
 
+def test_executor_reissues_training_recipe_and_finetune_replay_contracts(
+    tmp_path: Path,
+) -> None:
+    recipe_id = "sha256:" + "b" * 64
+    replay_id = "sha256:" + "e" * 64
+    _, child = _seed_chain(
+        tmp_path,
+        training_recipe_id=recipe_id,
+        finetune_replay_id=replay_id,
+    )
+
+    report = st.run_hf_adapter_continuation_executor(
+        child,
+        output_root=tmp_path / "executor-runs",
+        max_lineage_depth=3,
+        max_steps=2,
+        max_train_samples=16,
+    )
+    pending = report["pending_generation"]
+    command = pending["command"]["command"]
+
+    assert report["selected_transition"]["finetune_replay_identity_ready"] is True
+    assert report["selected_transition"]["finetune_replay_identity_adopted"] is True
+    assert pending["training_recipe_identity_contract"]["status"] == "reissued"
+    assert pending["training_recipe_source_expected_id"] == recipe_id
+    assert pending["training_recipe_expected_id"] is None
+    assert pending["finetune_replay_identity_contract"]["status"] == "reissued"
+    assert pending["finetune_replay_source_expected_id"] == replay_id
+    assert pending["finetune_replay_expected_id"] is None
+    assert "--expected-training-recipe-id" not in command
+    assert "--expected-finetune-replay-id" not in command
+    assert any(
+        "training_recipe_contract=reissued" in line
+        and f"training_recipe_source={recipe_id}" in line
+        and "finetune_replay_contract=reissued" in line
+        and f"finetune_replay_source={replay_id}" in line
+        for line in st.hf_adapter_continuation_executor_lines(report)
+    )
+
+
 def test_executor_preserves_enforced_execution_input_contract(
     tmp_path: Path,
 ) -> None:
@@ -706,6 +817,16 @@ def test_executor_postflight_requires_ready_selected_transition(
         expected_parent_adapter_id=parent_id,
         expected_lineage_depth=1,
     )
+    replay_tampered_chain = json.loads(json.dumps(chain))
+    replay_tampered_chain["transitions"][0][
+        "finetune_replay_identity_ready"
+    ] = False
+    replay_tampered = st.hf_adapter_executor._postflight_report(
+        replay_tampered_chain,
+        output_dir=child,
+        expected_parent_adapter_id=parent_id,
+        expected_lineage_depth=1,
+    )
 
     assert ready["ready"] is True
     assert ready["transition_ready"] is True
@@ -717,6 +838,8 @@ def test_executor_postflight_requires_ready_selected_transition(
     )
     assert tampered["ready"] is False
     assert "transition_ready" in tampered["failed_checks"]
+    assert replay_tampered["ready"] is False
+    assert "transition_finetune_replay_identity" in replay_tampered["failed_checks"]
 
 
 def test_executor_single_writer_lock_blocks_live_owner_and_reaps_stale_owner(

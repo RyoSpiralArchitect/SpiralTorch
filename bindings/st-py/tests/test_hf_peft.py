@@ -591,3 +591,34 @@ def test_prepare_preloaded_adapter_reuses_trainable_peft_model() -> None:
             preloaded_adapter=True,
             peft_module=_ArtifactPeft,
         )
+
+
+def test_prepare_preloaded_adapter_canonicalizes_unordered_runtime_config() -> None:
+    class RuntimeConfig:
+        def to_dict(self):
+            return {
+                "peft_type": "LORA",
+                "target_modules": {"c_proj", "c_attn"},
+                "nested": {"modules_to_save": frozenset({"lm_head", "embed"})},
+            }
+
+    model = _Model("gpt2")
+    model.peft_config = {"default": RuntimeConfig()}
+    model.active_adapter = "default"
+
+    prepared, report = st.prepare_hf_finetune_model(
+        model,
+        mode="lora",
+        preloaded_adapter=True,
+        peft_module=_FakePeft,
+    )
+
+    assert prepared is model
+    assert report["runtime_adapter_config"]["target_modules"] == [
+        "c_attn",
+        "c_proj",
+    ]
+    assert report["runtime_adapter_config"]["nested"]["modules_to_save"] == [
+        "embed",
+        "lm_head",
+    ]

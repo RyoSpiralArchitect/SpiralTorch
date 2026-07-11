@@ -152,6 +152,8 @@ def _write_promoted_child(
     expected_dataset_materialization_id: str | None = None,
     tokenized_dataset_id: str | None = None,
     expected_tokenized_dataset_id: str | None = None,
+    finetune_replay_id: str | None = None,
+    expected_finetune_replay_id: str | None = None,
     max_train_samples: int = 8,
     block_size: int = 128,
     dataset_revision: str = "e93a9faa9c77e5d09219f6c868bfc7a1bd65593c",
@@ -301,6 +303,31 @@ def _write_promoted_child(
             "identity_verified": True,
             "fail_fast": True,
         }
+    if finetune_replay_id is not None:
+        card["finetune_replay_identity"] = {
+            "row_type": "hf_finetune_replay_identity",
+            "status": "ready",
+            "phase": "before_trainer_init",
+            "expected_identity_id": expected_finetune_replay_id,
+            "observed_identity_id": finetune_replay_id,
+            "identity_verified": True,
+            "component_count": 8,
+            "applicable_component_count": 7,
+            "ready_component_count": 7,
+        }
+        card["finetune_replay_identity_contract"] = {
+            "status": (
+                "enforced"
+                if expected_finetune_replay_id is not None
+                else "adopted"
+            ),
+            "expected_identity_id": (
+                expected_finetune_replay_id or finetune_replay_id
+            ),
+            "observed_identity_id": finetune_replay_id,
+            "identity_verified": True,
+            "fail_fast": True,
+        }
     if launch_command:
         card["launch_command"] = _adapter_launch_command(
             parent,
@@ -322,6 +349,13 @@ def _write_promoted_child(
                 [
                     "--expected-tokenized-dataset-id",
                     expected_tokenized_dataset_id or tokenized_dataset_id,
+                ]
+            )
+        if finetune_replay_id is not None:
+            card["launch_command"].extend(
+                [
+                    "--expected-finetune-replay-id",
+                    expected_finetune_replay_id or finetune_replay_id,
                 ]
             )
         card["launch_command_display"] = " ".join(card["launch_command"])
@@ -976,6 +1010,143 @@ def test_adapter_chain_adopts_then_requires_execution_input_identity(
         if line.startswith("hf_adapter_promotion_chain_transition ")
     ]
     assert "execution_input_ready=False" in transition_lines[-1]
+
+
+def test_adapter_chain_reissues_finetune_replay_identity_per_generation(
+    tmp_path: Path,
+) -> None:
+    adopted_replay_id = "sha256:" + "9" * 64
+    reissued_replay_id = "sha256:" + "a" * 64
+    root = _write_adapter(tmp_path / "root", b"root")
+    st.write_hf_adapter_lineage(root)
+    adopted, adopted_lineage, adopted_promotion = _write_promoted_child(
+        tmp_path / "adopted",
+        root,
+        b"adopted",
+        finetune_replay_id=adopted_replay_id,
+    )
+    enforced, enforced_lineage, enforced_promotion = _write_promoted_child(
+        tmp_path / "enforced",
+        adopted,
+        b"enforced",
+        finetune_replay_id=reissued_replay_id,
+        expected_finetune_replay_id=reissued_replay_id,
+    )
+    _, dropped_lineage, _ = _write_promoted_child(
+        tmp_path / "dropped",
+        enforced,
+        b"dropped",
+    )
+
+    chain = st.hf_adapter_promotion_chain_report(tmp_path)
+    root_to_adopted, adopted_to_enforced, enforced_to_dropped = chain[
+        "transitions"
+    ]
+
+    assert adopted_lineage["finetune_replay_identity_required"] is True
+    assert adopted_lineage["finetune_replay_identity_verified"] is True
+    assert adopted_lineage["finetune_replay_observed_id"] == adopted_replay_id
+    assert adopted_promotion["finetune_replay_identity_verified"] is True
+    assert root_to_adopted["finetune_replay_identity_required"] is True
+    assert root_to_adopted["finetune_replay_identity_ready"] is True
+    assert root_to_adopted["finetune_replay_identity_adopted"] is True
+    assert root_to_adopted["finetune_replay_identity_reissued"] is False
+
+    assert enforced_lineage["finetune_replay_identity_contract_status"] == (
+        "enforced"
+    )
+    assert enforced_promotion["finetune_replay_observed_id"] == reissued_replay_id
+    assert adopted_to_enforced["finetune_replay_identity_required"] is True
+    assert adopted_to_enforced["finetune_replay_identity_ready"] is True
+    assert adopted_to_enforced["finetune_replay_identity_reissued"] is True
+    assert adopted_to_enforced["finetune_replay_matches_parent"] is False
+
+    assert dropped_lineage["finetune_replay_identity_present"] is False
+    assert enforced_to_dropped["finetune_replay_identity_required"] is True
+    assert enforced_to_dropped["finetune_replay_identity_ready"] is False
+    assert enforced_to_dropped["lineage_ready"] is False
+    transition_lines = [
+        line
+        for line in st.hf_adapter_promotion_chain_lines(chain)
+        if line.startswith("hf_adapter_promotion_chain_transition ")
+    ]
+    assert "finetune_replay_reissued=True" in transition_lines[1]
+    assert "finetune_replay_ready=False" in transition_lines[2]
+
+
+def test_adapter_chain_rejects_reused_parent_finetune_replay_identity(
+    tmp_path: Path,
+) -> None:
+    replay_id = "sha256:" + "9" * 64
+    root = _write_adapter(tmp_path / "root", b"root")
+    st.write_hf_adapter_lineage(root)
+    adopted, _, _ = _write_promoted_child(
+        tmp_path / "adopted",
+        root,
+        b"adopted",
+        finetune_replay_id=replay_id,
+    )
+    _write_promoted_child(
+        tmp_path / "reused",
+        adopted,
+        b"reused",
+        finetune_replay_id=replay_id,
+        expected_finetune_replay_id=replay_id,
+    )
+
+    chain = st.hf_adapter_promotion_chain_report(tmp_path)
+    reused_transition = chain["transitions"][1]
+
+    assert reused_transition["finetune_replay_identity_required"] is True
+    assert reused_transition["finetune_replay_identity_reissued"] is False
+    assert reused_transition["finetune_replay_matches_parent"] is True
+    assert reused_transition["finetune_replay_identity_ready"] is False
+    assert reused_transition["lineage_ready"] is False
+    assert reused_transition["status"] == "rejected"
+
+
+def test_adapter_lineage_rejects_mismatched_finetune_replay_contract(
+    tmp_path: Path,
+) -> None:
+    root = _write_adapter(tmp_path / "root", b"root")
+    st.write_hf_adapter_lineage(root)
+
+    with pytest.raises(ValueError, match="fine-tune replay identity does not match"):
+        _write_promoted_child(
+            tmp_path / "child",
+            root,
+            b"child",
+            finetune_replay_id="sha256:" + "c" * 64,
+            expected_finetune_replay_id="sha256:" + "d" * 64,
+        )
+
+
+def test_adapter_lineage_rejects_finetune_replay_without_final_contract(
+    tmp_path: Path,
+) -> None:
+    replay_id = "sha256:" + "c" * 64
+    root = _write_adapter(tmp_path / "root", b"root")
+    child = _write_adapter(tmp_path / "child", b"child")
+    st.write_hf_adapter_lineage(root)
+    card = _run_card(root)
+    card["finetune_replay_identity"] = {
+        "row_type": "hf_finetune_replay_identity",
+        "status": "ready",
+        "phase": "before_trainer_init",
+        "expected_identity_id": None,
+        "observed_identity_id": replay_id,
+        "identity_verified": True,
+        "component_count": 8,
+        "applicable_component_count": 7,
+        "ready_component_count": 7,
+    }
+
+    with pytest.raises(ValueError, match="fine-tune replay contract is not final"):
+        st.write_hf_adapter_lineage(
+            child,
+            parent_adapter=root,
+            run_card=card,
+        )
 
 
 def test_adapter_promotion_requires_lineage_weight_change_and_eval(
