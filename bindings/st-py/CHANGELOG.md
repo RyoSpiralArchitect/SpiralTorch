@@ -44,6 +44,11 @@
   detached launch, and Python APIs. Desire/psi-gated scale-up now provisions
   trainer telemetry automatically, removes conflicting trace-disable switches,
   and preflight-verifies the resulting command contract.
+- Durable geometry telemetry receipts: executor postflight now verifies the
+  emitted trainer trace, requires telemetry events and configured desire/psi
+  aggregates, cross-checks chain-node metrics, and records trace/evidence
+  digests. Missing evidence fails postflight, policy-limit evidence remains an
+  auditable stop, and later trace mutation is rejected when state is loaded.
 - Adapter generation-transition audit: promotion chains now expose explicit
   parent-to-child rows for depth/root/base continuity, parent fingerprints,
   changed weights, eval handoff and improvement, promotion revalidation, and
