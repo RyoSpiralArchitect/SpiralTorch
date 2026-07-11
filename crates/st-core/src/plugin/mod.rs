@@ -53,7 +53,10 @@ pub mod traits;
 mod sync;
 
 pub use context::{PluginContext, PluginDependency};
-pub use events::{EventListener, PluginEvent, PluginEventBus};
+pub use events::{
+    EventListener, PluginEvent, PluginEventBus, PluginEventDispatchReport,
+    PluginEventListenerFailure,
+};
 pub use loader::{DynamicPluginLoader, PluginLoader, StaticPluginLoader};
 pub use recorder::{
     PluginEventJsonlWriter, PluginEventJsonlWriterConfig, PluginEventRecord, PluginEventRecorder,
@@ -65,7 +68,27 @@ pub use traits::{Plugin, PluginCapability, PluginMetadata};
 use crate::PureResult;
 use st_tensor::TensorOpEvent;
 use st_tensor::{set_tensor_op_meta_observer, set_tensor_op_observer, TensorOpMetaEvent};
+use std::any::Any;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::Arc;
+
+fn panic_payload_message(payload: Box<dyn Any + Send>) -> String {
+    let payload = match payload.downcast::<String>() {
+        Ok(message) => return *message,
+        Err(payload) => payload,
+    };
+    let payload = match payload.downcast::<&'static str>() {
+        Ok(message) => return (*message).to_string(),
+        Err(payload) => payload,
+    };
+
+    // The destructor belongs to the panicking extension and may panic again. Only leak the
+    // secondary panic payload; ordinary unknown payloads are still released.
+    if let Err(secondary_payload) = catch_unwind(AssertUnwindSafe(|| drop(payload))) {
+        std::mem::forget(secondary_payload);
+    }
+    "non-string panic payload".to_string()
+}
 
 /// Initialize the global plugin system.
 ///

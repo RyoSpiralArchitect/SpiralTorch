@@ -6,9 +6,11 @@
 
 use std::any::Any;
 use std::collections::HashMap;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
+use super::panic_payload_message;
 use super::sync::lock_recover;
 
 /// Events that can be emitted and handled by plugins.
@@ -65,6 +67,41 @@ impl PluginEvent {
 pub type EventListener = Arc<dyn Fn(&PluginEvent) + Send + Sync>;
 type ListenerBucket = Vec<(usize, EventListener)>;
 type ListenerMap = HashMap<String, ListenerBucket>;
+
+/// A listener that panicked while handling an event.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PluginEventListenerFailure {
+    /// Subscription identifier returned by [`PluginEventBus::subscribe`].
+    pub subscription_id: usize,
+    /// String panic payload, or a stable fallback for non-string payloads.
+    pub message: String,
+}
+
+/// Delivery summary returned by [`PluginEventBus::publish_report`].
+#[must_use = "event dispatch failures should be inspected"]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PluginEventDispatchReport {
+    /// Event type used to select listeners.
+    pub event_type: String,
+    /// Number of matching specific and wildcard subscriptions.
+    pub matched: usize,
+    /// Number of listeners that returned without panicking.
+    pub delivered: usize,
+    /// Per-listener panic details. Remaining listeners are still called.
+    pub failures: Vec<PluginEventListenerFailure>,
+}
+
+impl PluginEventDispatchReport {
+    /// True when every matching listener completed without panicking.
+    pub fn ok(&self) -> bool {
+        self.failures.is_empty()
+    }
+
+    /// Number of listeners that panicked.
+    pub fn panicked(&self) -> usize {
+        self.failures.len()
+    }
+}
 
 /// Event bus for publishing and subscribing to plugin events.
 #[derive(Clone)]
@@ -144,31 +181,57 @@ impl PluginEventBus {
     }
 
     /// Publish an event to all interested listeners.
+    ///
+    /// Listener panics are isolated so one extension cannot interrupt later listeners or the
+    /// caller. Use [`Self::publish_report`] when the delivery result must be audited.
     pub fn publish(&self, event: &PluginEvent) {
+        let _ = self.publish_report(event);
+    }
+
+    /// Publish an event and return per-listener delivery diagnostics.
+    pub fn publish_report(&self, event: &PluginEvent) -> PluginEventDispatchReport {
         let event_type = self.event_type_name(event);
 
-        let listeners: Vec<EventListener> = {
+        let listeners: Vec<(usize, EventListener)> = {
             let listeners = lock_recover(&self.listeners);
             let mut collected = Vec::new();
-            if let Some(specific_listeners) = listeners.get(&event_type) {
-                collected.extend(
-                    specific_listeners
-                        .iter()
-                        .map(|(_, listener)| listener.clone()),
-                );
+            if event_type != "*" {
+                if let Some(specific_listeners) = listeners.get(&event_type) {
+                    collected.extend(
+                        specific_listeners
+                            .iter()
+                            .map(|(id, listener)| (*id, listener.clone())),
+                    );
+                }
             }
             if let Some(wildcard_listeners) = listeners.get("*") {
                 collected.extend(
                     wildcard_listeners
                         .iter()
-                        .map(|(_, listener)| listener.clone()),
+                        .map(|(id, listener)| (*id, listener.clone())),
                 );
             }
             collected
         };
 
-        for listener in listeners {
-            listener(event);
+        let matched = listeners.len();
+        let mut delivered = 0usize;
+        let mut failures = Vec::new();
+        for (subscription_id, listener) in listeners {
+            match catch_unwind(AssertUnwindSafe(|| listener(event))) {
+                Ok(()) => delivered += 1,
+                Err(payload) => failures.push(PluginEventListenerFailure {
+                    subscription_id,
+                    message: panic_payload_message(payload),
+                }),
+            }
+        }
+
+        PluginEventDispatchReport {
+            event_type,
+            matched,
+            delivered,
+            failures,
         }
     }
 
@@ -331,5 +394,79 @@ mod tests {
 
         assert!(bus.unsubscribe("SystemInit", id));
         assert!(dropped_without_lock.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn test_publish_report_isolates_listener_panics() {
+        let bus = PluginEventBus::new();
+        let panic_id = bus.subscribe(
+            "SystemInit",
+            Arc::new(|_| {
+                panic!("listener failed");
+            }),
+        );
+        let calls = Arc::new(AtomicUsize::new(0));
+        let listener_calls = Arc::clone(&calls);
+        bus.subscribe(
+            "SystemInit",
+            Arc::new(move |_| {
+                listener_calls.fetch_add(1, Ordering::SeqCst);
+            }),
+        );
+
+        let report = bus.publish_report(&PluginEvent::SystemInit);
+
+        assert_eq!(report.event_type, "SystemInit");
+        assert_eq!(report.matched, 2);
+        assert_eq!(report.delivered, 1);
+        assert_eq!(report.panicked(), 1);
+        assert!(!report.ok());
+        assert_eq!(report.failures[0].subscription_id, panic_id);
+        assert_eq!(report.failures[0].message, "listener failed");
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+        bus.publish(&PluginEvent::SystemInit);
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn test_publish_report_does_not_drop_unknown_panic_payload() {
+        struct PanicOnDrop;
+
+        impl Drop for PanicOnDrop {
+            fn drop(&mut self) {
+                panic!("payload drop panic");
+            }
+        }
+
+        let bus = PluginEventBus::new();
+        bus.subscribe(
+            "SystemInit",
+            Arc::new(|_| std::panic::panic_any(PanicOnDrop)),
+        );
+
+        let report = bus.publish_report(&PluginEvent::SystemInit);
+
+        assert_eq!(report.panicked(), 1);
+        assert_eq!(report.failures[0].message, "non-string panic payload");
+    }
+
+    #[test]
+    fn test_custom_wildcard_event_is_delivered_once() {
+        let bus = PluginEventBus::new();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let listener_calls = Arc::clone(&calls);
+        bus.subscribe(
+            "*",
+            Arc::new(move |_| {
+                listener_calls.fetch_add(1, Ordering::SeqCst);
+            }),
+        );
+
+        let report = bus.publish_report(&PluginEvent::custom("*", ()));
+
+        assert_eq!(report.matched, 1);
+        assert_eq!(report.delivered, 1);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 }

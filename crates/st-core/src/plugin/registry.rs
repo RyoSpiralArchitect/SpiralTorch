@@ -6,10 +6,10 @@
 
 use super::context::PluginContext;
 use super::events::{PluginEvent, PluginEventBus};
+use super::panic_payload_message;
 use super::sync::{lock_recover, read_recover, write_recover};
 use super::traits::{Plugin, PluginCapability, PluginMetadata};
 use crate::{PureResult, TensorError};
-use std::any::Any;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -99,7 +99,7 @@ impl PluginRegistry {
         let metadata = catch_unwind(AssertUnwindSafe(|| plugin.metadata())).map_err(|payload| {
             TensorError::Generic(format!(
                 "Plugin metadata() panicked: {}",
-                panic_payload_message(payload.as_ref())
+                panic_payload_message(payload)
             ))
         })?;
         let plugin_id = metadata.id.clone();
@@ -120,7 +120,7 @@ impl PluginRegistry {
         // Call on_load hook (avoid holding the registry context lock while executing plugin code)
         let mut ctx = self.context_snapshot();
         catch_unwind(AssertUnwindSafe(|| plugin.on_load(&mut ctx)))
-            .map_err(|payload| lifecycle_panic(&plugin_id, "on_load", payload.as_ref()))??;
+            .map_err(|payload| lifecycle_panic(&plugin_id, "on_load", payload))??;
 
         // Store the plugin
         let handle = PluginHandle::new(plugin);
@@ -166,7 +166,7 @@ impl PluginRegistry {
         let unload_result = catch_unwind(AssertUnwindSafe(|| {
             handle.with_plugin(|plugin: &mut dyn Plugin| plugin.on_unload(&mut ctx))
         }))
-        .map_err(|payload| lifecycle_panic(plugin_id, "on_unload", payload.as_ref()))
+        .map_err(|payload| lifecycle_panic(plugin_id, "on_unload", payload))
         .and_then(|result| result);
 
         unload_result?;
@@ -580,22 +580,16 @@ fn validate_metadata(metadata: &PluginMetadata) -> PureResult<()> {
     Ok(())
 }
 
-fn lifecycle_panic(plugin_id: &str, hook: &str, payload: &(dyn Any + Send)) -> TensorError {
+fn lifecycle_panic(
+    plugin_id: &str,
+    hook: &str,
+    payload: Box<dyn std::any::Any + Send>,
+) -> TensorError {
     TensorError::Generic(format!(
         "Plugin '{}' {hook}() panicked: {}",
         plugin_id,
         panic_payload_message(payload)
     ))
-}
-
-fn panic_payload_message(payload: &(dyn Any + Send)) -> String {
-    if let Some(message) = payload.downcast_ref::<&str>() {
-        return (*message).to_string();
-    }
-    if let Some(message) = payload.downcast_ref::<String>() {
-        return message.clone();
-    }
-    "non-string panic payload".to_string()
 }
 
 fn canonical_cycle(nodes: &[String]) -> Vec<String> {
@@ -830,6 +824,33 @@ mod tests {
 
         assert!(registry.register(plugin).is_ok());
         assert!(registry.get("test").is_some());
+    }
+
+    #[test]
+    fn test_listener_panic_does_not_roll_back_registration() {
+        let registry = PluginRegistry::new();
+        registry.event_bus().subscribe(
+            "PluginLoaded",
+            Arc::new(|_| {
+                panic!("observer panic");
+            }),
+        );
+        let observed = Arc::new(AtomicBool::new(false));
+        let listener_observed = Arc::clone(&observed);
+        registry.event_bus().subscribe(
+            "PluginLoaded",
+            Arc::new(move |_| {
+                listener_observed.store(true, Ordering::SeqCst);
+            }),
+        );
+
+        assert!(registry
+            .register(Box::new(TestPlugin {
+                name: "panic-isolated".to_string(),
+            }))
+            .is_ok());
+        assert!(registry.get("panic-isolated").is_some());
+        assert!(observed.load(Ordering::SeqCst));
     }
 
     #[test]
