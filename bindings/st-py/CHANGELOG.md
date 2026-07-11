@@ -78,6 +78,14 @@
   transitions, executor state/status, and public Python reports retain the
   evidence. The Pythia 70M sample now includes a sixth promoted generation
   whose three-file bundle passed both observations from a fresh wheel.
+- Content-addressed HF runtime inputs: fingerprint the effective base-model
+  basis and tokenizer, pin remote config resolution to its observed Hub commit
+  for tokenizer/model loading, and fail before model weights load when an
+  expected bundle changes. Run cards adopt the first ready identity, canonical
+  continuation commands pin it with `--expected-runtime-input-id`, and lineage,
+  scale-up, executor, and status reports enforce parent-to-child continuity.
+  The Pythia 70M sample now records a fresh-wheel depth-seven adoption and a
+  depth-eight enforced promotion with matching pre/post-load identity evidence.
 - Resumable adapter executor: add `spiral-hf-adapter-executor` and an importable
   state machine that closes audit, policy, scale-up, preflight, execution, and
   live postflight promotion verification into one atomic artifact. Successful,

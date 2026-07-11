@@ -842,7 +842,7 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
 
         self.assertEqual(
             sample["schema"],
-            "spiraltorch.hf_causal_lm_artifact_probe.sample.v8",
+            "spiraltorch.hf_causal_lm_artifact_probe.sample.v9",
         )
         self.assertEqual(sample["model_family"], "gpt_neox")
         self.assertTrue(sample["artifact_probe"]["adapter_loaded"])
@@ -977,6 +977,12 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         identity_generation_5 = sample["executor"]["identity_generation_5_run"]
         training_input_generation_6 = sample["executor"][
             "training_input_generation_6_run"
+        ]
+        runtime_identity_generation_7 = sample["executor"][
+            "runtime_identity_generation_7_run"
+        ]
+        runtime_identity_generation_8 = sample["executor"][
+            "runtime_identity_generation_8_run"
         ]
         self.assertEqual(executor_generation_2["attempt_status"], "promoted")
         self.assertEqual(executor_generation_2["returncode"], 0)
@@ -1203,6 +1209,86 @@ class ZSpaceGenerationExportTests(unittest.TestCase):
         )
         self.assertEqual(training_input_generation_6["postflight_status"], "ready")
         self.assertTrue(training_input_generation_6["status_report_healthy"])
+        self.assertEqual(runtime_identity_generation_7["attempt_status"], "promoted")
+        self.assertEqual(runtime_identity_generation_7["returncode"], 0)
+        self.assertEqual(
+            runtime_identity_generation_7["runtime_input_attempt_contract_status"],
+            "observe",
+        )
+        self.assertEqual(
+            runtime_identity_generation_7["runtime_input_run_card_contract_status"],
+            "adopted",
+        )
+        self.assertIsNone(runtime_identity_generation_7["runtime_input_expected_id"])
+        self.assertFalse(runtime_identity_generation_7["runtime_input_fail_fast"])
+        self.assertTrue(
+            runtime_identity_generation_7["base_model_commit_pin_applied"]
+        )
+        self.assertEqual(
+            runtime_identity_generation_7["runtime_input_pre_model_status"],
+            "ready",
+        )
+        self.assertEqual(
+            runtime_identity_generation_7["runtime_input_after_model_status"],
+            "ready",
+        )
+        self.assertTrue(
+            runtime_identity_generation_7["canonical_launch_pins_runtime_input"]
+        )
+        self.assertFalse(
+            runtime_identity_generation_7["lineage_runtime_input_required"]
+        )
+        self.assertTrue(
+            runtime_identity_generation_7["runtime_input_transition_ready"]
+        )
+        self.assertEqual(runtime_identity_generation_7["selected_lineage_depth"], 7)
+        self.assertEqual(runtime_identity_generation_7["transition_count"], 7)
+        self.assertEqual(runtime_identity_generation_7["ready_transition_count"], 7)
+        self.assertEqual(runtime_identity_generation_7["postflight_status"], "ready")
+        self.assertEqual(runtime_identity_generation_8["attempt_status"], "promoted")
+        self.assertEqual(runtime_identity_generation_8["returncode"], 0)
+        self.assertEqual(
+            runtime_identity_generation_8["runtime_input_attempt_contract_status"],
+            "enforced",
+        )
+        self.assertEqual(
+            runtime_identity_generation_8["runtime_input_expected_id"],
+            runtime_identity_generation_7["runtime_input_observed_id"],
+        )
+        self.assertEqual(
+            runtime_identity_generation_8["runtime_input_expected_id"],
+            runtime_identity_generation_8["runtime_input_observed_id"],
+        )
+        self.assertTrue(runtime_identity_generation_8["runtime_input_fail_fast"])
+        self.assertTrue(
+            runtime_identity_generation_8["runtime_input_pre_model_expected_verified"]
+        )
+        self.assertTrue(
+            runtime_identity_generation_8[
+                "runtime_input_after_model_expected_verified"
+            ]
+        )
+        self.assertTrue(
+            runtime_identity_generation_8["lineage_runtime_input_required"]
+        )
+        self.assertTrue(
+            runtime_identity_generation_8["runtime_input_transition_required"]
+        )
+        self.assertTrue(
+            runtime_identity_generation_8["runtime_input_transition_ready"]
+        )
+        self.assertTrue(
+            runtime_identity_generation_8["runtime_input_transition_matches_parent"]
+        )
+        self.assertEqual(runtime_identity_generation_8["selected_lineage_depth"], 8)
+        self.assertEqual(runtime_identity_generation_8["transition_count"], 8)
+        self.assertEqual(runtime_identity_generation_8["ready_transition_count"], 8)
+        self.assertEqual(
+            runtime_identity_generation_8["parent_adapter_id"],
+            runtime_identity_generation_7["child_adapter_id"],
+        )
+        self.assertGreater(runtime_identity_generation_8["child_eval_improvement"], 0)
+        self.assertEqual(runtime_identity_generation_8["postflight_status"], "ready")
 
     def test_inference_distortion_runtime_plan_and_cli_args_are_importable(self) -> None:
         runtime = zspace_inference_distortion_runtime_plan(

@@ -12,6 +12,7 @@ export: ModuleType
 hf_ft: ModuleType
 hf_peft: ModuleType
 hf_input_identity: ModuleType
+hf_runtime_identity: ModuleType
 hf_adapter: ModuleType
 hf_adapter_executor: ModuleType
 hf_adapter_executor_launch: ModuleType
@@ -563,6 +564,7 @@ HF_FINETUNE_REQUIRED_PYTHON_PACKAGES: List[str]
 HF_FINETUNE_REQUIRED_RUST_SURFACES: List[Dict[str, str]]
 HF_FINETUNE_INPUT_IDENTITY_SCHEMA: str
 HF_CAUSAL_LM_ARTIFACT_KINDS: Tuple[str, ...]
+HF_CAUSAL_LM_RUNTIME_IDENTITY_SCHEMA: str
 HF_ADAPTER_LINEAGE_FILENAME: str
 HF_ADAPTER_LINEAGE_SCHEMA: str
 HF_ADAPTER_PROMOTION_FILENAME: str
@@ -602,6 +604,9 @@ HF_ADAPTER_CONTINUATION_EXECUTOR_STOP_REQUEST_SCHEMA: str
 HF_FINETUNE_MODES: Tuple[str, ...]
 HF_FINETUNE_LORA_TARGET_MODULES: Dict[str, Tuple[str, ...]]
 
+class HfCausalLmRuntimeIdentityError(ValueError):
+    report: Dict[str, object]
+
 def hf_causal_lm_artifact_report(
     model_name_or_path: str | PathLike[str],
     *,
@@ -614,6 +619,21 @@ def hf_causal_lm_artifact_lines(
     *,
     artifact_kind: str = ...,
     tokenizer_name_or_path: str | PathLike[str] | None = ...,
+) -> List[str]: ...
+
+def hf_causal_lm_runtime_identity_report(
+    *,
+    base_model_source: str | PathLike[str],
+    base_model_revision: object | None,
+    tokenizer_source: str | PathLike[str] | None,
+    tokenizer_source_kind: str | None,
+    config: object,
+    tokenizer: object,
+    expected_identity_id: str | None = ...,
+    phase: str = ...,
+) -> Dict[str, object]: ...
+def hf_causal_lm_runtime_identity_lines(
+    report: Mapping[str, object],
 ) -> List[str]: ...
 
 def hf_finetune_input_identity_report(
@@ -960,6 +980,7 @@ def load_hf_causal_lm_artifact(
     tokenizer_kwargs: Mapping[str, object] | None = ...,
     model_kwargs: Mapping[str, object] | None = ...,
     adapter_kwargs: Mapping[str, object] | None = ...,
+    expected_runtime_identity_id: str | None = ...,
 ) -> Tuple[Any, Any, Any, Dict[str, object]]: ...
 
 def export_hf_merged_causal_lm(
@@ -10147,6 +10168,7 @@ __all__ = [
     "hf_ft",
     "hf_peft",
     "hf_input_identity",
+    "hf_runtime_identity",
     "hf_adapter",
     "hf_adapter_executor",
     "hf_adapter_executor_launch",
@@ -10166,6 +10188,7 @@ __all__ = [
     "HF_FINETUNE_REQUIRED_RUST_SURFACES",
     "HF_FINETUNE_INPUT_IDENTITY_SCHEMA",
     "HF_CAUSAL_LM_ARTIFACT_KINDS",
+    "HF_CAUSAL_LM_RUNTIME_IDENTITY_SCHEMA",
     "HF_ADAPTER_LINEAGE_FILENAME",
     "HF_ADAPTER_LINEAGE_SCHEMA",
     "HF_ADAPTER_PROMOTION_FILENAME",
@@ -10204,6 +10227,7 @@ __all__ = [
     "HF_ADAPTER_CONTINUATION_EXECUTOR_STOP_REQUEST_SCHEMA",
     "HF_FINETUNE_MODES",
     "HF_FINETUNE_LORA_TARGET_MODULES",
+    "HfCausalLmRuntimeIdentityError",
     "HF_GPT2_FT_DEFAULT_DEVICE_BACKENDS",
     "HF_GPT2_FT_RUN_CARD_FILENAME",
     "HF_GPT2_FT_TRAINER_TRACE_FILENAME",
@@ -10212,6 +10236,8 @@ __all__ = [
     "export_hf_merged_causal_lm",
     "hf_causal_lm_artifact_lines",
     "hf_causal_lm_artifact_report",
+    "hf_causal_lm_runtime_identity_lines",
+    "hf_causal_lm_runtime_identity_report",
     "hf_finetune_input_identity_lines",
     "hf_finetune_input_identity_report",
     "hf_adapter_fingerprint",

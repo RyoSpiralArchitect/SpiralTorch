@@ -791,6 +791,24 @@ same report with `st.hf_finetune_input_identity_report(...)` and
 and reads all covered bytes at both phases, so very large corpora or checkpoints
 should budget that I/O rather than treating the gate as metadata-only.
 
+The model basis and tokenizer now form a second content-addressed runtime
+contract. Remote base models record the resolved Hub commit plus stable config
+and tokenizer semantics; tokenizer files shipped with an adapter and local
+base-model config/weight files are hashed without embedding their absolute
+paths. After config resolution, SpiralTorch forces that commit onto the
+tokenizer and model loaders. A first audited generation adopts the observed
+bundle ID and writes `--expected-runtime-input-id` into its canonical launch
+command; later scale-up and executor generations enforce the same ID before
+model weights load, repeat the check after load, and require parent/child
+continuity in the promotion-chain transition. The reports are available as
+`st.hf_causal_lm_runtime_identity_report(...)` and
+`st.hf_causal_lm_runtime_identity_lines(...)`, while
+`st.load_hf_causal_lm_artifact(..., expected_runtime_identity_id=...)` raises
+`st.HfCausalLmRuntimeIdentityError` on drift. Local full-model identity checks
+read all covered weight bytes before and after load, so large local models must
+budget two additional sequential reads; remote models use the immutable Hub
+commit rather than downloading and hashing weights twice.
+
 The continuation runtime entrypoint does not depend on the repository staying
 at its original absolute path. Known `hf_finetune_bridge.py`, legacy
 `hf_gpt2_finetune_bridge.py`, and `spiral-hf-finetune` prefixes are rewritten

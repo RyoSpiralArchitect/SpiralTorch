@@ -82,10 +82,33 @@ class _ArtifactConfig:
     model_type = "gpt2"
     use_cache = True
 
+    def __init__(self, commit: str | None = None) -> None:
+        self._commit_hash = commit
+
+    def to_dict(self):
+        return {"model_type": self.model_type, "n_embd": 8}
+
+
+class _ArtifactBackendTokenizer:
+    def to_str(self) -> str:
+        return '{"model":{"type":"BPE"}}'
+
 
 class _ArtifactTokenizer:
+    backend_tokenizer = _ArtifactBackendTokenizer()
+    special_tokens_map = {"eos_token": "<eos>"}
+    model_input_names = ["input_ids", "attention_mask"]
+    padding_side = "right"
+    truncation_side = "right"
+
     def __init__(self, source: str) -> None:
         self.source = source
+
+    def get_vocab(self):
+        return {"<eos>": 0, "spiral": 1}
+
+    def get_added_vocab(self):
+        return {"<eos>": 0}
 
     def save_pretrained(self, output_dir: str | Path) -> None:
         output = Path(output_dir)
@@ -123,12 +146,13 @@ class _FakeTransformers:
     config_calls = []
     tokenizer_calls = []
     model_calls = []
+    config_commit = None
 
     class AutoConfig:
         @staticmethod
         def from_pretrained(source, **kwargs):
             _FakeTransformers.config_calls.append((str(source), dict(kwargs)))
-            return _ArtifactConfig()
+            return _ArtifactConfig(_FakeTransformers.config_commit)
 
     class AutoTokenizer:
         @staticmethod
@@ -193,6 +217,7 @@ def _reset_artifact_fakes() -> None:
     _FakeTransformers.config_calls.clear()
     _FakeTransformers.tokenizer_calls.clear()
     _FakeTransformers.model_calls.clear()
+    _FakeTransformers.config_commit = None
     _ArtifactPeft.config_calls.clear()
     _ArtifactPeft.model_calls.clear()
 
@@ -317,6 +342,86 @@ def test_artifact_loader_resolves_remote_adapter_metadata() -> None:
         "base_model_name_or_path": "org/remote-base"
     }
     assert _ArtifactPeft.config_calls[0][1] == {"local_files_only": True}
+
+
+def test_artifact_loader_pins_observed_commit_before_model_load() -> None:
+    commit = "e93a9faa9c77e5d09219f6c868bfc7a1bd65593c"
+    _FakeTransformers.config_commit = commit
+
+    model, _tokenizer, _config, report = st.load_hf_causal_lm_artifact(
+        "org/base",
+        transformers_module=_FakeTransformers,
+        loader_kwargs={"local_files_only": True},
+        tokenizer_kwargs={"revision": "main"},
+        model_kwargs={"revision": "main"},
+    )
+
+    assert model.source == "org/base"
+    assert report["base_model_commit_pin_applied"] is True
+    assert report["base_model_effective_revision"] == commit
+    assert report["runtime_identity_pre_model"]["status"] == "ready"
+    assert report["runtime_identity_after_model"]["status"] == "ready"
+    assert (
+        report["runtime_identity_pre_model"]["observed_identity_id"]
+        == report["runtime_identity_after_model"]["observed_identity_id"]
+    )
+    assert _FakeTransformers.tokenizer_calls[0][1]["revision"] == commit
+    assert _FakeTransformers.model_calls[0][1]["revision"] == commit
+
+
+def test_artifact_loader_only_pins_valid_commits() -> None:
+    _FakeTransformers.config_commit = "main"
+
+    _model, _tokenizer, _config, report = st.load_hf_causal_lm_artifact(
+        "org/base",
+        transformers_module=_FakeTransformers,
+    )
+
+    assert report["base_model_commit_pin_applied"] is False
+    assert report["resolved_base_model_commit"] is None
+    assert report["runtime_identity_pre_model"]["status"] == "evidence_incomplete"
+    assert "revision" not in _FakeTransformers.tokenizer_calls[0][1]
+    assert "revision" not in _FakeTransformers.model_calls[0][1]
+
+
+def test_artifact_loader_does_not_apply_base_commit_to_explicit_tokenizer() -> None:
+    commit = "e93a9faa9c77e5d09219f6c868bfc7a1bd65593c"
+    _FakeTransformers.config_commit = commit
+
+    st.load_hf_causal_lm_artifact(
+        "org/base",
+        tokenizer_name_or_path="org/tokenizer",
+        transformers_module=_FakeTransformers,
+    )
+
+    assert "revision" not in _FakeTransformers.tokenizer_calls[0][1]
+    assert _FakeTransformers.model_calls[0][1]["revision"] == commit
+
+
+def test_artifact_loader_blocks_commit_drift_before_model_weights() -> None:
+    original_commit = "e93a9faa9c77e5d09219f6c868bfc7a1bd65593c"
+    _FakeTransformers.config_commit = original_commit
+    _model, _tokenizer, _config, original = st.load_hf_causal_lm_artifact(
+        "org/base",
+        transformers_module=_FakeTransformers,
+    )
+    expected_id = original["runtime_identity_after_model"]["observed_identity_id"]
+    _FakeTransformers.config_calls.clear()
+    _FakeTransformers.tokenizer_calls.clear()
+    _FakeTransformers.model_calls.clear()
+    _FakeTransformers.config_commit = "0" * 40
+
+    with pytest.raises(st.HfCausalLmRuntimeIdentityError) as raised:
+        st.load_hf_causal_lm_artifact(
+            "org/base",
+            transformers_module=_FakeTransformers,
+            expected_runtime_identity_id=expected_id,
+        )
+
+    assert raised.value.report["status"] == "blocked"
+    assert raised.value.report["expected_identity_verified"] is False
+    assert _FakeTransformers.tokenizer_calls[0][1]["revision"] == "0" * 40
+    assert _FakeTransformers.model_calls == []
 
 
 def test_export_adapter_merges_atomically_into_full_model(tmp_path: Path) -> None:

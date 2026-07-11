@@ -113,6 +113,8 @@ def _write_promoted_adapter(
     before: float,
     after: float,
     launch_command: Sequence[str] | None = None,
+    runtime_input_id: str | None = None,
+    expected_runtime_input_id: str | None = None,
 ) -> dict[str, object]:
     adapter = _write_adapter(output, weights)
     command = list(launch_command or _launch_command(parent, output))
@@ -123,6 +125,33 @@ def _write_promoted_adapter(
         after=after,
         launch_command=command,
     )
+    if runtime_input_id is not None:
+        for key, phase in (
+            ("model_runtime_identity_pre_model", "pre_model_load"),
+            ("model_runtime_identity_after_model", "after_model_load"),
+        ):
+            card[key] = {
+                "status": "ready",
+                "phase": phase,
+                "expected_identity_id": (
+                    runtime_input_id
+                    if phase == "after_model_load"
+                    and expected_runtime_input_id is None
+                    else expected_runtime_input_id
+                ),
+                "observed_identity_id": runtime_input_id,
+                "identity_verified": True,
+            }
+        card["model_runtime_identity_contract"] = {
+            "status": (
+                "enforced"
+                if expected_runtime_input_id is not None
+                else "adopted"
+            ),
+            "expected_identity_id": expected_runtime_input_id,
+            "observed_identity_id": runtime_input_id,
+            "identity_verified": True,
+        }
     lineage = st.write_hf_adapter_lineage(
         adapter,
         parent_adapter=parent,
@@ -140,7 +169,12 @@ def _write_promoted_adapter(
     return lineage
 
 
-def _seed_chain(tmp_path: Path, *, improvement: float = 0.1) -> tuple[Path, Path]:
+def _seed_chain(
+    tmp_path: Path,
+    *,
+    improvement: float = 0.1,
+    runtime_input_id: str | None = None,
+) -> tuple[Path, Path]:
     root = _write_adapter(tmp_path / "root", b"root")
     st.write_hf_adapter_lineage(root)
     child = tmp_path / "child"
@@ -150,6 +184,7 @@ def _seed_chain(tmp_path: Path, *, improvement: float = 0.1) -> tuple[Path, Path
         weights=b"child",
         before=1.0,
         after=1.0 - improvement,
+        runtime_input_id=runtime_input_id,
     )
     return root, child
 
@@ -288,6 +323,32 @@ def test_executor_dry_run_writes_replayable_state_and_cli(
     )
     assert any("runtime=portable_module" in line for line in lines)
     assert any("input_identity=ready" in line for line in lines)
+
+
+def test_executor_preserves_enforced_runtime_input_contract(tmp_path: Path) -> None:
+    runtime_input_id = "sha256:" + "6" * 64
+    _, child = _seed_chain(tmp_path, runtime_input_id=runtime_input_id)
+
+    report = st.run_hf_adapter_continuation_executor(
+        child,
+        output_root=tmp_path / "executor-runs",
+        max_lineage_depth=3,
+        max_steps=2,
+        max_train_samples=16,
+    )
+    pending = report["pending_generation"]
+    contract = pending["runtime_input_identity_contract"]
+    command = pending["command"]["command"]
+
+    assert contract["status"] == "enforced"
+    assert contract["expected_identity_id"] == runtime_input_id
+    assert pending["runtime_input_expected_id"] == runtime_input_id
+    assert _flag(command, "--expected-runtime-input-id") == runtime_input_id
+    assert any(
+        "runtime_input_contract=enforced" in line
+        and f"runtime_input_expected={runtime_input_id}" in line
+        for line in st.hf_adapter_continuation_executor_lines(report)
+    )
 
 
 def test_executor_postflight_requires_ready_selected_transition(

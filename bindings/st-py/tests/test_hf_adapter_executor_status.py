@@ -54,6 +54,8 @@ def _write_running_state(
             "child_lineage_depth": 1,
             "eval_handoff_delta": 0.0,
             "child_eval_improvement": 0.1,
+            "runtime_input_identity_required": True,
+            "runtime_input_identity_ready": True,
             "artifact_probe_process_status": "ready",
             "artifact_probe_process_pid": 4242,
         },
@@ -76,6 +78,11 @@ def _write_running_state(
                     "portable": True,
                     "module": "spiraltorch.hf_finetune_entrypoint",
                 },
+                "runtime_input_identity_contract": {
+                    "status": "enforced",
+                    "expected_identity_id": "sha256:" + "5" * 64,
+                },
+                "runtime_input_expected_id": "sha256:" + "5" * 64,
                 "source_transition": {
                     "status": "ready",
                     "transition_ready": True,
@@ -266,12 +273,20 @@ def test_status_reports_live_local_process_and_artifacts(
     assert report["active_attempt"]["command_runtime"]["status"] == (
         "portable_module"
     )
+    assert report["active_attempt"]["runtime_input_identity_contract"][
+        "status"
+    ] == "enforced"
+    assert report["active_attempt"]["runtime_input_expected_id"] == (
+        "sha256:" + "5" * 64
+    )
     assert code == 0
     assert "status=running" in output
     assert "pid_alive=True" in output
     assert "transition_evidence=ready" in output
     assert "hf_adapter_continuation_executor_status_transition" in output
     assert "runtime=portable_module" in output
+    assert "runtime_input_identity=True" in output
+    assert "runtime_input_contract=enforced" in output
 
 
 def test_status_marks_pre_transition_state_as_legacy_without_breaking_health(
